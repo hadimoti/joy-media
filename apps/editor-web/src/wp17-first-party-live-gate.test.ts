@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createPlan, type AgentPlanStep } from '@joy-media/agent-tools';
-import { FIRST_PARTY_WORKFLOW_IDS } from '@joy-media/workflow-engine';
+import {
+  FIRST_PARTY_WORKFLOW_IDS,
+  REFERENCE_SOCIAL_CUTDOWN_SLICE_WORKFLOW_ID,
+} from '@joy-media/workflow-engine';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import { EditorSession } from './editor-session.js';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
@@ -27,8 +30,21 @@ describe('WP-17 first-party workflows', () => {
   it('loads the production pipeline packs at the pinned version', () => {
     const loaded = loadFirstPartyWorkflows();
     expect(loaded.map((entry) => entry.workflow.id)).toEqual([...FIRST_PARTY_WORKFLOW_IDS]);
-    expect(loaded).toHaveLength(5);
-    expect(loaded.every((entry) => entry.label === 'Production pack')).toBe(true);
+    expect(loaded).toHaveLength(FIRST_PARTY_WORKFLOW_IDS.length);
+    expect(loaded.map((entry) => entry.workflow.id)).toContain(
+      REFERENCE_SOCIAL_CUTDOWN_SLICE_WORKFLOW_ID,
+    );
+    expect(
+      loaded.find((entry) => entry.workflow.id === REFERENCE_SOCIAL_CUTDOWN_SLICE_WORKFLOW_ID),
+    ).toMatchObject({
+      label: 'Certified editor slice',
+      requiredPorts: ['editor.executeCommandTransaction'],
+    });
+    expect(
+      loaded
+        .filter((entry) => entry.workflow.id !== REFERENCE_SOCIAL_CUTDOWN_SLICE_WORKFLOW_ID)
+        .every((entry) => entry.label === 'Production pack'),
+    ).toBe(true);
     expect(getFirstPartyWorkflowVersion()).toBe('2.0.0');
   });
 

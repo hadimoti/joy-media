@@ -69,6 +69,15 @@ describe('timeline coordinates', () => {
       { id: 'c', heightPx: 20, locked: false, muted: false, solo: false },
     ];
     expect(virtualTracks(tracks, 20, 20).map((track) => track.id)).toEqual(['a', 'b', 'c']);
+    expect(virtualTracks(tracks, 40, 20).map((track) => track.id)).toEqual(['b', 'c']);
+    const scaledTracks = Array.from({ length: 400 }, (_, index) => ({
+      id: `scaled-${index}`,
+      heightPx: 36,
+      locked: false,
+      muted: false,
+      solo: false,
+    }));
+    expect(virtualTracks(scaledTracks, 0, 180)).toHaveLength(6);
     expect(toggleTrackFlag(tracks[0]!, 'muted').muted).toBe(true);
   });
   it('fits zoom to width and places duplicates after gaps', () => {

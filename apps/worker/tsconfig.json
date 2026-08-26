@@ -2,6 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "rootDir": "src", "outDir": "dist" },
   "include": ["src"],
+  "exclude": ["src/p3-editor-golden.test.ts"],
   "references": [
     { "path": "../api" },
     { "path": "../render-host" },

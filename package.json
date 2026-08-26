@@ -27,6 +27,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.31.0",
+    "jsdom": "^30.0.1",
     "prettier": "^3.6.0",
     "typescript": "^5.8.0",
     "typescript-eslint": "^8.36.0",

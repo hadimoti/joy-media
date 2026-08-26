@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   isWorkerJobType,
   validateWorkerJobV1,
@@ -8,13 +9,28 @@ import {
 } from '@joy-media/job-protocol';
 import type {
   MediaSemanticIndexReceipt,
+  RenderInspectPayload,
   VideoReferenceAnalyzeReceipt,
   WorkerJobV1,
 } from '@joy-media/job-protocol';
+import type { RenderReportV1 } from '@joy-media/production-quality';
+import {
+  InMemoryProjectRevisionStore,
+  type AppendProjectRevisionInput,
+  type CreateRecoveredCopyInput,
+  type ProjectDocumentSnapshotV2,
+  type ProjectRevisionV1,
+  type RecoveredCopy,
+  type RestoreProjectRevisionInput,
+} from './project-revisions.js';
 
 export interface Actor {
   readonly id: string;
 }
+
+/** The curated operator-managed library is the only cross-owner private-object catalog. */
+export const EXPLICIT_SHARED_LIBRARY_PROJECT_ID = 'joy-media-alpha-library';
+export const EXPLICIT_SHARED_LIBRARY_OWNER_ID = 'joy-media-library';
 export interface ProjectMetadata {
   readonly id: string;
   readonly title: string;
@@ -200,12 +216,14 @@ export interface RenderExportReceipt {
   readonly outputRef: string;
   readonly sha256: string;
   readonly bytes: number;
-  readonly qualityReport?: unknown;
+  readonly qualityReport?: RenderReportV1;
 }
 export interface RenderInspectReceipt {
   readonly kind: 'render.inspect';
   readonly reportRef: string;
-  readonly findings: number;
+  readonly outputRef?: string;
+  readonly report?: RenderReportV1;
+  readonly findings?: number;
 }
 export interface TextAiWorkerReceipt {
   readonly kind: 'text.lm-studio' | 'text.openrouter';
@@ -260,6 +278,24 @@ export interface JobEvent {
 
 /** The API transport can use the synchronous local spike or durable PostgreSQL. */
 export interface ControlPlane {
+  getProjectDocument(actor: Actor, projectId: string): Promise<ProjectDocumentSnapshotV2>;
+  appendProjectRevision(
+    actor: Actor,
+    projectId: string,
+    input: AppendProjectRevisionInput,
+  ): Promise<ProjectRevisionV1>;
+  getProjectRevision(actor: Actor, projectId: string, revision: number): Promise<ProjectRevisionV1>;
+  restoreProjectRevision(
+    actor: Actor,
+    projectId: string,
+    input: RestoreProjectRevisionInput,
+  ): Promise<ProjectRevisionV1>;
+  createRecoveredCopy(
+    actor: Actor,
+    sourceProjectId: string,
+    input: CreateRecoveredCopyInput,
+  ): Promise<RecoveredCopy>;
+  getProject(actor: Actor, id: string): ProjectMetadata | Promise<ProjectMetadata>;
   createProject(
     actor: Actor,
     id: string,
@@ -304,8 +340,9 @@ export interface ControlPlane {
     },
   ): MediaAssetRecord | Promise<MediaAssetRecord>;
   /**
-   * Owner-only hard delete of an asset and its derivative metadata rows.
-   * Private-object bytes in remote storage are not purged in v1.
+   * Owner-only asset revocation. Live metadata/access is removed atomically,
+   * asset-bound jobs are canceled/requested-canceled, and durable adapters
+   * retain an audit snapshot while purging known private objects.
    */
   deleteAsset(
     actor: Actor,
@@ -320,16 +357,11 @@ export interface ControlPlane {
    * All assets across every project owned by this Joy identity (cross-browser catalog).
    */
   assetsForOwner(actor: Actor): readonly MediaAssetRecord[] | Promise<readonly MediaAssetRecord[]>;
-  /**
-   * Shared cloud library: any authenticated Joy user may list assets that have a
-   * private-object original (cross-account catalog, login still required).
-   */
+  /** Owner's private backups plus the explicitly shared curated library. */
   sharedCloudAssets(
     actor: Actor,
   ): readonly MediaAssetRecord[] | Promise<readonly MediaAssetRecord[]>;
-  /**
-   * Resolve a cloud-backed asset for any authenticated Joy user (private-object required).
-   */
+  /** Resolve an owner backup or explicitly shared curated asset. */
   sharedCloudAsset(actor: Actor, assetId: string): MediaAssetRecord | Promise<MediaAssetRecord>;
   registerLocalDerivative(
     actor: Actor,
@@ -364,6 +396,12 @@ export interface ControlPlane {
     actor: Actor,
     projectId: string,
     artifactId: string,
+  ): RenderArtifactRecord | Promise<RenderArtifactRecord>;
+  renderArtifactForWorker(
+    workerId: string,
+    jobId: string,
+    outputRef: string,
+    now?: number,
   ): RenderArtifactRecord | Promise<RenderArtifactRecord>;
   pairWorker(actor: Actor, workerId: string): WorkerRecord | Promise<WorkerRecord>;
   createPairingOffer(
@@ -452,6 +490,7 @@ export class ControlPlaneError extends Error {
   constructor(
     readonly code: string,
     message: string,
+    readonly details?: Readonly<Record<string, unknown>>,
   ) {
     super(message);
     this.name = 'ControlPlaneError';
@@ -463,9 +502,13 @@ export class LocalControlPlane implements ControlPlane {
   readonly #projects = new Map<string, ProjectMetadata>();
   readonly #workers = new Map<string, WorkerRecord>();
   readonly #jobs = new Map<string, Job>();
+  readonly #revokedJobIds = new Set<string>();
   readonly #assets = new Map<string, MediaAssetRecord>();
   readonly #derivatives = new Map<string, MediaDerivativeRecord>();
   readonly #renderArtifacts = new Map<string, RenderArtifactRecord>();
+  readonly #projectRevisions = new InMemoryProjectRevisionStore((actor, projectId) =>
+    this.project(actor, projectId),
+  );
   readonly #events: JobEvent[] = [];
   readonly #pairingOffers = new Map<
     string,
@@ -475,9 +518,65 @@ export class LocalControlPlane implements ControlPlane {
     string,
     { readonly workerId: string; readonly expiresAt: number }
   >();
+  getProject(actor: Actor, id: string): ProjectMetadata {
+    return this.project(actor, id);
+  }
+  getProjectDocument(actor: Actor, projectId: string): Promise<ProjectDocumentSnapshotV2> {
+    return this.#projectRevisions.getProjectDocument(actor, projectId);
+  }
+  appendProjectRevision(
+    actor: Actor,
+    projectId: string,
+    input: AppendProjectRevisionInput,
+  ): Promise<ProjectRevisionV1> {
+    return this.#projectRevisions.appendProjectRevision(actor, projectId, input);
+  }
+  getProjectRevision(
+    actor: Actor,
+    projectId: string,
+    revision: number,
+  ): Promise<ProjectRevisionV1> {
+    return this.#projectRevisions.getProjectRevision(actor, projectId, revision);
+  }
+  restoreProjectRevision(
+    actor: Actor,
+    projectId: string,
+    input: RestoreProjectRevisionInput,
+  ): Promise<ProjectRevisionV1> {
+    return this.#projectRevisions.restoreProjectRevision(actor, projectId, input);
+  }
+  async createRecoveredCopy(
+    actor: Actor,
+    sourceProjectId: string,
+    input: CreateRecoveredCopyInput,
+  ): Promise<RecoveredCopy> {
+    this.project(actor, sourceProjectId);
+    const recoveredProjectId = `recovered-${randomUUID()}`;
+    const result = await this.#projectRevisions.createRecoveredCopy(
+      actor,
+      sourceProjectId,
+      input,
+      recoveredProjectId,
+    );
+    if (!this.#projects.has(result.projectId)) {
+      this.#projects.set(result.projectId, {
+        id: result.projectId,
+        title: result.name,
+        revision: 0,
+        ownerId: actor.id,
+        assetSyncEnabled: false,
+      });
+    }
+    return result;
+  }
   createProject(actor: Actor, id: string, title: string): ProjectMetadata {
     this.auth(actor);
-    if (this.#projects.has(id)) throw new ControlPlaneError('PROJECT_EXISTS', id);
+    const existing = this.#projects.get(id);
+    if (existing !== undefined) {
+      if (existing.ownerId === actor.id) throw new ControlPlaneError('PROJECT_EXISTS', id);
+      // Do not reveal that an opaque project ID belongs to another owner.
+      throw new ControlPlaneError('PROJECT_NOT_FOUND', id);
+    }
     const result = { id, title, revision: 0, ownerId: actor.id, assetSyncEnabled: false };
     this.#projects.set(id, result);
     return result;
@@ -526,7 +625,12 @@ export class LocalControlPlane implements ControlPlane {
     assetId: string,
     location: AssetLocationRecord & { readonly kind: 'private-object' },
   ): MediaAssetRecord {
-    this.project(actor, projectId);
+    const project = this.project(actor, projectId);
+    if (!project.assetSyncEnabled)
+      throw new ControlPlaneError(
+        'ASSET_SYNC_DISABLED',
+        'private backup requires explicit project consent',
+      );
     if (location.kind !== 'private-object')
       throw new ControlPlaneError('ASSET_INVALID', 'cloud original requires private-object');
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(location.ref))
@@ -577,6 +681,18 @@ export class LocalControlPlane implements ControlPlane {
       if (derivative.projectId === projectId && derivative.assetId === assetId)
         this.#derivatives.delete(derivativeId);
     }
+    for (const job of this.#jobs.values()) {
+      if (job.projectId === projectId && job.assetId === assetId) {
+        this.#revokedJobIds.add(job.id);
+        if (job.state === 'queued') {
+          this.#jobs.set(job.id, { ...job, state: 'canceled' });
+          this.event(job.id, 'canceled', Date.now());
+        } else if (job.state === 'leased') {
+          this.#jobs.set(job.id, { ...job, cancelRequested: true });
+          this.event(job.id, 'cancel-requested', Date.now());
+        }
+      }
+    }
     this.#assets.delete(assetId);
     return { id: assetId };
   }
@@ -604,7 +720,16 @@ export class LocalControlPlane implements ControlPlane {
   sharedCloudAssets(actor: Actor): readonly MediaAssetRecord[] {
     this.auth(actor);
     return [...this.#assets.values()]
-      .filter((asset) => asset.locations.some((location) => location.kind === 'private-object'))
+      .filter((asset) => {
+        const project = this.#projects.get(asset.projectId);
+        return (
+          project !== undefined &&
+          (project.ownerId === actor.id ||
+            (project.id === EXPLICIT_SHARED_LIBRARY_PROJECT_ID &&
+              project.ownerId === EXPLICIT_SHARED_LIBRARY_OWNER_ID)) &&
+          asset.locations.some((location) => location.kind === 'private-object')
+        );
+      })
       .map(cloneAsset)
       .sort(
         (left, right) =>
@@ -614,8 +739,13 @@ export class LocalControlPlane implements ControlPlane {
   sharedCloudAsset(actor: Actor, assetId: string): MediaAssetRecord {
     this.auth(actor);
     const asset = this.#assets.get(assetId);
+    const project = asset === undefined ? undefined : this.#projects.get(asset.projectId);
     if (
       asset === undefined ||
+      project === undefined ||
+      (project.ownerId !== actor.id &&
+        (project.id !== EXPLICIT_SHARED_LIBRARY_PROJECT_ID ||
+          project.ownerId !== EXPLICIT_SHARED_LIBRARY_OWNER_ID)) ||
       !asset.locations.some((location) => location.kind === 'private-object')
     ) {
       throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
@@ -716,8 +846,19 @@ export class LocalControlPlane implements ControlPlane {
     if (worker === undefined || job.type !== 'render.export')
       throw new ControlPlaneError('ARTIFACT_UPLOAD_DENIED', jobId);
     this.project({ id: worker.ownerId }, job.projectId);
-    if (this.#renderArtifacts.has(artifact.id))
+    const existing = this.#renderArtifacts.get(artifact.id);
+    if (existing !== undefined) {
+      if (
+        existing.projectId === job.projectId &&
+        existing.jobId === jobId &&
+        existing.outputRef === artifact.outputRef &&
+        existing.sha256 === artifact.sha256 &&
+        existing.bytes === artifact.bytes &&
+        existing.location.ref === artifact.location.ref
+      )
+        return cloneRenderArtifact(existing);
       throw new ControlPlaneError('ARTIFACT_EXISTS', artifact.id);
+    }
     const record: RenderArtifactRecord = {
       ...cloneWorkerRenderArtifactRegistration(artifact),
       projectId: job.projectId,
@@ -746,6 +887,38 @@ export class LocalControlPlane implements ControlPlane {
       job.derivative.bytes !== artifact.bytes
     )
       throw new ControlPlaneError('ARTIFACT_NOT_FOUND', artifactId);
+    return cloneRenderArtifact(artifact);
+  }
+  renderArtifactForWorker(
+    workerId: string,
+    jobId: string,
+    outputRef: string,
+    now = Date.now(),
+  ): RenderArtifactRecord {
+    const inspectJob = this.ownedLease(workerId, jobId, now);
+    const worker = this.#workers.get(workerId);
+    if (
+      worker === undefined ||
+      worker.revoked ||
+      inspectJob.type !== 'render.inspect' ||
+      inspectJob.projectId.length === 0
+    )
+      throw new ControlPlaneError('ARTIFACT_NOT_FOUND', outputRef);
+    this.project({ id: worker.ownerId }, inspectJob.projectId);
+    const artifact = [...this.#renderArtifacts.values()].find(
+      (candidate) =>
+        candidate.projectId === inspectJob.projectId && candidate.outputRef === outputRef,
+    );
+    const exportJob = artifact === undefined ? undefined : this.#jobs.get(artifact.jobId);
+    if (
+      artifact === undefined ||
+      exportJob?.state !== 'completed' ||
+      !isRenderExportReceipt(exportJob.derivative) ||
+      exportJob.derivative.outputRef !== artifact.outputRef ||
+      exportJob.derivative.sha256 !== artifact.sha256 ||
+      exportJob.derivative.bytes !== artifact.bytes
+    )
+      throw new ControlPlaneError('ARTIFACT_NOT_FOUND', outputRef);
     return cloneRenderArtifact(artifact);
   }
   pairWorker(actor: Actor, workerId: string): WorkerRecord {
@@ -877,6 +1050,30 @@ export class LocalControlPlane implements ControlPlane {
       if (asset === undefined || asset.projectId !== projectId)
         throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
     }
+    if (type === 'render.inspect' && typedJob !== undefined) {
+      const payload = typedJob.payload as RenderInspectPayload;
+      if (payload.artifactId !== undefined || payload.outputRef !== undefined) {
+        const artifact =
+          payload.artifactId === undefined
+            ? undefined
+            : this.#renderArtifacts.get(payload.artifactId);
+        const exportJob = artifact === undefined ? undefined : this.#jobs.get(artifact.jobId);
+        if (
+          artifact === undefined ||
+          artifact.projectId !== projectId ||
+          artifact.outputRef !== payload.outputRef ||
+          exportJob?.state !== 'completed' ||
+          !isRenderExportReceipt(exportJob.derivative) ||
+          exportJob.derivative.outputRef !== artifact.outputRef ||
+          exportJob.derivative.sha256 !== artifact.sha256 ||
+          exportJob.derivative.bytes !== artifact.bytes
+        )
+          throw new ControlPlaneError(
+            'ARTIFACT_NOT_FOUND',
+            payload.outputRef ?? payload.artifactId!,
+          );
+      }
+    }
     const job: Job = {
       id,
       projectId,
@@ -934,6 +1131,7 @@ export class LocalControlPlane implements ControlPlane {
       throw new ControlPlaneError('WORKER_UNAUTHORIZED', workerId);
     const job = [...this.#jobs.values()].find(
       (item) =>
+        !this.#revokedJobIds.has(item.id) &&
         isWorkerCompatible(worker, item) &&
         (item.state === 'queued' ||
           (item.state === 'leased' &&
@@ -969,6 +1167,7 @@ export class LocalControlPlane implements ControlPlane {
     return { job: updated, cancelRequested: updated.cancelRequested };
   }
   complete(workerId: string, jobId: string, now = Date.now(), receipt?: WorkerResultReceipt): Job {
+    if (this.#revokedJobIds.has(jobId)) throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
     const job = this.ownedLease(workerId, jobId, now);
     if (isWorkerJobType(job.type)) {
       try {
@@ -1005,6 +1204,40 @@ export class LocalControlPlane implements ControlPlane {
         artifact.bytes !== receipt.bytes
       )
         throw new ControlPlaneError('RESULT_INVALID', jobId);
+    }
+    if (job.type === 'render.inspect' && receipt?.kind === 'render.inspect') {
+      const payload = job.payload as Extract<
+        WorkerJobV1,
+        { readonly type: 'render.inspect' }
+      >['payload'];
+      const artifactBacked = 'artifactId' in payload;
+      if (artifactBacked && (receipt.report === undefined || receipt.outputRef === undefined))
+        throw new ControlPlaneError('RESULT_INVALID', jobId);
+      if (!artifactBacked) {
+        if (
+          !('legacyVersion' in payload) ||
+          payload.legacyVersion !== 0 ||
+          !isRenderInspectReceipt(receipt) ||
+          receipt.findings === undefined
+        )
+          throw new ControlPlaneError('RESULT_INVALID', jobId);
+      }
+      if (artifactBacked) {
+        const artifact = [...this.#renderArtifacts.values()].find(
+          (candidate) =>
+            candidate.id === payload.artifactId && candidate.outputRef === payload.outputRef,
+        );
+        if (
+          !isRenderInspectReceipt(receipt) ||
+          artifact === undefined ||
+          artifact.projectId !== job.projectId ||
+          artifact.outputRef !== receipt.outputRef ||
+          artifact.outputRef !== receipt.report?.artifact?.outputRef ||
+          artifact.sha256 !== receipt.report?.artifact?.sha256 ||
+          artifact.bytes !== receipt.report?.artifact?.bytes
+        )
+          throw new ControlPlaneError('RESULT_INVALID', jobId);
+      }
     }
     const derivative =
       receipt === undefined ? undefined : derivativeOf(jobId, workerId, receipt, now);
@@ -1054,6 +1287,7 @@ export class LocalControlPlane implements ControlPlane {
     const job = this.#jobs.get(jobId);
     if (job === undefined || job.projectId !== projectId)
       throw new ControlPlaneError('JOB_NOT_FOUND', jobId);
+    if (this.#revokedJobIds.has(jobId)) throw new ControlPlaneError('JOB_NOT_RETRYABLE', jobId);
     if (job.state === 'leased' || job.state === 'queued')
       throw new ControlPlaneError('JOB_NOT_RETRYABLE', jobId);
     for (const [artifactId, artifact] of this.#renderArtifacts) {
@@ -1178,6 +1412,41 @@ function isRenderExportReceipt(
   );
 }
 
+function isRenderInspectReceipt(
+  value: WorkerResultReceipt | undefined,
+): value is RenderInspectReceipt {
+  if (
+    value?.kind === 'render.inspect' &&
+    value.outputRef === undefined &&
+    value.report === undefined &&
+    Number.isSafeInteger((value as RenderInspectReceipt).findings) &&
+    (value as RenderInspectReceipt).findings! >= 0
+  )
+    return true;
+  if (
+    value?.kind !== 'render.inspect' ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.reportRef) ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.outputRef ?? '')
+  )
+    return false;
+  const report = value.report;
+  return (
+    report !== null &&
+    typeof report === 'object' &&
+    report.version === 1 &&
+    typeof report.promiseId === 'string' &&
+    typeof report.checkedAt === 'string' &&
+    report.artifact?.outputRef === value.outputRef &&
+    Array.isArray(report.findings) &&
+    report.findings.every(
+      (finding) =>
+        finding !== null &&
+        typeof finding === 'object' &&
+        (finding.status === 'pass' || finding.status === 'warn' || finding.status === 'fail'),
+    )
+  );
+}
+
 function isLocalGpuReceipt(value: WorkerResultReceipt | undefined): value is LocalGpuWorkerReceipt {
   return (
     (value?.kind === 'image.comfy' || value?.kind === 'audio.ml-denoise') &&
@@ -1284,7 +1553,7 @@ function legacyWorkerJob(
       maxAttempts: 3,
     });
   }
-  if (type === 'render.export' || type === 'render.inspect') {
+  if (type === 'render.export') {
     return validateWorkerJobV1({
       protocolVersion: WORKER_PROTOCOL_VERSION,
       jobId: id,
@@ -1294,6 +1563,23 @@ function legacyWorkerJob(
         compositionId: id,
         presetId: 'default',
         reportRef: `report-${id}`,
+      },
+      requirements: { capabilities: [type], privacy: 'local-only' },
+      idempotencyKey: id,
+      maxAttempts: 3,
+    });
+  }
+  if (type === 'render.inspect') {
+    return validateWorkerJobV1({
+      protocolVersion: WORKER_PROTOCOL_VERSION,
+      jobId: id,
+      type,
+      payload: {
+        projectRef: projectId,
+        compositionId: id,
+        presetId: 'default',
+        reportRef: `report-${id}`,
+        legacyVersion: 0,
       },
       requirements: { capabilities: [type], privacy: 'local-only' },
       idempotencyKey: id,

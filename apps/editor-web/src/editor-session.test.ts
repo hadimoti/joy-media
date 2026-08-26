@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
+import { DUAL_LENS_FLAG_KEY } from '@joy-media/project-schema';
+import type { CreativeArtifactV2 } from '@joy-media/project-schema';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
 import { EditorSession } from './editor-session.js';
+import { planProjectDocumentHydration } from './project-document-hydration.js';
 
 function memoryStorage() {
   const values = new Map<string, string>();
@@ -21,7 +24,177 @@ function memoryStorage() {
   };
 }
 
+function artifact(id: string): CreativeArtifactV2 {
+  return {
+    id,
+    kind: 'script',
+    schemaVersion: 1,
+    revision: 0,
+    label: id,
+    contentRef: { type: 'inline', value: 'content' },
+    binding: { type: 'none' },
+    provenance: {
+      sourceArtifactIds: [],
+      inputHashes: [],
+      createdBy: { type: 'human', id: 'test' },
+    },
+    createdAt: '2026-08-26T00:00:00.000Z',
+    updatedAt: '2026-08-26T00:00:00.000Z',
+  };
+}
+
 describe('EditorSession', () => {
+  it('hydrates all V2 slices as one opening baseline before later saves', () => {
+    const storage = memoryStorage();
+    storage.setItem(DUAL_LENS_FLAG_KEY, 'on');
+    const session = new EditorSession(
+      storage,
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const audio = {
+      clips: {},
+      buses: [
+        { id: 'master', name: 'Master', gain: 0.7, pan: 0, mute: false, solo: false, inputs: [] },
+      ],
+      effects: [],
+    };
+    const result = planProjectDocumentHydration(
+      {
+        schemaVersion: 2,
+        projectId: INITIAL_EDITOR_PROJECT.id,
+        title: 'Recovered project',
+        project: INITIAL_EDITOR_PROJECT,
+        timeline: { ...buildReferenceSpikeProject(), id: INITIAL_EDITOR_PROJECT.id },
+        workflow: {
+          schemaVersion: 1,
+          nodes: [
+            {
+              id: 'recovered-node',
+              type: 'analysis.transcribe',
+              schemaVersion: 1,
+              label: 'Recovered node',
+              inputs: [],
+              outputs: [],
+              config: {},
+              executionPolicy: { requiredCapabilities: ['timeline.read'], requiresApproval: false },
+            },
+          ],
+          edges: [],
+        },
+        artifacts: { artifacts: { recovered: artifact('recovered') }, versions: {} },
+        audio,
+      },
+      INITIAL_EDITOR_PROJECT.id,
+      { graphEnabled: true },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    session.hydrateProjectDocument(result.plan, 'Project hydrated from local V2');
+    expect(session.visualProject.title).toBe('Recovered project');
+    expect(session.timelineProject.id).toBe(INITIAL_EDITOR_PROJECT.id);
+    expect(session.workflowGraph.nodes.map((node) => node.id)).toEqual(['recovered-node']);
+    expect(Object.keys(session.artifacts.artifacts)).toEqual(['recovered']);
+    expect(session.visualProject.audio).toEqual(audio);
+  });
+
+  it('clears stale graph and artifacts when omitted by an enabled V2 document', () => {
+    const storage = memoryStorage();
+    storage.setItem(DUAL_LENS_FLAG_KEY, 'on');
+    const session = new EditorSession(
+      storage,
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    session.dispatchGraph({
+      label: 'Seed graph',
+      commands: [
+        {
+          type: 'graph.node.create',
+          payload: {
+            node: {
+              id: 'stale-node',
+              type: 'analysis.transcribe',
+              schemaVersion: 1,
+              label: 'Stale node',
+              inputs: [],
+              outputs: [],
+              config: {},
+              executionPolicy: { requiredCapabilities: ['timeline.read'], requiresApproval: false },
+            },
+          },
+        },
+      ],
+    });
+    session.dispatchArtifacts({
+      label: 'Seed artifact',
+      commands: [{ type: 'artifact.create', payload: { artifact: artifact('stale') } }],
+    });
+    const result = planProjectDocumentHydration(
+      {
+        schemaVersion: 2,
+        projectId: INITIAL_EDITOR_PROJECT.id,
+        project: INITIAL_EDITOR_PROJECT,
+        timeline: { ...buildReferenceSpikeProject(), id: INITIAL_EDITOR_PROJECT.id },
+      },
+      INITIAL_EDITOR_PROJECT.id,
+      { graphEnabled: true },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    session.hydrateProjectDocument(result.plan);
+    expect(session.workflowGraph.nodes).toEqual([]);
+    expect(session.workflowGraph.edges).toEqual([]);
+    expect(session.artifacts).toEqual({ artifacts: {}, versions: {} });
+  });
+
+  it('emits one normalized durable notification per mutation and none for no-op history calls', () => {
+    const session = new EditorSession(
+      memoryStorage(),
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const changes: { label: string; operationCount: number }[] = [];
+    session.subscribeDurableChanges((change) => changes.push(change));
+
+    session.dispatchTimeline({
+      label: 'Trim intro',
+      commands: [
+        {
+          type: 'timeline.trimClipEnd',
+          payload: {
+            compositionId: 'root',
+            trackId: 'track-0',
+            clipId: 'intro',
+            newEndUs: 9_000_000,
+          },
+        },
+      ],
+    });
+    session.dispatchVisualObjects({
+      label: 'Move title',
+      commands: [
+        {
+          type: 'object.setTransformProperty',
+          payload: { objectId: 'intro-title', key: 'x', value: 20 },
+        },
+      ],
+    });
+    session.undo();
+    session.redo();
+    session.jumpToHistory(0);
+
+    expect(changes).toHaveLength(5);
+    expect(changes.every((change) => change.operationCount > 0)).toBe(true);
+    expect(changes.map((change) => change.label)).toEqual([
+      'Trim intro',
+      'Move title',
+      'Undo Move title',
+      'Redo Move title',
+      'Jump to history 0',
+    ]);
+  });
+
   it('recovers the same durable project revision and advances it for either document slice', () => {
     const storage = memoryStorage();
     const session = new EditorSession(

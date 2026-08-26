@@ -15,6 +15,11 @@ export default tseslint.config(
       '**/.claude/worktrees/**',
       '**/web-releases/**',
       '**/releases/**',
+      // TypeScript compiler outputs emitted alongside authored source files.
+      '**/src/**/*.js',
+      '**/src/**/*.d.ts',
+      '**/src/**/*.js.map',
+      '**/src/**/*.d.ts.map',
     ],
   },
   js.configs.recommended,

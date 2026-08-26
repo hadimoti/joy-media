@@ -4,6 +4,8 @@ import { detectSilence, measureLoudness, measurePeak } from '@joy-media/audio-co
 import { applyGate } from '@joy-media/audio-core/effects';
 import { normalizeDialogue } from '@joy-media/audio-core/normalize';
 import { buildNodeLibrary, type NodeLibrary } from '@joy-media/workflow-engine';
+import { applyTransaction, type CommandTransaction, type SpikeCommand } from '@joy-media/commands';
+import type { EditorSession } from './editor-session.js';
 
 export interface FirstPartyLibraryStatus {
   readonly available: boolean;
@@ -91,6 +93,96 @@ export function getProductionFirstPartyLibraryStatus(): FirstPartyLibraryStatus 
 
 export function isProductionFirstPartyLibrary(library: NodeLibrary): boolean {
   return (library as Partial<MarkedProductionLibrary>)[PRODUCTION_LIBRARY_MARKER] === true;
+}
+
+/**
+ * Connect only the editor port to the real local editor session.
+ *
+ * This is deliberately an explicit injection seam: all analysis, generation,
+ * render, and output ports stay unavailable unless a caller wires real
+ * adapters for them. The editor port accepts timeline commands only and routes
+ * them through EditorSession.dispatchTimeline, which gives the workflow the
+ * same persistence, history, undo, redo, and reload semantics as a human edit.
+ */
+export function createEditorSessionFirstPartyLibrary(session: EditorSession): NodeLibrary {
+  let transactionSequence = 0;
+  const allowedCommands = new Set([
+    'timeline.trimClipStart',
+    'timeline.trimClipEnd',
+    'timeline.moveClip',
+    'timeline.splitClip',
+    'timeline.joinClips',
+  ]);
+  return buildNodeLibrary({
+    ports: {
+      editor: {
+        executeCommandTransaction: ({ label, commands, workflowInputs }) => {
+          if (commands.length === 0) {
+            throw new Error('reference cutdown requires at least one timeline command');
+          }
+          if (
+            commands.some(
+              (command) =>
+                command === null ||
+                typeof command !== 'object' ||
+                typeof (command as { readonly type?: unknown }).type !== 'string' ||
+                !allowedCommands.has((command as { readonly type: string }).type),
+            )
+          ) {
+            throw new Error('reference cutdown editor port accepts timeline commands only');
+          }
+          const media =
+            workflowInputs !== null && typeof workflowInputs === 'object'
+              ? (workflowInputs as { readonly selectedMedia?: unknown }).selectedMedia
+              : undefined;
+          if (
+            media === null ||
+            typeof media !== 'object' ||
+            typeof (media as { readonly assetId?: unknown }).assetId !== 'string' ||
+            !(media as { readonly fileBacked?: unknown }).fileBacked
+          ) {
+            throw new Error('reference cutdown requires an explicitly file-backed selected video');
+          }
+          const transaction: CommandTransaction = {
+            label,
+            commands: commands as readonly SpikeCommand[],
+          };
+          const projected = applyTransaction(session.timelineProject, transaction).project;
+          const trackIds = new Set(
+            (commands as readonly SpikeCommand[]).flatMap((command) => {
+              const payload = command.payload as { readonly trackId?: unknown };
+              return typeof payload.trackId === 'string' ? [payload.trackId] : [];
+            }),
+          );
+          for (const trackId of trackIds) {
+            const track = projected.compositions[projected.rootCompositionId]?.tracks.find(
+              (candidate) => candidate.id === trackId,
+            );
+            if (track === undefined)
+              throw new Error(`reference cutdown target track is missing: ${trackId}`);
+            const clips = [...track.clips].sort((left, right) => left.startUs - right.startUs);
+            let cursor = 0;
+            for (const clip of clips) {
+              if (
+                clip.kind !== 'video' ||
+                (clip.playbackRate !== undefined && clip.playbackRate !== 1) ||
+                clip.startUs !== cursor
+              ) {
+                throw new Error('reference cutdown must remain contiguous 1× video');
+              }
+              cursor += clip.durationUs;
+            }
+          }
+          session.dispatchTimeline({
+            ...transaction,
+          });
+          return {
+            transactionId: `editor-tx-${Date.now().toString(36)}-${String(++transactionSequence)}`,
+          };
+        },
+      },
+    },
+  });
 }
 
 /** Build a NodeLibrary whose ports are deterministic fixtures suitable for tests. */

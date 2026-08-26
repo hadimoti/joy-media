@@ -26,6 +26,8 @@ export interface Transform2D {
   readonly translateY: number;
   readonly scaleX: number;
   readonly scaleY: number;
+  /** Static rotation around the node's local origin, in degrees. */
+  readonly rotationDeg?: number;
 }
 
 interface RenderNodeBase {
@@ -209,6 +211,8 @@ function validateNodes(nodes: readonly RenderNode[], ids: Set<string>): void {
     ) {
       throw new RangeError(`node "${node.id}" transform must be finite with positive scales`);
     }
+    if (node.transform.rotationDeg !== undefined && !Number.isFinite(node.transform.rotationDeg))
+      throw new RangeError(`node "${node.id}" rotation must be finite`);
     if (node.kind === 'sprite' || node.kind === 'video-frame') {
       if (
         !Number.isFinite(node.width) ||
@@ -263,6 +267,7 @@ const IDENTITY_TRANSFORM: Transform2D = {
   translateY: 0,
   scaleX: 1,
   scaleY: 1,
+  rotationDeg: 0,
 };
 
 function flattenNode(
@@ -284,6 +289,7 @@ function composeTransform(parent: Transform2D, child: Transform2D): Transform2D 
     translateY: parent.translateY + child.translateY * parent.scaleY,
     scaleX: parent.scaleX * child.scaleX,
     scaleY: parent.scaleY * child.scaleY,
+    rotationDeg: (parent.rotationDeg ?? 0) + (child.rotationDeg ?? 0),
   };
 }
 

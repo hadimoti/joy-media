@@ -6,14 +6,13 @@
  */
 
 import type { TimeUs, VisualObjectTransformV1, VisualObjectV1 } from '@joy-media/project-schema';
+import { parentChain, resolveWorldTransform } from '@joy-media/motion-core/parenting';
+import { resolveObjectTransform } from '@joy-media/motion-core/transform';
 import {
-  parentChain,
-  resolveObjectTransform,
   resolveObjectTransformWithExpressions,
-  resolveWorldTransform,
   resolveWorldTransformWithExpressions,
-} from '@joy-media/motion-core';
-import type { ExpressionChannelDiagnostic } from '@joy-media/motion-core';
+} from '@joy-media/motion-core/expression';
+import type { ExpressionChannelDiagnostic } from '@joy-media/motion-core/expression';
 import { projectThroughCamera, type CameraParams } from './projection.js';
 
 export class CameraSceneError extends Error {

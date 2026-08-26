@@ -31,15 +31,22 @@ export interface ReleaseGateInput {
   readonly builds: Readonly<Record<string, boolean>>;
   readonly manifestGenerated: boolean;
   readonly sbomGenerated: boolean;
-  readonly browserJourneys: readonly {
-    readonly id: string;
-    readonly status: 'verified' | 'failed' | 'unverified';
-    readonly verifiedAt?: string;
-    readonly evidencePath?: string;
-  }[];
+  readonly browserJourneys: readonly ReleaseBrowserJourney[];
   readonly featureStatus: { readonly auditedOn: string; readonly statuses: readonly string[] };
   readonly waivers?: readonly ReleaseWaiver[];
   readonly commandResults?: readonly ReleaseCommandResult[];
+}
+
+/** Release evidence that is safe to evaluate without reading the evidence file. */
+export interface ReleaseBrowserJourney {
+  readonly id: string;
+  readonly status: 'verified' | 'failed' | 'unverified';
+  readonly verifiedAt?: string;
+  readonly evidencePath?: string;
+  readonly execution?: 'real-services' | 'mocked' | 'unknown';
+  readonly deliveryChannel?: 'verified-delivery' | 'quick-browser-export' | 'unknown';
+  readonly inspectionState?: 'passed' | 'failed' | 'not-requested' | 'unknown';
+  readonly postMotionPlacement?: boolean;
 }
 
 export interface ReleaseGateResult {
@@ -111,13 +118,9 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
     check(
       'browser-journey',
       input.browserJourneys.some(
-        (journey) => journey.id === REQUIRED_JOURNEY_ID && journey.status === 'verified',
+        (journey) => journey.id === REQUIRED_JOURNEY_ID && browserJourneyReleaseReady(journey),
       ),
-      input.browserJourneys.some(
-        (journey) => journey.id === REQUIRED_JOURNEY_ID && journey.status === 'verified',
-      )
-        ? 'authenticated editor 1.0 journey verified'
-        : `required journey ${REQUIRED_JOURNEY_ID} is not verified`,
+      browserJourneyMessage(input.browserJourneys),
     ),
     check(
       'feature-status',
@@ -182,6 +185,34 @@ export interface ReleaseCommandResult {
   readonly command: string;
   readonly exitCode: number;
   readonly durationMs: number;
+  readonly output?: string;
+}
+
+function browserJourneyReleaseReady(journey: ReleaseBrowserJourney): boolean {
+  return (
+    journey.status === 'verified' &&
+    journey.evidencePath !== undefined &&
+    journey.execution === 'real-services' &&
+    journey.deliveryChannel === 'verified-delivery' &&
+    journey.inspectionState === 'passed' &&
+    journey.postMotionPlacement === true
+  );
+}
+
+function browserJourneyMessage(journeys: readonly ReleaseBrowserJourney[]): string {
+  const journey = journeys.find((candidate) => candidate.id === REQUIRED_JOURNEY_ID);
+  if (journey === undefined) return `required journey ${REQUIRED_JOURNEY_ID} is missing`;
+  if (browserJourneyReleaseReady(journey))
+    return 'authenticated editor 1.0 journey verified against real services and inspected delivery';
+  const reasons: string[] = [];
+  if (journey.status !== 'verified') reasons.push(`status=${journey.status}`);
+  if (journey.evidencePath === undefined) reasons.push('evidence path missing');
+  if (journey.execution !== 'real-services') reasons.push('real-service evidence missing');
+  if (journey.deliveryChannel !== 'verified-delivery')
+    reasons.push('verified delivery channel missing');
+  if (journey.inspectionState !== 'passed') reasons.push('passed inspection missing');
+  if (journey.postMotionPlacement !== true) reasons.push('post-Motion placement missing');
+  return `required journey ${REQUIRED_JOURNEY_ID} is not release-ready: ${reasons.join(', ')}`;
 }
 
 export function sha256File(path: string): string {
@@ -265,13 +296,10 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     artifacts: artifactHashes,
     commands: commandResults,
   };
-  const sbom = {
-    bomFormat: 'cyclonedx',
-    specVersion: '1.5',
-    components: [{ type: 'application', name: 'joy-media', version: '1.0.0' }],
-  };
+  const sbom = buildSbom(root);
+  const testSummary = parseTestSummary(tests?.output ?? '', tests?.exitCode ?? 1);
   return {
-    testSummary: { collected: tests === undefined ? 0 : 1, failed: tests?.exitCode === 0 ? 0 : 1 },
+    testSummary,
     dirtyGeneratedArtifacts: dirtyGeneratedArtifacts(root),
     fixtureHandlers: fixtureHandlers(root),
     builds: buildSuccess,
@@ -306,7 +334,9 @@ function runReleaseCommands(root: string): readonly ReleaseCommandResult[] {
     // release evidence reflects the real command results on every platform.
     const result = spawnSync(pnpm, args, {
       cwd: root,
-      stdio: 'ignore',
+      stdio: id === 'tests' ? 'pipe' : 'ignore',
+      encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024,
       shell: process.platform === 'win32',
     });
     return {
@@ -314,8 +344,62 @@ function runReleaseCommands(root: string): readonly ReleaseCommandResult[] {
       command: [pnpm, ...args].join(' '),
       exitCode: result.status ?? 1,
       durationMs: Date.now() - started,
+      ...(id === 'tests'
+        ? {
+            output: `${typeof result.stdout === 'string' ? result.stdout : ''}${typeof result.stderr === 'string' ? result.stderr : ''}`,
+          }
+        : {}),
     };
   });
+}
+
+function parseTestSummary(output: string, exitCode: number): { collected: number; failed: number } {
+  let collected = 0;
+  let failed = 0;
+  for (const line of output.split(/\r?\n/u)) {
+    if (!/\bTests\b/u.test(line)) continue;
+    const passed = Number(line.match(/(\d+)\s+passed\b/u)?.[1] ?? 0);
+    const skipped = Number(line.match(/(\d+)\s+skipped\b/u)?.[1] ?? 0);
+    const lineFailed = Number(line.match(/(\d+)\s+failed\b/u)?.[1] ?? 0);
+    if (passed + skipped + lineFailed === 0) continue;
+    collected += passed + skipped + lineFailed;
+    failed += lineFailed;
+  }
+  if (collected === 0 && exitCode !== 0) return { collected: 0, failed: 1 };
+  return { collected, failed };
+}
+
+function buildSbom(root: string): Readonly<Record<string, unknown>> {
+  const lockfile = join(root, 'pnpm-lock.yaml');
+  const components: { type: 'library'; name: string; version: string; purl: string }[] = [];
+  if (existsSync(lockfile)) {
+    const packagesSection = readFileSync(lockfile, 'utf8').split(/^packages:\s*$/mu)[1] ?? '';
+    const seen = new Set<string>();
+    for (const line of packagesSection.split(/\r?\n/u)) {
+      const match = line.match(/^\s{2}(?:'([^']+)'|([^:]+)):\s*$/u);
+      const key = (match?.[1] ?? match?.[2])?.replace(/\([^)]*\)$/u, '');
+      if (key === undefined) continue;
+      const separator = key.lastIndexOf('@');
+      if (separator <= 0) continue;
+      const name = key.slice(0, separator);
+      const version = key.slice(separator + 1);
+      const identity = `${name}@${version}`;
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      components.push({
+        type: 'library',
+        name,
+        version,
+        purl: `pkg:npm/${name.startsWith('@') ? name.slice(1).replace('/', '%2F') : name}@${version}`,
+      });
+    }
+  }
+  return {
+    bomFormat: 'CycloneDX',
+    specVersion: '1.5',
+    serialNumber: `urn:uuid:${sha256Text(JSON.stringify(components)).slice(0, 32)}`,
+    components,
+  };
 }
 
 function dirtyGeneratedArtifacts(root: string): readonly string[] {
@@ -348,7 +432,7 @@ function fixtureHandlers(root: string): readonly string[] {
     });
 }
 
-function readBrowserJourneys(root: string): ReleaseGateInput['browserJourneys'] {
+function readBrowserJourneys(root: string): readonly ReleaseBrowserJourney[] {
   const path = join(root, 'test-output/browser/journeys.json');
   if (!existsSync(path)) return [];
   try {
@@ -363,19 +447,56 @@ function readBrowserJourneys(root: string): ReleaseGateInput['browserJourneys'] 
 
 function verifiedBrowserJourneys(
   root: string,
-  journeys: ReleaseGateInput['browserJourneys'],
-): ReleaseGateInput['browserJourneys'] {
-  return journeys.filter((journey) => {
-    if (journey.status !== 'verified') return true;
-    if (journey.evidencePath === undefined) return false;
+  journeys: readonly ReleaseBrowserJourney[],
+): readonly ReleaseBrowserJourney[] {
+  return journeys.map((journey) => {
+    if (journey.status !== 'verified') return journey;
+    if (journey.evidencePath === undefined) return { ...journey, execution: 'unknown' };
     const evidencePath = resolve(root, journey.evidencePath);
     const repositoryRoot = resolve(root);
     const insideRepository =
       evidencePath === repositoryRoot ||
       evidencePath.startsWith(`${repositoryRoot}/`) ||
       evidencePath.startsWith(`${repositoryRoot}\\`);
-    return insideRepository && existsSync(evidencePath);
+    if (!insideRepository || !existsSync(evidencePath)) return { ...journey, execution: 'unknown' };
+    try {
+      const evidence = JSON.parse(readFileSync(evidencePath, 'utf8')) as unknown;
+      return { ...journey, ...journeyReleaseAttributes(evidence) };
+    } catch {
+      return { ...journey, execution: 'unknown' };
+    }
   });
+}
+
+function journeyReleaseAttributes(value: unknown): Partial<ReleaseBrowserJourney> {
+  const evidence = record(value);
+  const assertions = record(evidence.assertions);
+  const verifiedExport = record(assertions.verifiedExport);
+  const inspection = record(verifiedExport.inspection);
+  const channel = verifiedExport.channel;
+  const inspectionState = inspection.state;
+  const execution = evidence.execution;
+  const motionPlacement = assertions.motionPlacement;
+  return {
+    ...(execution === 'real-services' || execution === 'mocked' || execution === 'unknown'
+      ? { execution }
+      : { execution: 'unknown' as const }),
+    ...(channel === 'verified-delivery' || channel === 'quick-browser-export'
+      ? { deliveryChannel: channel }
+      : { deliveryChannel: 'unknown' as const }),
+    ...(inspectionState === 'passed' ||
+    inspectionState === 'failed' ||
+    inspectionState === 'not-requested'
+      ? { inspectionState }
+      : { inspectionState: 'unknown' as const }),
+    postMotionPlacement: Array.isArray(motionPlacement) && motionPlacement.length >= 2,
+  };
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function verifyArtifactHashes(
@@ -418,7 +539,18 @@ function verifyReleaseDocuments(
   sbom: Readonly<Record<string, unknown>>,
 ): void {
   if (manifest.schemaVersion !== 1) throw new Error('release manifest schemaVersion must be 1');
-  if (sbom.bomFormat !== 'cyclonedx' || !Array.isArray(sbom.components)) {
+  if (
+    (sbom.bomFormat !== 'cyclonedx' && sbom.bomFormat !== 'CycloneDX') ||
+    !Array.isArray(sbom.components) ||
+    sbom.components.length === 0 ||
+    sbom.components.some(
+      (component) =>
+        component === null ||
+        typeof component !== 'object' ||
+        typeof (component as Record<string, unknown>).name !== 'string' ||
+        typeof (component as Record<string, unknown>).version !== 'string',
+    )
+  ) {
     throw new Error('release SBOM must be CycloneDX with components');
   }
 }

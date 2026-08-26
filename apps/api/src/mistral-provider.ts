@@ -19,6 +19,7 @@ import {
   ProviderApprovalError,
   ProviderApprovalService,
   type ProviderApprovalOutcome,
+  type ProviderFailureUsage,
 } from './provider-approval.js';
 
 export interface MistralCompletionRequest {
@@ -301,17 +302,19 @@ export class MistralProviderRegistry {
     }
 
     this.#lifecycle.recordJobStart(MISTRAL_PROVIDER_ID);
+    let failureUsage: ProviderFailureUsage | undefined;
     try {
       const result = await this.#provider.invoke('llm.complete', request.input, request);
+      failureUsage = { actualCost: result.usage?.cost, providerUsageId: result.requestId };
       if (result.status === 'succeeded') {
-        this.#lifecycle.markHealthy(MISTRAL_PROVIDER_ID);
-        this.#lifecycle.recordJobEnd(MISTRAL_PROVIDER_ID, true);
         const approvedResult = withApprovalProvenance(result, preflight.requestDigest, approval);
         await this.#approvals.recordSucceeded(
           approvalVerification,
           approval.reservation,
           approvedResult.usage?.cost,
         );
+        this.#lifecycle.markHealthy(MISTRAL_PROVIDER_ID);
+        this.#lifecycle.recordJobEnd(MISTRAL_PROVIDER_ID, true);
         return this.ledger.record(actorId, approvedResult);
       }
       const code = result.diagnostics[0]?.code;
@@ -320,6 +323,7 @@ export class MistralProviderRegistry {
         approvalVerification,
         approval.reservation,
         code ?? 'provider-request-failed',
+        failureUsage,
       );
       if (code === 'MISTRAL_UNAUTHORIZED') {
         this.#lifecycle.markUnauthorized(
@@ -346,6 +350,7 @@ export class MistralProviderRegistry {
         approvalVerification,
         approval.reservation,
         'provider-unavailable',
+        failureUsage,
       );
       throw new MistralProviderError('MISTRAL_UNAVAILABLE', 'Mistral is unavailable.');
     }
@@ -433,6 +438,7 @@ export class MistralProviderRegistry {
     }
 
     this.#lifecycle.recordJobStart(MISTRAL_PROVIDER_ID);
+    let failureUsage: ProviderFailureUsage | undefined;
     try {
       const providerResult = await this.#provider.invoke(
         'llm.complete',
@@ -445,6 +451,10 @@ export class MistralProviderRegistry {
         },
         request,
       );
+      failureUsage = {
+        actualCost: providerResult.usage?.cost,
+        providerUsageId: providerResult.requestId,
+      };
       if (providerResult.status !== 'succeeded') {
         const code = providerResult.diagnostics[0]?.code;
         this.#lifecycle.recordJobEnd(MISTRAL_PROVIDER_ID, false);
@@ -452,6 +462,7 @@ export class MistralProviderRegistry {
           approvalVerification,
           approval.reservation,
           code ?? 'provider-request-failed',
+          failureUsage,
         );
         throw new MistralProviderError('MISTRAL_REQUEST_FAILED', 'Mistral completion failed.');
       }
@@ -479,17 +490,18 @@ export class MistralProviderRegistry {
           approvalVerification,
           approval.reservation,
           'invalid-structured-output',
+          failureUsage,
         );
         throw error;
       }
-      await this.ledger.record(actorId, approvedResult);
-      this.#lifecycle.markHealthy(MISTRAL_PROVIDER_ID);
-      this.#lifecycle.recordJobEnd(MISTRAL_PROVIDER_ID, true);
       await this.#approvals.recordSucceeded(
         approvalVerification,
         approval.reservation,
         approvedResult.usage?.cost,
       );
+      await this.ledger.record(actorId, approvedResult);
+      this.#lifecycle.markHealthy(MISTRAL_PROVIDER_ID);
+      this.#lifecycle.recordJobEnd(MISTRAL_PROVIDER_ID, true);
       return response;
     } catch (error) {
       if (error instanceof MistralProviderError || error instanceof ProviderApprovalError) {
@@ -501,6 +513,7 @@ export class MistralProviderRegistry {
         approvalVerification,
         approval.reservation,
         'provider-unavailable',
+        failureUsage,
       );
       throw new MistralProviderError('MISTRAL_UNAVAILABLE', 'Mistral is unavailable.');
     }
@@ -757,7 +770,7 @@ function parseEvidenceReferences(
     if (!knownEvidence.has(ref)) {
       throw new MistralProviderError(
         'MISTRAL_REQUEST_FAILED',
-        `${path} contains unknown evidence ${ref}.`,
+        'Mistral structured output referenced unknown evidence.',
       );
     }
   }

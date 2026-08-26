@@ -4,11 +4,23 @@ import { once } from 'node:events';
 import type { Pool } from 'pg';
 import { newDb } from 'pg-mem';
 import { afterEach, describe, expect, it } from 'vitest';
-import { LocalControlPlane, type ControlPlane } from './control-plane.js';
+import {
+  ControlPlaneError,
+  LocalControlPlane,
+  type Actor,
+  type AssetLocationRecord,
+  type ControlPlane,
+  type MediaAssetRecord,
+} from './control-plane.js';
 import { createControlPlaneHttpServer, type ApiAuthentication } from './http-server.js';
 import { DisabledMediaAuth } from './media-auth.js';
-import { MemoryMistralInvocationLedger, MistralProviderRegistry } from './mistral-provider.js';
-import { ProviderApprovalService } from './provider-approval.js';
+import type { HermesTagInput, HermesTagResult } from './asset-hermes-tags.js';
+import {
+  MemoryMistralInvocationLedger,
+  MistralProviderRegistry,
+  PostgresMistralInvocationLedger,
+} from './mistral-provider.js';
+import { PostgresProviderApprovalStore, ProviderApprovalService } from './provider-approval.js';
 import type { PrivateObjectDescriptor, PrivateObjectStore } from './private-object-store.js';
 import type { WorkerResultReceiptV1, WorkerJobType } from '@joy-media/job-protocol';
 import { PostgresControlPlane } from './postgres-control-plane.js';
@@ -30,6 +42,37 @@ afterEach(async () => {
 });
 
 describe('control-plane HTTP transport', () => {
+  it('exposes owner-scoped v2 document revisions with typed conflicts', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    expect(
+      await request(origin, 'POST', '/v1/projects', { id: 'v2-project', title: 'Project' }),
+    ).toMatchObject({
+      status: 201,
+    });
+    const body = {
+      baseRevision: 0,
+      idempotencyKey: 'http-write-1',
+      document: { schemaVersion: 2, projectId: 'v2-project', title: 'A' },
+    };
+    expect(await request(origin, 'POST', '/v2/projects/v2-project/revisions', body)).toMatchObject({
+      status: 201,
+      body: { data: { revision: 1 } },
+    });
+    expect(
+      await request(origin, 'POST', '/v2/projects/v2-project/revisions', {
+        ...body,
+        idempotencyKey: 'http-write-2',
+      }),
+    ).toMatchObject({
+      status: 409,
+      body: { error: { code: 'REVISION_CONFLICT', details: { currentRevision: 1 } } },
+    });
+    expect(await request(origin, 'GET', '/v2/projects/v2-project/document')).toMatchObject({
+      status: 200,
+      body: { data: { revision: 1, document: { title: 'A' } } },
+    });
+  });
+
   it('keeps health public while rejecting versioned routes without an authenticated actor', async () => {
     const origin = await start({ authenticate: () => undefined });
 
@@ -51,6 +94,61 @@ describe('control-plane HTTP transport', () => {
     ).toMatchObject({
       status: 401,
       body: { error: { code: 'AUTH_REQUIRED' } },
+    });
+  });
+
+  it('exposes separate liveness/readiness endpoints and strict API security headers', async () => {
+    const origin = await start({ authenticate: () => undefined });
+    const health = await fetch(`${origin}/health`);
+    expect(health.status).toBe(200);
+    expect(health.headers.get('x-request-id')).toMatch(/^[a-f0-9]{16}$/);
+    expect(health.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(health.headers.get('x-frame-options')).toBe('DENY');
+    expect(health.headers.get('cache-control')).toBe('no-store');
+    expect(health.headers.get('content-security-policy')).toContain("default-src 'none'");
+    expect(await (await fetch(`${origin}/live`)).json()).toMatchObject({ liveness: true });
+    expect(await (await fetch(`${origin}/ready`)).json()).toMatchObject({ readiness: true });
+  });
+
+  it('rejects oversized JSON and applies a bounded per-process request limit', async () => {
+    const limitedOrigin = await start(
+      { authenticate: () => undefined },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { windowMs: 60_000, maxRequests: 1 },
+    );
+    const first = await fetch(`${limitedOrigin}/v1/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'limited', title: 'Limited' }),
+    });
+    expect(first.status).toBe(401);
+    const second = await fetch(`${limitedOrigin}/v1/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'limited-2', title: 'Limited' }),
+    });
+    expect(second.status).toBe(429);
+    expect(second.headers.get('retry-after')).toBe('60');
+    const v2Limited = await fetch(`${limitedOrigin}/v2/projects/limited/revisions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(v2Limited.status).toBe(429);
+
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    const response = await fetch(`${origin}/v1/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'too-large', title: 'x'.repeat(2 * 1024 * 1024) }),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { code: 'REQUEST_INVALID', message: 'request body exceeds the size limit' },
     });
   });
 
@@ -171,6 +269,104 @@ describe('control-plane HTTP transport', () => {
       },
     });
     expect(JSON.stringify(audit.body)).not.toContain('Do not persist this prompt.');
+  });
+
+  it('fails a valid provider result when reported cost exceeds the approved cap', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const approvalStore = new PostgresProviderApprovalStore(pool);
+    await approvalStore.initialize();
+    const approvalService = new ProviderApprovalService(approvalStore, undefined, {
+      keyId: 'approval-key-test',
+      secret: 'test-only-secret',
+    });
+    const invocationLedger = new PostgresMistralInvocationLedger(pool);
+    await invocationLedger.initialize();
+    const registry = new MistralProviderRegistry(
+      'test-only-mistral-secret',
+      invocationLedger,
+      approvalService,
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: 'Valid provider output.' } }],
+            usage: {
+              prompt_tokens: 3,
+              completion_tokens: 4,
+              cost: { amount: '0.11', currency: 'USD' },
+            },
+          }),
+        ),
+    );
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      registry,
+      undefined,
+      approvalService,
+    );
+    const base = {
+      model: 'mistral-small-latest',
+      messages: [{ role: 'user', content: 'Cap test.' }],
+      idempotencyKey: 'mistral-over-cap-1',
+      privacyMode: 'ask-before-remote',
+      approvedRemoteProcessing: true,
+      approvedSpend: true,
+    };
+    const approvalRequired = await request(origin, 'POST', '/v1/providers/mistral/complete', base);
+    const preflight = (
+      approvalRequired.body as {
+        error: {
+          preflight: {
+            providerId: string;
+            capability: 'llm.complete';
+            requestDigest: string;
+          };
+        };
+      }
+    ).error.preflight;
+    const grant = approvalService.createGrant({
+      actorId: 'owner',
+      providerId: preflight.providerId,
+      capability: preflight.capability,
+      requestDigest: preflight.requestDigest,
+      expiresAt: '2026-12-31T00:00:00.000Z',
+      costCap: { amount: '0.05', currency: 'USD' },
+      grantId: 'grant-mistral-over-cap-1',
+    });
+    const failed = await request(origin, 'POST', '/v1/providers/mistral/complete', {
+      ...base,
+      providerApprovalGrant: grant,
+    });
+    expect(failed).toMatchObject({
+      status: 409,
+      body: {
+        error: {
+          code: 'PROVIDER_SPEND_CAP_EXCEEDED',
+          message: 'Provider usage exceeded the approved spend cap.',
+        },
+      },
+    });
+    expect(JSON.stringify(failed.body)).not.toContain('Valid provider output.');
+
+    const reconciliation = await pool.query<{ kind: string; reconciliation_data: unknown }>(
+      'SELECT kind, reconciliation_data FROM provider_approval_reconciliations',
+    );
+    expect(reconciliation.rows).toHaveLength(1);
+    expect(reconciliation.rows[0]).toMatchObject({ kind: 'overage' });
+    expect(reconciliation.rows[0]?.reconciliation_data).toMatchObject({
+      actualCost: { amount: '0.11', currency: 'USD' },
+    });
+    const audit = await request(origin, 'GET', '/v1/providers/approvals/audit');
+    expect(audit).toMatchObject({
+      status: 200,
+      body: {
+        data: expect.arrayContaining([
+          expect.objectContaining({ status: 'failed', reason: 'provider-cost-over-cap' }),
+        ]),
+      },
+    });
   });
 
   it('keeps bounded Joy Code reasoning unconfigured until Mistral is configured', async () => {
@@ -553,6 +749,120 @@ describe('control-plane HTTP transport', () => {
     });
   });
 
+  it('durably reconciles known provider cost when Joy Code structured output is malformed', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const approvalStore = new PostgresProviderApprovalStore(pool);
+    await approvalStore.initialize();
+    const invocationLedger = new PostgresMistralInvocationLedger(pool);
+    await invocationLedger.initialize();
+    const approvals = new ProviderApprovalService(approvalStore, undefined, {
+      keyId: 'approval-key-test',
+      secret: 'test-only-secret',
+    });
+    const registry = new MistralProviderRegistry(
+      'test-only-mistral-secret',
+      invocationLedger,
+      approvals,
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    brief: {
+                      summary: 'Malformed result.',
+                      rationale: 'This references an unknown evidence item.',
+                      evidenceReferences: ['secret-token-evidence'],
+                    },
+                  }),
+                },
+              },
+            ],
+            usage: {
+              prompt_tokens: 4,
+              completion_tokens: 5,
+              cost: { amount: '0.06', currency: 'USD' },
+              provider_usage_id: 'provider-secret-token',
+            },
+          }),
+        ),
+    );
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      registry,
+      undefined,
+      approvals,
+    );
+    const base = {
+      model: 'mistral-small-latest',
+      goal: 'Review the intro only.',
+      snapshotDigest: `fnv1a-${'e'.repeat(8)}`,
+      projectRevision: 'rev-durable-malformed',
+      idempotencyKey: 'joy-code-durable-malformed-1',
+      privacyMode: 'ask-before-remote',
+      evidence: [
+        {
+          evidenceId: 'clip:intro',
+          kind: 'selected-clip',
+          label: 'Intro clip',
+          detail: 'Opening narration from 0s to 10s.',
+        },
+      ],
+      allowedIntentIds: ['shorten-intro'],
+    };
+    const approvalRequired = await request(
+      origin,
+      'POST',
+      '/v1/providers/reasoning/joy-code',
+      base,
+    );
+    const preflight = (
+      approvalRequired.body as {
+        error: {
+          preflight: { providerId: string; capability: 'llm.complete'; requestDigest: string };
+        };
+      }
+    ).error.preflight;
+    const grant = await request(origin, 'POST', '/v1/providers/approvals/grants', {
+      providerId: preflight.providerId,
+      capability: preflight.capability,
+      requestDigest: preflight.requestDigest,
+      expiresAt: '2026-12-31T00:00:00.000Z',
+      costCap: { amount: '0.20', currency: 'USD' },
+    });
+    const failed = await request(origin, 'POST', '/v1/providers/reasoning/joy-code', {
+      ...base,
+      providerApprovalGrant: (grant.body as { data: unknown }).data,
+    });
+    expect(failed).toMatchObject({
+      status: 502,
+      body: { error: { code: 'MISTRAL_REQUEST_FAILED' } },
+    });
+    expect(JSON.stringify(failed.body)).not.toContain('secret-token-evidence');
+    expect(failed.body).toMatchObject({
+      error: { message: 'Provider request failed.' },
+    });
+
+    const reconciliation = await pool.query<{ reconciliation_data: unknown }>(
+      'SELECT reconciliation_data FROM provider_approval_reconciliations',
+    );
+    expect(reconciliation.rows).toHaveLength(1);
+    const serialized = JSON.stringify(reconciliation.rows[0]?.reconciliation_data);
+    expect(serialized).not.toContain('provider-secret-token');
+    expect(serialized).toContain('0.06');
+    expect(reconciliation.rows[0]?.reconciliation_data).toMatchObject({
+      kind: 'final',
+      actualCost: { amount: '0.06', currency: 'USD' },
+    });
+    const audit = await request(origin, 'GET', '/v1/providers/approvals/audit');
+    expect(JSON.stringify(audit.body)).not.toContain('provider-secret-token');
+    expect(JSON.stringify(audit.body)).toContain('invalid-structured-output');
+  });
+
   it('rejects forged provider approval grants at the HTTP boundary', async () => {
     const approvals = new ProviderApprovalService();
     const registry = new MistralProviderRegistry(
@@ -667,6 +977,10 @@ describe('control-plane HTTP transport', () => {
       status: 200,
       body: { data: { assetSyncEnabled: true } },
     });
+    expect(await request(origin, 'GET', '/v1/projects/p')).toMatchObject({
+      status: 200,
+      body: { data: { id: 'p', assetSyncEnabled: true } },
+    });
     const asset = {
       id: 'asset-1',
       kind: 'video',
@@ -679,6 +993,16 @@ describe('control-plane HTTP transport', () => {
     expect(await request(origin, 'POST', '/v1/projects/p/assets', asset)).toMatchObject({
       status: 201,
       body: { data: { id: 'asset-1', projectId: 'p', bytes: 8_589_934_592 } },
+    });
+    expect(
+      await request(origin, 'POST', '/v1/projects/p/assets', {
+        ...asset,
+        id: 'asset-client-private',
+        locations: [{ kind: 'private-object', ref: 'client-supplied-ref' }],
+      }),
+    ).toMatchObject({
+      status: 409,
+      body: { error: { code: 'ASSET_INVALID' } },
     });
     expect(
       await request(origin, 'POST', '/v1/projects/p/assets/asset-1/derivatives', {
@@ -851,6 +1175,28 @@ describe('control-plane HTTP transport', () => {
     });
   });
 
+  it('keeps project backup state owner-bound over HTTP', async () => {
+    const origin = await start({
+      authenticate: (incoming) => ({
+        id: incoming.headers.authorization === 'Bearer owner-token' ? 'owner' : 'other-owner',
+      }),
+    });
+    await request(
+      origin,
+      'POST',
+      '/v1/projects',
+      { id: 'private-project', title: 'Private' },
+      'owner-token',
+    );
+
+    expect(
+      await request(origin, 'GET', '/v1/projects/private-project', undefined, 'owner-token'),
+    ).toMatchObject({ status: 200, body: { data: { ownerId: 'owner' } } });
+    expect(
+      await request(origin, 'GET', '/v1/projects/private-project', undefined, 'other-token'),
+    ).toMatchObject({ status: 409, body: { error: { code: 'PROJECT_NOT_FOUND' } } });
+  });
+
   it('brokers a Worker thumbnail through private storage only with sync consent, then streams verified bytes to the owner', async () => {
     const store = new MemoryPrivateObjectStore();
     const origin = await start({ authenticate: () => ({ id: 'owner' }) }, store);
@@ -928,6 +1274,234 @@ describe('control-plane HTTP transport', () => {
     expect(new Uint8Array(await content.arrayBuffer())).toEqual(thumbnail);
     expect(content.url).toContain('/content');
     expect(content.url).not.toContain('parspack');
+  });
+
+  it('rejects cloud original uploads until project sync consent is explicitly enabled', async () => {
+    const store = new MemoryPrivateObjectStore();
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) }, store);
+    await request(origin, 'POST', '/v1/projects', { id: 'p', title: 'Project' });
+    const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    await request(origin, 'POST', '/v1/projects/p/assets', {
+      id: 'image-1',
+      kind: 'image',
+      displayName: 'frame.jpg',
+      sha256,
+      bytes: bytes.byteLength,
+      descriptor: { mimeType: 'image/jpeg', width: 1, height: 1 },
+      locations: [{ kind: 'opfs-cache', ref: 'local-image-1' }],
+    });
+
+    const upload = () =>
+      fetch(`${origin}/v1/projects/p/assets/image-1/original`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'image/jpeg',
+          'x-joy-sha256': sha256,
+          'x-joy-bytes': String(bytes.byteLength),
+        },
+        body: bytes,
+      });
+
+    const denied = await upload();
+    expect(denied.status).toBe(409);
+    expect(await denied.json()).toMatchObject({
+      error: { code: 'ASSET_SYNC_DISABLED' },
+    });
+    expect(store.objects).toHaveLength(0);
+    expect(await request(origin, 'GET', '/v1/projects/p')).toMatchObject({
+      body: { data: { assetSyncEnabled: false } },
+    });
+
+    await request(origin, 'POST', '/v1/projects/p/asset-sync', { enabled: true });
+    const uploaded = await upload();
+    expect(uploaded.status).toBe(201);
+    expect(store.objects).toHaveLength(1);
+  });
+
+  it('owner-binds private backup listing and content while preserving owner download', async () => {
+    const store = new MemoryPrivateObjectStore();
+    const origin = await start(
+      {
+        authenticate: (incoming) => ({
+          id: incoming.headers.authorization === 'Bearer owner-token' ? 'owner' : 'peer',
+        }),
+      },
+      store,
+    );
+    const upload = await prepareOriginalUpload(origin, 'owner-token');
+    await request(origin, 'POST', '/v1/projects/p/asset-sync', { enabled: true }, 'owner-token');
+    expect((await upload()).status).toBe(201);
+
+    expect(
+      await request(origin, 'GET', '/v1/library/cloud-assets', undefined, 'owner-token'),
+    ).toMatchObject({ status: 200, body: { data: [{ id: 'image-1' }] } });
+    expect(
+      await request(origin, 'GET', '/v1/library/cloud-assets', undefined, 'peer-token'),
+    ).toMatchObject({ status: 200, body: { data: [] } });
+
+    const ownerContent = await fetch(`${origin}/v1/library/cloud-assets/image-1/content`, {
+      headers: { authorization: 'Bearer owner-token' },
+    });
+    expect(ownerContent.status).toBe(200);
+    expect(new Uint8Array(await ownerContent.arrayBuffer())).toEqual(
+      new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
+    );
+    const peerContent = await fetch(`${origin}/v1/library/cloud-assets/image-1/content`, {
+      headers: { authorization: 'Bearer peer-token' },
+    });
+    expect(peerContent.status).toBe(409);
+    expect(await peerContent.json()).toMatchObject({ error: { code: 'ASSET_NOT_FOUND' } });
+    expect(store.gets).toHaveLength(1);
+  });
+
+  it('keeps a successful same-SHA backup readable when a retry fails after storage', async () => {
+    let attempts = 0;
+    const tagger = async (): Promise<HermesTagResult> => {
+      attempts += 1;
+      if (attempts === 2) throw new Error('injected retry tag failure');
+      return { tags: ['image'], sortName: 'frame.jpg', provenance: 'hermes-heuristic' };
+    };
+    const store = new MemoryPrivateObjectStore();
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      store,
+      undefined,
+      undefined,
+      undefined,
+      tagger,
+    );
+    const upload = await prepareOriginalUpload(origin);
+    await request(origin, 'POST', '/v1/projects/p/asset-sync', { enabled: true });
+
+    const first = await upload();
+    expect(first.status).toBe(201);
+    const firstBody = (await first.json()) as { data: { cloudRef: string } };
+    const firstRef = firstBody.data.cloudRef;
+    expect(store.objects.map((entry) => entry.descriptor.ref)).toEqual([firstRef]);
+
+    const failedRetry = await upload();
+    expect(failedRetry.status).not.toBe(201);
+    expect(store.removed).toHaveLength(1);
+    expect(store.removed[0]).not.toBe(firstRef);
+    expect(store.objects.map((entry) => entry.descriptor.ref)).toEqual([firstRef]);
+
+    const content = await fetch(`${origin}/v1/library/cloud-assets/image-1/content`);
+    expect(content.status).toBe(200);
+    expect(new Uint8Array(await content.arrayBuffer())).toEqual(
+      new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
+    );
+  });
+
+  it('isolates concurrent same-SHA upload attempts when one fails', async () => {
+    let attempts = 0;
+    let releaseFirst!: () => void;
+    const firstCanFinish = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const tagger = async (): Promise<HermesTagResult> => {
+      attempts += 1;
+      if (attempts === 1) {
+        await firstCanFinish;
+        return { tags: ['image'], sortName: 'frame.jpg', provenance: 'hermes-heuristic' };
+      }
+      releaseFirst();
+      throw new Error('injected concurrent tag failure');
+    };
+    const store = new MemoryPrivateObjectStore();
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      store,
+      undefined,
+      undefined,
+      undefined,
+      tagger,
+    );
+    const upload = await prepareOriginalUpload(origin);
+    await request(origin, 'POST', '/v1/projects/p/asset-sync', { enabled: true });
+
+    const responses = await Promise.all([upload(), upload()]);
+
+    expect(responses.map((response) => response.status).sort()).toEqual([201, 500]);
+    expect(store.objects).toHaveLength(1);
+    expect(store.removed).toHaveLength(1);
+    expect(store.objects[0]?.descriptor.ref).not.toBe(store.removed[0]);
+    const content = await fetch(`${origin}/v1/library/cloud-assets/image-1/content`);
+    expect(content.status).toBe(200);
+    expect(new Uint8Array(await content.arrayBuffer())).toEqual(
+      new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
+    );
+  });
+
+  it('rejects a raced original upload when consent is disabled before metadata commit', async () => {
+    const controlPlane = new LocalControlPlane();
+    const owner = { id: 'owner' };
+    const store = new MemoryPrivateObjectStore(() => {
+      controlPlane.setAssetSync(owner, 'p', false);
+    });
+    const origin = await start({ authenticate: () => owner }, store, undefined, controlPlane);
+    const upload = await prepareOriginalUpload(origin);
+    await request(origin, 'POST', '/v1/projects/p/asset-sync', { enabled: true });
+
+    const response = await upload();
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: 'ASSET_SYNC_DISABLED' } });
+    expect(store.objects).toHaveLength(0);
+    expect(store.removed).toHaveLength(1);
+    expect(controlPlane.getProject(owner, 'p').assetSyncEnabled).toBe(false);
+    expect(controlPlane.assetsForProject(owner, 'p')[0]?.locations).toEqual([
+      { kind: 'opfs-cache', ref: 'local-image-1' },
+    ]);
+  });
+
+  it('never leaves a private location when original-backup mutation boundaries fail', async () => {
+    const cases: readonly {
+      readonly name: string;
+      readonly failure: 'store' | 'tag' | 'metadata' | 'attach';
+    }[] = [
+      { name: 'object storage', failure: 'store' },
+      { name: 'tagging', failure: 'tag' },
+      { name: 'metadata update', failure: 'metadata' },
+      { name: 'location attachment', failure: 'attach' },
+    ];
+
+    for (const scenario of cases) {
+      const controlPlane = new FaultInjectingControlPlane(scenario.failure);
+      const store = new MemoryPrivateObjectStore(
+        scenario.failure === 'store'
+          ? () => {
+              throw new Error('injected object-store failure');
+            }
+          : undefined,
+      );
+      const tagger =
+        scenario.failure === 'tag'
+          ? async (): Promise<HermesTagResult> => {
+              throw new Error('injected tag failure');
+            }
+          : undefined;
+      const origin = await start(
+        { authenticate: () => ({ id: 'owner' }) },
+        store,
+        undefined,
+        controlPlane,
+        undefined,
+        tagger,
+      );
+      const upload = await prepareOriginalUpload(origin);
+      await request(origin, 'POST', '/v1/projects/p/asset-sync', { enabled: true });
+
+      const response = await upload();
+
+      expect(response.status, scenario.name).not.toBe(201);
+      expect(store.objects, scenario.name).toHaveLength(0);
+      expect(
+        controlPlane.assetsForProject({ id: 'owner' }, 'p')[0]?.locations,
+        scenario.name,
+      ).toEqual([{ kind: 'opfs-cache', ref: 'local-image-1' }]);
+      expect(store.removed, scenario.name).toHaveLength(1);
+    }
   });
 
   it('accepts only typed Worker job payloads and leases them back over HTTP', async () => {
@@ -1702,6 +2276,8 @@ async function start(
   mistral?: MistralProviderRegistry,
   controlPlane?: ControlPlane,
   providerApprovals?: ProviderApprovalService,
+  assetTagger?: (input: HermesTagInput) => Promise<HermesTagResult>,
+  rateLimit?: { readonly windowMs?: number; readonly maxRequests?: number },
 ): Promise<string> {
   const server = createControlPlaneHttpServer({
     controlPlane: controlPlane ?? new LocalControlPlane(),
@@ -1710,6 +2286,8 @@ async function start(
     ...(privateObjectStore === undefined ? {} : { privateObjectStore }),
     ...(mistral === undefined ? {} : { mistral }),
     ...(providerApprovals === undefined ? {} : { providerApprovals }),
+    ...(assetTagger === undefined ? {} : { assetTagger }),
+    ...(rateLimit === undefined ? {} : { rateLimit }),
   });
   servers.push(server);
   server.listen(0, '127.0.0.1');
@@ -1725,11 +2303,21 @@ class MemoryPrivateObjectStore implements PrivateObjectStore {
     readonly bytes: Uint8Array;
   }> = [];
   readonly removed: string[] = [];
+  readonly gets: string[] = [];
+
+  constructor(
+    private readonly onPut?: (
+      descriptor: PrivateObjectDescriptor,
+      bytes: Uint8Array,
+    ) => void | Promise<void>,
+  ) {}
 
   async put(descriptor: PrivateObjectDescriptor, bytes: Uint8Array): Promise<void> {
     this.objects.push({ descriptor, bytes });
+    await this.onPut?.(descriptor, bytes);
   }
   async get(descriptor: PrivateObjectDescriptor): Promise<Uint8Array> {
+    this.gets.push(descriptor.ref);
     const object = this.objects.find((candidate) => candidate.descriptor.ref === descriptor.ref);
     if (object === undefined) throw new Error('private object not found');
     return object.bytes;
@@ -1739,6 +2327,73 @@ class MemoryPrivateObjectStore implements PrivateObjectStore {
     const index = this.objects.findIndex((candidate) => candidate.descriptor.ref === ref);
     if (index >= 0) this.objects.splice(index, 1);
   }
+}
+
+class FaultInjectingControlPlane extends LocalControlPlane {
+  constructor(private readonly failure: 'store' | 'tag' | 'metadata' | 'attach') {
+    super();
+  }
+
+  override updateAssetMetadata(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+    patch: {
+      readonly tags?: readonly string[];
+      readonly sortName?: string;
+      readonly displayName?: string;
+    },
+  ): MediaAssetRecord {
+    if (this.failure === 'metadata')
+      throw new ControlPlaneError('INJECTED_FAILURE', 'metadata update failed');
+    return super.updateAssetMetadata(actor, projectId, assetId, patch);
+  }
+
+  override attachCloudOriginal(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+    location: AssetLocationRecord & { readonly kind: 'private-object' },
+  ): MediaAssetRecord {
+    if (this.failure === 'attach')
+      throw new ControlPlaneError('INJECTED_FAILURE', 'location attachment failed');
+    return super.attachCloudOriginal(actor, projectId, assetId, location);
+  }
+}
+
+async function prepareOriginalUpload(
+  origin: string,
+  bearerToken?: string,
+): Promise<() => Promise<Response>> {
+  await request(origin, 'POST', '/v1/projects', { id: 'p', title: 'Project' }, bearerToken);
+  const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  await request(
+    origin,
+    'POST',
+    '/v1/projects/p/assets',
+    {
+      id: 'image-1',
+      kind: 'image',
+      displayName: 'frame.jpg',
+      sha256,
+      bytes: bytes.byteLength,
+      descriptor: { mimeType: 'image/jpeg', width: 1, height: 1 },
+      locations: [{ kind: 'opfs-cache', ref: 'local-image-1' }],
+    },
+    bearerToken,
+  );
+  return () =>
+    fetch(`${origin}/v1/projects/p/assets/image-1/original`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'image/jpeg',
+        'x-joy-sha256': sha256,
+        'x-joy-bytes': String(bytes.byteLength),
+        ...(bearerToken === undefined ? {} : { authorization: `Bearer ${bearerToken}` }),
+      },
+      body: bytes,
+    });
 }
 
 async function request(
@@ -1753,7 +2408,7 @@ async function request(
   if (bearerToken !== undefined) headers.authorization = `Bearer ${bearerToken}`;
   const response = await fetch(
     `${origin}${pathname}`,
-    body === undefined ? { method } : { method, headers, body: JSON.stringify(body) },
+    body === undefined ? { method, headers } : { method, headers, body: JSON.stringify(body) },
   );
   return { status: response.status, body: await response.json() };
 }

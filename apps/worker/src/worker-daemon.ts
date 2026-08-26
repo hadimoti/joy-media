@@ -29,6 +29,8 @@ export class WorkerDaemon {
         let cancelRequested = false;
         const result = await this.runtime.run(job, {
           cancelled: () => options.stopped() || cancelRequested,
+          readRenderArtifact: ({ jobId, outputRef }) =>
+            this.client.downloadRenderArtifact(jobId, outputRef),
           progress: async (progress) => {
             const heartbeat = await this.client.heartbeat(job.id, progress);
             cancelRequested ||= heartbeat.cancelRequested;

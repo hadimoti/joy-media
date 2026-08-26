@@ -17,6 +17,22 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./commands": {
+      "types": "./dist/commands.d.ts",
+      "default": "./dist/commands.js"
+    },
+    "./transform": {
+      "types": "./dist/transform.d.ts",
+      "default": "./dist/transform.js"
+    },
+    "./expression": {
+      "types": "./dist/expression.d.ts",
+      "default": "./dist/expression.js"
+    },
+    "./parenting": {
+      "types": "./dist/parenting.d.ts",
+      "default": "./dist/parenting.js"
     }
   }
 }

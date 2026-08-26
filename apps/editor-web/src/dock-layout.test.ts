@@ -13,7 +13,7 @@ import {
   verticalDockLayout,
   widescreenDockLayout,
 } from './dock-layout.js';
-import { PANEL_IDS } from './workspace.js';
+import { PERSISTED_LAYOUT_PANEL_IDS } from './workspace.js';
 
 type LayoutWithPanels = {
   readonly panels: Record<string, Record<string, unknown>>;
@@ -73,14 +73,14 @@ describe('dock layout constraints', () => {
   it('seeds every editor panel with compact, resize-safe minimums', () => {
     const layout = defaultDockLayout() as LayoutWithPanels;
 
-    expect(Object.keys(layout.panels)).toEqual(PANEL_IDS);
+    expect(Object.keys(layout.panels)).toEqual(PERSISTED_LAYOUT_PANEL_IDS);
     for (const panel of Object.values(layout.panels)) {
       expect(panel.minimumWidth).toBe(DOCK_PANEL_MINIMUM_WIDTH);
       expect(panel.minimumHeight).toBe(DOCK_PANEL_MINIMUM_HEIGHT);
     }
   });
 
-  it('migrates saved editor panels without disturbing the user layout', () => {
+  it('migrates saved editor panels and drops unknown panels in production', () => {
     const savedLayout = {
       grid: { root: { type: 'branch', data: ['keep-this-grid'] } },
       panels: {
@@ -104,9 +104,81 @@ describe('dock layout constraints', () => {
       minimumHeight: DOCK_PANEL_MINIMUM_HEIGHT,
       maximumWidth: 500,
     });
-    expect(migrated.panels.futurePanel).toBe(savedLayout.panels.futurePanel);
+    expect(migrated.panels).not.toHaveProperty('futurePanel');
     expect(savedLayout.panels.media.minimumWidth).toBe(100);
     expect(savedLayout.panels.media.minimumHeight).toBe(100);
+  });
+
+  it('removes hidden experimental panels from persisted layout state', () => {
+    const migrated = normalizeDockLayoutConstraints({
+      grid: {
+        root: {
+          type: 'leaf',
+          data: { views: ['timeline', 'flow', 'plugins'], activeView: 'plugins', id: 'saved' },
+        },
+      },
+      panels: {
+        timeline: { id: 'timeline' },
+        flow: { id: 'flow' },
+        plugins: { id: 'plugins' },
+      },
+    }) as LayoutWithPanels;
+
+    expect(migrated.panels).not.toHaveProperty('flow');
+    expect(migrated.panels).not.toHaveProperty('plugins');
+    expect((migrated.grid?.root as Record<string, unknown>).data).toMatchObject({
+      views: ['timeline'],
+      activeView: 'timeline',
+    });
+  });
+
+  it('removes leaves whose views are all stale so no fallback placeholder can mount', () => {
+    const migrated = normalizeDockLayoutConstraints({
+      grid: {
+        root: {
+          type: 'branch',
+          data: [
+            {
+              type: 'leaf',
+              data: { views: ['flow', 'plugins'], activeView: 'plugins', id: 'stale-only' },
+            },
+            {
+              type: 'leaf',
+              data: {
+                views: ['timeline', 'unknown-panel'],
+                activeView: 'unknown-panel',
+                id: 'valid',
+              },
+            },
+          ],
+        },
+      },
+      panels: {
+        flow: { id: 'flow' },
+        plugins: { id: 'plugins' },
+        timeline: { id: 'timeline' },
+        'unknown-panel': { id: 'unknown-panel' },
+      },
+    }) as LayoutWithPanels;
+
+    const leaves: Array<Record<string, unknown>> = [];
+    const walk = (node: unknown): void => {
+      if (!isRecord(node)) return;
+      if (node.type === 'leaf') {
+        leaves.push(node);
+        return;
+      }
+      if (Array.isArray(node.data)) for (const child of node.data) walk(child);
+    };
+    walk(migrated.grid?.root);
+    expect(leaves).toHaveLength(1);
+    expect(leaves[0]?.data).toMatchObject({
+      views: ['timeline'],
+      activeView: 'timeline',
+    });
+    expect(leaves.some((leaf) => (leaf.data as Record<string, unknown>).id === 'stale-only')).toBe(
+      false,
+    );
   });
 });
 
@@ -131,7 +203,7 @@ describe('view modes', () => {
     const vertical = verticalDockLayout() as LayoutWithPanels;
     const wide = widescreenDockLayout() as LayoutWithPanels;
 
-    expect(Object.keys(wide.panels)).toEqual(PANEL_IDS);
+    expect(Object.keys(wide.panels)).toEqual(PERSISTED_LAYOUT_PANEL_IDS);
     for (const panel of Object.values(wide.panels)) {
       expect(panel.minimumWidth).toBe(DOCK_PANEL_MINIMUM_WIDTH);
       expect(panel.minimumHeight).toBe(DOCK_PANEL_MINIMUM_HEIGHT);
@@ -147,8 +219,8 @@ describe('view modes', () => {
     expect(seedDockLayout('vertical')).toEqual(vertical);
   });
 
-  it('does not open experimental platform panels in seeded GA layouts', () => {
-    const experimental = new Set(['jobs', 'workflows', 'production', 'plugins', 'templates']);
+  it('seeds Production in both GA layouts while keeping experimental panels closed', () => {
+    const experimental = new Set(['flow', 'jobs', 'workflows', 'plugins', 'templates']);
     const views = (layout: unknown): string[] => {
       const out: string[] = [];
       const walk = (node: unknown): void => {
@@ -164,5 +236,7 @@ describe('view modes', () => {
 
     expect(views(verticalDockLayout()).some((view) => experimental.has(view))).toBe(false);
     expect(views(widescreenDockLayout()).some((view) => experimental.has(view))).toBe(false);
+    expect(views(verticalDockLayout())).toContain('production');
+    expect(views(widescreenDockLayout())).toContain('production');
   });
 });

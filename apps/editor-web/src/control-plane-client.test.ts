@@ -4,6 +4,180 @@ import { createQueuedProductionRunRecord } from '@joy-media/workflow-engine';
 import { BrowserControlPlaneClient } from './control-plane-client.js';
 
 describe('BrowserControlPlaneClient', () => {
+  it('creates a typed recovered copy with the exact stale-revision contract', async () => {
+    let request: { readonly url: string; readonly init?: RequestInit } | undefined;
+    const original = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      request = { url: String(input), ...(init === undefined ? {} : { init }) };
+      return json(201, {
+        data: {
+          kind: 'recovered-copy',
+          projectId: 'recovered-project-1',
+          name: 'Campaign (Recovered copy)',
+          document: { schemaVersion: 2, projectId: 'recovered-project-1' },
+          basedOnRevision: 3,
+          serverRevision: 7,
+          createdAt: '2026-08-26T00:00:00.000Z',
+          provenance: {
+            sourceProjectId: 'source-project-1',
+            baseRevision: 3,
+            sourceHeadRevision: 7,
+            operation: {
+              kind: 'append',
+              document: { schemaVersion: 2, projectId: 'source-project-1' },
+            },
+            requestedDocumentHash: 'hash-requested',
+          },
+        },
+      });
+    };
+    try {
+      const client = new BrowserControlPlaneClient('/api', () => 'token');
+      await expect(
+        client.recoverStaleRevision('source/project', {
+          baseRevision: 3,
+          idempotencyKey: 'recover-1',
+          suggestedName: 'Campaign (Recovered copy)',
+          operation: {
+            kind: 'append',
+            document: { schemaVersion: 2, projectId: 'source-project-1' },
+          },
+        }),
+      ).resolves.toMatchObject({
+        kind: 'recovered-copy',
+        projectId: 'recovered-project-1',
+        provenance: { sourceProjectId: 'source-project-1', sourceHeadRevision: 7 },
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(request?.url).toBe('/api/v2/projects/source%2Fproject/recovered-copies');
+    expect(request?.init?.method).toBe('POST');
+    expect(JSON.parse(String(request?.init?.body))).toEqual({
+      baseRevision: 3,
+      idempotencyKey: 'recover-1',
+      suggestedName: 'Campaign (Recovered copy)',
+      operation: {
+        kind: 'append',
+        document: { schemaVersion: 2, projectId: 'source-project-1' },
+      },
+    });
+  });
+
+  it('preserves recovery API error codes and status', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = async () =>
+      json(409, { error: { code: 'REVISION_CONFLICT', message: 'stale source revision' } });
+    try {
+      const client = new BrowserControlPlaneClient('/api', () => 'token');
+      await expect(
+        client.recoverStaleRevision('source-project', {
+          baseRevision: 1,
+          idempotencyKey: 'recover-2',
+          suggestedName: 'Recovered',
+          operation: {
+            kind: 'restore',
+            targetRevision: 1,
+          },
+        }),
+      ).rejects.toMatchObject({
+        code: 'REVISION_CONFLICT',
+        status: 409,
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('does not make a recovery request without a session token', async () => {
+    const original = globalThis.fetch;
+    let called = false;
+    globalThis.fetch = async () => {
+      called = true;
+      throw new Error('network should not be reached');
+    };
+    try {
+      const client = new BrowserControlPlaneClient('/api', () => undefined);
+      await expect(
+        client.recoverStaleRevision('source-project', {
+          baseRevision: 1,
+          idempotencyKey: 'recover-3',
+          suggestedName: 'Recovered',
+          operation: { kind: 'restore', targetRevision: 1 },
+        }),
+      ).rejects.toThrow('JOY Media session required');
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(called).toBe(false);
+  });
+
+  it('returns typed restore metadata including its source revision', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = async () =>
+      json(201, {
+        data: {
+          projectId: 'project-1',
+          revision: 2,
+          baseRevision: 1,
+          idempotencyKey: 'restore-1',
+          operation: {
+            kind: 'restore',
+            idempotencyKey: 'restore-1',
+            label: 'restore revision 1',
+            targetRevision: 1,
+          },
+          document: { schemaVersion: 2, projectId: 'project-1' },
+          documentHash: 'hash',
+          createdAt: 'now',
+        },
+      });
+    try {
+      const client = new BrowserControlPlaneClient('/api', () => 'token');
+      const restored = await client.restoreProjectRevision('project-1', {
+        baseRevision: 1,
+        revision: 1,
+        idempotencyKey: 'restore-1',
+      });
+      expect(restored.operation).toMatchObject({ kind: 'restore', targetRevision: 1 });
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('sends the selected reference asset without claiming server-side range trimming', async () => {
+    let requestBody = '';
+    const original = globalThis.fetch;
+    globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requestBody = String(init?.body ?? '');
+      return json(200, {
+        data: {
+          language: 'en-US',
+          words: [],
+          speakers: [],
+          provenance: { providerId: 'whisper', modelId: 'tiny', createdAt: 'now' },
+        },
+      });
+    };
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => 'joy-session-token',
+      );
+      await client.transcribeSpeech('en-US', {
+        referenceAssetId: 'asset-selected',
+        sourceStartUs: 2_000_000,
+        sourceDurationUs: 4_000_000,
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(JSON.parse(requestBody)).toEqual({
+      language: 'en-US',
+      referenceAssetId: 'asset-selected',
+    });
+  });
+
   it('sends the local session token only to the Media API', async () => {
     const requests: Array<{ readonly url: string; readonly authorization?: string }> = [];
     const fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -170,6 +344,43 @@ describe('BrowserControlPlaneClient', () => {
       },
     ]);
     expect(JSON.stringify(requests)).not.toContain('C:\\');
+  });
+
+  it('refreshes authoritative sync state when ensuring an existing project', async () => {
+    const requests: Array<{ readonly url: string; readonly method?: string }> = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, ...(init?.method === undefined ? {} : { method: init.method }) });
+      if (url.endsWith('/v1/projects')) {
+        return json(409, { error: { code: 'PROJECT_EXISTS', message: 'project-1' } });
+      }
+      return json(200, {
+        data: {
+          id: 'project-1',
+          title: 'Project',
+          revision: 2,
+          ownerId: 'owner',
+          assetSyncEnabled: true,
+        },
+      });
+    };
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => 'joy-session-token',
+      );
+      await expect(client.ensureProject('project-1', 'Project')).resolves.toMatchObject({
+        id: 'project-1',
+        assetSyncEnabled: true,
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(requests).toEqual([
+      { url: 'https://media.joyteam.ir/api/v1/projects', method: 'POST' },
+      { url: 'https://media.joyteam.ir/api/v1/projects/project-1', method: 'GET' },
+    ]);
   });
 
   it('queues one executable render export job with a bundle and linked report reference', async () => {

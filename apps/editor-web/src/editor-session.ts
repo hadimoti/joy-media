@@ -17,7 +17,7 @@ import type {
 import {
   applyVisualObjectProjectTransaction,
   VisualObjectProjectHistory,
-} from '@joy-media/property-system';
+} from './editor-visual-kernel.js';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import {
   BrowserProjectStore,
@@ -29,10 +29,12 @@ import {
   validateJoyProjectV1,
   validateSpikeProject,
   validateWorkflowGraph,
+  validateCreativeArtifact,
   readDualLensFlags,
   EMPTY_WORKFLOW_GRAPH,
 } from '@joy-media/project-schema';
 import type { JoyProjectV1, SpikeProject, WorkflowGraphV2 } from '@joy-media/project-schema';
+import type { ProjectDocumentHydrationPlan } from './project-document-hydration.js';
 import type { ProjectRevisionId } from '@joy-media/agent-tools';
 import { EditorCommandController } from './command-controller.js';
 import { withDefaultPortraitComposition } from './editor-project.js';
@@ -47,6 +49,18 @@ export interface HistoryEntry {
   readonly commandCount: number;
   readonly sequence: number;
 }
+
+/**
+ * Notification emitted after a durable editor mutation has been committed to
+ * the session's local persistence.  This deliberately excludes selection,
+ * playhead, and other ephemeral editor state.
+ */
+export interface EditorSessionDurableChange {
+  readonly label: string;
+  readonly operationCount: number;
+}
+
+export type EditorSessionDurableChangeListener = (change: EditorSessionDurableChange) => void;
 
 /**
  * `document-snapshot` exists because a whole-document replacement has no
@@ -130,7 +144,7 @@ const graphAdapter: PersistenceAdapter<PersistedGraphDocument, GraphTransaction>
 export class EditorSession {
   readonly #timelinePersistence: LocalProjectPersistence<SpikeProject, CommandTransaction>;
   readonly #visualObjectPersistence: LocalProjectPersistence<JoyProjectV1, VisualObjectTransaction>;
-  readonly #timeline: EditorCommandController;
+  #timeline: EditorCommandController;
   readonly #visualObjects: VisualObjectProjectHistory;
   readonly #undo: HistoryStackEntry[] = [];
   readonly #redo: HistoryStackEntry[] = [];
@@ -153,6 +167,7 @@ export class EditorSession {
   readonly #artifactRedo: ArtifactTransactionRecord[] = [];
   readonly #snapshotUndo: { before: JoyProjectV1; after: JoyProjectV1 }[] = [];
   readonly #snapshotRedo: { before: JoyProjectV1; after: JoyProjectV1 }[] = [];
+  readonly #durableChangeListeners = new Set<EditorSessionDurableChangeListener>();
   #artifactDocument: PersistedArtifactDocument;
   #artifactRevision: number;
   #graphDocument: PersistedGraphDocument;
@@ -266,6 +281,14 @@ export class EditorSession {
     return this.#redo.length > 0;
   }
 
+  /** Subscribe to durable mutations; ephemeral selection/playhead changes do not use this seam. */
+  subscribeDurableChanges(listener: EditorSessionDurableChangeListener): () => void {
+    this.#durableChangeListeners.add(listener);
+    return () => {
+      this.#durableChangeListeners.delete(listener);
+    };
+  }
+
   get historyEntries(): readonly HistoryEntry[] {
     const cursorSequence = this.historyCursorSequence;
     // Photoshop-style linear strip: Document → past → current tip → future redo states.
@@ -306,13 +329,18 @@ export class EditorSession {
       this.#redo.some((e) => e.sequence === sequence);
     if (!known) return;
     let guard = this.#undo.length + this.#redo.length + 2;
+    let operationCount = 0;
     while (this.historyCursorSequence > sequence && this.canUndo && guard-- > 0) {
-      this.undo();
+      const entry = this.#undoInternal();
+      operationCount += positiveOperationCount(entry?.commandCount);
     }
     guard = this.#undo.length + this.#redo.length + 2;
     while (this.historyCursorSequence < sequence && this.canRedo && guard-- > 0) {
-      this.redo();
+      const entry = this.#redoInternal();
+      operationCount += positiveOperationCount(entry?.commandCount);
     }
+    if (operationCount > 0)
+      this.#emitDurableChange(`Jump to history ${String(sequence)}`, operationCount);
   }
 
   #toEntry(entry: HistoryStackEntry, direction: 'undo' | 'redo' | 'current'): HistoryEntry {
@@ -337,6 +365,7 @@ export class EditorSession {
     this.#timelinePersistence.saveTransaction(before, transaction, false);
     this.#timelineRevision += 1;
     this.#record('timeline', transaction.label, transaction.commands.length);
+    this.#emitDurableChange(transaction.label, transaction.commands.length);
     return project;
   }
 
@@ -346,6 +375,7 @@ export class EditorSession {
     this.#visualObjectPersistence.saveTransaction(before, transaction, false);
     this.#visualObjectRevision += 1;
     this.#record('visual-object', transaction.label, transaction.commands.length);
+    this.#emitDurableChange(transaction.label, transaction.commands.length);
     return project;
   }
 
@@ -366,6 +396,7 @@ export class EditorSession {
     this.#graphUndo.push(result.record);
     this.#graphRedo.length = 0;
     this.#record('graph', transaction.label, transaction.commands.length);
+    this.#emitDurableChange(transaction.label, transaction.commands.length);
     return result.graph;
   }
 
@@ -382,6 +413,7 @@ export class EditorSession {
     this.#artifactUndo.push(result.record);
     this.#artifactRedo.length = 0;
     this.#record('artifact', transaction.label, transaction.commands.length);
+    this.#emitDurableChange(transaction.label, transaction.commands.length);
     return result.store;
   }
 
@@ -516,6 +548,7 @@ export class EditorSession {
 
     if (operations.length === 0) return;
     this.#recordCompound(operations, label, commandCount);
+    this.#emitDurableChange(label, commandCount);
   }
 
   replaceVisualProject(next: JoyProjectV1): JoyProjectV1 {
@@ -525,18 +558,117 @@ export class EditorSession {
     this.#visualObjectPersistence.saveSnapshot(project, false);
     this.#visualObjectRevision += 1;
     this.#record('visual-object', 'Replace project document', 0);
+    this.#emitDurableChange('Replace project document', 1);
     return project;
   }
 
+  /**
+   * Replace every durable slice from a validated V2 hydration plan. The plan
+   * is prepared at the untrusted journal/remote boundary; this method still
+   * rechecks its typed values before writing anything and resets edit history
+   * because a recovered document is the new opening baseline.
+   */
+  hydrateProjectDocument(
+    plan: ProjectDocumentHydrationPlan,
+    label = 'Project document hydrated',
+  ): void {
+    const visualDiagnostics = validateJoyProjectV1(plan.visualProject);
+    const timelineDiagnostics = validateSpikeProject(plan.timelineProject);
+    if (visualDiagnostics.length > 0 || timelineDiagnostics.length > 0)
+      throw new RangeError('hydration plan contains an invalid visual or timeline project');
+    if (plan.visualProject.id !== plan.timelineProject.id)
+      throw new RangeError('hydration plan project ids do not match');
+    if (plan.workflowGraph !== undefined) {
+      if (!this.graphEnabled) throw new RangeError('hydration includes a disabled workflow graph');
+      if (validateWorkflowGraph(plan.workflowGraph, 'workflow').length > 0)
+        throw new RangeError('hydration plan contains an invalid workflow graph');
+    }
+    if (plan.artifacts !== undefined) {
+      if (!this.graphEnabled) throw new RangeError('hydration includes disabled artifacts');
+      for (const [id, artifact] of Object.entries(plan.artifacts.artifacts)) {
+        if (artifact.id !== id || validateCreativeArtifact(artifact, `artifacts.${id}`).length > 0)
+          throw new RangeError(`hydration plan contains an invalid artifact "${id}"`);
+      }
+    }
+
+    const beforeVisual = this.#visualObjects.present;
+    const beforeTimeline = this.#timeline.project;
+    const beforeGraph = this.#graphDocument;
+    const beforeArtifacts = this.#artifactDocument;
+    const nextGraph = !this.graphEnabled
+      ? beforeGraph
+      : { ...beforeGraph, graph: plan.workflowGraph ?? EMPTY_WORKFLOW_GRAPH };
+    const nextArtifacts = !this.graphEnabled
+      ? beforeArtifacts
+      : { ...beforeArtifacts, store: plan.artifacts ?? EMPTY_ARTIFACT_STORE };
+    let visualWritten = false;
+    let timelineWritten = false;
+    let graphWritten = false;
+    let artifactsWritten = false;
+    try {
+      this.#visualObjectPersistence.saveSnapshot(plan.visualProject, false);
+      visualWritten = true;
+      this.#timelinePersistence.saveSnapshot(plan.timelineProject, false);
+      timelineWritten = true;
+      if (this.graphEnabled) {
+        this.#graphPersistence?.saveSnapshot(nextGraph, false);
+        graphWritten = true;
+      }
+      if (this.graphEnabled) {
+        this.#artifactPersistence?.saveSnapshot(nextArtifacts, false);
+        artifactsWritten = true;
+      }
+    } catch (error) {
+      // Restore every snapshot already written. This mirrors dispatchCompound's
+      // write-ahead behavior and leaves the live objects untouched on failure.
+      try {
+        if (artifactsWritten) this.#artifactPersistence?.saveSnapshot(beforeArtifacts, false);
+        if (graphWritten) this.#graphPersistence?.saveSnapshot(beforeGraph, false);
+        if (timelineWritten) this.#timelinePersistence.saveSnapshot(beforeTimeline, false);
+        if (visualWritten) this.#visualObjectPersistence.saveSnapshot(beforeVisual, false);
+      } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], 'hydration rollback was incomplete');
+      }
+      throw error;
+    }
+
+    this.#timeline = new EditorCommandController(plan.timelineProject);
+    this.#visualObjects.replacePresent(plan.visualProject);
+    if (this.graphEnabled) {
+      this.#graphDocument = nextGraph;
+      this.#artifactDocument = nextArtifacts;
+    }
+    this.#timelineRevision += 1;
+    this.#visualObjectRevision += 1;
+    if (this.graphEnabled) this.#graphRevision += 1;
+    if (this.graphEnabled) this.#artifactRevision += 1;
+    this.#undo.length = 0;
+    this.#redo.length = 0;
+    this.#graphUndo.length = 0;
+    this.#graphRedo.length = 0;
+    this.#artifactUndo.length = 0;
+    this.#artifactRedo.length = 0;
+    this.#snapshotUndo.length = 0;
+    this.#snapshotRedo.length = 0;
+    this.#sequence = 0;
+    this.#emitDurableChange(label, 1);
+  }
+
   undo(): void {
+    const entry = this.#undoInternal();
+    if (entry !== undefined) this.#emitDurableChange(`Undo ${entry.label}`, entry.commandCount);
+  }
+
+  #undoInternal(): HistoryStackEntry | undefined {
     const entry = this.#undo.pop();
-    if (entry === undefined) return;
+    if (entry === undefined) return undefined;
     // Reverse order: a compound applied document-then-artifact must undo
     // artifact-then-document, or the halves come apart.
     for (const operation of [...entry.operations].reverse()) {
       this.#undoOne(operation);
     }
     this.#redo.push(entry);
+    return entry;
   }
 
   #undoOne(operation: EditorOperation): void {
@@ -597,12 +729,18 @@ export class EditorSession {
   }
 
   redo(): void {
+    const entry = this.#redoInternal();
+    if (entry !== undefined) this.#emitDurableChange(`Redo ${entry.label}`, entry.commandCount);
+  }
+
+  #redoInternal(): HistoryStackEntry | undefined {
     const entry = this.#redo.pop();
-    if (entry === undefined) return;
+    if (entry === undefined) return undefined;
     for (const operation of entry.operations) {
       this.#redoOne(operation);
     }
     this.#undo.push(entry);
+    return entry;
   }
 
   #redoOne(operation: EditorOperation): void {
@@ -690,6 +828,31 @@ export class EditorSession {
     this.#artifactRedo.length = 0;
     this.#snapshotRedo.length = 0;
   }
+
+  #emitDurableChange(label: string, operationCount: number): void {
+    const change: EditorSessionDurableChange = {
+      label: safeLabel(label),
+      operationCount: positiveOperationCount(operationCount),
+    };
+    for (const listener of [...this.#durableChangeListeners]) {
+      // A notification observer must never turn an already-persisted edit into
+      // a failed edit. The observer can report its own failure through its
+      // controller's status channel instead.
+      try {
+        listener(change);
+      } catch {
+        // Intentionally isolated from the editor mutation.
+      }
+    }
+  }
+}
+
+function positiveOperationCount(value: number | undefined): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : 1;
+}
+
+function safeLabel(value: string): string {
+  return typeof value === 'string' && value.trim().length > 0 ? value : 'Editor change';
 }
 
 function recoverOrInitialize<P, T>(

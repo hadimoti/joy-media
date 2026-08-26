@@ -21,11 +21,19 @@ The environment file is created on the VPS with mode `0600` and contains (see
 - `JOY_MEDIA_MISTRAL_API_KEY` — optional, dedicated JOY Media Mistral key for
   the server-side `llm.complete` provider. Leave it absent until the owner
   provisions one; never reuse, print, or copy the Hermes credential.
+- `JOY_MEDIA_PROVIDER_APPROVAL_SIGNING_KEY_ID` — non-secret id for the active
+  provider-approval signing key
+- `JOY_MEDIA_PROVIDER_APPROVAL_SIGNING_SECRET` — runtime-only HMAC secret for
+  provider approvals; do not commit or log it
 
-It is never committed. There is no signing key or JWKS endpoint to provision
-any more — the JWT identity bridge from the now-superseded ADR-0016 is
-retired, along with `/opt/joy-media/secrets/joy-media-identity.pem` and its
-`joy-wg-bot` systemd drop-in.
+It is never committed. Keep `/etc/joy-media/api.env` mode `0600`. The API
+persists only approval signing-key metadata (the key id), grants, budget
+reservations/reconciliations, and redacted audit rows; the secret remains in
+the runtime environment. If either approval variable is absent, grant
+issuance and remote provider paths requiring approval fail closed with HTTP
+503 `PROVIDER_APPROVAL_UNAVAILABLE`. A restart with the same database and key
+configuration verifies existing grants; a changed key id or secret rejects
+them.
 
 The joy-vps admin panel's "Joy Media" tab connects directly to this same
 Postgres instance to manage the `media_allowed_users` allow-list, using a

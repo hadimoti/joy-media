@@ -3,13 +3,16 @@ import {
   useCallback,
   useContext,
   useEffect,
+  lazy,
   useMemo,
   useRef,
   useState,
 } from 'react';
+import type { ComponentProps } from 'react';
 import { DockviewReact } from 'dockview';
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview';
 import { PanelTab } from './PanelTab.js';
+import { LazyPanel } from './LazyPanel.js';
 import { AppMenuBar } from './AppMenuBar.js';
 import { panelIdFromMenuAction, type AppMenuActionId } from './app-menu.js';
 import {
@@ -24,7 +27,10 @@ import {
   type VideoClipSpec,
 } from '@joy-media/playback-engine';
 import type { VideoFrameNode } from '@joy-media/render-ir';
-import { createRenderBundle, planRenderFrame } from '@joy-media/render-planner';
+import type { RenderBundleV2, CompositionPlanV2 } from '@joy-media/render-planner';
+import { createCompositionPlanV2 } from '../../../packages/render-planner/src/v2.js';
+import { createRenderBundle } from '../../../packages/render-planner/src/render-bundle.js';
+const CAPTION_BURN_IN_KEY = 'joy.captions.burnIn' as const;
 import { duplicateClipCommand, rippleDelete, toggleSelection } from '@joy-media/timeline-engine';
 import type { TimelineTrackView, TimelineViewport } from '@joy-media/timeline-engine';
 import type {
@@ -33,33 +39,239 @@ import type {
   ArtifactStore,
   ArtifactTransaction,
 } from '@joy-media/commands';
-import type { EditorContext } from '@joy-media/agent-tools';
-import { buildEditorContext } from '@joy-media/agent-tools';
+import type { CommandDispatcher, EditorContext } from '@joy-media/agent-tools';
 import type { HistoryEntry } from './editor-session.js';
-import type { JoyProjectV1, SpikeProject, VideoClip } from '@joy-media/project-schema';
+import type { AudioClip, JoyProjectV1, SpikeProject, VideoClip } from '@joy-media/project-schema';
 import { normalizePlaybackRate } from '@joy-media/project-schema';
-import {
-  applyVisualObjectProjectTransaction,
-  type VisualObjectTransaction,
-} from '@joy-media/property-system';
-import { registerBuiltins, effectRegistry } from '@joy-media/visual-effects';
+import type { VisualObjectTransaction } from '@joy-media/property-system';
 import type { ProductionRunAuthority } from '@joy-media/workflow-engine';
+import type { createVerifiedDeliverySnapshot } from './verified-delivery-snapshot.js';
+import type { deliveryPromiseForManifest } from '@joy-media/export-core/browser';
+import type { transcribeReferenceCaption } from './caption-transcription-runner.js';
+import type { ProjectDocumentSpine } from './project-document-spine.js';
 
-registerBuiltins();
+/**
+ * Secondary panels are intentionally separate entry points. Dockview creates
+ * their component only after a panel is selected, so these imports do not add
+ * motion/AI/workflow/3D code to the editor shell's initial request.
+ */
+const LazyAgentPanel = lazy(() =>
+  import('./AgentPanel.js').then(({ AgentPanel }) => ({ default: AgentPanel })),
+);
+const LazyCameraPanel = lazy(() =>
+  import('./CameraPanel.js').then(({ CameraPanel }) => ({ default: CameraPanel })),
+);
+const LazyDualLensPanel = lazy(() =>
+  import('./DualLensPanel.js').then(({ DualLensPanel }) => ({ default: DualLensPanel })),
+);
+const LazyInspectorPanel = lazy(() =>
+  import('./InspectorPanel.js').then(({ InspectorPanel }) => ({ default: InspectorPanel })),
+);
+const LazyEffectsPanel = lazy(() =>
+  import('./EffectsPanel.js').then(({ EffectsPanel }) => ({ default: EffectsPanel })),
+);
+const LazyAudioPanel = lazy(() =>
+  import('./AudioPanel.js').then(({ AudioPanel }) => ({ default: AudioPanel })),
+);
+const LazyCaptionsPanel = lazy(() =>
+  import('./CaptionsPanel.js').then(({ CaptionsPanel }) => ({ default: CaptionsPanel })),
+);
+const LazyColorPanel = lazy(() =>
+  import('./ColorPanel.js').then(({ ColorPanel }) => ({ default: ColorPanel })),
+);
+const LazyTransitionsPanel = lazy(() =>
+  import('./TransitionsPanel.js').then(({ TransitionsPanel }) => ({ default: TransitionsPanel })),
+);
+const LazyHistoryPanel = lazy(() =>
+  import('./HistoryPanel.js').then(({ HistoryPanel }) => ({ default: HistoryPanel })),
+);
+const LazyJobsPanel = lazy(() =>
+  import('./JobsPanel.js').then(({ JobsPanel }) => ({ default: JobsPanel })),
+);
+const LazyMotionPanel = lazy(() =>
+  import('./MotionPanel.js').then(({ MotionPanel }) => ({ default: MotionPanel })),
+);
+const LazyMotionStudioShell = lazy(() =>
+  import('./motion-studio/index.js').then(({ MotionStudioShell }) => ({
+    default: MotionStudioShell,
+  })),
+);
+const LazyEffectStudioShell = lazy(() =>
+  import('./effect-studio/index.js').then(({ EffectStudioShell }) => ({
+    default: EffectStudioShell,
+  })),
+);
+const LazyPluginsPanel = lazy(() =>
+  import('./PluginsPanel.js').then(({ PluginsPanel }) => ({ default: PluginsPanel })),
+);
+const LazyProductionBoardPanel = lazy(() =>
+  import('./ProductionBoardPanel.js').then(({ ProductionBoardPanel }) => ({
+    default: ProductionBoardPanel,
+  })),
+);
+const LazySpecialistReviewPanel = lazy(() =>
+  import('./SpecialistReviewPanel.js').then(({ SpecialistReviewPanel }) => ({
+    default: SpecialistReviewPanel,
+  })),
+);
+const LazyTemplatesPanel = lazy(() =>
+  import('./TemplatesPanel.js').then(({ TemplatesPanel }) => ({ default: TemplatesPanel })),
+);
+const LazyWorkflowsPanel = lazy(() =>
+  import('./WorkflowsPanel.js').then(({ WorkflowsPanel }) => ({ default: WorkflowsPanel })),
+);
+const LazyAssetLibraryPanel = lazy(() =>
+  import('./AssetLibraryPanel.js').then(({ AssetLibraryPanel }) => ({
+    default: AssetLibraryPanel,
+  })),
+);
+const LazyDeliveryReportPanel = lazy(() =>
+  import('./DeliveryReportPanel.js').then(({ DeliveryReportPanel }) => ({
+    default: DeliveryReportPanel,
+  })),
+);
+const LazyProjectLibrary = lazy(() =>
+  import('./ProjectLibrary.js').then(({ ProjectLibrary }) => ({ default: ProjectLibrary })),
+);
+const LazyAgentSettingsDialog = lazy(() =>
+  import('./AgentSettingsDialog.js').then(({ AgentSettingsDialog }) => ({
+    default: AgentSettingsDialog,
+  })),
+);
+
+type AgentPanelProps = ComponentProps<typeof LazyAgentPanel>;
+
+async function createVerifiedDeliverySnapshotDeferred(
+  ...args: Parameters<typeof createVerifiedDeliverySnapshot>
+): Promise<RenderBundleV2> {
+  const { createVerifiedDeliverySnapshot } = await import('./verified-delivery-snapshot.js');
+  return createVerifiedDeliverySnapshot(...args);
+}
+
+async function deliveryPromiseForManifestDeferred(
+  ...args: Parameters<typeof deliveryPromiseForManifest>
+) {
+  const { deliveryPromiseForManifest } = await import('@joy-media/export-core/browser');
+  return deliveryPromiseForManifest(...args);
+}
+
+async function transcribeReferenceCaptionDeferred(
+  ...args: Parameters<typeof transcribeReferenceCaption>
+) {
+  const { transcribeReferenceCaption } = await import('./caption-transcription-runner.js');
+  return transcribeReferenceCaption(...args);
+}
+
+/** Load the agent-tools context only when the (non-shell) Agent panel mounts. */
+function AgentPanelGate({
+  project,
+  commandBus,
+  audioState,
+  ...props
+}: Omit<AgentPanelProps, 'agentContext' | 'project'> & {
+  readonly project: SpikeProject;
+  readonly commandBus: CommandDispatcher;
+  readonly audioState: AudioState;
+}) {
+  const [agentContext, setAgentContext] = useState<EditorContext>();
+  useEffect(() => {
+    let cancelled = false;
+    void import('@joy-media/agent-tools')
+      .then(({ buildEditorContext }) => {
+        if (!cancelled) {
+          setAgentContext(
+            buildEditorContext(project, undefined, commandBus, { liveAudio: audioState }),
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAgentContext(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [audioState, commandBus, project]);
+
+  if (agentContext === undefined) {
+    return (
+      <section className="panel-loading" role="status" aria-label="Loading Agent">
+        Loading Agent…
+      </section>
+    );
+  }
+  return <LazyAgentPanel {...props} project={project} agentContext={agentContext} />;
+}
+
+type ProductionBoardPanelProps = ComponentProps<typeof LazyProductionBoardPanel>;
+type ProductionRuntime = {
+  readonly store: BrowserProductionRunStore;
+  readonly runner: typeof WorkflowRunner;
+  readonly handlers: typeof FirstPartyHandlers;
+};
+
+function ProductionBoardPanelGate({
+  loadRuntime,
+  ...props
+}: Omit<ProductionBoardPanelProps, 'store'> & {
+  readonly loadRuntime: () => Promise<ProductionRuntime>;
+}) {
+  const [runtime, setRuntime] = useState<ProductionRuntime>();
+  useEffect(() => {
+    let cancelled = false;
+    void loadRuntime().then((next) => {
+      if (!cancelled) setRuntime(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadRuntime]);
+  if (runtime === undefined) {
+    return (
+      <section className="panel-loading" role="status" aria-label="Loading Production">
+        Loading Production…
+      </section>
+    );
+  }
+  return <LazyProductionBoardPanel {...props} store={runtime.store} />;
+}
+
+function PluginsPanelGate({
+  loadPluginHost,
+  onChange,
+}: {
+  readonly loadPluginHost: () => Promise<EditorPluginHost>;
+  readonly onChange: () => void;
+}) {
+  const [pluginHost, setPluginHost] = useState<EditorPluginHost>();
+  useEffect(() => {
+    let cancelled = false;
+    void loadPluginHost().then((next) => {
+      if (!cancelled) setPluginHost(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadPluginHost]);
+  if (pluginHost === undefined) {
+    return (
+      <section className="panel-loading" role="status" aria-label="Loading Plugins">
+        Loading Plugins…
+      </section>
+    );
+  }
+  return <LazyPluginsPanel pluginHost={pluginHost} onChange={onChange} />;
+}
 
 const CLIP_FRAME_CACHE_LIMIT = 120;
+const BROWSER_MP4_MIME_TYPE = 'video/mp4;codecs=avc1.42E01E,mp4a.40.2';
+import type { HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
+import type { MotionSceneSurfaceCache } from './motion-scene-surfaces.js';
 
-import {
-  createBrowserPixiRenderer,
-  type BrowserPixiRenderer,
-} from '@joy-media/renderer-pixi/browser';
-import {
-  downloadBrowserMp4,
-  BROWSER_MP4_MIME_TYPE,
-  type BrowserExportManifest,
-  type BrowserExportResult,
+import type { BrowserPixiRenderer } from '@joy-media/renderer-pixi/browser';
+import type {
+  BrowserExportManifest,
+  BrowserExportResult,
 } from '@joy-media/renderer-pixi/browser-export';
-import { createDeliverySceneFrameSource, HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
 import {
@@ -67,7 +279,6 @@ import {
   importAssetKind,
   TimelinePanel,
 } from './TimelinePanel.js';
-import { DualLensPanel } from './DualLensPanel.js';
 import { buildDualLensProjection, type DualLensProjection } from './dual-lens-model.js';
 import {
   primaryNodeIdForClip,
@@ -75,39 +286,27 @@ import {
   type LensRevealRequest,
 } from './dual-lens-reveal.js';
 import { buildDataLanes, type DataLane } from './data-lanes.js';
-import { SpecialistReviewPanel } from './SpecialistReviewPanel.js';
-import { ProjectLibrary } from './ProjectLibrary.js';
 import { useAccessibleDialog } from './dialog-a11y.js';
 import {
   clearActiveProjectId,
   getCatalogProject,
   loadActiveProjectId,
   saveActiveProjectId,
+  TIMELINE_LOG_KEY,
+  VISUAL_LOG_KEY,
   upsertCatalogProject,
   type ProjectCatalogEntry,
 } from './project-catalog.js';
 import { createBlankProjectDocuments, seedsForCatalogEntry } from './project-factory.js';
-import { CaptionsPanel } from './CaptionsPanel.js';
-import { InspectorPanel } from './InspectorPanel.js';
-import { MotionPanel } from './MotionPanel.js';
-import { MotionStudioShell } from './motion-studio/index.js';
 import { buildMotionScenePlacementPlan } from './motion-studio/motionScenePlacement.js';
-import { EffectStudioShell } from './effect-studio/index.js';
-import { ThreeDStudioShell } from './three-d-studio/index.js';
-import { CameraPanel } from './CameraPanel.js';
-import { JobsPanel } from './JobsPanel.js';
-import { AssetLibraryPanel } from './AssetLibraryPanel.js';
 import {
-  BrowserControlPlaneClient,
   type BrowserAsset,
   type BrowserAssetRegistration,
   type BrowserDerivative,
   type BrowserWorker,
 } from './control-plane-client.js';
-import { AudioPanel } from './AudioPanel.js';
-import { EffectsPanel } from './EffectsPanel.js';
-import { ColorPanel } from './ColorPanel.js';
-import { TransitionsPanel } from './TransitionsPanel.js';
+import { BrowserControlPlaneError } from './control-plane-errors.js';
+import { createDeferredControlPlaneClient } from './deferred-control-plane-client.js';
 import { bindClipToObject, resolveObjectIdForSelection } from './sticker-bindings.js';
 import { isSingleVideoClipSelected } from './effects-apply-state.js';
 import { StickerImageCache } from './sticker-image-cache.js';
@@ -116,7 +315,6 @@ import {
   plannedMotionSceneCaptureTargets,
   plannedStillBitmapTargets,
 } from './render-plan-capture-targets.js';
-import { MotionSceneSurfaceCache } from './motion-scene-surfaces.js';
 import { openOpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
 import { openOpfsDerivativeCache } from './opfs-asset-cache.js';
 import { createMediaSessionPlayableAssetResolver } from './media-session.js';
@@ -130,6 +328,7 @@ import {
   type MonitorMediaSource,
 } from './monitor-media-source.js';
 import {
+  EMPTY_AUDIO_STATE,
   ensureClipAudio,
   loadAudioState,
   saveAudioState,
@@ -137,32 +336,44 @@ import {
 } from './audio-session.js';
 import type { AudioState } from '@joy-media/commands';
 import { buildMixerBuffer } from './mixer-buffer.js';
-import type { ExportPresetId, WorkflowGraphV2 } from '@joy-media/project-schema';
-import {
-  AgentPanel,
-  type AgentPanelCommand,
-  type AgentPanelCommandType,
-  type KiloCodeAttachedAsset,
+import type {
+  ExportPresetId,
+  WorkflowGraphV2,
+  ProjectDocumentV2,
+  JsonValue,
+} from '@joy-media/project-schema';
+import type {
+  AgentPanelCommand,
+  AgentPanelCommandType,
+  KiloCodeAttachedAsset,
 } from './AgentPanel.js';
-import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
-import { AgentSettingsDialog } from './AgentSettingsDialog.js';
-import { loadAgentSettings, saveAgentSettings, type AgentSettings } from './agent-settings.js';
-import { HistoryPanel } from './HistoryPanel.js';
-import { WorkflowsPanel } from './WorkflowsPanel.js';
-import { ProductionBoardPanel } from './ProductionBoardPanel.js';
-import { BrowserProductionRunStore } from './browser-production-run-store.js';
-import { PluginsPanel } from './PluginsPanel.js';
-import { TemplatesPanel } from './TemplatesPanel.js';
-import { buildContentTemplateTransaction } from './content-template-transaction.js';
-import { createEditorPluginHost } from './plugin-host.js';
+import { loadAgentSettings, saveAgentSettings } from './agent-settings-storage.js';
+import type { AgentSettings } from './agent-settings-types.js';
+import type { EditorPluginHost } from './plugin-host.js';
 import { createAgentCommandBus } from './agent-command-bus.js';
-import { createProductionFirstPartyLibrary } from './first-party-handlers.js';
-import { resumeWorkflow, runWorkflow } from './workflow-runner.js';
+import type * as WorkflowRunner from './workflow-runner.js';
+import type * as FirstPartyHandlers from './first-party-handlers.js';
+import type { BrowserProductionRunStore } from './browser-production-run-store.js';
 import {
   getOrCreateControlPlaneProjectBinding,
   type ControlPlaneProjectBinding,
-} from './project-control-plane.js';
-import { transcribeReferenceCaption } from './local-transcription.js';
+} from './project-control-plane-local.js';
+import type { ProjectDocumentLegacyBackup } from './project-document-browser-journal.js';
+import type { ProjectDocumentSpineFailure } from './project-document-spine.js';
+import type {
+  ProjectDocumentRecoveredCopy,
+  ProjectDocumentSyncCoordinator,
+} from './project-document-sync-coordinator.js';
+import type { ProjectDocumentBrowserJournal } from './project-document-browser-journal.js';
+import {
+  prepareCaptionTranscriptionSource,
+  selectedOrCurrentTranscriptionCandidate,
+  type CaptionTranscriptionAvailability,
+  type CaptionTranscriptionSource,
+  type CaptionTranscriptionTarget,
+} from './local-transcription.js';
+import { DeliveryBlockedStatus } from './DeliveryBlockedStatus.js';
+import { RecoveredCopyStatus } from './RecoveredCopyStatus.js';
 import { DEFAULT_WORKSPACE } from './workspace.js';
 import {
   DOCK_LAYOUT_KEY,
@@ -206,29 +417,50 @@ import { logoutJoySession, probeJoySession, type JoySessionState } from './ident
 import {
   deliveryGate,
   loadExportHistory,
+  recentProcessLabel,
   reconcileDeliveryInspections,
   saveExportHistory,
   upsertEntry,
   type ExportProcessEntry,
 } from './export-history.js';
-import { DeliveryReportPanel } from './DeliveryReportPanel.js';
+
 import { createMonoAudioBuffer } from './export-audio.js';
 import { nextVideoClipAtOrAfter } from './timeline-playback.js';
 import { useAuthLocked } from './LoginGate.js';
 import {
   deliveryMediaStateFromEvidence,
+  deliveryTimelineClipsFromProject,
   deliveryPreflight,
   type DeliveryCapability,
   type DeliveryMediaState,
   type DeliveryTimelineClip,
+  type VerifiedRenderEnvelope,
 } from './delivery-preflight.js';
 import { workerPresence } from './jobs-panel-state.js';
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
 import { JOY_COLORS } from './theme.js';
 
+const loadPlanRenderFrame = () =>
+  import('../../../packages/render-planner/src/plan-frame.js').then(
+    ({ planRenderFrame }) => planRenderFrame,
+  );
+type PlanRenderFrame = Awaited<ReturnType<typeof loadPlanRenderFrame>>;
+
 const stickerImageCache = new StickerImageCache();
 const originalAssetCachePromise = openOpfsOriginalAssetCache();
+
+function userFacingDeliveryError(error: unknown, action: string): string {
+  if (error instanceof BrowserControlPlaneError) {
+    if (error.code === 'ARTIFACT_NOT_FOUND' || error.code === 'ARTIFACT_UNAVAILABLE')
+      return `${action} is waiting for a retained render artifact. Please retry.`;
+    if (error.code === 'WORKER_UNAVAILABLE' || error.code === 'WORKER_SESSION_REQUIRED')
+      return `${action} needs an available paired worker.`;
+    if (error.code === 'RESULT_INVALID')
+      return `${action} returned invalid verification evidence. Please retry.`;
+  }
+  return `${action} could not be completed. Please try again.`;
+}
 
 async function loadStickerAssetBlob(assetId: string): Promise<Blob | undefined> {
   const cache = await originalAssetCachePromise;
@@ -243,6 +475,29 @@ function imageSizesFromCache(): Readonly<
     sizes[id] = { width: bitmap.width, height: bitmap.height };
   }
   return sizes;
+}
+
+/** Check the old per-domain logs before EditorSession can seed a new project. */
+function hasLegacyProjectData(storage: Storage, projectId: string): boolean {
+  for (const key of [TIMELINE_LOG_KEY, VISUAL_LOG_KEY]) {
+    try {
+      const raw = storage.getItem(key);
+      if (raw === null) continue;
+      const parsed = JSON.parse(raw) as {
+        readonly projects?: Record<
+          string,
+          { readonly snapshots?: readonly unknown[]; readonly transactions?: readonly unknown[] }
+        >;
+      };
+      const project = parsed.projects?.[projectId];
+      if ((project?.snapshots?.length ?? 0) > 0 || (project?.transactions?.length ?? 0) > 0)
+        return true;
+    } catch {
+      // A malformed legacy log is still not permission to migrate/overwrite;
+      // the journal lifecycle will surface its own recoverable error.
+    }
+  }
+  return false;
 }
 
 function opaqueRenderRef(value: string | undefined, fallback: string): string {
@@ -424,7 +679,13 @@ interface EditorPanelContextValue {
   readonly stickerTick: number;
   readonly audioState: AudioState;
   readonly setAudioState: (next: AudioState, label?: string) => void;
-  readonly transcribe: (documentId: string, language: 'fa-IR' | 'en-US') => Promise<void>;
+  readonly transcribe: (
+    documentId: string,
+    language: 'fa-IR' | 'en-US',
+    source: CaptionTranscriptionSource,
+    target: CaptionTranscriptionTarget,
+  ) => Promise<void>;
+  readonly transcriptionAvailability: CaptionTranscriptionAvailability;
   readonly transcriptionError: string | undefined;
   readonly undo: () => void;
   readonly redo: () => void;
@@ -435,13 +696,14 @@ interface EditorPanelContextValue {
    */
   readonly session: EditorSession;
   readonly activatePanel: (panelId: string) => void;
-  readonly agentContext: EditorContext;
+  readonly agentContext: EditorContext | undefined;
+  readonly agentCommandBus: CommandDispatcher;
   readonly agentSettings: AgentSettings;
   readonly agentPanelCommand: AgentPanelCommand | undefined;
   readonly kiloCodeAttachedAssets: readonly KiloCodeAttachedAsset[];
   readonly attachKiloCodeAsset: (asset: KiloCodeAttachedAsset) => void;
   readonly detachKiloCodeAsset: (assetId: string) => void;
-  readonly pluginHost: ReturnType<typeof createEditorPluginHost>;
+  readonly pluginHost: EditorPluginHost | undefined;
   readonly bumpProjectRevision: () => void;
   readonly bumpPluginRevision: () => void;
   readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
@@ -508,13 +770,31 @@ export function App() {
     [storage],
   );
 
+  const openRecoveredCopy = useCallback(
+    async (copy: ProjectDocumentRecoveredCopy, ownerKey: string) => {
+      // The recovered document is loaded by EditorWorkspace's normal
+      // authenticated bootstrap. This step only creates the local catalog
+      // entry and records the server-selected project id without touching the
+      // original project's local files or binding.
+      if (ownerKey.trim().length === 0) return;
+      const { createAndActivateRecoveredCopyProject } = await import('./recovered-copy-flow.js');
+      const { entry } = createAndActivateRecoveredCopyProject(storage, copy, ownerKey);
+      setActiveProjectId(entry.id);
+    },
+    [storage],
+  );
+
   const backToLibrary = useCallback(() => {
     clearActiveProjectId(storage);
     setActiveProjectId(null);
   }, [storage]);
 
   if (activeProjectId === null) {
-    return <ProjectLibrary storage={storage} onOpen={openProject} onCreate={createProject} />;
+    return (
+      <LazyPanel label="Project library">
+        <LazyProjectLibrary storage={storage} onOpen={openProject} onCreate={createProject} />
+      </LazyPanel>
+    );
   }
 
   return (
@@ -522,6 +802,7 @@ export function App() {
       key={activeProjectId}
       projectId={activeProjectId}
       onBackToLibrary={backToLibrary}
+      onOpenRecoveredCopy={openRecoveredCopy}
     />
   );
 }
@@ -529,9 +810,11 @@ export function App() {
 function EditorWorkspace({
   projectId,
   onBackToLibrary,
+  onOpenRecoveredCopy,
 }: {
   readonly projectId: string;
   readonly onBackToLibrary: () => void;
+  readonly onOpenRecoveredCopy: (copy: ProjectDocumentRecoveredCopy, ownerKey: string) => void;
 }) {
   const authLocked = useAuthLocked();
   const [state, setState] = useState<EditorRuntimeState>({ ...EMPTY_EDITOR_STATE, playing: false });
@@ -553,6 +836,8 @@ function EditorWorkspace({
   );
   const [exportPreset, setExportPreset] = useState<ExportPresetId>('reels-1080');
   const [audioState, setAudioStateRaw] = useState<AudioState>(() => loadAudioState(projectId));
+  const audioStateRef = useRef(audioState);
+  audioStateRef.current = audioState;
   const [processesOpen, setProcessesOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [exportPresetOpen, setExportPresetOpen] = useState(false);
@@ -578,7 +863,6 @@ function EditorWorkspace({
   const paletteRef = useRef<HTMLElement | null>(null);
   const accountDropdownRef = useRef<HTMLElement | null>(null);
   const [motionStudioSceneId, setMotionStudioSceneId] = useState<string | undefined>(undefined);
-  const [threeDStudioSceneId, setThreeDStudioSceneId] = useState<string | undefined>(undefined);
   const [effectStudioSession, setEffectStudioSession] = useState<
     { readonly recipeId: string; readonly objectId?: string } | undefined
   >(undefined);
@@ -608,17 +892,22 @@ function EditorWorkspace({
     undefined,
   );
   const [, setRevision] = useState(0);
-  const [pluginHost] = useState(() => createEditorPluginHost());
   const [, setPluginRevision] = useState(0);
   const sessionRef = useRef<EditorSession | null>(null);
+  // Recovery/hydration may replace the opening baseline. Mutating actions are
+  // gated until that decision is complete so a click cannot be overwritten by
+  // a later deferred hydrate.
+  const hydrationReadyRef = useRef(false);
   const dockviewApiRef = useRef<DockviewApi | null>(null);
   const dockviewComponentsRef = useRef<{ readonly 'editor-panel': typeof Panel } | null>(null);
+  const legacyStorageHadDataRef = useRef<boolean | undefined>(undefined);
   const scheduler = useRef(new PlaybackScheduler());
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const decoderRef = useRef<HtmlMediaDecoder | null>(null);
   const clockRef = useRef<MediaClock | null>(null);
   /** Last decoded RGBA per timeline clip id — feeds dual-texture transitions. */
   const clipFrameCacheRef = useRef<Map<string, ImageDataLike>>(new Map());
+  const verifiedDeliverySnapshotCacheRef = useRef(new Map<string, RenderBundleV2>());
   const [clipFrameTick, setClipFrameTick] = useState(0);
   const partnerVideoRef = useRef<HTMLVideoElement | null>(null);
   const partnerDecoderRef = useRef<HtmlMediaDecoder | null>(null);
@@ -630,12 +919,18 @@ function EditorWorkspace({
   const previewAudioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const previewGainNodeRef = useRef<GainNode | null>(null);
   const previewPanNodeRef = useRef<StereoPannerNode | null>(null);
-  const mediaClient = useMemo(() => new BrowserControlPlaneClient(), []);
+  const mediaClient = useMemo(() => createDeferredControlPlaneClient(), []);
   const [monitorAssetCatalog, setMonitorAssetCatalog] = useState<{
     readonly assets: Readonly<Record<string, BrowserAsset>>;
     readonly derivativesByAssetId: Readonly<Record<string, readonly BrowserDerivative[]>>;
   }>(() => ({ assets: {}, derivativesByAssetId: {} }));
   const [deliveryWorkers, setDeliveryWorkers] = useState<readonly BrowserWorker[]>([]);
+  const [documentSyncState, setDocumentSyncState] = useState<
+    'local' | 'syncing' | 'server-unavailable' | 'conflict-recovered'
+  >('local');
+  const [recoveredCopy, setRecoveredCopy] = useState<ProjectDocumentRecoveredCopy>();
+  const [legacyBackupAvailable, setLegacyBackupAvailable] = useState(false);
+  const legacyBackupJournalRef = useRef<ProjectDocumentBrowserJournal | null>(null);
 
   useAccessibleDialog({
     open: keyboardShortcutsOpen,
@@ -693,19 +988,321 @@ function EditorWorkspace({
   if (sessionRef.current === null) {
     const entry = getCatalogProject(window.localStorage, projectId);
     if (entry === undefined) throw new Error(`unknown project "${projectId}"`);
+    legacyStorageHadDataRef.current = hasLegacyProjectData(window.localStorage, projectId);
     const seeds = seedsForCatalogEntry(entry);
     sessionRef.current = new EditorSession(window.localStorage, seeds.timeline, seeds.visual);
   }
   const session = sessionRef.current;
+  const ensureHydrationReady = useCallback(() => {
+    return hydrationReadyRef.current;
+  }, []);
   const controlPlaneOwnerKey =
-    joySession.kind === 'ready' ? (joySession.subject ?? 'signed-in') : 'signed-out';
+    joySession.kind === 'ready' ? (joySession.subject ?? 'signed-in') : undefined;
   const controlPlaneProject = useMemo(
     () =>
-      getOrCreateControlPlaneProjectBinding(window.localStorage, session.visualProject, {
-        ownerKey: controlPlaneOwnerKey,
-      }),
+      getOrCreateControlPlaneProjectBinding(
+        window.localStorage,
+        session.visualProject,
+        controlPlaneOwnerKey === undefined ? {} : { ownerKey: controlPlaneOwnerKey },
+      ),
     [controlPlaneOwnerKey, session.visualProject.id, session.visualProject.title],
   );
+
+  // The browser journal is the durable source for this lifecycle bridge. The
+  // live EditorSession remains authoritative; the V2 document is a derived
+  // projection attached exactly once for this opened project.
+  useEffect(() => {
+    let cancelled = false;
+    let spine: ProjectDocumentSpine | undefined;
+    let coordinator: ProjectDocumentSyncCoordinator | undefined;
+    let unsubscribeCoordinator: (() => void) | undefined;
+    const localCoordinator = {
+      queueLocalDocument: (_document: ProjectDocumentV2) => undefined,
+    };
+    const reportFailure = (failure: ProjectDocumentSpineFailure) => {
+      if (cancelled) return;
+      setDocumentSyncState(failure.stage === 'remote-queue' ? 'server-unavailable' : 'local');
+      if (failure.stage === 'remote-queue') {
+        showToast(
+          'Saved locally; cloud sync is unavailable. Your live project remains intact.',
+          'info',
+        );
+      } else if (failure.stage === 'local-journal') {
+        showToast('Project changes could not be saved to browser storage.', 'error');
+      }
+    };
+    const attach = async () => {
+      // Project-document recovery is post-shell hydration. Keep the journal,
+      // spine, and migration implementation out of the initial editor entry;
+      // EditorSession remains synchronous and authoritative while these load.
+      const [
+        { createProjectDocumentBrowserStorage },
+        { ProjectDocumentBrowserJournal },
+        { createProjectDocumentSpine },
+        {
+          recoverOrMigrateProjectDocument,
+          shouldBootstrapFromRemoteAfterHydration,
+          shouldBootstrapFromRemoteAfterOpening,
+        },
+      ] = await Promise.all([
+        import('./project-document-browser-journal-storage.js'),
+        import('./project-document-browser-journal.js'),
+        import('./project-document-spine.js'),
+        import('./project-document-lifecycle.js'),
+      ]);
+      if (cancelled) return;
+      const storage = createProjectDocumentBrowserStorage({ kind: 'indexeddb' });
+      const journal = new ProjectDocumentBrowserJournal(storage, projectId);
+      legacyBackupJournalRef.current = journal;
+      let queueCoordinator: {
+        queueLocalDocument: (
+          document: ProjectDocumentV2,
+          options?: { label?: string; operationCount?: number },
+        ) => void | Promise<void>;
+      } = localCoordinator;
+      let openingSaveAllowed = true;
+      let localRecoveryBlockedByHydration = false;
+      const openingJournal = {
+        recover: () => journal.recover(),
+        saveSnapshot: (document: ProjectDocumentV2, options?: unknown) =>
+          journal.saveSnapshot(document, options as never),
+        saveLegacyBackup: (backup: ProjectDocumentLegacyBackup) => journal.saveLegacyBackup(backup),
+        hasLegacyBackup: () => journal.hasLegacyBackup(),
+        loadLegacyBackup: () => journal.loadLegacyBackup(),
+      };
+      // Keep projection local-first even while authenticated bootstrap is in flight.
+      const projectionSpine = createProjectDocumentSpine({
+        session,
+        journal,
+        coordinator: localCoordinator,
+        audioSidecar: () => audioStateRef.current as unknown as JsonValue,
+        onFailure: reportFailure,
+      });
+      let hydratedFrom: 'local' | 'remote' | undefined;
+      // A valid local V2 journal is authoritative. Only a genuinely absent
+      // journal may trigger the one-time legacy migration; read/corruption/
+      // quota failures must never fall through to an overwrite.
+      const opening = await recoverOrMigrateProjectDocument({
+        journal: openingJournal,
+        projectId,
+        legacyDomains:
+          legacyStorageHadDataRef.current === true
+            ? {
+                project: session.visualProject,
+                timeline: session.timelineProject,
+                ...(audioStateRef.current === undefined ? {} : { audio: audioStateRef.current }),
+                ...(session.graphEnabled
+                  ? { workflow: session.workflowGraph, artifacts: session.artifacts }
+                  : {}),
+              }
+            : null,
+        markerStorage: window.localStorage,
+      });
+      // Recovery can span IndexedDB/OPFS awaits. The opener may have been
+      // replaced while it was in flight; never hydrate that stale session (or
+      // emit its opening toasts/state changes) after cleanup has cancelled it.
+      if (cancelled) {
+        projectionSpine.dispose();
+        return;
+      }
+      if (opening.kind === 'local' || opening.kind === 'migrated') {
+        const { planProjectDocumentHydration } = await import('./project-document-hydration.js');
+        setLegacyBackupAvailable(opening.backupAvailable);
+        if (opening.kind === 'local' && opening.backupError !== undefined)
+          showToast('The local recovery backup could not be read.', 'info');
+        const recovered = opening.kind === 'local' ? opening.recovery : undefined;
+        const document = opening.kind === 'local' ? opening.recovery.document : opening.document;
+        const hydration = planProjectDocumentHydration(document, projectId, {
+          graphEnabled: session.graphEnabled,
+        });
+        if (hydration.ok) {
+          session.hydrateProjectDocument(hydration.plan, 'Project hydrated from local V2');
+          hydratedFrom = 'local';
+          setRevision((revision) => revision + 1);
+          const hydratedAudio = hydration.plan.audioStatePresent
+            ? hydration.plan.audioState!
+            : EMPTY_AUDIO_STATE;
+          audioStateRef.current = hydratedAudio;
+          setAudioStateRaw(hydratedAudio);
+          saveAudioState(projectId, hydratedAudio);
+          if (opening.kind === 'migrated') showToast('Legacy project migrated locally.', 'info');
+          if (recovered?.recoveredWithWarnings)
+            showToast('Recovered the latest valid local project document.', 'info');
+        } else {
+          openingSaveAllowed = false;
+          localRecoveryBlockedByHydration = true;
+          showToast(
+            `Local V2 recovery was rejected: ${hydration.warnings[0] ?? 'invalid document'}`,
+            'info',
+          );
+        }
+      } else if (opening.kind === 'blocked') {
+        openingSaveAllowed = false;
+        showToast(
+          'Local project storage needs attention; cloud recovery was skipped and the existing project was preserved.',
+          'info',
+        );
+      }
+      const localRecoveryBlocked =
+        localRecoveryBlockedByHydration ||
+        !shouldBootstrapFromRemoteAfterHydration(opening, !localRecoveryBlockedByHydration) ||
+        !shouldBootstrapFromRemoteAfterOpening(opening);
+      // A failed local read is fail-closed for this opening: do not let a
+      // signed-in remote snapshot replace the legacy/live session underneath
+      // a recoverable local-storage failure.
+      if (joySession.kind === 'ready' && !localRecoveryBlocked) {
+        const { bootstrapProjectDocument } = await import('./project-document-bootstrap.js');
+        const bootstrap = await bootstrapProjectDocument({
+          projectId: controlPlaneProject.controlPlaneProjectId,
+          title: session.visualProject.title,
+          remote: mediaClient,
+          projectDocument: () => projectionSpine.projectDocument(),
+        });
+        if (cancelled) {
+          projectionSpine.dispose();
+          return;
+        }
+        if (bootstrap.kind === 'ready') {
+          const remoteSnapshot = bootstrap.snapshot;
+          if (cancelled) {
+            projectionSpine.dispose();
+            return;
+          }
+          if (hydratedFrom === undefined) {
+            const { planProjectDocumentHydration } =
+              await import('./project-document-hydration.js');
+            const hydration = planProjectDocumentHydration(
+              remoteSnapshot.document,
+              controlPlaneProject.controlPlaneProjectId,
+              { graphEnabled: session.graphEnabled, sessionProjectId: projectId },
+            );
+            if (hydration.ok) {
+              session.hydrateProjectDocument(hydration.plan, 'Project hydrated from remote V2');
+              hydratedFrom = 'remote';
+              setRevision((revision) => revision + 1);
+              const hydratedAudio = hydration.plan.audioStatePresent
+                ? hydration.plan.audioState!
+                : EMPTY_AUDIO_STATE;
+              audioStateRef.current = hydratedAudio;
+              setAudioStateRaw(hydratedAudio);
+              saveAudioState(projectId, hydratedAudio);
+            } else {
+              showToast(
+                `Remote V2 recovery was rejected: ${hydration.warnings[0] ?? 'invalid document'}`,
+                'info',
+              );
+            }
+          }
+          const { ProjectDocumentSyncCoordinator: SyncCoordinator } =
+            await import('./project-document-sync-coordinator.js');
+          if (cancelled) {
+            projectionSpine.dispose();
+            return;
+          }
+          coordinator = new SyncCoordinator({
+            initialSnapshot: remoteSnapshot,
+            remote: {
+              loadDocument: (id) => mediaClient.projectDocument(id),
+              appendRevision: (id, input) => mediaClient.appendProjectRevision(id, input),
+              restoreRevision: (id, input) => mediaClient.restoreProjectRevision(id, input),
+              recoverStaleRevision: (input) =>
+                mediaClient.recoverStaleRevision(input.projectId, {
+                  baseRevision: input.baseRevision,
+                  idempotencyKey: input.idempotencyKey,
+                  suggestedName: input.suggestedName,
+                  operation: input.operation,
+                }),
+            },
+          });
+          unsubscribeCoordinator = coordinator.subscribe((snapshot) => {
+            if (cancelled) return;
+            setDocumentSyncState(snapshot.state);
+            setRecoveredCopy(snapshot.lastRecoveredCopy);
+          });
+          // The browser creative id and control-plane record id are distinct.
+          // Keep the local journal's envelope untouched, but route queued
+          // remote documents under the authenticated API's project id.
+          queueCoordinator = {
+            queueLocalDocument: (document, options) =>
+              coordinator!.queueLocalDocument(
+                { ...document, projectId: controlPlaneProject.controlPlaneProjectId },
+                options,
+              ),
+          };
+        } else {
+          if (!cancelled) {
+            setDocumentSyncState('server-unavailable');
+            showToast('Saved locally; cloud sync is unavailable.', 'info');
+          }
+        }
+      }
+      if (cancelled) {
+        projectionSpine.dispose();
+        unsubscribeCoordinator?.();
+        coordinator?.dispose();
+        return;
+      }
+      if (coordinator === undefined && (joySession.kind !== 'ready' || localRecoveryBlocked)) {
+        setDocumentSyncState('local');
+      }
+      spine = createProjectDocumentSpine({
+        session,
+        journal,
+        coordinator: queueCoordinator,
+        audioSidecar: () => audioStateRef.current as unknown as JsonValue,
+        onFailure: reportFailure,
+      });
+      spine.attach();
+      hydrationReadyRef.current = true;
+      // Persist the opening projection locally. A freshly seeded remote
+      // snapshot is already the coordinator base; queueing it again would
+      // create an unnecessary second revision.
+      if (openingSaveAllowed && opening.kind !== 'migrated')
+        try {
+          await journal.saveSnapshot?.(spine.projectDocument(), {
+            operationKind: 'editor-session.change',
+            operationMetadata: {
+              label:
+                hydratedFrom === 'local'
+                  ? 'Project opened (local V2 recovered)'
+                  : hydratedFrom === 'remote'
+                    ? 'Project opened (remote V2 recovered)'
+                    : 'Project opened',
+              operationCount: 1,
+            },
+          });
+        } catch (error) {
+          reportFailure({ stage: 'local-journal', error, recoverable: true });
+        }
+      projectionSpine.dispose();
+    };
+    void attach().catch((error: unknown) => {
+      if (!cancelled) {
+        hydrationReadyRef.current = true;
+        setDocumentSyncState('local');
+        showToast(
+          `Project saved locally only: ${error instanceof Error ? error.message : String(error)}`,
+          'info',
+        );
+      }
+    });
+    return () => {
+      cancelled = true;
+      hydrationReadyRef.current = false;
+      legacyBackupJournalRef.current = null;
+      unsubscribeCoordinator?.();
+      spine?.dispose();
+      coordinator?.dispose();
+    };
+  }, [
+    controlPlaneProject.controlPlaneProjectId,
+    controlPlaneProject.title,
+    joySession.kind,
+    joySession.kind === 'ready' ? joySession.subject : undefined,
+    mediaClient,
+    projectId,
+    session,
+  ]);
   const workflowAuthority = useMemo<ProductionRunAuthority>(
     () => ({
       principalId:
@@ -717,16 +1314,38 @@ function EditorWorkspace({
     }),
     [joySession],
   );
-  const productionRunStore = useMemo(
-    () =>
-      new BrowserProductionRunStore(window.localStorage, {
-        projectId: session.timelineProject.id,
-        authority: workflowAuthority,
-      }),
-    [session.timelineProject.id, workflowAuthority],
-  );
-  const firstPartyWorkflowLibrary = useMemo(() => createProductionFirstPartyLibrary(), []);
+  const workflowRuntimeLoader = useMemo(() => {
+    let runtimePromise: Promise<ProductionRuntime> | undefined;
+    return () => {
+      runtimePromise ??= Promise.all([
+        import('./browser-production-run-store.js'),
+        import('./workflow-runner.js'),
+        import('./first-party-handlers.js'),
+      ]).then(([storeModule, runner, handlers]) => ({
+        store: new storeModule.BrowserProductionRunStore(window.localStorage, {
+          projectId: session.timelineProject.id,
+          authority: workflowAuthority,
+        }),
+        runner,
+        handlers,
+      }));
+      return runtimePromise;
+    };
+  }, [session.timelineProject.id, workflowAuthority]);
+  const pluginHostLoader = useMemo(() => {
+    let pluginHostPromise: Promise<EditorPluginHost> | undefined;
+    return () => {
+      pluginHostPromise ??= import('./plugin-host.js').then(({ createEditorPluginHost }) =>
+        createEditorPluginHost(),
+      );
+      return pluginHostPromise;
+    };
+  }, []);
   useEffect(() => {
+    if (joySession.kind !== 'ready') {
+      setMonitorAssetCatalog({ assets: {}, derivativesByAssetId: {} });
+      return;
+    }
     let cancelled = false;
     void mediaClient
       .assets(controlPlaneProject.controlPlaneProjectId)
@@ -761,7 +1380,61 @@ function EditorWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [controlPlaneProject.controlPlaneProjectId, mediaClient]);
+  }, [controlPlaneProject.controlPlaneProjectId, joySession.kind, mediaClient]);
+  const transcriptionCandidate = useMemo(
+    () =>
+      selectedOrCurrentTranscriptionCandidate(
+        session.timelineProject,
+        state.selectedIds,
+        state.playheadUs,
+        monitorAssetCatalog.assets,
+      ),
+    [monitorAssetCatalog.assets, session.timelineProject, state.playheadUs, state.selectedIds],
+  );
+  const [preparedTranscription, setPreparedTranscription] =
+    useState<CaptionTranscriptionAvailability>({
+      state: 'unavailable',
+      reason: 'Checking source media…',
+    });
+  useEffect(() => {
+    let cancelled = false;
+    if (transcriptionCandidate.state === 'unavailable') {
+      setPreparedTranscription(transcriptionCandidate);
+      return () => {
+        cancelled = true;
+      };
+    }
+    void prepareCaptionTranscriptionSource(transcriptionCandidate, loadStickerAssetBlob)
+      .then((availability) => {
+        if (!cancelled) setPreparedTranscription(availability);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPreparedTranscription({
+            state: 'unavailable',
+            candidateKey: transcriptionCandidate.source.candidateKey,
+            reason: 'Original media could not be read. Re-import the source and try again.',
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [transcriptionCandidate]);
+  const transcriptionAvailability: CaptionTranscriptionAvailability =
+    transcriptionCandidate.state === 'unavailable'
+      ? transcriptionCandidate
+      : preparedTranscription.state === 'ready' &&
+          preparedTranscription.source.candidateKey === transcriptionCandidate.source.candidateKey
+        ? preparedTranscription
+        : preparedTranscription.state === 'unavailable' &&
+            preparedTranscription.candidateKey === transcriptionCandidate.source.candidateKey
+          ? preparedTranscription
+          : {
+              state: 'unavailable',
+              candidateKey: transcriptionCandidate.source.candidateKey,
+              reason: 'Checking source media…',
+            };
   useEffect(() => {
     let cancelled = false;
     const refreshWorkers = (): void => {
@@ -787,17 +1460,6 @@ function EditorWorkspace({
     agentCommandBusRef.current = createAgentCommandBus(session, () =>
       setRevision((revision) => revision + 1),
     );
-  // WP-15.1/15.2: rebuilt each render so a dry-run/execute always sees the
-  // current real timeline, bound to the real command bus above — not a mock.
-  // `buildEditorContext`'s selection/audio fields are pre-existing, unwired
-  // summarizers (always empty); the Agent panel reads real selection/playhead
-  // state directly as props instead, documented in the WP-15 plan.
-  const agentContext = buildEditorContext(
-    session.timelineProject,
-    undefined,
-    agentCommandBusRef.current,
-    { liveAudio: audioState },
-  );
   const stateRef = useRef(state);
   stateRef.current = state;
   const lastMediaTimeUsRef = useRef<number | undefined>(undefined);
@@ -816,7 +1478,7 @@ function EditorWorkspace({
   }, []);
 
   const resolveClipMonitorMediaSource = useCallback(
-    async (clip: VideoClip): Promise<MonitorMediaSource> => {
+    async (clip: VideoClip | AudioClip): Promise<MonitorMediaSource> => {
       if (clip.assetId.startsWith('motion-scene:')) {
         return {
           state: 'unavailable',
@@ -872,6 +1534,7 @@ function EditorWorkspace({
 
   const captureTransitionPartnerFrames = useCallback(
     async (playheadUs: number): Promise<void> => {
+      const planRenderFrame = await loadPlanRenderFrame();
       const plan = planRenderFrame({
         bundle: createRenderBundle({
           timelineProject: session.timelineProject,
@@ -922,6 +1585,7 @@ function EditorWorkspace({
 
   const syncMediaToPlayhead = useCallback(
     async (playheadUs: number, play: boolean): Promise<boolean> => {
+      const planRenderFrame = await loadPlanRenderFrame();
       const video = videoRef.current;
       const clock = clockRef.current;
       const decoder = decoderRef.current;
@@ -1195,24 +1859,27 @@ function EditorWorkspace({
   }, [syncMediaToPlayhead]);
   const dispatchTimeline = useCallback(
     (transaction: CommandTransaction) => {
+      if (!ensureHydrationReady()) return;
       session.dispatchTimeline(transaction);
       setRevision((revision) => revision + 1);
     },
-    [session],
+    [ensureHydrationReady, session],
   );
   const dispatchGraph = useCallback(
     (transaction: GraphTransaction) => {
+      if (!ensureHydrationReady()) return;
       session.dispatchGraph(transaction);
       setRevision((revision) => revision + 1);
     },
-    [session],
+    [ensureHydrationReady, session],
   );
   const dispatchArtifacts = useCallback(
     (transaction: ArtifactTransaction) => {
+      if (!ensureHydrationReady()) return;
       session.dispatchArtifacts(transaction);
       setRevision((revision) => revision + 1);
     },
-    [session],
+    [ensureHydrationReady, session],
   );
   // Recomputed per render rather than memoized: the session exposes stable
   // references and signals change through `setRevision`, so a memo keyed on
@@ -1230,6 +1897,7 @@ function EditorWorkspace({
       key: 'x' | 'y' | 'scaleX' | 'scaleY' | 'rotationDeg' | 'opacity',
       value: number,
     ) => {
+      if (!ensureHydrationReady()) return;
       const transaction: VisualObjectTransaction = {
         label: `Set ${key}`,
         commands: [{ type: 'object.setTransformProperty', payload: { objectId, key, value } }],
@@ -1237,25 +1905,28 @@ function EditorWorkspace({
       session.dispatchVisualObjects(transaction);
       setRevision((revision) => revision + 1);
     },
-    [session],
+    [ensureHydrationReady, session],
   );
   const dispatchProject = useCallback(
     (transaction: VisualObjectTransaction) => {
+      if (!ensureHydrationReady()) return;
       session.dispatchVisualObjects(transaction);
       setRevision((revision) => revision + 1);
     },
-    [session],
+    [ensureHydrationReady, session],
   );
 
   const replaceVisualProject = useCallback(
     (next: JoyProjectV1) => {
+      if (!ensureHydrationReady()) return;
       session.replaceVisualProject(next);
       setRevision((revision) => revision + 1);
     },
-    [session],
+    [ensureHydrationReady, session],
   );
 
   const syncStickerBitmaps = useCallback(async () => {
+    const planRenderFrame = await loadPlanRenderFrame();
     const plan = planRenderFrame({
       bundle: createRenderBundle({
         timelineProject: session.timelineProject,
@@ -1276,6 +1947,7 @@ function EditorWorkspace({
       readonly displayName?: string;
       readonly blob?: Blob;
     }) => {
+      if (!ensureHydrationReady()) return;
       if (asset.blob !== undefined) stickerImageCache.rememberBlob(asset.assetId, asset.blob);
       const objectId = `sticker-${asset.assetId}-${Date.now().toString(36)}`;
       const clipId = `clip-${objectId}`;
@@ -1344,11 +2016,12 @@ function EditorWorkspace({
       setState((current) => ({ ...current, selectedIds: [clipId] }));
       setRevision((revision) => revision + 1);
     },
-    [session, syncStickerBitmaps],
+    [ensureHydrationReady, session, syncStickerBitmaps],
   );
 
   const addHtmlSceneToSelectedClip = useCallback(
     (scenePackageId: string) => {
+      if (!ensureHydrationReady()) return;
       const composition = session.timelineProject.compositions.root;
       if (composition === undefined) return;
       const selectedClipId = state.selectedIds[0];
@@ -1457,11 +2130,12 @@ function EditorWorkspace({
       setState((current) => ({ ...current, selectedIds: [clipId] }));
       setRevision((revision) => revision + 1);
     },
-    [session, state.selectedIds],
+    [ensureHydrationReady, session, state.selectedIds],
   );
 
   const addMotionSceneToSelectedClip = useCallback(
     (motionSceneId: string) => {
+      if (!ensureHydrationReady()) return;
       const composition = session.timelineProject.compositions.root;
       if (composition === undefined) return;
       const plan = buildMotionScenePlacementPlan({
@@ -1477,28 +2151,35 @@ function EditorWorkspace({
       // slices through the session's compound snapshot. This keeps Place
       // Motion Scene to one durable undo step (and avoids a dangling binding
       // if a later timeline command rejects).
-      const created = applyVisualObjectProjectTransaction(
-        session.visualProject,
-        plan.visualTransaction,
-      );
-      session.dispatchCompound(`Place Motion scene ${motionSceneId}`, {
-        document: bindClipToObject(created, plan.clipId, plan.objectId),
-        timeline: plan.timelineTransaction,
-      });
-      setState((current) => ({ ...current, selectedIds: [plan.clipId] }));
-      setRevision((revision) => revision + 1);
+      void import('@joy-media/property-system')
+        .then(({ applyVisualObjectProjectTransaction }) => {
+          const created = applyVisualObjectProjectTransaction(
+            session.visualProject,
+            plan.visualTransaction,
+          );
+          session.dispatchCompound(`Place Motion scene ${motionSceneId}`, {
+            document: bindClipToObject(created, plan.clipId, plan.objectId),
+            timeline: plan.timelineTransaction,
+          });
+          setState((current) => ({ ...current, selectedIds: [plan.clipId] }));
+          setRevision((revision) => revision + 1);
+        })
+        .catch(() => {
+          // Optional motion-scene support fails closed if its runtime chunk is unavailable.
+        });
     },
-    [session, state.selectedIds],
+    [ensureHydrationReady, session, state.selectedIds],
   );
 
   const setAudioState = useCallback(
     (next: AudioState) => {
+      if (!ensureHydrationReady()) return;
       setAudioStateRaw(next);
       saveAudioState(projectId, next);
       session.replaceVisualProject(withProjectAudio(session.visualProject, next));
       setRevision((revision) => revision + 1);
     },
-    [projectId, session],
+    [ensureHydrationReady, projectId, session],
   );
 
   const timelineClipIds =
@@ -1510,37 +2191,57 @@ function EditorWorkspace({
   }, [timelineClipIds.join('|')]);
 
   const transcribe = useCallback(
-    async (documentId: string, language: 'fa-IR' | 'en-US') => {
+    async (
+      documentId: string,
+      language: 'fa-IR' | 'en-US',
+      source: CaptionTranscriptionSource,
+      target: CaptionTranscriptionTarget,
+    ) => {
+      if (!ensureHydrationReady()) return;
       try {
-        const document = await transcribeReferenceCaption(documentId, language);
+        const document = await transcribeReferenceCaptionDeferred(documentId, language, source);
         session.dispatchVisualObjects({
           label: `Transcribe ${language}`,
-          commands: [{ type: 'caption.replaceDocument', payload: { documentId, document } }],
+          commands: [
+            { type: 'caption.replaceDocument', payload: { documentId, document } },
+            {
+              type: 'caption.setClipTiming',
+              payload: {
+                documentId,
+                clipId: target.clipId,
+                startUs: source.timelineStartUs,
+                durationUs: source.timelineDurationUs,
+              },
+            },
+          ],
         });
         setTranscriptionError(undefined);
         setRevision((revision) => revision + 1);
-      } catch (error) {
+      } catch {
         setTranscriptionError(
-          error instanceof Error ? error.message : 'Local transcription is unavailable.',
+          'Caption transcription failed. Check the selected media and try again.',
         );
       }
     },
-    [session],
+    [ensureHydrationReady, session],
   );
   const undo = useCallback(() => {
+    if (!ensureHydrationReady()) return;
     session.undo();
     setRevision((revision) => revision + 1);
-  }, [session]);
+  }, [ensureHydrationReady, session]);
   const redo = useCallback(() => {
+    if (!ensureHydrationReady()) return;
     session.redo();
     setRevision((revision) => revision + 1);
-  }, [session]);
+  }, [ensureHydrationReady, session]);
   const jumpToHistory = useCallback(
     (sequence: number) => {
+      if (!ensureHydrationReady()) return;
       session.jumpToHistory(sequence);
       setRevision((revision) => revision + 1);
     },
-    [session],
+    [ensureHydrationReady, session],
   );
   const executeAction = useCallback(
     (id: string) => {
@@ -1630,6 +2331,32 @@ function EditorWorkspace({
     }, 4000);
     toastTimersRef.current.set(id, timer);
   }, []);
+  const downloadLegacyBackup = useCallback(() => {
+    const journal = legacyBackupJournalRef.current;
+    if (journal === null) {
+      showToast('The local recovery backup is not currently available.', 'info');
+      return;
+    }
+    void journal
+      .loadLegacyBackup()
+      .then((backup) => {
+        if (backup === null) {
+          setLegacyBackupAvailable(false);
+          showToast('The local recovery backup could not be found.', 'info');
+          return;
+        }
+        void import('./project-document-lifecycle.js').then(({ legacyBackupBlob }) => {
+          const blob = legacyBackupBlob(backup);
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement('a');
+          anchor.href = url;
+          anchor.download = backup.filename;
+          anchor.click();
+          window.setTimeout(() => URL.revokeObjectURL(url), 0);
+        });
+      })
+      .catch(() => showToast('The local recovery backup could not be read.', 'info'));
+  }, [showToast]);
   const attachKiloCodeAsset = useCallback((asset: KiloCodeAttachedAsset) => {
     setKiloCodeAttachedAssets((current) => {
       if (current.some((entry) => entry.assetId === asset.assetId)) return current;
@@ -1641,7 +2368,8 @@ function EditorWorkspace({
       const entry = kiloCodeAttachedAssets.find((item) => item.assetId === assetId);
       setKiloCodeAttachedAssets((current) => current.filter((item) => item.assetId !== assetId));
       if (entry?.source === 'joycode-folder') {
-        void openJoyCodeOpfsAssetCache()
+        void import('./joycode-opfs-assets.js')
+          .then(({ openJoyCodeOpfsAssetCache }) => openJoyCodeOpfsAssetCache())
           .then((cache) => cache.remove(assetId))
           .catch(() => {
             /* OPFS cleanup is best-effort */
@@ -1774,35 +2502,95 @@ function EditorWorkspace({
     () => exportHistory.find((entry) => deliveryGate(entry).status === 'blocked'),
     [exportHistory],
   );
-  const deliveryVideoClips = useMemo<readonly VideoClip[]>(
+  const deliveryTimelineClips = useMemo<readonly DeliveryTimelineClip[]>(
+    () => deliveryTimelineClipsFromProject(session.timelineProject),
+    [session.timelineProject],
+  );
+  const deliveryMediaClips = useMemo<readonly (VideoClip | AudioClip)[]>(
     () =>
       session.timelineProject.compositions.root?.tracks.flatMap((track) =>
-        track.clips.flatMap((clip) => (clip.kind === 'video' ? [clip] : [])),
+        track.clips.flatMap((clip) =>
+          clip.kind === 'video' || clip.kind === 'audio' ? [clip] : [],
+        ),
       ) ?? [],
     [session.timelineProject],
   );
-  const deliveryTimelineClips = useMemo<readonly DeliveryTimelineClip[]>(
-    () =>
-      deliveryVideoClips.map((clip) => ({
-        id: clip.id,
-        assetId: clip.assetId,
-        durationUs: clip.durationUs,
-      })),
-    [deliveryVideoClips],
-  );
+  const verifiedRenderEnvelope = useMemo<VerifiedRenderEnvelope>(() => {
+    const timeline = session.timelineProject.compositions.root;
+    const allClips =
+      timeline?.tracks.filter((track) => track.enabled).flatMap((track) => track.clips) ?? [];
+    const videoClips = allClips
+      .filter((clip): clip is VideoClip => clip.kind === 'video')
+      .sort((left, right) => left.startUs - right.startUs);
+    let cursorUs = 0;
+    const nonContiguous =
+      timeline === undefined ||
+      videoClips.some((clip) => {
+        const gap = clip.startUs !== cursorUs;
+        cursorUs += clip.durationUs;
+        return gap;
+      }) ||
+      cursorUs !== (timeline?.durationUs ?? 0);
+    const nonOneXPlaybackCount = videoClips.filter((clip) => (clip.playbackRate ?? 1) !== 1).length;
+    const audio = session.visualProject.audio;
+    const audioFadeCount = Object.values(audio?.clips ?? {}).filter(
+      (clip) => clip.fadeInUs !== undefined || clip.fadeOutUs !== undefined,
+    ).length;
+    const unsupportedAssetCount = allClips.filter((clip) => {
+      if (clip.kind !== 'video' && clip.kind !== 'audio') return false;
+      return session.visualProject.assets[clip.assetId]?.kind !== clip.kind;
+    }).length;
+    const captionBurnIn = session.visualProject.pluginData[CAPTION_BURN_IN_KEY] === true;
+    const supportedTransitionCount = session.visualProject.transitions?.length ?? 0;
+    let verifiedRenderPlan: CompositionPlanV2 | undefined;
+    let verifiedRenderPlanError: string | undefined;
+    try {
+      // Use the exact normalized intent that the verified-delivery snapshot
+      // mints. This keeps the editor gate and Worker on one contract.
+      verifiedRenderPlan = createCompositionPlanV2({
+        timelineProject: session.timelineProject,
+        visualProject: { ...session.visualProject, exportPreset },
+      });
+    } catch (error) {
+      verifiedRenderPlanError =
+        error instanceof Error
+          ? error.message
+          : 'This project is not eligible for verified delivery yet.';
+    }
+    return {
+      visualObjectCount: Object.keys(session.visualProject.visualObjects).length,
+      transitionCount: session.visualProject.transitions?.length ?? 0,
+      supportedTransitionCount,
+      captionBurnIn,
+      ...(verifiedRenderPlan?.captionBurnIn === undefined
+        ? {}
+        : { captionBurnInPayload: verifiedRenderPlan.captionBurnIn }),
+      ...(verifiedRenderPlan === undefined ? {} : { verifiedRenderPlan }),
+      ...(verifiedRenderPlanError === undefined ? {} : { verifiedRenderPlanError }),
+      audioEffectCount: audio?.effects.length ?? 0,
+      audioBusCount: audio?.buses.length ?? 0,
+      audioFadeCount,
+      unsupportedClipCount: allClips.filter(
+        (clip) => clip.kind !== 'video' && clip.kind !== 'audio',
+      ).length,
+      nonContiguous,
+      nonOneXPlaybackCount,
+      unsupportedAssetCount,
+    };
+  }, [exportPreset, session.timelineProject, session.visualProject]);
   const [deliveryMediaStates, setDeliveryMediaStates] = useState<
     ReadonlyMap<string, DeliveryMediaState>
   >(() => new Map());
   useEffect(() => {
     let cancelled = false;
-    if (deliveryVideoClips.length === 0) {
+    if (deliveryMediaClips.length === 0) {
       setDeliveryMediaStates(new Map());
       return () => {
         cancelled = true;
       };
     }
     void Promise.all(
-      deliveryVideoClips.map(async (clip) => {
+      deliveryMediaClips.map(async (clip) => {
         try {
           const source = await resolveClipMonitorMediaSource(clip);
           const state: DeliveryMediaState = deliveryMediaStateFromEvidence(source);
@@ -1819,7 +2607,7 @@ function EditorWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [deliveryVideoClips, resolveClipMonitorMediaSource]);
+  }, [deliveryMediaClips, resolveClipMonitorMediaSource]);
   const deliveryCapabilities = useMemo<readonly DeliveryCapability[]>(() => {
     const capabilities: DeliveryCapability[] = [];
     if (
@@ -1852,8 +2640,9 @@ function EditorWorkspace({
         clips: deliveryTimelineClips,
         mediaStates: deliveryMediaStates,
         capabilities: deliveryCapabilities,
+        verifiedRenderEnvelope,
       }),
-    [deliveryCapabilities, deliveryMediaStates, deliveryTimelineClips],
+    [deliveryCapabilities, deliveryMediaStates, deliveryTimelineClips, verifiedRenderEnvelope],
   );
   const deliverBlockedReason = exporting
     ? 'Deliver is unavailable while another export is running.'
@@ -1862,6 +2651,22 @@ function EditorWorkspace({
       : verifiedDeliveryPreflight.allowed
         ? undefined
         : `Deliver blocked: ${verifiedDeliveryPreflight.reason}`;
+  const deliveryBlockedFailures: readonly {
+    readonly channel: 'Quick export' | 'Verified delivery';
+    readonly detail: string;
+  }[] = [
+    ...(!quickExportPreflight.allowed
+      ? [
+          {
+            channel: 'Quick export' as const,
+            detail: `Quick export blocked: ${quickExportPreflight.reason ?? 'Delivery is unavailable.'}`,
+          },
+        ]
+      : []),
+    ...(deliverBlockedReason === undefined
+      ? []
+      : [{ channel: 'Verified delivery' as const, detail: deliverBlockedReason }]),
+  ];
   const deliveryHistoryNeedsReconcile = useMemo(
     () => exportHistory.some((entry) => deliveryGate(entry).status === 'pending'),
     [exportHistory],
@@ -1870,16 +2675,58 @@ function EditorWorkspace({
     if (!deliveryHistoryNeedsReconcile) return;
     try {
       const jobs = await mediaClient.jobs(projectId);
+      const currentEntries = exportHistory;
       setExportHistory((entries) => {
         const next = reconcileDeliveryInspections(entries, jobs);
         if (next !== entries) saveExportHistory(window.localStorage, next);
         return next;
       });
+      // Export completion only unlocks inspection. Queue it against the
+      // concrete API artifact; inline export QA is never promoted to verified.
+      for (const entry of currentEntries) {
+        if (
+          entry.channel !== 'verified-delivery' ||
+          entry.exportJobId === undefined ||
+          entry.inspectJobId !== undefined ||
+          entry.inspectionPromise === undefined
+        )
+          continue;
+        const exportJob = jobs.find((job) => job.id === entry.exportJobId);
+        const outputRef = exportJob?.derivative?.outputRef;
+        const sha256 = exportJob?.derivative?.sha256;
+        if (exportJob?.state !== 'completed' || outputRef === undefined || sha256 === undefined)
+          continue;
+        const inspectJobId = `${entry.id}-inspect`;
+        const artifactId = `artifact-${entry.exportJobId}-${sha256.slice(0, 16)}`;
+        try {
+          const inspection = await mediaClient.enqueueRenderInspection(projectId, inspectJobId, {
+            projectRef: `project-${projectId}`,
+            compositionId: `composition-${projectId}`,
+            presetId: `preset-${projectId}`,
+            reportRef: entry.reportRef ?? `report-${inspectJobId}`,
+            artifactId,
+            outputRef,
+            promise: entry.inspectionPromise,
+            mode: 'sampled',
+          });
+          recordExportEntry({
+            ...entry,
+            inspectJobId: inspection.id,
+            inspection: {
+              state: 'queued',
+              ...(entry.reportRef === undefined ? {} : { reportRef: entry.reportRef }),
+            },
+          });
+        } catch {
+          // Keep the export pending; the next poll retries the same idempotent
+          // inspect job after a transient API/Worker failure.
+        }
+      }
     } catch {
       // JobsPanel already owns user-facing connection errors; delivery history
       // remains fail-closed until a report projection is available.
     }
-  }, [deliveryHistoryNeedsReconcile, mediaClient, projectId]);
+  }, [deliveryHistoryNeedsReconcile, exportHistory, mediaClient, projectId, recordExportEntry]);
   useEffect(() => {
     if (!deliveryHistoryNeedsReconcile) return;
     void reconcileDeliveryHistory();
@@ -2075,6 +2922,7 @@ function EditorWorkspace({
   );
 
   const handleExport = useCallback(async () => {
+    if (!ensureHydrationReady()) return;
     if (exporting) return;
     if (!quickExportPreflight.allowed) {
       setExportStatus(
@@ -2132,6 +2980,7 @@ function EditorWorkspace({
         exportPreset,
         updatedAt: new Date().toISOString(),
       });
+      const planRenderFrame = await loadPlanRenderFrame();
       const frameTimeUs = (index: number): number =>
         Math.min(durationUs - 1, Math.floor((index * 1_000_000) / frameRate));
       const buildFramePlan = (timeUs: number) =>
@@ -2261,15 +3110,29 @@ function EditorWorkspace({
       const exportAudioTrack = audioDestination.stream.getAudioTracks()[0];
       if (exportAudioTrack === undefined)
         throw new Error('Export audio mix did not produce a track');
-      const renderer = await createBrowserPixiRenderer({ width, height, resolution: 1 });
-      const sceneFrameSource = createDeliverySceneFrameSource(new HtmlSceneSurfaceCache());
-      const motionSceneFrameSource = new MotionSceneSurfaceCache(window.localStorage);
+      const [rendererModule, exportModule, htmlSceneModule, motionSceneModule] = await Promise.all([
+        import('@joy-media/renderer-pixi/browser'),
+        import('@joy-media/renderer-pixi/browser-export'),
+        import('./html-scene-surfaces.js'),
+        import('./motion-scene-surfaces.js'),
+      ]);
+      const renderer = await rendererModule.createBrowserPixiRenderer({
+        width,
+        height,
+        resolution: 1,
+      });
+      const sceneFrameSource = htmlSceneModule.createDeliverySceneFrameSource(
+        new htmlSceneModule.HtmlSceneSurfaceCache(),
+      );
+      const motionSceneFrameSource = new motionSceneModule.MotionSceneSurfaceCache(
+        window.localStorage,
+      );
       const startTimers: number[] = [];
       const audioSources: AudioBufferSourceNode[] = [];
       try {
         await audioContext.resume();
         setExportStatus(`Encoding ${totalFrames} preview-equivalent H.264/AAC frames…`);
-        const exportResult: BrowserExportResult = await downloadBrowserMp4({
+        const exportResult: BrowserExportResult = await exportModule.downloadBrowserMp4({
           manifest,
           frameCount: totalFrames,
           canvas: renderer.canvas,
@@ -2407,7 +3270,7 @@ function EditorWorkspace({
         await audioContext.close();
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = userFacingDeliveryError(error, 'Quick export');
       setExportStatus(`Export failed: ${message}`);
       recordExportEntry({
         id: entryId,
@@ -2427,6 +3290,7 @@ function EditorWorkspace({
       setExporting(false);
     }
   }, [
+    ensureHydrationReady,
     quickExportPreflight,
     exportPreset,
     exporting,
@@ -2437,6 +3301,7 @@ function EditorWorkspace({
   ]);
 
   const handleVerifiedDelivery = useCallback(async () => {
+    if (!ensureHydrationReady()) return;
     if (exporting) return;
     if (!verifiedDeliveryPreflight.allowed) {
       setExportStatus(
@@ -2485,17 +3350,38 @@ function EditorWorkspace({
       }
     })();
     const durationUs = session.timelineProject.compositions.root?.durationUs ?? 30_000_000;
-    const bundle = createRenderBundle({
-      timelineProject: session.timelineProject,
-      visualProject: {
-        ...session.visualProject,
-        exportPreset,
-        updatedAt: new Date().toISOString(),
-      },
-      ...(compositionV1 === undefined ? {} : { compositionId: compositionV1.id }),
-      outputPreset: exportPreset,
-      seed: `delivery:${entryId}`,
-    });
+    const timelineFrameRate = session.timelineProject.compositions.root?.frameRate;
+    const frameRate =
+      timelineFrameRate === undefined
+        ? compositionV1?.frameRate.num !== undefined && compositionV1.frameRate.den !== 0
+          ? compositionV1.frameRate.num / compositionV1.frameRate.den
+          : 30
+        : timelineFrameRate.num / timelineFrameRate.den;
+    const snapshotKey = `${projectId}:${session.projectRevisionId}:${exportPreset}:${durationUs}:${width}x${height}`;
+    const cachedBundle = verifiedDeliverySnapshotCacheRef.current.get(snapshotKey);
+    const bundle =
+      cachedBundle ??
+      (await createVerifiedDeliverySnapshotDeferred({
+        timelineProject: session.timelineProject,
+        visualProject: { ...session.visualProject, exportPreset },
+        ...(compositionV1 === undefined ? {} : { compositionId: compositionV1.id }),
+        projectRef: opaqueRenderRef(projectId, 'project'),
+        viewport: { width, height },
+        assets: Object.fromEntries(
+          Object.entries(monitorAssetCatalog.assets).map(([id, asset]) => [
+            id,
+            {
+              id,
+              sha256: asset.sha256,
+              bytes: asset.bytes,
+              mimeType: asset.descriptor.mimeType,
+              opaqueRef: `asset:${id}`,
+            },
+          ]),
+        ),
+      }));
+    if (cachedBundle === undefined)
+      verifiedDeliverySnapshotCacheRef.current.set(snapshotKey, bundle);
     const payload = {
       projectRef: opaqueRenderRef(projectId, 'project'),
       compositionId: opaqueRenderRef(compositionV1?.id, 'root-composition'),
@@ -2503,6 +3389,34 @@ function EditorWorkspace({
       reportRef,
       bundle,
     };
+    const baseInspectionPromise = await deliveryPromiseForManifestDeferred({
+      projectId,
+      revision: 0,
+      width,
+      height,
+      frameRate,
+      durationUs,
+      preset: exportPreset,
+    });
+    const inspectionPromise =
+      bundle.plan.captionBurnIn === undefined
+        ? baseInspectionPromise
+        : {
+            ...baseInspectionPromise,
+            captions: {
+              mode: 'burned-in' as const,
+              required: true,
+              burnIn: {
+                styleRef: bundle.plan.captionBurnIn.styleRef,
+                segments: bundle.plan.captionBurnIn.segments.map((segment) => ({
+                  startUs: segment.startUs,
+                  endUs: segment.endUs,
+                  text: segment.text,
+                  direction: segment.direction,
+                })),
+              },
+            },
+          };
     const queuedEntry: ExportProcessEntry = {
       id: entryId,
       filename,
@@ -2512,6 +3426,7 @@ function EditorWorkspace({
       exportJobId,
       reportRef,
       inspection: { state: 'queued', reportRef },
+      inspectionPromise,
     };
     recordExportEntry(queuedEntry);
     try {
@@ -2525,7 +3440,7 @@ function EditorWorkspace({
         setExportProgress(undefined);
       }, 4_000);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = userFacingDeliveryError(error, 'Verified delivery');
       recordExportEntry({
         ...queuedEntry,
         status: 'failed',
@@ -2545,10 +3460,12 @@ function EditorWorkspace({
     blockedDeliveryEntry,
     exportPreset,
     exporting,
+    ensureHydrationReady,
     mediaClient,
     projectId,
     recordExportEntry,
     session,
+    monitorAssetCatalog.assets,
     verifiedDeliveryPreflight,
   ]);
   const issueAgentPanelCommand = useCallback((type: AgentPanelCommandType) => {
@@ -2720,8 +3637,12 @@ function EditorWorkspace({
           },
           derivativesByAssetId: previous.derivativesByAssetId,
         }));
+        const imageCount = files.filter((file) => importAssetKind(file) === 'image').length;
+        const timelineCount = transactions.length;
         context.showToast(
-          `${registered.length} media file${registered.length === 1 ? '' : 's'} registered and added to the timeline.`,
+          imageCount > 0
+            ? `${timelineCount} media file${timelineCount === 1 ? '' : 's'} added to the timeline. ${imageCount} still image${imageCount === 1 ? '' : 's'} registered in Assets only; use Add as sticker to place an overlay.`
+            : `${registered.length} media file${registered.length === 1 ? '' : 's'} registered and added to the timeline.`,
           'success',
         );
       } catch (error) {
@@ -2735,46 +3656,56 @@ function EditorWorkspace({
       const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
       const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
       return (
-        <InspectorPanel
-          object={object}
-          {...(state.selectedIds[0] !== undefined ? { selectedClipId: state.selectedIds[0] } : {})}
-          allObjects={visualProject.visualObjects}
-          playheadUs={state.playheadUs}
-          audioState={context.audioState}
-          onAudioChange={(next) => context.setAudioState(next)}
-          onSetStatic={updateVisualProperty}
-          onDispatch={context.dispatchProject}
-        />
+        <LazyPanel label="Inspector">
+          <LazyInspectorPanel
+            object={object}
+            {...(state.selectedIds[0] !== undefined
+              ? { selectedClipId: state.selectedIds[0] }
+              : {})}
+            allObjects={visualProject.visualObjects}
+            playheadUs={state.playheadUs}
+            audioState={context.audioState}
+            onAudioChange={(next) => context.setAudioState(next)}
+            onSetStatic={updateVisualProperty}
+            onDispatch={context.dispatchProject}
+          />
+        </LazyPanel>
       );
     }
     if (api.id === 'motion') {
       const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
       const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
       return (
-        <MotionPanel
-          object={object}
-          allObjects={visualProject.visualObjects}
-          compositionDurationUs={
-            context.timelineProject.compositions.root?.durationUs ?? 30_000_000
-          }
-          playheadUs={state.playheadUs}
-          onSeek={context.seek}
-          onDispatch={context.dispatchProject}
-          {...(state.selectedIds[0] !== undefined ? { selectedClipId: state.selectedIds[0] } : {})}
-          onAddHtmlSceneToSelection={context.addHtmlSceneToSelectedClip}
-          onAddMotionSceneToSelection={context.addMotionSceneToSelectedClip}
-        />
+        <LazyPanel label="Motion">
+          <LazyMotionPanel
+            object={object}
+            allObjects={visualProject.visualObjects}
+            compositionDurationUs={
+              context.timelineProject.compositions.root?.durationUs ?? 30_000_000
+            }
+            playheadUs={state.playheadUs}
+            onSeek={context.seek}
+            onDispatch={context.dispatchProject}
+            {...(state.selectedIds[0] !== undefined
+              ? { selectedClipId: state.selectedIds[0] }
+              : {})}
+            onAddHtmlSceneToSelection={context.addHtmlSceneToSelectedClip}
+            onAddMotionSceneToSelection={context.addMotionSceneToSelectedClip}
+          />
+        </LazyPanel>
       );
     }
     if (api.id === 'camera') {
       const composition = visualProject.compositions[visualProject.rootCompositionId];
       if (composition === undefined) return <p>Main composition is missing.</p>;
       return (
-        <CameraPanel
-          allObjects={visualProject.visualObjects}
-          composition={composition}
-          onDispatch={context.dispatchProject}
-        />
+        <LazyPanel label="Camera">
+          <LazyCameraPanel
+            allObjects={visualProject.visualObjects}
+            composition={composition}
+            onDispatch={context.dispatchProject}
+          />
+        </LazyPanel>
       );
     }
     if (api.id === 'audio') {
@@ -2783,11 +3714,13 @@ function EditorWorkspace({
           track.clips.map((clip) => clip.id),
         ) ?? [];
       return (
-        <AudioPanel
-          clipIds={clipIds}
-          audioState={context.audioState}
-          onAudioChange={(next) => context.setAudioState(next)}
-        />
+        <LazyPanel label="Audio">
+          <LazyAudioPanel
+            clipIds={clipIds}
+            audioState={context.audioState}
+            onAudioChange={(next) => context.setAudioState(next)}
+          />
+        </LazyPanel>
       );
     }
     if (api.id === 'effects') {
@@ -2796,65 +3729,76 @@ function EditorWorkspace({
         objectId !== undefined &&
         isSingleVideoClipSelected(context.timelineProject, state.selectedIds);
       return (
-        <EffectsPanel
-          project={visualProject}
-          objectId={objectId}
-          canApplyEffects={canApplyEffects}
-          onDispatch={(command) => {
-            context.dispatchProject({
-              label: `Effect: ${(command.payload as { effectId: string }).effectId}`,
-              commands: [command],
-            } as unknown as VisualObjectTransaction);
-          }}
-          showToast={context.showToast}
-        />
+        <LazyPanel label="Effects">
+          <LazyEffectsPanel
+            project={visualProject}
+            objectId={objectId}
+            canApplyEffects={canApplyEffects}
+            onDispatch={(command) => {
+              context.dispatchProject({
+                label: `Effect: ${(command.payload as { effectId: string }).effectId}`,
+                commands: [command],
+              } as unknown as VisualObjectTransaction);
+            }}
+            showToast={context.showToast}
+          />
+        </LazyPanel>
       );
     }
     if (api.id === 'transitions') {
       return (
-        <TransitionsPanel
-          project={visualProject}
-          selectedClipIds={state.selectedIds}
-          onAddTransition={(t) =>
-            context.replaceVisualProject({
-              ...visualProject,
-              transitions: [
-                ...(visualProject.transitions ?? []),
-                { ...t, id: `transition-${Date.now()}` },
-              ],
-            })
-          }
-          onRemoveTransition={(transitionId) =>
-            context.replaceVisualProject({
-              ...visualProject,
-              transitions: (visualProject.transitions ?? []).filter((t) => t.id !== transitionId),
-            })
-          }
-          onUpdateTransition={(transitionId, updates) =>
-            context.replaceVisualProject({
-              ...visualProject,
-              transitions: (visualProject.transitions ?? []).map((t) =>
-                t.id === transitionId ? { ...t, ...updates } : t,
-              ),
-            })
-          }
-          showToast={context.showToast}
-        />
+        <LazyPanel label="Transitions">
+          <LazyTransitionsPanel
+            project={visualProject}
+            selectedClipIds={state.selectedIds}
+            onAddTransition={(t) =>
+              context.replaceVisualProject({
+                ...visualProject,
+                transitions: [
+                  ...(visualProject.transitions ?? []),
+                  { ...t, id: `transition-${Date.now()}` },
+                ],
+              })
+            }
+            onRemoveTransition={(transitionId) =>
+              context.replaceVisualProject({
+                ...visualProject,
+                transitions: (visualProject.transitions ?? []).filter((t) => t.id !== transitionId),
+              })
+            }
+            onUpdateTransition={(transitionId, updates) =>
+              context.replaceVisualProject({
+                ...visualProject,
+                transitions: (visualProject.transitions ?? []).map((t) =>
+                  t.id === transitionId ? { ...t, ...updates } : t,
+                ),
+              })
+            }
+            showToast={context.showToast}
+          />
+        </LazyPanel>
       );
     }
     if (api.id === 'color')
-      return <ColorPanel project={visualProject} onChange={context.replaceVisualProject} />;
+      return (
+        <LazyPanel label="Color">
+          <LazyColorPanel project={visualProject} onChange={context.replaceVisualProject} />
+        </LazyPanel>
+      );
     if (api.id === 'captions')
       return (
-        <CaptionsPanel
-          project={visualProject}
-          playheadUs={state.playheadUs}
-          onSeek={context.seek}
-          onDispatch={context.dispatchProject}
-          onTranscribe={context.transcribe}
-          transcriptionError={context.transcriptionError}
-          onProjectChange={(next) => context.replaceVisualProject(next)}
-        />
+        <LazyPanel label="Captions">
+          <LazyCaptionsPanel
+            project={visualProject}
+            playheadUs={state.playheadUs}
+            onSeek={context.seek}
+            onDispatch={context.dispatchProject}
+            onTranscribe={context.transcribe}
+            transcriptionAvailability={context.transcriptionAvailability}
+            transcriptionError={context.transcriptionError}
+            onProjectChange={(next) => context.replaceVisualProject(next)}
+          />
+        </LazyPanel>
       );
     if (api.id === 'timeline')
       return (
@@ -2923,16 +3867,21 @@ function EditorWorkspace({
               context.showToast("Could not find this clip's target.", 'error');
               return;
             }
-            const descriptor = effectRegistry.getEffect(effectId);
-            if (!descriptor) return;
-            const defaults: Record<string, unknown> = {};
-            for (const p of descriptor.params) {
-              defaults[p.key] = p.defaultValue;
-            }
-            context.dispatchProject({
-              label: `Effect: ${effectId}`,
-              commands: [{ type: 'effect.add', payload: { objectId, effectId, params: defaults } }],
-            } as unknown as VisualObjectTransaction);
+            void import('@joy-media/visual-effects').then(
+              ({ effectRegistry, registerBuiltins }) => {
+                registerBuiltins();
+                const descriptor = effectRegistry.getEffect(effectId);
+                if (!descriptor) return;
+                const defaults: Record<string, unknown> = {};
+                for (const p of descriptor.params) defaults[p.key] = p.defaultValue;
+                context.dispatchProject({
+                  label: `Effect: ${effectId}`,
+                  commands: [
+                    { type: 'effect.add', payload: { objectId, effectId, params: defaults } },
+                  ],
+                } as unknown as VisualObjectTransaction);
+              },
+            );
           }}
           onTransitionDrop={(transitionId, leftClipId, rightClipId, trackId) => {
             context.selectClips([leftClipId, rightClipId]);
@@ -2956,122 +3905,134 @@ function EditorWorkspace({
       );
     if (api.id === 'flow')
       return (
-        <DualLensPanel
-          projection={context.dualLensProjection}
-          playheadUs={state.playheadUs}
-          playing={state.playing}
-          selectedClipIds={state.selectedIds}
-          timelineViewport={context.timelineViewport}
-          onTimelineViewportChange={context.onTimelineViewportChange}
-          trackFlags={context.timelineTrackFlags}
-          onTrackFlagsChange={context.onTimelineTrackFlagsChange}
-          compositionId={context.timelineProject.rootCompositionId}
-          onDispatch={context.dispatchTimeline}
-          onTogglePlayback={context.togglePlayback}
-          onSeek={context.seek}
-          onSelectClips={context.selectClips}
-          onRevealOnTimeline={context.revealOnTimeline}
-          markers={visualProject.markers}
-          onAddMarker={(timeUs, label) =>
-            context.dispatchProject({
-              label: `Add ${label}`,
-              commands: [
-                {
-                  type: 'marker.add',
-                  payload: {
-                    marker: {
-                      id: `marker-${timeUs}-${Date.now()}`,
-                      timeUs,
-                      label,
-                      kind: 'marker',
-                      color: JOY_COLORS.accent,
+        <LazyPanel label="Flow">
+          <LazyDualLensPanel
+            projection={context.dualLensProjection}
+            playheadUs={state.playheadUs}
+            playing={state.playing}
+            selectedClipIds={state.selectedIds}
+            timelineViewport={context.timelineViewport}
+            onTimelineViewportChange={context.onTimelineViewportChange}
+            trackFlags={context.timelineTrackFlags}
+            onTrackFlagsChange={context.onTimelineTrackFlagsChange}
+            compositionId={context.timelineProject.rootCompositionId}
+            onDispatch={context.dispatchTimeline}
+            onTogglePlayback={context.togglePlayback}
+            onSeek={context.seek}
+            onSelectClips={context.selectClips}
+            onRevealOnTimeline={context.revealOnTimeline}
+            markers={visualProject.markers}
+            onAddMarker={(timeUs, label) =>
+              context.dispatchProject({
+                label: `Add ${label}`,
+                commands: [
+                  {
+                    type: 'marker.add',
+                    payload: {
+                      marker: {
+                        id: `marker-${timeUs}-${Date.now()}`,
+                        timeUs,
+                        label,
+                        kind: 'marker',
+                        color: JOY_COLORS.accent,
+                      },
                     },
                   },
-                },
-              ],
-            })
-          }
-          onRemoveMarker={(id) =>
-            context.dispatchProject({
-              label: `Remove marker ${id}`,
-              commands: [{ type: 'marker.remove', payload: { markerId: id } }],
-            })
-          }
-          {...(context.lensReveal === undefined ? {} : { reveal: context.lensReveal })}
-          {...(context.workflowGraph === undefined
-            ? {}
-            : {
-                workflowGraph: context.workflowGraph,
-                onDispatchGraph: context.dispatchGraph,
-                specialistReview: (
-                  <SpecialistReviewPanel
-                    timeline={context.timelineProject}
-                    creative={visualProject}
-                    compositionId={context.timelineProject.rootCompositionId}
-                    selectedClipIds={state.selectedIds}
-                    projectId={context.timelineProject.id}
-                    revisionId={() => context.session.projectRevisionId}
-                    onApplyChangeSet={(label, document, artifacts, timelineTransaction) => {
-                      context.session.dispatchCompound(label, {
-                        document,
-                        artifacts,
-                        ...(timelineTransaction === undefined
-                          ? {}
-                          : { timeline: timelineTransaction }),
-                      });
-                      context.bumpProjectRevision();
-                    }}
-                  />
-                ),
-              })}
-        />
+                ],
+              })
+            }
+            onRemoveMarker={(id) =>
+              context.dispatchProject({
+                label: `Remove marker ${id}`,
+                commands: [{ type: 'marker.remove', payload: { markerId: id } }],
+              })
+            }
+            {...(context.lensReveal === undefined ? {} : { reveal: context.lensReveal })}
+            {...(context.workflowGraph === undefined
+              ? {}
+              : {
+                  workflowGraph: context.workflowGraph,
+                  onDispatchGraph: context.dispatchGraph,
+                  specialistReview: (
+                    <LazySpecialistReviewPanel
+                      timeline={context.timelineProject}
+                      creative={visualProject}
+                      compositionId={context.timelineProject.rootCompositionId}
+                      selectedClipIds={state.selectedIds}
+                      projectId={context.timelineProject.id}
+                      revisionId={() => context.session.projectRevisionId}
+                      onApplyChangeSet={(label, document, artifacts, timelineTransaction) => {
+                        if (!ensureHydrationReady()) return;
+                        context.session.dispatchCompound(label, {
+                          document,
+                          artifacts,
+                          ...(timelineTransaction === undefined
+                            ? {}
+                            : { timeline: timelineTransaction }),
+                        });
+                        context.bumpProjectRevision();
+                      }}
+                    />
+                  ),
+                })}
+          />
+        </LazyPanel>
       );
     if (api.id === 'jobs')
       return (
-        <JobsPanel
-          projectId={controlPlaneProject.controlPlaneProjectId}
-          projectTitle={controlPlaneProject.title}
-        />
+        <LazyPanel label="Jobs">
+          <LazyJobsPanel
+            projectId={controlPlaneProject.controlPlaneProjectId}
+            projectTitle={controlPlaneProject.title}
+          />
+        </LazyPanel>
       );
     if (api.id === 'media')
       return (
-        <AssetLibraryPanel
-          projectId={controlPlaneProject.controlPlaneProjectId}
-          projectTitle={controlPlaneProject.title}
-          onAddSticker={(asset) => void context.addStickerFromAsset(asset)}
-          onEditWithAi={(asset) => {
-            context.attachKiloCodeAsset(asset);
-            context.activatePanel('agent');
-          }}
-          {...(context.artifacts === undefined ? {} : { artifacts: context.artifacts })}
-          {...(context.dispatchArtifacts === undefined
-            ? {}
-            : { onDispatchArtifacts: context.dispatchArtifacts })}
-        />
+        <LazyPanel label="Media">
+          <LazyAssetLibraryPanel
+            projectId={controlPlaneProject.controlPlaneProjectId}
+            projectTitle={controlPlaneProject.title}
+            onAddSticker={(asset) => void context.addStickerFromAsset(asset)}
+            onEditWithAi={(asset) => {
+              context.attachKiloCodeAsset(asset);
+              context.activatePanel('agent');
+            }}
+            {...(context.artifacts === undefined ? {} : { artifacts: context.artifacts })}
+            {...(context.dispatchArtifacts === undefined
+              ? {}
+              : { onDispatchArtifacts: context.dispatchArtifacts })}
+          />
+        </LazyPanel>
       );
     if (api.id === 'agent') {
       return (
-        <AgentPanel
-          project={context.timelineProject}
-          selectedClipIds={state.selectedIds}
-          playheadUs={state.playheadUs}
-          agentContext={context.agentContext}
-          onUndo={context.undo}
-          session={context.session}
-          settings={context.agentSettings}
-          {...(context.agentPanelCommand === undefined
-            ? {}
-            : { command: context.agentPanelCommand })}
-          attachedAssets={context.kiloCodeAttachedAssets}
-          assets={Object.values(monitorAssetCatalog.assets)}
-          onOpen3DStudio={() => setThreeDStudioSceneId(controlPlaneProject.controlPlaneProjectId)}
-          onDetachAsset={context.detachKiloCodeAsset}
-          onAttachAsset={context.attachKiloCodeAsset}
-        />
+        <LazyPanel label="Agent">
+          <AgentPanelGate
+            project={context.timelineProject}
+            commandBus={context.agentCommandBus}
+            audioState={context.audioState}
+            selectedClipIds={state.selectedIds}
+            playheadUs={state.playheadUs}
+            onUndo={context.undo}
+            session={context.session}
+            settings={context.agentSettings}
+            {...(context.agentPanelCommand === undefined
+              ? {}
+              : { command: context.agentPanelCommand })}
+            attachedAssets={context.kiloCodeAttachedAssets}
+            onDetachAsset={context.detachKiloCodeAsset}
+            onAttachAsset={context.attachKiloCodeAsset}
+          />
+        </LazyPanel>
       );
     }
     if (api.id === 'history') {
-      return <HistoryPanel entries={context.historyEntries} onJumpTo={context.jumpToHistory} />;
+      return (
+        <LazyPanel label="History">
+          <LazyHistoryPanel entries={context.historyEntries} onJumpTo={context.jumpToHistory} />
+        </LazyPanel>
+      );
     }
     if (api.id === 'diagnostics')
       return (
@@ -3091,108 +4052,149 @@ function EditorWorkspace({
     if (api.id === 'monitor') return <MonitorPanel />;
     if (api.id === 'workflows') {
       return (
-        <WorkflowsPanel
-          session={context.session}
-          selectedClipIds={state.selectedIds}
-          playheadUs={state.playheadUs}
-          onRun={async (workflowId, inputs) => {
-            try {
-              const outcome = await runWorkflow(context.session, workflowId, inputs, {
-                productionRunStore,
-                authority: workflowAuthority,
-                firstPartyLibrary: firstPartyWorkflowLibrary,
-              });
-              context.bumpProjectRevision();
-              return outcome;
-            } catch (error) {
-              console.error('Failed to run workflow:', error);
-              return {
-                status: 'failed' as const,
-                workflowId,
-                runId: 'error',
-                error: error instanceof Error ? error.message : String(error),
-              };
-            }
-          }}
-          onResume={async (runId, humanInputs, approval) => {
-            try {
-              const outcome = await resumeWorkflow(context.session, runId, humanInputs, {
-                productionRunStore,
-                authority: workflowAuthority,
-                firstPartyLibrary: firstPartyWorkflowLibrary,
-                ...(approval.approvalId === undefined ? {} : { approvalId: approval.approvalId }),
-                ...(approval.approvalRequestedSeq === undefined
-                  ? {}
-                  : { approvalRequestedSeq: approval.approvalRequestedSeq }),
-                ...(approval.approvalExpiresAtSeq === undefined
-                  ? {}
-                  : { approvalExpiresAtSeq: approval.approvalExpiresAtSeq }),
-              });
-              context.bumpProjectRevision();
-              return outcome;
-            } catch (error) {
-              console.error('Failed to resume workflow:', error);
-              return {
-                status: 'failed' as const,
-                workflowId: 'unknown',
-                runId,
-                error: error instanceof Error ? error.message : String(error),
-              };
-            }
-          }}
-        />
+        <LazyPanel label="Workflows">
+          <LazyWorkflowsPanel
+            session={context.session}
+            selectedClipIds={state.selectedIds}
+            playheadUs={state.playheadUs}
+            onRun={async (workflowId, inputs) => {
+              try {
+                const runtime = await workflowRuntimeLoader();
+                const outcome = await runtime.runner.runWorkflow(
+                  context.session,
+                  workflowId,
+                  inputs,
+                  {
+                    productionRunStore: runtime.store,
+                    authority: workflowAuthority,
+                    firstPartyLibrary:
+                      workflowId === 'joy.first-party.reference-social-cutdown.slice'
+                        ? runtime.handlers.createEditorSessionFirstPartyLibrary(context.session)
+                        : runtime.handlers.createProductionFirstPartyLibrary(),
+                  },
+                );
+                context.bumpProjectRevision();
+                return outcome;
+              } catch (error) {
+                console.error('Failed to run workflow:', error);
+                return {
+                  status: 'failed' as const,
+                  workflowId,
+                  runId: 'error',
+                  error: error instanceof Error ? error.message : String(error),
+                };
+              }
+            }}
+            onResume={async (runId, humanInputs, approval) => {
+              try {
+                const runtime = await workflowRuntimeLoader();
+                const storedRun = await runtime.store.load(runId);
+                const outcome = await runtime.runner.resumeWorkflow(
+                  context.session,
+                  runId,
+                  humanInputs,
+                  {
+                    productionRunStore: runtime.store,
+                    authority: workflowAuthority,
+                    firstPartyLibrary:
+                      storedRun?.workflowId === 'joy.first-party.reference-social-cutdown.slice'
+                        ? runtime.handlers.createEditorSessionFirstPartyLibrary(context.session)
+                        : runtime.handlers.createProductionFirstPartyLibrary(),
+                    ...(approval.approvalId === undefined
+                      ? {}
+                      : { approvalId: approval.approvalId }),
+                    ...(approval.approvalRequestedSeq === undefined
+                      ? {}
+                      : { approvalRequestedSeq: approval.approvalRequestedSeq }),
+                    ...(approval.approvalExpiresAtSeq === undefined
+                      ? {}
+                      : { approvalExpiresAtSeq: approval.approvalExpiresAtSeq }),
+                  },
+                );
+                context.bumpProjectRevision();
+                return outcome;
+              } catch (error) {
+                console.error('Failed to resume workflow:', error);
+                return {
+                  status: 'failed' as const,
+                  workflowId: 'unknown',
+                  runId,
+                  error: error instanceof Error ? error.message : String(error),
+                };
+              }
+            }}
+          />
+        </LazyPanel>
       );
     }
     if (api.id === 'production') {
       return (
-        <ProductionBoardPanel
-          store={productionRunStore}
-          authority={workflowAuthority}
-          currentProjectRevision={context.session.projectRevisionId}
-          artifacts={context.artifacts ?? { artifacts: {}, versions: {} }}
-          dataLanes={context.dataLanes ?? []}
-          assets={Object.values(monitorAssetCatalog.assets)}
-          onOpenLink={(href) => {
-            if (href.startsWith('#data-lane:') || href.startsWith('#artifact:')) {
-              context.activatePanel('timeline');
-              return;
-            }
-            if (href.startsWith('#asset:')) {
-              context.activatePanel('media');
-              return;
-            }
-            if (
-              href.startsWith('#job:') ||
-              href.startsWith('#provider:') ||
-              href.startsWith('#report:')
-            ) {
-              context.activatePanel('jobs');
-            }
-          }}
-        />
+        <LazyPanel label="Production">
+          <ProductionBoardPanelGate
+            loadRuntime={workflowRuntimeLoader}
+            authority={workflowAuthority}
+            currentProjectRevision={context.session.projectRevisionId}
+            artifacts={context.artifacts ?? { artifacts: {}, versions: {} }}
+            dataLanes={context.dataLanes ?? []}
+            assets={Object.values(monitorAssetCatalog.assets)}
+            onOpenLink={(href) => {
+              if (href.startsWith('#data-lane:') || href.startsWith('#artifact:')) {
+                context.activatePanel('timeline');
+                return;
+              }
+              if (href.startsWith('#asset:')) {
+                context.activatePanel('media');
+                return;
+              }
+              if (
+                href.startsWith('#job:') ||
+                href.startsWith('#provider:') ||
+                href.startsWith('#report:')
+              ) {
+                context.activatePanel('jobs');
+              }
+            }}
+          />
+        </LazyPanel>
       );
     }
     if (api.id === 'plugins') {
-      return <PluginsPanel pluginHost={context.pluginHost} onChange={context.bumpPluginRevision} />;
+      return (
+        <LazyPanel label="Plugins">
+          <PluginsPanelGate
+            loadPluginHost={pluginHostLoader}
+            onChange={context.bumpPluginRevision}
+          />
+        </LazyPanel>
+      );
     }
     if (api.id === 'templates') {
       return (
-        <TemplatesPanel
-          session={context.session}
-          selectedClipIds={state.selectedIds}
-          playheadUs={state.playheadUs}
-          onApplyTemplate={(seeded) => {
-            buildContentTemplateTransaction(seeded, {
-              session: context.session,
-              selectedClipIds: state.selectedIds,
-              playheadUs: state.playheadUs,
-            });
-            setRevision((r) => r + 1);
-          }}
-          showToast={(message, kind) => {
-            console.log(`[Templates] ${kind}: ${message}`);
-          }}
-        />
+        <LazyPanel label="Templates">
+          <LazyTemplatesPanel
+            session={context.session}
+            selectedClipIds={state.selectedIds}
+            playheadUs={state.playheadUs}
+            onApplyTemplate={(seeded) => {
+              if (!ensureHydrationReady()) return;
+              void import('./content-template-transaction.js')
+                .then(({ buildContentTemplateTransaction }) => {
+                  buildContentTemplateTransaction(seeded, {
+                    session: context.session,
+                    selectedClipIds: state.selectedIds,
+                    playheadUs: state.playheadUs,
+                  });
+                  setRevision((r) => r + 1);
+                })
+                .catch(() => {
+                  context.showToast('Templates are unavailable in this session.', 'error');
+                });
+            }}
+            showToast={(message, kind) => {
+              console.log(`[Templates] ${kind}: ${message}`);
+            }}
+          />
+        </LazyPanel>
       );
     }
     return (
@@ -3211,7 +4213,29 @@ function EditorWorkspace({
   const dockviewComponents = dockviewComponentsRef.current;
 
   return (
-    <main>
+    <main data-document-sync-state={documentSyncState}>
+      {legacyBackupAvailable && (
+        <p className="local-recovery-banner" role="status" aria-live="polite">
+          A local recovery backup is available.
+          <button type="button" className="text-button" onClick={downloadLegacyBackup}>
+            Download backup
+          </button>
+        </p>
+      )}
+      {documentSyncState === 'server-unavailable' && (
+        <p className="export-toast" role="status" aria-live="polite">
+          Saved locally; cloud sync is unavailable.
+        </p>
+      )}
+      {documentSyncState === 'conflict-recovered' && recoveredCopy !== undefined && (
+        <RecoveredCopyStatus
+          copy={recoveredCopy}
+          onOpen={() => {
+            if (joySession.kind !== 'ready') return;
+            onOpenRecoveredCopy(recoveredCopy, joySession.subject?.trim() || 'signed-in');
+          }}
+        />
+      )}
       <header className="app-header">
         {exportProgress !== undefined && (
           <div
@@ -3359,14 +4383,14 @@ function EditorWorkspace({
             onClick={handleExport}
             disabled={exporting || !quickExportPreflight.allowed}
             aria-describedby={
-              quickExportPreflight.allowed ? undefined : 'quick-export-blocked-reason'
+              quickExportPreflight.allowed ? undefined : 'delivery-blocked-announcement'
             }
             aria-label={
               exporting
                 ? 'Exporting…'
                 : quickExportPreflight.allowed
                   ? 'Quick browser export MP4'
-                  : `Quick export blocked: ${quickExportPreflight.reason}`
+                  : 'Quick export unavailable'
             }
             data-guide={exporting ? 'Exporting…' : 'Quick export'}
             aria-busy={exporting}
@@ -3380,30 +4404,29 @@ function EditorWorkspace({
             disabled={
               exporting || blockedDeliveryEntry !== undefined || !verifiedDeliveryPreflight.allowed
             }
-            aria-describedby="verified-delivery-blocked-reason"
-            aria-label={deliverBlockedReason ?? 'Deliver verified render'}
-            title={deliverBlockedReason ?? 'Deliver verified render'}
+            aria-describedby={
+              deliverBlockedReason === undefined ? undefined : 'delivery-blocked-announcement'
+            }
+            aria-label={
+              deliverBlockedReason === undefined
+                ? 'Deliver verified render'
+                : 'Verified delivery unavailable'
+            }
+            title={
+              deliverBlockedReason === undefined
+                ? 'Deliver verified render'
+                : 'Verified delivery unavailable'
+            }
             data-guide="Deliver"
             aria-busy={exporting}
           >
             Deliver
           </button>
-          {!quickExportPreflight.allowed && (
-            <span
-              id="quick-export-blocked-reason"
-              className="delivery-blocked-reason"
-              role="status"
-            >
-              Quick export blocked: {quickExportPreflight.reason}
-            </span>
-          )}
-          <span
-            id="verified-delivery-blocked-reason"
-            className="delivery-blocked-reason"
-            role="status"
-          >
-            {deliverBlockedReason ?? 'Deliver is ready.'}
-          </span>
+          <div className="delivery-blocked-reasons">
+            {deliveryBlockedFailures.length > 0 && (
+              <DeliveryBlockedStatus id="delivery-blocked" failures={deliveryBlockedFailures} />
+            )}
+          </div>
           <div className="header-menu">
             <button
               className="icon-button"
@@ -3426,22 +4449,13 @@ function EditorWorkspace({
                 ) : (
                   <ul className="process-list">
                     {exportHistory.map((entry) => {
-                      const gate = deliveryGate(entry);
                       return (
                         <li key={entry.id} className={`process-row process-${entry.status}`}>
                           <span className="process-dot" aria-hidden="true" />
-                          <span className="process-name" dir="ltr">
-                            {entry.filename}
+                          <span className="process-name">
+                            <bdi dir="auto">{entry.filename}</bdi>
                           </span>
-                          <span className="process-meta">
-                            {entry.status === 'completed' && entry.totalBytes !== undefined
-                              ? `${(entry.totalBytes / 1_048_576).toFixed(1)} MB · ${gate.label}`
-                              : entry.status === 'failed'
-                                ? (entry.error ?? 'failed')
-                                : entry.channel === 'verified-delivery'
-                                  ? gate.label
-                                  : 'encoding…'}
-                          </span>
+                          <span className="process-meta">{recentProcessLabel(entry)}</span>
                           {lastExportRef.current?.entryId === entry.id && (
                             <a
                               className="icon-button"
@@ -3458,7 +4472,9 @@ function EditorWorkspace({
                     })}
                   </ul>
                 )}
-                <DeliveryReportPanel entries={exportHistory} />
+                <LazyPanel label="Delivery report">
+                  <LazyDeliveryReportPanel entries={exportHistory} />
+                </LazyPanel>
               </section>
             )}
           </div>
@@ -3613,19 +4629,21 @@ function EditorWorkspace({
           audioState,
           setAudioState,
           transcribe,
+          transcriptionAvailability,
           transcriptionError,
           undo,
           redo,
           jumpToHistory,
           session,
           activatePanel,
-          agentContext,
+          agentContext: undefined,
+          agentCommandBus: agentCommandBusRef.current,
           agentSettings,
           agentPanelCommand,
           kiloCodeAttachedAssets,
           attachKiloCodeAsset,
           detachKiloCodeAsset,
-          pluginHost,
+          pluginHost: undefined,
           bumpProjectRevision,
           bumpPluginRevision,
           showToast,
@@ -3656,73 +4674,71 @@ function EditorWorkspace({
         />
       </EditorPanelContext.Provider>
       {motionStudioSceneId !== undefined && (
-        <MotionStudioShell
-          key={motionStudioSceneId}
-          sceneId={motionStudioSceneId}
-          onClose={() => setMotionStudioSceneId(undefined)}
-        />
-      )}
-      {threeDStudioSceneId !== undefined && (
-        <ThreeDStudioShell
-          key={threeDStudioSceneId}
-          sceneId={threeDStudioSceneId}
-          assets={Object.values(monitorAssetCatalog.assets)}
-          onClose={() => setThreeDStudioSceneId(undefined)}
-        />
+        <LazyPanel label="Motion Studio">
+          <LazyMotionStudioShell
+            key={motionStudioSceneId}
+            sceneId={motionStudioSceneId}
+            onClose={() => setMotionStudioSceneId(undefined)}
+          />
+        </LazyPanel>
       )}
       {effectStudioSession !== undefined && (
-        <EffectStudioShell
-          key={effectStudioSession.recipeId}
-          recipeId={effectStudioSession.recipeId}
-          canApply={
-            effectStudioSession.objectId !== undefined ||
-            resolveObjectIdForSelection(session.visualProject, state.selectedIds) !== undefined
-          }
-          onApply={(effects) => {
-            const objectId =
-              effectStudioSession.objectId ??
-              resolveObjectIdForSelection(session.visualProject, state.selectedIds);
-            if (objectId === undefined) {
-              showToast('Select a clip to apply the recipe.', 'info');
-              return;
+        <LazyPanel label="Effect Studio">
+          <LazyEffectStudioShell
+            key={effectStudioSession.recipeId}
+            recipeId={effectStudioSession.recipeId}
+            canApply={
+              effectStudioSession.objectId !== undefined ||
+              resolveObjectIdForSelection(session.visualProject, state.selectedIds) !== undefined
             }
-            const existing = session.visualProject.visualObjects[objectId]?.effects ?? [];
-            const commands = [
-              ...existing.map((effect) => ({
-                type: 'effect.remove' as const,
-                payload: { objectId, effectInstanceId: effect.id },
-              })),
-              ...effects
-                .filter((effect) => effect.enabled)
-                .map((effect) => ({
-                  type: 'effect.add' as const,
-                  payload: {
-                    objectId,
-                    effectId: effect.effectId,
-                    params: effect.params,
-                  },
+            onApply={(effects) => {
+              const objectId =
+                effectStudioSession.objectId ??
+                resolveObjectIdForSelection(session.visualProject, state.selectedIds);
+              if (objectId === undefined) {
+                showToast('Select a clip to apply the recipe.', 'info');
+                return;
+              }
+              const existing = session.visualProject.visualObjects[objectId]?.effects ?? [];
+              const commands = [
+                ...existing.map((effect) => ({
+                  type: 'effect.remove' as const,
+                  payload: { objectId, effectInstanceId: effect.id },
                 })),
-            ];
-            if (commands.length === 0) {
-              showToast('This recipe has no active effects to apply.', 'info');
-              return;
-            }
-            dispatchProject({
-              label: 'Apply Effect Recipe',
-              commands,
-            } as unknown as VisualObjectTransaction);
-            showToast('Effect recipe applied to the clip.', 'success');
-            setEffectStudioSession(undefined);
-          }}
-          onClose={() => setEffectStudioSession(undefined)}
-        />
+                ...effects
+                  .filter((effect) => effect.enabled)
+                  .map((effect) => ({
+                    type: 'effect.add' as const,
+                    payload: {
+                      objectId,
+                      effectId: effect.effectId,
+                      params: effect.params,
+                    },
+                  })),
+              ];
+              if (commands.length === 0) {
+                showToast('This recipe has no active effects to apply.', 'info');
+                return;
+              }
+              dispatchProject({
+                label: 'Apply Effect Recipe',
+                commands,
+              } as unknown as VisualObjectTransaction);
+              showToast('Effect recipe applied to the clip.', 'success');
+              setEffectStudioSession(undefined);
+            }}
+            onClose={() => setEffectStudioSession(undefined)}
+          />
+        </LazyPanel>
       )}
       {agentSettingsOpen && (
-        <AgentSettingsDialog
-          settings={agentSettings}
-          onChange={setAgentSettings}
-          onClose={() => setAgentSettingsOpen(false)}
-        />
+        <LazyPanel label="Agent settings">
+          <LazyAgentSettingsDialog
+            settings={agentSettings}
+            onChange={setAgentSettings}
+            onClose={() => setAgentSettingsOpen(false)}
+          />
+        </LazyPanel>
       )}
       {toasts.length > 0 && (
         <div className="toast-container" aria-live="polite">
@@ -3835,9 +4851,10 @@ function MonitorPanel() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [monitorDragOver, setMonitorDragOver] = useState(false);
   const rendererRef = useRef<BrowserPixiRenderer | null>(null);
+  const planRenderFrameRef = useRef<PlanRenderFrame | undefined>(undefined);
   const paintRef = useRef<() => void>(() => {});
-  const sceneCacheRef = useRef(new HtmlSceneSurfaceCache());
-  const motionSceneCacheRef = useRef(new MotionSceneSurfaceCache(window.localStorage));
+  const sceneCacheRef = useRef<HtmlSceneSurfaceCache | undefined>(undefined);
+  const motionSceneCacheRef = useRef<MotionSceneSurfaceCache | undefined>(undefined);
   const [sceneTick, setSceneTick] = useState(0);
   const [error, setError] = useState<string | undefined>(undefined);
   const [viewerZoom, setViewerZoom] = useState<'fit' | '50' | '100' | '200'>('fit');
@@ -3846,7 +4863,23 @@ function MonitorPanel() {
   const panelRef = useRef<HTMLElement | null>(null);
   const transportRef = useRef<HTMLDivElement | null>(null);
   const zoomDrawerRef = useRef<HTMLDivElement | null>(null);
-
+  useEffect(() => {
+    let disposed = false;
+    void loadPlanRenderFrame()
+      .then((planRenderFrame) => {
+        if (disposed) return;
+        planRenderFrameRef.current = planRenderFrame;
+        paintRef.current();
+        setSceneTick((tick) => tick + 1);
+      })
+      .catch((reason: unknown) => {
+        if (!disposed) setError(reason instanceof Error ? reason.message : String(reason));
+      });
+    return () => {
+      disposed = true;
+      planRenderFrameRef.current = undefined;
+    };
+  }, []);
   useAccessibleDialog({
     open: zoomDrawerOpen,
     containerRef: zoomDrawerRef,
@@ -3854,6 +4887,29 @@ function MonitorPanel() {
     initialFocusSelector:
       'button[aria-pressed="true"], button[aria-label="Close scale options"], button:not([disabled])',
   });
+
+  useEffect(() => {
+    let disposed = false;
+    void Promise.all([import('./html-scene-surfaces.js'), import('./motion-scene-surfaces.js')])
+      .then(([htmlSceneModule, motionSceneModule]) => {
+        if (disposed) return;
+        sceneCacheRef.current = new htmlSceneModule.HtmlSceneSurfaceCache();
+        motionSceneCacheRef.current = new motionSceneModule.MotionSceneSurfaceCache(
+          window.localStorage,
+        );
+        setSceneTick((tick) => tick + 1);
+      })
+      .catch((reason: unknown) => {
+        if (!disposed) setError(reason instanceof Error ? reason.message : String(reason));
+      });
+    return () => {
+      disposed = true;
+      sceneCacheRef.current?.destroy();
+      motionSceneCacheRef.current?.destroy();
+      sceneCacheRef.current = undefined;
+      motionSceneCacheRef.current = undefined;
+    };
+  }, []);
 
   useEffect(() => {
     if (!zoomDrawerOpen) return;
@@ -3870,6 +4926,8 @@ function MonitorPanel() {
 
   useEffect(() => {
     let cancelled = false;
+    const planRenderFrame = planRenderFrameRef.current;
+    if (planRenderFrame === undefined) return;
     const plan = planRenderFrame({
       bundle: createRenderBundle({
         timelineProject,
@@ -3893,11 +4951,13 @@ function MonitorPanel() {
     return () => {
       cancelled = true;
     };
-  }, [state.playheadUs, stickerTick, timelineProject, visualProject]);
+  }, [sceneTick, state.playheadUs, stickerTick, timelineProject, visualProject]);
 
   paintRef.current = (): void => {
     const renderer = rendererRef.current;
     if (renderer === null) return;
+    const planRenderFrame = planRenderFrameRef.current;
+    if (planRenderFrame === undefined) return;
     const composition = visualProject.compositions[visualProject.rootCompositionId];
     if (composition === undefined) return;
     const plan = planRenderFrame({
@@ -3923,14 +4983,14 @@ function MonitorPanel() {
       visualProject,
       plan.captureRequirements,
     )) {
-      const bitmap = sceneCacheRef.current.bitmaps().get(target.objectId);
+      const bitmap = sceneCacheRef.current?.bitmaps().get(target.objectId);
       if (bitmap !== undefined) videoBitmaps.set(target.objectId, bitmap);
     }
     for (const target of plannedMotionSceneCaptureTargets(
       visualProject,
       plan.captureRequirements,
     )) {
-      const bitmap = motionSceneCacheRef.current.bitmaps().get(target.objectId);
+      const bitmap = motionSceneCacheRef.current?.bitmaps().get(target.objectId);
       if (bitmap !== undefined) videoBitmaps.set(target.objectId, bitmap);
     }
     for (const target of plannedStillBitmapTargets(visualProject, plan.captureRequirements)) {
@@ -3944,7 +5004,8 @@ function MonitorPanel() {
     const container = containerRef.current;
     if (container === null) return;
     let disposed = false;
-    createBrowserPixiRenderer({ parent: container })
+    void import('@joy-media/renderer-pixi/browser')
+      .then(({ createBrowserPixiRenderer }) => createBrowserPixiRenderer({ parent: container }))
       .then((created) => {
         if (disposed) {
           created.destroy();
@@ -3967,6 +5028,8 @@ function MonitorPanel() {
 
   useEffect(() => {
     let cancelled = false;
+    const planRenderFrame = planRenderFrameRef.current;
+    if (planRenderFrame === undefined) return;
     const plan = planRenderFrame({
       bundle: createRenderBundle({
         timelineProject,
@@ -3976,7 +5039,9 @@ function MonitorPanel() {
       timeUs: state.playheadUs,
       imageSizesByObjectId: imageSizesFromCache(),
     });
-    void sceneCacheRef.current
+    const sceneCache = sceneCacheRef.current;
+    if (sceneCache === undefined) return;
+    void sceneCache
       .sync(htmlSceneCaptureTargetsForRequirements(visualProject, plan.captureRequirements))
       .then(() => {
         if (cancelled) return;
@@ -3985,10 +5050,12 @@ function MonitorPanel() {
     return () => {
       cancelled = true;
     };
-  }, [state.playheadUs, timelineProject, visualProject]);
+  }, [sceneTick, state.playheadUs, timelineProject, visualProject]);
 
   useEffect(() => {
     let cancelled = false;
+    const planRenderFrame = planRenderFrameRef.current;
+    if (planRenderFrame === undefined) return;
     const plan = planRenderFrame({
       bundle: createRenderBundle({
         timelineProject,
@@ -3998,11 +5065,13 @@ function MonitorPanel() {
       timeUs: state.playheadUs,
       imageSizesByObjectId: imageSizesFromCache(),
     });
-    void motionSceneCacheRef.current
+    const motionSceneCache = motionSceneCacheRef.current;
+    if (motionSceneCache === undefined) return;
+    void motionSceneCache
       .sync(plannedMotionSceneCaptureTargets(visualProject, plan.captureRequirements))
       .then(() => {
         if (cancelled) return;
-        const diagnostic = motionSceneCacheRef.current.diagnostics()[0];
+        const diagnostic = motionSceneCache.diagnostics()[0];
         setError(diagnostic?.message);
         setSceneTick((value) => value + 1);
       })
@@ -4013,15 +5082,7 @@ function MonitorPanel() {
     return () => {
       cancelled = true;
     };
-  }, [state.playheadUs, timelineProject, visualProject]);
-
-  useEffect(
-    () => () => {
-      sceneCacheRef.current.destroy();
-      motionSceneCacheRef.current.destroy();
-    },
-    [],
-  );
+  }, [sceneTick, state.playheadUs, timelineProject, visualProject]);
 
   useEffect(() => {
     paintRef.current();
@@ -4085,21 +5146,22 @@ function MonitorPanel() {
           showToast('Select one video clip before dropping an effect.', 'info');
           return;
         }
-        const descriptor = effectRegistry.getEffect(payload.effectId);
-        if (!descriptor) return;
-        const defaults: Record<string, unknown> = {};
-        for (const p of descriptor.params) {
-          defaults[p.key] = p.defaultValue;
-        }
-        dispatchProject({
-          label: `Effect: ${payload.effectId}`,
-          commands: [
-            {
-              type: 'effect.add',
-              payload: { objectId, effectId: payload.effectId, params: defaults },
-            },
-          ],
-        } as unknown as VisualObjectTransaction);
+        void import('@joy-media/visual-effects').then(({ effectRegistry, registerBuiltins }) => {
+          registerBuiltins();
+          const descriptor = effectRegistry.getEffect(payload.effectId);
+          if (!descriptor) return;
+          const defaults: Record<string, unknown> = {};
+          for (const p of descriptor.params) defaults[p.key] = p.defaultValue;
+          dispatchProject({
+            label: `Effect: ${payload.effectId}`,
+            commands: [
+              {
+                type: 'effect.add',
+                payload: { objectId, effectId: payload.effectId, params: defaults },
+              },
+            ],
+          } as unknown as VisualObjectTransaction);
+        });
       } catch {
         /* ignore malformed */
       }

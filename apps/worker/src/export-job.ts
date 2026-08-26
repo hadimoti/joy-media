@@ -1,7 +1,7 @@
 import type { RenderManifest } from '@joy-media/export-core';
 import { deliveryPromiseForManifest, verifyExportDelivery } from '@joy-media/export-core';
 import { assertApiSafeRenderReport, type RenderReportV1 } from '@joy-media/production-quality';
-import type { RenderBundleV1 } from '@joy-media/render-planner';
+import type { RenderBundleV1, RenderBundleV2 } from '@joy-media/render-planner';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -64,7 +64,7 @@ export async function executeLeasedExport(
   coordinator: ExportLeaseCoordinator,
   workerId: string,
   jobId: string,
-  bundle: RenderBundleV1,
+  bundle: RenderBundleV1 | RenderBundleV2,
   options: ExecuteLeasedExportOptions,
 ): Promise<RenderExportReceiptV1> {
   const outputDirectory = options.outputDirectory ?? join(tmpdir(), 'joy-media-worker-exports');
@@ -78,17 +78,33 @@ export async function executeLeasedExport(
       outputPath,
       mediaResolver: options.mediaResolver,
       ...(options.frameLimit === undefined ? {} : { frameLimit: options.frameLimit }),
-    });
+    } as Parameters<RenderHostDriver['export']>[0]);
     const outputRef = `render-${opaqueSegment(jobId)}-${result.sha256.slice(0, 16)}`;
     const reportRef = options.reportRef ?? `report-${opaqueSegment(jobId)}`;
     if (!existsSync(outputPath)) throw new Error('render export artifact is missing');
-    const qualityReport = verifyExportDelivery(
-      outputPath,
-      deliveryPromiseForManifest(result.manifest),
-      {
-        outputRef,
-      },
-    );
+    const deliveryPromise = deliveryPromiseForManifest(result.manifest);
+    const promisedDelivery =
+      bundle.version === 2 && bundle.plan.captionBurnIn !== undefined
+        ? {
+            ...deliveryPromise,
+            captions: {
+              mode: 'burned-in' as const,
+              required: true,
+              burnIn: {
+                styleRef: bundle.plan.captionBurnIn.styleRef,
+                segments: bundle.plan.captionBurnIn.segments.map((segment) => ({
+                  startUs: segment.startUs,
+                  endUs: segment.endUs,
+                  text: segment.text,
+                  direction: segment.direction,
+                })),
+              },
+            },
+          }
+        : deliveryPromise;
+    const qualityReport = verifyExportDelivery(outputPath, promisedDelivery, {
+      outputRef,
+    });
     assertApiSafeRenderReport(qualityReport);
     rejectFailedDelivery(qualityReport);
     const receipt: RenderExportReceiptV1 = {

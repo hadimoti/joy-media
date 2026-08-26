@@ -17,6 +17,8 @@
     "test": "pnpm exec vitest run --root ../.. packages/job-protocol/src"
   },
   "dependencies": {
-    "@joy-media/project-schema": "workspace:*"
+    "@joy-media/project-schema": "workspace:*",
+    "@joy-media/production-quality": "workspace:*",
+    "@joy-media/render-planner": "workspace:*"
   }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildRulerTicks,
   clampPixelsPerSecond,
@@ -449,7 +449,7 @@ function buildAssetInsertTransaction(
           trackId,
           clip: {
             id: `${isAudio ? 'voice' : 'clip'}-${asset.assetId}-${stamp}`,
-            kind: 'video',
+            kind: isAudio ? 'audio' : 'video',
             assetId: asset.assetId,
             startUs,
             durationUs,
@@ -482,13 +482,13 @@ function buildAssetTrackCreateTransaction(
           compositionId: composition.id,
           track: {
             id: timelineTrackCode(nextKind, nextKindIndex),
-            kind: 'video',
+            kind: nextKind === 'audio' ? 'audio' : 'video',
             order,
             enabled: true,
             clips: [
               {
                 id: `${clipIdPrefix}-${asset.assetId}-${stamp}`,
-                kind: 'video',
+                kind: nextKind === 'audio' ? 'audio' : 'video',
                 assetId: asset.assetId,
                 startUs,
                 durationUs: 5_000_000,
@@ -540,9 +540,12 @@ export function buildTimelineFileImportTransactions({
   readonly createAssetId?: (file: Pick<File, 'name' | 'type'>, index: number) => string;
   readonly now?: () => number;
 }): CommandTransaction[] {
-  return files.map((file, index) => {
+  return files.flatMap((file, index) => {
     const assetId = createAssetId(file, index);
     const assetKind = importAssetKind(file);
+    // Still images are visual overlay sources, not timeline video clips.
+    // Normal timeline intake leaves them in Assets for the explicit sticker action.
+    if (assetKind === 'image') return [];
     const targetTrackId = pickTimelineImportTrackId(composition, trackFlags, assetKind);
     const asset = {
       assetId,
@@ -570,6 +573,20 @@ export function addTimelineMarkerAtPlayhead(
 
 export function openTimelineAssetLibrary(onOpenAssetLibrary: (() => void) | undefined): void {
   onOpenAssetLibrary?.();
+}
+
+/** Keep the focused track action mounted while the user scrolls past it. */
+export function pinFocusedTimelineTrack(
+  tracks: readonly TimelineTrackView[],
+  visible: readonly TimelineTrackView[],
+  focusedTrackId: string | undefined,
+): readonly TimelineTrackView[] {
+  if (focusedTrackId === undefined || visible.some((track) => track.id === focusedTrackId)) {
+    return visible;
+  }
+  const focused = tracks.find((track) => track.id === focusedTrackId);
+  if (focused === undefined) return visible;
+  return [...visible, focused].sort((left, right) => tracks.indexOf(left) - tracks.indexOf(right));
 }
 
 export function TimelinePanel({
@@ -660,6 +677,8 @@ export function TimelinePanel({
   const [splitToolActive, setSplitToolActive] = useState(false);
   const [splitGuideUs, setSplitGuideUs] = useState<number | undefined>(undefined);
   const [tracksHeightPx, setTracksHeightPx] = useState(180);
+  const [tracksScrollTopPx, setTracksScrollTopPx] = useState(0);
+  const [focusedTrackId, setFocusedTrackId] = useState<string | undefined>(undefined);
   /** Clip being dragged over by an effect or transition — shows amber highlight. */
   const [dragEffectOverClipId, setDragEffectOverClipId] = useState<string | null>(null);
   // §6.2: collapsed by default, so standard editing is visually unchanged.
@@ -683,10 +702,18 @@ export function TimelinePanel({
     return saved ?? defaultTrackView(track.id, track.enabled);
   });
 
-  const visible = useMemo(
-    () => virtualTracks(tracks, 0, Math.max(36, tracksHeightPx)),
-    [tracks, tracksHeightPx],
-  );
+  const visible = useMemo(() => {
+    const window = virtualTracks(tracks, tracksScrollTopPx, Math.max(36, tracksHeightPx));
+    return pinFocusedTimelineTrack(tracks, window, focusedTrackId);
+  }, [tracks, tracksHeightPx, tracksScrollTopPx, focusedTrackId]);
+  const visibleTrackBounds = useMemo(() => {
+    const first = visible.length === 0 ? -1 : tracks.indexOf(visible[0]!);
+    const before =
+      first < 0 ? 0 : tracks.slice(0, first).reduce((sum, track) => sum + track.heightPx, 0);
+    const rendered = visible.reduce((sum, track) => sum + track.heightPx, 0);
+    const total = tracks.reduce((sum, track) => sum + track.heightPx, 0);
+    return { before, after: Math.max(0, total - before - rendered) };
+  }, [tracks, visible]);
 
   // Virtual (not-yet-created) empty lanes that fill the track viewport below the
   // real tracks, so the grid reaches the bottom of the panel and media can be
@@ -700,6 +727,17 @@ export function TimelinePanel({
     const avail = Math.max(0, tracksHeightPx - realTracksHeightPx);
     return Math.ceil(avail / EMPTY_LANE_HEIGHT_PX) + EMPTY_LANE_OVERSCAN;
   }, [tracksHeightPx, realTracksHeightPx]);
+
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (root === null) return;
+    const onScroll = () => {
+      setTracksScrollTopPx(Math.max(0, root.scrollTop));
+    };
+    onScroll();
+    root.addEventListener('scroll', onScroll, { passive: true });
+    return () => root.removeEventListener('scroll', onScroll);
+  }, []);
 
   useEffect(() => {
     const root = scrollRef.current;
@@ -1368,405 +1406,433 @@ export function TimelinePanel({
               aria-hidden="true"
             />
           )}
+          {visibleTrackBounds.before > 0 && (
+            <div
+              className="timeline-track-virtual-spacer"
+              style={{ height: visibleTrackBounds.before }}
+              aria-hidden="true"
+            />
+          )}
           {visible.map((track, index) => {
             const source = composition.tracks.find((item) => item.id === track.id);
             if (source === undefined) return null;
+            const trackIndex = tracks.indexOf(track);
             const kind = timelineTrackKind(source);
-            const kindIndex = visible.slice(0, index + 1).filter((t) => {
+            const kindIndex = tracks.slice(0, trackIndex + 1).filter((t) => {
               const s = composition.tracks.find((item) => item.id === t.id);
               return s !== undefined && timelineTrackKind(s) === kind;
             }).length;
+            const previousIndex = index === 0 ? -1 : tracks.indexOf(visible[index - 1]!);
+            const gapHeight = tracks
+              .slice(previousIndex + 1, trackIndex)
+              .reduce((sum, item) => sum + item.heightPx, 0);
             return (
-              <div
-                className={
-                  source.clips.some((clip) => selectedIds.includes(clip.id))
-                    ? 'timeline-track is-selected'
-                    : 'timeline-track'
-                }
-                key={track.id}
-                style={{ height: track.heightPx }}
-              >
+              <Fragment key={track.id}>
+                {gapHeight > 0 && (
+                  <div
+                    className="timeline-track-virtual-spacer"
+                    style={{ height: gapHeight }}
+                    aria-hidden="true"
+                  />
+                )}
                 <div
-                  className="timeline-track-header"
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    const items = buildTrackHeaderContextMenu(
-                      track.id,
-                      () => {
-                        const order = composition.tracks.length;
-                        onDispatch({
-                          label: 'Add video track',
-                          commands: [
-                            {
-                              type: 'timeline.addTrack',
-                              payload: {
-                                compositionId: composition.id,
-                                track: {
-                                  id: `V${order + 1}`,
-                                  kind: 'video',
-                                  order,
-                                  enabled: true,
-                                  clips: [],
+                  className={
+                    source.clips.some((clip) => selectedIds.includes(clip.id))
+                      ? 'timeline-track is-selected'
+                      : 'timeline-track'
+                  }
+                  style={{ height: track.heightPx }}
+                  onFocusCapture={() => setFocusedTrackId(track.id)}
+                >
+                  <div
+                    className="timeline-track-header"
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const items = buildTrackHeaderContextMenu(
+                        track.id,
+                        () => {
+                          const order = composition.tracks.length;
+                          onDispatch({
+                            label: 'Add video track',
+                            commands: [
+                              {
+                                type: 'timeline.addTrack',
+                                payload: {
+                                  compositionId: composition.id,
+                                  track: {
+                                    id: `V${order + 1}`,
+                                    kind: 'video',
+                                    order,
+                                    enabled: true,
+                                    clips: [],
+                                  },
                                 },
                               },
-                            },
-                          ],
-                        });
-                      },
-                      () => {
+                            ],
+                          });
+                        },
+                        () => {
+                          onDispatch({
+                            label: `Remove ${track.id}`,
+                            commands: [
+                              {
+                                type: 'timeline.removeTrack',
+                                payload: { compositionId: composition.id, trackId: track.id },
+                              },
+                            ],
+                          });
+                        },
+                        (enabled: boolean) => {
+                          onDispatch({
+                            label: enabled ? `Enable ${track.id}` : `Mute ${track.id}`,
+                            commands: [
+                              {
+                                type: 'property.setTrackEnabled',
+                                payload: {
+                                  compositionId: composition.id,
+                                  trackId: track.id,
+                                  enabled,
+                                },
+                              },
+                            ],
+                          });
+                        },
+                        source.enabled ?? true,
+                      );
+                      setMenu({ x: event.clientX, y: event.clientY, items });
+                    }}
+                  >
+                    <span
+                      className="timeline-track-kind-icon"
+                      title={`${kind[0]?.toUpperCase()}${kind.slice(1)} track`}
+                    >
+                      <TimelineTrackKindIcon kind={kind} />
+                    </span>
+                    <div className="timeline-track-label">
+                      <span className="track-code" dir="ltr">
+                        {timelineTrackCode(kind, kindIndex)}
+                      </span>
+                      <span className="track-name" dir="ltr" title={track.id}>
+                        {timelineTrackDisplayName(kind, kindIndex)}
+                      </span>
+                    </div>
+                    <button
+                      className="icon-button"
+                      aria-pressed={track.locked}
+                      aria-label={`Lock ${track.id}`}
+                      title={track.locked ? 'Unlock track' : 'Lock track'}
+                      onClick={() => toggle(track.id, 'locked')}
+                    >
+                      <LockIcon />
+                    </button>
+                    <button
+                      className="icon-button"
+                      aria-pressed={track.muted}
+                      aria-label={`Mute ${track.id}`}
+                      title={track.muted ? 'Unmute track' : 'Mute track'}
+                      onClick={() => {
+                        toggle(track.id, 'muted');
                         onDispatch({
-                          label: `Remove ${track.id}`,
-                          commands: [
-                            {
-                              type: 'timeline.removeTrack',
-                              payload: { compositionId: composition.id, trackId: track.id },
-                            },
-                          ],
-                        });
-                      },
-                      (enabled: boolean) => {
-                        onDispatch({
-                          label: enabled ? `Enable ${track.id}` : `Mute ${track.id}`,
+                          label: track.muted ? `Enable ${track.id}` : `Mute ${track.id}`,
                           commands: [
                             {
                               type: 'property.setTrackEnabled',
                               payload: {
                                 compositionId: composition.id,
                                 trackId: track.id,
-                                enabled,
+                                enabled: track.muted,
                               },
                             },
                           ],
                         });
-                      },
-                      source.enabled ?? true,
-                    );
-                    setMenu({ x: event.clientX, y: event.clientY, items });
-                  }}
-                >
-                  <span
-                    className="timeline-track-kind-icon"
-                    title={`${kind[0]?.toUpperCase()}${kind.slice(1)} track`}
-                  >
-                    <TimelineTrackKindIcon kind={kind} />
-                  </span>
-                  <div className="timeline-track-label">
-                    <span className="track-code" dir="ltr">
-                      {timelineTrackCode(kind, kindIndex)}
-                    </span>
-                    <span className="track-name" dir="ltr" title={track.id}>
-                      {timelineTrackDisplayName(kind, kindIndex)}
-                    </span>
-                  </div>
-                  <button
-                    className="icon-button"
-                    aria-pressed={track.locked}
-                    aria-label={`Lock ${track.id}`}
-                    title={track.locked ? 'Unlock track' : 'Lock track'}
-                    onClick={() => toggle(track.id, 'locked')}
-                  >
-                    <LockIcon />
-                  </button>
-                  <button
-                    className="icon-button"
-                    aria-pressed={track.muted}
-                    aria-label={`Mute ${track.id}`}
-                    title={track.muted ? 'Unmute track' : 'Mute track'}
-                    onClick={() => {
-                      toggle(track.id, 'muted');
-                      onDispatch({
-                        label: track.muted ? `Enable ${track.id}` : `Mute ${track.id}`,
-                        commands: [
-                          {
-                            type: 'property.setTrackEnabled',
-                            payload: {
-                              compositionId: composition.id,
-                              trackId: track.id,
-                              enabled: track.muted,
-                            },
-                          },
-                        ],
-                      });
-                    }}
-                  >
-                    {track.muted ? <MuteIcon /> : <SpeakerOnIcon />}
-                  </button>
-                  <button
-                    className="icon-button"
-                    aria-pressed={track.solo}
-                    aria-label={`Solo ${track.id}`}
-                    title={track.solo ? 'Unsolo track' : 'Solo track'}
-                    onClick={() => toggle(track.id, 'solo')}
-                  >
-                    <SoloIcon />
-                  </button>
-                  {source.clips.length === 0 && composition.tracks.length > 1 && (
-                    <button
-                      type="button"
-                      className="icon-button"
-                      aria-label={`Remove track ${track.id}`}
-                      title="Remove empty track"
-                      onClick={() =>
-                        onDispatch({
-                          label: `Remove ${track.id}`,
-                          commands: [
-                            {
-                              type: 'timeline.removeTrack',
-                              payload: {
-                                compositionId: composition.id,
-                                trackId: track.id,
-                              },
-                            },
-                          ],
-                        })
-                      }
+                      }}
                     >
-                      <TrashIcon />
+                      {track.muted ? <MuteIcon /> : <SpeakerOnIcon />}
                     </button>
-                  )}
-                </div>
-                <span
-                  className="timeline-lane"
-                  style={{ minWidth: `${laneWidthPx}px` }}
-                  onPointerDown={(event) => {
-                    if (event.target !== event.currentTarget) return;
-                    if (splitToolActive) {
-                      setSplitGuideUs(undefined);
-                      return;
-                    }
-                    if (selectToolActive) onClearSelection();
-                    seekFromLane(event);
-                  }}
-                  onPointerMove={(event) => {
-                    if (!splitToolActive) return;
-                    const rect = event.currentTarget.getBoundingClientRect();
-                    const localX = event.clientX - rect.left;
-                    const rawUs = pixelToTime(localX, {
-                      originUs: 0,
-                      pixelsPerSecond: viewport.pixelsPerSecond,
-                    });
-                    const snapped = Math.round(rawUs / frameUs) * frameUs;
-                    const source = composition.tracks.find((t) => t.id === track.id);
-                    if (source === undefined) return;
-                    const clip = source.clips.find((c) => {
-                      const end = c.startUs + c.durationUs;
-                      return snapped > c.startUs + frameUs && snapped < end - frameUs;
-                    });
-                    if (clip) {
-                      setSplitGuideUs(snapped);
-                    } else {
-                      setSplitGuideUs(undefined);
-                    }
-                  }}
-                  onPointerLeave={() => {
-                    if (splitToolActive) setSplitGuideUs(undefined);
-                  }}
-                  onDragOver={(event) => {
-                    if (
-                      !event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND) &&
-                      !event.dataTransfer.types.includes('application/x-joy-effect') &&
-                      !event.dataTransfer.types.includes('application/x-joy-transition')
-                    )
-                      return;
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = track.locked ? 'none' : 'copy';
-
-                    const rect = event.currentTarget.getBoundingClientRect();
-                    const dropUs = pixelToTime(event.clientX - rect.left, {
-                      originUs: 0,
-                      pixelsPerSecond: viewport.pixelsPerSecond,
-                    });
-                    const hitClip = source.clips.find(
-                      (c: Clip) => dropUs >= c.startUs && dropUs <= c.startUs + c.durationUs,
-                    );
-                    setDragEffectOverClipId(hitClip?.id ?? null);
-                  }}
-                  onDragLeave={() => {
-                    setDragEffectOverClipId(null);
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    if (track.locked) return;
-                    setDragEffectOverClipId(null);
-
-                    // Effect drop
-                    const effectRaw = event.dataTransfer.getData('application/x-joy-effect');
-                    if (effectRaw) {
-                      try {
-                        const payload = JSON.parse(effectRaw) as {
-                          kind: string;
-                          effectId: string;
-                          source: string;
-                        };
-                        const rect = event.currentTarget.getBoundingClientRect();
-                        const dropUs = pixelToTime(event.clientX - rect.left, {
-                          originUs: 0,
-                          pixelsPerSecond: viewport.pixelsPerSecond,
-                        });
-                        const source = composition.tracks.find((t) => t.id === track.id);
-                        if (source === undefined) return;
-                        const clip = source.clips.find((c) => {
-                          const end = c.startUs + c.durationUs;
-                          return dropUs >= c.startUs && dropUs <= end;
-                        });
-                        if (clip) {
-                          onEffectDrop?.(payload.effectId, clip.id, track.id);
+                    <button
+                      className="icon-button"
+                      aria-pressed={track.solo}
+                      aria-label={`Solo ${track.id}`}
+                      title={track.solo ? 'Unsolo track' : 'Solo track'}
+                      onClick={() => toggle(track.id, 'solo')}
+                    >
+                      <SoloIcon />
+                    </button>
+                    {source.clips.length === 0 && composition.tracks.length > 1 && (
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label={`Remove track ${track.id}`}
+                        title="Remove empty track"
+                        onClick={() =>
+                          onDispatch({
+                            label: `Remove ${track.id}`,
+                            commands: [
+                              {
+                                type: 'timeline.removeTrack',
+                                payload: {
+                                  compositionId: composition.id,
+                                  trackId: track.id,
+                                },
+                              },
+                            ],
+                          })
                         }
+                      >
+                        <TrashIcon />
+                      </button>
+                    )}
+                  </div>
+                  <span
+                    className="timeline-lane"
+                    style={{ minWidth: `${laneWidthPx}px` }}
+                    onPointerDown={(event) => {
+                      if (event.target !== event.currentTarget) return;
+                      if (splitToolActive) {
+                        setSplitGuideUs(undefined);
                         return;
-                      } catch {
-                        /* ignore malformed */
                       }
-                    }
-
-                    // Transition drop
-                    const transitionRaw = event.dataTransfer.getData(
-                      'application/x-joy-transition',
-                    );
-                    if (transitionRaw) {
-                      try {
-                        const payload = JSON.parse(transitionRaw) as {
-                          kind: string;
-                          transitionId: string;
-                          source: string;
-                        };
-                        const rect = event.currentTarget.getBoundingClientRect();
-                        const dropUs = pixelToTime(event.clientX - rect.left, {
-                          originUs: 0,
-                          pixelsPerSecond: viewport.pixelsPerSecond,
-                        });
-                        const source = composition.tracks.find((t) => t.id === track.id);
-                        if (source === undefined) return;
-                        const sorted = [...source.clips].sort((a, b) => a.startUs - b.startUs);
-                        // Find the clip boundary nearest the drop point. Accept the drop
-                        // (a) within a small tolerance of the boundary for contiguous clips,
-                        // or (b) anywhere inside a real gap between two clips. The old code
-                        // required the drop time to land exactly on a gap, which made it
-                        // impossible to drop onto two contiguous clips (their shared
-                        // boundary is a single instant).
-                        const usPerPx =
-                          viewport.pixelsPerSecond > 0
-                            ? 1_000_000 / viewport.pixelsPerSecond
-                            : 1_000_000;
-                        const toleranceUs = 6 * usPerPx;
-                        for (let i = 0; i < sorted.length - 1; i++) {
-                          const left = sorted[i]!;
-                          const right = sorted[i + 1]!;
-                          const leftEnd = left.startUs + left.durationUs;
-                          if (right.startUs < leftEnd) continue; // overlap — not a clean boundary
-                          const inGap = dropUs >= leftEnd && dropUs <= right.startUs;
-                          const nearBoundary =
-                            Math.abs(dropUs - leftEnd) <= toleranceUs ||
-                            Math.abs(dropUs - right.startUs) <= toleranceUs;
-                          if (inGap || (right.startUs === leftEnd && nearBoundary)) {
-                            onTransitionDrop?.(payload.transitionId, left.id, right.id, track.id);
-                            return;
-                          }
-                        }
-                      } catch {
-                        /* ignore malformed */
+                      if (selectToolActive) onClearSelection();
+                      seekFromLane(event);
+                    }}
+                    onPointerMove={(event) => {
+                      if (!splitToolActive) return;
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      const localX = event.clientX - rect.left;
+                      const rawUs = pixelToTime(localX, {
+                        originUs: 0,
+                        pixelsPerSecond: viewport.pixelsPerSecond,
+                      });
+                      const snapped = Math.round(rawUs / frameUs) * frameUs;
+                      const source = composition.tracks.find((t) => t.id === track.id);
+                      if (source === undefined) return;
+                      const clip = source.clips.find((c) => {
+                        const end = c.startUs + c.durationUs;
+                        return snapped > c.startUs + frameUs && snapped < end - frameUs;
+                      });
+                      if (clip) {
+                        setSplitGuideUs(snapped);
+                      } else {
+                        setSplitGuideUs(undefined);
                       }
-                    }
+                    }}
+                    onPointerLeave={() => {
+                      if (splitToolActive) setSplitGuideUs(undefined);
+                    }}
+                    onDragOver={(event) => {
+                      if (
+                        !event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND) &&
+                        !event.dataTransfer.types.includes('application/x-joy-effect') &&
+                        !event.dataTransfer.types.includes('application/x-joy-transition')
+                      )
+                        return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = track.locked ? 'none' : 'copy';
 
-                    // Existing media asset drop
-                    const raw = event.dataTransfer.getData(JOY_MEDIA_ASSET_DND);
-                    if (!raw) return;
-                    try {
-                      const asset = JSON.parse(raw) as {
-                        assetId: string;
-                        kind: string;
-                        displayName?: string;
-                      };
                       const rect = event.currentTarget.getBoundingClientRect();
                       const dropUs = pixelToTime(event.clientX - rect.left, {
                         originUs: 0,
                         pixelsPerSecond: viewport.pixelsPerSecond,
                       });
-                      insertAssetOnTrack(track.id, asset, dropUs);
-                    } catch {
-                      /* ignore malformed payload */
-                    }
-                  }}
-                >
-                  {index === 0 &&
-                    markers.map((marker) => {
-                      const selected = selectedMarkerId === marker.id;
-                      return (
-                        <div
-                          key={marker.id}
-                          className={selected ? 'timeline-marker is-selected' : 'timeline-marker'}
-                          style={{
-                            left: `${timeToPixel(marker.timeUs, { ...viewport, originUs: 0 })}px`,
-                          }}
-                        >
-                          <button
-                            type="button"
-                            className="timeline-marker-hit"
-                            aria-pressed={selected}
-                            title={`${marker.label} — Delete to remove`}
-                            aria-label={`${marker.label}. Delete to remove.`}
-                            onClick={() => {
-                              onClearSelection();
-                              selectMarker(marker.id);
-                              onSeek(marker.timeUs);
-                            }}
-                            onContextMenu={(event) => {
-                              event.preventDefault();
-                              removeMarker(marker.id);
-                            }}
-                          >
-                            <TimelineMarkerIcon />
-                          </button>
-                          <button
-                            type="button"
-                            className="timeline-marker-remove"
-                            aria-label={`Remove ${marker.label}`}
-                            title="Remove marker"
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              removeMarker(marker.id);
-                            }}
-                          >
-                            <CloseIcon />
-                          </button>
-                        </div>
+                      const hitClip = source.clips.find(
+                        (c: Clip) => dropUs >= c.startUs && dropUs <= c.startUs + c.durationUs,
                       );
-                    })}
-                  {source.clips.map((clip) => (
-                    <TimelineClip
-                      key={clip.id}
-                      clip={clip}
-                      selected={selectedIds.includes(clip.id)}
-                      isDragOver={dragEffectOverClipId === clip.id}
-                      maxStartUs={composition.durationUs - clip.durationUs}
-                      viewport={{ ...viewport, originUs: 0 }}
-                      locked={track.locked}
-                      laneIndex={index}
-                      splitToolActive={splitToolActive}
-                      frameUs={frameUs}
-                      onToggleSelection={onToggleSelection}
-                      onMove={track.locked ? () => false : moveClip(track.id)}
-                      onTrim={track.locked ? () => false : trimClip(track.id)}
-                      onContextMenu={(clipId, x, y) => {
-                        const target = source.clips.find((c) => c.id === clipId);
-                        if (target === undefined) return;
-                        openClipMenu(track.id, target, x, y);
-                      }}
-                      onSplitHover={(atUs) => {
-                        if (splitToolActive) setSplitGuideUs(atUs);
-                      }}
-                      onSplitAt={(atUs) => {
-                        if (splitToolActive) {
-                          dispatchSplitAt(track.id, clip.id, atUs);
+                      setDragEffectOverClipId(hitClip?.id ?? null);
+                    }}
+                    onDragLeave={() => {
+                      setDragEffectOverClipId(null);
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      if (track.locked) return;
+                      setDragEffectOverClipId(null);
+
+                      // Effect drop
+                      const effectRaw = event.dataTransfer.getData('application/x-joy-effect');
+                      if (effectRaw) {
+                        try {
+                          const payload = JSON.parse(effectRaw) as {
+                            kind: string;
+                            effectId: string;
+                            source: string;
+                          };
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          const dropUs = pixelToTime(event.clientX - rect.left, {
+                            originUs: 0,
+                            pixelsPerSecond: viewport.pixelsPerSecond,
+                          });
+                          const source = composition.tracks.find((t) => t.id === track.id);
+                          if (source === undefined) return;
+                          const clip = source.clips.find((c) => {
+                            const end = c.startUs + c.durationUs;
+                            return dropUs >= c.startUs && dropUs <= end;
+                          });
+                          if (clip) {
+                            onEffectDrop?.(payload.effectId, clip.id, track.id);
+                          }
+                          return;
+                        } catch {
+                          /* ignore malformed */
                         }
-                      }}
-                    />
-                  ))}
-                </span>
-              </div>
+                      }
+
+                      // Transition drop
+                      const transitionRaw = event.dataTransfer.getData(
+                        'application/x-joy-transition',
+                      );
+                      if (transitionRaw) {
+                        try {
+                          const payload = JSON.parse(transitionRaw) as {
+                            kind: string;
+                            transitionId: string;
+                            source: string;
+                          };
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          const dropUs = pixelToTime(event.clientX - rect.left, {
+                            originUs: 0,
+                            pixelsPerSecond: viewport.pixelsPerSecond,
+                          });
+                          const source = composition.tracks.find((t) => t.id === track.id);
+                          if (source === undefined) return;
+                          const sorted = [...source.clips].sort((a, b) => a.startUs - b.startUs);
+                          // Find the clip boundary nearest the drop point. Accept the drop
+                          // (a) within a small tolerance of the boundary for contiguous clips,
+                          // or (b) anywhere inside a real gap between two clips. The old code
+                          // required the drop time to land exactly on a gap, which made it
+                          // impossible to drop onto two contiguous clips (their shared
+                          // boundary is a single instant).
+                          const usPerPx =
+                            viewport.pixelsPerSecond > 0
+                              ? 1_000_000 / viewport.pixelsPerSecond
+                              : 1_000_000;
+                          const toleranceUs = 6 * usPerPx;
+                          for (let i = 0; i < sorted.length - 1; i++) {
+                            const left = sorted[i]!;
+                            const right = sorted[i + 1]!;
+                            const leftEnd = left.startUs + left.durationUs;
+                            if (right.startUs < leftEnd) continue; // overlap — not a clean boundary
+                            const inGap = dropUs >= leftEnd && dropUs <= right.startUs;
+                            const nearBoundary =
+                              Math.abs(dropUs - leftEnd) <= toleranceUs ||
+                              Math.abs(dropUs - right.startUs) <= toleranceUs;
+                            if (inGap || (right.startUs === leftEnd && nearBoundary)) {
+                              onTransitionDrop?.(payload.transitionId, left.id, right.id, track.id);
+                              return;
+                            }
+                          }
+                        } catch {
+                          /* ignore malformed */
+                        }
+                      }
+
+                      // Existing media asset drop
+                      const raw = event.dataTransfer.getData(JOY_MEDIA_ASSET_DND);
+                      if (!raw) return;
+                      try {
+                        const asset = JSON.parse(raw) as {
+                          assetId: string;
+                          kind: string;
+                          displayName?: string;
+                        };
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        const dropUs = pixelToTime(event.clientX - rect.left, {
+                          originUs: 0,
+                          pixelsPerSecond: viewport.pixelsPerSecond,
+                        });
+                        insertAssetOnTrack(track.id, asset, dropUs);
+                      } catch {
+                        /* ignore malformed payload */
+                      }
+                    }}
+                  >
+                    {trackIndex === 0 &&
+                      markers.map((marker) => {
+                        const selected = selectedMarkerId === marker.id;
+                        return (
+                          <div
+                            key={marker.id}
+                            className={selected ? 'timeline-marker is-selected' : 'timeline-marker'}
+                            style={{
+                              left: `${timeToPixel(marker.timeUs, { ...viewport, originUs: 0 })}px`,
+                            }}
+                          >
+                            <button
+                              type="button"
+                              className="timeline-marker-hit"
+                              aria-pressed={selected}
+                              title={`${marker.label} — Delete to remove`}
+                              aria-label={`${marker.label}. Delete to remove.`}
+                              onClick={() => {
+                                onClearSelection();
+                                selectMarker(marker.id);
+                                onSeek(marker.timeUs);
+                              }}
+                              onContextMenu={(event) => {
+                                event.preventDefault();
+                                removeMarker(marker.id);
+                              }}
+                            >
+                              <TimelineMarkerIcon />
+                            </button>
+                            <button
+                              type="button"
+                              className="timeline-marker-remove"
+                              aria-label={`Remove ${marker.label}`}
+                              title="Remove marker"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                removeMarker(marker.id);
+                              }}
+                            >
+                              <CloseIcon />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    {source.clips.map((clip) => (
+                      <TimelineClip
+                        key={clip.id}
+                        clip={clip}
+                        selected={selectedIds.includes(clip.id)}
+                        isDragOver={dragEffectOverClipId === clip.id}
+                        maxStartUs={composition.durationUs - clip.durationUs}
+                        viewport={{ ...viewport, originUs: 0 }}
+                        locked={track.locked}
+                        laneIndex={index}
+                        splitToolActive={splitToolActive}
+                        frameUs={frameUs}
+                        onToggleSelection={onToggleSelection}
+                        onMove={track.locked ? () => false : moveClip(track.id)}
+                        onTrim={track.locked ? () => false : trimClip(track.id)}
+                        onContextMenu={(clipId, x, y) => {
+                          const target = source.clips.find((c) => c.id === clipId);
+                          if (target === undefined) return;
+                          openClipMenu(track.id, target, x, y);
+                        }}
+                        onSplitHover={(atUs) => {
+                          if (splitToolActive) setSplitGuideUs(atUs);
+                        }}
+                        onSplitAt={(atUs) => {
+                          if (splitToolActive) {
+                            dispatchSplitAt(track.id, clip.id, atUs);
+                          }
+                        }}
+                      />
+                    ))}
+                  </span>
+                </div>
+              </Fragment>
             );
           })}
+          {visibleTrackBounds.after > 0 && (
+            <div
+              className="timeline-track-virtual-spacer"
+              style={{ height: visibleTrackBounds.after }}
+              aria-hidden="true"
+            />
+          )}
 
           {/* Virtual empty lanes: let the grid reach the bottom of the panel and
               create a real track when media is dropped into an unused lane. */}

@@ -1,4 +1,4 @@
-import type { VideoClip } from '@joy-media/project-schema';
+import type { AudioClip, VideoClip } from '@joy-media/project-schema';
 import type {
   PlayableAssetDescriptor,
   PlayableAssetDerivativeRequest,
@@ -55,7 +55,7 @@ export interface MonitorMediaSourceResolver {
 
 export async function resolveMonitorMediaSource(options: {
   readonly projectId: string;
-  readonly clip: VideoClip;
+  readonly clip: VideoClip | AudioClip;
   readonly asset: MonitorPlayableAsset | undefined;
   readonly derivatives?: readonly MonitorPlayableDerivative[];
   readonly resolver: MonitorMediaSourceResolver;
@@ -234,7 +234,7 @@ function availabilityRank(value: PlayableAssetDerivativeRequest['availability'])
   }
 }
 
-function unavailable(clip: VideoClip, message: string): MonitorMediaSource {
+function unavailable(clip: VideoClip | AudioClip, message: string): MonitorMediaSource {
   return {
     state: 'unavailable',
     clipId: clip.id,

@@ -35,6 +35,50 @@ export interface ControlPlaneBindingOptions {
 }
 
 /**
+ * Persist a binding when the control plane has already chosen the record id.
+ * Recovered-copy creation is one such case: the editor must retain the
+ * server-created id instead of manufacturing another opaque project id.
+ */
+export function bindControlPlaneProjectBinding(
+  storage: BrowserKeyValueStore,
+  project: Pick<JoyProjectV1, 'id' | 'title'>,
+  controlPlaneProjectId: string,
+  options: Pick<ControlPlaneBindingOptions, 'ownerKey'> = {},
+): ControlPlaneProjectBinding {
+  if (!isNonBlank(project.id) || !isNonBlank(project.title))
+    throw new TypeError('editor project requires a non-empty id and title');
+  if (!isNonBlank(controlPlaneProjectId))
+    throw new TypeError('control-plane project requires a non-empty id');
+
+  const ownerKey = normalizeOwnerKey(options.ownerKey);
+  const database = readDatabase(storage);
+  const ownerBindings = database.bindingsByOwner[ownerKey] ?? {};
+  const existing = ownerBindings[project.id];
+  if (existing !== undefined) {
+    if (existing.controlPlaneProjectId !== controlPlaneProjectId)
+      throw new Error(`editor project is already bound to ${existing.controlPlaneProjectId}`);
+    return existing;
+  }
+
+  const binding: ControlPlaneProjectBinding = {
+    editorProjectId: project.id,
+    controlPlaneProjectId: controlPlaneProjectId.trim(),
+    title: project.title,
+  };
+  storage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      version: 2,
+      bindingsByOwner: {
+        ...database.bindingsByOwner,
+        [ownerKey]: { ...ownerBindings, [project.id]: binding },
+      },
+    } satisfies BindingDatabaseV2),
+  );
+  return binding;
+}
+
+/**
  * Binds a persisted local editor project to one opaque control-plane record.
  * The creative document remains browser-local; only this ID/title pair is
  * submitted when the user initializes a Worker job.
@@ -81,17 +125,17 @@ function normalizeOptions(
   if (typeof createIdOrOptions === 'function') {
     return {
       createId: createIdOrOptions,
-      ownerKey: isNonBlank(ownerKeyArg) ? ownerKeyArg.trim() : 'local',
+      ownerKey: normalizeOwnerKey(ownerKeyArg),
     };
   }
   return {
     createId: createIdOrOptions.createId ?? createOpaqueProjectId,
-    ownerKey: isNonBlank(createIdOrOptions.ownerKey)
-      ? createIdOrOptions.ownerKey.trim()
-      : isNonBlank(ownerKeyArg)
-        ? ownerKeyArg.trim()
-        : 'local',
+    ownerKey: normalizeOwnerKey(createIdOrOptions.ownerKey ?? ownerKeyArg),
   };
+}
+
+function normalizeOwnerKey(ownerKey: string | undefined): string {
+  return isNonBlank(ownerKey) ? ownerKey.trim() : 'local';
 }
 
 function createOpaqueProjectId(): string {

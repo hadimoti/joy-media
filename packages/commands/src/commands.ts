@@ -289,8 +289,8 @@ function assertNoOverlap(
 
 /** Source-side offset field for a clip kind: video shifts sourceInUs by rate×delta. */
 function shiftSourceForStartTrim(clip: Clip, deltaUs: number): Clip {
-  if (clip.kind === 'video') {
-    const rate = normalizePlaybackRate(clip.playbackRate);
+  if (clip.kind === 'video' || clip.kind === 'audio') {
+    const rate = clip.kind === 'video' ? normalizePlaybackRate(clip.playbackRate) : 1;
     const sourceInUs = clip.sourceInUs + Math.round(deltaUs * rate);
     if (sourceInUs < 0) {
       throw new CommandError(

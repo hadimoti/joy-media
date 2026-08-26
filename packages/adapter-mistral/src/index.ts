@@ -340,12 +340,18 @@ function usageFrom(
   if (!isRecord(payload) || !isRecord(payload.usage)) return undefined;
   const inputTokens = payload.usage.prompt_tokens;
   const outputTokens = payload.usage.completion_tokens;
-  if (
-    typeof inputTokens !== 'number' ||
-    typeof outputTokens !== 'number' ||
-    !Number.isSafeInteger(inputTokens) ||
-    !Number.isSafeInteger(outputTokens)
-  )
+  const rawCost = payload.usage.cost;
+  const cost =
+    isRecord(rawCost) && typeof rawCost.amount === 'string' && typeof rawCost.currency === 'string'
+      ? { amount: rawCost.amount, currency: rawCost.currency }
+      : undefined;
+  const validInputTokens =
+    typeof inputTokens === 'number' && Number.isSafeInteger(inputTokens) ? inputTokens : undefined;
+  const validOutputTokens =
+    typeof outputTokens === 'number' && Number.isSafeInteger(outputTokens)
+      ? outputTokens
+      : undefined;
+  if (cost === undefined && validInputTokens === undefined && validOutputTokens === undefined)
     return undefined;
   return {
     providerId: MISTRAL_PROVIDER_ID,
@@ -353,8 +359,9 @@ function usageFrom(
     modelId,
     timestamp: new Date().toISOString(),
     durationMs,
-    inputTokens,
-    outputTokens,
+    ...(validInputTokens === undefined ? {} : { inputTokens: validInputTokens }),
+    ...(validOutputTokens === undefined ? {} : { outputTokens: validOutputTokens }),
+    ...(cost === undefined ? {} : { cost }),
   };
 }
 

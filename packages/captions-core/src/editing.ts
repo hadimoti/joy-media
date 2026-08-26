@@ -79,6 +79,15 @@ export type CaptionCommand =
       };
     }
   | {
+      readonly type: 'caption.setClipTiming';
+      readonly payload: {
+        readonly documentId: string;
+        readonly clipId: string;
+        readonly startUs: TimeUs;
+        readonly durationUs: TimeUs;
+      };
+    }
+  | {
       readonly type: 'caption.replaceDocument';
       readonly payload: {
         readonly documentId: string;
@@ -230,6 +239,34 @@ export function applyCaptionProjectCommand(
         },
       };
     }
+    case 'caption.setClipTiming': {
+      if (command.payload.startUs < 0 || command.payload.durationUs <= 0) {
+        throw new CaptionCommandError(
+          'CAPTION_COMMAND_INVALID_CLIP_RANGE',
+          'caption clip timing requires a non-negative start and positive duration',
+        );
+      }
+      const located = findCaptionClip(project, command.payload.clipId, document.id);
+      return {
+        project: withCaptionClipTiming(
+          project,
+          located.compositionId,
+          located.trackId,
+          located.clip,
+          command.payload.startUs,
+          command.payload.durationUs,
+        ),
+        inverse: {
+          type: 'caption.setClipTiming',
+          payload: {
+            documentId: document.id,
+            clipId: located.clip.id,
+            startUs: located.clip.startUs,
+            durationUs: located.clip.durationUs,
+          },
+        },
+      };
+    }
     case 'caption.replaceDocument': {
       if (command.payload.document.id !== command.payload.documentId)
         throw new CaptionCommandError(
@@ -245,6 +282,64 @@ export function applyCaptionProjectCommand(
       };
     }
   }
+}
+
+function findCaptionClip(
+  project: JoyProjectV1,
+  clipId: string,
+  documentId: string,
+): {
+  readonly compositionId: string;
+  readonly trackId: string;
+  readonly clip: CaptionClipV1;
+} {
+  for (const composition of Object.values(project.compositions)) {
+    for (const track of composition.tracks) {
+      for (const clip of track.clips) {
+        if (
+          clip.id === clipId &&
+          clip.kind === 'caption' &&
+          clip.captionDocumentId === documentId
+        ) {
+          return { compositionId: composition.id, trackId: track.id, clip };
+        }
+      }
+    }
+  }
+  throw new CaptionCommandError(
+    'CAPTION_COMMAND_UNKNOWN_CLIP',
+    'caption clip is unavailable for the requested document',
+  );
+}
+
+function withCaptionClipTiming(
+  project: JoyProjectV1,
+  compositionId: string,
+  trackId: string,
+  clip: CaptionClipV1,
+  startUs: TimeUs,
+  durationUs: TimeUs,
+): JoyProjectV1 {
+  const composition = project.compositions[compositionId]!;
+  return {
+    ...project,
+    compositions: {
+      ...project.compositions,
+      [compositionId]: {
+        ...composition,
+        tracks: composition.tracks.map((track) =>
+          track.id === trackId
+            ? {
+                ...track,
+                clips: track.clips.map((item) =>
+                  item.id === clip.id ? { ...clip, startUs, durationUs } : item,
+                ),
+              }
+            : track,
+        ),
+      },
+    },
+  };
 }
 
 /** A caption clip resolved with its document — what editing panels iterate. */

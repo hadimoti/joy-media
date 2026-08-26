@@ -385,16 +385,23 @@ export interface TimelineTrackView {
   readonly muted: boolean;
   readonly solo: boolean;
 }
+const MAX_VIRTUAL_TRACKS = 250;
 export function virtualTracks(
   tracks: readonly TimelineTrackView[],
   scrollTopPx: number,
   viewportHeightPx: number,
 ): readonly TimelineTrackView[] {
   let offset = 0;
+  let visibleCount = 0;
   return tracks.filter((track) => {
     const top = offset;
     offset += track.heightPx;
-    return top + track.heightPx >= scrollTopPx && top <= scrollTopPx + viewportHeightPx;
+    const isVisible = top + track.heightPx >= scrollTopPx && top <= scrollTopPx + viewportHeightPx;
+    // Never clip rows that intersect the viewport. The bound applies once the
+    // viewport is covered, limiting overscan without creating a blank window.
+    if (visibleCount >= MAX_VIRTUAL_TRACKS && top > scrollTopPx + viewportHeightPx) return false;
+    if (isVisible) visibleCount += 1;
+    return isVisible;
   });
 }
 export function toggleTrackFlag(

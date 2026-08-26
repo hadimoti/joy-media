@@ -265,12 +265,20 @@ export function ProductionBoardPanelView({
         </button>
       }
     >
-      {loadState === 'loading' && <p className="production-board-empty">Loading runs…</p>}
+      {loadState === 'loading' && (
+        <p className="production-board-empty" role="status" aria-live="polite">
+          Loading runs…
+        </p>
+      )}
       {loadState === 'error' && (
-        <p className="production-board-error">Unable to load production runs.</p>
+        <p className="production-board-error" role="alert" aria-live="assertive">
+          Unable to load production runs{errorMessage === undefined ? '.' : `: ${errorMessage}`}
+        </p>
       )}
       {loadState === 'loaded' && model !== undefined && model.isEmpty && (
-        <p className="production-board-empty">Start a Workflow to create a durable run.</p>
+        <p className="production-board-empty" role="status">
+          Start a Workflow to create a durable run.
+        </p>
       )}
       {loadState === 'loaded' && model !== undefined && !model.isEmpty && (
         <div
@@ -282,13 +290,24 @@ export function ProductionBoardPanelView({
             selectedId === undefined ? undefined : `production-run-${selectedId}`
           }
           onKeyDown={(event) => {
-            if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+            if (
+              event.key !== 'ArrowDown' &&
+              event.key !== 'ArrowUp' &&
+              event.key !== 'Home' &&
+              event.key !== 'End'
+            )
+              return;
             event.preventDefault();
-            const next = productionBoardNextRunId(
-              model.runs,
-              selectedId,
-              event.key === 'ArrowDown' ? 'next' : 'previous',
-            );
+            const next =
+              event.key === 'Home'
+                ? model.runs[0]?.runId
+                : event.key === 'End'
+                  ? model.runs.at(-1)?.runId
+                  : productionBoardNextRunId(
+                      model.runs,
+                      selectedId,
+                      event.key === 'ArrowDown' ? 'next' : 'previous',
+                    );
             setSelectedRunId(next);
           }}
         >
@@ -376,12 +395,18 @@ function RunDetails({
         </p>
       )}
       {run.actions.disabledReason !== undefined && (
-        <p className="production-board-action-note">{run.actions.disabledReason}</p>
+        <p id={`production-run-${run.runId}-action-note`} className="production-board-action-note">
+          {run.actions.disabledReason}
+        </p>
       )}
       <div className="production-board-actions" aria-label="Run actions">
         <button
           type="button"
           className="icon-button icon-button-labeled"
+          aria-label={`Retry production run ${run.runId}`}
+          {...(run.actions.disabledReason === undefined
+            ? {}
+            : { 'aria-describedby': `production-run-${run.runId}-action-note` })}
           disabled={!run.actions.canRetry || !retryAvailable}
           onClick={() => onRetry?.(run)}
         >
@@ -391,6 +416,10 @@ function RunDetails({
         <button
           type="button"
           className="icon-button icon-button-labeled"
+          aria-label={`Cancel production run ${run.runId}`}
+          {...(run.actions.disabledReason === undefined
+            ? {}
+            : { 'aria-describedby': `production-run-${run.runId}-action-note` })}
           disabled={!run.actions.canCancel}
           onClick={() => onCancel?.(run)}
         >

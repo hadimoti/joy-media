@@ -10,7 +10,11 @@ import {
   createRuntimeMistralProviderRegistry,
   PostgresMistralInvocationLedger,
 } from './mistral-provider.js';
-import { ProviderApprovalService } from './provider-approval.js';
+import {
+  PostgresProviderApprovalStore,
+  ProviderApprovalService,
+  providerApprovalSigningConfigFromEnv,
+} from './provider-approval.js';
 
 await start();
 
@@ -19,11 +23,36 @@ async function start(): Promise<void> {
   const port = Number(process.env.JOY_MEDIA_API_PORT ?? 8790);
   const databaseUrl = process.env.JOY_MEDIA_DATABASE_URL;
   const pool = databaseUrl === undefined ? undefined : new Pool({ connectionString: databaseUrl });
-  const durableControlPlane = pool === undefined ? undefined : new PostgresControlPlane(pool);
+  const privateObjectStore =
+    process.env.JOY_MEDIA_OBJECT_STORE_REMOTE_PREFIX === undefined
+      ? undefined
+      : new RclonePrivateObjectStore({
+          remotePrefix: process.env.JOY_MEDIA_OBJECT_STORE_REMOTE_PREFIX,
+          ...(process.env.JOY_MEDIA_RCLONE_COMMAND === undefined
+            ? {}
+            : { command: process.env.JOY_MEDIA_RCLONE_COMMAND }),
+        });
+  const durableControlPlane =
+    pool === undefined
+      ? undefined
+      : new PostgresControlPlane(
+          pool,
+          privateObjectStore === undefined ? {} : { privateObjectStore },
+        );
   if (durableControlPlane !== undefined) await durableControlPlane.initialize();
   const mistralLedger = pool === undefined ? undefined : new PostgresMistralInvocationLedger(pool);
   if (mistralLedger !== undefined) await mistralLedger.initialize();
-  const providerApprovals = new ProviderApprovalService();
+  const providerApprovalStore =
+    pool === undefined ? undefined : new PostgresProviderApprovalStore(pool);
+  if (providerApprovalStore !== undefined) await providerApprovalStore.initialize();
+  // Production server construction is explicit about missing configuration so
+  // approval-required provider paths fail closed instead of generating a
+  // process-local signing key.
+  const providerApprovals = new ProviderApprovalService(
+    providerApprovalStore,
+    undefined,
+    providerApprovalSigningConfigFromEnv(),
+  );
   const mailer = createMailer();
   const telegram = createTelegramSender();
   const mediaAuthHashKeys = mediaAuthHashKeysForDatabase(databaseUrl);
@@ -54,16 +83,7 @@ async function start(): Promise<void> {
       ...(mistralLedger === undefined ? {} : { ledger: mistralLedger }),
       approvals: providerApprovals,
     }),
-    ...(process.env.JOY_MEDIA_OBJECT_STORE_REMOTE_PREFIX === undefined
-      ? {}
-      : {
-          privateObjectStore: new RclonePrivateObjectStore({
-            remotePrefix: process.env.JOY_MEDIA_OBJECT_STORE_REMOTE_PREFIX,
-            ...(process.env.JOY_MEDIA_RCLONE_COMMAND === undefined
-              ? {}
-              : { command: process.env.JOY_MEDIA_RCLONE_COMMAND }),
-          }),
-        }),
+    ...(privateObjectStore === undefined ? {} : { privateObjectStore }),
   }).listen(port, host);
   console.log(`JOY Media API listening on ${host}:${port}`);
 }

@@ -49,6 +49,17 @@ export interface DeliveryPromiseV1 {
   readonly captions: {
     readonly mode: 'none' | 'burned-in' | 'sidecar';
     readonly required?: boolean;
+    /** Optional signed cue evidence. Without it, generic inspection must not
+     * claim that caption pixels were proven. */
+    readonly burnIn?: {
+      readonly styleRef: string;
+      readonly segments: readonly {
+        readonly startUs: number;
+        readonly endUs: number;
+        readonly text: string;
+        readonly direction: 'ltr' | 'rtl';
+      }[];
+    };
   };
   readonly deterministic: {
     readonly requireDeterministicEffects: boolean;
@@ -69,6 +80,8 @@ export interface RenderReportV1 {
   readonly version: 1;
   readonly promiseId: string;
   readonly checkedAt: string;
+  /** The measured scope of this report; sampled never implies whole-file coverage. */
+  readonly evidenceLevel?: 'sampled';
   readonly artifact?: {
     readonly outputRef: string;
     readonly sha256: string;
@@ -91,12 +104,15 @@ export interface RenderFactsV1 {
     readonly blackFrames: number;
     readonly blankFrames?: number;
     readonly duplicateFrames: number;
+    /** Number of sampled frames with visible activity in the caption safe area. */
+    readonly captionPixelFrames?: number;
   };
   readonly audio?: {
     readonly codec: string;
     readonly sampleRate: number;
     readonly channels: number;
     readonly durationUs: number;
+    readonly sampledDurationUs?: number;
     readonly rms: number;
     readonly peak: number;
     readonly clippedSamples: number;
@@ -158,6 +174,8 @@ export function assertApiSafeRenderReport(report: RenderReportV1): void {
   const hash = report.artifact?.sha256;
   if (hash !== undefined && !/^[a-f0-9]{64}$/.test(hash))
     throw new Error('render report artifact hash is invalid');
+  if (report.evidenceLevel !== undefined && report.evidenceLevel !== 'sampled')
+    throw new Error('render report evidence level is invalid');
 }
 
 export function finding(

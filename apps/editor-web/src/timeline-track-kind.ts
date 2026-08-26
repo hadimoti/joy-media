@@ -7,17 +7,16 @@ const SCRIPT_TOKEN =
   /(?:^|[^a-z0-9])(script|caption|captions|subtitle|subtitles|transcript|srt|vtt|text)(?:$|[^a-z0-9])/i;
 
 function clipIdentity(clip: Clip): string {
-  return clip.kind === 'video'
-    ? `${clip.id}\0${clip.assetId}`
-    : `${clip.id}\0${clip.compositionId}`;
+  if (clip.kind === 'video' || clip.kind === 'audio') return `${clip.id}\0${clip.assetId}`;
+  return `${clip.id}\0${clip.compositionId}`;
 }
 
 /**
- * The spike project schema still reports every timeline row as `video`.
- * Until the full track taxonomy lands, derive presentation kind from stable
- * track/clip identities and leave unknown or mixed rows as video.
+ * Derive presentation kind from explicit track/clip identities and leave
+ * unknown or mixed rows as video.
  */
-export function timelineTrackKind(track: Pick<Track, 'id' | 'clips'>): TimelineTrackKind {
+export function timelineTrackKind(track: Pick<Track, 'id' | 'kind' | 'clips'>): TimelineTrackKind {
+  if (track.kind === 'audio') return 'audio';
   if (SCRIPT_TOKEN.test(track.id)) return 'script';
   if (AUDIO_TOKEN.test(track.id)) return 'audio';
   if (track.clips.length === 0) return 'video';

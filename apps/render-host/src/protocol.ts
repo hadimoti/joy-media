@@ -1,9 +1,11 @@
 import type { RenderManifest } from '@joy-media/export-core';
+import type { MotionSceneDocument } from '../../../packages/motion-core/src/scene.js';
 import type {
   PlannedAudioSample,
   PlannedCaptureRequirement,
   PlannedVideoSample,
   RenderBundleV1,
+  RenderBundleV2,
   RenderFramePlan,
 } from '@joy-media/render-planner';
 
@@ -40,6 +42,22 @@ export interface RenderHostResolvedAudioSample extends PlannedAudioSample {
 
 export interface RenderHostResolvedCapture extends PlannedCaptureRequirement {
   readonly media: RenderHostResolvedInput;
+  readonly motionScene?: {
+    readonly snapshot: MotionSceneDocument;
+    readonly layers: Readonly<
+      Record<
+        string,
+        {
+          readonly opaqueRef: string;
+          readonly integrity: {
+            readonly sha256: string;
+            readonly bytes: number;
+            readonly mime: string;
+          };
+        }
+      >
+    >;
+  };
 }
 
 export interface RenderHostFrameInputV1 {
@@ -60,6 +78,11 @@ export interface RenderHostExportRequestV1 {
   readonly outputPath: string;
   readonly mediaResolver: RenderHostMediaResolver;
   readonly frameLimit?: number;
+}
+
+/** Additive V2 wire request; V1 driver typing above remains source-compatible. */
+export interface RenderHostExportRequestV2 extends Omit<RenderHostExportRequestV1, 'bundle'> {
+  readonly bundle: RenderBundleV2;
 }
 
 export interface RenderHostExportResultV1 {

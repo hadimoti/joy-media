@@ -1,5 +1,5 @@
-import { useRef, useState, type ReactElement } from 'react';
-import type { JoyProjectV1 } from '@joy-media/project-schema';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
+import type { CaptionDocumentV1, CaptionSegmentV1, JoyProjectV1 } from '@joy-media/project-schema';
 import {
   captionSlots,
   DEFAULT_CAPTION_TEMPLATE_ID,
@@ -10,6 +10,7 @@ import {
   parseWebVtt,
   resolveCaptionDirection,
   searchCaptionSegments,
+  segmentDisplayText,
   segmentMinConfidence,
   segmentSourceText,
   segmentTimelineRange,
@@ -28,6 +29,11 @@ import {
 } from './icons.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
+import type {
+  CaptionTranscriptionAvailability,
+  CaptionTranscriptionSource,
+  CaptionTranscriptionTarget,
+} from './local-transcription.js';
 
 const TEMPLATE_ICONS: Readonly<
   Record<string, { readonly Icon: () => ReactElement; readonly label: string }>
@@ -59,6 +65,7 @@ export function CaptionsPanel({
   onSeek,
   onDispatch,
   onTranscribe,
+  transcriptionAvailability,
   transcriptionError,
   onProjectChange,
 }: {
@@ -66,7 +73,13 @@ export function CaptionsPanel({
   readonly playheadUs: number;
   readonly onSeek: (timeUs: number) => void;
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
-  readonly onTranscribe: (documentId: string, language: 'fa-IR' | 'en-US') => Promise<void>;
+  readonly onTranscribe: (
+    documentId: string,
+    language: 'fa-IR' | 'en-US',
+    source: CaptionTranscriptionSource,
+    target: CaptionTranscriptionTarget,
+  ) => Promise<void>;
+  readonly transcriptionAvailability: CaptionTranscriptionAvailability;
   readonly transcriptionError: string | undefined;
   readonly onProjectChange: (next: JoyProjectV1) => void;
 }) {
@@ -114,6 +127,7 @@ export function CaptionsPanel({
           onSeek={onSeek}
           onDispatch={onDispatch}
           onTranscribe={onTranscribe}
+          transcriptionAvailability={transcriptionAvailability}
         />
       ))}
     </PanelShell>
@@ -137,17 +151,31 @@ function CaptionSlotEditor({
   onSeek,
   onDispatch,
   onTranscribe,
+  transcriptionAvailability,
 }: {
   readonly slot: CaptionSlot;
   readonly query: string;
   readonly playheadUs: number;
   readonly onSeek: (timeUs: number) => void;
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
-  readonly onTranscribe: (documentId: string, language: 'fa-IR' | 'en-US') => Promise<void>;
+  readonly onTranscribe: (
+    documentId: string,
+    language: 'fa-IR' | 'en-US',
+    source: CaptionTranscriptionSource,
+    target: CaptionTranscriptionTarget,
+  ) => Promise<void>;
+  readonly transcriptionAvailability: CaptionTranscriptionAvailability;
 }) {
   const { clip, document } = slot;
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [importIssues, setImportIssues] = useState(0);
+  const [pendingFocusSegmentId, setPendingFocusSegmentId] = useState<string>();
+  const transcriptionSource =
+    transcriptionAvailability.state === 'ready' ? transcriptionAvailability.source : undefined;
+  const transcriptionUnavailableReason =
+    transcriptionAvailability.state === 'unavailable'
+      ? transcriptionAvailability.reason
+      : undefined;
   const direction = resolveCaptionDirection(document);
   const matches =
     query.trim().length === 0
@@ -157,7 +185,11 @@ function CaptionSlotEditor({
     (segment) => matches === undefined || matches.has(segment.id),
   );
   const addSegment = () => {
-    const startUs = Math.max(0, playheadUs - clip.startUs);
+    const maxStartUs = Math.max(0, clip.durationUs - 1);
+    const startUs = Math.min(Math.max(0, playheadUs - clip.startUs), maxStartUs);
+    const endUs = Math.min(clip.durationUs, startUs + 2_000_000);
+    const segmentId = crypto.randomUUID();
+    setPendingFocusSegmentId(segmentId);
     onDispatch({
       label: 'Add caption',
       commands: [
@@ -166,11 +198,10 @@ function CaptionSlotEditor({
           payload: {
             documentId: document.id,
             segment: {
-              id: crypto.randomUUID(),
+              id: segmentId,
               startUs,
-              endUs: startUs + 2_000_000,
+              endUs,
               wordIds: [],
-              textOverride: 'New caption',
             },
           },
         },
@@ -233,7 +264,7 @@ function CaptionSlotEditor({
           className="icon-button"
           aria-label="Export captions as SRT"
           data-guide="Export SRT"
-          onClick={() => downloadTextFile(`${document.id}.srt`, formatSrt(document))}
+          onClick={() => downloadTextFile(`captions-${document.language}.srt`, formatSrt(document))}
         >
           <PngMaskIcon src="/assets/24_output.png" size={14} />
         </button>
@@ -241,7 +272,9 @@ function CaptionSlotEditor({
           className="icon-button"
           aria-label="Export captions as WebVTT"
           data-guide="Export VTT"
-          onClick={() => downloadTextFile(`${document.id}.vtt`, formatWebVtt(document))}
+          onClick={() =>
+            downloadTextFile(`captions-${document.language}.vtt`, formatWebVtt(document))
+          }
         >
           <PngMaskIcon src="/assets/24_output.png" size={14} />
         </button>
@@ -276,7 +309,16 @@ function CaptionSlotEditor({
           className="icon-button"
           aria-label="Auto caption"
           data-guide="Auto caption"
-          onClick={() => void onTranscribe(document.id, 'en-US')}
+          disabled={transcriptionSource === undefined}
+          title={transcriptionSource === undefined ? transcriptionUnavailableReason : undefined}
+          onClick={() =>
+            transcriptionSource !== undefined &&
+            void onTranscribe(document.id, 'en-US', transcriptionSource, {
+              clipId: clip.id,
+              startUs: clip.startUs,
+              durationUs: clip.durationUs,
+            })
+          }
         >
           <AutoCaptionIcon />
         </button>
@@ -284,7 +326,16 @@ function CaptionSlotEditor({
           className="icon-button"
           aria-label="Transcribe Persian"
           data-guide="Persian (fa)"
-          onClick={() => void onTranscribe(document.id, 'fa-IR')}
+          disabled={transcriptionSource === undefined}
+          title={transcriptionSource === undefined ? transcriptionUnavailableReason : undefined}
+          onClick={() =>
+            transcriptionSource !== undefined &&
+            void onTranscribe(document.id, 'fa-IR', transcriptionSource, {
+              clipId: clip.id,
+              startUs: clip.startUs,
+              durationUs: clip.durationUs,
+            })
+          }
         >
           <LanguageIcon label="FA" />
         </button>
@@ -292,7 +343,16 @@ function CaptionSlotEditor({
           className="icon-button"
           aria-label="Transcribe English"
           data-guide="English (en)"
-          onClick={() => void onTranscribe(document.id, 'en-US')}
+          disabled={transcriptionSource === undefined}
+          title={transcriptionSource === undefined ? transcriptionUnavailableReason : undefined}
+          onClick={() =>
+            transcriptionSource !== undefined &&
+            void onTranscribe(document.id, 'en-US', transcriptionSource, {
+              clipId: clip.id,
+              startUs: clip.startUs,
+              durationUs: clip.durationUs,
+            })
+          }
         >
           <PngMaskIcon src="/assets/24_Audio.png" size={14} />
         </button>
@@ -302,83 +362,199 @@ function CaptionSlotEditor({
       )}
       {segments.length === 0 && <p>No matching captions found.</p>}
       <ol className="captions-list">
-        {segments.map((segment) => {
-          const range = segmentTimelineRange(clip, segment);
-          const active =
-            range !== undefined &&
-            playheadUs >= range.startUs &&
-            playheadUs < range.startUs + range.durationUs;
-          const source = segmentSourceText(document, segment);
-          const confidence = segmentMinConfidence(document, segment);
-          return (
-            <li key={segment.id} className={active ? 'caption-row active' : 'caption-row'}>
-              <span
-                className="caption-time"
-                role="button"
-                tabIndex={0}
-                aria-label={`Seek to ${(segment.startUs / 1_000_000).toFixed(2)}s`}
-                onClick={() => range !== undefined && onSeek(range.startUs)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && range !== undefined) onSeek(range.startUs);
-                }}
-              >
-                {(segment.startUs / 1_000_000).toFixed(2)}s
-              </span>
-              {confidence !== undefined && (
-                <span
-                  className="caption-warning"
-                  title={`Transcription confidence: ${Math.round(confidence * 100)}%`}
-                >
-                  {Math.round(confidence * 100)}%
-                </span>
-              )}
-              <span className="caption-source">{source}</span>
-              {segment.textOverride !== undefined && (
-                <button
-                  className="icon-button caption-undo-btn"
-                  aria-label={`Revert caption ${segment.id} to source text`}
-                  title={`Revert to source: ${source}`}
-                  onClick={() =>
-                    onDispatch({
-                      label: 'Revert caption text',
-                      commands: [
-                        {
-                          type: 'caption.setSegmentText',
-                          payload: {
-                            documentId: document.id,
-                            segmentId: segment.id,
-                            textOverride: undefined,
-                          },
-                        },
-                      ],
-                    })
-                  }
-                >
-                  <UndoIcon />
-                </button>
-              )}
-              <button
-                className="icon-button caption-delete-btn"
-                aria-label={`Delete caption ${segment.id}`}
-                title="Delete caption"
-                onClick={() =>
-                  onDispatch({
-                    label: 'Delete caption',
-                    commands: [
-                      {
-                        type: 'caption.removeSegment',
-                        payload: { documentId: document.id, segmentId: segment.id },
-                      },
-                    ],
-                  })
-                }
-              >
-                <TrashIcon />
-              </button>
-            </li>
-          );
-        })}
+        {segments.map((segment) => (
+          <CaptionSegmentEditor
+            key={segment.id}
+            clip={clip}
+            document={document}
+            segment={segment}
+            playheadUs={playheadUs}
+            onSeek={onSeek}
+            onDispatch={onDispatch}
+            ordinal={document.segments.indexOf(segment) + 1}
+            autoFocus={pendingFocusSegmentId === segment.id}
+            onAutoFocused={() => setPendingFocusSegmentId(undefined)}
+          />
+        ))}
       </ol>
     </section>
+  );
+}
+
+export function captionTextTransaction(input: {
+  readonly documentId: string;
+  readonly segmentId: string;
+  readonly sourceText: string;
+  readonly currentOverride?: string;
+  readonly draft: string;
+}): VisualObjectTransaction | undefined {
+  const nextOverride = input.draft === input.sourceText ? undefined : input.draft;
+  if (nextOverride === input.currentOverride) return undefined;
+  return {
+    label: nextOverride === undefined ? 'Revert caption text' : 'Edit caption text',
+    commands: [
+      {
+        type: 'caption.setSegmentText',
+        payload: {
+          documentId: input.documentId,
+          segmentId: input.segmentId,
+          textOverride: nextOverride,
+        },
+      },
+    ],
+  };
+}
+
+export function CaptionSegmentEditor({
+  clip,
+  document,
+  segment,
+  playheadUs,
+  onSeek,
+  onDispatch,
+  ordinal,
+  autoFocus = false,
+  onAutoFocused,
+}: {
+  readonly clip: CaptionSlot['clip'];
+  readonly document: CaptionDocumentV1;
+  readonly segment: CaptionSegmentV1;
+  readonly playheadUs: number;
+  readonly onSeek: (timeUs: number) => void;
+  readonly onDispatch: (transaction: VisualObjectTransaction) => void;
+  readonly ordinal: number;
+  readonly autoFocus?: boolean;
+  readonly onAutoFocused?: () => void;
+}) {
+  const source = segmentSourceText(document, segment);
+  const display = segmentDisplayText(document, segment);
+  const [draft, setDraft] = useState(display);
+  const skipNextCommit = useRef(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focused.current) setDraft(display);
+  }, [display]);
+  useEffect(() => {
+    if (!autoFocus) return;
+    inputRef.current?.focus();
+    onAutoFocused?.();
+  }, [autoFocus, onAutoFocused]);
+  const range = segmentTimelineRange(clip, segment);
+  const active =
+    range !== undefined &&
+    playheadUs >= range.startUs &&
+    playheadUs < range.startUs + range.durationUs;
+  const confidence = segmentMinConfidence(document, segment);
+  const timecode = `${(segment.startUs / 1_000_000).toFixed(2)}s`;
+  const captionLabel = `caption ${ordinal} at ${timecode}`;
+  const commit = () => {
+    if (skipNextCommit.current) {
+      skipNextCommit.current = false;
+      return;
+    }
+    const transaction = captionTextTransaction({
+      documentId: document.id,
+      segmentId: segment.id,
+      sourceText: source,
+      ...(segment.textOverride === undefined ? {} : { currentOverride: segment.textOverride }),
+      draft,
+    });
+    if (transaction !== undefined) onDispatch(transaction);
+  };
+  return (
+    <li className={active ? 'caption-row active' : 'caption-row'}>
+      <span
+        className="caption-time"
+        role="button"
+        tabIndex={0}
+        aria-label={`Seek to ${(segment.startUs / 1_000_000).toFixed(2)}s`}
+        onClick={() => range !== undefined && onSeek(range.startUs)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && range !== undefined) onSeek(range.startUs);
+        }}
+      >
+        {(segment.startUs / 1_000_000).toFixed(2)}s
+      </span>
+      {confidence !== undefined && (
+        <span
+          className="caption-warning"
+          title={`Transcription confidence: ${Math.round(confidence * 100)}%`}
+        >
+          {Math.round(confidence * 100)}%
+        </span>
+      )}
+      <input
+        ref={inputRef}
+        className="caption-text-input"
+        aria-label={`Edit ${captionLabel}`}
+        placeholder="Write caption…"
+        value={draft}
+        onChange={(event) => setDraft(event.currentTarget.value)}
+        onFocus={() => {
+          focused.current = true;
+        }}
+        onBlur={() => {
+          focused.current = false;
+          commit();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur();
+          if (event.key === 'Escape') {
+            skipNextCommit.current = true;
+            setDraft(display);
+            event.currentTarget.blur();
+          }
+        }}
+      />
+      <span className="caption-source" title={source}>
+        Source: {source.length === 0 ? '—' : source}
+      </span>
+      {segment.textOverride !== undefined && (
+        <button
+          className="icon-button caption-undo-btn"
+          aria-label={`Revert ${captionLabel} to source text`}
+          title="Revert to source text"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            setDraft(source);
+            onDispatch({
+              label: 'Revert caption text',
+              commands: [
+                {
+                  type: 'caption.setSegmentText',
+                  payload: {
+                    documentId: document.id,
+                    segmentId: segment.id,
+                    textOverride: undefined,
+                  },
+                },
+              ],
+            });
+          }}
+        >
+          <UndoIcon />
+        </button>
+      )}
+      <button
+        className="icon-button caption-delete-btn"
+        aria-label={`Delete ${captionLabel}`}
+        title="Delete caption"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() =>
+          onDispatch({
+            label: 'Delete caption',
+            commands: [
+              {
+                type: 'caption.removeSegment',
+                payload: { documentId: document.id, segmentId: segment.id },
+              },
+            ],
+          })
+        }
+      >
+        <TrashIcon />
+      </button>
+    </li>
   );
 }

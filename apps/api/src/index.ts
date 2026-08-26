@@ -19,6 +19,12 @@ export type {
 } from './control-plane.js';
 export { createControlPlaneHttpServer, type ApiAuthentication } from './http-server.js';
 export { ControlPlaneError, LocalControlPlane } from './control-plane.js';
+export type {
+  CreateRecoveredCopyInput,
+  RecoveredCopy,
+  RecoveredCopyOperation,
+  RecoveredCopyProvenance,
+} from './project-revisions.js';
 export {
   PrivateObjectIntegrityError,
   RclonePrivateObjectStore,
@@ -29,3 +35,15 @@ export {
   PostgresControlPlane,
   type PostgresControlPlaneOptions,
 } from './postgres-control-plane.js';
+export {
+  MemoryProviderApprovalStore,
+  PostgresProviderApprovalStore,
+  ProviderApprovalError,
+  ProviderApprovalService,
+  providerApprovalSigningConfigFromEnv,
+  type ProviderApprovalAuditRow,
+  type ProviderApprovalAuditStatus,
+  type ProviderApprovalSigningConfig,
+  type ProviderApprovalStore,
+  type ProviderFailureUsage,
+} from './provider-approval.js';

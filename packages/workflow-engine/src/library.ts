@@ -411,6 +411,10 @@ export interface EditorPorts {
   readonly executeCommandTransaction?: (args: {
     readonly label: string;
     readonly commands: readonly unknown[];
+    /** Original run input, available to explicitly connected host adapters. */
+    readonly workflowInputs?: unknown;
+    /** Opaque editor revision at which this handler is executing. */
+    readonly projectRevision?: string;
   }) => { readonly transactionId: string };
   readonly createBranch?: (args: { readonly name: string; readonly source: unknown }) => {
     readonly branchId: string;
@@ -1323,7 +1327,14 @@ export function buildNodeLibrary(options: BuildNodeLibraryOptions = {}): NodeLib
             `node "${ctx.node.id}" resolved commands is not an array`,
           );
         }
-        return okResult(port({ label: stringParam(ctx, 'label'), commands }));
+        return okResult(
+          port({
+            label: stringParam(ctx, 'label'),
+            commands,
+            workflowInputs: ctx.workflowInputs,
+            projectRevision: ctx.projectRevision,
+          }),
+        );
       },
     ),
   );

@@ -2,9 +2,9 @@
 
 import { rangeContainsUs } from '@joy-media/project-schema';
 import type { TimeUs, VisualObjectTransformV1, VisualObjectV1 } from '@joy-media/project-schema';
-import { resolveObjectTransform } from '@joy-media/motion-core';
-import type { ExpressionChannelDiagnostic } from '@joy-media/motion-core';
-import { resolveObjectTransformWithExpressions } from '@joy-media/motion-core';
+import { resolveObjectTransform } from '@joy-media/motion-core/transform';
+import type { ExpressionChannelDiagnostic } from '@joy-media/motion-core/expression';
+import { resolveObjectTransformWithExpressions } from '@joy-media/motion-core/expression';
 import {
   resolveObjectTransformThroughCamera,
   resolveObjectTransformThroughCameraWithExpressions,

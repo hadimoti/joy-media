@@ -19,5 +19,8 @@ describe('@joy-media/benchmark', () => {
       'track-6',
       'track-7',
     ]);
+    const scrolled = runTimelineViewportBenchmark('scaled-down', 252, 180);
+    expect(scrolled.visibleTrackIds).not.toEqual(result.visibleTrackIds);
+    expect(scrolled.visibleTrackIds.length).toBeLessThanOrEqual(250);
   });
 });

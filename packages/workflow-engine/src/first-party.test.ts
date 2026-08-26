@@ -7,6 +7,7 @@ import { WorkflowBuilder, parseWorkflowJson, workflowToJson } from './authoring.
 import {
   FIRST_PARTY_WORKFLOWS_VERSION,
   FIRST_PARTY_WORKFLOW_IDS,
+  REFERENCE_SOCIAL_CUTDOWN_SLICE_WORKFLOW_ID,
   buildFirstPartyPipelinePacks,
   buildFirstPartyWorkflows,
   buildLongVideoDraftReelsWorkflow,
@@ -278,6 +279,7 @@ function collectRequiredPortsFromWorkflow(workflow: JoyWorkflow): readonly strin
 
 describe('first-party workflow definitions (§23.4)', () => {
   it('every definition builds, validates against the v1 registry, and is versioned', () => {
+    expect(FIRST_PARTY_WORKFLOW_IDS).toContain(REFERENCE_SOCIAL_CUTDOWN_SLICE_WORKFLOW_ID);
     const built = buildFirstPartyWorkflows();
     expect(built.map((entry) => entry.workflow.id)).toEqual([...FIRST_PARTY_WORKFLOW_IDS]);
     const { registry } = buildNodeLibrary();
@@ -296,12 +298,28 @@ describe('first-party workflow definitions (§23.4)', () => {
   it('declares production pack metadata, ports, approvals, capabilities, and report refs', () => {
     const packs = buildFirstPartyPipelinePacks();
     expect(packs.map((pack) => pack.workflow.id)).toEqual([...FIRST_PARTY_WORKFLOW_IDS]);
-    expect(packs).toHaveLength(5);
+    expect(packs).toHaveLength(6);
     for (const pack of packs) {
       expect(pack.provider).toBe('production');
-      expect(pack.label).toBe('Production pack');
+      expect(pack.label).toBe(
+        pack.workflow.id === REFERENCE_SOCIAL_CUTDOWN_SLICE_WORKFLOW_ID
+          ? 'Certified editor slice'
+          : 'Production pack',
+      );
       expect(pack.requiredPorts.length).toBeGreaterThan(0);
       expect(pack.capabilities.length).toBeGreaterThan(0);
+      if (pack.workflow.id === 'joy.first-party.reference-social-cutdown.slice') {
+        expect(pack.approvals).toEqual(['choose-candidates']);
+        expect(pack.workflow.nodes.map((node) => node.id)).toEqual(
+          expect.arrayContaining([
+            'selected-media',
+            'references',
+            'approve-cutdown',
+            'apply-cutdown',
+          ]),
+        );
+        continue;
+      }
       expect(pack.approvals).toContain('confirm-cost');
       expect(pack.reportRefs.length).toBeGreaterThan(0);
       const declaredPorts = new Set([...pack.requiredPorts, ...pack.optionalPorts]);

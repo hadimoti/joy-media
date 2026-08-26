@@ -21,6 +21,8 @@ import { panelTabIconUrl } from './panel-tab-icons.js';
 import { ContactSheetApproval, type ContactSheetApprovalDecision } from './ContactSheetApproval.js';
 import { useAccessibleDialog } from './dialog-a11y.js';
 
+const CERTIFIED_EDITOR_SLICE_ID = 'joy.first-party.reference-social-cutdown.slice';
+
 const TABS: readonly PanelTabSpec[] = [
   { id: 'saved', label: 'Saved' },
   { id: 'system', label: 'System' },
@@ -166,6 +168,8 @@ export function WorkflowsPanel({
   const systemWorkflowVersion = getFirstPartyWorkflowVersion();
   const systemLibraryStatus = getProductionFirstPartyLibraryStatus();
 
+  const isEditorSlice = (workflowId: string): boolean => workflowId === CERTIFIED_EDITOR_SLICE_ID;
+
   function applyOutcome(outcome: WorkflowRunOutcome): void {
     if (outcome.status === 'waiting_for_input') {
       setApproval({
@@ -227,24 +231,36 @@ export function WorkflowsPanel({
     const workflowId = runModal.workflowId;
     setRunModal(undefined);
     setRunInputs({});
-    const outcome = await onRun(workflowId, inputs);
-    applyOutcome(outcome);
+    try {
+      const outcome = await onRun(workflowId, inputs);
+      applyOutcome(outcome);
+    } catch (error) {
+      setStatusMessage(
+        `Workflow run failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   async function submitApprovalDecision(decision: ContactSheetApprovalDecision) {
     if (approval === undefined) return;
     const humanInputs: Record<string, unknown> = { [approval.nodeId]: decision.response };
 
-    const outcome = await onResume(approval.runId, humanInputs, {
-      ...(approval.approvalId === undefined ? {} : { approvalId: approval.approvalId }),
-      ...(approval.approvalRequestedSeq === undefined
-        ? {}
-        : { approvalRequestedSeq: approval.approvalRequestedSeq }),
-      ...(approval.approvalExpiresAtSeq === undefined
-        ? {}
-        : { approvalExpiresAtSeq: approval.approvalExpiresAtSeq }),
-    });
-    applyOutcome(outcome);
+    try {
+      const outcome = await onResume(approval.runId, humanInputs, {
+        ...(approval.approvalId === undefined ? {} : { approvalId: approval.approvalId }),
+        ...(approval.approvalRequestedSeq === undefined
+          ? {}
+          : { approvalRequestedSeq: approval.approvalRequestedSeq }),
+        ...(approval.approvalExpiresAtSeq === undefined
+          ? {}
+          : { approvalExpiresAtSeq: approval.approvalExpiresAtSeq }),
+      });
+      applyOutcome(outcome);
+    } catch (error) {
+      setStatusMessage(
+        `Workflow approval failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   function renderRecordedRow(recorded: RecordedWorkflow) {
@@ -315,16 +331,22 @@ export function WorkflowsPanel({
             {entry.label} · v{entry.workflow.version} · {entry.requiredPorts.length} required ports
           </span>
           <span title={entry.approvals.join(', ')}>{entry.summary}</span>
-          {!systemLibraryStatus.available && (
+          {!systemLibraryStatus.available && !isEditorSlice(entry.workflow.id) && (
             <span className="workflow-status-hint">
               {systemLibraryStatus.label}: {systemLibraryStatus.reason}
+            </span>
+          )}
+          {isEditorSlice(entry.workflow.id) && (
+            <span className="workflow-status-hint">
+              Available locally through the real EditorSession command port; provider/render
+              delivery is not included.
             </span>
           )}
         </div>
         <div className="workflow-row-actions">
           <button
             className="icon-button"
-            disabled={!systemLibraryStatus.available}
+            disabled={!systemLibraryStatus.available && !isEditorSlice(entry.workflow.id)}
             onClick={() =>
               hasInputs
                 ? openRunModal(entry.workflow.id)
@@ -332,9 +354,11 @@ export function WorkflowsPanel({
             }
             aria-label={`Run ${entry.workflow.name}`}
             title={
-              systemLibraryStatus.available
-                ? 'Start production workflow run'
-                : `${systemLibraryStatus.label}: ${systemLibraryStatus.recovery}`
+              isEditorSlice(entry.workflow.id)
+                ? 'Run the certified editor slice locally'
+                : systemLibraryStatus.available
+                  ? 'Start production workflow run'
+                  : `${systemLibraryStatus.label}: ${systemLibraryStatus.recovery}`
             }
           >
             <PlayIcon />
@@ -376,11 +400,11 @@ export function WorkflowsPanel({
           ref={runDialogRef}
           className="workflow-run-modal"
           role="dialog"
-          aria-label="Run workflow inputs"
+          aria-labelledby="workflow-run-dialog-title"
           aria-modal="true"
           tabIndex={-1}
         >
-          <h4>Run: {runModal.workflowId}</h4>
+          <h4 id="workflow-run-dialog-title">Run: {runModal.workflowId}</h4>
           {runModal.parameters.map((parameter) => (
             <label key={parameter.name}>
               {parameter.description}
@@ -419,10 +443,13 @@ export function WorkflowsPanel({
           ref={approvalDialogRef}
           className="workflow-run-modal"
           role="dialog"
-          aria-label="Workflow approval"
+          aria-labelledby="workflow-approval-dialog-title"
           aria-modal="true"
           tabIndex={-1}
         >
+          <h4 id="workflow-approval-dialog-title" className="sr-only">
+            Workflow approval
+          </h4>
           <ContactSheetApproval
             key={`${approval.runId}:${approval.nodeId}:${approval.approvalId ?? 'local'}`}
             request={approval.request}
@@ -436,19 +463,26 @@ export function WorkflowsPanel({
       )}
 
       {tab === 'saved' && (
-        <ul className="workflow-list">{workflows.map((wf) => renderRecordedRow(wf))}</ul>
+        <>
+          {workflows.length === 0 && (
+            <p className="workflow-status-hint" role="status" aria-live="polite">
+              No saved workflows yet.
+            </p>
+          )}
+          <ul className="workflow-list">{workflows.map((wf) => renderRecordedRow(wf))}</ul>
+        </>
       )}
 
       {tab === 'system' && (
         <>
           <div className="workflow-section-header">
-            <h4>Production pipeline packs</h4>
-            <span className="system-version-badge" title="First-party production pack version">
+            <h4>System workflows</h4>
+            <span className="system-version-badge" title="First-party workflow definition version">
               v{systemWorkflowVersion}
             </span>
           </div>
           {!systemLibraryStatus.available && (
-            <p className="workflow-status-hint" role="status">
+            <p className="workflow-status-hint" role="status" aria-live="polite">
               {systemLibraryStatus.label}: {systemLibraryStatus.reason}{' '}
               {systemLibraryStatus.recovery}
             </p>

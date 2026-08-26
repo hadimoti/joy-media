@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
+    "check:budget": "pnpm build && pnpm exec vitest run --root ../.. apps/editor-web/src/editor-build-budget.test.ts",
     "dev": "vite",
     "test": "pnpm exec vitest run --root ../.. apps/editor-web/src"
   },
@@ -14,10 +15,12 @@
     "@joy-media/captions-core": "workspace:*",
     "@joy-media/commands": "workspace:*",
     "@joy-media/evaluator": "workspace:*",
+    "@joy-media/export-core": "workspace:*",
     "@joy-media/html-scene-runtime": "workspace:*",
     "@joy-media/job-protocol": "workspace:*",
     "@joy-media/motion-core": "workspace:*",
     "@joy-media/playback-engine": "workspace:*",
+    "@joy-media/production-quality": "workspace:*",
     "@joy-media/plugin-sdk": "workspace:*",
     "@joy-media/project-persistence": "workspace:*",
     "@joy-media/project-schema": "workspace:*",

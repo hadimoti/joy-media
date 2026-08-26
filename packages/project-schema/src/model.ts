@@ -35,7 +35,7 @@ export interface Composition {
 
 export interface Track {
   readonly id: TrackId;
-  readonly kind: 'video';
+  readonly kind: 'video' | 'audio';
   /** Draw order: ascending = bottom to top. */
   readonly order: number;
   readonly enabled: boolean;
@@ -80,6 +80,15 @@ export interface VideoClip extends ClipBase {
   readonly playbackRate?: number;
 }
 
+/** A file-backed audio-only timeline clip. It never contributes pixels. */
+export interface AudioClip extends ClipBase {
+  readonly kind: 'audio';
+  readonly assetId: AssetId;
+  readonly sourceInUs: TimeUs;
+  /** See {@link normalizePlaybackRate}. Omit for 1×; audio rates preserve pitch. */
+  readonly playbackRate?: number;
+}
+
 export interface CompositionClip extends ClipBase {
   readonly kind: 'composition';
   readonly compositionId: CompositionId;
@@ -87,7 +96,7 @@ export interface CompositionClip extends ClipBase {
   readonly childOffsetUs: TimeUs;
 }
 
-export type Clip = VideoClip | CompositionClip;
+export type Clip = VideoClip | AudioClip | CompositionClip;
 
 export interface ProjectDiagnostic {
   readonly code: string;
@@ -141,7 +150,17 @@ export function validateSpikeProject(project: SpikeProject): ProjectDiagnostic[]
           });
         }
         if (
-          clip.kind === 'video' &&
+          clip.kind === 'audio' &&
+          (!Number.isSafeInteger(clip.sourceInUs) || clip.sourceInUs < 0)
+        ) {
+          diagnostics.push({
+            code: 'PROJECT_SCHEMA_BAD_AUDIO_SOURCE_IN',
+            message: 'audio sourceInUs must be a non-negative safe integer',
+            path,
+          });
+        }
+        if (
+          (clip.kind === 'video' || clip.kind === 'audio') &&
           clip.playbackRate !== undefined &&
           !isValidPlaybackRate(clip.playbackRate)
         ) {

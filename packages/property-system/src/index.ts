@@ -7,7 +7,7 @@ import type {
 } from '@joy-media/project-schema';
 import { applyCaptionProjectCommand } from '@joy-media/captions-core';
 import type { CaptionCommand } from '@joy-media/captions-core';
-import { applyMotionProjectCommand } from '@joy-media/motion-core';
+import { applyMotionProjectCommand } from '@joy-media/motion-core/commands';
 import type {
   MotionCommand,
   AddEffectCommand,
@@ -17,7 +17,7 @@ import type {
   SetEffectParamCommand,
   ClearEffectsCommand,
   ReplaceEffectCommand,
-} from '@joy-media/motion-core';
+} from '@joy-media/motion-core/commands';
 
 export type ObjectKind = VisualObjectV1['kind'];
 export type TransformProperties = VisualObjectTransformV1;
@@ -177,6 +177,7 @@ export function applyVisualObjectProjectCommand(
     case 'caption.addSegment':
     case 'caption.removeSegment':
     case 'caption.setStyle':
+    case 'caption.setClipTiming':
     case 'caption.replaceDocument':
       return applyCaptionProjectCommand(project, command);
     case 'object.replaceAnimation':

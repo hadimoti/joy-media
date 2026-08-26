@@ -168,6 +168,7 @@ export type { HeadlessRunOptions, HeadlessRunResult } from './headless.js';
 export {
   FIRST_PARTY_WORKFLOWS_VERSION,
   FIRST_PARTY_WORKFLOW_IDS,
+  REFERENCE_SOCIAL_CUTDOWN_SLICE_WORKFLOW_ID,
   buildFirstPartyPipelinePacks,
   buildFirstPartyWorkflows,
   buildInterviewDocumentaryAssemblyWorkflow,
@@ -175,6 +176,7 @@ export {
   buildMultilingualPromoWorkflow,
   buildPodcastCleanupWorkflow,
   buildReferenceSocialCutdownWorkflow,
+  buildReferenceSocialCutdownSliceWorkflow,
   firstPartyDefinitionFiles,
 } from './first-party.js';
 export type {

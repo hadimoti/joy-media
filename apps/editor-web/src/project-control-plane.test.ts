@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { BrowserControlPlaneClient } from './control-plane-client.js';
-import { getOrCreateControlPlaneProjectBinding } from './project-control-plane.js';
+import {
+  bindControlPlaneProjectBinding,
+  getOrCreateControlPlaneProjectBinding,
+} from './project-control-plane.js';
 
 function memoryStorage() {
   const values = new Map<string, string>();
@@ -18,6 +21,32 @@ function json(status: number, value: unknown): Response {
 }
 
 describe('control-plane project binding', () => {
+  it('binds a known server project id without invoking id generation', () => {
+    const storage = memoryStorage();
+    let generated = false;
+    const binding = bindControlPlaneProjectBinding(
+      storage,
+      { id: 'local-recovered-1', title: 'Campaign (Recovered copy)' },
+      'server-recovered-1',
+      { ownerKey: 'owner-1' },
+    );
+    const reopened = getOrCreateControlPlaneProjectBinding(
+      storage,
+      { id: 'local-recovered-1', title: 'Campaign (Recovered copy)' },
+      {
+        ownerKey: 'owner-1',
+        createId: () => {
+          generated = true;
+          return 'must-not-be-used';
+        },
+      },
+    );
+
+    expect(binding.controlPlaneProjectId).toBe('server-recovered-1');
+    expect(reopened).toEqual(binding);
+    expect(generated).toBe(false);
+  });
+
   it('persists one opaque control-plane identity for a reopened editor project', () => {
     const storage = memoryStorage();
     const createId = () => 'opaque-project-1';

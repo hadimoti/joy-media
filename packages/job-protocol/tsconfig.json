@@ -5,5 +5,9 @@
     "outDir": "dist"
   },
   "include": ["src"],
-  "references": [{ "path": "../project-schema" }]
+  "references": [
+    { "path": "../project-schema" },
+    { "path": "../production-quality" },
+    { "path": "../render-planner" }
+  ]
 }

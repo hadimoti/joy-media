@@ -36,13 +36,11 @@ import { approvalPolicyForAgentSettings } from './agent-settings.js';
 import {
   BrowserControlPlaneError,
   BrowserControlPlaneClient,
-  type BrowserAsset,
   type BrowserProviderApprovalPreflight,
   type BrowserJoyCodeReasoningRequest,
   type BrowserJoyCodeReasoningResponse,
 } from './control-plane-client.js';
 import { JoyCodeLogo } from './JoyCodeLogo.js';
-import { JoyCode3DViewer } from './JoyCode3DViewer.js';
 import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
 import {
   addJoyCodeMessage,
@@ -62,7 +60,6 @@ const THINKING_REVEAL_MS = 320;
 const TABS: readonly PanelTabSpec[] = [
   { id: 'history', label: 'History' },
   { id: 'composer', label: 'Composer' },
-  { id: '3d', label: '', iconUrl: '/assets/24_3d.png' },
 ];
 
 interface PendingPlan {
@@ -460,8 +457,6 @@ export function AgentPanel({
   onUndo,
   session,
   attachedAssets = [],
-  assets = [],
-  onOpen3DStudio,
   onDetachAsset,
   onAttachAsset,
   settings,
@@ -474,9 +469,6 @@ export function AgentPanel({
   readonly onUndo: () => void;
   readonly session: EditorSession;
   readonly attachedAssets?: readonly KiloCodeAttachedAsset[];
-  /** Registered catalog assets available to the asset-backed 3D preview. */
-  readonly assets?: readonly BrowserAsset[];
-  readonly onOpen3DStudio?: () => void;
   readonly onDetachAsset?: (assetId: string) => void;
   readonly onAttachAsset?: (asset: KiloCodeAttachedAsset) => void;
   readonly settings: AgentSettings;
@@ -1165,7 +1157,7 @@ export function AgentPanel({
                     height={120}
                   />
                   {pending.dryRun.errors.length > 0 && (
-                    <p className="agent-error">
+                    <p className="agent-error" role="alert" aria-live="assertive">
                       Dry-run errors: {pending.dryRun.errors.join(', ')}
                     </p>
                   )}
@@ -1287,7 +1279,9 @@ export function AgentPanel({
                     )}
                   </div>
                   {!lastRun.executionResult.success && (
-                    <p className="agent-error">{lastRun.executionResult.errors.join(', ')}</p>
+                    <p className="agent-error" role="alert" aria-live="assertive">
+                      {lastRun.executionResult.errors.join(', ')}
+                    </p>
                   )}
                   {lastRun.reverted && <p lang="fa">بازگردانی شد.</p>}
                   {lastRun.savedWorkflowId !== undefined && (
@@ -1396,13 +1390,6 @@ export function AgentPanel({
               </div>
             </div>
           </section>
-        )}
-
-        {tab === '3d' && (
-          <JoyCode3DViewer
-            assets={assets}
-            {...(onOpen3DStudio === undefined ? {} : { onOpenStudio: onOpen3DStudio })}
-          />
         )}
       </div>
     </PanelShell>
