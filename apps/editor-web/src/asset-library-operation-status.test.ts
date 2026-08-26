@@ -5,7 +5,21 @@ import {
   assetImportOperationStatus,
   privateBackupBatchStatus,
   refreshCatalogThenReport,
+  timelineAssetKind,
 } from './AssetLibraryPanel.js';
+
+describe('asset-to-timeline action contract', () => {
+  it.each([
+    ['video', 'video'],
+    ['audio', 'audio'],
+  ] as const)('accepts %s assets', (kind, expected) => {
+    expect(timelineAssetKind(kind)).toBe(expected);
+  });
+
+  it.each(['image', 'model'] as const)('rejects %s assets', (kind) => {
+    expect(timelineAssetKind(kind)).toBeUndefined();
+  });
+});
 
 describe('asset-library privacy operation status', () => {
   it.each([
