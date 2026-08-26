@@ -4,7 +4,10 @@ import {
   BrowserControlPlaneError,
   type BrowserProjectDocumentSnapshot,
 } from './control-plane-client.js';
-import { bootstrapProjectDocument } from './project-document-bootstrap.js';
+import {
+  bootstrapProjectDocument,
+  classifyBootstrapFailure,
+} from './project-document-bootstrap.js';
 
 const document = {
   schemaVersion: 2,
@@ -99,5 +102,35 @@ describe('bootstrapProjectDocument', () => {
   it('does not call remote methods when the caller is signed out', () => {
     // Signed-out gating is owned by App: this helper is only invoked in the ready branch.
     expect(true).toBe(true);
+  });
+
+  it.each([
+    [new BrowserControlPlaneError('AUTH_REQUIRED', 'unauthorized', 401), 'auth-required'],
+    [
+      new BrowserControlPlaneError('ROUTE_NOT_FOUND', 'missing route', 404),
+      'route-or-method-missing',
+    ],
+    [new TypeError('Failed to fetch'), 'server-unavailable'],
+    [
+      new BrowserControlPlaneError('REVISION_CONFLICT', 'conflict', 409),
+      'conflict-or-invalid-response',
+    ],
+    [new Error('JOY Media API returned an invalid response'), 'conflict-or-invalid-response'],
+  ] as const)('classifies failures as %s', (failure, reason) => {
+    expect(classifyBootstrapFailure(failure)).toMatchObject({ reason });
+  });
+
+  it('returns only a safe recovery hint with every unavailable result', async () => {
+    const input = options();
+    vi.mocked(input.remote.ensureProject).mockRejectedValueOnce(
+      new Error('token=secret-project-id and internal stack'),
+    );
+    const result = await bootstrapProjectDocument(input);
+    expect(result.kind).toBe('unavailable');
+    if (result.kind === 'unavailable') {
+      expect(result.recoveryHint).toBe('Try again shortly; your local work is safe.');
+      expect(result.reason).toBe('server-unavailable');
+      expect(result.recoveryHint).not.toContain('secret');
+    }
   });
 });

@@ -49,6 +49,7 @@ import type { createVerifiedDeliverySnapshot } from './verified-delivery-snapsho
 import type { deliveryPromiseForManifest } from '@joy-media/export-core/browser';
 import type { transcribeReferenceCaption } from './caption-transcription-runner.js';
 import type { ProjectDocumentSpine } from './project-document-spine.js';
+import type { ProjectDocumentBootstrapFailure } from './project-document-bootstrap.js';
 
 /**
  * Secondary panels are intentionally separate entry points. Dockview creates
@@ -929,6 +930,7 @@ function EditorWorkspace({
   const [documentSyncState, setDocumentSyncState] = useState<
     'local' | 'syncing' | 'server-unavailable' | 'conflict-recovered'
   >('local');
+  const [bootstrapFailure, setBootstrapFailure] = useState<ProjectDocumentBootstrapFailure>();
   const [recoveredCopy, setRecoveredCopy] = useState<ProjectDocumentRecoveredCopy>();
   const [legacyBackupAvailable, setLegacyBackupAvailable] = useState(false);
   const legacyBackupJournalRef = useRef<ProjectDocumentBrowserJournal | null>(null);
@@ -1164,6 +1166,7 @@ function EditorWorkspace({
           return;
         }
         if (bootstrap.kind === 'ready') {
+          setBootstrapFailure(undefined);
           const remoteSnapshot = bootstrap.snapshot;
           if (cancelled) {
             projectionSpine.dispose();
@@ -1232,8 +1235,9 @@ function EditorWorkspace({
           };
         } else {
           if (!cancelled) {
+            setBootstrapFailure(bootstrap);
             setDocumentSyncState('server-unavailable');
-            showToast('Saved locally; cloud sync is unavailable.', 'info');
+            showToast(`Saved locally; ${bootstrap.recoveryHint}`, 'info');
           }
         }
       }
@@ -4230,7 +4234,10 @@ function EditorWorkspace({
   const dockviewComponents = dockviewComponentsRef.current;
 
   return (
-    <main data-document-sync-state={documentSyncState}>
+    <main
+      data-document-sync-state={documentSyncState}
+      data-document-sync-reason={bootstrapFailure?.reason}
+    >
       {legacyBackupAvailable && (
         <p className="local-recovery-banner" role="status" aria-live="polite">
           A local recovery backup is available.
@@ -4241,7 +4248,9 @@ function EditorWorkspace({
       )}
       {documentSyncState === 'server-unavailable' && (
         <p className="export-toast" role="status" aria-live="polite">
-          Saved locally; cloud sync is unavailable.
+          {bootstrapFailure === undefined
+            ? 'Saved locally; cloud sync is unavailable.'
+            : `Saved locally; ${bootstrapFailure.recoveryHint}`}
         </p>
       )}
       {documentSyncState === 'conflict-recovered' && recoveredCopy !== undefined && (
