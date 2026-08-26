@@ -102,6 +102,7 @@ export function AssetLibraryPanel({
   projectId,
   projectTitle = 'Editor project',
   onAddSticker,
+  onInsertToTimeline,
   onEditWithAi,
   artifacts,
   onDispatchArtifacts,
@@ -112,6 +113,12 @@ export function AssetLibraryPanel({
     readonly assetId: string;
     readonly displayName?: string;
     readonly blob?: Blob;
+  }) => void;
+  /** Insert an eligible audio/video asset at the editor playhead. */
+  readonly onInsertToTimeline?: (asset: {
+    readonly assetId: string;
+    readonly kind: 'audio' | 'video';
+    readonly displayName: string;
   }) => void;
   /** Attach image/video to KiloCode for further editing automations. */
   readonly onEditWithAi?: (asset: {
@@ -1429,6 +1436,25 @@ export function AssetLibraryPanel({
                       </span>
                       <span className="asset-card-meta">{formatBytes(asset.bytes)}</span>
                       <div className="asset-card-actions">
+                        {(asset.kind === 'video' || asset.kind === 'audio') &&
+                          onInsertToTimeline !== undefined && (
+                            <button
+                              type="button"
+                              className="asset-card-timeline-action"
+                              aria-label={`Add ${asset.displayName} to timeline`}
+                              title="Add to timeline"
+                              data-guide="Add to timeline"
+                              onClick={() =>
+                                onInsertToTimeline({
+                                  assetId: asset.id,
+                                  kind: asset.kind,
+                                  displayName: asset.displayName,
+                                })
+                              }
+                            >
+                              Add to timeline
+                            </button>
+                          )}
                         {(asset.kind === 'image' || asset.kind === 'video') && (
                           <button
                             type="button"
