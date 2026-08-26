@@ -502,6 +502,32 @@ function buildAssetTrackCreateTransaction(
   };
 }
 
+/** Build the same routing-aware insertion used by timeline file intake. */
+export function buildTimelineAssetInsertTransaction({
+  composition,
+  trackFlags,
+  playheadUs,
+  asset,
+  now = () => Date.now(),
+}: {
+  readonly composition: Composition;
+  readonly trackFlags: readonly TimelineTrackView[];
+  readonly playheadUs: number;
+  readonly asset: {
+    readonly assetId: string;
+    readonly kind: 'audio' | 'video';
+    readonly displayName?: string;
+  };
+  readonly now?: () => number;
+}): CommandTransaction {
+  const targetTrackId = pickTimelineImportTrackId(composition, trackFlags, asset.kind);
+  const stamp = now();
+  return targetTrackId === undefined
+    ? buildAssetTrackCreateTransaction(composition, asset, playheadUs, stamp)
+    : (buildAssetInsertTransaction(composition, targetTrackId, asset, playheadUs, stamp) ??
+        buildAssetTrackCreateTransaction(composition, asset, playheadUs, stamp));
+}
+
 function pickTimelineImportTrackId(
   composition: Composition,
   trackFlags: readonly TimelineTrackView[],
@@ -554,10 +580,13 @@ export function buildTimelineFileImportTransactions({
     };
     const stamp = now() + index;
     if (targetTrackId !== undefined) {
-      return (
-        buildAssetInsertTransaction(composition, targetTrackId, asset, playheadUs, stamp) ??
-        buildAssetTrackCreateTransaction(composition, asset, playheadUs, stamp)
-      );
+      return buildTimelineAssetInsertTransaction({
+        composition,
+        trackFlags,
+        playheadUs,
+        asset,
+        now: () => stamp,
+      });
     }
     return buildAssetTrackCreateTransaction(composition, asset, playheadUs, stamp);
   });

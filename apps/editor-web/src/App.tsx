@@ -276,6 +276,7 @@ import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
 import {
   buildTimelineFileImportTransactions,
+  buildTimelineAssetInsertTransaction,
   importAssetKind,
   TimelinePanel,
 } from './TimelinePanel.js';
@@ -3997,6 +3998,22 @@ function EditorWorkspace({
             onEditWithAi={(asset) => {
               context.attachKiloCodeAsset(asset);
               context.activatePanel('agent');
+            }}
+            onInsertToTimeline={(asset) => {
+              const composition = context.timelineProject.compositions.root;
+              if (composition === undefined) {
+                context.showToast('The main timeline composition is unavailable.', 'error');
+                return;
+              }
+              context.dispatchTimeline(
+                buildTimelineAssetInsertTransaction({
+                  composition,
+                  trackFlags: context.timelineTrackFlags,
+                  playheadUs: state.playheadUs,
+                  asset,
+                }),
+              );
+              context.showToast(`${asset.displayName} added to the timeline.`, 'success');
             }}
             {...(context.artifacts === undefined ? {} : { artifacts: context.artifacts })}
             {...(context.dispatchArtifacts === undefined
