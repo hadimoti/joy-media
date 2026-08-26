@@ -18,7 +18,7 @@
     "release:gate:test": "pnpm --filter @joy-media/release test",
     "desktop:build": "pnpm --filter @joy-media/desktop build",
     "desktop:package": "pnpm --filter @joy-media/desktop package:win",
-    "desktop:package:signed": "pnpm --filter @joy-media/desktop package:win && node apps/desktop/scripts/sign-windows-installer.mjs",
+    "desktop:package:signed": "node apps/desktop/scripts/package-windows.mjs && node apps/desktop/scripts/sign-windows-installer.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

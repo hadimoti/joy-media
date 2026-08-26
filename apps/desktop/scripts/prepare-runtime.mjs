@@ -1,5 +1,6 @@
 /* global process */
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -36,3 +37,10 @@ const bundle = spawnSync(
   { cwd: root, stdio: 'inherit', shell: false },
 );
 if (bundle.status !== 0) process.exit(bundle.status ?? 1);
+const workerBundle = join(runtime, 'worker.js');
+const sha256 = createHash('sha256').update(readFileSync(workerBundle)).digest('hex');
+writeFileSync(
+  join(runtime, 'worker-integrity.json'),
+  `${JSON.stringify({ algorithm: 'sha256', file: 'worker.js', sha256 }, null, 2)}\n`,
+  'utf8',
+);

@@ -2,10 +2,12 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { configPath, loadConfig, saveConfig, type DesktopConfig } from './config.js';
 import { WorkerController } from './lifecycle.js';
+import { disposeWorkerForQuit } from './shutdown.js';
 
 let window: InstanceType<typeof BrowserWindow> | undefined;
-let controller: WorkerController;
+let controller: WorkerController | undefined;
 let configuration: DesktopConfig;
+let quitting: Promise<void> | undefined;
 
 async function createWindow(): Promise<void> {
   const userData = app.getPath('userData');
@@ -34,16 +36,16 @@ async function createWindow(): Promise<void> {
 }
 
 function registerIpc(settingsPath: string, userData: string): void {
-  ipcMain.handle('worker:status', () => controller.status());
-  ipcMain.handle('worker:start', () => controller.start());
-  ipcMain.handle('worker:stop', () => controller.stop());
-  ipcMain.handle('worker:restart', () => controller.restart());
+  ipcMain.handle('worker:status', () => controller?.status());
+  ipcMain.handle('worker:start', () => controller?.start());
+  ipcMain.handle('worker:stop', () => controller?.stop());
+  ipcMain.handle('worker:restart', () => controller?.restart());
   ipcMain.handle('config:get', () => configuration);
   ipcMain.handle('config:save', async (_event: unknown, candidate: unknown) => {
     const next = parseConfig(candidate);
     saveConfig(settingsPath, next);
     configuration = next;
-    await controller.stop();
+    await controller?.stop();
     controller = new WorkerController({
       config: configuration,
       userDataPath: userData,
@@ -77,4 +79,15 @@ app
     console.error(error instanceof Error ? error.message : 'desktop startup failed');
     app.quit();
   });
+app.on('before-quit', (event) => {
+  if (quitting !== undefined) {
+    event.preventDefault();
+    return;
+  }
+  event.preventDefault();
+  quitting = (async () => {
+    await disposeWorkerForQuit(controller);
+    app.exit(0);
+  })();
+});
 app.on('window-all-closed', () => app.quit());

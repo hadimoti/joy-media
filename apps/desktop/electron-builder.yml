@@ -6,12 +6,14 @@ directories:
 files:
   - dist/**
   - package.json
+afterPack: scripts/sign-windows-artifacts.mjs
 extraResources:
   - from: .runtime
     to: worker-runtime
     filter:
       - worker.js
       - worker.js.map
+      - worker-integrity.json
 win:
   target:
     - target: nsis

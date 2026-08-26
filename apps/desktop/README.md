@@ -30,4 +30,4 @@ Unsigned packages are for local testing only. Before distributing an installer, 
 pnpm desktop:package:signed
 ```
 
-The signing script invokes `signtool.exe` and then verifies the resulting installer with `Get-AuthenticodeSignature`. It fails closed when `signtool.exe`, the owner-provided certificate selection, or a valid `Status` is absent. Do not commit certificates, passwords, PFX files, certificate paths containing secrets, or signing environment values. A build without those owner-supplied prerequisites must remain unsigned and must not be called a release.
+The signed packaging workflow invokes `signtool.exe` from electron-builder's `afterPack` hook for every installed `.exe` helper, verifies each with `Get-AuthenticodeSignature`, and then signs and verifies the resulting installer. It fails closed when `signtool.exe`, the owner-provided certificate selection, or an HTTPS timestamp URL is absent or invalid. Do not commit certificates, passwords, PFX files, certificate paths containing secrets, or signing environment values. A build without those owner-supplied prerequisites must remain unsigned and must not be called a release.

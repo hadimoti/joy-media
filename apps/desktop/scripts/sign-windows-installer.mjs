@@ -2,19 +2,14 @@
 import { readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { signingConfiguration } from './sign-windows-artifacts.mjs';
 
 const output = resolve('apps/desktop/dist-installer');
 const installers = readdirSync(output).filter((name) => name.toLowerCase().endsWith('.exe'));
 if (installers.length !== 1)
   throw new Error('Signing requires exactly one NSIS installer in apps/desktop/dist-installer');
 const installer = join(output, installers[0]);
-const signtool = process.env.JOY_SIGNTOOL_PATH;
-const thumbprint = process.env.JOY_SIGNING_CERT_THUMBPRINT;
-if (!signtool || !thumbprint)
-  throw new Error(
-    'Refusing unsigned release: owner must provide JOY_SIGNTOOL_PATH and JOY_SIGNING_CERT_THUMBPRINT at release time',
-  );
-const timestamp = process.env.JOY_SIGNING_TIMESTAMP_URL ?? 'http://timestamp.digicert.com';
+const { signtool, thumbprint, timestamp } = signingConfiguration(process.env);
 const signed = spawnSync(
   signtool,
   ['sign', '/sha1', thumbprint, '/fd', 'SHA256', '/tr', timestamp, '/td', 'SHA256', installer],
