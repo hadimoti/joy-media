@@ -5342,6 +5342,24 @@ label {
   background: rgb(14 14 16 / 72%);
   color: #c8c8cc;
 }
+.asset-card-timeline-action {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0.2rem 0.42rem;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: rgb(14 14 16 / 88%);
+  color: #f0f0f2;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+.asset-card-timeline-action:hover,
+.asset-card-timeline-action:focus-visible {
+  background: var(--joy-accent);
+  color: var(--joy-bg-deep);
+}
 .asset-card-media:disabled {
   opacity: 1;
 }

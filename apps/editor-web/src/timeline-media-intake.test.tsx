@@ -3,6 +3,7 @@ import { emptySpikeProject } from '@joy-media/test-fixtures';
 import {
   addTimelineMarkerAtPlayhead,
   buildTimelineFileImportTransactions,
+  buildTimelineAssetInsertTransaction,
   openTimelineAssetLibrary,
   pinFocusedTimelineTrack,
 } from './TimelinePanel.js';
@@ -192,6 +193,34 @@ describe('timeline media intake', () => {
       payload: {
         trackId: 'track-7',
         clip: { kind: 'audio', assetId: 'asset-generic-audio' },
+      },
+    });
+  });
+
+  it('routes keyboard/library insertion to the first unlocked compatible track', () => {
+    const project = emptySpikeProject({ trackCount: 0, durationUs: 30_000_000 });
+    const composition = {
+      ...project.compositions[project.rootCompositionId]!,
+      tracks: [
+        { id: 'V1', kind: 'video' as const, order: 0, enabled: true, clips: [] },
+        { id: 'A1', kind: 'audio' as const, order: 1, enabled: true, clips: [] },
+      ],
+    };
+    const transaction = buildTimelineAssetInsertTransaction({
+      composition,
+      trackFlags: [
+        { id: 'V1', heightPx: 44, locked: false, muted: false, solo: false },
+        { id: 'A1', heightPx: 44, locked: false, muted: false, solo: false },
+      ],
+      playheadUs: 2_000_000,
+      asset: { assetId: 'library-song', kind: 'audio', displayName: 'Song.mp3' },
+      now: () => 5555,
+    });
+    expect(transaction.commands[0]).toMatchObject({
+      type: 'timeline.insertClip',
+      payload: {
+        trackId: 'A1',
+        clip: { assetId: 'library-song', kind: 'audio', startUs: 2_000_000 },
       },
     });
   });
