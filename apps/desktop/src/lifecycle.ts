@@ -133,6 +133,16 @@ export class WorkerController {
     child.stderr?.on('data', (data: Buffer) => this.appendLog(data.toString('utf8')));
     child.once('error', (error) => {
       if (this.#child !== child) return;
+      if (this.#status.state === 'stopping') {
+        // An error is not proof that the process (or its descendants) exited.
+        // Keep ownership until the exit event so a retry cannot overlap it.
+        this.update({
+          state: 'stopping',
+          mediaTools: tools,
+          message: `Worker shutdown encountered an error; waiting for process exit before allowing restart: ${redactLogLine(error.message)}`,
+        });
+        return;
+      }
       this.#child = undefined;
       this.update({ state: 'failed', mediaTools: tools, message: redactLogLine(error.message) });
     });
@@ -157,10 +167,13 @@ export class WorkerController {
     const child = this.#child;
     if (child === undefined) return this.status();
     this.update({ state: 'stopping', mediaTools: this.#status.mediaTools });
+    let exitObserved = false;
     const exited = new Promise<void>((resolvePromise) => {
-      const resolveOnce = (): void => resolvePromise();
-      child.once('exit', resolveOnce);
-      child.once('error', resolveOnce);
+      child.once('exit', () => {
+        exitObserved = true;
+        resolvePromise();
+      });
+      child.once('error', resolvePromise);
     });
     const terminate =
       this.#options.terminateProcessTree ??
@@ -172,14 +185,16 @@ export class WorkerController {
       exited,
       new Promise<void>((resolvePromise) => setTimeout(resolvePromise, timeout)),
     ]);
-    if (this.#child === child) {
+    if (this.#child === child && !exitObserved) {
       // A timeout only bounds this call; it does not prove that the process
       // tree is gone. Keep the child owned by the controller until its exit is
       // observed so start/restart cannot create a second Worker alongside it.
       this.update({
         state: 'stopping',
         mediaTools: this.#status.mediaTools,
-        message: 'Worker shutdown timed out; waiting for process exit before allowing restart',
+        message:
+          this.#status.message ??
+          'Worker shutdown timed out; waiting for process exit before allowing restart',
       });
     }
     return this.status();

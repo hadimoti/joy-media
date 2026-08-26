@@ -194,6 +194,46 @@ describe('worker lifecycle', () => {
     expect(spawnCount).toBe(2);
   });
 
+  it('keeps ownership when shutdown reports an error before the Worker exits', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-desktop-error-race-'));
+    const worker = join(directory, 'worker.js');
+    writeFileSync(worker, 'console.log("worker");');
+    const child = fakeChild();
+    let spawnCount = 0;
+    const controller = new WorkerController({
+      config: { apiUrl: 'https://media.example.test' },
+      userDataPath: directory,
+      workerEntry: worker,
+      platform: 'win32',
+      shutdownTimeoutMs: 10,
+      discoverMediaTools: () => ({
+        ready: true,
+        ffmpegPath: 'ffmpeg.exe',
+        ffprobePath: 'ffprobe.exe',
+      }),
+      spawnWorker: ((_file: string, _args: readonly string[], _options: unknown) => {
+        spawnCount += 1;
+        return child as never;
+      }) as never,
+      terminateProcessTree: async () => {
+        child.emit('error', new Error('tree termination failed'));
+      },
+    });
+
+    await controller.start();
+    const status = await controller.stop();
+    expect(status.state).toBe('stopping');
+    expect(status.message).toMatch(/waiting for process exit/);
+    expect((await controller.start()).state).toBe('stopping');
+    expect((await controller.restart()).state).toBe('stopping');
+    expect(spawnCount).toBe(1);
+
+    child.emit('exit', 0, null);
+    expect(controller.status().state).toBe('stopped');
+    expect((await controller.start()).state).toBe('starting');
+    expect(spawnCount).toBe(2);
+  });
+
   it('supports normal stop and restart after the Worker exits', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-desktop-restart-'));
     const worker = join(directory, 'worker.js');
