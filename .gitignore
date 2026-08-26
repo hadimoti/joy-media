@@ -8,3 +8,14 @@ coverage/
 
 # Captured worker stdout from local debugging runs, not source.
 worker_output.txt
+
+# Local/CI release and browser evidence is generated at run time and archived
+# externally; it is not a source or runtime input.
+test-output/
+test-results/
+tooling/browser-smoke/test-results/
+
+# TypeScript side-by-side compiler output (keep authored source declarations).
+apps/editor-web/src/*.js
+apps/editor-web/src/*.js.map
+apps/editor-web/src/*.d.ts

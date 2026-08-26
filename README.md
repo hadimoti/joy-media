@@ -45,5 +45,7 @@ This is the standalone `joy-media` repository (owner decision Q16, 2026-07-19) â
 
 Run `pnpm release:gate:test` for the pure evaluator and `pnpm release:gate` for the non-deploying
 evidence command. The gate writes machine-readable reports, a manifest, an SBOM, and artifact
-hashes under `test-output/release-gate/`; it fails closed when browser, build, test, persistence,
-privacy, or authentication evidence is missing. See [`docs/releases/JOY-STUDIO-1.0-CHECKLIST.md`](docs/releases/JOY-STUDIO-1.0-CHECKLIST.md).
+hashes under `test-output/release-gate/`; these generated outputs are ignored and should be
+archived in local/CI evidence storage, not committed. It fails closed when browser, build, test,
+persistence, privacy, or authentication evidence is missing. See
+[`docs/releases/JOY-STUDIO-1.0-CHECKLIST.md`](docs/releases/JOY-STUDIO-1.0-CHECKLIST.md).

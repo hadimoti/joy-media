@@ -10,7 +10,8 @@ Run from a clean checkout after installing Node 22 and pnpm:
 6. Record authenticated browser evidence for `authenticated-editor-1.0` (login, project open,
    timeline edit, Motion Studio publish/place/preview, save/reopen, undo/redo, and verified export).
 7. Run `pnpm release:gate` with the evidence JSON and archive the generated report, manifest, SBOM,
-   artifact hashes, browser screenshots, and golden evidence.
+   artifact hashes, browser screenshots, and golden evidence in local/CI evidence storage; these
+   generated outputs are ignored and are not committed to the source repository.
 
 The gate must fail for zero tests, dirty generated output, fixture production handlers, missing
 builds/manifest/SBOM, stale feature status, or an unverified journey. A quick browser export,
