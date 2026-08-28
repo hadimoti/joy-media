@@ -354,7 +354,7 @@ export async function runAuthenticatedEditorJourney({
   const login = page.getByRole('dialog', { name: 'Joy Studio login' });
   await expect(login).toBeVisible();
   await login.getByRole('button', { name: 'Token' }).click();
-  await login.getByRole('combobox').fill(TEST_TOKEN);
+  await login.getByRole('textbox', { name: 'Paste your access token' }).fill(TEST_TOKEN);
   await login.getByRole('button', { name: 'Login →' }).click();
   await expect(login).toBeHidden({ timeout: 10_000 });
   await expect(page.getByRole('button', { name: 'New project' })).toBeVisible();
