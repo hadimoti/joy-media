@@ -65,6 +65,25 @@ describe('JOY Studio 1.0 release gate', () => {
     );
   });
 
+  it('audits production dependency advisories before build and release evaluation', () => {
+    const workflow = readFileSync(
+      resolve(import.meta.dirname, '../../../.github/workflows/ci.yml'),
+      'utf8',
+    );
+    const workflowLines = workflow.split(/\r?\n/u).map((line) => line.trim());
+    const audit = 'run: pnpm audit --prod --audit-level high';
+    const auditIndex = workflowLines.indexOf(audit);
+
+    expect(workflowLines.filter((line) => line === audit)).toHaveLength(1);
+    expect(auditIndex).toBeGreaterThan(
+      workflowLines.indexOf('- run: pnpm install --frozen-lockfile'),
+    );
+    expect(auditIndex).toBeLessThan(
+      workflowLines.indexOf('- run: pnpm --filter @joy-media/editor-web build'),
+    );
+    expect(auditIndex).toBeLessThan(workflowLines.indexOf('run: pnpm release:gate'));
+  });
+
   it('keeps missing static assets out of the SPA fallback in nginx', () => {
     const config = readFileSync(
       resolve(import.meta.dirname, '../../../deploy/joy-media.nginx.conf'),

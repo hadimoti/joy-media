@@ -63,6 +63,7 @@ import {
 } from './protocol.js';
 import * as renderPage from './render-page.js';
 import type { OfflineRenderPage } from './render-page.js';
+import { runSubprocess } from './subprocess.js';
 
 const PINNED_CAPTION_FONT_SHA256 =
   '932319d2ebd6fe90f6eaf3e785694a9dd9210a098575d98967709477688b1cac';
@@ -680,7 +681,7 @@ async function renderSourceBackedBundleToFile(
       sources.buses,
       masterLimiter,
     );
-    const result = spawnSync('ffmpeg', args, { shell: false, encoding: 'utf8' });
+    const result = await runSubprocess('ffmpeg', args);
     if (result.status !== 0) {
       throw new Error(`source-backed ffmpeg export failed: ${result.stderr}`);
     }

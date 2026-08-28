@@ -1623,8 +1623,14 @@ export async function refreshCatalogThenReport(
   report: (status: string) => void,
   operationStatus: string,
 ): Promise<void> {
-  await refresh();
-  report(operationStatus);
+  try {
+    await refresh();
+    report(operationStatus);
+  } catch (error) {
+    report(
+      `${operationStatus} The catalog could not be refreshed: ${message(error)}. Use Refresh to reload the asset list.`,
+    );
+  }
 }
 
 export async function addAssetAsSticker({

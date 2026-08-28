@@ -13,6 +13,8 @@ jobs:
           node-version: 22
       - run: corepack enable pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Audit production dependencies
+        run: pnpm audit --prod --audit-level high
       # The editor budget test reads Vite's generated manifest, so a clean CI
       # checkout must build the editor before `pnpm check` collects that test.
       - run: pnpm --filter @joy-media/editor-web build

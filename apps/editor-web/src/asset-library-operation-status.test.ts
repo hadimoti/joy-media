@@ -59,6 +59,22 @@ describe('asset-library privacy operation status', () => {
     ]);
   });
 
+  it('preserves a completed import result when only the catalog refresh fails', async () => {
+    const refresh = vi.fn(async () => {
+      throw new Error('session offline');
+    });
+    const report = vi.fn<(status: string) => void>();
+
+    await expect(
+      refreshCatalogThenReport(refresh, report, 'photo.png is stored locally.'),
+    ).resolves.toBeUndefined();
+
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(report).toHaveBeenCalledWith(
+      'photo.png is stored locally. The catalog could not be refreshed: session offline. Use Refresh to reload the asset list.',
+    );
+  });
+
   it('keeps logout/read failures fail-closed and privacy copy local-first', () => {
     const source = readFileSync(
       fileURLToPath(new URL('./AssetLibraryPanel.tsx', import.meta.url)),
