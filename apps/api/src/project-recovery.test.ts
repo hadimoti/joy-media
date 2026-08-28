@@ -145,6 +145,56 @@ describe('recovered project copies', () => {
     });
   });
 
+  it('maps malformed persisted recovery provenance to a typed database error', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+    const owner = { id: 'malformed-recovery-owner' };
+    await api.createProject(owner, 'malformed-recovery-source', 'Source');
+    await api.appendProjectRevision(owner, 'malformed-recovery-source', {
+      baseRevision: 0,
+      idempotencyKey: 'malformed-source-1',
+      document: sourceDocument('malformed-recovery-source', 'One'),
+    });
+    await api.appendProjectRevision(owner, 'malformed-recovery-source', {
+      baseRevision: 1,
+      idempotencyKey: 'malformed-source-2',
+      document: sourceDocument('malformed-recovery-source', 'Two'),
+    });
+    const input = {
+      baseRevision: 1,
+      idempotencyKey: 'malformed-recover-1',
+      suggestedName: 'Recovered',
+      operation: { kind: 'restore' as const, targetRevision: 1 },
+    };
+    const valid = await api.createRecoveredCopy(owner, 'malformed-recovery-source', input);
+    const malformedResponses: readonly unknown[] = [
+      { ...valid, provenance: null },
+      { ...valid, provenance: { ...valid.provenance, operation: null } },
+      {
+        ...valid,
+        provenance: { ...valid.provenance, operation: { kind: 'unknown' } },
+      },
+      {
+        ...valid,
+        provenance: { ...valid.provenance, operation: { kind: 'append' } },
+      },
+    ];
+
+    for (const response of malformedResponses) {
+      await pool.query(
+        `UPDATE project_recovery_copies SET response = $1::jsonb
+         WHERE source_project_id = $2 AND idempotency_key = $3`,
+        [JSON.stringify(response), 'malformed-recovery-source', input.idempotencyKey],
+      );
+      await expect(
+        api.createRecoveredCopy(owner, 'malformed-recovery-source', input),
+      ).rejects.toMatchObject({ code: 'DATABASE_ERROR' });
+    }
+  });
+
   it('hides cross-owner duplicate project creation in PostgreSQL', async () => {
     const database = newDb();
     const adapter = database.adapters.createPg();

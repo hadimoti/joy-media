@@ -63,7 +63,13 @@ describe('project document revisions', () => {
       ['cloudRef', 'private-object-key'],
       ['objectKey', 'private-object-key'],
       ['credentials', { accessKey: 'credential-value' }],
+      ['apiKey', 'credential-value'],
+      ['privateKey', 'credential-value'],
+      ['clientSecret', 'credential-value'],
+      ['password', 'credential-value'],
+      ['authorization', 'Bearer credential-value'],
       ['accessToken', 'token-value'],
+      ['bearerToken', 'token-value'],
     ] as const) {
       await expect(
         api.appendProjectRevision(owner, 'project-2', {

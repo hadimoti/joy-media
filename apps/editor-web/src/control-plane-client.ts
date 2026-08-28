@@ -18,7 +18,7 @@ import type {
   ProviderApprovalGrant,
   ProviderApprovalPreflight,
 } from '@joy-media/provider-sdk';
-import type { ProjectDocumentV2 } from '@joy-media/project-schema';
+import { validateProjectDocumentV2, type ProjectDocumentV2 } from '@joy-media/project-schema';
 import { DerivativeAuthorityRevokedError } from './asset-resolver.js';
 import { getStoredMediaToken } from './media-session.js';
 import { BrowserControlPlaneError } from './control-plane-errors.js';
@@ -375,7 +375,9 @@ export class BrowserControlPlaneClient {
     return this.get(`/v1/projects/${encodeURIComponent(id)}`);
   }
   async projectDocument(id: string): Promise<BrowserProjectDocumentSnapshot> {
-    return this.get(`/v2/projects/${encodeURIComponent(id)}/document`);
+    return browserProjectDocumentSnapshot(
+      await this.get<unknown>(`/v2/projects/${encodeURIComponent(id)}/document`),
+    );
   }
   async appendProjectRevision(
     projectId: string,
@@ -386,10 +388,16 @@ export class BrowserControlPlaneClient {
       readonly label?: string;
     },
   ): Promise<BrowserProjectRevision> {
-    return this.post(`/v2/projects/${encodeURIComponent(projectId)}/revisions`, input);
+    return browserProjectRevision(
+      await this.post<unknown>(`/v2/projects/${encodeURIComponent(projectId)}/revisions`, input),
+    );
   }
   async projectRevision(projectId: string, revision: number): Promise<BrowserProjectRevision> {
-    return this.get(`/v2/projects/${encodeURIComponent(projectId)}/revisions/${revision}`);
+    return browserProjectRevision(
+      await this.get<unknown>(
+        `/v2/projects/${encodeURIComponent(projectId)}/revisions/${revision}`,
+      ),
+    );
   }
   async restoreProjectRevision(
     projectId: string,
@@ -400,13 +408,20 @@ export class BrowserControlPlaneClient {
       readonly label?: string;
     },
   ): Promise<BrowserProjectRevision> {
-    return this.post(`/v2/projects/${encodeURIComponent(projectId)}/restore`, input);
+    return browserProjectRevision(
+      await this.post<unknown>(`/v2/projects/${encodeURIComponent(projectId)}/restore`, input),
+    );
   }
   async recoverStaleRevision(
     sourceProjectId: string,
     input: BrowserProjectRecoveredCopyInput,
   ): Promise<BrowserProjectRecoveredCopy> {
-    return this.post(`/v2/projects/${encodeURIComponent(sourceProjectId)}/recovered-copies`, input);
+    return browserRecoveredCopy(
+      await this.post<unknown>(
+        `/v2/projects/${encodeURIComponent(sourceProjectId)}/recovered-copies`,
+        input,
+      ),
+    );
   }
   async ensureProject(id: string, title: string): Promise<BrowserProject> {
     try {
@@ -842,6 +857,126 @@ async function responseBody(response: Response): Promise<unknown> {
 }
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function browserProjectDocumentSnapshot(value: unknown): BrowserProjectDocumentSnapshot {
+  if (!isRecord(value)) throw invalidProjectResponse();
+  const projectId = projectResponseString(value.projectId);
+  return {
+    projectId,
+    revision: projectResponsePositiveInteger(value.revision),
+    document: browserProjectDocument(value.document, projectId),
+    documentHash: projectResponseString(value.documentHash),
+    updatedAt: projectResponseString(value.updatedAt),
+  };
+}
+
+function browserProjectRevision(value: unknown): BrowserProjectRevision {
+  if (!isRecord(value)) throw invalidProjectResponse();
+  const projectId = projectResponseString(value.projectId);
+  return {
+    projectId,
+    revision: projectResponsePositiveInteger(value.revision),
+    baseRevision: projectResponseNonNegativeInteger(value.baseRevision),
+    idempotencyKey: projectResponseString(value.idempotencyKey),
+    operation: browserProjectRevisionOperation(value.operation),
+    document: browserProjectDocument(value.document, projectId),
+    documentHash: projectResponseString(value.documentHash),
+    createdAt: projectResponseString(value.createdAt),
+  };
+}
+
+function browserProjectRevisionOperation(value: unknown): BrowserProjectRevision['operation'] {
+  if (!isRecord(value) || (value.kind !== 'replace' && value.kind !== 'restore'))
+    throw invalidProjectResponse();
+  const label = optionalProjectResponseString(value.label);
+  const targetRevision = optionalProjectResponsePositiveInteger(value.targetRevision);
+  if (value.kind === 'restore' && targetRevision === undefined) throw invalidProjectResponse();
+  return {
+    kind: value.kind,
+    idempotencyKey: projectResponseString(value.idempotencyKey),
+    ...(label === undefined ? {} : { label }),
+    ...(targetRevision === undefined ? {} : { targetRevision }),
+  };
+}
+
+function browserRecoveredCopy(value: unknown): BrowserProjectRecoveredCopy {
+  if (!isRecord(value) || value.kind !== 'recovered-copy' || !isRecord(value.provenance))
+    throw invalidProjectResponse();
+  const projectId = projectResponseString(value.projectId);
+  const provenance = value.provenance;
+  return {
+    kind: 'recovered-copy',
+    projectId,
+    name: projectResponseString(value.name),
+    document: browserProjectDocument(value.document, projectId),
+    basedOnRevision: projectResponseNonNegativeInteger(value.basedOnRevision),
+    serverRevision: projectResponsePositiveInteger(value.serverRevision),
+    createdAt: projectResponseString(value.createdAt),
+    provenance: {
+      sourceProjectId: projectResponseString(provenance.sourceProjectId),
+      baseRevision: projectResponseNonNegativeInteger(provenance.baseRevision),
+      sourceHeadRevision: projectResponseNonNegativeInteger(provenance.sourceHeadRevision),
+      operation: browserRecoveredOperation(provenance.operation),
+      requestedDocumentHash: projectResponseString(provenance.requestedDocumentHash),
+    },
+  };
+}
+
+function browserRecoveredOperation(value: unknown): BrowserRecoveredCopyOperation {
+  if (!isRecord(value)) throw invalidProjectResponse();
+  const label = optionalProjectResponseString(value.label);
+  if (value.kind === 'append') {
+    return {
+      kind: 'append',
+      document: browserProjectDocument(value.document),
+      ...(label === undefined ? {} : { label }),
+    };
+  }
+  if (value.kind === 'restore') {
+    return {
+      kind: 'restore',
+      targetRevision: projectResponsePositiveInteger(value.targetRevision),
+      ...(label === undefined ? {} : { label }),
+    };
+  }
+  throw invalidProjectResponse();
+}
+
+function browserProjectDocument(value: unknown, expectedProjectId?: string): ProjectDocumentV2 {
+  const diagnostics = validateProjectDocumentV2(value);
+  if (diagnostics.length > 0) throw invalidProjectResponse();
+  const document = value as ProjectDocumentV2;
+  if (expectedProjectId !== undefined && document.projectId !== expectedProjectId)
+    throw invalidProjectResponse();
+  return JSON.parse(JSON.stringify(document)) as ProjectDocumentV2;
+}
+
+function projectResponseString(value: unknown): string {
+  if (typeof value !== 'string' || value.length === 0) throw invalidProjectResponse();
+  return value;
+}
+
+function optionalProjectResponseString(value: unknown): string | undefined {
+  return value === undefined ? undefined : projectResponseString(value);
+}
+
+function projectResponsePositiveInteger(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1) throw invalidProjectResponse();
+  return value as number;
+}
+
+function projectResponseNonNegativeInteger(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) throw invalidProjectResponse();
+  return value as number;
+}
+
+function optionalProjectResponsePositiveInteger(value: unknown): number | undefined {
+  return value === undefined ? undefined : projectResponsePositiveInteger(value);
+}
+
+function invalidProjectResponse(): Error {
+  return new Error('JOY Media API returned an invalid project response');
 }
 
 function browserAssetList(value: unknown): readonly BrowserAsset[] {

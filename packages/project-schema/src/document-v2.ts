@@ -32,7 +32,7 @@ export interface ProjectDocumentV2 {
 // Reject transport/storage-bearing fields while allowing opaque references
 // such as assetRef/mediaRef and ordinary domain keys such as mediaType.
 const FORBIDDEN_KEYS =
-  /^(?:raw(?:Media|Bytes)?|media|bytes|base64|buffer|blob|path|url|uri|locations|cloudRef|localRef|objectKey|credentials?|secret|accessToken|refreshToken|sessionToken|pairingCode|.*(?:Path|Url|Uri|Bytes|Base64|Buffer|Blob|MediaData))$/i;
+  /^(?:raw(?:Media|Bytes)?|media|bytes|base64|buffer|blob|path|url|uri|locations|cloudRef|localRef|objectKey|credentials?|secret|clientSecret|apiKey|privateKey|password|authorization|accessToken|refreshToken|sessionToken|bearerToken|pairingCode|.*(?:Path|Url|Uri|Bytes|Base64|Buffer|Blob|MediaData))$/i;
 const MAX_DEPTH = 32;
 const MAX_NODES = 50_000;
 const MAX_STRING_LENGTH = 16_384;

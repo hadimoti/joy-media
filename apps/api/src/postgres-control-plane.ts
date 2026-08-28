@@ -2730,22 +2730,74 @@ function parseRecoveredCopy(value: unknown): RecoveredCopy {
     }
   }
   if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate))
-    throw new ControlPlaneError('DATABASE_ERROR', 'stored recovered copy is invalid');
-  const result = candidate as RecoveredCopy;
-  if (
-    result.kind !== 'recovered-copy' ||
-    typeof result.projectId !== 'string' ||
-    typeof result.name !== 'string' ||
-    result.document === undefined ||
-    result.provenance === undefined
-  )
-    throw new ControlPlaneError('DATABASE_ERROR', 'stored recovered copy is invalid');
+    throw invalidStoredRecoveredCopy();
+  const result = candidate as Record<string, unknown>;
+  if (result.kind !== 'recovered-copy' || !isStoredRecord(result.provenance))
+    throw invalidStoredRecoveredCopy();
+  const projectId = storedRecoveryString(result.projectId);
   const document = parseProjectDocument(result.document);
-  if (document.projectId !== result.projectId)
-    throw new ControlPlaneError('DATABASE_ERROR', 'stored recovered copy is invalid');
-  const operation = result.provenance.operation;
-  if (operation.kind === 'append') parseProjectDocument(operation.document);
-  return cloneJson(result);
+  if (document.projectId !== projectId) throw invalidStoredRecoveredCopy();
+  const provenance = result.provenance;
+  const operation = storedRecoveredOperation(provenance.operation);
+  return {
+    kind: 'recovered-copy',
+    projectId,
+    name: storedRecoveryString(result.name),
+    document,
+    basedOnRevision: storedRecoveryNonNegativeInteger(result.basedOnRevision),
+    serverRevision: storedRecoveryPositiveInteger(result.serverRevision),
+    createdAt: storedRecoveryString(result.createdAt),
+    provenance: {
+      sourceProjectId: storedRecoveryString(provenance.sourceProjectId),
+      baseRevision: storedRecoveryNonNegativeInteger(provenance.baseRevision),
+      sourceHeadRevision: storedRecoveryNonNegativeInteger(provenance.sourceHeadRevision),
+      operation,
+      requestedDocumentHash: storedRecoveryString(provenance.requestedDocumentHash),
+    },
+  };
+}
+
+function storedRecoveredOperation(value: unknown): RecoveredCopyProvenance['operation'] {
+  if (!isStoredRecord(value)) throw invalidStoredRecoveredCopy();
+  const label = value.label === undefined ? undefined : storedRecoveryString(value.label);
+  if (value.kind === 'append') {
+    return {
+      kind: 'append',
+      document: parseProjectDocument(value.document),
+      ...(label === undefined ? {} : { label }),
+    };
+  }
+  if (value.kind === 'restore') {
+    return {
+      kind: 'restore',
+      targetRevision: storedRecoveryPositiveInteger(value.targetRevision),
+      ...(label === undefined ? {} : { label }),
+    };
+  }
+  throw invalidStoredRecoveredCopy();
+}
+
+function isStoredRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function storedRecoveryString(value: unknown): string {
+  if (typeof value !== 'string' || value.length === 0) throw invalidStoredRecoveredCopy();
+  return value;
+}
+
+function storedRecoveryNonNegativeInteger(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) throw invalidStoredRecoveredCopy();
+  return value as number;
+}
+
+function storedRecoveryPositiveInteger(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1) throw invalidStoredRecoveredCopy();
+  return value as number;
+}
+
+function invalidStoredRecoveredCopy(): ControlPlaneError {
+  return new ControlPlaneError('DATABASE_ERROR', 'stored recovered copy is invalid');
 }
 
 function projectRevisionOf(row: ProjectRevisionRow): ProjectRevisionV1 {

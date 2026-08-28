@@ -18,6 +18,8 @@ describe('BrowserControlPlaneClient', () => {
           basedOnRevision: 3,
           serverRevision: 7,
           createdAt: '2026-08-26T00:00:00.000Z',
+          cloudRef: 'private-object-key',
+          credentials: 'credential-value',
           provenance: {
             sourceProjectId: 'source-project-1',
             baseRevision: 3,
@@ -25,29 +27,33 @@ describe('BrowserControlPlaneClient', () => {
             operation: {
               kind: 'append',
               document: { schemaVersion: 2, projectId: 'source-project-1' },
+              bearerToken: 'token-value',
             },
             requestedDocumentHash: 'hash-requested',
+            privateKey: 'credential-value',
           },
         },
       });
     };
     try {
       const client = new BrowserControlPlaneClient('/api', () => 'token');
-      await expect(
-        client.recoverStaleRevision('source/project', {
-          baseRevision: 3,
-          idempotencyKey: 'recover-1',
-          suggestedName: 'Campaign (Recovered copy)',
-          operation: {
-            kind: 'append',
-            document: { schemaVersion: 2, projectId: 'source-project-1' },
-          },
-        }),
-      ).resolves.toMatchObject({
+      const recovered = await client.recoverStaleRevision('source/project', {
+        baseRevision: 3,
+        idempotencyKey: 'recover-1',
+        suggestedName: 'Campaign (Recovered copy)',
+        operation: {
+          kind: 'append',
+          document: { schemaVersion: 2, projectId: 'source-project-1' },
+        },
+      });
+      expect(recovered).toMatchObject({
         kind: 'recovered-copy',
         projectId: 'recovered-project-1',
         provenance: { sourceProjectId: 'source-project-1', sourceHeadRevision: 7 },
       });
+      expect(JSON.stringify(recovered)).not.toMatch(
+        /cloudRef|credentials|privateKey|bearerToken|private-object-key|credential-value|token-value/,
+      );
     } finally {
       globalThis.fetch = original;
     }
@@ -84,6 +90,126 @@ describe('BrowserControlPlaneClient', () => {
         code: 'REVISION_CONFLICT',
         status: 409,
       });
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('rejects unsafe nested project documents across document, revision, restore, and recovery responses', async () => {
+    const safeDocument = { schemaVersion: 2 as const, projectId: 'project-1' };
+    const unsafeDocument = {
+      ...safeDocument,
+      assets: {
+        image: {
+          assetRef: 'opaque-asset-id',
+          locations: [{ kind: 'private-object', ref: 'private-object-key' }],
+        },
+      },
+    };
+    const revision = {
+      projectId: 'project-1',
+      revision: 1,
+      baseRevision: 0,
+      idempotencyKey: 'revision-1',
+      operation: { kind: 'replace', idempotencyKey: 'revision-1' },
+      document: unsafeDocument,
+      documentHash: 'hash',
+      createdAt: 'now',
+    };
+    const recovered = {
+      kind: 'recovered-copy',
+      projectId: 'project-1',
+      name: 'Recovered',
+      document: unsafeDocument,
+      basedOnRevision: 0,
+      serverRevision: 1,
+      createdAt: 'now',
+      provenance: {
+        sourceProjectId: 'source-project',
+        baseRevision: 0,
+        sourceHeadRevision: 1,
+        operation: { kind: 'restore', targetRevision: 1 },
+        requestedDocumentHash: 'hash',
+      },
+    };
+    let responseData: unknown;
+    const original = globalThis.fetch;
+    globalThis.fetch = async () => json(200, { data: responseData });
+    try {
+      const client = new BrowserControlPlaneClient('/api', () => 'token');
+      const cases: readonly {
+        readonly data: unknown;
+        readonly invoke: () => Promise<unknown>;
+      }[] = [
+        {
+          data: {
+            projectId: 'project-1',
+            revision: 1,
+            document: unsafeDocument,
+            documentHash: 'hash',
+            updatedAt: 'now',
+          },
+          invoke: () => client.projectDocument('project-1'),
+        },
+        {
+          data: revision,
+          invoke: () =>
+            client.appendProjectRevision('project-1', {
+              baseRevision: 0,
+              idempotencyKey: 'revision-1',
+              document: safeDocument,
+            }),
+        },
+        {
+          data: revision,
+          invoke: () => client.projectRevision('project-1', 1),
+        },
+        {
+          data: {
+            ...revision,
+            operation: { kind: 'restore', idempotencyKey: 'revision-1', targetRevision: 1 },
+          },
+          invoke: () =>
+            client.restoreProjectRevision('project-1', {
+              baseRevision: 0,
+              revision: 1,
+              idempotencyKey: 'revision-1',
+            }),
+        },
+        {
+          data: recovered,
+          invoke: () =>
+            client.recoverStaleRevision('source-project', {
+              baseRevision: 0,
+              idempotencyKey: 'recover-unsafe-1',
+              suggestedName: 'Recovered',
+              operation: { kind: 'restore', targetRevision: 1 },
+            }),
+        },
+        {
+          data: {
+            ...recovered,
+            document: safeDocument,
+            provenance: {
+              ...recovered.provenance,
+              operation: { kind: 'append', document: unsafeDocument },
+            },
+          },
+          invoke: () =>
+            client.recoverStaleRevision('source-project', {
+              baseRevision: 0,
+              idempotencyKey: 'recover-unsafe-2',
+              suggestedName: 'Recovered',
+              operation: { kind: 'restore', targetRevision: 1 },
+            }),
+        },
+      ];
+      for (const testCase of cases) {
+        responseData = testCase.data;
+        await expect(testCase.invoke()).rejects.toThrow(
+          'JOY Media API returned an invalid project response',
+        );
+      }
     } finally {
       globalThis.fetch = original;
     }
