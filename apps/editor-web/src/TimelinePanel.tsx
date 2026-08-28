@@ -2260,7 +2260,19 @@ export function TimelinePanel({
                     event.stopPropagation();
                     const items = buildTrackHeaderContextMenu(
                       () => {},
-                      () => {},
+                      () =>
+                        onDispatch({
+                          label: `Remove ${source.name ?? source.id}`,
+                          commands: [
+                            {
+                              type: 'timeline.removeTrack',
+                              payload: {
+                                compositionId: composition.id,
+                                trackId: source.id,
+                              },
+                            },
+                          ],
+                        }),
                       (visible: boolean) => setVisibility(track.id, visible),
                       source.enabled ?? true,
                       source.clips.length === 0 && composition.tracks.length > 1,

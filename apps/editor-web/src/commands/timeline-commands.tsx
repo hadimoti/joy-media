@@ -623,12 +623,19 @@ export function buildEmptyCanvasContextMenu(
 
 export function buildTrackHeaderContextMenu(
   _onAddTrack: () => void,
-  _onRemoveTrack: () => void,
+  onRemoveTrack: () => void,
   onToggleVisibility: (visible: boolean) => void,
   currentVisible: boolean,
-  _canRemove: boolean,
+  canRemoveTrack = false,
 ): readonly ContextMenuItem[] {
   return [
+    {
+      label: 'Remove Track',
+      icon: TrashIcon,
+      shortcut: 'Shift+T',
+      action: onRemoveTrack,
+      disabled: !canRemoveTrack,
+    },
     {
       label: currentVisible ? 'Hide Track' : 'Show Track',
       shortcut: 'E',
