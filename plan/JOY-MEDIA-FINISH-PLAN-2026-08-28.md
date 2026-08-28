@@ -492,7 +492,7 @@ or raw secret-bearing artifacts.
 
 ## Execution checkpoint — 2026-08-28
 
-- The local JOY Media hardening checkpoint is committed through `8eeba0e` on
+- The local JOY Media hardening checkpoint is committed through `d3ad59b` on
   `codex/joy-media-implement-20260828`; its pre-merge state is preserved at
   `backup/joy-media-before-main-merge-20260828`.
 - The checkpoint passes `pnpm typecheck`, `pnpm format:check`, and the full `pnpm test`
@@ -504,6 +504,9 @@ or raw secret-bearing artifacts.
   reasoning responses after project/revision changes, prevent duplicate submits, and expose
   accessible failure alerts. Asset-library audio/video insertion is wired by `ecbdd56` and
   `e06c4cc` with routing/type-contract tests.
+- Deployment documentation now requires the four generated `JOY_MEDIA_RELEASE_*` values in
+  `/etc/joy-media/api.env`, sourced from the exact release manifest, so the new readiness gate
+  cannot be bypassed by a stale or partial deployment.
 - A GitHub branch has been published at
   `codex/joy-media-implement-20260828` for review.
 - The release evaluator run at 2026-08-28T11:58:05Z passes command health, tests,
