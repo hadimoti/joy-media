@@ -94,6 +94,9 @@ must be removed on the reconciliation branch.
 - Public `/api/health` returns HTTP 200 with `controlPlane:true`, but the authenticated UI reports
   cloud sync unavailable and Verified delivery unavailable. Current health is therefore not a
   readiness signal.
+- A fresh public GET of `/api/ready` still returns HTTP 200 with only the legacy
+  `ok/service/readiness/controlPlane` fields; it does not expose dependency checks or release
+  identity. The candidate's new `/ready` contract is therefore not live until an approved deploy.
 - The currently deployed release references `/transitions/preview/transition1.png` and
   `transition2.png`, which return the SPA body instead of image bytes; the browser records a
   transition preview load error. The checkpoint now ships deterministic source-controlled SVG
