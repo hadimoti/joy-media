@@ -439,7 +439,7 @@ describe('PostgresControlPlane', () => {
     await pool.end();
   });
 
-  it('does not lease an expired PostgreSQL job after its attempt budget is exhausted', async () => {
+  it('durably terminalizes an expired PostgreSQL lease after its attempt budget is exhausted', async () => {
     const database = newDb();
     const adapter = database.adapters.createPg();
     const pool = new adapter.Pool() as Pool;
@@ -470,9 +470,25 @@ describe('PostgresControlPlane', () => {
       state: 'leased',
     });
     await expect(api.lease('attempt-worker', 104, 30_000)).resolves.toBeUndefined();
-    await expect(api.jobsForProject(owner, 'attempt-project')).resolves.toMatchObject([
-      { id: 'attempt-job', state: 'leased' },
+    const [job] = await api.jobsForProject(owner, 'attempt-project');
+    expect(job).toMatchObject({
+      id: 'attempt-job',
+      state: 'failed',
+      error: 'Worker attempt budget exhausted',
+    });
+    expect(job).not.toHaveProperty('leaseOwner');
+    expect(job).not.toHaveProperty('leaseExpiresAt');
+    await expect(api.eventsAfter(owner, 'attempt-project', 0)).resolves.toMatchObject([
+      { type: 'queued' },
+      { type: 'leased' },
+      { type: 'failed' },
     ]);
+    const attempts = await pool.query<{ readonly completed_at: Date | null }>(
+      'SELECT completed_at FROM job_attempts WHERE job_id = $1',
+      ['attempt-job'],
+    );
+    expect(attempts.rows).toHaveLength(1);
+    expect(attempts.rows[0]?.completed_at).toEqual(new Date(104));
     await pool.end();
   });
 

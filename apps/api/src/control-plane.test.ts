@@ -137,6 +137,45 @@ describe('local control plane', () => {
     ).toMatchObject({ state: 'completed' });
   });
 
+  it('terminalizes an expired lease when its Worker attempt budget is exhausted', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'attempt-owner' };
+    api.createProject(owner, 'attempt-project', 'Attempts');
+    api.pairWorker(owner, 'attempt-worker');
+    api.helloWorker('attempt-worker', ['render.inspect'], [], 100);
+    api.enqueue(owner, 'attempt-job', 'attempt-project', 'render.inspect', 101, undefined, {
+      protocolVersion: 1,
+      jobId: 'attempt-job',
+      type: 'render.inspect',
+      payload: {
+        projectRef: 'attempt-project',
+        compositionId: 'composition-main',
+        presetId: 'inspect',
+        reportRef: 'report-attempt-job',
+        legacyVersion: 0,
+      },
+      requirements: { capabilities: ['render.inspect'], privacy: 'local-only' },
+      idempotencyKey: 'attempt-job',
+      maxAttempts: 1,
+    });
+
+    expect(api.lease('attempt-worker', 102, 1)).toMatchObject({ state: 'leased' });
+    expect(api.lease('attempt-worker', 104, 30_000)).toBeUndefined();
+    const [job] = api.jobsForProject(owner, 'attempt-project');
+    expect(job).toMatchObject({
+      id: 'attempt-job',
+      state: 'failed',
+      error: 'Worker attempt budget exhausted',
+    });
+    expect(job).not.toHaveProperty('leaseOwner');
+    expect(job).not.toHaveProperty('leaseExpiresAt');
+    expect(api.eventsAfter(owner, 'attempt-project', 0).map((event) => event.type)).toEqual([
+      'queued',
+      'leased',
+      'failed',
+    ]);
+  });
+
   it('rejects unknown job types, capability-mismatched leases, and duplicate enqueue overwrites', () => {
     const api = new LocalControlPlane();
     const owner = { id: 'owner' };

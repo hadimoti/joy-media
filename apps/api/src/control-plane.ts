@@ -31,6 +31,7 @@ export interface Actor {
 /** The curated operator-managed library is the only cross-owner private-object catalog. */
 export const EXPLICIT_SHARED_LIBRARY_PROJECT_ID = 'joy-media-alpha-library';
 export const EXPLICIT_SHARED_LIBRARY_OWNER_ID = 'joy-media-library';
+const WORKER_ATTEMPT_BUDGET_EXHAUSTED = 'Worker attempt budget exhausted';
 export interface ProjectMetadata {
   readonly id: string;
   readonly title: string;
@@ -493,6 +494,7 @@ export class LocalControlPlane implements ControlPlane {
   readonly #projects = new Map<string, ProjectMetadata>();
   readonly #workers = new Map<string, WorkerRecord>();
   readonly #jobs = new Map<string, Job>();
+  readonly #jobAttempts = new Map<string, number>();
   readonly #revokedJobIds = new Set<string>();
   readonly #assets = new Map<string, MediaAssetRecord>();
   readonly #derivatives = new Map<string, MediaDerivativeRecord>();
@@ -1120,15 +1122,29 @@ export class LocalControlPlane implements ControlPlane {
     const worker = this.#workers.get(workerId);
     if (worker === undefined || worker.revoked || !worker.paired)
       throw new ControlPlaneError('WORKER_UNAUTHORIZED', workerId);
-    const job = [...this.#jobs.values()].find(
-      (item) =>
-        !this.#revokedJobIds.has(item.id) &&
-        isWorkerCompatible(worker, item) &&
-        (item.state === 'queued' ||
-          (item.state === 'leased' &&
+    let job: Job | undefined;
+    for (const item of this.#jobs.values()) {
+      if (
+        this.#revokedJobIds.has(item.id) ||
+        !isWorkerCompatible(worker, item) ||
+        (item.state !== 'queued' &&
+          !(
+            item.state === 'leased' &&
             item.leaseExpiresAt !== undefined &&
-            item.leaseExpiresAt <= now)),
-    );
+            item.leaseExpiresAt <= now
+          ))
+      )
+        continue;
+      const attempts = this.#jobAttempts.get(item.id) ?? 0;
+      if (item.maxAttempts !== undefined && attempts >= item.maxAttempts) {
+        const terminal = terminalJobAfterAttemptBudget(item);
+        this.#jobs.set(item.id, terminal);
+        this.event(item.id, terminal.state, now);
+        continue;
+      }
+      job = item;
+      break;
+    }
     if (job === undefined) return undefined;
     const leased: Job = {
       ...job,
@@ -1137,6 +1153,7 @@ export class LocalControlPlane implements ControlPlane {
       leaseExpiresAt: now + durationMs,
     };
     this.#jobs.set(job.id, leased);
+    this.#jobAttempts.set(job.id, (this.#jobAttempts.get(job.id) ?? 0) + 1);
     this.event(job.id, 'leased', now);
     return leased;
   }
@@ -1460,6 +1477,17 @@ function isSemanticIndexReceipt(
   } catch {
     return false;
   }
+}
+
+function terminalJobAfterAttemptBudget(job: Job): Job {
+  const terminal: { -readonly [Key in keyof Job]: Job[Key] } = { ...job };
+  terminal.state = job.cancelRequested ? 'canceled' : 'failed';
+  terminal.cancelRequested = false;
+  delete terminal.leaseOwner;
+  delete terminal.leaseExpiresAt;
+  if (terminal.state === 'canceled') delete terminal.error;
+  else terminal.error = WORKER_ATTEMPT_BUDGET_EXHAUSTED;
+  return terminal;
 }
 
 function isWorkerCompatible(worker: WorkerRecord, job: Job): boolean {

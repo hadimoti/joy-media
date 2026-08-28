@@ -59,6 +59,8 @@ import {
   type ProductionRunStore,
   type RespondToProductionApprovalInput,
 } from './production-runs.js';
+
+const WORKER_ATTEMPT_BUDGET_EXHAUSTED = 'Worker attempt budget exhausted';
 import {
   documentHash,
   rewriteRecoveredDocument,
@@ -1638,7 +1640,28 @@ export class PostgresControlPlane
             [item.id],
           );
           const count = Number(attempts.rows[0]?.count ?? 0);
-          if (count >= item.max_attempts) continue;
+          if (count >= item.max_attempts) {
+            const terminalState = item.cancel_requested ? 'canceled' : 'failed';
+            await client.query(
+              `UPDATE jobs SET state = $2, lease_owner = NULL, lease_expires_at = NULL,
+                   cancel_requested = false, error = $3
+               WHERE id = $1`,
+              [
+                item.id,
+                terminalState,
+                terminalState === 'failed' ? WORKER_ATTEMPT_BUDGET_EXHAUSTED : null,
+              ],
+            );
+            await client.query(
+              `UPDATE job_attempts SET completed_at = $2
+               WHERE id = (SELECT id FROM job_attempts
+                           WHERE job_id = $1 AND completed_at IS NULL
+                           ORDER BY id DESC LIMIT 1)`,
+              [item.id, new Date(now)],
+            );
+            await this.event(client, item.id, terminalState, now);
+            continue;
+          }
         }
         job = item;
         break;
