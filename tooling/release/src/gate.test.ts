@@ -10,6 +10,7 @@ import {
   REQUIRED_BUILD_IDS,
   REQUIRED_JOURNEY_ID,
   sha256File,
+  verifyRequiredEditorStaticAssets,
   verifyBrowserJourneyEvidence,
   writeReleaseEvidence,
   type ReleaseGateInput,
@@ -28,6 +29,7 @@ const passingInput = (): ReleaseGateInput => ({
   dirtyGeneratedArtifacts: [],
   fixtureHandlers: [],
   builds: Object.fromEntries(REQUIRED_BUILD_IDS.map((id) => [id, true])),
+  staticAssetPackaging: [],
   manifestGenerated: true,
   sbomGenerated: true,
   browserJourneys: [
@@ -101,6 +103,39 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(config).toContain('location ^~ /api/ {');
     expect(config.match(/try_files \$uri =404;/gu)).toHaveLength(2);
     expect(config.match(/try_files \$uri \$uri\/ \/index\.html;/gu)).toHaveLength(1);
+  });
+
+  it('fails the gate if required transition frames are not packaged as SVG', () => {
+    const result = evaluateReleaseGate({
+      ...passingInput(),
+      staticAssetPackaging: ['build output is not SVG: assets/transition-preview-frame-b.svg'],
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.checks.find((check) => check.id === 'static-assets')?.status).toBe('failed');
+  });
+
+  it('requires byte-for-byte SVG static assets in the editor build output', () => {
+    const root = mkdtempSync(join(tmpdir(), 'joy-release-static-assets-'));
+    const asset = 'assets/transition-preview-frame-a.svg';
+    const sourcePath = join(root, 'apps/editor-web/public', asset);
+    const outputPath = join(root, 'apps/editor-web/dist', asset);
+    mkdirSync(resolve(sourcePath, '..'), { recursive: true });
+    mkdirSync(resolve(outputPath, '..'), { recursive: true });
+    writeFileSync(sourcePath, '<svg viewBox="0 0 1 1"/>');
+    writeFileSync(outputPath, '<!doctype html><html></html>');
+
+    expect(verifyRequiredEditorStaticAssets(root)).toEqual([
+      `build output is not SVG: ${asset}`,
+      'source missing: assets/transition-preview-frame-b.svg',
+    ]);
+
+    writeFileSync(outputPath, '<svg viewBox="0 0 1 1"/>');
+    const secondSource = join(root, 'apps/editor-web/public/assets/transition-preview-frame-b.svg');
+    const secondOutput = join(root, 'apps/editor-web/dist/assets/transition-preview-frame-b.svg');
+    writeFileSync(secondSource, '<svg viewBox="0 0 1 1"/>');
+    writeFileSync(secondOutput, '<svg viewBox="0 0 1 1"/>');
+    expect(verifyRequiredEditorStaticAssets(root)).toEqual([]);
   });
 
   it('rejects dirty, missing, stale, or cross-revision browser provenance', () => {

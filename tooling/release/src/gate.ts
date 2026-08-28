@@ -8,6 +8,10 @@ export const REQUIRED_BUILD_IDS = ['editor', 'api', 'worker'] as const;
 export const REQUIRED_JOURNEY_ID = 'authenticated-editor-1.0' as const;
 export const RELEASE_STATUS_MAX_AGE_DAYS = 45;
 export const RELEASE_EVIDENCE_MAX_AGE_HOURS = 24;
+export const REQUIRED_EDITOR_STATIC_ASSETS = [
+  'assets/transition-preview-frame-a.svg',
+  'assets/transition-preview-frame-b.svg',
+] as const;
 
 export type ReleaseCheckStatus = 'passed' | 'failed' | 'waived';
 
@@ -30,6 +34,8 @@ export interface ReleaseGateInput {
   readonly dirtyGeneratedArtifacts: readonly string[];
   readonly fixtureHandlers: readonly string[];
   readonly builds: Readonly<Record<string, boolean>>;
+  /** Source-to-dist static asset checks from the clean editor build. */
+  readonly staticAssetPackaging: readonly string[];
   readonly manifestGenerated: boolean;
   readonly sbomGenerated: boolean;
   readonly browserJourneys: readonly ReleaseBrowserJourney[];
@@ -124,6 +130,13 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
       REQUIRED_BUILD_IDS.every((id) => input.builds[id] === true)
         ? 'editor, API, and Worker builds passed'
         : `missing or failed builds: ${REQUIRED_BUILD_IDS.filter((id) => input.builds[id] !== true).join(', ')}`,
+    ),
+    check(
+      'static-assets',
+      input.staticAssetPackaging.length === 0,
+      input.staticAssetPackaging.length === 0
+        ? 'required editor static assets are packaged as SVG, not an HTML fallback'
+        : `static asset packaging errors: ${input.staticAssetPackaging.join(', ')}`,
     ),
     check(
       'manifest',
@@ -398,6 +411,7 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     dirtyGeneratedArtifacts: dirtyGeneratedArtifacts(root),
     fixtureHandlers: findProductionFixtureRegistrations(root),
     builds: buildSuccess,
+    staticAssetPackaging: verifyRequiredEditorStaticAssets(root),
     manifestGenerated: true,
     sbomGenerated: true,
     browserJourneys,
@@ -408,6 +422,52 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     commandResults,
     sourceProvenance,
   };
+}
+
+/**
+ * The public transition frames have previously been shadowed by SPA fallbacks
+ * in production. Verify a clean Vite build copied the source-controlled SVGs
+ * byte-for-byte, and fail closed if either side resembles an HTML response.
+ *
+ * This is packaging evidence only. It deliberately does not claim that a live
+ * host served these files with the correct MIME type; that remains an origin
+ * and authenticated-browser release requirement.
+ */
+export function verifyRequiredEditorStaticAssets(root: string): readonly string[] {
+  const errors: string[] = [];
+  for (const asset of REQUIRED_EDITOR_STATIC_ASSETS) {
+    const sourcePath = join(root, 'apps/editor-web/public', asset);
+    const distPath = join(root, 'apps/editor-web/dist', asset);
+    if (!existsSync(sourcePath)) {
+      errors.push(`source missing: ${asset}`);
+      continue;
+    }
+    const source = readFileSync(sourcePath, 'utf8');
+    if (!isSvgDocument(source)) {
+      errors.push(`source is not SVG: ${asset}`);
+      continue;
+    }
+    if (!existsSync(distPath)) {
+      errors.push(`build output missing: ${asset}`);
+      continue;
+    }
+    const output = readFileSync(distPath, 'utf8');
+    if (!isSvgDocument(output)) {
+      errors.push(`build output is not SVG: ${asset}`);
+      continue;
+    }
+    if (output !== source) errors.push(`build output differs from source: ${asset}`);
+  }
+  return errors;
+}
+
+function isSvgDocument(value: string): boolean {
+  const normalized = value.trimStart().toLowerCase();
+  return (
+    normalized.startsWith('<svg') &&
+    !normalized.includes('<html') &&
+    !normalized.includes('<!doctype html')
+  );
 }
 
 export const RELEASE_COMMANDS: readonly [string, readonly string[]][] = [
