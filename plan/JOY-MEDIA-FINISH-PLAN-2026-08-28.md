@@ -171,6 +171,7 @@ reproduce it.
 | P1-23 | Effects keyboard/reduced motion        | Effect cards need a semantic keyboard add action and discoverable unavailable reason. Autoplay rejection/reduced-motion/hidden-tab paths must show a deterministic poster or fallback instead of silently blank media.                                                                                                                                                                                                                                      |
 | P1-24 | Library destructive-operation recovery | Replace blocking-only removal UX with focus-safe confirmation/status; storage failure must keep the project card/data intact and expose accessible retry.                                                                                                                                                                                                                                                                                                   |
 | P1-25 | Product identity                       | Choose JOY Studio or JOY Media as the canonical user-facing name and make HTML title, shell, login, project library, manifest, release docs and browser assertions agree.                                                                                                                                                                                                                                                                                   |
+| P1-26 | Responsive timeline semantics           | At the authenticated 480×1370 breakpoint, the timeline's Duplicate, Ripple Delete, Add Marker, Zoom in/out and range-slider controls are present but have zero-size/`display:none` geometry, leaving core edits unavailable except through undocumented keyboard paths. Repeated clips also expose duplicate accessible names (for example `Intro, 3.0s` and `Black Brush Stroke, 5.0s`), while track containers have no semantic role or accessible name. Expose an intentional compact-layout overflow/keyboard surface, keep zoom controls discoverable, add unique clip labels/IDs and labelled track groups, then rerun the responsive matrix at 320/480/768/1024/1280/1440 widths. |
 
 ### LIVE-13 — timeline browser certification (2026-08-29)
 
@@ -235,6 +236,32 @@ success; show an actionable error and retry on association or insertion failure;
 that starts from an unassociated cloud asset, observes the 200 association, sees the new clip and document revision,
 then reloads and confirms the clip remains. Repeat the same test for image, video, and audio assets and verify Undo.
 Until that evidence exists, P0-12 and the timeline portion of P1-07 remain open.
+
+### LIVE-17 — responsive timeline and semantic control pass (2026-08-29)
+
+The authenticated Codex in-app browser retested the live `915b0d9` build at both the compact
+480×1370 viewport and a 1366×900 desktop viewport. Inspector Effects/Audio/Transform and the
+Effects asset category remained stable: the URL stayed `https://joyst.ir/`, no recovery surface
+appeared, and the browser returned zero warning/error logs. Effect insertion completed with the
+success status and was reverted with Undo.
+
+The compact viewport exposed a release gap rather than a database outage. With a clip selected,
+the Duplicate and Ripple Delete buttons were present but their parent edit toolbar had
+`display:none` and zero-size geometry; Add Marker was likewise hidden. Zoom in/out and the
+`Timeline zoom` range input were also hidden, leaving Fit as the only visible zoom affordance.
+The same controls were visible at desktop width and keyboard duplication worked only after
+focusing the timeline panel, which is not discoverable from the compact UI. The timeline also
+contained duplicate accessible names (`Intro, 3.0s` and `Black Brush Stroke, 5.0s`) and its
+track containers had no role or accessible name, making screen-reader navigation and precise
+selection ambiguous. The playhead slider responded to arrows, but no keyboard shortcut is
+advertised.
+
+Required closure is tracked as P1-26/P1-07/P1-15: define and test a compact-layout overflow or
+keyboard surface for every edit/zoom command (including disabled reasons), expose a reachable
+zoom control, give each clip a unique accessible name that includes a stable identity/time range,
+label track groups and playhead keyboard semantics, and rerun the responsive matrix with a fresh
+project plus save/reopen and undo evidence. This pass does not reproduce the reported Effects
+subtab crash, but it does not close the broader Effects soak or release gates.
 
 ## Numeric release budgets and retained evidence
 
