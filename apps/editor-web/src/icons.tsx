@@ -415,6 +415,15 @@ export function ZoomOutIcon() {
   );
 }
 
+export function AspectRatioIcon() {
+  return (
+    <Svg>
+      <rect x="2" y="4" width="12" height="8" rx="1" />
+      <path d="M5 6.5h6M5 9.5h3" />
+    </Svg>
+  );
+}
+
 export function FitWidthIcon() {
   return <PngMaskIcon src={UI_ICONS.timelineFitWidth} size={16} />;
 }

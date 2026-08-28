@@ -99,6 +99,12 @@ export interface FreezeFramePayload extends TrackTarget {
 export interface RestoreTrackClipsPayload extends TrackTarget {
   readonly clips: readonly Clip[];
 }
+/** Update a composition canvas while preserving all timeline content. */
+export interface SetCompositionDimensionsPayload {
+  readonly compositionId: CompositionId;
+  readonly width: number;
+  readonly height: number;
+}
 export interface AddTrackPayload {
   readonly compositionId: CompositionId;
   readonly track: Track;
@@ -120,6 +126,10 @@ export type SpikeCommand =
   | { readonly type: 'timeline.setClipRate'; readonly payload: SetClipRatePayload }
   | { readonly type: 'timeline.freezeFrame'; readonly payload: FreezeFramePayload }
   | { readonly type: 'timeline.restoreTrackClips'; readonly payload: RestoreTrackClipsPayload }
+  | {
+      readonly type: 'timeline.setCompositionDimensions';
+      readonly payload: SetCompositionDimensionsPayload;
+    }
   | { readonly type: 'timeline.addTrack'; readonly payload: AddTrackPayload }
   | { readonly type: 'timeline.removeTrack'; readonly payload: RemoveTrackPayload }
   | { readonly type: 'property.setTrackEnabled'; readonly payload: SetTrackEnabledPayload };
@@ -146,6 +156,9 @@ export const COMMAND_REGISTRY: Readonly<
   },
   'timeline.restoreTrackClips': {
     description: 'Replace a track clip list (undo for compound edits).',
+  },
+  'timeline.setCompositionDimensions': {
+    description: 'Set a composition canvas width and height.',
   },
   'timeline.addTrack': { description: 'Add a track to a composition.' },
   'timeline.removeTrack': { description: 'Remove an empty track from a composition.' },
@@ -195,6 +208,8 @@ function applyCommandUnchecked(project: SpikeProject, command: SpikeCommand): Ap
       return applyFreezeFrame(project, command.payload);
     case 'timeline.restoreTrackClips':
       return applyRestoreTrackClips(project, command.payload);
+    case 'timeline.setCompositionDimensions':
+      return applySetCompositionDimensions(project, command.payload);
     case 'timeline.addTrack':
       return applyAddTrack(project, command.payload);
     case 'timeline.removeTrack':
@@ -751,6 +766,46 @@ function applySetTrackEnabled(project: SpikeProject, payload: SetTrackEnabledPay
     inverse: {
       type: 'property.setTrackEnabled',
       payload: { ...payload, enabled: track.enabled },
+    },
+  };
+}
+
+function isCanvasDimension(value: number): boolean {
+  return Number.isSafeInteger(value) && value > 0 && value <= 32_768;
+}
+
+function applySetCompositionDimensions(
+  project: SpikeProject,
+  payload: SetCompositionDimensionsPayload,
+): ApplyResult {
+  const composition = project.compositions[payload.compositionId];
+  if (composition === undefined) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_UNKNOWN_TARGET',
+      `unknown composition "${payload.compositionId}"`,
+    );
+  }
+  if (!isCanvasDimension(payload.width) || !isCanvasDimension(payload.height)) {
+    throw new CommandError(
+      'COMMAND_VALIDATION_RANGE',
+      'setCompositionDimensions: width and height must be whole pixels in [1, 32768]',
+    );
+  }
+  return {
+    project: {
+      ...project,
+      compositions: {
+        ...project.compositions,
+        [composition.id]: { ...composition, width: payload.width, height: payload.height },
+      },
+    },
+    inverse: {
+      type: 'timeline.setCompositionDimensions',
+      payload: {
+        compositionId: payload.compositionId,
+        width: composition.width,
+        height: composition.height,
+      },
     },
   };
 }

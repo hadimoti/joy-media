@@ -55,10 +55,42 @@ describe('applyCommand', () => {
       'timeline.removeTrack',
       'timeline.restoreTrackClips',
       'timeline.setClipRate',
+      'timeline.setCompositionDimensions',
       'timeline.splitClip',
       'timeline.trimClipEnd',
       'timeline.trimClipStart',
     ]);
+  });
+
+  it('changes composition dimensions as one reversible command without changing clips', () => {
+    const project = baseProject();
+    const { project: next, inverse } = applyCommand(project, {
+      type: 'timeline.setCompositionDimensions',
+      payload: { compositionId: 'root', width: 1080, height: 1080 },
+    });
+    expect(next.compositions.root).toMatchObject({ width: 1080, height: 1080 });
+    expect(next.compositions.root!.tracks).toEqual(project.compositions.root!.tracks);
+    expect(applyCommand(next, inverse).project).toEqual(project);
+  });
+
+  it('rejects invalid composition dimensions before changing the timeline', () => {
+    const project = baseProject();
+    expectCode(
+      () =>
+        applyCommand(project, {
+          type: 'timeline.setCompositionDimensions',
+          payload: { compositionId: 'root', width: 0, height: 1080 },
+        }),
+      'COMMAND_VALIDATION_RANGE',
+    );
+    expectCode(
+      () =>
+        applyCommand(project, {
+          type: 'timeline.setCompositionDimensions',
+          payload: { compositionId: 'missing', width: 1080, height: 1080 },
+        }),
+      'COMMAND_VALIDATION_UNKNOWN_TARGET',
+    );
   });
   it('inserts a clip into a gap and inverts to a remove', () => {
     const project = baseProject();

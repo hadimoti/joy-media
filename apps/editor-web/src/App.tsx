@@ -274,6 +274,7 @@ import type {
 } from '@joy-media/renderer-pixi/browser-export';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
+import { MonitorAspectRatioControl } from './MonitorAspectRatioSelector.js';
 import {
   buildTimelineFileImportTransactions,
   buildTimelineAssetInsertTransaction,
@@ -4863,6 +4864,8 @@ function MonitorPanel() {
     togglePlayback,
     seek,
     dispatchProject,
+    session,
+    bumpProjectRevision,
     showToast,
   } = context;
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -5316,6 +5319,13 @@ function MonitorPanel() {
           >
             <ZoomInIcon />
           </button>
+          <MonitorAspectRatioControl
+            session={session}
+            visualProject={visualProject}
+            timelineProject={timelineProject}
+            bumpProjectRevision={bumpProjectRevision}
+            showToast={showToast}
+          />
         </div>
       </div>
     </article>
