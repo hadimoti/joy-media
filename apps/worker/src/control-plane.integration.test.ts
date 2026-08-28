@@ -12,7 +12,8 @@ describe('Worker/control-plane export integration', () => {
     api.pairWorker(owner, 'worker');
     const now = Date.now();
     api.enqueue(owner, 'job', 'project', 'render.export', now);
-    expect(api.lease('worker', now + 1)?.id).toBe('job');
+    const lease = api.lease('worker', now + 1);
+    expect(lease?.id).toBe('job');
     const output = join(mkdtempSync(join(tmpdir(), 'joy-media-integration-')), 'output.mp4');
     executeLeasedExport(
       api,
@@ -28,6 +29,7 @@ describe('Worker/control-plane export integration', () => {
         preset: 'social-h264-aac',
       },
       output,
+      lease?.leaseToken,
     );
     expect(api.eventsAfter(owner, 'project', 0).map((event) => event.type)).toEqual([
       'queued',
@@ -43,8 +45,10 @@ describe('Worker/control-plane export integration', () => {
     api.pairWorker(owner, 'worker-new');
     const now = Date.now();
     api.enqueue(owner, 'job', 'project', 'render.export', now);
-    expect(api.lease('worker-old', now + 1, 5)?.leaseOwner).toBe('worker-old');
-    expect(api.lease('worker-new', now + 6, 30_000)?.leaseOwner).toBe('worker-new');
+    const oldLease = api.lease('worker-old', now + 1, 5);
+    expect(oldLease?.leaseOwner).toBe('worker-old');
+    const newLease = api.lease('worker-new', now + 6, 30_000);
+    expect(newLease?.leaseOwner).toBe('worker-new');
     expect(() => api.complete('worker-old', 'job', now + 7)).toThrow(
       expect.objectContaining({ code: 'LEASE_NOT_OWNED' }),
     );
@@ -63,6 +67,7 @@ describe('Worker/control-plane export integration', () => {
         preset: 'social-h264-aac',
       },
       output,
+      newLease?.leaseToken,
     );
     expect(api.eventsAfter(owner, 'project', 0).at(-1)?.type).toBe('completed');
   });

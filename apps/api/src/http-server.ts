@@ -353,6 +353,9 @@ async function route(
           decodeURIComponent(workerId),
           decodeURIComponent(workerHeartbeatMatch[2]!),
           requiredProgress(body),
+          undefined,
+          undefined,
+          requiredString(body, 'leaseToken'),
         ),
       });
       return;
@@ -364,6 +367,8 @@ async function route(
           decodeURIComponent(workerId),
           decodeURIComponent(workerFailMatch[2]!),
           requiredString(body, 'error'),
+          undefined,
+          requiredString(body, 'leaseToken'),
         ),
       });
       return;
@@ -422,16 +427,20 @@ async function route(
           availability: 'available-cloud',
           locations: [{ kind: 'private-object', ref }],
         },
+        undefined,
+        receipt.leaseToken,
       );
       respondJson(response, 201, { data: derivativeForBrowser(derivative) });
       return;
     }
+    const body = await readJson(request);
     respondJson(response, 200, {
       data: await options.controlPlane.complete(
         decodeURIComponent(workerId),
         decodeURIComponent(workerCompleteMatch![2]!),
         undefined,
-        optionalWorkerResult(await readJson(request)),
+        optionalWorkerResult(body),
+        requiredString(body, 'leaseToken'),
       ),
     });
     return;
@@ -1964,6 +1973,7 @@ function workerDerivativeHeaders(request: IncomingMessage): {
   readonly sha256: string;
   readonly bytes: number;
   readonly kind: 'thumbnail' | 'audio' | 'mask' | 'upscale';
+  readonly leaseToken: string;
   readonly descriptor: {
     readonly mimeType: string;
     readonly width?: number;
@@ -1979,6 +1989,7 @@ function workerDerivativeHeaders(request: IncomingMessage): {
   const heightHeader = request.headers['x-joy-height'];
   const durationHeader = request.headers['x-joy-duration-us'];
   const declaredKind = request.headers['x-joy-derivative-kind'];
+  const leaseToken = requiredHeader(request, 'x-joy-lease-token');
   const width = widthHeader === undefined ? undefined : Number(widthHeader);
   const height = heightHeader === undefined ? undefined : Number(heightHeader);
   const durationUs = durationHeader === undefined ? undefined : Number(durationHeader);
@@ -2044,6 +2055,7 @@ function workerDerivativeHeaders(request: IncomingMessage): {
     sha256,
     bytes,
     kind: isThumbnail ? 'thumbnail' : isMask ? 'mask' : isUpscale ? 'upscale' : 'audio',
+    leaseToken,
     descriptor: {
       mimeType,
       ...(width === undefined ? {} : { width }),
@@ -2136,6 +2148,7 @@ function jobForBrowser(job: Job) {
     id: job.id,
     projectId: job.projectId,
     type: job.type,
+    generation: job.generation,
     state: job.state,
     progress: job.progress,
     cancelRequested: job.cancelRequested,

@@ -34,7 +34,8 @@ describe('PostgresControlPlane', () => {
     await expect(first.authenticateWorker('session-hash', 102)).resolves.toBe('worker-1');
     await first.helloWorker('worker-1', ['asset.thumbnail'], ['asset-1'], 100);
     await first.enqueueAssetThumbnail(owner, 'job-1', 'project-1', 'asset-1', 100);
-    await expect(first.lease('worker-1', 101, 30_000)).resolves.toMatchObject({
+    const initialLease = await first.lease('worker-1', 101, 30_000);
+    expect(initialLease).toMatchObject({
       id: 'job-1',
       state: 'leased',
       leaseOwner: 'worker-1',
@@ -61,10 +62,10 @@ describe('PostgresControlPlane', () => {
       locations: [{ kind: 'private-object' as const, ref: 'worker-object-1' }],
     };
     await expect(
-      restarted.registerWorkerCloudDerivative('worker-1', 'job-1', workerDerivative, 101),
+      restarted.registerWorkerCloudDerivative('worker-1', 'job-1', workerDerivative, 101, initialLease?.leaseToken),
     ).resolves.toMatchObject({ id: 'derivative-job-1', verifiedAt: 101 });
     await expect(
-      restarted.registerWorkerCloudDerivative('worker-1', 'job-1', workerDerivative, 102),
+      restarted.registerWorkerCloudDerivative('worker-1', 'job-1', workerDerivative, 102, initialLease?.leaseToken),
     ).resolves.toMatchObject({ id: 'derivative-job-1', verifiedAt: 101 });
     await expect(
       restarted.registerWorkerCloudDerivative(
@@ -72,10 +73,11 @@ describe('PostgresControlPlane', () => {
         'job-1',
         { ...workerDerivative, profile: 'different-profile' },
         102,
+        initialLease?.leaseToken,
       ),
     ).rejects.toMatchObject({ code: 'DERIVATIVE_EXISTS' });
     await expect(
-      restarted.complete('worker-1', 'job-1', 102, realThumbnailReceipt()),
+      restarted.complete('worker-1', 'job-1', 102, realThumbnailReceipt(), initialLease?.leaseToken),
     ).resolves.toMatchObject({
       id: 'job-1',
       state: 'completed',
@@ -114,11 +116,19 @@ describe('PostgresControlPlane', () => {
     ]);
     const retried = await afterCompletionRestart.jobsForProject(owner, 'project-1');
     expect(retried[0]?.derivative).toBeUndefined();
-    await expect(afterCompletionRestart.lease('worker-1', 104, 30_000)).resolves.toMatchObject({
+    const retriedLease = await afterCompletionRestart.lease('worker-1', 104, 30_000);
+    expect(retriedLease).toMatchObject({
       id: 'job-1',
       assetId: 'asset-1',
       state: 'leased',
+      generation: 1,
     });
+    await expect(
+      afterCompletionRestart.complete('worker-1', 'job-1', 105, realThumbnailReceipt(), initialLease?.leaseToken),
+    ).rejects.toMatchObject({ code: 'LEASE_NOT_OWNED' });
+    await expect(
+      afterCompletionRestart.complete('worker-1', 'job-1', 106, realThumbnailReceipt(), retriedLease?.leaseToken),
+    ).resolves.toMatchObject({ state: 'completed', generation: 1 });
     await pool.end();
   });
 
@@ -196,14 +206,16 @@ describe('PostgresControlPlane', () => {
     });
     expect(job).not.toHaveProperty('leaseOwner');
     expect(job).not.toHaveProperty('leaseExpiresAt');
-    await expect(
-      controlPlane.retry(owner, 'attempt-project', 'attempt-job', 106),
-    ).rejects.toMatchObject({ code: 'JOB_NOT_RETRYABLE' });
+    await expect(controlPlane.retry(owner, 'attempt-project', 'attempt-job', 106)).resolves.toMatchObject({
+      state: 'queued',
+      generation: 1,
+    });
     await expect(controlPlane.eventsAfter(owner, 'attempt-project', 0)).resolves.toMatchObject([
       { type: 'queued' },
       { type: 'leased' },
       { type: 'leased' },
       { type: 'failed' },
+      { type: 'retried' },
     ]);
     const attempts = await pool.query<{ readonly completed_at: Date | null }>(
       'SELECT completed_at FROM job_attempts WHERE job_id = $1 ORDER BY id',

@@ -49,7 +49,12 @@ describe('WorkerControlPlaneClient', () => {
           });
         if (url.pathname.endsWith('/leases'))
           return response(200, {
-            data: { id: 'job-1', projectId: 'project-1', type: 'asset.thumbnail' },
+            data: {
+              id: 'job-1',
+              projectId: 'project-1',
+              type: 'asset.thumbnail',
+              leaseToken: 'lease-1',
+            },
           });
         if (url.pathname.endsWith('/complete')) return response(200, { data: { id: 'job-1' } });
         return response(404, { error: {} });
@@ -62,6 +67,7 @@ describe('WorkerControlPlaneClient', () => {
       id: 'job-1',
       projectId: 'project-1',
       type: 'asset.thumbnail',
+      leaseToken: 'lease-1',
     });
     await client.complete('job-1', realThumbnailReceipt());
 
@@ -169,8 +175,9 @@ describe('WorkerControlPlaneClient', () => {
         { id: 'job-1', type: 'asset.thumbnail', assetId: 'asset-1' },
         'joy-assertion',
       );
-      await expect(client.lease()).resolves.toMatchObject({ id: 'job-1' });
-      await expect(client.complete('job-1', realThumbnailReceipt())).resolves.toBeUndefined();
+      const lease = await client.lease();
+      expect(lease).toMatchObject({ id: 'job-1' });
+      await expect(client.complete('job-1', realThumbnailReceipt(), lease?.leaseToken)).resolves.toBeUndefined();
     } finally {
       await close(server);
     }

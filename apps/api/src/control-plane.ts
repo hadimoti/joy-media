@@ -329,9 +329,13 @@ export interface Job {
   readonly payload?: Readonly<Record<string, unknown>>;
   /** Optional per-job lease-attempt budget; omitted legacy jobs remain unbounded. */
   readonly maxAttempts?: number;
+  /** Manual retry generation; attempt budgets are scoped to this generation. */
+  readonly generation: number;
   readonly state: 'queued' | 'leased' | 'completed' | 'canceled' | 'failed';
   readonly leaseOwner?: string;
   readonly leaseExpiresAt?: number;
+  /** Opaque per-lease token; stale completions cannot reuse a worker identity. */
+  readonly leaseToken?: string;
   readonly progress: number;
   readonly cancelRequested: boolean;
   /** Safe, server-verified derivative metadata; never a local file or media payload. */
@@ -543,6 +547,7 @@ export interface ControlPlane {
     jobId: string,
     derivative: CloudDerivativeRegistration,
     now?: number,
+    leaseToken?: string,
   ): MediaDerivativeRecord | Promise<MediaDerivativeRecord>;
   derivativesForAsset(
     actor: Actor,
@@ -615,6 +620,7 @@ export interface ControlPlane {
     progress: number,
     now?: number,
     durationMs?: number,
+    leaseToken?: string,
   ):
     | { readonly job: Job; readonly cancelRequested: boolean }
     | Promise<{
@@ -626,8 +632,15 @@ export interface ControlPlane {
     jobId: string,
     now?: number,
     receipt?: WorkerResultReceipt,
+    leaseToken?: string,
   ): Job | Promise<Job>;
-  fail(workerId: string, jobId: string, error: string, now?: number): Job | Promise<Job>;
+  fail(
+    workerId: string,
+    jobId: string,
+    error: string,
+    now?: number,
+    leaseToken?: string,
+  ): Job | Promise<Job>;
   cancel(actor: Actor, projectId: string, jobId: string, now?: number): Job | Promise<Job>;
   retry(actor: Actor, projectId: string, jobId: string, now?: number): Job | Promise<Job>;
   jobsForProject(actor: Actor, projectId: string): readonly Job[] | Promise<readonly Job[]>;
@@ -825,7 +838,8 @@ export class LocalControlPlane implements ControlPlane {
     for (const [jobId, job] of this.#jobs.entries()) {
       if (job.projectId === id) {
         this.#jobs.delete(jobId);
-        this.#jobAttempts.delete(jobId);
+        for (const key of this.#jobAttempts.keys())
+          if (key.startsWith(`${jobId}:`)) this.#jobAttempts.delete(key);
       }
     }
     for (let index = this.#events.length - 1; index >= 0; index -= 1) {
@@ -1078,9 +1092,10 @@ export class LocalControlPlane implements ControlPlane {
     jobId: string,
     derivative: CloudDerivativeRegistration,
     now = Date.now(),
+    leaseToken?: string,
   ): MediaDerivativeRecord {
     validateCloudDerivativeRegistration(derivative);
-    const job = this.ownedLease(workerId, jobId, now);
+    const job = this.ownedLease(workerId, jobId, now, leaseToken);
     const worker = this.#workers.get(workerId);
     if (
       worker === undefined ||
@@ -1279,6 +1294,7 @@ export class LocalControlPlane implements ControlPlane {
       ...(assetId !== undefined ? { assetId } : {}),
       ...(payload === undefined ? {} : { payload: validatedJobPayload(payload) }),
       ...(maxAttempts === undefined ? {} : { maxAttempts }),
+      generation: 0,
       state: 'queued',
       progress: 0,
       cancelRequested: false,
@@ -1306,6 +1322,7 @@ export class LocalControlPlane implements ControlPlane {
       type: 'asset.thumbnail',
       assetId,
       ...(maxAttempts === undefined ? {} : { maxAttempts }),
+      generation: 0,
       state: 'queued',
       progress: 0,
       cancelRequested: false,
@@ -1330,7 +1347,7 @@ export class LocalControlPlane implements ControlPlane {
           ))
       )
         continue;
-      const attempts = this.#jobAttempts.get(item.id) ?? 0;
+      const attempts = this.#jobAttempts.get(attemptKey(item.id, item.generation)) ?? 0;
       if (item.maxAttempts !== undefined && attempts >= item.maxAttempts) {
         const terminal = terminalJobAfterAttemptBudget(item);
         this.#jobs.set(item.id, terminal);
@@ -1346,9 +1363,13 @@ export class LocalControlPlane implements ControlPlane {
       state: 'leased',
       leaseOwner: workerId,
       leaseExpiresAt: now + durationMs,
+      leaseToken: randomOpaqueId('lease'),
     };
     this.#jobs.set(job.id, leased);
-    this.#jobAttempts.set(job.id, (this.#jobAttempts.get(job.id) ?? 0) + 1);
+    this.#jobAttempts.set(
+      attemptKey(job.id, job.generation),
+      (this.#jobAttempts.get(attemptKey(job.id, job.generation)) ?? 0) + 1,
+    );
     this.event(job.id, 'leased', now);
     return leased;
   }
@@ -1358,8 +1379,9 @@ export class LocalControlPlane implements ControlPlane {
     progress: number,
     now = Date.now(),
     durationMs = 30_000,
+    leaseToken?: string,
   ): { readonly job: Job; readonly cancelRequested: boolean } {
-    const job = this.ownedLease(workerId, jobId, now);
+    const job = this.ownedLease(workerId, jobId, now, leaseToken);
     if (!Number.isSafeInteger(progress) || progress < job.progress || progress > 100)
       throw new ControlPlaneError('PROGRESS_INVALID', jobId);
     const updated = { ...job, progress, leaseExpiresAt: now + durationMs };
@@ -1369,8 +1391,14 @@ export class LocalControlPlane implements ControlPlane {
     this.event(jobId, `progress:${progress}`, now);
     return { job: updated, cancelRequested: updated.cancelRequested };
   }
-  complete(workerId: string, jobId: string, now = Date.now(), receipt?: WorkerResultReceipt): Job {
-    const job = this.ownedLease(workerId, jobId, now);
+  complete(
+    workerId: string,
+    jobId: string,
+    now = Date.now(),
+    receipt?: WorkerResultReceipt,
+    leaseToken?: string,
+  ): Job {
+    const job = this.ownedLease(workerId, jobId, now, leaseToken);
     if (job.type === 'fixture.thumbnail' && !isFixtureReceipt(receipt))
       throw new ControlPlaneError('RESULT_INVALID', jobId);
     if (
@@ -1406,8 +1434,8 @@ export class LocalControlPlane implements ControlPlane {
     this.event(jobId, 'completed', now);
     return done;
   }
-  fail(workerId: string, jobId: string, error: string, now = Date.now()): Job {
-    const job = this.ownedLease(workerId, jobId, now);
+  fail(workerId: string, jobId: string, error: string, now = Date.now(), leaseToken?: string): Job {
+    const job = this.ownedLease(workerId, jobId, now, leaseToken);
     const canceled = error === 'canceled';
     const failed = {
       ...job,
@@ -1443,8 +1471,6 @@ export class LocalControlPlane implements ControlPlane {
       throw new ControlPlaneError('JOB_NOT_FOUND', jobId);
     if (job.state === 'leased' || job.state === 'queued')
       throw new ControlPlaneError('JOB_NOT_RETRYABLE', jobId);
-    if (job.maxAttempts !== undefined && (this.#jobAttempts.get(jobId) ?? 0) >= job.maxAttempts)
-      throw new ControlPlaneError('JOB_NOT_RETRYABLE', jobId);
     const retried: Job = {
       id: job.id,
       projectId: job.projectId,
@@ -1452,6 +1478,7 @@ export class LocalControlPlane implements ControlPlane {
       ...(job.assetId === undefined ? {} : { assetId: job.assetId }),
       ...(job.payload === undefined ? {} : { payload: job.payload }),
       ...(job.maxAttempts === undefined ? {} : { maxAttempts: job.maxAttempts }),
+      generation: job.generation + 1,
       state: 'queued',
       progress: 0,
       cancelRequested: false,
@@ -1506,14 +1533,16 @@ export class LocalControlPlane implements ControlPlane {
       (job) => job.projectId === projectId && (job.state === 'queued' || job.state === 'leased'),
     ).length;
   }
-  private ownedLease(workerId: string, jobId: string, now: number): Job {
+  private ownedLease(workerId: string, jobId: string, now: number, leaseToken?: string): Job {
     const job = this.#jobs.get(jobId);
     if (
       job === undefined ||
       job.state !== 'leased' ||
       job.leaseOwner !== workerId ||
       job.leaseExpiresAt === undefined ||
-      job.leaseExpiresAt <= now
+      job.leaseExpiresAt <= now ||
+      job.leaseToken === undefined ||
+      leaseToken !== job.leaseToken
     )
       throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
     return job;
@@ -1525,6 +1554,10 @@ export class LocalControlPlane implements ControlPlane {
   private event(jobId: string, type: string, at: number): void {
     this.#events.push({ cursor: this.#events.length + 1, jobId, type, at });
   }
+}
+
+function attemptKey(jobId: string, generation: number): string {
+  return `${jobId}:${generation}`;
 }
 
 function privateRefs(locations: readonly AssetLocationRecord[]): string[] {
@@ -1679,6 +1712,7 @@ function terminalJobAfterAttemptBudget(job: Job): Job {
   terminal.cancelRequested = false;
   delete terminal.leaseOwner;
   delete terminal.leaseExpiresAt;
+  delete terminal.leaseToken;
   if (terminal.state === 'canceled') delete terminal.error;
   else terminal.error = WORKER_ATTEMPT_BUDGET_EXHAUSTED;
   return terminal;

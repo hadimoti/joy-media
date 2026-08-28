@@ -617,16 +617,18 @@ describe('control-plane HTTP transport', () => {
       status: 201,
       body: { data: { id: 'j', state: 'queued' } },
     });
-    expect(await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken)).toMatchObject({
+    const lease = await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken);
+    expect(lease).toMatchObject({
       status: 200,
       body: { data: { id: 'j', state: 'leased', leaseOwner: 'w' } },
     });
+    const leaseToken = (lease.body as { data: { leaseToken: string } }).data.leaseToken;
     expect(
       await request(
         origin,
         'POST',
         '/v1/workers/w/jobs/j/heartbeat',
-        { progress: 50 },
+        { progress: 50, leaseToken },
         workerToken,
       ),
     ).toMatchObject({
@@ -642,7 +644,7 @@ describe('control-plane HTTP transport', () => {
         origin,
         'POST',
         '/v1/workers/w/jobs/j/heartbeat',
-        { progress: 60 },
+        { progress: 60, leaseToken },
         workerToken,
       ),
     ).toMatchObject({ status: 200, body: { data: { cancelRequested: true } } });
@@ -651,7 +653,7 @@ describe('control-plane HTTP transport', () => {
         origin,
         'POST',
         '/v1/workers/w/jobs/j/fail',
-        { error: 'canceled' },
+        { error: 'canceled', leaseToken },
         workerToken,
       ),
     ).toMatchObject({ status: 200, body: { data: { state: 'canceled' } } });
@@ -659,7 +661,8 @@ describe('control-plane HTTP transport', () => {
       status: 200,
       body: { data: { state: 'queued', progress: 0 } },
     });
-    await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken);
+    const retriedLease = await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken);
+    const retriedLeaseToken = (retriedLease.body as { data: { leaseToken: string } }).data.leaseToken;
     const completion = await request(
       origin,
       'POST',
@@ -670,6 +673,7 @@ describe('control-plane HTTP transport', () => {
           sha256: '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735',
           bytes: 14,
         },
+        leaseToken: retriedLeaseToken,
       },
       workerToken,
     );
@@ -717,7 +721,7 @@ describe('control-plane HTTP transport', () => {
     });
   });
 
-  it('forwards bounded Worker attempts and rejects exhausted explicit retries', async () => {
+  it('forwards bounded Worker attempts and allows an explicit retry generation after exhaustion', async () => {
     const controlPlane = new LocalControlPlane();
     const owner = { id: 'attempt-owner' };
     controlPlane.createProject(owner, 'attempt-project', 'Attempts');
@@ -749,7 +753,7 @@ describe('control-plane HTTP transport', () => {
     expect(controlPlane.lease('attempt-worker', 102, 1)).toBeUndefined();
     expect(
       await request(origin, 'POST', '/v1/projects/attempt-project/jobs/bounded-job/retry', {}),
-    ).toMatchObject({ status: 409, body: { error: { code: 'JOB_NOT_RETRYABLE' } } });
+    ).toMatchObject({ status: 200, body: { data: { state: 'queued', generation: 1 } } });
 
     expect(
       await request(origin, 'POST', '/v1/projects/attempt-project/jobs', {
@@ -758,8 +762,9 @@ describe('control-plane HTTP transport', () => {
         assetId: 'attempt-asset',
       }),
     ).toMatchObject({ status: 201, body: { data: { id: 'unbounded-job', state: 'queued' } } });
-    expect(controlPlane.lease('attempt-worker', 104, 1)).toMatchObject({ id: 'unbounded-job' });
+    expect(controlPlane.lease('attempt-worker', 104, 1)).toMatchObject({ id: 'bounded-job', generation: 1 });
     expect(controlPlane.lease('attempt-worker', 106, 1)).toMatchObject({ id: 'unbounded-job' });
+    expect(controlPlane.lease('attempt-worker', 108, 1)).toMatchObject({ id: 'unbounded-job' });
 
     expect(
       await request(origin, 'POST', '/v1/projects/attempt-project/jobs', {
@@ -969,7 +974,8 @@ describe('control-plane HTTP transport', () => {
       type: 'asset.thumbnail',
       assetId: 'asset-1',
     });
-    await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken);
+    const lease = await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken);
+    const leaseToken = (lease.body as { data: { leaseToken: string } }).data.leaseToken;
 
     const thumbnail = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
     const sha256 = createHash('sha256').update(thumbnail).digest('hex');
@@ -984,6 +990,7 @@ describe('control-plane HTTP transport', () => {
           'x-joy-bytes': String(thumbnail.byteLength),
           'x-joy-width': '1',
           'x-joy-height': '1',
+          'x-joy-lease-token': leaseToken,
         },
         body: thumbnail,
       });
@@ -1017,7 +1024,8 @@ describe('control-plane HTTP transport', () => {
       type: 'audio.ml-denoise',
       assetId: 'asset-1',
     });
-    await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken);
+    const audioLease = await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken);
+    const audioLeaseToken = (audioLease.body as { data: { leaseToken: string } }).data.leaseToken;
     const audio = new Uint8Array([1, 2, 3, 4]);
     const audioSha256 = createHash('sha256').update(audio).digest('hex');
     const uploadAudio = (mimeType = 'audio/wav') =>
@@ -1031,6 +1039,7 @@ describe('control-plane HTTP transport', () => {
             'x-joy-asset-id': 'asset-1',
             'x-joy-sha256': audioSha256,
             'x-joy-bytes': String(audio.byteLength),
+            'x-joy-lease-token': audioLeaseToken,
           },
           body: audio,
         },
@@ -1076,6 +1085,7 @@ describe('control-plane HTTP transport', () => {
           localRef,
           descriptor: { mimeType: 'audio/wav' },
         },
+        leaseToken: audioLeaseToken,
       },
       workerToken,
     );

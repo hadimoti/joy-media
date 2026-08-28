@@ -2,7 +2,7 @@ import { renderFixture, verifyExport } from '@joy-media/export-core';
 import type { RenderManifest } from '@joy-media/export-core';
 import { existsSync, rmSync } from 'node:fs';
 export interface ExportLeaseCoordinator {
-  complete(workerId: string, jobId: string): unknown;
+  complete(workerId: string, jobId: string, now?: number, receipt?: unknown, leaseToken?: string): unknown;
 }
 export interface ExportJobResult {
   readonly outputPath: string;
@@ -16,11 +16,12 @@ export function executeLeasedExport(
   jobId: string,
   manifest: RenderManifest,
   outputPath: string,
+  leaseToken?: string,
 ): ExportJobResult {
   try {
     renderFixture(manifest, outputPath);
     const probe = verifyExport(outputPath);
-    coordinator.complete(workerId, jobId);
+    coordinator.complete(workerId, jobId, undefined, undefined, leaseToken);
     return { outputPath, videoCodec: probe.videoCodec, audioCodec: probe.audioCodec };
   } catch (error) {
     if (existsSync(outputPath)) rmSync(outputPath, { force: true });

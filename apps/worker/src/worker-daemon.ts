@@ -28,6 +28,7 @@ export class WorkerDaemon {
     );
     let lastHelloAt = Date.now();
     let leasedJobId: string | undefined;
+    let leasedJobToken: string | undefined;
     while (!options.stopped()) {
       try {
         if (Date.now() - lastHelloAt >= 15_000) {
@@ -43,6 +44,7 @@ export class WorkerDaemon {
           continue;
         }
         leasedJobId = job.id;
+        leasedJobToken = job.leaseToken;
         let cancelRequested = false;
         let currentProgress = 0;
         let heartbeatInFlight = false;
@@ -50,7 +52,7 @@ export class WorkerDaemon {
           if (heartbeatInFlight) return;
           heartbeatInFlight = true;
           try {
-            const heartbeat = await this.client.heartbeat(job.id, currentProgress);
+            const heartbeat = await this.client.heartbeat(job.id, currentProgress, job.leaseToken);
             cancelRequested ||= heartbeat.cancelRequested;
           } finally {
             heartbeatInFlight = false;
@@ -90,17 +92,19 @@ export class WorkerDaemon {
               job.id,
               result.result,
               this.runtime.readDerivative(result.result),
+              job.leaseToken,
             );
           }
-          await this.client.complete(job.id, result.result);
-        } else await this.client.fail(job.id, 'canceled');
+          await this.client.complete(job.id, result.result, job.leaseToken);
+        } else await this.client.fail(job.id, 'canceled', job.leaseToken);
         leasedJobId = undefined;
+        leasedJobToken = undefined;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'unknown Worker failure';
         this.runtime.log.write(`Worker job failed: ${message.slice(0, 240)}`);
         if (leasedJobId !== undefined) {
           try {
-            await this.client.fail(leasedJobId, message.slice(0, 240));
+            await this.client.fail(leasedJobId, message.slice(0, 240), leasedJobToken);
           } catch (failError) {
             this.runtime.log.write(
               `Unable to mark ${leasedJobId} failed: ${
@@ -109,6 +113,7 @@ export class WorkerDaemon {
             );
           }
           leasedJobId = undefined;
+          leasedJobToken = undefined;
         }
         await sleep(pollIntervalMs);
       }

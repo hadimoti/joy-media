@@ -32,7 +32,7 @@ describe('local control plane', () => {
         selection: { mode: 'subject' },
       },
     });
-    api.fail('mask-worker', 'mask-job', 'model unavailable', 103);
+    api.fail('mask-worker', 'mask-job', 'model unavailable', 103, leased?.leaseToken);
     api.retry(owner, 'mask-project', 'mask-job', 104);
     expect(api.lease('mask-worker', 105)?.payload).toEqual(leased?.payload);
   });
@@ -45,8 +45,9 @@ describe('local control plane', () => {
     );
     api.pairWorker(owner, 'w');
     api.enqueue(owner, 'j', 'p', 'render', 100);
-    expect(api.lease('w', 101, 10)).toMatchObject({ id: 'j', state: 'leased' });
-    api.complete('w', 'j', 102);
+    const leased = api.lease('w', 101, 10);
+    expect(leased).toMatchObject({ id: 'j', state: 'leased' });
+    api.complete('w', 'j', 102, undefined, leased?.leaseToken);
     expect(api.lease('w', 1_000)).toBeUndefined();
     expect(api.eventsAfter(owner, 'p', 1).map((event) => event.type)).toEqual([
       'leased',
@@ -74,13 +75,15 @@ describe('local control plane', () => {
     });
     expect(job).not.toHaveProperty('leaseOwner');
     expect(job).not.toHaveProperty('leaseExpiresAt');
-    expect(() => api.retry(owner, 'attempt-project', 'attempt-job', 105)).toThrow(
-      expect.objectContaining({ code: 'JOB_NOT_RETRYABLE' }),
-    );
+    expect(api.retry(owner, 'attempt-project', 'attempt-job', 105)).toMatchObject({
+      state: 'queued',
+      generation: 1,
+    });
     expect(api.eventsAfter(owner, 'attempt-project', 0).map((event) => event.type)).toEqual([
       'queued',
       'leased',
       'failed',
+      'retried',
     ]);
   });
 
@@ -102,6 +105,23 @@ describe('local control plane', () => {
       'leased',
       'leased',
     ]);
+  });
+
+  it('rejects a stale completion from an older lease of the same Worker', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'same-worker-owner' };
+    api.createProject(owner, 'same-worker-project', 'Same worker');
+    api.pairWorker(owner, 'same-worker');
+    api.enqueue(owner, 'same-worker-job', 'same-worker-project', 'render', 100);
+    const first = api.lease('same-worker', 101, 1);
+    const second = api.lease('same-worker', 103, 30_000);
+    expect(second?.leaseToken).not.toBe(first?.leaseToken);
+    expect(() => api.complete('same-worker', 'same-worker-job', 104, undefined, first?.leaseToken)).toThrow(
+      expect.objectContaining({ code: 'LEASE_NOT_OWNED' }),
+    );
+    expect(api.complete('same-worker', 'same-worker-job', 105, undefined, second?.leaseToken)).toMatchObject({
+      state: 'completed',
+    });
   });
 
   it('rejects invalid Worker attempt budgets', () => {

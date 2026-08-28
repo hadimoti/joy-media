@@ -14,6 +14,7 @@ export interface LeasedJob {
   readonly type: string;
   readonly assetId?: string;
   readonly payload?: Readonly<Record<string, unknown>>;
+  readonly leaseToken: string;
 }
 export interface WorkerJobResult {
   readonly kind:
@@ -96,12 +97,14 @@ export class WorkerControlPlaneClient {
     const assetId =
       isRecord(result) && typeof result.assetId === 'string' ? result.assetId : undefined;
     const payload = isRecord(result) && isRecord(result.payload) ? result.payload : undefined;
+    const leaseToken = requiredString(result, 'leaseToken');
     return {
       id: requiredString(result, 'id'),
       projectId: requiredString(result, 'projectId'),
       type: requiredString(result, 'type'),
       ...(assetId === undefined ? {} : { assetId }),
       ...(payload === undefined ? {} : { payload }),
+      leaseToken,
     };
   }
 
@@ -136,24 +139,24 @@ export class WorkerControlPlaneClient {
     );
   }
 
-  async heartbeat(jobId: string, progress: number): Promise<{ readonly cancelRequested: boolean }> {
+  async heartbeat(jobId: string, progress: number, leaseToken?: string): Promise<{ readonly cancelRequested: boolean }> {
     const result = await this.authenticatedRequest(
       `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/heartbeat`,
-      { progress },
+      { progress, leaseToken: leaseToken ?? '' },
     );
     if (!isRecord(result) || typeof result.cancelRequested !== 'boolean')
       throw new Error('Invalid Worker response: cancelRequested');
     return { cancelRequested: result.cancelRequested };
   }
 
-  async complete(jobId: string, result: WorkerJobResult): Promise<void> {
+  async complete(jobId: string, result: WorkerJobResult, leaseToken?: string): Promise<void> {
     await this.authenticatedRequest(
       `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/complete`,
-      { result },
+      { result, leaseToken: leaseToken ?? '' },
     );
   }
 
-  async uploadDerivative(jobId: string, result: WorkerJobResult, bytes: Uint8Array): Promise<void> {
+  async uploadDerivative(jobId: string, result: WorkerJobResult, bytes: Uint8Array, leaseToken?: string): Promise<void> {
     const sessionToken = this.options.sessionStore.loadWorkerSession();
     if (sessionToken === undefined) throw new Error('Worker is not paired');
     const headers: Record<string, string> = {
@@ -172,6 +175,7 @@ export class WorkerControlPlaneClient {
             : result.kind === 'upscale.image' || result.kind === 'upscale.video'
               ? 'upscale'
               : 'audio',
+      'x-joy-lease-token': leaseToken ?? '',
     };
     if (result.descriptor?.width !== undefined)
       headers['x-joy-width'] = String(result.descriptor.width);
@@ -197,10 +201,10 @@ export class WorkerControlPlaneClient {
     if (!response.ok) throw new Error(`Worker derivative upload failed (${response.status})`);
   }
 
-  async fail(jobId: string, error: string): Promise<void> {
+  async fail(jobId: string, error: string, leaseToken?: string): Promise<void> {
     await this.authenticatedRequest(
       `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/fail`,
-      { error },
+      { error, leaseToken: leaseToken ?? '' },
     );
   }
 

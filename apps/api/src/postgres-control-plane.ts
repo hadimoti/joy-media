@@ -1,4 +1,5 @@
 import type { Pool, PoolClient } from 'pg';
+import { randomUUID } from 'node:crypto';
 import {
   ControlPlaneError,
   SHARED_LIBRARY_OWNER_ID,
@@ -377,9 +378,11 @@ interface JobRow {
   readonly asset_id: string | null;
   readonly payload: unknown;
   readonly max_attempts: number | null;
+  readonly generation: number;
   readonly state: Job['state'];
   readonly lease_owner: string | null;
   readonly lease_expires_at: Date | null;
+  readonly lease_token: string | null;
   readonly progress: number;
   readonly cancel_requested: boolean;
   readonly result_kind: string | null;
@@ -1100,6 +1103,7 @@ export class PostgresControlPlane implements ControlPlane {
     jobId: string,
     derivative: CloudDerivativeRegistration,
     now = Date.now(),
+    leaseToken?: string,
   ): Promise<MediaDerivativeRecord> {
     validateCloudDerivativeRegistration(derivative);
     const result = await this.pool.query<{
@@ -1113,8 +1117,8 @@ export class PostgresControlPlane implements ControlPlane {
        FROM jobs JOIN workers ON workers.id = jobs.lease_owner
        JOIN projects ON projects.id = jobs.project_id
        WHERE jobs.id = $1 AND jobs.state = 'leased' AND jobs.lease_owner = $2
-         AND jobs.lease_expires_at > $3 AND workers.revoked_at IS NULL`,
-      [jobId, workerId, new Date(now)],
+         AND jobs.lease_expires_at > $3 AND jobs.lease_token = $4 AND workers.revoked_at IS NULL`,
+      [jobId, workerId, new Date(now), leaseToken ?? ''],
     );
     const job = result.rows[0];
     if (
@@ -1329,8 +1333,8 @@ export class PostgresControlPlane implements ControlPlane {
       try {
         const result = await client.query<JobRow>(
           `INSERT INTO jobs
-             (id, project_id, type, asset_id, payload, max_attempts, state, lease_owner, lease_expires_at)
-           VALUES ($1, $2, $3, $4, $5::jsonb, $6, 'queued', NULL, NULL) RETURNING *`,
+             (id, project_id, type, asset_id, payload, max_attempts, generation, state, lease_owner, lease_expires_at, lease_token)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6, 0, 'queued', NULL, NULL, NULL) RETURNING *`,
           [id, projectId, type, assetId ?? null, JSON.stringify(safePayload), maxAttempts ?? null],
         );
         const job = jobOf(requiredRow(result.rows[0], 'JOB_CREATE_FAILED'));
@@ -1356,8 +1360,8 @@ export class PostgresControlPlane implements ControlPlane {
       try {
         const result = await client.query<JobRow>(
           `INSERT INTO jobs
-             (id, project_id, type, asset_id, max_attempts, state, lease_owner, lease_expires_at)
-           VALUES ($1, $2, 'asset.thumbnail', $3, $4, 'queued', NULL, NULL) RETURNING *`,
+             (id, project_id, type, asset_id, max_attempts, generation, state, lease_owner, lease_expires_at, lease_token)
+           VALUES ($1, $2, 'asset.thumbnail', $3, $4, 0, 'queued', NULL, NULL, NULL) RETURNING *`,
           [id, projectId, assetId, maxAttempts ?? null],
         );
         const job = jobOf(requiredRow(result.rows[0], 'JOB_CREATE_FAILED'));
@@ -1419,20 +1423,20 @@ export class PostgresControlPlane implements ControlPlane {
         if (item.state === 'leased') {
           await client.query(
             `UPDATE job_attempts SET completed_at = $2
-             WHERE job_id = $1 AND completed_at IS NULL`,
-            [item.id, new Date(now)],
+             WHERE job_id = $1 AND generation = $3 AND completed_at IS NULL`,
+            [item.id, new Date(now), item.generation],
           );
         }
         if (item.max_attempts !== null) {
           const attempts = await client.query<{ readonly count: string }>(
-            'SELECT COUNT(*)::text AS count FROM job_attempts WHERE job_id = $1',
-            [item.id],
+            'SELECT COUNT(*)::text AS count FROM job_attempts WHERE job_id = $1 AND generation = $2',
+            [item.id, item.generation],
           );
           const count = Number(attempts.rows[0]?.count ?? 0);
           if (count >= item.max_attempts) {
             const terminalState = item.cancel_requested ? 'canceled' : 'failed';
             await client.query(
-              `UPDATE jobs SET state = $2, lease_owner = NULL, lease_expires_at = NULL,
+              `UPDATE jobs SET state = $2, lease_owner = NULL, lease_expires_at = NULL, lease_token = NULL,
                    cancel_requested = false, error = $3
                WHERE id = $1`,
               [
@@ -1449,15 +1453,16 @@ export class PostgresControlPlane implements ControlPlane {
         break;
       }
       if (job === undefined) return undefined;
+      const leaseToken = randomUUID();
       const result = await client.query<JobRow>(
-        `UPDATE jobs SET state = 'leased', lease_owner = $2, lease_expires_at = $3,
+        `UPDATE jobs SET state = 'leased', lease_owner = $2, lease_expires_at = $3, lease_token = $4,
              cancel_requested = false
          WHERE id = $1 RETURNING *`,
-        [job.id, workerId, new Date(now + durationMs)],
+        [job.id, workerId, new Date(now + durationMs), leaseToken],
       );
       await client.query(
-        'INSERT INTO job_attempts (job_id, worker_id, started_at) VALUES ($1, $2, $3)',
-        [job.id, workerId, new Date(now)],
+        'INSERT INTO job_attempts (job_id, generation, worker_id, started_at) VALUES ($1, $2, $3, $4)',
+        [job.id, job.generation, workerId, new Date(now)],
       );
       await this.event(client, job.id, 'leased', now);
       return jobOf(requiredRow(result.rows[0], 'JOB_LEASE_FAILED'));
@@ -1470,6 +1475,7 @@ export class PostgresControlPlane implements ControlPlane {
     progress: number,
     now = Date.now(),
     durationMs = 30_000,
+    leaseToken?: string,
   ): Promise<{ readonly job: Job; readonly cancelRequested: boolean }> {
     if (!Number.isSafeInteger(progress) || progress < 0 || progress > 100)
       throw new ControlPlaneError('PROGRESS_INVALID', jobId);
@@ -1477,9 +1483,9 @@ export class PostgresControlPlane implements ControlPlane {
       const result = await client.query<JobRow>(
         `UPDATE jobs SET progress = $3, lease_expires_at = $4
          WHERE id = $1 AND state = 'leased' AND lease_owner = $2 AND lease_expires_at > $5
-           AND progress <= $3
+           AND progress <= $3 AND lease_token = $6
          RETURNING *`,
-        [jobId, workerId, progress, new Date(now + durationMs), new Date(now)],
+        [jobId, workerId, progress, new Date(now + durationMs), new Date(now), leaseToken ?? ''],
       );
       const job = result.rows[0];
       if (job === undefined) throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
@@ -1498,6 +1504,7 @@ export class PostgresControlPlane implements ControlPlane {
     jobId: string,
     now = Date.now(),
     receipt?: WorkerResultReceipt,
+    leaseToken?: string,
   ): Promise<Job> {
     if (receipt !== undefined && !isWorkerReceipt(receipt))
       throw new ControlPlaneError('RESULT_INVALID', jobId);
@@ -1521,7 +1528,8 @@ export class PostgresControlPlane implements ControlPlane {
             AND (type <> 'mask.image' OR ($4 = 'mask.image' AND asset_id = $10))
             AND (type <> 'mask.video' OR ($4 = 'mask.video' AND asset_id = $10))
             AND (type <> 'upscale.image' OR ($4 = 'upscale.image' AND asset_id = $10))
-            AND (type <> 'upscale.video' OR ($4 = 'upscale.video' AND asset_id = $10))
+           AND (type <> 'upscale.video' OR ($4 = 'upscale.video' AND asset_id = $10))
+           AND lease_token = $16
          RETURNING *`,
         [
           jobId,
@@ -1549,6 +1557,7 @@ export class PostgresControlPlane implements ControlPlane {
           (isGpu || isMask || isUpscale) && receipt !== undefined
             ? (receipt.descriptor.durationUs ?? null)
             : null,
+          leaseToken ?? '',
         ],
       );
       if (result.rows[0] === undefined) throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
@@ -1563,14 +1572,21 @@ export class PostgresControlPlane implements ControlPlane {
     });
   }
 
-  async fail(workerId: string, jobId: string, error: string, now = Date.now()): Promise<Job> {
+  async fail(
+    workerId: string,
+    jobId: string,
+    error: string,
+    now = Date.now(),
+    leaseToken?: string,
+  ): Promise<Job> {
     return this.transaction(async (client) => {
       const result = await client.query<JobRow>(
         `UPDATE jobs SET state = CASE WHEN $4 = 'canceled' THEN 'canceled' ELSE 'failed' END,
              cancel_requested = false, error = CASE WHEN $4 = 'canceled' THEN NULL ELSE $4 END
          WHERE id = $1 AND state = 'leased' AND lease_owner = $2 AND lease_expires_at > $3
+           AND lease_token = $5
          RETURNING *`,
-        [jobId, workerId, new Date(now), error.slice(0, 500)],
+        [jobId, workerId, new Date(now), error.slice(0, 500), leaseToken ?? ''],
       );
       if (result.rows[0] === undefined) throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
       await this.event(client, jobId, error === 'canceled' ? 'canceled' : 'failed', now);
@@ -1604,21 +1620,15 @@ export class PostgresControlPlane implements ControlPlane {
       const current = currentResult.rows[0];
       if (current === undefined || !['completed', 'canceled', 'failed'].includes(current.state))
         throw new ControlPlaneError('JOB_NOT_RETRYABLE', jobId);
-      if (current.max_attempts !== null) {
-        const attempts = await client.query<{ readonly count: string }>(
-          'SELECT COUNT(*)::text AS count FROM job_attempts WHERE job_id = $1',
-          [jobId],
-        );
-        if (Number(attempts.rows[0]?.count ?? 0) >= current.max_attempts)
-          throw new ControlPlaneError('JOB_NOT_RETRYABLE', jobId);
-      }
+      // Manual retry starts a new generation; historical attempts remain
+      // intact for audit and the configured budget applies per generation.
       const result = await client.query<JobRow>(
-        `UPDATE jobs SET state = 'queued', progress = 0, cancel_requested = false,
+        `UPDATE jobs SET state = 'queued', generation = generation + 1, progress = 0, cancel_requested = false,
              lease_owner = NULL, lease_expires_at = NULL, result_kind = NULL,
              result_sha256 = NULL, result_bytes = NULL, result_ref = NULL,
              result_worker_ref = NULL, result_verified_at = NULL, result_asset_id = NULL,
              result_local_ref = NULL, result_mime_type = NULL, result_width = NULL,
-             result_height = NULL, result_duration_us = NULL, error = NULL
+             result_height = NULL, result_duration_us = NULL, error = NULL, lease_token = NULL
          WHERE id = $1 AND project_id = $2 AND state IN ('completed', 'canceled', 'failed')
          RETURNING *`,
         [jobId, projectId],
@@ -1796,11 +1806,13 @@ function jobOf(row: JobRow): Job {
     ...(row.asset_id === null ? {} : { assetId: row.asset_id }),
     ...(Object.keys(payload).length === 0 ? {} : { payload }),
     ...(row.max_attempts === null ? {} : { maxAttempts: row.max_attempts }),
+    generation: row.generation,
     state: row.state,
     progress: row.progress,
     cancelRequested: row.cancel_requested,
     ...(row.lease_owner === null ? {} : { leaseOwner: row.lease_owner }),
     ...(row.lease_expires_at === null ? {} : { leaseExpiresAt: row.lease_expires_at.getTime() }),
+    ...(row.lease_token === null ? {} : { leaseToken: row.lease_token }),
     ...(row.result_kind === null ||
     row.result_sha256 === null ||
     row.result_bytes === null ||
