@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react';
+import { useEffect, useId, useRef, useState, type ReactElement } from 'react';
 import type { CaptionDocumentV1, CaptionSegmentV1, JoyProjectV1 } from '@joy-media/project-schema';
 import {
   captionSlots,
@@ -170,6 +170,7 @@ function CaptionSlotEditor({
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [importIssues, setImportIssues] = useState(0);
   const [pendingFocusSegmentId, setPendingFocusSegmentId] = useState<string>();
+  const transcriptionStatusId = useId();
   const transcriptionSource =
     transcriptionAvailability.state === 'ready' ? transcriptionAvailability.source : undefined;
   const transcriptionUnavailableReason =
@@ -310,6 +311,9 @@ function CaptionSlotEditor({
           aria-label="Auto caption"
           data-guide="Auto caption"
           disabled={transcriptionSource === undefined}
+          aria-describedby={
+            transcriptionUnavailableReason === undefined ? undefined : transcriptionStatusId
+          }
           title={transcriptionSource === undefined ? transcriptionUnavailableReason : undefined}
           onClick={() =>
             transcriptionSource !== undefined &&
@@ -327,6 +331,9 @@ function CaptionSlotEditor({
           aria-label="Transcribe Persian"
           data-guide="Persian (fa)"
           disabled={transcriptionSource === undefined}
+          aria-describedby={
+            transcriptionUnavailableReason === undefined ? undefined : transcriptionStatusId
+          }
           title={transcriptionSource === undefined ? transcriptionUnavailableReason : undefined}
           onClick={() =>
             transcriptionSource !== undefined &&
@@ -344,6 +351,9 @@ function CaptionSlotEditor({
           aria-label="Transcribe English"
           data-guide="English (en)"
           disabled={transcriptionSource === undefined}
+          aria-describedby={
+            transcriptionUnavailableReason === undefined ? undefined : transcriptionStatusId
+          }
           title={transcriptionSource === undefined ? transcriptionUnavailableReason : undefined}
           onClick={() =>
             transcriptionSource !== undefined &&
@@ -357,6 +367,16 @@ function CaptionSlotEditor({
           <PngMaskIcon src="/assets/24_Audio.png" size={14} />
         </button>
       </header>
+      {transcriptionUnavailableReason !== undefined && (
+        <p
+          id={transcriptionStatusId}
+          className="caption-transcription-status"
+          role="status"
+          aria-live="polite"
+        >
+          Transcription unavailable: {transcriptionUnavailableReason}
+        </p>
+      )}
       {importIssues > 0 && (
         <p className="caption-warning">On import, {importIssues} bad cue(s) were skipped.</p>
       )}
