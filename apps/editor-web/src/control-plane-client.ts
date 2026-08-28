@@ -127,15 +127,7 @@ export interface BrowserJob {
       readonly height?: number;
       readonly durationUs?: number;
     };
-    readonly summary?: {
-      readonly shotCount: number;
-      readonly cutCount: number;
-      readonly averageShotDurationUs: number;
-      readonly fastestShotDurationUs: number;
-      readonly sampleCount: number;
-      readonly transcriptSegmentCount: number;
-      readonly audioBeatCount: number;
-    };
+    readonly summary?: BrowserRenderSummary;
     readonly evidence?: readonly unknown[];
     readonly evidenceIds?: readonly string[];
     readonly workerRef: string;
@@ -143,6 +135,16 @@ export interface BrowserJob {
     readonly verifiedAt: number;
     readonly model?: string;
   };
+}
+
+export interface BrowserRenderSummary {
+  readonly shotCount: number;
+  readonly cutCount: number;
+  readonly averageShotDurationUs: number;
+  readonly fastestShotDurationUs: number;
+  readonly sampleCount: number;
+  readonly transcriptSegmentCount: number;
+  readonly audioBeatCount: number;
 }
 
 export interface BrowserRenderReport {
@@ -1035,6 +1037,7 @@ function browserJobDerivative(value: unknown): NonNullable<BrowserJob['derivativ
   const descriptor =
     value.descriptor === undefined ? undefined : browserMediaDescriptor(value.descriptor);
   const evidenceIds = optionalOpaqueJobReferenceArray(value.evidenceIds);
+  const summary = value.summary === undefined ? undefined : browserRenderSummary(value.summary);
   const findings = optionalSafeJobValue(value.findings);
   if (findings !== undefined && typeof findings !== 'number' && !Array.isArray(findings))
     throw invalidJobResponse();
@@ -1056,7 +1059,7 @@ function browserJobDerivative(value: unknown): NonNullable<BrowserJob['derivativ
     ...(sha256 === undefined ? {} : { sha256 }),
     ...(bytes === undefined ? {} : { bytes }),
     ...(descriptor === undefined ? {} : { descriptor }),
-    ...(value.summary === undefined ? {} : { summary: safeJobValue(value.summary) }),
+    ...(summary === undefined ? {} : { summary }),
     ...(evidence === undefined ? {} : { evidence: evidence as readonly unknown[] }),
     ...(evidenceIds === undefined ? {} : { evidenceIds }),
     workerRef: opaqueJobReference(value.workerRef),
@@ -1064,6 +1067,30 @@ function browserJobDerivative(value: unknown): NonNullable<BrowserJob['derivativ
     verifiedAt: responseNonNegativeInteger(value.verifiedAt),
     ...(model === undefined ? {} : { model }),
   };
+}
+
+function browserRenderSummary(value: unknown): BrowserRenderSummary {
+  if (!isRecord(value)) throw invalidJobResponse();
+  safeJobValue(value);
+  return {
+    shotCount: jobResponseNonNegativeInteger(value.shotCount),
+    cutCount: jobResponseNonNegativeInteger(value.cutCount),
+    averageShotDurationUs: jobResponsePositiveInteger(value.averageShotDurationUs),
+    fastestShotDurationUs: jobResponsePositiveInteger(value.fastestShotDurationUs),
+    sampleCount: jobResponsePositiveInteger(value.sampleCount),
+    transcriptSegmentCount: jobResponseNonNegativeInteger(value.transcriptSegmentCount),
+    audioBeatCount: jobResponseNonNegativeInteger(value.audioBeatCount),
+  };
+}
+
+function jobResponsePositiveInteger(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1) throw invalidJobResponse();
+  return value as number;
+}
+
+function jobResponseNonNegativeInteger(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) throw invalidJobResponse();
+  return value as number;
 }
 
 const STORAGE_BEARING_JOB_KEYS = new Set([

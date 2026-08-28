@@ -361,6 +361,16 @@ describe('BrowserControlPlaneClient', () => {
             localRef: 'worker-local-ref',
             objectKey: 'private-object-key',
             descriptor: { mimeType: 'image/png', width: 10, height: 10, objectKey: 'nested-key' },
+            summary: {
+              shotCount: 3,
+              cutCount: 2,
+              averageShotDurationUs: 1_000_000,
+              fastestShotDurationUs: 500_000,
+              sampleCount: 4,
+              transcriptSegmentCount: 1,
+              audioBeatCount: 2,
+              ignoredAdapterField: 'safe-but-not-contracted',
+            },
             workerRef: 'worker-1',
             resultRef: 'derivative:job-1',
             verifiedAt: 1,
@@ -378,6 +388,15 @@ describe('BrowserControlPlaneClient', () => {
           derivative: expect.objectContaining({
             resultRef: 'derivative:job-1',
             descriptor: { mimeType: 'image/png', width: 10, height: 10 },
+            summary: {
+              shotCount: 3,
+              cutCount: 2,
+              averageShotDurationUs: 1_000_000,
+              fastestShotDurationUs: 500_000,
+              sampleCount: 4,
+              transcriptSegmentCount: 1,
+              audioBeatCount: 2,
+            },
           }),
         }),
       ]);
@@ -443,6 +462,19 @@ describe('BrowserControlPlaneClient', () => {
         { job: { error: 'FILE:///tmp/private.log' } },
         { derivative: { findings: [{ detail: 'HtTp://storage.invalid/finding' }] } },
         { derivative: { model: 'HTTPS://storage.invalid/private-model' } },
+        {
+          derivative: {
+            summary: {
+              shotCount: 1,
+              cutCount: 0,
+              averageShotDurationUs: 1_000_000,
+              fastestShotDurationUs: 500_000,
+              sampleCount: 2,
+              transcriptSegmentCount: 0,
+              audioBeatCount: 'not-an-integer',
+            },
+          },
+        },
       ];
       const aliasCases: readonly {
         readonly job?: Record<string, unknown>;
