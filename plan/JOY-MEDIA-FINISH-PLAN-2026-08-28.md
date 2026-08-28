@@ -617,8 +617,8 @@ unavailable`, and a console error loading `/transitions/preview/transition2.png`
   typed render summaries), and the corresponding adversarial/fresh-contract tests. The candidate
   remains intentionally separate from `main` (`2083ffc`) while the 407-commit divergence and
   coupled Joy Code/Creative Brief families are reconciled by behavior.
-- The latest release gate at `2026-08-28T15:31:19.637Z` (run before the final documentation-only
-  commits) is a truthful **NO-GO**: command health,
+- The latest release gate run on implementation tip `4709391` at `2026-08-28T15:40:11.185Z`
+  (before this documentation-only update) is a truthful **NO-GO**: command health,
   2,433 scoped tests, builds, static assets, manifest, SBOM, generated-artifact hygiene, fixture
   registry, and feature-status checks pass; source-bound authenticated browser provenance and
   `authenticated-editor-1.0` are still absent. No `main` promotion, VPS bare-remote update, or
