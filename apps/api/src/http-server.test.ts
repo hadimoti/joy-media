@@ -17,6 +17,7 @@ import {
 } from './control-plane.js';
 import { createControlPlaneHttpServer, type ApiAuthentication } from './http-server.js';
 import { DisabledMediaAuth } from './media-auth.js';
+import { createClientAddressResolver, type ClientAddressResolver } from './client-address.js';
 import { renderFixture, verifyExport } from '@joy-media/export-core';
 import { MemoryMistralInvocationLedger, MistralProviderRegistry } from './mistral-provider.js';
 import type { PrivateObjectDescriptor, PrivateObjectStore } from './private-object-store.js';
@@ -82,6 +83,47 @@ describe('control-plane HTTP transport', () => {
       status: 401,
       body: { error: { code: 'AUTH_REQUIRED' } },
     });
+  });
+
+  it('keys the process rate limit by the trusted client address, not a spoofed header', async () => {
+    const origin = await start(
+      { authenticate: () => undefined },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { windowMs: 60_000, maxRequests: 1 },
+      createClientAddressResolver({ trustedProxyAddresses: ['127.0.0.1'] }),
+    );
+    const first = await request(
+      origin,
+      'GET',
+      '/v1/projects/a',
+      undefined,
+      undefined,
+      { 'x-forwarded-for': '198.51.100.1' },
+    );
+    const second = await request(
+      origin,
+      'GET',
+      '/v1/projects/a',
+      undefined,
+      undefined,
+      { 'x-forwarded-for': '198.51.100.2' },
+    );
+    const repeated = await request(
+      origin,
+      'GET',
+      '/v1/projects/a',
+      undefined,
+      undefined,
+      { 'x-forwarded-for': '198.51.100.1' },
+    );
+    expect(first.status).toBe(401);
+    expect(second.status).toBe(401);
+    expect(repeated).toMatchObject({ status: 429, body: { error: { code: 'RATE_LIMITED' } } });
   });
 
   it('exposes the owner-authorized project lifecycle routes with revision and trash guards', async () => {
@@ -1846,6 +1888,8 @@ async function start(
   audioDenoise?: SpectralDenoiseService,
   creativeBriefInputResolver?: CreativeBriefInputResolver,
   creativeBriefRuntime?: CreativeBriefRuntime,
+  rateLimit?: { readonly windowMs?: number; readonly maxRequests?: number },
+  clientAddressResolver?: ClientAddressResolver,
 ): Promise<string> {
   const server = createControlPlaneHttpServer({
     controlPlane,
@@ -1856,6 +1900,8 @@ async function start(
     ...(audioDenoise === undefined ? {} : { audioDenoise }),
     ...(creativeBriefInputResolver === undefined ? {} : { creativeBriefInputResolver }),
     ...(creativeBriefRuntime === undefined ? {} : { creativeBriefRuntime }),
+    ...(rateLimit === undefined ? {} : { rateLimit }),
+    ...(clientAddressResolver === undefined ? {} : { clientAddressResolver }),
   });
   servers.push(server);
   server.listen(0, '127.0.0.1');
@@ -2211,13 +2257,17 @@ async function request(
   pathname: string,
   body?: Record<string, unknown>,
   bearerToken?: string,
+  additionalHeaders?: Record<string, string>,
 ): Promise<{ readonly status: number; readonly body: unknown }> {
   const headers: Record<string, string> = {};
   if (body !== undefined) headers['content-type'] = 'application/json';
   if (bearerToken !== undefined) headers.authorization = `Bearer ${bearerToken}`;
+  Object.assign(headers, additionalHeaders);
   const response = await fetch(
     `${origin}${pathname}`,
-    body === undefined ? { method } : { method, headers, body: JSON.stringify(body) },
+    body === undefined
+      ? { method, ...(Object.keys(headers).length === 0 ? {} : { headers }) }
+      : { method, headers, body: JSON.stringify(body) },
   );
   return { status: response.status, body: await response.json() };
 }

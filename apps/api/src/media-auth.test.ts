@@ -96,6 +96,23 @@ describe('MediaAuthService', () => {
     expect(mailer.sendOtp).toHaveBeenCalledTimes(3);
   });
 
+  it('does not let an untrusted forwarded address bypass the OTP limit', async () => {
+    const { auth, mailer } = await service();
+    await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
+    const request = (forwardedFor: string) =>
+      ({
+        socket: { remoteAddress: '203.0.113.10' },
+        headers: { 'x-forwarded-for': forwardedFor },
+      }) as never;
+    await auth.requestOtp('user@example.com', 'gmail', request('198.51.100.1'));
+    await auth.requestOtp('user@example.com', 'gmail', request('198.51.100.2'));
+    await auth.requestOtp('user@example.com', 'gmail', request('198.51.100.3'));
+    await expect(
+      auth.requestOtp('user@example.com', 'gmail', request('198.51.100.4')),
+    ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+    expect(mailer.sendOtp).toHaveBeenCalledTimes(3);
+  });
+
   it('delivers Telegram OTP by telegram_id and rejects gmail login for a Telegram-only user', async () => {
     const { auth, telegram, mailer } = await service();
     await auth.addAllowed({ telegramId: '123456', addedBy: 'admin' });
