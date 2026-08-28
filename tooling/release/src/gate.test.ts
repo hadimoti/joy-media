@@ -86,6 +86,29 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(auditIndex).toBeLessThan(workflowLines.indexOf('run: pnpm release:gate'));
   });
 
+  it('installs and verifies the FFmpeg/FFprobe toolchain before CI dependencies', () => {
+    const workflow = readFileSync(
+      resolve(import.meta.dirname, '../../../.github/workflows/ci.yml'),
+      'utf8',
+    );
+    const workflowLines = workflow.split(/\r?\n/u).map((line) => line.trim());
+    const toolchain = workflowLines.indexOf('- name: Install media toolchain');
+    const install = workflowLines.indexOf('- run: pnpm install --frozen-lockfile');
+
+    expect(toolchain).toBeGreaterThanOrEqual(0);
+    expect(install).toBeGreaterThan(toolchain);
+    for (const command of [
+      'sudo apt-get update',
+      'sudo apt-get install --yes ffmpeg',
+      'ffmpeg -version',
+      'ffprobe -version',
+    ]) {
+      const index = workflowLines.indexOf(command);
+      expect(index, `${command} must be present`).toBeGreaterThan(toolchain);
+      expect(index).toBeLessThan(install);
+    }
+  });
+
   it('keeps missing static assets out of the SPA fallback in nginx', () => {
     const config = readFileSync(
       resolve(import.meta.dirname, '../../../deploy/joy-media.nginx.conf'),

@@ -12,6 +12,12 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable pnpm
+      - name: Install media toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+          ffmpeg -version
+          ffprobe -version
       - run: pnpm install --frozen-lockfile
       - name: Audit production dependencies
         run: pnpm audit --prod --audit-level high
