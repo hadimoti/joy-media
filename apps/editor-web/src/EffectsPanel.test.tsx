@@ -140,8 +140,6 @@ describe('EffectsPanel', () => {
     const reasonId = card?.getAttribute('aria-describedby');
     expect(card?.getAttribute('aria-disabled')).toBe('true');
     expect(reasonId).toBeTruthy();
-    expect(container.querySelector(`#${reasonId}`)?.textContent).toContain(
-      'Select a video clip',
-    );
+    expect(container.querySelector(`#${reasonId}`)?.textContent).toContain('Select a video clip');
   });
 });

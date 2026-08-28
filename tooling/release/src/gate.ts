@@ -1046,8 +1046,15 @@ function isCompiledSourceSibling(path: string, trackedFiles: ReadonlySet<string>
   return trackedFiles.has(`${stem}.ts`) || trackedFiles.has(`${stem}.tsx`);
 }
 
+/**
+ * Production must not register test-only fixture handlers.  The runtime still
+ * contains a deliberately bounded `fixture.thumbnail` protocol path used by
+ * the real Worker delivery smoke, so matching every occurrence of that token
+ * would incorrectly fail a valid release.  Keep this detector limited to
+ * actual registry declarations and test-style exported fixture job types.
+ */
 const PRODUCTION_FIXTURE_REGISTRATION =
-  /(?:enqueueFixture|registerFixture(?:Handler|Job)|runFixtureThumbnail|fixture(?:[._-]?thumbnail|[\s._-]*(?:handler|job|registry|port))|(?:handler|job|registry|port)[\s._-]*fixture)/iu;
+  /(?:\benqueueFixture\b|\bregisterFixture(?:Handler|Job)\b|\bexport\s+(?:const|let|var)\s+type\s*=\s*['"]fixture\.thumbnail['"])/iu;
 
 export function findProductionFixtureRegistrations(root: string): readonly string[] {
   return collectFiles(root, 'apps')

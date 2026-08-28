@@ -62,10 +62,22 @@ describe('PostgresControlPlane', () => {
       locations: [{ kind: 'private-object' as const, ref: 'worker-object-1' }],
     };
     await expect(
-      restarted.registerWorkerCloudDerivative('worker-1', 'job-1', workerDerivative, 101, initialLease?.leaseToken),
+      restarted.registerWorkerCloudDerivative(
+        'worker-1',
+        'job-1',
+        workerDerivative,
+        101,
+        initialLease?.leaseToken,
+      ),
     ).resolves.toMatchObject({ id: 'derivative-job-1', verifiedAt: 101 });
     await expect(
-      restarted.registerWorkerCloudDerivative('worker-1', 'job-1', workerDerivative, 102, initialLease?.leaseToken),
+      restarted.registerWorkerCloudDerivative(
+        'worker-1',
+        'job-1',
+        workerDerivative,
+        102,
+        initialLease?.leaseToken,
+      ),
     ).resolves.toMatchObject({ id: 'derivative-job-1', verifiedAt: 101 });
     await expect(
       restarted.registerWorkerCloudDerivative(
@@ -77,7 +89,13 @@ describe('PostgresControlPlane', () => {
       ),
     ).rejects.toMatchObject({ code: 'DERIVATIVE_EXISTS' });
     await expect(
-      restarted.complete('worker-1', 'job-1', 102, realThumbnailReceipt(), initialLease?.leaseToken),
+      restarted.complete(
+        'worker-1',
+        'job-1',
+        102,
+        realThumbnailReceipt(),
+        initialLease?.leaseToken,
+      ),
     ).resolves.toMatchObject({
       id: 'job-1',
       state: 'completed',
@@ -124,10 +142,22 @@ describe('PostgresControlPlane', () => {
       generation: 1,
     });
     await expect(
-      afterCompletionRestart.complete('worker-1', 'job-1', 105, realThumbnailReceipt(), initialLease?.leaseToken),
+      afterCompletionRestart.complete(
+        'worker-1',
+        'job-1',
+        105,
+        realThumbnailReceipt(),
+        initialLease?.leaseToken,
+      ),
     ).rejects.toMatchObject({ code: 'LEASE_NOT_OWNED' });
     await expect(
-      afterCompletionRestart.complete('worker-1', 'job-1', 106, realThumbnailReceipt(), retriedLease?.leaseToken),
+      afterCompletionRestart.complete(
+        'worker-1',
+        'job-1',
+        106,
+        realThumbnailReceipt(),
+        retriedLease?.leaseToken,
+      ),
     ).resolves.toMatchObject({ state: 'completed', generation: 1 });
     await pool.end();
   });
@@ -206,7 +236,9 @@ describe('PostgresControlPlane', () => {
     });
     expect(job).not.toHaveProperty('leaseOwner');
     expect(job).not.toHaveProperty('leaseExpiresAt');
-    await expect(controlPlane.retry(owner, 'attempt-project', 'attempt-job', 106)).resolves.toMatchObject({
+    await expect(
+      controlPlane.retry(owner, 'attempt-project', 'attempt-job', 106),
+    ).resolves.toMatchObject({
       state: 'queued',
       generation: 1,
     });

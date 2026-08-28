@@ -48,4 +48,10 @@ describe('JobsPanel R2 pairing and exactly-once contract', () => {
     expect(panelSource).toContain("operationLedger?.finish(review.jobId, 'cancelled'");
     expect(panelSource).not.toContain('finish(`audio-denoise-${review.sourceAssetId}`');
   });
+
+  it('queues thumbnails only for the selected real media asset', () => {
+    expect(panelSource).toContain('thumbnailAssetId');
+    expect(panelSource).toContain('client.enqueueAssetThumbnail');
+    expect(panelSource).not.toContain('enqueueFixture');
+  });
 });

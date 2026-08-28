@@ -81,7 +81,8 @@ describe('P02 reference social-edit end-to-end workflow', () => {
 
     api.enqueue(owner, 'landscape', REFERENCE_PROJECT.id, 'render.export', now);
     expect(api.lease('interrupted-worker', now + 1, 5)?.id).toBe('landscape');
-    expect(api.lease('recovery-worker', now + 6, 30_000)?.id).toBe('landscape');
+    const landscapeLease = api.lease('recovery-worker', now + 6, 30_000);
+    expect(landscapeLease?.id).toBe('landscape');
     const landscapeManifest = freezeManifest({
       projectId: REFERENCE_PROJECT.id,
       revision: REFERENCE_PROJECT.revision,
@@ -93,12 +94,20 @@ describe('P02 reference social-edit end-to-end workflow', () => {
     });
     const landscapePath = join(outputDirectory, 'reference-landscape.mp4');
     expect(
-      executeLeasedExport(api, 'recovery-worker', 'landscape', landscapeManifest, landscapePath),
+      executeLeasedExport(
+        api,
+        'recovery-worker',
+        'landscape',
+        landscapeManifest,
+        landscapePath,
+        landscapeLease?.leaseToken,
+      ),
     ).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
     expect(verifyExport(landscapePath)).toMatchObject({ width: 64, height: 36 });
 
     api.enqueue(owner, 'vertical', REFERENCE_PROJECT.id, 'render.export', now + 10);
-    expect(api.lease('recovery-worker', now + 11)?.id).toBe('vertical');
+    const verticalLease = api.lease('recovery-worker', now + 11);
+    expect(verticalLease?.id).toBe('vertical');
     const verticalManifest = freezeManifest({
       ...landscapeManifest,
       width: 36,
@@ -106,7 +115,14 @@ describe('P02 reference social-edit end-to-end workflow', () => {
     });
     const verticalPath = join(outputDirectory, 'reference-vertical.mp4');
     expect(
-      executeLeasedExport(api, 'recovery-worker', 'vertical', verticalManifest, verticalPath),
+      executeLeasedExport(
+        api,
+        'recovery-worker',
+        'vertical',
+        verticalManifest,
+        verticalPath,
+        verticalLease?.leaseToken,
+      ),
     ).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
     expect(verifyExport(verticalPath)).toMatchObject({ width: 36, height: 64 });
     expect(api.eventsAfter(owner, REFERENCE_PROJECT.id, 0).map((event) => event.type)).toEqual([

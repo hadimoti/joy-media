@@ -34,6 +34,7 @@ export function JobsPanel({
   projectTitle,
   controlPlaneReady = true,
   audioAssetId,
+  thumbnailAssetId,
   onApplyWorkerAudioResult,
   operationLedger,
   operationRevision = 0,
@@ -42,6 +43,8 @@ export function JobsPanel({
   projectTitle: string;
   readonly controlPlaneReady?: boolean;
   readonly audioAssetId?: string;
+  /** Selected visual asset that can be rendered by the Worker thumbnail path. */
+  readonly thumbnailAssetId?: string;
   readonly onApplyWorkerAudioResult?: (
     result: VerifiedWorkerAudioResult,
     mode: 'replace' | 'keep',
@@ -237,9 +240,16 @@ export function JobsPanel({
         setStatus(
           'Audio denoise job queued. The Worker result will require review before insertion.',
         );
-      } else {
-        await client.enqueueFixture(projectId, `fixture-thumbnail-${crypto.randomUUID()}`);
+      } else if (thumbnailAssetId !== undefined) {
+        await client.enqueueAssetThumbnail(
+          projectId,
+          `asset-thumbnail-${crypto.randomUUID()}`,
+          thumbnailAssetId,
+        );
         setStatus('Thumbnail job queued for the paired local Worker.');
+      } else {
+        setStatus('Select a media clip before queueing a thumbnail.');
+        return;
       }
       await refresh();
     } catch (error) {
@@ -384,9 +394,17 @@ export function JobsPanel({
             aria-label={
               audioAssetId === undefined ? 'Queue thumbnail derivative' : 'Run audio denoise'
             }
-            title={audioAssetId === undefined ? 'Queue thumbnail' : 'Run audio denoise'}
+            title={
+              audioAssetId === undefined
+                ? 'Select a media clip before queueing a thumbnail'
+                : 'Run audio denoise'
+            }
             data-guide={audioAssetId === undefined ? 'Queue thumbnail' : 'Run audio denoise'}
-            disabled={!projectInitialized || submitting}
+            disabled={
+              !projectInitialized ||
+              submitting ||
+              (audioAssetId === undefined && thumbnailAssetId === undefined)
+            }
             onClick={() => void submit()}
           >
             <ImageIcon />

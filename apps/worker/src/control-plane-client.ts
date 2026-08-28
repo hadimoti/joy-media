@@ -139,7 +139,11 @@ export class WorkerControlPlaneClient {
     );
   }
 
-  async heartbeat(jobId: string, progress: number, leaseToken?: string): Promise<{ readonly cancelRequested: boolean }> {
+  async heartbeat(
+    jobId: string,
+    progress: number,
+    leaseToken?: string,
+  ): Promise<{ readonly cancelRequested: boolean }> {
     const result = await this.authenticatedRequest(
       `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/heartbeat`,
       { progress, leaseToken: leaseToken ?? '' },
@@ -156,7 +160,12 @@ export class WorkerControlPlaneClient {
     );
   }
 
-  async uploadDerivative(jobId: string, result: WorkerJobResult, bytes: Uint8Array, leaseToken?: string): Promise<void> {
+  async uploadDerivative(
+    jobId: string,
+    result: WorkerJobResult,
+    bytes: Uint8Array,
+    leaseToken?: string,
+  ): Promise<void> {
     const sessionToken = this.options.sessionStore.loadWorkerSession();
     if (sessionToken === undefined) throw new Error('Worker is not paired');
     const headers: Record<string, string> = {

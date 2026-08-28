@@ -2,7 +2,13 @@ import { renderFixture, verifyExport } from '@joy-media/export-core';
 import type { RenderManifest } from '@joy-media/export-core';
 import { existsSync, rmSync } from 'node:fs';
 export interface ExportLeaseCoordinator {
-  complete(workerId: string, jobId: string, now?: number, receipt?: unknown, leaseToken?: string): unknown;
+  complete(
+    workerId: string,
+    jobId: string,
+    now?: number,
+    receipt?: unknown,
+    leaseToken?: string,
+  ): unknown;
 }
 export interface ExportJobResult {
   readonly outputPath: string;

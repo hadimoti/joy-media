@@ -177,7 +177,9 @@ describe('WorkerControlPlaneClient', () => {
       );
       const lease = await client.lease();
       expect(lease).toMatchObject({ id: 'job-1' });
-      await expect(client.complete('job-1', realThumbnailReceipt(), lease?.leaseToken)).resolves.toBeUndefined();
+      await expect(
+        client.complete('job-1', realThumbnailReceipt(), lease?.leaseToken),
+      ).resolves.toBeUndefined();
     } finally {
       await close(server);
     }

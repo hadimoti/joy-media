@@ -474,12 +474,6 @@ export class BrowserControlPlaneClient {
       body: JSON.stringify(params),
     });
   }
-  async enqueueFixture(projectId: string, id: string): Promise<BrowserJob> {
-    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
-      id,
-      type: 'fixture.thumbnail',
-    });
-  }
   async enqueueAssetThumbnail(projectId: string, id: string, assetId: string): Promise<BrowserJob> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
       id,

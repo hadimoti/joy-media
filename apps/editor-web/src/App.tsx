@@ -5779,19 +5779,34 @@ function EditorWorkspace({
         />
       );
     if (api.id === 'jobs') {
-      const selectedAudioAssetId = state.selectedIds
+      const selectedWorkerAsset = state.selectedIds
         .map((clipId) =>
           context.timelineProject.compositions[context.timelineProject.rootCompositionId]?.tracks
-            .flatMap((track) => track.clips)
-            .find((clip) => clip.id === clipId),
+            .flatMap((track) => track.clips.map((clip) => ({ clip, track })))
+            .find((item) => item.clip.id === clipId),
         )
-        .find((clip): clip is VideoClip => clip?.kind === 'video')?.assetId;
+        .find((item) => item?.clip.kind === 'video');
+      const selectedVideoAsset =
+        selectedWorkerAsset?.clip.kind === 'video' ? selectedWorkerAsset.clip : undefined;
+      const selectedVideoTrackFamily =
+        selectedWorkerAsset?.clip.kind === 'video' ? selectedWorkerAsset.track.family : undefined;
+      const selectedAudioAssetId =
+        selectedVideoAsset !== undefined && selectedVideoTrackFamily === 'audio'
+          ? selectedVideoAsset.assetId
+          : undefined;
+      const selectedThumbnailAssetId =
+        selectedVideoAsset !== undefined && selectedVideoTrackFamily === 'audio'
+          ? undefined
+          : selectedVideoAsset?.assetId;
       return (
         <JobsPanel
           projectId={controlPlaneProject.controlPlaneProjectId}
           projectTitle={controlPlaneProject.title}
           controlPlaneReady={joySession.kind === 'ready'}
           {...(selectedAudioAssetId === undefined ? {} : { audioAssetId: selectedAudioAssetId })}
+          {...(selectedThumbnailAssetId === undefined
+            ? {}
+            : { thumbnailAssetId: selectedThumbnailAssetId })}
           onApplyWorkerAudioResult={applyWorkerAudioResult}
           operationLedger={operationLedger}
           operationRevision={session.historyCursorSequence}

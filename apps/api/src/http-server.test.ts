@@ -662,7 +662,8 @@ describe('control-plane HTTP transport', () => {
       body: { data: { state: 'queued', progress: 0 } },
     });
     const retriedLease = await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken);
-    const retriedLeaseToken = (retriedLease.body as { data: { leaseToken: string } }).data.leaseToken;
+    const retriedLeaseToken = (retriedLease.body as { data: { leaseToken: string } }).data
+      .leaseToken;
     const completion = await request(
       origin,
       'POST',
@@ -762,7 +763,10 @@ describe('control-plane HTTP transport', () => {
         assetId: 'attempt-asset',
       }),
     ).toMatchObject({ status: 201, body: { data: { id: 'unbounded-job', state: 'queued' } } });
-    expect(controlPlane.lease('attempt-worker', 104, 1)).toMatchObject({ id: 'bounded-job', generation: 1 });
+    expect(controlPlane.lease('attempt-worker', 104, 1)).toMatchObject({
+      id: 'bounded-job',
+      generation: 1,
+    });
     expect(controlPlane.lease('attempt-worker', 106, 1)).toMatchObject({ id: 'unbounded-job' });
     expect(controlPlane.lease('attempt-worker', 108, 1)).toMatchObject({ id: 'unbounded-job' });
 

@@ -116,10 +116,12 @@ describe('local control plane', () => {
     const first = api.lease('same-worker', 101, 1);
     const second = api.lease('same-worker', 103, 30_000);
     expect(second?.leaseToken).not.toBe(first?.leaseToken);
-    expect(() => api.complete('same-worker', 'same-worker-job', 104, undefined, first?.leaseToken)).toThrow(
-      expect.objectContaining({ code: 'LEASE_NOT_OWNED' }),
-    );
-    expect(api.complete('same-worker', 'same-worker-job', 105, undefined, second?.leaseToken)).toMatchObject({
+    expect(() =>
+      api.complete('same-worker', 'same-worker-job', 104, undefined, first?.leaseToken),
+    ).toThrow(expect.objectContaining({ code: 'LEASE_NOT_OWNED' }));
+    expect(
+      api.complete('same-worker', 'same-worker-job', 105, undefined, second?.leaseToken),
+    ).toMatchObject({
       state: 'completed',
     });
   });
