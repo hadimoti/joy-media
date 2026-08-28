@@ -1528,6 +1528,7 @@ export function TimelinePanel({
                           });
                         },
                         source.enabled ?? true,
+                        source.clips.length === 0 && composition.tracks.length > 1,
                       );
                       setMenu({ x: event.clientX, y: event.clientY, items });
                     }}

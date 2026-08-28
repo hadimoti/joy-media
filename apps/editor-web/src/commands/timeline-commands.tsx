@@ -538,10 +538,16 @@ export function buildTrackHeaderContextMenu(
   onRemoveTrack: () => void,
   onToggleEnabled: (enabled: boolean) => void,
   currentEnabled: boolean,
+  canRemoveTrack = false,
 ): readonly ContextMenuItem[] {
   return [
     { label: 'Add Video Track', shortcut: 'T', action: onAddTrack },
-    { label: 'Remove Track', shortcut: 'Shift+T', action: onRemoveTrack, disabled: true }, // TODO
+    {
+      label: 'Remove Track',
+      shortcut: 'Shift+T',
+      action: onRemoveTrack,
+      disabled: !canRemoveTrack,
+    },
     { label: '', action: () => {}, dividerBefore: true },
     {
       label: currentEnabled ? 'Disable Track' : 'Enable Track',
