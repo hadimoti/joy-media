@@ -19,7 +19,6 @@ import {
   hasError,
   isIdle,
   getRequest,
-  type CreativeBriefState,
 } from './creative-brief-controller.js';
 import { CreativeBriefDisplay } from './CreativeBriefDisplay.js';
 
@@ -41,7 +40,7 @@ export interface CreativeBriefPanelProps {
 
 /** Versioned disclosure shown immediately before project-level opt-in. */
 export const CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1 =
-  'A bounded semantic summary of this project (not media files, URLs, or secrets) will be sent to OpenRouter\'s free NVIDIA Nemotron model. OpenRouter may log prompts and outputs; do not include confidential data. Paid fallback is disabled.' as const;
+  "A bounded semantic summary of this project (not media files, URLs, or secrets) will be sent to OpenRouter's free NVIDIA Nemotron model. OpenRouter may log prompts and outputs; do not include confidential data. Paid fallback is disabled." as const;
 
 /**
  * Creative Brief Panel Component.
@@ -56,7 +55,12 @@ export const CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1 =
  * Errors transition to error state.
  * No action controls to execute/apply recommendations.
  */
-export function CreativeBriefPanel({ revisionId, runBrief, optedIn = false, onOptIn }: CreativeBriefPanelProps) {
+export function CreativeBriefPanel({
+  revisionId,
+  runBrief,
+  optedIn = false,
+  onOptIn,
+}: CreativeBriefPanelProps) {
   const [state, dispatch] = useReducer(creativeBriefReducer, INITIAL_BRIEF_STATE);
   const [requestText, setRequestText] = useState('');
   const [optInError, setOptInError] = useState<string | null>(null);
@@ -223,7 +227,9 @@ export function CreativeBriefPanel({ revisionId, runBrief, optedIn = false, onOp
         <div className="creative-brief-panel-consent" aria-label="Creative Brief consent gate">
           {onOptIn ? (
             <>
-              <p><strong>Creative Brief is currently disabled.</strong></p>
+              <p>
+                <strong>Creative Brief is currently disabled.</strong>
+              </p>
               <p>Enable Creative Brief to request improvements to your project.</p>
               <p className="creative-brief-panel-disclosure">
                 {CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1}
@@ -287,19 +293,13 @@ export function CreativeBriefPanel({ revisionId, runBrief, optedIn = false, onOp
 
         {optedIn && hasError(state) && (
           <div className="creative-brief-panel-error" aria-label="Error occurred">
-            <p><strong>Error:</strong> {state.error}</p>
-            <button
-              className="creative-brief-panel-retry"
-              onClick={handleRetry}
-              aria-label="Retry"
-            >
+            <p>
+              <strong>Error:</strong> {state.error}
+            </p>
+            <button className="creative-brief-panel-retry" onClick={handleRetry} aria-label="Retry">
               Retry
             </button>
-            <button
-              className="creative-brief-panel-reset"
-              onClick={handleReset}
-              aria-label="Reset"
-            >
+            <button className="creative-brief-panel-reset" onClick={handleReset} aria-label="Reset">
               Clear
             </button>
           </div>
@@ -307,7 +307,10 @@ export function CreativeBriefPanel({ revisionId, runBrief, optedIn = false, onOp
 
         {optedIn && isStale(state) && (
           <div className="creative-brief-panel-stale" aria-label="Brief is stale">
-            <p><strong>Warning:</strong> The creative brief is stale. The project revision has changed.</p>
+            <p>
+              <strong>Warning:</strong> The creative brief is stale. The project revision has
+              changed.
+            </p>
             <button
               className="creative-brief-panel-retry"
               onClick={handleRetry}
@@ -315,11 +318,7 @@ export function CreativeBriefPanel({ revisionId, runBrief, optedIn = false, onOp
             >
               Regenerate Brief
             </button>
-            <button
-              className="creative-brief-panel-reset"
-              onClick={handleReset}
-              aria-label="Reset"
-            >
+            <button className="creative-brief-panel-reset" onClick={handleReset} aria-label="Reset">
               Clear
             </button>
           </div>

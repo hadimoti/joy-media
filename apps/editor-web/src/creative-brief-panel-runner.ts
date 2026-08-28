@@ -5,6 +5,7 @@ import type { ControlPlaneProjectBinding } from './project-control-plane.js';
 import type { SyncProjectDocument } from './project-document-sync.js';
 import { coordinateCreativeBriefRequest } from './creative-brief-request-coordinator.js';
 import type { CreativeBriefTransport } from './creative-brief-request-coordinator.js';
+export type { CreativeBriefTransport } from './creative-brief-request-coordinator.js';
 
 /**
  * Runner error for blank input - no network calls made.
@@ -114,12 +115,23 @@ function runnerErrorCause(details: CreativeBriefRunnerError): string | undefined
   const code = typeof record.code === 'string' ? record.code : undefined;
   const message = typeof record.message === 'string' ? record.message : undefined;
   if (code === undefined && message === undefined) return undefined;
-  return boundedErrorText(code === undefined ? message! : message === undefined ? code : `${code}: ${message}`);
+  return boundedErrorText(
+    code === undefined ? message! : message === undefined ? code : `${code}: ${message}`,
+  );
 }
 
 function boundedErrorText(value: string): string | undefined {
-  const normalized = value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+  const normalized = Array.from(value, (character) =>
+    isControlCharacter(character) ? ' ' : character,
+  )
+    .join('')
+    .trim();
   return normalized === '' ? undefined : normalized.slice(0, 240);
+}
+
+function isControlCharacter(character: string): boolean {
+  const codePoint = character.codePointAt(0) ?? 0;
+  return codePoint <= 0x1f || codePoint === 0x7f;
 }
 
 /**
@@ -206,7 +218,7 @@ export function createCreativeBriefPanelRunner(
       browserKeyValueStore,
       syncProjectDocument,
       creativeBriefTransport,
-      { ownerKey },
+      ownerKey === undefined ? {} : { ownerKey },
     );
 
     // 4. Return the brief only for a successful coordination result
