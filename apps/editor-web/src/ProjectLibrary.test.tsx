@@ -18,7 +18,7 @@ function storage(): BrowserKeyValueStore {
 }
 
 describe('ProjectLibrary empty state', () => {
-  it('shows usable labelled actions when the catalog is genuinely empty', () => {
+  it('only presents starting actions that have working callbacks', () => {
     const store = storage();
     store.setItem(PROJECT_CATALOG_KEY, JSON.stringify({ version: 1, projects: {} }));
     const markup = renderToStaticMarkup(
@@ -26,10 +26,11 @@ describe('ProjectLibrary empty state', () => {
     );
 
     expect(markup).toContain('Your project library is empty');
+    expect(markup).toContain('Create a project to enter the editor.');
     expect(markup).toContain('>New project<');
-    expect(markup).toContain('>Import media<');
-    expect(markup).toContain('>Start from template<');
-    expect(markup).toContain('disabled=""');
+    expect(markup).not.toContain('>Import media<');
+    expect(markup).not.toContain('>Start from template<');
+    expect(markup).not.toContain('disabled=""');
     expect(markup).not.toContain('Open last project');
     expect(markup).not.toContain('project-library-card');
   });

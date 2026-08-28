@@ -31,6 +31,7 @@ export function ProjectLibrary({
   const [draftTitle, setDraftTitle] = useState('');
   const [creating, setCreating] = useState(false);
   const projects = useMemo(() => listCatalogProjects(storage), [storage, tick]);
+  const hasAlternateStart = onImportMedia !== undefined || onStartFromTemplate !== undefined;
   const lastProject = useMemo(() => {
     const activeId = loadActiveProjectId(storage);
     return activeId === null ? undefined : getCatalogProject(storage, activeId);
@@ -127,7 +128,11 @@ export function ProjectLibrary({
           <section className="project-library-empty" aria-labelledby="project-library-empty-title">
             <div className="project-library-empty-copy">
               <h2 id="project-library-empty-title">Your project library is empty</h2>
-              <p>Create a project, bring in media, or start with a template.</p>
+              <p>
+                {hasAlternateStart
+                  ? 'Create a project or choose another available starting point.'
+                  : 'Create a project to enter the editor.'}
+              </p>
             </div>
             <div className="project-library-empty-actions">
               <button
@@ -137,26 +142,24 @@ export function ProjectLibrary({
               >
                 New project
               </button>
-              <button
-                type="button"
-                className="project-library-secondary-action"
-                disabled={onImportMedia === undefined}
-                onClick={() => onImportMedia?.()}
-                title={onImportMedia === undefined ? 'Import media is unavailable here' : undefined}
-              >
-                Import media
-              </button>
-              <button
-                type="button"
-                className="project-library-secondary-action"
-                disabled={onStartFromTemplate === undefined}
-                onClick={() => onStartFromTemplate?.()}
-                title={
-                  onStartFromTemplate === undefined ? 'Templates are unavailable here' : undefined
-                }
-              >
-                Start from template
-              </button>
+              {onImportMedia !== undefined && (
+                <button
+                  type="button"
+                  className="project-library-secondary-action"
+                  onClick={onImportMedia}
+                >
+                  Import media
+                </button>
+              )}
+              {onStartFromTemplate !== undefined && (
+                <button
+                  type="button"
+                  className="project-library-secondary-action"
+                  onClick={onStartFromTemplate}
+                >
+                  Start from template
+                </button>
+              )}
             </div>
           </section>
         ) : (
