@@ -78,10 +78,10 @@ Codex in-app-browser findings below remain valid independent evidence.
 
 | Surface                     | Observed tip/state                                | Consequence                                                                       |
 | --------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Local checkpoint branch     | `eda8d64` on `codex/joy-media-implement-20260828` | Clean tested candidate, published for review; not yet promoted to `main`.         |
+| Local checkpoint branch     | `70e38f3` on `codex/joy-media-implement-20260828` | Clean tested candidate, published for review; not yet promoted to `main`.         |
 | Deployed/VPS release branch | `b3c1866`                                         | Older certified release; candidate has additional hardening and is not deployed.  |
-| GitHub `main`               | `2083ffc`                                         | 407 main-only commits versus 170 candidate-only commits.                          |
-| VPS `main`                  | `1e4657f`                                         | 225 VPS-main-only commits versus 170 candidate-only commits.                      |
+| GitHub `main`               | `2083ffc`                                         | 407 main-only commits versus 174 candidate-only commits.                          |
+| VPS `main`                  | `1e4657f`                                         | 225 VPS-main-only commits versus 174 candidate-only commits.                      |
 | Common merge base           | `73744bb`                                         | A blind merge is unsafe; simulated reconciliation has extensive overlap/conflict. |
 
 `aec01ef` contains 324 changed files and a large quantity of transient evidence, debug files, and
@@ -499,8 +499,8 @@ or raw secret-bearing artifacts.
   The focused visual-effects suite passes and the repository typecheck remains green. The
   detached Kilo commit also contained unrelated generated/tsconfig changes and was not
   cherry-picked wholesale.
-- The latest `pnpm release:gate` run at `2026-08-28T12:21:34Z` reports command health, 2,382
-  scoped tests, generated-artifact hygiene, fixture registries, builds, manifest, SBOM, and
+- The latest clean `pnpm release:gate` run at `2026-08-28T12:40:41Z` reports command health,
+  2,393 scoped tests, generated-artifact hygiene, fixture registries, builds, manifest, SBOM, and
   feature-status as passed. It remains **NO-GO** only because source-bound authenticated browser
   provenance and the required `authenticated-editor-1.0` journey are absent.
 - A fresh read-only OpenCLI probe using profile `cefd9k77` against `https://www.joyst.ir/` found
@@ -509,12 +509,17 @@ or raw secret-bearing artifacts.
   response, while `/transitions/preview/transition2.png` still returned 200 `text/html` (SPA
   fallback). Clicking the Local editor project did not leave the Projects route, so this remains
   public-shell evidence rather than an authenticated editor journey and no mutation was made.
-- The frontend specialist's additive, namespaced Creative Brief v2 contract landed as `eda8d64`.
-  It preserves all current v1 exports and its focused suite passes 10/10; the isolated worktree's
+- The frontend specialist's additive, namespaced Creative Brief v2 contract landed as `eda8d64`
+  with the diagnostic-label follow-up in `70e38f3`. It preserves all current v1 exports and its
+  focused suite passes 11/11; the isolated worktree's
   package build could not resolve an unrelated workspace declaration, so the candidate's full
   typecheck was run after integration and passed. No incompatible GitHub-main contract was copied.
+- Backend and release cross-review accepted this contract as safe/additive but explicitly rejected
+  treating it as a complete Creative Brief runtime or as release evidence. They also rejected a
+  wholesale WP-37/WP-38 merge, blind promotion, or any VPS mutation until the parity matrix,
+  migrations/readiness, live static routes, and source-bound authenticated journey are green.
 
-- The local JOY Media hardening checkpoint is committed through `eda8d64` on
+- The local JOY Media hardening checkpoint is committed through `70e38f3` on
   `codex/joy-media-implement-20260828`; its pre-merge state is preserved at
   `backup/joy-media-before-main-merge-20260828`.
 - The checkpoint passes `pnpm typecheck`, `pnpm format:check`, and the latest full `pnpm test`
