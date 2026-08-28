@@ -339,14 +339,40 @@ function EffectCard({
   readonly onToggleFavorite: () => void;
   readonly onDragStart: (event: React.DragEvent) => void;
 }) {
+  const unavailableReasonId = `effect-unavailable-${descriptor.id}`;
+  const unavailableReason = canApply
+    ? undefined
+    : 'Select a video clip to apply this effect, or drag it onto a timeline clip.';
+
   return (
     <div
       className={`effect-card${canApply ? '' : ' is-unavailable'}`}
+      role="group"
+      tabIndex={0}
+      aria-label={`${descriptor.label} effect`}
+      aria-keyshortcuts="Enter Space"
+      {...(unavailableReason === undefined
+        ? {}
+        : {
+            'aria-disabled': true,
+            'aria-describedby': unavailableReasonId,
+          })}
       draggable={true}
       onDragStart={onDragStart}
       onDoubleClick={canApply ? onAdd : undefined}
-      title={`${descriptor.label}${descriptor.description ? ` — ${descriptor.description}` : ''} (Cost: ${descriptor.cost})${canApply ? '' : ' Drag to a clip on the timeline to apply.'}`}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        onAdd();
+      }}
+      title={`${descriptor.label}${descriptor.description ? ` — ${descriptor.description}` : ''} (Cost: ${descriptor.cost})${unavailableReason === undefined ? '' : ` ${unavailableReason}`}`}
     >
+      {unavailableReason !== undefined && (
+        <span id={unavailableReasonId} className="sr-only">
+          {unavailableReason}
+        </span>
+      )}
       <div className="effect-card-thumb">
         <EffectPreviewMedia effectId={descriptor.id} className="effect-card-preview-media" />
         {!canApply && <span className="effect-card-preview-state">Preview only</span>}
@@ -377,12 +403,15 @@ function EffectCard({
             type="button"
             className="icon-button effect-add-btn"
             aria-label={`Add ${descriptor.label}`}
+            {...(unavailableReason === undefined
+              ? {}
+              : { 'aria-describedby': unavailableReasonId })}
             disabled={!canApply}
             onClick={(e) => {
               e.stopPropagation();
               onAdd();
             }}
-            title="Add effect"
+            title={unavailableReason ?? 'Add effect'}
           >
             <PlusIcon />
           </button>

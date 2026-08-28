@@ -25,6 +25,7 @@ describe('TimelineEmptyState interactions', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     const onImportClick = vi.fn();
+    const onAddFromLibrary = vi.fn();
     await act(async () => {
       root!.render(
         <TimelineEmptyState
@@ -34,7 +35,7 @@ describe('TimelineEmptyState interactions', () => {
           viewportPixelsPerSecond={20}
           onSeek={vi.fn()}
           onImportClick={onImportClick}
-          onAddFromLibrary={vi.fn()}
+          onAddFromLibrary={onAddFromLibrary}
           onContextMenu={vi.fn()}
         />,
       );
@@ -44,5 +45,13 @@ describe('TimelineEmptyState interactions', () => {
       container!.querySelector<HTMLElement>('.timeline-empty-text')!.click();
     });
     expect(onImportClick).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      container!.querySelector<HTMLElement>('.timeline-empty-strip-icon')!.click();
+      container!.querySelector<HTMLButtonElement>('.timeline-empty-action')!.click();
+      container!.querySelectorAll<HTMLButtonElement>('.timeline-empty-action')[1]!.click();
+    });
+    expect(onImportClick).toHaveBeenCalledTimes(3);
+    expect(onAddFromLibrary).toHaveBeenCalledTimes(1);
   });
 });

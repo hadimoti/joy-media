@@ -80,4 +80,68 @@ describe('EffectsPanel', () => {
     expect(container.textContent).toContain('Pixelate');
     expect(container.textContent).not.toContain('No effects match your search.');
   });
+
+  it('adds the focused effect card with Enter or Space', async () => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    const onDispatch = vi.fn();
+
+    await act(async () => {
+      root?.render(
+        <EffectsPanel
+          project={INITIAL_EDITOR_PROJECT}
+          objectId="intro-title"
+          canApplyEffects={true}
+          onDispatch={onDispatch}
+          showToast={vi.fn()}
+        />,
+      );
+      await Promise.resolve();
+    });
+
+    const card = container.querySelector<HTMLElement>('.effect-card');
+    expect(card?.getAttribute('role')).toBe('group');
+    expect(card?.getAttribute('aria-keyshortcuts')).toBe('Enter Space');
+    await act(async () => {
+      card?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      card?.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    });
+    expect(onDispatch).toHaveBeenCalledTimes(2);
+    expect(onDispatch).toHaveBeenCalledWith({
+      type: 'effect.add',
+      payload: {
+        objectId: 'intro-title',
+        effectId: 'pixelate',
+        params: {},
+      },
+    });
+  });
+
+  it('exposes why an effect is unavailable instead of silently disabling it', async () => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(
+        <EffectsPanel
+          project={INITIAL_EDITOR_PROJECT}
+          objectId={undefined}
+          canApplyEffects={false}
+          onDispatch={vi.fn()}
+          showToast={vi.fn()}
+        />,
+      );
+      await Promise.resolve();
+    });
+
+    const card = container.querySelector<HTMLElement>('.effect-card');
+    const reasonId = card?.getAttribute('aria-describedby');
+    expect(card?.getAttribute('aria-disabled')).toBe('true');
+    expect(reasonId).toBeTruthy();
+    expect(container.querySelector(`#${reasonId}`)?.textContent).toContain(
+      'Select a video clip',
+    );
+  });
 });

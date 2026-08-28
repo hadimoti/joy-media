@@ -19,6 +19,7 @@ import {
   PlusIcon,
   TrashIcon,
 } from './icons.js';
+import { JOY_STUDIO_NAME } from './product-identity.js';
 
 type ProjectOperationResult = void | ProjectCatalogEntry;
 type ProjectAction = 'rename' | 'duplicate' | 'trash' | 'restore' | 'purge';
@@ -243,7 +244,7 @@ export function ProjectLibrary({
             height={26}
             decoding="async"
           />
-          <strong>JOY Studio</strong>
+          <strong>{JOY_STUDIO_NAME}</strong>
         </div>
         <div className="project-library-header-actions">
           <div className="project-library-tabs" role="tablist" aria-label="Project library">

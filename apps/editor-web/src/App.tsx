@@ -332,6 +332,7 @@ import {
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
 import { JOY_COLORS } from './theme.js';
+import { JOY_STUDIO_NAME } from './product-identity.js';
 import { effectsByObjectIdAt, effectInstancesForTimelineClip } from './adjustment-render.js';
 import {
   buildTreatmentLayerInsertion,
@@ -6015,7 +6016,7 @@ function EditorWorkspace({
               height={24}
               decoding="async"
             />
-            <strong>JOY Studio</strong>
+            <strong>{JOY_STUDIO_NAME}</strong>
           </span>
           <AppMenuBar
             canUndo={session.canUndo}
@@ -6292,18 +6293,18 @@ function EditorWorkspace({
           <div className="header-menu">
             <button
               className="icon-button"
-              aria-label="Joy Studio account"
+              aria-label={`${JOY_STUDIO_NAME} account`}
               aria-expanded={accountOpen}
               title={
                 joySession.kind === 'ready'
-                  ? `Signed in · ${joySession.displayName ?? joySession.subject ?? 'Joy Studio'}`
+                  ? `Signed in · ${joySession.displayName ?? joySession.subject ?? JOY_STUDIO_NAME}`
                   : joySession.kind === 'no-access'
-                    ? 'Signed in, Joy Studio access not enabled'
+                    ? `Signed in, ${JOY_STUDIO_NAME} access not enabled`
                     : joySession.kind === 'signed-out'
                       ? 'Signed out'
                       : joySession.kind === 'unavailable'
                         ? 'Sign-in status unavailable'
-                        : 'Joy Studio account'
+                        : `${JOY_STUDIO_NAME} account`
               }
               onClick={() => {
                 setAccountOpen((open) => !open);
@@ -6319,7 +6320,7 @@ function EditorWorkspace({
               <section
                 ref={accountDropdownRef}
                 className="header-dropdown account-dropdown"
-                aria-label="Joy Studio account"
+                aria-label={`${JOY_STUDIO_NAME} account`}
               >
                 {joySession.kind === 'ready' && (
                   <>
@@ -6353,7 +6354,7 @@ function EditorWorkspace({
                     <button
                       type="button"
                       className="account-sign-out"
-                      title="Sign out of Joy Studio"
+                      title={`Sign out of ${JOY_STUDIO_NAME}`}
                       onClick={() => void signOut()}
                     >
                       <LogoutIcon />
@@ -6362,7 +6363,9 @@ function EditorWorkspace({
                   </>
                 )}
                 {joySession.kind === 'no-access' && (
-                  <p className="empty-hint">Joy Studio access is not enabled for this account.</p>
+                  <p className="empty-hint">
+                    {JOY_STUDIO_NAME} access is not enabled for this account.
+                  </p>
                 )}
                 {joySession.kind === 'signed-out' && (
                   <p className="empty-hint">Returning to login…</p>

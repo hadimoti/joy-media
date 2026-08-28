@@ -14,6 +14,7 @@ import {
   verifyOtp,
   type MediaAuthMethod,
 } from './media-session.js';
+import { JOY_STUDIO_NAME } from './product-identity.js';
 import './login-gate.css';
 
 type Step = 'checking' | 'contact' | 'otp' | 'unlocked';
@@ -276,16 +277,16 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
               <img
                 src="/assets/JoyCodeNew_128x128.png"
                 className="login-logo"
-                alt="Joy Studio"
+                alt={JOY_STUDIO_NAME}
                 width={80}
                 height={80}
                 decoding="async"
               />
             </div>
 
-            <h1 className="login-title" lang="en" dir="ltr" aria-label="Joy Studio.">
+            <h1 className="login-title" lang="en" dir="ltr" aria-label={`${JOY_STUDIO_NAME}.`}>
               <span className="login-title-joy">
-                {Array.from('Joy').map((ch, index) => (
+                {Array.from('JOY').map((ch, index) => (
                   <MatrixTitleChar
                     key={`matrix-${ch}-${index}`}
                     finalChar={ch}
@@ -306,7 +307,7 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
               <span
                 className="login-title-char login-title-dot"
                 style={{
-                  animationDelay: `${'Joy Studio'.length * 45}ms, ${'Joy Studio'.length * 45 + 550}ms`,
+                  animationDelay: `${JOY_STUDIO_NAME.length * 45}ms, ${JOY_STUDIO_NAME.length * 45 + 550}ms`,
                 }}
                 aria-hidden="true"
               >

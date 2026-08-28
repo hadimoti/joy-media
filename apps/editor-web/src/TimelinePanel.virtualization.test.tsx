@@ -83,6 +83,7 @@ describe('TimelinePanel virtualization focus behavior', () => {
     document.body.appendChild(container);
     const project = emptySpikeProject({ trackCount: 1, durationUs: 30_000_000 });
     const root: Root = createRoot(container);
+    const onOpenAssetLibrary = vi.fn();
     await act(async () => {
       root.render(
         <TimelinePanel
@@ -99,18 +100,36 @@ describe('TimelinePanel virtualization focus behavior', () => {
           onToggleSelection={vi.fn()}
           onClearSelection={vi.fn()}
           onDispatch={vi.fn()}
+          onOpenAssetLibrary={onOpenAssetLibrary}
         />,
       );
     });
 
     expect(container.querySelector<HTMLButtonElement>('[aria-label="Play"]')?.disabled).toBe(true);
-    const lane = container.querySelector<HTMLElement>('[aria-label^="Empty timeline"]');
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="Play"]')?.title).toContain(
+      'before playing',
+    );
+    expect(container.querySelector('[id="timeline-play-disabled-reason"]')?.textContent).toContain(
+      'before playing',
+    );
+    const emptyState = container.querySelector<HTMLElement>('[aria-label^="Empty timeline"]');
+    expect(emptyState).not.toBeNull();
+    expect(emptyState?.getAttribute('role')).toBe('region');
+    expect(emptyState?.getAttribute('tabindex')).toBe('0');
+    await act(async () => {
+      emptyState!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    const lane = container.querySelector<HTMLElement>('[aria-label^="Insert media"]');
     expect(lane).not.toBeNull();
-    expect(lane?.getAttribute('role')).toBe('region');
-    expect(lane?.getAttribute('tabindex')).toBe('0');
     await act(async () => {
       lane!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
+    expect(onOpenAssetLibrary).toHaveBeenCalledTimes(2);
+    expect(lane?.getAttribute('aria-keyshortcuts')).toBe('Enter Space');
+    const audioRunway = container.querySelector<HTMLElement>('[aria-label^="Audio runway"]');
+    expect(audioRunway?.getAttribute('role')).toBe('button');
+    await act(async () => audioRunway?.click());
+    expect(onOpenAssetLibrary).toHaveBeenCalledTimes(3);
     await act(async () => root.unmount());
     container.remove();
     vi.unstubAllGlobals();

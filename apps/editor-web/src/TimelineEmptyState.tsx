@@ -149,11 +149,28 @@ export function TimelineEmptyState({
         {dragActive ? 'Release to import media' : 'Drag media here and start creating'}
       </p>
       <div className="timeline-empty-actions">
-        <button type="button" className="timeline-empty-action" onClick={onImportClick}>
+        <button
+          type="button"
+          className="timeline-empty-action"
+          onClick={(event) => {
+            event.stopPropagation();
+            onImportClick();
+          }}
+        >
           <UploadIcon />
           Import media
         </button>
-        <button type="button" className="timeline-empty-action" onClick={onAddFromLibrary}>
+        <button
+          type="button"
+          className="timeline-empty-action"
+          onClick={(event) => {
+            // The whole empty state is a drop/import target. Stop the nested
+            // button click from bubbling into the root so one activation
+            // produces exactly one action.
+            event.stopPropagation();
+            onAddFromLibrary();
+          }}
+        >
           Browse library
         </button>
       </div>

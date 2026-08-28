@@ -508,6 +508,8 @@ function TimelineRunway({
       role="button"
       tabIndex={0}
       aria-label={`${family === 'audio' ? 'Audio' : 'Visual'} runway. Open media library to add a layer.`}
+      aria-keyshortcuts="Enter Space"
+      onClick={onActivate}
       onKeyDown={(event) => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault();
@@ -724,6 +726,7 @@ export function TimelinePanel({
   const composition = project.compositions[activeCompositionId];
   if (composition === undefined) throw new Error('timeline root composition is unavailable');
   const isCompoundView = activeCompositionId !== project.rootCompositionId;
+  const canPlayTimeline = composition.tracks.some((track) => track.clips.length > 0);
 
   useEffect(() => {
     if (activeCompositionIdProp !== undefined) return;
@@ -1951,11 +1954,23 @@ export function TimelinePanel({
             className="icon-button"
             onClick={onTogglePlayback}
             aria-label={playing ? 'Pause' : 'Play'}
-            title={playing ? 'Pause (Space)' : 'Play (Space)'}
-            disabled={!composition.tracks.some((track) => track.clips.length > 0)}
+            title={
+              canPlayTimeline
+                ? playing
+                  ? 'Pause (Space)'
+                  : 'Play (Space)'
+                : 'Add media to the timeline before playing'
+            }
+            {...(!canPlayTimeline ? { 'aria-describedby': 'timeline-play-disabled-reason' } : {})}
+            disabled={!canPlayTimeline}
           >
             {playing ? <PauseIcon /> : <PlayIcon />}
           </button>
+          {!canPlayTimeline && (
+            <span id="timeline-play-disabled-reason" className="sr-only">
+              Add media to the timeline before playing.
+            </span>
+          )}
           <button
             className="icon-button"
             onClick={() => onSeek(Math.max(0, playheadUs - 1_000_000))}
@@ -2420,6 +2435,8 @@ export function TimelinePanel({
                   role="button"
                   tabIndex={0}
                   aria-label={`Insert media on ${track.id} track`}
+                  aria-keyshortcuts="Enter Space"
+                  title={`Insert media on ${track.id} track (Enter or Space)`}
                   style={{ minWidth: `${laneWidthPx}px` }}
                   onKeyDown={(event) => {
                     if (event.key !== 'Enter' && event.key !== ' ') return;
