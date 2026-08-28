@@ -588,6 +588,9 @@ unavailable`, and a console error loading `/transitions/preview/transition2.png`
   editor shell, but the deployed release still reports local-only save/cloud-sync unavailable and
   Verified delivery unavailable. The live UI has no candidate ratio selector, and its transition
   surface is the older deployment; this is diagnostic evidence only, not candidate evidence.
+- The local candidate build at `http://127.0.0.1:4177/` was opened read-only in Codex browser and
+  showed the Projects shell plus the normal login dialog without mutation. Both candidate transition
+  SVG routes returned HTTP 200 with `image/svg+xml` and an `<svg` body.
 - The candidate now includes `85cde92`, which centralizes an exact-IP trusted-proxy resolver and
   uses it for both HTTP transport and OTP throttles, and `0fefdab`, which durably terminalizes
   expired Worker leases after their attempt budget (including cancellation and PostgreSQL attempt
