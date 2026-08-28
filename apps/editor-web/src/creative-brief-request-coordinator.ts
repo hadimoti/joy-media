@@ -2,7 +2,13 @@ import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import type { JoyProjectV1, ProjectRevisionId } from '@joy-media/project-schema';
 import type { CreativeBriefRequestV1, CreativeBriefV1 } from '@joy-media/agent-tools';
 import type { ControlPlaneProjectBinding } from './project-control-plane.js';
-import { syncProjectDocumentBinding, type DocumentSyncResult } from './project-document-sync.js';
+import {
+  syncProjectDocumentBinding,
+  type DocumentSyncConflict,
+  type DocumentSyncRequestFailure,
+  type DocumentSyncResult,
+  type DocumentSyncSuccess,
+} from './project-document-sync.js';
 import type { SyncProjectDocument } from './project-document-sync.js';
 
 /**
@@ -10,7 +16,7 @@ import type { SyncProjectDocument } from './project-document-sync.js';
  */
 export interface CreativeBriefCoordinationSuccess {
   readonly kind: 'success';
-  readonly syncResult: DocumentSyncResult;
+  readonly syncResult: DocumentSyncSuccess;
   readonly brief: CreativeBriefV1;
 }
 
@@ -33,7 +39,7 @@ export interface CreativeBriefCoordinationParityFailure {
  */
 export interface CreativeBriefCoordinationStale {
   readonly kind: 'stale';
-  readonly syncConflict: DocumentSyncResult;
+  readonly syncConflict: DocumentSyncConflict;
 }
 
 /**
@@ -42,7 +48,7 @@ export interface CreativeBriefCoordinationStale {
  */
 export interface CreativeBriefCoordinationSyncFailure {
   readonly kind: 'sync-failure';
-  readonly syncResult: DocumentSyncResult;
+  readonly syncResult: DocumentSyncRequestFailure;
 }
 
 /**
@@ -51,7 +57,7 @@ export interface CreativeBriefCoordinationSyncFailure {
  */
 export interface CreativeBriefCoordinationBriefFailure {
   readonly kind: 'brief-failure';
-  readonly syncResult: DocumentSyncResult;
+  readonly syncResult: DocumentSyncSuccess;
   readonly error: unknown;
 }
 
@@ -137,14 +143,9 @@ export function coordinateCreativeBriefRequest(
   const ownerKey = options.ownerKey ?? 'local';
 
   // Synchronize the document first
-  return syncProjectDocumentBinding(
-    binding,
-    document,
-    revisionId,
-    storage,
-    syncProjectDocument,
-    { ownerKey },
-  ).then((syncResult: DocumentSyncResult) => {
+  return syncProjectDocumentBinding(binding, document, revisionId, storage, syncProjectDocument, {
+    ownerKey,
+  }).then<CreativeBriefCoordinationResult>((syncResult: DocumentSyncResult) => {
     // Map sync conflict to typed stale result - do NOT call brief transport
     if (syncResult.kind === 'conflict') {
       return {

@@ -432,7 +432,9 @@ function reduceStaleState(
 /**
  * Check if the current state has a brief available for display.
  */
-export function hasBrief(state: CreativeBriefState): boolean {
+export function hasBrief(
+  state: CreativeBriefState,
+): state is CreativeBriefReadyState | CreativeBriefStaleState {
   return state.type === 'brief-ready' || state.type === 'stale';
 }
 
@@ -452,35 +454,35 @@ export function getBrief(state: CreativeBriefState): CreativeBriefV1 | null {
 /**
  * Check if the current brief is stale.
  */
-export function isStale(state: CreativeBriefState): boolean {
+export function isStale(state: CreativeBriefState): state is CreativeBriefStaleState {
   return state.type === 'stale';
 }
 
 /**
  * Check if brief generation is in progress.
  */
-export function isCollecting(state: CreativeBriefState): boolean {
+export function isCollecting(state: CreativeBriefState): state is CreativeBriefCollectingState {
   return state.type === 'collecting';
 }
 
 /**
  * Check if brief generation is unavailable.
  */
-export function isUnavailable(state: CreativeBriefState): boolean {
+export function isUnavailable(state: CreativeBriefState): state is CreativeBriefUnavailableState {
   return state.type === 'unavailable';
 }
 
 /**
  * Check if an error occurred.
  */
-export function hasError(state: CreativeBriefState): boolean {
+export function hasError(state: CreativeBriefState): state is CreativeBriefErrorState {
   return state.type === 'error';
 }
 
 /**
  * Check if in idle state.
  */
-export function isIdle(state: CreativeBriefState): boolean {
+export function isIdle(state: CreativeBriefState): state is CreativeBriefIdleState {
   return state.type === 'idle';
 }
 
@@ -522,26 +524,38 @@ export function getRevisionId(state: CreativeBriefState): ProjectRevisionId | nu
 // Type Guards
 // ==========================================================================
 
-export function isCreativeBriefIdleState(state: CreativeBriefState): state is CreativeBriefIdleState {
+export function isCreativeBriefIdleState(
+  state: CreativeBriefState,
+): state is CreativeBriefIdleState {
   return state.type === 'idle';
 }
 
-export function isCreativeBriefCollectingState(state: CreativeBriefState): state is CreativeBriefCollectingState {
+export function isCreativeBriefCollectingState(
+  state: CreativeBriefState,
+): state is CreativeBriefCollectingState {
   return state.type === 'collecting';
 }
 
-export function isCreativeBriefReadyState(state: CreativeBriefState): state is CreativeBriefReadyState {
+export function isCreativeBriefReadyState(
+  state: CreativeBriefState,
+): state is CreativeBriefReadyState {
   return state.type === 'brief-ready';
 }
 
-export function isCreativeBriefUnavailableState(state: CreativeBriefState): state is CreativeBriefUnavailableState {
+export function isCreativeBriefUnavailableState(
+  state: CreativeBriefState,
+): state is CreativeBriefUnavailableState {
   return state.type === 'unavailable';
 }
 
-export function isCreativeBriefErrorState(state: CreativeBriefState): state is CreativeBriefErrorState {
+export function isCreativeBriefErrorState(
+  state: CreativeBriefState,
+): state is CreativeBriefErrorState {
   return state.type === 'error';
 }
 
-export function isCreativeBriefStaleState(state: CreativeBriefState): state is CreativeBriefStaleState {
+export function isCreativeBriefStaleState(
+  state: CreativeBriefState,
+): state is CreativeBriefStaleState {
   return state.type === 'stale';
 }
