@@ -632,7 +632,8 @@ unavailable`, and a console error loading `/transitions/preview/transition2.png`
   fixture for the exact old shape, and proxies `/live`, `/ready`, and `/health/ready` around the
   SPA fallback. The fix passed focused 85/85 coverage plus typecheck/build/lint/format checks.
 
-- The latest branch tip is `cead951` (with the browser-smoke readback cleanup at `c199ba3`). A
+- The latest implementation tip is `cead951` (with the browser-smoke readback cleanup at
+  `c199ba3`); the candidate documentation tip is `6c06e6c`. A
   fresh local authenticated mocked browser-smoke run completed successfully across 1024×768,
   1280×720, and 1440×900 with no clipped controls or page overflow. The generated evidence remains
   explicitly `execution: mocked` and therefore cannot satisfy the real-service release gate.
