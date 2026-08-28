@@ -32,6 +32,7 @@ import {
   validateCloudDerivativeRegistration,
   validateLocalDerivativeRegistration,
   validateSortName,
+  validateWorkerMaxAttempts,
   matchesCloudDerivativeRegistration,
 } from './control-plane.js';
 import { POSTGRES_SCHEMA } from './postgres-schema.js';
@@ -41,6 +42,7 @@ import { JOY_CODE_CONSENT_VERSION } from './joy-code-consent.js';
 
 const FIXTURE_THUMBNAIL_SHA256 = '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735';
 const FIXTURE_THUMBNAIL_BYTES = 14;
+const WORKER_ATTEMPT_BUDGET_EXHAUSTED = 'Worker attempt budget exhausted';
 
 // Project Document Store types for PostgresControlPlane
 type PostgresProjectId = string;
@@ -358,6 +360,7 @@ interface JobRow {
   readonly type: string;
   readonly asset_id: string | null;
   readonly payload: unknown;
+  readonly max_attempts: number | null;
   readonly state: Job['state'];
   readonly lease_owner: string | null;
   readonly lease_expires_at: Date | null;
@@ -1270,6 +1273,7 @@ export class PostgresControlPlane implements ControlPlane {
     now = Date.now(),
     assetId?: string,
     payload?: Readonly<Record<string, unknown>>,
+    maxAttempts?: number,
   ): Promise<Job> {
     if (type === 'asset.thumbnail')
       throw new ControlPlaneError(
@@ -1278,6 +1282,7 @@ export class PostgresControlPlane implements ControlPlane {
       );
     return this.transaction(async (client) => {
       await this.project(actor, projectId, client);
+      validateWorkerMaxAttempts(maxAttempts);
       if (requiresSourceAsset(type) && assetId === undefined)
         throw new ControlPlaneError('ASSET_JOB_INVALID', 'Worker generation requires an asset ID');
       if (requiresSourceAsset(type) && assetId !== undefined) {
@@ -1298,9 +1303,10 @@ export class PostgresControlPlane implements ControlPlane {
       const safePayload = validatedJobPayload(payload ?? {});
       try {
         const result = await client.query<JobRow>(
-          `INSERT INTO jobs (id, project_id, type, asset_id, payload, state, lease_owner, lease_expires_at)
-           VALUES ($1, $2, $3, $4, $5::jsonb, 'queued', NULL, NULL) RETURNING *`,
-          [id, projectId, type, assetId ?? null, JSON.stringify(safePayload)],
+          `INSERT INTO jobs
+             (id, project_id, type, asset_id, payload, max_attempts, state, lease_owner, lease_expires_at)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6, 'queued', NULL, NULL) RETURNING *`,
+          [id, projectId, type, assetId ?? null, JSON.stringify(safePayload), maxAttempts ?? null],
         );
         const job = jobOf(requiredRow(result.rows[0], 'JOB_CREATE_FAILED'));
         await this.event(client, id, 'queued', now);
@@ -1317,14 +1323,17 @@ export class PostgresControlPlane implements ControlPlane {
     projectId: string,
     assetId: string,
     now = Date.now(),
+    maxAttempts?: number,
   ): Promise<Job> {
     return this.transaction(async (client) => {
       await this.asset(actor, projectId, assetId, client);
+      validateWorkerMaxAttempts(maxAttempts);
       try {
         const result = await client.query<JobRow>(
-          `INSERT INTO jobs (id, project_id, type, asset_id, state, lease_owner, lease_expires_at)
-           VALUES ($1, $2, 'asset.thumbnail', $3, 'queued', NULL, NULL) RETURNING *`,
-          [id, projectId, assetId],
+          `INSERT INTO jobs
+             (id, project_id, type, asset_id, max_attempts, state, lease_owner, lease_expires_at)
+           VALUES ($1, $2, 'asset.thumbnail', $3, $4, 'queued', NULL, NULL) RETURNING *`,
+          [id, projectId, assetId, maxAttempts ?? null],
         );
         const job = jobOf(requiredRow(result.rows[0], 'JOB_CREATE_FAILED'));
         await this.event(client, id, 'queued', now);
@@ -1353,7 +1362,7 @@ export class PostgresControlPlane implements ControlPlane {
       // Keep opaque-locality matching in the Worker/control-plane domain; this
       // also keeps the durable contract executable in pg-mem without changing
       // PostgreSQL's queue lock semantics.
-      const job = candidate.rows.find((item) => {
+      const compatibleJobs = candidate.rows.filter((item) => {
         const caps = workerRecord.capabilities;
         if (item.type === 'asset.thumbnail') {
           return (
@@ -1380,6 +1389,40 @@ export class PostgresControlPlane implements ControlPlane {
         }
         return true;
       });
+      let job: JobRow | undefined;
+      for (const item of compatibleJobs) {
+        if (item.state === 'leased') {
+          await client.query(
+            `UPDATE job_attempts SET completed_at = $2
+             WHERE job_id = $1 AND completed_at IS NULL`,
+            [item.id, new Date(now)],
+          );
+        }
+        if (item.max_attempts !== null) {
+          const attempts = await client.query<{ readonly count: string }>(
+            'SELECT COUNT(*)::text AS count FROM job_attempts WHERE job_id = $1',
+            [item.id],
+          );
+          const count = Number(attempts.rows[0]?.count ?? 0);
+          if (count >= item.max_attempts) {
+            const terminalState = item.cancel_requested ? 'canceled' : 'failed';
+            await client.query(
+              `UPDATE jobs SET state = $2, lease_owner = NULL, lease_expires_at = NULL,
+                   cancel_requested = false, error = $3
+               WHERE id = $1`,
+              [
+                item.id,
+                terminalState,
+                terminalState === 'failed' ? WORKER_ATTEMPT_BUDGET_EXHAUSTED : null,
+              ],
+            );
+            await this.event(client, item.id, terminalState, now);
+            continue;
+          }
+        }
+        job = item;
+        break;
+      }
       if (job === undefined) return undefined;
       const result = await client.query<JobRow>(
         `UPDATE jobs SET state = 'leased', lease_owner = $2, lease_expires_at = $3,
@@ -1529,6 +1572,21 @@ export class PostgresControlPlane implements ControlPlane {
   async retry(actor: Actor, projectId: string, jobId: string, now = Date.now()): Promise<Job> {
     return this.transaction(async (client) => {
       await this.project(actor, projectId, client);
+      const currentResult = await client.query<JobRow>(
+        'SELECT * FROM jobs WHERE id = $1 AND project_id = $2 FOR UPDATE',
+        [jobId, projectId],
+      );
+      const current = currentResult.rows[0];
+      if (current === undefined || !['completed', 'canceled', 'failed'].includes(current.state))
+        throw new ControlPlaneError('JOB_NOT_RETRYABLE', jobId);
+      if (current.max_attempts !== null) {
+        const attempts = await client.query<{ readonly count: string }>(
+          'SELECT COUNT(*)::text AS count FROM job_attempts WHERE job_id = $1',
+          [jobId],
+        );
+        if (Number(attempts.rows[0]?.count ?? 0) >= current.max_attempts)
+          throw new ControlPlaneError('JOB_NOT_RETRYABLE', jobId);
+      }
       const result = await client.query<JobRow>(
         `UPDATE jobs SET state = 'queued', progress = 0, cancel_requested = false,
              lease_owner = NULL, lease_expires_at = NULL, result_kind = NULL,
@@ -1540,9 +1598,8 @@ export class PostgresControlPlane implements ControlPlane {
          RETURNING *`,
         [jobId, projectId],
       );
-      if (result.rows[0] === undefined) throw new ControlPlaneError('JOB_NOT_RETRYABLE', jobId);
       await this.event(client, jobId, 'retried', now);
-      return jobOf(result.rows[0]);
+      return jobOf(requiredRow(result.rows[0], 'JOB_RETRY_FAILED'));
     });
   }
 
@@ -1709,6 +1766,7 @@ function jobOf(row: JobRow): Job {
     type: row.type,
     ...(row.asset_id === null ? {} : { assetId: row.asset_id }),
     ...(Object.keys(payload).length === 0 ? {} : { payload }),
+    ...(row.max_attempts === null ? {} : { maxAttempts: row.max_attempts }),
     state: row.state,
     progress: row.progress,
     cancelRequested: row.cancel_requested,
