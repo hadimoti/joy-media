@@ -34,7 +34,10 @@ export interface HtmlCanvas2DContextLike {
 export interface HtmlCanvasElementLike {
   width: number;
   height: number;
-  getContext(kind: '2d'): HtmlCanvas2DContextLike | null;
+  getContext(
+    kind: '2d',
+    options?: { readonly willReadFrequently?: boolean },
+  ): HtmlCanvas2DContextLike | null;
 }
 
 /**
@@ -87,7 +90,9 @@ function captureBitmap(
   if (video.videoWidth === 0 || video.videoHeight === 0) return undefined;
   // HTMLCanvasElement has a wider DOM `drawImage` signature than our minimal
   // test boundary. At runtime both expose exactly the operations below.
-  const context = canvas.getContext('2d') as HtmlCanvas2DContextLike | null;
+  const context = canvas.getContext('2d', {
+    willReadFrequently: true,
+  }) as HtmlCanvas2DContextLike | null;
   if (context === null) return undefined;
   // A caller can provide a zero-sized canvas to opt into the source's
   // intrinsic size. This is useful for editor preview because a newly-created
