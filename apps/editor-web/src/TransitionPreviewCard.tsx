@@ -3,8 +3,8 @@ import type { TransitionShaderEntry } from '@joy-media/transition-shaders';
 
 // Keep the source frames text-based and source-controlled so clean installs do
 // not depend on optional generated PNGs just to render the transition catalog.
-const TRANSITION_A = '/transitions/preview/transition1.svg';
-const TRANSITION_B = '/transitions/preview/transition2.svg';
+const TRANSITION_A = '/assets/transition-preview-frame-a.svg';
+const TRANSITION_B = '/assets/transition-preview-frame-b.svg';
 
 let sharedImageA: HTMLImageElement | null = null;
 let sharedImageB: HTMLImageElement | null = null;

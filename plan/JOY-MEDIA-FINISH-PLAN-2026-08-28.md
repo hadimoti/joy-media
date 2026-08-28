@@ -98,8 +98,9 @@ must be removed on the reconciliation branch.
 - The currently deployed release references `/transitions/preview/transition1.png` and
   `transition2.png`, which return the SPA body instead of image bytes; the browser records a
   transition preview load error. The checkpoint now ships deterministic source-controlled SVG
-  frames at `/transitions/preview/transition1.svg` and `transition2.svg` so clean builds do not
-  depend on optional generated PNGs.
+  frames at `/assets/transition-preview-frame-a.svg` and
+  `/assets/transition-preview-frame-b.svg` so clean builds do not depend on optional generated
+  PNGs.
 - The committed release report has `result.passed=false`. The critical journey records quick browser
   export, real-service execution unknown, and inspection not requested.
 - The report/journey/build manifest predates `aec01ef`. It is not SHA-bound evidence for the
@@ -514,8 +515,9 @@ or raw secret-bearing artifacts.
   This is evidence of the currently deployed release, not evidence for the new
   checkpoint; no browser mutation was performed.
 - The transition preview defect is fixed on the checkpoint in commits `6310a6d` and
-  `f6b129b`. OpenCLI profile `cefd9k77` verified both new SVG endpoints from a local production
-  build with HTTP 200 and `image/svg+xml`, and the editor preview unit tests/build passed.
+  `f6b129b` (superseded by the asset-path correction in the next checkpoint commit). OpenCLI
+  profile `cefd9k77` verified both new SVG endpoints from a local production build with HTTP 200
+  and `image/svg+xml`, and the editor preview unit tests/build passed.
 - The legacy `fixture.thumbnail` production path was retired in `f485bbc`. The
   release evaluator now passes command health, tests, generated-artifact hygiene,
   fixture registry, builds, manifest, SBOM, and feature-status checks. It still
