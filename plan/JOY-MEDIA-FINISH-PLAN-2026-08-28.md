@@ -76,13 +76,13 @@ Codex in-app-browser findings below remain valid independent evidence.
 
 ### Repository and branch state
 
-| Surface                     | Observed tip/state                                   | Consequence                                                                       |
-| --------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Surface                     | Observed tip/state                                | Consequence                                                                       |
+| --------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------- |
 | Local checkpoint branch     | `244691b` on `codex/joy-media-implement-20260828` | Clean tested candidate, published for review; not yet promoted to `main`.         |
-| Deployed/VPS release branch | `b3c1866`                                            | The checkpoint is one commit ahead of the deployed release branch.                |
-| GitHub `main`               | `2083ffc`                                            | 407 main-only commits versus 162 candidate-only commits.                          |
-| VPS `main`                  | `1e4657f`                                            | 225 VPS-main-only commits versus 162 candidate-only commits.                      |
-| Common merge base           | `73744bb`                                            | A blind merge is unsafe; simulated reconciliation has extensive overlap/conflict. |
+| Deployed/VPS release branch | `b3c1866`                                         | The checkpoint is one commit ahead of the deployed release branch.                |
+| GitHub `main`               | `2083ffc`                                         | 407 main-only commits versus 162 candidate-only commits.                          |
+| VPS `main`                  | `1e4657f`                                         | 225 VPS-main-only commits versus 162 candidate-only commits.                      |
+| Common merge base           | `73744bb`                                         | A blind merge is unsafe; simulated reconciliation has extensive overlap/conflict. |
 
 `aec01ef` contains 324 changed files and a large quantity of transient evidence, debug files, and
 generated JavaScript/declaration siblings that can shadow TypeScript source. It must remain an
