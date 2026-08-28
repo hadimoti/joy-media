@@ -111,6 +111,21 @@ describe('validateSpikeProject', () => {
     expect(codes).toContain('PROJECT_SCHEMA_BAD_CLIP_RANGE');
   });
 
+  it('rejects duplicate track and clip ids at the project boundary', () => {
+    const project = baseProject();
+    const mutated: SpikeProject = JSON.parse(JSON.stringify(project));
+    const root = mutated.compositions['comp-root']!;
+    const originalTrack = root.tracks[0]!;
+    const originalClip = originalTrack.clips[0]!;
+    (root.tracks as Array<unknown>).push({
+      ...originalTrack,
+      clips: [{ ...originalClip }, { ...originalClip }],
+    });
+    const codes = validateSpikeProject(mutated).map((diagnostic) => diagnostic.code);
+    expect(codes).toContain('PROJECT_SCHEMA_DUPLICATE_TRACK_ID');
+    expect(codes).toContain('PROJECT_SCHEMA_DUPLICATE_CLIP_ID');
+  });
+
   it('accepts freeze (0) and in-range playback rates', () => {
     const project = baseProject();
     const mutated: SpikeProject = JSON.parse(JSON.stringify(project));

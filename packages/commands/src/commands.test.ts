@@ -42,6 +42,32 @@ function clipsOf(
 }
 
 describe('applyCommand', () => {
+  it('rejects duplicate clip ids embedded in a newly added track', () => {
+    const project = emptySpikeProject({ trackCount: 1 });
+    const clip = {
+      kind: 'video' as const,
+      id: 'same',
+      startUs: 0,
+      durationUs: 1_000_000,
+      assetId: 'asset',
+      sourceInUs: 0,
+    };
+    expect(() =>
+      applyCommand(project, {
+        type: 'timeline.addTrack',
+        payload: {
+          compositionId: 'root',
+          track: {
+            id: 'new-track',
+            kind: 'video',
+            order: 1,
+            enabled: true,
+            clips: [clip, { ...clip }],
+          },
+        },
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'COMMAND_VALIDATION_DUPLICATE_ID' }));
+  });
   it('publishes every supported command through the registry', () => {
     expect(Object.keys(COMMAND_REGISTRY).sort()).toEqual([
       'property.setTrackEnabled',

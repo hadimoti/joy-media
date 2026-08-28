@@ -111,13 +111,9 @@ export function TimelineEmptyState({
     [onContextMenu],
   );
 
-  const handleClick = useCallback(
-    (event: React.MouseEvent) => {
-      if (event.target !== event.currentTarget) return;
-      onImportClick();
-    },
-    [onImportClick],
-  );
+  const handleClick = useCallback(() => {
+    onImportClick();
+  }, [onImportClick]);
 
   const composition = project.compositions[project.rootCompositionId];
   const isTimelineEmpty =

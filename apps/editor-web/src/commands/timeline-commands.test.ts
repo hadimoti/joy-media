@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildTrackHeaderContextMenu } from './timeline-commands.js';
+import { emptySpikeProject, makeVideoClip, withClips } from '@joy-media/test-fixtures';
+import { buildClipContextMenu, buildTrackHeaderContextMenu } from './timeline-commands.js';
 
 describe('buildTrackHeaderContextMenu', () => {
   const buildMenu = (canRemoveTrack: boolean) =>
@@ -24,5 +25,27 @@ describe('buildTrackHeaderContextMenu', () => {
     expect(menu.find((item) => item.label === 'Remove Track')?.disabled).toBe(false);
     menu.find((item) => item.label === 'Remove Track')?.action?.();
     expect(action).toHaveBeenCalledOnce();
+  });
+
+  it('disables every clip mutation from a locked track context menu', () => {
+    const project = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [
+      makeVideoClip('clip-1', 0, 5_000_000),
+    ]);
+    const composition = project.compositions.root!;
+    const track = composition.tracks[0]!;
+    const items = buildClipContextMenu(
+      {
+        project,
+        compositionId: 'root',
+        playheadUs: 1_000_000,
+        selectedTrackIds: [track.id],
+        selectedClip: { track, clip: track.clips[0]! },
+      },
+      vi.fn(),
+      true,
+    );
+    expect(
+      items.filter((item) => item.action && !item.dividerBefore).every((item) => item.disabled),
+    ).toBe(true);
   });
 });
