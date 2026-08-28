@@ -289,6 +289,7 @@ import {
 } from './dual-lens-reveal.js';
 import { buildDataLanes, type DataLane } from './data-lanes.js';
 import { useAccessibleDialog } from './dialog-a11y.js';
+import { useMonitorSceneSyncEffect } from './monitor-scene-sync.js';
 import {
   clearActiveProjectId,
   getCatalogProject,
@@ -4944,34 +4945,27 @@ function MonitorPanel() {
     };
   }, [zoomDrawerOpen]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const planRenderFrame = planRenderFrameRef.current;
-    if (planRenderFrame === undefined) return;
-    const plan = planRenderFrame({
-      bundle: createRenderBundle({
-        timelineProject,
-        visualProject,
-        seed: `preview:${visualProject.id}`,
-      }),
-      timeUs: state.playheadUs,
-      imageSizesByObjectId: imageSizesFromCache(),
-    });
-    void syncStickerBitmapTargets(
-      plannedStillBitmapTargets(visualProject, plan.captureRequirements),
-    )
-      .then(() => {
-        if (cancelled) return;
-        setSceneTick((tick) => tick + 1);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.warn('Failed to sync sticker bitmaps', error);
+  useMonitorSceneSyncEffect({
+    dependencies: [state.playheadUs, stickerTick, timelineProject, visualProject],
+    sync: () => {
+      const planRenderFrame = planRenderFrameRef.current;
+      if (planRenderFrame === undefined) return false;
+      const plan = planRenderFrame({
+        bundle: createRenderBundle({
+          timelineProject,
+          visualProject,
+          seed: `preview:${visualProject.id}`,
+        }),
+        timeUs: state.playheadUs,
+        imageSizesByObjectId: imageSizesFromCache(),
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [sceneTick, state.playheadUs, stickerTick, timelineProject, visualProject]);
+      return syncStickerBitmapTargets(
+        plannedStillBitmapTargets(visualProject, plan.captureRequirements),
+      ).then(() => true);
+    },
+    onComplete: () => setSceneTick((tick) => tick + 1),
+    onError: (error) => console.warn('Failed to sync sticker bitmaps', error),
+  });
 
   paintRef.current = (): void => {
     const renderer = rendererRef.current;
@@ -5046,63 +5040,57 @@ function MonitorPanel() {
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    const planRenderFrame = planRenderFrameRef.current;
-    if (planRenderFrame === undefined) return;
-    const plan = planRenderFrame({
-      bundle: createRenderBundle({
-        timelineProject,
-        visualProject,
-        seed: `preview:${visualProject.id}`,
-      }),
-      timeUs: state.playheadUs,
-      imageSizesByObjectId: imageSizesFromCache(),
-    });
-    const sceneCache = sceneCacheRef.current;
-    if (sceneCache === undefined) return;
-    void sceneCache
-      .sync(htmlSceneCaptureTargetsForRequirements(visualProject, plan.captureRequirements))
-      .then(() => {
-        if (cancelled) return;
-        setSceneTick((value) => value + 1);
+  useMonitorSceneSyncEffect({
+    dependencies: [state.playheadUs, timelineProject, visualProject],
+    sync: () => {
+      const planRenderFrame = planRenderFrameRef.current;
+      if (planRenderFrame === undefined) return false;
+      const plan = planRenderFrame({
+        bundle: createRenderBundle({
+          timelineProject,
+          visualProject,
+          seed: `preview:${visualProject.id}`,
+        }),
+        timeUs: state.playheadUs,
+        imageSizesByObjectId: imageSizesFromCache(),
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [sceneTick, state.playheadUs, timelineProject, visualProject]);
+      const sceneCache = sceneCacheRef.current;
+      if (sceneCache === undefined) return false;
+      return sceneCache
+        .sync(htmlSceneCaptureTargetsForRequirements(visualProject, plan.captureRequirements))
+        .then(() => true);
+    },
+    onComplete: () => setSceneTick((value) => value + 1),
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    const planRenderFrame = planRenderFrameRef.current;
-    if (planRenderFrame === undefined) return;
-    const plan = planRenderFrame({
-      bundle: createRenderBundle({
-        timelineProject,
-        visualProject,
-        seed: `preview:${visualProject.id}`,
-      }),
-      timeUs: state.playheadUs,
-      imageSizesByObjectId: imageSizesFromCache(),
-    });
-    const motionSceneCache = motionSceneCacheRef.current;
-    if (motionSceneCache === undefined) return;
-    void motionSceneCache
-      .sync(plannedMotionSceneCaptureTargets(visualProject, plan.captureRequirements))
-      .then(() => {
-        if (cancelled) return;
-        const diagnostic = motionSceneCache.diagnostics()[0];
-        setError(diagnostic?.message);
-        setSceneTick((value) => value + 1);
-      })
-      .catch((reason: unknown) => {
-        if (cancelled) return;
-        setError(reason instanceof Error ? reason.message : String(reason));
+  useMonitorSceneSyncEffect({
+    dependencies: [state.playheadUs, timelineProject, visualProject],
+    sync: () => {
+      const planRenderFrame = planRenderFrameRef.current;
+      if (planRenderFrame === undefined) return false;
+      const plan = planRenderFrame({
+        bundle: createRenderBundle({
+          timelineProject,
+          visualProject,
+          seed: `preview:${visualProject.id}`,
+        }),
+        timeUs: state.playheadUs,
+        imageSizesByObjectId: imageSizesFromCache(),
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [sceneTick, state.playheadUs, timelineProject, visualProject]);
+      const motionSceneCache = motionSceneCacheRef.current;
+      if (motionSceneCache === undefined) return false;
+      return motionSceneCache
+        .sync(plannedMotionSceneCaptureTargets(visualProject, plan.captureRequirements))
+        .then(() => {
+          const diagnostic = motionSceneCache.diagnostics()[0];
+          setError(diagnostic?.message);
+          return true;
+        });
+    },
+    onComplete: () => setSceneTick((value) => value + 1),
+    onError: (reason: unknown) =>
+      setError(reason instanceof Error ? reason.message : String(reason)),
+  });
 
   useEffect(() => {
     paintRef.current();
