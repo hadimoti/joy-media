@@ -396,7 +396,7 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
   return {
     testSummary,
     dirtyGeneratedArtifacts: dirtyGeneratedArtifacts(root),
-    fixtureHandlers: fixtureHandlers(root),
+    fixtureHandlers: findProductionFixtureRegistrations(root),
     builds: buildSuccess,
     manifestGenerated: true,
     sbomGenerated: true,
@@ -516,15 +516,16 @@ function dirtyGeneratedArtifacts(root: string): readonly string[] {
     .filter(Boolean);
 }
 
-function fixtureHandlers(root: string): readonly string[] {
+const PRODUCTION_FIXTURE_REGISTRATION =
+  /(?:fixture(?:[._-]?thumbnail|[\s._-]*(?:handler|job|registry|port))|(?:handler|job|registry|port)[\s._-]*fixture)/iu;
+
+export function findProductionFixtureRegistrations(root: string): readonly string[] {
   return collectFiles(root, 'apps')
     .filter((path) => /\.(?:ts|tsx)$/u.test(path) && !/\.test\.[^.]+$/u.test(path))
     .flatMap((path) => {
       const lines = readFileSync(path, 'utf8').split(/\r?\n/u);
       return lines.flatMap((line, index) =>
-        /fixture(?:handler|registry|port)/iu.test(line)
-          ? [`${relative(root, path)}:${index + 1}`]
-          : [],
+        PRODUCTION_FIXTURE_REGISTRATION.test(line) ? [`${relative(root, path)}:${index + 1}`] : [],
       );
     });
 }

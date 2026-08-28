@@ -1289,6 +1289,197 @@ describe('control-plane HTTP transport', () => {
     ).toMatchObject({ status: 409, body: { error: { code: 'PROJECT_NOT_FOUND' } } });
   });
 
+  it('projects every browser-facing asset and derivative response without storage references', async () => {
+    const controlPlane = new LocalControlPlane();
+    const store = new MemoryPrivateObjectStore();
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      store,
+      undefined,
+      controlPlane,
+      undefined,
+      async () => ({
+        tags: ['verified-image'],
+        sortName: 'verified-frame.jpg',
+        provenance: 'hermes-heuristic',
+      }),
+    );
+    await request(origin, 'POST', '/v1/projects', { id: 'p', title: 'Project' });
+    await request(origin, 'POST', '/v1/projects/p/asset-sync', { enabled: true });
+    const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const assetInput = {
+      id: 'image-safe',
+      kind: 'image',
+      displayName: 'frame.jpg',
+      sha256,
+      bytes: bytes.byteLength,
+      descriptor: { mimeType: 'image/jpeg', width: 1, height: 1 },
+      locations: [{ kind: 'opfs-cache', ref: 'local-image-ref' }],
+    };
+
+    const registered = await request(origin, 'POST', '/v1/projects/p/assets', assetInput);
+    expect(registered).toMatchObject({
+      status: 201,
+      body: {
+        data: {
+          id: 'image-safe',
+          projectId: 'p',
+          kind: 'image',
+          displayName: 'frame.jpg',
+          sha256,
+          bytes: bytes.byteLength,
+          descriptor: assetInput.descriptor,
+          tags: [],
+          sortName: 'frame.jpg',
+          createdAt: expect.any(Number),
+        },
+      },
+    });
+
+    const projectAssets = await request(origin, 'GET', '/v1/projects/p/assets');
+    expect(projectAssets).toMatchObject({
+      status: 200,
+      body: { data: [{ id: 'image-safe', descriptor: assetInput.descriptor, sha256 }] },
+    });
+    const ownerAssets = await request(origin, 'GET', '/v1/library/my-assets');
+    expect(ownerAssets).toMatchObject({ status: 200, body: { data: [{ id: 'image-safe' }] } });
+
+    const metadata = await request(origin, 'POST', '/v1/projects/p/assets/image-safe/metadata', {
+      displayName: 'renamed-frame.jpg',
+      tags: ['manual'],
+      sortName: 'renamed-frame.jpg',
+    });
+    expect(metadata).toMatchObject({
+      status: 200,
+      body: {
+        data: {
+          id: 'image-safe',
+          displayName: 'renamed-frame.jpg',
+          tags: ['manual'],
+          sortName: 'renamed-frame.jpg',
+          descriptor: assetInput.descriptor,
+          sha256,
+          bytes: bytes.byteLength,
+        },
+      },
+    });
+
+    const retagged = await request(origin, 'POST', '/v1/projects/p/assets/image-safe/retag', {});
+    expect(retagged).toMatchObject({
+      status: 200,
+      body: {
+        data: {
+          id: 'image-safe',
+          descriptor: assetInput.descriptor,
+          sha256,
+          bytes: bytes.byteLength,
+          tags: expect.any(Array),
+        },
+      },
+    });
+
+    const derivativeInput = {
+      id: 'proxy-safe',
+      assetId: 'image-safe',
+      kind: 'proxy',
+      profile: 'jpeg-preview',
+      sha256: 'b'.repeat(64),
+      bytes: 123,
+      descriptor: { mimeType: 'image/jpeg', width: 1, height: 1 },
+      availability: 'available-local',
+      locations: [{ kind: 'opfs-cache', ref: 'local-derivative-ref' }],
+    };
+    const derivative = await request(
+      origin,
+      'POST',
+      '/v1/projects/p/assets/image-safe/derivatives',
+      derivativeInput,
+    );
+    expect(derivative).toMatchObject({
+      status: 201,
+      body: {
+        data: {
+          id: 'proxy-safe',
+          projectId: 'p',
+          assetId: 'image-safe',
+          kind: 'proxy',
+          profile: 'jpeg-preview',
+          sha256: derivativeInput.sha256,
+          bytes: 123,
+          descriptor: derivativeInput.descriptor,
+          availability: 'available-local',
+          verifiedAt: expect.any(Number),
+        },
+      },
+    });
+    const derivatives = await request(
+      origin,
+      'GET',
+      '/v1/projects/p/assets/image-safe/derivatives',
+    );
+    expect(derivatives).toMatchObject({
+      status: 200,
+      body: { data: [{ id: 'proxy-safe', availability: 'available-local' }] },
+    });
+
+    const original = await fetch(`${origin}/v1/projects/p/assets/image-safe/original`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'image/jpeg',
+        'x-joy-sha256': sha256,
+        'x-joy-bytes': String(bytes.byteLength),
+      },
+      body: bytes,
+    });
+    expect(original.status).toBe(201);
+    const originalBody = await original.json();
+    expect(originalBody).toMatchObject({
+      data: {
+        asset: {
+          id: 'image-safe',
+          sha256,
+          bytes: bytes.byteLength,
+          descriptor: assetInput.descriptor,
+          tags: ['verified-image'],
+        },
+        tagProvenance: 'hermes-heuristic',
+      },
+    });
+
+    const cloudAssets = await request(origin, 'GET', '/v1/library/cloud-assets');
+    expect(cloudAssets).toMatchObject({
+      status: 200,
+      body: { data: [{ id: 'image-safe', tags: ['verified-image'] }] },
+    });
+
+    for (const payload of [
+      registered.body,
+      projectAssets.body,
+      ownerAssets.body,
+      metadata.body,
+      retagged.body,
+      derivative.body,
+      derivatives.body,
+      originalBody,
+      cloudAssets.body,
+    ]) {
+      const serialized = JSON.stringify(payload);
+      expect(serialized).not.toMatch(/"locations"|"cloudRef"/);
+      expect(serialized).not.toContain('local-image-ref');
+      expect(serialized).not.toContain('local-derivative-ref');
+      expect(serialized).not.toMatch(/orig-[a-f0-9]+/);
+    }
+
+    expect(controlPlane.assetsForProject({ id: 'owner' }, 'p')[0]?.locations).toEqual([
+      { kind: 'opfs-cache', ref: 'local-image-ref' },
+      { kind: 'private-object', ref: expect.stringMatching(/^orig-[a-f0-9]+$/) },
+    ]);
+    expect(
+      controlPlane.derivativesForAsset({ id: 'owner' }, 'p', 'image-safe')[0]?.locations,
+    ).toEqual([{ kind: 'opfs-cache', ref: 'local-derivative-ref' }]);
+  });
+
   it('brokers a Worker thumbnail through private storage only with sync consent, then streams verified bytes to the owner', async () => {
     const store = new MemoryPrivateObjectStore();
     const origin = await start({ authenticate: () => ({ id: 'owner' }) }, store);
@@ -1468,8 +1659,9 @@ describe('control-plane HTTP transport', () => {
 
     const first = await upload();
     expect(first.status).toBe(201);
-    const firstBody = (await first.json()) as { data: { cloudRef: string } };
-    const firstRef = firstBody.data.cloudRef;
+    const firstBody = await first.json();
+    expect(JSON.stringify(firstBody)).not.toMatch(/"locations"|"cloudRef"|orig-[a-f0-9]+/);
+    const firstRef = store.objects[0]!.descriptor.ref;
     expect(store.objects.map((entry) => entry.descriptor.ref)).toEqual([firstRef]);
 
     const failedRetry = await upload();

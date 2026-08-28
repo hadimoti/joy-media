@@ -380,11 +380,14 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
               <div className="login-panels">
                 {step === 'contact' && (
                   <form onSubmit={(event) => void submitContact(event)} autoComplete="off">
-                    <p className="login-sub">{cfg.sub}</p>
+                    <div className="login-sub">
+                      <label htmlFor="login-contact">{cfg.sub}</label>
+                    </div>
                     <div className="auth-input-wrap">
                       <input
+                        id="login-contact"
                         className="auth-input"
-                        type={cfg.type === 'email' ? 'text' : cfg.type}
+                        type={cfg.type}
                         inputMode={method === 'gmail' ? 'email' : 'text'}
                         placeholder={cfg.placeholder}
                         value={contact}
@@ -404,15 +407,11 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
                         autoComplete="off"
                         autoCapitalize="off"
                         autoFocus
-                        role="combobox"
-                        aria-autocomplete="list"
-                        aria-expanded={suggestions.length > 0}
-                        aria-controls="login-contact-suggest"
                       />
                       {suggestions.length > 0 && (
-                        <ul id="login-contact-suggest" className="auth-suggest" role="listbox">
+                        <ul id="login-contact-suggest" className="auth-suggest">
                           {suggestions.map((entry) => (
-                            <li key={entry} role="option">
+                            <li key={entry}>
                               <button
                                 type="button"
                                 className="auth-suggest-item"
@@ -437,7 +436,7 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
                 {step === 'otp' && (
                   <div>
                     <p className="login-sub">{hint ?? 'Enter the code we sent you'}</p>
-                    <div className="otp-row">
+                    <div className="otp-row" role="group" aria-label="One-time verification code">
                       {Array.from({ length: 6 }, (_, index) => (
                         <span className="otp-glow-wrap" key={index}>
                           <input
@@ -445,6 +444,7 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
                               otpRefs.current[index] = el;
                             }}
                             className="otp-box"
+                            aria-label={`Verification code digit ${index + 1} of 6`}
                             maxLength={1}
                             inputMode="numeric"
                             pattern="[0-9]"
@@ -494,7 +494,11 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
                 )}
               </div>
 
-              {error !== undefined && <p className="login-error">{error}</p>}
+              {error !== undefined && (
+                <p className="login-error" role="alert" aria-live="assertive">
+                  {error}
+                </p>
+              )}
             </div>
           </div>
         )}

@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   evaluateReleaseGate,
+  findProductionFixtureRegistrations,
   RELEASE_COMMANDS,
   REQUIRED_BUILD_IDS,
   REQUIRED_JOURNEY_ID,
@@ -154,6 +155,39 @@ describe('JOY Studio 1.0 release gate', () => {
     });
     expect(result.passed).toBe(false);
     expect(result.checks.find((check) => check.id === 'fixture-registries')?.status).toBe('failed');
+  });
+
+  it.each([
+    ['literal fixture thumbnail job type', "export const type = 'fixture.thumbnail';"],
+    ['fixture job registration', "registerFixtureJob('thumbnail', handler);"],
+    ['fixture handler registration', "registry.registerFixtureHandler('thumbnail', handler);"],
+  ])('rejects %s in production source', (_description, source) => {
+    const root = mkdtempSync(join(tmpdir(), 'joy-release-fixture-root-'));
+    const sourceDirectory = join(root, 'apps/api/src');
+    mkdirSync(sourceDirectory, { recursive: true });
+    writeFileSync(join(sourceDirectory, 'control-plane.ts'), source);
+
+    const fixtureHandlers = findProductionFixtureRegistrations(root);
+    expect(fixtureHandlers).toHaveLength(1);
+    expect(fixtureHandlers[0]?.replaceAll('\\', '/')).toBe('apps/api/src/control-plane.ts:1');
+
+    const result = evaluateReleaseGate({ ...passingInput(), fixtureHandlers });
+    expect(result.passed).toBe(false);
+    expect(result.checks.find((check) => check.id === 'fixture-registries')?.status).toBe('failed');
+  });
+
+  it('preserves fixture registrations in test-only source files', () => {
+    const root = mkdtempSync(join(tmpdir(), 'joy-release-test-fixture-root-'));
+    const sourceDirectory = join(root, 'apps/api/src');
+    mkdirSync(sourceDirectory, { recursive: true });
+    writeFileSync(
+      join(sourceDirectory, 'control-plane.test.ts'),
+      "registerFixtureJob('fixture.thumbnail', registerFixtureHandler);",
+    );
+
+    const fixtureHandlers = findProductionFixtureRegistrations(root);
+    expect(fixtureHandlers).toEqual([]);
+    expect(evaluateReleaseGate({ ...passingInput(), fixtureHandlers }).passed).toBe(true);
   });
 
   it('requires every build plus the manifest and SBOM', () => {

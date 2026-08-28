@@ -7,6 +7,7 @@ import {
   type ControlPlane,
   type LocalDerivativeRegistration,
   type MediaAssetRecord,
+  type MediaDerivativeRecord,
 } from './control-plane.js';
 import {
   DisabledMediaAuth,
@@ -561,12 +562,14 @@ async function route(
   }
 
   if (request.method === 'GET' && url.pathname === '/v1/library/cloud-assets') {
-    respondJson(response, 200, { data: await options.controlPlane.sharedCloudAssets(actor) });
+    const assets = await options.controlPlane.sharedCloudAssets(actor);
+    respondJson(response, 200, { data: assets.map(assetForBrowser) });
     return;
   }
 
   if (request.method === 'GET' && url.pathname === '/v1/library/my-assets') {
-    respondJson(response, 200, { data: await options.controlPlane.assetsForOwner(actor) });
+    const assets = await options.controlPlane.assetsForOwner(actor);
+    respondJson(response, 200, { data: assets.map(assetForBrowser) });
     return;
   }
 
@@ -1066,8 +1069,12 @@ async function route(
 
   const assetMatch = /^\/v1\/projects\/([^/]+)\/assets$/.exec(url.pathname);
   if (request.method === 'GET' && assetMatch !== null) {
+    const assets = await options.controlPlane.assetsForProject(
+      actor,
+      decodeURIComponent(assetMatch[1]!),
+    );
     respondJson(response, 200, {
-      data: await options.controlPlane.assetsForProject(actor, decodeURIComponent(assetMatch[1]!)),
+      data: assets.map(assetForBrowser),
     });
     return;
   }
@@ -1086,12 +1093,13 @@ async function route(
         'ASSET_INVALID',
         'private-object locations are server-owned and cannot be supplied at registration',
       );
+    const asset = await options.controlPlane.registerAsset(
+      actor,
+      decodeURIComponent(assetMatch[1]!),
+      assetRegistration(body),
+    );
     respondJson(response, 201, {
-      data: await options.controlPlane.registerAsset(
-        actor,
-        decodeURIComponent(assetMatch[1]!),
-        assetRegistration(body),
-      ),
+      data: assetForBrowser(asset),
     });
     return;
   }
@@ -1190,8 +1198,7 @@ async function route(
     }
     respondJson(response, 201, {
       data: {
-        asset: updated,
-        cloudRef: ref,
+        asset: assetForBrowser(updated),
         tagProvenance: tagged.provenance,
       },
     });
@@ -1208,17 +1215,18 @@ async function route(
       : undefined;
     const sortName = typeof body.sortName === 'string' ? body.sortName : undefined;
     const displayName = typeof body.displayName === 'string' ? body.displayName : undefined;
+    const asset = await options.controlPlane.updateAssetMetadata(
+      actor,
+      decodeURIComponent(assetMetadataMatch[1]!),
+      decodeURIComponent(assetMetadataMatch[2]!),
+      {
+        ...(tags !== undefined ? { tags } : {}),
+        ...(sortName !== undefined ? { sortName } : {}),
+        ...(displayName !== undefined ? { displayName } : {}),
+      },
+    );
     respondJson(response, 200, {
-      data: await options.controlPlane.updateAssetMetadata(
-        actor,
-        decodeURIComponent(assetMetadataMatch[1]!),
-        decodeURIComponent(assetMetadataMatch[2]!),
-        {
-          ...(tags !== undefined ? { tags } : {}),
-          ...(sortName !== undefined ? { sortName } : {}),
-          ...(displayName !== undefined ? { displayName } : {}),
-        },
-      ),
+      data: assetForBrowser(asset),
     });
     return;
   }
@@ -1239,11 +1247,12 @@ async function route(
       ...(asset.descriptor.width !== undefined ? { width: asset.descriptor.width } : {}),
       ...(asset.descriptor.height !== undefined ? { height: asset.descriptor.height } : {}),
     });
+    const updated = await options.controlPlane.updateAssetMetadata(actor, projectId, assetId, {
+      tags: tagged.tags,
+      sortName: tagged.sortName,
+    });
     respondJson(response, 200, {
-      data: await options.controlPlane.updateAssetMetadata(actor, projectId, assetId, {
-        tags: tagged.tags,
-        sortName: tagged.sortName,
-      }),
+      data: assetForBrowser(updated),
     });
     return;
   }
@@ -1252,12 +1261,13 @@ async function route(
     url.pathname,
   );
   if (request.method === 'GET' && derivativeMatch !== null) {
+    const derivatives = await options.controlPlane.derivativesForAsset(
+      actor,
+      decodeURIComponent(derivativeMatch[1]!),
+      decodeURIComponent(derivativeMatch[2]!),
+    );
     respondJson(response, 200, {
-      data: await options.controlPlane.derivativesForAsset(
-        actor,
-        decodeURIComponent(derivativeMatch[1]!),
-        decodeURIComponent(derivativeMatch[2]!),
-      ),
+      data: derivatives.map(derivativeForBrowser),
     });
     return;
   }
@@ -1266,12 +1276,13 @@ async function route(
     const derivative = localDerivativeRegistration(body);
     if (derivative.assetId !== decodeURIComponent(derivativeMatch[2]!))
       throw new ControlPlaneError('REQUEST_INVALID', 'derivative assetId must match the route');
+    const registered = await options.controlPlane.registerLocalDerivative(
+      actor,
+      decodeURIComponent(derivativeMatch[1]!),
+      derivative,
+    );
     respondJson(response, 201, {
-      data: await options.controlPlane.registerLocalDerivative(
-        actor,
-        decodeURIComponent(derivativeMatch[1]!),
-        derivative,
-      ),
+      data: derivativeForBrowser(registered),
     });
     return;
   }
@@ -1357,6 +1368,64 @@ async function route(
   }
 
   respondJson(response, 404, { error: { code: 'ROUTE_NOT_FOUND' } });
+}
+
+type BrowserAssetDto = Pick<
+  MediaAssetRecord,
+  | 'id'
+  | 'projectId'
+  | 'kind'
+  | 'displayName'
+  | 'sha256'
+  | 'bytes'
+  | 'descriptor'
+  | 'tags'
+  | 'sortName'
+  | 'createdAt'
+>;
+
+type BrowserDerivativeDto = Pick<
+  MediaDerivativeRecord,
+  | 'id'
+  | 'projectId'
+  | 'assetId'
+  | 'kind'
+  | 'profile'
+  | 'sha256'
+  | 'bytes'
+  | 'descriptor'
+  | 'availability'
+  | 'verifiedAt'
+>;
+
+function assetForBrowser(asset: MediaAssetRecord): BrowserAssetDto {
+  return {
+    id: asset.id,
+    projectId: asset.projectId,
+    kind: asset.kind,
+    displayName: asset.displayName,
+    sha256: asset.sha256,
+    bytes: asset.bytes,
+    descriptor: asset.descriptor,
+    tags: asset.tags,
+    sortName: asset.sortName,
+    createdAt: asset.createdAt,
+  };
+}
+
+function derivativeForBrowser(derivative: MediaDerivativeRecord): BrowserDerivativeDto {
+  return {
+    id: derivative.id,
+    projectId: derivative.projectId,
+    assetId: derivative.assetId,
+    kind: derivative.kind,
+    profile: derivative.profile,
+    sha256: derivative.sha256,
+    bytes: derivative.bytes,
+    descriptor: derivative.descriptor,
+    availability: derivative.availability,
+    verifiedAt: derivative.verifiedAt,
+  };
 }
 
 async function evaluateReadiness(
