@@ -28,7 +28,7 @@
     "@joy-media/project-schema": "workspace:*",
     "@joy-media/production-quality": "workspace:*",
     "@joy-media/provider-sdk": "workspace:*",
-    "nodemailer": "^6.9.16",
+    "nodemailer": "^9.0.1",
     "pg": "^8.22.0"
   }
 }

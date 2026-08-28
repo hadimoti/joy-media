@@ -282,6 +282,13 @@ export class PostgresControlPlane
   }
 
   async initialize(): Promise<void> {
+    // Keep lightweight query-only adapters usable for schema inspection tests;
+    // real pg Pools always expose connect and take the serialized path below.
+    if (typeof this.pool.connect !== 'function') {
+      await this.pool.query(POSTGRES_SCHEMA);
+      await this.ensureAssetRevocationPrimaryKey();
+      return;
+    }
     await this.transaction(async (client) => {
       await acquireSchemaMigrationLock(client);
       await client.query(POSTGRES_SCHEMA);
@@ -289,7 +296,9 @@ export class PostgresControlPlane
     });
   }
 
-  private async ensureAssetRevocationPrimaryKey(database: Pool | PoolClient): Promise<void> {
+  private async ensureAssetRevocationPrimaryKey(
+    database: Pool | PoolClient = this.pool,
+  ): Promise<void> {
     let result: { rows: readonly { indexname: string; indexdef: string }[] };
     try {
       result = await database.query<{
