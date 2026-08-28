@@ -511,7 +511,7 @@ or raw secret-bearing artifacts.
   complete, the final acceptance checklist remains intentionally unchecked.
 - Live Codex-browser inspection of the authenticated `https://www.joyst.ir/` tab
   still shows `Saved locally; cloud sync is unavailable`, `Verified delivery is
-  unavailable`, and a console error loading `/transitions/preview/transition2.png`.
+unavailable`, and a console error loading `/transitions/preview/transition2.png`.
   This is evidence of the currently deployed release, not evidence for the new
   checkpoint; no browser mutation was performed.
 - The transition preview defect is fixed on the checkpoint in commits `6310a6d` and
