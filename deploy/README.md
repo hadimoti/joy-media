@@ -32,17 +32,19 @@ Postgres instance to manage the `media_allowed_users` allow-list, using a
 separate, least-privileged database role scoped to that one table (see
 joy-vps's `bot/joy_media_db.py` and `docs/JOY-MEDIA-ADMIN-DB-ROLE.md`).
 
-Release order: backup `joymedia`; deploy the built API/static editor; install
+Release order: Back up the database (`joymedia`); deploy the built API/static editor; install
 the systemd/nginx manifests; validate configuration; restart services; verify
 public health and the OTP login path end to end (request + verify code by
-Gmail and by Telegram). Preserve the prior `/opt/joy-media/app` and each
-immutable release for rollback.
+Gmail and by Telegram). Preserve each immutable API and web release for
+rollback.
 
 On the VPS, use the lockfile to reconstruct the deployment dependency layout
 before building: `CI=true npm_config_confirm_modules_purge=false pnpm install
 --frozen-lockfile`. Build the API and static editor, then create the immutable
 API release with `CI=true npm_config_confirm_modules_purge=false pnpm deploy
---legacy --prod`. Point the `current-api` and `web` symlinks at the new
-release only after the checks pass. Rollback is a symlink change to the prior
-immutable release followed by `systemctl restart joy-media@api`; keep the
-database backup until the deployment gate is accepted.
+--legacy --prod`. Point `/opt/joy-media/releases/current-api` at the API
+release and `/opt/joy-media/web` at a separate `/opt/joy-media/web-releases/`
+static release only after the checks pass. Rollback is an atomic pair of
+symlink changes to the prior immutable API and web releases followed by
+`systemctl restart joy-media@api`; keep the database backup until the
+deployment gate is accepted.

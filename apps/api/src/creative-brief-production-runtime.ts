@@ -12,7 +12,10 @@ import {
   OpenRouterHttpPostTransport,
   type FetchImplementation,
 } from './openrouter-http-transport.js';
-import { createSystemdCredentialSecretSource, type ReadCredentialFile } from './systemd-credential-secret-source.js';
+import {
+  createSystemdCredentialSecretSource,
+  type ReadCredentialFile,
+} from './systemd-credential-secret-source.js';
 import { createCreativeBriefRuntimeFactory } from './creative-brief-runtime-factory.js';
 
 /**

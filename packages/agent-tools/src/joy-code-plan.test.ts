@@ -69,9 +69,7 @@ function validPlan(overrides: Partial<JoyCodeModelPlanV1> = {}): JoyCodeModelPla
   };
 }
 
-function validProposal(
-  overrides: Partial<JoyCodePlanProposalV1> = {},
-): JoyCodePlanProposalV1 {
+function validProposal(overrides: Partial<JoyCodePlanProposalV1> = {}): JoyCodePlanProposalV1 {
   const modelPlan = validPlan();
   return {
     ...modelPlan,
@@ -170,7 +168,9 @@ describe('Joy Code plan contract', () => {
     const result = validateJoyCodeModelPlan(input, CATALOGS);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.filter((error) => error.code === 'unknown-field').length).toBeGreaterThan(0);
+    expect(result.errors.filter((error) => error.code === 'unknown-field').length).toBeGreaterThan(
+      0,
+    );
   });
 
   it('rejects unknown templates and transitions even when the operation shape is valid', () => {
@@ -316,7 +316,9 @@ describe('Joy Code plan contract', () => {
     const result = validateJoyCodeModelPlan(input, CATALOGS);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.filter((error) => error.code === 'invalid-range').length).toBeGreaterThan(0);
+    expect(result.errors.filter((error) => error.code === 'invalid-range').length).toBeGreaterThan(
+      0,
+    );
   });
 
   it('does not mutate the input plan', () => {

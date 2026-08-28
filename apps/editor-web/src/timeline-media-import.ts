@@ -1,6 +1,6 @@
 import type { CommandTransaction } from '@joy-media/commands';
 import type { Clip, Composition, Track, VideoClip } from '@joy-media/project-schema';
-import { timelineTrackFamily } from './timeline-track-family.js';
+import { nextProfessionalTrackId, timelineTrackFamily } from './timeline-track-family.js';
 
 const SNAP_US = 100_000;
 const DEFAULT_STILL_DURATION_US = 5_000_000;
@@ -53,7 +53,7 @@ export function buildTimelineMediaImportTransaction(
 
     if (track === undefined) {
       track = {
-        id: nextTrackId(workingTracks),
+        id: nextProfessionalTrackId(workingTracks, family),
         kind: 'video',
         family,
         name:
@@ -126,13 +126,6 @@ function safeDurationUs(asset: TimelineMediaAsset): number {
   return durationUs !== undefined && Number.isSafeInteger(durationUs) && durationUs > 0
     ? durationUs
     : DEFAULT_STILL_DURATION_US;
-}
-
-function nextTrackId(tracks: readonly MutableTrack[]): string {
-  const used = new Set(tracks.map((track) => track.id));
-  let index = 1;
-  while (used.has(`track-${index}`)) index += 1;
-  return `track-${index}`;
 }
 
 function nextTrackOrder(tracks: readonly MutableTrack[]): number {

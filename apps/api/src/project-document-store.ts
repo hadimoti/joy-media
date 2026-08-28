@@ -133,9 +133,7 @@ export type ProjectDocumentWriteOutcome =
  * Returns diagnostics (empty array = valid).
  * Fails closed: returns non-empty diagnostics for any invalid input.
  */
-export function validateProjectDocumentRecord(
-  candidate: unknown,
-): readonly ProjectDiagnostic[] {
+export function validateProjectDocumentRecord(candidate: unknown): readonly ProjectDiagnostic[] {
   // Fail closed on non-record
   if (!isRecord(candidate)) {
     return [
@@ -206,7 +204,7 @@ export function isValidProjectDocumentRecord(
 
 /**
  * ProjectDocumentStore - API-internal contract for revisioned project document storage.
- * 
+ *
  * Implementations MUST:
  * - Enforce owner-scoped access
  * - Use compare-and-swap on write (baseRevision must match current head)
@@ -217,7 +215,7 @@ export function isValidProjectDocumentRecord(
 export interface ProjectDocumentStore {
   /**
    * Read the current revision of a project document.
-   * 
+   *
    * @param callerId - The caller's owner ID (for authorization in implementations)
    * @param projectId - The project to read
    * @param revisionId - Optional: specific revision to fetch. If omitted, returns current.
@@ -231,7 +229,7 @@ export interface ProjectDocumentStore {
 
   /**
    * Write a project document with compare-and-swap.
-   * 
+   *
    * @param callerId - The caller's owner ID (must match record.ownerId)
    * @param record - The complete document record to store
    * @param baseRevisionId - The expected current revision; write fails if this doesn't match
@@ -245,7 +243,7 @@ export interface ProjectDocumentStore {
 
   /**
    * List all revision IDs for a project (for debugging/diagnostics).
-   * 
+   *
    * @param callerId - The caller's owner ID
    * @param projectId - The project to list revisions for
    * @returns Array of revision IDs, or empty if not found/denied
@@ -479,10 +477,7 @@ export class InMemoryProjectDocumentStore implements ProjectDocumentStore {
     };
   }
 
-  listRevisions(
-    callerId: OwnerId,
-    projectId: ProjectId,
-  ): readonly ProjectRevisionId[] {
+  listRevisions(callerId: OwnerId, projectId: ProjectId): readonly ProjectRevisionId[] {
     // Check if project exists
     const ownerId = this.lookupOwner(projectId);
     if (ownerId === undefined) {
@@ -546,10 +541,7 @@ export class UnavailableProjectDocumentStore implements ProjectDocumentStore {
     };
   }
 
-  listRevisions(
-    _callerId: OwnerId,
-    _projectId: ProjectId,
-  ): readonly ProjectRevisionId[] {
+  listRevisions(_callerId: OwnerId, _projectId: ProjectId): readonly ProjectRevisionId[] {
     return [];
   }
 }

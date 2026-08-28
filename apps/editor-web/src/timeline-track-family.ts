@@ -61,13 +61,24 @@ export function nextProfessionalTrackId(
   family: ProfessionalTrackFamily,
 ): string {
   const prefix = family === 'audio' ? 'A' : 'V';
-  const nextIndex =
+  const used = new Set(tracks.map((track) => track.id));
+  // React can batch multiple add-track actions against one immutable array.
+  // Reserve IDs for that render so two actions cannot both emit V3/A2.
+  const key = tracks as object;
+  const reserved = trackIdReservations.get(key) ?? new Set<string>();
+  trackIdReservations.set(key, reserved);
+  let nextIndex =
     tracks.reduce((highest, track) => {
       const match = new RegExp(`^${prefix}(\\d+)$`).exec(track.id);
       return match === null ? highest : Math.max(highest, Number(match[1]));
     }, 0) + 1;
-  return `${prefix}${nextIndex}`;
+  let candidate = `${prefix}${nextIndex}`;
+  while (used.has(candidate) || reserved.has(candidate)) candidate = `${prefix}${++nextIndex}`;
+  reserved.add(candidate);
+  return candidate;
 }
+
+const trackIdReservations = new WeakMap<object, Set<string>>();
 
 export function professionalTrackName(
   family: ProfessionalTrackFamily,

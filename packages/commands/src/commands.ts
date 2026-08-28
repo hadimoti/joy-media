@@ -115,6 +115,9 @@ export interface SetTrackFamilyPayload extends TrackTarget {
 export interface SetTrackLockedPayload extends TrackTarget {
   readonly locked: boolean;
 }
+export interface SetTrackMutedPayload extends TrackTarget {
+  readonly muted: boolean;
+}
 export interface SetTrackLabelColorPayload extends TrackTarget {
   readonly labelColor?: TimelineTrackLabelColor;
 }
@@ -213,6 +216,7 @@ export type SpikeCommand =
   | { readonly type: 'timeline.renameTrack'; readonly payload: RenameTrackPayload }
   | { readonly type: 'timeline.setTrackFamily'; readonly payload: SetTrackFamilyPayload }
   | { readonly type: 'timeline.setTrackLocked'; readonly payload: SetTrackLockedPayload }
+  | { readonly type: 'timeline.setTrackMuted'; readonly payload: SetTrackMutedPayload }
   | { readonly type: 'timeline.setTrackLabelColor'; readonly payload: SetTrackLabelColorPayload }
   | { readonly type: 'property.setTrackEnabled'; readonly payload: SetTrackEnabledPayload };
 
@@ -272,6 +276,7 @@ export const COMMAND_REGISTRY: Readonly<
     internalOnly: true,
   },
   'timeline.setTrackLocked': { description: 'Set a durable track lock.' },
+  'timeline.setTrackMuted': { description: 'Set a durable track mute.' },
   'timeline.setTrackLabelColor': { description: 'Set a persisted track label color.' },
   'property.setTrackEnabled': { description: 'Set a track enabled state.' },
 };
@@ -347,6 +352,8 @@ function applyCommandUnchecked(project: SpikeProject, command: SpikeCommand): Ap
       return applySetTrackFamily(project, command.payload);
     case 'timeline.setTrackLocked':
       return applySetTrackLocked(project, command.payload);
+    case 'timeline.setTrackMuted':
+      return applySetTrackMuted(project, command.payload);
     case 'timeline.setTrackLabelColor':
       return applySetTrackLabelColor(project, command.payload);
     case 'property.setTrackEnabled':
@@ -1667,6 +1674,30 @@ function applySetTrackLocked(project: SpikeProject, payload: SetTrackLockedPaylo
     inverse: {
       type: 'timeline.setTrackLocked',
       payload: { ...payload, locked: track.locked === true },
+    },
+  };
+}
+
+function applySetTrackMuted(project: SpikeProject, payload: SetTrackMutedPayload): ApplyResult {
+  const track = getTrack(project, payload);
+  const comp = project.compositions[payload.compositionId]!;
+  const tracks = comp.tracks.map((item) => {
+    if (item.id !== track.id) return item;
+    if (!payload.muted) {
+      const next = { ...item };
+      Reflect.deleteProperty(next, 'muted');
+      return next;
+    }
+    return { ...item, muted: true };
+  });
+  return {
+    project: {
+      ...project,
+      compositions: { ...project.compositions, [comp.id]: { ...comp, tracks } },
+    },
+    inverse: {
+      type: 'timeline.setTrackMuted',
+      payload: { ...payload, muted: track.muted === true },
     },
   };
 }

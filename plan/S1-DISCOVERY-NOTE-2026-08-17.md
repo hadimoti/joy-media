@@ -3,7 +3,7 @@
 **Status:** Discovery complete  
 **Date:** 2026-08-17  
 **Session:** WP-37 S1 — Semantic Project Snapshot contract  
-**Agent:** Continuation from HANDOFF-JOY-MEDIA-AI-CREATIVE-OS-2026-08-17  
+**Agent:** Continuation from HANDOFF-JOY-MEDIA-AI-CREATIVE-OS-2026-08-17
 
 ---
 
@@ -22,6 +22,7 @@ This document answers the S1 discovery questions (WP-37 §204-224) to determine 
 **Type:** `JoyProjectV1` interface (lines 34-73)
 
 The `JoyProjectV1` is the authoritative, persisted project document. It contains:
+
 - `schemaVersion: 1`
 - `id: string` (ProjectId)
 - `title: string`
@@ -65,6 +66,7 @@ function encodeProjectRevision(
 **Access pattern:** `EditorSession.projectRevisionId` (line 285) returns the encoded revision.
 
 **Component tracking:**
+
 - `EditorSession.#timelineRevision` (line 1022)
 - `EditorSession.#visualObjectRevision` (line 1023)
 - `EditorSession.#graphRevision` (line 1024)
@@ -128,6 +130,7 @@ Each component increments independently when mutated, ensuring stale plan detect
 **Semantic Project Snapshot V1 should live in:** `@joy-media/project-schema`
 
 **Rationale:**
+
 1. Snapshot is a **read-only projection of persisted project state** (WP-37 §202)
 2. `@joy-media/project-schema` is the **innermost package** with no dependencies on other JOY packages
 3. The snapshot needs access to all canonical types (`JoyProjectV1`, `CompositionV1`, `TrackV1`, `ClipV1`, `VisualObjectV1`, `AssetRecordV1`, etc.)
@@ -146,6 +149,7 @@ Each component increments independently when mutated, ensuring stale plan detect
 ### Composition Data
 
 From `CompositionV1` (v1.ts lines 224-236):
+
 - `id: CompositionId`
 - `name: string`
 - `width: number`
@@ -160,6 +164,7 @@ From `CompositionV1` (v1.ts lines 224-236):
 ### Track Data
 
 From `TrackV1` (v1.ts lines 238-248):
+
 - `id: TrackId`
 - `kind: 'video' | 'audio' | 'caption' | 'object' | 'control'`
 - `family?: TimelineTrackFamily` (explicit compatibility family — WP-36)
@@ -174,6 +179,7 @@ From `TrackV1` (v1.ts lines 238-248):
 ### Clip Data
 
 From `ClipV1` (v1.ts lines 250-283): Discriminated union:
+
 - `VideoClipV1`: `id`, `startUs`, `durationUs`, `assetId`, `sourceInUs`, `playbackRate?`, `reversed?`
 - `CompositionClipV1`: `id`, `startUs`, `durationUs`, `compositionId`, `childOffsetUs`
 - `CaptionClipV1`: `id`, `startUs`, `durationUs`, `captionDocumentId`, `style?`
@@ -181,6 +187,7 @@ From `ClipV1` (v1.ts lines 250-283): Discriminated union:
 ### Asset Data
 
 From `AssetRecordV1` (model.ts):
+
 - `id: string`
 - `kind: AssetKindV1` (`'video' | 'audio' | 'image' | 'font' | 'lutt' | 'project'`)
 - `name: string`
@@ -195,6 +202,7 @@ From `AssetRecordV1` (model.ts):
 ### Visual Object Data
 
 From `VisualObjectV1` (v1.ts lines 187-222):
+
 - `id: string`
 - `kind: 'image' | 'text' | 'shape' | 'null' | 'camera' | 'html-scene'`
 - `transform: VisualObjectTransformV1` (x, y, scaleX, scaleY, rotationDeg, opacity, positionZ?, crop)
@@ -215,6 +223,7 @@ From `VisualObjectV1` (v1.ts lines 187-222):
 ### Caption Data
 
 From `CaptionDocumentV1` (v1.ts lines 292+):
+
 - `id: string`
 - `locale: string`
 - `segments: readonly CaptionSegmentV1[]`
@@ -224,6 +233,7 @@ From `CaptionDocumentV1` (v1.ts lines 292+):
 ### Audio Data
 
 From `ProjectAudioV1` (audio.ts):
+
 - `buses: readonly AudioBusV1[]`
 - `clips: readonly ProjectAudioClipV1[]`
 - `masterBus: AudioBusV1`
@@ -231,6 +241,7 @@ From `ProjectAudioV1` (audio.ts):
 ### Brand/Asset Information
 
 **Current state:** No explicit brand-kit schema found in `project-schema`. Brand data appears to be:
+
 - Either not yet implemented as a first-class schema
 - Or stored in `variables: Record<string, JsonValue>`
 - Or managed separately (requires verification in ADRs)
@@ -240,6 +251,7 @@ From `ProjectAudioV1` (audio.ts):
 ### Provenance Data
 
 From `GenerationProvenanceV1` (model.ts):
+
 - `providerId: string` (opaque, e.g., `'provider-comfy'`)
 - `modelId: string` (opaque, e.g., `'sdxl-1.0'`)
 - `version: string` (provider model version)
@@ -299,6 +311,7 @@ These are available but must be treated as opaque IDs in snapshots:
 ### Agent Command Envelope
 
 From `@joy-media/agent-tools/src/envelope.ts`:
+
 - `AgentCommandEnvelope<TParams>` — wraps agent-issued commands
 - `baseRevision: ProjectRevisionId` — project revision plan was built against
 - `transactionId: string` — groups commands into single undoable transaction
@@ -308,6 +321,7 @@ From `@joy-media/agent-tools/src/envelope.ts`:
 ### Agent Edit Plan
 
 From `@joy-media/agent-tools/src/plan.ts`:
+
 - `AgentEditPlan` — structured plan with steps
 - `snapshotRevisionId: string` — links plan to specific project state
 - `steps: readonly AgentPlanStep[]`
@@ -324,6 +338,7 @@ From `@joy-media/agent-tools/src/plan.ts`:
 **New file:** `packages/project-schema/src/semantic-snapshot.ts`
 
 **Exports:**
+
 ```typescript
 // Types
 export type { SemanticProjectSnapshotV1, SceneSummaryV1, ... }
@@ -345,6 +360,7 @@ export const EMPTY_SNAPSHOT: SemanticProjectSnapshotV1
 ```
 
 **Dependencies:**
+
 - Only `@joy-media/project-schema` internal types
 - No dependencies on `commands`, `timeline-engine`, or `agent-tools`
 - Zero circular dependency risk
@@ -354,7 +370,7 @@ export const EMPTY_SNAPSHOT: SemanticProjectSnapshotV1
 ```
 project-schema (owns snapshot)
     └── semantic-snapshot.ts
-    
+
 commands (can consume snapshot)
     └── Can import from project-schema
 
@@ -376,7 +392,8 @@ editor-web (can consume snapshot)
 
 ### Q1: Which persisted project source and revision ID are canonical?
 
-**A:** 
+**A:**
+
 - Source: `JoyProjectV1` in `@joy-media/project-schema`
 - Revision: `ProjectRevisionId` encoded from component revisions via `encodeProjectRevision()` in editor-session
 - Format: `local-revision:v1:<encoded-project-id>:timeline=<n>:document=<n>:graph=<n>:artifacts=<n>`
@@ -388,6 +405,7 @@ editor-web (can consume snapshot)
 ### Q3: Which existing fields already carry assets, clips, captions, audio, animation, brand data, generated provenance, and element-to-track bindings?
 
 **A:**
+
 - **Assets:** `JoyProjectV1.assets` → `AssetRecordV1` (with `generationProvenance?`)
 - **Clips:** `CompositionV1.tracks[]` → `TrackV1.clips` → `ClipV1` discriminated union
 - **Captions:** `JoyProjectV1.captionDocuments` + `CaptionClipV1.captionDocumentId`
@@ -400,6 +418,7 @@ editor-web (can consume snapshot)
 ### Q4: Which project/asset information is intentionally unavailable to an agent for privacy or authorization reasons?
 
 **A:**
+
 - Provider credentials (never in project)
 - Object-store locations/paths (never in project)
 - Signed URLs (never persisted)
@@ -410,6 +429,7 @@ editor-web (can consume snapshot)
 ### Q5: Which current plan/approval types can host a read-only proposal without duplicating the agent workflow?
 
 **A:** `AgentEditPlan` in `@joy-media/agent-tools` already supports:
+
 - `snapshotRevisionId: string` — binds plan to specific project state
 - Read-only proposal pattern via tool definitions
 - Existing approval policy system (`ApprovalEngine`, `ApprovalPolicy`)
@@ -420,26 +440,31 @@ editor-web (can consume snapshot)
 ## 8. Implementation Roadmap
 
 ### Phase 1: Schema and Types (S1.278)
+
 1. Add `SemanticProjectSnapshotV1` and related types to `project-schema`
 2. Add validation functions
 3. Export from package
 
 ### Phase 2: Projector (S1.279)
+
 1. Implement `projectToSemanticSnapshot()` pure function
 2. Derive composition, scenes, timeline, assets, brand, capabilities, warnings
 3. Scene segmentation: use explicit markers if available, else deterministic derivation
 
 ### Phase 3: Size Budgets and Truncation (S1.280-282)
+
 1. Define initial-context budget (target: ~4KB-8KB)
 2. Implement deterministic truncation with omission counts
 3. Add hierarchical detail-on-demand references
 
 ### Phase 4: Cache (S1.283)
+
 1. Add per-project/revision cache after pure behavior tests
 2. Bounded cache with no secrets
 3. Invalidation on revision change
 
 ### Phase 5: Fixtures and Tests (S1.284)
+
 1. Blank project fixture
 2. Mixed-element project fixture
 3. Persian/RTL captions fixture
@@ -458,4 +483,4 @@ editor-web (can consume snapshot)
 
 ---
 
-*This discovery note is based on code inspection of commit `0287946` on 2026-08-17. Verify against current HEAD before implementation.*
+_This discovery note is based on code inspection of commit `0287946` on 2026-08-17. Verify against current HEAD before implementation._

@@ -60,9 +60,7 @@ class ErrorSecretSource implements SecretSource {
 
 describe('CREATIVE_BRIEF_SECRET_REFERENCE', () => {
   it('exports the canonical opaque reference constant', () => {
-    expect(CREATIVE_BRIEF_SECRET_REFERENCE).toBe(
-      'joy-media/openrouter/creative-brief/v1',
-    );
+    expect(CREATIVE_BRIEF_SECRET_REFERENCE).toBe('joy-media/openrouter/creative-brief/v1');
   });
 
   it('is a string constant', () => {

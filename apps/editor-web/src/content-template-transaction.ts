@@ -4,6 +4,7 @@ import type { Clip, VisualObjectV1 } from '@joy-media/project-schema';
 import type { EditorSession } from './editor-session.js';
 import type { SeededContentTemplate } from './content-template-types.js';
 import { buildTimelineElementDocument } from './place-timeline-element.js';
+import { nextProfessionalTrackId } from './timeline-track-family.js';
 
 export function buildContentTemplateTransaction(
   seeded: SeededContentTemplate,
@@ -49,7 +50,7 @@ export function buildContentTemplateTransaction(
           !usedTrackIds.has(track.id),
       )
       .sort((left, right) => left.order - right.order)[0];
-    const trackId = targetExisting?.id ?? `track-${nextTrackOrder + 1}`;
+    const trackId = targetExisting?.id ?? nextProfessionalTrackId(composition.tracks, 'visual');
     if (targetExisting === undefined) {
       timelineCommands.push({
         type: 'timeline.addTrack',

@@ -16,14 +16,43 @@ describe('Joy Code production runtime composition', () => {
   it('stays unavailable for disabled configuration without reading credentials or network', () => {
     let reads = 0;
     let requests = 0;
-    const runtime = createProductionJoyCodeRuntime({}, () => { reads += 1; return 'secret'; }, async () => { requests += 1; return new Response('{}'); });
+    const runtime = createProductionJoyCodeRuntime(
+      {},
+      () => {
+        reads += 1;
+        return 'secret';
+      },
+      async () => {
+        requests += 1;
+        return new Response('{}');
+      },
+    );
     expect(runtime).toBe(DEFAULT_JOY_CODE_RUNTIME);
     expect(reads).toBe(0);
     expect(requests).toBe(0);
   });
   it('fails closed when the explicit credential is absent', async () => {
-    const runtime = createProductionJoyCodeRuntime(env, () => { throw new Error('missing'); }, async () => new Response('{}'));
-    const result = await runtime.execute({ projectId: 'p', snapshotRevisionId: 'r', prompt: 'x', selection: { clipIds: [] }, contextSummary: 'x', planId: 'id', createdAt: '2026-08-20T00:00:00.000Z', catalogVersion: 'v1', catalogs: { textTemplateIds: [], captionTemplateIds: [], transitionIds: [] } }, { correlationId: 'c' });
+    const runtime = createProductionJoyCodeRuntime(
+      env,
+      () => {
+        throw new Error('missing');
+      },
+      async () => new Response('{}'),
+    );
+    const result = await runtime.execute(
+      {
+        projectId: 'p',
+        snapshotRevisionId: 'r',
+        prompt: 'x',
+        selection: { clipIds: [] },
+        contextSummary: 'x',
+        planId: 'id',
+        createdAt: '2026-08-20T00:00:00.000Z',
+        catalogVersion: 'v1',
+        catalogs: { textTemplateIds: [], captionTemplateIds: [], transitionIds: [] },
+      },
+      { correlationId: 'c' },
+    );
     expect(result.category).toBe('unavailable');
   });
 });

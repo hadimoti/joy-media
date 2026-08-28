@@ -35,10 +35,7 @@ import {
   MAX_PROJECT_DOCUMENT_SYNC_BYTES,
   validateProjectDocumentSyncRequest,
   isProjectDocumentSyncValidationSuccess,
-  type ProjectDocumentSyncValidationSuccess,
 } from './project-document-sync-request-validation.js';
-import { validateCreativeBriefServerRequest } from './creative-brief-request-validation.js';
-import type { CreativeBriefServerRequest } from './creative-brief-request-validation.js';
 import type { CreativeBriefRuntime } from './creative-brief-runtime.js';
 import type { CreativeBriefRuntimeContext } from './creative-brief-runtime.js';
 import { DEFAULT_CREATIVE_BRIEF_RUNTIME } from './creative-brief-runtime.js';
@@ -58,14 +55,22 @@ import {
   type SerializedGpuPreviewFrameResponse,
 } from './gpu-preview-transport.js';
 import type { GpuPreviewFrameRequest } from '@joy-media/job-protocol';
-import type { CreativeBriefV1, AsyncCreativeBriefOutcome } from '@joy-media/agent-tools';
+import type { AsyncCreativeBriefOutcome } from '@joy-media/agent-tools';
 import { randomUUID } from 'node:crypto';
 import { CreativeBriefAdmissionGate } from './creative-brief-admission-gate.js';
 import type { JoyCodeRuntime, JoyCodeRuntimeInput } from './joy-code-runtime.js';
 import { DEFAULT_JOY_CODE_RUNTIME } from './joy-code-runtime.js';
-import type { JoyCodeInputResolver, JoyCodeInputResolverRequest, JoyCodeInputResolverContext } from './joy-code-input-resolver.js';
+import type {
+  JoyCodeInputResolver,
+  JoyCodeInputResolverRequest,
+  JoyCodeInputResolverContext,
+} from './joy-code-input-resolver.js';
 import { UnavailableJoyCodeInputResolver } from './joy-code-input-resolver.js';
-import { validateJoyCodeClientRequest, isValidJoyCodeClientRequest, type JoyCodeClientRequestEnvelope } from './joy-code-client-request-validation.js';
+import {
+  validateJoyCodeClientRequest,
+  isValidJoyCodeClientRequest,
+  type JoyCodeClientRequestEnvelope,
+} from './joy-code-client-request-validation.js';
 import { JoyCodeAdmissionGate } from './joy-code-admission-gate.js';
 import { createClientAddressResolver, type ClientAddressResolver } from './client-address.js';
 
@@ -74,6 +79,22 @@ const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 600;
 
 export interface ApiAuthentication {
   authenticate(request: IncomingMessage): Actor | undefined | Promise<Actor | undefined>;
+}
+
+export type ApiReadinessCheck = () => boolean | Promise<boolean>;
+
+export interface ApiReleaseIdentity {
+  readonly commitSha: string;
+  readonly treeHash: string;
+  readonly lockfileSha256: string;
+  readonly schemaVersion: number;
+}
+
+export interface ApiReadinessOptions {
+  /** Named dependency probes. Failures are reported by name without details. */
+  readonly checks?: Readonly<Record<string, ApiReadinessCheck>>;
+  /** Validated, non-secret release metadata projected by the readiness endpoint. */
+  readonly releaseIdentity?: ApiReleaseIdentity;
 }
 
 export interface ControlPlaneHttpServerOptions {
@@ -110,6 +131,8 @@ export interface ControlPlaneHttpServerOptions {
   };
   /** Shared trusted-proxy boundary used to key process-local abuse controls. */
   readonly clientAddressResolver?: ClientAddressResolver;
+  /** Injectable dependency probes for /ready. Omitted checks preserve legacy readiness. */
+  readonly readiness?: ApiReadinessOptions;
 }
 
 /**
@@ -180,6 +203,22 @@ async function route(
   response: ServerResponse,
 ): Promise<void> {
   const url = new URL(request.url ?? '/', 'http://joy-media.invalid');
+  if (request.method === 'GET' && (url.pathname === '/live' || url.pathname === '/health/live')) {
+    respondJson(response, 200, { ok: true, service: 'joy-media-api', liveness: true });
+    return;
+  }
+  if (request.method === 'GET' && (url.pathname === '/ready' || url.pathname === '/health/ready')) {
+    const readiness = await evaluateReadiness(options.readiness);
+    respondJson(response, readiness.ready ? 200 : 503, {
+      ok: readiness.ready,
+      service: 'joy-media-api',
+      readiness: readiness.ready,
+      controlPlane: readiness.ready,
+      checks: readiness.checks,
+      releaseIdentity: options.readiness?.releaseIdentity ?? null,
+    });
+    return;
+  }
   if (request.method === 'GET' && url.pathname === '/health') {
     respondJson(response, 200, { ok: true, service: 'joy-media-api', controlPlane: true });
     return;
@@ -459,33 +498,85 @@ async function route(
   if (request.method === 'POST' && joyCodePlanMatch !== null) {
     const projectId = decodeURIComponent(joyCodePlanMatch[1]!);
     const consent = await options.controlPlane.getJoyCodeOptIn(actor, projectId);
-    if (!consent.enabled) throw new ControlPlaneError('POLICY_DENIED', 'Joy Code planning is not opted in for this project');
+    if (!consent.enabled)
+      throw new ControlPlaneError(
+        'POLICY_DENIED',
+        'Joy Code planning is not opted in for this project',
+      );
     const body = await readJson(request);
     const validation = validateJoyCodeClientRequest(body);
-    if (!validation.valid) throw new ControlPlaneError('REQUEST_INVALID', validation.errors[0] ?? 'invalid Joy Code request');
-    if (!isValidJoyCodeClientRequest(body)) throw new ControlPlaneError('REQUEST_INVALID', 'invalid Joy Code request');
+    if (!validation.valid)
+      throw new ControlPlaneError(
+        'REQUEST_INVALID',
+        validation.errors[0] ?? 'invalid Joy Code request',
+      );
+    if (!isValidJoyCodeClientRequest(body))
+      throw new ControlPlaneError('REQUEST_INVALID', 'invalid Joy Code request');
     const envelope: JoyCodeClientRequestEnvelope = body;
-    if (envelope.projectId !== projectId) throw new ControlPlaneError('PROJECT_MISMATCH', 'projectId does not match route');
+    if (envelope.projectId !== projectId)
+      throw new ControlPlaneError('PROJECT_MISMATCH', 'projectId does not match route');
     const admission = options.joyCodeAdmissionGate.admit(actor.id, projectId, Date.now());
     if (!admission.allowed) {
-      const statusCode = admission.code === 'JOY_CODE_IN_FLIGHT' || admission.code === 'JOY_CODE_CIRCUIT_OPEN' ? 409 : 429;
+      const statusCode =
+        admission.code === 'JOY_CODE_IN_FLIGHT' || admission.code === 'JOY_CODE_CIRCUIT_OPEN'
+          ? 409
+          : 429;
       respondJson(response, statusCode, { error: { code: admission.code } });
       return;
     }
     try {
       const resolverRequest: JoyCodeInputResolverRequest = envelope;
-      const resolverContext: JoyCodeInputResolverContext = { actor, controlPlaneProjectId: projectId };
+      const resolverContext: JoyCodeInputResolverContext = {
+        actor,
+        controlPlaneProjectId: projectId,
+      };
       const resolved = await options.joyCodeInputResolver.resolve(resolverRequest, resolverContext);
-      if (resolved.status === 'stale-revision') { respondJson(response, 409, { error: { code: 'REVISION_MISMATCH', message: resolved.message } }); return; }
-      if (resolved.status === 'unavailable') { respondJson(response, 503, { error: { code: resolved.code, message: resolved.message } }); return; }
-      const runtimeInput: JoyCodeRuntimeInput = { ...resolved.input, planId: randomUUID(), createdAt: new Date().toISOString(), catalogVersion: 'v1' };
-      const outcome = await options.joyCodeRuntime.execute(runtimeInput, { correlationId: randomUUID(), timeoutMs: 30_000, spendLimitUsdCents: 0 });
+      if (resolved.status === 'stale-revision') {
+        respondJson(response, 409, {
+          error: { code: 'REVISION_MISMATCH', message: resolved.message },
+        });
+        return;
+      }
+      if (resolved.status === 'unavailable') {
+        respondJson(response, 503, { error: { code: resolved.code, message: resolved.message } });
+        return;
+      }
+      const runtimeInput: JoyCodeRuntimeInput = {
+        ...resolved.input,
+        planId: randomUUID(),
+        createdAt: new Date().toISOString(),
+        catalogVersion: 'v1',
+      };
+      const outcome = await options.joyCodeRuntime.execute(runtimeInput, {
+        correlationId: randomUUID(),
+        timeoutMs: 30_000,
+        spendLimitUsdCents: 0,
+      });
       options.joyCodeAdmissionGate.recordOutcome(outcome.category, Date.now());
-      if (outcome.category === 'ready' && outcome.result !== undefined) { respondJson(response, 200, { data: outcome.result }); return; }
-      const statusCode = outcome.category === 'unavailable' ? 503 : outcome.category === 'policy-denied' ? 403 : outcome.category === 'timeout' ? 504 : outcome.category === 'cancelled' ? 499 : 502;
-      respondJson(response, statusCode, { error: { code: outcome.errorCode ?? 'JOY_CODE_RUNTIME_FAILED', message: outcome.message ?? 'Joy Code runtime failed' } });
+      if (outcome.category === 'ready' && outcome.result !== undefined) {
+        respondJson(response, 200, { data: outcome.result });
+        return;
+      }
+      const statusCode =
+        outcome.category === 'unavailable'
+          ? 503
+          : outcome.category === 'policy-denied'
+            ? 403
+            : outcome.category === 'timeout'
+              ? 504
+              : outcome.category === 'cancelled'
+                ? 499
+                : 502;
+      respondJson(response, statusCode, {
+        error: {
+          code: outcome.errorCode ?? 'JOY_CODE_RUNTIME_FAILED',
+          message: outcome.message ?? 'Joy Code runtime failed',
+        },
+      });
       return;
-    } finally { options.joyCodeAdmissionGate.release(actor.id, projectId); }
+    } finally {
+      options.joyCodeAdmissionGate.release(actor.id, projectId);
+    }
   }
   if (request.method === 'POST' && creativeBriefMatch !== null) {
     const projectId = decodeURIComponent(creativeBriefMatch[1]!);
@@ -998,22 +1089,47 @@ async function route(
 
   const joyCodeOptInMatch = /^\/v1\/projects\/([^/]+)\/joy-code-opt-in$/.exec(url.pathname);
   if (request.method === 'GET' && joyCodeOptInMatch !== null) {
-    const status = await options.controlPlane.getJoyCodeOptIn(actor, decodeURIComponent(joyCodeOptInMatch[1]!));
+    const status = await options.controlPlane.getJoyCodeOptIn(
+      actor,
+      decodeURIComponent(joyCodeOptInMatch[1]!),
+    );
     respondJson(response, 200, { data: status });
     return;
   }
   if (request.method === 'PUT' && joyCodeOptInMatch !== null) {
     const body = await readJson(request);
     const keys = Object.keys(body);
-    if (keys.length !== 3 || !keys.includes('enabled') || !keys.includes('consentVersion') || !keys.includes('baseRevision'))
-      throw new ControlPlaneError('REQUEST_INVALID', 'exact body { enabled, consentVersion, baseRevision } required');
-    if (typeof body.enabled !== 'boolean') throw new ControlPlaneError('REQUEST_INVALID', 'enabled must be boolean');
+    if (
+      keys.length !== 3 ||
+      !keys.includes('enabled') ||
+      !keys.includes('consentVersion') ||
+      !keys.includes('baseRevision')
+    )
+      throw new ControlPlaneError(
+        'REQUEST_INVALID',
+        'exact body { enabled, consentVersion, baseRevision } required',
+      );
+    if (typeof body.enabled !== 'boolean')
+      throw new ControlPlaneError('REQUEST_INVALID', 'enabled must be boolean');
     if (body.consentVersion !== null && typeof body.consentVersion !== 'string')
       throw new ControlPlaneError('REQUEST_INVALID', 'consentVersion must be string or null');
-    if (typeof body.baseRevision !== 'number' || !Number.isSafeInteger(body.baseRevision) || body.baseRevision < 0)
-      throw new ControlPlaneError('REQUEST_INVALID', 'baseRevision must be a non-negative safe integer');
+    if (
+      typeof body.baseRevision !== 'number' ||
+      !Number.isSafeInteger(body.baseRevision) ||
+      body.baseRevision < 0
+    )
+      throw new ControlPlaneError(
+        'REQUEST_INVALID',
+        'baseRevision must be a non-negative safe integer',
+      );
     const projectId = decodeURIComponent(joyCodeOptInMatch[1]!);
-    const result = await options.controlPlane.setJoyCodeOptIn(actor, projectId, body.enabled, body.consentVersion === null ? undefined : body.consentVersion, body.baseRevision);
+    const result = await options.controlPlane.setJoyCodeOptIn(
+      actor,
+      projectId,
+      body.enabled,
+      body.consentVersion === null ? undefined : body.consentVersion,
+      body.baseRevision,
+    );
     const status = await options.controlPlane.getJoyCodeOptIn(actor, projectId);
     respondJson(response, 200, { data: { ...status, revision: result.revision } });
     return;
@@ -1479,6 +1595,23 @@ async function route(
   }
 
   respondJson(response, 404, { error: { code: 'ROUTE_NOT_FOUND' } });
+}
+
+async function evaluateReadiness(
+  options: ApiReadinessOptions | undefined,
+): Promise<{ readonly ready: boolean; readonly checks: Readonly<Record<string, boolean>> }> {
+  const entries = Object.entries(options?.checks ?? {});
+  const results = await Promise.all(
+    entries.map(async ([name, check]) => {
+      try {
+        return [name, (await check()) === true] as const;
+      } catch {
+        return [name, false] as const;
+      }
+    }),
+  );
+  const checks = Object.fromEntries(results) as Readonly<Record<string, boolean>>;
+  return { ready: results.every(([, ready]) => ready), checks };
 }
 
 async function readJson(

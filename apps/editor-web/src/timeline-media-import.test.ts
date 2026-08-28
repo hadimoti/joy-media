@@ -66,13 +66,13 @@ describe('buildTimelineMediaImportTransaction', () => {
       'timeline.insertClip',
     ]);
     expect(transaction.commands[0]).toMatchObject({
-      payload: { track: { id: 'track-1', family: 'audio', clips: [] } },
+      payload: { track: { id: 'A1', family: 'audio', clips: [] } },
     });
     expect(transaction.commands[1]).toMatchObject({
-      payload: { trackId: 'track-1', clip: { assetId: 'voice-a', startUs: 0 } },
+      payload: { trackId: 'A1', clip: { assetId: 'voice-a', startUs: 0 } },
     });
     expect(transaction.commands[2]).toMatchObject({
-      payload: { trackId: 'track-1', clip: { assetId: 'voice-b', startUs: 5_000_000 } },
+      payload: { trackId: 'A1', clip: { assetId: 'voice-b', startUs: 5_000_000 } },
     });
     expect(transaction.commands[3]).toMatchObject({
       payload: { track: { family: 'visual', clips: [] } },
@@ -95,7 +95,7 @@ describe('buildTimelineMediaImportTransaction', () => {
       expect.objectContaining({ type: 'timeline.addTrack' }),
       expect.objectContaining({
         type: 'timeline.insertClip',
-        payload: expect.objectContaining({ trackId: 'track-1' }),
+        payload: expect.objectContaining({ trackId: 'V1' }),
       }),
     ]);
   });

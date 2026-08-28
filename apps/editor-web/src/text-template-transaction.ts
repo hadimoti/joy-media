@@ -3,11 +3,13 @@ import {
   normalizeUniversalTimeline,
   UNIVERSAL_TIMELINE_SCHEMA_VERSION,
   type JoyProjectV1,
+  type SpikeProject,
   type VisualObjectV1,
 } from '@joy-media/project-schema';
 import type { EditorSession } from './editor-session.js';
 import { readClipObjectMap } from './sticker-bindings.js';
 import type { TextTemplateV1 } from './text-template-catalog.js';
+import { nextProfessionalTrackId } from './timeline-track-family.js';
 
 export interface InsertedTextTemplate {
   readonly clipId: string;
@@ -23,7 +25,7 @@ export interface PreparedTextTemplateInsertion {
 
 /** Pure, deterministic preparation seam used by Joy Code and the manual wrapper. */
 export function prepareTextTemplateInsertion(
-  timeline: import('@joy-media/project-schema').SpikeProject,
+  timeline: SpikeProject,
   visualProject: JoyProjectV1,
   template: TextTemplateV1,
   playheadUs: number,
@@ -79,7 +81,10 @@ export function prepareTextTemplateInsertion(
         !overlaps(track),
     )
     .sort((a, b) => a.order - b.order)[0];
-  const trackId = targetTrack?.id ?? `text-track-${idSuffix}`;
+  // Keep text insertion on the same collision-free visual track namespace as
+  // every other timeline insertion path. The suffix is an object/clip token,
+  // not a stable track identity and must never be used as one.
+  const trackId = targetTrack?.id ?? nextProfessionalTrackId(composition.tracks, 'visual');
   const trackCommands: SpikeCommand[] =
     targetTrack === undefined
       ? [

@@ -13,7 +13,10 @@ import {
   isDisabledConfig,
   isOpenRouterConfig,
 } from './creative-brief-runtime-config.js';
-import type { CreativeBriefRuntimeConfig, OpenRouterConfig } from './creative-brief-runtime-config.js';
+import type {
+  CreativeBriefRuntimeConfig,
+  OpenRouterConfig,
+} from './creative-brief-runtime-config.js';
 
 const PREFIX = 'JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_';
 
@@ -84,7 +87,7 @@ describe('parseCreativeBriefRuntimeConfig - valid configurations', () => {
 
   it('should return disabled config when mode is explicitly disabled', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'disabled',
+      [`${PREFIX}MODE`]: 'disabled',
     });
     expect(result).toEqual({ mode: 'disabled' });
     expect(isDisabledConfig(result)).toBe(true);
@@ -92,12 +95,12 @@ describe('parseCreativeBriefRuntimeConfig - valid configurations', () => {
 
   it('should return openrouter config with valid minimal parameters', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: CREATIVE_BRIEF_MODEL_ID,
-      [ `${PREFIX}TIMEOUT_MS` ]: '30000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '0',
-      [ `${PREFIX}SECRET_REF` ]: 'joy-media/openrouter/creative-brief/v1',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}TIMEOUT_MS`]: '30000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '0',
+      [`${PREFIX}SECRET_REF`]: 'joy-media/openrouter/creative-brief/v1',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: CREATIVE_BRIEF_MODEL_ID,
     });
     expect(result).toEqual({
       mode: 'openrouter',
@@ -113,24 +116,24 @@ describe('parseCreativeBriefRuntimeConfig - valid configurations', () => {
 
   it('should accept mode with mixed case', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'OpenRouter',
-      [ `${PREFIX}MODEL_ID` ]: CREATIVE_BRIEF_MODEL_ID,
-      [ `${PREFIX}TIMEOUT_MS` ]: '30000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '0',
-      [ `${PREFIX}SECRET_REF` ]: 'joy-media/openrouter/creative-brief/v1',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}MODE`]: 'OpenRouter',
+      [`${PREFIX}MODEL_ID`]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}TIMEOUT_MS`]: '30000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '0',
+      [`${PREFIX}SECRET_REF`]: 'joy-media/openrouter/creative-brief/v1',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: CREATIVE_BRIEF_MODEL_ID,
     });
     expect(result.mode).toBe('openrouter');
   });
 
   it('should trim whitespace from string values', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: '  openrouter  ',
-      [ `${PREFIX}MODEL_ID` ]: `  ${CREATIVE_BRIEF_MODEL_ID}  `,
-      [ `${PREFIX}TIMEOUT_MS` ]: '  30000  ',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '  0  ',
-      [ `${PREFIX}SECRET_REF` ]: '  joy-media/openrouter/creative-brief/v1  ',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: `  ${CREATIVE_BRIEF_MODEL_ID}  `,
+      [`${PREFIX}MODE`]: '  openrouter  ',
+      [`${PREFIX}MODEL_ID`]: `  ${CREATIVE_BRIEF_MODEL_ID}  `,
+      [`${PREFIX}TIMEOUT_MS`]: '  30000  ',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '  0  ',
+      [`${PREFIX}SECRET_REF`]: '  joy-media/openrouter/creative-brief/v1  ',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: `  ${CREATIVE_BRIEF_MODEL_ID}  `,
     });
     expect(result).toEqual({
       mode: 'openrouter',
@@ -150,80 +153,80 @@ describe('parseCreativeBriefRuntimeConfig - valid configurations', () => {
 describe('parseCreativeBriefRuntimeConfig - missing required fields', () => {
   it('should fail closed to disabled when openrouter mode is set but modelId is missing', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: 'openrouter/mistral-large',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed to disabled when openrouter mode is set but timeoutMs is missing', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: 'openrouter/mistral-large',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed to disabled when openrouter mode is set but spendLimitUsdCents is missing', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: 'openrouter/mistral-large',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed to disabled when openrouter mode is set but secretRef is missing', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: 'openrouter/mistral-large',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed to disabled when modelId is empty string', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: '',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: '',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: 'openrouter/mistral-large',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed to disabled when secretRef is empty string', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: '',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: '',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: 'openrouter/mistral-large',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed to disabled when secretRef is whitespace only', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: '   ',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: '   ',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: 'openrouter/mistral-large',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
@@ -236,56 +239,56 @@ describe('parseCreativeBriefRuntimeConfig - missing required fields', () => {
 describe('parseCreativeBriefRuntimeConfig - invalid numeric values', () => {
   it('should fail closed to disabled when timeoutMs is not an integer', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: 'not-a-number',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: 'not-a-number',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed to disabled when timeoutMs is a float', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000.5',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000.5',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed to disabled when timeoutMs is below minimum (1000)', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '999',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '999',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed to disabled when timeoutMs is above maximum (30000)', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '300001',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '300001',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should accept timeoutMs at minimum boundary (1000)', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: CREATIVE_BRIEF_MODEL_ID,
-      [ `${PREFIX}TIMEOUT_MS` ]: '1000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '0',
-      [ `${PREFIX}SECRET_REF` ]: 'joy-media/openrouter/creative-brief/v1',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}TIMEOUT_MS`]: '1000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '0',
+      [`${PREFIX}SECRET_REF`]: 'joy-media/openrouter/creative-brief/v1',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: CREATIVE_BRIEF_MODEL_ID,
     });
     if (isOpenRouterConfig(result)) {
       expect(result.timeoutMs).toBe(1000);
@@ -296,12 +299,12 @@ describe('parseCreativeBriefRuntimeConfig - invalid numeric values', () => {
 
   it('should accept timeoutMs at maximum boundary (30000)', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: CREATIVE_BRIEF_MODEL_ID,
-      [ `${PREFIX}TIMEOUT_MS` ]: '30000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '0',
-      [ `${PREFIX}SECRET_REF` ]: 'joy-media/openrouter/creative-brief/v1',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}TIMEOUT_MS`]: '30000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '0',
+      [`${PREFIX}SECRET_REF`]: 'joy-media/openrouter/creative-brief/v1',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: CREATIVE_BRIEF_MODEL_ID,
     });
     if (isOpenRouterConfig(result)) {
       expect(result.timeoutMs).toBe(30000);
@@ -312,56 +315,56 @@ describe('parseCreativeBriefRuntimeConfig - invalid numeric values', () => {
 
   it('should fail closed to disabled when spendLimitUsdCents is not an integer', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: 'not-a-number',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: 'not-a-number',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed to disabled when spendLimitUsdCents is a float', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500.5',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500.5',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed to disabled when spendLimitUsdCents is a fractional value like 0.5', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '0.5',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '0.5',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed to disabled when spendLimitUsdCents is above maximum (10000)', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '10001',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '10001',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should accept spendLimitUsdCents at zero (free-only policy)', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: CREATIVE_BRIEF_MODEL_ID,
-      [ `${PREFIX}TIMEOUT_MS` ]: '30000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '0',
-      [ `${PREFIX}SECRET_REF` ]: 'joy-media/openrouter/creative-brief/v1',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}TIMEOUT_MS`]: '30000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '0',
+      [`${PREFIX}SECRET_REF`]: 'joy-media/openrouter/creative-brief/v1',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: CREATIVE_BRIEF_MODEL_ID,
     });
     if (isOpenRouterConfig(result)) {
       expect(result.spendLimitUsdCents).toBe(0);
@@ -372,24 +375,24 @@ describe('parseCreativeBriefRuntimeConfig - invalid numeric values', () => {
 
   it('should reject any positive spendLimitUsdCents', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: CREATIVE_BRIEF_MODEL_ID,
-      [ `${PREFIX}TIMEOUT_MS` ]: '30000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '1',
-      [ `${PREFIX}SECRET_REF` ]: 'joy-media/openrouter/creative-brief/v1',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}TIMEOUT_MS`]: '30000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '1',
+      [`${PREFIX}SECRET_REF`]: 'joy-media/openrouter/creative-brief/v1',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: CREATIVE_BRIEF_MODEL_ID,
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should reject the former positive maximum spend boundary', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: CREATIVE_BRIEF_MODEL_ID,
-      [ `${PREFIX}TIMEOUT_MS` ]: '30000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '10000',
-      [ `${PREFIX}SECRET_REF` ]: 'joy-media/openrouter/creative-brief/v1',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}TIMEOUT_MS`]: '30000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '10000',
+      [`${PREFIX}SECRET_REF`]: 'joy-media/openrouter/creative-brief/v1',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: CREATIVE_BRIEF_MODEL_ID,
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
@@ -402,28 +405,28 @@ describe('parseCreativeBriefRuntimeConfig - invalid numeric values', () => {
 describe('parseCreativeBriefRuntimeConfig - unknown prefixed keys', () => {
   it('should fail closed to disabled when an unknown prefixed key is present', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}UNKNOWN_KEY` ]: 'some-value',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: 'openrouter/mistral-large',
+      [`${PREFIX}UNKNOWN_KEY`]: 'some-value',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed to disabled when an unknown prefixed key is present even with disabled mode', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'disabled',
-      [ `${PREFIX}UNKNOWN_KEY` ]: 'some-value',
+      [`${PREFIX}MODE`]: 'disabled',
+      [`${PREFIX}UNKNOWN_KEY`]: 'some-value',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed to disabled when an unknown prefixed key is present with no mode', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}UNKNOWN_KEY` ]: 'some-value',
+      [`${PREFIX}UNKNOWN_KEY`]: 'some-value',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
@@ -436,32 +439,32 @@ describe('parseCreativeBriefRuntimeConfig - unknown prefixed keys', () => {
 describe('parseCreativeBriefRuntimeConfig - malformed mode', () => {
   it('should fail closed to disabled when mode is invalid value', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'invalid-mode',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [`${PREFIX}MODE`]: 'invalid-mode',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed to disabled when openrouter keys are present but mode is not openrouter', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed to disabled when mode is empty string', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: '',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [`${PREFIX}MODE`]: '',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
@@ -476,14 +479,14 @@ describe('parseCreativeBriefRuntimeConfig - security', () => {
     // Simulate someone accidentally putting a secret value in the wrong place
     const secretValue = 'sk-actual-secret-key-1234567890';
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: 'openrouter/mistral-large',
       // This is an invalid key, but we want to ensure no secret leakage
-      [ `${PREFIX}API_KEY` ]: secretValue,
+      [`${PREFIX}API_KEY`]: secretValue,
     });
     // Should fail closed due to unknown key
     expect(result).toEqual({ mode: 'disabled' });
@@ -494,12 +497,12 @@ describe('parseCreativeBriefRuntimeConfig - security', () => {
 
   it('should only store opaque secret reference name, not actual secret', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: CREATIVE_BRIEF_MODEL_ID,
-      [ `${PREFIX}TIMEOUT_MS` ]: '30000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '0',
-      [ `${PREFIX}SECRET_REF` ]: 'joy-media/openrouter/creative-brief/v1',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}TIMEOUT_MS`]: '30000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '0',
+      [`${PREFIX}SECRET_REF`]: 'joy-media/openrouter/creative-brief/v1',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: CREATIVE_BRIEF_MODEL_ID,
     });
     expect(isOpenRouterConfig(result)).toBe(true);
     // The secretRef is just a reference name, not an actual secret
@@ -514,11 +517,11 @@ describe('parseCreativeBriefRuntimeConfig - security', () => {
     const secretValue = 'sk-1234567890abcdef';
     // Mode is invalid, should fail closed
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: secretValue,
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: secretValue,
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: 'openrouter/mistral-large',
       // secretRef is missing - should fail closed
     });
     expect(result).toEqual({ mode: 'disabled' });
@@ -559,56 +562,56 @@ describe('type guards', () => {
 describe('parseCreativeBriefRuntimeConfig - edge cases', () => {
   it('should handle negative timeoutMs as invalid', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '-1000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '-1000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should handle negative spendLimitUsdCents as invalid', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '-1',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '-1',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should handle very large timeoutMs as invalid', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '999999999999',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '999999999999',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should handle very large spendLimitUsdCents as invalid', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '999999999',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '999999999',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should handle timeoutMs with leading zeros', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: CREATIVE_BRIEF_MODEL_ID,
-      [ `${PREFIX}TIMEOUT_MS` ]: '00030000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '0',
-      [ `${PREFIX}SECRET_REF` ]: 'joy-media/openrouter/creative-brief/v1',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}TIMEOUT_MS`]: '00030000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '0',
+      [`${PREFIX}SECRET_REF`]: 'joy-media/openrouter/creative-brief/v1',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: CREATIVE_BRIEF_MODEL_ID,
     });
     if (isOpenRouterConfig(result)) {
       expect(result.timeoutMs).toBe(30000);
@@ -619,12 +622,12 @@ describe('parseCreativeBriefRuntimeConfig - edge cases', () => {
 
   it('should handle spendLimitUsdCents with leading zeros', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: CREATIVE_BRIEF_MODEL_ID,
-      [ `${PREFIX}TIMEOUT_MS` ]: '30000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '0000',
-      [ `${PREFIX}SECRET_REF` ]: 'joy-media/openrouter/creative-brief/v1',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}TIMEOUT_MS`]: '30000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '0000',
+      [`${PREFIX}SECRET_REF`]: 'joy-media/openrouter/creative-brief/v1',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: CREATIVE_BRIEF_MODEL_ID,
     });
     if (isOpenRouterConfig(result)) {
       expect(result.spendLimitUsdCents).toBe(0);
@@ -635,12 +638,12 @@ describe('parseCreativeBriefRuntimeConfig - edge cases', () => {
 
   it('should ignore non-prefixed environment keys', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: CREATIVE_BRIEF_MODEL_ID,
-      [ `${PREFIX}TIMEOUT_MS` ]: '30000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '0',
-      [ `${PREFIX}SECRET_REF` ]: 'joy-media/openrouter/creative-brief/v1',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}TIMEOUT_MS`]: '30000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '0',
+      [`${PREFIX}SECRET_REF`]: 'joy-media/openrouter/creative-brief/v1',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: CREATIVE_BRIEF_MODEL_ID,
       SOME_OTHER_KEY: 'should-be-ignored',
       ANOTHER_KEY: 'also-ignored',
     });
@@ -653,9 +656,9 @@ describe('parseCreativeBriefRuntimeConfig - edge cases', () => {
 
   it('should handle undefined values in env map', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'disabled',
-      [ `${PREFIX}MODEL_ID` ]: undefined,
-      [ `${PREFIX}TIMEOUT_MS` ]: undefined,
+      [`${PREFIX}MODE`]: 'disabled',
+      [`${PREFIX}MODEL_ID`]: undefined,
+      [`${PREFIX}TIMEOUT_MS`]: undefined,
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
@@ -668,12 +671,12 @@ describe('parseCreativeBriefRuntimeConfig - edge cases', () => {
 describe('parseCreativeBriefRuntimeConfig - allowed free model IDs', () => {
   it('should parse the pinned allowed free model ID', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: CREATIVE_BRIEF_MODEL_ID,
-      [ `${PREFIX}TIMEOUT_MS` ]: '30000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '0',
-      [ `${PREFIX}SECRET_REF` ]: 'joy-media/openrouter/creative-brief/v1',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}TIMEOUT_MS`]: '30000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '0',
+      [`${PREFIX}SECRET_REF`]: 'joy-media/openrouter/creative-brief/v1',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: CREATIVE_BRIEF_MODEL_ID,
     });
     expect(isOpenRouterConfig(result)).toBe(true);
     if (isOpenRouterConfig(result)) {
@@ -683,107 +686,108 @@ describe('parseCreativeBriefRuntimeConfig - allowed free model IDs', () => {
 
   it('should fail closed when multiple model IDs are configured', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: CREATIVE_BRIEF_MODEL_ID,
-      [ `${PREFIX}TIMEOUT_MS` ]: '30000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '0',
-      [ `${PREFIX}SECRET_REF` ]: 'joy-media/openrouter/creative-brief/v1',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: `${CREATIVE_BRIEF_MODEL_ID},another/model:free`,
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: CREATIVE_BRIEF_MODEL_ID,
+      [`${PREFIX}TIMEOUT_MS`]: '30000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '0',
+      [`${PREFIX}SECRET_REF`]: 'joy-media/openrouter/creative-brief/v1',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: `${CREATIVE_BRIEF_MODEL_ID},another/model:free`,
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed for a non-pinned model even when listed first', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'another/model:free',
-      [ `${PREFIX}TIMEOUT_MS` ]: '30000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '0',
-      [ `${PREFIX}SECRET_REF` ]: 'joy-media/openrouter/creative-brief/v1',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'another/model:free',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'another/model:free',
+      [`${PREFIX}TIMEOUT_MS`]: '30000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '0',
+      [`${PREFIX}SECRET_REF`]: 'joy-media/openrouter/creative-brief/v1',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: 'another/model:free',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed when allowed free model IDs is missing', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed when allowed free model IDs is empty string', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: '',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: '',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed when allowed free model IDs contains blank entries', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large,,openrouter/llama3-70b',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: 'openrouter/mistral-large,,openrouter/llama3-70b',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed when allowed free model IDs contains only whitespace entries', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large,  ,openrouter/llama3-70b',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: 'openrouter/mistral-large,  ,openrouter/llama3-70b',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed when allowed free model IDs contains duplicates', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/mistral-large',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large,openrouter/llama3-70b,openrouter/mistral-large',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/mistral-large',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]:
+        'openrouter/mistral-large,openrouter/llama3-70b,openrouter/mistral-large',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should fail closed when modelId is not in allowed free model IDs', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: 'openrouter/not-allowed-model',
-      [ `${PREFIX}TIMEOUT_MS` ]: '60000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '500',
-      [ `${PREFIX}SECRET_REF` ]: 'my-openrouter-key',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: 'openrouter/mistral-large,openrouter/llama3-70b',
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: 'openrouter/not-allowed-model',
+      [`${PREFIX}TIMEOUT_MS`]: '60000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '500',
+      [`${PREFIX}SECRET_REF`]: 'my-openrouter-key',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: 'openrouter/mistral-large,openrouter/llama3-70b',
     });
     expect(result).toEqual({ mode: 'disabled' });
   });
 
   it('should trim whitespace around the pinned allowed free model ID', () => {
     const result = parseCreativeBriefRuntimeConfig({
-      [ `${PREFIX}MODE` ]: 'openrouter',
-      [ `${PREFIX}MODEL_ID` ]: `  ${CREATIVE_BRIEF_MODEL_ID}  `,
-      [ `${PREFIX}TIMEOUT_MS` ]: '30000',
-      [ `${PREFIX}SPEND_LIMIT_USD_CENTS` ]: '0',
-      [ `${PREFIX}SECRET_REF` ]: '  joy-media/openrouter/creative-brief/v1  ',
-      [ `${PREFIX}ALLOWED_FREE_MODEL_IDS` ]: `  ${CREATIVE_BRIEF_MODEL_ID}  `,
+      [`${PREFIX}MODE`]: 'openrouter',
+      [`${PREFIX}MODEL_ID`]: `  ${CREATIVE_BRIEF_MODEL_ID}  `,
+      [`${PREFIX}TIMEOUT_MS`]: '30000',
+      [`${PREFIX}SPEND_LIMIT_USD_CENTS`]: '0',
+      [`${PREFIX}SECRET_REF`]: '  joy-media/openrouter/creative-brief/v1  ',
+      [`${PREFIX}ALLOWED_FREE_MODEL_IDS`]: `  ${CREATIVE_BRIEF_MODEL_ID}  `,
     });
     expect(isOpenRouterConfig(result)).toBe(true);
     if (isOpenRouterConfig(result)) {

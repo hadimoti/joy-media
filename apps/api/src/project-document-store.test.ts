@@ -359,9 +359,7 @@ describe('Write Outcome shapes', () => {
     const outcome: ProjectDocumentWriteOutcomeInvalidDocument = {
       kind: 'invalid-document',
       projectId: VALID_PROJECT_ID,
-      diagnostics: [
-        { code: 'PROJECT_SCHEMA_V1_VERSION', message: 'test', path: 'schemaVersion' },
-      ],
+      diagnostics: [{ code: 'PROJECT_SCHEMA_V1_VERSION', message: 'test', path: 'schemaVersion' }],
     };
     expect(outcome.kind).toBe('invalid-document');
     expect(outcome.diagnostics).toHaveLength(1);

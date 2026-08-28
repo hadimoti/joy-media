@@ -23,6 +23,7 @@ import { createProductionCreativeBriefRuntime } from './creative-brief-productio
 import { createProductionJoyCodeRuntime } from './joy-code-production-runtime.js';
 import { CanonicalJoyCodeInputResolver } from './joy-code-input-resolver.js';
 import { createClientAddressResolver, trustedProxyAddressesFromEnv } from './client-address.js';
+import { productionReadinessOptions, releaseIdentityFromEnvironment } from './server-readiness.js';
 
 await start();
 
@@ -59,8 +60,7 @@ async function start(): Promise<void> {
   });
   const creativeBriefRuntime = createProductionCreativeBriefRuntime(
     {
-      JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODE:
-        process.env.JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODE,
+      JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODE: process.env.JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODE,
       JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODEL_ID:
         process.env.JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODEL_ID,
       JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_TIMEOUT_MS:
@@ -80,9 +80,11 @@ async function start(): Promise<void> {
       JOY_MEDIA_JOY_CODE_RUNTIME_MODE: process.env.JOY_MEDIA_JOY_CODE_RUNTIME_MODE,
       JOY_MEDIA_JOY_CODE_RUNTIME_MODEL_ID: process.env.JOY_MEDIA_JOY_CODE_RUNTIME_MODEL_ID,
       JOY_MEDIA_JOY_CODE_RUNTIME_TIMEOUT_MS: process.env.JOY_MEDIA_JOY_CODE_RUNTIME_TIMEOUT_MS,
-      JOY_MEDIA_JOY_CODE_RUNTIME_SPEND_LIMIT_USD_CENTS: process.env.JOY_MEDIA_JOY_CODE_RUNTIME_SPEND_LIMIT_USD_CENTS,
+      JOY_MEDIA_JOY_CODE_RUNTIME_SPEND_LIMIT_USD_CENTS:
+        process.env.JOY_MEDIA_JOY_CODE_RUNTIME_SPEND_LIMIT_USD_CENTS,
       JOY_MEDIA_JOY_CODE_RUNTIME_SECRET_REF: process.env.JOY_MEDIA_JOY_CODE_RUNTIME_SECRET_REF,
-      JOY_MEDIA_JOY_CODE_RUNTIME_ALLOWED_FREE_MODEL_IDS: process.env.JOY_MEDIA_JOY_CODE_RUNTIME_ALLOWED_FREE_MODEL_IDS,
+      JOY_MEDIA_JOY_CODE_RUNTIME_ALLOWED_FREE_MODEL_IDS:
+        process.env.JOY_MEDIA_JOY_CODE_RUNTIME_ALLOWED_FREE_MODEL_IDS,
     },
     (path, encoding) => readFileSync(path, encoding),
     globalThis.fetch.bind(globalThis),
@@ -101,6 +103,15 @@ async function start(): Promise<void> {
           ...(telegram === undefined ? {} : { telegram }),
           clientAddressResolver,
         });
+  const privateObjectStore =
+    process.env.JOY_MEDIA_OBJECT_STORE_REMOTE_PREFIX === undefined
+      ? undefined
+      : new RclonePrivateObjectStore({
+          remotePrefix: process.env.JOY_MEDIA_OBJECT_STORE_REMOTE_PREFIX,
+          ...(process.env.JOY_MEDIA_RCLONE_COMMAND === undefined
+            ? {}
+            : { command: process.env.JOY_MEDIA_RCLONE_COMMAND }),
+        });
   createControlPlaneHttpServer({
     controlPlane,
     // Public /v1 (project/job/asset routes) stays disabled unless durable state
@@ -117,22 +128,19 @@ async function start(): Promise<void> {
     creativeBriefRuntime,
     joyCodeInputResolver,
     joyCodeRuntime,
+    readiness: productionReadinessOptions({
+      pool,
+      durableControlPlane,
+      privateObjectStore,
+      releaseIdentity: releaseIdentityFromEnvironment(process.env),
+    }),
     mistral: createRuntimeMistralProviderRegistry({
       ...(process.env.JOY_MEDIA_MISTRAL_API_KEY === undefined
         ? {}
         : { apiKey: process.env.JOY_MEDIA_MISTRAL_API_KEY }),
       ...(mistralLedger === undefined ? {} : { ledger: mistralLedger }),
     }),
-    ...(process.env.JOY_MEDIA_OBJECT_STORE_REMOTE_PREFIX === undefined
-      ? {}
-      : {
-          privateObjectStore: new RclonePrivateObjectStore({
-            remotePrefix: process.env.JOY_MEDIA_OBJECT_STORE_REMOTE_PREFIX,
-            ...(process.env.JOY_MEDIA_RCLONE_COMMAND === undefined
-              ? {}
-              : { command: process.env.JOY_MEDIA_RCLONE_COMMAND }),
-          }),
-        }),
+    ...(privateObjectStore === undefined ? {} : { privateObjectStore }),
   }).listen(port, host);
   console.log(`JOY Media API listening on ${host}:${port}`);
 }

@@ -37,6 +37,33 @@ function editorChunk(id: string): string | undefined {
   // making every editor-shell release invalidate the main entry chunk.
   if (moduleId.includes('/apps/editor-web/src/TimelinePanel')) return 'joy-timeline';
 
+  // Keep the large Dockview panel implementations out of the application
+  // bootstrap. They are still eagerly available to the shell, but their code
+  // is fetched as one independently cacheable panel bundle instead of pushing
+  // the entry chunk over the release budget whenever a panel grows.
+  if (
+    [
+      'InspectorPanel',
+      'AssetLibraryPanel',
+      'AudioPanel',
+      'MotionPanel',
+      'AgentPanel',
+      'ColorPanel',
+    ].some((panel) => moduleId.includes(`/apps/editor-web/src/${panel}`))
+  )
+    return 'joy-panels-core';
+  if (
+    [
+      'JobsPanel',
+      'CaptionsPanel',
+      'DualLensPanel',
+      'MaskInspector',
+      'TextPanel',
+      'ProjectLibrary',
+    ].some((panel) => moduleId.includes(`/apps/editor-web/src/${panel}`))
+  )
+    return 'joy-panels-media';
+
   const packageMatch = moduleId.match(/\/packages\/([^/]+)\//);
   const packageName = packageMatch?.[1];
   if (packageName === undefined) return undefined;

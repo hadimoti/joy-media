@@ -24,16 +24,48 @@ interface InternalProjectDocumentRecord {
 
 type InternalProjectDocumentReadOutcome =
   | { readonly kind: 'ready'; readonly record: InternalProjectDocumentRecord }
-  | { readonly kind: 'not-found'; readonly projectId: InternalProjectId; readonly revisionId: string | null }
-  | { readonly kind: 'stale-revision'; readonly projectId: InternalProjectId; readonly requestedRevisionId: string; readonly currentRevisionId: string }
+  | {
+      readonly kind: 'not-found';
+      readonly projectId: InternalProjectId;
+      readonly revisionId: string | null;
+    }
+  | {
+      readonly kind: 'stale-revision';
+      readonly projectId: InternalProjectId;
+      readonly requestedRevisionId: string;
+      readonly currentRevisionId: string;
+    }
   | { readonly kind: 'unavailable'; readonly message: string };
 
 type InternalProjectDocumentWriteOutcome =
-  | { readonly kind: 'stored'; readonly projectId: InternalProjectId; readonly ownerId: InternalOwnerId; readonly revisionId: string }
+  | {
+      readonly kind: 'stored';
+      readonly projectId: InternalProjectId;
+      readonly ownerId: InternalOwnerId;
+      readonly revisionId: string;
+    }
   | { readonly kind: 'not-found'; readonly projectId: InternalProjectId }
-  | { readonly kind: 'owner-denied'; readonly projectId: InternalProjectId; readonly ownerId: InternalOwnerId; readonly callerId: InternalOwnerId }
-  | { readonly kind: 'revision-conflict'; readonly projectId: InternalProjectId; readonly expectedBaseRevisionId: string; readonly actualBaseRevisionId: string }
-  | { readonly kind: 'invalid-document'; readonly projectId: InternalProjectId; readonly diagnostics: readonly { readonly code: string; readonly message: string; readonly path: string }[] }
+  | {
+      readonly kind: 'owner-denied';
+      readonly projectId: InternalProjectId;
+      readonly ownerId: InternalOwnerId;
+      readonly callerId: InternalOwnerId;
+    }
+  | {
+      readonly kind: 'revision-conflict';
+      readonly projectId: InternalProjectId;
+      readonly expectedBaseRevisionId: string;
+      readonly actualBaseRevisionId: string;
+    }
+  | {
+      readonly kind: 'invalid-document';
+      readonly projectId: InternalProjectId;
+      readonly diagnostics: readonly {
+        readonly code: string;
+        readonly message: string;
+        readonly path: string;
+      }[];
+    }
   | { readonly kind: 'unavailable'; readonly message: string };
 
 type InternalProjectOwnerLookup = (projectId: InternalProjectId) => InternalOwnerId | undefined;
@@ -41,7 +73,10 @@ type InternalProjectOwnerLookup = (projectId: InternalProjectId) => InternalOwne
 const INTERNAL_INITIAL_REVISION = '';
 
 class InternalInMemoryProjectDocumentStore {
-  private readonly store: Map<InternalProjectId, { readonly ownerId: InternalOwnerId; readonly revisionId: string; readonly document: unknown }> = new Map();
+  private readonly store: Map<
+    InternalProjectId,
+    { readonly ownerId: InternalOwnerId; readonly revisionId: string; readonly document: unknown }
+  > = new Map();
   private readonly revisions: Map<InternalProjectId, Set<string>> = new Map();
 
   constructor(private readonly lookupOwner: InternalProjectOwnerLookup) {}
@@ -63,9 +98,22 @@ class InternalInMemoryProjectDocumentStore {
       return { kind: 'not-found', projectId, revisionId: revisionId ?? null };
     }
     if (revisionId !== undefined && revisionId !== current.revisionId) {
-      return { kind: 'stale-revision', projectId, requestedRevisionId: revisionId, currentRevisionId: current.revisionId };
+      return {
+        kind: 'stale-revision',
+        projectId,
+        requestedRevisionId: revisionId,
+        currentRevisionId: current.revisionId,
+      };
     }
-    return { kind: 'ready', record: { projectId, ownerId, revisionId: current.revisionId, document: this.deepCopy(current.document) } };
+    return {
+      kind: 'ready',
+      record: {
+        projectId,
+        ownerId,
+        revisionId: current.revisionId,
+        document: this.deepCopy(current.document),
+      },
+    };
   }
 
   writeDocument(
@@ -86,38 +134,34 @@ class InternalInMemoryProjectDocumentStore {
     const current = this.store.get(record.projectId);
     const currentRevisionId = current?.revisionId ?? INTERNAL_INITIAL_REVISION;
     if (baseRevisionId !== currentRevisionId) {
-      return { kind: 'revision-conflict', projectId: record.projectId, expectedBaseRevisionId: baseRevisionId, actualBaseRevisionId: currentRevisionId };
+      return {
+        kind: 'revision-conflict',
+        projectId: record.projectId,
+        expectedBaseRevisionId: baseRevisionId,
+        actualBaseRevisionId: currentRevisionId,
+      };
     }
-    this.store.set(record.projectId, { ownerId, revisionId: record.revisionId, document: this.deepCopy(record.document) });
+    this.store.set(record.projectId, {
+      ownerId,
+      revisionId: record.revisionId,
+      document: this.deepCopy(record.document),
+    });
     let revSet = this.revisions.get(record.projectId);
     if (revSet === undefined) {
       revSet = new Set();
       this.revisions.set(record.projectId, revSet);
     }
     revSet.add(record.revisionId);
-    return { kind: 'stored', projectId: record.projectId, ownerId: record.ownerId, revisionId: record.revisionId };
+    return {
+      kind: 'stored',
+      projectId: record.projectId,
+      ownerId: record.ownerId,
+      revisionId: record.revisionId,
+    };
   }
 
   private deepCopy<T>(value: T): T {
     return JSON.parse(JSON.stringify(value));
-  }
-}
-
-class InternalUnavailableProjectDocumentStore {
-  readDocument(
-    _callerId: InternalOwnerId,
-    _projectId: InternalProjectId,
-    _revisionId?: string,
-  ): InternalProjectDocumentReadOutcome {
-    return { kind: 'unavailable', message: 'Project document store is unavailable' };
-  }
-
-  writeDocument(
-    _callerId: InternalOwnerId,
-    _record: InternalProjectDocumentRecord,
-    _baseRevisionId: string,
-  ): InternalProjectDocumentWriteOutcome {
-    return { kind: 'unavailable', message: 'Project document store is unavailable' };
   }
 }
 
@@ -430,7 +474,10 @@ export interface ControlPlane {
     enabled: boolean,
     baseRevision: number,
   ): ProjectMetadata | Promise<ProjectMetadata>;
-  getJoyCodeOptIn(actor: Actor, projectId: string): JoyCodeOptInStatus | Promise<JoyCodeOptInStatus>;
+  getJoyCodeOptIn(
+    actor: Actor,
+    projectId: string,
+  ): JoyCodeOptInStatus | Promise<JoyCodeOptInStatus>;
   setJoyCodeOptIn(
     actor: Actor,
     projectId: string,
@@ -854,7 +901,10 @@ export class LocalControlPlane implements ControlPlane {
         `expected ${baseRevision}, found ${current.revision}`,
       );
     if (enabled && consentVersion !== JOY_CODE_CONSENT_VERSION)
-      throw new ControlPlaneError('JOY_CODE_CONSENT_VERSION_REQUIRED', 'current disclosure version required');
+      throw new ControlPlaneError(
+        'JOY_CODE_CONSENT_VERSION_REQUIRED',
+        'current disclosure version required',
+      );
     const next = { ...current, revision: current.revision + 1 };
     this.#projects.set(projectId, next);
     if (enabled) this.#joyCodeConsentVersions.set(projectId, JOY_CODE_CONSENT_VERSION);

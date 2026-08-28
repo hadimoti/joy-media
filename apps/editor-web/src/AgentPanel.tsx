@@ -220,7 +220,9 @@ export function AgentPanel({
   const [attachError, setAttachError] = useState<string | undefined>(undefined);
   const [attaching, setAttaching] = useState(false);
   const [joyCode, setJoyCode] = useState<JoyCodeState>(() => initialJoyCodeState(project.id));
-const [serverProposal, setServerProposal] = useState<JoyCodePlanProposalV1 | undefined>(undefined);
+  const [serverProposal, setServerProposal] = useState<JoyCodePlanProposalV1 | undefined>(
+    undefined,
+  );
   const [serverDraft, setServerDraft] = useState<JoyCodeCompoundDraft | undefined>(undefined);
   const serverRunnerRef = useRef(new JoyCodeCompoundRunner());
 
@@ -404,25 +406,58 @@ const [serverProposal, setServerProposal] = useState<JoyCodePlanProposalV1 | und
         .then((result) => {
           if (result.kind === 'success') {
             setServerProposal(result.proposal);
-            return import('./joy-code-compound-compiler.js').then(({ compileJoyCodeCompoundDraft }) => {
-              const compiled = compileJoyCodeCompoundDraft({ planId: result.proposal.planId, baseRevision: result.proposal.snapshotRevisionId, timeline: session.timelineProject, visualProject: session.visualProject, registeredAssetIds: Object.keys(session.visualProject.assets), operations: result.proposal.operations });
-              if (!compiled.ok) {
-                appendMessage(threadId, 'assistant', `The proposal could not be compiled safely (${compiled.error.code}). No edits were applied.`);
-              } else {
-                setServerDraft(compiled);
-                appendMessage(threadId, 'assistant', `A guarded Joy Code proposal is ready: ${result.proposal.summary}. Review and explicitly approve the bounded changes.`);
-              }
-            });
+            return import('./joy-code-compound-compiler.js').then(
+              ({ compileJoyCodeCompoundDraft }) => {
+                const compiled = compileJoyCodeCompoundDraft({
+                  planId: result.proposal.planId,
+                  baseRevision: result.proposal.snapshotRevisionId,
+                  timeline: session.timelineProject,
+                  visualProject: session.visualProject,
+                  registeredAssetIds: Object.keys(session.visualProject.assets),
+                  operations: result.proposal.operations,
+                });
+                if (!compiled.ok) {
+                  appendMessage(
+                    threadId,
+                    'assistant',
+                    `The proposal could not be compiled safely (${compiled.error.code}). No edits were applied.`,
+                  );
+                } else {
+                  setServerDraft(compiled);
+                  appendMessage(
+                    threadId,
+                    'assistant',
+                    `A guarded Joy Code proposal is ready: ${result.proposal.summary}. Review and explicitly approve the bounded changes.`,
+                  );
+                }
+              },
+            );
           } else if (result.kind === 'stale') {
-            appendMessage(threadId, 'assistant', 'The project changed while planning. Refresh the project and try again.');
+            appendMessage(
+              threadId,
+              'assistant',
+              'The project changed while planning. Refresh the project and try again.',
+            );
           } else if (result.kind === 'cancelled') {
             appendMessage(threadId, 'assistant', 'Joy Code planning was cancelled.');
           } else {
-            appendMessage(threadId, 'assistant', `Joy Code planning did not complete (${result.kind}). No edits were applied.`);
+            appendMessage(
+              threadId,
+              'assistant',
+              `Joy Code planning did not complete (${result.kind}). No edits were applied.`,
+            );
           }
         })
-        .catch(() => appendMessage(threadId, 'assistant', 'Joy Code planning failed safely. No edits were applied.'))
-        .finally(() => setThinkingThreadId((current) => (current === threadId ? undefined : current)));
+        .catch(() =>
+          appendMessage(
+            threadId,
+            'assistant',
+            'Joy Code planning failed safely. No edits were applied.',
+          ),
+        )
+        .finally(() =>
+          setThinkingThreadId((current) => (current === threadId ? undefined : current)),
+        );
       return;
     }
     if (intent === undefined) {
@@ -447,18 +482,38 @@ const [serverProposal, setServerProposal] = useState<JoyCodePlanProposalV1 | und
   function rejectServerProposal() {
     setServerProposal(undefined);
     setServerDraft(undefined);
-    if (activeThread !== undefined) appendMessage(activeThread.id, 'assistant', 'Joy Code proposal rejected. No edits were applied.');
+    if (activeThread !== undefined)
+      appendMessage(
+        activeThread.id,
+        'assistant',
+        'Joy Code proposal rejected. No edits were applied.',
+      );
   }
 
   function applyServerProposal() {
     if (serverDraft === undefined || activeThread === undefined) return;
     try {
-      serverRunnerRef.current.apply(session, serverDraft, { planId: serverDraft.planId, proposalHash: serverDraft.proposalHash, baseRevision: serverDraft.baseRevision, approvedAt: new Date().toISOString() });
-      appendMessage(activeThread.id, 'assistant', 'Approved and applied as one compound edit. One Undo restores the prior timeline and visual document.');
+      serverRunnerRef.current.apply(session, serverDraft, {
+        planId: serverDraft.planId,
+        proposalHash: serverDraft.proposalHash,
+        baseRevision: serverDraft.baseRevision,
+        approvedAt: new Date().toISOString(),
+      });
+      appendMessage(
+        activeThread.id,
+        'assistant',
+        'Approved and applied as one compound edit. One Undo restores the prior timeline and visual document.',
+      );
       setServerProposal(undefined);
       setServerDraft(undefined);
     } catch (error) {
-      appendMessage(activeThread.id, 'assistant', error instanceof Error ? `Joy Code apply failed: ${error.message}` : 'Joy Code apply failed safely.');
+      appendMessage(
+        activeThread.id,
+        'assistant',
+        error instanceof Error
+          ? `Joy Code apply failed: ${error.message}`
+          : 'Joy Code apply failed safely.',
+      );
     }
   }
 
@@ -727,14 +782,18 @@ const [serverProposal, setServerProposal] = useState<JoyCodePlanProposalV1 | und
                   </p>
                   {joyCodeServerSession !== undefined && (
                     <p className="joy-code-disclosure">
-                      Server planning sends your prompt and bounded semantic project summary (including
-                      caption text and registered asset names) to OpenRouter/NVIDIA. It never sends
-                      media bytes, URLs, filesystem paths, or secrets. Provider output is untrusted and
-                      requires explicit preview approval.
+                      Server planning sends your prompt and bounded semantic project summary
+                      (including caption text and registered asset names) to OpenRouter/NVIDIA. It
+                      never sends media bytes, URLs, filesystem paths, or secrets. Provider output
+                      is untrusted and requires explicit preview approval.
                     </p>
                   )}
                   {!joyCodeOptedIn && onJoyCodeOptIn !== undefined && (
-                    <button type="button" className="is-primary" onClick={() => void onJoyCodeOptIn()}>
+                    <button
+                      type="button"
+                      className="is-primary"
+                      onClick={() => void onJoyCodeOptIn()}
+                    >
                       Enable server planning
                     </button>
                   )}
@@ -845,20 +904,38 @@ const [serverProposal, setServerProposal] = useState<JoyCodePlanProposalV1 | und
                 </section>
               )}
 
-              {serverDraft !== undefined && serverProposal !== undefined && activeThread !== undefined && (
-                <section className="joy-code-plan-card" aria-label="Proposed server Joy Code plan">
-                  <div className="joy-code-plan-head">
-                    <div><span>Server proposal</span><strong>{serverProposal.summary}</strong></div>
-                    <span className="agent-decision agent-decision-requires-manual">manual approval</span>
-                  </div>
-                  <p>{serverDraft.groups.map((group) => group.summary).join(' · ')}</p>
-                  {serverDraft.warnings.length > 0 && <p className="agent-error">{serverDraft.warnings.join(', ')}</p>}
-                  <div className="joy-code-plan-actions">
-                    <button type="button" className="is-primary" onClick={applyServerProposal}><CheckIcon />Approve &amp; apply</button>
-                    <button type="button" onClick={rejectServerProposal}><CloseIcon />Reject</button>
-                  </div>
-                </section>
-              )}
+              {serverDraft !== undefined &&
+                serverProposal !== undefined &&
+                activeThread !== undefined && (
+                  <section
+                    className="joy-code-plan-card"
+                    aria-label="Proposed server Joy Code plan"
+                  >
+                    <div className="joy-code-plan-head">
+                      <div>
+                        <span>Server proposal</span>
+                        <strong>{serverProposal.summary}</strong>
+                      </div>
+                      <span className="agent-decision agent-decision-requires-manual">
+                        manual approval
+                      </span>
+                    </div>
+                    <p>{serverDraft.groups.map((group) => group.summary).join(' · ')}</p>
+                    {serverDraft.warnings.length > 0 && (
+                      <p className="agent-error">{serverDraft.warnings.join(', ')}</p>
+                    )}
+                    <div className="joy-code-plan-actions">
+                      <button type="button" className="is-primary" onClick={applyServerProposal}>
+                        <CheckIcon />
+                        Approve &amp; apply
+                      </button>
+                      <button type="button" onClick={rejectServerProposal}>
+                        <CloseIcon />
+                        Reject
+                      </button>
+                    </div>
+                  </section>
+                )}
 
               {lastRun !== undefined && lastRun.threadId === activeThread?.id && (
                 <section

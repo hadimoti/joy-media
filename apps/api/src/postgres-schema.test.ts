@@ -27,7 +27,9 @@ describe('PostgreSQL Schema - Revisioned Project Documents', () => {
   // --- projects.document_revision_id column ---
 
   it('contains additive ALTER TABLE for projects.document_revision_id', () => {
-    expect(schema).toContain('ALTER TABLE projects ADD COLUMN IF NOT EXISTS document_revision_id text NULL');
+    expect(schema).toContain(
+      'ALTER TABLE projects ADD COLUMN IF NOT EXISTS document_revision_id text NULL',
+    );
   });
 
   it('projects.document_revision_id is nullable text', () => {
@@ -201,7 +203,9 @@ describe('PostgreSQL Schema - Document Revision Head Pointer', () => {
   const schema = POSTGRES_SCHEMA;
 
   it('projects table has document_revision_id as nullable head pointer', () => {
-    expect(schema).toContain('ALTER TABLE projects ADD COLUMN IF NOT EXISTS document_revision_id text NULL');
+    expect(schema).toContain(
+      'ALTER TABLE projects ADD COLUMN IF NOT EXISTS document_revision_id text NULL',
+    );
   });
 
   it('document_revision_id is the atomic current-head pointer', () => {
@@ -234,7 +238,7 @@ describe('PostgreSQL Schema - Static Definition Only', () => {
 
   it('contains only SQL DDL statements', () => {
     // Extract all statements separated by semicolons
-    const statements = schema.split(';').filter(s => s.trim().length > 0);
+    const statements = schema.split(';').filter((s) => s.trim().length > 0);
     for (const stmt of statements) {
       const trimmed = stmt.trim();
       // Should start with CREATE, ALTER, or similar DDL

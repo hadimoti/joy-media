@@ -2,7 +2,7 @@
 
 **Status:** implementation complete for the bounded Creative Brief/runtime surface; autonomous free-form video-cut execution remains a separate follow-up.
 **Authoring date:** 2026-08-17  
-**Product direction:** JOY Media becomes an AI-native creative workspace: a human and an AI designer operate on the *same editable project*. It is not an MP4 generator and it is not a UI-clicking bot.
+**Product direction:** JOY Media becomes an AI-native creative workspace: a human and an AI designer operate on the _same editable project_. It is not an MP4 generator and it is not a UI-clicking bot.
 
 This document is the next-agent execution plan after WP-36. It turns the owner’s north-star direction into bounded, reviewable work packages without reopening completed Timeline, Worker, provider, or agent foundations.
 
@@ -32,20 +32,20 @@ Human intent
   -> export
 ```
 
-The model chooses *what* should change. JOY Media’s command engine, renderer, and Worker remain responsible for *how* it changes. No model or agent may drive the editor DOM as an editing mechanism.
+The model chooses _what_ should change. JOY Media’s command engine, renderer, and Worker remain responsible for _how_ it changes. No model or agent may drive the editor DOM as an editing mechanism.
 
 ## 2. Measured starting point (do not overwrite with stale handoffs)
 
 Reconfirm these facts at the beginning of the next session; they are a planning snapshot, not a substitute for verification.
 
-| Area | Observed 2026-08-17 | Consequence for WP-37 |
-| --- | --- | --- |
-| Product source | The local `joy-media-fix` checkout and `/opt/joy-media/repo` both resolve to `0287946` (`Record WP-36 GBrain reconciliation`). The deployed WP-36 product revision is `733f584`. | Begin with a clean, fast-forwarded checkout; never assume a historic handoff commit is current. |
-| Product state | WP-36 is marked finished: managed V/A runways, persisted deck metadata, color labels, lock state, shared human/Agent synchronization, reorder, and guarded keyboard delete. | Reuse these contracts. Do not reintroduce generic track CRUD, virtual lanes, or kind-specific timeline assumptions. |
-| Release health | `joy-media@api` is active on loopback `:8790`; `gbrain-http` is active on `10.250.99.1:3131`; the public editor is `https://joyst.ir`. | Product deployment stays through JOY Media’s immutable release procedure, not direct edits to `/opt/joy-media/web`. |
-| GBrain | HTTP health is `ok`, PGLite-backed, version `0.42.59.0`. `doctor --fast --json` reports health score 85/100. It warns about a missing retrieval-reflex host path and an unresolved historical post-upgrade migration. A newer version (`0.46.12.3`) is available. | GBrain work is an explicit operational gate, not a silent prerequisite or an unreviewed upgrade. |
-| GBrain content quality | `joy-media-state` is approximately 336 KB, far above GBrain’s 50 KB page-warning threshold. The WP-36 reconciliation page is also approximately 56 KB. | Repair the knowledge shape before treating GBrain as a reliable planning/retrieval input. Do **not** keep appending full release histories to one page. |
-| Link context | The original shared ChatGPT URL cannot currently be fetched. The owner supplied its content separately. | This plan uses that supplied vision as the product direction; do not claim the inaccessible URL was verified. |
+| Area                   | Observed 2026-08-17                                                                                                                                                                                                                                               | Consequence for WP-37                                                                                                                                   |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Product source         | The local `joy-media-fix` checkout and `/opt/joy-media/repo` both resolve to `0287946` (`Record WP-36 GBrain reconciliation`). The deployed WP-36 product revision is `733f584`.                                                                                  | Begin with a clean, fast-forwarded checkout; never assume a historic handoff commit is current.                                                         |
+| Product state          | WP-36 is marked finished: managed V/A runways, persisted deck metadata, color labels, lock state, shared human/Agent synchronization, reorder, and guarded keyboard delete.                                                                                       | Reuse these contracts. Do not reintroduce generic track CRUD, virtual lanes, or kind-specific timeline assumptions.                                     |
+| Release health         | `joy-media@api` is active on loopback `:8790`; `gbrain-http` is active on `10.250.99.1:3131`; the public editor is `https://joyst.ir`.                                                                                                                            | Product deployment stays through JOY Media’s immutable release procedure, not direct edits to `/opt/joy-media/web`.                                     |
+| GBrain                 | HTTP health is `ok`, PGLite-backed, version `0.42.59.0`. `doctor --fast --json` reports health score 85/100. It warns about a missing retrieval-reflex host path and an unresolved historical post-upgrade migration. A newer version (`0.46.12.3`) is available. | GBrain work is an explicit operational gate, not a silent prerequisite or an unreviewed upgrade.                                                        |
+| GBrain content quality | `joy-media-state` is approximately 336 KB, far above GBrain’s 50 KB page-warning threshold. The WP-36 reconciliation page is also approximately 56 KB.                                                                                                            | Repair the knowledge shape before treating GBrain as a reliable planning/retrieval input. Do **not** keep appending full release histories to one page. |
+| Link context           | The original shared ChatGPT URL cannot currently be fetched. The owner supplied its content separately.                                                                                                                                                           | This plan uses that supplied vision as the product direction; do not claim the inaccessible URL was verified.                                           |
 
 ### Safety facts
 
@@ -100,17 +100,17 @@ JOY Media returns a reviewable creative brief and a proposed change set that nam
 
 Only one package is active at a time. Each package gets a separate, reviewable commit and a corresponding `STATE.md` update. If an invariant requires changing, stop and add an ADR or decision request instead of widening the implementation.
 
-| Order | Package | Deliverable | Deploy? |
-| --- | --- | --- | --- |
-| G0 | Knowledge-quality baseline and GBrain remediation | Small, linked GBrain pages; read-only quality report; no upgrade | No, except an explicitly authorized GBrain-only maintenance window |
-| S1 | Semantic Project Snapshot contract | Read-only, versioned canonical projection with fixtures | No |
-| S2 | Scene/brand inference and validation | Deterministic derived descriptors with explainable warnings | No |
-| S3 | Creative brief and read-only critique | Typed recommendations tied to snapshot evidence | No |
-| S4 | Constrained agent planning surface | “Improve project” produces a revision-bound proposal, no mutations | Yes, after local gate and authenticated browser proof |
-| S5 | Approved low-risk execution bridge | Existing command transactions execute an accepted bounded proposal | Yes, only after S4 is accepted |
-| V1 | Preview/critique repair loop | Low-res render → structured critic → separate repair proposal | Yes, only after owner approves its vision/provider/privacy policy |
-| P1 | First provider-backed creative job | One provider-neutral job route and one approved provider implementation | Yes, separately authorized |
-| W1 | Record-to-skill workflow | Save a successful approved run as a parameterized workflow | Yes, after P1 or when current workflow contracts prove it is ready |
+| Order | Package                                           | Deliverable                                                             | Deploy?                                                            |
+| ----- | ------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| G0    | Knowledge-quality baseline and GBrain remediation | Small, linked GBrain pages; read-only quality report; no upgrade        | No, except an explicitly authorized GBrain-only maintenance window |
+| S1    | Semantic Project Snapshot contract                | Read-only, versioned canonical projection with fixtures                 | No                                                                 |
+| S2    | Scene/brand inference and validation              | Deterministic derived descriptors with explainable warnings             | No                                                                 |
+| S3    | Creative brief and read-only critique             | Typed recommendations tied to snapshot evidence                         | No                                                                 |
+| S4    | Constrained agent planning surface                | “Improve project” produces a revision-bound proposal, no mutations      | Yes, after local gate and authenticated browser proof              |
+| S5    | Approved low-risk execution bridge                | Existing command transactions execute an accepted bounded proposal      | Yes, only after S4 is accepted                                     |
+| V1    | Preview/critique repair loop                      | Low-res render → structured critic → separate repair proposal           | Yes, only after owner approves its vision/provider/privacy policy  |
+| P1    | First provider-backed creative job                | One provider-neutral job route and one approved provider implementation | Yes, separately authorized                                         |
+| W1    | Record-to-skill workflow                          | Save a successful approved run as a parameterized workflow              | Yes, after P1 or when current workflow contracts prove it is ready |
 
 The next implementation agent must implement **G0 and S1 only**, unless the owner explicitly asks them to continue. S2–W1 are design-locked follow-ons, not implied authorization to do a giant feature branch.
 
@@ -179,12 +179,12 @@ Create `docs/qa/gbrain/` evidence (or the repository’s current equivalent) and
 
 The report must frame the choices:
 
-| Decision | Recommendation | Why |
-| --- | --- | --- |
-| Upgrade from 0.42.59.0 | Schedule separately with snapshot, compatibility/readiness check, migration dry-run or documented recovery, and service rollback | There is a recorded historical post-upgrade failure. |
-| Retrieval reflex | Do not install into JOY Media by default | The warning proves no visible host path; a new host integration affects shared agent behavior and needs a design/permission review. |
-| Oversized pages | Split/index now | This is safe, reversible, and directly improves retrieval quality. |
-| Runtime project access | Keep out of GBrain | The editor’s persisted project and revision system is the authoritative live model; GBrain is too indirect and stale for command preconditions. |
+| Decision               | Recommendation                                                                                                                   | Why                                                                                                                                             |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Upgrade from 0.42.59.0 | Schedule separately with snapshot, compatibility/readiness check, migration dry-run or documented recovery, and service rollback | There is a recorded historical post-upgrade failure.                                                                                            |
+| Retrieval reflex       | Do not install into JOY Media by default                                                                                         | The warning proves no visible host path; a new host integration affects shared agent behavior and needs a design/permission review.             |
+| Oversized pages        | Split/index now                                                                                                                  | This is safe, reversible, and directly improves retrieval quality.                                                                              |
+| Runtime project access | Keep out of GBrain                                                                                                               | The editor’s persisted project and revision system is the authoritative live model; GBrain is too indirect and stale for command preconditions. |
 
 ### G0 exit criteria
 
@@ -240,7 +240,11 @@ type SemanticProjectSnapshotV1 = {
     readonly height: number;
     readonly aspectRatio: string;
   };
-  readonly goal?: { readonly destination?: string; readonly durationTargetUs?: number; readonly brief?: string };
+  readonly goal?: {
+    readonly destination?: string;
+    readonly durationTargetUs?: number;
+    readonly brief?: string;
+  };
   readonly brand: BrandSummaryV1;
   readonly scenes: readonly SceneSummaryV1[];
   readonly timeline: TimelineSummaryV1;
@@ -306,7 +310,7 @@ Turn the S1 snapshot into explainable descriptors that are useful to a creative 
 - `BrandReadinessV1`: available/missing colors, fonts, logo, voice/tone instructions, prohibited claims/effects, and completeness warnings.
 - `SceneCoverageV1`: narration, captions, visual density, clip/audio overlap, duration, pace signals, and explicit evidence ranges.
 - `ProjectReadinessV1`: destination/aspect/duration alignment, captions availability, audio-state readiness, export suitability, and unresolved runtime needs.
-- A deterministic rule catalog with rule ID, severity, evidence, user-facing explanation, and suggested *intent* (not a mutation).
+- A deterministic rule catalog with rule ID, severity, evidence, user-facing explanation, and suggested _intent_ (not a mutation).
 
 Example result:
 
@@ -346,7 +350,15 @@ type CreativeBriefV1 = {
 
 type CreativeRecommendationV1 = {
   readonly id: string;
-  readonly kind: 'pacing' | 'caption' | 'visual-coverage' | 'brand' | 'audio' | 'transition' | 'color' | 'structure';
+  readonly kind:
+    | 'pacing'
+    | 'caption'
+    | 'visual-coverage'
+    | 'brand'
+    | 'audio'
+    | 'transition'
+    | 'color'
+    | 'structure';
   readonly confidence: 'low' | 'medium' | 'high';
   readonly evidence: readonly EvidenceRefV1[];
   readonly rationale: string;
@@ -484,15 +496,15 @@ Never turn an opaque model conversation into an executable workflow without a va
 
 ### Required test layers
 
-| Layer | Required proof |
-| --- | --- |
-| Unit | snapshot projection, truncation, scene derivation, validation, policy classification, parser rejection, provenance serialization |
-| Package integration | persisted revision → snapshot → brief → proposal; stale revision rejection; command bridge atomicity and one-step undo |
-| Fixture/model | deterministic fixture adapters for planning/critique/provider responses, including malformed and ambiguous responses |
-| Browser | existing project opens; Agent plan is readable/keyboard accessible; no mutation before approval; stale plan behavior; Persian/RTL content; error states |
-| Renderer | label-only metadata remains non-rendering; approved visual changes affect Preview/Export only through canonical render state |
-| Security | no secret/path/URL leakage in snapshots, logs, UI, serialized plans, telemetry, or browser requests; policy gates fail closed |
-| Production | immutable artifact, API health, signed-in disposable-project smoke, rollback target, public hash parity, and teardown/cleanup proof |
+| Layer               | Required proof                                                                                                                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit                | snapshot projection, truncation, scene derivation, validation, policy classification, parser rejection, provenance serialization                        |
+| Package integration | persisted revision → snapshot → brief → proposal; stale revision rejection; command bridge atomicity and one-step undo                                  |
+| Fixture/model       | deterministic fixture adapters for planning/critique/provider responses, including malformed and ambiguous responses                                    |
+| Browser             | existing project opens; Agent plan is readable/keyboard accessible; no mutation before approval; stale plan behavior; Persian/RTL content; error states |
+| Renderer            | label-only metadata remains non-rendering; approved visual changes affect Preview/Export only through canonical render state                            |
+| Security            | no secret/path/URL leakage in snapshots, logs, UI, serialized plans, telemetry, or browser requests; policy gates fail closed                           |
+| Production          | immutable artifact, API health, signed-in disposable-project smoke, rollback target, public hash parity, and teardown/cleanup proof                     |
 
 ### Telemetry/audit events
 
@@ -520,16 +532,16 @@ No performance claim should be recorded before it is measured on the actual Wind
 
 Create a decision request/ADR and stop the affected package if any of these are still unresolved:
 
-| Question | Required decision |
-| --- | --- |
-| Semantic snapshot ownership | Core package and dependency direction; whether a new `project-intelligence` package is justified |
-| Scene boundaries | Canonical explicit scene markers vs deterministic derivation and migration/UX implications |
-| Brand source | Exact existing canonical brand-kit schema and entitlement/privacy boundary |
-| Reasoning/vision provider | Approved model, data retention, geography/access, terms, spend cap, cancellation, and fallback behavior |
-| Preview privacy | Whether preview leaves device; storage TTL; who can view it; how it is revoked |
-| Autonomy | Exact actions allowed in Low-Risk and Full Auto modes for creative plans |
-| Provider selection | First adapter/provider after a real capability and commercial review |
-| GBrain upgrade | Snapshot/rollback, migration plan, maintenance window, and validation owner |
+| Question                    | Required decision                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Semantic snapshot ownership | Core package and dependency direction; whether a new `project-intelligence` package is justified        |
+| Scene boundaries            | Canonical explicit scene markers vs deterministic derivation and migration/UX implications              |
+| Brand source                | Exact existing canonical brand-kit schema and entitlement/privacy boundary                              |
+| Reasoning/vision provider   | Approved model, data retention, geography/access, terms, spend cap, cancellation, and fallback behavior |
+| Preview privacy             | Whether preview leaves device; storage TTL; who can view it; how it is revoked                          |
+| Autonomy                    | Exact actions allowed in Low-Risk and Full Auto modes for creative plans                                |
+| Provider selection          | First adapter/provider after a real capability and commercial review                                    |
+| GBrain upgrade              | Snapshot/rollback, migration plan, maintenance window, and validation owner                             |
 
 ## 17. Next-agent checklist (G0 + S1 only)
 

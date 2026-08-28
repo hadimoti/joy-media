@@ -50,7 +50,10 @@ export class JoyCodeAdmissionGate {
 
   admit(ownerId: string, projectId: string, now: number): JoyCodeAdmissionResult {
     this.#lastNow = now;
-    if (this.#circuitOpenedAt !== undefined && now - this.#circuitOpenedAt < this.#circuitCooldownMs)
+    if (
+      this.#circuitOpenedAt !== undefined &&
+      now - this.#circuitOpenedAt < this.#circuitCooldownMs
+    )
       return { allowed: false, code: 'JOY_CODE_CIRCUIT_OPEN' };
     if (this.#circuitOpenedAt !== undefined) {
       this.#circuitOpenedAt = undefined;

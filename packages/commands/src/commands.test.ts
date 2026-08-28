@@ -42,31 +42,26 @@ function clipsOf(
 }
 
 describe('applyCommand', () => {
-  it('rejects duplicate clip ids embedded in a newly added track', () => {
-    const project = emptySpikeProject({ trackCount: 1 });
-    const clip = {
-      kind: 'video' as const,
-      id: 'same',
-      startUs: 0,
-      durationUs: 1_000_000,
-      assetId: 'asset',
-      sourceInUs: 0,
-    };
+  it('rejects duplicate clip ids across tracks at the command boundary', () => {
+    const clip = makeVideoClip('same', 0, 1_000_000);
+    const project = withClips(emptySpikeProject({ trackCount: 1 }), 'track-0', [clip]);
+    const { project: withTrack } = applyCommand(project, {
+      type: 'timeline.addTrack',
+      payload: {
+        compositionId: 'root',
+        track: { id: 'new-track', kind: 'video', order: 1, enabled: true, clips: [] },
+      },
+    });
     expect(() =>
-      applyCommand(project, {
-        type: 'timeline.addTrack',
+      applyCommand(withTrack, {
+        type: 'timeline.insertClip',
         payload: {
           compositionId: 'root',
-          track: {
-            id: 'new-track',
-            kind: 'video',
-            order: 1,
-            enabled: true,
-            clips: [clip, { ...clip }],
-          },
+          trackId: 'new-track',
+          clip: { ...clip, startUs: 2_000_000 },
         },
       }),
-    ).toThrowError(expect.objectContaining({ code: 'COMMAND_VALIDATION_DUPLICATE_ID' }));
+    ).toThrowError(expect.objectContaining({ code: 'COMMAND_VALIDATION_RESULT_INVALID' }));
   });
   it('publishes every supported command through the registry', () => {
     expect(Object.keys(COMMAND_REGISTRY).sort()).toEqual([
@@ -93,6 +88,7 @@ describe('applyCommand', () => {
       'timeline.setTrackFamily',
       'timeline.setTrackLabelColor',
       'timeline.setTrackLocked',
+      'timeline.setTrackMuted',
       'timeline.splitClip',
       'timeline.toggleClipReverse',
       'timeline.trimClipEnd',
@@ -197,7 +193,7 @@ describe('applyCommand', () => {
           tracks: [
             ...baseProject().compositions.root!.tracks,
             {
-              id: 'track-1',
+              id: 'track-2',
               kind: 'video' as const,
               name: 'Layer 2',
               order: 1,
@@ -213,7 +209,7 @@ describe('applyCommand', () => {
       payload: {
         compositionId: 'root',
         sourceTrackId: 'track-0',
-        targetTrackId: 'track-1',
+        targetTrackId: 'track-2',
         clipId: 'clip-a',
         newStartUs: 0,
       },
@@ -221,7 +217,7 @@ describe('applyCommand', () => {
     expect(next.compositions.root!.tracks.find((track) => track.id === 'track-0')!.clips).toEqual([
       expect.objectContaining({ id: 'clip-b' }),
     ]);
-    expect(next.compositions.root!.tracks.find((track) => track.id === 'track-1')!.clips).toEqual([
+    expect(next.compositions.root!.tracks.find((track) => track.id === 'track-2')!.clips).toEqual([
       expect.objectContaining({ id: 'clip-a' }),
     ]);
     expect(applyCommand(next, inverse).project).toEqual(project);
@@ -448,6 +444,20 @@ describe('applyCommand', () => {
     expect(inverse).toEqual({
       type: 'property.setTrackEnabled',
       payload: { ...TARGET, enabled: true },
+    });
+    expect(applyCommand(next, inverse).project).toEqual(project);
+  });
+
+  it('persists track mute and restores it exactly through undo', () => {
+    const project = baseProject();
+    const { project: next, inverse } = applyCommand(project, {
+      type: 'timeline.setTrackMuted',
+      payload: { ...TARGET, muted: true },
+    });
+    expect(next.compositions.root!.tracks[0]!.muted).toBe(true);
+    expect(inverse).toEqual({
+      type: 'timeline.setTrackMuted',
+      payload: { ...TARGET, muted: false },
     });
     expect(applyCommand(next, inverse).project).toEqual(project);
   });

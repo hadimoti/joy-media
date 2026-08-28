@@ -4,17 +4,22 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { JoyProjectV1, CompositionV1, TrackV1, ClipV1, AssetRecordV1, MarkerV1, CaptionDocumentV1 } from './v1.js';
+import type {
+  JoyProjectV1,
+  CompositionV1,
+  TrackV1,
+  ClipV1,
+  AssetRecordV1,
+  MarkerV1,
+  CaptionDocumentV1,
+} from './v1.js';
 import type { Rational } from './time.js';
 import {
   projectToSemanticSnapshot,
   validateSemanticProjectSnapshot,
   segmentCompositionIntoScenes,
 } from './semantic-snapshot-impl.js';
-import type {
-  SemanticProjectSnapshotV1,
-  ProjectRevisionId,
-} from './semantic-snapshot.js';
+import type { SemanticProjectSnapshotV1, ProjectRevisionId } from './semantic-snapshot.js';
 
 // ==========================================================================
 // Test Fixtures
@@ -207,7 +212,8 @@ describe('semantic-snapshot', () => {
     it('should handle a blank project with no tracks or clips', () => {
       const composition = createComposition();
       const project = createProject('blank-project', 'comp-1', { 'comp-1': composition });
-      const revisionId: ProjectRevisionId = 'local-revision:v1:blank-project:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:blank-project:timeline=1:document=1:graph=1:artifacts=1';
 
       const snapshot = projectToSemanticSnapshot(project, revisionId);
 
@@ -228,66 +234,99 @@ describe('semantic-snapshot', () => {
 
     // Test 2: Mixed visual/audio project
     it('should correctly describe a mixed visual and audio project', () => {
-      const videoTrack = createTrack('video-track', 'video', [
-        createVideoClip('video-clip-1', 0, 2_000_000, 'asset-video-1'),
-        createVideoClip('video-clip-2', 2_000_000, 2_000_000, 'asset-video-2'),
-      ], 'visual');
+      const videoTrack = createTrack(
+        'video-track',
+        'video',
+        [
+          createVideoClip('video-clip-1', 0, 2_000_000, 'asset-video-1'),
+          createVideoClip('video-clip-2', 2_000_000, 2_000_000, 'asset-video-2'),
+        ],
+        'visual',
+      );
 
-      const audioTrack = createTrack('audio-track', 'audio', [
-        createVideoClip('audio-clip-1', 0, 4_000_000, 'asset-audio-1'),
-      ], 'audio');
+      const audioTrack = createTrack(
+        'audio-track',
+        'audio',
+        [createVideoClip('audio-clip-1', 0, 4_000_000, 'asset-audio-1')],
+        'audio',
+      );
 
-      const composition = createComposition('comp-1', 1920, 1080, 4_000_000, r(30, 1), [videoTrack, audioTrack]);
-      const project = createProject('mixed-project', 'comp-1', {
-        'comp-1': composition,
-      }, {
-        'asset-video-1': createAsset('asset-video-1', 'video', 'Video 1', 2_000_000),
-        'asset-video-2': createAsset('asset-video-2', 'video', 'Video 2', 2_000_000),
-        'asset-audio-1': createAsset('asset-audio-1', 'audio', 'Audio 1', 4_000_000),
-      });
+      const composition = createComposition('comp-1', 1920, 1080, 4_000_000, r(30, 1), [
+        videoTrack,
+        audioTrack,
+      ]);
+      const project = createProject(
+        'mixed-project',
+        'comp-1',
+        {
+          'comp-1': composition,
+        },
+        {
+          'asset-video-1': createAsset('asset-video-1', 'video', 'Video 1', 2_000_000),
+          'asset-video-2': createAsset('asset-video-2', 'video', 'Video 2', 2_000_000),
+          'asset-audio-1': createAsset('asset-audio-1', 'audio', 'Audio 1', 4_000_000),
+        },
+      );
 
-      const revisionId: ProjectRevisionId = 'local-revision:v1:mixed-project:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:mixed-project:timeline=1:document=1:graph=1:artifacts=1';
       const snapshot = projectToSemanticSnapshot(project, revisionId);
 
       expect(snapshot.timeline.visualTrackCount).toBe(1);
       expect(snapshot.timeline.audioTrackCount).toBe(1);
       expect(snapshot.timeline.totalClipCount).toBe(3);
       expect(snapshot.assets.length).toBe(3);
-      expect(snapshot.assets.some(a => a.kind === 'video')).toBe(true);
-      expect(snapshot.assets.some(a => a.kind === 'audio')).toBe(true);
+      expect(snapshot.assets.some((a) => a.kind === 'video')).toBe(true);
+      expect(snapshot.assets.some((a) => a.kind === 'audio')).toBe(true);
     });
 
     // Test 3: Persian/RTL captions
     it('should preserve Persian/RTL caption text', () => {
-      const track = createTrack('caption-track', 'caption', [
-        createCaptionClip('caption-clip-1', 0, 1_000_000, 'caption-doc-1'),
-      ], 'visual');
+      const track = createTrack(
+        'caption-track',
+        'caption',
+        [createCaptionClip('caption-clip-1', 0, 1_000_000, 'caption-doc-1')],
+        'visual',
+      );
 
       const composition = createComposition('comp-1', 1920, 1080, 1_000_000, r(30, 1), [track]);
 
       // Persian text with RTL direction
-      const captionDoc = createCaptionDocument('caption-doc-1', 'fa-IR', [
+      const captionDoc = createCaptionDocument(
+        'caption-doc-1',
+        'fa-IR',
+        [
+          {
+            id: 'seg-1',
+            startUs: 0,
+            endUs: 1_000_000,
+            wordIds: ['word-1', 'word-2'],
+          },
+        ],
         {
-          id: 'seg-1',
-          startUs: 0,
-          endUs: 1_000_000,
-          wordIds: ['word-1', 'word-2'],
+          'word-1': { id: 'word-1', text: 'سلام', startUs: 0, endUs: 500_000 },
+          'word-2': { id: 'word-2', text: 'دنیا', startUs: 500_000, endUs: 1_000_000 },
         },
-      ], {
-        'word-1': { id: 'word-1', text: 'سلام', startUs: 0, endUs: 500_000 },
-        'word-2': { id: 'word-2', text: 'دنیا', startUs: 500_000, endUs: 1_000_000 },
-      });
+      );
 
-      const project = createProject('persian-project', 'comp-1', {
-        'comp-1': composition,
-      }, {}, [], { 'caption-doc-1': captionDoc });
+      const project = createProject(
+        'persian-project',
+        'comp-1',
+        {
+          'comp-1': composition,
+        },
+        {},
+        [],
+        { 'caption-doc-1': captionDoc },
+      );
 
-      const revisionId: ProjectRevisionId = 'local-revision:v1:persian-project:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:persian-project:timeline=1:document=1:graph=1:artifacts=1';
       const snapshot = projectToSemanticSnapshot(project, revisionId);
 
       expect(snapshot.scenes.length).toBeGreaterThan(0);
       // The caption coverage should have the Persian locale
-      const sceneWithCaptions = snapshot.scenes.find(s => s.captionCoverage?.hasCaptions);
+      const sceneWithCaptions = snapshot.scenes.find((s) => s.captionCoverage?.hasCaptions);
       expect(sceneWithCaptions).toBeDefined();
       expect(sceneWithCaptions?.captionCoverage?.locale).toBe('fa-IR');
     });
@@ -315,13 +354,19 @@ describe('semantic-snapshot', () => {
       ]);
 
       const composition = createComposition('comp-1', 1920, 1080, 1_000_000, r(30, 1), [track]);
-      const project = createProject('generated-project', 'comp-1', {
-        'comp-1': composition,
-      }, {
-        'generated-asset-1': assetWithProvenance,
-      });
+      const project = createProject(
+        'generated-project',
+        'comp-1',
+        {
+          'comp-1': composition,
+        },
+        {
+          'generated-asset-1': assetWithProvenance,
+        },
+      );
 
-      const revisionId: ProjectRevisionId = 'local-revision:v1:generated-project:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:generated-project:timeline=1:document=1:graph=1:artifacts=1';
       const snapshot = projectToSemanticSnapshot(project, revisionId);
 
       expect(snapshot.assets.length).toBe(1);
@@ -350,7 +395,8 @@ describe('semantic-snapshot', () => {
       ]);
 
       const project = createProject('wp36-tracks-project', 'comp-1', { 'comp-1': composition });
-      const revisionId: ProjectRevisionId = 'local-revision:v1:wp36-tracks-project:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:wp36-tracks-project:timeline=1:document=1:graph=1:artifacts=1';
 
       const snapshot = projectToSemanticSnapshot(project, revisionId);
 
@@ -366,13 +412,19 @@ describe('semantic-snapshot', () => {
       ]);
 
       const composition = createComposition('comp-1', 1920, 1080, 1_000_000, r(30, 1), [track]);
-      const project = createProject('stable-project', 'comp-1', {
-        'comp-1': composition,
-      }, {
-        'asset-1': createAsset('asset-1', 'video', 'Asset 1', 1_000_000),
-      });
+      const project = createProject(
+        'stable-project',
+        'comp-1',
+        {
+          'comp-1': composition,
+        },
+        {
+          'asset-1': createAsset('asset-1', 'video', 'Asset 1', 1_000_000),
+        },
+      );
 
-      const revisionId: ProjectRevisionId = 'local-revision:v1:stable-project:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:stable-project:timeline=1:document=1:graph=1:artifacts=1';
 
       // Create snapshot with deterministic clock
       const clock = () => '2026-01-01T00:00:00.000Z';
@@ -392,14 +444,21 @@ describe('semantic-snapshot', () => {
       ]);
 
       const composition = createComposition('comp-1', 1920, 1080, 1_000_000, r(30, 1), [track]);
-      const project = createProject('revision-project', 'comp-1', {
-        'comp-1': composition,
-      }, {
-        'asset-1': createAsset('asset-1', 'video', 'Asset 1', 1_000_000),
-      });
+      const project = createProject(
+        'revision-project',
+        'comp-1',
+        {
+          'comp-1': composition,
+        },
+        {
+          'asset-1': createAsset('asset-1', 'video', 'Asset 1', 1_000_000),
+        },
+      );
 
-      const revisionId1: ProjectRevisionId = 'local-revision:v1:revision-project:timeline=1:document=1:graph=1:artifacts=1';
-      const revisionId2: ProjectRevisionId = 'local-revision:v1:revision-project:timeline=2:document=1:graph=1:artifacts=1';
+      const revisionId1: ProjectRevisionId =
+        'local-revision:v1:revision-project:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId2: ProjectRevisionId =
+        'local-revision:v1:revision-project:timeline=2:document=1:graph=1:artifacts=1';
 
       const clock = () => '2026-01-01T00:00:00.000Z';
       const snapshot1 = projectToSemanticSnapshot(project, revisionId1, { clock });
@@ -417,16 +476,22 @@ describe('semantic-snapshot', () => {
       ]);
 
       const composition = createComposition('comp-1', 1920, 1080, 1_000_000, r(30, 1), [track]);
-      const project = createProject('no-mutation-project', 'comp-1', {
-        'comp-1': composition,
-      }, {
-        'asset-1': createAsset('asset-1', 'video', 'Asset 1', 1_000_000),
-      });
+      const project = createProject(
+        'no-mutation-project',
+        'comp-1',
+        {
+          'comp-1': composition,
+        },
+        {
+          'asset-1': createAsset('asset-1', 'video', 'Asset 1', 1_000_000),
+        },
+      );
 
       // Deep clone the project to compare
       const projectBefore = JSON.parse(JSON.stringify(project));
 
-      const revisionId: ProjectRevisionId = 'local-revision:v1:no-mutation-project:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:no-mutation-project:timeline=1:document=1:graph=1:artifacts=1';
       projectToSemanticSnapshot(project, revisionId);
 
       // Project should be unchanged
@@ -450,11 +515,17 @@ describe('semantic-snapshot', () => {
         assets[`asset-${i}`] = createAsset(`asset-${i}`, 'video', `Asset ${i}`, 100_000);
       }
 
-      const project = createProject('oversized-project', 'comp-1', {
-        'comp-1': composition,
-      }, assets);
+      const project = createProject(
+        'oversized-project',
+        'comp-1',
+        {
+          'comp-1': composition,
+        },
+        assets,
+      );
 
-      const revisionId: ProjectRevisionId = 'local-revision:v1:oversized-project:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:oversized-project:timeline=1:document=1:graph=1:artifacts=1';
       const snapshot = projectToSemanticSnapshot(project, revisionId, {
         maxScenes: 5,
         maxAssets: 10,
@@ -464,7 +535,7 @@ describe('semantic-snapshot', () => {
       expect(snapshot.scenes.length).toBeLessThanOrEqual(5);
       expect(snapshot.assets.length).toBeLessThanOrEqual(10);
       expect(snapshot.truncation.assetsOmitted).toBeGreaterThan(0);
-      expect(snapshot.warnings.some(w => w.code === 'truncated')).toBe(true);
+      expect(snapshot.warnings.some((w) => w.code === 'truncated')).toBe(true);
     });
 
     // Test 10: Security - no forbidden data in output
@@ -475,7 +546,8 @@ describe('semantic-snapshot', () => {
         id: '/path/to/project', // Invalid - path-like
       } as unknown as JoyProjectV1;
 
-      const revisionId: ProjectRevisionId = 'local-revision:v1:malicious-project:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:malicious-project:timeline=1:document=1:graph=1:artifacts=1';
 
       // This should throw due to forbidden data validation
       expect(() => {
@@ -564,19 +636,26 @@ describe('semantic-snapshot', () => {
         createMarker('marker-2', 3_000_000, 'Scene 2'),
       ];
 
-      const project = createProject('marker-project', 'comp-1', {
-        'comp-1': composition,
-      }, {
-        'asset-1': createAsset('asset-1', 'video', 'Asset 1', 4_000_000),
-      }, markers);
+      const project = createProject(
+        'marker-project',
+        'comp-1',
+        {
+          'comp-1': composition,
+        },
+        {
+          'asset-1': createAsset('asset-1', 'video', 'Asset 1', 4_000_000),
+        },
+        markers,
+      );
 
-      const revisionId: ProjectRevisionId = 'local-revision:v1:marker-project:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:marker-project:timeline=1:document=1:graph=1:artifacts=1';
       const snapshot = projectToSemanticSnapshot(project, revisionId);
 
       // Should have scenes based on markers at 0, 1M, 3M, 4M
       expect(snapshot.scenes.length).toBeGreaterThanOrEqual(2);
-      expect(snapshot.scenes.some(s => s.startUs === 1_000_000)).toBe(true);
-      expect(snapshot.scenes.some(s => s.startUs === 3_000_000)).toBe(true);
+      expect(snapshot.scenes.some((s) => s.startUs === 1_000_000)).toBe(true);
+      expect(snapshot.scenes.some((s) => s.startUs === 3_000_000)).toBe(true);
     });
 
     // Test 13: Deterministic cuts and gaps segmentation
@@ -590,17 +669,26 @@ describe('semantic-snapshot', () => {
         createVideoClip('clip-3', 1_000_000, 1_000_000, 'asset-3'),
       ]);
 
-      const composition = createComposition('comp-1', 1920, 1080, 3_000_000, r(30, 1), [track1, track2]);
+      const composition = createComposition('comp-1', 1920, 1080, 3_000_000, r(30, 1), [
+        track1,
+        track2,
+      ]);
 
-      const project = createProject('cuts-gaps-project', 'comp-1', {
-        'comp-1': composition,
-      }, {
-        'asset-1': createAsset('asset-1', 'video', 'Asset 1', 1_000_000),
-        'asset-2': createAsset('asset-2', 'video', 'Asset 2', 1_000_000),
-        'asset-3': createAsset('asset-3', 'video', 'Asset 3', 1_000_000),
-      });
+      const project = createProject(
+        'cuts-gaps-project',
+        'comp-1',
+        {
+          'comp-1': composition,
+        },
+        {
+          'asset-1': createAsset('asset-1', 'video', 'Asset 1', 1_000_000),
+          'asset-2': createAsset('asset-2', 'video', 'Asset 2', 1_000_000),
+          'asset-3': createAsset('asset-3', 'video', 'Asset 3', 1_000_000),
+        },
+      );
 
-      const revisionId: ProjectRevisionId = 'local-revision:v1:cuts-gaps-project:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:cuts-gaps-project:timeline=1:document=1:graph=1:artifacts=1';
       const snapshot = projectToSemanticSnapshot(project, revisionId);
 
       // Should detect scenes based on cuts and gaps
@@ -616,11 +704,17 @@ describe('semantic-snapshot', () => {
       const composition = createComposition('comp-1', 1920, 1080, 1_000_000, r(30, 1), [track]);
 
       // Asset not in assets map - unavailable
-      const project = createProject('unavailable-project', 'comp-1', {
-        'comp-1': composition,
-      }, {});
+      const project = createProject(
+        'unavailable-project',
+        'comp-1',
+        {
+          'comp-1': composition,
+        },
+        {},
+      );
 
-      const revisionId: ProjectRevisionId = 'local-revision:v1:unavailable-project:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:unavailable-project:timeline=1:document=1:graph=1:artifacts=1';
       const snapshot = projectToSemanticSnapshot(project, revisionId);
 
       expect(snapshot.assets.length).toBe(0);
@@ -633,7 +727,8 @@ describe('semantic-snapshot', () => {
         'comp-1': createComposition('comp-1'),
       });
 
-      const revisionId: ProjectRevisionId = 'local-revision:v1:no-captions:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:no-captions:timeline=1:document=1:graph=1:artifacts=1';
       const snapshot = projectToSemanticSnapshot(projectNoCaptions, revisionId);
 
       expect(snapshot.capabilities['semantic-snapshot']).toBe('ready');
@@ -690,13 +785,19 @@ describe('semantic-snapshot', () => {
       ]);
 
       const composition = createComposition('comp-1', 1920, 1080, 1_000_000, r(30, 1), [track]);
-      const project = createProject('validation-project', 'comp-1', {
-        'comp-1': composition,
-      }, {
-        'asset-1': createAsset('asset-1', 'video', 'Asset 1', 1_000_000),
-      });
+      const project = createProject(
+        'validation-project',
+        'comp-1',
+        {
+          'comp-1': composition,
+        },
+        {
+          'asset-1': createAsset('asset-1', 'video', 'Asset 1', 1_000_000),
+        },
+      );
 
-      const revisionId: ProjectRevisionId = 'local-revision:v1:validation-project:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:validation-project:timeline=1:document=1:graph=1:artifacts=1';
       const snapshot = projectToSemanticSnapshot(project, revisionId);
 
       const result = validateSemanticProjectSnapshot(snapshot);
@@ -756,7 +857,7 @@ describe('semantic-snapshot', () => {
 
       const result = validateSemanticProjectSnapshot(invalidSnapshot);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.includes('projectId'))).toBe(true);
+      expect(result.errors.some((e) => e.includes('projectId'))).toBe(true);
     });
 
     it('should reject snapshot with forbidden data', () => {
@@ -811,7 +912,7 @@ describe('semantic-snapshot', () => {
 
       const result = validateSemanticProjectSnapshot(snapshotWithPath);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.includes('forbidden'))).toBe(true);
+      expect(result.errors.some((e) => e.includes('forbidden'))).toBe(true);
     });
   });
 });

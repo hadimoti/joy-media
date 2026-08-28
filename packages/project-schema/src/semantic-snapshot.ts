@@ -15,7 +15,8 @@ export type ProjectRevisionId = string;
 
 export interface EvidenceRefV1 {
   readonly id: string;
-  readonly kind: 'composition' | 'track' | 'clip' | 'asset' | 'visual-object' | 'caption' | 'marker';
+  readonly kind:
+    'composition' | 'track' | 'clip' | 'asset' | 'visual-object' | 'caption' | 'marker';
   readonly startUs?: TimeUs;
   readonly endUs?: TimeUs;
 }
@@ -29,7 +30,8 @@ export interface SnapshotTruncationV1 {
 }
 
 export interface SnapshotWarningV1 {
-  readonly code: 'missing-brand' | 'unavailable-asset' | 'truncated' | 'stale-revision' | 'unsupported-kind';
+  readonly code:
+    'missing-brand' | 'unavailable-asset' | 'truncated' | 'stale-revision' | 'unsupported-kind';
   readonly message: string;
   readonly severity: 'info' | 'warning' | 'error';
   readonly evidence?: readonly EvidenceRefV1[];

@@ -54,6 +54,7 @@ import {
 import { ensureClipAudio } from './audio-session.js';
 import { audioKeyframeState, audioKeyframeTransaction } from './audio-keyframes.js';
 import { PropertyRow } from './components/PropertyRow.js';
+import { BoundedPollingLoop } from './bounded-polling.js';
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'enhance', label: 'Enhance' },
@@ -248,12 +249,21 @@ export function AudioPanel({
       if (cancelled) return;
       if (workerResult.status === 'fulfilled') setWorkers(workerResult.value);
       if (providerResult.status === 'fulfilled') setProviders(providerResult.value);
+      if (workerResult.status === 'rejected' && providerResult.status === 'rejected') {
+        throw workerResult.reason ?? providerResult.reason;
+      }
     };
-    void refreshRuntime();
-    const timer = window.setInterval(() => void refreshRuntime(), 15_000);
+    const polling = new BoundedPollingLoop(refreshRuntime);
+    const syncVisibility = () => {
+      void polling.setVisible(document.visibilityState === 'visible').catch(() => undefined);
+    };
+    document.addEventListener('visibilitychange', syncVisibility);
+    syncVisibility();
+    polling.start();
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', syncVisibility);
+      polling.stop();
     };
   }, [client]);
   useEffect(() => {

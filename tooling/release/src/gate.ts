@@ -541,6 +541,7 @@ export function verifyDeploymentManifests(root: string): readonly string[] {
     for (const marker of [
       'current-api',
       'web',
+      '/opt/joy-media/web-releases/',
       'systemctl restart joy-media@api',
       'Back up the database',
     ]) {
@@ -552,11 +553,15 @@ export function verifyDeploymentManifests(root: string): readonly string[] {
   if (rollback !== undefined) {
     for (const marker of [
       'set -euo pipefail',
+      '<api-release> <web-release>',
+      'API_ROOT="/opt/joy-media/releases"',
+      'WEB_ROOT="/opt/joy-media/web-releases"',
       'readlink -f',
       'mv -Tf',
       'systemctl restart joy-media@api',
       'nginx -t',
       'curl --fail',
+      'index.html',
     ]) {
       if (!rollback.includes(marker))
         errors.push(`deploy/joy-media-rollback.sh missing: ${marker}`);
@@ -576,13 +581,13 @@ function isSvgDocument(value: string): boolean {
 }
 
 export const RELEASE_COMMANDS: readonly [string, readonly string[]][] = [
-  ['editor-build', ['--filter', '@joy-media/editor-web', 'build']],
   ['typecheck', ['typecheck']],
   ['lint', ['lint']],
   ['format', ['format:check']],
-  ['tests', ['test:release']],
+  ['editor-build', ['--filter', '@joy-media/editor-web', 'build']],
   ['api-build', ['--filter', '@joy-media/api', 'build']],
   ['worker-build', ['--filter', '@joy-media/worker', 'build']],
+  ['tests', ['test']],
   ['goldens', ['exec', 'vitest', 'run', 'tooling/golden-render/src']],
 ];
 

@@ -1,7 +1,11 @@
 import { DerivativeAuthorityRevokedError } from './asset-resolver.js';
 import { getStoredMediaToken } from './media-session.js';
 import type { GpuPreviewFrameRequest } from '@joy-media/job-protocol';
-import type { CreativeBriefV1, CreativeBriefRequestV1, JoyCodePlanProposalV1 } from '@joy-media/agent-tools';
+import type {
+  CreativeBriefV1,
+  CreativeBriefRequestV1,
+  JoyCodePlanProposalV1,
+} from '@joy-media/agent-tools';
 import type { JoyProjectV1, ProjectRevisionId } from '@joy-media/project-schema';
 
 const browserProjections = import('./browser-projections.js');
@@ -153,7 +157,10 @@ export interface BrowserJoyCodePlanRequest {
   readonly projectId: string;
   readonly snapshotRevisionId: string;
   readonly prompt: string;
-  readonly selection: { readonly clipIds: readonly string[]; readonly objectIds?: readonly string[] };
+  readonly selection: {
+    readonly clipIds: readonly string[];
+    readonly objectIds?: readonly string[];
+  };
 }
 
 export interface BrowserProjectDuplicateResult {
@@ -255,11 +262,15 @@ export class BrowserControlPlaneClient {
   }
   async jobs(projectId: string): Promise<readonly BrowserJob[]> {
     const { browserJobList } = await browserProjections;
-    return browserJobList(await this.get<unknown>(`/v1/projects/${encodeURIComponent(projectId)}/jobs`));
+    return browserJobList(
+      await this.get<unknown>(`/v1/projects/${encodeURIComponent(projectId)}/jobs`),
+    );
   }
   async assets(projectId: string): Promise<readonly BrowserAsset[]> {
     const { browserAssetList } = await browserProjections;
-    return browserAssetList(await this.get<unknown>(`/v1/projects/${encodeURIComponent(projectId)}/assets`));
+    return browserAssetList(
+      await this.get<unknown>(`/v1/projects/${encodeURIComponent(projectId)}/assets`),
+    );
   }
   /** Curated service-published cloud library visible to entitled Joy users. */
   async sharedCloudAssets(): Promise<readonly BrowserAsset[]> {
@@ -457,14 +468,11 @@ export class BrowserControlPlaneClient {
       readonly document: JoyProjectV1;
     },
   ): Promise<{ readonly projectId: string; readonly revisionId: ProjectRevisionId }> {
-    return this.request(
-      `/v1/projects/${encodeURIComponent(projectId)}/document`,
-      {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(params),
-      },
-    );
+    return this.request(`/v1/projects/${encodeURIComponent(projectId)}/document`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(params),
+    });
   }
   async enqueueFixture(projectId: string, id: string): Promise<BrowserJob> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
@@ -555,35 +563,27 @@ export class BrowserControlPlaneClient {
     controlPlaneProjectId: string,
     request: CreativeBriefRequestV1,
   ): Promise<CreativeBriefV1> {
-    return this.post(
-      `/v1/projects/${encodeURIComponent(controlPlaneProjectId)}/creative-brief`,
-      {
-        projectId: request.projectId,
-        snapshotRevisionId: request.snapshotRevisionId,
-        request,
-      },
-    );
+    return this.post(`/v1/projects/${encodeURIComponent(controlPlaneProjectId)}/creative-brief`, {
+      projectId: request.projectId,
+      snapshotRevisionId: request.snapshotRevisionId,
+      request,
+    });
   }
   async setCreativeBriefOptIn(
     projectId: string,
     enabled: boolean,
     baseRevision: number,
   ): Promise<{ readonly creativeBriefOptIn: boolean; readonly revision: number }> {
-    return this.request(
-      `/v1/projects/${encodeURIComponent(projectId)}/creative-brief-opt-in`,
-      {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ enabled, baseRevision }),
-      },
-    );
+    return this.request(`/v1/projects/${encodeURIComponent(projectId)}/creative-brief-opt-in`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled, baseRevision }),
+    });
   }
   async getCreativeBriefOptIn(
     projectId: string,
   ): Promise<{ readonly creativeBriefOptIn: boolean; readonly revision: number }> {
-    return this.get(
-      `/v1/projects/${encodeURIComponent(projectId)}/creative-brief-opt-in`,
-    );
+    return this.get(`/v1/projects/${encodeURIComponent(projectId)}/creative-brief-opt-in`);
   }
   async getJoyCodeOptIn(projectId: string): Promise<BrowserJoyCodeOptIn> {
     return this.get(`/v1/projects/${encodeURIComponent(projectId)}/joy-code-opt-in`);
@@ -605,12 +605,15 @@ export class BrowserControlPlaneClient {
     request: BrowserJoyCodePlanRequest,
     signal?: AbortSignal,
   ): Promise<JoyCodePlanProposalV1> {
-    return this.request(`/v1/projects/${encodeURIComponent(controlPlaneProjectId)}/joy-code/plans`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(request),
-      ...(signal === undefined ? {} : { signal }),
-    });
+    return this.request(
+      `/v1/projects/${encodeURIComponent(controlPlaneProjectId)}/joy-code/plans`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(request),
+        ...(signal === undefined ? {} : { signal }),
+      },
+    );
   }
   async pairWorker(workerId: string, pairingCode: string): Promise<BrowserWorker> {
     return this.post(`/v1/workers/${encodeURIComponent(workerId)}/pair`, { pairingCode });

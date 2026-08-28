@@ -46,8 +46,7 @@ export interface DisabledConfig {
 }
 
 /** Pinned initial free model; dynamic routers are not a product runtime policy. */
-export const CREATIVE_BRIEF_MODEL_ID =
-  'nvidia/nemotron-3-nano-30b-a3b:free' as const;
+export const CREATIVE_BRIEF_MODEL_ID = 'nvidia/nemotron-3-nano-30b-a3b:free' as const;
 
 /** Code-owned free models; operators may select only one of these exact IDs. */
 export const CREATIVE_BRIEF_FREE_MODEL_IDS = [
@@ -57,8 +56,7 @@ export const CREATIVE_BRIEF_FREE_MODEL_IDS = [
 ] as const;
 
 /** Versioned disclosure accepted by the owner before remote processing. */
-export const CREATIVE_BRIEF_CONSENT_VERSION =
-  'openrouter-nvidia-free-logging-v1' as const;
+export const CREATIVE_BRIEF_CONSENT_VERSION = 'openrouter-nvidia-free-logging-v1' as const;
 
 /**
  * Parsed Creative Brief runtime configuration.
@@ -199,20 +197,13 @@ export function parseCreativeBriefRuntimeConfig(
 
   // Parse timeout
   const timeoutMs = parseInteger(timeoutMsRaw);
-  if (
-    timeoutMs === null ||
-    timeoutMs < TIMEOUT_MIN ||
-    timeoutMs > TIMEOUT_MAX
-  ) {
+  if (timeoutMs === null || timeoutMs < TIMEOUT_MIN || timeoutMs > TIMEOUT_MAX) {
     return { mode: 'disabled' };
   }
 
   // Parse spend limit
   const spendLimitUsdCents = parseInteger(spendLimitUsdCentsRaw);
-  if (
-    spendLimitUsdCents === null ||
-    spendLimitUsdCents !== SPEND_LIMIT
-  ) {
+  if (spendLimitUsdCents === null || spendLimitUsdCents !== SPEND_LIMIT) {
     return { mode: 'disabled' };
   }
 
@@ -275,17 +266,13 @@ function parseAllowedFreeModelIds(value: string): readonly string[] | null {
 /**
  * Type guard for disabled configuration.
  */
-export function isDisabledConfig(
-  config: CreativeBriefRuntimeConfig,
-): config is DisabledConfig {
+export function isDisabledConfig(config: CreativeBriefRuntimeConfig): config is DisabledConfig {
   return config.mode === 'disabled';
 }
 
 /**
  * Type guard for OpenRouter configuration.
  */
-export function isOpenRouterConfig(
-  config: CreativeBriefRuntimeConfig,
-): config is OpenRouterConfig {
+export function isOpenRouterConfig(config: CreativeBriefRuntimeConfig): config is OpenRouterConfig {
   return config.mode === 'openrouter';
 }

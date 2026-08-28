@@ -10,6 +10,7 @@ import {
   type Track,
 } from '@joy-media/project-schema';
 import type { SpikeCommand } from '@joy-media/commands';
+import { nextProfessionalTrackId } from '../timeline-track-family.js';
 
 export interface CommandContext {
   readonly project: SpikeProject;
@@ -254,12 +255,13 @@ export const TIMELINE_COMMANDS: readonly CommandSpec[] = [
       if (!comp) return null;
       const order = comp.tracks.reduce((highest, track) => Math.max(highest, track.order), -1) + 1;
       const familyIndex = comp.tracks.filter((track) => track.family !== 'audio').length + 1;
+      const trackId = nextProfessionalTrackId(comp.tracks, 'visual');
       return {
         type: 'timeline.addTrack',
         payload: {
           compositionId: ctx.compositionId,
           track: {
-            id: `V${familyIndex}`,
+            id: trackId,
             kind: 'video',
             family: 'visual',
             name: `Visual ${familyIndex}`,
@@ -507,6 +509,7 @@ export interface ContextMenuItem {
 export function buildClipContextMenu(
   ctx: CommandContext,
   onExecute: (cmd: SpikeCommand) => void,
+  trackLocked = false,
 ): readonly ContextMenuItem[] {
   const items: ContextMenuItem[] = [];
 
@@ -519,6 +522,7 @@ export function buildClipContextMenu(
         label: 'Split at playhead',
         icon: ScissorsIcon,
         shortcut: 'S',
+        disabled: trackLocked,
         action: () => onExecute(result),
       });
     }
@@ -533,6 +537,7 @@ export function buildClipContextMenu(
         label: 'Duplicate',
         icon: DuplicateIcon,
         shortcut: 'Cmd/Ctrl+D',
+        disabled: trackLocked,
         action: () => onExecute(result),
       });
     }
@@ -549,6 +554,7 @@ export function buildClipContextMenu(
         label: 'Freeze frame at playhead',
         icon: ScissorsIcon,
         shortcut: 'F',
+        disabled: trackLocked,
         action: () => onExecute(result),
       });
     }
@@ -567,6 +573,7 @@ export function buildClipContextMenu(
             ? 'Restore forward playback'
             : 'Reverse clip',
         icon: ReverseIcon,
+        disabled: trackLocked,
         action: () => onExecute(result),
       });
     }
@@ -581,6 +588,7 @@ export function buildClipContextMenu(
         label: 'Set playback rate…',
         icon: ZoomInIcon,
         shortcut: 'R',
+        disabled: trackLocked,
         action: () => onExecute(result),
       });
     }
@@ -595,6 +603,7 @@ export function buildClipContextMenu(
         label: 'Ripple delete',
         icon: TrashIcon,
         shortcut: 'Menu action',
+        disabled: trackLocked,
         action: () => onExecute(result),
       });
     }

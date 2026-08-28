@@ -1,13 +1,13 @@
 /**
  * Semantic Project Snapshot V1 - Implementation
  * WP-37 S1: Semantic Project Intelligence and Critique
- * 
+ *
  * This file contains the pure implementation functions.
  * Keep it separate from types for easier maintenance.
  */
 
 import type { TimeUs } from './time.js';
-import type { CompositionId, TrackId } from './model.js';
+import type { CompositionId } from './model.js';
 import type {
   JoyProjectV1,
   CompositionV1,
@@ -15,10 +15,7 @@ import type {
   ClipV1,
   AssetRecordV1,
   MarkerV1,
-  VisualObjectV1,
   CaptionDocumentV1,
-  VideoClipV1,
-  CompositionClipV1,
 } from './v1.js';
 import type {
   ProjectRevisionId,
@@ -28,21 +25,17 @@ import type {
   AssetSummaryV1,
   BrandSummaryV1,
   TimelineSummaryV1,
-  SnapshotTruncationV1,
   SnapshotWarningV1,
   SnapshotOptions,
   SnapshotValidationResult,
   EvidenceRefV1,
-  ScenePurposeV1,
   VisualCoverageV1,
-  CaptionCoverageV1,
 } from './semantic-snapshot.js';
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-const DEFAULT_MAX_BYTES = 8192;
 const DEFAULT_MAX_SCENES = 20;
 const DEFAULT_MAX_ASSETS = 50;
 const DEFAULT_MAX_CLIP_PER_SCENE = 10;
@@ -76,7 +69,7 @@ export function looksLikePathOrUrl(value: string): boolean {
     /^gs:\/\//,
     /^az:\/\//,
   ];
-  return pathPatterns.some(pattern => pattern.test(value));
+  return pathPatterns.some((pattern) => pattern.test(value));
 }
 
 /** Check if a string looks like a credential or secret */
@@ -93,7 +86,7 @@ export function looksLikeSecret(value: string): boolean {
     /token\s*[=:]\s*/i,
     /api[_-]?key\s*[=:]\s*/i,
   ];
-  return secretPatterns.some(pattern => pattern.test(value));
+  return secretPatterns.some((pattern) => pattern.test(value));
 }
 
 /** Check if a value contains any forbidden path/secret-like strings */
@@ -102,7 +95,7 @@ export function containsForbiddenData(obj: unknown): boolean {
     return false;
   }
   if (Array.isArray(obj)) {
-    return obj.some(item => containsForbiddenData(item));
+    return obj.some((item) => containsForbiddenData(item));
   }
   for (const [, value] of Object.entries(obj as Record<string, unknown>)) {
     if (typeof value === 'string') {
@@ -141,7 +134,10 @@ function getExplicitSceneMarkers(
   if (boundaries.length === 0 || boundaries[0]!.timeUs > 0) {
     boundaries.unshift({ timeUs: 0, source: 'composition', refId: 'start' });
   }
-  if (boundaries.length === 0 || boundaries[boundaries.length - 1]!.timeUs < compositionDurationUs) {
+  if (
+    boundaries.length === 0 ||
+    boundaries[boundaries.length - 1]!.timeUs < compositionDurationUs
+  ) {
     boundaries.push({ timeUs: compositionDurationUs, source: 'composition', refId: 'end' });
   }
   return boundaries.sort((a, b) => a.timeUs - b.timeUs);
@@ -164,9 +160,13 @@ function getCutBoundaries(
       }
     }
   }
-  const boundaries: SceneBoundary[] = Array.from(cutTimes).map(t => ({ timeUs: t, source: 'cut' }));
+  const boundaries: SceneBoundary[] = Array.from(cutTimes).map((t) => ({
+    timeUs: t,
+    source: 'cut',
+  }));
   if (!cutTimes.has(0)) boundaries.push({ timeUs: 0, source: 'composition' });
-  if (!cutTimes.has(compositionDurationUs)) boundaries.push({ timeUs: compositionDurationUs, source: 'composition' });
+  if (!cutTimes.has(compositionDurationUs))
+    boundaries.push({ timeUs: compositionDurationUs, source: 'composition' });
   return boundaries.sort((a, b) => a.timeUs - b.timeUs);
 }
 
@@ -235,12 +235,14 @@ function createScenesFromBreakpoints(
     const endUs = breakpoints[i + 1]!;
     const durationUs = endUs - startUs;
     if (durationUs > 0) {
-      const evidence: EvidenceRefV1[] = [{
-        id: compositionId,
-        kind: 'composition',
-        startUs,
-        endUs,
-      }];
+      const evidence: EvidenceRefV1[] = [
+        {
+          id: compositionId,
+          kind: 'composition',
+          startUs,
+          endUs,
+        },
+      ];
       scenes.push({
         id: `scene-${compositionId}-${i}`,
         startUs,
@@ -267,7 +269,12 @@ export function segmentCompositionIntoScenes(
   const cutBoundaries = getCutBoundaries(composition.tracks, compositionDurationUs);
   const gapBoundaries = getGapBoundaries(composition.tracks, compositionDurationUs);
   const captionBoundaries = getCaptionBoundaries(captionDocuments);
-  const boundaryArrays: readonly SceneBoundary[][] = [markerBoundaries, cutBoundaries, gapBoundaries, captionBoundaries];
+  const boundaryArrays: readonly SceneBoundary[][] = [
+    markerBoundaries,
+    cutBoundaries,
+    gapBoundaries,
+    captionBoundaries,
+  ];
   const breakpoints = mergeBoundaries(...boundaryArrays);
   if (breakpoints.length === 0) {
     breakpoints.push(0, compositionDurationUs);
@@ -290,12 +297,13 @@ export function segmentCompositionIntoScenes(
 
 function clipKindToSemanticKind(clip: ClipV1): SemanticElementSummaryV1['kind'] {
   switch (clip.kind) {
-    case 'video': return 'video-clip';
-    case 'composition': return 'composition-clip';
-    case 'caption': return 'caption-clip';
-    default: 
-      // Ensure we handle all ClipV1 kinds
-      const _exhaustiveCheck: never = clip;
+    case 'video':
+      return 'video-clip';
+    case 'composition':
+      return 'composition-clip';
+    case 'caption':
+      return 'caption-clip';
+    default:
       return 'unknown';
   }
 }
@@ -363,13 +371,24 @@ function createAssetSummaries(
     const hasProvenance = asset.generationProvenance !== undefined;
     const warnings: SnapshotWarningV1[] = [];
     if (!asset.displayName || asset.displayName.length === 0) {
-      warnings.push({ code: 'unavailable-asset', severity: 'warning', message: `Asset ${id} has no display name` });
+      warnings.push({
+        code: 'unavailable-asset',
+        severity: 'warning',
+        message: `Asset ${id} has no display name`,
+      });
     }
     let kind: AssetSummaryV1['kind'];
     switch (asset.kind) {
-      case 'video': case 'audio': case 'image': kind = asset.kind; break;
-      case 'lut': kind = 'lutt'; break;
-      default: kind = 'unknown';
+      case 'video':
+      case 'audio':
+      case 'image':
+        kind = asset.kind;
+        break;
+      case 'lut':
+        kind = 'lutt';
+        break;
+      default:
+        kind = 'unknown';
     }
     let summary: AssetSummaryV1 = {
       id,
@@ -393,14 +412,13 @@ function createAssetSummaries(
   return summaries;
 }
 
-function createBrandSummary(
-  variables: Readonly<Record<string, unknown>>,
-): BrandSummaryV1 {
+function createBrandSummary(variables: Readonly<Record<string, unknown>>): BrandSummaryV1 {
   const warnings: SnapshotWarningV1[] = [];
-  const hasBrandKit = Object.keys(variables).some(k => 
-    k.toLowerCase().includes('brand') || 
-    k.toLowerCase().includes('color') ||
-    k.toLowerCase().includes('font')
+  const hasBrandKit = Object.keys(variables).some(
+    (k) =>
+      k.toLowerCase().includes('brand') ||
+      k.toLowerCase().includes('color') ||
+      k.toLowerCase().includes('font'),
   );
   if (!hasBrandKit) {
     warnings.push({ code: 'missing-brand', severity: 'info', message: 'No brand kit data found' });
@@ -457,9 +475,7 @@ function createTimelineSummary(
 // Validation
 // ============================================================================
 
-export function validateSemanticProjectSnapshot(
-  snapshot: unknown,
-): SnapshotValidationResult {
+export function validateSemanticProjectSnapshot(snapshot: unknown): SnapshotValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
   if (!snapshot || typeof snapshot !== 'object') {
@@ -484,9 +500,11 @@ export function validateSemanticProjectSnapshot(
     if (!s.composition.durationUs || typeof s.composition.durationUs !== 'number') {
       errors.push('composition.durationUs must be a number');
     }
-    if (!s.composition.frameRate || 
-        typeof s.composition.frameRate.num !== 'number' || 
-        typeof s.composition.frameRate.den !== 'number') {
+    if (
+      !s.composition.frameRate ||
+      typeof s.composition.frameRate.num !== 'number' ||
+      typeof s.composition.frameRate.den !== 'number'
+    ) {
       errors.push('composition.frameRate must have num and den as numbers');
     }
     if (!s.composition.width || typeof s.composition.width !== 'number') {
@@ -522,7 +540,11 @@ export function validateSemanticProjectSnapshot(
   if (containsForbiddenData(snapshot)) {
     errors.push('Snapshot contains forbidden path/secret data');
   }
-  return { valid: errors.length === 0, errors: errors as readonly string[], warnings: warnings as readonly string[] };
+  return {
+    valid: errors.length === 0,
+    errors: errors as readonly string[],
+    warnings: warnings as readonly string[],
+  };
 }
 
 // ============================================================================
@@ -538,17 +560,19 @@ export function projectToSemanticSnapshot(
   const maxScenes = options?.maxScenes ?? DEFAULT_MAX_SCENES;
   const maxAssets = options?.maxAssets ?? DEFAULT_MAX_ASSETS;
   const maxClipsPerScene = options?.maxClipsPerScene ?? DEFAULT_MAX_CLIP_PER_SCENE;
-  
+
   const rootComposition = project.compositions[project.rootCompositionId];
   if (!rootComposition) {
     throw new Error(`Root composition ${project.rootCompositionId} not found`);
   }
-  
+
   const allTracks: TrackV1[] = [...rootComposition.tracks];
   const allMarkers = [...project.markers];
-  
-  let scenes = segmentCompositionIntoScenes(rootComposition, project.captionDocuments, allMarkers, { maxScenes });
-  
+
+  let scenes = segmentCompositionIntoScenes(rootComposition, project.captionDocuments, allMarkers, {
+    maxScenes,
+  });
+
   // Add elements to scenes
   for (let i = 0; i < scenes.length; i++) {
     const scene = scenes[i]!;
@@ -563,18 +587,23 @@ export function projectToSemanticSnapshot(
         }
       }
     }
-    const elements = createClipElements(sceneClips.slice(0, maxClipsPerScene), project.assets, maxClipsPerScene);
-    const visualElements = elements.filter(e => e.hasVisual);
-    const visualCoverage: VisualCoverageV1 = visualElements.length === 0
-      ? 'none'
-      : visualElements.length < 3
-        ? 'sparse'
-        : visualElements.length >= 10
-          ? 'dense'
-          : 'adequate';
+    const elements = createClipElements(
+      sceneClips.slice(0, maxClipsPerScene),
+      project.assets,
+      maxClipsPerScene,
+    );
+    const visualElements = elements.filter((e) => e.hasVisual);
+    const visualCoverage: VisualCoverageV1 =
+      visualElements.length === 0
+        ? 'none'
+        : visualElements.length < 3
+          ? 'sparse'
+          : visualElements.length >= 10
+            ? 'dense'
+            : 'adequate';
     scenes[i] = { ...scene, elements, visualCoverage };
   }
-  
+
   // Add caption coverage
   if (Object.keys(project.captionDocuments).length > 0) {
     let totalWordCount = 0;
@@ -583,27 +612,31 @@ export function projectToSemanticSnapshot(
       totalWordCount += doc.words ? Object.keys(doc.words).length : 0;
       if (doc.language) firstLocale = doc.language;
     }
-    scenes = scenes.map(s => ({
+    scenes = scenes.map((s) => ({
       ...s,
       captionCoverage: { hasCaptions: true, wordCount: totalWordCount, locale: firstLocale },
     }));
   }
-  
+
   const assets = createAssetSummaries(project.assets, maxAssets);
   const timeline = createTimelineSummary(rootComposition, allTracks);
   const brand = createBrandSummary(project.variables);
-  
+
   const totalAssets = Object.keys(project.assets).length;
   const totalClips = allTracks.reduce((sum, track) => sum + track.clips.length, 0);
-  const elementsPerScene = scenes.map(s => s.elements.length);
+  const elementsPerScene = scenes.map((s) => s.elements.length);
   const totalElementsInScenes = elementsPerScene.reduce((a, b) => a + b, 0);
   const estimatedSize = JSON.stringify({ scenes, assets, timeline, brand }).length;
-  
+
   const warnings: SnapshotWarningV1[] = [];
   if (assets.length < totalAssets) {
-    warnings.push({ code: 'truncated', severity: 'info', message: `Asset count truncated from ${totalAssets} to ${maxAssets}` });
+    warnings.push({
+      code: 'truncated',
+      severity: 'info',
+      message: `Asset count truncated from ${totalAssets} to ${maxAssets}`,
+    });
   }
-  
+
   const snapshot: SemanticProjectSnapshotV1 = {
     schemaVersion: 1,
     projectId: project.id,
@@ -623,9 +656,10 @@ export function projectToSemanticSnapshot(
     capabilities: {
       'semantic-snapshot': 'ready',
       'scene-segmentation': 'ready',
-      'caption-detection': Object.keys(project.captionDocuments).length > 0 ? 'ready' : 'unavailable',
+      'caption-detection':
+        Object.keys(project.captionDocuments).length > 0 ? 'ready' : 'unavailable',
       'audio-analysis': project.audio !== undefined ? 'ready' : 'unavailable',
-      'generated-assets': assets.some(a => a.isGenerated) ? 'ready' : 'unavailable',
+      'generated-assets': assets.some((a) => a.isGenerated) ? 'ready' : 'unavailable',
     },
     warnings,
     truncation: {
@@ -636,10 +670,10 @@ export function projectToSemanticSnapshot(
       totalEstimateBytes: estimatedSize,
     },
   };
-  
+
   if (containsForbiddenData(snapshot)) {
     throw new Error('Snapshot contains forbidden path/secret data');
   }
-  
+
   return snapshot;
 }

@@ -34,9 +34,8 @@ describe('local upscaling runner', () => {
       'apps',
       'editor-web',
       'public',
-      'transitions',
-      'preview',
-      'zoom.png',
+      'assets',
+      '24_pixel.png',
     );
     const copyRunner = [
       "const fs=require('node:fs');",

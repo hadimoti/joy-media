@@ -8,7 +8,12 @@
 import { describe, it, expect } from 'vitest';
 
 import type { SemanticProjectSnapshotV1 } from '@joy-media/project-schema';
-import type { BrandReadinessV1, SceneCoverageV1, ProjectReadinessV1, IntelligenceRuleV1 } from '@joy-media/project-schema';
+import type {
+  BrandReadinessV1,
+  SceneCoverageV1,
+  ProjectReadinessV1,
+  IntelligenceRuleV1,
+} from '@joy-media/project-schema';
 
 import {
   createFakeModelAdapter,
@@ -234,17 +239,29 @@ describe('Model Adapter Modes', () => {
     const input = createInput();
     const result = adapter.createBrief(input);
     const unsafeStrings: string[] = [];
-    const addIfString = (s: unknown) => { if (typeof s === 'string') unsafeStrings.push(s); };
+    const addIfString = (s: unknown) => {
+      if (typeof s === 'string') unsafeStrings.push(s);
+    };
     addIfString(result.interpretedGoal.userIntent);
     addIfString(result.interpretedGoal.inferredGoal);
     addIfString(result.interpretedGoal.resolvedGoal);
-    result.distinction.facts.forEach(f => addIfString(f.statement));
-    result.assumptions.forEach(a => addIfString(a.statement));
-    result.recommendations.forEach(r => { addIfString(r.rationale); addIfString(r.expectedBenefit); });
-    const hasForbidden = unsafeStrings.some(s =>
-      s.includes('sk-') || s.includes('Bearer ') || s.includes('password') ||
-      s.includes('api_key') || s.includes('secret') || s.includes('exec:') ||
-      s.includes('rm -rf') || s.includes('s3://') || s.includes('https://')
+    result.distinction.facts.forEach((f) => addIfString(f.statement));
+    result.assumptions.forEach((a) => addIfString(a.statement));
+    result.recommendations.forEach((r) => {
+      addIfString(r.rationale);
+      addIfString(r.expectedBenefit);
+    });
+    const hasForbidden = unsafeStrings.some(
+      (s) =>
+        s.includes('sk-') ||
+        s.includes('Bearer ') ||
+        s.includes('password') ||
+        s.includes('api_key') ||
+        s.includes('secret') ||
+        s.includes('exec:') ||
+        s.includes('rm -rf') ||
+        s.includes('s3://') ||
+        s.includes('https://'),
     );
     expect(hasForbidden).toBe(true);
   });

@@ -5,6 +5,7 @@ import {
   type BrowserWorker,
 } from './control-plane-client.js';
 import { jobStateLabel, projectJobStatus, workerPresence } from './jobs-panel-state.js';
+import { BoundedPollingLoop } from './bounded-polling.js';
 import { CloseIcon, ImageIcon, PlusIcon, RefreshIcon } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
@@ -68,6 +69,7 @@ export function JobsPanel({
   const [pendingPairWorkerId, setPendingPairWorkerId] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const refreshSeqRef = useRef(0);
+  const pollingRef = useRef<BoundedPollingLoop | undefined>(undefined);
 
   useEffect(() => {
     if (review === undefined) {
@@ -79,7 +81,7 @@ export function JobsPanel({
     return () => URL.revokeObjectURL(url);
   }, [review]);
 
-  const refresh = useCallback(async () => {
+  const load = useCallback(async () => {
     const requestId = ++refreshSeqRef.current;
     try {
       const nextWorkers = await client.workers();
@@ -110,17 +112,28 @@ export function JobsPanel({
     } catch (error) {
       if (requestId !== refreshSeqRef.current) return;
       setConnectionStatus(`Not connected or not signed in: ${message(error)}`);
+      throw error;
     }
   }, [client, controlPlaneReady, projectId, projectInitialized, projectTitle]);
 
+  const refresh = useCallback(() => pollingRef.current?.refresh() ?? load(), [load]);
+
   useEffect(() => {
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), 2_000);
+    const polling = new BoundedPollingLoop(load);
+    pollingRef.current = polling;
+    const syncVisibility = () => {
+      void polling.setVisible(document.visibilityState === 'visible').catch(() => undefined);
+    };
+    document.addEventListener('visibilitychange', syncVisibility);
+    syncVisibility();
+    polling.start();
     return () => {
       refreshSeqRef.current += 1;
-      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', syncVisibility);
+      polling.stop();
+      if (pollingRef.current === polling) pollingRef.current = undefined;
     };
-  }, [refresh]);
+  }, [load]);
 
   const sortedWorkers = useMemo(() => {
     return [...workers].sort((left, right) => {
@@ -384,7 +397,7 @@ export function JobsPanel({
             aria-label="Refresh jobs"
             title="Refresh"
             data-guide="Refresh"
-            onClick={() => void refresh()}
+            onClick={() => void refresh().catch(report)}
           >
             <RefreshIcon />
           </button>

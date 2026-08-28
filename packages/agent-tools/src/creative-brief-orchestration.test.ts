@@ -21,10 +21,7 @@ import {
   DEFAULT_DETERMINISTIC_CLOCK,
   verifyPersianPreservation,
 } from './creative-brief.js';
-import type {
-  CreativeBriefV1,
-  CreativeBriefRequestV1,
-} from './creative-brief.js';
+import type { CreativeBriefV1, CreativeBriefRequestV1 } from './creative-brief.js';
 import {
   createValidFakeAdapter,
   createMalformedFakeAdapter,
@@ -222,7 +219,10 @@ function createValidInput(
     sceneCoverages: [
       { ...MINIMAL_SCENE_COVERAGE, ...overrides.sceneCoverages?.[0] } as SceneCoverageV1,
     ],
-    projectReadiness: { ...MINIMAL_PROJECT_READINESS, ...overrides.projectReadiness } as ProjectReadinessV1,
+    projectReadiness: {
+      ...MINIMAL_PROJECT_READINESS,
+      ...overrides.projectReadiness,
+    } as ProjectReadinessV1,
     rules: [...MINIMAL_RULES, ...(overrides.rules ?? [])] as const,
   };
 }
@@ -236,12 +236,16 @@ describe('createCreativeBrief Orchestration', () => {
     it('produces a valid CreativeBriefV1 with valid adapter', () => {
       const { snapshot, request, brandReadiness, sceneCoverages, projectReadiness, rules } =
         createValidInput();
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, request);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        request,
+      );
 
       const adapter = createValidFakeAdapter();
       const result = createCreativeBrief(input, adapter);
@@ -265,12 +269,16 @@ describe('createCreativeBrief Orchestration', () => {
     it('uses injected clock for deterministic timestamps', () => {
       const { snapshot, request, brandReadiness, sceneCoverages, projectReadiness, rules } =
         createValidInput();
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, request);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        request,
+      );
 
       const customClock = () => '2026-01-01T12:00:00.000Z' as const;
       const adapter = createValidFakeAdapter();
@@ -282,12 +290,16 @@ describe('createCreativeBrief Orchestration', () => {
     it('uses default deterministic clock when no clock provided', () => {
       const { snapshot, request, brandReadiness, sceneCoverages, projectReadiness, rules } =
         createValidInput();
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, request);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        request,
+      );
 
       const adapter = createValidFakeAdapter();
       const result = createCreativeBrief(input, adapter);
@@ -304,12 +316,16 @@ describe('createCreativeBrief Orchestration', () => {
     it('produces identical outputs for identical inputs', () => {
       const { snapshot, request, brandReadiness, sceneCoverages, projectReadiness, rules } =
         createValidInput();
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, request);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        request,
+      );
 
       const adapter = createValidFakeAdapter(42);
 
@@ -322,12 +338,16 @@ describe('createCreativeBrief Orchestration', () => {
     it('produces identical outputs with same seed across different adapter instances', () => {
       const { snapshot, request, brandReadiness, sceneCoverages, projectReadiness, rules } =
         createValidInput();
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, request);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        request,
+      );
 
       const adapter1 = createValidFakeAdapter(42);
       const adapter2 = createValidFakeAdapter(42);
@@ -341,12 +361,16 @@ describe('createCreativeBrief Orchestration', () => {
     it('uses adapter processingTimeMs in meta', () => {
       const { snapshot, request, brandReadiness, sceneCoverages, projectReadiness, rules } =
         createValidInput();
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, request);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        request,
+      );
 
       const adapter = createValidFakeAdapter(42);
       // The fake adapter has processingTimeMs: 10 by default
@@ -364,12 +388,16 @@ describe('createCreativeBrief Orchestration', () => {
     it('does not mutate the input snapshot', () => {
       const { snapshot, request, brandReadiness, sceneCoverages, projectReadiness, rules } =
         createValidInput();
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, request);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        request,
+      );
 
       // Deep clone the snapshot to compare
       const snapshotClone = JSON.parse(JSON.stringify(snapshot));
@@ -385,12 +413,16 @@ describe('createCreativeBrief Orchestration', () => {
       const { snapshot, request, brandReadiness, sceneCoverages, projectReadiness, rules } =
         createValidInput();
       const requestClone = { ...request };
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, request);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        request,
+      );
 
       const adapter = createValidFakeAdapter();
       createCreativeBrief(input, adapter);
@@ -435,12 +467,16 @@ describe('createCreativeBrief Orchestration', () => {
         snapshotRevisionId: 'rev-999',
       };
 
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, mismatchedRequest);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        mismatchedRequest,
+      );
 
       const adapter = createValidFakeAdapter();
 
@@ -459,12 +495,16 @@ describe('createCreativeBrief Orchestration', () => {
         projectId: 'wrong-project',
       };
 
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, mismatchedRequest);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        mismatchedRequest,
+      );
 
       const adapter = createValidFakeAdapter();
 
@@ -483,12 +523,16 @@ describe('createCreativeBrief Orchestration', () => {
         projectId: 'wrong-project',
       };
 
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, mismatchedRequest);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        mismatchedRequest,
+      );
 
       const adapter = createValidFakeAdapter();
 
@@ -507,12 +551,16 @@ describe('createCreativeBrief Orchestration', () => {
     it('rejects malformed adapter output', () => {
       const { snapshot, request, brandReadiness, sceneCoverages, projectReadiness, rules } =
         createValidInput();
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, request);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        request,
+      );
 
       const adapter = createMalformedFakeAdapter();
 
@@ -526,18 +574,24 @@ describe('createCreativeBrief Orchestration', () => {
     it('rejects unsafe adapter output with forbidden patterns', () => {
       const { snapshot, request, brandReadiness, sceneCoverages, projectReadiness, rules } =
         createValidInput();
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, request);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        request,
+      );
 
       const adapter = createUnsafeFakeAdapter();
 
       // Unsafe adapter returns output with forbidden patterns (secrets, URLs)
       // Our validation should catch this
-      expect(() => createCreativeBrief(input, adapter)).toThrow(/Model adapter output contains forbidden patterns/);
+      expect(() => createCreativeBrief(input, adapter)).toThrow(
+        /Model adapter output contains forbidden patterns/,
+      );
     });
 
     it('accepts excessive adapter output but validates it', () => {
@@ -545,29 +599,39 @@ describe('createCreativeBrief Orchestration', () => {
       // The final validation will check array lengths
       const { snapshot, request, brandReadiness, sceneCoverages, projectReadiness, rules } =
         createValidInput();
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, request);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        request,
+      );
 
       const adapter = createExcessiveFakeAdapter();
 
       // This should throw due to excessive recommendations (> 20)
       // The error comes from final validation, not from adapter output validation
-      expect(() => createCreativeBrief(input, adapter)).toThrow(/recommendations count must be <= 20/);
+      expect(() => createCreativeBrief(input, adapter)).toThrow(
+        /recommendations count must be <= 20/,
+      );
     });
 
     it('rejects empty adapter output with invalid fields', () => {
       const { snapshot, request, brandReadiness, sceneCoverages, projectReadiness, rules } =
         createValidInput();
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, request);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        request,
+      );
 
       const adapter = createEmptyFakeAdapter();
 
@@ -581,12 +645,16 @@ describe('createCreativeBrief Orchestration', () => {
     it('rejects failure adapter mode', () => {
       const { snapshot, request, brandReadiness, sceneCoverages, projectReadiness, rules } =
         createValidInput();
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, request);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        request,
+      );
 
       const adapter = createFailureFakeAdapter();
 
@@ -606,12 +674,16 @@ describe('createCreativeBrief Orchestration', () => {
             request: 'ویدئو من را برای اینستاگرام بهتر کنید',
           },
         });
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, request);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        request,
+      );
 
       const adapter = createValidFakeAdapter();
       const result = createCreativeBrief(input, adapter);
@@ -627,12 +699,16 @@ describe('createCreativeBrief Orchestration', () => {
             request: 'لطفا ویدئو را ویرایش کنید',
           },
         });
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, request);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        request,
+      );
 
       const adapter = createValidFakeAdapter();
       const result = createCreativeBrief(input, adapter);
@@ -690,19 +766,23 @@ describe('createCreativeBrief Orchestration', () => {
         }),
       };
 
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, request);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        request,
+      );
 
       // The evidence validation happens and should add warnings
       // But it doesn't throw - it adds error warnings
       const result = createCreativeBrief(input, invalidEvidenceAdapter);
 
       // Check that invalid evidence was detected and added as warnings
-      expect(result.warnings.some(w => w.code === 'invalid-evidence-reference')).toBe(true);
+      expect(result.warnings.some((w) => w.code === 'invalid-evidence-reference')).toBe(true);
     });
 
     it('rejects evidence that fails validation in final brief', () => {
@@ -734,12 +814,16 @@ describe('createCreativeBrief Orchestration', () => {
         }),
       };
 
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, request);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        request,
+      );
 
       // This should fail during adapter output validation
       expect(() => createCreativeBrief(input, invalidFinalAdapter)).toThrow(
@@ -756,12 +840,16 @@ describe('createCreativeBrief Orchestration', () => {
     it('returns only CreativeBriefV1, never other types', () => {
       const { snapshot, request, brandReadiness, sceneCoverages, projectReadiness, rules } =
         createValidInput();
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, request);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        request,
+      );
 
       const adapter = createValidFakeAdapter();
       const result = createCreativeBrief(input, adapter);
@@ -791,12 +879,16 @@ describe('createCreativeBrief Orchestration', () => {
     it('does not include command payloads, approvals, jobs, or mutations', () => {
       const { snapshot, request, brandReadiness, sceneCoverages, projectReadiness, rules } =
         createValidInput();
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, request);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        request,
+      );
 
       const adapter = createValidFakeAdapter();
       const result = createCreativeBrief(input, adapter);
@@ -837,12 +929,16 @@ describe('createCreativeBrief Orchestration', () => {
         scope: 'pacing',
       };
 
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, invalidRequest);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        invalidRequest,
+      );
 
       const adapter = createValidFakeAdapter();
 
@@ -860,12 +956,16 @@ describe('createCreativeBrief Orchestration', () => {
         scope: 'invalid-scope' as never, // Cast to never to bypass TS
       };
 
-      const input = createCreativeBriefInput(snapshot, {
-        brandReadiness,
-        sceneCoverages,
-        projectReadiness,
-        rules,
-      }, invalidRequest);
+      const input = createCreativeBriefInput(
+        snapshot,
+        {
+          brandReadiness,
+          sceneCoverages,
+          projectReadiness,
+          rules,
+        },
+        invalidRequest,
+      );
 
       const adapter = createValidFakeAdapter();
 

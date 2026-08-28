@@ -377,13 +377,23 @@ describe('PostgresControlPlane', () => {
 
     // Enable opt-in
     const project = controlPlane.createProject(owner, 'opt-in-project-2', 'OptIn Project 2');
-    const enabled = controlPlane.setCreativeBriefOptIn(owner, 'opt-in-project-2', true, project.revision);
+    const enabled = controlPlane.setCreativeBriefOptIn(
+      owner,
+      'opt-in-project-2',
+      true,
+      project.revision,
+    );
     expect(enabled.creativeBriefOptIn).toBe(true);
     expect(enabled.revision).toBe(project.revision + 1);
     expect(controlPlane.getCreativeBriefOptIn(owner, 'opt-in-project-2')).toBe(true);
 
     // Disable opt-in
-    const disabled = controlPlane.setCreativeBriefOptIn(owner, 'opt-in-project-2', false, enabled.revision);
+    const disabled = controlPlane.setCreativeBriefOptIn(
+      owner,
+      'opt-in-project-2',
+      false,
+      enabled.revision,
+    );
     expect(disabled.creativeBriefOptIn).toBe(false);
     expect(disabled.revision).toBe(enabled.revision + 1);
     expect(controlPlane.getCreativeBriefOptIn(owner, 'opt-in-project-2')).toBe(false);
@@ -394,9 +404,9 @@ describe('PostgresControlPlane', () => {
     ).toThrow(expect.objectContaining({ code: 'PROJECT_NOT_FOUND' }));
 
     // Revision conflict
-    expect(() =>
-      controlPlane.setCreativeBriefOptIn(owner, 'opt-in-project-2', true, 0),
-    ).toThrow(expect.objectContaining({ code: 'REVISION_CONFLICT' }));
+    expect(() => controlPlane.setCreativeBriefOptIn(owner, 'opt-in-project-2', true, 0)).toThrow(
+      expect.objectContaining({ code: 'REVISION_CONFLICT' }),
+    );
 
     // Unknown project
     expect(() => controlPlane.getCreativeBriefOptIn(owner, 'unknown-project')).toThrow(
@@ -440,9 +450,7 @@ describe('PostgresControlPlane', () => {
 
     expect(enabled.creativeBriefOptIn).toBe(true);
     expect(enabled.revision).toBe(created.revision + 1);
-    await expect(
-      controlPlane.getCreativeBriefOptIn(owner, created.id),
-    ).resolves.toBe(true);
+    await expect(controlPlane.getCreativeBriefOptIn(owner, created.id)).resolves.toBe(true);
     await pool.end();
   });
 });
@@ -650,7 +658,16 @@ describe('PostgresControlPlane project document storage - reads', () => {
        VALUES
        ($1, $2, $3, $4, NOW()),
        ($5, $6, $7, $8, NOW())`,
-      [projectId, revisionId1, 1, JSON.stringify(doc1), projectId, revisionId2, 1, JSON.stringify(doc2)],
+      [
+        projectId,
+        revisionId1,
+        1,
+        JSON.stringify(doc1),
+        projectId,
+        revisionId2,
+        1,
+        JSON.stringify(doc2),
+      ],
     );
 
     const result = await api.readProjectDocument(owner, projectId, revisionId1);
@@ -799,8 +816,18 @@ describe('PostgresControlPlane project document storage - reads', () => {
        VALUES
        ($1, $2, $3, $4, $5),
        ($6, $7, $8, $9, $10)`,
-      [projectId, revisionId1, 1, JSON.stringify(doc1), new Date(Date.now() - 3600000).toISOString(),
-       projectId, revisionId2, 1, JSON.stringify(doc2), new Date().toISOString()],
+      [
+        projectId,
+        revisionId1,
+        1,
+        JSON.stringify(doc1),
+        new Date(Date.now() - 3600000).toISOString(),
+        projectId,
+        revisionId2,
+        1,
+        JSON.stringify(doc2),
+        new Date().toISOString(),
+      ],
     );
 
     const result = await api.listProjectRevisions(owner, projectId);
@@ -866,12 +893,16 @@ describe('PostgresControlPlane project document storage - writes', () => {
     );
 
     const doc = createValidDocument('Initial');
-    const result = await api.writeProjectDocument(owner, {
-      projectId,
-      ownerId: owner.id,
-      revisionId: revisionId1,
-      document: doc,
-    }, '');
+    const result = await api.writeProjectDocument(
+      owner,
+      {
+        projectId,
+        ownerId: owner.id,
+        revisionId: revisionId1,
+        document: doc,
+      },
+      '',
+    );
 
     expect(result.kind).toBe('stored');
     if (result.kind === 'stored') {
@@ -894,9 +925,10 @@ describe('PostgresControlPlane project document storage - writes', () => {
       [projectId, revisionId1],
     );
     expect(docResult.rows.length).toBe(1);
-    const storedDoc = typeof docResult.rows[0]!.document === 'string'
-      ? JSON.parse(docResult.rows[0]!.document)
-      : docResult.rows[0]!.document;
+    const storedDoc =
+      typeof docResult.rows[0]!.document === 'string'
+        ? JSON.parse(docResult.rows[0]!.document)
+        : docResult.rows[0]!.document;
     expect((storedDoc as any).title).toBe('Initial');
 
     await pool.end();
@@ -923,12 +955,16 @@ describe('PostgresControlPlane project document storage - writes', () => {
     );
 
     const doc2 = createValidDocument('Version 2');
-    const result = await api.writeProjectDocument(owner, {
-      projectId,
-      ownerId: owner.id,
-      revisionId: revisionId2,
-      document: doc2,
-    }, revisionId1);
+    const result = await api.writeProjectDocument(
+      owner,
+      {
+        projectId,
+        ownerId: owner.id,
+        revisionId: revisionId2,
+        document: doc2,
+      },
+      revisionId1,
+    );
 
     expect(result.kind).toBe('stored');
     if (result.kind === 'stored') {
@@ -974,12 +1010,16 @@ describe('PostgresControlPlane project document storage - writes', () => {
     );
 
     const doc2 = createValidDocument('Version 2');
-    const result = await api.writeProjectDocument(owner, {
-      projectId,
-      ownerId: owner.id,
-      revisionId: revisionId2,
-      document: doc2,
-    }, 'wrong-base-revision');
+    const result = await api.writeProjectDocument(
+      owner,
+      {
+        projectId,
+        ownerId: owner.id,
+        revisionId: revisionId2,
+        document: doc2,
+      },
+      'wrong-base-revision',
+    );
 
     expect(result.kind).toBe('revision-conflict');
     if (result.kind === 'revision-conflict') {
@@ -1007,12 +1047,16 @@ describe('PostgresControlPlane project document storage - writes', () => {
     await api.initialize();
 
     const doc = createValidDocument('Test');
-    const result = await api.writeProjectDocument(owner, {
-      projectId: 'unknown-project',
-      ownerId: owner.id,
-      revisionId: revisionId1,
-      document: doc,
-    }, '');
+    const result = await api.writeProjectDocument(
+      owner,
+      {
+        projectId: 'unknown-project',
+        ownerId: owner.id,
+        revisionId: revisionId1,
+        document: doc,
+      },
+      '',
+    );
 
     expect(result.kind).toBe('not-found');
     if (result.kind === 'not-found') {
@@ -1037,12 +1081,16 @@ describe('PostgresControlPlane project document storage - writes', () => {
     );
 
     const doc = createValidDocument('Test');
-    const result = await api.writeProjectDocument(otherOwner, {
-      projectId,
-      ownerId: otherOwner.id,
-      revisionId: revisionId1,
-      document: doc,
-    }, '');
+    const result = await api.writeProjectDocument(
+      otherOwner,
+      {
+        projectId,
+        ownerId: otherOwner.id,
+        revisionId: revisionId1,
+        document: doc,
+      },
+      '',
+    );
 
     expect(result.kind).toBe('owner-denied');
     if (result.kind === 'owner-denied') {
@@ -1076,12 +1124,16 @@ describe('PostgresControlPlane project document storage - writes', () => {
     );
 
     const doc = createValidDocument('Test');
-    const result = await api.writeProjectDocument(owner, {
-      projectId,
-      ownerId: otherOwner.id, // Mismatch!
-      revisionId: revisionId1,
-      document: doc,
-    }, '');
+    const result = await api.writeProjectDocument(
+      owner,
+      {
+        projectId,
+        ownerId: otherOwner.id, // Mismatch!
+        revisionId: revisionId1,
+        document: doc,
+      },
+      '',
+    );
 
     expect(result.kind).toBe('owner-denied');
     if (result.kind === 'owner-denied') {
@@ -1108,12 +1160,16 @@ describe('PostgresControlPlane project document storage - writes', () => {
     );
 
     // Invalid document (empty object)
-    const result = await api.writeProjectDocument(owner, {
-      projectId,
-      ownerId: owner.id,
-      revisionId: revisionId1,
-      document: {},
-    }, '');
+    const result = await api.writeProjectDocument(
+      owner,
+      {
+        projectId,
+        ownerId: owner.id,
+        revisionId: revisionId1,
+        document: {},
+      },
+      '',
+    );
 
     expect(result.kind).toBe('invalid-document');
     if (result.kind === 'invalid-document') {
@@ -1147,12 +1203,16 @@ describe('PostgresControlPlane project document storage - writes', () => {
     );
 
     const doc = createValidDocument('Test');
-    const result = await api.writeProjectDocument(owner, {
-      projectId: maliciousProjectId,
-      ownerId: owner.id,
-      revisionId: revisionId1,
-      document: doc,
-    }, '');
+    const result = await api.writeProjectDocument(
+      owner,
+      {
+        projectId: maliciousProjectId,
+        ownerId: owner.id,
+        revisionId: revisionId1,
+        document: doc,
+      },
+      '',
+    );
 
     expect(result.kind).toBe('stored');
 
@@ -1183,21 +1243,29 @@ describe('PostgresControlPlane project document storage - writes', () => {
 
     // Write first revision
     const doc1 = createValidDocument('Version 1');
-    await api.writeProjectDocument(owner, {
-      projectId,
-      ownerId: owner.id,
-      revisionId: revisionId1,
-      document: doc1,
-    }, '');
+    await api.writeProjectDocument(
+      owner,
+      {
+        projectId,
+        ownerId: owner.id,
+        revisionId: revisionId1,
+        document: doc1,
+      },
+      '',
+    );
 
     // Write second revision
     const doc2 = createValidDocument('Version 2');
-    await api.writeProjectDocument(owner, {
-      projectId,
-      ownerId: owner.id,
-      revisionId: revisionId2,
-      document: doc2,
-    }, revisionId1);
+    await api.writeProjectDocument(
+      owner,
+      {
+        projectId,
+        ownerId: owner.id,
+        revisionId: revisionId2,
+        document: doc2,
+      },
+      revisionId1,
+    );
 
     // Read historical revision
     const result = await api.readProjectDocument(owner, projectId, revisionId1);
@@ -1230,21 +1298,29 @@ describe('PostgresControlPlane project document storage - writes', () => {
     const doc = createValidDocument('Test');
 
     // First write should succeed
-    const result1 = await api.writeProjectDocument(owner, {
-      projectId,
-      ownerId: owner.id,
-      revisionId: revisionId1,
-      document: doc,
-    }, '');
+    const result1 = await api.writeProjectDocument(
+      owner,
+      {
+        projectId,
+        ownerId: owner.id,
+        revisionId: revisionId1,
+        document: doc,
+      },
+      '',
+    );
     expect(result1.kind).toBe('stored');
 
     // Second write with same revision_id should fail
-    const result2 = await api.writeProjectDocument(owner, {
-      projectId,
-      ownerId: owner.id,
-      revisionId: revisionId1, // Same revision ID
-      document: doc,
-    }, revisionId1);
+    const result2 = await api.writeProjectDocument(
+      owner,
+      {
+        projectId,
+        ownerId: owner.id,
+        revisionId: revisionId1, // Same revision ID
+        document: doc,
+      },
+      revisionId1,
+    );
     expect(result2.kind).toBe('unavailable'); // PK violation causes unavailable
 
     // Head should still be revisionId1 (not updated to revisionId1 again, but the write failed)

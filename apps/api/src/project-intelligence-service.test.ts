@@ -4,7 +4,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { JoyProjectV1, ProjectRevisionId, SemanticProjectSnapshotV1 } from '@joy-media/project-schema';
+import type {
+  JoyProjectV1,
+  ProjectRevisionId,
+  SemanticProjectSnapshotV1,
+} from '@joy-media/project-schema';
 import type { Rational } from '@joy-media/project-schema';
 import { projectToSemanticSnapshot } from '@joy-media/project-schema';
 import { computeSemanticIntelligence, KNOWN_RULE_IDS } from '@joy-media/project-schema';
@@ -27,7 +31,17 @@ function createComposition(
   width: number = 1920,
   height: number = 1080,
   durationUs: number = 10_000_000,
-): { id: string; name: string; width: number; height: number; pixelAspectRatio: Rational; frameRate: Rational; durationUs: number; background: string; tracks: never[] } {
+): {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  pixelAspectRatio: Rational;
+  frameRate: Rational;
+  durationUs: number;
+  background: string;
+  tracks: never[];
+} {
   return {
     id,
     name: 'Test Composition',
@@ -203,9 +217,7 @@ describe('project-intelligence-service', () => {
       const service = new ProjectIntelligenceService();
       const snapshot = createMinimalSnapshot();
 
-      const results = Array.from({ length: 5 }, () =>
-        service.computeIntelligence(snapshot),
-      );
+      const results = Array.from({ length: 5 }, () => service.computeIntelligence(snapshot));
 
       const firstJson = JSON.stringify(results[0]);
       for (const result of results.slice(1)) {

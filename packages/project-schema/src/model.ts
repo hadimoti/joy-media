@@ -68,6 +68,8 @@ export interface Track {
   readonly enabled: boolean;
   /** Durable edit lock. Missing means unlocked for legacy documents. */
   readonly locked?: boolean;
+  /** Durable audio mute for every clip on this row. Missing means unmuted. */
+  readonly muted?: boolean;
   /** Optional persisted presentation token; omitted means the neutral theme. */
   readonly labelColor?: TimelineTrackLabelColor;
   readonly clips: readonly Clip[];
@@ -236,7 +238,17 @@ export function validateSpikeProject(project: SpikeProject): ProjectDiagnostic[]
         path: `compositions.${compId}.frameRate`,
       });
     }
+    const trackIds = new Set<string>();
+    const compositionClipIds = new Set<string>();
     for (const track of comp.tracks) {
+      if (trackIds.has(track.id)) {
+        diagnostics.push({
+          code: 'PROJECT_SCHEMA_DUPLICATE_TRACK_ID',
+          message: `duplicate track id "${track.id}" in composition "${compId}"`,
+          path: `compositions.${compId}.tracks.${track.id}`,
+        });
+      }
+      trackIds.add(track.id);
       if (!Number.isSafeInteger(track.order) || track.order < 0) {
         diagnostics.push({
           code: 'PROJECT_SCHEMA_BAD_TRACK_ORDER',
@@ -251,6 +263,13 @@ export function validateSpikeProject(project: SpikeProject): ProjectDiagnostic[]
           path: `compositions.${compId}.tracks.${track.id}.family`,
         });
       }
+      if (track.muted !== undefined && typeof track.muted !== 'boolean') {
+        diagnostics.push({
+          code: 'PROJECT_SCHEMA_BAD_TRACK_MUTE',
+          message: 'track muted flag must be boolean',
+          path: `compositions.${compId}.tracks.${track.id}.muted`,
+        });
+      }
       if (track.labelColor !== undefined && !isTimelineTrackLabelColor(track.labelColor)) {
         diagnostics.push({
           code: 'PROJECT_SCHEMA_BAD_TRACK_LABEL_COLOR',
@@ -260,6 +279,14 @@ export function validateSpikeProject(project: SpikeProject): ProjectDiagnostic[]
       }
       for (const clip of track.clips) {
         const path = `compositions.${compId}.tracks.${track.id}.clips.${clip.id}`;
+        if (compositionClipIds.has(clip.id)) {
+          diagnostics.push({
+            code: 'PROJECT_SCHEMA_DUPLICATE_CLIP_ID',
+            message: `duplicate clip id "${clip.id}" in composition "${compId}"`,
+            path,
+          });
+        }
+        compositionClipIds.add(clip.id);
         try {
           clipTimeRange(clip.startUs, clip.durationUs);
         } catch (error) {

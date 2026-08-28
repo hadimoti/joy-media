@@ -5,10 +5,26 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { UnavailableCreativeBriefRuntime, DEFAULT_CREATIVE_BRIEF_RUNTIME } from './creative-brief-runtime.js';
-import type { CreativeBriefRuntime, CreativeBriefRuntimeContext } from './creative-brief-runtime.js';
-import type { AsyncCreativeBriefOutcome, AsyncOutcomeCategory, CreativeBriefInputV1 } from '@joy-media/agent-tools';
-import type { SemanticProjectSnapshotV1, BrandReadinessV1, SceneCoverageV1, ProjectReadinessV1, IntelligenceRuleV1 } from '@joy-media/project-schema';
+import {
+  UnavailableCreativeBriefRuntime,
+  DEFAULT_CREATIVE_BRIEF_RUNTIME,
+} from './creative-brief-runtime.js';
+import type {
+  CreativeBriefRuntime,
+  CreativeBriefRuntimeContext,
+} from './creative-brief-runtime.js';
+import type {
+  AsyncCreativeBriefOutcome,
+  AsyncOutcomeCategory,
+  CreativeBriefInputV1,
+} from '@joy-media/agent-tools';
+import type {
+  SemanticProjectSnapshotV1,
+  BrandReadinessV1,
+  SceneCoverageV1,
+  ProjectReadinessV1,
+  IntelligenceRuleV1,
+} from '@joy-media/project-schema';
 
 const mockCreativeBriefInput: CreativeBriefInputV1 = {
   snapshot: {
@@ -16,14 +32,48 @@ const mockCreativeBriefInput: CreativeBriefInputV1 = {
     projectId: 'test-project-id',
     revisionId: 'test-revision-id',
     capturedAt: '2026-08-17T00:00:00.000Z',
-    composition: { durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9' },
-    brand: { hasBrandKit: false, colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], warnings: [] },
+    composition: {
+      durationUs: 1000000,
+      frameRate: { num: 30, den: 1 },
+      width: 1920,
+      height: 1080,
+      aspectRatio: '16:9',
+    },
+    brand: {
+      hasBrandKit: false,
+      colorsAvailable: false,
+      fontsAvailable: false,
+      logoAvailable: false,
+      voiceInstructionsAvailable: false,
+      toneInstructionsAvailable: false,
+      prohibitedClaims: [],
+      prohibitedEffects: [],
+      warnings: [],
+    },
     scenes: [],
-    timeline: { compositionId: 'comp-1', durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9', visualTrackCount: 1, audioTrackCount: 1, totalClipCount: 0, visualRowIds: [], audioRowIds: [] },
+    timeline: {
+      compositionId: 'comp-1',
+      durationUs: 1000000,
+      frameRate: { num: 30, den: 1 },
+      width: 1920,
+      height: 1080,
+      aspectRatio: '16:9',
+      visualTrackCount: 1,
+      audioTrackCount: 1,
+      totalClipCount: 0,
+      visualRowIds: [],
+      audioRowIds: [],
+    },
     assets: [],
     capabilities: {},
     warnings: [],
-    truncation: { clipsOmitted: 0, assetsOmitted: 0, visualObjectsOmitted: 0, scenesOmitted: 0, totalEstimateBytes: 0 },
+    truncation: {
+      clipsOmitted: 0,
+      assetsOmitted: 0,
+      visualObjectsOmitted: 0,
+      scenesOmitted: 0,
+      totalEstimateBytes: 0,
+    },
   },
   brandReadiness: {
     projectId: 'test-project-id',
@@ -68,7 +118,12 @@ const mockCreativeBriefInput: CreativeBriefInputV1 = {
     evidence: [],
   },
   rules: [],
-  request: { projectId: 'test-project-id', snapshotRevisionId: 'test-revision-id', request: 'test brief', scope: 'general' },
+  request: {
+    projectId: 'test-project-id',
+    snapshotRevisionId: 'test-revision-id',
+    request: 'test brief',
+    scope: 'general',
+  },
 };
 
 const mockRuntimeContext: CreativeBriefRuntimeContext = {
@@ -157,8 +212,12 @@ describe('CreativeBriefRuntime contract', () => {
 
   it('should propagate all failure categories', async () => {
     const categories: AsyncOutcomeCategory[] = [
-      'unavailable', 'policy-denied', 'invalid-output',
-      'provider-failed', 'timeout', 'cancelled',
+      'unavailable',
+      'policy-denied',
+      'invalid-output',
+      'provider-failed',
+      'timeout',
+      'cancelled',
     ];
 
     for (const category of categories) {

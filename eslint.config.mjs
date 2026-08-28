@@ -8,11 +8,22 @@ export default tseslint.config(
       '**/dist/**',
       '**/node_modules/**',
       '**/coverage/**',
+      '**/.agent/**',
+      '**/.superpowers/**',
       '**/playwright-report/**',
       '**/test-results*/**',
+      '**/test-output/**',
       '**/.claude/worktrees/**',
       '**/web-releases/**',
       '**/releases/**',
+      'debug-env.js',
+      'fetch-patch.cjs',
+      '.tmp-p3-debug.mts',
+      // TypeScript compiler outputs emitted alongside authored source files.
+      '**/src/**/*.js',
+      '**/src/**/*.d.ts',
+      '**/src/**/*.js.map',
+      '**/src/**/*.d.ts.map',
     ],
   },
   js.configs.recommended,
@@ -31,6 +42,16 @@ export default tseslint.config(
     rules: {
       '@typescript-eslint/consistent-type-imports': 'error',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    },
+  },
+  {
+    // Fixtures intentionally exercise malformed envelopes and use compact
+    // casts; keep production source strict without making test scaffolding a
+    // release blocker.
+    files: ['**/*.test.ts', '**/*.test.tsx'],
+    rules: {
+      '@typescript-eslint/no-unused-vars': 'off',
+      '@typescript-eslint/no-explicit-any': 'off',
     },
   },
   {

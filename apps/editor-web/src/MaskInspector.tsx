@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BrowserJob, BrowserWorker } from './control-plane-client.js';
 import { BrowserControlPlaneClient } from './control-plane-client.js';
+import { BoundedPollingLoop } from './bounded-polling.js';
 import {
   CloseIcon,
   MaskIcon,
@@ -159,13 +160,22 @@ export function MaskInspector({
       setRuntimeError(undefined);
     } catch (error) {
       setRuntimeError(error instanceof Error ? error.message : 'Worker status unavailable');
+      throw error;
     }
   }, [client]);
 
   useEffect(() => {
-    void refreshWorkers();
-    const timer = window.setInterval(() => void refreshWorkers(), 15_000);
-    return () => window.clearInterval(timer);
+    const polling = new BoundedPollingLoop(refreshWorkers);
+    const syncVisibility = () => {
+      void polling.setVisible(document.visibilityState === 'visible').catch(() => undefined);
+    };
+    document.addEventListener('visibilitychange', syncVisibility);
+    syncVisibility();
+    polling.start();
+    return () => {
+      document.removeEventListener('visibilitychange', syncVisibility);
+      polling.stop();
+    };
   }, [refreshWorkers]);
 
   const runtime = maskRuntimeStatus(target, workers);
@@ -181,6 +191,7 @@ export function MaskInspector({
     const jobId = settings.lastJob?.id;
     if (jobId === undefined || settings.lastJob?.resultAssetId !== undefined) return;
     let cancelled = false;
+    const pollingRef: { current?: BoundedPollingLoop } = {};
     const poll = async () => {
       try {
         const job = (await client.jobs(projectId)).find((candidate) => candidate.id === jobId);
@@ -217,16 +228,24 @@ export function MaskInspector({
               lastJob: { ...next.lastJob!, resultAssetId },
             });
         }
-        if (job.state !== 'queued' && job.state !== 'leased') window.clearInterval(timer);
+        if (job.state !== 'queued' && job.state !== 'leased') pollingRef.current?.stop();
       } catch (error) {
         if (!cancelled) setRuntimeError(error instanceof Error ? error.message : String(error));
+        throw error;
       }
     };
-    const timer = window.setInterval(() => void poll(), 1_000);
-    void poll();
+    const polling = new BoundedPollingLoop(poll);
+    pollingRef.current = polling;
+    const syncVisibility = () => {
+      void polling.setVisible(document.visibilityState === 'visible').catch(() => undefined);
+    };
+    document.addEventListener('visibilitychange', syncVisibility);
+    syncVisibility();
+    polling.start();
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', syncVisibility);
+      polling.stop();
     };
   }, [client, projectId, settings.lastJob?.id, settings.lastJob?.resultAssetId]);
 

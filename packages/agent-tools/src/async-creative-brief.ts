@@ -25,14 +25,10 @@ import {
 } from './creative-brief.js';
 import type {
   AsyncCreativeModelAdapter,
-  AsyncOutcome,
   AsyncOutcomeCategory,
   AsyncAdapterOptions,
 } from './async-model-adapter.js';
-import type {
-  ModelAdapterInputV1,
-  ModelAdapterOutputV1,
-} from './model-adapter.js';
+import type { ModelAdapterInputV1, ModelAdapterOutputV1 } from './model-adapter.js';
 import type { SemanticProjectSnapshotV1, EvidenceRefV1 } from '@joy-media/project-schema';
 import type { CreativeEvidenceRefV1 } from './creative-brief.js';
 
@@ -93,21 +89,22 @@ function finalizeCreativeBriefFromOutput(
   clock: () => string,
 ): CreativeBriefV1 {
   // Validate all evidence references in recommendations point to valid snapshot data
-  const evidenceWarnings = adapterOutput.recommendations.reduce<
-    CreativeBriefV1['warnings']
-  >((acc, rec) => {
-    const invalidEvidence = rec.evidence.filter(ev =>
-      !validateEvidenceReference(ev, input.snapshot),
-    );
-    return [
-      ...acc,
-      ...invalidEvidence.map(ev => ({
-        code: 'invalid-evidence-reference',
-        message: `Recommendation ${rec.id} references invalid evidence: ${ev.id}`,
-        severity: 'error' as const,
-      })),
-    ];
-  }, []);
+  const evidenceWarnings = adapterOutput.recommendations.reduce<CreativeBriefV1['warnings']>(
+    (acc, rec) => {
+      const invalidEvidence = rec.evidence.filter(
+        (ev) => !validateEvidenceReference(ev, input.snapshot),
+      );
+      return [
+        ...acc,
+        ...invalidEvidence.map((ev) => ({
+          code: 'invalid-evidence-reference',
+          message: `Recommendation ${rec.id} references invalid evidence: ${ev.id}`,
+          severity: 'error' as const,
+        })),
+      ];
+    },
+    [],
+  );
 
   // Calculate processing time from adapter's meta or use a small deterministic value
   const processingTimeMs = adapterOutput.meta?.processingTimeMs ?? 10;
@@ -153,7 +150,7 @@ function finalizeCreativeBriefFromOutput(
   const finalValidation = validateCreativeBrief(brief);
   if (!finalValidation.valid) {
     throw new Error(
-      `Final validation failed: ${finalValidation.errors.map(e => e.message).join('; ')}`,
+      `Final validation failed: ${finalValidation.errors.map((e) => e.message).join('; ')}`,
     );
   }
 
@@ -178,7 +175,13 @@ function validateEvidenceReference(
 
   // Check if the reference kind is valid
   const validKinds: EvidenceRefV1['kind'][] = [
-    'composition', 'track', 'clip', 'asset', 'visual-object', 'caption', 'marker',
+    'composition',
+    'track',
+    'clip',
+    'asset',
+    'visual-object',
+    'caption',
+    'marker',
   ];
   if (!validKinds.includes(baseRef.kind)) {
     return false;
@@ -201,29 +204,21 @@ function validateEvidenceReference(
       );
 
     case 'clip':
-      return snapshot.scenes.some(scene =>
-        scene.elements.some(el => el.id === baseRef.id),
-      );
+      return snapshot.scenes.some((scene) => scene.elements.some((el) => el.id === baseRef.id));
 
     case 'asset':
-      return snapshot.assets.some(a => a.id === baseRef.id);
+      return snapshot.assets.some((a) => a.id === baseRef.id);
 
     case 'visual-object':
-      return snapshot.scenes.some(scene =>
-        scene.elements.some(el => el.id === baseRef.id),
-      );
+      return snapshot.scenes.some((scene) => scene.elements.some((el) => el.id === baseRef.id));
 
     case 'caption':
       return snapshot.scenes.some(
-        scene =>
-          scene.captionCoverage?.locale === baseRef.id ||
-          scene.id === baseRef.id,
+        (scene) => scene.captionCoverage?.locale === baseRef.id || scene.id === baseRef.id,
       );
 
     case 'marker':
-      return snapshot.scenes.some(
-        scene => scene.id === baseRef.id,
-      );
+      return snapshot.scenes.some((scene) => scene.id === baseRef.id);
 
     default:
       return false;
@@ -270,7 +265,7 @@ export async function createAsyncCreativeBrief(
   if (!requestValidation.valid) {
     return {
       category: 'invalid-output',
-      message: `Invalid creative brief request: ${requestValidation.errors.map(e => e.message).join('; ')}`,
+      message: `Invalid creative brief request: ${requestValidation.errors.map((e) => e.message).join('; ')}`,
       retryable: false,
       durationMs: Date.now() - totalStartTime,
     };
@@ -309,10 +304,7 @@ export async function createAsyncCreativeBrief(
   };
 
   // Call async model adapter
-  const adapterOutcome = await options.adapter.createBrief(
-    adapterInput,
-    options.adapterOptions,
-  );
+  const adapterOutcome = await options.adapter.createBrief(adapterInput, options.adapterOptions);
 
   // Handle adapter failures
   if (adapterOutcome.category !== 'ready') {
@@ -342,10 +334,7 @@ export async function createAsyncCreativeBrief(
   }
 
   // Validate interpretedGoal
-  if (
-    !adapterOutput.interpretedGoal ||
-    typeof adapterOutput.interpretedGoal !== 'object'
-  ) {
+  if (!adapterOutput.interpretedGoal || typeof adapterOutput.interpretedGoal !== 'object') {
     return {
       category: 'invalid-output',
       message: 'Model adapter output missing or invalid interpretedGoal',
@@ -387,10 +376,7 @@ export async function createAsyncCreativeBrief(
   }
 
   // Validate distinction
-  if (
-    !adapterOutput.distinction ||
-    typeof adapterOutput.distinction !== 'object'
-  ) {
+  if (!adapterOutput.distinction || typeof adapterOutput.distinction !== 'object') {
     return {
       category: 'invalid-output',
       message: 'Model adapter output missing or invalid distinction',
@@ -411,10 +397,7 @@ export async function createAsyncCreativeBrief(
     };
   }
 
-  if (
-    adapterOutput.assumptions !== undefined &&
-    !Array.isArray(adapterOutput.assumptions)
-  ) {
+  if (adapterOutput.assumptions !== undefined && !Array.isArray(adapterOutput.assumptions)) {
     return {
       category: 'invalid-output',
       message: 'Model adapter output assumptions must be an array if provided',
@@ -424,10 +407,7 @@ export async function createAsyncCreativeBrief(
     };
   }
 
-  if (
-    adapterOutput.blockedBy !== undefined &&
-    !Array.isArray(adapterOutput.blockedBy)
-  ) {
+  if (adapterOutput.blockedBy !== undefined && !Array.isArray(adapterOutput.blockedBy)) {
     return {
       category: 'invalid-output',
       message: 'Model adapter output blockedBy must be an array if provided',

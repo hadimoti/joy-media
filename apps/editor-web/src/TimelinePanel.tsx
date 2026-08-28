@@ -25,6 +25,7 @@ import {
   DuplicateIcon,
   FitWidthIcon,
   LockIcon,
+  MuteIcon,
   PauseIcon,
   PlayIcon,
   ScissorsIcon,
@@ -484,6 +485,7 @@ function TimelineRunway({
   family,
   laneWidthPx,
   onDrop,
+  onActivate,
 }: {
   readonly family: 'visual' | 'audio';
   readonly laneWidthPx: number;
@@ -497,11 +499,20 @@ function TimelineRunway({
     clientX: number,
     rect: DOMRect,
   ) => void;
+  readonly onActivate: () => void;
 }) {
   return (
     <div
       className={`timeline-track timeline-runway timeline-runway--${family}`}
       data-track-family={family}
+      role="button"
+      tabIndex={0}
+      aria-label={`${family === 'audio' ? 'Audio' : 'Visual'} runway. Open media library to add a layer.`}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        onActivate();
+      }}
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes(JOY_MEDIA_ASSET_DND)) return;
         event.preventDefault();
@@ -777,10 +788,12 @@ export function TimelinePanel({
           id: track.id,
           heightPx: 44,
           locked: false,
+          muted: false,
           solo: false,
           order: index,
         }),
         locked: track.locked ?? saved?.locked ?? false,
+        muted: track.muted ?? saved?.muted ?? false,
         // The schema command is the output source of truth; visibility in this
         // presentation model must follow it after undo/redo or another surface.
         visible: track.enabled ?? true,
@@ -888,7 +901,7 @@ export function TimelinePanel({
     if (Math.abs(next - root.scrollLeft) >= 1) root.scrollLeft = next;
   }, [autoFit, playing, playheadUs, timelineDurationUs, viewport.pixelsPerSecond]);
 
-  const toggle = (id: string, flag: 'locked' | 'solo') => {
+  const toggle = (id: string, flag: 'locked' | 'muted' | 'solo') => {
     if (flag === 'locked') {
       const current = composition.tracks.find((track) => track.id === id)?.locked === true;
       onDispatch({
@@ -897,6 +910,19 @@ export function TimelinePanel({
           {
             type: 'timeline.setTrackLocked',
             payload: { compositionId: composition.id, trackId: id, locked: !current },
+          },
+        ],
+      });
+      return;
+    }
+    if (flag === 'muted') {
+      const current = composition.tracks.find((track) => track.id === id)?.muted === true;
+      onDispatch({
+        label: current ? `Unmute ${id}` : `Mute ${id}`,
+        commands: [
+          {
+            type: 'timeline.setTrackMuted',
+            payload: { compositionId: composition.id, trackId: id, muted: !current },
           },
         ],
       });
@@ -915,6 +941,16 @@ export function TimelinePanel({
   };
 
   const setVisibility = (id: string, visible: boolean) => {
+    if (composition.tracks.find((track) => track.id === id) === undefined) return;
+    onDispatch({
+      label: visible ? `Show ${id}` : `Hide ${id}`,
+      commands: [
+        {
+          type: 'property.setTrackEnabled',
+          payload: { compositionId: composition.id, trackId: id, enabled: visible },
+        },
+      ],
+    });
     const next = tracks
       .map((track) => (track.id === id ? { ...track, visible } : track))
       .map(({ id: trackId, heightPx, locked, visible: trackVisible, solo }) => ({
@@ -925,15 +961,6 @@ export function TimelinePanel({
         solo,
       }));
     setTrackFlags(next);
-    onDispatch({
-      label: visible ? `Show ${id}` : `Hide ${id}`,
-      commands: [
-        {
-          type: 'property.setTrackEnabled',
-          payload: { compositionId: composition.id, trackId: id, enabled: visible },
-        },
-      ],
-    });
   };
 
   const collectMarqueeIds = useCallback((rect: TimelineRect): readonly string[] => {
@@ -1083,6 +1110,7 @@ export function TimelinePanel({
 
   const dispatchSplitAt = useCallback(
     (trackId: string, clipId: string, atUs: number) => {
+      if (composition.tracks.find((track) => track.id === trackId)?.locked === true) return;
       onDispatch({
         label: `Split ${clipId}`,
         commands: [
@@ -1099,7 +1127,7 @@ export function TimelinePanel({
         ],
       });
     },
-    [composition.id, onDispatch],
+    [composition.id, composition.tracks, onDispatch],
   );
 
   const moveClip =
@@ -1107,6 +1135,7 @@ export function TimelinePanel({
     (clipId: string, newStartUs: number, targetTrackId = trackId): boolean => {
       try {
         const source = composition.tracks.find((candidate) => candidate.id === trackId);
+        if (source?.locked === true) return false;
         const clip = source?.clips.find((candidate) => candidate.id === clipId);
         const target = composition.tracks.find((candidate) => candidate.id === targetTrackId);
         const targetView = tracks.find((candidate) => candidate.id === targetTrackId);
@@ -1198,6 +1227,7 @@ export function TimelinePanel({
     (trackId: string) =>
     (clipId: string, edge: 'start' | 'end', timeUs: number): boolean => {
       try {
+        if (composition.tracks.find((track) => track.id === trackId)?.locked === true) return false;
         onDispatch({
           label: `Trim ${edge} ${clipId}`,
           commands: [trimCommand(composition.id, trackId, clipId, edge, timeUs)],
@@ -1221,6 +1251,7 @@ export function TimelinePanel({
     ) => {
       const source = composition.tracks.find((t) => t.id === trackId);
       if (source === undefined) return;
+      if (source.locked === true) return;
       const elementKind = asset.kind === 'audio' ? 'audio' : 'video';
       if (!canPlaceTimelineElement(elementKind, source, elementKinds)) {
         showToast?.(
@@ -1347,7 +1378,7 @@ export function TimelinePanel({
 
   const dispatchDuplicate = (trackId: string, clip: Clip) => {
     const source = composition.tracks.find((t) => t.id === trackId);
-    if (source === undefined) return;
+    if (source === undefined || source.locked === true) return;
     onDispatch({
       label: `Duplicate ${clip.id}`,
       commands: [
@@ -1396,7 +1427,7 @@ export function TimelinePanel({
 
   const dispatchDelete = (trackId: string, clipId: string) => {
     const source = composition.tracks.find((t) => t.id === trackId);
-    if (source === undefined) return;
+    if (source === undefined || source.locked === true) return;
     onDispatch(
       rippleDelete(
         composition.id,
@@ -1483,6 +1514,7 @@ export function TimelinePanel({
   ];
 
   const dispatchFreeze = (trackId: string, clipId: string) => {
+    if (composition.tracks.find((track) => track.id === trackId)?.locked === true) return;
     if (isCompoundView) {
       showToast?.(
         'Freeze is unavailable inside a merged timeline because its parent timing is fixed.',
@@ -1506,6 +1538,7 @@ export function TimelinePanel({
   };
 
   const dispatchReverse = (trackId: string, clipId: string) => {
+    if (composition.tracks.find((track) => track.id === trackId)?.locked === true) return;
     onDispatch({
       label: `Reverse ${clipId}`,
       commands: [toggleClipReverseCommand(composition.id, trackId, clipId)],
@@ -1550,6 +1583,7 @@ export function TimelinePanel({
       return;
     }
     const track = composition.tracks.find((t) => t.id === trackId);
+    if (track?.locked === true) return;
     const clip = track?.clips.find((c) => c.id === clipId);
     const fromFreeze = clip?.kind === 'video' && normalizePlaybackRate(clip.playbackRate) === 0;
     onDispatch({
@@ -1644,31 +1678,35 @@ export function TimelinePanel({
       selectedTrackIds: [trackId],
     };
 
-    const items = buildClipContextMenu(ctx, (cmd) => {
-      if (cmd) {
-        switch (cmd.type) {
-          case 'timeline.splitClip':
-            dispatchSplit(cmd.payload.trackId, cmd.payload.clipId);
-            break;
-          case 'timeline.duplicateClip':
-            dispatchDuplicate(cmd.payload.trackId, clip);
-            break;
-          case 'timeline.removeClip':
-            dispatchDelete(cmd.payload.trackId, cmd.payload.clipId);
-            break;
-          case 'timeline.freezeFrame':
-            dispatchFreeze(cmd.payload.trackId, cmd.payload.clipId);
-            break;
-          case 'timeline.toggleClipReverse':
-            dispatchReverse(cmd.payload.trackId, cmd.payload.clipId);
-            break;
-          case 'timeline.setClipRate':
-            dispatchRate(cmd.payload.trackId, cmd.payload.clipId, cmd.payload.playbackRate);
-            break;
-        }
-      }
-    });
     const trackIsLocked = tracks.find((candidate) => candidate.id === trackId)?.locked === true;
+    const items = buildClipContextMenu(
+      ctx,
+      (cmd) => {
+        if (cmd) {
+          switch (cmd.type) {
+            case 'timeline.splitClip':
+              dispatchSplit(cmd.payload.trackId, cmd.payload.clipId);
+              break;
+            case 'timeline.duplicateClip':
+              dispatchDuplicate(cmd.payload.trackId, clip);
+              break;
+            case 'timeline.removeClip':
+              dispatchDelete(cmd.payload.trackId, cmd.payload.clipId);
+              break;
+            case 'timeline.freezeFrame':
+              dispatchFreeze(cmd.payload.trackId, cmd.payload.clipId);
+              break;
+            case 'timeline.toggleClipReverse':
+              dispatchReverse(cmd.payload.trackId, cmd.payload.clipId);
+              break;
+            case 'timeline.setClipRate':
+              dispatchRate(cmd.payload.trackId, cmd.payload.clipId, cmd.payload.playbackRate);
+              break;
+          }
+        }
+      },
+      trackIsLocked,
+    );
     // A locked lane must reject every timeline mutation, including mutations
     // reached through a context menu rather than pointer drag/trim. Keep the
     // choices visible with disabled semantics so the reason is discoverable.
@@ -1875,6 +1913,7 @@ export function TimelinePanel({
           return;
         if (selectedIds.length === 0) return;
         event.preventDefault();
+        event.stopPropagation();
         dispatchDeleteSelection();
       }}
       className={
@@ -1913,6 +1952,7 @@ export function TimelinePanel({
             onClick={onTogglePlayback}
             aria-label={playing ? 'Pause' : 'Play'}
             title={playing ? 'Pause (Space)' : 'Play (Space)'}
+            disabled={!composition.tracks.some((track) => track.clips.length > 0)}
           >
             {playing ? <PauseIcon /> : <PlayIcon />}
           </button>
@@ -2186,7 +2226,12 @@ export function TimelinePanel({
             />
           )}
           {visualRunwayNeeded && (
-            <TimelineRunway family="visual" laneWidthPx={laneWidthPx} onDrop={handleRunwayDrop} />
+            <TimelineRunway
+              family="visual"
+              laneWidthPx={laneWidthPx}
+              onDrop={handleRunwayDrop}
+              onActivate={handleAddFromLibrary}
+            />
           )}
           {visible.map((track, index) => {
             const source = composition.tracks.find((item) => item.id === track.id);
@@ -2275,7 +2320,7 @@ export function TimelinePanel({
                         }),
                       (visible: boolean) => setVisibility(track.id, visible),
                       source.enabled ?? true,
-                      source.clips.length === 0 && composition.tracks.length > 1,
+                      source.clips.length === 0 && composition.tracks.length > 1 && !track.locked,
                     );
                     setMenu({ x: event.clientX, y: event.clientY, items });
                   }}
@@ -2348,6 +2393,16 @@ export function TimelinePanel({
                     visible={track.visible}
                     onToggle={(visible) => setVisibility(track.id, visible)}
                   />
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-pressed={track.muted === true}
+                    aria-label={`${track.muted ? 'Unmute' : 'Mute'} ${track.id}`}
+                    title={track.muted ? 'Unmute track' : 'Mute track'}
+                    onClick={() => toggle(track.id, 'muted')}
+                  >
+                    <MuteIcon />
+                  </button>
                   <button
                     type="button"
                     className="icon-button"
@@ -2636,7 +2691,12 @@ export function TimelinePanel({
           })}
 
           {audioRunwayNeeded && (
-            <TimelineRunway family="audio" laneWidthPx={laneWidthPx} onDrop={handleRunwayDrop} />
+            <TimelineRunway
+              family="audio"
+              laneWidthPx={laneWidthPx}
+              onDrop={handleRunwayDrop}
+              onActivate={handleAddFromLibrary}
+            />
           )}
 
           {selectedObject !== undefined && onPropertyDispatch !== undefined && (

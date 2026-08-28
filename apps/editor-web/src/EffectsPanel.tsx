@@ -9,6 +9,7 @@ import type { JoyProjectV1 } from '@joy-media/project-schema';
 import {
   effectRegistry,
   listEffects,
+  registerBuiltins,
   type EffectDescriptor,
   type EffectDragPayload,
 } from '@joy-media/visual-effects';
@@ -92,12 +93,18 @@ export function EffectsPanel({
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('pixel-bw');
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [builtinsReady, setBuiltinsReady] = useState(false);
   const [recipes, setRecipes] = useState<readonly EffectRecipeCatalogEntry[]>(() =>
     listEffectRecipes(window.localStorage),
   );
   const editorContext = useContext(EditorPanelContext);
   const effectStudioOpen = editorContext?.effectStudioOpen ?? false;
   const wasStudioOpen = useRef(effectStudioOpen);
+
+  useEffect(() => {
+    registerBuiltins();
+    setBuiltinsReady(true);
+  }, []);
 
   useEffect(() => {
     if (wasStudioOpen.current && !effectStudioOpen) {

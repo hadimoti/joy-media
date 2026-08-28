@@ -1,7 +1,7 @@
 /**
  * Semantic Intelligence V1 - Deterministic Scene and Brand Intelligence
  * WP-37 S2: Deterministic Scene and Brand Intelligence
- * 
+ *
  * Pure, deterministic derivation of readiness and coverage from SemanticProjectSnapshotV1.
  * No LLM calls, no network, no persistence, no secrets.
  */
@@ -24,7 +24,7 @@ export type IntelligenceSeverity = 'info' | 'suggestion' | 'warning' | 'error';
 export type RuleId = string;
 
 /**
- * Evidence reference for S2 rules - references snapshot evidence or 
+ * Evidence reference for S2 rules - references snapshot evidence or
  * derives new evidence from snapshot analysis
  */
 export interface IntelligenceEvidenceRefV1 extends EvidenceRefV1 {
@@ -35,7 +35,7 @@ export interface IntelligenceEvidenceRefV1 extends EvidenceRefV1 {
 /**
  * Rule categories for organizing rules
  */
-export type RuleCategory = 
+export type RuleCategory =
   | 'brand'
   | 'visual-coverage'
   | 'audio-coverage'
@@ -82,33 +82,33 @@ export const KNOWN_RULE_IDS = {
   BRAND_MISSING_TONE_INSTRUCTIONS: 'brand.missing.tone-instructions' as const,
   BRAND_MISSING_COMPONENTS: 'brand.missing.components' as const,
   BRAND_NO_KIT: 'brand.no-kit' as const,
-  
+
   // Visual coverage rules
   VISUAL_COVERAGE_SPARSE_DURING_NARRATION: 'scene.visual-coverage.sparse-during-narration' as const,
   VISUAL_COVERAGE_NONE: 'scene.visual-coverage.none' as const,
   VISUAL_CHANGE_SIGNAL_MISSING: 'scene.visual-change.signal-missing' as const,
-  
+
   // Caption coverage rules
   CAPTION_MISSING_WHERE_NARRATION_EXISTS: 'scene.caption.missing-where-narration-exists' as const,
   CAPTION_COVERAGE_GAP: 'scene.caption.coverage-gap' as const,
   CAPTION_MISSING: 'scene.caption.missing' as const,
-  
+
   // Audio coverage rules
   AUDIO_MISSING_WHERE_VISUAL_EXISTS: 'scene.audio.missing-where-visual-exists' as const,
   AUDIO_GAP: 'scene.audio.gap' as const,
-  
+
   // Destination/aspect rules
   DESTINATION_MISMATCH: 'project.destination.mismatch' as const,
   ASPECT_RATIO_MISMATCH: 'project.aspect-ratio.mismatch' as const,
   DURATION_MISMATCH: 'project.duration.mismatch' as const,
-  
+
   // Capability rules
   CAPABILITY_SETUP_REQUIRED: 'project.capability.setup-required' as const,
   CAPABILITY_UNAVAILABLE: 'project.capability.unavailable' as const,
 } as const;
 
 /** All known rule IDs as a type */
-export type KnownRuleId = typeof KNOWN_RULE_IDS[keyof typeof KNOWN_RULE_IDS];
+export type KnownRuleId = (typeof KNOWN_RULE_IDS)[keyof typeof KNOWN_RULE_IDS];
 
 /**
  * Brand readiness describes which canonical brand fields are available
@@ -117,30 +117,38 @@ export type KnownRuleId = typeof KNOWN_RULE_IDS[keyof typeof KNOWN_RULE_IDS];
 export interface BrandReadinessV1 {
   readonly projectId: string;
   readonly revisionId: string;
-  
+
   // Core brand kit availability
   readonly colorsAvailable: boolean;
   readonly fontsAvailable: boolean;
   readonly logoAvailable: boolean;
-  
+
   // Voice/tone guidance
   readonly voiceInstructionsAvailable: boolean;
   readonly toneInstructionsAvailable: boolean;
-  
+
   // Constraints/guidelines
   readonly prohibitedClaims: readonly string[];
   readonly prohibitedEffects: readonly string[];
-  
+
   // Overall state
   readonly hasBrandKit: boolean;
   readonly brandCompleteness: 'none' | 'partial' | 'complete';
-  
+
   /** Missing brand components that should be present for full brand support */
-  readonly missingComponents: readonly ('colors' | 'fonts' | 'logo' | 'voice-instructions' | 'tone-instructions' | 'prohibited-claims' | 'prohibited-effects')[];
-  
+  readonly missingComponents: readonly (
+    | 'colors'
+    | 'fonts'
+    | 'logo'
+    | 'voice-instructions'
+    | 'tone-instructions'
+    | 'prohibited-claims'
+    | 'prohibited-effects'
+  )[];
+
   /** Warnings about brand data issues */
   readonly warnings: readonly IntelligenceRuleV1[];
-  
+
   /** Evidence references for brand readiness claims */
   readonly evidence: readonly IntelligenceEvidenceRefV1[];
 }
@@ -152,82 +160,82 @@ export interface BrandReadinessV1 {
 export interface SceneCoverageV1 {
   readonly sceneId: string;
   readonly projectId: string;
-  
+
   // Temporal characteristics
   readonly startUs: TimeUs;
   readonly endUs: TimeUs;
   readonly durationUs: TimeUs;
-  
+
   // Visual characteristics
   readonly visualElementCount: number;
   readonly visualDensity: 'none' | 'sparse' | 'adequate' | 'dense';
   readonly hasVisualElements: boolean;
-  
+
   // Audio characteristics
   readonly hasAudio: boolean;
   readonly hasNarration: boolean;
   readonly audioDurationUs: TimeUs;
   readonly narrationDurationUs: TimeUs;
-  
+
   // Caption characteristics
   readonly hasCaptions: boolean;
   readonly captionWordCount: number;
   readonly captionLocale: string | undefined;
   readonly captionCoverageRatio: number; // 0.0 to 1.0
-  
+
   // Coverage signals
   readonly visualChangeSignals: readonly TimeUs[];
   readonly audioGaps: readonly { startUs: TimeUs; endUs: TimeUs; durationUs: TimeUs }[];
   readonly captionGaps: readonly { startUs: TimeUs; endUs: TimeUs; durationUs: TimeUs }[];
-  
+
   // Evidence for coverage claims
   readonly evidence: readonly IntelligenceEvidenceRefV1[];
-  
+
   /** Rules triggered for this specific scene */
   readonly rules: readonly IntelligenceRuleV1[];
 }
 
 /**
- * Project readiness describes the overall state of the project for 
+ * Project readiness describes the overall state of the project for
  * creative workflows, based on destination, aspect ratio, duration,
  * and capability alignment.
  */
 export interface ProjectReadinessV1 {
   readonly projectId: string;
   readonly revisionId: string;
-  
+
   // Destination alignment (from snapshot.goal)
   readonly destination: string | undefined;
   readonly destinationAligned: boolean;
   readonly destinationMismatch: { expected: string; actual: string } | undefined;
-  
+
   // Duration alignment
   readonly durationTargetUs: TimeUs | undefined;
   readonly compositionDurationUs: TimeUs;
   readonly durationAligned: boolean;
   readonly durationGapUs: TimeUs | undefined; // positive = too short, negative = too long
-  
+
   // Aspect ratio alignment
   readonly aspectRatio: string;
   readonly aspectRatioAligned: boolean;
   readonly aspectRatioMismatch: { expected: string; actual: string } | undefined;
-  
+
   // Capability state
   readonly captionAvailable: boolean;
   readonly audioAvailable: boolean;
   readonly generatedAssetsAvailable: boolean;
-  
+
   // Overall readiness
   readonly readinessLevel: 'unknown' | 'setup-required' | 'partial' | 'ready';
   readonly blockers: readonly IntelligenceRuleV1[];
   readonly warnings: readonly IntelligenceRuleV1[];
-  
+
   // Aggregated coverage
   readonly sceneCount: number;
   readonly scenesWithVisuals: number;
   readonly scenesWithAudio: number;
   readonly scenesWithCaptions: number;
-  
+
   // Evidence for readiness claims
   readonly evidence: readonly IntelligenceEvidenceRefV1[];
 }
@@ -248,7 +256,10 @@ interface RuleDefinition {
   /**
    * Create the rule instance with evidence from the snapshot
    */
-  readonly createRule: (snapshot: SemanticProjectSnapshotV1, scene?: SceneSummaryV1) => IntelligenceRuleV1 | null;
+  readonly createRule: (
+    snapshot: SemanticProjectSnapshotV1,
+    scene?: SceneSummaryV1,
+  ) => IntelligenceRuleV1 | null;
 }
 
 // ==========================================================================
@@ -328,7 +339,9 @@ const ruleCatalog: readonly RuleDefinition[] = [
       severity: 'suggestion',
       category: 'brand',
       projectId: snapshot.projectId,
-      evidence: [{ id: snapshot.projectId, kind: 'composition', detail: 'brand.voice-instructions' }],
+      evidence: [
+        { id: snapshot.projectId, kind: 'composition', detail: 'brand.voice-instructions' },
+      ],
       message: 'Brand kit is missing voice/tone instructions',
       suggestedIntent: 'add-brand-voice-instructions',
     }),
@@ -343,12 +356,14 @@ const ruleCatalog: readonly RuleDefinition[] = [
       severity: 'suggestion',
       category: 'brand',
       projectId: snapshot.projectId,
-      evidence: [{ id: snapshot.projectId, kind: 'composition', detail: 'brand.tone-instructions' }],
+      evidence: [
+        { id: snapshot.projectId, kind: 'composition', detail: 'brand.tone-instructions' },
+      ],
       message: 'Brand kit is missing tone/style instructions',
       suggestedIntent: 'add-brand-tone-instructions',
     }),
   },
-  
+
   // Scene Visual Coverage Rules
   {
     ruleId: KNOWN_RULE_IDS.VISUAL_COVERAGE_NONE,
@@ -377,13 +392,13 @@ const ruleCatalog: readonly RuleDefinition[] = [
       if (!scene) return false;
       const hasNarration = scene.narration?.hasNarration ?? false;
       const isSparseVisual = scene.visualCoverage === 'sparse' || scene.visualCoverage === 'none';
-      return hasNarration && isSparseVisual && (scene.endUs - scene.startUs) > 0;
+      return hasNarration && isSparseVisual && scene.endUs - scene.startUs > 0;
     },
     createRule: (snapshot, scene) => {
       if (!scene) return null;
       const narrationDuration = scene.narration?.durationUs ?? 0;
       if (narrationDuration === 0) return null;
-      
+
       return {
         ruleId: KNOWN_RULE_IDS.VISUAL_COVERAGE_SPARSE_DURING_NARRATION,
         severity: 'suggestion',
@@ -396,7 +411,7 @@ const ruleCatalog: readonly RuleDefinition[] = [
       };
     },
   },
-  
+
   // Caption Coverage Rules
   {
     ruleId: KNOWN_RULE_IDS.CAPTION_MISSING_WHERE_NARRATION_EXISTS,
@@ -412,7 +427,7 @@ const ruleCatalog: readonly RuleDefinition[] = [
       if (!scene) return null;
       const narrationDuration = scene.narration?.durationUs ?? 0;
       if (narrationDuration === 0) return null;
-      
+
       return {
         ruleId: KNOWN_RULE_IDS.CAPTION_MISSING_WHERE_NARRATION_EXISTS,
         severity: 'suggestion',
@@ -431,7 +446,7 @@ const ruleCatalog: readonly RuleDefinition[] = [
     severity: 'suggestion',
     check: (snapshot, scene) => {
       if (!scene) return false;
-      const hasVisualOrAudio = scene.elements.some(e => e.hasVisual || e.hasAudio);
+      const hasVisualOrAudio = scene.elements.some((e) => e.hasVisual || e.hasAudio);
       const hasCaptions = scene.captionCoverage?.hasCaptions ?? false;
       return hasVisualOrAudio && !hasCaptions;
     },
@@ -449,7 +464,7 @@ const ruleCatalog: readonly RuleDefinition[] = [
       };
     },
   },
-  
+
   // Project Alignment Rules
   {
     ruleId: KNOWN_RULE_IDS.DESTINATION_MISMATCH,
@@ -467,13 +482,15 @@ const ruleCatalog: readonly RuleDefinition[] = [
       if (!goal?.destination) return null;
       const expectedAspect = destinationToAspectRatio(goal.destination);
       if (!expectedAspect) return null;
-      
+
       return {
         ruleId: KNOWN_RULE_IDS.DESTINATION_MISMATCH,
         severity: 'warning',
         category: 'destination',
         projectId: snapshot.projectId,
-        evidence: [{ id: snapshot.composition.aspectRatio, kind: 'composition', detail: 'aspect-ratio' }],
+        evidence: [
+          { id: snapshot.composition.aspectRatio, kind: 'composition', detail: 'aspect-ratio' },
+        ],
         message: `Composition aspect ratio "${snapshot.composition.aspectRatio}" does not match expected "${expectedAspect}" for destination "${goal.destination}"`,
         suggestedIntent: 'adjust-aspect-ratio',
       };
@@ -491,17 +508,23 @@ const ruleCatalog: readonly RuleDefinition[] = [
     createRule: (snapshot) => {
       const goal = snapshot.goal;
       if (!goal?.durationTargetUs) return null;
-      
+
       const gapUs = goal.durationTargetUs - snapshot.composition.durationUs;
       const gapMs = gapUs / 1000;
       const isShort = gapUs > 0;
-      
+
       return {
         ruleId: KNOWN_RULE_IDS.DURATION_MISMATCH,
         severity: 'warning',
         category: 'destination',
         projectId: snapshot.projectId,
-        evidence: [{ id: snapshot.composition.durationUs.toString(), kind: 'composition', detail: 'duration' }],
+        evidence: [
+          {
+            id: snapshot.composition.durationUs.toString(),
+            kind: 'composition',
+            detail: 'duration',
+          },
+        ],
         message: `Composition duration ${formatDurationUs(snapshot.composition.durationUs)} is ${isShort ? 'shorter' : 'longer'} than target ${formatDurationUs(goal.durationTargetUs)} by ${Math.abs(gapMs).toFixed(0)}ms`,
         suggestedIntent: 'adjust-duration',
       };
@@ -523,32 +546,34 @@ const ruleCatalog: readonly RuleDefinition[] = [
       if (!goal?.destination) return null;
       const expectedAspect = destinationToAspectRatio(goal.destination);
       if (!expectedAspect) return null;
-      
+
       return {
         ruleId: KNOWN_RULE_IDS.ASPECT_RATIO_MISMATCH,
         severity: 'warning',
         category: 'destination',
         projectId: snapshot.projectId,
-        evidence: [{ id: snapshot.composition.aspectRatio, kind: 'composition', detail: 'aspect-ratio' }],
+        evidence: [
+          { id: snapshot.composition.aspectRatio, kind: 'composition', detail: 'aspect-ratio' },
+        ],
         message: `Aspect ratio "${snapshot.composition.aspectRatio}" does not match expected "${expectedAspect}" for destination "${goal.destination}"`,
         suggestedIntent: 'adjust-composition-aspect',
       };
     },
   },
-  
+
   // Capability Rules
   {
     ruleId: KNOWN_RULE_IDS.CAPABILITY_SETUP_REQUIRED,
     category: 'capability',
     severity: 'info',
     check: (snapshot) => {
-      return Object.values(snapshot.capabilities).some(c => c === 'setup-required');
+      return Object.values(snapshot.capabilities).some((c) => c === 'setup-required');
     },
     createRule: (snapshot) => {
       const setupRequired = Object.entries(snapshot.capabilities)
         .filter(([_, status]) => status === 'setup-required')
         .map(([cap, _]) => cap);
-      
+
       return {
         ruleId: KNOWN_RULE_IDS.CAPABILITY_SETUP_REQUIRED,
         severity: 'info',
@@ -565,13 +590,13 @@ const ruleCatalog: readonly RuleDefinition[] = [
     category: 'capability',
     severity: 'info',
     check: (snapshot) => {
-      return Object.values(snapshot.capabilities).some(c => c === 'unavailable');
+      return Object.values(snapshot.capabilities).some((c) => c === 'unavailable');
     },
     createRule: (snapshot) => {
       const unavailable = Object.entries(snapshot.capabilities)
         .filter(([_, status]) => status === 'unavailable')
         .map(([cap, _]) => cap);
-      
+
       return {
         ruleId: KNOWN_RULE_IDS.CAPABILITY_UNAVAILABLE,
         severity: 'info',
@@ -596,15 +621,15 @@ function destinationToAspectRatio(destination: string): string | null {
     'instagram-story': '9:16',
     'instagram-feed': '4:5',
     'instagram-square': '1:1',
-    'tiktok': '9:16',
+    tiktok: '9:16',
     'youtube-short': '9:16',
-    'youtube': '16:9',
-    'twitter': '16:9',
+    youtube: '16:9',
+    twitter: '16:9',
     'facebook-feed': '16:9',
     'facebook-story': '9:16',
-    'linkedin': '16:9',
-    'snapchat': '9:16',
-    'pinterest': '2:3',
+    linkedin: '16:9',
+    snapchat: '9:16',
+    pinterest: '2:3',
     '16:9': '16:9',
     '9:16': '9:16',
     '4:5': '4:5',
@@ -639,7 +664,7 @@ function applyRules(
 ): readonly IntelligenceRuleV1[] {
   const triggeredRules: IntelligenceRuleV1[] = [];
   const sceneList = scenes ?? snapshot.scenes;
-  
+
   // Apply global rules (no scene context)
   for (const ruleDef of ruleCatalog) {
     if (ruleDef.check(snapshot, undefined)) {
@@ -649,7 +674,7 @@ function applyRules(
       }
     }
   }
-  
+
   // Apply per-scene rules
   for (const scene of sceneList) {
     for (const ruleDef of ruleCatalog) {
@@ -661,7 +686,7 @@ function applyRules(
       }
     }
   }
-  
+
   // Sort deterministically by ruleId, then projectId, then sceneId
   return triggeredRules.sort((a, b) => {
     const ruleCmp = a.ruleId.localeCompare(b.ruleId);
@@ -680,13 +705,11 @@ function applyRules(
  * Compute brand readiness from a semantic snapshot.
  * This is a pure function that reports truthfully on available/missing brand data.
  */
-export function computeBrandReadiness(
-  snapshot: SemanticProjectSnapshotV1,
-): BrandReadinessV1 {
+export function computeBrandReadiness(snapshot: SemanticProjectSnapshotV1): BrandReadinessV1 {
   const brand = snapshot.brand;
   const projectId = snapshot.projectId;
   const revisionId = snapshot.revisionId;
-  
+
   // Determine which components are available
   const colorsAvailable = brand.colorsAvailable;
   const fontsAvailable = brand.fontsAvailable;
@@ -694,9 +717,17 @@ export function computeBrandReadiness(
   const voiceInstructionsAvailable = brand.voiceInstructionsAvailable;
   const toneInstructionsAvailable = brand.toneInstructionsAvailable;
   const hasBrandKit = brand.hasBrandKit;
-  
+
   // Determine completeness
-  const allComponents = ['colors', 'fonts', 'logo', 'voice-instructions', 'tone-instructions', 'prohibited-claims', 'prohibited-effects'] as const;
+  const allComponents = [
+    'colors',
+    'fonts',
+    'logo',
+    'voice-instructions',
+    'tone-instructions',
+    'prohibited-claims',
+    'prohibited-effects',
+  ] as const;
   const availableCount = [
     colorsAvailable ? 1 : 0,
     fontsAvailable ? 1 : 0,
@@ -706,7 +737,7 @@ export function computeBrandReadiness(
     brand.prohibitedClaims.length > 0 ? 1 : 0,
     brand.prohibitedEffects.length > 0 ? 1 : 0,
   ].reduce((a, b) => a + b, 0);
-  
+
   let brandCompleteness: 'none' | 'partial' | 'complete';
   if (availableCount === 0 || !hasBrandKit) {
     brandCompleteness = 'none';
@@ -715,9 +746,9 @@ export function computeBrandReadiness(
   } else {
     brandCompleteness = 'complete';
   }
-  
+
   // Determine missing components
-  const missingComponents: typeof allComponents[number][] = [];
+  const missingComponents: (typeof allComponents)[number][] = [];
   if (!colorsAvailable) missingComponents.push('colors');
   if (!fontsAvailable) missingComponents.push('fonts');
   if (!logoAvailable) missingComponents.push('logo');
@@ -725,20 +756,24 @@ export function computeBrandReadiness(
   if (!toneInstructionsAvailable) missingComponents.push('tone-instructions');
   if (brand.prohibitedClaims.length === 0) missingComponents.push('prohibited-claims');
   if (brand.prohibitedEffects.length === 0) missingComponents.push('prohibited-effects');
-  
+
   // Generate warnings/rules for missing brand components
-  const warnings = applyRules(snapshot)
-    .filter(rule => rule.category === 'brand' && rule.projectId === projectId);
-  
+  const warnings = applyRules(snapshot).filter(
+    (rule) => rule.category === 'brand' && rule.projectId === projectId,
+  );
+
   // Build evidence
   const evidence: IntelligenceEvidenceRefV1[] = [
     { id: projectId, kind: 'composition', detail: 'brand-summary' },
-    ...brand.warnings.map(w => ({
-      ...w.evidence?.[0] ?? { id: projectId, kind: 'composition' },
-      detail: 'brand-warning'
-    } as IntelligenceEvidenceRefV1)),
+    ...brand.warnings.map(
+      (w) =>
+        ({
+          ...(w.evidence?.[0] ?? { id: projectId, kind: 'composition' }),
+          detail: 'brand-warning',
+        }) as IntelligenceEvidenceRefV1,
+    ),
   ];
-  
+
   return {
     projectId,
     revisionId,
@@ -770,15 +805,15 @@ export function computeSceneCoverages(
 ): readonly SceneCoverageV1[] {
   const projectId = snapshot.projectId;
   const scenes = snapshot.scenes;
-  
-  return scenes.map(scene => {
+
+  return scenes.map((scene) => {
     const durationUs = scene.endUs - scene.startUs;
-    
+
     // Visual characteristics
-    const visualElements = scene.elements.filter(e => e.hasVisual);
+    const visualElements = scene.elements.filter((e) => e.hasVisual);
     const visualElementCount = visualElements.length;
     const hasVisualElements = visualElementCount > 0;
-    
+
     // Determine visual density (match S1 logic for consistency)
     const visualDensity: 'none' | 'sparse' | 'adequate' | 'dense' = hasVisualElements
       ? visualElementCount < 3
@@ -787,37 +822,37 @@ export function computeSceneCoverages(
           ? 'dense'
           : 'adequate'
       : 'none';
-    
+
     // Audio characteristics
-    const audioElements = scene.elements.filter(e => e.hasAudio);
+    const audioElements = scene.elements.filter((e) => e.hasAudio);
     const hasAudio = audioElements.length > 0;
     const audioDurationUs = audioElements.reduce((sum, e) => sum + e.durationUs, 0);
-    
+
     // Narration from scene data
     const hasNarration = scene.narration?.hasNarration ?? false;
     const narrationDurationUs = scene.narration?.durationUs ?? 0;
-    
+
     // Caption characteristics
     const captionCoverage = scene.captionCoverage;
     const hasCaptions = captionCoverage?.hasCaptions ?? false;
     const captionWordCount = captionCoverage?.wordCount ?? 0;
     const captionLocale = captionCoverage?.locale;
-    
+
     // Calculate caption coverage ratio (simplified - assume captions cover their scene)
     const captionCoverageRatio = hasCaptions ? 1.0 : 0.0;
-    
+
     // Visual change signals - use element start times as change points
     const visualChangeSignals: TimeUs[] = visualElements
-      .map(e => e.startUs)
+      .map((e) => e.startUs)
       .filter((t, i, arr) => i === 0 || t !== arr[i - 1]);
-    
+
     // Audio gaps - simplified detection
     const audioGaps: { startUs: TimeUs; endUs: TimeUs; durationUs: TimeUs }[] = [];
     if (hasAudio && durationUs > 0) {
       // Simple gap detection: if audio doesn't cover full scene
-      const audioCoverageStart = Math.min(...audioElements.map(e => e.startUs));
-      const audioCoverageEnd = Math.max(...audioElements.map(e => e.startUs + e.durationUs));
-      
+      const audioCoverageStart = Math.min(...audioElements.map((e) => e.startUs));
+      const audioCoverageEnd = Math.max(...audioElements.map((e) => e.startUs + e.durationUs));
+
       if (audioCoverageStart > scene.startUs) {
         audioGaps.push({
           startUs: scene.startUs,
@@ -833,20 +868,27 @@ export function computeSceneCoverages(
         });
       }
     }
-    
+
     // Caption gaps - simplified
     const captionGaps: { startUs: TimeUs; endUs: TimeUs; durationUs: TimeUs }[] = [];
-    
+
     // Apply scene-level rules
-    const rules = applyRules(snapshot, [scene])
-      .filter(rule => rule.sceneId === scene.id);
-    
+    const rules = applyRules(snapshot, [scene]).filter((rule) => rule.sceneId === scene.id);
+
     // Build evidence
     const evidence: IntelligenceEvidenceRefV1[] = [
-      { id: scene.id, kind: 'marker', startUs: scene.startUs, endUs: scene.endUs, detail: 'scene-coverage' },
-      ...scene.evidence.map(e => ({ ...e, detail: 'scene-evidence' } as IntelligenceEvidenceRefV1)),
+      {
+        id: scene.id,
+        kind: 'marker',
+        startUs: scene.startUs,
+        endUs: scene.endUs,
+        detail: 'scene-coverage',
+      },
+      ...scene.evidence.map(
+        (e) => ({ ...e, detail: 'scene-evidence' }) as IntelligenceEvidenceRefV1,
+      ),
     ];
-    
+
     return {
       sceneId: scene.id,
       projectId,
@@ -882,58 +924,58 @@ export function computeSceneCoverages(
  * Reports factual readiness based on destination, aspect ratio, duration alignment,
  * and capability state. Missing data becomes unknown/warning state, never fabricated.
  */
-export function computeProjectReadiness(
-  snapshot: SemanticProjectSnapshotV1,
-): ProjectReadinessV1 {
+export function computeProjectReadiness(snapshot: SemanticProjectSnapshotV1): ProjectReadinessV1 {
   const projectId = snapshot.projectId;
   const revisionId = snapshot.revisionId;
   const composition = snapshot.composition;
   const goal = snapshot.goal;
   const scenes = snapshot.scenes;
   const capabilities = snapshot.capabilities;
-  
+
   // Destination alignment
   const destination = goal?.destination;
   const expectedAspectRatio = destination ? destinationToAspectRatio(destination) : null;
-  const destinationAligned = !destination || !expectedAspectRatio || 
-    composition.aspectRatio === expectedAspectRatio;
-  const destinationMismatch = destination && expectedAspectRatio && 
-    composition.aspectRatio !== expectedAspectRatio
-    ? { expected: expectedAspectRatio, actual: composition.aspectRatio }
-    : undefined;
-  
+  const destinationAligned =
+    !destination || !expectedAspectRatio || composition.aspectRatio === expectedAspectRatio;
+  const destinationMismatch =
+    destination && expectedAspectRatio && composition.aspectRatio !== expectedAspectRatio
+      ? { expected: expectedAspectRatio, actual: composition.aspectRatio }
+      : undefined;
+
   // Duration alignment
   const durationTargetUs = goal?.durationTargetUs;
   const compositionDurationUs = composition.durationUs;
   const durationAligned = !durationTargetUs || compositionDurationUs === durationTargetUs;
   const durationGapUs = durationTargetUs ? compositionDurationUs - durationTargetUs : undefined;
-  
+
   // Aspect ratio alignment
   const aspectRatio = composition.aspectRatio;
-  const aspectRatioAligned = !expectedAspectRatio || composition.aspectRatio === expectedAspectRatio;
-  const aspectRatioMismatch = expectedAspectRatio && composition.aspectRatio !== expectedAspectRatio
-    ? { expected: expectedAspectRatio, actual: composition.aspectRatio }
-    : undefined;
-  
+  const aspectRatioAligned =
+    !expectedAspectRatio || composition.aspectRatio === expectedAspectRatio;
+  const aspectRatioMismatch =
+    expectedAspectRatio && composition.aspectRatio !== expectedAspectRatio
+      ? { expected: expectedAspectRatio, actual: composition.aspectRatio }
+      : undefined;
+
   // Capability state
   const captionAvailable = capabilities['caption-detection'] === 'ready';
   const audioAvailable = capabilities['audio-analysis'] === 'ready';
   const generatedAssetsAvailable = capabilities['generated-assets'] === 'ready';
-  
+
   // Scene coverage aggregates
   const sceneCount = scenes.length;
-  const scenesWithVisuals = scenes.filter(s => s.visualCoverage !== 'none').length;
-  const scenesWithAudio = scenes.filter(s => s.elements.some(e => e.hasAudio)).length;
-  const scenesWithCaptions = scenes.filter(s => s.captionCoverage?.hasCaptions).length;
-  
+  const scenesWithVisuals = scenes.filter((s) => s.visualCoverage !== 'none').length;
+  const scenesWithAudio = scenes.filter((s) => s.elements.some((e) => e.hasAudio)).length;
+  const scenesWithCaptions = scenes.filter((s) => s.captionCoverage?.hasCaptions).length;
+
   // Determine readiness level
   let readinessLevel: 'unknown' | 'setup-required' | 'partial' | 'ready';
-  
+
   // Check for blockers and warnings
   const allRules = applyRules(snapshot);
   const blockers: IntelligenceRuleV1[] = [];
   const ruleWarnings: IntelligenceRuleV1[] = [];
-  
+
   for (const rule of allRules) {
     if (rule.projectId === projectId) {
       if (rule.severity === 'error') {
@@ -943,7 +985,7 @@ export function computeProjectReadiness(
       }
     }
   }
-  
+
   // If we have setup-required capabilities, readiness can't be 'ready'
   if (Object.values(capabilities).includes('setup-required')) {
     readinessLevel = 'setup-required';
@@ -956,21 +998,21 @@ export function computeProjectReadiness(
   } else {
     readinessLevel = 'ready';
   }
-  
+
   // If no goal is specified, we can't determine alignment
   if (!goal?.destination && !goal?.durationTargetUs) {
     readinessLevel = 'unknown';
   }
-  
+
   // Build evidence
   const evidence: IntelligenceEvidenceRefV1[] = [
     { id: projectId, kind: 'composition', detail: 'project-readiness' },
   ];
-  
+
   if (goal) {
     evidence.push({ id: 'goal', kind: 'composition', detail: 'project-goal' });
   }
-  
+
   return {
     projectId,
     revisionId,
@@ -1006,16 +1048,14 @@ export function computeProjectReadiness(
  * Compute all S2 intelligence from a semantic snapshot.
  * Returns brand readiness, scene coverages, project readiness, and all triggered rules.
  */
-export function computeSemanticIntelligence(
-  snapshot: SemanticProjectSnapshotV1,
-): {
+export function computeSemanticIntelligence(snapshot: SemanticProjectSnapshotV1): {
   readonly brandReadiness: BrandReadinessV1;
   readonly sceneCoverages: readonly SceneCoverageV1[];
   readonly projectReadiness: ProjectReadinessV1;
   readonly allRules: readonly IntelligenceRuleV1[];
 } {
   const allRules = applyRules(snapshot);
-  
+
   return {
     brandReadiness: computeBrandReadiness(snapshot),
     sceneCoverages: computeSceneCoverages(snapshot),
@@ -1040,5 +1080,5 @@ export function getRuleDefinitions(): readonly RuleDefinition[] {
 
 /** Get a specific rule definition by ID */
 export function getRuleDefinition(ruleId: KnownRuleId): RuleDefinition | null {
-  return ruleCatalog.find(r => r.ruleId === ruleId) ?? null;
+  return ruleCatalog.find((r) => r.ruleId === ruleId) ?? null;
 }

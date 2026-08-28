@@ -4,16 +4,20 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { JoyProjectV1, CompositionV1, TrackV1, ClipV1, AssetRecordV1, MarkerV1, CaptionDocumentV1, GenerationProvenanceV1 } from './v1.js';
+import type {
+  JoyProjectV1,
+  CompositionV1,
+  TrackV1,
+  ClipV1,
+  AssetRecordV1,
+  MarkerV1,
+  CaptionDocumentV1,
+  GenerationProvenanceV1,
+} from './v1.js';
 import type { Rational } from './time.js';
 import type { JsonValue } from './v1.js';
-import {
-  projectToSemanticSnapshot,
-} from './semantic-snapshot-impl.js';
-import type {
-  SemanticProjectSnapshotV1,
-  ProjectRevisionId,
-} from './semantic-snapshot.js';
+import { projectToSemanticSnapshot } from './semantic-snapshot-impl.js';
+import type { SemanticProjectSnapshotV1, ProjectRevisionId } from './semantic-snapshot.js';
 import {
   computeBrandReadiness,
   computeSceneCoverages,
@@ -257,7 +261,7 @@ describe('semantic-intelligence', () => {
       const definitions = getRuleDefinitions();
       expect(definitions).toBeInstanceOf(Array);
       expect(definitions.length).toBeGreaterThan(0);
-      
+
       for (const def of definitions) {
         expect(def.ruleId).toBeDefined();
         expect(def.category).toBeDefined();
@@ -272,7 +276,7 @@ describe('semantic-intelligence', () => {
       expect(def).not.toBeNull();
       expect(def?.ruleId).toBe(KNOWN_RULE_IDS.BRAND_NO_KIT);
       expect(def?.category).toBe('brand');
-      
+
       const nonExistent = getRuleDefinition('non-existent' as KnownRuleId);
       expect(nonExistent).toBeNull();
     });
@@ -283,9 +287,9 @@ describe('semantic-intelligence', () => {
       const composition = createComposition();
       const project = createProject('no-brand-project', 'comp-1', { 'comp-1': composition });
       const snapshot = createSnapshot(project);
-      
+
       const brandReadiness = computeBrandReadiness(snapshot);
-      
+
       expect(brandReadiness.projectId).toBe('no-brand-project');
       expect(brandReadiness.hasBrandKit).toBe(false);
       expect(brandReadiness.brandCompleteness).toBe('none');
@@ -299,9 +303,11 @@ describe('semantic-intelligence', () => {
       expect(brandReadiness.missingComponents).toContain('colors');
       expect(brandReadiness.missingComponents).toContain('fonts');
       expect(brandReadiness.missingComponents).toContain('logo');
-      
+
       // Should have rules triggered for missing brand
-      const hasBrandRules = brandReadiness.warnings.some(w => w.ruleId === KNOWN_RULE_IDS.BRAND_NO_KIT);
+      const hasBrandRules = brandReadiness.warnings.some(
+        (w) => w.ruleId === KNOWN_RULE_IDS.BRAND_NO_KIT,
+      );
       expect(hasBrandRules).toBe(true);
     });
 
@@ -309,9 +315,9 @@ describe('semantic-intelligence', () => {
       const composition = createComposition();
       const project = createProject('unknown-brand-project', 'comp-1', { 'comp-1': composition });
       const snapshot = createSnapshot(project);
-      
+
       const brandReadiness = computeBrandReadiness(snapshot);
-      
+
       // Should not fabricate brand data
       expect(brandReadiness.colorsAvailable).toBe(false);
       expect(brandReadiness.fontsAvailable).toBe(false);
@@ -326,9 +332,9 @@ describe('semantic-intelligence', () => {
       const composition = createComposition();
       const project = createProject('evidence-test', 'comp-1', { 'comp-1': composition });
       const snapshot = createSnapshot(project);
-      
+
       const brandReadiness = computeBrandReadiness(snapshot);
-      
+
       expect(brandReadiness.evidence).toBeInstanceOf(Array);
       expect(brandReadiness.evidence.length).toBeGreaterThan(0);
       expect(brandReadiness.evidence[0]!.id).toBe('evidence-test');
@@ -339,19 +345,26 @@ describe('semantic-intelligence', () => {
     it('should detect narration without captions', () => {
       const narrationClip = createVideoClip('narration-clip', 0, 2_000_000, 'asset-narration');
       const narrationTrack = createTrack('narration-track', 'video', [narrationClip], 'visual');
-      
-      const composition = createComposition('comp-1', 1920, 1080, 2_000_000, r(30, 1), [narrationTrack]);
-      
-      const project = createProject('no-captions-test', 'comp-1', { 'comp-1': composition }, {
-        'asset-narration': createAsset('asset-narration', 'video', 'Narration', 2_000_000),
-      });
-      
+
+      const composition = createComposition('comp-1', 1920, 1080, 2_000_000, r(30, 1), [
+        narrationTrack,
+      ]);
+
+      const project = createProject(
+        'no-captions-test',
+        'comp-1',
+        { 'comp-1': composition },
+        {
+          'asset-narration': createAsset('asset-narration', 'video', 'Narration', 2_000_000),
+        },
+      );
+
       const snapshot = createSnapshot(project);
       const sceneCoverages = computeSceneCoverages(snapshot);
-      
+
       expect(sceneCoverages).toBeInstanceOf(Array);
       expect(sceneCoverages.length).toBeGreaterThan(0);
-      
+
       const firstScene = sceneCoverages[0]!;
       expect(firstScene.hasCaptions).toBe(false);
       expect(firstScene.captionWordCount).toBe(0);
@@ -361,29 +374,42 @@ describe('semantic-intelligence', () => {
     it('should correctly identify scenes with captions', () => {
       const videoClip = createVideoClip('video-clip', 0, 2_000_000, 'asset-video');
       const videoTrack = createTrack('video-track', 'video', [videoClip], 'visual');
-      
+
       const captionClip = createCaptionClip('caption-clip', 0, 2_000_000, 'caption-doc-1');
       const captionTrack = createTrack('caption-track', 'caption', [captionClip], 'visual');
-      
-      const composition = createComposition('comp-1', 1920, 1080, 2_000_000, r(30, 1), [videoTrack, captionTrack]);
-      
-      const captionDoc = createCaptionDocument('caption-doc-1', 'en-US', [
-        { id: 'seg-1', startUs: 0, endUs: 2_000_000, wordIds: ['word-1', 'word-2'] },
-      ], {
-        'word-1': { id: 'word-1', text: 'Hello', startUs: 0, endUs: 1_000_000 },
-        'word-2': { id: 'word-2', text: 'World', startUs: 1_000_000, endUs: 2_000_000 },
-      });
-      
-      const project = createProject('with-captions-test', 'comp-1', { 'comp-1': composition }, {
-        'asset-video': createAsset('asset-video', 'video', 'Video', 2_000_000),
-      }, [], { 'caption-doc-1': captionDoc });
-      
+
+      const composition = createComposition('comp-1', 1920, 1080, 2_000_000, r(30, 1), [
+        videoTrack,
+        captionTrack,
+      ]);
+
+      const captionDoc = createCaptionDocument(
+        'caption-doc-1',
+        'en-US',
+        [{ id: 'seg-1', startUs: 0, endUs: 2_000_000, wordIds: ['word-1', 'word-2'] }],
+        {
+          'word-1': { id: 'word-1', text: 'Hello', startUs: 0, endUs: 1_000_000 },
+          'word-2': { id: 'word-2', text: 'World', startUs: 1_000_000, endUs: 2_000_000 },
+        },
+      );
+
+      const project = createProject(
+        'with-captions-test',
+        'comp-1',
+        { 'comp-1': composition },
+        {
+          'asset-video': createAsset('asset-video', 'video', 'Video', 2_000_000),
+        },
+        [],
+        { 'caption-doc-1': captionDoc },
+      );
+
       const snapshot = createSnapshot(project);
       const sceneCoverages = computeSceneCoverages(snapshot);
-      
+
       expect(sceneCoverages).toBeInstanceOf(Array);
       expect(sceneCoverages.length).toBeGreaterThan(0);
-      
+
       const firstScene = sceneCoverages[0]!;
       expect(firstScene.hasCaptions).toBe(true);
       expect(firstScene.captionWordCount).toBeGreaterThan(0);
@@ -395,28 +421,41 @@ describe('semantic-intelligence', () => {
     it('should preserve Persian/RTL caption locale in coverage', () => {
       const videoClip = createVideoClip('video-clip', 0, 1_000_000, 'asset-video');
       const videoTrack = createTrack('video-track', 'video', [videoClip], 'visual');
-      
+
       const captionClip = createCaptionClip('caption-clip', 0, 1_000_000, 'caption-doc-1');
       const captionTrack = createTrack('caption-track', 'caption', [captionClip], 'visual');
-      
-      const composition = createComposition('comp-1', 1920, 1080, 1_000_000, r(30, 1), [videoTrack, captionTrack]);
-      
-      const captionDoc = createCaptionDocument('caption-doc-1', 'fa-IR', [
-        { id: 'seg-1', startUs: 0, endUs: 1_000_000, wordIds: ['word-1'] },
-      ], {
-        'word-1': { id: 'word-1', text: 'سلام', startUs: 0, endUs: 1_000_000 },
-      });
-      
-      const project = createProject('persian-coverage-test', 'comp-1', { 'comp-1': composition }, {
-        'asset-video': createAsset('asset-video', 'video', 'Video', 1_000_000),
-      }, [], { 'caption-doc-1': captionDoc });
-      
+
+      const composition = createComposition('comp-1', 1920, 1080, 1_000_000, r(30, 1), [
+        videoTrack,
+        captionTrack,
+      ]);
+
+      const captionDoc = createCaptionDocument(
+        'caption-doc-1',
+        'fa-IR',
+        [{ id: 'seg-1', startUs: 0, endUs: 1_000_000, wordIds: ['word-1'] }],
+        {
+          'word-1': { id: 'word-1', text: 'سلام', startUs: 0, endUs: 1_000_000 },
+        },
+      );
+
+      const project = createProject(
+        'persian-coverage-test',
+        'comp-1',
+        { 'comp-1': composition },
+        {
+          'asset-video': createAsset('asset-video', 'video', 'Video', 1_000_000),
+        },
+        [],
+        { 'caption-doc-1': captionDoc },
+      );
+
       const snapshot = createSnapshot(project);
       const sceneCoverages = computeSceneCoverages(snapshot);
-      
+
       expect(sceneCoverages).toBeInstanceOf(Array);
       expect(sceneCoverages.length).toBeGreaterThan(0);
-      
+
       const firstScene = sceneCoverages[0]!;
       expect(firstScene.captionLocale).toBe('fa-IR');
       expect(firstScene.hasCaptions).toBe(true);
@@ -426,9 +465,9 @@ describe('semantic-intelligence', () => {
       const composition = createComposition();
       const project = createProject('evidence-coverage-test', 'comp-1', { 'comp-1': composition });
       const snapshot = createSnapshot(project);
-      
+
       const sceneCoverages = computeSceneCoverages(snapshot);
-      
+
       expect(sceneCoverages).toBeInstanceOf(Array);
       for (const coverage of sceneCoverages) {
         expect(coverage.evidence).toBeInstanceOf(Array);
@@ -441,19 +480,22 @@ describe('semantic-intelligence', () => {
   describe('computeProjectReadiness', () => {
     it('should report destination aspect ratio mismatch', () => {
       const composition = createComposition('comp-1', 1920, 1080, 15_000_000, r(30, 1), []);
-      
+
       const project = createProject(
         'mismatch-test',
         'comp-1',
         { 'comp-1': composition },
         {},
         [],
-        {}
+        {},
       );
-      
-      const snapshot = createSnapshot(project, 'rev-1', { destination: 'instagram-reel', durationTargetUs: 15_000_000 });
+
+      const snapshot = createSnapshot(project, 'rev-1', {
+        destination: 'instagram-reel',
+        durationTargetUs: 15_000_000,
+      });
       const projectReadiness = computeProjectReadiness(snapshot);
-      
+
       expect(projectReadiness.projectId).toBe('mismatch-test');
       expect(projectReadiness.destination).toBe('instagram-reel');
       expect(projectReadiness.aspectRatio).toBe('16:9');
@@ -467,19 +509,22 @@ describe('semantic-intelligence', () => {
 
     it('should report correct alignment for matching destination', () => {
       const composition = createComposition('comp-1', 1080, 1920, 15_000_000, r(30, 1), []);
-      
+
       const project = createProject(
         'aligned-test',
         'comp-1',
         { 'comp-1': composition },
         {},
         [],
-        {}
+        {},
       );
-      
-      const snapshot = createSnapshot(project, 'rev-1', { destination: 'instagram-reel', durationTargetUs: 15_000_000 });
+
+      const snapshot = createSnapshot(project, 'rev-1', {
+        destination: 'instagram-reel',
+        durationTargetUs: 15_000_000,
+      });
       const projectReadiness = computeProjectReadiness(snapshot);
-      
+
       expect(projectReadiness.destination).toBe('instagram-reel');
       expect(projectReadiness.aspectRatio).toBe('9:16');
       expect(projectReadiness.aspectRatioAligned).toBe(true);
@@ -492,19 +537,22 @@ describe('semantic-intelligence', () => {
 
     it('should report duration mismatch', () => {
       const composition = createComposition('comp-1', 1920, 1080, 10_000_000, r(30, 1), []);
-      
+
       const project = createProject(
         'duration-mismatch-test',
         'comp-1',
         { 'comp-1': composition },
         {},
         [],
-        {}
+        {},
       );
-      
-      const snapshot = createSnapshot(project, 'rev-1', { destination: 'youtube', durationTargetUs: 15_000_000 });
+
+      const snapshot = createSnapshot(project, 'rev-1', {
+        destination: 'youtube',
+        durationTargetUs: 15_000_000,
+      });
       const projectReadiness = computeProjectReadiness(snapshot);
-      
+
       expect(projectReadiness.compositionDurationUs).toBe(10_000_000);
       expect(projectReadiness.durationTargetUs).toBe(15_000_000);
       expect(projectReadiness.durationAligned).toBe(false);
@@ -514,10 +562,10 @@ describe('semantic-intelligence', () => {
     it('should report unknown readiness when no goal is specified', () => {
       const composition = createComposition();
       const project = createProject('no-goal-test', 'comp-1', { 'comp-1': composition });
-      
+
       const snapshot = createSnapshot(project);
       const projectReadiness = computeProjectReadiness(snapshot);
-      
+
       expect(projectReadiness.destination).toBeUndefined();
       expect(projectReadiness.durationTargetUs).toBeUndefined();
       expect(projectReadiness.readinessLevel).toBe('unknown');
@@ -526,10 +574,10 @@ describe('semantic-intelligence', () => {
     it('should report aggregate scene coverage', () => {
       const composition = createComposition();
       const project = createProject('aggregate-test', 'comp-1', { 'comp-1': composition });
-      
+
       const snapshot = createSnapshot(project);
       const projectReadiness = computeProjectReadiness(snapshot);
-      
+
       expect(projectReadiness.sceneCount).toBeGreaterThanOrEqual(0);
       expect(projectReadiness.scenesWithVisuals).toBeGreaterThanOrEqual(0);
       expect(projectReadiness.scenesWithAudio).toBeGreaterThanOrEqual(0);
@@ -539,10 +587,10 @@ describe('semantic-intelligence', () => {
     it('should include evidence for readiness claims', () => {
       const composition = createComposition();
       const project = createProject('readiness-evidence-test', 'comp-1', { 'comp-1': composition });
-      
+
       const snapshot = createSnapshot(project);
       const projectReadiness = computeProjectReadiness(snapshot);
-      
+
       expect(projectReadiness.evidence).toBeInstanceOf(Array);
       expect(projectReadiness.evidence.length).toBeGreaterThan(0);
     });
@@ -553,15 +601,15 @@ describe('semantic-intelligence', () => {
       const composition = createComposition();
       const project = createProject('full-test', 'comp-1', { 'comp-1': composition });
       const snapshot = createSnapshot(project);
-      
+
       const intelligence = computeSemanticIntelligence(snapshot);
-      
+
       expect(intelligence).toBeDefined();
       expect(intelligence.brandReadiness).toBeDefined();
       expect(intelligence.sceneCoverages).toBeDefined();
       expect(intelligence.projectReadiness).toBeDefined();
       expect(intelligence.allRules).toBeDefined();
-      
+
       expect(intelligence.brandReadiness.projectId).toBe('full-test');
       expect(intelligence.sceneCoverages).toBeInstanceOf(Array);
       expect(intelligence.projectReadiness.projectId).toBe('full-test');
@@ -572,10 +620,10 @@ describe('semantic-intelligence', () => {
       const composition = createComposition();
       const project = createProject('deterministic-test', 'comp-1', { 'comp-1': composition });
       const snapshot = createSnapshot(project);
-      
+
       const intelligence1 = computeSemanticIntelligence(snapshot);
       const intelligence2 = computeSemanticIntelligence(snapshot);
-      
+
       expect(intelligence1).toEqual(intelligence2);
     });
 
@@ -583,9 +631,9 @@ describe('semantic-intelligence', () => {
       const composition = createComposition();
       const project = createProject('evidence-valid-test', 'comp-1', { 'comp-1': composition });
       const snapshot = createSnapshot(project);
-      
+
       const intelligence = computeSemanticIntelligence(snapshot);
-      
+
       for (const rule of intelligence.allRules) {
         expect(rule.evidence.length).toBeGreaterThan(0);
         for (const evidence of rule.evidence) {
@@ -599,10 +647,10 @@ describe('semantic-intelligence', () => {
       const composition = createComposition();
       const project = createProject('ordering-test', 'comp-1', { 'comp-1': composition });
       const snapshot = createSnapshot(project);
-      
+
       const intelligence1 = computeSemanticIntelligence(snapshot);
       const intelligence2 = computeSemanticIntelligence(snapshot);
-      
+
       expect(intelligence1.allRules).toEqual(intelligence2.allRules);
     });
 
@@ -610,10 +658,20 @@ describe('semantic-intelligence', () => {
       const composition = createComposition();
       const project = createProject('no-subjectivity-test', 'comp-1', { 'comp-1': composition });
       const snapshot = createSnapshot(project);
-      
+
       const intelligence = computeSemanticIntelligence(snapshot);
-      
-      const subjectiveTerms = ['premium', 'luxury', 'cinematic', 'weak', 'on-brand', 'beautiful', 'ugly', 'good', 'bad'];
+
+      const subjectiveTerms = [
+        'premium',
+        'luxury',
+        'cinematic',
+        'weak',
+        'on-brand',
+        'beautiful',
+        'ugly',
+        'good',
+        'bad',
+      ];
       for (const rule of intelligence.allRules) {
         const messageLower = rule.message.toLowerCase();
         for (const term of subjectiveTerms) {
@@ -626,9 +684,9 @@ describe('semantic-intelligence', () => {
       const composition = createComposition();
       const project = createProject('intent-test', 'comp-1', { 'comp-1': composition });
       const snapshot = createSnapshot(project);
-      
+
       const intelligence = computeSemanticIntelligence(snapshot);
-      
+
       for (const rule of intelligence.allRules) {
         if (rule.suggestedIntent) {
           const intentLower = rule.suggestedIntent.toLowerCase();
@@ -647,11 +705,11 @@ describe('semantic-intelligence', () => {
       const composition = createComposition();
       const project = createProject('security-test', 'comp-1', { 'comp-1': composition });
       const snapshot = createSnapshot(project);
-      
+
       const intelligence = computeSemanticIntelligence(snapshot);
-      
+
       const json = JSON.stringify(intelligence);
-      
+
       const forbiddenPatterns = [
         /^\//,
         /^[a-zA-Z]:\\/,
@@ -668,7 +726,7 @@ describe('semantic-intelligence', () => {
         /secret/i,
         /token/i,
       ];
-      
+
       for (const pattern of forbiddenPatterns) {
         expect(json).not.toMatch(pattern);
       }
@@ -678,11 +736,11 @@ describe('semantic-intelligence', () => {
       const composition = createComposition();
       const project = createProject('purity-test', 'comp-1', { 'comp-1': composition });
       const snapshot = createSnapshot(project);
-      
+
       const intelligence1 = computeSemanticIntelligence(snapshot);
       const intelligence2 = computeSemanticIntelligence(snapshot);
       const intelligence3 = computeSemanticIntelligence(snapshot);
-      
+
       expect(intelligence1).toEqual(intelligence2);
       expect(intelligence2).toEqual(intelligence3);
     });
@@ -691,13 +749,13 @@ describe('semantic-intelligence', () => {
       const composition = createComposition();
       const project = createProject('byte-stable-test', 'comp-1', { 'comp-1': composition });
       const snapshot = createSnapshot(project);
-      
+
       const intelligence1 = computeSemanticIntelligence(snapshot);
       const intelligence2 = computeSemanticIntelligence(snapshot);
-      
+
       const json1 = JSON.stringify(intelligence1);
       const json2 = JSON.stringify(intelligence2);
-      
+
       expect(json1).toBe(json2);
     });
   });
@@ -707,39 +765,55 @@ describe('semantic-intelligence', () => {
       const composition = createComposition();
       const project = createProject('blank-test', 'comp-1', { 'comp-1': composition });
       const snapshot = createSnapshot(project);
-      
+
       const intelligence = computeSemanticIntelligence(snapshot);
-      
+
       expect(intelligence.brandReadiness).toBeDefined();
       expect(intelligence.sceneCoverages).toBeDefined();
       expect(intelligence.projectReadiness).toBeDefined();
       expect(intelligence.allRules).toBeDefined();
-      
+
       expect(intelligence.projectReadiness.readinessLevel).toBeOneOf(['unknown', 'partial']);
     });
 
     it('should handle mixed visual/audio project', () => {
-      const videoTrack = createTrack('video-track', 'video', [
-        createVideoClip('video-clip-1', 0, 2_000_000, 'asset-video-1'),
-        createVideoClip('video-clip-2', 2_000_000, 2_000_000, 'asset-video-2'),
-      ], 'visual');
+      const videoTrack = createTrack(
+        'video-track',
+        'video',
+        [
+          createVideoClip('video-clip-1', 0, 2_000_000, 'asset-video-1'),
+          createVideoClip('video-clip-2', 2_000_000, 2_000_000, 'asset-video-2'),
+        ],
+        'visual',
+      );
 
-      const audioTrack = createTrack('audio-track', 'audio', [
-        createVideoClip('audio-clip-1', 0, 4_000_000, 'asset-audio-1'),
-      ], 'audio');
+      const audioTrack = createTrack(
+        'audio-track',
+        'audio',
+        [createVideoClip('audio-clip-1', 0, 4_000_000, 'asset-audio-1')],
+        'audio',
+      );
 
-      const composition = createComposition('comp-1', 1920, 1080, 4_000_000, r(30, 1), [videoTrack, audioTrack]);
-      const project = createProject('mixed-test', 'comp-1', {
-        'comp-1': composition,
-      }, {
-        'asset-video-1': createAsset('asset-video-1', 'video', 'Video 1', 2_000_000),
-        'asset-video-2': createAsset('asset-video-2', 'video', 'Video 2', 2_000_000),
-        'asset-audio-1': createAsset('asset-audio-1', 'audio', 'Audio 1', 4_000_000),
-      });
+      const composition = createComposition('comp-1', 1920, 1080, 4_000_000, r(30, 1), [
+        videoTrack,
+        audioTrack,
+      ]);
+      const project = createProject(
+        'mixed-test',
+        'comp-1',
+        {
+          'comp-1': composition,
+        },
+        {
+          'asset-video-1': createAsset('asset-video-1', 'video', 'Video 1', 2_000_000),
+          'asset-video-2': createAsset('asset-video-2', 'video', 'Video 2', 2_000_000),
+          'asset-audio-1': createAsset('asset-audio-1', 'audio', 'Audio 1', 4_000_000),
+        },
+      );
 
       const snapshot = createSnapshot(project);
       const intelligence = computeSemanticIntelligence(snapshot);
-      
+
       expect(intelligence.projectReadiness.scenesWithVisuals).toBeGreaterThan(0);
       expect(intelligence.projectReadiness.scenesWithAudio).toBeGreaterThan(0);
     });
@@ -747,10 +821,10 @@ describe('semantic-intelligence', () => {
     it('should handle WP-36 track states', () => {
       const composition = createComposition();
       const project = createProject('wp36-test', 'comp-1', { 'comp-1': composition });
-      
+
       const snapshot = createSnapshot(project);
       const intelligence = computeSemanticIntelligence(snapshot);
-      
+
       expect(intelligence.brandReadiness).toBeDefined();
       expect(intelligence.sceneCoverages).toBeDefined();
       expect(intelligence.projectReadiness).toBeDefined();

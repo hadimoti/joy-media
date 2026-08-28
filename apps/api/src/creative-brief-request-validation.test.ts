@@ -15,10 +15,7 @@ import {
   MAX_REQUEST_LENGTH,
   MAX_BRIEF_LENGTH,
 } from './creative-brief-request-validation.js';
-import type {
-  SemanticProjectSnapshotV1,
-  ProjectRevisionId,
-} from '@joy-media/project-schema';
+import type { SemanticProjectSnapshotV1, ProjectRevisionId } from '@joy-media/project-schema';
 import type {
   BrandReadinessV1,
   SceneCoverageV1,
@@ -162,7 +159,14 @@ function createMinimalRequest(
   projectId: string = TEST_PROJECT_ID,
   snapshotRevisionId: ProjectRevisionId = TEST_REVISION_ID,
   request: string = 'Test request',
-  scope: 'pacing' | 'caption-coverage' | 'visual-coverage' | 'brand-alignment' | 'audio-quality' | 'structure' | 'general' = 'general',
+  scope:
+    | 'pacing'
+    | 'caption-coverage'
+    | 'visual-coverage'
+    | 'brand-alignment'
+    | 'audio-quality'
+    | 'structure'
+    | 'general' = 'general',
 ): CreativeBriefRequestV1 {
   return {
     snapshotRevisionId,
@@ -204,7 +208,7 @@ describe('validateCreativeBriefServerRequest', () => {
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(true);
       expect(result.errors).toHaveLength(0);
     });
@@ -222,13 +226,13 @@ describe('validateCreativeBriefServerRequest', () => {
       (envelope.request as any).durationTargetUs = 30000000;
       (envelope.request as any).maxRecommendations = 5;
       (envelope.request as any).allowedRecommendationKinds = ['pacing', 'caption'];
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(true);
       expect(result.errors).toHaveLength(0);
     });
@@ -242,7 +246,7 @@ describe('validateCreativeBriefServerRequest', () => {
         'different-project-id',
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -258,13 +262,13 @@ describe('validateCreativeBriefServerRequest', () => {
         'different-project-in-snapshot',
         TEST_REVISION_ID,
       );
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -280,13 +284,13 @@ describe('validateCreativeBriefServerRequest', () => {
         'different-project-in-request',
         TEST_REVISION_ID,
       );
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -305,7 +309,7 @@ describe('validateCreativeBriefServerRequest', () => {
         TEST_ROUTE_PROJECT_ID,
         'different-revision-id',
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -321,13 +325,13 @@ describe('validateCreativeBriefServerRequest', () => {
         TEST_PROJECT_ID,
         'different-revision-in-snapshot',
       );
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -343,13 +347,13 @@ describe('validateCreativeBriefServerRequest', () => {
         TEST_PROJECT_ID,
         'different-revision-in-request',
       );
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -364,13 +368,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope with unknown top-level fields', () => {
       const envelope = createValidEnvelope();
       (envelope as any).unknownField = 'should-not-be-allowed';
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -386,15 +390,17 @@ describe('validateCreativeBriefServerRequest', () => {
         ...createMinimalRequest(),
         unknownRequestField: 'should-not-be-allowed',
       };
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'invalid-request' || e.code === 'forbidden-data')).toBe(true);
+      expect(
+        result.errors.some((e) => e.code === 'invalid-request' || e.code === 'forbidden-data'),
+      ).toBe(true);
     });
   });
 
@@ -402,13 +408,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope with command field', () => {
       const envelope = createValidEnvelope();
       (envelope as any).command = { type: 'execute' };
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -420,13 +426,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope with job field', () => {
       const envelope = createValidEnvelope();
       (envelope as any).job = { id: 'job-123' };
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -438,13 +444,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope with approval field', () => {
       const envelope = createValidEnvelope();
       (envelope as any).approval = { status: 'pending' };
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -456,13 +462,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope with provider field', () => {
       const envelope = createValidEnvelope();
       (envelope as any).provider = { name: 'mistral' };
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -474,13 +480,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope with model field', () => {
       const envelope = createValidEnvelope();
       (envelope as any).model = 'mistral-large';
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -492,13 +498,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope with secret field', () => {
       const envelope = createValidEnvelope();
       (envelope as any).secret = 'api-key-1234567890';
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -510,13 +516,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope with apiKey field', () => {
       const envelope = createValidEnvelope();
       (envelope as any).apiKey = 'sk-1234567890abcdef';
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -528,13 +534,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope with token field', () => {
       const envelope = createValidEnvelope();
       (envelope as any).token = 'bearer-token-123';
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -546,13 +552,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope with url field', () => {
       const envelope = createValidEnvelope();
       (envelope as any).url = 'https://example.com';
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -564,13 +570,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope with path field', () => {
       const envelope = createValidEnvelope();
       (envelope as any).path = '/some/path/to/file';
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -582,13 +588,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope with file field', () => {
       const envelope = createValidEnvelope();
       (envelope as any).file = 'file.txt';
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -600,13 +606,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope with write field', () => {
       const envelope = createValidEnvelope();
       (envelope as any).write = true;
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -624,13 +630,13 @@ describe('validateCreativeBriefServerRequest', () => {
         TEST_REVISION_ID,
         'Go to https://example.com for more info',
       );
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -646,13 +652,13 @@ describe('validateCreativeBriefServerRequest', () => {
         TEST_REVISION_ID,
         'Load from s3://bucket/key',
       );
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -668,13 +674,13 @@ describe('validateCreativeBriefServerRequest', () => {
         TEST_REVISION_ID,
         'Use key sk-1234567890abcdef1234567890',
       );
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -690,13 +696,13 @@ describe('validateCreativeBriefServerRequest', () => {
         TEST_REVISION_ID,
         'Auth with Bearer abc123.def456.ghi789',
       );
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -712,13 +718,13 @@ describe('validateCreativeBriefServerRequest', () => {
         TEST_REVISION_ID,
         'AWS key AKIAIOSFODNN7EXAMPLE',
       );
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -734,13 +740,13 @@ describe('validateCreativeBriefServerRequest', () => {
         TEST_REVISION_ID,
         'Load from s3://my-bucket/data.json',
       );
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -756,13 +762,13 @@ describe('validateCreativeBriefServerRequest', () => {
         TEST_REVISION_ID,
         'Read from /usr/local/bin/node',
       );
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -780,13 +786,13 @@ describe('validateCreativeBriefServerRequest', () => {
         TEST_REVISION_ID,
         'a'.repeat(MAX_REQUEST_LENGTH + 1),
       );
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -799,13 +805,13 @@ describe('validateCreativeBriefServerRequest', () => {
       const envelope = createValidEnvelope();
       (envelope as any).request = createMinimalRequest();
       (envelope.request as any).brief = 'a'.repeat(MAX_BRIEF_LENGTH + 1);
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -821,13 +827,13 @@ describe('validateCreativeBriefServerRequest', () => {
         { length: 21 },
         (_, i) => `kind-${i}`,
       );
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -846,13 +852,13 @@ describe('validateCreativeBriefServerRequest', () => {
         'Test',
         'invalid-scope' as any,
       );
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -868,13 +874,13 @@ describe('validateCreativeBriefServerRequest', () => {
       const envelope = createValidEnvelope();
       (envelope as any).request = createMinimalRequest();
       (envelope.request as any).destination = 'invalid-destination';
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -890,13 +896,13 @@ describe('validateCreativeBriefServerRequest', () => {
       const envelope = createValidEnvelope();
       (envelope as any).request = createMinimalRequest();
       (envelope.request as any).durationTargetUs = -1000;
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -909,13 +915,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects request with negative maxRecommendations', () => {
       const envelope = createValidEnvelope();
       (envelope.request as any).maxRecommendations = -5;
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -928,13 +934,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects request with maxRecommendations of zero', () => {
       const envelope = createValidEnvelope();
       (envelope.request as any).maxRecommendations = 0;
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -947,13 +953,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects request with non-integer maxRecommendations', () => {
       const envelope = createValidEnvelope();
       (envelope.request as any).maxRecommendations = 5.5;
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -973,13 +979,13 @@ describe('validateCreativeBriefServerRequest', () => {
         TEST_REVISION_ID,
         persianRequest,
       );
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(true);
       expect(result.errors).toHaveLength(0);
     });
@@ -992,13 +998,13 @@ describe('validateCreativeBriefServerRequest', () => {
         TEST_REVISION_ID,
         mixedRequest,
       );
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(true);
       expect(result.errors).toHaveLength(0);
     });
@@ -1008,13 +1014,13 @@ describe('validateCreativeBriefServerRequest', () => {
       const envelope = createValidEnvelope();
       (envelope as any).request = createMinimalRequest();
       (envelope.request as any).brief = persianBrief;
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(true);
       expect(result.errors).toHaveLength(0);
     });
@@ -1024,52 +1030,36 @@ describe('validateCreativeBriefServerRequest', () => {
     it('does not mutate the envelope object', () => {
       const envelope = createValidEnvelope();
       const envelopeCopy = JSON.parse(JSON.stringify(envelope));
-      
-      validateCreativeBriefServerRequest(
-        envelope,
-        TEST_ROUTE_PROJECT_ID,
-        TEST_ROUTE_REVISION_ID,
-      );
-      
+
+      validateCreativeBriefServerRequest(envelope, TEST_ROUTE_PROJECT_ID, TEST_ROUTE_REVISION_ID);
+
       expect(envelope).toEqual(envelopeCopy);
     });
 
     it('does not mutate the request object', () => {
       const envelope = createValidEnvelope();
       const requestCopy = JSON.parse(JSON.stringify(envelope.request));
-      
-      validateCreativeBriefServerRequest(
-        envelope,
-        TEST_ROUTE_PROJECT_ID,
-        TEST_ROUTE_REVISION_ID,
-      );
-      
+
+      validateCreativeBriefServerRequest(envelope, TEST_ROUTE_PROJECT_ID, TEST_ROUTE_REVISION_ID);
+
       expect(envelope.request).toEqual(requestCopy);
     });
 
     it('does not mutate the snapshot object', () => {
       const envelope = createValidEnvelope();
       const snapshotCopy = JSON.parse(JSON.stringify(envelope.snapshot));
-      
-      validateCreativeBriefServerRequest(
-        envelope,
-        TEST_ROUTE_PROJECT_ID,
-        TEST_ROUTE_REVISION_ID,
-      );
-      
+
+      validateCreativeBriefServerRequest(envelope, TEST_ROUTE_PROJECT_ID, TEST_ROUTE_REVISION_ID);
+
       expect(envelope.snapshot).toEqual(snapshotCopy);
     });
 
     it('does not mutate the intelligence object', () => {
       const envelope = createValidEnvelope();
       const intelligenceCopy = JSON.parse(JSON.stringify(envelope.intelligence));
-      
-      validateCreativeBriefServerRequest(
-        envelope,
-        TEST_ROUTE_PROJECT_ID,
-        TEST_ROUTE_REVISION_ID,
-      );
-      
+
+      validateCreativeBriefServerRequest(envelope, TEST_ROUTE_PROJECT_ID, TEST_ROUTE_REVISION_ID);
+
       expect(envelope.intelligence).toEqual(intelligenceCopy);
     });
   });
@@ -1081,7 +1071,7 @@ describe('validateCreativeBriefServerRequest', () => {
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -1096,7 +1086,7 @@ describe('validateCreativeBriefServerRequest', () => {
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -1108,13 +1098,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope missing projectId', () => {
       const envelope = createValidEnvelope();
       delete (envelope as any).projectId;
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -1126,13 +1116,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope with empty projectId string', () => {
       const envelope = createValidEnvelope();
       (envelope as any).projectId = '';
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -1144,13 +1134,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope missing snapshotRevisionId', () => {
       const envelope = createValidEnvelope();
       delete (envelope as any).snapshotRevisionId;
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -1162,13 +1152,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope with empty snapshotRevisionId string', () => {
       const envelope = createValidEnvelope();
       (envelope as any).snapshotRevisionId = '';
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -1180,13 +1170,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope missing snapshot', () => {
       const envelope = createValidEnvelope();
       delete (envelope as any).snapshot;
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -1198,13 +1188,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope missing intelligence', () => {
       const envelope = createValidEnvelope();
       delete (envelope as any).intelligence;
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({
@@ -1216,13 +1206,13 @@ describe('validateCreativeBriefServerRequest', () => {
     it('rejects envelope missing request', () => {
       const envelope = createValidEnvelope();
       delete (envelope as any).request;
-      
+
       const result = validateCreativeBriefServerRequest(
         envelope,
         TEST_ROUTE_PROJECT_ID,
         TEST_ROUTE_REVISION_ID,
       );
-      
+
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(
         expect.objectContaining({

@@ -133,7 +133,14 @@ export function TimelineEmptyState({
       onContextMenu={handleContextMenu}
       onClick={handleClick}
       role="region"
+      tabIndex={0}
       aria-label="Empty timeline — drop media to start editing"
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        onImportClick();
+      }}
     >
       <div className="timeline-empty-strip-icon" aria-hidden="true">
         <UploadIcon />

@@ -9,15 +9,15 @@
  * secret handling, environment access, UI, or deployment concerns.
  */
 
-import type {
-  CreativeBriefInputV1,
-  CreativeBriefRequestV1,
-} from '@joy-media/agent-tools';
+import type { CreativeBriefInputV1, CreativeBriefRequestV1 } from '@joy-media/agent-tools';
 import type { Actor } from './control-plane.js';
 import type { ControlPlane } from './control-plane.js';
 import type { ProjectSnapshotService } from './project-snapshot-service.js';
-import type { ProjectIntelligenceService, S2IntelligenceResult } from './project-intelligence-service.js';
-import type { JoyProjectV1, ProjectRevisionId } from '@joy-media/project-schema';
+import type {
+  ProjectIntelligenceService,
+  S2IntelligenceResult,
+} from './project-intelligence-service.js';
+import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { validateJoyProjectV1 } from '@joy-media/project-schema';
 import { createCreativeBriefInput } from '@joy-media/agent-tools';
 
@@ -106,12 +106,17 @@ export interface CreativeBriefInputResolver {
 // Constants
 // ============================================================================
 
-const STALE_REVISION_MESSAGE = 'The requested snapshot revision does not match the current project state' as const;
+const STALE_REVISION_MESSAGE =
+  'The requested snapshot revision does not match the current project state' as const;
 const UNAVAILABLE_STORE_MESSAGE = 'Project document store is unavailable' as const;
-const UNAVAILABLE_INVALID_DOCUMENT_MESSAGE = 'Project document is invalid or cannot be validated as JoyProjectV1' as const;
-const UNAVAILABLE_PROJECT_ID_MISMATCH_MESSAGE = 'Project document project ID does not match the request' as const;
-const UNAVAILABLE_PROJECTOR_FAILURE_MESSAGE = 'Failed to create semantic snapshot from project document' as const;
-const UNAVAILABLE_INTELLIGENCE_FAILURE_MESSAGE = 'Failed to compute semantic intelligence from snapshot' as const;
+const UNAVAILABLE_INVALID_DOCUMENT_MESSAGE =
+  'Project document is invalid or cannot be validated as JoyProjectV1' as const;
+const UNAVAILABLE_PROJECT_ID_MISMATCH_MESSAGE =
+  'Project document project ID does not match the request' as const;
+const UNAVAILABLE_PROJECTOR_FAILURE_MESSAGE =
+  'Failed to create semantic snapshot from project document' as const;
+const UNAVAILABLE_INTELLIGENCE_FAILURE_MESSAGE =
+  'Failed to compute semantic intelligence from snapshot' as const;
 
 // ============================================================================
 // Real Implementation (Canonical)
@@ -284,12 +289,16 @@ export class CanonicalCreativeBriefInputResolver implements CreativeBriefInputRe
 
     // Build CreativeBriefInputV1 with canonical createCreativeBriefInput
     // The request text is preserved byte-for-byte from the input request
-    const input = createCreativeBriefInput(snapshot, {
-      brandReadiness: intelligence.brandReadiness,
-      sceneCoverages: intelligence.sceneCoverages,
-      projectReadiness: intelligence.projectReadiness,
-      rules: intelligence.allRules,
-    }, request.request);
+    const input = createCreativeBriefInput(
+      snapshot,
+      {
+        brandReadiness: intelligence.brandReadiness,
+        sceneCoverages: intelligence.sceneCoverages,
+        projectReadiness: intelligence.projectReadiness,
+        rules: intelligence.allRules,
+      },
+      request.request,
+    );
 
     return {
       status: 'resolved',
@@ -307,7 +316,10 @@ export class CanonicalCreativeBriefInputResolver implements CreativeBriefInputRe
  * Performs no I/O, has no side effects, and does not access any external state.
  */
 export const UnavailableCreativeBriefInputResolver: CreativeBriefInputResolver = {
-  resolve(_request: CreativeBriefInputResolverRequest, _context: CreativeBriefInputResolverContext): CreativeBriefInputResolverUnavailable {
+  resolve(
+    _request: CreativeBriefInputResolverRequest,
+    _context: CreativeBriefInputResolverContext,
+  ): CreativeBriefInputResolverUnavailable {
     return {
       status: 'unavailable',
       code: 'CREATIVE_BRIEF_INPUT_RESOLVER_UNAVAILABLE',

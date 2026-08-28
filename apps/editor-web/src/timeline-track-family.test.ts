@@ -62,6 +62,13 @@ describe('professional timeline track families', () => {
     expect(nextProfessionalTrackId([track('A1', 0, 'audio')], 'audio')).toBe('A2');
   });
 
+  it('reserves IDs when two add actions use the same immutable render snapshot', () => {
+    const tracks = [track('V2', 0, 'visual')];
+    expect(nextProfessionalTrackId(tracks, 'visual')).toBe('V3');
+    expect(nextProfessionalTrackId(tracks, 'visual')).toBe('V4');
+    expect(nextProfessionalTrackId(tracks, 'audio')).toBe('A1');
+  });
+
   it('reorders an entire visual stack atomically without crossing into audio', () => {
     const tracks = [
       track('V-bottom', 0, 'visual'),

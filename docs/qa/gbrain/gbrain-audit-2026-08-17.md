@@ -2,7 +2,7 @@
 
 **Status:** Read-only audit complete  
 **Session:** WP-37 G0 knowledge-quality baseline  
-**Agent:** Continuation from HANDOFF-JOY-MEDIA-AI-CREATIVE-OS-2026-08-17  
+**Agent:** Continuation from HANDOFF-JOY-MEDIA-AI-CREATIVE-OS-2026-08-17
 
 ---
 
@@ -14,15 +14,15 @@ GBrain HTTP service is **active and healthy** at version `0.42.59.0` with PGLite
 
 ## Service State
 
-| Field | Value | Status |
-| --- | --- | --- |
-| Service | `gbrain-http.service` | Active (running) |
-| Command | `/root/.bun/bin/gbrain serve --http --port 3131 --bind 10.250.99.1` | ✅ |
-| Listener | `10.250.99.1:3131` | ✅ |
-| Health endpoint | `http://10.250.99.1:3131/health` | ✅ |
-| Health response | `{"status":"ok","version":"0.42.59.0","engine":"pglite"}` | ✅ |
-| Data engine | PGLite at `/root/.gbrain/brain.pglite` | ✅ |
-| GBrain home size | ~363 MB | ✅ |
+| Field            | Value                                                               | Status           |
+| ---------------- | ------------------------------------------------------------------- | ---------------- |
+| Service          | `gbrain-http.service`                                               | Active (running) |
+| Command          | `/root/.bun/bin/gbrain serve --http --port 3131 --bind 10.250.99.1` | ✅               |
+| Listener         | `10.250.99.1:3131`                                                  | ✅               |
+| Health endpoint  | `http://10.250.99.1:3131/health`                                    | ✅               |
+| Health response  | `{"status":"ok","version":"0.42.59.0","engine":"pglite"}`           | ✅               |
+| Data engine      | PGLite at `/root/.gbrain/brain.pglite`                              | ✅               |
+| GBrain home size | ~363 MB                                                             | ✅               |
 
 ---
 
@@ -45,18 +45,18 @@ GBrain HTTP service is **active and healthy** at version `0.42.59.0` with PGLite
 
 ### Checks Summary
 
-| Check | Status | Category | Notes |
-| --- | --- | --- | --- |
-| resolver_health | ✅ ok | skill | 52 skills, all reachable |
-| retrieval_reflex_health | ⚠️ warn | skill | No visible host path; policy skill not installed |
-| skill_conformance | ✅ ok | skill | 52/52 skills pass |
-| skill_brain_first | ✅ ok | skill | 52 skill(s) compliant or exempt |
-| upgrade_errors | ⚠️ warn | meta | Post-upgrade failure on 2026-08-04 (0.42.67.0 → 0.42.72.1) |
-| nightly_quality_probe_health | ✅ ok | brain | disabled (opt-in) |
-| progressive_batch_audit_health | ✅ ok | ops | No operations in last 7 days |
-| conversation_parser_probe_health | ✅ ok | brain | Skipped (opt-in) |
-| home_dir_in_worktree | ✅ ok | ops | GBrain home outside git worktree |
-| connection | ⚠️ warn | ops | Skipping DB checks (--fast mode) |
+| Check                            | Status  | Category | Notes                                                      |
+| -------------------------------- | ------- | -------- | ---------------------------------------------------------- |
+| resolver_health                  | ✅ ok   | skill    | 52 skills, all reachable                                   |
+| retrieval_reflex_health          | ⚠️ warn | skill    | No visible host path; policy skill not installed           |
+| skill_conformance                | ✅ ok   | skill    | 52/52 skills pass                                          |
+| skill_brain_first                | ✅ ok   | skill    | 52 skill(s) compliant or exempt                            |
+| upgrade_errors                   | ⚠️ warn | meta     | Post-upgrade failure on 2026-08-04 (0.42.67.0 → 0.42.72.1) |
+| nightly_quality_probe_health     | ✅ ok   | brain    | disabled (opt-in)                                          |
+| progressive_batch_audit_health   | ✅ ok   | ops      | No operations in last 7 days                               |
+| conversation_parser_probe_health | ✅ ok   | brain    | Skipped (opt-in)                                           |
+| home_dir_in_worktree             | ✅ ok   | ops      | GBrain home outside git worktree                           |
+| connection                       | ⚠️ warn | ops      | Skipping DB checks (--fast mode)                           |
 
 ---
 
@@ -99,12 +99,12 @@ The following commands timed out waiting for PGLite lock (service is actively ru
 
 ## Unresolved Issues (Deferred Operational Decisions)
 
-| Issue | Severity | Decision | Rationale |
-| --- | --- | --- | --- |
-| Upgrade from 0.42.59.0 to 0.46.12.3 | Warning | **Do not upgrade** | Historical post-upgrade failure on 2026-08-04 requires snapshot, compatibility check, migration dry-run, and service rollback plan |
-| Retrieval reflex | Warning | **Do not install** | No visible host path; affects shared VPS behavior; requires design/permission review |
-| Oversized pages | Critical | **Split/index now** | Safe, reversible, directly improves retrieval quality |
-| Runtime project access | Info | **Keep out of GBrain** | Editor's persisted project and revision system remain authoritative |
+| Issue                               | Severity | Decision               | Rationale                                                                                                                          |
+| ----------------------------------- | -------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Upgrade from 0.42.59.0 to 0.46.12.3 | Warning  | **Do not upgrade**     | Historical post-upgrade failure on 2026-08-04 requires snapshot, compatibility check, migration dry-run, and service rollback plan |
+| Retrieval reflex                    | Warning  | **Do not install**     | No visible host path; affects shared VPS behavior; requires design/permission review                                               |
+| Oversized pages                     | Critical | **Split/index now**    | Safe, reversible, directly improves retrieval quality                                                                              |
+| Runtime project access              | Info     | **Keep out of GBrain** | Editor's persisted project and revision system remain authoritative                                                                |
 
 ---
 
@@ -113,6 +113,7 @@ The following commands timed out waiting for PGLite lock (service is actively ru
 ### Immediate (G0 Package)
 
 1. ✅ **Create linked index architecture** (G0.2):
+
    ```
    joy-media-index
    ├── joy-media-current-state              (<10 KB; current revision, deployed release, open work)
@@ -169,4 +170,4 @@ gbrain list -n 200
 
 ---
 
-*No secrets, configuration tokens, or credential-bearing URLs were exposed during this audit.*
+_No secrets, configuration tokens, or credential-bearing URLs were exposed during this audit._

@@ -170,13 +170,23 @@ describe('validateCreativeBriefClientRequest - forbidden fields', () => {
         request: 'Create a video',
         scope: 'general',
       },
-      snapshot: { version: 1, projectId: 'test', revisionId: 'test', scenes: [], timeline: { tracks: [], durationUs: 0 }, resources: { assets: new Map(), elements: new Map() }, metadata: { title: '', description: '', tags: [], createdAt: '' } },
+      snapshot: {
+        version: 1,
+        projectId: 'test',
+        revisionId: 'test',
+        scenes: [],
+        timeline: { tracks: [], durationUs: 0 },
+        resources: { assets: new Map(), elements: new Map() },
+        metadata: { title: '', description: '', tags: [], createdAt: '' },
+      },
     };
 
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'forbidden-field' && e.path === 'snapshot')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'forbidden-field' && e.path === 'snapshot')).toBe(
+      true,
+    );
   });
 
   it('should reject intelligence field at top level', () => {
@@ -189,13 +199,20 @@ describe('validateCreativeBriefClientRequest - forbidden fields', () => {
         request: 'Create a video',
         scope: 'general',
       },
-      intelligence: { brandReadiness: { score: 0, summary: '' }, sceneCoverages: [], projectReadiness: { score: 0, summary: '' }, rules: [] },
+      intelligence: {
+        brandReadiness: { score: 0, summary: '' },
+        sceneCoverages: [],
+        projectReadiness: { score: 0, summary: '' },
+        rules: [],
+      },
     };
 
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'forbidden-field' && e.path === 'intelligence')).toBe(true);
+    expect(
+      result.errors.some((e) => e.code === 'forbidden-field' && e.path === 'intelligence'),
+    ).toBe(true);
   });
 
   it('should reject assets field at top level', () => {
@@ -214,7 +231,9 @@ describe('validateCreativeBriefClientRequest - forbidden fields', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'forbidden-field' && e.path === 'assets')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'forbidden-field' && e.path === 'assets')).toBe(
+      true,
+    );
   });
 
   it('should reject provider field at top level', () => {
@@ -233,7 +252,9 @@ describe('validateCreativeBriefClientRequest - forbidden fields', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'forbidden-field' && e.path === 'provider')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'forbidden-field' && e.path === 'provider')).toBe(
+      true,
+    );
   });
 
   it('should reject secret field at top level', () => {
@@ -252,7 +273,9 @@ describe('validateCreativeBriefClientRequest - forbidden fields', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'forbidden-field' && e.path === 'secret')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'forbidden-field' && e.path === 'secret')).toBe(
+      true,
+    );
   });
 
   it('should reject path field at top level', () => {
@@ -271,7 +294,7 @@ describe('validateCreativeBriefClientRequest - forbidden fields', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'forbidden-field' && e.path === 'path')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'forbidden-field' && e.path === 'path')).toBe(true);
   });
 
   it('should reject url field at top level', () => {
@@ -290,7 +313,7 @@ describe('validateCreativeBriefClientRequest - forbidden fields', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'forbidden-field' && e.path === 'url')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'forbidden-field' && e.path === 'url')).toBe(true);
   });
 
   it('should reject apiKey field at top level', () => {
@@ -309,7 +332,9 @@ describe('validateCreativeBriefClientRequest - forbidden fields', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'forbidden-field' && e.path === 'apiKey')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'forbidden-field' && e.path === 'apiKey')).toBe(
+      true,
+    );
   });
 });
 
@@ -334,7 +359,7 @@ describe('validateCreativeBriefClientRequest - unknown fields', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'unknown-field')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'unknown-field')).toBe(true);
   });
 
   it('should reject unknown nested field in request', () => {
@@ -353,7 +378,9 @@ describe('validateCreativeBriefClientRequest - unknown fields', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'invalid-request' && e.path === 'request')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'invalid-request' && e.path === 'request')).toBe(
+      true,
+    );
   });
 });
 
@@ -392,7 +419,9 @@ describe('validateCreativeBriefClientRequest - invalid envelope', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'invalid-envelope' && e.path === 'projectId')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'invalid-envelope' && e.path === 'projectId')).toBe(
+      true,
+    );
   });
 
   it('should reject missing snapshotRevisionId', () => {
@@ -409,7 +438,9 @@ describe('validateCreativeBriefClientRequest - invalid envelope', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'invalid-envelope' && e.path === 'snapshotRevisionId')).toBe(true);
+    expect(
+      result.errors.some((e) => e.code === 'invalid-envelope' && e.path === 'snapshotRevisionId'),
+    ).toBe(true);
   });
 
   it('should reject missing request', () => {
@@ -421,7 +452,9 @@ describe('validateCreativeBriefClientRequest - invalid envelope', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'invalid-envelope' && e.path === 'request')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'invalid-envelope' && e.path === 'request')).toBe(
+      true,
+    );
   });
 
   it('should reject empty projectId', () => {
@@ -439,7 +472,9 @@ describe('validateCreativeBriefClientRequest - invalid envelope', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'invalid-envelope' && e.path === 'projectId')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'invalid-envelope' && e.path === 'projectId')).toBe(
+      true,
+    );
   });
 
   it('should reject whitespace-only projectId', () => {
@@ -457,7 +492,9 @@ describe('validateCreativeBriefClientRequest - invalid envelope', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'invalid-envelope' && e.path === 'projectId')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'invalid-envelope' && e.path === 'projectId')).toBe(
+      true,
+    );
   });
 
   it('should reject empty snapshotRevisionId', () => {
@@ -475,7 +512,9 @@ describe('validateCreativeBriefClientRequest - invalid envelope', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'invalid-envelope' && e.path === 'snapshotRevisionId')).toBe(true);
+    expect(
+      result.errors.some((e) => e.code === 'invalid-envelope' && e.path === 'snapshotRevisionId'),
+    ).toBe(true);
   });
 
   it('should reject non-string projectId', () => {
@@ -493,7 +532,9 @@ describe('validateCreativeBriefClientRequest - invalid envelope', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'invalid-envelope' && e.path === 'projectId')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'invalid-envelope' && e.path === 'projectId')).toBe(
+      true,
+    );
   });
 
   it('should reject non-object request', () => {
@@ -506,7 +547,9 @@ describe('validateCreativeBriefClientRequest - invalid envelope', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'invalid-request' && e.path === 'request')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'invalid-request' && e.path === 'request')).toBe(
+      true,
+    );
   });
 });
 
@@ -528,7 +571,9 @@ describe('validateCreativeBriefClientRequest - invalid request fields', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'invalid-request' && e.path === 'request')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'invalid-request' && e.path === 'request')).toBe(
+      true,
+    );
   });
 
   it('should reject empty request string', () => {
@@ -546,7 +591,9 @@ describe('validateCreativeBriefClientRequest - invalid request fields', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'invalid-request' && e.path === 'request.request')).toBe(true);
+    expect(
+      result.errors.some((e) => e.code === 'invalid-request' && e.path === 'request.request'),
+    ).toBe(true);
   });
 
   it('should reject missing scope', () => {
@@ -563,7 +610,9 @@ describe('validateCreativeBriefClientRequest - invalid request fields', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'invalid-request' && e.path === 'request')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'invalid-request' && e.path === 'request')).toBe(
+      true,
+    );
   });
 
   it('should reject invalid scope', () => {
@@ -581,7 +630,9 @@ describe('validateCreativeBriefClientRequest - invalid request fields', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'invalid-request' && e.path === 'request.scope')).toBe(true);
+    expect(
+      result.errors.some((e) => e.code === 'invalid-request' && e.path === 'request.scope'),
+    ).toBe(true);
   });
 
   it('should reject invalid maxRecommendations', () => {
@@ -600,7 +651,11 @@ describe('validateCreativeBriefClientRequest - invalid request fields', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'invalid-request' && e.path === 'request.maxRecommendations')).toBe(true);
+    expect(
+      result.errors.some(
+        (e) => e.code === 'invalid-request' && e.path === 'request.maxRecommendations',
+      ),
+    ).toBe(true);
   });
 
   it('should reject maxRecommendations above 20', () => {
@@ -619,7 +674,11 @@ describe('validateCreativeBriefClientRequest - invalid request fields', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'invalid-request' && e.path === 'request.maxRecommendations')).toBe(true);
+    expect(
+      result.errors.some(
+        (e) => e.code === 'invalid-request' && e.path === 'request.maxRecommendations',
+      ),
+    ).toBe(true);
   });
 
   it('should reject negative durationTargetUs', () => {
@@ -638,7 +697,11 @@ describe('validateCreativeBriefClientRequest - invalid request fields', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'invalid-request' && e.path === 'request.durationTargetUs')).toBe(true);
+    expect(
+      result.errors.some(
+        (e) => e.code === 'invalid-request' && e.path === 'request.durationTargetUs',
+      ),
+    ).toBe(true);
   });
 
   it('should reject oversized brief', () => {
@@ -658,7 +721,9 @@ describe('validateCreativeBriefClientRequest - invalid request fields', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'invalid-request' && e.path === 'request.brief')).toBe(true);
+    expect(
+      result.errors.some((e) => e.code === 'invalid-request' && e.path === 'request.brief'),
+    ).toBe(true);
   });
 });
 
@@ -689,7 +754,7 @@ describe('validateCreativeBriefClientRequest - payload size', () => {
     const result = validateCreativeBriefClientRequest(envelope);
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.code === 'payload-too-large')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'payload-too-large')).toBe(true);
   });
 });
 

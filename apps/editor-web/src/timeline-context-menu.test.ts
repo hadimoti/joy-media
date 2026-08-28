@@ -20,9 +20,10 @@ describe('timeline context menu commands', () => {
     expect(onOpenLibrary).toHaveBeenCalledOnce();
   });
 
-  it('does not expose add/remove track commands in the product menu', () => {
+  it('does not expose add-track, while removal stays explicit and guarded', () => {
     const items = buildTrackHeaderContextMenu(vi.fn(), vi.fn(), vi.fn(), true, true);
-    expect(items.some((item) => /add track|remove track/i.test(item.label))).toBe(false);
+    expect(items.some((item) => /add track/i.test(item.label))).toBe(false);
+    expect(items.find((item) => item.label === 'Remove Track')).toMatchObject({ disabled: false });
   });
 
   it('uses visibility language for the track output toggle', () => {
@@ -30,10 +31,12 @@ describe('timeline context menu commands', () => {
     const visible = buildTrackHeaderContextMenu(vi.fn(), vi.fn(), onToggleVisibility, true, true);
     const hidden = buildTrackHeaderContextMenu(vi.fn(), vi.fn(), onToggleVisibility, false, true);
 
-    expect(visible[0]).toMatchObject({ label: 'Hide Track' });
-    expect(hidden[0]).toMatchObject({ label: 'Show Track' });
-    visible[0]?.action?.();
-    hidden[0]?.action?.();
+    const visibleToggle = visible.find((item) => item.label === 'Hide Track');
+    const hiddenToggle = hidden.find((item) => item.label === 'Show Track');
+    expect(visibleToggle).toBeDefined();
+    expect(hiddenToggle).toBeDefined();
+    visibleToggle?.action?.();
+    hiddenToggle?.action?.();
     expect(onToggleVisibility).toHaveBeenNthCalledWith(1, false);
     expect(onToggleVisibility).toHaveBeenNthCalledWith(2, true);
   });

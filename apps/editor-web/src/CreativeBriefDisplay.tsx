@@ -16,12 +16,15 @@ export interface CreativeBriefDisplayProps {
 /**
  * Risk level labels for display.
  */
-const RISK_LABEL: Record<'none' | 'reversible-local' | 'destructive' | 'remote-egress' | 'spend', string> = {
-  'none': 'No risk',
+const RISK_LABEL: Record<
+  'none' | 'reversible-local' | 'destructive' | 'remote-egress' | 'spend',
+  string
+> = {
+  none: 'No risk',
   'reversible-local': 'Reversible',
-  'destructive': 'Destructive',
+  destructive: 'Destructive',
   'remote-egress': 'Network required',
-  'spend': 'Costs apply',
+  spend: 'Costs apply',
 };
 
 /**
@@ -46,7 +49,15 @@ const SEVERITY_LABEL: Record<'info' | 'suggestion' | 'warning' | 'error', string
 /**
  * Format evidence references for display.
  */
-function formatEvidence(evidence: readonly { readonly startUs?: number; readonly endUs?: number; readonly elementIds?: readonly string[]; readonly sceneIds?: readonly string[]; readonly detail?: string }[]): string {
+function formatEvidence(
+  evidence: readonly {
+    readonly startUs?: number;
+    readonly endUs?: number;
+    readonly elementIds?: readonly string[];
+    readonly sceneIds?: readonly string[];
+    readonly detail?: string;
+  }[],
+): string {
   if (evidence.length === 0) return 'No evidence';
 
   const parts: string[] = [];
@@ -101,10 +112,18 @@ export function CreativeBriefDisplay({ brief }: CreativeBriefDisplayProps) {
 
         <h3 className="creative-brief-heading">Interpreted Goal</h3>
         <div className="creative-brief-goal">
-          <p><strong>User intent:</strong> {brief.interpretedGoal.userIntent}</p>
-          <p><strong>Inferred goal:</strong> {brief.interpretedGoal.inferredGoal}</p>
-          <p><strong>Resolved goal:</strong> {brief.interpretedGoal.resolvedGoal}</p>
-          <p><small>Confidence: {CONFIDENCE_LABEL[brief.interpretedGoal.confidence]}</small></p>
+          <p>
+            <strong>User intent:</strong> {brief.interpretedGoal.userIntent}
+          </p>
+          <p>
+            <strong>Inferred goal:</strong> {brief.interpretedGoal.inferredGoal}
+          </p>
+          <p>
+            <strong>Resolved goal:</strong> {brief.interpretedGoal.resolvedGoal}
+          </p>
+          <p>
+            <small>Confidence: {CONFIDENCE_LABEL[brief.interpretedGoal.confidence]}</small>
+          </p>
         </div>
       </section>
 
@@ -117,7 +136,10 @@ export function CreativeBriefDisplay({ brief }: CreativeBriefDisplayProps) {
               <li key={fact.id} className="creative-brief-fact">
                 <span className="creative-brief-statement">{fact.statement}</span>
                 {fact.evidence.length > 0 && (
-                  <span className="creative-brief-evidence"> ({formatEvidence(fact.evidence)})</span>
+                  <span className="creative-brief-evidence">
+                    {' '}
+                    ({formatEvidence(fact.evidence)})
+                  </span>
                 )}
                 <span className="creative-brief-source"> [{fact.source}]</span>
               </li>
@@ -133,12 +155,18 @@ export function CreativeBriefDisplay({ brief }: CreativeBriefDisplayProps) {
             {inferences.map((inference) => (
               <li key={inference.id} className="creative-brief-inference">
                 <span className="creative-brief-statement">{inference.statement}</span>
-                <span className="creative-brief-confidence"> (Confidence: {CONFIDENCE_LABEL[inference.confidence]})</span>
+                <span className="creative-brief-confidence">
+                  {' '}
+                  (Confidence: {CONFIDENCE_LABEL[inference.confidence]})
+                </span>
                 {inference.rationale && (
                   <div className="creative-brief-rationale">Rationale: {inference.rationale}</div>
                 )}
                 {inference.evidence.length > 0 && (
-                  <span className="creative-brief-evidence"> Evidence: {formatEvidence(inference.evidence)}</span>
+                  <span className="creative-brief-evidence">
+                    {' '}
+                    Evidence: {formatEvidence(inference.evidence)}
+                  </span>
                 )}
               </li>
             ))}
@@ -156,8 +184,14 @@ export function CreativeBriefDisplay({ brief }: CreativeBriefDisplayProps) {
             {brief.assumptions.map((assumption) => (
               <li key={assumption.id} className="creative-brief-assumption">
                 <span className="creative-brief-statement">{assumption.statement}</span>
-                <span className="creative-brief-verified"> {assumption.verified ? '[Verified]' : '[Unverified]'}</span>
-                <span className="creative-brief-confidence"> (Confidence: {CONFIDENCE_LABEL[assumption.confidence]})</span>
+                <span className="creative-brief-verified">
+                  {' '}
+                  {assumption.verified ? '[Verified]' : '[Unverified]'}
+                </span>
+                <span className="creative-brief-confidence">
+                  {' '}
+                  (Confidence: {CONFIDENCE_LABEL[assumption.confidence]})
+                </span>
               </li>
             ))}
           </ul>
@@ -174,18 +208,32 @@ export function CreativeBriefDisplay({ brief }: CreativeBriefDisplayProps) {
                 <div className="creative-brief-rec-header">
                   <span className="creative-brief-rec-kind">{rec.kind}</span>
                   <span className="creative-brief-rec-risk"> Risk: {RISK_LABEL[rec.risk]}</span>
-                  <span className="creative-brief-rec-confidence"> Confidence: {CONFIDENCE_LABEL[rec.confidence]}</span>
+                  <span className="creative-brief-rec-confidence">
+                    {' '}
+                    Confidence: {CONFIDENCE_LABEL[rec.confidence]}
+                  </span>
                 </div>
                 <p className="creative-brief-rec-rationale">{rec.rationale}</p>
-                <p className="creative-brief-rec-benefit"><strong>Expected benefit:</strong> {rec.expectedBenefit}</p>
+                <p className="creative-brief-rec-benefit">
+                  <strong>Expected benefit:</strong> {rec.expectedBenefit}
+                </p>
                 {rec.proposedIntent && (
-                  <p className="creative-brief-rec-intent"><small>Suggested intent: {rec.proposedIntent}</small></p>
+                  <p className="creative-brief-rec-intent">
+                    <small>Suggested intent: {rec.proposedIntent}</small>
+                  </p>
                 )}
                 {rec.evidence.length > 0 && (
-                  <p className="creative-brief-rec-evidence"><small>Evidence: {formatEvidence(rec.evidence)}</small></p>
+                  <p className="creative-brief-rec-evidence">
+                    <small>Evidence: {formatEvidence(rec.evidence)}</small>
+                  </p>
                 )}
                 {rec.scope && (
-                  <p className="creative-brief-rec-scope"><small>Scope: {rec.scope.sceneIds?.join(', ') ?? ''} {rec.scope.elementIds?.join(', ') ?? ''}</small></p>
+                  <p className="creative-brief-rec-scope">
+                    <small>
+                      Scope: {rec.scope.sceneIds?.join(', ') ?? ''}{' '}
+                      {rec.scope.elementIds?.join(', ') ?? ''}
+                    </small>
+                  </p>
                 )}
               </li>
             ))}
@@ -218,9 +266,15 @@ export function CreativeBriefDisplay({ brief }: CreativeBriefDisplayProps) {
           <ul className="creative-brief-list">
             {brief.requiresHumanDecision.map((decision) => (
               <li key={decision.id} className="creative-brief-decision">
-                <p><strong>Question:</strong> {decision.question}</p>
-                <p><strong>Context:</strong> {decision.context}</p>
-                <p><small>Options: {decision.options.join(', ')}</small></p>
+                <p>
+                  <strong>Question:</strong> {decision.question}
+                </p>
+                <p>
+                  <strong>Context:</strong> {decision.context}
+                </p>
+                <p>
+                  <small>Options: {decision.options.join(', ')}</small>
+                </p>
               </li>
             ))}
           </ul>
@@ -233,8 +287,13 @@ export function CreativeBriefDisplay({ brief }: CreativeBriefDisplayProps) {
           <h3 className="creative-brief-heading">Warnings</h3>
           <ul className="creative-brief-list">
             {brief.warnings.map((warning, index) => (
-              <li key={index} className={`creative-brief-warning creative-brief-warning-${warning.severity}`}>
-                <span className="creative-brief-warning-label">[{SEVERITY_LABEL[warning.severity]}]</span>
+              <li
+                key={index}
+                className={`creative-brief-warning creative-brief-warning-${warning.severity}`}
+              >
+                <span className="creative-brief-warning-label">
+                  [{SEVERITY_LABEL[warning.severity]}]
+                </span>
                 <span> {warning.message}</span>
               </li>
             ))}
@@ -244,9 +303,18 @@ export function CreativeBriefDisplay({ brief }: CreativeBriefDisplayProps) {
 
       {/* Metadata */}
       <section className="creative-brief-section creative-brief-meta" aria-label="Brief metadata">
-        <p><small>Snapshot revision: {brief.snapshotRevisionId}</small></p>
-        <p><small>Project: {brief.projectId}</small></p>
-        <p><small>Generated: {brief.meta.generatedAt} | Adapter: {brief.meta.modelAdapter} | Processing: {brief.meta.processingTimeMs}ms</small></p>
+        <p>
+          <small>Snapshot revision: {brief.snapshotRevisionId}</small>
+        </p>
+        <p>
+          <small>Project: {brief.projectId}</small>
+        </p>
+        <p>
+          <small>
+            Generated: {brief.meta.generatedAt} | Adapter: {brief.meta.modelAdapter} | Processing:{' '}
+            {brief.meta.processingTimeMs}ms
+          </small>
+        </p>
       </section>
     </article>
   );

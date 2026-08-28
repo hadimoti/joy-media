@@ -4,10 +4,7 @@ import type { HttpPostTransport } from '@joy-media/adapter-openrouter';
 export const OPENROUTER_CHAT_COMPLETIONS_URL =
   'https://openrouter.ai/api/v1/chat/completions' as const;
 
-type FetchImplementation = (
-  input: string | URL,
-  init?: RequestInit,
-) => Promise<Response>;
+type FetchImplementation = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 /**
  * Fixed-origin HTTP transport for the OpenRouter adapter.

@@ -15,14 +15,21 @@ import type {
   CreativeBriefInputResolverContext,
   ControlPlaneReader,
 } from './creative-brief-input-resolver.js';
-import { UnavailableCreativeBriefInputResolver, CanonicalCreativeBriefInputResolver } from './creative-brief-input-resolver.js';
+import {
+  UnavailableCreativeBriefInputResolver,
+  CanonicalCreativeBriefInputResolver,
+} from './creative-brief-input-resolver.js';
 import type { CreativeBriefRequestV1, CreativeBriefInputV1 } from '@joy-media/agent-tools';
 import type { Actor } from './control-plane.js';
 import type { ControlPlane } from './control-plane.js';
 import { LocalControlPlane } from './control-plane.js';
 import { ProjectSnapshotService } from './project-snapshot-service.js';
 import { ProjectIntelligenceService } from './project-intelligence-service.js';
-import type { JoyProjectV1, ProjectRevisionId, SemanticProjectSnapshotV1 } from '@joy-media/project-schema';
+import type {
+  JoyProjectV1,
+  ProjectRevisionId,
+  SemanticProjectSnapshotV1,
+} from '@joy-media/project-schema';
 import { validateJoyProjectV1 } from '@joy-media/project-schema';
 import { createCreativeBriefInput } from '@joy-media/agent-tools';
 import type { S2IntelligenceResult } from './project-intelligence-service.js';
@@ -204,7 +211,10 @@ describe('UnavailableCreativeBriefInputResolver', () => {
     let resolveCalled = false;
 
     const asyncResolver: CreativeBriefInputResolver = {
-      async resolve(_request: CreativeBriefInputResolverRequest, ctx: CreativeBriefInputResolverContext): Promise<CreativeBriefInputResolverSuccess> {
+      async resolve(
+        _request: CreativeBriefInputResolverRequest,
+        ctx: CreativeBriefInputResolverContext,
+      ): Promise<CreativeBriefInputResolverSuccess> {
         // Verify context is received
         expect(ctx.actor.id).toBe('async-test-actor');
         resolveCalled = true;
@@ -218,71 +228,48 @@ describe('UnavailableCreativeBriefInputResolver', () => {
               projectId: 'test-project-id',
               revisionId: 'test-revision-id',
               capturedAt: '2026-08-17T00:00:00.000Z',
-              composition: { durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9' },
-              brand: { hasBrandKit: false, colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], warnings: [] },
+              composition: {
+                durationUs: 1000000,
+                frameRate: { num: 30, den: 1 },
+                width: 1920,
+                height: 1080,
+                aspectRatio: '16:9',
+              },
+              brand: {
+                hasBrandKit: false,
+                colorsAvailable: false,
+                fontsAvailable: false,
+                logoAvailable: false,
+                voiceInstructionsAvailable: false,
+                toneInstructionsAvailable: false,
+                prohibitedClaims: [],
+                prohibitedEffects: [],
+                warnings: [],
+              },
               scenes: [],
-              timeline: { compositionId: 'comp-1', durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9', visualTrackCount: 1, audioTrackCount: 1, totalClipCount: 0, visualRowIds: [], audioRowIds: [] },
+              timeline: {
+                compositionId: 'comp-1',
+                durationUs: 1000000,
+                frameRate: { num: 30, den: 1 },
+                width: 1920,
+                height: 1080,
+                aspectRatio: '16:9',
+                visualTrackCount: 1,
+                audioTrackCount: 1,
+                totalClipCount: 0,
+                visualRowIds: [],
+                audioRowIds: [],
+              },
               assets: [],
               capabilities: {},
               warnings: [],
-              truncation: { clipsOmitted: 0, assetsOmitted: 0, visualObjectsOmitted: 0, scenesOmitted: 0, totalEstimateBytes: 0 },
-            },
-            brandReadiness: { projectId: 'test-project-id', revisionId: 'test-revision-id', colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], hasBrandKit: false, brandCompleteness: 'none', missingComponents: [], warnings: [], evidence: [] },
-            sceneCoverages: [],
-            projectReadiness: { projectId: 'test-project-id', revisionId: 'test-revision-id', destination: undefined, destinationAligned: true, destinationMismatch: undefined, durationTargetUs: undefined, compositionDurationUs: 1000000, durationAligned: true, durationGapUs: undefined, aspectRatio: '16:9', aspectRatioAligned: true, aspectRatioMismatch: undefined, captionAvailable: false, audioAvailable: false, generatedAssetsAvailable: false, readinessLevel: 'unknown', blockers: [], warnings: [], sceneCount: 0, scenesWithVisuals: 0, scenesWithAudio: 0, scenesWithCaptions: 0, evidence: [] },
-            rules: [],
-            request: { projectId: 'test-project-id', snapshotRevisionId: 'test-revision-id', request: 'test', scope: 'general' },
-          },
-        };
-      },
-    };
-
-    const request: CreativeBriefInputResolverRequest = {
-      projectId: 'test-project-id',
-      snapshotRevisionId: 'test-revision-id',
-      request: {
-        snapshotRevisionId: 'test-revision-id',
-        projectId: 'test-project-id',
-        request: 'test',
-        scope: 'general',
-      },
-    };
-
-    const result = await asyncResolver.resolve(request, context);
-
-    expect(resolveCalled).toBe(true);
-    expect(result.status).toBe('resolved');
-    if (result.status !== 'resolved') throw new Error('Expected resolved');
-    expect(result.input).toBeDefined();
-  });
-
-  it('should receive the authenticated actor in context', async () => {
-    // This test verifies that the resolver receives the authenticated actor through context
-    const authenticatedActor: Actor = { id: 'authenticated-user-123' };
-    const context = createTestContext(authenticatedActor);
-
-    // Track whether the resolver received the expected actor
-    let receivedActor: Actor | undefined;
-
-    const testResolver: CreativeBriefInputResolver = {
-      resolve(_request: CreativeBriefInputResolverRequest, ctx: CreativeBriefInputResolverContext): CreativeBriefInputResolverSuccess {
-        receivedActor = ctx.actor;
-        return {
-          status: 'resolved',
-          input: {
-            snapshot: {
-              schemaVersion: 1,
-              projectId: 'test-project-id',
-              revisionId: 'test-revision-id',
-              capturedAt: '2026-08-17T00:00:00.000Z',
-              composition: { durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9' },
-              brand: { hasBrandKit: false, colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], warnings: [] },
-              scenes: [],
-              timeline: { compositionId: 'comp-1', durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9', visualTrackCount: 1, audioTrackCount: 1, totalClipCount: 0, visualRowIds: [], audioRowIds: [] },
-              assets: [],
-              capabilities: {},
-              warnings: [],
-              truncation: { clipsOmitted: 0, assetsOmitted: 0, visualObjectsOmitted: 0, scenesOmitted: 0, totalEstimateBytes: 0 },
+              truncation: {
+                clipsOmitted: 0,
+                assetsOmitted: 0,
+                visualObjectsOmitted: 0,
+                scenesOmitted: 0,
+                totalEstimateBytes: 0,
+              },
             },
             brandReadiness: {
               projectId: 'test-project-id',
@@ -327,7 +314,150 @@ describe('UnavailableCreativeBriefInputResolver', () => {
               evidence: [],
             },
             rules: [],
-            request: { projectId: 'test-project-id', snapshotRevisionId: 'test-revision-id', request: 'test', scope: 'general' },
+            request: {
+              projectId: 'test-project-id',
+              snapshotRevisionId: 'test-revision-id',
+              request: 'test',
+              scope: 'general',
+            },
+          },
+        };
+      },
+    };
+
+    const request: CreativeBriefInputResolverRequest = {
+      projectId: 'test-project-id',
+      snapshotRevisionId: 'test-revision-id',
+      request: {
+        snapshotRevisionId: 'test-revision-id',
+        projectId: 'test-project-id',
+        request: 'test',
+        scope: 'general',
+      },
+    };
+
+    const result = await asyncResolver.resolve(request, context);
+
+    expect(resolveCalled).toBe(true);
+    expect(result.status).toBe('resolved');
+    if (result.status !== 'resolved') throw new Error('Expected resolved');
+    expect(result.input).toBeDefined();
+  });
+
+  it('should receive the authenticated actor in context', async () => {
+    // This test verifies that the resolver receives the authenticated actor through context
+    const authenticatedActor: Actor = { id: 'authenticated-user-123' };
+    const context = createTestContext(authenticatedActor);
+
+    // Track whether the resolver received the expected actor
+    let receivedActor: Actor | undefined;
+
+    const testResolver: CreativeBriefInputResolver = {
+      resolve(
+        _request: CreativeBriefInputResolverRequest,
+        ctx: CreativeBriefInputResolverContext,
+      ): CreativeBriefInputResolverSuccess {
+        receivedActor = ctx.actor;
+        return {
+          status: 'resolved',
+          input: {
+            snapshot: {
+              schemaVersion: 1,
+              projectId: 'test-project-id',
+              revisionId: 'test-revision-id',
+              capturedAt: '2026-08-17T00:00:00.000Z',
+              composition: {
+                durationUs: 1000000,
+                frameRate: { num: 30, den: 1 },
+                width: 1920,
+                height: 1080,
+                aspectRatio: '16:9',
+              },
+              brand: {
+                hasBrandKit: false,
+                colorsAvailable: false,
+                fontsAvailable: false,
+                logoAvailable: false,
+                voiceInstructionsAvailable: false,
+                toneInstructionsAvailable: false,
+                prohibitedClaims: [],
+                prohibitedEffects: [],
+                warnings: [],
+              },
+              scenes: [],
+              timeline: {
+                compositionId: 'comp-1',
+                durationUs: 1000000,
+                frameRate: { num: 30, den: 1 },
+                width: 1920,
+                height: 1080,
+                aspectRatio: '16:9',
+                visualTrackCount: 1,
+                audioTrackCount: 1,
+                totalClipCount: 0,
+                visualRowIds: [],
+                audioRowIds: [],
+              },
+              assets: [],
+              capabilities: {},
+              warnings: [],
+              truncation: {
+                clipsOmitted: 0,
+                assetsOmitted: 0,
+                visualObjectsOmitted: 0,
+                scenesOmitted: 0,
+                totalEstimateBytes: 0,
+              },
+            },
+            brandReadiness: {
+              projectId: 'test-project-id',
+              revisionId: 'test-revision-id',
+              colorsAvailable: false,
+              fontsAvailable: false,
+              logoAvailable: false,
+              voiceInstructionsAvailable: false,
+              toneInstructionsAvailable: false,
+              prohibitedClaims: [],
+              prohibitedEffects: [],
+              hasBrandKit: false,
+              brandCompleteness: 'none',
+              missingComponents: [],
+              warnings: [],
+              evidence: [],
+            },
+            sceneCoverages: [],
+            projectReadiness: {
+              projectId: 'test-project-id',
+              revisionId: 'test-revision-id',
+              destination: undefined,
+              destinationAligned: true,
+              destinationMismatch: undefined,
+              durationTargetUs: undefined,
+              compositionDurationUs: 1000000,
+              durationAligned: true,
+              durationGapUs: undefined,
+              aspectRatio: '16:9',
+              aspectRatioAligned: true,
+              aspectRatioMismatch: undefined,
+              captionAvailable: false,
+              audioAvailable: false,
+              generatedAssetsAvailable: false,
+              readinessLevel: 'unknown',
+              blockers: [],
+              warnings: [],
+              sceneCount: 0,
+              scenesWithVisuals: 0,
+              scenesWithAudio: 0,
+              scenesWithCaptions: 0,
+              evidence: [],
+            },
+            rules: [],
+            request: {
+              projectId: 'test-project-id',
+              snapshotRevisionId: 'test-revision-id',
+              request: 'test',
+              scope: 'general',
+            },
           },
         };
       },
@@ -459,7 +589,10 @@ describe('CreativeBriefInputResolver - result types', () => {
     };
 
     const testResolver: CreativeBriefInputResolver = {
-      resolve(_request: CreativeBriefInputResolverRequest, _context: CreativeBriefInputResolverContext): CreativeBriefInputResolverSuccess {
+      resolve(
+        _request: CreativeBriefInputResolverRequest,
+        _context: CreativeBriefInputResolverContext,
+      ): CreativeBriefInputResolverSuccess {
         return {
           status: 'resolved',
           input: testInput,
@@ -522,7 +655,10 @@ describe('CreativeBriefInputResolver - Persian text', () => {
     const persianText = 'به من کمک کن یک ویدئو بسازم';
 
     const testResolver: CreativeBriefInputResolver = {
-      resolve(request: CreativeBriefInputResolverRequest, _context: CreativeBriefInputResolverContext): CreativeBriefInputResolverSuccess {
+      resolve(
+        request: CreativeBriefInputResolverRequest,
+        _context: CreativeBriefInputResolverContext,
+      ): CreativeBriefInputResolverSuccess {
         return {
           status: 'resolved',
           input: {
@@ -769,7 +905,8 @@ describe('CreativeBriefInputResolver - type safety', () => {
     const r0 = results[0];
     const r1 = results[1];
     const r2 = results[2];
-    if (r0 === undefined || r1 === undefined || r2 === undefined) throw new Error('Expected 3 results');
+    if (r0 === undefined || r1 === undefined || r2 === undefined)
+      throw new Error('Expected 3 results');
     expect(r0.status).toBe('resolved');
     expect(r1.status).toBe('unavailable');
     expect(r2.status).toBe('stale-revision');
@@ -785,7 +922,10 @@ const TEST_PROJECT_ID = 'test-project-id' as const;
 const TEST_REVISION_ID = 'test-revision-id' as const;
 const TEST_ACTOR: Actor = { id: 'test-actor' } as const;
 
-function createMinimalJoyProjectV1ForCanonicalTests(id: string, _revisionId?: string): JoyProjectV1 {
+function createMinimalJoyProjectV1ForCanonicalTests(
+  id: string,
+  _revisionId?: string,
+): JoyProjectV1 {
   return {
     schemaVersion: 1,
     id,
@@ -842,7 +982,10 @@ function createTestContextForCanonicalTests(
 
 // Mock ControlPlaneReader that simulates readProjectDocument behavior
 class MockControlPlane implements ControlPlaneReader {
-  private readonly documents: Map<string, { projectId: string; revisionId: string; document: unknown; ownerId: string }> = new Map();
+  private readonly documents: Map<
+    string,
+    { projectId: string; revisionId: string; document: unknown; ownerId: string }
+  > = new Map();
   private readonly ownerId: string;
   private storeUnavailable: boolean = false;
 
@@ -867,9 +1010,22 @@ class MockControlPlane implements ControlPlaneReader {
     projectId: string,
     revisionId?: string,
   ): Promise<
-    | { readonly kind: 'ready'; readonly record: { readonly projectId: string; readonly ownerId: string; readonly revisionId: string; readonly document: unknown } }
+    | {
+        readonly kind: 'ready';
+        readonly record: {
+          readonly projectId: string;
+          readonly ownerId: string;
+          readonly revisionId: string;
+          readonly document: unknown;
+        };
+      }
     | { readonly kind: 'not-found'; readonly projectId: string; readonly revisionId: string | null }
-    | { readonly kind: 'stale-revision'; readonly projectId: string; readonly requestedRevisionId: string; readonly currentRevisionId: string }
+    | {
+        readonly kind: 'stale-revision';
+        readonly projectId: string;
+        readonly requestedRevisionId: string;
+        readonly currentRevisionId: string;
+      }
     | { readonly kind: 'unavailable'; readonly message: string }
   > {
     if (this.storeUnavailable) {
@@ -886,10 +1042,23 @@ class MockControlPlane implements ControlPlaneReader {
     }
 
     if (revisionId !== undefined && revisionId !== stored.revisionId) {
-      return { kind: 'stale-revision', projectId, requestedRevisionId: revisionId, currentRevisionId: stored.revisionId };
+      return {
+        kind: 'stale-revision',
+        projectId,
+        requestedRevisionId: revisionId,
+        currentRevisionId: stored.revisionId,
+      };
     }
 
-    return { kind: 'ready', record: { projectId: stored.projectId, ownerId: stored.ownerId, revisionId: stored.revisionId, document: stored.document } };
+    return {
+      kind: 'ready',
+      record: {
+        projectId: stored.projectId,
+        ownerId: stored.ownerId,
+        revisionId: stored.revisionId,
+        document: stored.document,
+      },
+    };
   }
 }
 
@@ -1125,7 +1294,9 @@ describe('CanonicalCreativeBriefInputResolver', () => {
       expect(result.status).toBe('unavailable');
       if (result.status !== 'unavailable') throw new Error('Expected unavailable');
       expect(result.code).toBe('CREATIVE_BRIEF_INPUT_RESOLVER_UNAVAILABLE');
-      expect(result.message).toBe('Project document is invalid or cannot be validated as JoyProjectV1');
+      expect(result.message).toBe(
+        'Project document is invalid or cannot be validated as JoyProjectV1',
+      );
     });
 
     it('should return unavailable when project ID in document does not match record projectId', async () => {
@@ -1194,7 +1365,11 @@ describe('CanonicalCreativeBriefInputResolver', () => {
         intelligenceService: new ProjectIntelligenceService(),
       });
 
-      const request = createTestRequestForCanonicalTests(TEST_PROJECT_ID, TEST_REVISION_ID, persianText);
+      const request = createTestRequestForCanonicalTests(
+        TEST_PROJECT_ID,
+        TEST_REVISION_ID,
+        persianText,
+      );
       const context = createTestContextForCanonicalTests();
 
       const result = await resolver.resolve(request, context);
@@ -1217,7 +1392,11 @@ describe('CanonicalCreativeBriefInputResolver', () => {
         intelligenceService: new ProjectIntelligenceService(),
       });
 
-      const request = createTestRequestForCanonicalTests(TEST_PROJECT_ID, TEST_REVISION_ID, rtlText);
+      const request = createTestRequestForCanonicalTests(
+        TEST_PROJECT_ID,
+        TEST_REVISION_ID,
+        rtlText,
+      );
       const context = createTestContextForCanonicalTests();
 
       const result = await resolver.resolve(request, context);

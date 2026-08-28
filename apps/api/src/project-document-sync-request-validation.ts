@@ -53,8 +53,7 @@ export interface ProjectDocumentSyncValidationFailure {
 }
 
 export type ProjectDocumentSyncValidationResult =
-  | ProjectDocumentSyncValidationSuccess
-  | ProjectDocumentSyncValidationFailure;
+  ProjectDocumentSyncValidationSuccess | ProjectDocumentSyncValidationFailure;
 
 // ============================================================================
 // Envelope Types
@@ -71,13 +70,13 @@ export interface ProjectDocumentSyncEnvelope {
    * Must be INITIAL_REVISION ('') for first write.
    */
   readonly baseRevisionId: ProjectRevisionId;
-  
+
   /**
    * The new revision ID to store.
    * Must be a non-empty string.
    */
   readonly revisionId: ProjectRevisionId;
-  
+
   /**
    * The JoyProjectV1 document to store.
    * Must pass validateJoyProjectV1. document.id is the canonical editor-document ID
@@ -131,11 +130,7 @@ const FORBIDDEN_TOP_LEVEL_FIELDS = new Set([
 /**
  * Allowed top-level fields in the sync envelope - must be exactly these.
  */
-const ALLOWED_TOP_LEVEL_FIELDS = new Set([
-  'baseRevisionId',
-  'revisionId',
-  'document',
-]);
+const ALLOWED_TOP_LEVEL_FIELDS = new Set(['baseRevisionId', 'revisionId', 'document']);
 
 // ============================================================================
 // Helper Functions
@@ -202,7 +197,7 @@ function checkUnknownFields(obj: Record<string, unknown>): string[] {
  */
 export function validateProjectDocumentSyncRequest(
   envelope: unknown,
-  expectedProjectId: ProjectId,
+  _expectedProjectId: ProjectId,
 ): ProjectDocumentSyncValidationResult {
   const errors: ProjectDocumentSyncValidationError[] = [];
 
@@ -210,10 +205,12 @@ export function validateProjectDocumentSyncRequest(
   if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) {
     return {
       valid: false,
-      errors: Object.freeze([{
-        code: 'invalid-request',
-        message: 'Request envelope must be a non-null object',
-      }]),
+      errors: Object.freeze([
+        {
+          code: 'invalid-request',
+          message: 'Request envelope must be a non-null object',
+        },
+      ]),
     };
   }
 
@@ -270,7 +267,8 @@ export function validateProjectDocumentSyncRequest(
   } else if (baseRevisionIdValue !== INITIAL_REVISION && baseRevisionIdValue.length === 0) {
     errors.push({
       code: 'revision-mismatch',
-      message: 'baseRevisionId must be either INITIAL_REVISION (empty string) or a non-empty string',
+      message:
+        'baseRevisionId must be either INITIAL_REVISION (empty string) or a non-empty string',
       path: 'baseRevisionId',
     });
   }

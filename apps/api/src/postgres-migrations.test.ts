@@ -43,6 +43,14 @@ describe('ordered PostgreSQL migrations', () => {
     ).toBe(false);
   });
 
+  it('does not attempt the legacy revocation repair on a fresh current schema', async () => {
+    const { pool, queries } = createRecordingPool();
+    await POSTGRES_MIGRATIONS[1]!.up(pool);
+    expect(queries.some((query) => query.includes('ALTER TABLE asset_revocation_audits'))).toBe(
+      false,
+    );
+  });
+
   it('fails closed when an applied migration checksum has drifted', async () => {
     const { pool } = createRecordingPool([
       { id: POSTGRES_MIGRATIONS[0]!.id, checksum: 'sha256:unexpected' },

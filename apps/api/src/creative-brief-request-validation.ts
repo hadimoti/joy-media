@@ -6,10 +6,7 @@
  * and forbids any command, job, approval, provider, or secret data.
  */
 
-import type {
-  SemanticProjectSnapshotV1,
-  ProjectRevisionId,
-} from '@joy-media/project-schema';
+import type { SemanticProjectSnapshotV1, ProjectRevisionId } from '@joy-media/project-schema';
 import type {
   BrandReadinessV1,
   SceneCoverageV1,
@@ -119,13 +116,13 @@ const FORBIDDEN_FIELD_PATTERNS = [
 export interface CreativeBriefServerRequest {
   /** Route-level project ID from URL path */
   readonly projectId: string;
-  
+
   /** Snapshot revision ID from URL path or query */
   readonly snapshotRevisionId: ProjectRevisionId;
-  
+
   /** Bounded S1 semantic project snapshot */
   readonly snapshot: SemanticProjectSnapshotV1;
-  
+
   /** Bounded S2 intelligence data */
   readonly intelligence: {
     readonly brandReadiness: BrandReadinessV1;
@@ -133,7 +130,7 @@ export interface CreativeBriefServerRequest {
     readonly projectReadiness: ProjectReadinessV1;
     readonly rules: readonly IntelligenceRuleV1[];
   };
-  
+
   /** Bounded CreativeBriefRequestV1 from user */
   readonly request: CreativeBriefRequestV1;
 }
@@ -161,7 +158,7 @@ function containsForbiddenPattern(value: string): boolean {
 function hasForbiddenFields(obj: Record<string, unknown>): string[] {
   const forbidden: string[] = [];
   const allKeys = Object.keys(obj);
-  
+
   for (const key of allKeys) {
     for (const pattern of FORBIDDEN_FIELD_PATTERNS) {
       if (pattern.test(key)) {
@@ -170,7 +167,7 @@ function hasForbiddenFields(obj: Record<string, unknown>): string[] {
       }
     }
   }
-  
+
   return forbidden;
 }
 
@@ -179,22 +176,22 @@ function hasForbiddenFields(obj: Record<string, unknown>): string[] {
  */
 function deepCheckForbiddenPatterns(obj: unknown, path: string = ''): string[] {
   const violations: string[] = [];
-  
+
   if (obj === null || typeof obj !== 'object') {
     return violations;
   }
-  
+
   if (Array.isArray(obj)) {
     for (let i = 0; i < obj.length; i++) {
       violations.push(...deepCheckForbiddenPatterns(obj[i], `${path}[${i}]`));
     }
     return violations;
   }
-  
+
   const record = obj as Record<string, unknown>;
   for (const [key, value] of Object.entries(record)) {
     const currentPath = path ? `${path}.${key}` : key;
-    
+
     if (typeof value === 'string') {
       if (containsForbiddenPattern(value)) {
         violations.push(currentPath);
@@ -203,7 +200,7 @@ function deepCheckForbiddenPatterns(obj: unknown, path: string = ''): string[] {
       violations.push(...deepCheckForbiddenPatterns(value, currentPath));
     }
   }
-  
+
   return violations;
 }
 
@@ -224,7 +221,7 @@ function validateStringField(
     });
     return;
   }
-  
+
   if (value.length === 0) {
     errors.push({
       code: 'invalid-request',
@@ -233,7 +230,7 @@ function validateStringField(
     });
     return;
   }
-  
+
   if (value.length > maxLength) {
     errors.push({
       code: 'payload-too-large',
@@ -241,7 +238,7 @@ function validateStringField(
       path: fieldName,
     });
   }
-  
+
   if (containsForbiddenPattern(value)) {
     errors.push({
       code: 'forbidden-data',
@@ -264,7 +261,7 @@ function validateScope(value: unknown, path: string, errors: CreativeBriefValida
     'structure',
     'general',
   ] as const;
-  
+
   if (typeof value !== 'string') {
     errors.push({
       code: 'invalid-request',
@@ -273,7 +270,7 @@ function validateScope(value: unknown, path: string, errors: CreativeBriefValida
     });
     return;
   }
-  
+
   if (!validScopes.includes(value as CreativeBriefScope)) {
     errors.push({
       code: 'invalid-request',
@@ -302,9 +299,9 @@ function validateDestinationPreset(
     'linkedin-video',
     'custom',
   ] as const;
-  
+
   if (value === undefined) return;
-  
+
   if (typeof value !== 'string') {
     errors.push({
       code: 'invalid-request',
@@ -313,7 +310,7 @@ function validateDestinationPreset(
     });
     return;
   }
-  
+
   if (!validPresets.includes(value as DestinationPreset)) {
     errors.push({
       code: 'invalid-request',
@@ -332,7 +329,7 @@ function validateNonNegativeInteger(
   errors: CreativeBriefValidationError[],
 ): void {
   if (value === undefined) return;
-  
+
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
     errors.push({
       code: 'invalid-request',
@@ -352,7 +349,7 @@ function validatePositiveInteger(
   maxValue?: number,
 ): void {
   if (value === undefined) return;
-  
+
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
     errors.push({
       code: 'invalid-request',
@@ -361,7 +358,7 @@ function validatePositiveInteger(
     });
     return;
   }
-  
+
   if (maxValue !== undefined && value > maxValue) {
     errors.push({
       code: 'invalid-request',
@@ -381,7 +378,7 @@ function validateArrayLength(
   errors: CreativeBriefValidationError[],
 ): void {
   if (value === undefined) return;
-  
+
   if (!Array.isArray(value)) {
     errors.push({
       code: 'invalid-request',
@@ -390,7 +387,7 @@ function validateArrayLength(
     });
     return;
   }
-  
+
   if (value.length > maxLength) {
     errors.push({
       code: 'payload-too-large',
@@ -416,9 +413,9 @@ function validateCreativeBriefRequestV1(
     });
     return;
   }
-  
+
   const r = request as Record<string, unknown>;
-  
+
   // Check for forbidden field names
   const forbiddenFields = hasForbiddenFields(r);
   if (forbiddenFields.length > 0) {
@@ -429,7 +426,7 @@ function validateCreativeBriefRequestV1(
     });
     return; // Don't continue validating if forbidden fields exist
   }
-  
+
   // Check for unknown fields - CreativeBriefRequestV1 has specific known fields
   const knownRequestFields = new Set([
     'snapshotRevisionId',
@@ -443,8 +440,8 @@ function validateCreativeBriefRequestV1(
     'brief',
   ]);
   const actualRequestFields = Object.keys(r);
-  const unknownRequestFields = actualRequestFields.filter(f => !knownRequestFields.has(f));
-  
+  const unknownRequestFields = actualRequestFields.filter((f) => !knownRequestFields.has(f));
+
   if (unknownRequestFields.length > 0) {
     errors.push({
       code: 'invalid-request',
@@ -453,26 +450,36 @@ function validateCreativeBriefRequestV1(
     });
     return; // Don't continue validating if unknown fields exist
   }
-  
+
   // Required fields
   validateStringField(r.snapshotRevisionId, `${path}.snapshotRevisionId`, 256, errors);
   validateStringField(r.projectId, `${path}.projectId`, 256, errors);
   validateStringField(r.request, `${path}.request`, MAX_REQUEST_LENGTH, errors);
   validateScope(r.scope, `${path}.scope`, errors);
-  
+
   // Optional fields - only validate if present
   if (r.brief !== undefined) {
     validateStringField(r.brief, `${path}.brief`, MAX_BRIEF_LENGTH, errors);
   }
   validateDestinationPreset(r.destination, `${path}.destination`, errors);
   validateNonNegativeInteger(r.durationTargetUs, `${path}.durationTargetUs`, errors);
-  validatePositiveInteger(r.maxRecommendations, `${path}.maxRecommendations`, errors, AGENT_TOOLS_MAX_LENGTHS.recommendationCount);
-  
+  validatePositiveInteger(
+    r.maxRecommendations,
+    `${path}.maxRecommendations`,
+    errors,
+    AGENT_TOOLS_MAX_LENGTHS.recommendationCount,
+  );
+
   // Validate allowedRecommendationKinds
   if (r.allowedRecommendationKinds !== undefined) {
-    validateArrayLength(r.allowedRecommendationKinds, `${path}.allowedRecommendationKinds`, 20, errors);
+    validateArrayLength(
+      r.allowedRecommendationKinds,
+      `${path}.allowedRecommendationKinds`,
+      20,
+      errors,
+    );
   }
-  
+
   // Deep check for forbidden patterns in all string fields
   const patternViolations = deepCheckForbiddenPatterns(request, path);
   if (patternViolations.length > 0) {
@@ -498,10 +505,7 @@ function estimateJsonSize(obj: unknown): number {
 /**
  * Validate the size of the S1 snapshot.
  */
-function validateSnapshotSize(
-  snapshot: unknown,
-  errors: CreativeBriefValidationError[],
-): void {
+function validateSnapshotSize(snapshot: unknown, errors: CreativeBriefValidationError[]): void {
   const size = estimateJsonSize(snapshot);
   if (size > MAX_SNAPSHOT_BYTES) {
     errors.push({
@@ -535,7 +539,7 @@ function validateIntelligenceSize(
 
 /**
  * Validate a server-side Creative Brief request envelope.
- * 
+ *
  * Checks:
  * - Route projectId matches envelope projectId
  * - Route projectId matches snapshot.projectId
@@ -546,7 +550,7 @@ function validateIntelligenceSize(
  * - Size bounds for all components
  * - Valid scope, destination, and numeric fields
  * - Input is not mutated
- * 
+ *
  * @param envelope - The raw request envelope from the route handler
  * @param routeProjectId - The projectId extracted from the URL path
  * @param routeSnapshotRevisionId - The snapshotRevisionId extracted from the URL path
@@ -558,20 +562,22 @@ export function validateCreativeBriefServerRequest(
   routeSnapshotRevisionId: ProjectRevisionId,
 ): CreativeBriefValidationResult {
   const errors: CreativeBriefValidationError[] = [];
-  
+
   // Must be an object
   if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) {
     return {
       valid: false,
-      errors: [{
-        code: 'invalid-request',
-        message: 'Request envelope must be a non-null object',
-      }],
+      errors: [
+        {
+          code: 'invalid-request',
+          message: 'Request envelope must be a non-null object',
+        },
+      ],
     };
   }
-  
+
   const env = envelope as Record<string, unknown>;
-  
+
   // Check for forbidden field names at the top level
   const forbiddenFields = hasForbiddenFields(env);
   if (forbiddenFields.length > 0) {
@@ -581,7 +587,7 @@ export function validateCreativeBriefServerRequest(
     });
     return { valid: false, errors };
   }
-  
+
   // Check for unknown fields at the top level
   const expectedTopLevelFields = new Set([
     'projectId',
@@ -591,15 +597,15 @@ export function validateCreativeBriefServerRequest(
     'request',
   ]);
   const actualFields = Object.keys(env);
-  const unknownFields = actualFields.filter(f => !expectedTopLevelFields.has(f));
-  
+  const unknownFields = actualFields.filter((f) => !expectedTopLevelFields.has(f));
+
   if (unknownFields.length > 0) {
     errors.push({
       code: 'invalid-request',
       message: `Unknown fields in request envelope: ${unknownFields.join(', ')}`,
     });
   }
-  
+
   // Validate projectId
   if (typeof env.projectId !== 'string' || env.projectId.length === 0) {
     errors.push({
@@ -617,7 +623,7 @@ export function validateCreativeBriefServerRequest(
       });
     }
   }
-  
+
   // Validate snapshotRevisionId
   if (typeof env.snapshotRevisionId !== 'string' || env.snapshotRevisionId.length === 0) {
     errors.push({
@@ -635,7 +641,7 @@ export function validateCreativeBriefServerRequest(
       });
     }
   }
-  
+
   // Validate snapshot exists and has correct structure
   if (env.snapshot === undefined) {
     errors.push({
@@ -646,7 +652,7 @@ export function validateCreativeBriefServerRequest(
   } else {
     validateSnapshotSize(env.snapshot, errors);
   }
-  
+
   // Validate intelligence exists and has correct structure
   if (env.intelligence === undefined) {
     errors.push({
@@ -657,7 +663,7 @@ export function validateCreativeBriefServerRequest(
   } else {
     validateIntelligenceSize(env.intelligence, errors);
   }
-  
+
   // Validate request
   if (env.request === undefined) {
     errors.push({
@@ -668,21 +674,21 @@ export function validateCreativeBriefServerRequest(
   } else {
     validateCreativeBriefRequestV1(env.request, 'envelope.request', errors);
   }
-  
+
   // If we have structural errors (missing required fields), return early
   // This prevents cascading errors when basic structure is invalid
-  const structuralErrors = errors.filter(e => e.code === 'invalid-request');
+  const structuralErrors = errors.filter((e) => e.code === 'invalid-request');
   if (structuralErrors.length > 0) {
     return { valid: false, errors };
   }
-  
+
   // Now check project/revision parity
   // We need to check that all project IDs match
   const envelopeProjectId = env.projectId as string | undefined;
   const envelopeSnapshotRevisionId = env.snapshotRevisionId as string | undefined;
   const snapshot = env.snapshot as SemanticProjectSnapshotV1 | undefined;
   const request = env.request as CreativeBriefRequestV1 | undefined;
-  
+
   // Check route projectId matches envelope projectId
   if (envelopeProjectId && envelopeProjectId !== routeProjectId) {
     errors.push({
@@ -691,7 +697,7 @@ export function validateCreativeBriefServerRequest(
       path: 'projectId',
     });
   }
-  
+
   // Check envelope projectId matches snapshot.projectId
   if (envelopeProjectId && snapshot && snapshot.projectId !== envelopeProjectId) {
     errors.push({
@@ -700,7 +706,7 @@ export function validateCreativeBriefServerRequest(
       path: 'snapshot.projectId',
     });
   }
-  
+
   // Check envelope projectId matches request.projectId
   if (envelopeProjectId && request && request.projectId !== envelopeProjectId) {
     errors.push({
@@ -709,7 +715,7 @@ export function validateCreativeBriefServerRequest(
       path: 'request.projectId',
     });
   }
-  
+
   // Check route snapshotRevisionId matches envelope snapshotRevisionId
   if (envelopeSnapshotRevisionId && envelopeSnapshotRevisionId !== routeSnapshotRevisionId) {
     errors.push({
@@ -718,25 +724,33 @@ export function validateCreativeBriefServerRequest(
       path: 'snapshotRevisionId',
     });
   }
-  
+
   // Check envelope snapshotRevisionId matches snapshot.revisionId
-  if (envelopeSnapshotRevisionId && snapshot && snapshot.revisionId !== envelopeSnapshotRevisionId) {
+  if (
+    envelopeSnapshotRevisionId &&
+    snapshot &&
+    snapshot.revisionId !== envelopeSnapshotRevisionId
+  ) {
     errors.push({
       code: 'revision-mismatch',
       message: `Envelope snapshotRevisionId (${envelopeSnapshotRevisionId}) does not match snapshot.revisionId (${snapshot.revisionId})`,
       path: 'snapshot.revisionId',
     });
   }
-  
+
   // Check envelope snapshotRevisionId matches request.snapshotRevisionId
-  if (envelopeSnapshotRevisionId && request && request.snapshotRevisionId !== envelopeSnapshotRevisionId) {
+  if (
+    envelopeSnapshotRevisionId &&
+    request &&
+    request.snapshotRevisionId !== envelopeSnapshotRevisionId
+  ) {
     errors.push({
       code: 'revision-mismatch',
       message: `Envelope snapshotRevisionId (${envelopeSnapshotRevisionId}) does not match request.snapshotRevisionId (${request.snapshotRevisionId})`,
       path: 'request.snapshotRevisionId',
     });
   }
-  
+
   const valid = errors.length === 0;
   return { valid, errors: Object.freeze(errors.slice()) };
 }

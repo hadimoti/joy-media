@@ -9,11 +9,9 @@
 import type {
   AsyncCreativeModelAdapter,
   AsyncOutcome,
-  AsyncOutcomeCategory,
   AsyncAdapterOptions,
   ModelAdapterInputV1,
   ModelAdapterOutputV1,
-  AuditEventSink,
 } from '@joy-media/agent-tools';
 
 // ============================================================================
@@ -313,12 +311,10 @@ class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
     let cleanupSignalListener: (() => void) | undefined;
     let cleanupSignalAbortListener: (() => void) | undefined;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    let abortController: AbortController | undefined;
+    const abortController = new AbortController();
     let signalAbortPromise: Promise<never> | undefined;
 
     // Create an AbortController for the transport
-    abortController = new AbortController();
-
     // Listen to caller's signal and abort our controller
     if (options.signal !== undefined) {
       const listener = () => {
@@ -374,7 +370,7 @@ class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
 
       let response: Response;
       try {
-        const racePromises: Promise<any>[] = [transportPromise];
+        const racePromises: Array<Promise<Response>> = [transportPromise];
         if (timeoutPromise !== undefined) {
           racePromises.push(timeoutPromise);
         }
@@ -597,7 +593,7 @@ class OpenRouterCreativeAdapter implements AsyncCreativeModelAdapter {
         retryable: false,
         durationMs,
       };
-    } catch (error) {
+    } catch {
       // Map transport exceptions to provider-failed with redacted data
       const durationMs = this.#clock.now() - startTime;
       if (options.auditSink !== undefined) {

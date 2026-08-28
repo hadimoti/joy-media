@@ -1131,8 +1131,7 @@ describe('BrowserControlPlaneClient', () => {
 
     it('returns typed response with creativeBriefOptIn and revision', async () => {
       const original = globalThis.fetch;
-      globalThis.fetch = async () =>
-        json(200, { data: { creativeBriefOptIn: true, revision: 5 } });
+      globalThis.fetch = async () => json(200, { data: { creativeBriefOptIn: true, revision: 5 } });
       try {
         const client = new BrowserControlPlaneClient(
           'https://media.joyteam.ir/api',
@@ -1154,9 +1153,9 @@ describe('BrowserControlPlaneClient', () => {
           'https://media.joyteam.ir/api',
           () => 'joy-session-token',
         );
-        await expect(
-          client.setCreativeBriefOptIn('nonexistent', true, 0),
-        ).rejects.toThrow('PROJECT_NOT_FOUND: Project not found');
+        await expect(client.setCreativeBriefOptIn('nonexistent', true, 0)).rejects.toThrow(
+          'PROJECT_NOT_FOUND: Project not found',
+        );
       } finally {
         globalThis.fetch = original;
       }
@@ -1242,8 +1241,7 @@ describe('BrowserControlPlaneClient', () => {
 
     it('returns typed response with creativeBriefOptIn and revision', async () => {
       const original = globalThis.fetch;
-      globalThis.fetch = async () =>
-        json(200, { data: { creativeBriefOptIn: true, revision: 5 } });
+      globalThis.fetch = async () => json(200, { data: { creativeBriefOptIn: true, revision: 5 } });
       try {
         const client = new BrowserControlPlaneClient(
           'https://media.joyteam.ir/api',
@@ -1265,9 +1263,9 @@ describe('BrowserControlPlaneClient', () => {
           'https://media.joyteam.ir/api',
           () => 'joy-session-token',
         );
-        await expect(
-          client.getCreativeBriefOptIn('nonexistent'),
-        ).rejects.toThrow('PROJECT_NOT_FOUND: Project not found');
+        await expect(client.getCreativeBriefOptIn('nonexistent')).rejects.toThrow(
+          'PROJECT_NOT_FOUND: Project not found',
+        );
       } finally {
         globalThis.fetch = original;
       }
@@ -1300,18 +1298,44 @@ describe('BrowserControlPlaneClient', () => {
 
 describe('BrowserControlPlaneClient Joy Code', () => {
   it('uses the Joy Code opt-in route and POST plan envelope with auth and encoding', async () => {
-    const requests: Array<{ readonly url: string; readonly method: string; readonly body?: string }> = [];
+    const requests: Array<{
+      readonly url: string;
+      readonly method: string;
+      readonly body?: string;
+    }> = [];
     const original = globalThis.fetch;
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      requests.push({ url: String(input), method: init?.method ?? 'GET', ...(init?.body === undefined ? {} : { body: String(init.body) }) });
-      return json(200, { data: { enabled: true, consentVersion: 'openrouter-nvidia-free-edit-planning-v1', revision: 2 } });
+      requests.push({
+        url: String(input),
+        method: init?.method ?? 'GET',
+        ...(init?.body === undefined ? {} : { body: String(init.body) }),
+      });
+      return json(200, {
+        data: {
+          enabled: true,
+          consentVersion: 'openrouter-nvidia-free-edit-planning-v1',
+          revision: 2,
+        },
+      });
     };
     try {
       const client = new BrowserControlPlaneClient('https://media.joyteam.ir/api', () => 'token');
       await client.getJoyCodeOptIn('project/one');
-      await client.setJoyCodeOptIn('project/one', true, 'openrouter-nvidia-free-edit-planning-v1', 2);
-      await client.createJoyCodePlan('project/one', { projectId: 'project/one', snapshotRevisionId: 'rev-2', prompt: 'trim', selection: { clipIds: ['clip-1'] } });
-    } finally { globalThis.fetch = original; }
+      await client.setJoyCodeOptIn(
+        'project/one',
+        true,
+        'openrouter-nvidia-free-edit-planning-v1',
+        2,
+      );
+      await client.createJoyCodePlan('project/one', {
+        projectId: 'project/one',
+        snapshotRevisionId: 'rev-2',
+        prompt: 'trim',
+        selection: { clipIds: ['clip-1'] },
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
     expect(requests.map((request) => request.url)).toEqual([
       'https://media.joyteam.ir/api/v1/projects/project%2Fone/joy-code-opt-in',
       'https://media.joyteam.ir/api/v1/projects/project%2Fone/joy-code-opt-in',

@@ -1300,11 +1300,20 @@ function EditorWorkspace({
     const activeVideoClip = activeClip?.kind === 'video' ? activeClip : undefined;
     const clipConfig =
       activeVideoClip === undefined ? undefined : previewAudioState.clips[activeVideoClip.id];
+    const activeTrackMuted =
+      activeVideoClip !== undefined &&
+      Object.values(session.timelineProject.compositions).some((composition) =>
+        composition.tracks.some(
+          (track) =>
+            track.muted === true && track.clips.some((clip) => clip.id === activeVideoClip.id),
+        ),
+      );
     const master =
       previewAudioState.buses.find((bus) => bus.id === 'master') ?? previewAudioState.buses[0];
     const hasSolo = Object.values(previewAudioState.clips).some((clip) => clip.solo);
     const clipAudible =
-      clipConfig === undefined || (!clipConfig.mute && (!hasSolo || clipConfig.solo));
+      !activeTrackMuted &&
+      (clipConfig === undefined || (!clipConfig.mute && (!hasSolo || clipConfig.solo)));
     const gain =
       (master?.mute ? 0 : (master?.gain ?? 1)) * (clipAudible ? (clipConfig?.gain ?? 1) : 0);
     const pan = Math.max(-1, Math.min(1, (master?.pan ?? 0) + (clipConfig?.pan ?? 0)));
@@ -1390,11 +1399,20 @@ function EditorWorkspace({
       document: session.visualProject,
       revisionId: session.projectRevisionId,
       storage: window.localStorage,
-      syncProjectDocument: (controlPlaneProjectId, params) => mediaControlPlaneClient.syncProjectDocument(controlPlaneProjectId, params),
-      joyCodeTransport: (controlPlaneProjectId, request, signal) => mediaControlPlaneClient.createJoyCodePlan(controlPlaneProjectId, request, signal),
+      syncProjectDocument: (controlPlaneProjectId, params) =>
+        mediaControlPlaneClient.syncProjectDocument(controlPlaneProjectId, params),
+      joyCodeTransport: (controlPlaneProjectId, request, signal) =>
+        mediaControlPlaneClient.createJoyCodePlan(controlPlaneProjectId, request, signal),
       ownerKey: controlPlaneOwnerKey,
     });
-  }, [controlPlaneOwnerKey, controlPlaneProject, joyCodeOptedIn, joySession.kind, session.projectRevisionId, session.visualProject]);
+  }, [
+    controlPlaneOwnerKey,
+    controlPlaneProject,
+    joyCodeOptedIn,
+    joySession.kind,
+    session.projectRevisionId,
+    session.visualProject,
+  ]);
   const onCreativeBriefOptIn = useCallback(async () => {
     const result = await coordinateCreativeBriefOptIn(
       controlPlaneProject,
@@ -1413,14 +1431,28 @@ function EditorWorkspace({
     let cancelled = false;
     setJoyCodeOptedIn(false);
     if (joySession.kind !== 'ready') return () => undefined;
-    void mediaControlPlaneClient.getJoyCodeOptIn(controlPlaneProject.controlPlaneProjectId)
-      .then((result) => { if (!cancelled) setJoyCodeOptedIn(result.enabled); })
-      .catch(() => { if (!cancelled) setJoyCodeOptedIn(false); });
-    return () => { cancelled = true; };
+    void mediaControlPlaneClient
+      .getJoyCodeOptIn(controlPlaneProject.controlPlaneProjectId)
+      .then((result) => {
+        if (!cancelled) setJoyCodeOptedIn(result.enabled);
+      })
+      .catch(() => {
+        if (!cancelled) setJoyCodeOptedIn(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [controlPlaneProject.controlPlaneProjectId, joySession.kind]);
   const onJoyCodeOptIn = useCallback(async () => {
-    const current = await mediaControlPlaneClient.getJoyCodeOptIn(controlPlaneProject.controlPlaneProjectId);
-    const result = await mediaControlPlaneClient.setJoyCodeOptIn(controlPlaneProject.controlPlaneProjectId, true, 'openrouter-nvidia-free-edit-planning-v1', current.revision);
+    const current = await mediaControlPlaneClient.getJoyCodeOptIn(
+      controlPlaneProject.controlPlaneProjectId,
+    );
+    const result = await mediaControlPlaneClient.setJoyCodeOptIn(
+      controlPlaneProject.controlPlaneProjectId,
+      true,
+      'openrouter-nvidia-free-edit-planning-v1',
+      current.revision,
+    );
     setJoyCodeOptedIn(result.enabled);
   }, [controlPlaneProject.controlPlaneProjectId]);
   const mediaResolver = useMemo(
@@ -3146,6 +3178,10 @@ function EditorWorkspace({
           break;
         case 'clip.split': {
           if (composition === undefined || selection === undefined) return;
+          if (selection.track.locked === true) {
+            showToast('Unlock the track before splitting clips.', 'info');
+            return;
+          }
           const endUs = selection.clip.startUs + selection.clip.durationUs;
           if (current.playheadUs <= selection.clip.startUs || current.playheadUs >= endUs) return;
           dispatchTimeline({
@@ -3185,6 +3221,10 @@ function EditorWorkspace({
         }
         case 'clip.duplicate': {
           if (composition === undefined || selection === undefined) return;
+          if (selection.track.locked === true) {
+            showToast('Unlock the track before duplicating clips.', 'info');
+            return;
+          }
           dispatchTimeline({
             label: `Duplicate ${selection.clip.id}`,
             commands: [
@@ -3220,6 +3260,10 @@ function EditorWorkspace({
         .flatMap((track) => track.clips.map((clip) => ({ track, clip })))
         .find((item) => current.selectedIds.includes(item.clip.id));
       if (selection === undefined) return;
+      if (selection.track.locked === true) {
+        showToast('Unlock the track before editing this clip.', 'info');
+        return;
+      }
       if (kind === 'split') {
         const endUs = selection.clip.startUs + selection.clip.durationUs;
         if (current.playheadUs <= selection.clip.startUs || current.playheadUs >= endUs) return;
@@ -5783,7 +5827,9 @@ function EditorWorkspace({
           onAdd3DRender={context.addJoyCode3DRender}
           joyCodeOptedIn={context.joyCodeOptedIn}
           onJoyCodeOptIn={context.onJoyCodeOptIn}
-          {...(context.joyCodeServerSession === undefined ? {} : { joyCodeServerSession: context.joyCodeServerSession })}
+          {...(context.joyCodeServerSession === undefined
+            ? {}
+            : { joyCodeServerSession: context.joyCodeServerSession })}
         />
       );
     }
@@ -6984,6 +7030,8 @@ function MonitorPanel() {
     timelineComposition === undefined
       ? (composition?.durationUs ?? 30_000_000)
       : timelineEffectiveDurationUs(timelineComposition);
+  const hasTimelineContent =
+    timelineComposition?.tracks.some((track) => track.clips.length > 0) ?? false;
   const zoomScale =
     viewerZoom === 'fit' ? 1 : viewerZoom === '50' ? 0.5 : viewerZoom === '200' ? 2 : 1;
   const zoomLabel =
@@ -7222,6 +7270,7 @@ function MonitorPanel() {
             aria-label={state.playing ? 'Pause' : 'Play'}
             title={state.playing ? 'Pause (Space)' : 'Play (Space)'}
             onClick={togglePlayback}
+            disabled={!hasTimelineContent}
           >
             {state.playing ? <PauseIcon /> : <PlayIcon />}
           </button>

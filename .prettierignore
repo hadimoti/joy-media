@@ -2,5 +2,23 @@ dist/
 node_modules/
 coverage/
 pnpm-lock.yaml
+# Local agent/tooling workspaces and generated evidence.
+.pytest_cache/
+.agent/
+.superpowers/
+test-output/
+test-results/
+**/test-results/
+apps/editor-web/public/assets/
 # Generated workflow artifacts: canonical format is workflowToJson (pinned by test).
 packages/workflow-engine/workflows/
+# TypeScript compiler outputs emitted alongside authored source files.
+**/src/**/*.js
+**/src/**/*.d.ts
+**/src/**/*.js.map
+**/src/**/*.d.ts.map
+.tmp-p3-debug.mts
+# Vendored Python environments used only by local agent skills.
+.agent/**/.venv/
+.agent/**/.pytest_cache/
+.agent/**/test-output/

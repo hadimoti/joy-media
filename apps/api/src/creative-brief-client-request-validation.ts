@@ -114,9 +114,6 @@ const FORBIDDEN_TOP_LEVEL_FIELDS = [
   'keys',
 ] as const;
 
-/** Set of forbidden top-level field names for fast lookup */
-const FORBIDDEN_TOP_LEVEL_FIELD_SET = new Set(FORBIDDEN_TOP_LEVEL_FIELDS);
-
 /**
  * Known top-level field names for the client envelope.
  * Any field not in this set is considered unknown and will be rejected.
@@ -193,9 +190,7 @@ export function validateCreativeBriefClientRequest(
 
   // Check for unknown top-level fields
   const allTopLevelFields = Object.keys(env);
-  const unknownFields = allTopLevelFields.filter(
-    (field) => !KNOWN_TOP_LEVEL_FIELDS.has(field),
-  );
+  const unknownFields = allTopLevelFields.filter((field) => !KNOWN_TOP_LEVEL_FIELDS.has(field));
 
   if (unknownFields.length > 0) {
     errors.push({
@@ -284,9 +279,7 @@ export function validateCreativeBriefClientRequest(
   ]);
 
   const actualRequestFields = Object.keys(requestObj);
-  const unknownRequestFields = actualRequestFields.filter(
-    (f) => !knownRequestFields.has(f),
-  );
+  const unknownRequestFields = actualRequestFields.filter((f) => !knownRequestFields.has(f));
 
   if (unknownRequestFields.length > 0) {
     errors.push({
@@ -326,10 +319,7 @@ export function validateCreativeBriefClientRequest(
     });
   }
 
-  if (
-    typeof requestObj.projectId !== 'string' ||
-    requestObj.projectId.trim() === ''
-  ) {
+  if (typeof requestObj.projectId !== 'string' || requestObj.projectId.trim() === '') {
     errors.push({
       code: 'invalid-request',
       message: 'request.projectId must be a non-empty string',
@@ -337,10 +327,7 @@ export function validateCreativeBriefClientRequest(
     });
   }
 
-  if (
-    typeof requestObj.request !== 'string' ||
-    requestObj.request.trim() === ''
-  ) {
+  if (typeof requestObj.request !== 'string' || requestObj.request.trim() === '') {
     errors.push({
       code: 'invalid-request',
       message: 'request.request must be a non-empty string',
@@ -349,7 +336,10 @@ export function validateCreativeBriefClientRequest(
   }
 
   // Validate scope against canonical CreativeBriefScope contract
-  if (requestObj.scope !== undefined && !CREATIVE_BRIEF_SCOPES.includes(requestObj.scope as CreativeBriefScope)) {
+  if (
+    requestObj.scope !== undefined &&
+    !CREATIVE_BRIEF_SCOPES.includes(requestObj.scope as CreativeBriefScope)
+  ) {
     errors.push({
       code: 'invalid-request',
       message: 'request.scope must be a valid CreativeBriefScope',

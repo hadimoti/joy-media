@@ -7,7 +7,6 @@
  */
 
 import type { AsyncCreativeBriefOutcome } from '@joy-media/agent-tools';
-import type { AsyncOutcomeCategory } from '@joy-media/agent-tools';
 import type { CreativeBriefInputV1 } from '@joy-media/agent-tools';
 
 // ============================================================================
@@ -80,8 +79,6 @@ export interface CreativeBriefRuntime {
  * are made unless explicitly configured.
  */
 export class UnavailableCreativeBriefRuntime implements CreativeBriefRuntime {
-  readonly #name = 'UnavailableCreativeBriefRuntime';
-
   /**
    * Always returns unavailable outcome.
    * No fake success, no model call, no network request, no credential access.

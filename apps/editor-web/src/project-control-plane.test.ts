@@ -123,7 +123,18 @@ describe('control-plane project binding', () => {
     globalThis.fetch = async (input: RequestInfo | URL) => {
       const url = String(input);
       requests.push(url);
-      return json(200, { data: [{ id: 'job-1', state: 'queued' }] });
+      return json(200, {
+        data: [
+          {
+            id: 'job-1',
+            projectId: 'project-opaque-project-1',
+            type: 'export.video',
+            state: 'queued',
+            progress: 0,
+            cancelRequested: false,
+          },
+        ],
+      });
     };
     const first = getOrCreateControlPlaneProjectBinding(
       storage,

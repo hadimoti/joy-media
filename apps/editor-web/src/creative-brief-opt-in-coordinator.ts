@@ -95,7 +95,11 @@ export function coordinateCreativeBriefOptIn(
   return transport(binding.controlPlaneProjectId, enabled, baseRevision)
     .then((response) => {
       // Validate the revision is a valid number
-      if (typeof response.revision !== 'number' || !Number.isInteger(response.revision) || response.revision < 0) {
+      if (
+        typeof response.revision !== 'number' ||
+        !Number.isInteger(response.revision) ||
+        response.revision < 0
+      ) {
         return {
           kind: 'invalid-revision',
           revision: response.revision,

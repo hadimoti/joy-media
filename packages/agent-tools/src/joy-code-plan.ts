@@ -21,12 +21,7 @@ export const JOY_CODE_OPERATION_KINDS = [
 
 export type JoyCodeOperationKind = (typeof JOY_CODE_OPERATION_KINDS)[number];
 
-export const JOY_CODE_PLACEMENT_PRESETS = [
-  'center',
-  'top',
-  'bottom',
-  'lower-third',
-] as const;
+export const JOY_CODE_PLACEMENT_PRESETS = ['center', 'top', 'bottom', 'lower-third'] as const;
 
 export type JoyCodePlacementPreset = (typeof JOY_CODE_PLACEMENT_PRESETS)[number];
 
@@ -268,7 +263,8 @@ function checkKnownKeys(
   path: string,
 ): void {
   for (const key of Object.keys(value)) {
-    if (!keys.includes(key)) error(errors, 'unknown-field', 'Unknown field is not allowed', path + '.' + key);
+    if (!keys.includes(key))
+      error(errors, 'unknown-field', 'Unknown field is not allowed', path + '.' + key);
   }
 }
 
@@ -352,7 +348,12 @@ function readDependencies(
   for (let index = 0; index < candidate.length; index += 1) {
     const dependency = candidate[index];
     if (typeof dependency !== 'string' || dependency.trim() === '') {
-      error(errors, 'invalid-dependency', 'Dependency must be a non-empty string', path + '.dependsOn[' + index + ']');
+      error(
+        errors,
+        'invalid-dependency',
+        'Dependency must be a non-empty string',
+        path + '.dependsOn[' + index + ']',
+      );
     } else {
       dependencies.push(dependency);
     }
@@ -397,7 +398,10 @@ function parseOperation(
   const id = readId(value, 'id', errors, path, JOY_CODE_PLAN_LIMITS.operationId);
   const dependsOn = readDependencies(value, errors, path);
   const kind = value.kind;
-  if (typeof kind !== 'string' || !JOY_CODE_OPERATION_KINDS.includes(kind as JoyCodeOperationKind)) {
+  if (
+    typeof kind !== 'string' ||
+    !JOY_CODE_OPERATION_KINDS.includes(kind as JoyCodeOperationKind)
+  ) {
     error(errors, 'invalid-operation-kind', 'Operation kind is not allowlisted', path + '.kind');
     return undefined;
   }
@@ -406,7 +410,12 @@ function parseOperation(
   const base = { id, dependsOn, kind };
 
   if (kind === 'timeline.trimClip') {
-    checkKnownKeys(value, ['id', 'dependsOn', 'kind', 'compositionId', 'trackId', 'clipId', 'newStartUs', 'newEndUs'], errors, path);
+    checkKnownKeys(
+      value,
+      ['id', 'dependsOn', 'kind', 'compositionId', 'trackId', 'clipId', 'newStartUs', 'newEndUs'],
+      errors,
+      path,
+    );
     const compositionId = readId(value, 'compositionId', errors, path);
     const trackId = readId(value, 'trackId', errors, path);
     const clipId = readId(value, 'clipId', errors, path);
@@ -415,72 +424,198 @@ function parseOperation(
     if (newStartUs !== undefined && newEndUs !== undefined && newEndUs <= newStartUs) {
       error(errors, 'invalid-range', 'End must be greater than start', path);
     }
-    if (compositionId === undefined || trackId === undefined || clipId === undefined || newStartUs === undefined || newEndUs === undefined) return undefined;
+    if (
+      compositionId === undefined ||
+      trackId === undefined ||
+      clipId === undefined ||
+      newStartUs === undefined ||
+      newEndUs === undefined
+    )
+      return undefined;
     return { ...base, kind, compositionId, trackId, clipId, newStartUs, newEndUs };
   }
 
   if (kind === 'timeline.splitClip') {
-    checkKnownKeys(value, ['id', 'dependsOn', 'kind', 'compositionId', 'trackId', 'clipId', 'atUs'], errors, path);
+    checkKnownKeys(
+      value,
+      ['id', 'dependsOn', 'kind', 'compositionId', 'trackId', 'clipId', 'atUs'],
+      errors,
+      path,
+    );
     const compositionId = readId(value, 'compositionId', errors, path);
     const trackId = readId(value, 'trackId', errors, path);
     const clipId = readId(value, 'clipId', errors, path);
     const atUs = readPositiveInteger(value, 'atUs', errors, path);
-    if (compositionId === undefined || trackId === undefined || clipId === undefined || atUs === undefined) return undefined;
+    if (
+      compositionId === undefined ||
+      trackId === undefined ||
+      clipId === undefined ||
+      atUs === undefined
+    )
+      return undefined;
     return { ...base, kind, compositionId, trackId, clipId, atUs };
   }
 
   if (kind === 'timeline.moveClip') {
-    checkKnownKeys(value, ['id', 'dependsOn', 'kind', 'compositionId', 'sourceTrackId', 'targetTrackId', 'clipId', 'newStartUs'], errors, path);
+    checkKnownKeys(
+      value,
+      [
+        'id',
+        'dependsOn',
+        'kind',
+        'compositionId',
+        'sourceTrackId',
+        'targetTrackId',
+        'clipId',
+        'newStartUs',
+      ],
+      errors,
+      path,
+    );
     const compositionId = readId(value, 'compositionId', errors, path);
     const clipId = readId(value, 'clipId', errors, path);
     const sourceTrackId = readId(value, 'sourceTrackId', errors, path);
     const targetTrackId = readId(value, 'targetTrackId', errors, path);
     const newStartUs = readNonNegativeInteger(value, 'newStartUs', errors, path);
-    if (compositionId === undefined || sourceTrackId === undefined || targetTrackId === undefined || clipId === undefined || newStartUs === undefined) return undefined;
+    if (
+      compositionId === undefined ||
+      sourceTrackId === undefined ||
+      targetTrackId === undefined ||
+      clipId === undefined ||
+      newStartUs === undefined
+    )
+      return undefined;
     return { ...base, kind, compositionId, sourceTrackId, targetTrackId, clipId, newStartUs };
   }
 
   if (kind === 'timeline.removeClip') {
-    checkKnownKeys(value, ['id', 'dependsOn', 'kind', 'compositionId', 'trackId', 'clipId'], errors, path);
+    checkKnownKeys(
+      value,
+      ['id', 'dependsOn', 'kind', 'compositionId', 'trackId', 'clipId'],
+      errors,
+      path,
+    );
     const compositionId = readId(value, 'compositionId', errors, path);
     const trackId = readId(value, 'trackId', errors, path);
     const clipId = readId(value, 'clipId', errors, path);
-    if (compositionId === undefined || trackId === undefined || clipId === undefined) return undefined;
+    if (compositionId === undefined || trackId === undefined || clipId === undefined)
+      return undefined;
     return { ...base, kind, compositionId, trackId, clipId };
   }
 
   if (kind === 'timeline.insertExistingAsset') {
-    checkKnownKeys(value, ['id', 'dependsOn', 'kind', 'compositionId', 'targetTrackId', 'assetId', 'startUs', 'durationUs'], errors, path);
+    checkKnownKeys(
+      value,
+      [
+        'id',
+        'dependsOn',
+        'kind',
+        'compositionId',
+        'targetTrackId',
+        'assetId',
+        'startUs',
+        'durationUs',
+      ],
+      errors,
+      path,
+    );
     const compositionId = readId(value, 'compositionId', errors, path);
     const targetTrackId = readId(value, 'targetTrackId', errors, path);
     const assetId = readId(value, 'assetId', errors, path);
     const startUs = readNonNegativeInteger(value, 'startUs', errors, path);
     const durationUs = readPositiveInteger(value, 'durationUs', errors, path);
-    if (compositionId === undefined || targetTrackId === undefined || assetId === undefined || startUs === undefined || durationUs === undefined) return undefined;
+    if (
+      compositionId === undefined ||
+      targetTrackId === undefined ||
+      assetId === undefined ||
+      startUs === undefined ||
+      durationUs === undefined
+    )
+      return undefined;
     return { ...base, kind, compositionId, targetTrackId, assetId, startUs, durationUs };
   }
 
   if (kind === 'text.insertTemplate') {
-    checkKnownKeys(value, ['id', 'dependsOn', 'kind', 'templateId', 'content', 'startUs', 'durationUs', 'placementPreset'], errors, path);
-    const templateId = readCatalogId(value, 'templateId', options.textTemplateIds, 'unknown-template', errors, path);
-    const content = readNonEmptyString(value, 'content', errors, path, JOY_CODE_PLAN_LIMITS.textContent, 'text-too-long');
+    checkKnownKeys(
+      value,
+      [
+        'id',
+        'dependsOn',
+        'kind',
+        'templateId',
+        'content',
+        'startUs',
+        'durationUs',
+        'placementPreset',
+      ],
+      errors,
+      path,
+    );
+    const templateId = readCatalogId(
+      value,
+      'templateId',
+      options.textTemplateIds,
+      'unknown-template',
+      errors,
+      path,
+    );
+    const content = readNonEmptyString(
+      value,
+      'content',
+      errors,
+      path,
+      JOY_CODE_PLAN_LIMITS.textContent,
+      'text-too-long',
+    );
     const startUs = readNonNegativeInteger(value, 'startUs', errors, path);
     const durationUs = readPositiveInteger(value, 'durationUs', errors, path);
     const placementPreset = value.placementPreset;
     if (!JOY_CODE_PLACEMENT_PRESETS.includes(placementPreset as JoyCodePlacementPreset)) {
       error(errors, 'invalid-placement', 'Placement is not allowlisted', path + '.placementPreset');
     }
-    if (startUs !== undefined && durationUs !== undefined && (durationUs < JOY_CODE_PLAN_LIMITS.titleMinDurationUs || durationUs > JOY_CODE_PLAN_LIMITS.titleMaxDurationUs)) {
-      error(errors, 'invalid-range', 'Title duration is outside the safe range', path + '.durationUs');
+    if (
+      startUs !== undefined &&
+      durationUs !== undefined &&
+      (durationUs < JOY_CODE_PLAN_LIMITS.titleMinDurationUs ||
+        durationUs > JOY_CODE_PLAN_LIMITS.titleMaxDurationUs)
+    ) {
+      error(
+        errors,
+        'invalid-range',
+        'Title duration is outside the safe range',
+        path + '.durationUs',
+      );
     }
-    if (templateId === undefined || content === undefined || startUs === undefined || durationUs === undefined || !JOY_CODE_PLACEMENT_PRESETS.includes(placementPreset as JoyCodePlacementPreset)) return undefined;
-    return { ...base, kind, templateId, content, startUs, durationUs, placementPreset: placementPreset as JoyCodePlacementPreset };
+    if (
+      templateId === undefined ||
+      content === undefined ||
+      startUs === undefined ||
+      durationUs === undefined ||
+      !JOY_CODE_PLACEMENT_PRESETS.includes(placementPreset as JoyCodePlacementPreset)
+    )
+      return undefined;
+    return {
+      ...base,
+      kind,
+      templateId,
+      content,
+      startUs,
+      durationUs,
+      placementPreset: placementPreset as JoyCodePlacementPreset,
+    };
   }
 
   if (kind === 'text.setContent') {
     checkKnownKeys(value, ['id', 'dependsOn', 'kind', 'objectId', 'content'], errors, path);
     const objectId = readId(value, 'objectId', errors, path);
-    const content = readNonEmptyString(value, 'content', errors, path, JOY_CODE_PLAN_LIMITS.textContent, 'text-too-long');
+    const content = readNonEmptyString(
+      value,
+      'content',
+      errors,
+      path,
+      JOY_CODE_PLAN_LIMITS.textContent,
+      'text-too-long',
+    );
     if (objectId === undefined || content === undefined) return undefined;
     return { ...base, kind, objectId, content };
   }
@@ -488,56 +623,123 @@ function parseOperation(
   if (kind === 'text.setTemplate') {
     checkKnownKeys(value, ['id', 'dependsOn', 'kind', 'objectId', 'templateId'], errors, path);
     const objectId = readId(value, 'objectId', errors, path);
-    const templateId = readCatalogId(value, 'templateId', options.textTemplateIds, 'unknown-template', errors, path);
+    const templateId = readCatalogId(
+      value,
+      'templateId',
+      options.textTemplateIds,
+      'unknown-template',
+      errors,
+      path,
+    );
     if (objectId === undefined || templateId === undefined) return undefined;
     return { ...base, kind, objectId, templateId };
   }
 
   if (kind === 'caption.setSegmentText') {
-    checkKnownKeys(value, ['id', 'dependsOn', 'kind', 'captionClipId', 'segmentId', 'text'], errors, path);
+    checkKnownKeys(
+      value,
+      ['id', 'dependsOn', 'kind', 'captionClipId', 'segmentId', 'text'],
+      errors,
+      path,
+    );
     const captionClipId = readId(value, 'captionClipId', errors, path);
     const segmentId = readId(value, 'segmentId', errors, path);
-    const text = readNonEmptyString(value, 'text', errors, path, JOY_CODE_PLAN_LIMITS.textContent, 'text-too-long');
-    if (captionClipId === undefined || segmentId === undefined || text === undefined) return undefined;
+    const text = readNonEmptyString(
+      value,
+      'text',
+      errors,
+      path,
+      JOY_CODE_PLAN_LIMITS.textContent,
+      'text-too-long',
+    );
+    if (captionClipId === undefined || segmentId === undefined || text === undefined)
+      return undefined;
     return { ...base, kind, captionClipId, segmentId, text };
   }
 
   if (kind === 'caption.setSegmentTiming') {
-    checkKnownKeys(value, ['id', 'dependsOn', 'kind', 'captionClipId', 'segmentId', 'startUs', 'endUs'], errors, path);
+    checkKnownKeys(
+      value,
+      ['id', 'dependsOn', 'kind', 'captionClipId', 'segmentId', 'startUs', 'endUs'],
+      errors,
+      path,
+    );
     const captionClipId = readId(value, 'captionClipId', errors, path);
     const segmentId = readId(value, 'segmentId', errors, path);
     const startUs = readNonNegativeInteger(value, 'startUs', errors, path);
     const endUs = readPositiveInteger(value, 'endUs', errors, path);
-    if (startUs !== undefined && endUs !== undefined && endUs <= startUs) error(errors, 'invalid-range', 'End must be greater than start', path);
-    if (captionClipId === undefined || segmentId === undefined || startUs === undefined || endUs === undefined) return undefined;
+    if (startUs !== undefined && endUs !== undefined && endUs <= startUs)
+      error(errors, 'invalid-range', 'End must be greater than start', path);
+    if (
+      captionClipId === undefined ||
+      segmentId === undefined ||
+      startUs === undefined ||
+      endUs === undefined
+    )
+      return undefined;
     return { ...base, kind, captionClipId, segmentId, startUs, endUs };
   }
 
   if (kind === 'caption.setTemplate') {
     checkKnownKeys(value, ['id', 'dependsOn', 'kind', 'captionClipId', 'templateId'], errors, path);
     const captionClipId = readId(value, 'captionClipId', errors, path);
-    const templateId = readCatalogId(value, 'templateId', options.captionTemplateIds, 'unknown-template', errors, path);
+    const templateId = readCatalogId(
+      value,
+      'templateId',
+      options.captionTemplateIds,
+      'unknown-template',
+      errors,
+      path,
+    );
     if (captionClipId === undefined || templateId === undefined) return undefined;
     return { ...base, kind, captionClipId, templateId };
   }
 
   if (kind === 'caption.setBurnIn') {
     checkKnownKeys(value, ['id', 'dependsOn', 'kind', 'enabled'], errors, path);
-    if (typeof value.enabled !== 'boolean') error(errors, 'invalid-burn-in', 'enabled must be boolean', path + '.enabled');
+    if (typeof value.enabled !== 'boolean')
+      error(errors, 'invalid-burn-in', 'enabled must be boolean', path + '.enabled');
     if (typeof value.enabled !== 'boolean') return undefined;
     return { ...base, kind, enabled: value.enabled };
   }
 
   if (kind === 'transition.addAtJunction') {
-    checkKnownKeys(value, ['id', 'dependsOn', 'kind', 'outgoingClipId', 'incomingClipId', 'transitionId', 'durationUs'], errors, path);
+    checkKnownKeys(
+      value,
+      ['id', 'dependsOn', 'kind', 'outgoingClipId', 'incomingClipId', 'transitionId', 'durationUs'],
+      errors,
+      path,
+    );
     const outgoingClipId = readId(value, 'outgoingClipId', errors, path);
     const incomingClipId = readId(value, 'incomingClipId', errors, path);
-    const transitionId = readCatalogId(value, 'transitionId', options.transitionIds, 'unknown-transition', errors, path);
+    const transitionId = readCatalogId(
+      value,
+      'transitionId',
+      options.transitionIds,
+      'unknown-transition',
+      errors,
+      path,
+    );
     const durationUs = readPositiveInteger(value, 'durationUs', errors, path);
-    if (durationUs !== undefined && (durationUs < JOY_CODE_PLAN_LIMITS.transitionMinUs || durationUs > JOY_CODE_PLAN_LIMITS.transitionMaxUs)) {
-      error(errors, 'invalid-range', 'Transition duration is outside the safe range', path + '.durationUs');
+    if (
+      durationUs !== undefined &&
+      (durationUs < JOY_CODE_PLAN_LIMITS.transitionMinUs ||
+        durationUs > JOY_CODE_PLAN_LIMITS.transitionMaxUs)
+    ) {
+      error(
+        errors,
+        'invalid-range',
+        'Transition duration is outside the safe range',
+        path + '.durationUs',
+      );
     }
-    if (outgoingClipId === undefined || incomingClipId === undefined || transitionId === undefined || durationUs === undefined) return undefined;
+    if (
+      outgoingClipId === undefined ||
+      incomingClipId === undefined ||
+      transitionId === undefined ||
+      durationUs === undefined
+    )
+      return undefined;
     return { ...base, kind, outgoingClipId, incomingClipId, transitionId, durationUs };
   }
 
@@ -554,13 +756,20 @@ function checkDependencies(
   const ids = new Set<string>();
   const graph = new Map<string, readonly string[]>();
   for (const operation of operations) {
-    if (ids.has(operation.id)) error(errors, 'duplicate-operation-id', 'Operation IDs must be unique', 'operations');
+    if (ids.has(operation.id))
+      error(errors, 'duplicate-operation-id', 'Operation IDs must be unique', 'operations');
     ids.add(operation.id);
     graph.set(operation.id, operation.dependsOn);
   }
   for (const operation of operations) {
     for (const dependency of operation.dependsOn) {
-      if (!ids.has(dependency)) error(errors, 'unknown-dependency', 'Dependency does not exist', 'operations.' + operation.id);
+      if (!ids.has(dependency))
+        error(
+          errors,
+          'unknown-dependency',
+          'Dependency does not exist',
+          'operations.' + operation.id,
+        );
     }
   }
   const visiting = new Set<string>();
@@ -588,14 +797,21 @@ function validateModelObject(
     return { valid: false, errors: [{ code: 'invalid-type', message: 'Plan must be an object' }] };
   }
   checkKnownKeys(value, MODEL_KEYS, errors, '');
-  if (value.schemaVersion !== JOY_CODE_PLAN_SCHEMA_VERSION) error(errors, 'invalid-schema-version', 'Unsupported Joy Code plan schema version', 'schemaVersion');
+  if (value.schemaVersion !== JOY_CODE_PLAN_SCHEMA_VERSION)
+    error(
+      errors,
+      'invalid-schema-version',
+      'Unsupported Joy Code plan schema version',
+      'schemaVersion',
+    );
   const goal = readNonEmptyString(value, 'goal', errors, '', JOY_CODE_PLAN_LIMITS.goal);
   const summary = readNonEmptyString(value, 'summary', errors, '', JOY_CODE_PLAN_LIMITS.summary);
   if (!Array.isArray(value.operations)) {
     error(errors, 'invalid-operations', 'operations must be an array', 'operations');
   }
   const rawOperations = Array.isArray(value.operations) ? value.operations : [];
-  if (rawOperations.length > JOY_CODE_PLAN_LIMITS.operations) error(errors, 'too-many-operations', 'Operation count exceeds the safe limit', 'operations');
+  if (rawOperations.length > JOY_CODE_PLAN_LIMITS.operations)
+    error(errors, 'too-many-operations', 'Operation count exceeds the safe limit', 'operations');
   const operations: JoyCodePlanOperationV1[] = [];
   for (let index = 0; index < rawOperations.length; index += 1) {
     const operation = parseOperation(rawOperations[index], index, options, errors);
@@ -621,7 +837,12 @@ function validateModelObject(
     for (let index = 0; index < candidate.length; index += 1) {
       const entry = candidate[index];
       if (typeof entry !== 'string' || entry.trim() === '') {
-        error(errors, 'invalid-list-entry', key + ' entries must be non-empty strings', key + '[' + index + ']');
+        error(
+          errors,
+          'invalid-list-entry',
+          key + ' entries must be non-empty strings',
+          key + '[' + index + ']',
+        );
       } else if (entry.length > JOY_CODE_PLAN_LIMITS.contextNote) {
         error(errors, 'string-too-long', key + ' entry exceeds its limit', key + '[' + index + ']');
       } else {
@@ -631,7 +852,12 @@ function validateModelObject(
     normalizedArrays[key] = entries;
   }
   checkForbiddenData(value, errors);
-  if (errors.length > 0 || goal === undefined || summary === undefined || value.schemaVersion !== JOY_CODE_PLAN_SCHEMA_VERSION) {
+  if (
+    errors.length > 0 ||
+    goal === undefined ||
+    summary === undefined ||
+    value.schemaVersion !== JOY_CODE_PLAN_SCHEMA_VERSION
+  ) {
     return { valid: false, errors };
   }
   return {
@@ -662,7 +888,10 @@ export function validateJoyCodePlanProposal(
 ): JoyCodePlanValidationResult<JoyCodePlanProposalV1> {
   const errors: JoyCodePlanValidationError[] = [];
   if (!isRecord(value)) {
-    return { valid: false, errors: [{ code: 'invalid-type', message: 'Proposal must be an object' }] };
+    return {
+      valid: false,
+      errors: [{ code: 'invalid-type', message: 'Proposal must be an object' }],
+    };
   }
   checkKnownKeys(value, PROPOSAL_KEYS, errors, '');
   const modelInput: RecordValue = {};
@@ -674,11 +903,29 @@ export function validateJoyCodePlanProposal(
   const projectId = readId(value, 'projectId', errors, '');
   const snapshotRevisionId = readId(value, 'snapshotRevisionId', errors, '');
   const createdAt = readNonEmptyString(value, 'createdAt', errors, '', 100);
-  const consentVersion = readNonEmptyString(value, 'consentVersion', errors, '', JOY_CODE_PLAN_LIMITS.catalogVersion);
-  const catalogVersion = readNonEmptyString(value, 'catalogVersion', errors, '', JOY_CODE_PLAN_LIMITS.catalogVersion);
-  if (createdAt !== undefined && Number.isNaN(Date.parse(createdAt))) error(errors, 'invalid-created-at', 'createdAt must be an ISO date', 'createdAt');
+  const consentVersion = readNonEmptyString(
+    value,
+    'consentVersion',
+    errors,
+    '',
+    JOY_CODE_PLAN_LIMITS.catalogVersion,
+  );
+  const catalogVersion = readNonEmptyString(
+    value,
+    'catalogVersion',
+    errors,
+    '',
+    JOY_CODE_PLAN_LIMITS.catalogVersion,
+  );
+  if (createdAt !== undefined && Number.isNaN(Date.parse(createdAt)))
+    error(errors, 'invalid-created-at', 'createdAt must be an ISO date', 'createdAt');
   if (options.consentVersion !== undefined && consentVersion !== options.consentVersion) {
-    error(errors, 'consent-version-mismatch', 'Proposal consent version does not match current policy', 'consentVersion');
+    error(
+      errors,
+      'consent-version-mismatch',
+      'Proposal consent version does not match current policy',
+      'consentVersion',
+    );
   }
 
   const provenance = value.provenance;
@@ -686,23 +933,60 @@ export function validateJoyCodePlanProposal(
     error(errors, 'invalid-provenance', 'provenance must be an object', 'provenance');
   } else {
     checkKnownKeys(provenance, ['actor', 'adapterName', 'modelId'], errors, 'provenance');
-    if (provenance.actor !== 'joy-code-server') error(errors, 'invalid-actor', 'Only joy-code-server may create a proposal', 'provenance.actor');
-    const adapterName = readNonEmptyString(provenance, 'adapterName', errors, 'provenance', JOY_CODE_PLAN_LIMITS.genericId);
-    const modelId = readNonEmptyString(provenance, 'modelId', errors, 'provenance', JOY_CODE_PLAN_LIMITS.genericId);
-    if (options.allowedModelIds !== undefined && (modelId === undefined || !options.allowedModelIds.includes(modelId))) {
-      error(errors, 'model-not-allowed', 'Proposal model is not allowed by policy', 'provenance.modelId');
+    if (provenance.actor !== 'joy-code-server')
+      error(
+        errors,
+        'invalid-actor',
+        'Only joy-code-server may create a proposal',
+        'provenance.actor',
+      );
+    const adapterName = readNonEmptyString(
+      provenance,
+      'adapterName',
+      errors,
+      'provenance',
+      JOY_CODE_PLAN_LIMITS.genericId,
+    );
+    const modelId = readNonEmptyString(
+      provenance,
+      'modelId',
+      errors,
+      'provenance',
+      JOY_CODE_PLAN_LIMITS.genericId,
+    );
+    if (
+      options.allowedModelIds !== undefined &&
+      (modelId === undefined || !options.allowedModelIds.includes(modelId))
+    ) {
+      error(
+        errors,
+        'model-not-allowed',
+        'Proposal model is not allowed by policy',
+        'provenance.modelId',
+      );
     }
     if (adapterName === undefined || modelId === undefined) {
       error(errors, 'invalid-provenance', 'Provenance fields are required', 'provenance');
     }
   }
 
-  if (errors.length > 0 || !modelResult.valid || planId === undefined || projectId === undefined || snapshotRevisionId === undefined || createdAt === undefined || consentVersion === undefined || catalogVersion === undefined || !isRecord(provenance)) {
+  if (
+    errors.length > 0 ||
+    !modelResult.valid ||
+    planId === undefined ||
+    projectId === undefined ||
+    snapshotRevisionId === undefined ||
+    createdAt === undefined ||
+    consentVersion === undefined ||
+    catalogVersion === undefined ||
+    !isRecord(provenance)
+  ) {
     return { valid: false, errors };
   }
   const adapterName = provenance.adapterName;
   const modelId = provenance.modelId;
-  if (typeof adapterName !== 'string' || typeof modelId !== 'string') return { valid: false, errors };
+  if (typeof adapterName !== 'string' || typeof modelId !== 'string')
+    return { valid: false, errors };
   return {
     valid: true,
     value: {

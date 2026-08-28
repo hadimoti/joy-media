@@ -15,7 +15,11 @@ import {
   type MediaAssetRecord,
   type MediaDerivativeRecord,
 } from './control-plane.js';
-import { createControlPlaneHttpServer, type ApiAuthentication } from './http-server.js';
+import {
+  createControlPlaneHttpServer,
+  type ApiAuthentication,
+  type ApiReadinessOptions,
+} from './http-server.js';
 import { DisabledMediaAuth } from './media-auth.js';
 import { createClientAddressResolver, type ClientAddressResolver } from './client-address.js';
 import { renderFixture, verifyExport } from '@joy-media/export-core';
@@ -37,7 +41,11 @@ import {
 } from './creative-brief-input-resolver.js';
 import type { CreativeBriefRuntime } from './creative-brief-runtime.js';
 import { DEFAULT_CREATIVE_BRIEF_RUNTIME } from './creative-brief-runtime.js';
-import type { CreativeBriefInputV1, CreativeBriefRequestV1, AsyncCreativeBriefOutcome } from '@joy-media/agent-tools';
+import type {
+  CreativeBriefInputV1,
+  CreativeBriefRequestV1,
+  AsyncCreativeBriefOutcome,
+} from '@joy-media/agent-tools';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import {
   INITIAL_REVISION,
@@ -61,6 +69,42 @@ afterEach(async () => {
 });
 
 describe('control-plane HTTP transport', () => {
+  it('separates liveness from fail-closed dependency readiness', async () => {
+    const origin = await start(
+      { authenticate: () => undefined },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        checks: { database: () => true, objectStore: () => false },
+        releaseIdentity: {
+          commitSha: 'a'.repeat(40),
+          treeHash: 'b'.repeat(40),
+          lockfileSha256: 'c'.repeat(64),
+          schemaVersion: 2,
+        },
+      },
+    );
+    expect(await request(origin, 'GET', '/live')).toMatchObject({
+      status: 200,
+      body: { ok: true, liveness: true },
+    });
+    expect(await request(origin, 'GET', '/ready')).toMatchObject({
+      status: 503,
+      body: {
+        ok: false,
+        readiness: false,
+        checks: { database: true, objectStore: false },
+        releaseIdentity: { schemaVersion: 2 },
+      },
+    });
+  });
+
   it('keeps health public while rejecting versioned routes without an authenticated actor', async () => {
     const origin = await start({ authenticate: () => undefined });
 
@@ -97,30 +141,15 @@ describe('control-plane HTTP transport', () => {
       { windowMs: 60_000, maxRequests: 1 },
       createClientAddressResolver({ trustedProxyAddresses: ['127.0.0.1'] }),
     );
-    const first = await request(
-      origin,
-      'GET',
-      '/v1/projects/a',
-      undefined,
-      undefined,
-      { 'x-forwarded-for': '198.51.100.1' },
-    );
-    const second = await request(
-      origin,
-      'GET',
-      '/v1/projects/a',
-      undefined,
-      undefined,
-      { 'x-forwarded-for': '198.51.100.2' },
-    );
-    const repeated = await request(
-      origin,
-      'GET',
-      '/v1/projects/a',
-      undefined,
-      undefined,
-      { 'x-forwarded-for': '198.51.100.1' },
-    );
+    const first = await request(origin, 'GET', '/v1/projects/a', undefined, undefined, {
+      'x-forwarded-for': '198.51.100.1',
+    });
+    const second = await request(origin, 'GET', '/v1/projects/a', undefined, undefined, {
+      'x-forwarded-for': '198.51.100.2',
+    });
+    const repeated = await request(origin, 'GET', '/v1/projects/a', undefined, undefined, {
+      'x-forwarded-for': '198.51.100.1',
+    });
     expect(first.status).toBe(401);
     expect(second.status).toBe(401);
     expect(repeated).toMatchObject({ status: 429, body: { error: { code: 'RATE_LIMITED' } } });
@@ -461,14 +490,25 @@ describe('control-plane HTTP transport', () => {
       availability: 'available-local',
       locations: [{ kind: 'opfs-cache', ref: 'opfs-d1' }],
     });
-    const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
     const response = await request(origin, 'GET', '/v1/projects/projection-project/assets');
     expect(response).toMatchObject({
       status: 200,
       body: { data: [{ descriptor: { mimeType: 'image/jpeg', width: 1, height: 1 } }] },
     });
-    expect(JSON.stringify(response.body)).not.toMatch(/locations|cloudRef|objectKey|credentials|private-key/);
-    const derivatives = await request(origin, 'GET', '/v1/projects/projection-project/assets/asset-1/derivatives');
+    expect(JSON.stringify(response.body)).not.toMatch(
+      /locations|cloudRef|objectKey|credentials|private-key/,
+    );
+    const derivatives = await request(
+      origin,
+      'GET',
+      '/v1/projects/projection-project/assets/asset-1/derivatives',
+    );
     expect(derivatives).toMatchObject({
       status: 200,
       body: { data: [{ descriptor: { mimeType: 'image/jpeg', width: 1, height: 1 } }] },
@@ -1189,10 +1229,11 @@ describe('control-plane HTTP transport', () => {
 
   describe('Creative Brief route', () => {
     // Helper to create a test resolver that returns resolved input
-    const createTestResolver = (
-      input: CreativeBriefInputV1,
-    ): CreativeBriefInputResolver => ({
-      resolve: (_req: CreativeBriefInputResolverRequest, _context: CreativeBriefInputResolverContext): CreativeBriefInputResolverSuccess => ({
+    const createTestResolver = (input: CreativeBriefInputV1): CreativeBriefInputResolver => ({
+      resolve: (
+        _req: CreativeBriefInputResolverRequest,
+        _context: CreativeBriefInputResolverContext,
+      ): CreativeBriefInputResolverSuccess => ({
         status: 'resolved',
         input,
       }),
@@ -1211,7 +1252,12 @@ describe('control-plane HTTP transport', () => {
     it('rejects non-owner actor', async () => {
       const controlPlane = new LocalControlPlane();
       await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
-      const origin = await start({ authenticate: () => ({ id: 'other-user' }) }, undefined, undefined, controlPlane);
+      const origin = await start(
+        { authenticate: () => ({ id: 'other-user' }) },
+        undefined,
+        undefined,
+        controlPlane,
+      );
       expect(
         await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {}),
       ).toMatchObject({
@@ -1233,12 +1279,22 @@ describe('control-plane HTTP transport', () => {
     it('rejects project without opt-in', async () => {
       const controlPlane = new LocalControlPlane();
       await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
-      const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+      const origin = await start(
+        { authenticate: () => ({ id: 'owner' }) },
+        undefined,
+        undefined,
+        controlPlane,
+      );
       expect(
         await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
           projectId: 'test-project',
           snapshotRevisionId: 'rev-1',
-          request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
+          request: {
+            projectId: 'test-project',
+            snapshotRevisionId: 'rev-1',
+            request: 'test',
+            scope: 'general',
+          },
         }),
       ).toMatchObject({
         status: 409,
@@ -1250,7 +1306,12 @@ describe('control-plane HTTP transport', () => {
       const controlPlane = new LocalControlPlane();
       await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
       await controlPlane.setCreativeBriefOptIn({ id: 'owner' }, 'test-project', true, 0);
-      const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+      const origin = await start(
+        { authenticate: () => ({ id: 'owner' }) },
+        undefined,
+        undefined,
+        controlPlane,
+      );
       expect(
         await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {}),
       ).toMatchObject({
@@ -1263,14 +1324,29 @@ describe('control-plane HTTP transport', () => {
       const controlPlane = new LocalControlPlane();
       await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
       await controlPlane.setCreativeBriefOptIn({ id: 'owner' }, 'test-project', true, 0);
-      const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+      const origin = await start(
+        { authenticate: () => ({ id: 'owner' }) },
+        undefined,
+        undefined,
+        controlPlane,
+      );
       expect(
         await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
           projectId: 'test-project',
           snapshotRevisionId: 'rev-1',
           snapshot: { projectId: 'test-project', revisionId: 'rev-1', schemaVersion: 1 as const },
-          intelligence: { brandReadiness: { status: 'ready' }, sceneCoverages: [], projectReadiness: { status: 'ready' }, rules: [] },
-          request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
+          intelligence: {
+            brandReadiness: { status: 'ready' },
+            sceneCoverages: [],
+            projectReadiness: { status: 'ready' },
+            rules: [],
+          },
+          request: {
+            projectId: 'test-project',
+            snapshotRevisionId: 'rev-1',
+            request: 'test',
+            scope: 'general',
+          },
         }),
       ).toMatchObject({
         status: 400,
@@ -1282,12 +1358,22 @@ describe('control-plane HTTP transport', () => {
       const controlPlane = new LocalControlPlane();
       await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
       await controlPlane.setCreativeBriefOptIn({ id: 'owner' }, 'test-project', true, 0);
-      const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+      const origin = await start(
+        { authenticate: () => ({ id: 'owner' }) },
+        undefined,
+        undefined,
+        controlPlane,
+      );
       expect(
         await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
           projectId: 'other-project',
           snapshotRevisionId: 'rev-1',
-          request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
+          request: {
+            projectId: 'test-project',
+            snapshotRevisionId: 'rev-1',
+            request: 'test',
+            scope: 'general',
+          },
         }),
       ).toMatchObject({
         status: 409,
@@ -1299,11 +1385,21 @@ describe('control-plane HTTP transport', () => {
       const controlPlane = new LocalControlPlane();
       await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
       await controlPlane.setCreativeBriefOptIn({ id: 'owner' }, 'test-project', true, 0);
-      const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+      const origin = await start(
+        { authenticate: () => ({ id: 'owner' }) },
+        undefined,
+        undefined,
+        controlPlane,
+      );
       const response = await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
         projectId: 'test-project',
         snapshotRevisionId: 'rev-1',
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test brief', scope: 'general' },
+        request: {
+          projectId: 'test-project',
+          snapshotRevisionId: 'rev-1',
+          request: 'test brief',
+          scope: 'general',
+        },
       });
       expect(response).toMatchObject({
         status: 503,
@@ -1322,14 +1418,48 @@ describe('control-plane HTTP transport', () => {
           projectId: 'test-project',
           revisionId: 'rev-1',
           capturedAt: '2026-08-17T00:00:00.000Z',
-          composition: { durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9' },
-          brand: { hasBrandKit: false, colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], warnings: [] },
+          composition: {
+            durationUs: 1000000,
+            frameRate: { num: 30, den: 1 },
+            width: 1920,
+            height: 1080,
+            aspectRatio: '16:9',
+          },
+          brand: {
+            hasBrandKit: false,
+            colorsAvailable: false,
+            fontsAvailable: false,
+            logoAvailable: false,
+            voiceInstructionsAvailable: false,
+            toneInstructionsAvailable: false,
+            prohibitedClaims: [],
+            prohibitedEffects: [],
+            warnings: [],
+          },
           scenes: [],
-          timeline: { compositionId: 'comp-1', durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9', visualTrackCount: 1, audioTrackCount: 1, totalClipCount: 0, visualRowIds: [], audioRowIds: [] },
+          timeline: {
+            compositionId: 'comp-1',
+            durationUs: 1000000,
+            frameRate: { num: 30, den: 1 },
+            width: 1920,
+            height: 1080,
+            aspectRatio: '16:9',
+            visualTrackCount: 1,
+            audioTrackCount: 1,
+            totalClipCount: 0,
+            visualRowIds: [],
+            audioRowIds: [],
+          },
           assets: [],
           capabilities: {},
           warnings: [],
-          truncation: { clipsOmitted: 0, assetsOmitted: 0, visualObjectsOmitted: 0, scenesOmitted: 0, totalEstimateBytes: 0 },
+          truncation: {
+            clipsOmitted: 0,
+            assetsOmitted: 0,
+            visualObjectsOmitted: 0,
+            scenesOmitted: 0,
+            totalEstimateBytes: 0,
+          },
         },
         brandReadiness: {
           projectId: 'test-project',
@@ -1374,20 +1504,42 @@ describe('control-plane HTTP transport', () => {
           evidence: [],
         },
         rules: [],
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test brief', scope: 'general' },
+        request: {
+          projectId: 'test-project',
+          snapshotRevisionId: 'rev-1',
+          request: 'test brief',
+          scope: 'general',
+        },
       };
 
       const testResolver = createTestResolver(testInput);
-      const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane, undefined, testResolver);
+      const origin = await start(
+        { authenticate: () => ({ id: 'owner' }) },
+        undefined,
+        undefined,
+        controlPlane,
+        undefined,
+        testResolver,
+      );
 
       const response = await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
         projectId: 'test-project',
         snapshotRevisionId: 'rev-1',
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test brief', scope: 'general' },
+        request: {
+          projectId: 'test-project',
+          snapshotRevisionId: 'rev-1',
+          request: 'test brief',
+          scope: 'general',
+        },
       });
       expect(response).toMatchObject({
         status: 503,
-        body: { error: { code: 'RUNTIME_UNAVAILABLE', message: 'Creative brief runtime is not configured' } },
+        body: {
+          error: {
+            code: 'RUNTIME_UNAVAILABLE',
+            message: 'Creative brief runtime is not configured',
+          },
+        },
       });
     });
 
@@ -1403,14 +1555,48 @@ describe('control-plane HTTP transport', () => {
           projectId: 'test-project',
           revisionId: 'rev-1',
           capturedAt: '2026-08-17T00:00:00.000Z',
-          composition: { durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9' },
-          brand: { hasBrandKit: false, colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], warnings: [] },
+          composition: {
+            durationUs: 1000000,
+            frameRate: { num: 30, den: 1 },
+            width: 1920,
+            height: 1080,
+            aspectRatio: '16:9',
+          },
+          brand: {
+            hasBrandKit: false,
+            colorsAvailable: false,
+            fontsAvailable: false,
+            logoAvailable: false,
+            voiceInstructionsAvailable: false,
+            toneInstructionsAvailable: false,
+            prohibitedClaims: [],
+            prohibitedEffects: [],
+            warnings: [],
+          },
           scenes: [],
-          timeline: { compositionId: 'comp-1', durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9', visualTrackCount: 1, audioTrackCount: 1, totalClipCount: 0, visualRowIds: [], audioRowIds: [] },
+          timeline: {
+            compositionId: 'comp-1',
+            durationUs: 1000000,
+            frameRate: { num: 30, den: 1 },
+            width: 1920,
+            height: 1080,
+            aspectRatio: '16:9',
+            visualTrackCount: 1,
+            audioTrackCount: 1,
+            totalClipCount: 0,
+            visualRowIds: [],
+            audioRowIds: [],
+          },
           assets: [],
           capabilities: {},
           warnings: [],
-          truncation: { clipsOmitted: 0, assetsOmitted: 0, visualObjectsOmitted: 0, scenesOmitted: 0, totalEstimateBytes: 0 },
+          truncation: {
+            clipsOmitted: 0,
+            assetsOmitted: 0,
+            visualObjectsOmitted: 0,
+            scenesOmitted: 0,
+            totalEstimateBytes: 0,
+          },
         },
         brandReadiness: {
           projectId: 'test-project',
@@ -1455,20 +1641,42 @@ describe('control-plane HTTP transport', () => {
           evidence: [],
         },
         rules: [],
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: persianRequest, scope: 'general' },
+        request: {
+          projectId: 'test-project',
+          snapshotRevisionId: 'rev-1',
+          request: persianRequest,
+          scope: 'general',
+        },
       };
 
       const testResolver = createTestResolver(testInput);
-      const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane, undefined, testResolver);
+      const origin = await start(
+        { authenticate: () => ({ id: 'owner' }) },
+        undefined,
+        undefined,
+        controlPlane,
+        undefined,
+        testResolver,
+      );
 
       const response = await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
         projectId: 'test-project',
         snapshotRevisionId: 'rev-1',
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: persianRequest, scope: 'general' },
+        request: {
+          projectId: 'test-project',
+          snapshotRevisionId: 'rev-1',
+          request: persianRequest,
+          scope: 'general',
+        },
       });
       expect(response).toMatchObject({
         status: 503,
-        body: { error: { code: 'RUNTIME_UNAVAILABLE', message: 'Creative brief runtime is not configured' } },
+        body: {
+          error: {
+            code: 'RUNTIME_UNAVAILABLE',
+            message: 'Creative brief runtime is not configured',
+          },
+        },
       });
     });
 
@@ -1478,19 +1686,34 @@ describe('control-plane HTTP transport', () => {
       await controlPlane.setCreativeBriefOptIn({ id: 'owner' }, 'test-project', true, 0);
 
       const staleResolver: CreativeBriefInputResolver = {
-        resolve: (_req: CreativeBriefInputResolverRequest, _context: CreativeBriefInputResolverContext) => ({
+        resolve: (
+          _req: CreativeBriefInputResolverRequest,
+          _context: CreativeBriefInputResolverContext,
+        ) => ({
           status: 'stale-revision',
           code: 'CREATIVE_BRIEF_INPUT_RESOLVER_STALE_REVISION',
           message: 'Revision is stale',
         }),
       };
 
-      const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane, undefined, staleResolver);
+      const origin = await start(
+        { authenticate: () => ({ id: 'owner' }) },
+        undefined,
+        undefined,
+        controlPlane,
+        undefined,
+        staleResolver,
+      );
 
       const response = await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
         projectId: 'test-project',
         snapshotRevisionId: 'rev-1',
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
+        request: {
+          projectId: 'test-project',
+          snapshotRevisionId: 'rev-1',
+          request: 'test',
+          scope: 'general',
+        },
       });
       expect(response).toMatchObject({
         status: 409,
@@ -1507,7 +1730,10 @@ describe('control-plane HTTP transport', () => {
       let receivedContext: CreativeBriefInputResolverContext | undefined;
 
       const actorCapturingResolver: CreativeBriefInputResolver = {
-        resolve(_req: CreativeBriefInputResolverRequest, context: CreativeBriefInputResolverContext): CreativeBriefInputResolverSuccess {
+        resolve(
+          _req: CreativeBriefInputResolverRequest,
+          context: CreativeBriefInputResolverContext,
+        ): CreativeBriefInputResolverSuccess {
           receivedContext = context;
           return {
             status: 'resolved',
@@ -1517,31 +1743,121 @@ describe('control-plane HTTP transport', () => {
                 projectId: 'test-project',
                 revisionId: 'rev-1',
                 capturedAt: '2026-08-17T00:00:00.000Z',
-                composition: { durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9' },
-                brand: { hasBrandKit: false, colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], warnings: [] },
+                composition: {
+                  durationUs: 1000000,
+                  frameRate: { num: 30, den: 1 },
+                  width: 1920,
+                  height: 1080,
+                  aspectRatio: '16:9',
+                },
+                brand: {
+                  hasBrandKit: false,
+                  colorsAvailable: false,
+                  fontsAvailable: false,
+                  logoAvailable: false,
+                  voiceInstructionsAvailable: false,
+                  toneInstructionsAvailable: false,
+                  prohibitedClaims: [],
+                  prohibitedEffects: [],
+                  warnings: [],
+                },
                 scenes: [],
-                timeline: { compositionId: 'comp-1', durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9', visualTrackCount: 1, audioTrackCount: 1, totalClipCount: 0, visualRowIds: [], audioRowIds: [] },
+                timeline: {
+                  compositionId: 'comp-1',
+                  durationUs: 1000000,
+                  frameRate: { num: 30, den: 1 },
+                  width: 1920,
+                  height: 1080,
+                  aspectRatio: '16:9',
+                  visualTrackCount: 1,
+                  audioTrackCount: 1,
+                  totalClipCount: 0,
+                  visualRowIds: [],
+                  audioRowIds: [],
+                },
                 assets: [],
                 capabilities: {},
                 warnings: [],
-                truncation: { clipsOmitted: 0, assetsOmitted: 0, visualObjectsOmitted: 0, scenesOmitted: 0, totalEstimateBytes: 0 },
+                truncation: {
+                  clipsOmitted: 0,
+                  assetsOmitted: 0,
+                  visualObjectsOmitted: 0,
+                  scenesOmitted: 0,
+                  totalEstimateBytes: 0,
+                },
               },
-              brandReadiness: { projectId: 'test-project', revisionId: 'rev-1', colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], hasBrandKit: false, brandCompleteness: 'none', missingComponents: [], warnings: [], evidence: [] },
+              brandReadiness: {
+                projectId: 'test-project',
+                revisionId: 'rev-1',
+                colorsAvailable: false,
+                fontsAvailable: false,
+                logoAvailable: false,
+                voiceInstructionsAvailable: false,
+                toneInstructionsAvailable: false,
+                prohibitedClaims: [],
+                prohibitedEffects: [],
+                hasBrandKit: false,
+                brandCompleteness: 'none',
+                missingComponents: [],
+                warnings: [],
+                evidence: [],
+              },
               sceneCoverages: [],
-              projectReadiness: { projectId: 'test-project', revisionId: 'rev-1', destination: undefined, destinationAligned: true, destinationMismatch: undefined, durationTargetUs: undefined, compositionDurationUs: 1000000, durationAligned: true, durationGapUs: undefined, aspectRatio: '16:9', aspectRatioAligned: true, aspectRatioMismatch: undefined, captionAvailable: false, audioAvailable: false, generatedAssetsAvailable: false, readinessLevel: 'unknown', blockers: [], warnings: [], sceneCount: 0, scenesWithVisuals: 0, scenesWithAudio: 0, scenesWithCaptions: 0, evidence: [] },
+              projectReadiness: {
+                projectId: 'test-project',
+                revisionId: 'rev-1',
+                destination: undefined,
+                destinationAligned: true,
+                destinationMismatch: undefined,
+                durationTargetUs: undefined,
+                compositionDurationUs: 1000000,
+                durationAligned: true,
+                durationGapUs: undefined,
+                aspectRatio: '16:9',
+                aspectRatioAligned: true,
+                aspectRatioMismatch: undefined,
+                captionAvailable: false,
+                audioAvailable: false,
+                generatedAssetsAvailable: false,
+                readinessLevel: 'unknown',
+                blockers: [],
+                warnings: [],
+                sceneCount: 0,
+                scenesWithVisuals: 0,
+                scenesWithAudio: 0,
+                scenesWithCaptions: 0,
+                evidence: [],
+              },
               rules: [],
-              request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
+              request: {
+                projectId: 'test-project',
+                snapshotRevisionId: 'rev-1',
+                request: 'test',
+                scope: 'general',
+              },
             },
           };
         },
       };
 
-      const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane, undefined, actorCapturingResolver);
+      const origin = await start(
+        { authenticate: () => ({ id: 'owner' }) },
+        undefined,
+        undefined,
+        controlPlane,
+        undefined,
+        actorCapturingResolver,
+      );
 
       await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
         projectId: 'test-project',
         snapshotRevisionId: 'rev-1',
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
+        request: {
+          projectId: 'test-project',
+          snapshotRevisionId: 'rev-1',
+          request: 'test',
+          scope: 'general',
+        },
       });
 
       expect(receivedContext).toBeDefined();
@@ -1559,7 +1875,10 @@ describe('control-plane HTTP transport', () => {
       let receivedRequest: CreativeBriefInputResolverRequest | undefined;
 
       const requestCapturingResolver: CreativeBriefInputResolver = {
-        resolve(req: CreativeBriefInputResolverRequest, _context: CreativeBriefInputResolverContext): CreativeBriefInputResolverSuccess {
+        resolve(
+          req: CreativeBriefInputResolverRequest,
+          _context: CreativeBriefInputResolverContext,
+        ): CreativeBriefInputResolverSuccess {
           receivedRequest = req;
           return {
             status: 'resolved',
@@ -1569,31 +1888,121 @@ describe('control-plane HTTP transport', () => {
                 projectId: 'test-project',
                 revisionId: 'rev-1',
                 capturedAt: '2026-08-17T00:00:00.000Z',
-                composition: { durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9' },
-                brand: { hasBrandKit: false, colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], warnings: [] },
+                composition: {
+                  durationUs: 1000000,
+                  frameRate: { num: 30, den: 1 },
+                  width: 1920,
+                  height: 1080,
+                  aspectRatio: '16:9',
+                },
+                brand: {
+                  hasBrandKit: false,
+                  colorsAvailable: false,
+                  fontsAvailable: false,
+                  logoAvailable: false,
+                  voiceInstructionsAvailable: false,
+                  toneInstructionsAvailable: false,
+                  prohibitedClaims: [],
+                  prohibitedEffects: [],
+                  warnings: [],
+                },
                 scenes: [],
-                timeline: { compositionId: 'comp-1', durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9', visualTrackCount: 1, audioTrackCount: 1, totalClipCount: 0, visualRowIds: [], audioRowIds: [] },
+                timeline: {
+                  compositionId: 'comp-1',
+                  durationUs: 1000000,
+                  frameRate: { num: 30, den: 1 },
+                  width: 1920,
+                  height: 1080,
+                  aspectRatio: '16:9',
+                  visualTrackCount: 1,
+                  audioTrackCount: 1,
+                  totalClipCount: 0,
+                  visualRowIds: [],
+                  audioRowIds: [],
+                },
                 assets: [],
                 capabilities: {},
                 warnings: [],
-                truncation: { clipsOmitted: 0, assetsOmitted: 0, visualObjectsOmitted: 0, scenesOmitted: 0, totalEstimateBytes: 0 },
+                truncation: {
+                  clipsOmitted: 0,
+                  assetsOmitted: 0,
+                  visualObjectsOmitted: 0,
+                  scenesOmitted: 0,
+                  totalEstimateBytes: 0,
+                },
               },
-              brandReadiness: { projectId: 'test-project', revisionId: 'rev-1', colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], hasBrandKit: false, brandCompleteness: 'none', missingComponents: [], warnings: [], evidence: [] },
+              brandReadiness: {
+                projectId: 'test-project',
+                revisionId: 'rev-1',
+                colorsAvailable: false,
+                fontsAvailable: false,
+                logoAvailable: false,
+                voiceInstructionsAvailable: false,
+                toneInstructionsAvailable: false,
+                prohibitedClaims: [],
+                prohibitedEffects: [],
+                hasBrandKit: false,
+                brandCompleteness: 'none',
+                missingComponents: [],
+                warnings: [],
+                evidence: [],
+              },
               sceneCoverages: [],
-              projectReadiness: { projectId: 'test-project', revisionId: 'rev-1', destination: undefined, destinationAligned: true, destinationMismatch: undefined, durationTargetUs: undefined, compositionDurationUs: 1000000, durationAligned: true, durationGapUs: undefined, aspectRatio: '16:9', aspectRatioAligned: true, aspectRatioMismatch: undefined, captionAvailable: false, audioAvailable: false, generatedAssetsAvailable: false, readinessLevel: 'unknown', blockers: [], warnings: [], sceneCount: 0, scenesWithVisuals: 0, scenesWithAudio: 0, scenesWithCaptions: 0, evidence: [] },
+              projectReadiness: {
+                projectId: 'test-project',
+                revisionId: 'rev-1',
+                destination: undefined,
+                destinationAligned: true,
+                destinationMismatch: undefined,
+                durationTargetUs: undefined,
+                compositionDurationUs: 1000000,
+                durationAligned: true,
+                durationGapUs: undefined,
+                aspectRatio: '16:9',
+                aspectRatioAligned: true,
+                aspectRatioMismatch: undefined,
+                captionAvailable: false,
+                audioAvailable: false,
+                generatedAssetsAvailable: false,
+                readinessLevel: 'unknown',
+                blockers: [],
+                warnings: [],
+                sceneCount: 0,
+                scenesWithVisuals: 0,
+                scenesWithAudio: 0,
+                scenesWithCaptions: 0,
+                evidence: [],
+              },
               rules: [],
-              request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
+              request: {
+                projectId: 'test-project',
+                snapshotRevisionId: 'rev-1',
+                request: 'test',
+                scope: 'general',
+              },
             },
           };
         },
       };
 
-      const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane, undefined, requestCapturingResolver);
+      const origin = await start(
+        { authenticate: () => ({ id: 'owner' }) },
+        undefined,
+        undefined,
+        controlPlane,
+        undefined,
+        requestCapturingResolver,
+      );
 
       await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
         projectId: 'test-project',
         snapshotRevisionId: 'rev-1',
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
+        request: {
+          projectId: 'test-project',
+          snapshotRevisionId: 'rev-1',
+          request: 'test',
+          scope: 'general',
+        },
       });
 
       expect(receivedRequest).toBeDefined();
@@ -1615,7 +2024,10 @@ describe('control-plane HTTP transport', () => {
       // Test async resolved outcome
       let resolverCalled = false;
       const asyncResolvedResolver: CreativeBriefInputResolver = {
-        async resolve(_req: CreativeBriefInputResolverRequest, ctx: CreativeBriefInputResolverContext): Promise<CreativeBriefInputResolverSuccess> {
+        async resolve(
+          _req: CreativeBriefInputResolverRequest,
+          ctx: CreativeBriefInputResolverContext,
+        ): Promise<CreativeBriefInputResolverSuccess> {
           resolverCalled = true;
           // Verify context is received
           expect(ctx.actor.id).toBe('owner');
@@ -1629,38 +2041,131 @@ describe('control-plane HTTP transport', () => {
                 projectId: 'test-project',
                 revisionId: 'rev-1',
                 capturedAt: '2026-08-17T00:00:00.000Z',
-                composition: { durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9' },
-                brand: { hasBrandKit: false, colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], warnings: [] },
+                composition: {
+                  durationUs: 1000000,
+                  frameRate: { num: 30, den: 1 },
+                  width: 1920,
+                  height: 1080,
+                  aspectRatio: '16:9',
+                },
+                brand: {
+                  hasBrandKit: false,
+                  colorsAvailable: false,
+                  fontsAvailable: false,
+                  logoAvailable: false,
+                  voiceInstructionsAvailable: false,
+                  toneInstructionsAvailable: false,
+                  prohibitedClaims: [],
+                  prohibitedEffects: [],
+                  warnings: [],
+                },
                 scenes: [],
-                timeline: { compositionId: 'comp-1', durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9', visualTrackCount: 1, audioTrackCount: 1, totalClipCount: 0, visualRowIds: [], audioRowIds: [] },
+                timeline: {
+                  compositionId: 'comp-1',
+                  durationUs: 1000000,
+                  frameRate: { num: 30, den: 1 },
+                  width: 1920,
+                  height: 1080,
+                  aspectRatio: '16:9',
+                  visualTrackCount: 1,
+                  audioTrackCount: 1,
+                  totalClipCount: 0,
+                  visualRowIds: [],
+                  audioRowIds: [],
+                },
                 assets: [],
                 capabilities: {},
                 warnings: [],
-                truncation: { clipsOmitted: 0, assetsOmitted: 0, visualObjectsOmitted: 0, scenesOmitted: 0, totalEstimateBytes: 0 },
+                truncation: {
+                  clipsOmitted: 0,
+                  assetsOmitted: 0,
+                  visualObjectsOmitted: 0,
+                  scenesOmitted: 0,
+                  totalEstimateBytes: 0,
+                },
               },
-              brandReadiness: { projectId: 'test-project', revisionId: 'rev-1', colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], hasBrandKit: false, brandCompleteness: 'none', missingComponents: [], warnings: [], evidence: [] },
+              brandReadiness: {
+                projectId: 'test-project',
+                revisionId: 'rev-1',
+                colorsAvailable: false,
+                fontsAvailable: false,
+                logoAvailable: false,
+                voiceInstructionsAvailable: false,
+                toneInstructionsAvailable: false,
+                prohibitedClaims: [],
+                prohibitedEffects: [],
+                hasBrandKit: false,
+                brandCompleteness: 'none',
+                missingComponents: [],
+                warnings: [],
+                evidence: [],
+              },
               sceneCoverages: [],
-              projectReadiness: { projectId: 'test-project', revisionId: 'rev-1', destination: undefined, destinationAligned: true, destinationMismatch: undefined, durationTargetUs: undefined, compositionDurationUs: 1000000, durationAligned: true, durationGapUs: undefined, aspectRatio: '16:9', aspectRatioAligned: true, aspectRatioMismatch: undefined, captionAvailable: false, audioAvailable: false, generatedAssetsAvailable: false, readinessLevel: 'unknown', blockers: [], warnings: [], sceneCount: 0, scenesWithVisuals: 0, scenesWithAudio: 0, scenesWithCaptions: 0, evidence: [] },
+              projectReadiness: {
+                projectId: 'test-project',
+                revisionId: 'rev-1',
+                destination: undefined,
+                destinationAligned: true,
+                destinationMismatch: undefined,
+                durationTargetUs: undefined,
+                compositionDurationUs: 1000000,
+                durationAligned: true,
+                durationGapUs: undefined,
+                aspectRatio: '16:9',
+                aspectRatioAligned: true,
+                aspectRatioMismatch: undefined,
+                captionAvailable: false,
+                audioAvailable: false,
+                generatedAssetsAvailable: false,
+                readinessLevel: 'unknown',
+                blockers: [],
+                warnings: [],
+                sceneCount: 0,
+                scenesWithVisuals: 0,
+                scenesWithAudio: 0,
+                scenesWithCaptions: 0,
+                evidence: [],
+              },
               rules: [],
-              request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
+              request: {
+                projectId: 'test-project',
+                snapshotRevisionId: 'rev-1',
+                request: 'test',
+                scope: 'general',
+              },
             },
           };
         },
       };
 
-      const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane, undefined, asyncResolvedResolver);
+      const origin = await start(
+        { authenticate: () => ({ id: 'owner' }) },
+        undefined,
+        undefined,
+        controlPlane,
+        undefined,
+        asyncResolvedResolver,
+      );
 
       await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
         projectId: 'test-project',
         snapshotRevisionId: 'rev-1',
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
+        request: {
+          projectId: 'test-project',
+          snapshotRevisionId: 'rev-1',
+          request: 'test',
+          scope: 'general',
+        },
       });
 
       expect(resolverCalled).toBe(true);
 
       // Test async unavailable outcome
       const asyncUnavailableResolver: CreativeBriefInputResolver = {
-        async resolve(_req: CreativeBriefInputResolverRequest, _ctx: CreativeBriefInputResolverContext): Promise<CreativeBriefInputResolverUnavailable> {
+        async resolve(
+          _req: CreativeBriefInputResolverRequest,
+          _ctx: CreativeBriefInputResolverContext,
+        ): Promise<CreativeBriefInputResolverUnavailable> {
           await new Promise<void>((r) => setImmediate(r));
           return {
             status: 'unavailable',
@@ -1670,21 +2175,42 @@ describe('control-plane HTTP transport', () => {
         },
       };
 
-      const origin2 = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane, undefined, asyncUnavailableResolver);
+      const origin2 = await start(
+        { authenticate: () => ({ id: 'owner' }) },
+        undefined,
+        undefined,
+        controlPlane,
+        undefined,
+        asyncUnavailableResolver,
+      );
 
       const response2 = await request(origin2, 'POST', '/v1/projects/test-project/creative-brief', {
         projectId: 'test-project',
         snapshotRevisionId: 'rev-1',
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
+        request: {
+          projectId: 'test-project',
+          snapshotRevisionId: 'rev-1',
+          request: 'test',
+          scope: 'general',
+        },
       });
       expect(response2).toMatchObject({
         status: 503,
-        body: { data: { kind: 'unavailable', code: 'CREATIVE_BRIEF_INPUT_RESOLVER_UNAVAILABLE', message: 'Async unavailable' } },
+        body: {
+          data: {
+            kind: 'unavailable',
+            code: 'CREATIVE_BRIEF_INPUT_RESOLVER_UNAVAILABLE',
+            message: 'Async unavailable',
+          },
+        },
       });
 
       // Test async stale-revision outcome
       const asyncStaleResolver: CreativeBriefInputResolver = {
-        async resolve(_req: CreativeBriefInputResolverRequest, _ctx: CreativeBriefInputResolverContext): Promise<CreativeBriefInputResolverStaleRevision> {
+        async resolve(
+          _req: CreativeBriefInputResolverRequest,
+          _ctx: CreativeBriefInputResolverContext,
+        ): Promise<CreativeBriefInputResolverStaleRevision> {
           await new Promise<void>((r) => setImmediate(r));
           return {
             status: 'stale-revision',
@@ -1694,12 +2220,24 @@ describe('control-plane HTTP transport', () => {
         },
       };
 
-      const origin3 = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane, undefined, asyncStaleResolver);
+      const origin3 = await start(
+        { authenticate: () => ({ id: 'owner' }) },
+        undefined,
+        undefined,
+        controlPlane,
+        undefined,
+        asyncStaleResolver,
+      );
 
       const response3 = await request(origin3, 'POST', '/v1/projects/test-project/creative-brief', {
         projectId: 'test-project',
         snapshotRevisionId: 'rev-1',
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test', scope: 'general' },
+        request: {
+          projectId: 'test-project',
+          snapshotRevisionId: 'rev-1',
+          request: 'test',
+          scope: 'general',
+        },
       });
       expect(response3).toMatchObject({
         status: 409,
@@ -1726,20 +2264,68 @@ describe('control-plane HTTP transport', () => {
               snapshotRevisionId: 'rev-1',
               projectId: 'test-project',
               request: 'test brief',
-              interpretedGoal: { userIntent: 'test', inferredGoal: 'test', resolvedGoal: 'test', confidence: 'high' },
+              interpretedGoal: {
+                userIntent: 'test',
+                inferredGoal: 'test',
+                resolvedGoal: 'test',
+                confidence: 'high',
+              },
               distinction: { facts: [], inferences: [] },
               assumptions: [],
               recommendations: [],
               blockedBy: [],
               requiresHumanDecision: [],
               intelligence: {
-                brand: { projectId: 'test-project', revisionId: 'rev-1', hasBrandKit: false, colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], warnings: [], brandCompleteness: 'none', missingComponents: [], evidence: [] },
+                brand: {
+                  projectId: 'test-project',
+                  revisionId: 'rev-1',
+                  hasBrandKit: false,
+                  colorsAvailable: false,
+                  fontsAvailable: false,
+                  logoAvailable: false,
+                  voiceInstructionsAvailable: false,
+                  toneInstructionsAvailable: false,
+                  prohibitedClaims: [],
+                  prohibitedEffects: [],
+                  warnings: [],
+                  brandCompleteness: 'none',
+                  missingComponents: [],
+                  evidence: [],
+                },
                 scenes: [],
-                project: { projectId: 'test-project', revisionId: 'rev-1', destination: undefined, destinationAligned: true, destinationMismatch: undefined, durationTargetUs: undefined, compositionDurationUs: 1000000, durationAligned: true, durationGapUs: undefined, aspectRatio: '16:9', aspectRatioAligned: true, aspectRatioMismatch: undefined, captionAvailable: false, audioAvailable: false, generatedAssetsAvailable: false, readinessLevel: 'unknown', blockers: [], warnings: [], sceneCount: 0, scenesWithVisuals: 0, scenesWithAudio: 0, scenesWithCaptions: 0, evidence: [] },
+                project: {
+                  projectId: 'test-project',
+                  revisionId: 'rev-1',
+                  destination: undefined,
+                  destinationAligned: true,
+                  destinationMismatch: undefined,
+                  durationTargetUs: undefined,
+                  compositionDurationUs: 1000000,
+                  durationAligned: true,
+                  durationGapUs: undefined,
+                  aspectRatio: '16:9',
+                  aspectRatioAligned: true,
+                  aspectRatioMismatch: undefined,
+                  captionAvailable: false,
+                  audioAvailable: false,
+                  generatedAssetsAvailable: false,
+                  readinessLevel: 'unknown',
+                  blockers: [],
+                  warnings: [],
+                  sceneCount: 0,
+                  scenesWithVisuals: 0,
+                  scenesWithAudio: 0,
+                  scenesWithCaptions: 0,
+                  evidence: [],
+                },
                 rules: [],
               },
               warnings: [],
-              meta: { generatedAt: '2026-08-19T00:00:00.000Z', modelAdapter: 'test', processingTimeMs: 100 },
+              meta: {
+                generatedAt: '2026-08-19T00:00:00.000Z',
+                modelAdapter: 'test',
+                processingTimeMs: 100,
+              },
             },
             message: 'Generated brief',
             retryable: false,
@@ -1754,20 +2340,98 @@ describe('control-plane HTTP transport', () => {
           projectId: 'test-project',
           revisionId: 'rev-1',
           capturedAt: '2026-08-17T00:00:00.000Z',
-          composition: { durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9' },
-          brand: { hasBrandKit: false, colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], warnings: [] },
+          composition: {
+            durationUs: 1000000,
+            frameRate: { num: 30, den: 1 },
+            width: 1920,
+            height: 1080,
+            aspectRatio: '16:9',
+          },
+          brand: {
+            hasBrandKit: false,
+            colorsAvailable: false,
+            fontsAvailable: false,
+            logoAvailable: false,
+            voiceInstructionsAvailable: false,
+            toneInstructionsAvailable: false,
+            prohibitedClaims: [],
+            prohibitedEffects: [],
+            warnings: [],
+          },
           scenes: [],
-          timeline: { compositionId: 'comp-1', durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9', visualTrackCount: 1, audioTrackCount: 1, totalClipCount: 0, visualRowIds: [], audioRowIds: [] },
+          timeline: {
+            compositionId: 'comp-1',
+            durationUs: 1000000,
+            frameRate: { num: 30, den: 1 },
+            width: 1920,
+            height: 1080,
+            aspectRatio: '16:9',
+            visualTrackCount: 1,
+            audioTrackCount: 1,
+            totalClipCount: 0,
+            visualRowIds: [],
+            audioRowIds: [],
+          },
           assets: [],
           capabilities: {},
           warnings: [],
-          truncation: { clipsOmitted: 0, assetsOmitted: 0, visualObjectsOmitted: 0, scenesOmitted: 0, totalEstimateBytes: 0 },
+          truncation: {
+            clipsOmitted: 0,
+            assetsOmitted: 0,
+            visualObjectsOmitted: 0,
+            scenesOmitted: 0,
+            totalEstimateBytes: 0,
+          },
         },
-        brandReadiness: { projectId: 'test-project', revisionId: 'rev-1', colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], hasBrandKit: false, brandCompleteness: 'none', missingComponents: [], warnings: [], evidence: [] },
+        brandReadiness: {
+          projectId: 'test-project',
+          revisionId: 'rev-1',
+          colorsAvailable: false,
+          fontsAvailable: false,
+          logoAvailable: false,
+          voiceInstructionsAvailable: false,
+          toneInstructionsAvailable: false,
+          prohibitedClaims: [],
+          prohibitedEffects: [],
+          hasBrandKit: false,
+          brandCompleteness: 'none',
+          missingComponents: [],
+          warnings: [],
+          evidence: [],
+        },
         sceneCoverages: [],
-        projectReadiness: { projectId: 'test-project', revisionId: 'rev-1', destination: undefined, destinationAligned: true, destinationMismatch: undefined, durationTargetUs: undefined, compositionDurationUs: 1000000, durationAligned: true, durationGapUs: undefined, aspectRatio: '16:9', aspectRatioAligned: true, aspectRatioMismatch: undefined, captionAvailable: false, audioAvailable: false, generatedAssetsAvailable: false, readinessLevel: 'unknown', blockers: [], warnings: [], sceneCount: 0, scenesWithVisuals: 0, scenesWithAudio: 0, scenesWithCaptions: 0, evidence: [] },
+        projectReadiness: {
+          projectId: 'test-project',
+          revisionId: 'rev-1',
+          destination: undefined,
+          destinationAligned: true,
+          destinationMismatch: undefined,
+          durationTargetUs: undefined,
+          compositionDurationUs: 1000000,
+          durationAligned: true,
+          durationGapUs: undefined,
+          aspectRatio: '16:9',
+          aspectRatioAligned: true,
+          aspectRatioMismatch: undefined,
+          captionAvailable: false,
+          audioAvailable: false,
+          generatedAssetsAvailable: false,
+          readinessLevel: 'unknown',
+          blockers: [],
+          warnings: [],
+          sceneCount: 0,
+          scenesWithVisuals: 0,
+          scenesWithAudio: 0,
+          scenesWithCaptions: 0,
+          evidence: [],
+        },
         rules: [],
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test brief', scope: 'general' },
+        request: {
+          projectId: 'test-project',
+          snapshotRevisionId: 'rev-1',
+          request: 'test brief',
+          scope: 'general',
+        },
       });
 
       const origin = await start(
@@ -1783,7 +2447,12 @@ describe('control-plane HTTP transport', () => {
       const response = await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
         projectId: 'test-project',
         snapshotRevisionId: 'rev-1',
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test brief', scope: 'general' },
+        request: {
+          projectId: 'test-project',
+          snapshotRevisionId: 'rev-1',
+          request: 'test brief',
+          scope: 'general',
+        },
       });
 
       expect(runtimeCalled).toBe(true);
@@ -1806,20 +2475,98 @@ describe('control-plane HTTP transport', () => {
           projectId: 'test-project',
           revisionId: 'rev-1',
           capturedAt: '2026-08-17T00:00:00.000Z',
-          composition: { durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9' },
-          brand: { hasBrandKit: false, colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], warnings: [] },
+          composition: {
+            durationUs: 1000000,
+            frameRate: { num: 30, den: 1 },
+            width: 1920,
+            height: 1080,
+            aspectRatio: '16:9',
+          },
+          brand: {
+            hasBrandKit: false,
+            colorsAvailable: false,
+            fontsAvailable: false,
+            logoAvailable: false,
+            voiceInstructionsAvailable: false,
+            toneInstructionsAvailable: false,
+            prohibitedClaims: [],
+            prohibitedEffects: [],
+            warnings: [],
+          },
           scenes: [],
-          timeline: { compositionId: 'comp-1', durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9', visualTrackCount: 1, audioTrackCount: 1, totalClipCount: 0, visualRowIds: [], audioRowIds: [] },
+          timeline: {
+            compositionId: 'comp-1',
+            durationUs: 1000000,
+            frameRate: { num: 30, den: 1 },
+            width: 1920,
+            height: 1080,
+            aspectRatio: '16:9',
+            visualTrackCount: 1,
+            audioTrackCount: 1,
+            totalClipCount: 0,
+            visualRowIds: [],
+            audioRowIds: [],
+          },
           assets: [],
           capabilities: {},
           warnings: [],
-          truncation: { clipsOmitted: 0, assetsOmitted: 0, visualObjectsOmitted: 0, scenesOmitted: 0, totalEstimateBytes: 0 },
+          truncation: {
+            clipsOmitted: 0,
+            assetsOmitted: 0,
+            visualObjectsOmitted: 0,
+            scenesOmitted: 0,
+            totalEstimateBytes: 0,
+          },
         },
-        brandReadiness: { projectId: 'test-project', revisionId: 'rev-1', colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], hasBrandKit: false, brandCompleteness: 'none', missingComponents: [], warnings: [], evidence: [] },
+        brandReadiness: {
+          projectId: 'test-project',
+          revisionId: 'rev-1',
+          colorsAvailable: false,
+          fontsAvailable: false,
+          logoAvailable: false,
+          voiceInstructionsAvailable: false,
+          toneInstructionsAvailable: false,
+          prohibitedClaims: [],
+          prohibitedEffects: [],
+          hasBrandKit: false,
+          brandCompleteness: 'none',
+          missingComponents: [],
+          warnings: [],
+          evidence: [],
+        },
         sceneCoverages: [],
-        projectReadiness: { projectId: 'test-project', revisionId: 'rev-1', destination: undefined, destinationAligned: true, destinationMismatch: undefined, durationTargetUs: undefined, compositionDurationUs: 1000000, durationAligned: true, durationGapUs: undefined, aspectRatio: '16:9', aspectRatioAligned: true, aspectRatioMismatch: undefined, captionAvailable: false, audioAvailable: false, generatedAssetsAvailable: false, readinessLevel: 'unknown', blockers: [], warnings: [], sceneCount: 0, scenesWithVisuals: 0, scenesWithAudio: 0, scenesWithCaptions: 0, evidence: [] },
+        projectReadiness: {
+          projectId: 'test-project',
+          revisionId: 'rev-1',
+          destination: undefined,
+          destinationAligned: true,
+          destinationMismatch: undefined,
+          durationTargetUs: undefined,
+          compositionDurationUs: 1000000,
+          durationAligned: true,
+          durationGapUs: undefined,
+          aspectRatio: '16:9',
+          aspectRatioAligned: true,
+          aspectRatioMismatch: undefined,
+          captionAvailable: false,
+          audioAvailable: false,
+          generatedAssetsAvailable: false,
+          readinessLevel: 'unknown',
+          blockers: [],
+          warnings: [],
+          sceneCount: 0,
+          scenesWithVisuals: 0,
+          scenesWithAudio: 0,
+          scenesWithCaptions: 0,
+          evidence: [],
+        },
         rules: [],
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test brief', scope: 'general' },
+        request: {
+          projectId: 'test-project',
+          snapshotRevisionId: 'rev-1',
+          request: 'test brief',
+          scope: 'general',
+        },
       });
 
       const origin = await start(
@@ -1834,12 +2581,22 @@ describe('control-plane HTTP transport', () => {
       const response = await request(origin, 'POST', '/v1/projects/test-project/creative-brief', {
         projectId: 'test-project',
         snapshotRevisionId: 'rev-1',
-        request: { projectId: 'test-project', snapshotRevisionId: 'rev-1', request: 'test brief', scope: 'general' },
+        request: {
+          projectId: 'test-project',
+          snapshotRevisionId: 'rev-1',
+          request: 'test brief',
+          scope: 'general',
+        },
       });
 
       expect(response).toMatchObject({
         status: 503,
-        body: { error: { code: 'RUNTIME_UNAVAILABLE', message: 'Creative brief runtime is not configured' } },
+        body: {
+          error: {
+            code: 'RUNTIME_UNAVAILABLE',
+            message: 'Creative brief runtime is not configured',
+          },
+        },
       });
     });
   });
@@ -1890,6 +2647,7 @@ async function start(
   creativeBriefRuntime?: CreativeBriefRuntime,
   rateLimit?: { readonly windowMs?: number; readonly maxRequests?: number },
   clientAddressResolver?: ClientAddressResolver,
+  readiness?: ApiReadinessOptions,
 ): Promise<string> {
   const server = createControlPlaneHttpServer({
     controlPlane,
@@ -1902,6 +2660,7 @@ async function start(
     ...(creativeBriefRuntime === undefined ? {} : { creativeBriefRuntime }),
     ...(rateLimit === undefined ? {} : { rateLimit }),
     ...(clientAddressResolver === undefined ? {} : { clientAddressResolver }),
+    ...(readiness === undefined ? {} : { readiness }),
   });
   servers.push(server);
   server.listen(0, '127.0.0.1');
@@ -1970,7 +2729,12 @@ describe('PUT /v1/projects/:projectId/document - project document sync route', (
   it('first CAS write succeeds with 200 and returns projectId and revisionId', async () => {
     const controlPlane = new LocalControlPlane();
     await controlPlane.createProject({ id: 'owner-1' }, 'project-1', 'Test Project');
-    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) }, undefined, undefined, controlPlane);
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner-1' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
     const envelope = validProjectDocumentSyncEnvelope('project-1', INITIAL_REVISION, 'rev-1');
     const result = await request(origin, 'PUT', '/v1/projects/project-1/document', envelope);
     expect(result.status).toBe(200);
@@ -1986,7 +2750,12 @@ describe('PUT /v1/projects/:projectId/document - project document sync route', (
       { projectId: 'project-1', ownerId: 'owner-1', revisionId: 'rev-1', document: validDoc },
       INITIAL_REVISION,
     );
-    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) }, undefined, undefined, controlPlane);
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner-1' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
     const envelope = validProjectDocumentSyncEnvelope('project-1', 'rev-1', 'rev-2');
     const result = await request(origin, 'PUT', '/v1/projects/project-1/document', envelope);
     expect(result.status).toBe(200);
@@ -2002,7 +2771,12 @@ describe('PUT /v1/projects/:projectId/document - project document sync route', (
       { projectId: 'project-1', ownerId: 'owner-1', revisionId: 'rev-1', document: validDoc },
       INITIAL_REVISION,
     );
-    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) }, undefined, undefined, controlPlane);
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner-1' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
     const envelope = validProjectDocumentSyncEnvelope('project-1', 'wrong-base-rev', 'rev-2');
     const result = await request(origin, 'PUT', '/v1/projects/project-1/document', envelope);
     expect(result.status).toBe(409);
@@ -2020,7 +2794,12 @@ describe('PUT /v1/projects/:projectId/document - project document sync route', (
   it('returns 404 PROJECT_NOT_FOUND for owner-denied access', async () => {
     const controlPlane = new LocalControlPlane();
     await controlPlane.createProject({ id: 'owner-1' }, 'project-1', 'Test Project');
-    const origin = await start({ authenticate: () => ({ id: 'owner-2' }) }, undefined, undefined, controlPlane);
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner-2' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
     const envelope = validProjectDocumentSyncEnvelope('project-1');
     const result = await request(origin, 'PUT', '/v1/projects/project-1/document', envelope);
     expect(result.status).toBe(404);
@@ -2030,7 +2809,12 @@ describe('PUT /v1/projects/:projectId/document - project document sync route', (
   it('returns 400 REQUEST_INVALID for envelope rejection - forbidden fields', async () => {
     const controlPlane = new LocalControlPlane();
     await controlPlane.createProject({ id: 'owner-1' }, 'project-1', 'Test Project');
-    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) }, undefined, undefined, controlPlane);
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner-1' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
     const envelope = {
       ...validProjectDocumentSyncEnvelope('project-1'),
       projectId: 'project-1', // forbidden field
@@ -2043,7 +2827,12 @@ describe('PUT /v1/projects/:projectId/document - project document sync route', (
   it('returns 400 REQUEST_INVALID for envelope rejection - ownerId in body', async () => {
     const controlPlane = new LocalControlPlane();
     await controlPlane.createProject({ id: 'owner-1' }, 'project-1', 'Test Project');
-    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) }, undefined, undefined, controlPlane);
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner-1' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
     const envelope = {
       ...validProjectDocumentSyncEnvelope('project-1'),
       ownerId: 'owner-1', // forbidden field
@@ -2104,7 +2893,12 @@ describe('PUT /v1/projects/:projectId/document - project document sync route', (
     // document.id is the canonical editor-document ID and can differ from URL path projectId
     const controlPlane = new LocalControlPlane();
     await controlPlane.createProject({ id: 'owner-1' }, 'project-1', 'Test Project');
-    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) }, undefined, undefined, controlPlane);
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner-1' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
     const envelope = {
       baseRevisionId: '',
       revisionId: 'rev-1',
@@ -2186,7 +2980,12 @@ describe('PUT /v1/projects/:projectId/document - project document sync route', (
   it('derives ownerId only from authenticated actor - ignores body ownerId', async () => {
     const controlPlane = new LocalControlPlane();
     await controlPlane.createProject({ id: 'owner-1' }, 'project-1', 'Test Project');
-    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) }, undefined, undefined, controlPlane);
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner-1' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
     const envelope = {
       ...validProjectDocumentSyncEnvelope('project-1'),
       ownerId: 'malicious-owner', // should be ignored
@@ -2199,7 +2998,12 @@ describe('PUT /v1/projects/:projectId/document - project document sync route', (
   it('derives projectId only from URL path - ignores body projectId', async () => {
     const controlPlane = new LocalControlPlane();
     await controlPlane.createProject({ id: 'owner-1' }, 'project-1', 'Test Project');
-    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) }, undefined, undefined, controlPlane);
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner-1' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
     const envelope = {
       ...validProjectDocumentSyncEnvelope('project-1'),
       projectId: 'malicious-project', // should be ignored
@@ -2290,7 +3094,12 @@ describe('GET /v1/projects/:projectId/creative-brief-opt-in', () => {
   it('returns the owner-scoped opt-in state and lifecycle revision', async () => {
     const controlPlane = new LocalControlPlane();
     await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
-    const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
     expect(
       await request(origin, 'GET', '/v1/projects/test-project/creative-brief-opt-in'),
     ).toMatchObject({
@@ -2303,7 +3112,12 @@ describe('GET /v1/projects/:projectId/creative-brief-opt-in', () => {
     const controlPlane = new LocalControlPlane();
     await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
     await controlPlane.setCreativeBriefOptIn({ id: 'owner' }, 'test-project', true, 0);
-    const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
     expect(
       await request(origin, 'GET', '/v1/projects/test-project/creative-brief-opt-in'),
     ).toMatchObject({
@@ -2315,7 +3129,12 @@ describe('GET /v1/projects/:projectId/creative-brief-opt-in', () => {
   it('hides unknown and non-owner projects', async () => {
     const controlPlane = new LocalControlPlane();
     await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
-    const origin = await start({ authenticate: () => ({ id: 'other' }) }, undefined, undefined, controlPlane);
+    const origin = await start(
+      { authenticate: () => ({ id: 'other' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
     expect(
       await request(origin, 'GET', '/v1/projects/test-project/creative-brief-opt-in'),
     ).toMatchObject({
@@ -2342,7 +3161,12 @@ describe('PUT /v1/projects/:projectId/creative-brief-opt-in', () => {
   it('enables creative brief opt-in', async () => {
     const controlPlane = new LocalControlPlane();
     await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
-    const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
     expect(
       await request(origin, 'PUT', '/v1/projects/test-project/creative-brief-opt-in', {
         enabled: true,
@@ -2358,7 +3182,12 @@ describe('PUT /v1/projects/:projectId/creative-brief-opt-in', () => {
     const controlPlane = new LocalControlPlane();
     await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
     await controlPlane.setCreativeBriefOptIn({ id: 'owner' }, 'test-project', true, 0);
-    const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
     expect(
       await request(origin, 'PUT', '/v1/projects/test-project/creative-brief-opt-in', {
         enabled: false,
@@ -2373,7 +3202,12 @@ describe('PUT /v1/projects/:projectId/creative-brief-opt-in', () => {
   it('rejects with revision conflict when baseRevision does not match', async () => {
     const controlPlane = new LocalControlPlane();
     await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
-    const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
     expect(
       await request(origin, 'PUT', '/v1/projects/test-project/creative-brief-opt-in', {
         enabled: true,
@@ -2388,7 +3222,12 @@ describe('PUT /v1/projects/:projectId/creative-brief-opt-in', () => {
   it('rejects for non-owner with owner isolation', async () => {
     const controlPlane = new LocalControlPlane();
     await controlPlane.createProject({ id: 'owner' }, 'test-project', 'Test');
-    const origin = await start({ authenticate: () => ({ id: 'other' }) }, undefined, undefined, controlPlane);
+    const origin = await start(
+      { authenticate: () => ({ id: 'other' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
     expect(
       await request(origin, 'PUT', '/v1/projects/test-project/creative-brief-opt-in', {
         enabled: true,

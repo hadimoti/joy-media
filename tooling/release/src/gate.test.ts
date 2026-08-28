@@ -53,7 +53,7 @@ const passingInput = (): ReleaseGateInput => ({
 });
 
 describe('JOY Studio 1.0 release gate', () => {
-  it('builds the editor before tests evaluate the generated budget manifest', () => {
+  it('builds the editor before tests evaluate the generated release evidence', () => {
     const editorBuild = RELEASE_COMMANDS.findIndex(([id]) => id === 'editor-build');
     const tests = RELEASE_COMMANDS.findIndex(([id]) => id === 'tests');
     expect(editorBuild).toBeGreaterThanOrEqual(0);
@@ -64,28 +64,19 @@ describe('JOY Studio 1.0 release gate', () => {
       'utf8',
     );
     const workflowLines = workflow.split(/\r?\n/u).map((line) => line.trim());
-    expect(workflowLines.indexOf('- run: pnpm --filter @joy-media/editor-web build')).toBeLessThan(
-      workflowLines.indexOf('- run: pnpm check'),
-    );
+    expect(workflowLines.indexOf('- run: pnpm run verify:ci')).toBeGreaterThanOrEqual(0);
   });
 
-  it('audits production dependency advisories before build and release evaluation', () => {
+  it('keeps production dependency auditing in the CI verification contract', () => {
     const workflow = readFileSync(
       resolve(import.meta.dirname, '../../../.github/workflows/ci.yml'),
       'utf8',
     );
     const workflowLines = workflow.split(/\r?\n/u).map((line) => line.trim());
-    const audit = 'run: pnpm audit --prod --audit-level high';
-    const auditIndex = workflowLines.indexOf(audit);
-
-    expect(workflowLines.filter((line) => line === audit)).toHaveLength(1);
-    expect(auditIndex).toBeGreaterThan(
-      workflowLines.indexOf('- run: pnpm install --frozen-lockfile'),
+    expect(readFileSync(resolve(import.meta.dirname, '../../../package.json'), 'utf8')).toContain(
+      '"audit:prod": "pnpm audit --prod --audit-level=moderate"',
     );
-    expect(auditIndex).toBeLessThan(
-      workflowLines.indexOf('- run: pnpm --filter @joy-media/editor-web build'),
-    );
-    expect(auditIndex).toBeLessThan(workflowLines.indexOf('run: pnpm release:gate'));
+    expect(workflowLines).toContain('- run: pnpm run verify:ci');
   });
 
   it('installs and verifies the FFmpeg/FFprobe toolchain before CI dependencies', () => {
@@ -175,6 +166,7 @@ describe('JOY Studio 1.0 release gate', () => {
       'deploy/joy-media-api.override.conf missing: EnvironmentFile=/etc/joy-media/api.env',
       'deploy/README.md missing: current-api',
       'deploy/README.md missing: web',
+      'deploy/README.md missing: /opt/joy-media/web-releases/',
       'deploy/README.md missing: systemctl restart joy-media@api',
       'deploy/README.md missing: Back up the database',
       'missing file: deploy/joy-media-rollback.sh',

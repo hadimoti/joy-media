@@ -10,6 +10,7 @@ import {
   type AssetThumbnailReceipt,
   type CloudDerivativeRegistration,
   type ControlPlane,
+  type JoyCodeOptInStatus,
   type LocalDerivativeRegistration,
   type MediaAssetRecord,
   type MediaDerivativeRecord,
@@ -36,7 +37,7 @@ import {
   validateWorkerMaxAttempts,
   matchesCloudDerivativeRegistration,
 } from './control-plane.js';
-import { POSTGRES_SCHEMA } from './postgres-schema.js';
+import { runPostgresMigrations } from './postgres-migrations.js';
 import { validateProjectDocumentRecord } from './project-document-store.js';
 import { CREATIVE_BRIEF_CONSENT_VERSION } from './creative-brief-runtime-config.js';
 import { JOY_CODE_CONSENT_VERSION } from './joy-code-consent.js';
@@ -58,16 +59,48 @@ interface PostgresProjectDocumentRecord {
 
 type PostgresProjectDocumentReadOutcome =
   | { readonly kind: 'ready'; readonly record: PostgresProjectDocumentRecord }
-  | { readonly kind: 'not-found'; readonly projectId: PostgresProjectId; readonly revisionId: string | null }
-  | { readonly kind: 'stale-revision'; readonly projectId: PostgresProjectId; readonly requestedRevisionId: string; readonly currentRevisionId: string }
+  | {
+      readonly kind: 'not-found';
+      readonly projectId: PostgresProjectId;
+      readonly revisionId: string | null;
+    }
+  | {
+      readonly kind: 'stale-revision';
+      readonly projectId: PostgresProjectId;
+      readonly requestedRevisionId: string;
+      readonly currentRevisionId: string;
+    }
   | { readonly kind: 'unavailable'; readonly message: string };
 
 type PostgresProjectDocumentWriteOutcome =
-  | { readonly kind: 'stored'; readonly projectId: PostgresProjectId; readonly ownerId: PostgresOwnerId; readonly revisionId: string }
+  | {
+      readonly kind: 'stored';
+      readonly projectId: PostgresProjectId;
+      readonly ownerId: PostgresOwnerId;
+      readonly revisionId: string;
+    }
   | { readonly kind: 'not-found'; readonly projectId: PostgresProjectId }
-  | { readonly kind: 'owner-denied'; readonly projectId: PostgresProjectId; readonly ownerId: PostgresOwnerId; readonly callerId: PostgresOwnerId }
-  | { readonly kind: 'revision-conflict'; readonly projectId: PostgresProjectId; readonly expectedBaseRevisionId: string; readonly actualBaseRevisionId: string }
-  | { readonly kind: 'invalid-document'; readonly projectId: PostgresProjectId; readonly diagnostics: readonly { readonly code: string; readonly message: string; readonly path: string }[] }
+  | {
+      readonly kind: 'owner-denied';
+      readonly projectId: PostgresProjectId;
+      readonly ownerId: PostgresOwnerId;
+      readonly callerId: PostgresOwnerId;
+    }
+  | {
+      readonly kind: 'revision-conflict';
+      readonly projectId: PostgresProjectId;
+      readonly expectedBaseRevisionId: string;
+      readonly actualBaseRevisionId: string;
+    }
+  | {
+      readonly kind: 'invalid-document';
+      readonly projectId: PostgresProjectId;
+      readonly diagnostics: readonly {
+        readonly code: string;
+        readonly message: string;
+        readonly path: string;
+      }[];
+    }
   | { readonly kind: 'unavailable'; readonly message: string };
 
 class PostgresProjectDocumentStore {
@@ -258,18 +291,18 @@ class PostgresProjectDocumentStore {
            VALUES ($1, $2, $3, $4::jsonb, CURRENT_TIMESTAMP)`,
           [record.projectId, record.revisionId, 1, JSON.stringify(record.document)],
         );
-      } catch (error) {
+      } catch {
         await client.query('ROLLBACK');
         return { kind: 'unavailable', message: 'Project document store is unavailable' };
       }
 
       // 9. Atomically update the head pointer
       try {
-        await client.query(
-          'UPDATE projects SET document_revision_id = $2 WHERE id = $1',
-          [record.projectId, record.revisionId],
-        );
-      } catch (error) {
+        await client.query('UPDATE projects SET document_revision_id = $2 WHERE id = $1', [
+          record.projectId,
+          record.revisionId,
+        ]);
+      } catch {
         await client.query('ROLLBACK');
         return { kind: 'unavailable', message: 'Project document store is unavailable' };
       }
@@ -282,7 +315,7 @@ class PostgresProjectDocumentStore {
         ownerId: record.ownerId,
         revisionId: record.revisionId,
       };
-    } catch (error) {
+    } catch {
       // Any unexpected error - rollback if we have a transaction
       try {
         await client.query('ROLLBACK');
@@ -293,24 +326,6 @@ class PostgresProjectDocumentStore {
     } finally {
       client.release();
     }
-  }
-}
-
-class PostgresUnavailableProjectDocumentStore {
-  readDocument(
-    _callerId: PostgresOwnerId,
-    _projectId: PostgresProjectId,
-    _revisionId?: string,
-  ): PostgresProjectDocumentReadOutcome {
-    return { kind: 'unavailable', message: 'Project document store is unavailable' };
-  }
-
-  writeDocument(
-    _callerId: PostgresOwnerId,
-    _record: PostgresProjectDocumentRecord,
-    _baseRevisionId: string,
-  ): PostgresProjectDocumentWriteOutcome {
-    return { kind: 'unavailable', message: 'Project document store is unavailable' };
   }
 }
 
@@ -436,7 +451,7 @@ export class PostgresControlPlane implements ControlPlane {
   }
 
   async initialize(): Promise<void> {
-    await this.pool.query(POSTGRES_SCHEMA);
+    await runPostgresMigrations(this.pool);
   }
 
   async createProject(actor: Actor, id: string, title: string): Promise<ProjectMetadata> {
@@ -744,12 +759,15 @@ export class PostgresControlPlane implements ControlPlane {
     return projectOf(result.rows[0]);
   }
 
-  async getJoyCodeOptIn(actor: Actor, projectId: string): Promise<import('./control-plane.js').JoyCodeOptInStatus> {
+  async getJoyCodeOptIn(actor: Actor, projectId: string): Promise<JoyCodeOptInStatus> {
     assertActor(actor);
-    const result = await this.pool.query<{ readonly revision: number; readonly joy_code_consent_version: string | null }>(
-      'SELECT revision, joy_code_consent_version FROM projects WHERE id = $1 AND owner_id = $2',
-      [projectId, actor.id],
-    );
+    const result = await this.pool.query<{
+      readonly revision: number;
+      readonly joy_code_consent_version: string | null;
+    }>('SELECT revision, joy_code_consent_version FROM projects WHERE id = $1 AND owner_id = $2', [
+      projectId,
+      actor.id,
+    ]);
     const row = result.rows[0];
     if (row === undefined) throw new ControlPlaneError('PROJECT_NOT_FOUND', projectId);
     const consentVersion = row.joy_code_consent_version;
@@ -769,7 +787,10 @@ export class PostgresControlPlane implements ControlPlane {
   ): Promise<ProjectMetadata> {
     assertActor(actor);
     if (enabled && consentVersion !== JOY_CODE_CONSENT_VERSION)
-      throw new ControlPlaneError('JOY_CODE_CONSENT_VERSION_REQUIRED', 'current disclosure version required');
+      throw new ControlPlaneError(
+        'JOY_CODE_CONSENT_VERSION_REQUIRED',
+        'current disclosure version required',
+      );
     const result = await this.pool.query<ProjectRow>(
       `UPDATE projects SET joy_code_consent_version = $3, revision = revision + 1
        WHERE id = $1 AND owner_id = $2 AND revision = $4 RETURNING *`,
@@ -778,7 +799,10 @@ export class PostgresControlPlane implements ControlPlane {
     if (result.rows[0] === undefined) {
       const current = await this.project(actor, projectId);
       if (current.revision !== baseRevision)
-        throw new ControlPlaneError('REVISION_CONFLICT', `expected ${baseRevision}, found ${current.revision}`);
+        throw new ControlPlaneError(
+          'REVISION_CONFLICT',
+          `expected ${baseRevision}, found ${current.revision}`,
+        );
       throw new ControlPlaneError('PROJECT_NOT_FOUND', projectId);
     }
     return projectOf(result.rows[0]);
@@ -1645,10 +1669,7 @@ export class PostgresControlPlane implements ControlPlane {
     return this.#documentStore.readDocument(actor.id, projectId, revisionId);
   }
 
-  async listProjectRevisions(
-    actor: Actor,
-    projectId: string,
-  ): Promise<readonly string[]> {
+  async listProjectRevisions(actor: Actor, projectId: string): Promise<readonly string[]> {
     return this.#documentStore.listRevisions(actor.id, projectId);
   }
 

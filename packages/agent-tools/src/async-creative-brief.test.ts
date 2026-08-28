@@ -13,15 +13,40 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import type { CreativeBriefInputV1, CreativeBriefV1, CreativeBriefRequestV1 } from './creative-brief.js';
-import { createCreativeBrief, createCreativeBriefInput, DEFAULT_DETERMINISTIC_CLOCK } from './creative-brief.js';
+import type {
+  CreativeBriefInputV1,
+  CreativeBriefV1,
+  CreativeBriefRequestV1,
+} from './creative-brief.js';
+import {
+  createCreativeBrief,
+  createCreativeBriefInput,
+  DEFAULT_DETERMINISTIC_CLOCK,
+} from './creative-brief.js';
 import { createValidFakeAdapter } from './model-adapter.js';
 import type { AsyncCreativeModelAdapter, AsyncOutcome } from './async-model-adapter.js';
 import type { ModelAdapterOutputV1 } from './model-adapter.js';
-import { createValidFakeAsyncAdapter, createUnavailableFakeAsyncAdapter, createPolicyDeniedFakeAsyncAdapter, createInvalidOutputFakeAsyncAdapter, createProviderFailedFakeAsyncAdapter, createTimeoutFakeAsyncAdapter, createCancelledFakeAsyncAdapter } from './async-model-adapter.js';
-import { createAsyncCreativeBrief, createAsyncCreativeBriefWithOptions } from './async-creative-brief.js';
+import {
+  createValidFakeAsyncAdapter,
+  createUnavailableFakeAsyncAdapter,
+  createPolicyDeniedFakeAsyncAdapter,
+  createInvalidOutputFakeAsyncAdapter,
+  createProviderFailedFakeAsyncAdapter,
+  createTimeoutFakeAsyncAdapter,
+  createCancelledFakeAsyncAdapter,
+} from './async-model-adapter.js';
+import {
+  createAsyncCreativeBrief,
+  createAsyncCreativeBriefWithOptions,
+} from './async-creative-brief.js';
 import type { AsyncCreativeBriefOutcome } from './async-creative-brief.js';
-import type { SemanticProjectSnapshotV1, BrandReadinessV1, SceneCoverageV1, ProjectReadinessV1, IntelligenceRuleV1 } from '@joy-media/project-schema';
+import type {
+  SemanticProjectSnapshotV1,
+  BrandReadinessV1,
+  SceneCoverageV1,
+  ProjectReadinessV1,
+  IntelligenceRuleV1,
+} from '@joy-media/project-schema';
 
 // ==========================================================================
 // Test Fixtures
@@ -223,7 +248,9 @@ function createTestCreativeBriefInput(): CreativeBriefInputV1 {
 /**
  * Create a CreativeBriefInputV1 with a custom request.
  */
-function createTestCreativeBriefInputWithRequest(request: CreativeBriefRequestV1): CreativeBriefInputV1 {
+function createTestCreativeBriefInputWithRequest(
+  request: CreativeBriefRequestV1,
+): CreativeBriefInputV1 {
   return createCreativeBriefInput(
     MINIMAL_SNAPSHOT,
     {
@@ -279,7 +306,7 @@ describe('Async Creative Brief - Valid Results', () => {
 
     expect(outcome.category).toBe('ready');
     const brief = outcome.brief!;
-    
+
     // Check all required fields are present
     expect(brief.schemaVersion).toBe(1);
     expect(brief.projectId).toBeDefined();
@@ -335,36 +362,36 @@ describe('Async Creative Brief - Valid Results', () => {
 describe('Async Creative Brief - Equivalence with Sync Path', () => {
   it('produces equivalent brief to synchronous path for same adapter output', async () => {
     const input = createTestCreativeBriefInput();
-    
+
     // Create sync brief using fake sync adapter
     const syncAdapter = createValidFakeAdapter();
     const syncBrief = createCreativeBrief(input, syncAdapter);
-    
+
     // For async path, we need the adapter to produce the same output
     // Since we're using different adapters (sync vs async), they will produce
     // different IDs, but the structure should be the same
     const asyncAdapter = createValidFakeAsyncAdapter(42); // Use same seed
     const options = createTestAsyncOptions(asyncAdapter);
-    
+
     const outcome = await createAsyncCreativeBrief(input, options);
-    
+
     expect(outcome.category).toBe('ready');
     const asyncBrief = outcome.brief!;
-    
+
     // Check structure equivalence
     expect(asyncBrief.schemaVersion).toBe(syncBrief.schemaVersion);
     expect(asyncBrief.projectId).toBe(syncBrief.projectId);
     expect(asyncBrief.snapshotRevisionId).toBe(syncBrief.snapshotRevisionId);
     expect(asyncBrief.request).toBe(syncBrief.request);
-    
+
     // Both should have interpretedGoal
     expect(asyncBrief.interpretedGoal).toBeDefined();
     expect(syncBrief.interpretedGoal).toBeDefined();
-    
+
     // Both should have distinction
     expect(asyncBrief.distinction).toBeDefined();
     expect(syncBrief.distinction).toBeDefined();
-    
+
     // Both should have arrays for recommendations, assumptions, etc.
     expect(Array.isArray(asyncBrief.recommendations)).toBe(true);
     expect(Array.isArray(syncBrief.recommendations)).toBe(true);
@@ -379,12 +406,12 @@ describe('Async Creative Brief - Equivalence with Sync Path', () => {
       scope: 'pacing',
     };
     const input = createTestCreativeBriefInputWithRequest(request);
-    
+
     const adapter = createValidFakeAsyncAdapter();
     const options = createTestAsyncOptions(adapter);
-    
+
     const outcome = await createAsyncCreativeBrief(input, options);
-    
+
     expect(outcome.category).toBe('ready');
     expect(outcome.brief!.request).toBe(requestText);
     expect(outcome.brief!.interpretedGoal.userIntent).toBe(requestText);
@@ -487,7 +514,7 @@ describe('Async Creative Brief - Input Validation', () => {
       },
       request,
     );
-    
+
     const adapter = createValidFakeAsyncAdapter();
     const options = createTestAsyncOptions(adapter);
 
@@ -518,10 +545,12 @@ describe('Async Creative Brief - Input Validation', () => {
           ...MINIMAL_BRAND_READINESS,
           projectId: 'test-project' as const,
         },
-        sceneCoverages: [{
-          ...MINIMAL_SCENE_COVERAGE,
-          projectId: 'test-project' as const,
-        }],
+        sceneCoverages: [
+          {
+            ...MINIMAL_SCENE_COVERAGE,
+            projectId: 'test-project' as const,
+          },
+        ],
         projectReadiness: {
           ...MINIMAL_PROJECT_READINESS,
           projectId: 'test-project' as const,
@@ -530,7 +559,7 @@ describe('Async Creative Brief - Input Validation', () => {
       },
       request,
     );
-    
+
     const adapter = createValidFakeAsyncAdapter();
     const options = createTestAsyncOptions(adapter);
 

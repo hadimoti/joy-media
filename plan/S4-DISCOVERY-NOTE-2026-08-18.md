@@ -8,6 +8,7 @@
 ## 1. Agent/Joy Code UI Mount
 
 The existing Agent/Joy Code UI is mounted in `apps/editor-web/src/App.tsx:5651` as a dock panel with id `agent` → `AgentPanel` component. Panel tabs are defined in `apps/editor-web/src/AgentPanel.tsx:56-60`:
+
 ```ts
 const TABS: readonly PanelTabSpec[] = [
   { id: 'history', label: 'History' },
@@ -19,6 +20,7 @@ const TABS: readonly PanelTabSpec[] = [
 ## 2. Current Project/Selection/Revision Owner
 
 `EditorSession` class in `apps/editor-web/src/editor-session.ts:160` owns:
+
 - `timelineProject: SpikeProject` — canonical timeline state (schemaVersion 0, tracks with `kind: 'video'` only)
 - `visualProject: JoyProjectV1` — full visual project state (schemaVersion 1, tracks with `kind: 'video' | 'audio' | 'caption' | 'object' | 'control'`, plus assets, visualObjects, captionDocuments, markers, audio)
 - `projectRevisionId: ProjectRevisionId` — durable, opaque revision getter (line 285) encoding all component revisions via `encodeProjectRevision()`
@@ -29,15 +31,17 @@ const TABS: readonly PanelTabSpec[] = [
 ## 3. S1 + S2 Creation Without Second Project Model
 
 S1 snapshot projection lives in `packages/project-schema/src/semantic-snapshot-impl.ts`:
+
 ```ts
 export function projectToSemanticSnapshot(
   project: JoyProjectV1,
   revisionId: ProjectRevisionId,
   options?: SnapshotOptions,
-): SemanticProjectSnapshotV1
+): SemanticProjectSnapshotV1;
 ```
 
 S2 intelligence lives in `packages/project-schema/src/semantic-intelligence.ts`:
+
 - `computeBrandReadiness(snapshot)` → `BrandReadinessV1`
 - `computeSceneCoverages(snapshot)` → `SceneCoverageV1[]`
 - `computeProjectReadiness(snapshot)` → `ProjectReadinessV1`
@@ -48,13 +52,15 @@ S2 intelligence lives in `packages/project-schema/src/semantic-intelligence.ts`:
 ## 4. S3 createCreativeBrief() Without Mutation
 
 `createCreativeBrief()` in `packages/agent-tools/src/creative-brief.ts:856` is pure/synchronous:
+
 ```ts
 export function createCreativeBrief(
   input: CreativeBriefInputV1,
   adapter: CreativeModelAdapter,
   options: CreativeBriefOptions = {},
-): CreativeBriefV1
+): CreativeBriefV1;
 ```
+
 - Validates `input.snapshot.revisionId === input.request.snapshotRevisionId` (line 876)
 - Validates `input.snapshot.projectId === input.request.projectId` (line 883)
 - Calls `adapter.createBrief(adapterInput)` synchronously (line 904)
@@ -70,6 +76,7 @@ idle → collecting (user types request) → brief-ready (S3 brief displayed) �
 ```
 
 States:
+
 - **idle**: No active brief; Composer input empty or placeholder
 - **collecting**: User has entered text; waiting for brief generation
 - **brief-ready**: CreativeBriefV1 available; display recommendations grouped by scene/timestamp
@@ -81,11 +88,13 @@ State owner: `AgentPanel` component. No new Redux/React context needed; local co
 ## 6. Future S4-A Files/Tests
 
 **New files:**
+
 - `apps/editor-web/src/useCreativeBrief.ts` — hook: `project` + `session.projectRevisionId` → `CreativeBriefV1 | null | 'stale' | 'error'`
 - `apps/editor-web/src/CreativeBriefDisplay.tsx` — read-only brief UI component
 - `apps/editor-web/src/CreativeBriefDisplay.test.ts` — Vitest UI tests
 
 **Test coverage:**
+
 - Byte-stable brief for identical `project` + `revisionId`
 - Stale detection when `revisionId` changes
 - Persian/RTL request preservation in UI
@@ -103,6 +112,7 @@ State owner: `AgentPanel` component. No new Redux/React context needed; local co
 ## 8. S4 Input-Bridge Decision
 
 **S1/S2 information sources:**
+
 - `projectToSemanticSnapshot()` in `packages/project-schema/src/semantic-snapshot-impl.ts:532` requires `JoyProjectV1` (schemaVersion 1) because it uses:
   - `project.compositions[rootCompositionId]` → `CompositionV1` with `tracks: TrackV1[]` (multi-kind: video/audio/caption/object/control)
   - `project.captionDocuments` (line 550) for scene segmentation and caption coverage
@@ -112,6 +122,7 @@ State owner: `AgentPanel` component. No new Redux/React context needed; local co
   - `project.audio` (line 627) for audio capability detection
 
 **Timeline/caption/audio/selection information unavailable from `SpikeProject`:**
+
 - `SpikeProject` (schemaVersion 0) only contains `compositions` with `Track[]` where `Track.kind` is hardcoded to `'video'`
 - Missing: caption tracks, audio tracks, object tracks, control tracks, assets, visualObjects, captionDocuments, markers, audio graph, color grades
 - Selection/playhead are available via separate `AgentPanel` props (`selectedClipIds`, `playheadUs`)
@@ -120,12 +131,14 @@ State owner: `AgentPanel` component. No new Redux/React context needed; local co
 `EditorSession` in `apps/editor-web/src/editor-session.ts:160` already owns **both** `timelineProject: SpikeProject` and `visualProject: JoyProjectV1`. `AgentPanel` receives the full `session` prop, so it can access `session.visualProject` (JoyProjectV1) directly. **No new bridge needed.**
 
 **S4 input-bridge resolution:**
+
 - Use `session.visualProject` (JoyProjectV1) + `session.projectRevisionId` → `projectToSemanticSnapshot()` → S2 functions → S3 `createCreativeBrief()`
 - Do **not** use the `project` prop (SpikeProject) for S1/S2/S3
 
 ## 9. Model Adapter Policy Decision
 
 **Test-only fake adapter boundary:**
+
 - Fake adapter constructors (`createValidFakeAdapter`, `createMalformedFakeAdapter`, etc.) in `packages/agent-tools/src/model-adapter.ts:782-824` are **NOT** exported from `packages/agent-tools/src/index.ts`
 - Production code importing from `@joy-media/agent-tools` cannot access test-only adapters
 - **Blocker:** No production `CreativeModelAdapter` implementation exists for S4
@@ -136,6 +149,7 @@ State owner: `AgentPanel` component. No new Redux/React context needed; local co
 - **Current state:** The fake adapter is test-only; it cannot be bundled in production editor code
 
 **Future S4 test-injection/runtime-policy decision:**
+
 - Tests may continue importing fake adapters directly from `model-adapter.js`
 - Production must NOT import from `model-adapter.js`; use only public `@joy-media/agent-tools` exports
 - Policy decision: Who can trigger brief generation? What are the rate limits? What happens offline?

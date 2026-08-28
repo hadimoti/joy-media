@@ -9,7 +9,6 @@ import type {
   SemanticProjectSnapshotV1,
   ProjectRevisionId,
   EvidenceRefV1,
-  SceneSummaryV1,
 } from '@joy-media/project-schema';
 
 import type {
@@ -20,7 +19,11 @@ import type {
   IntelligenceEvidenceRefV1,
 } from '@joy-media/project-schema';
 
-import type { CreativeModelAdapter, ModelAdapterInputV1, ModelAdapterOutputV1 } from './model-adapter.js';
+import type {
+  CreativeModelAdapter,
+  ModelAdapterInputV1,
+  ModelAdapterOutputV1,
+} from './model-adapter.js';
 
 // ============================================================================
 // S3 Types
@@ -65,11 +68,11 @@ export type InferenceConfidence = 'low' | 'medium' | 'high';
  * Determines approval requirements.
  */
 export type RecommendationRisk =
-  | 'none'           // Purely advisory, no mutation
+  | 'none' // Purely advisory, no mutation
   | 'reversible-local' // Local-only, can be undone
-  | 'destructive'    // Cannot be undone without manual intervention
-  | 'remote-egress'  // Requires network access
-  | 'spend';         // Incurs cost
+  | 'destructive' // Cannot be undone without manual intervention
+  | 'remote-egress' // Requires network access
+  | 'spend'; // Incurs cost
 
 /**
  * Kind of creative recommendation.
@@ -373,7 +376,7 @@ export const FORBIDDEN_PATTERNS = [
   /\b(C|D|E|F):\\\[^\s\\]*\b/i,
   /bexecs*:/i,
   /brms+-s*r[af]/i,
-  /\b\/([^\s\/]+\/)+[^\s\/]+\b/,
+  /\b\/([^\s/]+\/)+[^\s/]+\b/,
   // URLs and object store references
   /\bhttps?:\/\/[^\s]+/i,
   /\bftp:\/\/[^\s]+/i,
@@ -400,7 +403,7 @@ export const FORBIDDEN_PATTERNS = [
   /\bBearer\s+[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+/,
   // Provider-specific key patterns - only match full key formats
   /\b(openrouter|anthropic|openai|mistral|google|azure)[_-]?sk-[a-zA-Z0-9]{10,}\b/i,
-  /\b(openrouter|anthropic|openai|mistral|google|azure)[_-]?api[_-]?key[a-zA-Z0-9_\-]{10,}\b/i,
+  /\b(openrouter|anthropic|openai|mistral|google|azure)[_-]?api[_-]?key[a-zA-Z0-9_-]{10,}\b/i,
   // AWS/Cloud credentials
   /\bAKIA[0-9A-Z]{16}\b/,
   /\b[0-9a-zA-Z/+]{40}\b/,
@@ -470,9 +473,7 @@ export const DESTINATION_PRESETS: readonly DestinationPreset[] = [
  * Validate a CreativeBriefRequestV1
  * Returns errors for any violation of the contract
  */
-export function validateCreativeBriefRequest(
-  request: unknown,
-): BriefRequestValidationResult {
+export function validateCreativeBriefRequest(request: unknown): BriefRequestValidationResult {
   const errors: { code: string; message: string; field?: string }[] = [];
   const warnings: { code: string; message: string; field?: string }[] = [];
 
@@ -489,49 +490,114 @@ export function validateCreativeBriefRequest(
 
   // Check required fields
   if (typeof r.snapshotRevisionId !== 'string' || r.snapshotRevisionId.trim() === '') {
-    errors.push({ code: 'missing-snapshot-revision', message: 'snapshotRevisionId is required and must be a non-empty string', field: 'snapshotRevisionId' });
+    errors.push({
+      code: 'missing-snapshot-revision',
+      message: 'snapshotRevisionId is required and must be a non-empty string',
+      field: 'snapshotRevisionId',
+    });
   }
 
   if (typeof r.projectId !== 'string' || r.projectId.trim() === '') {
-    errors.push({ code: 'missing-project-id', message: 'projectId is required and must be a non-empty string', field: 'projectId' });
+    errors.push({
+      code: 'missing-project-id',
+      message: 'projectId is required and must be a non-empty string',
+      field: 'projectId',
+    });
   }
 
   if (typeof r.request !== 'string' || r.request.trim() === '') {
-    errors.push({ code: 'missing-request', message: 'request is required and must be a non-empty string', field: 'request' });
+    errors.push({
+      code: 'missing-request',
+      message: 'request is required and must be a non-empty string',
+      field: 'request',
+    });
   } else if (r.request.length > MAX_LENGTHS.request) {
-    errors.push({ code: 'request-too-long', message: `request must be <= ${MAX_LENGTHS.request} characters`, field: 'request' });
+    errors.push({
+      code: 'request-too-long',
+      message: `request must be <= ${MAX_LENGTHS.request} characters`,
+      field: 'request',
+    });
   }
 
-  if (typeof r.scope !== 'string' || !CREATIVE_BRIEF_SCOPES.includes(r.scope as CreativeBriefScope)) {
-    errors.push({ code: 'invalid-scope', message: `scope must be one of: ${CREATIVE_BRIEF_SCOPES.join(', ')}`, field: 'scope' });
+  if (
+    typeof r.scope !== 'string' ||
+    !CREATIVE_BRIEF_SCOPES.includes(r.scope as CreativeBriefScope)
+  ) {
+    errors.push({
+      code: 'invalid-scope',
+      message: `scope must be one of: ${CREATIVE_BRIEF_SCOPES.join(', ')}`,
+      field: 'scope',
+    });
   }
 
   // Check optional fields
   if (r.brief !== undefined && typeof r.brief !== 'string') {
-    errors.push({ code: 'invalid-brief', message: 'brief must be a string if provided', field: 'brief' });
+    errors.push({
+      code: 'invalid-brief',
+      message: 'brief must be a string if provided',
+      field: 'brief',
+    });
   } else if (typeof r.brief === 'string' && r.brief.length > MAX_LENGTHS.brief) {
-    errors.push({ code: 'brief-too-long', message: `brief must be <= ${MAX_LENGTHS.brief} characters`, field: 'brief' });
+    errors.push({
+      code: 'brief-too-long',
+      message: `brief must be <= ${MAX_LENGTHS.brief} characters`,
+      field: 'brief',
+    });
   }
 
-  if (r.destination !== undefined && !DESTINATION_PRESETS.includes(r.destination as DestinationPreset)) {
-    errors.push({ code: 'invalid-destination', message: `destination must be one of: ${DESTINATION_PRESETS.join(', ')}`, field: 'destination' });
+  if (
+    r.destination !== undefined &&
+    !DESTINATION_PRESETS.includes(r.destination as DestinationPreset)
+  ) {
+    errors.push({
+      code: 'invalid-destination',
+      message: `destination must be one of: ${DESTINATION_PRESETS.join(', ')}`,
+      field: 'destination',
+    });
   }
 
-  if (r.durationTargetUs !== undefined && (typeof r.durationTargetUs !== 'number' || r.durationTargetUs < 0)) {
-    errors.push({ code: 'invalid-duration', message: 'durationTargetUs must be a non-negative number if provided', field: 'durationTargetUs' });
+  if (
+    r.durationTargetUs !== undefined &&
+    (typeof r.durationTargetUs !== 'number' || r.durationTargetUs < 0)
+  ) {
+    errors.push({
+      code: 'invalid-duration',
+      message: 'durationTargetUs must be a non-negative number if provided',
+      field: 'durationTargetUs',
+    });
   }
 
-  if (r.maxRecommendations !== undefined && (typeof r.maxRecommendations !== 'number' || r.maxRecommendations <= 0 || r.maxRecommendations > MAX_LENGTHS.recommendationCount)) {
-    errors.push({ code: 'invalid-max-recommendations', message: `maxRecommendations must be between 1 and ${MAX_LENGTHS.recommendationCount}`, field: 'maxRecommendations' });
+  if (
+    r.maxRecommendations !== undefined &&
+    (typeof r.maxRecommendations !== 'number' ||
+      r.maxRecommendations <= 0 ||
+      r.maxRecommendations > MAX_LENGTHS.recommendationCount)
+  ) {
+    errors.push({
+      code: 'invalid-max-recommendations',
+      message: `maxRecommendations must be between 1 and ${MAX_LENGTHS.recommendationCount}`,
+      field: 'maxRecommendations',
+    });
   }
 
   if (r.allowedRecommendationKinds !== undefined) {
     if (!Array.isArray(r.allowedRecommendationKinds)) {
-      errors.push({ code: 'invalid-allowed-kinds', message: 'allowedRecommendationKinds must be an array if provided', field: 'allowedRecommendationKinds' });
+      errors.push({
+        code: 'invalid-allowed-kinds',
+        message: 'allowedRecommendationKinds must be an array if provided',
+        field: 'allowedRecommendationKinds',
+      });
     } else {
       for (const kind of r.allowedRecommendationKinds as unknown[]) {
-        if (typeof kind !== 'string' || !RECOMMENDATION_KINDS.includes(kind as RecommendationKind)) {
-          errors.push({ code: 'invalid-recommendation-kind', message: `allowedRecommendationKinds contains invalid value: ${kind}`, field: 'allowedRecommendationKinds' });
+        if (
+          typeof kind !== 'string' ||
+          !RECOMMENDATION_KINDS.includes(kind as RecommendationKind)
+        ) {
+          errors.push({
+            code: 'invalid-recommendation-kind',
+            message: `allowedRecommendationKinds contains invalid value: ${kind}`,
+            field: 'allowedRecommendationKinds',
+          });
           break;
         }
       }
@@ -545,7 +611,11 @@ export function validateCreativeBriefRequest(
       const value = r[field] as string;
       for (const pattern of FORBIDDEN_PATTERNS) {
         if (pattern.test(value)) {
-          errors.push({ code: 'forbidden-pattern', message: `Field '${field}' contains forbidden pattern`, field });
+          errors.push({
+            code: 'forbidden-pattern',
+            message: `Field '${field}' contains forbidden pattern`,
+            field,
+          });
           break;
         }
       }
@@ -581,9 +651,7 @@ export function validateCreativeBriefRequest(
  * Validate a CreativeBriefV1
  * Returns errors for any violation of the contract
  */
-export function validateCreativeBrief(
-  brief: unknown,
-): BriefValidationResult {
+export function validateCreativeBrief(brief: unknown): BriefValidationResult {
   const errors: { code: string; message: string; path?: string }[] = [];
   const warnings: { code: string; message: string; path?: string }[] = [];
 
@@ -599,16 +667,28 @@ export function validateCreativeBrief(
 
   // Check schema version
   if (b.schemaVersion !== 1) {
-    errors.push({ code: 'invalid-schema-version', message: 'schemaVersion must be 1', path: 'schemaVersion' });
+    errors.push({
+      code: 'invalid-schema-version',
+      message: 'schemaVersion must be 1',
+      path: 'schemaVersion',
+    });
   }
 
   // Check required fields
   if (typeof b.snapshotRevisionId !== 'string' || b.snapshotRevisionId.trim() === '') {
-    errors.push({ code: 'missing-snapshot-revision', message: 'snapshotRevisionId is required', path: 'snapshotRevisionId' });
+    errors.push({
+      code: 'missing-snapshot-revision',
+      message: 'snapshotRevisionId is required',
+      path: 'snapshotRevisionId',
+    });
   }
 
   if (typeof b.projectId !== 'string' || b.projectId.trim() === '') {
-    errors.push({ code: 'missing-project-id', message: 'projectId is required', path: 'projectId' });
+    errors.push({
+      code: 'missing-project-id',
+      message: 'projectId is required',
+      path: 'projectId',
+    });
   }
 
   if (typeof b.request !== 'string' || b.request.trim() === '') {
@@ -617,69 +697,142 @@ export function validateCreativeBrief(
 
   // Validate interpretedGoal
   if (!b.interpretedGoal || typeof b.interpretedGoal !== 'object') {
-    errors.push({ code: 'missing-interpreted-goal', message: 'interpretedGoal is required', path: 'interpretedGoal' });
+    errors.push({
+      code: 'missing-interpreted-goal',
+      message: 'interpretedGoal is required',
+      path: 'interpretedGoal',
+    });
   } else {
     const ig = b.interpretedGoal as Record<string, unknown>;
     if (typeof ig.userIntent !== 'string' || ig.userIntent.trim() === '') {
-      errors.push({ code: 'missing-user-intent', message: 'interpretedGoal.userIntent is required', path: 'interpretedGoal.userIntent' });
+      errors.push({
+        code: 'missing-user-intent',
+        message: 'interpretedGoal.userIntent is required',
+        path: 'interpretedGoal.userIntent',
+      });
     }
     if (typeof ig.inferredGoal !== 'string' || ig.inferredGoal.trim() === '') {
-      errors.push({ code: 'missing-inferred-goal', message: 'interpretedGoal.inferredGoal is required', path: 'interpretedGoal.inferredGoal' });
+      errors.push({
+        code: 'missing-inferred-goal',
+        message: 'interpretedGoal.inferredGoal is required',
+        path: 'interpretedGoal.inferredGoal',
+      });
     }
     if (typeof ig.resolvedGoal !== 'string' || ig.resolvedGoal.trim() === '') {
-      errors.push({ code: 'missing-resolved-goal', message: 'interpretedGoal.resolvedGoal is required', path: 'interpretedGoal.resolvedGoal' });
+      errors.push({
+        code: 'missing-resolved-goal',
+        message: 'interpretedGoal.resolvedGoal is required',
+        path: 'interpretedGoal.resolvedGoal',
+      });
     }
-    if (ig.confidence !== undefined && !['low', 'medium', 'high'].includes(ig.confidence as string)) {
-      errors.push({ code: 'invalid-confidence', message: 'interpretedGoal.confidence must be low, medium, or high', path: 'interpretedGoal.confidence' });
+    if (
+      ig.confidence !== undefined &&
+      !['low', 'medium', 'high'].includes(ig.confidence as string)
+    ) {
+      errors.push({
+        code: 'invalid-confidence',
+        message: 'interpretedGoal.confidence must be low, medium, or high',
+        path: 'interpretedGoal.confidence',
+      });
     }
   }
 
   // Validate distinction
   if (!b.distinction || typeof b.distinction !== 'object') {
-    errors.push({ code: 'missing-distinction', message: 'distinction is required', path: 'distinction' });
+    errors.push({
+      code: 'missing-distinction',
+      message: 'distinction is required',
+      path: 'distinction',
+    });
   }
 
   // Validate recommendations array
   if (!Array.isArray(b.recommendations)) {
-    errors.push({ code: 'missing-recommendations', message: 'recommendations must be an array', path: 'recommendations' });
+    errors.push({
+      code: 'missing-recommendations',
+      message: 'recommendations must be an array',
+      path: 'recommendations',
+    });
   } else if (b.recommendations.length > MAX_LENGTHS.recommendationCount) {
-    errors.push({ code: 'too-many-recommendations', message: `recommendations count must be <= ${MAX_LENGTHS.recommendationCount}`, path: 'recommendations' });
+    errors.push({
+      code: 'too-many-recommendations',
+      message: `recommendations count must be <= ${MAX_LENGTHS.recommendationCount}`,
+      path: 'recommendations',
+    });
   } else {
     for (const [idx, rec] of (b.recommendations as unknown[]).entries()) {
-      const recErrors = validateRecommendation(rec as Record<string, unknown>, `recommendations[${idx}]`);
+      const recErrors = validateRecommendation(
+        rec as Record<string, unknown>,
+        `recommendations[${idx}]`,
+      );
       errors.push(...recErrors);
     }
   }
 
   // Validate assumptions array
   if (b.assumptions !== undefined && !Array.isArray(b.assumptions)) {
-    errors.push({ code: 'invalid-assumptions', message: 'assumptions must be an array if provided', path: 'assumptions' });
+    errors.push({
+      code: 'invalid-assumptions',
+      message: 'assumptions must be an array if provided',
+      path: 'assumptions',
+    });
   } else if (Array.isArray(b.assumptions) && b.assumptions.length > MAX_LENGTHS.assumptionCount) {
-    errors.push({ code: 'too-many-assumptions', message: `assumptions count must be <= ${MAX_LENGTHS.assumptionCount}`, path: 'assumptions' });
+    errors.push({
+      code: 'too-many-assumptions',
+      message: `assumptions count must be <= ${MAX_LENGTHS.assumptionCount}`,
+      path: 'assumptions',
+    });
   }
 
   // Validate blockedBy array
   if (b.blockedBy !== undefined && !Array.isArray(b.blockedBy)) {
-    errors.push({ code: 'invalid-blocked-by', message: 'blockedBy must be an array if provided', path: 'blockedBy' });
+    errors.push({
+      code: 'invalid-blocked-by',
+      message: 'blockedBy must be an array if provided',
+      path: 'blockedBy',
+    });
   } else if (Array.isArray(b.blockedBy) && b.blockedBy.length > MAX_LENGTHS.capabilityGapCount) {
-    errors.push({ code: 'too-many-blocked-by', message: `blockedBy count must be <= ${MAX_LENGTHS.capabilityGapCount}`, path: 'blockedBy' });
+    errors.push({
+      code: 'too-many-blocked-by',
+      message: `blockedBy count must be <= ${MAX_LENGTHS.capabilityGapCount}`,
+      path: 'blockedBy',
+    });
   }
 
   // Validate requiresHumanDecision array
   if (b.requiresHumanDecision !== undefined && !Array.isArray(b.requiresHumanDecision)) {
-    errors.push({ code: 'invalid-human-decisions', message: 'requiresHumanDecision must be an array if provided', path: 'requiresHumanDecision' });
-  } else if (Array.isArray(b.requiresHumanDecision) && b.requiresHumanDecision.length > MAX_LENGTHS.humanDecisionCount) {
-    errors.push({ code: 'too-many-human-decisions', message: `requiresHumanDecision count must be <= ${MAX_LENGTHS.humanDecisionCount}`, path: 'requiresHumanDecision' });
+    errors.push({
+      code: 'invalid-human-decisions',
+      message: 'requiresHumanDecision must be an array if provided',
+      path: 'requiresHumanDecision',
+    });
+  } else if (
+    Array.isArray(b.requiresHumanDecision) &&
+    b.requiresHumanDecision.length > MAX_LENGTHS.humanDecisionCount
+  ) {
+    errors.push({
+      code: 'too-many-human-decisions',
+      message: `requiresHumanDecision count must be <= ${MAX_LENGTHS.humanDecisionCount}`,
+      path: 'requiresHumanDecision',
+    });
   }
 
   // Validate intelligence
   if (!b.intelligence || typeof b.intelligence !== 'object') {
-    errors.push({ code: 'missing-intelligence', message: 'intelligence is required', path: 'intelligence' });
+    errors.push({
+      code: 'missing-intelligence',
+      message: 'intelligence is required',
+      path: 'intelligence',
+    });
   }
 
   // Validate warnings array
   if (b.warnings !== undefined && !Array.isArray(b.warnings)) {
-    errors.push({ code: 'invalid-warnings', message: 'warnings must be an array if provided', path: 'warnings' });
+    errors.push({
+      code: 'invalid-warnings',
+      message: 'warnings must be an array if provided',
+      path: 'warnings',
+    });
   }
 
   // Validate meta
@@ -688,13 +841,25 @@ export function validateCreativeBrief(
   } else {
     const meta = b.meta as Record<string, unknown>;
     if (typeof meta.generatedAt !== 'string') {
-      errors.push({ code: 'missing-generated-at', message: 'meta.generatedAt is required', path: 'meta.generatedAt' });
+      errors.push({
+        code: 'missing-generated-at',
+        message: 'meta.generatedAt is required',
+        path: 'meta.generatedAt',
+      });
     }
     if (typeof meta.modelAdapter !== 'string') {
-      errors.push({ code: 'missing-model-adapter', message: 'meta.modelAdapter is required', path: 'meta.modelAdapter' });
+      errors.push({
+        code: 'missing-model-adapter',
+        message: 'meta.modelAdapter is required',
+        path: 'meta.modelAdapter',
+      });
     }
     if (typeof meta.processingTimeMs !== 'number' || meta.processingTimeMs < 0) {
-      errors.push({ code: 'invalid-processing-time', message: 'meta.processingTimeMs must be a non-negative number', path: 'meta.processingTimeMs' });
+      errors.push({
+        code: 'invalid-processing-time',
+        message: 'meta.processingTimeMs must be a non-negative number',
+        path: 'meta.processingTimeMs',
+      });
     }
   }
 
@@ -706,7 +871,11 @@ export function validateCreativeBrief(
       if (typeof value === 'string') {
         for (const pattern of FORBIDDEN_PATTERNS) {
           if (pattern.test(value)) {
-            errors.push({ code: 'forbidden-pattern', message: `Forbidden pattern in ${currentPath}`, path: currentPath });
+            errors.push({
+              code: 'forbidden-pattern',
+              message: `Forbidden pattern in ${currentPath}`,
+              path: currentPath,
+            });
             break;
           }
         }
@@ -734,45 +903,106 @@ function validateRecommendation(
   const errors: { code: string; message: string; path?: string }[] = [];
 
   if (typeof rec.id !== 'string' || rec.id.trim() === '') {
-    errors.push({ code: 'invalid-recommendation-id', message: 'id is required', path: `${path}.id` });
+    errors.push({
+      code: 'invalid-recommendation-id',
+      message: 'id is required',
+      path: `${path}.id`,
+    });
   } else if (rec.id.length > MAX_LENGTHS.recommendationId) {
-    errors.push({ code: 'recommendation-id-too-long', message: `id must be <= ${MAX_LENGTHS.recommendationId} characters`, path: `${path}.id` });
+    errors.push({
+      code: 'recommendation-id-too-long',
+      message: `id must be <= ${MAX_LENGTHS.recommendationId} characters`,
+      path: `${path}.id`,
+    });
   }
 
-  if (typeof rec.kind !== 'string' || !RECOMMENDATION_KINDS.includes(rec.kind as RecommendationKind)) {
-    errors.push({ code: 'invalid-recommendation-kind', message: `kind must be one of: ${RECOMMENDATION_KINDS.join(', ')}`, path: `${path}.kind` });
+  if (
+    typeof rec.kind !== 'string' ||
+    !RECOMMENDATION_KINDS.includes(rec.kind as RecommendationKind)
+  ) {
+    errors.push({
+      code: 'invalid-recommendation-kind',
+      message: `kind must be one of: ${RECOMMENDATION_KINDS.join(', ')}`,
+      path: `${path}.kind`,
+    });
   }
 
   if (typeof rec.confidence !== 'string' || !['low', 'medium', 'high'].includes(rec.confidence)) {
-    errors.push({ code: 'invalid-confidence', message: 'confidence must be low, medium, or high', path: `${path}.confidence` });
+    errors.push({
+      code: 'invalid-confidence',
+      message: 'confidence must be low, medium, or high',
+      path: `${path}.confidence`,
+    });
   }
 
   if (!Array.isArray(rec.evidence)) {
-    errors.push({ code: 'invalid-evidence', message: 'evidence must be an array', path: `${path}.evidence` });
+    errors.push({
+      code: 'invalid-evidence',
+      message: 'evidence must be an array',
+      path: `${path}.evidence`,
+    });
   } else if (rec.evidence.length > MAX_LENGTHS.evidenceRefCount) {
-    errors.push({ code: 'too-much-evidence', message: `evidence count must be <= ${MAX_LENGTHS.evidenceRefCount}`, path: `${path}.evidence` });
+    errors.push({
+      code: 'too-much-evidence',
+      message: `evidence count must be <= ${MAX_LENGTHS.evidenceRefCount}`,
+      path: `${path}.evidence`,
+    });
   }
 
   if (typeof rec.rationale !== 'string' || rec.rationale.trim() === '') {
-    errors.push({ code: 'invalid-rationale', message: 'rationale is required', path: `${path}.rationale` });
+    errors.push({
+      code: 'invalid-rationale',
+      message: 'rationale is required',
+      path: `${path}.rationale`,
+    });
   } else if (rec.rationale.length > MAX_LENGTHS.rationale) {
-    errors.push({ code: 'rationale-too-long', message: `rationale must be <= ${MAX_LENGTHS.rationale} characters`, path: `${path}.rationale` });
+    errors.push({
+      code: 'rationale-too-long',
+      message: `rationale must be <= ${MAX_LENGTHS.rationale} characters`,
+      path: `${path}.rationale`,
+    });
   }
 
   if (typeof rec.expectedBenefit !== 'string' || rec.expectedBenefit.trim() === '') {
-    errors.push({ code: 'invalid-expected-benefit', message: 'expectedBenefit is required', path: `${path}.expectedBenefit` });
+    errors.push({
+      code: 'invalid-expected-benefit',
+      message: 'expectedBenefit is required',
+      path: `${path}.expectedBenefit`,
+    });
   } else if (rec.expectedBenefit.length > MAX_LENGTHS.expectedBenefit) {
-    errors.push({ code: 'expected-benefit-too-long', message: `expectedBenefit must be <= ${MAX_LENGTHS.expectedBenefit} characters`, path: `${path}.expectedBenefit` });
+    errors.push({
+      code: 'expected-benefit-too-long',
+      message: `expectedBenefit must be <= ${MAX_LENGTHS.expectedBenefit} characters`,
+      path: `${path}.expectedBenefit`,
+    });
   }
 
   if (rec.proposedIntent !== undefined && typeof rec.proposedIntent !== 'string') {
-    errors.push({ code: 'invalid-proposed-intent', message: 'proposedIntent must be a string if provided', path: `${path}.proposedIntent` });
-  } else if (typeof rec.proposedIntent === 'string' && rec.proposedIntent.length > MAX_LENGTHS.proposedIntent) {
-    errors.push({ code: 'proposed-intent-too-long', message: `proposedIntent must be <= ${MAX_LENGTHS.proposedIntent} characters`, path: `${path}.proposedIntent` });
+    errors.push({
+      code: 'invalid-proposed-intent',
+      message: 'proposedIntent must be a string if provided',
+      path: `${path}.proposedIntent`,
+    });
+  } else if (
+    typeof rec.proposedIntent === 'string' &&
+    rec.proposedIntent.length > MAX_LENGTHS.proposedIntent
+  ) {
+    errors.push({
+      code: 'proposed-intent-too-long',
+      message: `proposedIntent must be <= ${MAX_LENGTHS.proposedIntent} characters`,
+      path: `${path}.proposedIntent`,
+    });
   }
 
-  if (typeof rec.risk !== 'string' || !['none', 'reversible-local', 'destructive', 'remote-egress', 'spend'].includes(rec.risk)) {
-    errors.push({ code: 'invalid-risk', message: 'risk must be a valid risk classification', path: `${path}.risk` });
+  if (
+    typeof rec.risk !== 'string' ||
+    !['none', 'reversible-local', 'destructive', 'remote-egress', 'spend'].includes(rec.risk)
+  ) {
+    errors.push({
+      code: 'invalid-risk',
+      message: 'risk must be a valid risk classification',
+      path: `${path}.risk`,
+    });
   }
 
   if (!rec.scope || typeof rec.scope !== 'object') {
@@ -869,7 +1099,9 @@ export function createCreativeBrief(
   // Validate inputs
   const requestValidation = validateCreativeBriefRequest(input.request);
   if (!requestValidation.valid) {
-    throw new Error(`Invalid creative brief request: ${requestValidation.errors.map(e => e.message).join('; ')}`);
+    throw new Error(
+      `Invalid creative brief request: ${requestValidation.errors.map((e) => e.message).join('; ')}`,
+    );
   }
 
   // Validate snapshot revision parity
@@ -903,7 +1135,9 @@ export function createCreativeBrief(
   try {
     adapterOutput = adapter.createBrief(adapterInput);
   } catch (error) {
-    throw new Error(`Model adapter failed: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Model adapter failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 
   // Validate adapter output structure - reject malformed, unsafe, excessive, empty-invalid
@@ -941,14 +1175,19 @@ export function createCreativeBrief(
   if (adapterOutput.blockedBy !== undefined && !Array.isArray(adapterOutput.blockedBy)) {
     throw new Error('Model adapter output blockedBy must be an array if provided');
   }
-  if (adapterOutput.requiresHumanDecision !== undefined && !Array.isArray(adapterOutput.requiresHumanDecision)) {
+  if (
+    adapterOutput.requiresHumanDecision !== undefined &&
+    !Array.isArray(adapterOutput.requiresHumanDecision)
+  ) {
     throw new Error('Model adapter output requiresHumanDecision must be an array if provided');
   }
 
   // Check for forbidden patterns in adapter output
   const adapterErrors = deepCheckForbiddenPatterns(adapterOutput);
   if (adapterErrors.length > 0) {
-    throw new Error(`Model adapter output contains forbidden patterns: ${adapterErrors.join('; ')}`);
+    throw new Error(
+      `Model adapter output contains forbidden patterns: ${adapterErrors.join('; ')}`,
+    );
   }
 
   // Use adapter output directly (already properly typed by ModelAdapterOutputV1)
@@ -963,17 +1202,22 @@ export function createCreativeBrief(
 
   // Verify all evidence references in recommendations point to valid snapshot data
   // Build evidence warnings immutably using reduce
-  const evidenceWarnings = output.recommendations.reduce<CreativeBriefV1['warnings']>((acc, rec) => {
-    const invalidEvidence = rec.evidence.filter(ev => !validateEvidenceReference(ev, input.snapshot));
-    return [
-      ...acc,
-      ...invalidEvidence.map(ev => ({
-        code: 'invalid-evidence-reference',
-        message: `Recommendation ${rec.id} references invalid evidence: ${ev.id}`,
-        severity: 'error' as const,
-      })),
-    ];
-  }, []);
+  const evidenceWarnings = output.recommendations.reduce<CreativeBriefV1['warnings']>(
+    (acc, rec) => {
+      const invalidEvidence = rec.evidence.filter(
+        (ev) => !validateEvidenceReference(ev, input.snapshot),
+      );
+      return [
+        ...acc,
+        ...invalidEvidence.map((ev) => ({
+          code: 'invalid-evidence-reference',
+          message: `Recommendation ${rec.id} references invalid evidence: ${ev.id}`,
+          severity: 'error' as const,
+        })),
+      ];
+    },
+    [],
+  );
 
   // Build the creative brief
   const brief: CreativeBriefV1 = {
@@ -1012,7 +1256,9 @@ export function createCreativeBrief(
   // Final validation of the complete brief
   const finalValidation = validateCreativeBrief(brief);
   if (!finalValidation.valid) {
-    throw new Error(`Final validation failed: ${finalValidation.errors.map(e => e.message).join('; ')}`);
+    throw new Error(
+      `Final validation failed: ${finalValidation.errors.map((e) => e.message).join('; ')}`,
+    );
   }
 
   return brief;
@@ -1028,7 +1274,13 @@ function validateEvidenceReference(
 ): boolean {
   // Check if the reference kind is valid
   const validKinds: EvidenceRefV1['kind'][] = [
-    'composition', 'track', 'clip', 'asset', 'visual-object', 'caption', 'marker',
+    'composition',
+    'track',
+    'clip',
+    'asset',
+    'visual-object',
+    'caption',
+    'marker',
   ];
   if (!validKinds.includes(ref.kind)) {
     return false;
@@ -1038,42 +1290,41 @@ function validateEvidenceReference(
   switch (ref.kind) {
     case 'composition':
       // Composition references are valid if they match projectId or other composition-level IDs
-      return ref.id === snapshot.projectId ||
+      return (
+        ref.id === snapshot.projectId ||
         ref.id === snapshot.composition.aspectRatio ||
-        ref.id === snapshot.composition.durationUs.toString();
+        ref.id === snapshot.composition.durationUs.toString()
+      );
 
     case 'track':
       // Check if track exists in snapshot
-      return snapshot.timeline?.visualRowIds?.includes(ref.id) ||
+      return (
+        snapshot.timeline?.visualRowIds?.includes(ref.id) ||
         snapshot.timeline?.audioRowIds?.includes(ref.id) ||
-        ref.id === snapshot.projectId;
+        ref.id === snapshot.projectId
+      );
 
     case 'clip':
       // Check if clip exists in any scene
-      return snapshot.scenes.some(scene =>
-        scene.elements.some(el => el.id === ref.id)
-      );
+      return snapshot.scenes.some((scene) => scene.elements.some((el) => el.id === ref.id));
 
     case 'asset':
       // Check if asset exists
-      return snapshot.assets.some(a => a.id === ref.id);
+      return snapshot.assets.some((a) => a.id === ref.id);
 
     case 'visual-object':
       // Visual objects are referenced by ID in elements
-      return snapshot.scenes.some(scene =>
-        scene.elements.some(el => el.id === ref.id)
-      );
+      return snapshot.scenes.some((scene) => scene.elements.some((el) => el.id === ref.id));
 
     case 'caption':
       // Check caption documents
-      return snapshot.scenes.some(scene =>
-        scene.captionCoverage?.locale === ref.id ||
-        scene.id === ref.id
+      return snapshot.scenes.some(
+        (scene) => scene.captionCoverage?.locale === ref.id || scene.id === ref.id,
       );
 
     case 'marker':
       // Scene markers
-      return snapshot.scenes.some(scene => scene.id === ref.id);
+      return snapshot.scenes.some((scene) => scene.id === ref.id);
 
     default:
       return false;

@@ -9,6 +9,11 @@
  */
 
 import type { ModelAdapterInputV1, ModelAdapterOutputV1 } from './model-adapter.js';
+import type {
+  RecommendationKind,
+  InferenceConfidence,
+  RecommendationRisk,
+} from './creative-brief.js';
 
 // ==========================================================================
 // Async Runtime Contract Types
@@ -19,13 +24,13 @@ import type { ModelAdapterInputV1, ModelAdapterOutputV1 } from './model-adapter.
  * Used for typed error handling and audit logging.
  */
 export type AsyncOutcomeCategory =
-  | 'ready'           // Model call succeeded and returned valid output
-  | 'unavailable'     // Provider is not configured or healthy
-  | 'policy-denied'   // Request denied by server policy (opt-in, ownership, auth)
-  | 'invalid-output'  // Model returned output that failed S3 validation
-  | 'provider-failed'  // Provider returned an error (rate limit, auth, internal)
-  | 'timeout'         // Request exceeded timeoutMs
-  | 'cancelled';       // Request was aborted via AbortSignal
+  | 'ready' // Model call succeeded and returned valid output
+  | 'unavailable' // Provider is not configured or healthy
+  | 'policy-denied' // Request denied by server policy (opt-in, ownership, auth)
+  | 'invalid-output' // Model returned output that failed S3 validation
+  | 'provider-failed' // Provider returned an error (rate limit, auth, internal)
+  | 'timeout' // Request exceeded timeoutMs
+  | 'cancelled'; // Request was aborted via AbortSignal
 
 /**
  * Detailed outcome with category and optional metadata.
@@ -148,13 +153,13 @@ export interface AsyncCreativeModelAdapter {
  * These modes are deterministic and produce stable outputs for the same inputs.
  */
 export type FakeAsyncAdapterMode =
-  | 'valid'               // Well-formed, deterministic valid output
-  | 'unavailable'         // Provider not configured/healthy
-  | 'policy-denied'      // Policy rejection (not opted-in, not owner)
-  | 'invalid-output'     // Output that would fail S3 validation
-  | 'provider-failed'    // Provider returned an error
-  | 'timeout'            // Simulate timeout (when timeoutMs is small)
-  | 'cancelled';          // Simulate cancellation (when signal is aborted)
+  | 'valid' // Well-formed, deterministic valid output
+  | 'unavailable' // Provider not configured/healthy
+  | 'policy-denied' // Policy rejection (not opted-in, not owner)
+  | 'invalid-output' // Output that would fail S3 validation
+  | 'provider-failed' // Provider returned an error
+  | 'timeout' // Simulate timeout (when timeoutMs is small)
+  | 'cancelled'; // Simulate cancellation (when signal is aborted)
 
 /**
  * Configuration for creating a test-only async fake adapter.
@@ -185,11 +190,7 @@ const DEFAULT_FAKE_ASYNC_CONFIG: FakeAsyncAdapterConfig = {
  * Deterministic ID generator using seed.
  * Produces stable IDs for the same seed and index.
  */
-function generateDeterministicIdAsync(
-  seed: number,
-  prefix: string,
-  index: number,
-): string {
+function generateDeterministicIdAsync(seed: number, prefix: string, index: number): string {
   const combined = `${seed}-${prefix}-${index}`;
   let hash = 0;
   for (let i = 0; i < combined.length; i++) {
@@ -211,7 +212,7 @@ function toCreativeEvidenceAsync(
   refs: readonly EvidenceRefV1[],
   detail?: string,
 ): readonly CreativeEvidenceRefV1[] {
-  return refs.map(ref => ({
+  return refs.map((ref) => ({
     ...ref,
     detail,
     s3Detail: detail,
@@ -225,8 +226,6 @@ function toCreativeEvidenceAsync(
 import type {
   SemanticProjectSnapshotV1,
   SceneCoverageV1,
-  BrandReadinessV1,
-  ProjectReadinessV1,
   IntelligenceRuleV1,
 } from '@joy-media/project-schema';
 
@@ -286,8 +285,6 @@ class BaseFakeAsyncModelAdapter implements AsyncCreativeModelAdapter {
     options: AsyncAdapterOptions,
   ): Promise<AsyncOutcome<ModelAdapterOutputV1>> {
     const startTime = Date.now();
-    const seed = this.config.seed ?? 42;
-
     // Check for cancellation before doing any work
     if (options.signal?.aborted) {
       return {
@@ -492,21 +489,19 @@ class BaseFakeAsyncModelAdapter implements AsyncCreativeModelAdapter {
       5,
     );
 
-    const sceneIds = input.snapshot.scenes.map(s => s.id);
-    const primarySceneId = sceneIds[0] ?? 'unknown';
-    const allSceneIds: readonly string[] | undefined =
-      sceneIds.length > 0 ? sceneIds : undefined;
+    const sceneIds = input.snapshot.scenes.map((s) => s.id);
+    const allSceneIds: readonly string[] | undefined = sceneIds.length > 0 ? sceneIds : undefined;
 
     // Generate deterministic recommendations
     const recommendations = [] as Array<{
       id: string;
-      kind: import('./creative-brief.js').RecommendationKind;
-      confidence: import('./creative-brief.js').InferenceConfidence;
+      kind: RecommendationKind;
+      confidence: InferenceConfidence;
       evidence: readonly CreativeEvidenceRefV1[];
       rationale: string;
       expectedBenefit: string;
       proposedIntent?: string;
-      risk: import('./creative-brief.js').RecommendationRisk;
+      risk: RecommendationRisk;
       scope: {
         sceneIds?: readonly string[];
         startUs?: number;
@@ -530,8 +525,7 @@ class BaseFakeAsyncModelAdapter implements AsyncCreativeModelAdapter {
           ...(input.snapshot.scenes[0]?.startUs !== undefined && {
             startUs: input.snapshot.scenes[0]!.startUs,
           }),
-          ...(input.snapshot.scenes[input.snapshot.scenes.length - 1]?.endUs !==
-            undefined && {
+          ...(input.snapshot.scenes[input.snapshot.scenes.length - 1]?.endUs !== undefined && {
             endUs: input.snapshot.scenes[input.snapshot.scenes.length - 1]!.endUs,
           }),
         },
@@ -625,9 +619,7 @@ export function createFakeAsyncModelAdapter(
  * Produces well-formed, deterministic creative briefs asynchronously.
  * This function is NOT exported from the package root.
  */
-export function createValidFakeAsyncAdapter(
-  seed: number = 42,
-): AsyncCreativeModelAdapter {
+export function createValidFakeAsyncAdapter(seed: number = 42): AsyncCreativeModelAdapter {
   return createFakeAsyncModelAdapter({
     mode: 'valid',
     seed,
@@ -640,8 +632,7 @@ export function createValidFakeAsyncAdapter(
  * Create an unavailable async fake adapter for testing.
  * This function is NOT exported from the package root.
  */
-export function createUnavailableFakeAsyncAdapter():
-  AsyncCreativeModelAdapter {
+export function createUnavailableFakeAsyncAdapter(): AsyncCreativeModelAdapter {
   return createFakeAsyncModelAdapter({ mode: 'unavailable' });
 }
 
@@ -649,8 +640,7 @@ export function createUnavailableFakeAsyncAdapter():
  * Create a policy-denied async fake adapter for testing.
  * This function is NOT exported from the package root.
  */
-export function createPolicyDeniedFakeAsyncAdapter():
-  AsyncCreativeModelAdapter {
+export function createPolicyDeniedFakeAsyncAdapter(): AsyncCreativeModelAdapter {
   return createFakeAsyncModelAdapter({ mode: 'policy-denied' });
 }
 
@@ -658,8 +648,7 @@ export function createPolicyDeniedFakeAsyncAdapter():
  * Create an invalid-output async fake adapter for testing.
  * This function is NOT exported from the package root.
  */
-export function createInvalidOutputFakeAsyncAdapter():
-  AsyncCreativeModelAdapter {
+export function createInvalidOutputFakeAsyncAdapter(): AsyncCreativeModelAdapter {
   return createFakeAsyncModelAdapter({ mode: 'invalid-output' });
 }
 
@@ -667,8 +656,7 @@ export function createInvalidOutputFakeAsyncAdapter():
  * Create a provider-failed async fake adapter for testing.
  * This function is NOT exported from the package root.
  */
-export function createProviderFailedFakeAsyncAdapter():
-  AsyncCreativeModelAdapter {
+export function createProviderFailedFakeAsyncAdapter(): AsyncCreativeModelAdapter {
   return createFakeAsyncModelAdapter({ mode: 'provider-failed' });
 }
 
@@ -676,8 +664,7 @@ export function createProviderFailedFakeAsyncAdapter():
  * Create a timeout async fake adapter for testing.
  * This function is NOT exported from the package root.
  */
-export function createTimeoutFakeAsyncAdapter():
-  AsyncCreativeModelAdapter {
+export function createTimeoutFakeAsyncAdapter(): AsyncCreativeModelAdapter {
   return createFakeAsyncModelAdapter({ mode: 'timeout', responseDelayMs: 100 });
 }
 
@@ -685,7 +672,6 @@ export function createTimeoutFakeAsyncAdapter():
  * Create a cancelled async fake adapter for testing.
  * This function is NOT exported from the package root.
  */
-export function createCancelledFakeAsyncAdapter():
-  AsyncCreativeModelAdapter {
+export function createCancelledFakeAsyncAdapter(): AsyncCreativeModelAdapter {
   return createFakeAsyncModelAdapter({ mode: 'cancelled' });
 }

@@ -6,18 +6,13 @@
  * No network, no real provider, no credentials, no timeouts.
  */
 
-import type {
-  SemanticProjectSnapshotV1,
-  EvidenceRefV1,
-  SceneSummaryV1,
-} from '@joy-media/project-schema';
+import type { SemanticProjectSnapshotV1, EvidenceRefV1 } from '@joy-media/project-schema';
 
 import type {
   BrandReadinessV1,
   SceneCoverageV1,
   ProjectReadinessV1,
   IntelligenceRuleV1,
-  IntelligenceEvidenceRefV1,
 } from '@joy-media/project-schema';
 
 import type {
@@ -152,12 +147,12 @@ export interface CreativeModelAdapter {
 
 /** Mode for the fake adapter to produce different types of output */
 export type FakeAdapterMode =
-  | 'valid'              // Well-formed, deterministic output
-  | 'malformed'          // Intentionally invalid output (missing fields, wrong types)
-  | 'unsafe'             // Output with forbidden patterns (secrets, paths, URLs)
-  | 'excessive'          // Oversized arrays/strings to test boundary validation
-  | 'empty'              // Minimal/empty brief
-  | 'failure';           // Throws an error
+  | 'valid' // Well-formed, deterministic output
+  | 'malformed' // Intentionally invalid output (missing fields, wrong types)
+  | 'unsafe' // Output with forbidden patterns (secrets, paths, URLs)
+  | 'excessive' // Oversized arrays/strings to test boundary validation
+  | 'empty' // Minimal/empty brief
+  | 'failure'; // Throws an error
 
 /** Configuration for creating a fake adapter */
 export interface FakeAdapterConfig {
@@ -246,7 +241,7 @@ function toCreativeEvidence(
   refs: readonly EvidenceRefV1[],
   s3Detail?: string,
 ): readonly CreativeEvidenceRefV1[] {
-  return refs.map(ref => ({
+  return refs.map((ref) => ({
     ...ref,
     detail: s3Detail,
     s3Detail,
@@ -297,15 +292,9 @@ class BaseFakeModelAdapter implements CreativeModelAdapter {
    */
   private createValidBrief(input: ModelAdapterInputV1): ModelAdapterOutputV1 {
     const seed = this.config.seed ?? 42;
-    const evidence = extractValidEvidence(
-      input.snapshot,
-      input.sceneCoverages,
-      input.rules,
-      5,
-    );
+    const evidence = extractValidEvidence(input.snapshot, input.sceneCoverages, input.rules, 5);
 
-    const sceneIds = input.snapshot.scenes.map(s => s.id);
-    const primarySceneId = sceneIds[0] ?? 'unknown';
+    const sceneIds = input.snapshot.scenes.map((s) => s.id);
     const allSceneIds: readonly string[] | undefined = sceneIds.length > 0 ? sceneIds : undefined;
 
     // Generate deterministic recommendations based on snapshot analysis
@@ -333,20 +322,25 @@ class BaseFakeModelAdapter implements CreativeModelAdapter {
         kind: 'pacing',
         confidence: 'high' as const,
         evidence: toCreativeEvidence(evidence.slice(0, 2), 'pacing-analysis'),
-        rationale: 'Scene transitions could benefit from tighter pacing to maintain viewer engagement',
+        rationale:
+          'Scene transitions could benefit from tighter pacing to maintain viewer engagement',
         expectedBenefit: 'Improved viewer retention through optimized scene timing',
         proposedIntent: 'adjust-scene-pacing',
         risk: 'reversible-local' as const,
         scope: {
           ...(allSceneIds !== undefined && { sceneIds: allSceneIds }),
-          ...(input.snapshot.scenes[0]?.startUs !== undefined && { startUs: input.snapshot.scenes[0]!.startUs }),
-          ...(input.snapshot.scenes[input.snapshot.scenes.length - 1]?.endUs !== undefined && { endUs: input.snapshot.scenes[input.snapshot.scenes.length - 1]!.endUs }),
+          ...(input.snapshot.scenes[0]?.startUs !== undefined && {
+            startUs: input.snapshot.scenes[0]!.startUs,
+          }),
+          ...(input.snapshot.scenes[input.snapshot.scenes.length - 1]?.endUs !== undefined && {
+            endUs: input.snapshot.scenes[input.snapshot.scenes.length - 1]!.endUs,
+          }),
         } as ModelAdapterOutputV1['recommendations'][number]['scope'],
       });
     }
 
     // Caption recommendation
-    if (input.sceneCoverages.some(s => !s.hasCaptions)) {
+    if (input.sceneCoverages.some((s) => !s.hasCaptions)) {
       recommendations.push({
         id: generateDeterministicId(seed, 'caption', 0),
         kind: 'caption',
@@ -363,13 +357,16 @@ class BaseFakeModelAdapter implements CreativeModelAdapter {
     }
 
     // Visual coverage recommendation
-    if (input.sceneCoverages.some(s => s.visualDensity === 'sparse' || s.visualDensity === 'none')) {
+    if (
+      input.sceneCoverages.some((s) => s.visualDensity === 'sparse' || s.visualDensity === 'none')
+    ) {
       recommendations.push({
         id: generateDeterministicId(seed, 'visual-coverage', 0),
         kind: 'visual-coverage',
         confidence: 'medium' as const,
         evidence: toCreativeEvidence(evidence.slice(0, 2), 'visual-coverage-analysis'),
-        rationale: 'Some scenes have sparse or no visual coverage which may reduce viewer engagement',
+        rationale:
+          'Some scenes have sparse or no visual coverage which may reduce viewer engagement',
         expectedBenefit: 'Enhanced visual interest and information density',
         proposedIntent: 'add-visual-broll',
         risk: 'reversible-local' as const,
@@ -649,7 +646,8 @@ class BaseFakeModelAdapter implements CreativeModelAdapter {
         elementIds?: readonly string[];
       };
     }>;
-    for (let i = 0; i < 25; i++) { // More than max of 20
+    for (let i = 0; i < 25; i++) {
+      // More than max of 20
       recommendations.push({
         id: generateDeterministicId(seed, 'rec', i),
         kind: 'pacing',
@@ -672,7 +670,8 @@ class BaseFakeModelAdapter implements CreativeModelAdapter {
       evidence: readonly CreativeEvidenceRefV1[];
       verified: boolean;
     }>;
-    for (let i = 0; i < 15; i++) { // More than max of 10
+    for (let i = 0; i < 15; i++) {
+      // More than max of 10
       assumptions.push({
         id: generateDeterministicId(seed, 'assumption', i),
         statement: 'D'.repeat(600), // Exceeds max of 500
@@ -689,7 +688,8 @@ class BaseFakeModelAdapter implements CreativeModelAdapter {
       message: string;
       evidence: readonly CreativeEvidenceRefV1[];
     }>;
-    for (let i = 0; i < 15; i++) { // More than max of 10
+    for (let i = 0; i < 15; i++) {
+      // More than max of 10
       blockedBy.push({
         id: generateDeterministicId(seed, 'blocker', i),
         capability: 'E'.repeat(150), // Exceeds max of 100
@@ -706,7 +706,8 @@ class BaseFakeModelAdapter implements CreativeModelAdapter {
       options: readonly string[];
       evidence: readonly CreativeEvidenceRefV1[];
     }>;
-    for (let i = 0; i < 15; i++) { // More than max of 10
+    for (let i = 0; i < 15; i++) {
+      // More than max of 10
       humanDecisions.push({
         id: generateDeterministicId(seed, 'decision', i),
         question: 'G'.repeat(600), // Exceeds max of 500
@@ -779,9 +780,7 @@ export function createFakeModelAdapter(
  * Create a valid fake adapter (default mode).
  * This produces well-formed, deterministic creative briefs.
  */
-export function createValidFakeAdapter(
-  seed: number = 42,
-): CreativeModelAdapter {
+export function createValidFakeAdapter(seed: number = 42): CreativeModelAdapter {
   return createFakeModelAdapter({
     mode: 'valid',
     seed,
@@ -843,12 +842,16 @@ export function isModelAdapterInputV1(value: unknown): value is ModelAdapterInpu
   const input = value as Record<string, unknown>;
 
   return (
-    typeof input.snapshot === 'object' && input.snapshot !== null &&
-    typeof input.brandReadiness === 'object' && input.brandReadiness !== null &&
+    typeof input.snapshot === 'object' &&
+    input.snapshot !== null &&
+    typeof input.brandReadiness === 'object' &&
+    input.brandReadiness !== null &&
     Array.isArray(input.sceneCoverages) &&
-    typeof input.projectReadiness === 'object' && input.projectReadiness !== null &&
+    typeof input.projectReadiness === 'object' &&
+    input.projectReadiness !== null &&
     Array.isArray(input.rules) &&
-    typeof input.request === 'object' && input.request !== null
+    typeof input.request === 'object' &&
+    input.request !== null
   );
 }
 
@@ -861,8 +864,10 @@ export function isModelAdapterOutputV1(value: unknown): value is ModelAdapterOut
   const output = value as Record<string, unknown>;
 
   return (
-    typeof output.interpretedGoal === 'object' && output.interpretedGoal !== null &&
-    typeof output.distinction === 'object' && output.distinction !== null &&
+    typeof output.interpretedGoal === 'object' &&
+    output.interpretedGoal !== null &&
+    typeof output.distinction === 'object' &&
+    output.distinction !== null &&
     Array.isArray(output.assumptions) &&
     Array.isArray(output.recommendations) &&
     Array.isArray(output.blockedBy) &&

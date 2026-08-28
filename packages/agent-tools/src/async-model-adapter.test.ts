@@ -220,9 +220,7 @@ function createTestInput(): ModelAdapterInputV1 {
 /**
  * Create minimal async adapter options.
  */
-function createTestOptions(
-  overrides: Partial<AsyncAdapterOptions> = {},
-): AsyncAdapterOptions {
+function createTestOptions(overrides: Partial<AsyncAdapterOptions> = {}): AsyncAdapterOptions {
   return {
     correlationId: 'test-correlation-id',
     ...overrides,
@@ -297,8 +295,19 @@ describe('Async Model Adapter - Types and Interfaces', () => {
     const errorOutcomes: AsyncOutcome[] = [
       { category: 'unavailable', message: 'Not configured', retryable: true, durationMs: 5 },
       { category: 'policy-denied', message: 'Not allowed', retryable: false, durationMs: 0 },
-      { category: 'invalid-output', message: 'Validation failed', retryable: false, durationMs: 10 },
-      { category: 'provider-failed', message: 'API error', errorCode: 'API_ERROR', retryable: true, durationMs: 15 },
+      {
+        category: 'invalid-output',
+        message: 'Validation failed',
+        retryable: false,
+        durationMs: 10,
+      },
+      {
+        category: 'provider-failed',
+        message: 'API error',
+        errorCode: 'API_ERROR',
+        retryable: true,
+        durationMs: 15,
+      },
       { category: 'timeout', message: 'Timed out', retryable: true, durationMs: 30000 },
       { category: 'cancelled', message: 'Aborted', retryable: false, durationMs: 50 },
     ];
@@ -611,7 +620,7 @@ describe('Async Model Adapter - Audit Events', () => {
     await adapter.createBrief(input, options);
 
     expect(auditSink.events.length).toBeGreaterThanOrEqual(1);
-    const startEvent = auditSink.events.find(e => e.eventType === 'start');
+    const startEvent = auditSink.events.find((e) => e.eventType === 'start');
     expect(startEvent).toBeDefined();
     expect(startEvent!.correlationId).toBe('test-audit-valid');
     expect(startEvent!.adapterName).toContain('fake-async-valid');
@@ -629,7 +638,7 @@ describe('Async Model Adapter - Audit Events', () => {
 
     await adapter.createBrief(input, options);
 
-    const endEvent = auditSink.events.find(e => e.eventType === 'end');
+    const endEvent = auditSink.events.find((e) => e.eventType === 'end');
     expect(endEvent).toBeDefined();
     expect(endEvent!.status).toBe('ready');
     expect(endEvent!.durationMs).toBeGreaterThanOrEqual(0);
@@ -646,7 +655,7 @@ describe('Async Model Adapter - Audit Events', () => {
 
     await adapter.createBrief(input, options);
 
-    const errorEvent = auditSink.events.find(e => e.eventType === 'error');
+    const errorEvent = auditSink.events.find((e) => e.eventType === 'error');
     expect(errorEvent).toBeDefined();
     expect(errorEvent!.status).toBe('unavailable');
     expect(errorEvent!.errorCode).toBe('ADAPTER_NOT_CONFIGURED');
@@ -683,7 +692,7 @@ describe('Async Model Adapter - Audit Events', () => {
 
     await adapter.createBrief(input, options);
 
-    const endEvent = auditSink.events.find(e => e.eventType === 'end');
+    const endEvent = auditSink.events.find((e) => e.eventType === 'end');
     expect(endEvent).toBeDefined();
     expect(endEvent!.durationMs).toBeDefined();
     expect(endEvent!.durationMs!).toBeGreaterThanOrEqual(0);

@@ -390,6 +390,7 @@ export interface TimelineTrackView {
   readonly locked: boolean;
   readonly visible: boolean;
   readonly solo: boolean;
+  readonly muted?: boolean;
 }
 export function virtualTracks(
   tracks: readonly TimelineTrackView[],
@@ -405,7 +406,7 @@ export function virtualTracks(
 }
 export function toggleTrackFlag(
   track: TimelineTrackView,
-  flag: 'locked' | 'visible' | 'solo',
+  flag: 'locked' | 'visible' | 'solo' | 'muted',
 ): TimelineTrackView {
   return { ...track, [flag]: !track[flag] };
 }

@@ -32,6 +32,22 @@ const BASELINE_MIGRATION: PostgresMigration = {
 };
 
 async function repairAssetRevocationPrimaryKey(database: MigrationDatabase): Promise<void> {
+  // The current JOY Media schema does not create the historical revocation
+  // audit table. Only repair it when it exists on a legacy installation;
+  // otherwise a fresh install must not fail while altering a missing table.
+  let tableExists = false;
+  try {
+    const result = await database.query<{ readonly exists: boolean }>(
+      "SELECT to_regclass('public.asset_revocation_audits') IS NOT NULL AS exists",
+    );
+    tableExists = result.rows[0]?.exists === true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/to_regclass|unsupported|pg_catalog/iu.test(message)) return;
+    throw error;
+  }
+  if (!tableExists) return;
+
   // A legacy installation may have a composite primary key and rows created
   // before revoke_id existed. Allocate IDs before adding the new constraint.
   try {

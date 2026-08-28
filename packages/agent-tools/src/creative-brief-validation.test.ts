@@ -45,9 +45,7 @@ function createValidRequest(
   };
 }
 
-function createValidBrief(
-  overrides: Partial<CreativeBriefV1> = {},
-): CreativeBriefV1 {
+function createValidBrief(overrides: Partial<CreativeBriefV1> = {}): CreativeBriefV1 {
   return {
     schemaVersion: 1,
     snapshotRevisionId: MINIMAL_REVISION_ID,
@@ -182,7 +180,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'unknown-field')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'unknown-field')).toBe(true);
     });
 
     it('rejects request with command payload field', () => {
@@ -192,7 +190,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'unknown-field')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'unknown-field')).toBe(true);
     });
   });
 
@@ -203,7 +201,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'invalid-scope')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'invalid-scope')).toBe(true);
     });
 
     it('accepts all valid scopes', () => {
@@ -222,7 +220,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'invalid-destination')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'invalid-destination')).toBe(true);
     });
 
     it('accepts all valid destinations', () => {
@@ -241,7 +239,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'invalid-recommendation-kind')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'invalid-recommendation-kind')).toBe(true);
     });
 
     it('accepts all valid recommendation kinds', () => {
@@ -260,7 +258,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.field === 'snapshotRevisionId')).toBe(true);
+      expect(result.errors.some((e) => e.field === 'snapshotRevisionId')).toBe(true);
     });
 
     it('rejects empty projectId', () => {
@@ -269,7 +267,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.field === 'projectId')).toBe(true);
+      expect(result.errors.some((e) => e.field === 'projectId')).toBe(true);
     });
 
     it('rejects empty request', () => {
@@ -278,7 +276,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.field === 'request')).toBe(true);
+      expect(result.errors.some((e) => e.field === 'request')).toBe(true);
     });
 
     it('rejects negative durationTargetUs', () => {
@@ -287,7 +285,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'invalid-duration')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'invalid-duration')).toBe(true);
     });
 
     it('rejects zero maxRecommendations', () => {
@@ -296,7 +294,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'invalid-max-recommendations')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'invalid-max-recommendations')).toBe(true);
     });
 
     it('rejects maxRecommendations exceeding limit', () => {
@@ -305,7 +303,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'invalid-max-recommendations')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'invalid-max-recommendations')).toBe(true);
     });
   });
 
@@ -316,7 +314,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'request-too-long')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'request-too-long')).toBe(true);
     });
 
     it('rejects brief exceeding max length', () => {
@@ -325,7 +323,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'brief-too-long')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'brief-too-long')).toBe(true);
     });
 
     // Note: allowedRecommendationKinds length validation is not implemented in the validator
@@ -340,7 +338,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'forbidden-pattern')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'forbidden-pattern')).toBe(true);
     });
 
     it('rejects tool call payload with path', () => {
@@ -350,7 +348,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'forbidden-pattern')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'forbidden-pattern')).toBe(true);
     });
   });
 
@@ -361,7 +359,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'forbidden-pattern')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'forbidden-pattern')).toBe(true);
     });
 
     it('rejects Stripe key pattern', () => {
@@ -370,17 +368,18 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'forbidden-pattern')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'forbidden-pattern')).toBe(true);
     });
 
     it('rejects Bearer token', () => {
       // Use a full JWT token with 3 dot-separated parts
       const request = createValidRequest({
-        request: 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2MzQ1Njc4OTl9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c',
+        request:
+          'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2MzQ1Njc4OTl9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c',
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'forbidden-pattern')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'forbidden-pattern')).toBe(true);
     });
 
     it('rejects AWS access key', () => {
@@ -389,7 +388,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'forbidden-pattern')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'forbidden-pattern')).toBe(true);
     });
 
     it('rejects S3 URL', () => {
@@ -398,7 +397,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'forbidden-pattern')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'forbidden-pattern')).toBe(true);
     });
 
     it('rejects HTTPS URL', () => {
@@ -407,7 +406,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'forbidden-pattern')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'forbidden-pattern')).toBe(true);
     });
 
     it('rejects Unix filesystem path', () => {
@@ -416,7 +415,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'forbidden-pattern')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'forbidden-pattern')).toBe(true);
     });
 
     it('rejects Unix filesystem path', () => {
@@ -425,7 +424,7 @@ describe('validateCreativeBriefRequest', () => {
       });
       const result = validateCreativeBriefRequest(request);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'forbidden-pattern')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'forbidden-pattern')).toBe(true);
     });
   });
 
@@ -563,7 +562,7 @@ describe('validateCreativeBrief', () => {
       });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'invalid-evidence')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'invalid-evidence')).toBe(true);
     });
 
     it('rejects recommendation with empty evidence array exceeding limit', () => {
@@ -588,7 +587,7 @@ describe('validateCreativeBrief', () => {
       });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'too-much-evidence')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'too-much-evidence')).toBe(true);
     });
 
     it('rejects recommendation with empty id', () => {
@@ -608,7 +607,7 @@ describe('validateCreativeBrief', () => {
       });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'invalid-recommendation-id')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'invalid-recommendation-id')).toBe(true);
     });
 
     it('rejects recommendation with invalid kind', () => {
@@ -628,7 +627,7 @@ describe('validateCreativeBrief', () => {
       });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'invalid-recommendation-kind')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'invalid-recommendation-kind')).toBe(true);
     });
 
     it('rejects recommendation with invalid confidence', () => {
@@ -649,7 +648,7 @@ describe('validateCreativeBrief', () => {
       });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'invalid-confidence')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'invalid-confidence')).toBe(true);
     });
 
     it('rejects recommendation with invalid risk', () => {
@@ -670,7 +669,7 @@ describe('validateCreativeBrief', () => {
       });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'invalid-risk')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'invalid-risk')).toBe(true);
     });
 
     it('rejects recommendation with missing scope', () => {
@@ -689,7 +688,7 @@ describe('validateCreativeBrief', () => {
       });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'invalid-scope')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'invalid-scope')).toBe(true);
     });
   });
 
@@ -697,11 +696,15 @@ describe('validateCreativeBrief', () => {
     it('accepts brief with facts and inferences', () => {
       const brief = createValidBrief({
         distinction: {
-          facts: [
-            { id: 'fact-1', statement: 'Project has 3 scenes', source: 's1', evidence: [] },
-          ],
+          facts: [{ id: 'fact-1', statement: 'Project has 3 scenes', source: 's1', evidence: [] }],
           inferences: [
-            { id: 'inf-1', statement: 'Project needs more visuals', confidence: 'medium', rationale: 'Low visual coverage', evidence: [] },
+            {
+              id: 'inf-1',
+              statement: 'Project needs more visuals',
+              confidence: 'medium',
+              rationale: 'Low visual coverage',
+              evidence: [],
+            },
           ],
         },
       });
@@ -712,9 +715,7 @@ describe('validateCreativeBrief', () => {
     it('validates that facts have required structure', () => {
       const brief = createValidBrief({
         distinction: {
-          facts: [
-            { id: 'fact-1', statement: 'Valid fact', source: 's1', evidence: [] },
-          ],
+          facts: [{ id: 'fact-1', statement: 'Valid fact', source: 's1', evidence: [] }],
           inferences: [],
         },
       });
@@ -727,7 +728,13 @@ describe('validateCreativeBrief', () => {
         distinction: {
           facts: [],
           inferences: [
-            { id: 'inf-1', statement: 'Valid inference', confidence: 'medium', rationale: 'reason', evidence: [] },
+            {
+              id: 'inf-1',
+              statement: 'Valid inference',
+              confidence: 'medium',
+              rationale: 'reason',
+              evidence: [],
+            },
           ],
         },
       });
@@ -739,10 +746,21 @@ describe('validateCreativeBrief', () => {
       const brief = createValidBrief({
         distinction: {
           facts: [
-            { id: 'fact-1', statement: 'Fact without confidence/rationale', source: 's1', evidence: [] },
+            {
+              id: 'fact-1',
+              statement: 'Fact without confidence/rationale',
+              source: 's1',
+              evidence: [],
+            },
           ],
           inferences: [
-            { id: 'inf-1', statement: 'Inference with confidence and rationale', confidence: 'medium', rationale: 'reason', evidence: [] },
+            {
+              id: 'inf-1',
+              statement: 'Inference with confidence and rationale',
+              confidence: 'medium',
+              rationale: 'reason',
+              evidence: [],
+            },
           ],
         },
       });
@@ -770,7 +788,7 @@ describe('validateCreativeBrief', () => {
       const brief = createValidBrief({ recommendations: recommendations as any });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'too-many-recommendations')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'too-many-recommendations')).toBe(true);
     });
 
     it('rejects too many assumptions', () => {
@@ -787,7 +805,7 @@ describe('validateCreativeBrief', () => {
       const brief = createValidBrief({ assumptions: assumptions as any });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'too-many-assumptions')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'too-many-assumptions')).toBe(true);
     });
 
     it('rejects too many blockedBy entries', () => {
@@ -804,7 +822,7 @@ describe('validateCreativeBrief', () => {
       const brief = createValidBrief({ blockedBy: blockedBy as any });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'too-many-blocked-by')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'too-many-blocked-by')).toBe(true);
     });
 
     it('rejects too many human decisions', () => {
@@ -821,7 +839,7 @@ describe('validateCreativeBrief', () => {
       const brief = createValidBrief({ requiresHumanDecision: humanDecisions as any });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'too-many-human-decisions')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'too-many-human-decisions')).toBe(true);
     });
   });
 
@@ -837,7 +855,7 @@ describe('validateCreativeBrief', () => {
       });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'forbidden-pattern')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'forbidden-pattern')).toBe(true);
     });
 
     it('rejects brief with URL in rationale', () => {
@@ -857,7 +875,7 @@ describe('validateCreativeBrief', () => {
       });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'forbidden-pattern')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'forbidden-pattern')).toBe(true);
     });
 
     it('rejects brief with filesystem path in interpretedGoal', () => {
@@ -876,7 +894,7 @@ describe('validateCreativeBrief', () => {
       });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'forbidden-pattern')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'forbidden-pattern')).toBe(true);
     });
   });
 
@@ -887,7 +905,7 @@ describe('validateCreativeBrief', () => {
       });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'invalid-schema-version')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'invalid-schema-version')).toBe(true);
     });
 
     it('rejects brief with schemaVersion 2', () => {
@@ -896,7 +914,7 @@ describe('validateCreativeBrief', () => {
       });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'invalid-schema-version')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'invalid-schema-version')).toBe(true);
     });
   });
 
@@ -907,7 +925,7 @@ describe('validateCreativeBrief', () => {
       });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'missing-interpreted-goal')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'missing-interpreted-goal')).toBe(true);
     });
 
     it('rejects brief with missing distinction', () => {
@@ -916,7 +934,7 @@ describe('validateCreativeBrief', () => {
       });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'missing-distinction')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'missing-distinction')).toBe(true);
     });
 
     it('rejects brief with missing intelligence', () => {
@@ -925,7 +943,7 @@ describe('validateCreativeBrief', () => {
       });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'missing-intelligence')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'missing-intelligence')).toBe(true);
     });
 
     it('rejects brief with missing meta', () => {
@@ -934,7 +952,7 @@ describe('validateCreativeBrief', () => {
       });
       const result = validateCreativeBrief(brief);
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.code === 'missing-meta')).toBe(true);
+      expect(result.errors.some((e) => e.code === 'missing-meta')).toBe(true);
     });
   });
 });
@@ -953,7 +971,11 @@ describe('containsForbiddenPattern', () => {
   });
 
   it('detects Bearer token', () => {
-    expect(containsForbiddenPattern('Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2MzQ1Njc4OTl9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c')).toBe(true);
+    expect(
+      containsForbiddenPattern(
+        'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2MzQ1Njc4OTl9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c',
+      ),
+    ).toBe(true);
   });
 
   it('detects AWS access key', () => {
@@ -1025,10 +1047,7 @@ describe('deepCheckForbiddenPatterns', () => {
 
   it('detects forbidden pattern in array', () => {
     const obj = {
-      items: [
-        { name: 'item1' },
-        { name: 'sk-1234567890abcdef' },
-      ],
+      items: [{ name: 'item1' }, { name: 'sk-1234567890abcdef' }],
     };
     const violations = deepCheckForbiddenPatterns(obj);
     expect(violations.length).toBeGreaterThan(0);

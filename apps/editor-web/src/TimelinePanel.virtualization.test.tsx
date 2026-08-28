@@ -103,12 +103,10 @@ describe('TimelinePanel virtualization focus behavior', () => {
       );
     });
 
-    expect(container.querySelector<HTMLButtonElement>('[aria-label="Play proxy"]')?.disabled).toBe(
-      true,
-    );
-    const lane = container.querySelector<HTMLElement>('[aria-label^="Empty timeline lane"]');
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="Play"]')?.disabled).toBe(true);
+    const lane = container.querySelector<HTMLElement>('[aria-label^="Empty timeline"]');
     expect(lane).not.toBeNull();
-    expect(lane?.getAttribute('role')).toBe('button');
+    expect(lane?.getAttribute('role')).toBe('region');
     expect(lane?.getAttribute('tabindex')).toBe('0');
     await act(async () => {
       lane!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));

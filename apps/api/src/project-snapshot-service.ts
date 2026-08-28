@@ -4,7 +4,12 @@
  * Delegates to canonical projector from @joy-media/project-schema.
  */
 
-import type { JoyProjectV1, ProjectRevisionId, SemanticProjectSnapshotV1, SnapshotOptions } from '@joy-media/project-schema';
+import type {
+  JoyProjectV1,
+  ProjectRevisionId,
+  SemanticProjectSnapshotV1,
+  SnapshotOptions,
+} from '@joy-media/project-schema';
 import { projectToSemanticSnapshot } from '@joy-media/project-schema';
 
 /**
@@ -42,10 +47,7 @@ export class ProjectSnapshotService {
    * @param revisionId - The ProjectRevisionId for this snapshot
    * @returns SemanticProjectSnapshotV1 with deterministic capturedAt when clock is provided
    */
-  createSnapshot(
-    project: JoyProjectV1,
-    revisionId: ProjectRevisionId,
-  ): SemanticProjectSnapshotV1 {
+  createSnapshot(project: JoyProjectV1, revisionId: ProjectRevisionId): SemanticProjectSnapshotV1 {
     if (this.options === undefined) {
       return projectToSemanticSnapshot(project, revisionId);
     }
@@ -54,7 +56,9 @@ export class ProjectSnapshotService {
       ...(this.options.clock !== undefined ? { clock: this.options.clock } : {}),
       ...(this.options.maxScenes !== undefined ? { maxScenes: this.options.maxScenes } : {}),
       ...(this.options.maxAssets !== undefined ? { maxAssets: this.options.maxAssets } : {}),
-      ...(this.options.maxClipsPerScene !== undefined ? { maxClipsPerScene: this.options.maxClipsPerScene } : {}),
+      ...(this.options.maxClipsPerScene !== undefined
+        ? { maxClipsPerScene: this.options.maxClipsPerScene }
+        : {}),
     };
 
     return projectToSemanticSnapshot(project, revisionId, snapshotOptions);
@@ -83,7 +87,9 @@ export function createProjectSnapshot(
     ...(options.clock !== undefined ? { clock: options.clock } : {}),
     ...(options.maxScenes !== undefined ? { maxScenes: options.maxScenes } : {}),
     ...(options.maxAssets !== undefined ? { maxAssets: options.maxAssets } : {}),
-    ...(options.maxClipsPerScene !== undefined ? { maxClipsPerScene: options.maxClipsPerScene } : {}),
+    ...(options.maxClipsPerScene !== undefined
+      ? { maxClipsPerScene: options.maxClipsPerScene }
+      : {}),
   };
 
   return projectToSemanticSnapshot(project, revisionId, snapshotOptions);

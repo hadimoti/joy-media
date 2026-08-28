@@ -53,7 +53,7 @@
 **Conclusion:** YES — S1 and S2 **can** be recomputed deterministically from `JoyProjectV1` + `ProjectRevisionId`. The pipeline is:
 
 ```
-JoyProjectV1 + ProjectRevisionId 
+JoyProjectV1 + ProjectRevisionId
   → projectToSemanticSnapshot() → SemanticProjectSnapshotV1 (S1)
   → computeSemanticIntelligence() → BrandReadinessV1 + SceneCoverageV1[] + ProjectReadinessV1 + IntelligenceRuleV1[] (S2)
   → createCreativeBriefInput() → CreativeBriefInputV1
@@ -92,6 +92,7 @@ CREATE INDEX IF NOT EXISTS project_documents_project_revision_idx ON project_doc
 **Storage Contract:** `projects.document_revision_id` is the **atomic current-head pointer**. Do NOT rely on `created_at` timestamps to determine the head revision; the head is explicitly tracked by `document_revision_id`.
 
 **Missing from `PostgresControlPlane` (`apps/api/src/postgres-control-plane.ts:138`):
+
 - No storage/retrieval of `JoyProjectV1` documents
 - No revision tracking for project documents
 
@@ -119,14 +120,14 @@ CreativeBriefInputResolver.resolve() returns { status: 'resolved', input }
 
 ### Ownership & Boundaries
 
-| Concern | Owner | Boundary |
-|---------|-------|----------|
-| JoyProjectV1 persistence | ControlPlane | `getProjectDocument` / `setProjectDocument` |
-| Revision validation | ControlPlane | Compare `snapshotRevisionId` with current head |
-| S1 projection | Pure function | `projectToSemanticSnapshot()` from `@joy-media/project-schema` |
-| S2 intelligence | Pure function | `computeSemanticIntelligence()` from `@joy-media/project-schema` |
-| Input assembly | Pure function | `createCreativeBriefInput()` from `@joy-media/agent-tools` |
-| Resolution | CreativeBriefInputResolver | Server-side only, no browser trust |
+| Concern                  | Owner                      | Boundary                                                         |
+| ------------------------ | -------------------------- | ---------------------------------------------------------------- |
+| JoyProjectV1 persistence | ControlPlane               | `getProjectDocument` / `setProjectDocument`                      |
+| Revision validation      | ControlPlane               | Compare `snapshotRevisionId` with current head                   |
+| S1 projection            | Pure function              | `projectToSemanticSnapshot()` from `@joy-media/project-schema`   |
+| S2 intelligence          | Pure function              | `computeSemanticIntelligence()` from `@joy-media/project-schema` |
+| Input assembly           | Pure function              | `createCreativeBriefInput()` from `@joy-media/agent-tools`       |
+| Resolution               | CreativeBriefInputResolver | Server-side only, no browser trust                               |
 
 ### Auth/Privacy/Caching
 
@@ -144,6 +145,7 @@ CreativeBriefInputResolver.resolve() returns { status: 'resolved', input }
 ### Phase 1: Server-Side Project Document Storage (FIRST - 3 minutes)
 
 **Files to create/modify:**
+
 - `apps/api/src/control-plane.ts` — Add `getProjectDocument`, `setProjectDocument`, `listProjectRevisions` to interface
 - `apps/api/src/postgres-schema.ts` — Add `project_documents` table
 - `apps/api/src/postgres-control-plane.ts` — Implement document storage methods
@@ -152,6 +154,7 @@ CreativeBriefInputResolver.resolve() returns { status: 'resolved', input }
 - `apps/api/src/local-control-plane.test.ts` — Add document storage tests
 
 **Tests:**
+
 - Round-trip: store `JoyProjectV1`, retrieve, verify deep equality
 - Revision isolation: store two revisions, retrieve each independently
 - Owner isolation: actor A cannot read actor B's project document
@@ -161,10 +164,12 @@ CreativeBriefInputResolver.resolve() returns { status: 'resolved', input }
 ### Phase 2: S1/S2 Projector Service (2 minutes)
 
 **Files to create:**
+
 - `apps/api/src/project-snapshot-service.ts` — Pure service: `projectToSnapshot(snapshotRevisionId: ProjectRevisionId, project: JoyProjectV1): SemanticProjectSnapshotV1`
 - `apps/api/src/project-snapshot-service.test.ts` — Unit tests
 
 **Logic:**
+
 ```typescript
 async function projectToSnapshot(
   controlPlane: ControlPlane,
@@ -179,6 +184,7 @@ async function projectToSnapshot(
 ```
 
 **Tests:**
+
 - Deterministic: same input → byte-identical output
 - Persian/RTL: preserves RTL text in captions, assets
 - Missing revision: returns null
@@ -186,10 +192,12 @@ async function projectToSnapshot(
 ### Phase 3: S2 Intelligence Service (2 minutes)
 
 **Files to create:**
+
 - `apps/api/src/project-intelligence-service.ts` — Pure service: `snapshotToIntelligence(snapshot: SemanticProjectSnapshotV1): {...}`
 - `apps/api/src/project-intelligence-service.test.ts` — Unit tests
 
 **Logic:**
+
 ```typescript
 function snapshotToIntelligence(snapshot: SemanticProjectSnapshotV1): {
   brandReadiness: BrandReadinessV1;
@@ -202,16 +210,19 @@ function snapshotToIntelligence(snapshot: SemanticProjectSnapshotV1): {
 ```
 
 **Tests:**
+
 - Deterministic output for identical snapshot
 - Rules triggered correctly for known conditions (no captions, no visuals, etc.)
 
 ### Phase 4: Real CreativeBriefInputResolver (3 minutes)
 
 **Files to create/modify:**
+
 - `apps/api/src/creative-brief-input-resolver.ts` — Add `RealCreativeBriefInputResolver` implementing the full pipeline
 - `apps/api/src/creative-brief-input-resolver.test.ts` — Add integration tests
 
 **Logic:**
+
 ```typescript
 class RealCreativeBriefInputResolver implements CreativeBriefInputResolver {
   constructor(
@@ -230,26 +241,27 @@ class RealCreativeBriefInputResolver implements CreativeBriefInputResolver {
     if (!document) {
       return { status: 'stale-revision', code: '...', message: 'Revision not found' };
     }
-    
+
     // 2. Project S1
     const snapshot = this.snapshotService.projectToSnapshot(
       request.projectId,
       request.snapshotRevisionId,
       document,
     );
-    
+
     // 3. Project S2
     const intelligence = this.intelligenceService.snapshotToIntelligence(snapshot);
-    
+
     // 4. Build input
     const input = createCreativeBriefInput(snapshot, intelligence, request.request);
-    
+
     return { status: 'resolved', input };
   }
 }
 ```
 
 **Tests:**
+
 - End-to-end: request → resolved input with valid snapshot/intelligence
 - Stale revision: mismatch returns `stale-revision`
 - Missing project: returns `unavailable`
@@ -259,18 +271,21 @@ class RealCreativeBriefInputResolver implements CreativeBriefInputResolver {
 ### Phase 5: Wire Resolver to HTTP Route (2 minutes)
 
 **Files to modify:**
+
 - `apps/api/src/http-server.ts` — Change default `creativeBriefInputResolver` from `UnavailableCreativeBriefInputResolver` to `RealCreativeBriefInputResolver` when project persistence is available
 
 **Logic:**
+
 ```typescript
 // In createControlPlaneHttpServerOptions:
-creativeBriefInputResolver: options.creativeBriefInputResolver 
-  ?? (options.enableCreativeBrief 
+creativeBriefInputResolver: options.creativeBriefInputResolver
+  ?? (options.enableCreativeBrief
       ? new RealCreativeBriefInputResolver(options.controlPlane, snapshotService, intelligenceService)
       : UnavailableCreativeBriefInputResolver),
 ```
 
 **Tests:**
+
 - Route integration: POST /v1/projects/:id/creative-brief returns 200 with brief when enabled
 - Feature flag: disabled → 503 unavailable
 
@@ -281,11 +296,13 @@ creativeBriefInputResolver: options.creativeBriefInputResolver
 **Implement server-side project persistence FIRST.**
 
 Without server-side `JoyProjectV1` storage:
+
 - The `CreativeBriefInputResolver` **cannot** access canonical state
 - Any attempt to resolve input would require trusting browser-supplied data (VIOLATES requirement)
 - The feature must remain **unavailable** in production
 
 **First implementation task (PostgreSQL schema complete):**
+
 > PostgreSQL schema for revisioned project documents is defined in `apps/api/src/postgres-schema.ts`. Next: implement `getProjectDocument` and `setProjectDocument` methods on the `ControlPlane` interface, with `PostgresControlPlane` implementation using the `project_documents` table and `document_revision_id` head pointer, plus `LocalControlPlane` in-memory store, and tests proving round-trip persistence and owner isolation.
 
 **Keep unavailable until then:** The current `UnavailableCreativeBriefInputResolver` (`apps/api/src/creative-brief-input-resolver.ts:93`) correctly fails closed. Production **must not** enable `RealCreativeBriefInputResolver` until Phase 1 is complete and deployed.
@@ -294,15 +311,15 @@ Without server-side `JoyProjectV1` storage:
 
 ## File Evidence Index
 
-| Question | Answer | Evidence |
-|----------|--------|----------|
-| Where is JoyProjectV1 persisted? | Browser only | `editor-session.ts:160`, `postgres-schema.ts:3` |
-| Canonical revision representation? | Metadata-only on server | `control-plane.ts:274-277`, `editor-session.ts:285` |
-| S1 computable from state? | YES | `semantic-snapshot-impl.ts:532` |
-| S2 computable from S1? | YES | `semantic-intelligence.ts:1009` |
-| Input assembly possible? | YES | `creative-brief.ts:1087` |
-| Missing ControlPlane capability? | Document storage | `control-plane.ts:262` (no document methods) |
-| Missing PostgreSQL capability? | project_documents table | `postgres-schema.ts` (schema added: `projects.document_revision_id` head pointer + `project_documents` revision history) |
+| Question                           | Answer                  | Evidence                                                                                                                 |
+| ---------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Where is JoyProjectV1 persisted?   | Browser only            | `editor-session.ts:160`, `postgres-schema.ts:3`                                                                          |
+| Canonical revision representation? | Metadata-only on server | `control-plane.ts:274-277`, `editor-session.ts:285`                                                                      |
+| S1 computable from state?          | YES                     | `semantic-snapshot-impl.ts:532`                                                                                          |
+| S2 computable from S1?             | YES                     | `semantic-intelligence.ts:1009`                                                                                          |
+| Input assembly possible?           | YES                     | `creative-brief.ts:1087`                                                                                                 |
+| Missing ControlPlane capability?   | Document storage        | `control-plane.ts:262` (no document methods)                                                                             |
+| Missing PostgreSQL capability?     | project_documents table | `postgres-schema.ts` (schema added: `projects.document_revision_id` head pointer + `project_documents` revision history) |
 
 ---
 

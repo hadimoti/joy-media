@@ -67,7 +67,8 @@ describe('project-snapshot-service', () => {
       const clock = () => '2026-01-01T00:00:00.000Z';
       const service = new ProjectSnapshotService({ clock });
       const project = createProject();
-      const revisionId: ProjectRevisionId = 'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
 
       const snapshot = service.createSnapshot(project, revisionId);
 
@@ -81,7 +82,8 @@ describe('project-snapshot-service', () => {
       const clock = () => '2026-01-01T00:00:00.000Z';
       const service = new ProjectSnapshotService({ clock });
       const project = createProject();
-      const revisionId: ProjectRevisionId = 'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
 
       const snapshot1 = service.createSnapshot(project, revisionId);
       const snapshot2 = service.createSnapshot(project, revisionId);
@@ -94,8 +96,10 @@ describe('project-snapshot-service', () => {
     it('should propagate revision id correctly', () => {
       const service = new ProjectSnapshotService();
       const project = createProject();
-      const revisionId1: ProjectRevisionId = 'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
-      const revisionId2: ProjectRevisionId = 'local-revision:v1:test:timeline=2:document=1:graph=1:artifacts=1';
+      const revisionId1: ProjectRevisionId =
+        'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId2: ProjectRevisionId =
+        'local-revision:v1:test:timeline=2:document=1:graph=1:artifacts=1';
 
       const snapshot1 = service.createSnapshot(project, revisionId1);
       const snapshot2 = service.createSnapshot(project, revisionId2);
@@ -121,13 +125,14 @@ describe('project-snapshot-service', () => {
       const project = createProject('persian-project', 'comp-1', {
         'caption-fa': persianCaption,
       });
-      const revisionId: ProjectRevisionId = 'local-revision:v1:persian:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:persian:timeline=1:document=1:graph=1:artifacts=1';
 
       const snapshot = service.createSnapshot(project, revisionId);
 
       expect(snapshot.capabilities['caption-detection']).toBe('ready');
       // Persian locale should be preserved in caption coverage
-      expect(snapshot.scenes.some(s => s.captionCoverage?.locale === 'fa-IR')).toBe(true);
+      expect(snapshot.scenes.some((s) => s.captionCoverage?.locale === 'fa-IR')).toBe(true);
     });
 
     it('should not mutate input project', () => {
@@ -135,7 +140,8 @@ describe('project-snapshot-service', () => {
       const service = new ProjectSnapshotService({ clock });
       const project = createProject();
       const projectBefore = JSON.parse(JSON.stringify(project));
-      const revisionId: ProjectRevisionId = 'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
 
       service.createSnapshot(project, revisionId);
 
@@ -152,7 +158,8 @@ describe('project-snapshot-service', () => {
         maxClipsPerScene: 3,
       });
       const project = createProject();
-      const revisionId: ProjectRevisionId = 'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
 
       const snapshot = service.createSnapshot(project, revisionId);
 
@@ -163,7 +170,8 @@ describe('project-snapshot-service', () => {
     it('should work without options', () => {
       const service = new ProjectSnapshotService();
       const project = createProject();
-      const revisionId: ProjectRevisionId = 'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
 
       const snapshot = service.createSnapshot(project, revisionId);
 
@@ -177,7 +185,8 @@ describe('project-snapshot-service', () => {
     it('should create snapshot with deterministic clock', () => {
       const clock = () => '2026-01-01T00:00:00.000Z';
       const project = createProject();
-      const revisionId: ProjectRevisionId = 'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
 
       const snapshot = createProjectSnapshot(project, revisionId, { clock });
 
@@ -189,7 +198,8 @@ describe('project-snapshot-service', () => {
     it('should produce byte-stable output for identical inputs', () => {
       const clock = () => '2026-01-01T00:00:00.000Z';
       const project = createProject();
-      const revisionId: ProjectRevisionId = 'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
 
       const snapshot1 = createProjectSnapshot(project, revisionId, { clock });
       const snapshot2 = createProjectSnapshot(project, revisionId, { clock });
@@ -201,8 +211,10 @@ describe('project-snapshot-service', () => {
 
     it('should propagate revision id correctly', () => {
       const project = createProject();
-      const revisionId1: ProjectRevisionId = 'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
-      const revisionId2: ProjectRevisionId = 'local-revision:v1:test:timeline=2:document=1:graph=1:artifacts=1';
+      const revisionId1: ProjectRevisionId =
+        'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId2: ProjectRevisionId =
+        'local-revision:v1:test:timeline=2:document=1:graph=1:artifacts=1';
 
       const snapshot1 = createProjectSnapshot(project, revisionId1);
       const snapshot2 = createProjectSnapshot(project, revisionId2);
@@ -227,19 +239,21 @@ describe('project-snapshot-service', () => {
       const project = createProject('persian-project', 'comp-1', {
         'caption-fa': persianCaption,
       });
-      const revisionId: ProjectRevisionId = 'local-revision:v1:persian:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:persian:timeline=1:document=1:graph=1:artifacts=1';
 
       const snapshot = createProjectSnapshot(project, revisionId, { clock });
 
       expect(snapshot.capabilities['caption-detection']).toBe('ready');
-      expect(snapshot.scenes.some(s => s.captionCoverage?.locale === 'fa-IR')).toBe(true);
+      expect(snapshot.scenes.some((s) => s.captionCoverage?.locale === 'fa-IR')).toBe(true);
     });
 
     it('should not mutate input project', () => {
       const clock = () => '2026-01-01T00:00:00.000Z';
       const project = createProject();
       const projectBefore = JSON.parse(JSON.stringify(project));
-      const revisionId: ProjectRevisionId = 'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
 
       createProjectSnapshot(project, revisionId, { clock });
 
@@ -249,7 +263,8 @@ describe('project-snapshot-service', () => {
 
     it('should work without options', () => {
       const project = createProject();
-      const revisionId: ProjectRevisionId = 'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
 
       const snapshot = createProjectSnapshot(project, revisionId);
 
@@ -262,7 +277,8 @@ describe('project-snapshot-service', () => {
   describe('byte-stability with different clocks', () => {
     it('should produce different capturedAt with different clocks', () => {
       const project = createProject();
-      const revisionId: ProjectRevisionId = 'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
 
       const clock1 = () => '2026-01-01T00:00:00.000Z';
       const clock2 = () => '2026-02-01T00:00:00.000Z';
@@ -276,7 +292,8 @@ describe('project-snapshot-service', () => {
 
     it('should have same content except capturedAt when clocks differ', () => {
       const project = createProject();
-      const revisionId: ProjectRevisionId = 'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
+      const revisionId: ProjectRevisionId =
+        'local-revision:v1:test:timeline=1:document=1:graph=1:artifacts=1';
 
       const clock1 = () => '2026-01-01T00:00:00.000Z';
       const clock2 = () => '2026-02-01T00:00:00.000Z';

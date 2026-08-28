@@ -424,12 +424,16 @@ describe('LocalControlPlane project document storage', () => {
       pluginData: {},
     };
 
-    const writeResult = api.writeProjectDocument(owner, {
-      projectId: 'doc-project',
-      ownerId: 'doc-owner',
-      revisionId: 'rev-1',
-      document,
-    }, '');
+    const writeResult = api.writeProjectDocument(
+      owner,
+      {
+        projectId: 'doc-project',
+        ownerId: 'doc-owner',
+        revisionId: 'rev-1',
+        document,
+      },
+      '',
+    );
 
     expect(writeResult.kind).toBe('stored');
     if (writeResult.kind !== 'stored') throw new Error('Expected stored outcome');
@@ -450,12 +454,16 @@ describe('LocalControlPlane project document storage', () => {
     const other = { id: 'other-owner' };
     api.createProject(owner, 'doc-project', 'Doc Project');
 
-    api.writeProjectDocument(owner, {
-      projectId: 'doc-project',
-      ownerId: 'doc-owner',
-      revisionId: 'rev-1',
-      document: { schemaVersion: 1, id: 'doc-project', title: 'Test' },
-    }, '');
+    api.writeProjectDocument(
+      owner,
+      {
+        projectId: 'doc-project',
+        ownerId: 'doc-owner',
+        revisionId: 'rev-1',
+        document: { schemaVersion: 1, id: 'doc-project', title: 'Test' },
+      },
+      '',
+    );
 
     const readResult = api.readProjectDocument(other, 'doc-project');
     expect(readResult.kind).toBe('not-found');
@@ -468,22 +476,31 @@ describe('LocalControlPlane project document storage', () => {
     const owner = { id: 'doc-owner' };
     api.createProject(owner, 'doc-project', 'Doc Project');
 
-    api.writeProjectDocument(owner, {
-      projectId: 'doc-project',
-      ownerId: 'doc-owner',
-      revisionId: 'rev-1',
-      document: { schemaVersion: 1, id: 'doc-project', title: 'V1' },
-    }, '');
+    api.writeProjectDocument(
+      owner,
+      {
+        projectId: 'doc-project',
+        ownerId: 'doc-owner',
+        revisionId: 'rev-1',
+        document: { schemaVersion: 1, id: 'doc-project', title: 'V1' },
+      },
+      '',
+    );
 
-    const writeResult = api.writeProjectDocument(owner, {
-      projectId: 'doc-project',
-      ownerId: 'doc-owner',
-      revisionId: 'rev-2',
-      document: { schemaVersion: 1, id: 'doc-project', title: 'V2' },
-    }, 'wrong-revision');
+    const writeResult = api.writeProjectDocument(
+      owner,
+      {
+        projectId: 'doc-project',
+        ownerId: 'doc-owner',
+        revisionId: 'rev-2',
+        document: { schemaVersion: 1, id: 'doc-project', title: 'V2' },
+      },
+      'wrong-revision',
+    );
 
     expect(writeResult.kind).toBe('revision-conflict');
-    if (writeResult.kind !== 'revision-conflict') throw new Error('Expected revision-conflict outcome');
+    if (writeResult.kind !== 'revision-conflict')
+      throw new Error('Expected revision-conflict outcome');
     expect(writeResult.expectedBaseRevisionId).toBe('wrong-revision');
     expect(writeResult.actualBaseRevisionId).toBe('rev-1');
   });

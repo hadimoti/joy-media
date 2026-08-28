@@ -11,9 +11,11 @@ import type {
   CreativeBriefRuntimeContext,
 } from './creative-brief-runtime.js';
 import { DEFAULT_CREATIVE_BRIEF_RUNTIME } from './creative-brief-runtime.js';
-import type { CreativeBriefRuntimeConfig, OpenRouterConfig } from './creative-brief-runtime-config.js';
+import type {
+  CreativeBriefRuntimeConfig,
+  OpenRouterConfig,
+} from './creative-brief-runtime-config.js';
 import {
-  CREATIVE_BRIEF_MODEL_ID,
   CREATIVE_BRIEF_FREE_MODEL_IDS,
   CREATIVE_BRIEF_SECRET_REFERENCE,
   isDisabledConfig,
@@ -110,9 +112,8 @@ export function createCreativeBriefRuntimeFactory(
     transport: deps.transport,
     allowedFreeModelIds: config.allowedFreeModelIds,
   };
-  const adapterOptions = deps.clock !== undefined
-    ? { ...baseAdapterOptions, clock: deps.clock }
-    : baseAdapterOptions;
+  const adapterOptions =
+    deps.clock !== undefined ? { ...baseAdapterOptions, clock: deps.clock } : baseAdapterOptions;
   const adapter: AsyncCreativeModelAdapter = createOpenRouterCreativeAdapter(adapterOptions);
 
   // Return a runtime that executes through createAsyncCreativeBrief

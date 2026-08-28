@@ -16,7 +16,11 @@ import {
   type OpenRouterConfig,
   type DisabledConfig,
 } from './creative-brief-runtime-config.js';
-import { createCreativeBriefRuntimeFactory, type CreativeBriefRuntimeFactoryOptions, type RedactedAuditSink } from './creative-brief-runtime-factory.js';
+import {
+  createCreativeBriefRuntimeFactory,
+  type CreativeBriefRuntimeFactoryOptions,
+  type RedactedAuditSink,
+} from './creative-brief-runtime-factory.js';
 import type { SecretResolver, HttpPostTransport, Clock } from '@joy-media/adapter-openrouter';
 
 describe('Creative Brief runtime factory free-only policy', () => {
@@ -53,14 +57,48 @@ const mockCreativeBriefInput: CreativeBriefInputV1 = {
     projectId: 'test-project-id',
     revisionId: 'test-revision-id',
     capturedAt: '2026-08-19T00:00:00.000Z',
-    composition: { durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9' },
-    brand: { hasBrandKit: false, colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, prohibitedClaims: [], prohibitedEffects: [], warnings: [] },
+    composition: {
+      durationUs: 1000000,
+      frameRate: { num: 30, den: 1 },
+      width: 1920,
+      height: 1080,
+      aspectRatio: '16:9',
+    },
+    brand: {
+      hasBrandKit: false,
+      colorsAvailable: false,
+      fontsAvailable: false,
+      logoAvailable: false,
+      voiceInstructionsAvailable: false,
+      toneInstructionsAvailable: false,
+      prohibitedClaims: [],
+      prohibitedEffects: [],
+      warnings: [],
+    },
     scenes: [],
-    timeline: { compositionId: 'comp-1', durationUs: 1000000, frameRate: { num: 30, den: 1 }, width: 1920, height: 1080, aspectRatio: '16:9', visualTrackCount: 1, audioTrackCount: 1, totalClipCount: 0, visualRowIds: [], audioRowIds: [] },
+    timeline: {
+      compositionId: 'comp-1',
+      durationUs: 1000000,
+      frameRate: { num: 30, den: 1 },
+      width: 1920,
+      height: 1080,
+      aspectRatio: '16:9',
+      visualTrackCount: 1,
+      audioTrackCount: 1,
+      totalClipCount: 0,
+      visualRowIds: [],
+      audioRowIds: [],
+    },
     assets: [],
     capabilities: {},
     warnings: [],
-    truncation: { clipsOmitted: 0, assetsOmitted: 0, visualObjectsOmitted: 0, scenesOmitted: 0, totalEstimateBytes: 0 },
+    truncation: {
+      clipsOmitted: 0,
+      assetsOmitted: 0,
+      visualObjectsOmitted: 0,
+      scenesOmitted: 0,
+      totalEstimateBytes: 0,
+    },
   },
   brandReadiness: {
     projectId: 'test-project-id',
@@ -105,7 +143,12 @@ const mockCreativeBriefInput: CreativeBriefInputV1 = {
     evidence: [],
   },
   rules: [],
-  request: { projectId: 'test-project-id', snapshotRevisionId: 'test-revision-id', request: 'test brief', scope: 'general' },
+  request: {
+    projectId: 'test-project-id',
+    snapshotRevisionId: 'test-revision-id',
+    request: 'test brief',
+    scope: 'general',
+  },
 };
 
 const mockRuntimeContext = {
@@ -126,10 +169,16 @@ function createFactoryOptions(
   };
   const transport: HttpPostTransport = {
     post: async (_url: string, _options?: RequestInit): Promise<Response> => {
-      return new Response(JSON.stringify({ model: 'nvidia/nemotron-3-nano-30b-a3b:free', choices: [{ message: { role: 'assistant', content: '{}' } }] }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
+      return new Response(
+        JSON.stringify({
+          model: 'nvidia/nemotron-3-nano-30b-a3b:free',
+          choices: [{ message: { role: 'assistant', content: '{}' } }],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
     },
   };
   const clock: Clock = { now: () => Date.now() };
@@ -176,7 +225,8 @@ describe('createCreativeBriefRuntimeFactory', () => {
       };
       const runtime = createCreativeBriefRuntimeFactory(config, {
         transport: {
-          post: async (_url: string, _options?: RequestInit): Promise<Response> => new Response('{}'),
+          post: async (_url: string, _options?: RequestInit): Promise<Response> =>
+            new Response('{}'),
         },
       });
       expect(runtime).toBe(DEFAULT_CREATIVE_BRIEF_RUNTIME);
@@ -206,8 +256,7 @@ describe('createCreativeBriefRuntimeFactory', () => {
         secretRef: 'joy-media/openrouter/creative-brief/v1',
         allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free'],
       };
-      const runtime = createCreativeBriefRuntimeFactory(config, {
-      });
+      const runtime = createCreativeBriefRuntimeFactory(config, {});
       expect(runtime).toBe(DEFAULT_CREATIVE_BRIEF_RUNTIME);
     });
   });
@@ -379,7 +428,11 @@ describe('createCreativeBriefRuntimeFactory', () => {
         timeoutMs: 30000,
         spendLimitUsdCents: 0,
         secretRef: 'joy-media/openrouter/creative-brief/v1',
-        allowedFreeModelIds: ['nvidia/nemotron-3-nano-30b-a3b:free', 'openrouter/llama3-70b', 'openrouter/gemini-flash'],
+        allowedFreeModelIds: [
+          'nvidia/nemotron-3-nano-30b-a3b:free',
+          'openrouter/llama3-70b',
+          'openrouter/gemini-flash',
+        ],
       };
       const runtime = createCreativeBriefRuntimeFactory(config, createFactoryOptions());
       expect(runtime).toBe(DEFAULT_CREATIVE_BRIEF_RUNTIME);
