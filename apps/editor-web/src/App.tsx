@@ -130,6 +130,7 @@ import { updateUniversalTimelineForTransaction } from './universal-placement.js'
 import { TimelinePanel } from './TimelinePanel.js';
 import { buildTimelineMediaImportTransaction } from './timeline-media-import.js';
 import { buildTimelineElementDocument } from './place-timeline-element.js';
+import { nextProfessionalTrackId } from './timeline-track-family.js';
 import { buildTimelineDeletePlan } from './delete-timeline-elements.js';
 import { DualLensPanel } from './DualLensPanel.js';
 import { buildDualLensProjection, type DualLensProjection } from './dual-lens-model.js';
@@ -2605,7 +2606,8 @@ function EditorWorkspace({
         .sort((a, b) => a.order - b.order);
       const targetExisting = aboveTracks[0];
       const order = composition.tracks.reduce((max, track) => Math.max(max, track.order), -1) + 1;
-      const targetTrackId = targetExisting?.id ?? `V${order + 1}`;
+      const targetTrackId =
+        targetExisting?.id ?? nextProfessionalTrackId(composition.tracks, 'visual');
       const insertClipCommand = {
         type: 'timeline.insertClip' as const,
         payload: {

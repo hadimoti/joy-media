@@ -85,6 +85,8 @@ export function prepareTextTemplateInsertion(
   // every other timeline insertion path. The suffix is an object/clip token,
   // not a stable track identity and must never be used as one.
   const trackId = targetTrack?.id ?? nextProfessionalTrackId(composition.tracks, 'visual');
+  const nextTrackOrder =
+    composition.tracks.reduce((highest, track) => Math.max(highest, track.order), -1) + 1;
   const trackCommands: SpikeCommand[] =
     targetTrack === undefined
       ? [
@@ -97,7 +99,7 @@ export function prepareTextTemplateInsertion(
                 kind: 'video',
                 family: 'visual',
                 name: 'Text',
-                order: composition.tracks.length,
+                order: nextTrackOrder,
                 enabled: true,
                 clips: [],
               },
@@ -132,7 +134,11 @@ export function prepareTextTemplateInsertion(
           id: trackId,
           kind: 'video' as const,
           name: 'Text',
-          order: visualComposition.tracks.length,
+          order:
+            visualComposition.tracks.reduce(
+              (highest, track) => Math.max(highest, track.order),
+              -1,
+            ) + 1,
           enabled: true,
           locked: false,
           clips: [clip],
