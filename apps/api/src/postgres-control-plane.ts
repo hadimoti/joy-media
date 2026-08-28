@@ -2,6 +2,7 @@ import type { Pool, PoolClient } from 'pg';
 import {
   ControlPlaneError,
   SHARED_LIBRARY_OWNER_ID,
+  MAX_WORKER_ATTEMPTS,
   type AssetDeletionResult,
   type AssetLocationRecord,
   type AssetRegistration,
@@ -1759,6 +1760,13 @@ function workerOf(row: WorkerRow): WorkerRecord {
 }
 
 function jobOf(row: JobRow): Job {
+  if (
+    row.max_attempts !== null &&
+    (!Number.isSafeInteger(row.max_attempts) ||
+      row.max_attempts < 1 ||
+      row.max_attempts > MAX_WORKER_ATTEMPTS)
+  )
+    throw new ControlPlaneError('DATABASE_ERROR', 'stored job max_attempts is invalid');
   const payload = jobPayloadOf(row.payload);
   return {
     id: row.id,

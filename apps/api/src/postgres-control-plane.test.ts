@@ -260,6 +260,31 @@ describe('PostgresControlPlane', () => {
     await pool.end();
   });
 
+  it('fails closed when a persisted job contains an invalid attempt budget', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const controlPlane = new PostgresControlPlane(pool, { skipLocked: false });
+    await controlPlane.initialize();
+    const owner = { id: 'invalid-persisted-attempt-owner' };
+    await controlPlane.createProject(
+      owner,
+      'invalid-persisted-attempt-project',
+      'Invalid attempts',
+    );
+    await pool.query(
+      `INSERT INTO jobs
+         (id, project_id, type, payload, max_attempts, state, lease_owner, lease_expires_at)
+       VALUES ($1, $2, 'render', '{}', 0, 'queued', NULL, NULL)`,
+      ['invalid-persisted-attempt-job', 'invalid-persisted-attempt-project'],
+    );
+
+    await expect(
+      controlPlane.jobsForProject(owner, 'invalid-persisted-attempt-project'),
+    ).rejects.toMatchObject({ code: 'DATABASE_ERROR' });
+    await pool.end();
+  });
+
   it('keeps personal backups private and reference-counts cloud objects on delete', async () => {
     const database = newDb();
     const adapter = database.adapters.createPg();
