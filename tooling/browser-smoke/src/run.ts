@@ -45,6 +45,7 @@ export const AUTHENTICATED_SHELL_VIEWPORTS = [
 
 export interface ViewportShellEvidence {
   readonly viewport: { readonly width: number; readonly height: number };
+  readonly workspace: WorkspaceGeometry;
   readonly document: {
     readonly innerWidth: number;
     readonly scrollWidth: number;
@@ -64,6 +65,12 @@ export interface CoreControlEvidence {
     readonly right: number;
     readonly bottom: number;
   };
+}
+
+export interface WorkspaceGeometry {
+  readonly top: number;
+  readonly bottom: number;
+  readonly height: number;
 }
 
 export interface ViewportDocumentMetrics {
@@ -89,6 +96,13 @@ export function clippedCoreControls(
       rect.right > viewport.width + 1 ||
       rect.bottom > viewport.height + 1,
   );
+}
+
+export function workspaceFitsViewport(
+  workspace: WorkspaceGeometry,
+  viewport: { readonly height: number },
+): boolean {
+  return workspace.top >= -1 && workspace.bottom <= viewport.height + 1 && workspace.height > 0;
 }
 
 export const AUTHENTICATED_CORE_CONTROL_SPECS = [
@@ -585,7 +599,15 @@ export async function verifyAuthenticatedShellViewports(
           rect.right > innerWidth + 1 ||
           rect.bottom > innerHeight + 1,
       );
+      const workspace = document.querySelector<HTMLElement>('.workspace');
+      if (workspace === null) throw new Error('missing Dockview workspace host');
+      const workspaceRect = workspace.getBoundingClientRect();
       return {
+        workspace: {
+          top: workspaceRect.top,
+          bottom: workspaceRect.bottom,
+          height: workspaceRect.height,
+        },
         document: {
           innerWidth,
           scrollWidth: document.documentElement.scrollWidth,
@@ -601,6 +623,7 @@ export async function verifyAuthenticatedShellViewports(
         innerHeight: viewport.height,
       }),
     ).toBe(false);
+    expect(workspaceFitsViewport(shell.workspace, viewport)).toBe(true);
     expect(clippedCoreControls(shell.coreControls, viewport)).toEqual([]);
 
     const shortcutButton = page.getByRole('button', { name: 'Keyboard shortcuts' });
@@ -614,6 +637,7 @@ export async function verifyAuthenticatedShellViewports(
 
     const item: ViewportShellEvidence = {
       viewport,
+      workspace: shell.workspace,
       document: shell.document,
       coreControls: shell.coreControls,
       clippedControls: shell.clippedControls,

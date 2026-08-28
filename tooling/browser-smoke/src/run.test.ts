@@ -5,6 +5,7 @@ import {
   buildBrowserSmokeCliPlan,
   clippedCoreControls,
   hasPageOverflow,
+  workspaceFitsViewport,
 } from './run.js';
 
 describe('browser smoke CLI planning', () => {
@@ -92,5 +93,14 @@ describe('browser smoke CLI planning', () => {
     expect(JSON.parse(JSON.stringify(clipped))).toEqual([
       { name: 'Timeline clip', index: 0, rect: { left: -2, top: 8, right: 100, bottom: 40 } },
     ]);
+  });
+
+  it('requires the Dockview workspace host to stay below the app header', () => {
+    expect(workspaceFitsViewport({ top: 40, bottom: 768, height: 728 }, { height: 768 })).toBe(
+      true,
+    );
+    expect(workspaceFitsViewport({ top: 40, bottom: 808, height: 768 }, { height: 768 })).toBe(
+      false,
+    );
   });
 });
