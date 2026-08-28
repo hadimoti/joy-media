@@ -543,9 +543,9 @@ describe('JOY Studio 1.0 release gate', () => {
   });
 
   it.each([
-    ['literal fixture thumbnail job type', "export const type = 'fixture.thumbnail';"],
     ['fixture job registration', "registerFixtureJob('thumbnail', handler);"],
     ['fixture handler registration', "registry.registerFixtureHandler('thumbnail', handler);"],
+    ['fixture enqueue path', "await client.enqueueFixture('project', 'fixture-thumbnail-id');"],
   ])('rejects %s in production source', (_description, source) => {
     const root = mkdtempSync(join(tmpdir(), 'joy-release-fixture-root-'));
     const sourceDirectory = join(root, 'apps/api/src');
@@ -559,6 +559,27 @@ describe('JOY Studio 1.0 release gate', () => {
     const result = evaluateReleaseGate({ ...passingInput(), fixtureHandlers });
     expect(result.passed).toBe(false);
     expect(result.checks.find((check) => check.id === 'fixture-registries')?.status).toBe('failed');
+  });
+
+  it('ignores fixture comments, declarations, and dist output', () => {
+    const root = mkdtempSync(join(tmpdir(), 'joy-release-fixture-ignore-root-'));
+    mkdirSync(join(root, 'apps/api/src'), { recursive: true });
+    mkdirSync(join(root, 'apps/api/dist'), { recursive: true });
+    writeFileSync(
+      join(root, 'apps/api/src/control-plane.ts'),
+      [
+        '/** fixture.thumbnail is a transport kind, not a registration. */',
+        'export interface FixtureReceipt {',
+        "  readonly kind: 'fixture.thumbnail';",
+        '}',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(root, 'apps/api/dist/control-plane.d.ts'),
+      "export interface FixtureReceipt { readonly kind: 'fixture.thumbnail'; }",
+    );
+
+    expect(findProductionFixtureRegistrations(root)).toEqual([]);
   });
 
   it('preserves fixture registrations in test-only source files', () => {

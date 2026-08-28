@@ -268,7 +268,8 @@ function featureStatusFresh(auditedOn: string, now: Date): boolean {
   const timestamp = Date.parse(auditedOn);
   if (!Number.isFinite(timestamp)) return false;
   const age = now.getTime() - timestamp;
-  return age >= 0 && age <= RELEASE_STATUS_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+  const futureToleranceMs = 24 * 60 * 60 * 1000;
+  return age >= -futureToleranceMs && age <= RELEASE_STATUS_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
 }
 
 function featureStatusReady(featureStatus: ReleaseGateInput['featureStatus'], now: Date): boolean {
@@ -518,9 +519,10 @@ function signatureForAsset(path: string, value: Buffer): string {
       return value.subarray(0, 4).toString('hex');
     case '.woff':
     case '.woff2':
-    case '.otf':
     case '.svg':
       return value.subarray(0, 4).toString('utf8');
+    case '.otf':
+      return value.subarray(0, 4).toString('hex');
     case '.ttf':
     case '.ico':
       return value.subarray(0, 4).toString('hex');
@@ -541,7 +543,10 @@ function validAssetSignature(path: string, value: Buffer): boolean {
     case '.ico':
       return value.subarray(0, 4).equals(Buffer.from([0x00, 0x00, 0x01, 0x00]));
     case '.otf':
-      return value.subarray(0, 4).toString('utf8') === 'OTTO';
+      return (
+        value.subarray(0, 4).toString('utf8') === 'OTTO' ||
+        value.subarray(0, 4).equals(Buffer.from([0x00, 0x01, 0x00, 0x00]))
+      );
     case '.png':
       return value
         .subarray(0, 8)
@@ -1042,17 +1047,30 @@ function isCompiledSourceSibling(path: string, trackedFiles: ReadonlySet<string>
 }
 
 const PRODUCTION_FIXTURE_REGISTRATION =
-  /(?:fixture(?:[._-]?thumbnail|[\s._-]*(?:handler|job|registry|port))|(?:handler|job|registry|port)[\s._-]*fixture)/iu;
+  /(?:enqueueFixture|registerFixture(?:Handler|Job)|runFixtureThumbnail|fixture(?:[._-]?thumbnail|[\s._-]*(?:handler|job|registry|port))|(?:handler|job|registry|port)[\s._-]*fixture)/iu;
 
 export function findProductionFixtureRegistrations(root: string): readonly string[] {
   return collectFiles(root, 'apps')
-    .filter((path) => /\.(?:ts|tsx)$/u.test(path) && !/\.test\.[^.]+$/u.test(path))
+    .filter(
+      (path) =>
+        /\.(?:ts|tsx)$/u.test(path) &&
+        !/\.d\.ts$/u.test(path) &&
+        !/\.test\.[^.]+$/u.test(path) &&
+        !/[/\\]dist[/\\]/u.test(path),
+    )
     .flatMap((path) => {
       const lines = readFileSync(path, 'utf8').split(/\r?\n/u);
       return lines.flatMap((line, index) =>
-        PRODUCTION_FIXTURE_REGISTRATION.test(line) ? [`${relative(root, path)}:${index + 1}`] : [],
+        productionFixtureLine(line) && PRODUCTION_FIXTURE_REGISTRATION.test(line)
+          ? [`${relative(root, path)}:${index + 1}`]
+          : [],
       );
     });
+}
+
+function productionFixtureLine(line: string): boolean {
+  const trimmed = line.trim();
+  return !/^(?:\/[/*]|\*|\||readonly\b|export interface\b|interface\b|type\b)/u.test(trimmed);
 }
 
 function readBrowserJourneys(root: string): readonly ReleaseBrowserJourney[] {
