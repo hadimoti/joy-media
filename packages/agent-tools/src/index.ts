@@ -273,6 +273,20 @@ export {
   validateCreativeBriefV1,
 } from './creative-brief.js';
 export type {
+  CreativeBriefV2Confidence,
+  CreativeBriefV2Recommendation,
+  CreativeBriefV2Request,
+  CreativeBriefV2RequestValidationContext,
+  CreativeBriefV2Result,
+  CreativeBriefV2ValidationResult,
+} from './creative-brief-v2.js';
+export {
+  CREATIVE_BRIEF_V2_SCHEMA_VERSION,
+  CreativeBriefV2,
+  validateCreativeBriefV2Request,
+  validateCreativeBriefV2Result,
+} from './creative-brief-v2.js';
+export type {
   BoundedModelInputV1,
   StructuredModelOutputV1,
   CreativeModelAdapter,
