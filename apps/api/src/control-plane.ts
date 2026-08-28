@@ -7,6 +7,8 @@ export interface Actor {
 
 /** Only this service identity may publish cross-account library media. */
 export const SHARED_LIBRARY_OWNER_ID = 'joy-media-library';
+export const MAX_WORKER_ATTEMPTS = 2_147_483_647;
+const WORKER_ATTEMPT_BUDGET_EXHAUSTED = 'Worker attempt budget exhausted';
 
 // Project Document Store types and implementations
 // Using local types to avoid module resolution issues with verbatimModuleSyntax
@@ -281,6 +283,8 @@ export interface Job {
   readonly assetId?: string;
   /** Validated JSON delivered only to the leased Worker, never to browser job listings. */
   readonly payload?: Readonly<Record<string, unknown>>;
+  /** Optional per-job lease-attempt budget; omitted legacy jobs remain unbounded. */
+  readonly maxAttempts?: number;
   readonly state: 'queued' | 'leased' | 'completed' | 'canceled' | 'failed';
   readonly leaseOwner?: string;
   readonly leaseExpiresAt?: number;
@@ -543,6 +547,7 @@ export interface ControlPlane {
     now?: number,
     assetId?: string,
     payload?: Readonly<Record<string, unknown>>,
+    maxAttempts?: number,
   ): Job | Promise<Job>;
   enqueueAssetThumbnail(
     actor: Actor,
@@ -550,6 +555,7 @@ export interface ControlPlane {
     projectId: string,
     assetId: string,
     now?: number,
+    maxAttempts?: number,
   ): Job | Promise<Job>;
   lease(
     workerId: string,
@@ -615,6 +621,7 @@ export class LocalControlPlane implements ControlPlane {
   readonly #joyCodeConsentVersions = new Map<string, string>();
   readonly #workers = new Map<string, WorkerRecord>();
   readonly #jobs = new Map<string, Job>();
+  readonly #jobAttempts = new Map<string, number>();
   readonly #assets = new Map<string, MediaAssetRecord>();
   readonly #derivatives = new Map<string, MediaDerivativeRecord>();
   readonly #events: JobEvent[] = [];
@@ -769,7 +776,10 @@ export class LocalControlPlane implements ControlPlane {
       for (const ref of privateRefs(derivative.locations)) candidates.add(ref);
     }
     for (const [jobId, job] of this.#jobs.entries()) {
-      if (job.projectId === id) this.#jobs.delete(jobId);
+      if (job.projectId === id) {
+        this.#jobs.delete(jobId);
+        this.#jobAttempts.delete(jobId);
+      }
     }
     for (let index = this.#events.length - 1; index >= 0; index -= 1) {
       if (!this.#jobs.has(this.#events[index]!.jobId)) this.#events.splice(index, 1);
@@ -1191,8 +1201,10 @@ export class LocalControlPlane implements ControlPlane {
     now = Date.now(),
     assetId?: string,
     payload?: Readonly<Record<string, unknown>>,
+    maxAttempts?: number,
   ): Job {
     this.project(actor, projectId);
+    validateWorkerMaxAttempts(maxAttempts);
     if (type === 'asset.thumbnail')
       throw new ControlPlaneError(
         'ASSET_JOB_INVALID',
@@ -1216,6 +1228,7 @@ export class LocalControlPlane implements ControlPlane {
       type,
       ...(assetId !== undefined ? { assetId } : {}),
       ...(payload === undefined ? {} : { payload: validatedJobPayload(payload) }),
+      ...(maxAttempts === undefined ? {} : { maxAttempts }),
       state: 'queued',
       progress: 0,
       cancelRequested: false,
@@ -1230,8 +1243,10 @@ export class LocalControlPlane implements ControlPlane {
     projectId: string,
     assetId: string,
     now = Date.now(),
+    maxAttempts?: number,
   ): Job {
     this.project(actor, projectId);
+    validateWorkerMaxAttempts(maxAttempts);
     const asset = this.#assets.get(assetId);
     if (asset === undefined || asset.projectId !== projectId)
       throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
@@ -1240,6 +1255,7 @@ export class LocalControlPlane implements ControlPlane {
       projectId,
       type: 'asset.thumbnail',
       assetId,
+      ...(maxAttempts === undefined ? {} : { maxAttempts }),
       state: 'queued',
       progress: 0,
       cancelRequested: false,
@@ -1252,14 +1268,28 @@ export class LocalControlPlane implements ControlPlane {
     const worker = this.#workers.get(workerId);
     if (worker === undefined || worker.revoked || !worker.paired)
       throw new ControlPlaneError('WORKER_UNAUTHORIZED', workerId);
-    const job = [...this.#jobs.values()].find(
-      (item) =>
-        isWorkerCompatible(worker, item) &&
-        (item.state === 'queued' ||
-          (item.state === 'leased' &&
+    let job: Job | undefined;
+    for (const item of this.#jobs.values()) {
+      if (
+        !isWorkerCompatible(worker, item) ||
+        (item.state !== 'queued' &&
+          !(
+            item.state === 'leased' &&
             item.leaseExpiresAt !== undefined &&
-            item.leaseExpiresAt <= now)),
-    );
+            item.leaseExpiresAt <= now
+          ))
+      )
+        continue;
+      const attempts = this.#jobAttempts.get(item.id) ?? 0;
+      if (item.maxAttempts !== undefined && attempts >= item.maxAttempts) {
+        const terminal = terminalJobAfterAttemptBudget(item);
+        this.#jobs.set(item.id, terminal);
+        this.event(item.id, terminal.state, now);
+        continue;
+      }
+      job = item;
+      break;
+    }
     if (job === undefined) return undefined;
     const leased: Job = {
       ...job,
@@ -1268,6 +1298,7 @@ export class LocalControlPlane implements ControlPlane {
       leaseExpiresAt: now + durationMs,
     };
     this.#jobs.set(job.id, leased);
+    this.#jobAttempts.set(job.id, (this.#jobAttempts.get(job.id) ?? 0) + 1);
     this.event(job.id, 'leased', now);
     return leased;
   }
@@ -1362,12 +1393,15 @@ export class LocalControlPlane implements ControlPlane {
       throw new ControlPlaneError('JOB_NOT_FOUND', jobId);
     if (job.state === 'leased' || job.state === 'queued')
       throw new ControlPlaneError('JOB_NOT_RETRYABLE', jobId);
+    if (job.maxAttempts !== undefined && (this.#jobAttempts.get(jobId) ?? 0) >= job.maxAttempts)
+      throw new ControlPlaneError('JOB_NOT_RETRYABLE', jobId);
     const retried: Job = {
       id: job.id,
       projectId: job.projectId,
       type: job.type,
       ...(job.assetId === undefined ? {} : { assetId: job.assetId }),
       ...(job.payload === undefined ? {} : { payload: job.payload }),
+      ...(job.maxAttempts === undefined ? {} : { maxAttempts: job.maxAttempts }),
       state: 'queued',
       progress: 0,
       cancelRequested: false,
@@ -1589,6 +1623,17 @@ function isWorkerCompatible(worker: WorkerRecord, job: Job): boolean {
   return true;
 }
 
+function terminalJobAfterAttemptBudget(job: Job): Job {
+  const terminal: { -readonly [Key in keyof Job]: Job[Key] } = { ...job };
+  terminal.state = job.cancelRequested ? 'canceled' : 'failed';
+  terminal.cancelRequested = false;
+  delete terminal.leaseOwner;
+  delete terminal.leaseExpiresAt;
+  if (terminal.state === 'canceled') delete terminal.error;
+  else terminal.error = WORKER_ATTEMPT_BUDGET_EXHAUSTED;
+  return terminal;
+}
+
 function validatedJobPayload(
   value: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> {
@@ -1604,6 +1649,17 @@ function validatedJobPayload(
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
     throw new ControlPlaneError('JOB_PAYLOAD_INVALID', 'job payload must be an object');
   return parsed as Readonly<Record<string, unknown>>;
+}
+
+export function validateWorkerMaxAttempts(value: number | undefined): void {
+  if (
+    value !== undefined &&
+    (!Number.isSafeInteger(value) || value < 1 || value > MAX_WORKER_ATTEMPTS)
+  )
+    throw new ControlPlaneError(
+      'JOB_PAYLOAD_INVALID',
+      `maxAttempts must be an integer from 1 to ${MAX_WORKER_ATTEMPTS}`,
+    );
 }
 
 function validatedOpaqueIds(values: readonly string[]): readonly string[] {

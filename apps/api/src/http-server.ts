@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createHash, randomBytes } from 'node:crypto';
 import {
   ControlPlaneError,
+  MAX_WORKER_ATTEMPTS,
   type Actor,
   type AssetRegistration,
   type ControlPlane,
@@ -1371,6 +1372,7 @@ async function route(
   if (request.method === 'POST' && jobMatch !== null) {
     const body = await readJson(request);
     const type = requiredString(body, 'type');
+    const maxAttempts = optionalPositiveInteger(body, 'maxAttempts', MAX_WORKER_ATTEMPTS);
     const job =
       type === 'asset.thumbnail'
         ? await options.controlPlane.enqueueAssetThumbnail(
@@ -1378,6 +1380,8 @@ async function route(
             requiredString(body, 'id'),
             decodeURIComponent(jobMatch[1]!),
             requiredString(body, 'assetId'),
+            Date.now(),
+            maxAttempts,
           )
         : type === 'image.comfy' ||
             type === 'audio.ml-denoise' ||
@@ -1393,6 +1397,7 @@ async function route(
               Date.now(),
               requiredString(body, 'assetId'),
               jobPayload(body),
+              maxAttempts,
             )
           : await options.controlPlane.enqueue(
               actor,
@@ -1402,6 +1407,7 @@ async function route(
               Date.now(),
               typeof body.assetId === 'string' ? body.assetId : undefined,
               jobPayload(body),
+              maxAttempts,
             );
     respondJson(response, 201, { data: jobForBrowser(job) });
     return;
@@ -1552,11 +1558,17 @@ function mistralCompletionRequest(body: Record<string, unknown>) {
   };
 }
 
-function optionalPositiveInteger(body: Record<string, unknown>, field: string): number | undefined {
+function optionalPositiveInteger(
+  body: Record<string, unknown>,
+  field: string,
+  maximum = Number.MAX_SAFE_INTEGER,
+): number | undefined {
   const value = body[field];
   if (value === undefined) return undefined;
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0)
     throw new ControlPlaneError('REQUEST_INVALID', `${field} must be a positive integer`);
+  if (value > maximum)
+    throw new ControlPlaneError('REQUEST_INVALID', `${field} must be no greater than ${maximum}`);
   return value;
 }
 

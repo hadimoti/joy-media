@@ -1,7 +1,11 @@
 import type { Pool } from 'pg';
 import { newDb } from 'pg-mem';
 import { describe, expect, it } from 'vitest';
-import { SHARED_LIBRARY_OWNER_ID, LocalControlPlane } from './control-plane.js';
+import {
+  SHARED_LIBRARY_OWNER_ID,
+  LocalControlPlane,
+  MAX_WORKER_ATTEMPTS,
+} from './control-plane.js';
 import { PostgresControlPlane } from './postgres-control-plane.js';
 
 describe('PostgresControlPlane', () => {
@@ -135,6 +139,124 @@ describe('PostgresControlPlane', () => {
     await expect(controlPlane.complete('worker-old', 'job-1', 107)).rejects.toMatchObject({
       code: 'LEASE_NOT_OWNED',
     });
+    await pool.end();
+  });
+
+  it('persists Worker attempt limits, re-leases below the limit, and terminalizes exhaustion', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const controlPlane = new PostgresControlPlane(pool, { skipLocked: false });
+    await controlPlane.initialize();
+    const owner = { id: 'attempt-owner' };
+    await controlPlane.createProject(owner, 'attempt-project', 'Attempts');
+    await controlPlane.pairWorker(owner, 'attempt-worker');
+    await expect(
+      controlPlane.enqueue(
+        owner,
+        'invalid-attempt-job',
+        'attempt-project',
+        'render',
+        100,
+        undefined,
+        undefined,
+        0,
+      ),
+    ).rejects.toMatchObject({ code: 'JOB_PAYLOAD_INVALID' });
+    await controlPlane.enqueue(
+      owner,
+      'attempt-job',
+      'attempt-project',
+      'render',
+      100,
+      undefined,
+      undefined,
+      2,
+    );
+
+    await expect(controlPlane.jobsForProject(owner, 'attempt-project')).resolves.toMatchObject([
+      { id: 'attempt-job', maxAttempts: 2, state: 'queued' },
+    ]);
+    await expect(controlPlane.lease('attempt-worker', 101, 1)).resolves.toMatchObject({
+      state: 'leased',
+    });
+    await expect(controlPlane.lease('attempt-worker', 103, 1)).resolves.toMatchObject({
+      id: 'attempt-job',
+      maxAttempts: 2,
+      state: 'leased',
+    });
+    await expect(controlPlane.lease('attempt-worker', 105, 30_000)).resolves.toBeUndefined();
+
+    const [job] = await controlPlane.jobsForProject(owner, 'attempt-project');
+    expect(job).toMatchObject({
+      id: 'attempt-job',
+      maxAttempts: 2,
+      state: 'failed',
+      error: 'Worker attempt budget exhausted',
+    });
+    expect(job).not.toHaveProperty('leaseOwner');
+    expect(job).not.toHaveProperty('leaseExpiresAt');
+    await expect(
+      controlPlane.retry(owner, 'attempt-project', 'attempt-job', 106),
+    ).rejects.toMatchObject({ code: 'JOB_NOT_RETRYABLE' });
+    await expect(controlPlane.eventsAfter(owner, 'attempt-project', 0)).resolves.toMatchObject([
+      { type: 'queued' },
+      { type: 'leased' },
+      { type: 'leased' },
+      { type: 'failed' },
+    ]);
+    const attempts = await pool.query<{ readonly completed_at: Date | null }>(
+      'SELECT completed_at FROM job_attempts WHERE job_id = $1 ORDER BY id',
+      ['attempt-job'],
+    );
+    expect(attempts.rows).toHaveLength(2);
+    expect(attempts.rows[0]?.completed_at).toEqual(new Date(103));
+    expect(attempts.rows[1]?.completed_at).toEqual(new Date(105));
+
+    await controlPlane.createProject(owner, 'range-project', 'Attempt range');
+    await expect(
+      controlPlane.enqueue(
+        owner,
+        'maximum-attempt-job',
+        'range-project',
+        'render',
+        107,
+        undefined,
+        undefined,
+        MAX_WORKER_ATTEMPTS,
+      ),
+    ).resolves.toMatchObject({ maxAttempts: MAX_WORKER_ATTEMPTS });
+    await expect(
+      controlPlane.enqueue(
+        owner,
+        'oversized-attempt-job',
+        'range-project',
+        'render',
+        107,
+        undefined,
+        undefined,
+        MAX_WORKER_ATTEMPTS + 1,
+      ),
+    ).rejects.toMatchObject({ code: 'JOB_PAYLOAD_INVALID' });
+    await controlPlane.registerAsset(owner, 'range-project', assetRegistration());
+    await expect(
+      controlPlane.enqueueAssetThumbnail(
+        owner,
+        'bounded-thumbnail-job',
+        'range-project',
+        'asset-1',
+        108,
+        1,
+      ),
+    ).resolves.toMatchObject({ maxAttempts: 1 });
+    const unboundedThumbnail = await controlPlane.enqueueAssetThumbnail(
+      owner,
+      'unbounded-thumbnail-job',
+      'range-project',
+      'asset-1',
+      108,
+    );
+    expect(unboundedThumbnail).not.toHaveProperty('maxAttempts');
     await pool.end();
   });
 
