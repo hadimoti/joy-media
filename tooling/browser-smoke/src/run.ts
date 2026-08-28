@@ -560,6 +560,10 @@ export async function verifyAuthenticatedShellViewports(
   const evidence: ViewportShellEvidence[] = [];
   for (const viewport of AUTHENTICATED_SHELL_VIEWPORTS) {
     await page.setViewportSize(viewport);
+    // Start each shell measurement with the current viewport as its initial
+    // Dockview geometry. This mirrors a fresh desktop open and avoids relying
+    // on Playwright's emulated resize event delivery.
+    await page.reload({ waitUntil: 'networkidle' });
     const shell = await page.evaluate((specs) => {
       const coreControls: CoreControlEvidence[] = [];
       for (const { name, selector } of specs) {

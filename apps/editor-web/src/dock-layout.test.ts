@@ -5,6 +5,7 @@ import {
   DOCK_PANEL_MINIMUM_WIDTH,
   defaultDockLayout,
   dockLayoutKey,
+  layoutDockviewToContainer,
   loadViewMode,
   migrateLegacyDockLayout,
   normalizeDockLayoutConstraints,
@@ -70,6 +71,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 describe('dock layout constraints', () => {
+  it('relayouts Dockview when its responsive host changes size', () => {
+    const layouts: Array<[number, number, boolean | undefined]> = [];
+    const api = {
+      width: 1280,
+      height: 728,
+      layout: (width: number, height: number, force?: boolean) => {
+        layouts.push([width, height, force]);
+        api.width = width;
+        api.height = height;
+      },
+    };
+
+    expect(layoutDockviewToContainer(api, { clientWidth: 1024, clientHeight: 728 })).toBe(true);
+    expect(layouts).toEqual([[1024, 728, true]]);
+    expect(layoutDockviewToContainer(api, { clientWidth: 1024, clientHeight: 728 })).toBe(true);
+    expect(layouts).toEqual([
+      [1024, 728, true],
+      [1024, 728, true],
+    ]);
+    expect(layoutDockviewToContainer(api, { clientWidth: 0, clientHeight: 728 })).toBe(false);
+  });
+
   it('seeds every editor panel with compact, resize-safe minimums', () => {
     const layout = defaultDockLayout() as LayoutWithPanels;
 

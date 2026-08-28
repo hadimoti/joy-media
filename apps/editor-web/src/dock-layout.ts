@@ -58,6 +58,24 @@ export const SUPERSEDED_DOCK_LAYOUT_KEYS: readonly string[] = [
 export const DOCK_PANEL_MINIMUM_WIDTH = 64;
 export const DOCK_PANEL_MINIMUM_HEIGHT = 72;
 
+export interface DockviewLayoutApi {
+  readonly width: number;
+  readonly height: number;
+  layout(width: number, height: number, force?: boolean): void;
+}
+
+/** Keep Dockview's pixel layout aligned with its responsive host element. */
+export function layoutDockviewToContainer(
+  api: DockviewLayoutApi,
+  container: Pick<HTMLElement, 'clientWidth' | 'clientHeight'>,
+): boolean {
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+  if (width <= 0 || height <= 0) return false;
+  api.layout(width, height, true);
+  return true;
+}
+
 const BROWSER_GROUP = ['media', 'effects', 'transitions', 'captions', 'audio', 'color'] as const;
 
 const CONTEXT_GROUP = ['inspector', 'motion', 'history', 'diagnostics', 'camera'] as const;

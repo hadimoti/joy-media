@@ -10073,8 +10073,8 @@ label {
   flex: 1;
   min-height: 0;
   /* Fill remaining main height after header; never grow the document. */
-  height: auto;
-  max-height: 100%;
+  height: 0;
+  max-height: none;
   overflow: hidden;
 }
 .inspector-section-toggle {

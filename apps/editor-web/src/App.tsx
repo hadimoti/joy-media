@@ -385,6 +385,7 @@ import {
   SUPERSEDED_DOCK_LAYOUT_KEYS,
   type EditorViewMode,
   dockLayoutKey,
+  layoutDockviewToContainer,
   loadViewMode,
   migrateLegacyDockLayout,
   normalizeDockLayoutConstraints,
@@ -902,6 +903,7 @@ function EditorWorkspace({
   // a later deferred hydrate.
   const hydrationReadyRef = useRef(false);
   const dockviewApiRef = useRef<DockviewApi | null>(null);
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
   const dockviewComponentsRef = useRef<{ readonly 'editor-panel': typeof Panel } | null>(null);
   const legacyStorageHadDataRef = useRef<boolean | undefined>(undefined);
   const scheduler = useRef(new PlaybackScheduler());
@@ -3562,6 +3564,11 @@ function EditorWorkspace({
       const mode = loadViewMode(window.localStorage);
       setViewMode(mode);
       applyDockLayout(event.api, mode);
+      const workspace =
+        workspaceRef.current ?? document.querySelector<HTMLDivElement>('.workspace');
+      if (workspace !== null) {
+        layoutDockviewToContainer(event.api, workspace);
+      }
 
       const persistDockLayout = () => {
         window.localStorage.setItem(
@@ -3573,6 +3580,23 @@ function EditorWorkspace({
     },
     [applyDockLayout],
   );
+
+  useEffect(() => {
+    const workspace = workspaceRef.current ?? document.querySelector<HTMLDivElement>('.workspace');
+    if (workspace === null) return;
+    const resize = () => {
+      const api = dockviewApiRef.current;
+      if (api !== null) layoutDockviewToContainer(api, workspace);
+    };
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(resize);
+    observer?.observe(workspace);
+    window.addEventListener('resize', resize);
+    resize();
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', resize);
+    };
+  }, []);
 
   function Panel({ api }: IDockviewPanelProps) {
     const context = useContext(EditorPanelContext);
@@ -4684,13 +4708,14 @@ function EditorWorkspace({
           onTimelineAutoFitChange: setTimelineAutoFit,
         }}
       >
-        <DockviewReact
-          className="workspace"
-          components={dockviewComponents}
-          defaultTabComponent={PanelTab}
-          disableTabsOverflowList
-          onReady={onReady}
-        />
+        <div ref={workspaceRef} className="workspace">
+          <DockviewReact
+            components={dockviewComponents}
+            defaultTabComponent={PanelTab}
+            disableTabsOverflowList
+            onReady={onReady}
+          />
+        </div>
       </EditorPanelContext.Provider>
       {motionStudioSceneId !== undefined && (
         <LazyPanel label="Motion Studio">
