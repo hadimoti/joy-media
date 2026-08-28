@@ -488,7 +488,7 @@ export function AgentPanel({
   const mountedRef = useRef(true);
   const requestTokenRef = useRef(0);
   const submissionInProgressRef = useRef(false);
-  const previousReasoningIdentityRef = useRef<string>();
+  const previousReasoningIdentityRef = useRef<string | undefined>(undefined);
   const currentReasoningIdentityRef = useRef({
     projectId: project.id,
     projectRevision: session.projectRevisionId,

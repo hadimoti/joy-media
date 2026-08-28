@@ -11,11 +11,7 @@ import {
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import { DEFAULT_AGENT_SETTINGS } from './agent-settings.js';
 import type { EditorSession } from './editor-session.js';
-import {
-  AgentPanel,
-  ProviderApprovalDetails,
-  selectJoyCodePendingApproval,
-} from './AgentPanel.js';
+import { AgentPanel, ProviderApprovalDetails, selectJoyCodePendingApproval } from './AgentPanel.js';
 import {
   BrowserControlPlaneClient,
   type BrowserJoyCodeReasoningResponse,
@@ -129,7 +125,9 @@ describe('AgentPanel remote reasoning lifecycle', () => {
     const project = buildReferenceSpikeProject();
     const view = await mountAgentPanel(project, 'revision-a');
 
-    const send = view.container.querySelector<HTMLButtonElement>('button[aria-label="Send message"]')!;
+    const send = view.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Send message"]',
+    )!;
     await act(async () => {
       setComposerValue(view.container, 'Give me a bounded critique');
       send.click();
@@ -178,7 +176,10 @@ describe('AgentPanel remote reasoning lifecycle', () => {
   });
 });
 
-function panel(project: ReturnType<typeof buildReferenceSpikeProject>, revision: ProjectRevisionId) {
+function panel(
+  project: ReturnType<typeof buildReferenceSpikeProject>,
+  revision: ProjectRevisionId,
+) {
   return (
     <AgentPanel
       project={project}
@@ -215,7 +216,9 @@ async function submit(container: HTMLElement, value: string): Promise<void> {
 }
 
 function setComposerValue(container: HTMLElement, value: string): void {
-  const composer = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message Joy Code"]')!;
+  const composer = container.querySelector<HTMLTextAreaElement>(
+    'textarea[aria-label="Message Joy Code"]',
+  )!;
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
   setter?.call(composer, value);
   composer.dispatchEvent(new Event('input', { bubbles: true }));
