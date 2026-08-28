@@ -147,7 +147,18 @@ describe('control-plane project binding', () => {
     globalThis.fetch = async (input: RequestInfo | URL) => {
       const url = String(input);
       requests.push(url);
-      return json(200, { data: [{ id: 'job-1', state: 'queued' }] });
+      return json(200, {
+        data: [
+          {
+            id: 'job-1',
+            projectId: 'project-opaque-project-1',
+            type: 'render.inspect',
+            state: 'queued',
+            progress: 0,
+            cancelRequested: false,
+          },
+        ],
+      });
     };
     const first = getOrCreateControlPlaneProjectBinding(
       storage,
@@ -165,7 +176,14 @@ describe('control-plane project binding', () => {
         () => 'joy-session-token',
       );
       await expect(client.jobs(reopened.controlPlaneProjectId)).resolves.toMatchObject([
-        { id: 'job-1', state: 'queued' },
+        {
+          id: 'job-1',
+          projectId: reopened.controlPlaneProjectId,
+          type: 'render.inspect',
+          state: 'queued',
+          progress: 0,
+          cancelRequested: false,
+        },
       ]);
     } finally {
       globalThis.fetch = originalFetch;
