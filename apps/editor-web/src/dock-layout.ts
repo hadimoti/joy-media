@@ -63,7 +63,11 @@ export const DOCK_PANEL_MINIMUM_HEIGHT = 72;
 
 const BROWSER_GROUP = ['media', 'effects'] as const;
 
-const CONTEXT_GROUP = ['inspector'] as const;
+// Keep specialist context panels in one reachable tab group. Named workspace
+// presets select these views (Enhance → Motion, Audio & Captions → Audio,
+// Automate → Jobs); omitting a view here makes that preset silently fall back
+// to Inspector even though the panel is registered.
+const CONTEXT_GROUP = ['inspector', 'motion', 'audio', 'jobs'] as const;
 
 export interface ViewModeStorage {
   getItem(key: string): string | null;
