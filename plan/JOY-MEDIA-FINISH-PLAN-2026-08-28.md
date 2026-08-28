@@ -78,10 +78,10 @@ Codex in-app-browser findings below remain valid independent evidence.
 
 | Surface                     | Observed tip/state                                | Consequence                                                                       |
 | --------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Local checkpoint branch     | `5c916d3` on `codex/joy-media-implement-20260828` | Clean tested candidate, published for review; not yet promoted to `main`.         |
+| Local checkpoint branch     | `eda8d64` on `codex/joy-media-implement-20260828` | Clean tested candidate, published for review; not yet promoted to `main`.         |
 | Deployed/VPS release branch | `b3c1866`                                         | Older certified release; candidate has additional hardening and is not deployed.  |
-| GitHub `main`               | `2083ffc`                                         | 407 main-only commits versus 162 candidate-only commits.                          |
-| VPS `main`                  | `1e4657f`                                         | 225 VPS-main-only commits versus 162 candidate-only commits.                      |
+| GitHub `main`               | `2083ffc`                                         | 407 main-only commits versus 170 candidate-only commits.                          |
+| VPS `main`                  | `1e4657f`                                         | 225 VPS-main-only commits versus 170 candidate-only commits.                      |
 | Common merge base           | `73744bb`                                         | A blind merge is unsafe; simulated reconciliation has extensive overlap/conflict. |
 
 `aec01ef` contains 324 changed files and a large quantity of transient evidence, debug files, and
@@ -494,11 +494,25 @@ or raw secret-bearing artifacts.
 
 ## Execution checkpoint — 2026-08-28
 
-- The local JOY Media hardening checkpoint is committed through `5c916d3` on
+- Continuation checkpoint: the candidate now includes `2c70057`, a safe subset of the Kilo
+  review that preserves optional visual-effect factory semantics and adds four focused tests.
+  The focused visual-effects suite passes and the repository typecheck remains green. The
+  detached Kilo commit also contained unrelated generated/tsconfig changes and was not
+  cherry-picked wholesale.
+- The latest `pnpm release:gate` run at `2026-08-28T12:21:34Z` reports command health, 2,382
+  scoped tests, generated-artifact hygiene, fixture registries, builds, manifest, SBOM, and
+  feature-status as passed. It remains **NO-GO** only because source-bound authenticated browser
+  provenance and the required `authenticated-editor-1.0` journey are absent.
+- The frontend specialist's additive, namespaced Creative Brief v2 contract landed as `eda8d64`.
+  It preserves all current v1 exports and its focused suite passes 10/10; the isolated worktree's
+  package build could not resolve an unrelated workspace declaration, so the candidate's full
+  typecheck was run after integration and passed. No incompatible GitHub-main contract was copied.
+
+- The local JOY Media hardening checkpoint is committed through `eda8d64` on
   `codex/joy-media-implement-20260828`; its pre-merge state is preserved at
   `backup/joy-media-before-main-merge-20260828`.
-- The checkpoint passes `pnpm typecheck`, `pnpm format:check`, and the full `pnpm test`
-  suite (311 files, 2,425 passed tests, 1 skipped). Focused API, asset-library, timeline,
+- The checkpoint passes `pnpm typecheck`, `pnpm format:check`, and the latest full `pnpm test`
+  suite (313 files, 2,439 passed tests, 1 skipped). Focused API, asset-library, timeline,
   and Joy Code lifecycle tests pass (68 tests).
 - `pnpm audit --prod --audit-level high` reports no known vulnerabilities.
 - The candidate now includes `ef86e87`, which adds validated non-secret release identity and
@@ -532,8 +546,8 @@ unavailable`, and a console error loading `/transitions/preview/transition2.png`
   checkpoint; no browser mutation was performed.
 - The transition preview defect is fixed on the checkpoint in `e2e7838` (with the formatted
   release note in `63c6511`). OpenCLI profile `cefd9k77` verified both stable SVG endpoints from
-  a local production build with HTTP 200 and `image/svg+xml`; transition preview tests, the full
-  test suite (2,425 passed, 1 skipped), and editor build passed.
+  a local production build with HTTP 200 and `image/svg+xml`; transition preview tests, the latest
+  full test suite (2,439 passed, 1 skipped), and editor build passed.
 - Kilo was invoked with `kilo/kilo-auto/free` and OpenCLI profile `cefd9k77` for an independent
   review. Its run was stopped after it began reviewing a stale detached checkpoint, so its
   observations are advisory only. Hermes was invoked with `openrouter/free` for bounded review;
