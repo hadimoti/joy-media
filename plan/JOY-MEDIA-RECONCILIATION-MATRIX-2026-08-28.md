@@ -40,7 +40,7 @@ readiness checks, and live static-route verification remain open.
 
 The reviewed candidate is `124f359` on `codex/joy-media-implement-20260828`; GitHub `main` is
 `2083ffc` and VPS `main` is `1e4657f`. They share base `73744bb` but currently diverge by 407
-main-only and 212 candidate-only commits, so direct merging is unsafe. Candidate CI now restores
+main-only and 214 candidate-only commits, so direct merging is unsafe. Candidate CI now restores
 FFmpeg/FFprobe preflight, the V2 head table is isolated from the legacy live schema, and the local
 mocked browser-smoke journey passes all supported shell viewports; release remains NO-GO until
 real-service, source-bound browser evidence, verified delivery/inspection, and a fresh main-based
