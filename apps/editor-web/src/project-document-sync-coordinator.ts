@@ -7,6 +7,7 @@ import {
 import { BrowserControlPlaneError } from './control-plane-errors.js';
 
 const IDLE_SYNC_DELAY_MS = 2_000;
+const MAX_RETRY_DELAY_MS = 60_000;
 const MAX_PENDING_OPERATIONS = 50;
 const MAX_CHECKPOINT_AGE_MS = 30_000;
 
@@ -194,6 +195,7 @@ export class ProjectDocumentSyncCoordinator {
   #syncPromise: Promise<ProjectDocumentSyncResult> | undefined;
   #retryAppend: AppendAttempt | undefined;
   #retryRestore: RestoreAttempt | undefined;
+  #consecutiveRemoteFailures = 0;
 
   constructor(options: ProjectDocumentSyncCoordinatorOptions) {
     this.#projectId = options.initialSnapshot.projectId;
@@ -353,12 +355,14 @@ export class ProjectDocumentSyncCoordinator {
       this.#remoteRevision = revision.revision;
       this.#retryRestore = undefined;
       this.#retryAppend = undefined;
+      this.#consecutiveRemoteFailures = 0;
       this.#state = 'local';
       this.#lastCheckpointAtMs = checkpoint.startedAtMs;
       this.#notify();
       return { kind: 'restored', checkpoint, revision, snapshot: this.getSnapshot() };
     } catch (error) {
       if (!isRevisionConflict(error)) {
+        this.#consecutiveRemoteFailures += 1;
         this.#retryRestore = attempt;
         this.#state = 'server-unavailable';
         this.#notify();
@@ -403,11 +407,13 @@ export class ProjectDocumentSyncCoordinator {
         (batch) => batch.generation > checkpointGeneration,
       );
       this.#retryAppend = undefined;
+      this.#consecutiveRemoteFailures = 0;
       this.#state = 'local';
       this.#notify();
       return { kind: 'synced', checkpoint, revision, snapshot: this.getSnapshot() };
     } catch (error) {
       if (!isRevisionConflict(error)) {
+        this.#consecutiveRemoteFailures += 1;
         this.#retryAppend = attempt;
         this.#state = 'server-unavailable';
         this.#notify();
@@ -461,6 +467,7 @@ export class ProjectDocumentSyncCoordinator {
         );
       }
       this.#state = 'conflict-recovered';
+      this.#consecutiveRemoteFailures = 0;
       this.#lastRecoveredCopy = recoveredCopy;
       this.#notify();
       return {
@@ -471,6 +478,7 @@ export class ProjectDocumentSyncCoordinator {
         snapshot: this.getSnapshot(),
       };
     } catch (recoveryError) {
+      this.#consecutiveRemoteFailures += 1;
       this.#state = 'server-unavailable';
       this.#notify();
       return {
@@ -505,21 +513,28 @@ export class ProjectDocumentSyncCoordinator {
       this.#idleTimer = this.#scheduler.setTimeout(() => {
         this.#idleTimer = undefined;
         void this.syncNow();
-      }, IDLE_SYNC_DELAY_MS);
+      }, this.#retryDelayMs());
       return;
     }
     if (this.#retryAppend !== undefined) {
       this.#idleTimer = this.#scheduler.setTimeout(() => {
         this.#idleTimer = undefined;
         void this.syncNow();
-      }, IDLE_SYNC_DELAY_MS);
+      }, this.#retryDelayMs());
+      return;
+    }
+    if (this.#consecutiveRemoteFailures > 0) {
+      this.#idleTimer = this.#scheduler.setTimeout(() => {
+        this.#idleTimer = undefined;
+        void this.syncNow();
+      }, this.#retryDelayMs());
       return;
     }
     const firstPending = this.#pendingBatches[0]!;
     this.#idleTimer = this.#scheduler.setTimeout(() => {
       this.#idleTimer = undefined;
       void this.syncNow();
-    }, IDLE_SYNC_DELAY_MS);
+    }, this.#retryDelayMs());
     const remainingDeadlineMs = Math.max(
       0,
       MAX_CHECKPOINT_AGE_MS - (this.#scheduler.now() - firstPending.queuedAtMs),
@@ -539,6 +554,12 @@ export class ProjectDocumentSyncCoordinator {
       this.#scheduler.clearTimeout(this.#deadlineTimer);
       this.#deadlineTimer = undefined;
     }
+  }
+
+  #retryDelayMs(): number {
+    if (this.#consecutiveRemoteFailures <= 1) return IDLE_SYNC_DELAY_MS;
+    const exponent = Math.min(this.#consecutiveRemoteFailures - 1, 10);
+    return Math.min(IDLE_SYNC_DELAY_MS * 2 ** exponent, MAX_RETRY_DELAY_MS);
   }
 
   #notify(): void {

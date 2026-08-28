@@ -130,6 +130,41 @@ describe('ProjectDocumentSyncCoordinator', () => {
     });
   });
 
+  it('backs off repeated remote failures instead of polling the database every two seconds', async () => {
+    const scheduler = new FakeScheduler();
+    const remote = createRemote({
+      append: async () => {
+        throw new Error('backend offline');
+      },
+    });
+    const coordinator = new ProjectDocumentSyncCoordinator({
+      initialSnapshot: remote.snapshot(),
+      remote,
+      scheduler,
+      createIdempotencyKey: nextKey,
+    });
+
+    coordinator.queueLocalDocument(documentAt(1, 'offline copy'));
+    scheduler.advanceBy(2_000);
+    await scheduler.flushMicrotasks();
+    scheduler.advanceBy(2_000);
+    await scheduler.flushMicrotasks();
+    expect(remote.appendCalls).toHaveLength(2);
+
+    scheduler.advanceBy(2_000);
+    await scheduler.flushMicrotasks();
+    expect(remote.appendCalls).toHaveLength(2);
+
+    scheduler.advanceBy(2_000);
+    await scheduler.flushMicrotasks();
+    expect(remote.appendCalls).toHaveLength(3);
+    expect(remote.appendCalls.map((call) => call.idempotencyKey)).toEqual([
+      'key-1',
+      'key-1',
+      'key-1',
+    ]);
+  });
+
   it('returns a recovered copy payload instead of overwriting on stale revision conflict', async () => {
     const scheduler = new FakeScheduler();
     const remote = createRemote({
