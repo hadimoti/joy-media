@@ -2417,7 +2417,22 @@ export function TimelinePanel({
                 <span
                   className="timeline-lane"
                   data-track-id={track.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Insert media on ${track.id} track`}
                   style={{ minWidth: `${laneWidthPx}px` }}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return;
+                    event.preventDefault();
+                    handleAddFromLibrary();
+                  }}
+                  onClick={(event) => {
+                    // Empty tracks need a visible activation path; populated
+                    // lanes keep click-to-seek behavior in the timeline.
+                    if (event.target === event.currentTarget && source.clips.length === 0) {
+                      handleAddFromLibrary();
+                    }
+                  }}
                   onPointerDown={(event) => {
                     if (event.target !== event.currentTarget) return;
                     if (splitToolActive) {
