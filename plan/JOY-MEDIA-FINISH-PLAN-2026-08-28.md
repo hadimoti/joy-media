@@ -510,6 +510,12 @@ or raw secret-bearing artifacts.
 unavailable`, and a console error loading `/transitions/preview/transition2.png`.
   This is evidence of the currently deployed release, not evidence for the new
   checkpoint; no browser mutation was performed.
+- The legacy `fixture.thumbnail` production path was retired in `f485bbc`. The
+  release evaluator now passes command health, tests, generated-artifact hygiene,
+  fixture registry, builds, manifest, SBOM, and feature-status checks. It still
+  fails only the required fresh source-bound authenticated browser evidence and
+  browser-journey checks, which cannot be honestly synthesized from the current
+  live tab.
 
 - [ ] GitHub `main`, local `main`, VPS bare `main`, release tag, manifest, and deployed release all
       resolve to the same verified source SHA/tree.
