@@ -6,6 +6,50 @@ import type { PrivateObjectStore } from './private-object-store.js';
 import { deliveryPromiseFromManifest } from '@joy-media/production-quality';
 
 describe('PostgresControlPlane', () => {
+  it('initializes V2 document heads without mutating the legacy project_documents table', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    await pool.query(`
+      CREATE TABLE project_documents (
+        project_id text NOT NULL,
+        revision_id text NOT NULL,
+        schema_version integer NOT NULL,
+        document jsonb NOT NULL,
+        created_at timestamptz NOT NULL,
+        PRIMARY KEY (project_id, revision_id)
+      )
+    `);
+    await pool.query(
+      `INSERT INTO project_documents
+         (project_id, revision_id, schema_version, document, created_at)
+       VALUES ('legacy-project', 'legacy-revision', 1, '{"schemaVersion":1}'::jsonb, NOW())`,
+    );
+
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+    const owner = { id: 'v2-owner' };
+    await api.createProject(owner, 'v2-project', 'V2 project');
+    await expect(
+      api.appendProjectRevision(owner, 'v2-project', {
+        baseRevision: 0,
+        idempotencyKey: 'v2-write-1',
+        document: { schemaVersion: 2, projectId: 'v2-project', title: 'V2 document' },
+      }),
+    ).resolves.toMatchObject({ revision: 1 });
+    await expect(api.getProjectDocument(owner, 'v2-project')).resolves.toMatchObject({
+      projectId: 'v2-project',
+      revision: 1,
+      document: { title: 'V2 document' },
+    });
+    await expect(
+      pool.query('SELECT project_id, revision_id, schema_version FROM project_documents'),
+    ).resolves.toMatchObject({
+      rows: [{ project_id: 'legacy-project', revision_id: 'legacy-revision', schema_version: 1 }],
+    });
+    await pool.end();
+  });
+
   it('durably revokes asset access, cancels jobs, snapshots refs, and purges every historical object', async () => {
     const database = newDb();
     const adapter = database.adapters.createPg();

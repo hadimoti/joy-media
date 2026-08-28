@@ -34,7 +34,7 @@ describe('production readiness wiring', () => {
     expect(checks.privateObjectStore!()).toBe(true);
     expect(queries).toEqual([
       'SELECT 1',
-      'SELECT 1 FROM projects, project_documents, media_assets, jobs LIMIT 0',
+      'SELECT 1 FROM projects, project_document_heads_v2, project_revisions, media_assets, jobs LIMIT 0',
     ]);
   });
 

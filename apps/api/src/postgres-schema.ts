@@ -2,7 +2,10 @@
 export const POSTGRES_SCHEMA = `
 CREATE TABLE IF NOT EXISTS projects (id text primary key, owner_id text not null, title text not null, revision integer not null);
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS asset_sync_enabled boolean NOT NULL DEFAULT false;
-CREATE TABLE IF NOT EXISTS project_documents (
+-- The main/live lineage already owns project_documents with a legacy
+-- revision-log shape. Keep that table untouched and give V2 its own additive
+-- head table so deploying this schema over an existing database is safe.
+CREATE TABLE IF NOT EXISTS project_document_heads_v2 (
   project_id text primary key,
   revision integer NOT NULL DEFAULT 0,
   document jsonb NOT NULL,
