@@ -637,6 +637,15 @@ async function captureJourneyScreenshot(
 }
 
 async function installApiMock(page: Page, assets: Map<string, BrowserAsset>): Promise<void> {
+  const documents = new Map<
+    string,
+    {
+      readonly revision: number;
+      readonly document: Record<string, unknown>;
+      readonly documentHash: string;
+      readonly updatedAt: string;
+    }
+  >();
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -655,6 +664,56 @@ async function installApiMock(page: Page, assets: Map<string, BrowserAsset>): Pr
 
     if (method === 'POST' && path === '/v1/projects') {
       await json(route, {});
+      return;
+    }
+
+    const projectDocumentMatch = path.match(/^\/v2\/projects\/([^/]+)\/document$/);
+    if (projectDocumentMatch !== null && method === 'GET') {
+      const projectId = decodeURIComponent(projectDocumentMatch[1]!);
+      const snapshot = documents.get(projectId);
+      if (snapshot === undefined) {
+        await route.fulfill({
+          status: 404,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: { code: 'DOCUMENT_NOT_FOUND', message: 'document not found' },
+          }),
+        });
+      } else {
+        await json(route, { projectId, ...snapshot });
+      }
+      return;
+    }
+
+    const projectRevisionMatch = path.match(/^\/v2\/projects\/([^/]+)\/revisions$/);
+    if (projectRevisionMatch !== null && method === 'POST') {
+      const projectId = decodeURIComponent(projectRevisionMatch[1]!);
+      const body = (await request.postDataJSON()) as {
+        readonly baseRevision: number;
+        readonly idempotencyKey: string;
+        readonly document: Record<string, unknown>;
+        readonly label?: string;
+      };
+      const previous = documents.get(projectId);
+      const revision = (previous?.revision ?? 0) + 1;
+      const createdAt = new Date().toISOString();
+      const documentHash = createHash('sha256').update(JSON.stringify(body.document)).digest('hex');
+      const snapshot = { revision, document: body.document, documentHash, updatedAt: createdAt };
+      documents.set(projectId, snapshot);
+      await json(route, {
+        projectId,
+        revision,
+        baseRevision: body.baseRevision,
+        idempotencyKey: body.idempotencyKey,
+        operation: {
+          kind: 'replace',
+          idempotencyKey: body.idempotencyKey,
+          ...(body.label === undefined ? {} : { label: body.label }),
+        },
+        document: body.document,
+        documentHash,
+        createdAt,
+      });
       return;
     }
 
