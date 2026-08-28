@@ -61,9 +61,8 @@ Required free-model routing:
 - Hermes CLI uses `openrouter/free` with provider `openrouter`.
 - Do not silently fall back to paid models. Record the actual selected model in the run report.
 - Kilo and Hermes use OpenCLI Browser Bridge profile `cefd9k77`, unique session names, and OpenCLI
-  commands only. With OpenCLI 1.8.6, select the profile globally with
-  `opencli profile use cefd9k77` and verify `opencli profile list`; its advertised per-command
-  `--profile` option is rejected on browser subcommands.
+  commands only. OpenCLI 1.8.6 accepted the profile through the `--profile cefd9k77` browser
+  option for the local probes.
 - Each specialist reads the other two reports, challenges unsupported findings, and records the
   accepted/rejected resolution before the lead integrator advances the milestone.
 
@@ -79,10 +78,10 @@ Codex in-app-browser findings below remain valid independent evidence.
 
 | Surface                     | Observed tip/state                                   | Consequence                                                                       |
 | --------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Local checkpoint branch     | `aec01ef` on `codex/joy-studio-1.0-release-20260825` | Existing work is preserved, but is not a release candidate.                       |
+| Local checkpoint branch     | `244691b` on `codex/joy-media-implement-20260828` | Clean tested candidate, published for review; not yet promoted to `main`.         |
 | Deployed/VPS release branch | `b3c1866`                                            | The checkpoint is one commit ahead of the deployed release branch.                |
-| GitHub `main`               | `2083ffc`                                            | 407 main-only commits versus 127 checkpoint-only commits.                         |
-| VPS `main`                  | `1e4657f`                                            | 225 VPS-main-only commits versus 127 checkpoint-only commits.                     |
+| GitHub `main`               | `2083ffc`                                            | 407 main-only commits versus 162 candidate-only commits.                          |
+| VPS `main`                  | `1e4657f`                                            | 225 VPS-main-only commits versus 162 candidate-only commits.                      |
 | Common merge base           | `73744bb`                                            | A blind merge is unsafe; simulated reconciliation has extensive overlap/conflict. |
 
 `aec01ef` contains 324 changed files and a large quantity of transient evidence, debug files, and
