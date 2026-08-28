@@ -1,19 +1,43 @@
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { extname, join, posix, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const REQUIRED_BUILD_IDS = ['editor', 'api', 'worker'] as const;
 export const REQUIRED_JOURNEY_ID = 'authenticated-editor-1.0' as const;
 export const RELEASE_STATUS_MAX_AGE_DAYS = 45;
 export const RELEASE_EVIDENCE_MAX_AGE_HOURS = 24;
+export const FEATURE_STATUS_PATH = 'docs/product/FEATURE-STATUS.md' as const;
 export const REQUIRED_EDITOR_STATIC_ASSETS = [
   'assets/transition-preview-frame-a.svg',
   'assets/transition-preview-frame-b.svg',
 ] as const;
+export const MINIMUM_EFFECT_PREVIEW_COUNT = 33;
+export const REQUIRED_EFFECT_MOTION_PREVIEW_COUNT = 19;
 
-const EFFECT_PREVIEW_DIRECTORIES = ['effects/preview', 'effects/preview-motion'] as const;
+const PUBLIC_STATIC_ROOT = 'apps/editor-web/public' as const;
+const EDITOR_DIST_ROOT = 'apps/editor-web/dist' as const;
+const STATIC_ASSET_EXTENSIONS = new Set([
+  '.avif',
+  '.bmp',
+  '.css',
+  '.gif',
+  '.ico',
+  '.jpeg',
+  '.jpg',
+  '.js',
+  '.json',
+  '.map',
+  '.mjs',
+  '.otf',
+  '.png',
+  '.svg',
+  '.ttf',
+  '.webm',
+  '.woff',
+  '.woff2',
+]);
 
 export type ReleaseCheckStatus = 'passed' | 'failed' | 'waived';
 
@@ -39,10 +63,16 @@ export interface ReleaseGateInput {
   readonly builds: Readonly<Record<string, boolean>>;
   /** Source-to-dist static asset checks from the clean editor build. */
   readonly staticAssetPackaging: readonly string[];
+  readonly staticAssetInventory?: ReleaseStaticAssetInventory;
   readonly manifestGenerated: boolean;
   readonly sbomGenerated: boolean;
   readonly browserJourneys: readonly ReleaseBrowserJourney[];
-  readonly featureStatus: { readonly auditedOn: string; readonly statuses: readonly string[] };
+  readonly featureStatus: {
+    readonly auditedOn: string;
+    readonly statuses: readonly string[];
+    readonly sourcePath?: string;
+    readonly present?: boolean;
+  };
   readonly waivers?: readonly ReleaseWaiver[];
   readonly commandResults?: readonly ReleaseCommandResult[];
   /** Present for real workspace evidence; omitted by the pure evaluator. */
@@ -73,6 +103,36 @@ export interface ReleaseGateResult {
   readonly passed: boolean;
   readonly generatedAt: string;
   readonly checks: readonly ReleaseCheck[];
+}
+
+export interface ReleaseStaticAssetInventory {
+  readonly assets: readonly ReleaseStaticAssetRecord[];
+  readonly htmlEntryPoints: readonly string[];
+  readonly htmlReferences: readonly string[];
+  readonly summary: {
+    readonly publicAssetCount: number;
+    readonly copiedSourceAssetCount: number;
+    readonly builtAssetCount: number;
+    readonly requiredTransitionFrameCount: number;
+    readonly effectPreviewCount: number;
+    readonly effectMotionPreviewCount: number;
+  };
+}
+
+export interface ReleaseStaticAssetRecord {
+  readonly path: string;
+  readonly kind:
+    | 'copied-public-asset'
+    | 'built-asset'
+    | 'required-transition-frame'
+    | 'effect-preview'
+    | 'effect-motion-preview';
+  readonly mimeType: string;
+  readonly signature: string;
+  readonly size: number;
+  readonly sha256: string;
+  readonly sourcePath?: string;
+  readonly sourceSha256?: string;
 }
 
 export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): ReleaseGateResult {
@@ -143,10 +203,8 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
     ),
     check(
       'static-assets',
-      input.staticAssetPackaging.length === 0,
-      input.staticAssetPackaging.length === 0
-        ? 'required editor static assets are packaged as SVG, not an HTML fallback'
-        : `static asset packaging errors: ${input.staticAssetPackaging.join(', ')}`,
+      staticAssetInventoryReady(input) && input.staticAssetPackaging.length === 0,
+      staticAssetMessage(input),
     ),
     check(
       'manifest',
@@ -165,13 +223,11 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
     ),
     check(
       'feature-status',
-      featureStatusFresh(input.featureStatus.auditedOn, now) &&
+      featureStatusReady(input.featureStatus, now) &&
         input.featureStatus.statuses.every((status) =>
           ['production', 'demo-only', 'experimental', 'hidden'].includes(status),
         ),
-      featureStatusFresh(input.featureStatus.auditedOn, now)
-        ? 'feature status audit is current'
-        : `feature status audit is older than ${RELEASE_STATUS_MAX_AGE_DAYS} days`,
+      featureStatusMessage(input.featureStatus, now),
       false,
     ),
   ];
@@ -213,6 +269,18 @@ function featureStatusFresh(auditedOn: string, now: Date): boolean {
   if (!Number.isFinite(timestamp)) return false;
   const age = now.getTime() - timestamp;
   return age >= 0 && age <= RELEASE_STATUS_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+}
+
+function featureStatusReady(featureStatus: ReleaseGateInput['featureStatus'], now: Date): boolean {
+  return featureStatus.present !== false && featureStatusFresh(featureStatus.auditedOn, now);
+}
+
+function featureStatusMessage(featureStatus: ReleaseGateInput['featureStatus'], now: Date): string {
+  const label = featureStatus.sourcePath ?? FEATURE_STATUS_PATH;
+  if (featureStatus.present === false) return `${label} is missing`;
+  if (!featureStatusFresh(featureStatus.auditedOn, now))
+    return `feature status audit is older than ${RELEASE_STATUS_MAX_AGE_DAYS} days`;
+  return 'feature status audit is current';
 }
 
 export interface ReleaseEvidence extends ReleaseGateInput {
@@ -356,6 +424,12 @@ export function writeReleaseEvidence(
     join(outputDirectory, 'artifact-hashes.json'),
     JSON.stringify(evidence.artifactHashes, null, 2),
   );
+  if (evidence.staticAssetInventory !== undefined) {
+    writeFileSync(
+      join(outputDirectory, 'static-assets.json'),
+      JSON.stringify(evidence.staticAssetInventory, null, 2),
+    );
+  }
   writeFileSync(
     join(outputDirectory, 'release-manifest.sha256'),
     `${sha256Text(manifestText)}  manifest.json\n`,
@@ -377,9 +451,303 @@ function collectFiles(root: string, directory: string): readonly string[] {
   });
 }
 
+function normalizeRelativePath(root: string, path: string): string {
+  return relative(root, path).replaceAll('\\', '/');
+}
+
+function collectAssetLikeFiles(root: string, directory: string): readonly string[] {
+  return collectFiles(root, directory).filter((path) =>
+    STATIC_ASSET_EXTENSIONS.has(extname(path).toLowerCase()),
+  );
+}
+
+function collectHtmlFiles(root: string, directory: string): readonly string[] {
+  return collectFiles(root, directory).filter((path) => extname(path).toLowerCase() === '.html');
+}
+
+function classifyStaticAsset(path: string): ReleaseStaticAssetRecord['kind'] {
+  if (
+    REQUIRED_EDITOR_STATIC_ASSETS.includes(path as (typeof REQUIRED_EDITOR_STATIC_ASSETS)[number])
+  )
+    return 'required-transition-frame';
+  if (path.startsWith('effects/preview-motion/')) return 'effect-motion-preview';
+  if (path.startsWith('effects/preview/')) return 'effect-preview';
+  return 'copied-public-asset';
+}
+
+function mimeTypeForAsset(path: string): string {
+  switch (extname(path).toLowerCase()) {
+    case '.css':
+      return 'text/css';
+    case '.ico':
+      return 'image/x-icon';
+    case '.jpeg':
+    case '.jpg':
+      return 'image/jpeg';
+    case '.js':
+    case '.mjs':
+      return 'text/javascript';
+    case '.json':
+    case '.map':
+      return 'application/json';
+    case '.otf':
+      return 'font/otf';
+    case '.png':
+      return 'image/png';
+    case '.svg':
+      return 'image/svg+xml';
+    case '.ttf':
+      return 'font/ttf';
+    case '.webm':
+      return 'video/webm';
+    case '.woff':
+      return 'font/woff';
+    case '.woff2':
+      return 'font/woff2';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+function signatureForAsset(path: string, value: Buffer): string {
+  const extension = extname(path).toLowerCase();
+  switch (extension) {
+    case '.png':
+      return value.subarray(0, 8).toString('hex');
+    case '.webm':
+      return value.subarray(0, 4).toString('hex');
+    case '.woff':
+    case '.woff2':
+    case '.otf':
+    case '.svg':
+      return value.subarray(0, 4).toString('utf8');
+    case '.ttf':
+    case '.ico':
+      return value.subarray(0, 4).toString('hex');
+    default:
+      return value.subarray(0, 16).toString('utf8').trim();
+  }
+}
+
+function validAssetSignature(path: string, value: Buffer): boolean {
+  if (value.length === 0) return false;
+  switch (extname(path).toLowerCase()) {
+    case '.css':
+    case '.js':
+    case '.json':
+    case '.map':
+    case '.mjs':
+      return !isHtmlFallback(value);
+    case '.ico':
+      return value.subarray(0, 4).equals(Buffer.from([0x00, 0x00, 0x01, 0x00]));
+    case '.otf':
+      return value.subarray(0, 4).toString('utf8') === 'OTTO';
+    case '.png':
+      return value
+        .subarray(0, 8)
+        .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    case '.svg':
+      return isSvgDocument(value.toString('utf8'));
+    case '.ttf':
+      return value.subarray(0, 4).equals(Buffer.from([0x00, 0x01, 0x00, 0x00]));
+    case '.webm':
+      return value.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
+    case '.woff':
+      return value.subarray(0, 4).toString('utf8') === 'wOFF';
+    case '.woff2':
+      return value.subarray(0, 4).toString('utf8') === 'wOF2';
+    default:
+      return true;
+  }
+}
+
+function parseHtmlAssetReferences(htmlPath: string, content: string): readonly string[] {
+  const htmlDirectory = posix.dirname(htmlPath);
+  const references = new Set<string>();
+  for (const match of content.matchAll(
+    /\b(?:src|href|poster|data-worker|data-worklet)=["']([^"'#?]+(?:\?[^"']*)?(?:#[^"']*)?)["']/gu,
+  )) {
+    const raw = match[1];
+    if (raw === undefined || raw.startsWith('data:') || /^[a-z]+:/iu.test(raw)) continue;
+    const [withoutHash] = raw.split('#', 1);
+    const [withoutQuery] = (withoutHash ?? raw).split('?', 1);
+    if (withoutQuery.length === 0) continue;
+    const normalized = withoutQuery.startsWith('/')
+      ? withoutQuery.slice(1)
+      : posix.normalize(posix.join(htmlDirectory === '.' ? '' : htmlDirectory, withoutQuery));
+    if (
+      normalized.length === 0 ||
+      normalized.startsWith('../') ||
+      normalized === '..' ||
+      !STATIC_ASSET_EXTENSIONS.has(extname(normalized).toLowerCase())
+    )
+      continue;
+    references.add(normalized);
+  }
+  return [...references].sort();
+}
+
+export function buildStaticAssetInventory(root: string): {
+  readonly inventory: ReleaseStaticAssetInventory;
+  readonly errors: readonly string[];
+} {
+  const errors: string[] = [];
+  const publicAssets = [
+    ...new Set([
+      ...REQUIRED_EDITOR_STATIC_ASSETS,
+      ...collectAssetLikeFiles(root, PUBLIC_STATIC_ROOT).map((path) =>
+        normalizeRelativePath(resolve(root, PUBLIC_STATIC_ROOT), path),
+      ),
+    ]),
+  ].sort();
+  const distAssets = collectAssetLikeFiles(root, EDITOR_DIST_ROOT)
+    .map((path) => normalizeRelativePath(resolve(root, EDITOR_DIST_ROOT), path))
+    .sort();
+  const distAssetSet = new Set(distAssets);
+  const records: ReleaseStaticAssetRecord[] = [];
+
+  for (const assetPath of publicAssets) {
+    const sourcePath = join(root, PUBLIC_STATIC_ROOT, assetPath);
+    const distPath = join(root, EDITOR_DIST_ROOT, assetPath);
+    if (!existsSync(sourcePath)) {
+      errors.push(`source missing: ${assetPath}`);
+      continue;
+    }
+    const source = readFileSync(sourcePath);
+    if (source.length === 0) {
+      errors.push(`source is empty: ${assetPath}`);
+      continue;
+    }
+    if (!validAssetSignature(assetPath, source)) {
+      errors.push(`source has invalid signature: ${assetPath}`);
+      continue;
+    }
+    if (!existsSync(distPath)) {
+      errors.push(`build output missing: ${assetPath}`);
+      continue;
+    }
+    const output = readFileSync(distPath);
+    if (output.length === 0) {
+      errors.push(`build output is empty: ${assetPath}`);
+      continue;
+    }
+    if (!validAssetSignature(assetPath, output)) {
+      errors.push(`build output has invalid signature: ${assetPath}`);
+      continue;
+    }
+    if (!output.equals(source)) {
+      errors.push(`build output differs from source: ${assetPath}`);
+      continue;
+    }
+    records.push({
+      path: assetPath,
+      kind: classifyStaticAsset(assetPath),
+      mimeType: mimeTypeForAsset(assetPath),
+      signature: signatureForAsset(assetPath, output),
+      size: output.length,
+      sha256: sha256File(distPath),
+      sourcePath: `${PUBLIC_STATIC_ROOT}/${assetPath}`,
+      sourceSha256: sha256File(sourcePath),
+    });
+  }
+
+  for (const assetPath of distAssets) {
+    if (publicAssets.includes(assetPath)) continue;
+    const distPath = join(root, EDITOR_DIST_ROOT, assetPath);
+    const output = readFileSync(distPath);
+    if (output.length === 0) {
+      errors.push(`build output is empty: ${assetPath}`);
+      continue;
+    }
+    if (!validAssetSignature(assetPath, output)) {
+      errors.push(`build output has invalid signature: ${assetPath}`);
+      continue;
+    }
+    records.push({
+      path: assetPath,
+      kind: 'built-asset',
+      mimeType: mimeTypeForAsset(assetPath),
+      signature: signatureForAsset(assetPath, output),
+      size: output.length,
+      sha256: sha256File(distPath),
+    });
+  }
+
+  const htmlEntryPoints = collectHtmlFiles(root, EDITOR_DIST_ROOT)
+    .map((path) => normalizeRelativePath(resolve(root, EDITOR_DIST_ROOT), path))
+    .sort();
+  const htmlReferences = new Set<string>();
+  for (const htmlPath of htmlEntryPoints) {
+    const absolute = join(root, EDITOR_DIST_ROOT, htmlPath);
+    for (const reference of parseHtmlAssetReferences(htmlPath, readFileSync(absolute, 'utf8'))) {
+      htmlReferences.add(reference);
+      if (!distAssetSet.has(reference))
+        errors.push(`html reference missing from dist: ${reference}`);
+    }
+  }
+  const inventoryPaths = new Set(records.map((record) => record.path));
+  for (const reference of htmlReferences) {
+    if (!inventoryPaths.has(reference))
+      errors.push(`html reference missing from inventory: ${reference}`);
+  }
+
+  const inventory: ReleaseStaticAssetInventory = {
+    assets: records.sort((left, right) => left.path.localeCompare(right.path)),
+    htmlEntryPoints,
+    htmlReferences: [...htmlReferences].sort(),
+    summary: {
+      publicAssetCount: publicAssets.length,
+      copiedSourceAssetCount: records.filter((record) => record.sourcePath !== undefined).length,
+      builtAssetCount: records.filter((record) => record.kind === 'built-asset').length,
+      requiredTransitionFrameCount: records.filter(
+        (record) => record.kind === 'required-transition-frame',
+      ).length,
+      effectPreviewCount: records.filter((record) => record.kind === 'effect-preview').length,
+      effectMotionPreviewCount: records.filter((record) => record.kind === 'effect-motion-preview')
+        .length,
+    },
+  };
+  return { inventory, errors };
+}
+
+function staticAssetInventoryReady(input: ReleaseGateInput): boolean {
+  const inventory = input.staticAssetInventory;
+  if (inventory === undefined) return false;
+  return (
+    inventory.assets.length > 0 &&
+    inventory.htmlEntryPoints.length > 0 &&
+    inventory.summary.requiredTransitionFrameCount === REQUIRED_EDITOR_STATIC_ASSETS.length &&
+    inventory.summary.effectPreviewCount >= MINIMUM_EFFECT_PREVIEW_COUNT &&
+    inventory.summary.effectMotionPreviewCount === REQUIRED_EFFECT_MOTION_PREVIEW_COUNT
+  );
+}
+
+function staticAssetMessage(input: ReleaseGateInput): string {
+  if (input.staticAssetInventory === undefined) return 'static asset inventory is missing';
+  if (input.staticAssetPackaging.length > 0)
+    return `static asset packaging errors: ${input.staticAssetPackaging.join(', ')}`;
+  if (
+    input.staticAssetInventory.summary.requiredTransitionFrameCount !==
+    REQUIRED_EDITOR_STATIC_ASSETS.length
+  )
+    return `expected ${REQUIRED_EDITOR_STATIC_ASSETS.length} transition frames in inventory`;
+  if (input.staticAssetInventory.summary.effectPreviewCount < MINIMUM_EFFECT_PREVIEW_COUNT)
+    return `expected at least ${MINIMUM_EFFECT_PREVIEW_COUNT} effect preview PNGs in inventory`;
+  if (
+    input.staticAssetInventory.summary.effectMotionPreviewCount !==
+    REQUIRED_EFFECT_MOTION_PREVIEW_COUNT
+  )
+    return `expected ${REQUIRED_EFFECT_MOTION_PREVIEW_COUNT} effect motion previews in inventory`;
+  if (input.staticAssetInventory.htmlEntryPoints.length === 0)
+    return 'editor build HTML entry points are missing from the static asset inventory';
+  const summary = input.staticAssetInventory.summary;
+  return `static asset inventory recorded ${summary.copiedSourceAssetCount} copied public assets, ${summary.builtAssetCount} built assets, ${summary.effectPreviewCount} effect preview PNGs, and ${summary.effectMotionPreviewCount} motion previews`;
+}
+
 export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
   const commandResults = runReleaseCommands(root);
   const sourceProvenance = workspaceSourceProvenance(root);
+  const staticAssets = buildStaticAssetInventory(root);
   const artifacts = ['apps/editor-web/dist', 'apps/api/dist', 'apps/worker/dist'];
   const buildSuccess = Object.fromEntries(
     REQUIRED_BUILD_IDS.map((id) => {
@@ -394,12 +762,12 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
   const artifactHashes: Record<string, string> = {};
   for (const directory of artifacts) {
     for (const path of collectFiles(root, directory))
-      artifactHashes[relative(root, path)] = sha256File(path);
+      artifactHashes[normalizeRelativePath(root, path)] = sha256File(path);
   }
   const tests = commandResults.find((result) => result.id === 'tests');
-  const featureStatusText = existsSync(join(root, 'docs/product/FEATURE-STATUS.md'))
-    ? readFileSync(join(root, 'docs/product/FEATURE-STATUS.md'), 'utf8')
-    : '';
+  const featureStatusPath = join(root, FEATURE_STATUS_PATH);
+  const featureStatusPresent = existsSync(featureStatusPath);
+  const featureStatusText = featureStatusPresent ? readFileSync(featureStatusPath, 'utf8') : '';
   const auditedOn =
     featureStatusText.match(/Audited against current source on (\d{4}-\d{2}-\d{2})/u)?.[1] ??
     '1970-01-01';
@@ -412,6 +780,7 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     generatedAt: new Date().toISOString(),
     sourceProvenance,
     artifacts: artifactHashes,
+    staticAssets: staticAssets.inventory.summary,
     commands: commandResults,
   };
   const sbom = buildSbom(root);
@@ -422,11 +791,17 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     fixtureHandlers: findProductionFixtureRegistrations(root),
     deploymentManifests: verifyDeploymentManifests(root),
     builds: buildSuccess,
-    staticAssetPackaging: verifyRequiredEditorStaticAssets(root),
+    staticAssetPackaging: staticAssets.errors,
+    staticAssetInventory: staticAssets.inventory,
     manifestGenerated: true,
     sbomGenerated: true,
     browserJourneys,
-    featureStatus: { auditedOn, statuses },
+    featureStatus: {
+      auditedOn,
+      statuses,
+      sourcePath: FEATURE_STATUS_PATH,
+      present: featureStatusPresent,
+    },
     artifactHashes,
     manifest,
     sbom,
@@ -445,57 +820,7 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
  * and authenticated-browser release requirement.
  */
 export function verifyRequiredEditorStaticAssets(root: string): readonly string[] {
-  const errors: string[] = [];
-  const assets = [
-    ...REQUIRED_EDITOR_STATIC_ASSETS.map((path) => ({ path, type: 'svg' as const })),
-    ...collectEffectPreviewAssets(root).map((path) => ({ path, type: 'binary' as const })),
-  ];
-  for (const asset of assets) {
-    const assetPath = asset.path;
-    const sourcePath = join(root, 'apps/editor-web/public', assetPath);
-    const distPath = join(root, 'apps/editor-web/dist', assetPath);
-    if (!existsSync(sourcePath)) {
-      errors.push(`source missing: ${assetPath}`);
-      continue;
-    }
-    const source = readFileSync(sourcePath);
-    if (asset.type === 'svg' && !isSvgDocument(source.toString('utf8'))) {
-      errors.push(`source is not SVG: ${assetPath}`);
-      continue;
-    }
-    if (asset.type === 'binary' && isHtmlFallback(source)) {
-      errors.push(`source is HTML fallback: ${assetPath}`);
-      continue;
-    }
-    if (!existsSync(distPath)) {
-      errors.push(`build output missing: ${assetPath}`);
-      continue;
-    }
-    const output = readFileSync(distPath);
-    if (asset.type === 'svg' && !isSvgDocument(output.toString('utf8'))) {
-      errors.push(`build output is not SVG: ${assetPath}`);
-      continue;
-    }
-    if (asset.type === 'binary' && isHtmlFallback(output)) {
-      errors.push(`build output is HTML fallback: ${assetPath}`);
-      continue;
-    }
-    if (!output.equals(source)) errors.push(`build output differs from source: ${assetPath}`);
-  }
-  return errors;
-}
-
-function collectEffectPreviewAssets(root: string): readonly string[] {
-  const assets: string[] = [];
-  for (const directory of EFFECT_PREVIEW_DIRECTORIES) {
-    const absolute = join(root, 'apps/editor-web/public', directory);
-    if (!existsSync(absolute)) continue;
-    for (const entry of readdirSync(absolute, { withFileTypes: true })) {
-      if (!entry.isFile()) continue;
-      assets.push(`${directory}/${entry.name}`);
-    }
-  }
-  return assets.sort();
+  return buildStaticAssetInventory(root).errors;
 }
 
 function isHtmlFallback(value: Buffer): boolean {

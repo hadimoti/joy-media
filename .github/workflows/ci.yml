@@ -20,6 +20,14 @@ jobs:
           ffprobe -version
       - run: pnpm install --frozen-lockfile
       - run: pnpm run verify:ci
+      - run: pnpm run release:gate
+      - name: Upload release gate evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-gate
+          path: test-output/release-gate/
+          if-no-files-found: error
   browser-e2e:
     needs: check
     strategy:

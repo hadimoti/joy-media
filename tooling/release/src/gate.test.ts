@@ -3,11 +3,14 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  buildStaticAssetInventory,
   evaluateReleaseGate,
+  FEATURE_STATUS_PATH,
   findProductionFixtureRegistrations,
   findTrackedArtifactViolations,
   RELEASE_COMMANDS,
   REQUIRED_BUILD_IDS,
+  REQUIRED_EFFECT_MOTION_PREVIEW_COUNT,
   REQUIRED_JOURNEY_ID,
   sha256File,
   verifyDeploymentManifests,
@@ -25,6 +28,59 @@ const sourceProvenance = (commit = 'a'.repeat(40)): ReleaseSourceProvenance => (
   worktreeClean: true,
 });
 
+const staticAssetInventory = () => ({
+  assets: [
+    {
+      path: 'assets/transition-preview-frame-a.svg',
+      kind: 'required-transition-frame' as const,
+      mimeType: 'image/svg+xml',
+      signature: '<svg',
+      size: 20,
+      sha256: '1'.repeat(64),
+      sourcePath: 'apps/editor-web/public/assets/transition-preview-frame-a.svg',
+      sourceSha256: '2'.repeat(64),
+    },
+    {
+      path: 'effects/preview/glow.png',
+      kind: 'effect-preview' as const,
+      mimeType: 'image/png',
+      signature: '89504e470d0a1a0a',
+      size: 4,
+      sha256: '3'.repeat(64),
+      sourcePath: 'apps/editor-web/public/effects/preview/glow.png',
+      sourceSha256: '4'.repeat(64),
+    },
+    {
+      path: 'effects/preview-motion/joy-motion-01.webm',
+      kind: 'effect-motion-preview' as const,
+      mimeType: 'video/webm',
+      signature: '1a45dfa3',
+      size: 4,
+      sha256: '5'.repeat(64),
+      sourcePath: 'apps/editor-web/public/effects/preview-motion/joy-motion-01.webm',
+      sourceSha256: '6'.repeat(64),
+    },
+    {
+      path: 'assets/index-a1b2c3.js',
+      kind: 'built-asset' as const,
+      mimeType: 'text/javascript',
+      signature: 'console.log("ok"',
+      size: 18,
+      sha256: '7'.repeat(64),
+    },
+  ],
+  htmlEntryPoints: ['index.html'],
+  htmlReferences: ['assets/index-a1b2c3.js'],
+  summary: {
+    publicAssetCount: 54,
+    copiedSourceAssetCount: 53,
+    builtAssetCount: 1,
+    requiredTransitionFrameCount: 2,
+    effectPreviewCount: 33,
+    effectMotionPreviewCount: REQUIRED_EFFECT_MOTION_PREVIEW_COUNT,
+  },
+});
+
 const passingInput = (): ReleaseGateInput => ({
   testSummary: { collected: 12, failed: 0 },
   dirtyGeneratedArtifacts: [],
@@ -32,6 +88,7 @@ const passingInput = (): ReleaseGateInput => ({
   deploymentManifests: [],
   builds: Object.fromEntries(REQUIRED_BUILD_IDS.map((id) => [id, true])),
   staticAssetPackaging: [],
+  staticAssetInventory: staticAssetInventory(),
   manifestGenerated: true,
   sbomGenerated: true,
   browserJourneys: [
@@ -49,6 +106,8 @@ const passingInput = (): ReleaseGateInput => ({
   featureStatus: {
     auditedOn: '2026-08-22',
     statuses: ['production', 'demo-only', 'experimental', 'hidden'],
+    sourcePath: FEATURE_STATUS_PATH,
+    present: true,
   },
 });
 
@@ -64,7 +123,10 @@ describe('JOY Studio 1.0 release gate', () => {
       'utf8',
     );
     const workflowLines = workflow.split(/\r?\n/u).map((line) => line.trim());
-    expect(workflowLines.indexOf('- run: pnpm run verify:ci')).toBeGreaterThanOrEqual(0);
+    const verifyCi = workflowLines.indexOf('- run: pnpm run verify:ci');
+    const releaseGate = workflowLines.indexOf('- run: pnpm run release:gate');
+    expect(verifyCi).toBeGreaterThanOrEqual(0);
+    expect(releaseGate).toBeGreaterThan(verifyCi);
   });
 
   it('keeps production dependency auditing in the CI verification contract', () => {
@@ -77,6 +139,20 @@ describe('JOY Studio 1.0 release gate', () => {
       '"audit:prod": "pnpm audit --prod --audit-level=moderate"',
     );
     expect(workflowLines).toContain('- run: pnpm run verify:ci');
+    expect(readFileSync(resolve(import.meta.dirname, '../../../package.json'), 'utf8')).toContain(
+      '"release:gate": "node --experimental-strip-types tooling/release/src/gate.ts"',
+    );
+  });
+
+  it('publishes the release-gate artifact from the CI check job', () => {
+    const workflow = readFileSync(
+      resolve(import.meta.dirname, '../../../.github/workflows/ci.yml'),
+      'utf8',
+    );
+    const workflowLines = workflow.split(/\r?\n/u).map((line) => line.trim());
+    expect(workflowLines).toContain('- name: Upload release gate evidence');
+    expect(workflowLines).toContain('name: release-gate');
+    expect(workflowLines).toContain('path: test-output/release-gate/');
   });
 
   it('installs and verifies the FFmpeg/FFprobe toolchain before CI dependencies', () => {
@@ -176,7 +252,9 @@ describe('JOY Studio 1.0 release gate', () => {
   it('fails the gate if required transition frames are not packaged as SVG', () => {
     const result = evaluateReleaseGate({
       ...passingInput(),
-      staticAssetPackaging: ['build output is not SVG: assets/transition-preview-frame-b.svg'],
+      staticAssetPackaging: [
+        'build output has invalid signature: assets/transition-preview-frame-b.svg',
+      ],
     });
 
     expect(result.passed).toBe(false);
@@ -188,13 +266,20 @@ describe('JOY Studio 1.0 release gate', () => {
     const asset = 'assets/transition-preview-frame-a.svg';
     const sourcePath = join(root, 'apps/editor-web/public', asset);
     const outputPath = join(root, 'apps/editor-web/dist', asset);
+    mkdirSync(join(root, 'apps/editor-web/dist/assets'), { recursive: true });
+    mkdirSync(join(root, 'apps/editor-web/dist'), { recursive: true });
+    writeFileSync(
+      join(root, 'apps/editor-web/dist/index.html'),
+      '<script src="/assets/index.js"></script>',
+    );
+    writeFileSync(join(root, 'apps/editor-web/dist/assets/index.js'), 'console.log("ok");');
     mkdirSync(resolve(sourcePath, '..'), { recursive: true });
     mkdirSync(resolve(outputPath, '..'), { recursive: true });
     writeFileSync(sourcePath, '<svg viewBox="0 0 1 1"/>');
     writeFileSync(outputPath, '<!doctype html><html></html>');
 
     expect(verifyRequiredEditorStaticAssets(root)).toEqual([
-      `build output is not SVG: ${asset}`,
+      `build output has invalid signature: ${asset}`,
       'source missing: assets/transition-preview-frame-b.svg',
     ]);
 
@@ -206,23 +291,97 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(verifyRequiredEditorStaticAssets(root)).toEqual([]);
   });
 
+  it('records a deterministic static asset inventory from the editor build', () => {
+    const root = mkdtempSync(join(tmpdir(), 'joy-release-static-inventory-'));
+    const svgAssets = [
+      'assets/transition-preview-frame-a.svg',
+      'assets/transition-preview-frame-b.svg',
+    ];
+    const publicFiles = [
+      ...svgAssets,
+      'effects/preview/glow.png',
+      'effects/preview/emboss.png',
+      'effects/preview/sepia.png',
+      'effects/preview-motion/joy-motion-01.webm',
+      'effects/preview-motion/joy-motion-02.webm',
+      'fonts/demo.woff2',
+    ];
+    for (const asset of publicFiles) {
+      const sourcePath = join(root, 'apps/editor-web/public', asset);
+      const distPath = join(root, 'apps/editor-web/dist', asset);
+      mkdirSync(resolve(sourcePath, '..'), { recursive: true });
+      mkdirSync(resolve(distPath, '..'), { recursive: true });
+      if (asset.endsWith('.svg')) {
+        writeFileSync(sourcePath, '<svg viewBox="0 0 1 1"/>');
+        writeFileSync(distPath, '<svg viewBox="0 0 1 1"/>');
+      } else if (asset.endsWith('.png')) {
+        const png = Buffer.from([
+          0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00,
+        ]);
+        writeFileSync(sourcePath, png);
+        writeFileSync(distPath, png);
+      } else if (asset.endsWith('.webm')) {
+        const webm = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x93, 0x42]);
+        writeFileSync(sourcePath, webm);
+        writeFileSync(distPath, webm);
+      } else {
+        const woff2 = Buffer.from('wOF2demo');
+        writeFileSync(sourcePath, woff2);
+        writeFileSync(distPath, woff2);
+      }
+    }
+    const builtJs = join(root, 'apps/editor-web/dist/assets/index-abcd1234.js');
+    mkdirSync(resolve(builtJs, '..'), { recursive: true });
+    writeFileSync(builtJs, 'console.log("release");');
+    writeFileSync(
+      join(root, 'apps/editor-web/dist/index.html'),
+      '<link href="/fonts/demo.woff2" rel="preload"><script src="/assets/index-abcd1234.js"></script>',
+    );
+
+    const result = buildStaticAssetInventory(root);
+    expect(result.errors).toEqual([]);
+    expect(result.inventory.htmlEntryPoints).toEqual(['index.html']);
+    expect(result.inventory.htmlReferences).toEqual([
+      'assets/index-abcd1234.js',
+      'fonts/demo.woff2',
+    ]);
+    expect(result.inventory.summary.requiredTransitionFrameCount).toBe(2);
+    expect(result.inventory.summary.effectPreviewCount).toBe(3);
+    expect(result.inventory.summary.effectMotionPreviewCount).toBe(2);
+    expect(
+      result.inventory.assets.find((asset) => asset.path === 'assets/index-abcd1234.js'),
+    ).toMatchObject({
+      kind: 'built-asset',
+      mimeType: 'text/javascript',
+      size: expect.any(Number),
+      sha256: expect.any(String),
+    });
+  });
+
   it('requires every effect preview binary to survive the build without an SPA fallback', () => {
     const root = mkdtempSync(join(tmpdir(), 'joy-release-effect-assets-'));
     const asset = 'effects/preview/glow.png';
     const sourcePath = join(root, 'apps/editor-web/public', asset);
     const outputPath = join(root, 'apps/editor-web/dist', asset);
+    mkdirSync(join(root, 'apps/editor-web/dist/assets'), { recursive: true });
+    mkdirSync(join(root, 'apps/editor-web/dist'), { recursive: true });
+    writeFileSync(
+      join(root, 'apps/editor-web/dist/index.html'),
+      '<script src="/assets/index.js"></script>',
+    );
+    writeFileSync(join(root, 'apps/editor-web/dist/assets/index.js'), 'console.log("ok");');
     mkdirSync(resolve(sourcePath, '..'), { recursive: true });
     mkdirSync(resolve(outputPath, '..'), { recursive: true });
-    writeFileSync(sourcePath, Buffer.from([0, 1, 2, 3]));
+    writeFileSync(sourcePath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]));
     writeFileSync(outputPath, '<!doctype html><html></html>');
 
     expect(verifyRequiredEditorStaticAssets(root)).toEqual([
       'source missing: assets/transition-preview-frame-a.svg',
       'source missing: assets/transition-preview-frame-b.svg',
-      'build output is HTML fallback: effects/preview/glow.png',
+      'build output has invalid signature: effects/preview/glow.png',
     ]);
 
-    writeFileSync(outputPath, Buffer.from([0, 1, 2, 3]));
+    writeFileSync(outputPath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]));
     expect(verifyRequiredEditorStaticAssets(root)).toEqual([
       'source missing: assets/transition-preview-frame-a.svg',
       'source missing: assets/transition-preview-frame-b.svg',
@@ -439,7 +598,12 @@ describe('JOY Studio 1.0 release gate', () => {
     const result = evaluateReleaseGate(
       {
         ...passingInput(),
-        featureStatus: { auditedOn: '2026-01-01', statuses: ['production'] },
+        featureStatus: {
+          auditedOn: '2026-01-01',
+          statuses: ['production'],
+          sourcePath: FEATURE_STATUS_PATH,
+          present: true,
+        },
       },
       new Date('2026-08-22T00:00:00.000Z'),
     );
@@ -447,11 +611,36 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(result.checks.find((check) => check.id === 'feature-status')?.status).toBe('failed');
   });
 
+  it('fails explicitly when the feature-status document is missing', () => {
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        featureStatus: {
+          auditedOn: '1970-01-01',
+          statuses: [],
+          sourcePath: FEATURE_STATUS_PATH,
+          present: false,
+        },
+      },
+      new Date('2026-08-29T00:00:00.000Z'),
+    );
+    expect(result.passed).toBe(false);
+    expect(result.checks.find((check) => check.id === 'feature-status')).toMatchObject({
+      status: 'failed',
+      message: `${FEATURE_STATUS_PATH} is missing`,
+    });
+  });
+
   it('only accepts named, unexpired waivers for non-critical checks', () => {
     const result = evaluateReleaseGate(
       {
         ...passingInput(),
-        featureStatus: { auditedOn: '2026-01-01', statuses: ['production'] },
+        featureStatus: {
+          auditedOn: '2026-01-01',
+          statuses: ['production'],
+          sourcePath: FEATURE_STATUS_PATH,
+          present: true,
+        },
         waivers: [
           {
             checkId: 'feature-status',
@@ -467,7 +656,7 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(result.checks.find((check) => check.id === 'feature-status')?.status).toBe('waived');
   });
 
-  it('writes machine-readable report, manifest, SBOM, and artifact hashes', () => {
+  it('writes machine-readable report, manifest, SBOM, asset hashes, and static inventory', () => {
     const root = mkdtempSync(join(tmpdir(), 'joy-release-root-'));
     const output = mkdtempSync(join(tmpdir(), 'joy-release-gate-'));
     mkdirSync(join(root, 'apps/api/dist'), { recursive: true });
@@ -502,6 +691,9 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(JSON.parse(readFileSync(join(output, 'sbom.json'), 'utf8'))).toEqual(evidence.sbom);
     expect(JSON.parse(readFileSync(join(output, 'artifact-hashes.json'), 'utf8'))).toEqual(
       evidence.artifactHashes,
+    );
+    expect(JSON.parse(readFileSync(join(output, 'static-assets.json'), 'utf8'))).toEqual(
+      evidence.staticAssetInventory,
     );
   });
 
