@@ -68,8 +68,9 @@ describe('CaptionsPanel text editing', () => {
     );
 
     expect(markup).toContain('aria-label="Edit caption 1 at 0.00s"');
+    expect(markup).toContain('class="caption-text-input" dir="rtl"');
     expect(markup).toContain('value="سلام به جوی"');
-    expect(markup).toContain('Source: سلام به جوی');
+    expect(markup).toContain('Source: <bdi dir="rtl">سلام به جوی</bdi>');
     expect(markup).toContain('Select an audio or video clip to transcribe');
     expect(markup).toContain('placeholder="Write caption…"');
     expect(markup).not.toContain('seg-1');

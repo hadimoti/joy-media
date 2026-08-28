@@ -428,6 +428,7 @@ export function CaptionSegmentEditor({
 }) {
   const source = segmentSourceText(document, segment);
   const display = segmentDisplayText(document, segment);
+  const direction = resolveCaptionDirection(document);
   const [draft, setDraft] = useState(display);
   const skipNextCommit = useRef(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -487,6 +488,7 @@ export function CaptionSegmentEditor({
       <input
         ref={inputRef}
         className="caption-text-input"
+        dir={direction}
         aria-label={`Edit ${captionLabel}`}
         placeholder="Write caption…"
         value={draft}
@@ -508,7 +510,7 @@ export function CaptionSegmentEditor({
         }}
       />
       <span className="caption-source" title={source}>
-        Source: {source.length === 0 ? '—' : source}
+        Source: <bdi dir={direction}>{source.length === 0 ? '—' : source}</bdi>
       </span>
       {segment.textOverride !== undefined && (
         <button
