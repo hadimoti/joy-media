@@ -45,4 +45,12 @@ describe('AssetLibraryPanel successful import contract', () => {
   it('reports a real All count alongside media-specific category counts', () => {
     expect(panelSource).toMatch(/entry\.id === 'all'\s*\?\s*sourceItems\.length/);
   });
+
+  it('associates a cross-project catalog asset before adding it to the timeline', () => {
+    expect(panelSource).toContain('const catalogAsset = items.find');
+    expect(panelSource).toContain(
+      'const associated = await client.associateAsset(projectId, catalogAsset.id);',
+    );
+    expect(panelSource).toContain('Could not add ${asset.displayName} to this project');
+  });
 });

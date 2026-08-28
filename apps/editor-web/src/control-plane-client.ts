@@ -348,6 +348,13 @@ export class BrowserControlPlaneClient {
   async registerAsset(projectId: string, asset: BrowserAssetRegistration): Promise<BrowserAsset> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/assets`, asset);
   }
+  /** Associate a durable library asset with the active project while keeping its stable ID. */
+  async associateAsset(projectId: string, assetId: string): Promise<BrowserAsset> {
+    return this.post(
+      `/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/associate`,
+      {},
+    );
+  }
   /** Owner-only hard delete with reference-counted private-object cleanup. */
   async deleteAsset(
     projectId: string,

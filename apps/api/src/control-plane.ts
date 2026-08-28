@@ -527,6 +527,16 @@ export interface ControlPlane {
     projectId: string,
   ): readonly MediaAssetRecord[] | Promise<readonly MediaAssetRecord[]>;
   /**
+   * Grant an owner project access to a durable asset from that same owner's
+   * library or from the curated shared library. The asset ID stays stable so
+   * existing timeline documents and Worker source maps remain valid.
+   */
+  associateAsset(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+  ): MediaAssetRecord | Promise<MediaAssetRecord>;
+  /**
    * All assets across every project owned by this Joy identity (cross-browser catalog).
    */
   assetsForOwner(actor: Actor): readonly MediaAssetRecord[] | Promise<readonly MediaAssetRecord[]>;
@@ -683,6 +693,8 @@ export class LocalControlPlane implements ControlPlane {
   readonly #jobs = new Map<string, Job>();
   readonly #jobAttempts = new Map<string, number>();
   readonly #assets = new Map<string, MediaAssetRecord>();
+  /** target project + asset ID -> canonical source project ID */
+  readonly #assetAccess = new Map<string, string>();
   readonly #derivatives = new Map<string, MediaDerivativeRecord>();
   readonly #events: JobEvent[] = [];
   readonly #documentStore: InternalInMemoryProjectDocumentStore;
@@ -826,12 +838,22 @@ export class LocalControlPlane implements ControlPlane {
     const assetIds = new Set(
       [...this.#assets.values()].filter((asset) => asset.projectId === id).map((asset) => asset.id),
     );
+    for (const [jobId, job] of this.#jobs.entries()) {
+      if (job.assetId === undefined || !assetIds.has(job.assetId)) continue;
+      if (job.state === 'queued') {
+        this.#jobs.set(jobId, { ...job, state: 'canceled', cancelRequested: true });
+        this.event(jobId, 'canceled', Date.now());
+      } else if (job.state === 'leased' && !job.cancelRequested) {
+        this.#jobs.set(jobId, { ...job, cancelRequested: true });
+        this.event(jobId, 'cancel-requested', Date.now());
+      }
+    }
     const candidates = new Set<string>();
     for (const asset of [...this.#assets.values()].filter((item) => item.projectId === id)) {
       for (const ref of privateRefs(asset.locations)) candidates.add(ref);
     }
     for (const derivative of [...this.#derivatives.values()].filter(
-      (item) => item.projectId === id,
+      (item) => item.projectId === id || assetIds.has(item.assetId),
     )) {
       for (const ref of privateRefs(derivative.locations)) candidates.add(ref);
     }
@@ -846,8 +868,13 @@ export class LocalControlPlane implements ControlPlane {
       if (!this.#jobs.has(this.#events[index]!.jobId)) this.#events.splice(index, 1);
     }
     for (const assetId of assetIds) this.#assets.delete(assetId);
+    for (const [key, sourceProjectId] of this.#assetAccess.entries()) {
+      const [targetProjectId] = key.split('\u0000');
+      if (targetProjectId === id || sourceProjectId === id) this.#assetAccess.delete(key);
+    }
     for (const [derivativeId, derivative] of this.#derivatives.entries()) {
-      if (derivative.projectId === id) this.#derivatives.delete(derivativeId);
+      if (derivative.projectId === id || assetIds.has(derivative.assetId))
+        this.#derivatives.delete(derivativeId);
     }
     this.#projects.delete(id);
     const remaining = new Set<string>([
@@ -993,16 +1020,43 @@ export class LocalControlPlane implements ControlPlane {
   deleteAsset(actor: Actor, projectId: string, assetId: string): AssetDeletionResult {
     this.project(actor, projectId);
     const current = this.#assets.get(assetId);
-    if (current === undefined || current.projectId !== projectId)
-      throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    if (current === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    if (current.projectId !== projectId) {
+      const key = `${projectId}\u0000${assetId}`;
+      if (this.#assetAccess.get(key) !== current.projectId)
+        throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+      this.cancelJobsForAsset(assetId);
+      const candidateRefs = new Set<string>();
+      for (const [derivativeId, derivative] of this.#derivatives) {
+        if (derivative.projectId === projectId && derivative.assetId === assetId) {
+          for (const ref of privateRefs(derivative.locations)) candidateRefs.add(ref);
+          this.#derivatives.delete(derivativeId);
+        }
+      }
+      this.#assetAccess.delete(key);
+      const remainingRefs = new Set<string>([
+        ...[...this.#assets.values()].flatMap((asset) => privateRefs(asset.locations)),
+        ...[...this.#derivatives.values()].flatMap((derivative) =>
+          privateRefs(derivative.locations),
+        ),
+      ]);
+      return {
+        id: assetId,
+        orphanedPrivateObjectRefs: [...candidateRefs].filter((ref) => !remainingRefs.has(ref)),
+      };
+    }
+    this.cancelJobsForAsset(assetId);
     const privateObjectRefs = new Set(privateRefs(current.locations));
     for (const [derivativeId, derivative] of this.#derivatives) {
-      if (derivative.projectId === projectId && derivative.assetId === assetId) {
+      if (derivative.assetId === assetId) {
         for (const ref of privateRefs(derivative.locations)) privateObjectRefs.add(ref);
         this.#derivatives.delete(derivativeId);
       }
     }
     this.#assets.delete(assetId);
+    for (const [key] of this.#assetAccess.entries()) {
+      if (key.endsWith(`\u0000${assetId}`)) this.#assetAccess.delete(key);
+    }
     const remainingRefs = new Set([
       ...[...this.#assets.values()].flatMap((asset) => privateRefs(asset.locations)),
       ...[...this.#derivatives.values()].flatMap((derivative) => privateRefs(derivative.locations)),
@@ -1014,9 +1068,42 @@ export class LocalControlPlane implements ControlPlane {
   }
   assetsForProject(actor: Actor, projectId: string): readonly MediaAssetRecord[] {
     this.project(actor, projectId);
-    return [...this.#assets.values()]
-      .filter((asset) => asset.projectId === projectId)
-      .map(cloneAsset);
+    const assets = new Map(
+      [...this.#assets.values()]
+        .filter((asset) => asset.projectId === projectId)
+        .map((asset) => [asset.id, cloneAsset(asset)] as const),
+    );
+    for (const [key, sourceProjectId] of this.#assetAccess.entries()) {
+      const [targetProjectId, assetId] = key.split('\u0000');
+      if (targetProjectId !== projectId || assetId === undefined) continue;
+      const asset = this.#assets.get(assetId);
+      const source = this.#projects.get(sourceProjectId);
+      if (
+        asset === undefined ||
+        source === undefined ||
+        source.trashedAt !== undefined ||
+        asset.projectId !== sourceProjectId
+      )
+        continue;
+      assets.set(asset.id, cloneAsset({ ...asset, projectId }));
+    }
+    return [...assets.values()];
+  }
+  associateAsset(actor: Actor, projectId: string, assetId: string): MediaAssetRecord {
+    this.project(actor, projectId);
+    const asset = this.#assets.get(assetId);
+    const source = asset === undefined ? undefined : this.#projects.get(asset.projectId);
+    if (asset !== undefined && asset.projectId === projectId) return cloneAsset(asset);
+    if (
+      asset === undefined ||
+      source === undefined ||
+      source.trashedAt !== undefined ||
+      (source.ownerId !== actor.id && source.ownerId !== SHARED_LIBRARY_OWNER_ID) ||
+      !asset.locations.some((location) => location.kind === 'private-object')
+    )
+      throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    this.#assetAccess.set(`${projectId}\u0000${assetId}`, asset.projectId);
+    return cloneAsset({ ...asset, projectId });
   }
   assetsForOwner(actor: Actor): readonly MediaAssetRecord[] {
     this.auth(actor);
@@ -1074,8 +1161,7 @@ export class LocalControlPlane implements ControlPlane {
   ): MediaDerivativeRecord {
     this.project(actor, projectId);
     validateLocalDerivativeRegistration(derivative);
-    const asset = this.#assets.get(derivative.assetId);
-    if (asset === undefined || asset.projectId !== projectId)
+    if (this.assetInProject(actor, projectId, derivative.assetId) === undefined)
       throw new ControlPlaneError('ASSET_NOT_FOUND', derivative.assetId);
     if (this.#derivatives.has(derivative.id))
       throw new ControlPlaneError('DERIVATIVE_EXISTS', derivative.id);
@@ -1106,8 +1192,9 @@ export class LocalControlPlane implements ControlPlane {
       throw new ControlPlaneError('DERIVATIVE_UPLOAD_DENIED', jobId);
     const project = this.project({ id: worker.ownerId }, job.projectId);
     if (!project.assetSyncEnabled) throw new ControlPlaneError('DERIVATIVE_UPLOAD_DENIED', jobId);
-    const asset = this.#assets.get(derivative.assetId);
-    if (asset === undefined || asset.projectId !== job.projectId)
+    if (
+      this.assetInProject({ id: worker.ownerId }, job.projectId, derivative.assetId) === undefined
+    )
       throw new ControlPlaneError('ASSET_NOT_FOUND', derivative.assetId);
     const existing = this.#derivatives.get(derivative.id);
     if (existing !== undefined) {
@@ -1129,11 +1216,10 @@ export class LocalControlPlane implements ControlPlane {
     assetId: string,
   ): readonly MediaDerivativeRecord[] {
     this.project(actor, projectId);
-    const asset = this.#assets.get(assetId);
-    if (asset === undefined || asset.projectId !== projectId)
+    if (this.assetInProject(actor, projectId, assetId) === undefined)
       throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
     return [...this.#derivatives.values()]
-      .filter((derivative) => derivative.assetId === assetId)
+      .filter((derivative) => derivative.projectId === projectId && derivative.assetId === assetId)
       .map(cloneDerivative);
   }
   cloudDerivativeForOwner(
@@ -1278,9 +1364,8 @@ export class LocalControlPlane implements ControlPlane {
     if (requiresSourceAsset(type) && assetId === undefined)
       throw new ControlPlaneError('ASSET_JOB_INVALID', 'Worker generation requires an asset ID');
     if (requiresSourceAsset(type) && assetId !== undefined) {
-      const asset = this.#assets.get(assetId);
-      if (asset === undefined || asset.projectId !== projectId)
-        throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+      const asset = this.assetInProject(actor, projectId, assetId);
+      if (asset === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
       if (
         (type === 'mask.image' && asset.kind !== 'image') ||
         (type === 'mask.video' && asset.kind !== 'video')
@@ -1313,8 +1398,7 @@ export class LocalControlPlane implements ControlPlane {
   ): Job {
     this.project(actor, projectId);
     validateWorkerMaxAttempts(maxAttempts);
-    const asset = this.#assets.get(assetId);
-    if (asset === undefined || asset.projectId !== projectId)
+    if (this.assetInProject(actor, projectId, assetId) === undefined)
       throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
     const job: Job = {
       id,
@@ -1532,6 +1616,40 @@ export class LocalControlPlane implements ControlPlane {
     return [...this.#jobs.values()].filter(
       (job) => job.projectId === projectId && (job.state === 'queued' || job.state === 'leased'),
     ).length;
+  }
+  private cancelJobsForAsset(assetId: string, at = Date.now()): void {
+    for (const [jobId, job] of this.#jobs.entries()) {
+      if (job.assetId !== assetId) continue;
+      if (job.state === 'queued') {
+        this.#jobs.set(jobId, { ...job, state: 'canceled', cancelRequested: true });
+        this.event(jobId, 'canceled', at);
+      } else if (job.state === 'leased' && !job.cancelRequested) {
+        this.#jobs.set(jobId, { ...job, cancelRequested: true });
+        this.event(jobId, 'cancel-requested', at);
+      }
+    }
+  }
+  /** Resolve a canonical asset through a project-local durable association. */
+  private assetInProject(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+  ): MediaAssetRecord | undefined {
+    this.project(actor, projectId);
+    const asset = this.#assets.get(assetId);
+    if (asset === undefined) return undefined;
+    if (asset.projectId === projectId) return cloneAsset(asset);
+    const sourceProjectId = this.#assetAccess.get(`${projectId}\u0000${assetId}`);
+    const source = sourceProjectId === undefined ? undefined : this.#projects.get(sourceProjectId);
+    if (
+      sourceProjectId !== asset.projectId ||
+      source === undefined ||
+      source.trashedAt !== undefined ||
+      (source.ownerId !== actor.id && source.ownerId !== SHARED_LIBRARY_OWNER_ID) ||
+      !asset.locations.some((location) => location.kind === 'private-object')
+    )
+      return undefined;
+    return cloneAsset({ ...asset, projectId });
   }
   private ownedLease(workerId: string, jobId: string, now: number, leaseToken?: string): Job {
     const job = this.#jobs.get(jobId);

@@ -51,7 +51,15 @@ describe('JobsPanel R2 pairing and exactly-once contract', () => {
 
   it('queues thumbnails only for the selected real media asset', () => {
     expect(panelSource).toContain('thumbnailAssetId');
+    expect(panelSource).toContain('await client.associateAsset(projectId, thumbnailAssetId);');
     expect(panelSource).toContain('client.enqueueAssetThumbnail');
     expect(panelSource).not.toContain('enqueueFixture');
+  });
+
+  it('associates audio sources before queueing a project-scoped Worker operation', () => {
+    expect(panelSource).toContain('await client.associateAsset(projectId, audioAssetId);');
+    expect(panelSource).toContain(
+      "client.enqueueWorkerGeneration(projectId, jobId, 'audio.ml-denoise', audioAssetId)",
+    );
   });
 });

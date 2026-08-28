@@ -74,6 +74,48 @@ describe('BrowserControlPlaneClient', () => {
     ]);
   });
 
+  it('associates a catalog asset through the active project endpoint', async () => {
+    const requests: Array<{ readonly url: string; readonly method?: string }> = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({
+        url: String(input),
+        ...(init?.method === undefined ? {} : { method: init.method }),
+      });
+      return json(200, {
+        data: {
+          id: 'catalog-video',
+          projectId: 'target',
+          kind: 'video',
+          displayName: 'catalog.mp4',
+          sha256: 'a'.repeat(64),
+          bytes: 12,
+          descriptor: { mimeType: 'video/mp4' },
+          createdAt: 1,
+          cloudBacked: true,
+        },
+      });
+    };
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => 'joy-session-token',
+      );
+      await expect(client.associateAsset('target', 'catalog-video')).resolves.toMatchObject({
+        id: 'catalog-video',
+        projectId: 'target',
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(requests).toEqual([
+      {
+        url: 'https://media.joyteam.ir/api/v1/projects/target/assets/catalog-video/associate',
+        method: 'POST',
+      },
+    ]);
+  });
+
   it('uses the idempotent ensure endpoint so refreshes do not emit conflicts', async () => {
     const requests: Array<{ readonly url: string; readonly method?: string }> = [];
     const original = globalThis.fetch;

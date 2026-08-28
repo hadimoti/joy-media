@@ -1319,6 +1319,18 @@ async function route(
   }
 
   const assetByIdMatch = /^\/v1\/projects\/([^/]+)\/assets\/([^/]+)$/.exec(url.pathname);
+  const assetAssociateMatch = /^\/v1\/projects\/([^/]+)\/assets\/([^/]+)\/associate$/.exec(
+    url.pathname,
+  );
+  if (request.method === 'POST' && assetAssociateMatch !== null) {
+    const asset = await options.controlPlane.associateAsset(
+      actor,
+      decodeURIComponent(assetAssociateMatch[1]!),
+      decodeURIComponent(assetAssociateMatch[2]!),
+    );
+    respondJson(response, 200, { data: assetForBrowser(asset) });
+    return;
+  }
   if (request.method === 'DELETE' && assetByIdMatch !== null) {
     const deleted = await options.controlPlane.deleteAsset(
       actor,

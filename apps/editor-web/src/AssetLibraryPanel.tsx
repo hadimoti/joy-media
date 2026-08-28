@@ -412,33 +412,50 @@ export function AssetLibraryPanel({
       readonly displayName: string;
       readonly descriptor: BrowserAsset['descriptor'];
     }) => {
-      let descriptor = asset.descriptor;
-      if (
-        (asset.kind === 'video' || asset.kind === 'audio') &&
-        descriptor.durationUs === undefined
-      ) {
-        setStatus(`Reading ${asset.displayName} duration…`);
-        try {
-          const cache = await originalAssetCache;
-          let blob = await cache.get(asset.assetId);
-          if (blob === undefined) {
-            try {
-              blob = await client.originalBytes(projectId, asset.assetId);
-            } catch {
-              blob = await client.sharedCloudOriginalBytes(asset.assetId);
+      try {
+        let descriptor = asset.descriptor;
+        if (
+          (asset.kind === 'video' || asset.kind === 'audio') &&
+          descriptor.durationUs === undefined
+        ) {
+          setStatus(`Reading ${asset.displayName} duration…`);
+          try {
+            const cache = await originalAssetCache;
+            let blob = await cache.get(asset.assetId);
+            if (blob === undefined) {
+              try {
+                blob = await client.originalBytes(projectId, asset.assetId);
+              } catch {
+                blob = await client.sharedCloudOriginalBytes(asset.assetId);
+              }
             }
+            const file = new File([blob], asset.displayName, { type: descriptor.mimeType });
+            descriptor = await describeMedia(file, asset.kind, descriptor.mimeType);
+          } catch {
+            setStatus(
+              `Could not read ${asset.displayName} duration; using the default timeline segment.`,
+            );
           }
-          const file = new File([blob], asset.displayName, { type: descriptor.mimeType });
-          descriptor = await describeMedia(file, asset.kind, descriptor.mimeType);
-        } catch {
-          setStatus(
-            `Could not read ${asset.displayName} duration; using the default timeline segment.`,
-          );
         }
+        const catalogAsset = items.find((candidate) => candidate.asset.id === asset.assetId)?.asset;
+        let scopedAsset = asset;
+        if (catalogAsset !== undefined && catalogAsset.projectId !== projectId) {
+          setStatus(`Preparing ${asset.displayName} for this project…`);
+          const associated = await client.associateAsset(projectId, catalogAsset.id);
+          scopedAsset = {
+            ...asset,
+            assetId: associated.id,
+            kind: associated.kind,
+            displayName: associated.displayName,
+            descriptor: associated.descriptor,
+          };
+        }
+        onAddToTimeline?.({ ...scopedAsset, descriptor });
+      } catch (error) {
+        setStatus(`Could not add ${asset.displayName} to this project: ${message(error)}`);
       }
-      onAddToTimeline?.({ ...asset, descriptor });
     },
-    [client, onAddToTimeline, originalAssetCache, projectId],
+    [client, items, onAddToTimeline, originalAssetCache, projectId],
   );
 
   const openPreview = useCallback(

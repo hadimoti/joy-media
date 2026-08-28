@@ -260,6 +260,42 @@ describe('control-plane HTTP transport', () => {
     );
   });
 
+  it('associates a durable catalog asset before it is used by a project-scoped Worker job', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    await request(origin, 'POST', '/v1/projects', { id: 'source', title: 'Source' });
+    await request(origin, 'POST', '/v1/projects', { id: 'target', title: 'Target' });
+    await request(origin, 'POST', '/v1/projects/source/assets', {
+      id: 'catalog-video',
+      kind: 'video',
+      displayName: 'catalog.mp4',
+      sha256: SHA256,
+      bytes: 12,
+      descriptor: { mimeType: 'video/mp4', durationUs: 1_000_000 },
+      locations: [{ kind: 'private-object', ref: 'catalog-original' }],
+    });
+
+    expect(
+      await request(origin, 'POST', '/v1/projects/target/assets/catalog-video/associate'),
+    ).toMatchObject({
+      status: 200,
+      body: { data: { id: 'catalog-video', projectId: 'target', cloudBacked: true } },
+    });
+    expect(await request(origin, 'GET', '/v1/projects/target/assets')).toMatchObject({
+      status: 200,
+      body: { data: [{ id: 'catalog-video', projectId: 'target' }] },
+    });
+    expect(
+      await request(origin, 'POST', '/v1/projects/target/jobs', {
+        id: 'catalog-thumbnail-job',
+        type: 'asset.thumbnail',
+        assetId: 'catalog-video',
+      }),
+    ).toMatchObject({
+      status: 201,
+      body: { data: { projectId: 'target', assetId: 'catalog-video' } },
+    });
+  });
+
   it('keeps Mistral unconfigured without the dedicated runtime secret', async () => {
     const origin = await start({ authenticate: () => ({ id: 'owner' }) });
     expect(await request(origin, 'GET', '/v1/providers/reasoning')).toMatchObject({

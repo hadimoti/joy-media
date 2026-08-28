@@ -236,11 +236,13 @@ export function JobsPanel({
           revision: operationRevision,
         });
         operationStarted = true;
+        await client.associateAsset(projectId, audioAssetId);
         await client.enqueueWorkerGeneration(projectId, jobId, 'audio.ml-denoise', audioAssetId);
         setStatus(
           'Audio denoise job queued. The Worker result will require review before insertion.',
         );
       } else if (thumbnailAssetId !== undefined) {
+        await client.associateAsset(projectId, thumbnailAssetId);
         await client.enqueueAssetThumbnail(
           projectId,
           `asset-thumbnail-${crypto.randomUUID()}`,

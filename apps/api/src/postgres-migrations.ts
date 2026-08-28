@@ -133,10 +133,29 @@ const WORKER_LEASE_GENERATION_MIGRATION: PostgresMigration = {
   },
 };
 
+const PROJECT_ASSET_ACCESS_MIGRATION: PostgresMigration = {
+  id: '004-project-asset-access',
+  checksum: 'sha256:project-asset-access-2026-08-29',
+  up: async (database) => {
+    await database.query(`
+      CREATE TABLE IF NOT EXISTS media_asset_access (
+        project_id text NOT NULL,
+        asset_id text NOT NULL,
+        source_project_id text NOT NULL,
+        created_at timestamptz NOT NULL,
+        PRIMARY KEY (project_id, asset_id)
+      );
+      CREATE INDEX IF NOT EXISTS media_asset_access_source_idx
+        ON media_asset_access (source_project_id, asset_id);
+    `);
+  },
+};
+
 export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
   BASELINE_MIGRATION,
   ASSET_REVOCATION_PRIMARY_KEY_MIGRATION,
   WORKER_LEASE_GENERATION_MIGRATION,
+  PROJECT_ASSET_ACCESS_MIGRATION,
 ];
 
 export async function runPostgresMigrations(database: MigrationDatabase): Promise<void> {

@@ -666,12 +666,30 @@ export class PostgresControlPlane implements ControlPlane {
         [id],
       );
       if (Number(active.rows[0]?.count ?? 0) > 0) throw new ControlPlaneError('PROJECT_BUSY', id);
+      const associatedQueued = await client.query<{ readonly id: string }>(
+        `UPDATE jobs SET state = 'canceled', cancel_requested = true
+         WHERE asset_id IN (SELECT id FROM media_assets WHERE project_id = $1)
+           AND state = 'queued' RETURNING id`,
+        [id],
+      );
+      for (const job of associatedQueued.rows)
+        await this.event(client, job.id, 'canceled', Date.now());
+      const associatedLeased = await client.query<{ readonly id: string }>(
+        `UPDATE jobs SET cancel_requested = true
+         WHERE asset_id IN (SELECT id FROM media_assets WHERE project_id = $1)
+           AND state = 'leased' AND cancel_requested = false RETURNING id`,
+        [id],
+      );
+      for (const job of associatedLeased.rows)
+        await this.event(client, job.id, 'cancel-requested', Date.now());
       const assets = await client.query<{ readonly locations: unknown }>(
         'SELECT locations FROM media_assets WHERE project_id = $1',
         [id],
       );
       const derivatives = await client.query<{ readonly locations: unknown }>(
-        'SELECT locations FROM media_derivatives WHERE project_id = $1',
+        `SELECT locations FROM media_derivatives
+         WHERE project_id = $1
+            OR asset_id IN (SELECT id FROM media_assets WHERE project_id = $1)`,
         [id],
       );
       const candidates = new Set<string>([
@@ -689,6 +707,15 @@ export class PostgresControlPlane implements ControlPlane {
         await client.query('DELETE FROM jobs WHERE project_id = $1', [id]);
       }
       await client.query('DELETE FROM media_derivatives WHERE project_id = $1', [id]);
+      await client.query(
+        `DELETE FROM media_derivatives
+         WHERE asset_id IN (SELECT id FROM media_assets WHERE project_id = $1)`,
+        [id],
+      );
+      await client.query(
+        'DELETE FROM media_asset_access WHERE project_id = $1 OR source_project_id = $1',
+        [id],
+      );
       await client.query('DELETE FROM media_assets WHERE project_id = $1', [id]);
       await client.query('DELETE FROM projects WHERE id = $1 AND owner_id = $2', [id, actor.id]);
       const remainingAssets = await client.query<{ readonly locations: unknown }>(
@@ -925,23 +952,75 @@ export class PostgresControlPlane implements ControlPlane {
   ): Promise<AssetDeletionResult> {
     return this.transaction(async (client) => {
       await this.project(actor, projectId, client);
+      const queuedForAsset = await client.query<{ readonly id: string }>(
+        `UPDATE jobs SET state = 'canceled', cancel_requested = true
+         WHERE asset_id = $1 AND state = 'queued' RETURNING id`,
+        [assetId],
+      );
+      for (const job of queuedForAsset.rows)
+        await this.event(client, job.id, 'canceled', Date.now());
+      const leasedForAsset = await client.query<{ readonly id: string }>(
+        `UPDATE jobs SET cancel_requested = true
+         WHERE asset_id = $1 AND state = 'leased' AND cancel_requested = false RETURNING id`,
+        [assetId],
+      );
+      for (const job of leasedForAsset.rows)
+        await this.event(client, job.id, 'cancel-requested', Date.now());
       const existing = await client.query<MediaAssetRow>(
         'SELECT * FROM media_assets WHERE id = $1 AND project_id = $2',
         [assetId, projectId],
       );
-      if (existing.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+      if (existing.rows[0] === undefined) {
+        const access = await client.query<{ readonly source_project_id: string }>(
+          `SELECT asset_access.source_project_id
+           FROM media_asset_access asset_access
+           JOIN media_assets a ON a.id = asset_access.asset_id AND a.project_id = asset_access.source_project_id
+           JOIN projects source ON source.id = asset_access.source_project_id
+           WHERE asset_access.project_id = $1 AND asset_access.asset_id = $2
+             AND source.owner_id IN ($3, $4) AND source.trashed_at IS NULL`,
+          [projectId, assetId, actor.id, SHARED_LIBRARY_OWNER_ID],
+        );
+        if (access.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+        const derivatives = await client.query<MediaDerivativeRow>(
+          'SELECT * FROM media_derivatives WHERE project_id = $1 AND asset_id = $2',
+          [projectId, assetId],
+        );
+        const candidateRefs = new Set(
+          derivatives.rows.flatMap((row) => privateRefsFromLocations(row.locations)),
+        );
+        await client.query(
+          'DELETE FROM media_derivatives WHERE project_id = $1 AND asset_id = $2',
+          [projectId, assetId],
+        );
+        await client.query(
+          'DELETE FROM media_asset_access WHERE project_id = $1 AND asset_id = $2',
+          [projectId, assetId],
+        );
+        const remainingAssets = await client.query<{ readonly locations: unknown }>(
+          'SELECT locations FROM media_assets',
+        );
+        const remainingDerivatives = await client.query<{ readonly locations: unknown }>(
+          'SELECT locations FROM media_derivatives',
+        );
+        const remainingRefs = new Set([
+          ...remainingAssets.rows.flatMap((row) => privateRefsFromLocations(row.locations)),
+          ...remainingDerivatives.rows.flatMap((row) => privateRefsFromLocations(row.locations)),
+        ]);
+        return {
+          id: assetId,
+          orphanedPrivateObjectRefs: [...candidateRefs].filter((ref) => !remainingRefs.has(ref)),
+        };
+      }
       const derivatives = await client.query<MediaDerivativeRow>(
-        'SELECT * FROM media_derivatives WHERE project_id = $1 AND asset_id = $2',
-        [projectId, assetId],
+        'SELECT * FROM media_derivatives WHERE asset_id = $1',
+        [assetId],
       );
       const candidateRefs = new Set([
         ...privateRefsFromLocations(existing.rows[0].locations),
         ...derivatives.rows.flatMap((row) => privateRefsFromLocations(row.locations)),
       ]);
-      await client.query('DELETE FROM media_derivatives WHERE project_id = $1 AND asset_id = $2', [
-        projectId,
-        assetId,
-      ]);
+      await client.query('DELETE FROM media_derivatives WHERE asset_id = $1', [assetId]);
+      await client.query('DELETE FROM media_asset_access WHERE asset_id = $1', [assetId]);
       await client.query('DELETE FROM media_assets WHERE id = $1 AND project_id = $2', [
         assetId,
         projectId,
@@ -967,10 +1046,59 @@ export class PostgresControlPlane implements ControlPlane {
   async assetsForProject(actor: Actor, projectId: string): Promise<readonly MediaAssetRecord[]> {
     await this.project(actor, projectId);
     const result = await this.pool.query<MediaAssetRow>(
-      "SELECT * FROM media_assets WHERE project_id = $1 ORDER BY COALESCE(CASE WHEN sort_name = '' THEN NULL ELSE sort_name END, lower(display_name)), id",
-      [projectId],
+      `SELECT * FROM (
+         SELECT a.* FROM media_assets a WHERE a.project_id = $1
+         UNION ALL
+         SELECT a.id, $1 AS project_id, a.kind, a.display_name, a.sha256, a.byte_length,
+                a.descriptor, a.locations, a.created_at, a.tags, a.sort_name
+         FROM media_asset_access asset_access
+         JOIN media_assets a ON a.id = asset_access.asset_id AND a.project_id = asset_access.source_project_id
+         JOIN projects source ON source.id = asset_access.source_project_id
+         WHERE asset_access.project_id = $1 AND source.owner_id IN ($2, $3)
+           AND source.trashed_at IS NULL
+       ) AS assets
+       ORDER BY COALESCE(CASE WHEN assets.sort_name = '' THEN NULL ELSE assets.sort_name END,
+                         lower(assets.display_name)), assets.id`,
+      [projectId, actor.id, SHARED_LIBRARY_OWNER_ID],
     );
     return result.rows.map(mediaAssetOf);
+  }
+
+  async associateAsset(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+  ): Promise<MediaAssetRecord> {
+    return this.transaction(async (client) => {
+      await this.project(actor, projectId, client);
+      const result = await client.query<
+        MediaAssetRow & {
+          readonly source_owner_id: string;
+          readonly source_trashed_at: Date | null;
+        }
+      >(
+        `SELECT a.*, p.owner_id AS source_owner_id, p.trashed_at AS source_trashed_at
+         FROM media_assets a JOIN projects p ON p.id = a.project_id
+         WHERE a.id = $1`,
+        [assetId],
+      );
+      const row = result.rows[0];
+      if (row !== undefined && row.project_id === projectId) return mediaAssetOf(row);
+      if (
+        row === undefined ||
+        row.source_trashed_at !== null ||
+        (row.source_owner_id !== actor.id && row.source_owner_id !== SHARED_LIBRARY_OWNER_ID) ||
+        privateRefsFromLocations(row.locations).length === 0
+      )
+        throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+      await client.query(
+        `INSERT INTO media_asset_access (project_id, asset_id, source_project_id, created_at)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+         ON CONFLICT (project_id, asset_id) DO UPDATE SET source_project_id = EXCLUDED.source_project_id`,
+        [projectId, assetId, row.project_id],
+      );
+      return mediaAssetOf({ ...row, project_id: projectId });
+    });
   }
 
   async assetsForOwner(actor: Actor): Promise<readonly MediaAssetRecord[]> {
@@ -1723,8 +1851,14 @@ export class PostgresControlPlane implements ControlPlane {
   ): Promise<void> {
     await this.project(actor, projectId, client);
     const result = await client.query<{ readonly id: string }>(
-      'SELECT id FROM media_assets WHERE id = $1 AND project_id = $2',
-      [assetId, projectId],
+      `SELECT id FROM media_assets WHERE id = $1 AND project_id = $2
+       UNION ALL
+       SELECT a.id FROM media_asset_access asset_access
+       JOIN media_assets a ON a.id = asset_access.asset_id AND a.project_id = asset_access.source_project_id
+       JOIN projects source ON source.id = asset_access.source_project_id
+       WHERE asset_access.asset_id = $1 AND asset_access.project_id = $2
+         AND source.owner_id IN ($3, $4) AND source.trashed_at IS NULL`,
+      [assetId, projectId, actor.id, SHARED_LIBRARY_OWNER_ID],
     );
     if (result.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
   }

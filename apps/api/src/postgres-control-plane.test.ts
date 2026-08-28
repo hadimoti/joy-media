@@ -365,6 +365,106 @@ describe('PostgresControlPlane', () => {
     await pool.end();
   });
 
+  it('associates durable library assets with a target project and scopes Worker jobs there', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const controlPlane = new PostgresControlPlane(pool, { skipLocked: false });
+    await controlPlane.initialize();
+    const owner = { id: 'association-owner' };
+    const peer = { id: 'association-peer' };
+    await controlPlane.createProject(owner, 'source', 'Source');
+    await controlPlane.createProject(owner, 'target', 'Target');
+    await controlPlane.createProject({ id: SHARED_LIBRARY_OWNER_ID }, 'library', 'Library');
+    await controlPlane.registerAsset(owner, 'source', {
+      ...cloudAsset('owner-cloud', 'owner-ref'),
+    });
+    await controlPlane.registerAsset({ id: SHARED_LIBRARY_OWNER_ID }, 'library', {
+      ...cloudAsset('shared-cloud', 'shared-ref'),
+    });
+
+    await expect(
+      controlPlane.associateAsset(owner, 'target', 'owner-cloud'),
+    ).resolves.toMatchObject({
+      id: 'owner-cloud',
+      projectId: 'target',
+    });
+    await expect(
+      controlPlane.associateAsset(owner, 'target', 'shared-cloud'),
+    ).resolves.toMatchObject({
+      id: 'shared-cloud',
+      projectId: 'target',
+    });
+    await expect(controlPlane.assetsForProject(owner, 'target')).resolves.toMatchObject([
+      { id: 'owner-cloud', projectId: 'target' },
+      { id: 'shared-cloud', projectId: 'target' },
+    ]);
+    await expect(controlPlane.associateAsset(peer, 'target', 'owner-cloud')).rejects.toMatchObject({
+      code: 'PROJECT_NOT_FOUND',
+    });
+    await expect(
+      controlPlane.enqueueAssetThumbnail(owner, 'associated-job', 'target', 'owner-cloud'),
+    ).resolves.toMatchObject({ projectId: 'target', assetId: 'owner-cloud' });
+    await expect(
+      controlPlane.attachCloudOriginal(owner, 'target', 'owner-cloud', {
+        kind: 'private-object',
+        ref: 'must-not-replace-source',
+      }),
+    ).rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
+    await expect(controlPlane.deleteAsset(owner, 'target', 'owner-cloud')).resolves.toMatchObject({
+      id: 'owner-cloud',
+      orphanedPrivateObjectRefs: [],
+    });
+    await expect(controlPlane.assetsForProject(owner, 'target')).resolves.toMatchObject([
+      { id: 'shared-cloud', projectId: 'target' },
+    ]);
+    await pool.end();
+  });
+
+  it('cleans project-asset access rows when source or target projects are deleted', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const controlPlane = new PostgresControlPlane(pool, { skipLocked: false });
+    await controlPlane.initialize();
+    const owner = { id: 'association-lifecycle-owner' };
+    await controlPlane.createProject(owner, 'source', 'Source');
+    await controlPlane.createProject(owner, 'target', 'Target');
+    await controlPlane.createProject(owner, 'target-2', 'Target 2');
+    await controlPlane.registerAsset(owner, 'source', {
+      ...cloudAsset('lifecycle-cloud', 'lifecycle-ref'),
+    });
+    await controlPlane.associateAsset(owner, 'target', 'lifecycle-cloud');
+    await controlPlane.trashProject(owner, 'target', 0, 10);
+    await expect(controlPlane.deleteProject(owner, 'target')).resolves.toMatchObject({
+      id: 'target',
+    });
+    await expect(controlPlane.assetsForProject(owner, 'source')).resolves.toMatchObject([
+      { id: 'lifecycle-cloud', projectId: 'source' },
+    ]);
+    await controlPlane.associateAsset(owner, 'target-2', 'lifecycle-cloud');
+    await controlPlane.registerLocalDerivative(owner, 'target-2', {
+      id: 'target-derivative',
+      assetId: 'lifecycle-cloud',
+      kind: 'thumbnail',
+      profile: 'jpeg-640',
+      sha256: 'b'.repeat(64),
+      bytes: 1024,
+      descriptor: { mimeType: 'image/jpeg', width: 640, height: 360 },
+      availability: 'available-local',
+      locations: [{ kind: 'opfs-cache', ref: 'target-derivative-cache' }],
+    });
+    await controlPlane.trashProject(owner, 'source', 0, 20);
+    await expect(controlPlane.deleteProject(owner, 'source')).resolves.toMatchObject({
+      id: 'source',
+    });
+    await expect(controlPlane.assetsForProject(owner, 'target-2')).resolves.toHaveLength(0);
+    await expect(
+      controlPlane.derivativesForAsset(owner, 'target-2', 'lifecycle-cloud'),
+    ).rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
+    await pool.end();
+  });
+
   it('duplicates durable media and enforces the trash lifecycle transactionally', async () => {
     const database = newDb();
     const adapter = database.adapters.createPg();

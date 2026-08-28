@@ -348,6 +348,88 @@ describe('local control plane', () => {
     expect(api.assetsForProject(owner, 'project-cursor')).toHaveLength(0);
   });
 
+  it('associates durable owner and shared-library assets without changing their stable IDs', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'owner-association' };
+    const peer = { id: 'peer-association' };
+    api.createProject(owner, 'source', 'Source');
+    api.createProject(owner, 'target', 'Target');
+    api.createProject(owner, 'target-2', 'Target 2');
+    api.createProject({ id: SHARED_LIBRARY_OWNER_ID }, 'library', 'Library');
+    api.registerAsset(owner, 'source', {
+      ...assetRegistration(),
+      id: 'owner-cloud-asset',
+      locations: [{ kind: 'private-object', ref: 'owner-original' }],
+    });
+    api.registerAsset({ id: SHARED_LIBRARY_OWNER_ID }, 'library', {
+      ...assetRegistration(),
+      id: 'shared-cloud-asset',
+      locations: [{ kind: 'private-object', ref: 'shared-original' }],
+    });
+    api.registerAsset(owner, 'source', { ...assetRegistration(), id: 'owner-local-asset' });
+
+    expect(api.associateAsset(owner, 'target', 'owner-cloud-asset')).toMatchObject({
+      id: 'owner-cloud-asset',
+      projectId: 'target',
+    });
+    expect(api.assetsForProject(owner, 'target')).toMatchObject([
+      { id: 'owner-cloud-asset', projectId: 'target' },
+    ]);
+    expect(api.associateAsset(owner, 'target', 'shared-cloud-asset')).toMatchObject({
+      id: 'shared-cloud-asset',
+      projectId: 'target',
+    });
+    expect(api.assetsForProject(owner, 'target')).toHaveLength(2);
+    expect(() => api.associateAsset(peer, 'target', 'owner-cloud-asset')).toThrow(
+      expect.objectContaining({ code: 'PROJECT_NOT_FOUND' }),
+    );
+    expect(() => api.associateAsset(owner, 'target', 'owner-local-asset')).toThrow(
+      expect.objectContaining({ code: 'ASSET_NOT_FOUND' }),
+    );
+
+    const job = api.enqueueAssetThumbnail(
+      owner,
+      'associated-thumbnail',
+      'target',
+      'owner-cloud-asset',
+    );
+    expect(job).toMatchObject({ projectId: 'target', assetId: 'owner-cloud-asset' });
+    expect(() =>
+      api.attachCloudOriginal(owner, 'target', 'owner-cloud-asset', {
+        kind: 'private-object',
+        ref: 'must-not-replace-source',
+      }),
+    ).toThrow(expect.objectContaining({ code: 'ASSET_NOT_FOUND' }));
+    expect(api.deleteAsset(owner, 'target', 'owner-cloud-asset')).toEqual({
+      id: 'owner-cloud-asset',
+      orphanedPrivateObjectRefs: [],
+    });
+    expect(api.assetsForProject(owner, 'target')).toMatchObject([
+      { id: 'shared-cloud-asset', projectId: 'target' },
+    ]);
+  });
+
+  it('removes asset associations when either the source or target project is deleted', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'owner-association-lifecycle' };
+    api.createProject(owner, 'source', 'Source');
+    api.createProject(owner, 'target', 'Target');
+    api.createProject(owner, 'target-2', 'Target 2');
+    api.registerAsset(owner, 'source', {
+      ...assetRegistration(),
+      id: 'lifecycle-cloud',
+      locations: [{ kind: 'private-object', ref: 'lifecycle-original' }],
+    });
+    api.associateAsset(owner, 'target', 'lifecycle-cloud');
+    api.trashProject(owner, 'target', 0, 10);
+    expect(api.deleteProject(owner, 'target')).toMatchObject({ id: 'target' });
+    expect(api.assetsForProject(owner, 'source')).toMatchObject([{ id: 'lifecycle-cloud' }]);
+    api.associateAsset(owner, 'target-2', 'lifecycle-cloud');
+    api.trashProject(owner, 'source', 0, 20);
+    expect(api.deleteProject(owner, 'source')).toMatchObject({ id: 'source' });
+    expect(api.assetsForProject(owner, 'target-2')).toHaveLength(0);
+  });
+
   it('duplicates durable media, cancels queued work on Trash, restores, and purges safely', () => {
     const api = new LocalControlPlane();
     const owner = { id: 'owner-lifecycle' };
