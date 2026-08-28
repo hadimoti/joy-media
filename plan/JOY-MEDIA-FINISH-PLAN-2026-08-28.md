@@ -218,6 +218,24 @@ responsive layouts, and real Worker delivery still require final-release evidenc
 were confined to the authenticated test project and the candidate branch remains **NO-GO** until
 P0-12/P0-13, source-bound Worker inspection, and the release/canary gates are complete.
 
+### LIVE-16 — cloud asset insertion hang (2026-08-29)
+
+The final candidate was retested in a fresh authenticated Codex in-app browser tab at the narrow responsive
+viewport. Opening the Effects library and the Inspector Effects/Audio/Transform tabs remained stable, and transport,
+Space playback, track visibility, selection, trim nudge, duplicate/undo, and transition focus all responded. A real
+shared-library asset (`Black Brush Stroke`) exposed a remaining P0/P1 boundary: clicking **Add to timeline** changed
+the status to `Preparing Black Brush Stroke for this project…` and stayed there for more than 18 seconds with no clip,
+toast, or document sync. CDP network evidence showed the association POST returned HTTP 200 and the project asset
+refresh returned HTTP 200, but no subsequent document transaction was issued. This is not a database crash; it is a
+silent client-side insertion/race failure after association (and the status has no timeout/retry).
+
+Required closure: make catalog association and timeline insertion one awaited transaction with a bounded timeout;
+refresh the active project/document before dispatching when the root composition is unavailable; clear status on
+success; show an actionable error and retry on association or insertion failure; and add an authenticated browser test
+that starts from an unassociated cloud asset, observes the 200 association, sees the new clip and document revision,
+then reloads and confirms the clip remains. Repeat the same test for image, video, and audio assets and verify Undo.
+Until that evidence exists, P0-12 and the timeline portion of P1-07 remain open.
+
 ## Numeric release budgets and retained evidence
 
 These are stop/go gates, not optional targets:
