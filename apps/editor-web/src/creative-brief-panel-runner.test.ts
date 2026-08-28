@@ -1,10 +1,18 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import type { JoyProjectV1, ProjectRevisionId } from '@joy-media/project-schema';
-import type { CreativeBriefRequestV1, CreativeBriefV1, CreativeBriefScope } from '@joy-media/agent-tools';
+import type {
+  CreativeBriefRequestV1,
+  CreativeBriefV1,
+  CreativeBriefScope,
+} from '@joy-media/agent-tools';
 import type { ControlPlaneProjectBinding } from './project-control-plane.js';
 import type { SyncProjectDocument } from './project-document-sync.js';
-import { createCreativeBriefPanelRunner, CreativeBriefPanelRunnerError, type CreativeBriefTransport, type CreativeBriefRequestFactory, type CreativeBriefRunnerError } from './creative-brief-panel-runner.js';
+import {
+  createCreativeBriefPanelRunner,
+  type CreativeBriefTransport,
+  type CreativeBriefRequestFactory,
+} from './creative-brief-panel-runner.js';
 
 // Test constants
 const MOCK_PROJECT_ID = 'local-edit-1';
@@ -72,6 +80,8 @@ const mockBrief: CreativeBriefV1 = {
       hasBrandKit: false,
       brandCompleteness: 'none',
       missingComponents: [],
+      warnings: [],
+      evidence: [],
     },
     scenes: [],
     project: {
@@ -92,6 +102,12 @@ const mockBrief: CreativeBriefV1 = {
       generatedAssetsAvailable: false,
       readinessLevel: 'unknown',
       blockers: [],
+      warnings: [],
+      sceneCount: 0,
+      scenesWithVisuals: 0,
+      scenesWithAudio: 0,
+      scenesWithCaptions: 0,
+      evidence: [],
     },
     rules: [],
   },
@@ -104,11 +120,11 @@ const mockBrief: CreativeBriefV1 = {
 };
 
 // Mock storage
-const mockStorage: BrowserKeyValueStore = {
+const mockStorage = {
   getItem: vi.fn().mockReturnValue(null),
   setItem: vi.fn(),
   removeItem: vi.fn(),
-};
+} satisfies BrowserKeyValueStore;
 
 // Mock sync transport that succeeds
 const createMockSyncTransportSuccess = (): SyncProjectDocument => {
@@ -135,10 +151,14 @@ const createMockSyncTransportConflict = (): SyncProjectDocument => {
 };
 
 // Mock brief transport that succeeds
-const createMockBriefTransportSuccess = (brief: CreativeBriefV1 = mockBrief): CreativeBriefTransport => {
-  return vi.fn().mockImplementation((_controlPlaneProjectId: string, _request: CreativeBriefRequestV1) => {
-    return Promise.resolve(brief);
-  });
+const createMockBriefTransportSuccess = (
+  brief: CreativeBriefV1 = mockBrief,
+): CreativeBriefTransport => {
+  return vi
+    .fn()
+    .mockImplementation((_controlPlaneProjectId: string, _request: CreativeBriefRequestV1) => {
+      return Promise.resolve(brief);
+    });
 };
 
 // Mock brief transport that fails
@@ -148,7 +168,9 @@ const createMockBriefTransportFailure = (error: unknown): CreativeBriefTransport
 
 // Mock request factory
 const createMockRequestFactory = () => {
-  const state = { lastCall: null as { text: string; projectId: string; revisionId: ProjectRevisionId } | null };
+  const state = {
+    lastCall: null as { text: string; projectId: string; revisionId: ProjectRevisionId } | null,
+  };
   const factory: CreativeBriefRequestFactory = (text, projectId, revisionId) => {
     state.lastCall = { text, projectId, revisionId };
     return {
@@ -158,7 +180,12 @@ const createMockRequestFactory = () => {
       scope: 'general' as CreativeBriefScope,
     };
   };
-  return { factory, get lastCall() { return state.lastCall; } };
+  return {
+    factory,
+    get lastCall() {
+      return state.lastCall;
+    },
+  };
 };
 
 // Mock request factory that produces mismatched projectId

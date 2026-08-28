@@ -2,7 +2,6 @@ import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import type { JoyProjectV1, ProjectRevisionId } from '@joy-media/project-schema';
 import {
   type ControlPlaneProjectBinding,
-  getControlPlaneProjectBinding,
   upsertControlPlaneProjectBinding,
 } from './project-control-plane.js';
 
@@ -34,9 +33,7 @@ export interface DocumentSyncRequestFailure {
 
 /** Union of all possible sync outcomes. */
 export type DocumentSyncResult =
-  | DocumentSyncSuccess
-  | DocumentSyncConflict
-  | DocumentSyncRequestFailure;
+  DocumentSyncSuccess | DocumentSyncConflict | DocumentSyncRequestFailure;
 
 /**
  * Injected sync transport. Matches the control-plane client method signature.

@@ -6,7 +6,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { CreativeBriefV1, RecommendationKind, RecommendationRisk, InferenceConfidence } from '@joy-media/agent-tools';
+import type {
+  CreativeBriefV1,
+  RecommendationKind,
+  RecommendationRisk,
+  InferenceConfidence,
+} from '@joy-media/agent-tools';
 import { CreativeBriefDisplay } from './CreativeBriefDisplay.js';
 
 // Static fixture - a complete, valid CreativeBriefV1 for testing
@@ -36,32 +41,101 @@ const STATIC_BRIEF: CreativeBriefV1 = {
         statement: 'Adding b-roll would improve visual interest',
         confidence: 'medium',
         rationale: 'Narration runs for 3 seconds without visual change in scene 2',
-        evidence: [{ id: 'scene-2', kind: 'scene', startUs: 5000000, endUs: 8000000, detail: 'narration-only segment' }],
+        evidence: [
+          {
+            id: 'scene-2',
+            kind: 'clip',
+            startUs: 5000000,
+            endUs: 8000000,
+            detail: 'narration-only segment',
+          },
+        ],
       },
     ],
   },
   assumptions: [
-    { id: 'a-001', statement: 'User wants premium feel', confidence: 'medium', evidence: [], verified: true },
+    {
+      id: 'a-001',
+      statement: 'User wants premium feel',
+      confidence: 'medium',
+      evidence: [],
+      verified: true,
+    },
   ],
   recommendations: [
     {
       id: 'pacing.hook.add-broll-001' as const,
       kind: 'pacing' as RecommendationKind,
       confidence: 'high' as InferenceConfidence,
-      evidence: [{ id: 'scene-2', kind: 'scene', startUs: 5000000, endUs: 8000000 }],
+      evidence: [{ id: 'scene-2', kind: 'clip', startUs: 5000000, endUs: 8000000 }],
       rationale: 'Narration-only segment needs visual support',
       expectedBenefit: 'More engaging video with better pacing',
       risk: 'reversible-local' as RecommendationRisk,
       scope: { sceneIds: ['scene-2'] },
     },
   ],
-  blockedBy: [{ id: 'b-001', capability: 'b-roll', status: 'setup-required', message: 'Needs provider', evidence: [] }],
-  requiresHumanDecision: [{ id: 'd-001', question: 'Which style?', context: 'Options available', options: ['a', 'b'], evidence: [] }],
+  blockedBy: [
+    {
+      id: 'b-001',
+      capability: 'b-roll',
+      status: 'setup-required',
+      message: 'Needs provider',
+      evidence: [],
+    },
+  ],
+  requiresHumanDecision: [
+    {
+      id: 'd-001',
+      question: 'Which style?',
+      context: 'Options available',
+      options: ['a', 'b'],
+      evidence: [],
+    },
+  ],
   warnings: [{ code: 'truncated', message: 'List truncated', severity: 'info' }],
   intelligence: {
-    brand: { projectId: 'test-project-001', revisionId: 'rev-abc123', colorsAvailable: true, fontsAvailable: false, logoAvailable: true, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, hasBrandKit: true, brandCompleteness: 'partial', missingComponents: [], warnings: [], evidence: [] },
+    brand: {
+      projectId: 'test-project-001',
+      revisionId: 'rev-abc123',
+      colorsAvailable: true,
+      fontsAvailable: false,
+      logoAvailable: true,
+      voiceInstructionsAvailable: false,
+      toneInstructionsAvailable: false,
+      prohibitedClaims: [],
+      prohibitedEffects: [],
+      hasBrandKit: true,
+      brandCompleteness: 'partial',
+      missingComponents: [],
+      warnings: [],
+      evidence: [],
+    },
     scenes: [],
-    project: { projectId: 'test-project-001', revisionId: 'rev-abc123', destination: 'instagram-reel', destinationAligned: true, durationTargetUs: 60000000, compositionDurationUs: 55000000, durationAligned: false, durationGapUs: -5000000, aspectRatio: '9:16', aspectRatioAligned: true, capabilities: {}, blockers: [], evidence: [] },
+    project: {
+      projectId: 'test-project-001',
+      revisionId: 'rev-abc123',
+      destination: 'instagram-reel',
+      destinationAligned: true,
+      destinationMismatch: undefined,
+      durationTargetUs: 60000000,
+      compositionDurationUs: 55000000,
+      durationAligned: false,
+      durationGapUs: -5000000,
+      aspectRatio: '9:16',
+      aspectRatioAligned: true,
+      aspectRatioMismatch: undefined,
+      captionAvailable: false,
+      audioAvailable: false,
+      generatedAssetsAvailable: false,
+      readinessLevel: 'partial',
+      blockers: [],
+      warnings: [],
+      sceneCount: 0,
+      scenesWithVisuals: 0,
+      scenesWithAudio: 0,
+      scenesWithCaptions: 0,
+      evidence: [],
+    },
     rules: [],
   },
   meta: { generatedAt: '2026-08-18T10:00:00.000Z', modelAdapter: 'fake-v1', processingTimeMs: 150 },
@@ -71,7 +145,12 @@ const STATIC_BRIEF: CreativeBriefV1 = {
 const PERSIAN_BRIEF: CreativeBriefV1 = {
   ...STATIC_BRIEF,
   request: 'ویدیو من رو سریع‌تر کنید',
-  interpretedGoal: { userIntent: 'ویدیو من رو سریع‌تر کنید', inferredGoal: 'کاهش مدت', resolvedGoal: 'حذف مقاطع', confidence: 'high' },
+  interpretedGoal: {
+    userIntent: 'ویدیو من رو سریع‌تر کنید',
+    inferredGoal: 'کاهش مدت',
+    resolvedGoal: 'حذف مقاطع',
+    confidence: 'high',
+  },
   recommendations: [],
   blockedBy: [],
   requiresHumanDecision: [],
@@ -85,7 +164,7 @@ describe('CreativeBriefDisplay', () => {
   });
 
   it('accepts CreativeBriefV1 prop - type check', () => {
-    const _result: JSX.Element = <CreativeBriefDisplay brief={STATIC_BRIEF} />;
+    const _result = <CreativeBriefDisplay brief={STATIC_BRIEF} />;
     expect(_result).toBeDefined();
   });
 
@@ -136,7 +215,69 @@ describe('CreativeBriefDisplay', () => {
   });
 
   it('empty brief accepted without error', () => {
-    const empty: CreativeBriefV1 = { schemaVersion: 1, snapshotRevisionId: 'r', projectId: 'p', request: 'q', interpretedGoal: { userIntent: 'q', inferredGoal: '', resolvedGoal: '', confidence: 'low' }, distinction: { facts: [], inferences: [] }, assumptions: [], recommendations: [], blockedBy: [], requiresHumanDecision: [], warnings: [], intelligence: { brand: { projectId: 'p', revisionId: 'r', colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, hasBrandKit: false, brandCompleteness: 'none', missingComponents: [], warnings: [], evidence: [] }, scenes: [], project: { projectId: 'p', revisionId: 'r', destination: undefined, destinationAligned: false, durationTargetUs: undefined, compositionDurationUs: 0, durationAligned: false, aspectRatio: '0:0', aspectRatioAligned: false, capabilities: {}, blockers: [], evidence: [] }, rules: [] }, meta: { generatedAt: '2026-08-18T10:00:00.000Z', modelAdapter: 'fake-v1', processingTimeMs: 0 } };
+    const empty: CreativeBriefV1 = {
+      schemaVersion: 1,
+      snapshotRevisionId: 'r',
+      projectId: 'p',
+      request: 'q',
+      interpretedGoal: { userIntent: 'q', inferredGoal: '', resolvedGoal: '', confidence: 'low' },
+      distinction: { facts: [], inferences: [] },
+      assumptions: [],
+      recommendations: [],
+      blockedBy: [],
+      requiresHumanDecision: [],
+      warnings: [],
+      intelligence: {
+        brand: {
+          projectId: 'p',
+          revisionId: 'r',
+          colorsAvailable: false,
+          fontsAvailable: false,
+          logoAvailable: false,
+          voiceInstructionsAvailable: false,
+          toneInstructionsAvailable: false,
+          prohibitedClaims: [],
+          prohibitedEffects: [],
+          hasBrandKit: false,
+          brandCompleteness: 'none',
+          missingComponents: [],
+          warnings: [],
+          evidence: [],
+        },
+        scenes: [],
+        project: {
+          projectId: 'p',
+          revisionId: 'r',
+          destination: undefined,
+          destinationAligned: false,
+          destinationMismatch: undefined,
+          durationTargetUs: undefined,
+          compositionDurationUs: 0,
+          durationAligned: false,
+          durationGapUs: undefined,
+          aspectRatio: '0:0',
+          aspectRatioAligned: false,
+          aspectRatioMismatch: undefined,
+          captionAvailable: false,
+          audioAvailable: false,
+          generatedAssetsAvailable: false,
+          readinessLevel: 'unknown',
+          blockers: [],
+          warnings: [],
+          sceneCount: 0,
+          scenesWithVisuals: 0,
+          scenesWithAudio: 0,
+          scenesWithCaptions: 0,
+          evidence: [],
+        },
+        rules: [],
+      },
+      meta: {
+        generatedAt: '2026-08-18T10:00:00.000Z',
+        modelAdapter: 'fake-v1',
+        processingTimeMs: 0,
+      },
+    };
     const _result = CreativeBriefDisplay({ brief: empty });
     expect(_result).toBeDefined();
   });
