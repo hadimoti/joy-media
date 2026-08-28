@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { LocalControlPlane, SHARED_LIBRARY_OWNER_ID } from './control-plane.js';
+import {
+  LocalControlPlane,
+  MAX_WORKER_ATTEMPTS,
+  SHARED_LIBRARY_OWNER_ID,
+} from './control-plane.js';
 describe('local control plane', () => {
   it('leases private mask parameters only to a capable Worker with the source asset', () => {
     const api = new LocalControlPlane();
@@ -50,6 +54,109 @@ describe('local control plane', () => {
     ]);
     api.revokeWorker(owner, 'w');
     expect(() => api.lease('w')).toThrow(expect.objectContaining({ code: 'WORKER_UNAUTHORIZED' }));
+  });
+
+  it('terminalizes an expired lease when its Worker attempt budget is exhausted', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'attempt-owner' };
+    api.createProject(owner, 'attempt-project', 'Attempts');
+    api.pairWorker(owner, 'attempt-worker');
+    api.enqueue(owner, 'attempt-job', 'attempt-project', 'render', 101, undefined, undefined, 1);
+
+    expect(api.lease('attempt-worker', 102, 1)).toMatchObject({ state: 'leased' });
+    expect(api.lease('attempt-worker', 104, 30_000)).toBeUndefined();
+    const [job] = api.jobsForProject(owner, 'attempt-project');
+    expect(job).toMatchObject({
+      id: 'attempt-job',
+      maxAttempts: 1,
+      state: 'failed',
+      error: 'Worker attempt budget exhausted',
+    });
+    expect(job).not.toHaveProperty('leaseOwner');
+    expect(job).not.toHaveProperty('leaseExpiresAt');
+    expect(() => api.retry(owner, 'attempt-project', 'attempt-job', 105)).toThrow(
+      expect.objectContaining({ code: 'JOB_NOT_RETRYABLE' }),
+    );
+    expect(api.eventsAfter(owner, 'attempt-project', 0).map((event) => event.type)).toEqual([
+      'queued',
+      'leased',
+      'failed',
+    ]);
+  });
+
+  it('re-leases an expired job while its Worker attempt budget remains', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'retry-owner' };
+    api.createProject(owner, 'retry-project', 'Retries');
+    api.pairWorker(owner, 'retry-worker');
+    api.enqueue(owner, 'retry-job', 'retry-project', 'render', 101, undefined, undefined, 2);
+
+    expect(api.lease('retry-worker', 102, 1)).toMatchObject({ state: 'leased' });
+    expect(api.lease('retry-worker', 104, 30_000)).toMatchObject({
+      id: 'retry-job',
+      maxAttempts: 2,
+      state: 'leased',
+    });
+    expect(api.eventsAfter(owner, 'retry-project', 0).map((event) => event.type)).toEqual([
+      'queued',
+      'leased',
+      'leased',
+    ]);
+  });
+
+  it('rejects invalid Worker attempt budgets', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'invalid-attempt-owner' };
+    api.createProject(owner, 'invalid-attempt-project', 'Invalid attempts');
+
+    expect(() =>
+      api.enqueue(
+        owner,
+        'zero-attempt-job',
+        'invalid-attempt-project',
+        'render',
+        101,
+        undefined,
+        undefined,
+        0,
+      ),
+    ).toThrow(expect.objectContaining({ code: 'JOB_PAYLOAD_INVALID' }));
+    expect(() =>
+      api.enqueue(
+        owner,
+        'fractional-attempt-job',
+        'invalid-attempt-project',
+        'render',
+        101,
+        undefined,
+        undefined,
+        1.5,
+      ),
+    ).toThrow(expect.objectContaining({ code: 'JOB_PAYLOAD_INVALID' }));
+    expect(
+      api.enqueue(
+        owner,
+        'maximum-attempt-job',
+        'invalid-attempt-project',
+        'render',
+        101,
+        undefined,
+        undefined,
+        MAX_WORKER_ATTEMPTS,
+      ),
+    ).toMatchObject({ maxAttempts: MAX_WORKER_ATTEMPTS });
+    expect(() =>
+      api.enqueue(
+        owner,
+        'oversized-attempt-job',
+        'invalid-attempt-project',
+        'render',
+        101,
+        undefined,
+        undefined,
+        MAX_WORKER_ATTEMPTS + 1,
+      ),
+    ).toThrow(expect.objectContaining({ code: 'JOB_PAYLOAD_INVALID' }));
   });
 
   it('records opaque asset and local-derivative metadata without accepting paths or cloud claims', () => {

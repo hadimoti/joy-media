@@ -26,6 +26,7 @@ ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_worker_ref text;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_verified_at timestamptz;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS asset_id text;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS payload jsonb NOT NULL DEFAULT '{}';
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS max_attempts integer;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_asset_id text;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_local_ref text;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_mime_type text;

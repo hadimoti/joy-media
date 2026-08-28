@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ControlPlaneError,
   LocalControlPlane,
+  MAX_WORKER_ATTEMPTS,
   type Actor,
   type AssetLocationRecord,
   type ControlPlane,
@@ -593,6 +594,60 @@ describe('control-plane HTTP transport', () => {
       status: 401,
       body: { error: { code: 'WORKER_SESSION_REQUIRED' } },
     });
+  });
+
+  it('forwards bounded Worker attempts and rejects exhausted explicit retries', async () => {
+    const controlPlane = new LocalControlPlane();
+    const owner = { id: 'attempt-owner' };
+    controlPlane.createProject(owner, 'attempt-project', 'Attempts');
+    controlPlane.registerAsset(owner, 'attempt-project', {
+      id: 'attempt-asset',
+      kind: 'image',
+      displayName: 'attempt.png',
+      sha256: SHA256,
+      bytes: 12,
+      descriptor: { mimeType: 'image/png', width: 64, height: 64 },
+      locations: [{ kind: 'opfs-cache', ref: 'attempt-asset-cache' }],
+    });
+    controlPlane.pairWorker(owner, 'attempt-worker');
+    controlPlane.helloWorker('attempt-worker', ['asset.thumbnail'], ['attempt-asset']);
+    const origin = await start({ authenticate: () => owner }, undefined, undefined, controlPlane);
+
+    expect(
+      await request(origin, 'POST', '/v1/projects/attempt-project/jobs', {
+        id: 'bounded-job',
+        type: 'asset.thumbnail',
+        assetId: 'attempt-asset',
+        maxAttempts: 1,
+      }),
+    ).toMatchObject({ status: 201, body: { data: { id: 'bounded-job', state: 'queued' } } });
+    expect(controlPlane.jobsForProject(owner, 'attempt-project')).toMatchObject([
+      { id: 'bounded-job', maxAttempts: 1 },
+    ]);
+    expect(controlPlane.lease('attempt-worker', 100, 1)).toMatchObject({ id: 'bounded-job' });
+    expect(controlPlane.lease('attempt-worker', 102, 1)).toBeUndefined();
+    expect(
+      await request(origin, 'POST', '/v1/projects/attempt-project/jobs/bounded-job/retry', {}),
+    ).toMatchObject({ status: 409, body: { error: { code: 'JOB_NOT_RETRYABLE' } } });
+
+    expect(
+      await request(origin, 'POST', '/v1/projects/attempt-project/jobs', {
+        id: 'unbounded-job',
+        type: 'asset.thumbnail',
+        assetId: 'attempt-asset',
+      }),
+    ).toMatchObject({ status: 201, body: { data: { id: 'unbounded-job', state: 'queued' } } });
+    expect(controlPlane.lease('attempt-worker', 104, 1)).toMatchObject({ id: 'unbounded-job' });
+    expect(controlPlane.lease('attempt-worker', 106, 1)).toMatchObject({ id: 'unbounded-job' });
+
+    expect(
+      await request(origin, 'POST', '/v1/projects/attempt-project/jobs', {
+        id: 'oversized-job',
+        type: 'asset.thumbnail',
+        assetId: 'attempt-asset',
+        maxAttempts: MAX_WORKER_ATTEMPTS + 1,
+      }),
+    ).toMatchObject({ status: 400, body: { error: { code: 'REQUEST_INVALID' } } });
   });
 
   it('keeps mask prompts private to the authenticated Worker lease', async () => {
