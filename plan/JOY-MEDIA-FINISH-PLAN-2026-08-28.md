@@ -636,7 +636,9 @@ unavailable`, and a console error loading `/transitions/preview/transition2.png`
   `codex/main-trusted-proxy-boundary`; it was based exactly on `github/main` and adds a bounded
   forwarded-IP resolver shared by HTTP and OTP throttling with adversarial tests. It remains a
   review branch because the candidate already contains equivalent behavior and the two lines are
-  not safe for blind merging.
+  not safe for blind merging. A conflict-free combined main-native review line is also available
+  at `b6aa47e` on `codex/main-native-integration-trusted-proxy`, based on the main-native UI/asset/job
+  branch `bea4ba6`; its focused API/editor tests, typecheck, and builds pass.
 
 - Promotion review confirms `github/main` remains `2083ffc` while the candidate is 407 commits
   behind and 211 commits ahead from common base `73744bb`; simulated merge conflicts make a direct
