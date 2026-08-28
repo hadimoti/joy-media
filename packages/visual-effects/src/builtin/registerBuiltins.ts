@@ -1,4 +1,4 @@
-import { registerEffect } from '../EffectRegistry.js';
+import { hasEffect, registerEffect } from '../EffectRegistry.js';
 import type { EffectDescriptor } from '../types.js';
 import { CREATIVE_PIXEL_DESCRIPTORS } from './creativePixel.js';
 
@@ -771,6 +771,9 @@ export function listBuiltinEffects(): readonly EffectDescriptor[] {
 
 export function registerBuiltins(): void {
   for (const desc of ALL_DESCRIPTORS) {
-    registerEffect(desc);
+    // App shell and lazily mounted panels may both ensure the catalog exists.
+    // Registration is therefore idempotent at the catalog boundary while the
+    // lower-level registry still rejects genuinely ambiguous custom IDs.
+    if (!hasEffect(desc.id)) registerEffect(desc);
   }
 }
