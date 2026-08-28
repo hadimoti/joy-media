@@ -505,6 +505,11 @@ or raw secret-bearing artifacts.
   promote the tested checkpoint as the new `main` while preserving the remote
   feature line in a review branch. Until that decision and a clean merge are
   complete, the final acceptance checklist remains intentionally unchecked.
+- Live Codex-browser inspection of the authenticated `https://www.joyst.ir/` tab
+  still shows `Saved locally; cloud sync is unavailable`, `Verified delivery is
+  unavailable`, and a console error loading `/transitions/preview/transition2.png`.
+  This is evidence of the currently deployed release, not evidence for the new
+  checkpoint; no browser mutation was performed.
 
 - [ ] GitHub `main`, local `main`, VPS bare `main`, release tag, manifest, and deployed release all
       resolve to the same verified source SHA/tree.
