@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactElement } from 'react';
+import { useId, useRef, useState, type ReactElement } from 'react';
 import type {
   CaptionClipStyleV2,
   CaptionClipV1,
@@ -217,6 +217,7 @@ export function CaptionsPanel({
             onDispatch={onDispatch}
             onTranscribe={onTranscribe}
             project={project}
+            transcriptionError={transcriptionError}
           />
         ))
       )}
@@ -233,6 +234,7 @@ function CaptionSlotEditor({
   onDispatch,
   onTranscribe,
   project,
+  transcriptionError,
 }: {
   readonly slot: CaptionSlot;
   readonly query: string;
@@ -242,11 +244,13 @@ function CaptionSlotEditor({
   readonly onDispatch: (transaction: VisualObjectTransaction) => void;
   readonly onTranscribe: (documentId: string, language: 'fa-IR' | 'en-US') => Promise<void>;
   readonly project: JoyProjectV1;
+  readonly transcriptionError: string | undefined;
 }) {
   const { clip, document } = slot;
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [importIssues, setImportIssues] = useState(0);
   const [transcribingLanguage, setTranscribingLanguage] = useState<'fa-IR' | 'en-US'>();
+  const transcriptionStatusId = useId();
   const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({});
   const direction = resolveCaptionDirection(document);
   const matches =
@@ -363,6 +367,7 @@ function CaptionSlotEditor({
       setTranscribingLanguage(undefined);
     }
   };
+  const transcriptionUnavailable = transcriptionError !== undefined;
   const commitSegmentText = (segmentId: string, currentText: string) => {
     const segment = document.segments.find((candidate) => candidate.id === segmentId);
     if (segment === undefined) return;
@@ -432,8 +437,18 @@ function CaptionSlotEditor({
         </details>
       </header>
       {transcribingLanguage !== undefined && (
-        <p className="caption-transcription-status" role="status">
+        <p className="caption-transcription-status" role="status" aria-live="polite">
           Transcribing {transcribingLanguage === 'fa-IR' ? 'Persian' : 'English'}…
+        </p>
+      )}
+      {transcriptionUnavailable && (
+        <p
+          id={transcriptionStatusId}
+          className="caption-transcription-status"
+          role="status"
+          aria-live="polite"
+        >
+          Transcription unavailable: {transcriptionError}
         </p>
       )}
       {importIssues > 0 && (
@@ -591,6 +606,7 @@ function CaptionSlotEditor({
               className="button button-primary"
               aria-busy={transcribingLanguage === 'fa-IR'}
               disabled={transcribingLanguage !== undefined}
+              aria-describedby={transcriptionUnavailable ? transcriptionStatusId : undefined}
               onClick={() => void transcribe('fa-IR')}
             >
               <LanguageIcon label="FA" />
@@ -601,6 +617,7 @@ function CaptionSlotEditor({
               className="button"
               aria-busy={transcribingLanguage === 'en-US'}
               disabled={transcribingLanguage !== undefined}
+              aria-describedby={transcriptionUnavailable ? transcriptionStatusId : undefined}
               onClick={() => void transcribe('en-US')}
             >
               Generate English
