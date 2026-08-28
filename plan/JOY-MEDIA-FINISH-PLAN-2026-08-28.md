@@ -599,6 +599,10 @@ unavailable`, and a console error loading `/transitions/preview/transition2.png`
 - The candidate includes `3d3f009` static-asset packaging enforcement and `daff729` truthful,
   accessible captions-transcription unavailable messaging. The full release gate's static-assets
   check passes and the scoped test count is now 2,423.
+- The disposable browser-smoke runner exposed and fixed one stale selector in `ed54e5a` (token
+  login is a labeled textbox, not a combobox). A subsequent run reaches authenticated project
+  creation but still times out while assigning the hidden media-file input after the auto-open
+  import drawer; this remains an actionable local journey gap, not release evidence.
 - The legacy `fixture.thumbnail` production path was retired in `f485bbc`. The
   release evaluator now passes command health, tests, generated-artifact hygiene,
   fixture registry, builds, manifest, SBOM, and feature-status checks. It still
