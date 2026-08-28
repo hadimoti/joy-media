@@ -243,8 +243,11 @@ describe('JOY Studio 1.0 release gate', () => {
       'deploy/README.md missing: current-api',
       'deploy/README.md missing: web',
       'deploy/README.md missing: /opt/joy-media/web-releases/',
+      'deploy/README.md missing: release-identity.env',
+      'deploy/README.md missing: joy-media-release-identity.sh write',
       'deploy/README.md missing: systemctl restart joy-media@api',
       'deploy/README.md missing: Back up the database',
+      'missing file: deploy/joy-media-release-identity.sh',
       'missing file: deploy/joy-media-rollback.sh',
     ]);
   });

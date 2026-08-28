@@ -839,6 +839,7 @@ export function verifyDeploymentManifests(root: string): readonly string[] {
   const overridePath = join(root, 'deploy/joy-media-api.override.conf');
   const readmePath = join(root, 'deploy/README.md');
   const rollbackPath = join(root, 'deploy/joy-media-rollback.sh');
+  const releaseIdentityPath = join(root, 'deploy/joy-media-release-identity.sh');
 
   const nginx = requiredFileText(nginxPath, 'deploy/joy-media.nginx.conf', errors);
   if (nginx !== undefined) {
@@ -872,10 +873,31 @@ export function verifyDeploymentManifests(root: string): readonly string[] {
       'current-api',
       'web',
       '/opt/joy-media/web-releases/',
+      'release-identity.env',
+      'joy-media-release-identity.sh write',
       'systemctl restart joy-media@api',
       'Back up the database',
     ]) {
       if (!readme.includes(marker)) errors.push(`deploy/README.md missing: ${marker}`);
+    }
+  }
+
+  const releaseIdentity = requiredFileText(
+    releaseIdentityPath,
+    'deploy/joy-media-release-identity.sh',
+    errors,
+  );
+  if (releaseIdentity !== undefined) {
+    for (const marker of [
+      'JOY_MEDIA_RELEASE_COMMIT_SHA',
+      'JOY_MEDIA_RELEASE_TREE_HASH',
+      'JOY_MEDIA_RELEASE_LOCKFILE_SHA256',
+      'JOY_MEDIA_RELEASE_SCHEMA_VERSION',
+      'write_release_identity_file',
+      'merge_release_identity_into_env',
+    ]) {
+      if (!releaseIdentity.includes(marker))
+        errors.push(`deploy/joy-media-release-identity.sh missing: ${marker}`);
     }
   }
 
@@ -884,8 +906,11 @@ export function verifyDeploymentManifests(root: string): readonly string[] {
     for (const marker of [
       'set -euo pipefail',
       '<api-release> <web-release>',
-      'API_ROOT="/opt/joy-media/releases"',
-      'WEB_ROOT="/opt/joy-media/web-releases"',
+      'JOY_MEDIA_API_RELEASE_ROOT',
+      'JOY_MEDIA_WEB_RELEASE_ROOT',
+      'release-identity.env',
+      'merge_release_identity_into_env',
+      'ROLLBACK_SWITCHED=1',
       'readlink -f',
       'mv -Tf',
       'systemctl restart joy-media@api',

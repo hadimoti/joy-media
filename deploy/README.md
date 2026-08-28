@@ -42,9 +42,15 @@ On the VPS, use the lockfile to reconstruct the deployment dependency layout
 before building: `CI=true npm_config_confirm_modules_purge=false pnpm install
 --frozen-lockfile`. Build the API and static editor, then create the immutable
 API release with `CI=true npm_config_confirm_modules_purge=false pnpm deploy
---legacy --prod`. Point `/opt/joy-media/releases/current-api` at the API
+--legacy --prod`. Write the exact non-secret release identity into the
+immutable API archive before activation:
+`bash deploy/joy-media-release-identity.sh write /opt/joy-media/releases/<release>/release-identity.env <commit-sha> <tree-hash> <lockfile-sha256> <schema-version>`.
+Point `/opt/joy-media/releases/current-api` at the API
 release and `/opt/joy-media/web` at a separate `/opt/joy-media/web-releases/`
 static release only after the checks pass. Rollback is an atomic pair of
-symlink changes to the prior immutable API and web releases followed by
-`systemctl restart joy-media@api`; keep the database backup until the
-deployment gate is accepted.
+symlink changes to the prior immutable API and web releases plus a rewrite of
+only the `JOY_MEDIA_RELEASE_*` keys in `/etc/joy-media/api.env` from the
+target release's `release-identity.env`, followed by
+`systemctl restart joy-media@api`. Keep the database backup until the deployment gate is
+accepted, and rehearse the switch locally with
+`bash deploy/joy-media-rollback.test.sh` whenever the rollback flow changes.
