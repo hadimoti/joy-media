@@ -611,24 +611,25 @@ unavailable`, and a console error loading `/transitions/preview/transition2.png`
 
 ### Continuation checkpoint — 2026-08-28
 
-- Candidate tip `6254d3c` is pushed to `github/codex/joy-media-implement-20260828`; the worktree
-  is clean. Since the earlier checkpoint, the candidate added browser-safe project/revision/
-  recovery validation, browser-safe owner-job projections (including nested locator denial and
-  typed render summaries), and the corresponding adversarial/fresh-contract tests. The candidate
-  remains intentionally separate from `main` (`2083ffc`) while the 407-commit divergence and
-  coupled Joy Code/Creative Brief families are reconciled by behavior.
-- The latest release gate run on implementation tip `4709391` at `2026-08-28T15:40:11.185Z`
-  (before this documentation-only update) is a truthful **NO-GO**: command health,
-  2,433 scoped tests, builds, static assets, manifest, SBOM, generated-artifact hygiene, fixture
-  registry, and feature-status checks pass; source-bound authenticated browser provenance and
-  `authenticated-editor-1.0` are still absent. No `main` promotion, VPS bare-remote update, or
-  deployment was performed. Re-run the gate on final tip `6254d3c` before any promotion; existing
-  evidence is source-bound to the prior candidate tip and cannot be reused.
+- Candidate implementation tip `26b53e0` is clean locally and is ready to push after this
+  documentation update. Since the prior checkpoint it adds CI FFmpeg/FFprobe preflight, removes
+  the Monitor scene-sync feedback loop, makes Motion placement assertions await the async commit,
+  and constrains Dockview to the workspace height. The local browser-smoke journey now passes
+  import, playback/audio, export, Motion publish/place, undo/redo/reopen, and all 1024×768,
+  1280×720, and 1440×900 shell checks with no clipped controls or page overflow.
+- The latest release gate run on implementation tip `26b53e0` at `2026-08-28T16:59:26.839Z` is a
+  truthful **NO-GO**: command health, 2,438 scoped tests, builds, static assets, manifest, SBOM,
+  generated-artifact hygiene, fixture registry, and feature-status checks pass. Critical failures
+  remain for source provenance and the required journey because the available evidence is mocked,
+  not real-service/source-bound, lacks verified delivery and passed inspection, and is not bound to
+  the clean checkout. No `main` promotion, VPS bare-remote update, or deployment was performed.
 
-- Promotion review confirms `github/main` remains `2083ffc` while the candidate has 407 main-only
-  and 204 candidate-only commits from common base `73744bb`; simulated merge conflicts make a
-  direct merge unsafe. Main's CI also explicitly installs FFmpeg/FFprobe while the candidate
-  workflow does not, so CI parity must be reconciled on a fresh main-based integration branch.
+- Promotion review confirms `github/main` remains `2083ffc` while the candidate is 407 commits
+  behind and 211 commits ahead from common base `73744bb`; simulated merge conflicts make a direct
+  merge unsafe. Main-native review branches are available for controlled reconciliation:
+  `codex/main-backend-reconcile-v2-combined` (`a1b1210`),
+  `codex/main-ui-release-reconcile-v2-asset-job` (`bea4ba6`), and
+  `codex/main-creative-brief-typecheck-20260828` (`7761504`).
 
 - [ ] GitHub `main`, local `main`, VPS bare `main`, release tag, manifest, and deployed release all
       resolve to the same verified source SHA/tree.

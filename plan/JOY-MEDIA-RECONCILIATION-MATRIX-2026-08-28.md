@@ -38,8 +38,9 @@ readiness checks, and live static-route verification remain open.
 
 ### Final candidate snapshot — 2026-08-28
 
-The reviewed candidate is `6254d3c` on `codex/joy-media-implement-20260828`; GitHub `main` is
+The reviewed candidate is `26b53e0` on `codex/joy-media-implement-20260828`; GitHub `main` is
 `2083ffc` and VPS `main` is `1e4657f`. They share base `73744bb` but currently diverge by 407
-main-only and 204 candidate-only commits, so direct merging is unsafe. The candidate's latest
-gate run is source-stale after the final documentation commits and remains NO-GO until a fresh
-source-bound authenticated browser journey is produced and CI FFmpeg/FFprobe parity is reconciled.
+main-only and 211 candidate-only commits, so direct merging is unsafe. Candidate CI now restores
+FFmpeg/FFprobe preflight, and the local mocked browser-smoke journey passes all supported shell
+viewports; release remains NO-GO until real-service, source-bound browser evidence, verified
+delivery/inspection, and a fresh main-based reconciliation are complete.
