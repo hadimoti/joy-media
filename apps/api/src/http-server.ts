@@ -65,6 +65,10 @@ import type { JoyCodeInputResolver, JoyCodeInputResolverRequest, JoyCodeInputRes
 import { UnavailableJoyCodeInputResolver } from './joy-code-input-resolver.js';
 import { validateJoyCodeClientRequest, isValidJoyCodeClientRequest, type JoyCodeClientRequestEnvelope } from './joy-code-client-request-validation.js';
 import { JoyCodeAdmissionGate } from './joy-code-admission-gate.js';
+import { createClientAddressResolver, type ClientAddressResolver } from './client-address.js';
+
+const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
+const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 600;
 
 export interface ApiAuthentication {
   authenticate(request: IncomingMessage): Actor | undefined | Promise<Actor | undefined>;
@@ -97,6 +101,13 @@ export interface ControlPlaneHttpServerOptions {
   readonly joyCodeRuntime?: JoyCodeRuntime;
   readonly joyCodeInputResolver?: JoyCodeInputResolver;
   readonly joyCodeAdmissionGate?: JoyCodeAdmissionGate;
+  /** Process-local abuse guard; production deployments should also enforce an edge limit. */
+  readonly rateLimit?: {
+    readonly windowMs?: number;
+    readonly maxRequests?: number;
+  };
+  /** Shared trusted-proxy boundary used to key process-local abuse controls. */
+  readonly clientAddressResolver?: ClientAddressResolver;
 }
 
 /**
@@ -122,7 +133,26 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
     joyCodeInputResolver: options.joyCodeInputResolver ?? UnavailableJoyCodeInputResolver,
     joyCodeAdmissionGate: options.joyCodeAdmissionGate ?? new JoyCodeAdmissionGate(),
   };
+  const rateLimitWindowMs = options.rateLimit?.windowMs ?? DEFAULT_RATE_LIMIT_WINDOW_MS;
+  const rateLimitMaxRequests = options.rateLimit?.maxRequests ?? DEFAULT_RATE_LIMIT_MAX_REQUESTS;
+  const rateLimitBuckets = new Map<string, { windowStart: number; count: number }>();
+  const clientAddressResolver = options.clientAddressResolver ?? createClientAddressResolver();
   return createServer(async (request, response) => {
+    const path = request.url?.split('?', 1)[0] ?? '/';
+    if (
+      (path.startsWith('/v1/') || path.startsWith('/v2/')) &&
+      !consumeRateLimit(
+        request,
+        rateLimitBuckets,
+        rateLimitWindowMs,
+        rateLimitMaxRequests,
+        clientAddressResolver,
+      )
+    ) {
+      response.setHeader('retry-after', String(Math.ceil(rateLimitWindowMs / 1000)));
+      respondJson(response, 429, { error: { code: 'RATE_LIMITED' } });
+      return;
+    }
     try {
       await route(resolvedOptions, request, response);
     } catch (error) {
@@ -2105,6 +2135,25 @@ function respondNoStoreJson(response: ServerResponse, status: number, payload: u
     pragma: 'no-cache',
   });
   response.end(JSON.stringify(payload));
+}
+
+function consumeRateLimit(
+  request: IncomingMessage,
+  buckets: Map<string, { windowStart: number; count: number }>,
+  windowMs: number,
+  maxRequests: number,
+  clientAddressResolver: ClientAddressResolver,
+): boolean {
+  const key = clientAddressResolver(request);
+  const now = Date.now();
+  const existing = buckets.get(key);
+  if (existing === undefined || now - existing.windowStart >= windowMs) {
+    buckets.set(key, { windowStart: now, count: 1 });
+    return true;
+  }
+  if (existing.count >= maxRequests) return false;
+  existing.count += 1;
+  return true;
 }
 
 function serializedGpuPreviewResponse(
