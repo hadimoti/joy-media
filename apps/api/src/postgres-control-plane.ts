@@ -2689,9 +2689,10 @@ function parseProjectDocument(value: unknown): ProjectDocumentV2 {
   }
   if (value === null || typeof value !== 'object' || Array.isArray(value))
     throw new ControlPlaneError('DATABASE_ERROR', 'stored project document is invalid');
-  const document = value as ProjectDocumentV2;
-  if (document.schemaVersion !== 2 || typeof document.projectId !== 'string')
+  const diagnostics = validateProjectDocumentV2(value);
+  if (diagnostics.length > 0)
     throw new ControlPlaneError('DATABASE_ERROR', 'stored project document is invalid');
+  const document = value as ProjectDocumentV2;
   return JSON.parse(JSON.stringify(document)) as ProjectDocumentV2;
 }
 
@@ -2739,6 +2740,11 @@ function parseRecoveredCopy(value: unknown): RecoveredCopy {
     result.provenance === undefined
   )
     throw new ControlPlaneError('DATABASE_ERROR', 'stored recovered copy is invalid');
+  const document = parseProjectDocument(result.document);
+  if (document.projectId !== result.projectId)
+    throw new ControlPlaneError('DATABASE_ERROR', 'stored recovered copy is invalid');
+  const operation = result.provenance.operation;
+  if (operation.kind === 'append') parseProjectDocument(operation.document);
   return cloneJson(result);
 }
 

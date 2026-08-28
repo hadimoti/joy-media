@@ -326,15 +326,17 @@ export class BrowserControlPlaneClient {
     return this.get(`/v1/projects/${encodeURIComponent(projectId)}/jobs`);
   }
   async assets(projectId: string): Promise<readonly BrowserAsset[]> {
-    return this.get(`/v1/projects/${encodeURIComponent(projectId)}/assets`);
+    return browserAssetList(
+      await this.get<unknown>(`/v1/projects/${encodeURIComponent(projectId)}/assets`),
+    );
   }
   /** Owner's private backups plus the explicitly shared curated library. */
   async sharedCloudAssets(): Promise<readonly BrowserAsset[]> {
-    return this.get('/v1/library/cloud-assets');
+    return browserAssetList(await this.get<unknown>('/v1/library/cloud-assets'));
   }
   /** All assets owned by this Joy identity across every local editor project. */
   async myAssets(): Promise<readonly BrowserAsset[]> {
-    return this.get('/v1/library/my-assets');
+    return browserAssetList(await this.get<unknown>('/v1/library/my-assets'));
   }
   /** Safe catalog only: model IDs and lifecycle state, never secret references or values. */
   async reasoningProviders(): Promise<readonly BrowserReasoningProvider[]> {
@@ -419,12 +421,16 @@ export class BrowserControlPlaneClient {
     }
   }
   async derivatives(projectId: string, assetId: string): Promise<readonly BrowserDerivative[]> {
-    return this.get(
-      `/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/derivatives`,
+    return browserDerivativeList(
+      await this.get<unknown>(
+        `/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/derivatives`,
+      ),
     );
   }
   async registerAsset(projectId: string, asset: BrowserAssetRegistration): Promise<BrowserAsset> {
-    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/assets`, asset);
+    return browserAsset(
+      await this.post<unknown>(`/v1/projects/${encodeURIComponent(projectId)}/assets`, asset),
+    );
   }
   /** Owner-only hard delete of catalog asset metadata (and derivative rows). */
   async deleteAsset(projectId: string, assetId: string): Promise<{ readonly id: string }> {
@@ -466,12 +472,14 @@ export class BrowserControlPlaneClient {
     if (!isRecord(body) || !isRecord(body.data) || !isRecord(body.data.asset))
       throw new Error('JOY Media API returned an invalid original-upload response');
     onProgress?.(1);
-    return body.data.asset as unknown as BrowserAsset;
+    return browserAsset(body.data.asset);
   }
   async retagAsset(projectId: string, assetId: string): Promise<BrowserAsset> {
-    return this.post(
-      `/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/retag`,
-      {},
+    return browserAsset(
+      await this.post<unknown>(
+        `/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/retag`,
+        {},
+      ),
     );
   }
   async setAssetSync(
@@ -835,6 +843,118 @@ async function responseBody(response: Response): Promise<unknown> {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
+
+function browserAssetList(value: unknown): readonly BrowserAsset[] {
+  if (!Array.isArray(value)) throw invalidAssetResponse();
+  return value.map(browserAsset);
+}
+
+function browserAsset(value: unknown): BrowserAsset {
+  if (!isRecord(value)) throw invalidAssetResponse();
+  const kind = value.kind;
+  if (kind !== 'video' && kind !== 'audio' && kind !== 'image' && kind !== 'model')
+    throw invalidAssetResponse();
+  const tags = optionalStringArray(value.tags);
+  const sortName = optionalString(value.sortName);
+  return {
+    id: responseString(value.id),
+    projectId: responseString(value.projectId),
+    kind,
+    displayName: responseString(value.displayName),
+    sha256: responseSha256(value.sha256),
+    bytes: responsePositiveInteger(value.bytes),
+    descriptor: browserMediaDescriptor(value.descriptor),
+    ...(tags === undefined ? {} : { tags }),
+    ...(sortName === undefined ? {} : { sortName }),
+    createdAt: responseNonNegativeInteger(value.createdAt),
+  };
+}
+
+function browserDerivativeList(value: unknown): readonly BrowserDerivative[] {
+  if (!Array.isArray(value)) throw invalidAssetResponse();
+  return value.map(browserDerivative);
+}
+
+function browserDerivative(value: unknown): BrowserDerivative {
+  if (!isRecord(value)) throw invalidAssetResponse();
+  const kind = value.kind;
+  const availability = value.availability;
+  if (kind !== 'thumbnail' && kind !== 'proxy') throw invalidAssetResponse();
+  if (
+    availability !== 'pending' &&
+    availability !== 'available-local' &&
+    availability !== 'available-cloud' &&
+    availability !== 'evicted' &&
+    availability !== 'invalid'
+  )
+    throw invalidAssetResponse();
+  return {
+    id: responseString(value.id),
+    projectId: responseString(value.projectId),
+    assetId: responseString(value.assetId),
+    kind,
+    profile: responseString(value.profile),
+    sha256: responseSha256(value.sha256),
+    bytes: responsePositiveInteger(value.bytes),
+    descriptor: browserMediaDescriptor(value.descriptor),
+    availability,
+    verifiedAt: responseNonNegativeInteger(value.verifiedAt),
+  };
+}
+
+function browserMediaDescriptor(value: unknown): BrowserMediaDescriptor {
+  if (!isRecord(value)) throw invalidAssetResponse();
+  const durationUs = optionalPositiveIntegerResponse(value.durationUs);
+  const width = optionalPositiveIntegerResponse(value.width);
+  const height = optionalPositiveIntegerResponse(value.height);
+  return {
+    mimeType: responseString(value.mimeType),
+    ...(durationUs === undefined ? {} : { durationUs }),
+    ...(width === undefined ? {} : { width }),
+    ...(height === undefined ? {} : { height }),
+  };
+}
+
+function responseString(value: unknown): string {
+  if (typeof value !== 'string' || value.length === 0) throw invalidAssetResponse();
+  return value;
+}
+
+function responseSha256(value: unknown): string {
+  if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)) throw invalidAssetResponse();
+  return value;
+}
+
+function responsePositiveInteger(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1) throw invalidAssetResponse();
+  return value as number;
+}
+
+function responseNonNegativeInteger(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) throw invalidAssetResponse();
+  return value as number;
+}
+
+function optionalPositiveIntegerResponse(value: unknown): number | undefined {
+  return value === undefined ? undefined : responsePositiveInteger(value);
+}
+
+function optionalString(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  return responseString(value);
+}
+
+function optionalStringArray(value: unknown): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string'))
+    throw invalidAssetResponse();
+  return value as readonly string[];
+}
+
+function invalidAssetResponse(): Error {
+  return new Error('JOY Media API returned an invalid asset response');
+}
+
 function messageIncludes(error: unknown, code: string): boolean {
   return error instanceof Error && error.message.includes(code);
 }

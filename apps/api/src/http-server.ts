@@ -7,6 +7,7 @@ import {
   type ControlPlane,
   type LocalDerivativeRegistration,
   type MediaAssetRecord,
+  type MediaDescriptor,
   type MediaDerivativeRecord,
 } from './control-plane.js';
 import {
@@ -1426,7 +1427,7 @@ function assetForBrowser(asset: MediaAssetRecord): BrowserAssetDto {
     displayName: asset.displayName,
     sha256: asset.sha256,
     bytes: asset.bytes,
-    descriptor: asset.descriptor,
+    descriptor: mediaDescriptorForBrowser(asset.descriptor),
     tags: asset.tags,
     sortName: asset.sortName,
     createdAt: asset.createdAt,
@@ -1442,9 +1443,18 @@ function derivativeForBrowser(derivative: MediaDerivativeRecord): BrowserDerivat
     profile: derivative.profile,
     sha256: derivative.sha256,
     bytes: derivative.bytes,
-    descriptor: derivative.descriptor,
+    descriptor: mediaDescriptorForBrowser(derivative.descriptor),
     availability: derivative.availability,
     verifiedAt: derivative.verifiedAt,
+  };
+}
+
+function mediaDescriptorForBrowser(descriptor: MediaDescriptor): MediaDescriptor {
+  return {
+    mimeType: descriptor.mimeType,
+    ...(descriptor.durationUs === undefined ? {} : { durationUs: descriptor.durationUs }),
+    ...(descriptor.width === undefined ? {} : { width: descriptor.width }),
+    ...(descriptor.height === undefined ? {} : { height: descriptor.height }),
   };
 }
 

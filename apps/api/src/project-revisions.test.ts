@@ -51,7 +51,7 @@ describe('project document revisions', () => {
     });
   });
 
-  it('rejects media bytes, filesystem paths, and URLs while allowing opaque refs', async () => {
+  it('rejects media bytes, storage references, credentials, paths, and URLs while allowing opaque refs', async () => {
     const api = new LocalControlPlane();
     const owner = { id: 'owner' };
     api.createProject(owner, 'project-2', 'Project');
@@ -59,6 +59,11 @@ describe('project document revisions', () => {
       ['filePath', 'C:/secret.mp4'],
       ['thumbnailUrl', 'https://example.test/a.jpg'],
       ['mediaBytes', 'AAAA'],
+      ['locations', [{ kind: 'private-object', ref: 'private-object-key' }]],
+      ['cloudRef', 'private-object-key'],
+      ['objectKey', 'private-object-key'],
+      ['credentials', { accessKey: 'credential-value' }],
+      ['accessToken', 'token-value'],
     ] as const) {
       await expect(
         api.appendProjectRevision(owner, 'project-2', {

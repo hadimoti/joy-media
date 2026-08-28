@@ -302,12 +302,158 @@ describe('BrowserControlPlaneClient', () => {
     ]);
   });
 
+  it('projects every asset response and nested descriptor before exposing it to editor code', async () => {
+    const unsafeAsset = {
+      id: 'asset-1',
+      projectId: 'project-1',
+      kind: 'image',
+      displayName: 'frame.jpg',
+      sha256: 'a'.repeat(64),
+      bytes: 10,
+      descriptor: {
+        mimeType: 'image/jpeg',
+        width: 1,
+        height: 1,
+        cloudRef: 'private-descriptor-ref',
+        credentials: 'descriptor-credential',
+      },
+      tags: ['image'],
+      sortName: 'frame.jpg',
+      createdAt: 123,
+      locations: [{ kind: 'private-object', ref: 'private-object-key' }],
+      cloudRef: 'private-object-key',
+      objectKey: 'private-object-key',
+      credentials: 'credential-value',
+    };
+    const unsafeDerivative = {
+      id: 'derivative-1',
+      projectId: 'project-1',
+      assetId: 'asset-1',
+      kind: 'thumbnail',
+      profile: 'jpeg-640',
+      sha256: 'b'.repeat(64),
+      bytes: 5,
+      descriptor: {
+        mimeType: 'image/jpeg',
+        width: 1,
+        height: 1,
+        objectKey: 'private-derivative-key',
+      },
+      availability: 'available-cloud',
+      verifiedAt: 456,
+      locations: [{ kind: 'private-object', ref: 'private-derivative-key' }],
+    };
+    const original = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/original'))
+        return json(201, { data: { asset: unsafeAsset, tagProvenance: 'heuristic' } });
+      if (url.endsWith('/derivatives')) return json(200, { data: [unsafeDerivative] });
+      if (url.includes('/library/')) return json(200, { data: [unsafeAsset] });
+      if (url.endsWith('/retag')) return json(200, { data: unsafeAsset });
+      if (url.endsWith('/assets') && init?.method === 'POST')
+        return json(201, { data: unsafeAsset });
+      return json(200, { data: [unsafeAsset] });
+    };
+    try {
+      const client = new BrowserControlPlaneClient('/api', () => 'token');
+      const assets = [
+        ...(await client.assets('project-1')),
+        ...(await client.sharedCloudAssets()),
+        ...(await client.myAssets()),
+        await client.registerAsset('project-1', {
+          id: 'asset-1',
+          kind: 'image',
+          displayName: 'frame.jpg',
+          sha256: 'a'.repeat(64),
+          bytes: 10,
+          descriptor: { mimeType: 'image/jpeg', width: 1, height: 1 },
+          locations: [{ kind: 'opfs-cache', ref: 'opfs-a1' }],
+        }),
+        await client.uploadAssetOriginal(
+          'project-1',
+          {
+            id: 'asset-1',
+            sha256: 'a'.repeat(64),
+            bytes: 10,
+            descriptor: { mimeType: 'image/jpeg', width: 1, height: 1 },
+          },
+          new Blob(['image']),
+        ),
+        await client.retagAsset('project-1', 'asset-1'),
+      ];
+      const derivatives = await client.derivatives('project-1', 'asset-1');
+
+      for (const asset of assets) {
+        expect(asset).toEqual({
+          id: 'asset-1',
+          projectId: 'project-1',
+          kind: 'image',
+          displayName: 'frame.jpg',
+          sha256: 'a'.repeat(64),
+          bytes: 10,
+          descriptor: { mimeType: 'image/jpeg', width: 1, height: 1 },
+          tags: ['image'],
+          sortName: 'frame.jpg',
+          createdAt: 123,
+        });
+      }
+      expect(derivatives).toEqual([
+        {
+          id: 'derivative-1',
+          projectId: 'project-1',
+          assetId: 'asset-1',
+          kind: 'thumbnail',
+          profile: 'jpeg-640',
+          sha256: 'b'.repeat(64),
+          bytes: 5,
+          descriptor: { mimeType: 'image/jpeg', width: 1, height: 1 },
+          availability: 'available-cloud',
+          verifiedAt: 456,
+        },
+      ]);
+      expect(JSON.stringify({ assets, derivatives })).not.toMatch(
+        /locations|cloudRef|objectKey|credentials|private-object-key|private-descriptor-ref|private-derivative-key/,
+      );
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('rejects malformed asset responses instead of casting them into the editor', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = async () => json(200, { data: [{ id: 'asset-without-safe-shape' }] });
+    try {
+      const client = new BrowserControlPlaneClient('/api', () => 'token');
+      await expect(client.assets('project-1')).rejects.toThrow(
+        'JOY Media API returned an invalid asset response',
+      );
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
   it('registers only asset metadata and explicit sync consent through the owner API', async () => {
     const requests: Array<{ readonly url: string; readonly body?: string }> = [];
     const original = globalThis.fetch;
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       requests.push({ url, ...(typeof init?.body === 'string' ? { body: init.body } : {}) });
+      if (url.endsWith('/assets'))
+        return json(201, {
+          data: {
+            id: 'asset-1',
+            projectId: 'project-1',
+            kind: 'video',
+            displayName: 'clip.mp4',
+            sha256: 'a'.repeat(64),
+            bytes: 10,
+            descriptor: { mimeType: 'video/mp4' },
+            tags: [],
+            sortName: 'clip.mp4',
+            createdAt: 1,
+          },
+        });
       return json(201, { data: { id: 'asset-1', assetSyncEnabled: true } });
     };
     try {

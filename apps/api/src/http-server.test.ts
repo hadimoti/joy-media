@@ -1367,6 +1367,39 @@ describe('control-plane HTTP transport', () => {
     ).toMatchObject({ status: 409, body: { error: { code: 'PROJECT_NOT_FOUND' } } });
   });
 
+  it('recursively projects stored asset descriptors instead of trusting adapter JSON', async () => {
+    const owner = { id: 'owner' };
+    const controlPlane = new UnsafeDescriptorControlPlane();
+    controlPlane.createProject(owner, 'descriptor-project', 'Project');
+    controlPlane.registerAsset(owner, 'descriptor-project', {
+      id: 'descriptor-asset',
+      kind: 'image',
+      displayName: 'frame.jpg',
+      sha256: 'a'.repeat(64),
+      bytes: 123,
+      descriptor: { mimeType: 'image/jpeg', width: 1, height: 1 },
+      locations: [{ kind: 'opfs-cache', ref: 'local-only-ref' }],
+    });
+    const origin = await start({ authenticate: () => owner }, undefined, undefined, controlPlane);
+
+    const result = await request(origin, 'GET', '/v1/projects/descriptor-project/assets');
+
+    expect(result).toMatchObject({
+      status: 200,
+      body: {
+        data: [
+          {
+            id: 'descriptor-asset',
+            descriptor: { mimeType: 'image/jpeg', width: 1, height: 1 },
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(result.body)).not.toMatch(
+      /locations|cloudRef|objectKey|credentials|private-object-key|local-only-ref/,
+    );
+  });
+
   it('projects every browser-facing asset and derivative response without storage references', async () => {
     const controlPlane = new LocalControlPlane();
     const store = new MemoryPrivateObjectStore();
@@ -2724,6 +2757,21 @@ class FaultInjectingControlPlane extends LocalControlPlane {
     if (this.failure === 'attach')
       throw new ControlPlaneError('INJECTED_FAILURE', 'location attachment failed');
     return super.attachCloudOriginal(actor, projectId, assetId, location);
+  }
+}
+
+class UnsafeDescriptorControlPlane extends LocalControlPlane {
+  override assetsForProject(actor: Actor, projectId: string): readonly MediaAssetRecord[] {
+    return super.assetsForProject(actor, projectId).map((asset) => ({
+      ...asset,
+      descriptor: {
+        ...asset.descriptor,
+        locations: [{ kind: 'private-object', ref: 'private-object-key' }],
+        cloudRef: 'private-object-key',
+        objectKey: 'private-object-key',
+        credentials: 'credential-value',
+      } as MediaAssetRecord['descriptor'],
+    }));
   }
 }
 

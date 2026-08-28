@@ -52,6 +52,32 @@ describe('recovered-copy HTTP transport', () => {
     });
     expect(invalid.status).toBe(400);
     await expect(invalid.json()).resolves.toMatchObject({ error: { code: 'REQUEST_INVALID' } });
+    const unsafeAsset = await fetch(`${origin}/v2/projects/http-source/recovered-copies`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        baseRevision: 1,
+        idempotencyKey: 'bad-storage-ref',
+        suggestedName: 'Unsafe Copy',
+        operation: {
+          kind: 'append',
+          document: {
+            schemaVersion: 2,
+            projectId: 'old',
+            assets: {
+              image: {
+                assetRef: 'opaque-asset-id',
+                locations: [{ kind: 'private-object', ref: 'private-object-key' }],
+              },
+            },
+          },
+        },
+      }),
+    });
+    expect(unsafeAsset.status).toBe(400);
+    await expect(unsafeAsset.json()).resolves.toMatchObject({
+      error: { code: 'REQUEST_INVALID' },
+    });
     const created = await fetch(`${origin}/v2/projects/http-source/recovered-copies`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
