@@ -139,6 +139,8 @@ reproduce it.
 | P0-09 | No final main/deploy proof.                                                                                                                | Run the full gate twice, fast-forward/merge reviewed integration to `main`, push GitHub and JOY Media VPS remotes without force, deploy the exact archive, canary, observe, and automatically roll back on any failure.                                                                                                                                                                |
 | P0-10 | CI does not produce real PostgreSQL/object-store/API/Worker/authenticated-browser release evidence.                                        | Add an isolated real-service CI/release lane with PostgreSQL, private-object test storage, API, Worker/render host and orchestrator-produced authenticated evidence. Mock/`pg-mem` suites remain useful but cannot satisfy this gate.                                                                                                                                                  |
 | P0-11 | Timeline track IDs are derived from current array length and can collide, hide, or overwrite rows after removal.                           | Replace every toolbar/context/drop-created ID with one durable collision-free allocator shared by all command paths. Reject duplicate IDs in validators/loaders. Add randomized add/remove/import plus rapid-repeat tests, then prove exact track/clip identity through undo/redo, save/reopen, project switch, render, and browser reproduction of the live `2 → 4 → 3 → 4` sequence. |
+| P0-12 | Browser-visible My media/cloud assets are not always present in the active control-plane project. Selecting a real `assetId` and queueing a thumbnail currently returns `ASSET_NOT_FOUND`, so verified Worker delivery cannot complete from the editor. | Reconcile asset-library scope with job scope: either register/import the asset into the active project before enabling Queue thumbnail, or make the job API intentionally accept owner/shared-library assets with an audited project association. Add an authenticated browser test that selects a catalog asset, queues it, receives a Worker lease, uploads a derivative, and reaches verified inspection; never show an enabled queue action that is guaranteed to return `ASSET_NOT_FOUND`. |
+| P0-13 | The rollback script switches immutable API/web pointers but leaves the final release identity environment in place; the previous binary therefore binds and serves `/live` while `/ready` is 503 (`releaseIdentity=false`). | Make rollback atomic across pointers and release identity: store per-release non-secret identity metadata beside each archive, switch `/etc/joy-media/api.env` to the target commit/tree/lock/schema before restart, restore the final identity on re-promotion, and require both `/live` and dependency-aware `/ready` to pass in the rehearsal. |
 
 ### P1 — production function and UX closure
 
@@ -169,6 +171,34 @@ reproduce it.
 | P1-23 | Effects keyboard/reduced motion        | Effect cards need a semantic keyboard add action and discoverable unavailable reason. Autoplay rejection/reduced-motion/hidden-tab paths must show a deterministic poster or fallback instead of silently blank media.                                                                                                                                                                                                                                      |
 | P1-24 | Library destructive-operation recovery | Replace blocking-only removal UX with focus-safe confirmation/status; storage failure must keep the project card/data intact and expose accessible retry.                                                                                                                                                                                                                                                                                                   |
 | P1-25 | Product identity                       | Choose JOY Studio or JOY Media as the canonical user-facing name and make HTML title, shell, login, project library, manifest, release docs and browser assertions agree.                                                                                                                                                                                                                                                                                   |
+
+### LIVE-13 — timeline browser certification (2026-08-29)
+
+The final deployed build was exercised from the authenticated in-app browser. A disposable empty
+project confirmed that the empty timeline exposes a truthful disabled Play control, an actionable
+Import/Browse path, and two empty lanes whose mouse, Enter, and Space activations do not double-fire.
+The showcase project then passed the deterministic `2 → 4 → remove non-tail → add` identity check,
+lock-blocked deletion, unlock/delete/Undo restoration, mute/unmute, and reload persistence. All 11
+visible insertion lanes exposed `aria-keyshortcuts="Enter Space"` and descriptive titles. Inspector
+Effects and the Assets Effects category were opened on empty and selected-clip states; every available
+asset category (Browse, Brand marks, Arrows, Effects, Icons, Illustrations, Patterns, Photos, Shapes,
+Text, and UI graphics) was cycled without a recovery surface, forced navigation, or console log.
+The added Effect clip path also completed and was removed cleanly. This closes the browser portion of
+P1-07/P1-22/P1-23 for the tested release, but not the real Worker-delivery gate: the editor exposed an
+enabled Queue thumbnail action for `asset-intro`, cloud `joylib-*`, and `luna-test-timecode-tone-*`
+clips while the API rejected each with `ASSET_NOT_FOUND` because those catalog records were not owned by
+the active control-plane project. The failure is recorded as P0-12 and must be fixed before claiming
+verified-delivery or source-bound release evidence.
+
+### LIVE-14 — rollback identity rehearsal (2026-08-29)
+
+The immutable previous API/web pair was dry-run validated and applied, and the old API eventually bound
+successfully. Its `/ready` response remained 503 solely because the environment still advertised the
+new release identity; restoring the target release's identity fields made the old pair ready. The final
+`8c1d7b28a23443d5b2f834f87947016310046cee` pair was then restored and passed `/live` and `/ready` on
+both `joyst.ir` and `www.joyst.ir`. This proves the binary/pointer rollback is recoverable but leaves
+P0-13 open until the rollback script switches identity metadata atomically and its own health check
+passes for the target release.
 
 ## Numeric release budgets and retained evidence
 
