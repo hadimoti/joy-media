@@ -9,6 +9,7 @@ import {
   type Job,
   type LocalDerivativeRegistration,
   type MediaAssetRecord,
+  type MediaDescriptor,
   type MediaDerivativeRecord,
   type WorkerModelInventoryRecord,
 } from './control-plane.js';
@@ -1924,7 +1925,7 @@ function assetForBrowser(asset: MediaAssetRecord) {
     displayName: asset.displayName,
     sha256: asset.sha256,
     bytes: asset.bytes,
-    descriptor: asset.descriptor,
+    descriptor: mediaDescriptorForBrowser(asset.descriptor),
     tags: asset.tags,
     sortName: asset.sortName,
     createdAt: asset.createdAt,
@@ -1941,9 +1942,28 @@ function derivativeForBrowser(derivative: MediaDerivativeRecord) {
     profile: derivative.profile,
     sha256: derivative.sha256,
     bytes: derivative.bytes,
-    descriptor: derivative.descriptor,
+    descriptor: mediaDescriptorForBrowser(derivative.descriptor),
     availability: derivative.availability,
     verifiedAt: derivative.verifiedAt,
+  };
+}
+
+function mediaDescriptorForBrowser(descriptor: MediaDescriptor): MediaDescriptor {
+  return {
+    mimeType: descriptor.mimeType,
+    ...(descriptor.durationUs === undefined ? {} : { durationUs: descriptor.durationUs }),
+    ...(descriptor.width === undefined ? {} : { width: descriptor.width }),
+    ...(descriptor.height === undefined ? {} : { height: descriptor.height }),
+    ...(descriptor.animation === undefined
+      ? {}
+      : {
+          animation: {
+            frameCount: descriptor.animation.frameCount,
+            cycleDurationUs: descriptor.animation.cycleDurationUs,
+            loopCount: descriptor.animation.loopCount,
+            hasAlpha: descriptor.animation.hasAlpha,
+          },
+        }),
   };
 }
 

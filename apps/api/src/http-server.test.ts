@@ -13,6 +13,7 @@ import {
   type AssetLocationRecord,
   type ControlPlane,
   type MediaAssetRecord,
+  type MediaDerivativeRecord,
 } from './control-plane.js';
 import { createControlPlaneHttpServer, type ApiAuthentication } from './http-server.js';
 import { DisabledMediaAuth } from './media-auth.js';
@@ -393,6 +394,44 @@ describe('control-plane HTTP transport', () => {
       strength: 0.8,
     });
     await expect(first).resolves.toMatchObject({ status: 200 });
+  });
+
+  it('strips storage-bearing descriptor fields from browser asset projections', async () => {
+    const controlPlane = new UnsafeDescriptorControlPlane();
+    await controlPlane.createProject({ id: 'owner' }, 'projection-project', 'Projection');
+    await controlPlane.registerAsset({ id: 'owner' }, 'projection-project', {
+      id: 'asset-1',
+      kind: 'image',
+      displayName: 'frame.jpg',
+      sha256: SHA256,
+      bytes: 10,
+      descriptor: { mimeType: 'image/jpeg', width: 1, height: 1 },
+      locations: [{ kind: 'opfs-cache', ref: 'opfs-a1' }],
+    });
+    await controlPlane.registerLocalDerivative({ id: 'owner' }, 'projection-project', {
+      id: 'derivative-1',
+      assetId: 'asset-1',
+      kind: 'thumbnail',
+      profile: 'jpeg-640',
+      sha256: 'b'.repeat(64),
+      bytes: 5,
+      descriptor: { mimeType: 'image/jpeg', width: 1, height: 1 },
+      availability: 'available-local',
+      locations: [{ kind: 'opfs-cache', ref: 'opfs-d1' }],
+    });
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, undefined, controlPlane);
+    const response = await request(origin, 'GET', '/v1/projects/projection-project/assets');
+    expect(response).toMatchObject({
+      status: 200,
+      body: { data: [{ descriptor: { mimeType: 'image/jpeg', width: 1, height: 1 } }] },
+    });
+    expect(JSON.stringify(response.body)).not.toMatch(/locations|cloudRef|objectKey|credentials|private-key/);
+    const derivatives = await request(origin, 'GET', '/v1/projects/projection-project/assets/asset-1/derivatives');
+    expect(derivatives).toMatchObject({
+      status: 200,
+      body: { data: [{ descriptor: { mimeType: 'image/jpeg', width: 1, height: 1 } }] },
+    });
+    expect(JSON.stringify(derivatives.body)).not.toMatch(/locations|objectKey|private-key/);
   });
 
   it('preserves project, Worker lease, completion, and cursor event semantics over v1', async () => {
@@ -1763,6 +1802,41 @@ describe('control-plane HTTP transport', () => {
     });
   });
 });
+
+class UnsafeDescriptorControlPlane extends LocalControlPlane {
+  override assetsForProject(actor: Actor, projectId: string): readonly MediaAssetRecord[] {
+    return super.assetsForProject(actor, projectId).map((asset) => ({
+      ...asset,
+      descriptor: {
+        ...asset.descriptor,
+        animation: {
+          frameCount: 1,
+          cycleDurationUs: 1_000_000,
+          loopCount: 0,
+          hasAlpha: false,
+          objectKey: 'private-key',
+        },
+        locations: [{ kind: 'private-object', ref: 'private-key' }],
+        cloudRef: 'private-key',
+        credentials: 'secret',
+      } as MediaAssetRecord['descriptor'],
+    }));
+  }
+
+  override derivativesForAsset(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+  ): readonly MediaDerivativeRecord[] {
+    return super.derivativesForAsset(actor, projectId, assetId).map((derivative) => ({
+      ...derivative,
+      descriptor: {
+        ...derivative.descriptor,
+        objectKey: 'private-key',
+      } as MediaDerivativeRecord['descriptor'],
+    }));
+  }
+}
 
 async function start(
   authentication: ApiAuthentication,

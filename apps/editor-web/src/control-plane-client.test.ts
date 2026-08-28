@@ -163,6 +163,34 @@ describe('BrowserControlPlaneClient', () => {
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       requests.push({ url, ...(typeof init?.body === 'string' ? { body: init.body } : {}) });
+      if (url.endsWith('/assets'))
+        return json(201, {
+          data: {
+            id: 'asset-1',
+            projectId: 'project-1',
+            kind: 'video',
+            displayName: 'clip.mp4',
+            sha256: 'a'.repeat(64),
+            bytes: 10,
+            descriptor: { mimeType: 'video/mp4' },
+            tags: [],
+            sortName: 'clip.mp4',
+            createdAt: 1,
+            cloudBacked: false,
+          },
+        });
+      if (url.endsWith('/jobs'))
+        return json(201, {
+          data: {
+            id: 'job-1',
+            projectId: 'project-1',
+            type: 'asset.thumbnail',
+            assetId: 'asset-1',
+            state: 'queued',
+            progress: 0,
+            cancelRequested: false,
+          },
+        });
       return json(201, { data: { id: 'asset-1', assetSyncEnabled: true } });
     };
     try {
@@ -199,6 +227,102 @@ describe('BrowserControlPlaneClient', () => {
       },
     ]);
     expect(JSON.stringify(requests)).not.toContain('C:\\');
+  });
+
+  it('projects asset and derivative responses while dropping storage-bearing descriptor fields', async () => {
+    const original = globalThis.fetch;
+    const unsafeAsset = {
+      id: 'asset-1',
+      projectId: 'project-1',
+      kind: 'image',
+      displayName: 'frame.jpg',
+      sha256: 'a'.repeat(64),
+      bytes: 10,
+      descriptor: {
+        mimeType: 'image/jpeg',
+        width: 1,
+        height: 1,
+        locations: [{ kind: 'private-object', ref: 'private-key' }],
+        credentials: 'secret',
+      },
+      tags: ['image'],
+      sortName: 'frame.jpg',
+      createdAt: 123,
+      cloudBacked: true,
+      locations: [{ kind: 'private-object', ref: 'private-key' }],
+      objectKey: 'private-key',
+    };
+    globalThis.fetch = async () => {
+      return json(200, { data: [unsafeAsset] });
+    };
+    try {
+      const client = new BrowserControlPlaneClient('/api', () => 'token');
+      await expect(client.assets('project-1')).resolves.toEqual([
+        {
+          id: 'asset-1',
+          projectId: 'project-1',
+          kind: 'image',
+          displayName: 'frame.jpg',
+          sha256: 'a'.repeat(64),
+          bytes: 10,
+          descriptor: { mimeType: 'image/jpeg', width: 1, height: 1 },
+          tags: ['image'],
+          sortName: 'frame.jpg',
+          createdAt: 123,
+          cloudBacked: true,
+        },
+      ]);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('rejects malformed asset and job responses at the browser boundary', async () => {
+    const original = globalThis.fetch;
+    let response: unknown;
+    globalThis.fetch = async () => json(200, response);
+    try {
+      const client = new BrowserControlPlaneClient('/api', () => 'token');
+      response = { data: [{ id: 'asset-1', kind: 'image' }] };
+      await expect(client.assets('project-1')).rejects.toThrow('invalid asset response');
+      response = {
+        data: [
+          {
+            id: 'job-1',
+            projectId: 'project-1',
+            type: 'image.comfy',
+            state: 'completed',
+            progress: 100,
+            cancelRequested: false,
+            derivative: {
+              jobId: 'job-1',
+              kind: 'image.comfy',
+              sha256: 'a'.repeat(64),
+              bytes: 5,
+              workerRef: 'worker-1',
+              resultRef: 'https://private.invalid/result',
+              verifiedAt: 1,
+            },
+          },
+        ],
+      };
+      await expect(client.jobs('project-1')).rejects.toThrow('invalid job response');
+      response = {
+        data: [
+          {
+            id: 'job-1',
+            projectId: 'project-1',
+            type: 'image.comfy',
+            state: 'completed',
+            progress: 101,
+            cancelRequested: false,
+          },
+        ],
+      };
+      await expect(client.jobs('project-1')).rejects.toThrow('invalid job response');
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 
   it('passes the caller abort signal through browser export remux', async () => {

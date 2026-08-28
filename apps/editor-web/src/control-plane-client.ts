@@ -4,6 +4,8 @@ import type { GpuPreviewFrameRequest } from '@joy-media/job-protocol';
 import type { CreativeBriefV1, CreativeBriefRequestV1, JoyCodePlanProposalV1 } from '@joy-media/agent-tools';
 import type { JoyProjectV1, ProjectRevisionId } from '@joy-media/project-schema';
 
+const browserProjections = import('./browser-projections.js');
+
 export interface BrowserWorker {
   readonly id: string;
   readonly paired: boolean;
@@ -252,14 +254,17 @@ export class BrowserControlPlaneClient {
     });
   }
   async jobs(projectId: string): Promise<readonly BrowserJob[]> {
-    return this.get(`/v1/projects/${encodeURIComponent(projectId)}/jobs`);
+    const { browserJobList } = await browserProjections;
+    return browserJobList(await this.get<unknown>(`/v1/projects/${encodeURIComponent(projectId)}/jobs`));
   }
   async assets(projectId: string): Promise<readonly BrowserAsset[]> {
-    return this.get(`/v1/projects/${encodeURIComponent(projectId)}/assets`);
+    const { browserAssetList } = await browserProjections;
+    return browserAssetList(await this.get<unknown>(`/v1/projects/${encodeURIComponent(projectId)}/assets`));
   }
   /** Curated service-published cloud library visible to entitled Joy users. */
   async sharedCloudAssets(): Promise<readonly BrowserAsset[]> {
-    return this.get('/v1/library/cloud-assets');
+    const { browserAssetList } = await browserProjections;
+    return browserAssetList(await this.get<unknown>('/v1/library/cloud-assets'));
   }
   /**
    * Assets owned by this Joy identity. Passing a project keeps the active
@@ -268,7 +273,8 @@ export class BrowserControlPlaneClient {
    */
   async myAssets(projectId?: string): Promise<readonly BrowserAsset[]> {
     const query = projectId === undefined ? '' : `?projectId=${encodeURIComponent(projectId)}`;
-    return this.get(`/v1/library/my-assets${query}`);
+    const { browserAssetList } = await browserProjections;
+    return browserAssetList(await this.get<unknown>(`/v1/library/my-assets${query}`));
   }
   /** Safe catalog only: model IDs and lifecycle state, never secret references or values. */
   async reasoningProviders(): Promise<readonly BrowserReasoningProvider[]> {
