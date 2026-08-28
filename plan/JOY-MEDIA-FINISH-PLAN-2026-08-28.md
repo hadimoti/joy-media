@@ -492,13 +492,24 @@ or raw secret-bearing artifacts.
 
 ## Execution checkpoint — 2026-08-28
 
-- The local JOY Media hardening checkpoint is committed through `63c6511` on
+- The local JOY Media hardening checkpoint is committed through `8eeba0e` on
   `codex/joy-media-implement-20260828`; its pre-merge state is preserved at
   `backup/joy-media-before-main-merge-20260828`.
-- The checkpoint passes `pnpm check` (310 files, 2,408 passed tests, 1 skipped) and
-  `pnpm audit --prod --audit-level high` (no known vulnerabilities).
+- The checkpoint passes `pnpm typecheck`, `pnpm format:check`, and the full `pnpm test`
+  suite (311 files, 2,425 passed tests, 1 skipped). Focused API, asset-library, timeline,
+  and Joy Code lifecycle tests pass (68 tests).
+- `pnpm audit --prod --audit-level high` reports no known vulnerabilities.
+- The candidate now includes `ef86e87`, which adds validated non-secret release identity and
+  dependency probes to `/ready`, and `d8c0be6`/`8eeba0e`, which discard stale Joy Code
+  reasoning responses after project/revision changes, prevent duplicate submits, and expose
+  accessible failure alerts. Asset-library audio/video insertion is wired by `ecbdd56` and
+  `e06c4cc` with routing/type-contract tests.
 - A GitHub branch has been published at
   `codex/joy-media-implement-20260828` for review.
+- The release evaluator run at 2026-08-28T11:58:05Z passes command health, tests,
+  generated-artifact hygiene, fixture registry, builds, manifest, SBOM, and feature-status
+  checks. It still fails only source-bound authenticated browser provenance and the missing
+  `authenticated-editor-1.0` journey.
 - Reconciliation with GitHub `main` is currently a release blocker: the two lines
   diverge from a July common base and the remote line's creative-brief, Joy Code,
   and universal-timeline additions do not type-check against the deployed
@@ -517,7 +528,12 @@ unavailable`, and a console error loading `/transitions/preview/transition2.png`
 - The transition preview defect is fixed on the checkpoint in `e2e7838` (with the formatted
   release note in `63c6511`). OpenCLI profile `cefd9k77` verified both stable SVG endpoints from
   a local production build with HTTP 200 and `image/svg+xml`; transition preview tests, the full
-  test suite (2,410 passed, 1 skipped), and editor build passed.
+  test suite (2,425 passed, 1 skipped), and editor build passed.
+- Kilo was invoked with `kilo/kilo-auto/free` and OpenCLI profile `cefd9k77` for an independent
+  review. Its run was stopped after it began reviewing a stale detached checkpoint, so its
+  observations are advisory only. Hermes was invoked with `openrouter/free` for bounded review;
+  its attempts did not return usable source-bound evidence. Neither agent was granted secret or
+  VPS access, and neither supports a promotion claim.
 - The legacy `fixture.thumbnail` production path was retired in `f485bbc`. The
   release evaluator now passes command health, tests, generated-artifact hygiene,
   fixture registry, builds, manifest, SBOM, and feature-status checks. It still
