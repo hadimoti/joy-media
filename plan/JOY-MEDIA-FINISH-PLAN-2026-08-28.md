@@ -50,31 +50,20 @@ above or translate “tests pass” into a stronger claim.
 
 ## Agent execution policy
 
-The execution round uses five independent roles and a consensus review after each milestone:
+The execution round uses Codex sub-agents and a consensus review after each milestone:
 
 1. Backend/domain specialist: API, migrations, auth, privacy, control plane, Worker protocol.
 2. Frontend/UX specialist: library/editor journeys, accessibility, errors, feature truth.
 3. Release/QA/operations specialist: clean CI, provenance, security, deployment, rollback.
-4. Kilo browser tester A: OpenCLI-only independent live/staging QA.
-5. Hermes browser tester B: OpenCLI-only independent live/staging QA.
+4. Codex browser QA agent A: read-only live/staging smoke and accessibility/error inspection.
+5. Codex browser QA agent B: independent journey review and release-evidence challenge.
 
-Required free-model routing:
-
-- Kilo CLI uses the available Kilo free-pool id `kilo/kilo-auto/free` (the CLI displays
-  `kilo-auto/free`; the shorter `kilo/free` is not a valid installed model id).
-- Hermes CLI uses `openrouter/free` with provider `openrouter`.
-- Do not silently fall back to paid models. Record the actual selected model in the run report.
-- Kilo and Hermes use OpenCLI Browser Bridge profile `cefd9k77`, unique session names, and OpenCLI
-  commands only. OpenCLI 1.8.6 accepted the profile through the `--profile cefd9k77` browser
-  option for the local probes.
-- Each specialist reads the other two reports, challenges unsupported findings, and records the
-  accepted/rejected resolution before the lead integrator advances the milestone.
-
-The 2026-08-28 OpenCLI runs verified that profile `cefd9k77` is connected, but the bound Chrome
-surface showed the unauthenticated login gate. Those reports prove the public login shell only;
-they do not count as authenticated editor evidence. Before the final OpenCLI gate, authenticate that
-profile through the normal user-controlled flow without exposing credentials. The authenticated
-Codex in-app-browser findings below remain valid independent evidence.
+The user subsequently narrowed execution to Codex sub-agents and the Codex in-app browser. The
+earlier Kilo/Hermes/OpenCLI experiments are historical diagnostics only and are not required for
+this implementation pass. Codex browser agents must use the existing user-controlled authenticated
+browser session when available, must not inspect or copy credentials/session bodies, and must keep
+mutation journeys to disposable local/staging fixtures. Each specialist reads the other reports,
+challenges unsupported findings, and records the accepted/rejected resolution before promotion.
 
 ## Evidence baseline
 
@@ -82,10 +71,10 @@ Codex in-app-browser findings below remain valid independent evidence.
 
 | Surface                     | Observed tip/state                                | Consequence                                                                       |
 | --------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Local checkpoint branch     | `fb94125` on `codex/joy-media-implement-20260828` | Clean tested candidate, published for review; not yet promoted to `main`.         |
+| Local checkpoint branch     | `0fefdab` on `codex/joy-media-implement-20260828` | Clean tested candidate, published for review; not yet promoted to `main`.         |
 | Deployed/VPS release branch | `b3c1866`                                         | Older certified release; candidate has additional hardening and is not deployed.  |
-| GitHub `main`               | `2083ffc`                                         | 407 main-only commits versus 186 candidate-only commits.                          |
-| VPS `main`                  | `1e4657f`                                         | 225 VPS-main-only commits versus 186 candidate-only commits.                      |
+| GitHub `main`               | `2083ffc`                                         | 407 main-only commits versus 191 candidate-only commits.                          |
+| VPS `main`                  | `1e4657f`                                         | 225 VPS-main-only commits versus 191 candidate-only commits.                      |
 | Common merge base           | `73744bb`                                         | A blind merge is unsafe; simulated reconciliation has extensive overlap/conflict. |
 
 `aec01ef` contains 324 changed files and a large quantity of transient evidence, debug files, and
@@ -586,22 +575,42 @@ unavailable`, and a console error loading `/transitions/preview/transition2.png`
   provider-facing interface is additive, cancellable, timeout-bounded, redacts audit payloads,
   and returns typed/sanitized failure outcomes; it does not claim the coupled main-branch
   Creative Brief runtime is reconciled. The agent-tools package suite passes 324/324.
-- The latest full repository test run passes 315 files (2,457 tests) with one skipped test. The
-  clean `pnpm release:gate` run at `2026-08-28T13:25:12Z` passes command health, 2,412 scoped
-  tests, generated-artifact hygiene, fixture registries, builds, manifest, SBOM, and feature
-  status. It remains **NO-GO** because source-bound authenticated browser provenance and the
-  required `authenticated-editor-1.0` journey are missing.
+- The latest clean `pnpm release:gate` run at `2026-08-28T13:49:04Z` passes command health,
+  2,423 scoped tests, generated-artifact hygiene, fixture registries, builds, static-assets,
+  manifest, SBOM, and feature status. It remains **NO-GO** because source-bound authenticated
+  browser provenance and the required `authenticated-editor-1.0` journey are missing.
 - A fresh read-only Codex in-app-browser inspection of the user-owned JOY Media tab at
   `2026-08-28T13:18:52Z` confirms the authenticated editor shell is reachable, but it still shows
   local-only save/cloud-sync-unavailable and Verified delivery unavailable states. Its console
   contains one transition preview error for the deployed `/transitions/preview/transition2.png`.
   No browser mutation was performed.
+- A fresh read-only Codex browser smoke at `2026-08-28T13:50:50Z` reached the authenticated live
+  editor shell, but the deployed release still reports local-only save/cloud-sync unavailable and
+  Verified delivery unavailable. The live UI has no candidate ratio selector, and its transition
+  surface is the older deployment; this is diagnostic evidence only, not candidate evidence.
+- The candidate now includes `85cde92`, which centralizes an exact-IP trusted-proxy resolver and
+  uses it for both HTTP transport and OTP throttles, and `0fefdab`, which durably terminalizes
+  expired Worker leases after their attempt budget (including cancellation and PostgreSQL attempt
+  closure). The focused API/control-plane suites pass 79/79; repository typecheck, lint, and
+  format checks pass.
+- The candidate includes `3d3f009` static-asset packaging enforcement and `daff729` truthful,
+  accessible captions-transcription unavailable messaging. The full release gate's static-assets
+  check passes and the scoped test count is now 2,423.
 - The legacy `fixture.thumbnail` production path was retired in `f485bbc`. The
   release evaluator now passes command health, tests, generated-artifact hygiene,
   fixture registry, builds, manifest, SBOM, and feature-status checks. It still
   fails only the required fresh source-bound authenticated browser evidence and
   browser-journey checks, which cannot be honestly synthesized from the current
   live tab.
+
+### Continuation checkpoint — 2026-08-28
+
+- Candidate tip `0fefdab` is pushed to `github/codex/joy-media-implement-20260828`; the worktree
+  is clean. The candidate remains intentionally separate from `main` (`2083ffc`) while the
+  407-commit divergence and coupled Joy Code/Creative Brief families are reconciled by behavior.
+- The release gate is a truthful **NO-GO**: implementation checks are green, while source-bound
+  authenticated real-service browser evidence and `authenticated-editor-1.0` are still absent.
+  No `main` promotion, VPS bare-remote update, or deployment was performed.
 
 - [ ] GitHub `main`, local `main`, VPS bare `main`, release tag, manifest, and deployed release all
       resolve to the same verified source SHA/tree.
