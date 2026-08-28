@@ -35,3 +35,11 @@ Backend, frontend, release, and Codex browser agents accepted the additive v2 co
 complete Creative Brief runtime functionality. They also rejected a wholesale WP-37/WP-38 merge,
 blind promotion, and any VPS action while authenticated source-bound browser evidence, migration /
 readiness checks, and live static-route verification remain open.
+
+### Final candidate snapshot — 2026-08-28
+
+The reviewed candidate is `6254d3c` on `codex/joy-media-implement-20260828`; GitHub `main` is
+`2083ffc` and VPS `main` is `1e4657f`. They share base `73744bb` but currently diverge by 407
+main-only and 204 candidate-only commits, so direct merging is unsafe. The candidate's latest
+gate run is source-stale after the final documentation commits and remains NO-GO until a fresh
+source-bound authenticated browser journey is produced and CI FFmpeg/FFprobe parity is reconciled.

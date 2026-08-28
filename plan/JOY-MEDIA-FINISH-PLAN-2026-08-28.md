@@ -611,17 +611,24 @@ unavailable`, and a console error loading `/transitions/preview/transition2.png`
 
 ### Continuation checkpoint — 2026-08-28
 
-- Candidate tip `6410ae6` is pushed to `github/codex/joy-media-implement-20260828`; the worktree
+- Candidate tip `6254d3c` is pushed to `github/codex/joy-media-implement-20260828`; the worktree
   is clean. Since the earlier checkpoint, the candidate added browser-safe project/revision/
   recovery validation, browser-safe owner-job projections (including nested locator denial and
   typed render summaries), and the corresponding adversarial/fresh-contract tests. The candidate
   remains intentionally separate from `main` (`2083ffc`) while the 407-commit divergence and
   coupled Joy Code/Creative Brief families are reconciled by behavior.
-- The latest release gate at `2026-08-28T15:31:19.637Z` is a truthful **NO-GO**: command health,
+- The latest release gate at `2026-08-28T15:31:19.637Z` (run before the final documentation-only
+  commits) is a truthful **NO-GO**: command health,
   2,433 scoped tests, builds, static assets, manifest, SBOM, generated-artifact hygiene, fixture
   registry, and feature-status checks pass; source-bound authenticated browser provenance and
   `authenticated-editor-1.0` are still absent. No `main` promotion, VPS bare-remote update, or
-  deployment was performed.
+  deployment was performed. Re-run the gate on final tip `6254d3c` before any promotion; existing
+  evidence is source-bound to the prior candidate tip and cannot be reused.
+
+- Promotion review confirms `github/main` remains `2083ffc` while the candidate has 407 main-only
+  and 204 candidate-only commits from common base `73744bb`; simulated merge conflicts make a
+  direct merge unsafe. Main's CI also explicitly installs FFmpeg/FFprobe while the candidate
+  workflow does not, so CI parity must be reconciled on a fresh main-based integration branch.
 
 - [ ] GitHub `main`, local `main`, VPS bare `main`, release tag, manifest, and deployed release all
       resolve to the same verified source SHA/tree.
