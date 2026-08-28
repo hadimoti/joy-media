@@ -381,6 +381,43 @@ describe('PostgresControlPlane', () => {
     await pool.end();
   });
 
+  it('does not lease an expired PostgreSQL job after its attempt budget is exhausted', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const api = new PostgresControlPlane(pool, { skipLocked: false });
+    await api.initialize();
+    const owner = { id: 'attempt-owner' };
+    await api.createProject(owner, 'attempt-project', 'Attempts');
+    await api.pairWorker(owner, 'attempt-worker');
+    await api.helloWorker('attempt-worker', ['render.inspect'], [], 100);
+    await api.enqueue(owner, 'attempt-job', 'attempt-project', 'render.inspect', 101, undefined, {
+      protocolVersion: 1,
+      jobId: 'attempt-job',
+      type: 'render.inspect',
+      payload: {
+        projectRef: 'attempt-project',
+        compositionId: 'composition-main',
+        presetId: 'inspect',
+        reportRef: 'report-attempt-job',
+        legacyVersion: 0,
+      },
+      requirements: { capabilities: ['render.inspect'], privacy: 'local-only' },
+      idempotencyKey: 'attempt-job',
+      maxAttempts: 1,
+    });
+
+    await expect(api.lease('attempt-worker', 102, 1)).resolves.toMatchObject({
+      id: 'attempt-job',
+      state: 'leased',
+    });
+    await expect(api.lease('attempt-worker', 104, 30_000)).resolves.toBeUndefined();
+    await expect(api.jobsForProject(owner, 'attempt-project')).resolves.toMatchObject([
+      { id: 'attempt-job', state: 'leased' },
+    ]);
+    await pool.end();
+  });
+
   it('requires typed artifact evidence for new inspect jobs and denies expired artifact reads', async () => {
     const database = newDb();
     const adapter = database.adapters.createPg();

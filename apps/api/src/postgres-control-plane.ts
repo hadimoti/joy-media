@@ -80,6 +80,19 @@ import {
 
 const FIXTURE_THUMBNAIL_SHA256 = '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735';
 const FIXTURE_THUMBNAIL_BYTES = 14;
+const POSTGRES_SCHEMA_LOCK_ID = 1_245_665_613;
+
+async function acquireSchemaMigrationLock(client: PoolClient): Promise<void> {
+  try {
+    await client.query('SELECT pg_advisory_xact_lock($1)', [POSTGRES_SCHEMA_LOCK_ID]);
+  } catch (error) {
+    // pg-mem does not implement PostgreSQL advisory-lock functions. Real
+    // PostgreSQL always provides this built-in, so only tolerate that exact
+    // emulator limitation and surface every other migration failure.
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/function\s+pg_advisory_xact_lock\b.*does not exist/iu.test(message)) throw error;
+  }
+}
 
 interface ProjectRow {
   readonly id: string;
@@ -269,14 +282,17 @@ export class PostgresControlPlane
   }
 
   async initialize(): Promise<void> {
-    await this.pool.query(POSTGRES_SCHEMA);
-    await this.ensureAssetRevocationPrimaryKey();
+    await this.transaction(async (client) => {
+      await acquireSchemaMigrationLock(client);
+      await client.query(POSTGRES_SCHEMA);
+      await this.ensureAssetRevocationPrimaryKey(client);
+    });
   }
 
-  private async ensureAssetRevocationPrimaryKey(): Promise<void> {
+  private async ensureAssetRevocationPrimaryKey(database: Pool | PoolClient): Promise<void> {
     let result: { rows: readonly { indexname: string; indexdef: string }[] };
     try {
-      result = await this.pool.query<{
+      result = await database.query<{
         readonly indexname: string;
         readonly indexdef: string;
       }>(
@@ -298,13 +314,13 @@ export class PostgresControlPlane
     const actual = primaryIndexes.find((row) => /revoke_id/i.test(row.indexdef));
     const legacy = primaryIndexes.find((row) => !/revoke_id/i.test(row.indexdef));
     if (legacy !== undefined) {
-      await this.pool.query(
+      await database.query(
         `ALTER TABLE asset_revocation_audits DROP CONSTRAINT "${legacy.indexname.replace(/"/g, '""')}"`,
       );
     }
     if (actual === undefined) {
       try {
-        await this.pool.query(
+        await database.query(
           'ALTER TABLE asset_revocation_audits ADD CONSTRAINT asset_revocation_audits_revoke_id_pkey PRIMARY KEY (revoke_id)',
         );
       } catch (error) {
@@ -1581,20 +1597,31 @@ export class PostgresControlPlane
       // Keep opaque-locality matching in the Worker/control-plane domain; this
       // also keeps the durable contract executable in pg-mem without changing
       // PostgreSQL's queue lock semantics.
-      const job = candidate.rows.find((item) => {
+      let job: JobRow | undefined;
+      for (const item of candidate.rows) {
         const caps = workerRecord.capabilities;
+        let compatible = false;
         if (item.type === 'asset.thumbnail') {
-          return (
+          compatible =
             item.asset_id !== null &&
             caps.includes('asset.thumbnail') &&
-            workerRecord.localAssetIds.includes(item.asset_id)
+            workerRecord.localAssetIds.includes(item.asset_id);
+        } else if (item.type === 'image.comfy') compatible = caps.includes('image.comfy');
+        else if (item.type === 'audio.ml-denoise') compatible = caps.includes('audio.ml-denoise');
+        else if (isWorkerJobType(item.type)) compatible = workerCanRunJob(caps, item.type);
+        else compatible = item.type === 'fixture.thumbnail';
+        if (!compatible) continue;
+        if (item.max_attempts !== null) {
+          const attempts = await client.query<{ readonly count: number | string }>(
+            'SELECT COUNT(*)::int AS count FROM job_attempts WHERE job_id = $1',
+            [item.id],
           );
+          const count = Number(attempts.rows[0]?.count ?? 0);
+          if (count >= item.max_attempts) continue;
         }
-        if (item.type === 'image.comfy') return caps.includes('image.comfy');
-        if (item.type === 'audio.ml-denoise') return caps.includes('audio.ml-denoise');
-        if (isWorkerJobType(item.type)) return workerCanRunJob(caps, item.type);
-        return item.type === 'fixture.thumbnail';
-      });
+        job = item;
+        break;
+      }
       if (job === undefined) return undefined;
       const result = await client.query<JobRow>(
         `UPDATE jobs SET state = 'leased', lease_owner = $2, lease_expires_at = $3,
