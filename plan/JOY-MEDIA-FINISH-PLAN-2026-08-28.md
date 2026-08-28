@@ -200,6 +200,24 @@ both `joyst.ir` and `www.joyst.ir`. This proves the binary/pointer rollback is r
 P0-13 open until the rollback script switches identity metadata atomically and its own health check
 passes for the target release.
 
+### LIVE-15 — timeline deep browser pass (2026-08-29)
+
+The authenticated Codex in-app browser retested the currently deployed release after the original
+Effects-outage report. The Effects asset category opened without navigation, recovery UI, or console
+errors; adding an effect clip and undoing it returned the exact prior clip count. Transport playback
+advanced the playhead, the video element reached `readyState=4`, and monitor screenshots changed
+between samples, proving moving visual frames. The timeline panel's advertised Space shortcut
+started and stopped playback, the Split tool produced two exact 3.0-second clips at the playhead,
+Duplicate created a collision-free copy, keyboard trim nudged by 0.1 seconds, and Undo restored the
+pre-edit duration. Locking Video 1 blocked Delete while leaving the clip intact; marker insertion
+also round-tripped through Undo. No new P0 timeline failure was reproduced in this pass.
+
+This pass does not close P1-07: the full 100-operation identity budget, drag/ripple-delete matrix,
+independent audio-track audible playback, missing/revoked-media recovery, preview/export parity,
+responsive layouts, and real Worker delivery still require final-release evidence. Browser mutations
+were confined to the authenticated test project and the candidate branch remains **NO-GO** until
+P0-12/P0-13, source-bound Worker inspection, and the release/canary gates are complete.
+
 ## Numeric release budgets and retained evidence
 
 These are stop/go gates, not optional targets:
