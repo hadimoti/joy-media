@@ -7,6 +7,10 @@ Studio application at `https://joyst.ir/` and `https://www.joyst.ir/`. It does n
 modify `joy-vps`. The older `plan/P18-joy-media-finalization.md` remains the historical capability
 roadmap; this document supersedes its integration, residual-gap, release, and deployment sequence.
 
+The domain-by-domain branch decisions are tracked in
+`plan/JOY-MEDIA-RECONCILIATION-MATRIX-2026-08-28.md`; that matrix is a working reconciliation
+artifact and does not waive any release gate.
+
 ## Objective and release definition
 
 Finish the currently implemented product, close every confirmed production/UI/backend gap, make
