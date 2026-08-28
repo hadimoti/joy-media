@@ -51,6 +51,9 @@ describe('AssetLibraryPanel successful import contract', () => {
     expect(panelSource).toContain(
       'const associated = await client.associateAsset(projectId, catalogAsset.id);',
     );
+    expect(panelSource).toContain(
+      'setStatus(`${scopedAsset.displayName} added to the timeline.`);',
+    );
     expect(panelSource).toContain('Could not add ${asset.displayName} to this project');
   });
 });

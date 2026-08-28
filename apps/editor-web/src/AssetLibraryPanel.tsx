@@ -451,6 +451,7 @@ export function AssetLibraryPanel({
           };
         }
         onAddToTimeline?.({ ...scopedAsset, descriptor });
+        setStatus(`${scopedAsset.displayName} added to the timeline.`);
       } catch (error) {
         setStatus(`Could not add ${asset.displayName} to this project: ${message(error)}`);
       }
