@@ -25,6 +25,15 @@ The environment file is created on the VPS with mode `0600` and contains (see
   provider-approval signing key
 - `JOY_MEDIA_PROVIDER_APPROVAL_SIGNING_SECRET` — runtime-only HMAC secret for
   provider approvals; do not commit or log it
+- `JOY_MEDIA_RELEASE_COMMIT_SHA` — the exact Git commit of the immutable release
+- `JOY_MEDIA_RELEASE_TREE_HASH` — the exact Git tree id used to build the release
+- `JOY_MEDIA_RELEASE_LOCKFILE_SHA256` — SHA-256 of the committed `pnpm-lock.yaml`
+- `JOY_MEDIA_RELEASE_SCHEMA_VERSION` — positive integer for the deployed control-plane schema
+
+The four release-identity values are generated from the source-bound release
+manifest during deployment and are safe to expose through `/ready`. Do not
+hand-edit them or copy values from a different checkout: the API intentionally
+fails readiness when the identity is missing or malformed.
 
 It is never committed. Keep `/etc/joy-media/api.env` mode `0600`. The API
 persists only approval signing-key metadata (the key id), grants, budget
@@ -40,7 +49,8 @@ Postgres instance to manage the `media_allowed_users` allow-list, using a
 separate, least-privileged database role scoped to that one table (see
 joy-vps's `bot/joy_media_db.py` and `docs/JOY-MEDIA-ADMIN-DB-ROLE.md`).
 
-Release order: backup `joymedia`; deploy the built API/static editor; install
+Release order: generate and verify the source-bound release manifest (including
+the four `JOY_MEDIA_RELEASE_*` values); back up `joymedia`; deploy the built API/static editor; install
 the systemd/nginx manifests; validate configuration; restart services; verify
 public health and the OTP login path end to end (request + verify code by
 Gmail and by Telegram). Preserve the prior `/opt/joy-media/app` and each
