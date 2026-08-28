@@ -5,6 +5,7 @@ import {
   type Actor,
   type AssetRegistration,
   type ControlPlane,
+  type Job,
   type LocalDerivativeRegistration,
   type MediaAssetRecord,
   type MediaDescriptor,
@@ -1310,8 +1311,9 @@ async function route(
 
   const jobMatch = /^\/v1\/projects\/([^/]+)\/jobs$/.exec(url.pathname);
   if (request.method === 'GET' && jobMatch !== null) {
+    const jobs = await options.controlPlane.jobsForProject(actor, decodeURIComponent(jobMatch[1]!));
     respondJson(response, 200, {
-      data: await options.controlPlane.jobsForProject(actor, decodeURIComponent(jobMatch[1]!)),
+      data: jobs.map(jobForBrowser),
     });
     return;
   }
@@ -1418,6 +1420,194 @@ type BrowserDerivativeDto = Pick<
   | 'availability'
   | 'verifiedAt'
 >;
+
+type BrowserJobDto = Pick<
+  Job,
+  | 'id'
+  | 'projectId'
+  | 'type'
+  | 'assetId'
+  | 'payload'
+  | 'state'
+  | 'progress'
+  | 'cancelRequested'
+  | 'error'
+> & {
+  readonly derivative?: BrowserJobDerivativeDto;
+};
+
+interface BrowserJobDerivativeDto {
+  readonly jobId: string;
+  readonly kind: string;
+  readonly assetId?: string;
+  readonly reportRef?: string;
+  readonly outputRef?: string;
+  readonly findings?: number | readonly unknown[];
+  readonly qualityReport?: RenderReportV1;
+  readonly report?: RenderReportV1;
+  readonly sha256?: string;
+  readonly bytes?: number;
+  readonly descriptor?: MediaDescriptor;
+  readonly summary?: unknown;
+  readonly evidence?: readonly unknown[];
+  readonly evidenceIds?: readonly string[];
+  readonly workerRef: string;
+  readonly resultRef: string;
+  readonly verifiedAt: number;
+  readonly model?: string;
+}
+
+function jobForBrowser(job: Job): BrowserJobDto {
+  return {
+    id: browserOpaqueJobReference(job.id),
+    projectId: browserOpaqueJobReference(job.projectId),
+    type: browserOpaqueJobReference(job.type),
+    ...(job.assetId === undefined ? {} : { assetId: browserOpaqueJobReference(job.assetId) }),
+    ...(job.payload === undefined ? {} : { payload: browserSafeJobValue(job.payload) }),
+    state: job.state,
+    progress: job.progress,
+    cancelRequested: job.cancelRequested,
+    ...(job.error === undefined ? {} : { error: browserSafeJobString(job.error) }),
+    ...(job.derivative === undefined
+      ? {}
+      : { derivative: jobDerivativeForBrowser(job.derivative) }),
+  };
+}
+
+function jobDerivativeForBrowser(
+  derivative: NonNullable<Job['derivative']>,
+): BrowserJobDerivativeDto {
+  const source = derivative as NonNullable<Job['derivative']> & {
+    readonly assetId?: string;
+    readonly reportRef?: string;
+    readonly outputRef?: string;
+    readonly findings?: number | readonly unknown[];
+    readonly qualityReport?: RenderReportV1;
+    readonly report?: RenderReportV1;
+    readonly sha256?: string;
+    readonly bytes?: number;
+    readonly descriptor?: MediaDescriptor;
+    readonly summary?: unknown;
+    readonly evidence?: readonly unknown[];
+    readonly evidenceIds?: readonly string[];
+    readonly model?: string;
+  };
+  return {
+    jobId: browserOpaqueJobReference(source.jobId),
+    kind: browserOpaqueJobReference(source.kind),
+    ...(source.assetId === undefined ? {} : { assetId: browserOpaqueJobReference(source.assetId) }),
+    ...(source.reportRef === undefined
+      ? {}
+      : { reportRef: browserOpaqueJobReference(source.reportRef) }),
+    ...(source.outputRef === undefined
+      ? {}
+      : { outputRef: browserOpaqueJobReference(source.outputRef) }),
+    ...(source.findings === undefined ? {} : { findings: browserSafeJobValue(source.findings) }),
+    ...(source.qualityReport === undefined
+      ? {}
+      : { qualityReport: browserSafeJobValue(source.qualityReport) }),
+    ...(source.report === undefined ? {} : { report: browserSafeJobValue(source.report) }),
+    ...(source.sha256 === undefined ? {} : { sha256: source.sha256 }),
+    ...(source.bytes === undefined ? {} : { bytes: source.bytes }),
+    ...(source.descriptor === undefined
+      ? {}
+      : { descriptor: mediaDescriptorForBrowser(source.descriptor) }),
+    ...(source.summary === undefined ? {} : { summary: browserSafeJobValue(source.summary) }),
+    ...(source.evidence === undefined ? {} : { evidence: browserSafeJobValue(source.evidence) }),
+    ...(source.evidenceIds === undefined
+      ? {}
+      : { evidenceIds: source.evidenceIds.map(browserOpaqueJobReference) }),
+    workerRef: browserOpaqueJobReference(source.workerRef),
+    resultRef: browserJobResultReference(source.resultRef),
+    verifiedAt: source.verifiedAt,
+    ...(source.model === undefined ? {} : { model: browserSafeJobString(source.model) }),
+  };
+}
+
+const STORAGE_BEARING_JOB_KEYS = new Set([
+  'localref',
+  'localrefs',
+  'localpath',
+  'localpaths',
+  'location',
+  'locations',
+  'objectkey',
+  'objectkeys',
+  'storagekey',
+  'storagekeys',
+  'bucketkey',
+  'bucketkeys',
+  'privateobjectref',
+  'privateobjectrefs',
+  'cloudref',
+  'cloudrefs',
+  'path',
+  'paths',
+  'filepath',
+  'filepaths',
+  'url',
+  'urls',
+  'uri',
+  'uris',
+]);
+
+function browserSafeJobValue<T>(value: T): T {
+  if (typeof value === 'string' && looksLikeStorageLocator(value)) {
+    throw new ControlPlaneError('JOB_RESPONSE_INVALID', 'job response contains a private locator');
+  }
+  if (Array.isArray(value)) {
+    value.forEach(browserSafeJobValue);
+    return value;
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const [key, child] of Object.entries(value)) {
+      if (STORAGE_BEARING_JOB_KEYS.has(canonicalJobKey(key))) {
+        throw new ControlPlaneError(
+          'JOB_RESPONSE_INVALID',
+          'job response contains a private locator',
+        );
+      }
+      browserSafeJobValue(child);
+    }
+  }
+  return value;
+}
+
+function canonicalJobKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function browserSafeJobString(value: string): string {
+  browserSafeJobValue(value);
+  return value;
+}
+
+function browserOpaqueJobReference(value: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value) || looksLikeStorageLocator(value)) {
+    throw new ControlPlaneError(
+      'JOB_RESPONSE_INVALID',
+      'job response contains an invalid reference',
+    );
+  }
+  return value;
+}
+
+function browserJobResultReference(value: string): string {
+  if (value.startsWith('derivative:')) {
+    browserOpaqueJobReference(value.slice('derivative:'.length));
+    return value;
+  }
+  return browserOpaqueJobReference(value);
+}
+
+function looksLikeStorageLocator(value: string): boolean {
+  return (
+    /^(?:file:|https?:\/\/)/i.test(value) ||
+    value.startsWith('/') ||
+    /^[A-Za-z]:[\\/]/.test(value) ||
+    value.startsWith('\\\\')
+  );
+}
 
 function assetForBrowser(asset: MediaAssetRecord): BrowserAssetDto {
   return {

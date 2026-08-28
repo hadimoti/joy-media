@@ -323,7 +323,9 @@ export class BrowserControlPlaneClient {
     return this.get('/v1/workers');
   }
   async jobs(projectId: string): Promise<readonly BrowserJob[]> {
-    return this.get(`/v1/projects/${encodeURIComponent(projectId)}/jobs`);
+    return browserJobList(
+      await this.get<unknown>(`/v1/projects/${encodeURIComponent(projectId)}/jobs`),
+    );
   }
   async assets(projectId: string): Promise<readonly BrowserAsset[]> {
     return browserAssetList(
@@ -984,6 +986,185 @@ function browserAssetList(value: unknown): readonly BrowserAsset[] {
   return value.map(browserAsset);
 }
 
+function browserJobList(value: unknown): readonly BrowserJob[] {
+  if (!Array.isArray(value)) throw invalidJobResponse();
+  return value.map(browserJob);
+}
+
+function browserJob(value: unknown): BrowserJob {
+  if (!isRecord(value)) throw invalidJobResponse();
+  const state = value.state;
+  if (
+    state !== 'queued' &&
+    state !== 'leased' &&
+    state !== 'completed' &&
+    state !== 'canceled' &&
+    state !== 'failed'
+  )
+    throw invalidJobResponse();
+  if (typeof value.cancelRequested !== 'boolean') throw invalidJobResponse();
+  const payload = optionalSafeJobRecord(value.payload);
+  const derivative =
+    value.derivative === undefined ? undefined : browserJobDerivative(value.derivative);
+  const assetId = optionalOpaqueJobReference(value.assetId);
+  const error = optionalSafeJobString(value.error);
+  return {
+    id: opaqueJobReference(value.id),
+    projectId: opaqueJobReference(value.projectId),
+    type: opaqueJobReference(value.type),
+    ...(assetId === undefined ? {} : { assetId }),
+    ...(payload === undefined
+      ? {}
+      : { payload: payload as Partial<RenderJobPayload> & Record<string, unknown> }),
+    state,
+    progress: responseNonNegativeInteger(value.progress),
+    cancelRequested: value.cancelRequested,
+    ...(error === undefined ? {} : { error }),
+    ...(derivative === undefined ? {} : { derivative }),
+  };
+}
+
+function browserJobDerivative(value: unknown): NonNullable<BrowserJob['derivative']> {
+  if (!isRecord(value)) throw invalidJobResponse();
+  const assetId = optionalOpaqueJobReference(value.assetId);
+  const reportRef = optionalOpaqueJobReference(value.reportRef);
+  const outputRef = optionalOpaqueJobReference(value.outputRef);
+  const sha256 = value.sha256 === undefined ? undefined : responseSha256(value.sha256);
+  const bytes = optionalPositiveIntegerResponse(value.bytes);
+  const model = optionalSafeJobString(value.model);
+  const descriptor =
+    value.descriptor === undefined ? undefined : browserMediaDescriptor(value.descriptor);
+  const evidenceIds = optionalOpaqueJobReferenceArray(value.evidenceIds);
+  const findings = optionalSafeJobValue(value.findings);
+  if (findings !== undefined && typeof findings !== 'number' && !Array.isArray(findings))
+    throw invalidJobResponse();
+  const evidence = optionalSafeJobValue(value.evidence);
+  if (evidence !== undefined && !Array.isArray(evidence)) throw invalidJobResponse();
+  const qualityReport = optionalSafeJobRecord(value.qualityReport);
+  const report = optionalSafeJobRecord(value.report);
+  return {
+    jobId: opaqueJobReference(value.jobId),
+    kind: opaqueJobReference(value.kind),
+    ...(assetId === undefined ? {} : { assetId }),
+    ...(reportRef === undefined ? {} : { reportRef }),
+    ...(outputRef === undefined ? {} : { outputRef }),
+    ...(findings === undefined ? {} : { findings: findings as number | readonly unknown[] }),
+    ...(qualityReport === undefined
+      ? {}
+      : { qualityReport: qualityReport as unknown as BrowserRenderReport }),
+    ...(report === undefined ? {} : { report: report as unknown as BrowserRenderReport }),
+    ...(sha256 === undefined ? {} : { sha256 }),
+    ...(bytes === undefined ? {} : { bytes }),
+    ...(descriptor === undefined ? {} : { descriptor }),
+    ...(value.summary === undefined ? {} : { summary: safeJobValue(value.summary) }),
+    ...(evidence === undefined ? {} : { evidence: evidence as readonly unknown[] }),
+    ...(evidenceIds === undefined ? {} : { evidenceIds }),
+    workerRef: opaqueJobReference(value.workerRef),
+    resultRef: jobResultReference(value.resultRef),
+    verifiedAt: responseNonNegativeInteger(value.verifiedAt),
+    ...(model === undefined ? {} : { model }),
+  };
+}
+
+const STORAGE_BEARING_JOB_KEYS = new Set([
+  'localref',
+  'localrefs',
+  'localpath',
+  'localpaths',
+  'location',
+  'locations',
+  'objectkey',
+  'objectkeys',
+  'storagekey',
+  'storagekeys',
+  'bucketkey',
+  'bucketkeys',
+  'privateobjectref',
+  'privateobjectrefs',
+  'cloudref',
+  'cloudrefs',
+  'path',
+  'paths',
+  'filepath',
+  'filepaths',
+  'url',
+  'urls',
+  'uri',
+  'uris',
+]);
+
+function optionalSafeJobRecord(value: unknown): Record<string, unknown> | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw invalidJobResponse();
+  safeJobValue(value);
+  return value;
+}
+
+function optionalSafeJobValue(value: unknown): unknown {
+  return value === undefined ? undefined : safeJobValue(value);
+}
+
+function safeJobValue(value: unknown): unknown {
+  if (typeof value === 'string' && looksLikeStorageLocator(value)) throw invalidJobResponse();
+  if (Array.isArray(value)) {
+    value.forEach(safeJobValue);
+    return value;
+  }
+  if (isRecord(value)) {
+    for (const [key, child] of Object.entries(value)) {
+      if (STORAGE_BEARING_JOB_KEYS.has(canonicalJobKey(key))) throw invalidJobResponse();
+      safeJobValue(child);
+    }
+  }
+  return value;
+}
+
+function canonicalJobKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function optionalSafeJobString(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  const result = responseString(value);
+  safeJobValue(result);
+  return result;
+}
+
+function opaqueJobReference(value: unknown): string {
+  const result = responseString(value);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(result) || looksLikeStorageLocator(result))
+    throw invalidJobResponse();
+  return result;
+}
+
+function optionalOpaqueJobReference(value: unknown): string | undefined {
+  return value === undefined ? undefined : opaqueJobReference(value);
+}
+
+function optionalOpaqueJobReferenceArray(value: unknown): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw invalidJobResponse();
+  return value.map(opaqueJobReference);
+}
+
+function jobResultReference(value: unknown): string {
+  const result = responseString(value);
+  if (result.startsWith('derivative:')) {
+    opaqueJobReference(result.slice('derivative:'.length));
+    return result;
+  }
+  return opaqueJobReference(result);
+}
+
+function looksLikeStorageLocator(value: string): boolean {
+  return (
+    /^(?:file:|https?:\/\/)/i.test(value) ||
+    value.startsWith('/') ||
+    /^[A-Za-z]:[\\/]/.test(value) ||
+    value.startsWith('\\\\')
+  );
+}
+
 function browserAsset(value: unknown): BrowserAsset {
   if (!isRecord(value)) throw invalidAssetResponse();
   const kind = value.kind;
@@ -1088,6 +1269,10 @@ function optionalStringArray(value: unknown): readonly string[] | undefined {
 
 function invalidAssetResponse(): Error {
   return new Error('JOY Media API returned an invalid asset response');
+}
+
+function invalidJobResponse(): Error {
+  return new Error('JOY Media API returned an invalid job response');
 }
 
 function messageIncludes(error: unknown, code: string): boolean {

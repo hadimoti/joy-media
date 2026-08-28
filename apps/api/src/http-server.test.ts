@@ -10,6 +10,7 @@ import {
   type Actor,
   type AssetLocationRecord,
   type ControlPlane,
+  type Job,
   type MediaAssetRecord,
 } from './control-plane.js';
 import {
@@ -1400,6 +1401,108 @@ describe('control-plane HTTP transport', () => {
     );
   });
 
+  it('projects owner-visible jobs without Worker-local or adapter-private receipt fields', async () => {
+    const owner = { id: 'owner' };
+    const controlPlane = new UnsafeJobProjectionControlPlane();
+    controlPlane.createProject(owner, 'job-projection-project', 'Project');
+    controlPlane.enqueue(owner, 'job-projection-1', 'job-projection-project', 'render.inspect');
+    const origin = await start({ authenticate: () => owner }, undefined, undefined, controlPlane);
+
+    const result = await request(origin, 'GET', '/v1/projects/job-projection-project/jobs');
+
+    expect(result).toMatchObject({
+      status: 200,
+      body: {
+        data: [
+          {
+            id: 'job-projection-1',
+            projectId: 'job-projection-project',
+            type: 'render.inspect',
+            state: 'completed',
+            progress: 100,
+            cancelRequested: false,
+            derivative: {
+              jobId: 'job-projection-1',
+              kind: 'image.comfy',
+              assetId: 'asset-safe',
+              sha256: 'a'.repeat(64),
+              bytes: 123,
+              descriptor: { mimeType: 'image/png', width: 16, height: 9 },
+              workerRef: 'worker-safe',
+              resultRef: 'derivative:job-projection-1',
+              verifiedAt: 123,
+              model: 'safe-model',
+            },
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(result.body)).not.toMatch(
+      /localRef|worker-local-ref|privateObjectRef|private-object-key|objectKey|bucket-key|locations|leaseOwner|leaseExpiresAt/,
+    );
+  });
+
+  it('fails closed when retained job fields contain path or URL values', async () => {
+    const cases: readonly {
+      readonly job?: Record<string, unknown>;
+      readonly derivative?: Record<string, unknown>;
+    }[] = [
+      { job: { error: 'C:\\worker\\failure.log' } },
+      { derivative: { findings: [{ detail: '/var/lib/joy/result.json' }] } },
+      { derivative: { evidenceIds: ['evidence-safe', 'https://storage.invalid/evidence'] } },
+      { derivative: { reportRef: 'file:///tmp/report.json' } },
+      { derivative: { outputRef: '/srv/private/output.mp4' } },
+      { derivative: { workerRef: 'https://worker.invalid/private' } },
+      { derivative: { resultRef: 'C:\\worker\\result.bin' } },
+      { derivative: { model: 'file:///opt/models/private.gguf' } },
+      { job: { error: 'FILE:///tmp/private.log' } },
+      { derivative: { findings: [{ detail: 'HtTp://storage.invalid/finding' }] } },
+      { derivative: { model: 'HTTPS://storage.invalid/private-model' } },
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const owner = { id: 'owner' };
+      const controlPlane = new UnsafeJobProjectionControlPlane(testCase.job, testCase.derivative);
+      const projectId = `unsafe-value-project-${index}`;
+      controlPlane.createProject(owner, projectId, 'Project');
+      controlPlane.enqueue(owner, `unsafe-value-job-${index}`, projectId, 'render.inspect');
+      const origin = await start({ authenticate: () => owner }, undefined, undefined, controlPlane);
+
+      expect(await request(origin, 'GET', `/v1/projects/${projectId}/jobs`)).toMatchObject({
+        status: 409,
+        body: { error: { code: 'JOB_RESPONSE_INVALID' } },
+      });
+    }
+  });
+
+  it('canonicalizes storage-key aliases in retained nested job data', async () => {
+    const cases: readonly {
+      readonly job?: Record<string, unknown>;
+      readonly derivative?: Record<string, unknown>;
+    }[] = [
+      { job: { payload: { params: { object_key: 'bucket/prefix/file' } } } },
+      { derivative: { report: { 'storage-key': 'bucket/prefix/file' } } },
+      { derivative: { evidence: [{ bucketKeys: 'bucket/prefix/file' }] } },
+      { derivative: { summary: { local_path: 'bucket/prefix/file' } } },
+      { derivative: { qualityReport: { object_keys: ['bucket/prefix/file'] } } },
+      { derivative: { findings: [{ 'private-object-refs': ['bucket/prefix/file'] }] } },
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const owner = { id: 'owner' };
+      const controlPlane = new UnsafeJobProjectionControlPlane(testCase.job, testCase.derivative);
+      const projectId = `unsafe-key-project-${index}`;
+      controlPlane.createProject(owner, projectId, 'Project');
+      controlPlane.enqueue(owner, `unsafe-key-job-${index}`, projectId, 'render.inspect');
+      const origin = await start({ authenticate: () => owner }, undefined, undefined, controlPlane);
+
+      expect(await request(origin, 'GET', `/v1/projects/${projectId}/jobs`)).toMatchObject({
+        status: 409,
+        body: { error: { code: 'JOB_RESPONSE_INVALID' } },
+      });
+    }
+  });
+
   it('projects every browser-facing asset and derivative response without storage references', async () => {
     const controlPlane = new LocalControlPlane();
     const store = new MemoryPrivateObjectStore();
@@ -2772,6 +2875,53 @@ class UnsafeDescriptorControlPlane extends LocalControlPlane {
         credentials: 'credential-value',
       } as MediaAssetRecord['descriptor'],
     }));
+  }
+}
+
+class UnsafeJobProjectionControlPlane extends LocalControlPlane {
+  constructor(
+    private readonly jobOverrides: Record<string, unknown> = {},
+    private readonly derivativeOverrides: Record<string, unknown> = {
+      localRef: 'worker-local-ref',
+      privateObjectRef: 'private-object-key',
+      objectKey: 'bucket-key',
+      locations: [{ kind: 'private-object', ref: 'private-object-key' }],
+    },
+  ) {
+    super();
+  }
+
+  override jobsForProject(actor: Actor, projectId: string): readonly Job[] {
+    return super.jobsForProject(actor, projectId).map(
+      (job) =>
+        ({
+          ...job,
+          state: 'completed',
+          progress: 100,
+          leaseOwner: 'worker-private',
+          leaseExpiresAt: 999,
+          ...this.jobOverrides,
+          derivative: {
+            jobId: job.id,
+            kind: 'image.comfy',
+            assetId: 'asset-safe',
+            sha256: 'a'.repeat(64),
+            bytes: 123,
+            descriptor: {
+              mimeType: 'image/png',
+              width: 16,
+              height: 9,
+              locations: [{ kind: 'private-object', ref: 'private-object-key' }],
+              objectKey: 'bucket-key',
+            },
+            workerRef: 'worker-safe',
+            resultRef: `derivative:${job.id}`,
+            verifiedAt: 123,
+            model: 'safe-model',
+            ...this.derivativeOverrides,
+          },
+        }) as unknown as Job,
+    );
   }
 }
 

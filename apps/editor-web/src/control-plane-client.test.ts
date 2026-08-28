@@ -340,6 +340,139 @@ describe('BrowserControlPlaneClient', () => {
     ]);
   });
 
+  it('projects job responses and rejects storage-bearing fields nested in safe payloads', async () => {
+    const original = globalThis.fetch;
+    let response: unknown = {
+      data: [
+        {
+          id: 'job-1',
+          projectId: 'project-1',
+          type: 'image.comfy',
+          state: 'completed',
+          progress: 100,
+          cancelRequested: false,
+          leaseOwner: 'worker-private',
+          derivative: {
+            jobId: 'job-1',
+            kind: 'image.comfy',
+            assetId: 'asset-1',
+            sha256: 'a'.repeat(64),
+            bytes: 10,
+            localRef: 'worker-local-ref',
+            objectKey: 'private-object-key',
+            descriptor: { mimeType: 'image/png', width: 10, height: 10, objectKey: 'nested-key' },
+            workerRef: 'worker-1',
+            resultRef: 'derivative:job-1',
+            verifiedAt: 1,
+          },
+        },
+      ],
+    };
+    globalThis.fetch = async () => json(200, response);
+    try {
+      const client = new BrowserControlPlaneClient('https://media.joyteam.ir/api', () => 'token');
+      const jobs = await client.jobs('project-1');
+      expect(jobs).toEqual([
+        expect.objectContaining({
+          id: 'job-1',
+          derivative: expect.objectContaining({
+            resultRef: 'derivative:job-1',
+            descriptor: { mimeType: 'image/png', width: 10, height: 10 },
+          }),
+        }),
+      ]);
+      expect(JSON.stringify(jobs)).not.toMatch(/leaseOwner|localRef|objectKey|private-object-key/);
+
+      response = {
+        data: [
+          {
+            id: 'job-2',
+            projectId: 'project-1',
+            type: 'render.inspect',
+            payload: { nested: { privateObjectRef: 'private-object-key' } },
+            state: 'queued',
+            progress: 0,
+            cancelRequested: false,
+          },
+        ],
+      };
+      await expect(client.jobs('project-1')).rejects.toThrow('invalid job response');
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('rejects path-bearing retained job fields and canonical storage-key aliases', async () => {
+    const original = globalThis.fetch;
+    const baseDerivative = {
+      jobId: 'job-unsafe',
+      kind: 'image.comfy',
+      assetId: 'asset-1',
+      sha256: 'a'.repeat(64),
+      bytes: 10,
+      descriptor: { mimeType: 'image/png', width: 10, height: 10 },
+      workerRef: 'worker-1',
+      resultRef: 'derivative:job-unsafe',
+      verifiedAt: 1,
+    };
+    const baseJob = {
+      id: 'job-unsafe',
+      projectId: 'project-1',
+      type: 'image.comfy',
+      state: 'completed',
+      progress: 100,
+      cancelRequested: false,
+      derivative: baseDerivative,
+    };
+    let response: unknown;
+    globalThis.fetch = async () => json(200, response);
+    try {
+      const client = new BrowserControlPlaneClient('https://media.joyteam.ir/api', () => 'token');
+      const retainedValueCases: readonly {
+        readonly job?: Record<string, unknown>;
+        readonly derivative?: Record<string, unknown>;
+      }[] = [
+        { job: { error: 'C:\\worker\\failure.log' } },
+        { derivative: { findings: [{ detail: '/var/lib/joy/result.json' }] } },
+        { derivative: { evidenceIds: ['evidence-safe', 'https://storage.invalid/evidence'] } },
+        { derivative: { reportRef: 'file:///tmp/report.json' } },
+        { derivative: { outputRef: '/srv/private/output.mp4' } },
+        { derivative: { workerRef: 'https://worker.invalid/private' } },
+        { derivative: { resultRef: 'C:\\worker\\result.bin' } },
+        { derivative: { model: 'file:///opt/models/private.gguf' } },
+        { job: { error: 'FILE:///tmp/private.log' } },
+        { derivative: { findings: [{ detail: 'HtTp://storage.invalid/finding' }] } },
+        { derivative: { model: 'HTTPS://storage.invalid/private-model' } },
+      ];
+      const aliasCases: readonly {
+        readonly job?: Record<string, unknown>;
+        readonly derivative?: Record<string, unknown>;
+      }[] = [
+        { job: { payload: { params: { object_key: 'bucket/prefix/file' } } } },
+        { derivative: { report: { 'storage-key': 'bucket/prefix/file' } } },
+        { derivative: { evidence: [{ bucketKeys: 'bucket/prefix/file' }] } },
+        { derivative: { summary: { local_path: 'bucket/prefix/file' } } },
+        { derivative: { qualityReport: { object_keys: ['bucket/prefix/file'] } } },
+        { derivative: { findings: [{ 'private-object-refs': ['bucket/prefix/file'] }] } },
+      ];
+
+      for (const testCase of [...retainedValueCases, ...aliasCases]) {
+        response = {
+          data: [
+            {
+              ...baseJob,
+              ...testCase.job,
+              derivative: { ...baseDerivative, ...testCase.derivative },
+            },
+          ],
+        };
+        await expect(client.jobs('project-1')).rejects.toThrow('invalid job response');
+      }
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
   it('rejects with no network call when there is no stored session', async () => {
     const original = globalThis.fetch;
     globalThis.fetch = async () => {
