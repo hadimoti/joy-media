@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { POSTGRES_SCHEMA } from './postgres-schema.js';
 
@@ -25,7 +24,10 @@ CREATE TABLE IF NOT EXISTS joy_media_schema_migrations (
  */
 const BASELINE_MIGRATION: PostgresMigration = {
   id: '001-baseline',
-  checksum: `sha256:${createHash('sha256').update(POSTGRES_SCHEMA).digest('hex')}`,
+  // This is the checksum recorded by the currently deployed JOY Media
+  // release. Keep the baseline immutable; additive schema changes belong in
+  // a new migration so an older release can still start during rollback.
+  checksum: 'sha256:6044f0fbe21a3fb9ec46fc0a95f022842f1a0463fba94cdd53d4da844c4a23a1',
   up: async (database) => {
     await database.query(POSTGRES_SCHEMA);
   },
@@ -119,9 +121,22 @@ const ASSET_REVOCATION_PRIMARY_KEY_MIGRATION: PostgresMigration = {
   up: repairAssetRevocationPrimaryKey,
 };
 
+const WORKER_LEASE_GENERATION_MIGRATION: PostgresMigration = {
+  id: '003-worker-lease-generation',
+  checksum: 'sha256:worker-lease-generation-2026-08-29',
+  up: async (database) => {
+    await database.query(`
+      ALTER TABLE jobs ADD COLUMN IF NOT EXISTS generation integer NOT NULL DEFAULT 0;
+      ALTER TABLE jobs ADD COLUMN IF NOT EXISTS lease_token text;
+      ALTER TABLE job_attempts ADD COLUMN IF NOT EXISTS generation integer NOT NULL DEFAULT 0;
+    `);
+  },
+};
+
 export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
   BASELINE_MIGRATION,
   ASSET_REVOCATION_PRIMARY_KEY_MIGRATION,
+  WORKER_LEASE_GENERATION_MIGRATION,
 ];
 
 export async function runPostgresMigrations(database: MigrationDatabase): Promise<void> {

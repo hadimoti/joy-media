@@ -27,6 +27,11 @@ describe('ordered PostgreSQL migrations', () => {
     expect(queries.some((query) => query.includes('CREATE TABLE IF NOT EXISTS projects'))).toBe(
       true,
     );
+    expect(
+      queries.some((query) =>
+        query.includes('ALTER TABLE jobs ADD COLUMN IF NOT EXISTS generation'),
+      ),
+    ).toBe(true);
   });
 
   it('does not rerun an already applied migration with the same checksum', async () => {
