@@ -486,6 +486,26 @@ or raw secret-bearing artifacts.
 
 ## Final acceptance checklist
 
+## Execution checkpoint — 2026-08-28
+
+- The local JOY Media hardening checkpoint is committed through `5a93312` on
+  `codex/joy-media-implement-20260828`; its pre-merge state is preserved at
+  `backup/joy-media-before-main-merge-20260828`.
+- The checkpoint passes `pnpm check` (310 files, 2,408 passed tests, 1 skipped) and
+  `pnpm audit --prod --audit-level high` (no known vulnerabilities).
+- A GitHub branch has been published at
+  `codex/joy-media-implement-20260828` for review.
+- Reconciliation with GitHub `main` is currently a release blocker: the two lines
+  diverge from a July common base and the remote line's creative-brief, Joy Code,
+  and universal-timeline additions do not type-check against the deployed
+  checkpoint when merged. The merge was aborted without changing either remote;
+  no force-push, VPS mutation, or live deployment has been performed.
+- Before promotion, an explicit reconciliation decision is required: port the
+  remote `main` feature line onto the tested checkpoint (with a new full gate), or
+  promote the tested checkpoint as the new `main` while preserving the remote
+  feature line in a review branch. Until that decision and a clean merge are
+  complete, the final acceptance checklist remains intentionally unchecked.
+
 - [ ] GitHub `main`, local `main`, VPS bare `main`, release tag, manifest, and deployed release all
       resolve to the same verified source SHA/tree.
 - [ ] No checkpoint behavior is lost or duplicated; the reconciliation/parity matrix is complete.
