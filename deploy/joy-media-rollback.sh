@@ -64,6 +64,23 @@ mv -Tf -- "$TMP_WEB" "$WEB"
 systemctl restart joy-media@api
 nginx -t
 systemctl reload nginx
-curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8790/live >/dev/null
-curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8790/ready >/dev/null
+
+# systemd reports the process started before Node has bound the socket. Poll
+# briefly so an otherwise healthy rollback is not reported as failed during
+# that normal startup window.
+wait_for_endpoint() {
+  local endpoint="$1"
+  local attempt
+  for attempt in $(seq 1 20); do
+    if curl --fail --silent --show-error --max-time 2 "$endpoint" >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "rollback health check timed out: $endpoint" >&2
+  return 1
+}
+
+wait_for_endpoint http://127.0.0.1:8790/live
+wait_for_endpoint http://127.0.0.1:8790/ready
 echo "rollback complete"
