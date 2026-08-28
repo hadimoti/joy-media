@@ -15,7 +15,7 @@ import {
   ProviderApprovalService,
   providerApprovalSigningConfigFromEnv,
 } from './provider-approval.js';
-import { productionReadinessOptions } from './server-readiness.js';
+import { productionReadinessOptions, releaseIdentityFromEnvironment } from './server-readiness.js';
 
 await start();
 
@@ -89,6 +89,7 @@ async function start(): Promise<void> {
       pool,
       durableControlPlane,
       privateObjectStore,
+      releaseIdentity: releaseIdentityFromEnvironment(process.env),
     }),
   }).listen(port, host);
   console.log(`JOY Media API listening on ${host}:${port}`);

@@ -62,9 +62,18 @@ export interface ApiAuthentication {
 
 export type ApiReadinessCheck = () => boolean | Promise<boolean>;
 
+export interface ApiReleaseIdentity {
+  readonly commitSha: string;
+  readonly treeHash: string;
+  readonly lockfileSha256: string;
+  readonly schemaVersion: number;
+}
+
 export interface ApiReadinessOptions {
   /** Named dependency probes. Failures are reported by name without exposing error details. */
   readonly checks?: Readonly<Record<string, ApiReadinessCheck>>;
+  /** Validated, non-secret source metadata injected when the release is built or deployed. */
+  readonly releaseIdentity?: ApiReleaseIdentity;
 }
 
 export interface ControlPlaneHttpServerOptions {
@@ -165,7 +174,8 @@ async function route(
       service: 'joy-media-api',
       readiness: readiness.ready,
       controlPlane: readiness.ready,
-      ...(Object.keys(readiness.checks).length === 0 ? {} : { checks: readiness.checks }),
+      checks: readiness.checks,
+      releaseIdentity: options.readiness?.releaseIdentity ?? null,
     });
     return;
   }

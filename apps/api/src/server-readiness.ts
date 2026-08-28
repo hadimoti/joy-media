@@ -1,5 +1,5 @@
 import type { ControlPlane } from './control-plane.js';
-import type { ApiReadinessOptions } from './http-server.js';
+import type { ApiReadinessOptions, ApiReleaseIdentity } from './http-server.js';
 import type { PrivateObjectStore } from './private-object-store.js';
 
 interface ReadinessQueryClient {
@@ -10,6 +10,42 @@ export interface ProductionReadinessDependencies {
   readonly pool: ReadinessQueryClient | undefined;
   readonly durableControlPlane: ControlPlane | undefined;
   readonly privateObjectStore: PrivateObjectStore | undefined;
+  readonly releaseIdentity: ApiReleaseIdentity | undefined;
+}
+
+export const RELEASE_IDENTITY_ENVIRONMENT_KEYS = {
+  commitSha: 'JOY_MEDIA_RELEASE_COMMIT_SHA',
+  treeHash: 'JOY_MEDIA_RELEASE_TREE_HASH',
+  lockfileSha256: 'JOY_MEDIA_RELEASE_LOCKFILE_SHA256',
+  schemaVersion: 'JOY_MEDIA_RELEASE_SCHEMA_VERSION',
+} as const;
+
+/**
+ * Reads only explicitly named, non-secret release metadata. Invalid or partial
+ * metadata is discarded so readiness can fail closed without echoing it.
+ */
+export function releaseIdentityFromEnvironment(
+  environment: Readonly<Record<string, string | undefined>>,
+): ApiReleaseIdentity | undefined {
+  const commitSha = environment[RELEASE_IDENTITY_ENVIRONMENT_KEYS.commitSha]?.trim();
+  const treeHash = environment[RELEASE_IDENTITY_ENVIRONMENT_KEYS.treeHash]?.trim();
+  const lockfileSha256 = environment[RELEASE_IDENTITY_ENVIRONMENT_KEYS.lockfileSha256]?.trim();
+  const rawSchemaVersion = environment[RELEASE_IDENTITY_ENVIRONMENT_KEYS.schemaVersion]?.trim();
+  const schemaVersion = rawSchemaVersion === undefined ? Number.NaN : Number(rawSchemaVersion);
+
+  if (
+    commitSha === undefined ||
+    !/^[0-9a-f]{40,64}$/u.test(commitSha) ||
+    treeHash === undefined ||
+    !/^[0-9a-f]{40,64}$/u.test(treeHash) ||
+    lockfileSha256 === undefined ||
+    !/^[0-9a-f]{64}$/u.test(lockfileSha256) ||
+    !Number.isSafeInteger(schemaVersion) ||
+    schemaVersion < 1
+  )
+    return undefined;
+
+  return { commitSha, treeHash, lockfileSha256, schemaVersion };
 }
 
 /**
@@ -20,7 +56,11 @@ export function productionReadinessOptions(
   dependencies: ProductionReadinessDependencies,
 ): ApiReadinessOptions {
   return {
+    ...(dependencies.releaseIdentity === undefined
+      ? {}
+      : { releaseIdentity: dependencies.releaseIdentity }),
     checks: {
+      releaseIdentity: () => dependencies.releaseIdentity !== undefined,
       database: async () => {
         if (dependencies.pool === undefined) return false;
         await dependencies.pool.query('SELECT 1');

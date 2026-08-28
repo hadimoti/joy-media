@@ -15,6 +15,7 @@ import {
 import {
   createControlPlaneHttpServer,
   type ApiAuthentication,
+  type ApiReleaseIdentity,
   type ApiReadinessOptions,
 } from './http-server.js';
 import { DisabledMediaAuth } from './media-auth.js';
@@ -31,6 +32,12 @@ import { PostgresControlPlane } from './postgres-control-plane.js';
 import type { ProductionRunAuthority, ProductionRunRecordV1 } from './production-runs.js';
 
 const servers: Server[] = [];
+const releaseIdentity: ApiReleaseIdentity = {
+  commitSha: 'a'.repeat(40),
+  treeHash: 'b'.repeat(40),
+  lockfileSha256: 'c'.repeat(64),
+  schemaVersion: 1,
+};
 
 afterEach(async () => {
   await Promise.all(
@@ -180,6 +187,7 @@ describe('control-plane HTTP transport', () => {
       undefined,
       undefined,
       {
+        releaseIdentity,
         checks: {
           database: () => true,
           objectStore: async () => true,
@@ -194,11 +202,37 @@ describe('control-plane HTTP transport', () => {
         readiness: true,
         controlPlane: true,
         checks: { database: true, objectStore: true },
+        releaseIdentity,
       },
     });
     expect(await request(origin, 'GET', '/health/ready')).toMatchObject({
       status: 200,
-      body: { readiness: true },
+      body: { readiness: true, checks: { database: true, objectStore: true }, releaseIdentity },
+    });
+  });
+
+  it('reports unavailable release identity without leaking unvalidated build metadata', async () => {
+    const origin = await start(
+      { authenticate: () => undefined },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        checks: { releaseIdentity: () => false, database: () => true },
+      },
+    );
+
+    expect(await request(origin, 'GET', '/ready')).toMatchObject({
+      status: 503,
+      body: {
+        ok: false,
+        readiness: false,
+        checks: { releaseIdentity: false, database: true },
+        releaseIdentity: null,
+      },
     });
   });
 
