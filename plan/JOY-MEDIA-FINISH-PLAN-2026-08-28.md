@@ -492,7 +492,7 @@ or raw secret-bearing artifacts.
 
 ## Execution checkpoint — 2026-08-28
 
-- The local JOY Media hardening checkpoint is committed through `f6b129b` on
+- The local JOY Media hardening checkpoint is committed through `63c6511` on
   `codex/joy-media-implement-20260828`; its pre-merge state is preserved at
   `backup/joy-media-before-main-merge-20260828`.
 - The checkpoint passes `pnpm check` (310 files, 2,408 passed tests, 1 skipped) and
@@ -514,10 +514,10 @@ or raw secret-bearing artifacts.
 unavailable`, and a console error loading `/transitions/preview/transition2.png`.
   This is evidence of the currently deployed release, not evidence for the new
   checkpoint; no browser mutation was performed.
-- The transition preview defect is fixed on the checkpoint in commits `6310a6d` and
-  `f6b129b` (superseded by the asset-path correction in the next checkpoint commit). OpenCLI
-  profile `cefd9k77` verified both new SVG endpoints from a local production build with HTTP 200
-  and `image/svg+xml`, and the editor preview unit tests/build passed.
+- The transition preview defect is fixed on the checkpoint in `e2e7838` (with the formatted
+  release note in `63c6511`). OpenCLI profile `cefd9k77` verified both stable SVG endpoints from
+  a local production build with HTTP 200 and `image/svg+xml`; transition preview tests, the full
+  test suite (2,410 passed, 1 skipped), and editor build passed.
 - The legacy `fixture.thumbnail` production path was retired in `f485bbc`. The
   release evaluator now passes command health, tests, generated-artifact hygiene,
   fixture registry, builds, manifest, SBOM, and feature-status checks. It still
