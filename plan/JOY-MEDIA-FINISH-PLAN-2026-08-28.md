@@ -84,8 +84,8 @@ Codex in-app-browser findings below remain valid independent evidence.
 | --------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------- |
 | Local checkpoint branch     | `39d723e` on `codex/joy-media-implement-20260828` | Clean tested candidate, published for review; not yet promoted to `main`.         |
 | Deployed/VPS release branch | `b3c1866`                                         | Older certified release; candidate has additional hardening and is not deployed.  |
-| GitHub `main`               | `2083ffc`                                         | 407 main-only commits versus 184 candidate-only commits.                          |
-| VPS `main`                  | `1e4657f`                                         | 225 VPS-main-only commits versus 184 candidate-only commits.                      |
+| GitHub `main`               | `2083ffc`                                         | 407 main-only commits versus 185 candidate-only commits.                          |
+| VPS `main`                  | `1e4657f`                                         | 225 VPS-main-only commits versus 185 candidate-only commits.                      |
 | Common merge base           | `73744bb`                                         | A blind merge is unsafe; simulated reconciliation has extensive overlap/conflict. |
 
 `aec01ef` contains 324 changed files and a large quantity of transient evidence, debug files, and
