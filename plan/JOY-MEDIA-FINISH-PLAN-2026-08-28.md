@@ -503,6 +503,12 @@ or raw secret-bearing artifacts.
   scoped tests, generated-artifact hygiene, fixture registries, builds, manifest, SBOM, and
   feature-status as passed. It remains **NO-GO** only because source-bound authenticated browser
   provenance and the required `authenticated-editor-1.0` journey are absent.
+- A fresh read-only OpenCLI probe using profile `cefd9k77` against `https://www.joyst.ir/` found
+  zero browser console messages and a Projects shell with a Local editor project. The same
+  browser fetch returned `GET /api/live` 200 JSON and the legacy 74-byte `GET /api/ready` 200
+  response, while `/transitions/preview/transition2.png` still returned 200 `text/html` (SPA
+  fallback). Clicking the Local editor project did not leave the Projects route, so this remains
+  public-shell evidence rather than an authenticated editor journey and no mutation was made.
 - The frontend specialist's additive, namespaced Creative Brief v2 contract landed as `eda8d64`.
   It preserves all current v1 exports and its focused suite passes 10/10; the isolated worktree's
   package build could not resolve an unrelated workspace declaration, so the candidate's full
