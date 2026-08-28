@@ -12,7 +12,12 @@ import type {
   VisualRenderNode,
   EffectInstanceIR,
 } from '@joy-media/render-ir';
-import { flattenRenderNodes, validateRenderFrameIR } from '@joy-media/render-ir';
+import {
+  flattenRenderNodes,
+  pinnedTextGlyph,
+  validateRenderFrameIR,
+  visualTextGlyphs,
+} from '@joy-media/render-ir';
 import { applyCreativeEffect } from './creative-effects.js';
 
 export const PACKAGE_NAME = '@joy-media/renderer-headless' as const;
@@ -133,13 +138,62 @@ function drawTextRaw(
   height: number,
   node: Extract<VisualRenderNode, { kind: 'text' }>,
 ): void {
+  const characters = visualTextGlyphs(node.text, node.direction ?? 'ltr');
+  const glyphWidth =
+    node.fontSizePx === undefined ? 4 : Math.max(4, Math.round(node.fontSizePx / 12));
+  const glyphHeight =
+    node.fontSizePx === undefined ? 5 : Math.max(5, Math.round(node.fontSizePx / 12) * 5);
+  const contentWidth = characters.length * glyphWidth;
+  const originX =
+    node.align === 'center' ? -contentWidth / 2 : node.align === 'right' ? -contentWidth : 0;
+  const padding = node.background === undefined ? 0 : Math.max(1, Math.round(glyphHeight * 0.12));
   rasterizeRaw(pixels, width, height, node, (u, v) => {
-    const glyphColumn = Math.floor(u) % 4;
-    const characterIndex = Math.floor(Math.floor(u) / 4);
-    return bitmap(node.text[characterIndex] ?? ' ', glyphColumn, Math.floor(v))
-      ? node.color
-      : undefined;
+    const localX = u - originX;
+    const localY = v;
+    if (localX >= 0 && localY >= 0 && localX < contentWidth && localY < glyphHeight) {
+      const visualIndex = Math.floor(localX / glyphWidth);
+      const visualGlyph = characters[visualIndex];
+      const glyphColumn = Math.min(3, Math.floor(((localX % glyphWidth) * 4) / glyphWidth));
+      const glyphRow = Math.min(4, Math.floor((localY * 5) / glyphHeight));
+      const character = visualGlyph?.character ?? ' ';
+      if (glyph(character, glyphColumn, glyphRow))
+        return textColorAt(node, visualGlyph?.sourceIndex ?? -1);
+    }
+    if (
+      node.background !== undefined &&
+      u >= originX - padding &&
+      u < originX + contentWidth + padding &&
+      v >= -padding &&
+      v < glyphHeight + padding
+    )
+      return node.background;
+    return undefined;
   });
+}
+
+function textColorAt(
+  node: Extract<VisualRenderNode, { kind: 'text' }>,
+  characterIndex: number,
+): Rgba {
+  if (node.spans === undefined) return node.color;
+  let offset = 0;
+  for (const span of node.spans) {
+    const end = offset + [...span.text].length;
+    if (characterIndex >= offset && characterIndex < end) return span.color;
+    offset = end;
+  }
+  return node.color;
+}
+
+/** Pinned 5x4 glyphs keep the original JOY fixture stable; other Unicode text
+ * uses a deterministic hash glyph so captions (including RTL scripts) remain
+ * visible without a platform font/provider dependency. */
+function glyph(character: string, column: number, row: number): boolean {
+  const pinned = pinnedTextGlyph(character, column, row);
+  if (pinned !== undefined) return pinned;
+  if (/^\s$/u.test(character)) return false;
+  const seed = hash32(`glyph:${character}`);
+  return ((seed >>> ((column + row * 4) % 24)) & 1) === 1;
 }
 
 function colorFromClipId(clipId: string): Rgba {
@@ -165,8 +219,13 @@ function rasterizeRaw(
 ): void {
   for (let row = 0; row < height; row++) {
     for (let column = 0; column < width; column++) {
-      const u = (column + 0.5 - node.transform.translateX) / node.transform.scaleX;
-      const v = (row + 0.5 - node.transform.translateY) / node.transform.scaleY;
+      const radians = ((node.transform.rotationDeg ?? 0) * Math.PI) / 180;
+      const cos = Math.cos(radians);
+      const sin = Math.sin(radians);
+      const dx = column + 0.5 - node.transform.translateX;
+      const dy = row + 0.5 - node.transform.translateY;
+      const u = (cos * dx + sin * dy) / node.transform.scaleX;
+      const v = (-sin * dx + cos * dy) / node.transform.scaleY;
       const color = lookup(u, v);
       if (color !== undefined) composite(pixels, (row * width + column) * 4, color, 1);
     }
@@ -430,14 +489,4 @@ function applyHueSaturation(
 
 function clamp(v: number): number {
   return Math.round(Math.max(0, Math.min(255, v)));
-}
-
-const BITMAP: Readonly<Record<string, readonly string[]>> = {
-  J: ['011', '001', '001', '101', '010'],
-  O: ['010', '101', '101', '101', '010'],
-  Y: ['101', '101', '010', '010', '010'],
-};
-
-function bitmap(character: string, column: number, row: number): boolean {
-  return BITMAP[character]?.[row]?.[column] === '1';
 }

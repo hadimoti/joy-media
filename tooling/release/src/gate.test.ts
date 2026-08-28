@@ -18,7 +18,18 @@ const passingInput = (): ReleaseGateInput => ({
   builds: Object.fromEntries(REQUIRED_BUILD_IDS.map((id) => [id, true])),
   manifestGenerated: true,
   sbomGenerated: true,
-  browserJourneys: [{ id: REQUIRED_JOURNEY_ID, status: 'verified', verifiedAt: '2026-08-22' }],
+  browserJourneys: [
+    {
+      id: REQUIRED_JOURNEY_ID,
+      status: 'verified',
+      verifiedAt: '2026-08-22',
+      evidencePath: 'test-output/browser/authenticated-editor-1.0/journey-evidence.json',
+      execution: 'real-services',
+      deliveryChannel: 'verified-delivery',
+      inspectionState: 'passed',
+      postMotionPlacement: true,
+    },
+  ],
   featureStatus: {
     auditedOn: '2026-08-22',
     statuses: ['production', 'demo-only', 'experimental', 'hidden'],
@@ -146,7 +157,10 @@ describe('JOY Studio 1.0 release gate', () => {
           'apps/api/dist/server.js': sha256File(join(root, 'apps/api/dist/server.js')),
         },
       },
-      sbom: { bomFormat: 'cyclonedx', components: [] },
+      sbom: {
+        bomFormat: 'cyclonedx',
+        components: [{ type: 'library', name: 'joy-media', version: '1.0.0' }],
+      },
     };
     const result = writeReleaseEvidence(
       root,

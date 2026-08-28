@@ -7,6 +7,28 @@ export type AssetAvailability = 'all' | BrowserDerivative['availability'] | 'non
 export type AssetSort = 'recent' | 'name' | 'size' | 'tags';
 export type AssetViewMode = 'large' | 'medium' | 'list';
 
+/** Keep the DOM bounded while allowing a deliberate, incremental reveal. */
+export const ASSET_RENDER_PAGE_SIZE = 120;
+export const ASSET_RENDER_MAX = 250;
+
+export function renderAssetLibraryItems(
+  items: readonly AssetLibraryItem[],
+  renderLimit: number,
+  page = 0,
+): readonly AssetLibraryItem[] {
+  const start = Math.max(0, page) * ASSET_RENDER_MAX;
+  return items.slice(start, start + Math.min(ASSET_RENDER_MAX, Math.max(0, renderLimit)));
+}
+
+export function nextAssetRenderLimit(current: number, total: number): number {
+  return Math.min(ASSET_RENDER_MAX, total, current + ASSET_RENDER_PAGE_SIZE);
+}
+
+/** Number of bounded pages needed to make every filtered item reachable. */
+export function assetLibraryPageCount(total: number): number {
+  return Math.max(1, Math.ceil(Math.max(0, total) / ASSET_RENDER_MAX));
+}
+
 export interface AssetLibraryItem {
   readonly asset: BrowserAsset;
   readonly derivatives: readonly BrowserDerivative[];

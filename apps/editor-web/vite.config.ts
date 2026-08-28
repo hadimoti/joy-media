@@ -30,6 +30,7 @@ export default defineConfig({
     },
   },
   build: {
+    manifest: true,
     rollupOptions: {
       output: {
         /**
@@ -42,11 +43,6 @@ export default defineConfig({
         manualChunks: {
           react: ['react', 'react-dom', 'react/jsx-runtime', 'react-dom/client'],
           dockview: ['dockview'],
-          three: [
-            'three',
-            'three/examples/jsm/controls/OrbitControls.js',
-            'three/examples/jsm/loaders/GLTFLoader.js',
-          ],
         },
       },
     },

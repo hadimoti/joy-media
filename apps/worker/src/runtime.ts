@@ -19,9 +19,11 @@ import type {
   VideoReferenceAnalyzeReceipt,
   WorkerCapability,
   WorkerHello,
+  RenderInspectPayload,
+  RenderInspectReceipt,
 } from '@joy-media/job-protocol';
 import { WORKER_PROTOCOL_VERSION } from '@joy-media/job-protocol';
-import type { RenderBundleV1 } from '@joy-media/render-planner';
+import type { RenderBundleV1, RenderBundleV2 } from '@joy-media/render-planner';
 import {
   readGpuDerivative,
   runAudioMlDenoiseJob,
@@ -39,6 +41,11 @@ import {
   renderExportOutputPath,
   type RenderExportReceiptV1,
 } from './export-job.js';
+import {
+  assertApiSafeRenderReport,
+  inspectRenderedDelivery,
+  type DeliveryPromiseV1,
+} from '@joy-media/production-quality';
 import { mediaResolverFromAssetSourceRegistry } from './worker-media-resolver.js';
 import { analyzeReferenceVideo, type ReferenceAnalysisError } from './reference-analysis.js';
 import { buildSemanticBrollIndex, createMediaSemanticIndexReceipt } from './semantic-index.js';
@@ -161,6 +168,14 @@ export interface LocalAssetSourceRegistry {
   resolve(assetId: string): string | undefined;
 }
 
+export interface WorkerRenderArtifactResolver {
+  (input: {
+    readonly jobId: string;
+    readonly artifactId: string;
+    readonly outputRef: string;
+  }): Promise<Uint8Array>;
+}
+
 export class StaticLocalAssetSourceRegistry implements LocalAssetSourceRegistry {
   readonly #paths = new Map<string, string>();
 
@@ -253,13 +268,19 @@ export class WorkerRuntime {
     private readonly options: {
       readonly sources?: LocalAssetSourceRegistry;
       readonly derivativeDirectory?: string;
+      readonly renderArtifactResolver?: WorkerRenderArtifactResolver;
     } = {},
   ) {}
   hello(platform: string, architecture: string): WorkerHello {
     const capabilities: WorkerCapability[] = [];
     capabilities.push('media.semantic-index');
     if (this.tools.ffmpeg && this.tools.ffprobe) {
-      capabilities.push('asset.thumbnail', 'render.export', 'video.reference-analyze');
+      capabilities.push(
+        'asset.thumbnail',
+        'render.export',
+        'render.inspect',
+        'video.reference-analyze',
+      );
     }
     if (this.tools.comfy) capabilities.push('image.comfy');
     if (this.tools.mlDenoise) capabilities.push('audio.ml-denoise');
@@ -284,9 +305,16 @@ export class WorkerRuntime {
       readonly type: string;
       readonly assetId?: string;
       readonly payload?: {
-        readonly bundle?: RenderBundleV1;
+        readonly projectRef?: string;
+        readonly compositionId?: string;
+        readonly presetId?: string;
+        readonly bundle?: RenderBundleV1 | RenderBundleV2;
         readonly frameLimit?: number;
         readonly reportRef?: string;
+        readonly artifactId?: string;
+        readonly outputRef?: string;
+        readonly promise?: DeliveryPromiseV1;
+        readonly mode?: 'sampled';
         readonly prompt?: string;
         readonly model?: string;
         readonly negativePrompt?: string;
@@ -308,6 +336,7 @@ export class WorkerRuntime {
     options: {
       readonly cancelled: () => boolean;
       readonly progress: (progress: number) => Promise<void>;
+      readonly readRenderArtifact?: WorkerRenderArtifactResolver;
     },
   ): Promise<
     | {
@@ -488,6 +517,54 @@ export class WorkerRuntime {
         throw error;
       }
     }
+    if (job.type === 'render.inspect') {
+      if (!this.tools.ffmpeg || !this.tools.ffprobe)
+        throw new Error('FFmpeg and FFprobe are required');
+      const payload = job.payload as Partial<RenderInspectPayload> | undefined;
+      if (
+        payload?.artifactId === undefined ||
+        payload.outputRef === undefined ||
+        payload.promise === undefined ||
+        payload.reportRef === undefined
+      )
+        throw new Error('render.inspect requires an existing export artifact payload');
+      const resolver = options.readRenderArtifact ?? this.options.renderArtifactResolver;
+      if (resolver === undefined)
+        throw new Error('render.inspect artifact resolver is unavailable');
+      if (options.cancelled()) return { state: 'canceled' };
+      const tempDir = mkdtempSync(join(tmpdir(), `joy-media-inspect-${job.id}-`));
+      const artifactPath = join(tempDir, 'artifact.mp4');
+      this.log.write(`job ${job.id} started (render.inspect)`);
+      try {
+        await options.progress(10);
+        const bytes = await resolver({
+          jobId: job.id,
+          artifactId: payload.artifactId,
+          outputRef: payload.outputRef,
+        });
+        if (bytes.byteLength < 1) throw new Error('render inspection artifact is empty');
+        writeFileSync(artifactPath, bytes);
+        await options.progress(35);
+        const report = inspectRenderedDelivery(artifactPath, payload.promise, {
+          mode: payload.mode ?? 'sampled',
+          outputRef: payload.outputRef,
+        });
+        assertApiSafeRenderReport(report);
+        await options.progress(100);
+        this.log.write(`job ${job.id} completed`);
+        return {
+          state: 'completed',
+          result: {
+            kind: 'render.inspect',
+            reportRef: payload.reportRef,
+            outputRef: payload.outputRef,
+            report,
+          },
+        };
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    }
     if (job.type === 'render.export') {
       if (!this.tools.ffmpeg || !this.tools.ffprobe)
         throw new Error('FFmpeg and FFprobe are required');
@@ -665,7 +742,8 @@ export type WorkerDerivativeReceipt =
   | ProtocolAiReceipt
   | ReferenceAnalysisReceipt
   | MediaSemanticIndexReceipt
-  | RenderExportReceiptV1;
+  | RenderExportReceiptV1
+  | RenderInspectReceipt;
 
 export type ProtocolAiReceipt =
   | {

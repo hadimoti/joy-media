@@ -88,7 +88,7 @@ function collectFrames(
           assetId: clip.assetId,
           sourceTimeUs,
         });
-      } else {
+      } else if (clip.kind === 'composition') {
         if (visiting.has(clip.compositionId)) {
           throw new Error(
             `composition recursion at clip "${clip.id}" -> "${clip.compositionId}"; run validateSpikeProject`,

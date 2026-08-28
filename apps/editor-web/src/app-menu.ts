@@ -1,4 +1,4 @@
-import { GA_PANEL_IDS, PANEL_IDS, type PanelId } from './workspace.js';
+import { NAVIGABLE_PANEL_IDS, WINDOW_MENU_PANEL_IDS, type PanelId } from './workspace.js';
 import { PANEL_LABELS } from './panel-tab-icons.js';
 
 export type AppMenuActionId =
@@ -38,15 +38,12 @@ export interface AppMenuGroup {
   readonly items: readonly AppMenuItem[];
 }
 
-const WINDOW_PANELS = [
-  'media',
-  'monitor',
-  'timeline',
-  'inspector',
-] as const satisfies readonly PanelId[];
+// Keep Window focused on the small set of high-value workspaces, including
+// the durable Production Board. Other GA panels remain discoverable in View.
+const WINDOW_PANELS = WINDOW_MENU_PANEL_IDS;
 
 function panelViewItems(): readonly AppMenuItem[] {
-  return GA_PANEL_IDS.map((panelId) => ({
+  return NAVIGABLE_PANEL_IDS.map((panelId) => ({
     id: `view.panel.${panelId}` as const,
     label: PANEL_LABELS[panelId],
   }));
@@ -128,5 +125,5 @@ export function isPanelMenuAction(
 export function panelIdFromMenuAction(id: string): PanelId | undefined {
   if (!isPanelMenuAction(id)) return undefined;
   const panelId = id.slice(id.indexOf('panel.') + 'panel.'.length) as PanelId;
-  return PANEL_IDS.includes(panelId) ? panelId : undefined;
+  return NAVIGABLE_PANEL_IDS.includes(panelId) ? panelId : undefined;
 }

@@ -1,3 +1,5 @@
+import type { DeliveryPromiseV1 } from '@joy-media/production-quality';
+
 /**
  * Session export history for the header processes menu. Metadata persists in
  * localStorage; only the most recent export's bytes are retained in memory
@@ -9,6 +11,7 @@ export type DeliveryQualityStatus = 'pass' | 'warn' | 'fail';
 
 export interface DeliveryRenderReport {
   readonly version?: number;
+  readonly evidenceLevel?: 'sampled';
   readonly findings: readonly {
     readonly status: DeliveryQualityStatus;
   }[];
@@ -36,6 +39,8 @@ export interface ExportProcessEntry {
   readonly inspectJobId?: string;
   readonly reportRef?: string;
   readonly inspection?: DeliveryInspectionRecord;
+  /** Small deterministic contract needed to queue standalone inspection after export. */
+  readonly inspectionPromise?: DeliveryPromiseV1;
 }
 
 export type ExportProcessChannel = 'quick-browser-export' | 'verified-delivery';
@@ -77,6 +82,7 @@ export interface DeliveryJobProjection {
     readonly kind?: string;
     readonly reportRef?: string;
     readonly qualityReport?: DeliveryRenderReport;
+    readonly report?: DeliveryRenderReport;
   };
 }
 
@@ -94,7 +100,7 @@ export function loadExportHistory(storage: ExportHistoryStorage): readonly Expor
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isEntry).map(normalizeInterrupted);
+    return parsed.filter(isEntry).map(normalizePersistedEntry);
   } catch {
     return [];
   }
@@ -136,6 +142,18 @@ function normalizeInterrupted(entry: ExportProcessEntry): ExportProcessEntry {
   return { ...entry, status: 'failed', error: 'interrupted by page reload' };
 }
 
+function normalizePersistedEntry(entry: ExportProcessEntry): ExportProcessEntry {
+  const normalized = normalizeInterrupted(entry);
+  if (entry.status === 'running' || normalized.error === undefined) return normalized;
+  return {
+    ...normalized,
+    error:
+      normalized.channel === 'verified-delivery'
+        ? 'Delivery could not be verified. Please retry.'
+        : 'Export failed. Please try again.',
+  };
+}
+
 export function deliveryGate(entry: ExportProcessEntry): DeliveryGateResult {
   const inspection = entry.inspection;
   if (inspection === undefined || inspection.state === 'not-requested') {
@@ -167,7 +185,7 @@ export function deliveryGate(entry: ExportProcessEntry): DeliveryGateResult {
       'failed',
       false,
       'Inspection failed',
-      inspection.error ?? 'Render inspection failed before a report was recorded.',
+      'Render inspection failed. Please retry verification.',
     );
   }
   const report = inspection.report;
@@ -199,6 +217,55 @@ export function deliveryGate(entry: ExportProcessEntry): DeliveryGateResult {
   return gate('pass', true, 'Verified', 'Render inspection passed.', summary);
 }
 
+/** Process status for exports that do not use the verified-delivery gate. */
+export function exportProcessGate(entry: ExportProcessEntry): DeliveryGateResult {
+  const channel = entry.channel === 'quick-browser-export' ? 'Browser export' : 'Legacy export';
+  switch (entry.status) {
+    case 'running':
+      return {
+        status: 'pending',
+        canDeliver: false,
+        label: `${channel} in progress`,
+        reason: `${channel} is still in progress.`,
+        summary: { pass: 0, warn: 0, fail: 0 },
+      };
+    case 'failed':
+      return {
+        status: 'failed',
+        canDeliver: false,
+        label: `${channel} failed`,
+        reason: entry.error ?? `${channel} failed before it completed.`,
+        summary: { pass: 0, warn: 0, fail: 0 },
+      };
+    case 'canceled':
+      return {
+        status: 'canceled',
+        canDeliver: false,
+        label: `${channel} canceled`,
+        reason: `${channel} was canceled before it completed.`,
+        summary: { pass: 0, warn: 0, fail: 0 },
+      };
+    case 'completed':
+      return {
+        status: 'pass',
+        canDeliver: false,
+        label: `${channel} complete`,
+        reason: `${channel} completed; no delivery inspection was requested.`,
+        summary: { pass: 0, warn: 0, fail: 0 },
+      };
+  }
+}
+
+/** Text used by the Recent processes menu; keeps channel semantics in one place. */
+export function recentProcessLabel(entry: ExportProcessEntry): string {
+  const gate =
+    entry.channel === 'verified-delivery' ? deliveryGate(entry) : exportProcessGate(entry);
+  if (entry.status === 'completed' && entry.totalBytes !== undefined) {
+    return `${(entry.totalBytes / 1_048_576).toFixed(1)} MB · ${gate.label}`;
+  }
+  return gate.label;
+}
+
 export function reconcileDeliveryInspections(
   entries: readonly ExportProcessEntry[],
   jobs: readonly DeliveryJobProjection[],
@@ -207,9 +274,12 @@ export function reconcileDeliveryInspections(
   let changed = false;
   const next = entries.map((entry) => {
     if (entry.channel !== 'verified-delivery' || entry.exportJobId === undefined) return entry;
+    // Once an inspect job exists, never fall back to the export job's inline
+    // QA. That report is advisory and cannot satisfy the verified gate.
     const job =
-      (entry.inspectJobId === undefined ? undefined : jobsById.get(entry.inspectJobId)) ??
-      jobsById.get(entry.exportJobId);
+      entry.inspectJobId === undefined
+        ? jobsById.get(entry.exportJobId)
+        : jobsById.get(entry.inspectJobId);
     if (job === undefined) return entry;
     const reconciled = reconcileEntry(entry, job);
     if (reconciled !== entry) changed = true;
@@ -246,13 +316,22 @@ function reconcileEntry(entry: ExportProcessEntry, job: DeliveryJobProjection): 
       {
         state: 'failed',
         ...(reportRef === undefined ? {} : { reportRef }),
-        ...(job.error === undefined ? {} : { error: job.error }),
+        error: 'Render inspection failed. Please retry verification.',
         ...(waiver === undefined ? {} : { waiver }),
       },
       'failed',
     );
   }
-  const report = job.derivative?.qualityReport;
+  // An export's inline report is intentionally advisory only. Standalone
+  // inspection must read the retained artifact before this gate can pass.
+  if (entry.inspectJobId === undefined && entry.inspectionPromise !== undefined) {
+    return replaceInspection(entry, {
+      state: 'queued',
+      ...(reportRef === undefined ? {} : { reportRef }),
+      ...(waiver === undefined ? {} : { waiver }),
+    });
+  }
+  const report = job.derivative?.report ?? job.derivative?.qualityReport;
   if (report === undefined) {
     return replaceInspection(
       entry,

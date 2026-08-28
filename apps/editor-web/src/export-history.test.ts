@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   EXPORT_HISTORY_KEY,
   loadExportHistory,
+  recentProcessLabel,
   saveExportHistory,
   upsertEntry,
   type ExportProcessEntry,
@@ -58,5 +59,16 @@ describe('export history', () => {
     for (let i = 0; i < 25; i++) entries = upsertEntry(entries, entry(`e${i}`, 'completed'));
     expect(entries).toHaveLength(20);
     expect(entries[0]?.id).toBe('e24');
+  });
+
+  it('labels completed quick exports as browser completion in the Recent processes menu', () => {
+    expect(
+      recentProcessLabel({
+        ...entry('quick', 'completed'),
+        channel: 'quick-browser-export',
+        filename: 'نما_rough-cut.mp4',
+        totalBytes: 1_048_576,
+      }),
+    ).toBe('1.0 MB · Browser export complete');
   });
 });

@@ -1,0 +1,43 @@
+{
+  "id": "asset-386acec772",
+  "filename": "unknown-visual-0001.png",
+  "title": "Unknown Visual 0001",
+  "category": "unknown",
+  "description": "An isolated transparent visual awaiting semantic review.",
+  "tags": [
+    "unknown",
+    "transparent",
+    "review-needed"
+  ],
+  "colors": [
+    "gray"
+  ],
+  "orientation": "none",
+  "confidence": 0.0,
+  "source": {
+    "file": "world_map.png",
+    "relativePath": "world_map.png"
+  },
+  "tightBounds": {
+    "x": 211,
+    "y": 0,
+    "width": 1450,
+    "height": 940
+  },
+  "exportBounds": {
+    "x": 203,
+    "y": 0,
+    "width": 1466,
+    "height": 940
+  },
+  "alphaPixelArea": 282076,
+  "componentCount": 1,
+  "exactHash": "d78526785db6639f0e217661f797bca2a2155569646e425610d358428300b84d",
+  "perceptualHash": "ee1991e66f4d10b1",
+  "duplicateOf": null,
+  "filePath": "assets/unknown/unknown-visual-0001.png",
+  "semanticKey": "world_map.png#1",
+  "exported": true,
+  "createdAt": "2026-07-29T09:15:22.528363+00:00",
+  "processingVersion": "1.0.0"
+}

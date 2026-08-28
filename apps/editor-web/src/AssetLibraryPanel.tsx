@@ -9,22 +9,27 @@ import type {
   SemanticBrollSearchIndexV1,
   SemanticBrollTimeRangeV1,
 } from '@joy-media/project-schema';
-import { searchBroll, type BrollSearchResult } from '@joy-media/agent-tools';
+import type { BrollSearchResult } from '@joy-media/agent-tools';
 import { AuthorizedDerivativeResolver } from './asset-resolver.js';
 import {
-  BrowserControlPlaneClient,
   type BrowserAsset,
   type BrowserAssetRegistration,
   type BrowserDerivative,
   type BrowserJob,
 } from './control-plane-client.js';
+import { createDeferredControlPlaneClient } from './deferred-control-plane-client.js';
 import { getStoredMediaToken, MEDIA_SESSION_CHANGED_EVENT } from './media-session.js';
 import {
   assetCollectionId,
   assetCollectionLabel,
+  assetLibraryPageCount,
   assetCollectionsForCategory,
   filterAssetLibrary,
   preferredDerivative,
+  ASSET_RENDER_MAX,
+  ASSET_RENDER_PAGE_SIZE,
+  nextAssetRenderLimit,
+  renderAssetLibraryItems,
   type AssetAvailability,
   type AssetCategory,
   type AssetCollectionId,
@@ -65,8 +70,11 @@ import {
   referenceStatusForAsset,
 } from './reference-analysis-model.js';
 import { useAccessibleDialog } from './dialog-a11y.js';
-
-const ASSET_RENDER_PAGE_SIZE = 120;
+import {
+  importAssetLocallyByDefault,
+  readAuthoritativeAssetSync,
+  type LocalFirstAssetImportResult,
+} from './asset-import-privacy.js';
 
 const categories: readonly {
   readonly id: AssetCategory;
@@ -114,7 +122,7 @@ export function AssetLibraryPanel({
   readonly artifacts?: ArtifactStore;
   readonly onDispatchArtifacts?: (transaction: ArtifactTransaction) => void;
 }) {
-  const client = useMemo(() => new BrowserControlPlaneClient(), []);
+  const client = useMemo(() => createDeferredControlPlaneClient(), []);
   const resolver = useMemo(
     () =>
       openOpfsDerivativeCache().then(
@@ -145,6 +153,7 @@ export function AssetLibraryPanel({
   const [sort, setSort] = useState<AssetSort>('name');
   const [viewMode, setViewMode] = useState<AssetViewMode>(() => readAssetViewMode());
   const [renderLimit, setRenderLimit] = useState(ASSET_RENDER_PAGE_SIZE);
+  const [renderPage, setRenderPage] = useState(0);
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [preview, setPreview] = useState<Preview | undefined>(undefined);
   const [assetId, setAssetId] = useState('');
@@ -155,6 +164,13 @@ export function AssetLibraryPanel({
   const [importProgress, setImportProgress] = useState<number | undefined>(undefined);
   const [openReferenceAnalysisAssetId, setOpenReferenceAnalysisAssetId] = useState<
     string | undefined
+  >(undefined);
+  const [brollSearchView, setBrollSearchView] = useState<
+    | {
+        readonly rangeCount: number;
+        readonly results: readonly BrollSearchResult[];
+      }
+    | undefined
   >(undefined);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
@@ -190,15 +206,14 @@ export function AssetLibraryPanel({
     if (getStoredMediaToken(window.localStorage) === undefined) {
       // LoginGate keeps the editor mounted under the blur; don't wipe a prior
       // catalog or treat "not signed in yet" as a hard failure.
+      setSyncEnabled(false);
       return;
     }
     try {
-      // Catalog listing must not depend on ensureProject — a stale binding to
-      // another account's project returns PROJECT_EXISTS/NOT_FOUND and used to
-      // zero the whole Assets panel before cloud-assets could load.
-      void client.ensureProject(projectId, projectTitle).catch(() => undefined);
-
-      const [ownedResult, sharedResult, jobsResult] = await Promise.allSettled([
+      // Catalog listing remains independent from project binding, while the
+      // sync toggle is refreshed from the authoritative project response.
+      const [projectResult, ownedResult, sharedResult, jobsResult] = await Promise.allSettled([
+        client.ensureProject(projectId, projectTitle),
         client.myAssets(),
         client.sharedCloudAssets(),
         client.jobs(projectId),
@@ -242,17 +257,24 @@ export function AssetLibraryPanel({
       );
       const byAsset = new Map(derivatives);
       if (requestId !== refreshSeqRef.current) return;
+      setSyncEnabled(
+        projectResult.status === 'fulfilled' ? projectResult.value.assetSyncEnabled : false,
+      );
       setCloudAssetIds(new Set(sharedAssets.map((asset) => asset.id)));
       setItems(assets.map((asset) => ({ asset, derivatives: byAsset.get(asset.id) ?? [] })));
       setJobs(jobsResult.status === 'fulfilled' ? jobsResult.value : []);
-      if (sharedResult.status === 'rejected') {
+      if (projectResult.status === 'rejected') {
         setStatus(
-          `کتابخانهٔ Cloud در دسترس نیست (${message(sharedResult.reason)}). ${assets.length} فایلِ مالکیتی نمایش داده می‌شود.`,
+          'Assets loaded. Private backup status could not be verified, so uploads are disabled.',
+        );
+      } else if (sharedResult.status === 'rejected') {
+        setStatus(
+          `Private cloud library is unavailable (${message(sharedResult.reason)}). Showing ${assets.length} locally registered assets.`,
         );
       } else {
         setStatus(
           assets.length === 0
-            ? 'هنوز مدیایی ثبت نشده است. برای همگام‌سازی با کتابخانهٔ Cloud یک فایل وارد کنید.'
+            ? 'No media yet. Imports stay in this browser unless private backup is enabled.'
             : undefined,
         );
       }
@@ -260,8 +282,9 @@ export function AssetLibraryPanel({
     } catch (error) {
       if (requestId !== refreshSeqRef.current) return;
       const detail = message(error);
+      setSyncEnabled(false);
       setItems([]);
-      setStatus(`بارگیری کاتالوگ مدیا ناموفق بود: ${detail}`);
+      setStatus(`Could not load the media catalog: ${detail}`);
     }
   }, [client, projectId, projectTitle]);
   useEffect(() => {
@@ -323,7 +346,7 @@ export function AssetLibraryPanel({
           }),
         );
       } catch (error) {
-        setStatus(`ذخیره‌سازی تحلیل Reference ناموفق بود: ${message(error)}`);
+        setStatus(`Could not save the Reference analysis: ${message(error)}`);
       }
     }
   }, [artifacts, items, jobs, onDispatchArtifacts]);
@@ -352,11 +375,11 @@ export function AssetLibraryPanel({
   const editWithAi = useCallback(
     (asset: BrowserAsset) => {
       if (asset.kind !== 'image' && asset.kind !== 'video') {
-        setStatus('ویرایش AI فقط برای Image و Video پشتیبانی می‌شود.');
+        setStatus('AI editing is supported for images and video only.');
         return;
       }
       if (onEditWithAi === undefined) {
-        setStatus('اتصال مدیا به KiloCode در این نشست در دسترس نیست.');
+        setStatus('Media handoff to Joy Code is unavailable in this session.');
         return;
       }
       onEditWithAi({
@@ -365,7 +388,7 @@ export function AssetLibraryPanel({
         displayName: asset.displayName,
       });
       setStatus(
-        `${asset.displayName} به KiloCode وصل شد. آن را روی Timeline بکشید یا از Agent خودکارش کنید.`,
+        `${asset.displayName} is ready for Joy Code. Drag it to the timeline or use an approved action.`,
       );
     },
     [onEditWithAi],
@@ -391,45 +414,63 @@ export function AssetLibraryPanel({
     );
     return asset === undefined || analysis === undefined ? undefined : { asset, analysis };
   }, [artifacts, items, openReferenceAnalysisAssetId]);
-  const brollSearchView = useMemo(() => {
-    if (artifacts === undefined) return undefined;
+  useEffect(() => {
+    if (artifacts === undefined) {
+      setBrollSearchView(undefined);
+      return;
+    }
+    let active = true;
     const index = buildPanelSemanticBrollIndex(projectId, items, artifacts);
     const normalizedQuery = deferredBrollQuery.trim();
     const rangeCount = index.assets.reduce((count, asset) => count + asset.ranges.length, 0);
-    if (normalizedQuery.length === 0) return { rangeCount, results: [] as BrollSearchResult[] };
-    try {
-      return {
-        rangeCount,
-        results: [...searchBroll(index, { query: normalizedQuery, maxResults: 6 }).results],
-      };
-    } catch {
-      return { rangeCount, results: [] as BrollSearchResult[] };
+    if (normalizedQuery.length === 0) {
+      setBrollSearchView({ rangeCount, results: [] });
+      return;
     }
+    setBrollSearchView({ rangeCount, results: [] });
+    void import('@joy-media/agent-tools')
+      .then(({ searchBroll }) => searchBroll(index, { query: normalizedQuery, maxResults: 6 }))
+      .then((result) => {
+        if (active) setBrollSearchView({ rangeCount, results: [...result.results] });
+      })
+      .catch(() => {
+        if (active) setBrollSearchView({ rangeCount, results: [] });
+      });
+    return () => {
+      active = false;
+    };
   }, [artifacts, deferredBrollQuery, items, projectId]);
   useEffect(() => {
     setRenderLimit(ASSET_RENDER_PAGE_SIZE);
+    setRenderPage(0);
   }, [items, category, collection, deferredQuery, availability, sort]);
-  const rendered = useMemo(() => visible.slice(0, renderLimit), [visible, renderLimit]);
+  const rendered = useMemo(
+    () => renderAssetLibraryItems(visible, renderLimit, renderPage),
+    [visible, renderLimit, renderPage],
+  );
+  const pageCount = assetLibraryPageCount(visible.length);
+  const pageStart = renderPage * ASSET_RENDER_MAX;
+  const pageItems = Math.min(ASSET_RENDER_MAX, Math.max(0, visible.length - pageStart));
   const registerSelectedAsset = useCallback(async () => {
     if (selectedFile === undefined) {
-      setStatus('یک فایل مدیا برای ثبت انتخاب کنید.');
+      setStatus('Choose a media file to import.');
       return;
     }
     const normalizedId = assetId.trim();
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(normalizedId)) {
-      setStatus('Asset ID فقط می‌تواند شامل حروف لاتین، رقم، نقطه، زیرخط، یا خط تیره باشد.');
+      setStatus('Asset ID may contain only letters, numbers, dots, underscores, or hyphens.');
       return;
     }
     try {
       const kind = assetKind(selectedFile);
       const mimeType = normalizedMimeType(selectedFile, kind);
       setImportProgress(0.02);
-      setStatus(`در حال خواندن ${selectedFile.name}…`);
+      setStatus(`Reading ${selectedFile.name}…`);
       const buffer = await readFileWithProgress(selectedFile, (ratio) => {
         setImportProgress(0.02 + 0.38 * ratio);
       });
       setImportProgress(0.42);
-      setStatus(`در حال محاسبهٔ Hash برای ${selectedFile.name}…`);
+      setStatus(`Hashing ${selectedFile.name}…`);
       const sha256 = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', buffer)));
       setImportProgress(0.55);
       const registration: BrowserAssetRegistration = {
@@ -441,60 +482,53 @@ export function AssetLibraryPanel({
         descriptor: { mimeType },
         locations: [{ kind: 'opfs-cache', ref: `opfs-${sha256.slice(0, 32)}` }],
       };
-      setStatus(`در حال ذخیرهٔ محلی ${selectedFile.name}…`);
-      setImportProgress(0.62);
-      await (
-        await originalAssetCache
-      ).put(
-        {
-          assetId: registration.id,
-          sha256: registration.sha256,
-          bytes: registration.bytes,
-          mimeType: registration.descriptor.mimeType,
+      const imported = await importAssetLocallyByDefault({
+        client,
+        cache: await originalAssetCache,
+        projectId,
+        registration,
+        file: selectedFile,
+        onAuthoritativeSyncState: setSyncEnabled,
+        onStage: (stage) => {
+          if (stage === 'cache-local') {
+            setImportProgress(0.62);
+            setStatus(`Saving ${selectedFile.name} in this browser…`);
+          } else if (stage === 'register') {
+            setImportProgress(0.88);
+            setStatus(`Registering ${selectedFile.name}…`);
+          } else if (stage === 'check-sync') {
+            setImportProgress(0.9);
+            setStatus('Checking this project’s private backup setting…');
+          } else {
+            setImportProgress(0.92);
+            setStatus(`Backing up ${selectedFile.name} privately…`);
+          }
         },
-        selectedFile,
-      );
-      setImportProgress(0.88);
-      setStatus(`در حال ثبت ${selectedFile.name}…`);
-      const registered = await client.registerAsset(projectId, registration);
-      if (kind === 'image') {
-        setImportProgress(0.9);
-        setStatus(`در حال بارگذاری ${selectedFile.name} در فضای خصوصی Cloud…`);
-        await client.uploadAssetOriginal(projectId, registered, selectedFile, (ratio) =>
-          setImportProgress(0.9 + 0.08 * ratio),
-        );
-        setStatus(
-          `${selectedFile.name} در Cloud پشتیبان‌گیری شد. برچسب‌های Agent اعمال شدند و کاتالوگ در حال تازه‌سازی است.`,
-        );
-      } else {
-        try {
-          await client.retagAsset(projectId, registered.id);
-        } catch {
-          /* heuristic retag is best-effort for video/audio */
-        }
-        setStatus(
-          `${selectedFile.name} به‌صورت محلی ثبت شد. پشتیبان‌گیری Cloud برای ${kind === 'model' ? '3D model' : 'Video و Audio'} در v1 اولویت پایین‌تری دارد.`,
-        );
-      }
+        onUploadProgress: (ratio) => setImportProgress(0.92 + 0.06 * ratio),
+      });
+      const operationStatus = assetImportOperationStatus(selectedFile.name, kind, imported);
       setImportProgress(1);
       setSelectedFile(undefined);
       setAssetId('');
       if (fileInputRef.current !== null) fileInputRef.current.value = '';
       setImportOpen(false);
-      await refresh();
+      await refreshCatalogThenReport(refresh, setStatus, operationStatus);
       window.setTimeout(() => setImportProgress(undefined), 350);
     } catch (error) {
       setImportProgress(undefined);
-      setStatus(`ثبت مدیا ناموفق بود: ${message(error)}`);
+      setStatus(`Media import failed: ${message(error)}`);
     }
   }, [assetId, client, originalAssetCache, projectId, refresh, selectedFile]);
   const enableSync = useCallback(async () => {
     try {
       const result = await client.setAssetSync(projectId, true);
       setSyncEnabled(result.assetSyncEnabled);
-      setStatus('پشتیبان‌گیری خصوصی Derivative برای این پروژه فعال شد.');
+      setStatus(
+        'Private backup is enabled. New image imports can now be backed up after verification.',
+      );
     } catch (error) {
-      setStatus(`فعال‌سازی پشتیبان‌گیری خصوصی ناموفق بود: ${message(error)}`);
+      setSyncEnabled(false);
+      setStatus(`Could not enable private backup: ${message(error)}`);
     }
   }, [client, projectId]);
   const fetchCloudOriginal = useCallback(
@@ -514,7 +548,7 @@ export function AssetLibraryPanel({
             : asset.kind === 'model'
               ? '3D model'
               : 'image';
-      setStatus(`در حال باز کردن Preview ${sourceKind} تأییدشده…`);
+      setStatus(`Opening verified ${sourceKind} preview…`);
       try {
         const [resolverInstance, originalCache] = await Promise.all([resolver, originalAssetCache]);
         const outcome = await resolveAssetThumb({
@@ -530,7 +564,7 @@ export function AssetLibraryPanel({
           return;
         }
         if (outcome.url === undefined) {
-          setStatus(`Preview در دسترس نیست: ${outcome.source}`);
+          setStatus(`Preview is unavailable: ${outcome.source}`);
           return;
         }
         const nextPreview: Preview = {
@@ -544,14 +578,14 @@ export function AssetLibraryPanel({
         setPreview(nextPreview);
         setStatus(
           outcome.source === 'derivative'
-            ? `Preview ${asset.displayName} از کش محلیِ تأییدشدهٔ همین مرورگر نمایش داده می‌شود.`
+            ? `Previewing ${asset.displayName} from this browser’s verified local cache.`
             : outcome.source === 'cloud'
-              ? `Preview ${asset.displayName} از کتابخانهٔ اشتراکی Cloud نمایش داده می‌شود.`
-              : `Preview ${asset.displayName} از نسخهٔ محلی همین مرورگر نمایش داده می‌شود.`,
+              ? `Previewing ${asset.displayName} from private backup storage.`
+              : `Previewing ${asset.displayName} from this browser’s local original.`,
         );
       } catch (error) {
         if (requestId !== previewSeqRef.current) return;
-        setStatus(`باز کردن Preview ناموفق بود: ${message(error)}`);
+        setStatus(`Could not open the preview: ${message(error)}`);
       }
     },
     [clearPreview, fetchCloudOriginal, originalAssetCache, projectId, resolver],
@@ -566,33 +600,56 @@ export function AssetLibraryPanel({
     });
   }, []);
 
+  const verifyPrivateBackup = useCallback(
+    async (targetProjectId: string): Promise<boolean> => {
+      const enabled = await readAuthoritativeAssetSync(client, targetProjectId);
+      if (targetProjectId === projectId) setSyncEnabled(enabled);
+      return enabled;
+    },
+    [client, projectId],
+  );
+
   const shareToCloud = useCallback(
     async (asset: BrowserAsset) => {
       if (asset.kind !== 'image') {
-        setStatus('اشتراک‌گذاری Cloud در v1 فقط برای Image در دسترس است.');
+        setStatus('Private backup is available for images only in v1.');
         return;
       }
       if (cloudAssetIds.has(asset.id)) {
-        setStatus(`${asset.displayName} از قبل در کتابخانهٔ اشتراکی Cloud وجود دارد.`);
+        setStatus(`${asset.displayName} is already backed up privately.`);
+        return;
+      }
+      const targetProjectId = asset.projectId || projectId;
+      try {
+        if (!(await verifyPrivateBackup(targetProjectId))) {
+          setStatus('Enable private backup before sharing an image. No upload was attempted.');
+          return;
+        }
+      } catch (error) {
+        if (targetProjectId === projectId) setSyncEnabled(false);
+        setStatus(
+          `Backup status could not be verified. No upload was attempted: ${message(error)}`,
+        );
         return;
       }
       try {
         const blob = await (await originalAssetCache).get(asset.id);
         if (blob === undefined) {
-          setStatus(
-            'نسخهٔ اصلی OPFS در این مرورگر موجود نیست. ابتدا همین‌جا تصویر را دوباره وارد کنید.',
-          );
+          setStatus('The local original is missing. Re-import this image in the current browser.');
           return;
         }
-        setStatus(`در حال بارگذاری ${asset.displayName} در فضای خصوصی Cloud…`);
-        await client.uploadAssetOriginal(asset.projectId || projectId, asset, blob);
-        setStatus(`${asset.displayName} به فضای Cloud فرستاده شد.`);
-        await refresh();
+        setStatus(`Backing up ${asset.displayName} privately…`);
+        await client.uploadAssetOriginal(targetProjectId, asset, blob);
+        await refreshCatalogThenReport(
+          refresh,
+          setStatus,
+          `${asset.displayName} was backed up privately.`,
+        );
       } catch (error) {
-        setStatus(`اشتراک‌گذاری Cloud ناموفق بود: ${message(error)}`);
+        setStatus(`Private backup failed: ${message(error)}`);
       }
     },
-    [client, cloudAssetIds, originalAssetCache, projectId, refresh],
+    [client, cloudAssetIds, originalAssetCache, projectId, refresh, verifyPrivateBackup],
   );
 
   const deleteAsset = useCallback(
@@ -607,10 +664,10 @@ export function AssetLibraryPanel({
           next.delete(asset.id);
           return next;
         });
-        setStatus(`${asset.displayName} حذف شد.`);
+        setStatus(`${asset.displayName} was removed from the catalog.`);
         await refresh();
       } catch (error) {
-        setStatus(`حذف مدیا ناموفق بود: ${message(error)}`);
+        setStatus(`Could not remove the media: ${message(error)}`);
       }
     },
     [client, projectId, refresh],
@@ -624,7 +681,7 @@ export function AssetLibraryPanel({
         loadOriginalBlob: async () => (await originalAssetCache).get(asset.id),
       });
       if (added) {
-        setStatus(`${asset.displayName} به‌عنوان Sticker اضافه شد.`);
+        setStatus(`${asset.displayName} was added as a sticker.`);
       }
     },
     [onAddSticker, originalAssetCache],
@@ -632,18 +689,18 @@ export function AssetLibraryPanel({
   const markAsReference = useCallback(
     (asset: BrowserAsset) => {
       if (asset.kind !== 'video') {
-        setStatus('فقط دارایی‌های Video می‌توانند به‌عنوان Reference علامت بخورند.');
+        setStatus('Only video assets can be marked as a Reference.');
         return;
       }
       if (onDispatchArtifacts === undefined) {
-        setStatus('Artifactهای Reference در این نشست در دسترس نیستند.');
+        setStatus('Reference artifacts are unavailable in this session.');
         return;
       }
       try {
         onDispatchArtifacts(buildReferenceMarkerTransaction(asset, new Date().toISOString()));
-        setStatus(`${asset.displayName} به‌عنوان منبع Reference علامت خورد.`);
+        setStatus(`${asset.displayName} is marked as a Reference source.`);
       } catch (error) {
-        setStatus(`علامت‌گذاری منبع Reference ناموفق بود: ${message(error)}`);
+        setStatus(`Could not mark the Reference source: ${message(error)}`);
       }
     },
     [onDispatchArtifacts],
@@ -652,20 +709,20 @@ export function AssetLibraryPanel({
   const runReferenceAnalysis = useCallback(
     async (asset: BrowserAsset) => {
       if (asset.kind !== 'video') {
-        setStatus('تحلیل Reference فقط برای دارایی‌های Video پشتیبانی می‌شود.');
+        setStatus('Reference analysis is supported for video assets only.');
         return;
       }
       if (artifacts === undefined || onDispatchArtifacts === undefined) {
-        setStatus('تحلیل Reference به Artifactهای ماندگار در همین نشست نیاز دارد.');
+        setStatus('Reference analysis needs a durable artifact in this session.');
         return;
       }
       const referenceState = referenceStatusForAsset({ asset, store: artifacts, jobs });
       if (!referenceState.marked) {
-        setStatus('ابتدا این Video را به‌عنوان Reference علامت بزنید.');
+        setStatus('Mark this video as a Reference before starting analysis.');
         return;
       }
       if (referenceState.running) {
-        setStatus(`تحلیل ${asset.displayName} از قبل در حال اجرا است.`);
+        setStatus(`Analysis for ${asset.displayName} is already running.`);
         return;
       }
       const jobId = `reference-${asset.id}-${Date.now().toString(36)}`;
@@ -677,42 +734,62 @@ export function AssetLibraryPanel({
           sampleCount: 3,
           maxAudioBeats: 6,
         });
-        setStatus(`تحلیل Reference برای ${asset.displayName} در صف قرار گرفت.`);
+        setStatus(`Reference analysis for ${asset.displayName} is queued.`);
         await refresh();
       } catch (error) {
-        setStatus(`صف‌گذاری تحلیل Reference ناموفق بود: ${message(error)}`);
+        setStatus(`Could not queue Reference analysis: ${message(error)}`);
       }
     },
     [artifacts, client, jobs, onDispatchArtifacts, projectId, refresh],
   );
 
   const bulkShare = useCallback(async () => {
+    if (!syncEnabled) {
+      setStatus('Enable private backup before sharing selected images.');
+      return;
+    }
     const targets = visible.filter(
       ({ asset }) =>
         selectedAssetIds.has(asset.id) && asset.kind === 'image' && !cloudAssetIds.has(asset.id),
     );
     if (targets.length === 0) {
-      setStatus('هیچ Image انتخاب‌شده‌ای برای اشتراک‌گذاری آماده نیست؛ نسخهٔ اصلی OPFS لازم است.');
+      setStatus('No selected image has a local original ready for private backup.');
       return;
     }
     let shared = 0;
+    let blocked = 0;
     for (const { asset } of targets) {
       try {
+        const targetProjectId = asset.projectId || projectId;
+        if (!(await verifyPrivateBackup(targetProjectId))) {
+          blocked += 1;
+          continue;
+        }
         const blob = await (await originalAssetCache).get(asset.id);
         if (blob === undefined) continue;
-        await client.uploadAssetOriginal(asset.projectId || projectId, asset, blob);
+        await client.uploadAssetOriginal(targetProjectId, asset, blob);
         shared += 1;
       } catch {
-        /* continue remaining */
+        blocked += 1;
       }
     }
-    setStatus(`${shared} از ${targets.length} تصویر انتخاب‌شده به Cloud فرستاده شد.`);
-    await refresh();
-  }, [client, cloudAssetIds, originalAssetCache, projectId, refresh, selectedAssetIds, visible]);
+    const operationStatus = privateBackupBatchStatus(shared, targets.length, blocked);
+    await refreshCatalogThenReport(refresh, setStatus, operationStatus);
+  }, [
+    client,
+    cloudAssetIds,
+    originalAssetCache,
+    projectId,
+    refresh,
+    selectedAssetIds,
+    syncEnabled,
+    verifyPrivateBackup,
+    visible,
+  ]);
 
   const bulkEditWithAi = useCallback(() => {
     if (onEditWithAi === undefined) {
-      setStatus('اتصال مدیا به KiloCode در این نشست در دسترس نیست.');
+      setStatus('Media handoff to Joy Code is unavailable in this session.');
       return;
     }
     let attached = 0;
@@ -728,8 +805,8 @@ export function AssetLibraryPanel({
     }
     setStatus(
       attached === 0
-        ? 'هیچ Image یا Video انتخاب‌شده‌ای برای اتصال وجود ندارد.'
-        : `${attached} فایل مدیا به KiloCode وصل شد.`,
+        ? 'No selected image or video is ready for Joy Code.'
+        : `${attached} media item(s) are ready for Joy Code.`,
     );
   }, [onEditWithAi, selectedAssetIds, visible]);
 
@@ -748,7 +825,7 @@ export function AssetLibraryPanel({
       }
     }
     setSelectedAssetIds(new Set());
-    setStatus(`${deleted} از ${targets.length} فایل مدیای انتخاب‌شده حذف شد.`);
+    setStatus(`${deleted} of ${targets.length} selected media item(s) were removed.`);
     await refresh();
   }, [client, projectId, refresh, selectedAssetIds, visible]);
 
@@ -834,7 +911,7 @@ export function AssetLibraryPanel({
             aria-label={
               syncEnabled
                 ? 'Private backup is enabled for this project'
-                : 'Enable private cloud backup for this project'
+                : 'Enable private backup for this project'
             }
             data-guide={syncEnabled ? 'Backup on' : 'Enable backup'}
             onClick={() => void enableSync()}
@@ -931,7 +1008,7 @@ export function AssetLibraryPanel({
             <div
               className="asset-upload-progress"
               role="progressbar"
-              aria-label="Asset upload progress"
+              aria-label="Asset import progress"
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={Math.round(importProgress * 100)}
@@ -960,9 +1037,10 @@ export function AssetLibraryPanel({
                   <CloseIcon />
                 </button>
               </div>
-              <p className="asset-import-hint" lang="fa">
-                فایل در همین مرورگر Hash و ذخیره می‌شود. از یک Asset ID غیرمستقیم و هماهنگ با Worker
-                استفاده کنید؛ مسیرها محلی می‌مانند.
+              <p className="asset-import-hint">
+                Files are hashed, registered, and kept in this browser by default. When private
+                backup is already enabled, image imports are also backed up. Video, audio, and 3D
+                originals remain local in v1.
               </p>
               <div className="asset-import-row">
                 <input
@@ -986,7 +1064,7 @@ export function AssetLibraryPanel({
                   <PlusIcon />
                 </button>
                 <span className="asset-import-file" title={selectedFile?.name}>
-                  {selectedFile?.name ?? 'یک فایل انتخاب کنید'}
+                  {selectedFile?.name ?? 'Choose a media file'}
                 </span>
                 <input
                   className="asset-import-id"
@@ -1011,7 +1089,7 @@ export function AssetLibraryPanel({
                 <div
                   className="asset-upload-progress asset-upload-progress--inline"
                   role="progressbar"
-                  aria-label="Asset upload progress"
+                  aria-label="Asset import progress"
                   aria-valuemin={0}
                   aria-valuemax={100}
                   aria-valuenow={Math.round(importProgress * 100)}
@@ -1050,7 +1128,7 @@ export function AssetLibraryPanel({
                   aria-label="Filter by availability"
                 >
                   <option value="all">Any status</option>
-                  <option value="available-cloud">Ready in cloud</option>
+                  <option value="available-cloud">Ready in private backup</option>
                   <option value="available-local">Cached locally</option>
                   <option value="pending">Processing</option>
                   <option value="evicted">Cache evicted</option>
@@ -1191,9 +1269,12 @@ export function AssetLibraryPanel({
               <button
                 type="button"
                 className="icon-button"
-                aria-label="Share selected images to cloud"
-                title="Share to cloud"
-                data-guide="Share to cloud"
+                disabled={!syncEnabled}
+                aria-label="Back up selected images privately"
+                title={
+                  syncEnabled ? 'Back up selected images privately' : 'Enable private backup first'
+                }
+                data-guide="Private backup"
                 onClick={() => void bulkShare()}
               >
                 <CloudIcon />
@@ -1289,7 +1370,7 @@ export function AssetLibraryPanel({
                     assetCollection,
                     asset.descriptor.mimeType,
                     formatBytes(asset.bytes),
-                    cloudBacked ? 'Cloud original' : availabilityLabel(avail),
+                    cloudBacked ? 'Private backup' : availabilityLabel(avail),
                   ].join(' · ');
                   const referenceState =
                     asset.kind === 'video' && artifacts !== undefined
@@ -1375,6 +1456,7 @@ export function AssetLibraryPanel({
                         {asset.kind === 'image' && !cloudBacked && (
                           <AssetShareCloudButton
                             asset={asset}
+                            syncEnabled={syncEnabled}
                             originalCachePromise={originalAssetCache}
                             onShare={() => void shareToCloud(asset)}
                           />
@@ -1439,18 +1521,55 @@ export function AssetLibraryPanel({
                   );
                 })}
               </ul>
-              {rendered.length < visible.length && (
+              {rendered.length < pageItems && (
                 <button
                   type="button"
                   className="asset-library-load-more"
                   onClick={() =>
-                    setRenderLimit((current) =>
-                      Math.min(visible.length, current + ASSET_RENDER_PAGE_SIZE),
-                    )
+                    setRenderLimit((current) => nextAssetRenderLimit(current, pageItems))
                   }
                 >
-                  Load {Math.min(ASSET_RENDER_PAGE_SIZE, visible.length - rendered.length)} more
+                  Load{' '}
+                  {Math.min(
+                    ASSET_RENDER_PAGE_SIZE,
+                    ASSET_RENDER_MAX - rendered.length,
+                    visible.length - rendered.length,
+                  )}{' '}
+                  more
                 </button>
+              )}
+              {pageCount > 1 && (
+                <nav className="asset-library-pagination" aria-label="Asset pages">
+                  <button
+                    type="button"
+                    className="asset-library-load-more"
+                    disabled={renderPage === 0}
+                    onClick={() => {
+                      setRenderPage((page) => Math.max(0, page - 1));
+                      setRenderLimit(ASSET_RENDER_PAGE_SIZE);
+                    }}
+                  >
+                    Previous assets
+                  </button>
+                  <span aria-live="polite">
+                    Showing {pageStart + 1}–{pageStart + rendered.length} of {visible.length}
+                    {' · '}page {renderPage + 1} of {pageCount}
+                  </span>
+                  <button
+                    type="button"
+                    className="asset-library-load-more"
+                    disabled={renderPage >= pageCount - 1 || rendered.length < pageItems}
+                    title={
+                      rendered.length < pageItems ? 'Load the rest of this page first' : undefined
+                    }
+                    onClick={() => {
+                      setRenderPage((page) => Math.min(pageCount - 1, page + 1));
+                      setRenderLimit(ASSET_RENDER_PAGE_SIZE);
+                    }}
+                  >
+                    Next assets
+                  </button>
+                </nav>
               )}
             </>
           )}
@@ -1463,7 +1582,7 @@ export function AssetLibraryPanel({
 function availabilityLabel(status: AssetAvailability): string {
   switch (status) {
     case 'available-cloud':
-      return 'Ready in private cloud storage';
+      return 'Ready in private backup';
     case 'available-local':
       return 'Available in local cache';
     case 'pending':
@@ -1477,6 +1596,35 @@ function availabilityLabel(status: AssetAvailability): string {
     default:
       return 'Unknown status';
   }
+}
+
+export function assetImportOperationStatus(
+  fileName: string,
+  kind: BrowserAsset['kind'],
+  imported: Pick<LocalFirstAssetImportResult, 'backupState' | 'backupError'>,
+): string {
+  if (imported.backupState === 'uploaded')
+    return `${fileName} is stored locally and backed up privately.`;
+  if (imported.backupState === 'upload-failed')
+    return `${fileName} is stored locally. Private backup failed: ${message(imported.backupError)}`;
+  if (imported.backupState === 'sync-state-unavailable')
+    return `${fileName} is stored locally. Backup status could not be verified, so no upload was attempted.`;
+  if (imported.backupState === 'disabled')
+    return `${fileName} is stored locally. Private backup is off for this project.`;
+  return `${fileName} is stored locally. ${kind === 'model' ? '3D model' : 'Video and audio'} originals remain local in v1.`;
+}
+
+export function privateBackupBatchStatus(shared: number, total: number, blocked: number): string {
+  return `${shared} of ${total} selected images were backed up privately.${blocked > 0 ? ` ${blocked} were blocked or failed.` : ''}`;
+}
+
+export async function refreshCatalogThenReport(
+  refresh: () => Promise<void>,
+  report: (status: string) => void,
+  operationStatus: string,
+): Promise<void> {
+  await refresh();
+  report(operationStatus);
 }
 
 export async function addAssetAsSticker({
@@ -1504,10 +1652,12 @@ export async function addAssetAsSticker({
 
 function AssetShareCloudButton({
   asset,
+  syncEnabled,
   originalCachePromise,
   onShare,
 }: {
   readonly asset: BrowserAsset;
+  readonly syncEnabled: boolean;
   readonly originalCachePromise: Promise<OpfsOriginalAssetCache>;
   readonly onShare: () => void;
 }) {
@@ -1523,14 +1673,14 @@ function AssetShareCloudButton({
       cancelled = true;
     };
   }, [asset.id, originalCachePromise]);
-  if (!hasLocal) return null;
+  if (!syncEnabled || !hasLocal) return null;
   return (
     <button
       type="button"
       className="icon-button"
-      aria-label={`Share ${asset.displayName} to cloud`}
-      title="Share to cloud"
-      data-guide="Share to cloud"
+      aria-label={`Back up ${asset.displayName} privately`}
+      title="Back up privately"
+      data-guide="Private backup"
       onClick={onShare}
     >
       <CloudIcon />

@@ -17,8 +17,8 @@ function videoClip(id: string, assetId: string): Clip {
   };
 }
 
-function track(id: string, clips: readonly Clip[] = []): Track {
-  return { id, kind: 'video', order: 0, enabled: true, clips };
+function track(id: string, clips: readonly Clip[] = [], kind: Track['kind'] = 'video'): Track {
+  return { id, kind, order: 0, enabled: true, clips };
 }
 
 describe('timelineTrackKind', () => {
@@ -29,6 +29,7 @@ describe('timelineTrackKind', () => {
 
   it('recognizes audio tracks from either the row or all clip identities', () => {
     expect(timelineTrackKind(track('A1-voice'))).toBe('audio');
+    expect(timelineTrackKind(track('track-7', [], 'audio'))).toBe('audio');
     expect(
       timelineTrackKind(
         track('track-2', [

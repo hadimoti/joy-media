@@ -20,7 +20,25 @@ const project: JoyProjectV1 = {
       frameRate: { num: 30, den: 1 },
       durationUs: 10_000_000,
       background: '#000000',
-      tracks: [],
+      tracks: [
+        {
+          id: 'captions',
+          kind: 'caption',
+          name: 'Captions',
+          order: 0,
+          enabled: true,
+          locked: false,
+          clips: [
+            {
+              id: 'caption-clip',
+              kind: 'caption',
+              startUs: 0,
+              durationUs: 1_000_000,
+              captionDocumentId: 'doc',
+            },
+          ],
+        },
+      ],
     },
   },
   assets: {},
@@ -60,5 +78,45 @@ describe('caption commands ride the shared durable v1 history', () => {
 
     const redone = history.redo();
     expect(redone.project.captionDocuments.doc!.segments[0]!.textOverride).toBe('Hello JOY');
+  });
+
+  it('undoes and redoes transcription document replacement with clip placement as one step', () => {
+    const history = new VisualObjectProjectHistory(project);
+    const replacement = {
+      ...project.captionDocuments.doc!,
+      words: { w2: { id: 'w2', text: 'later', startUs: 0, endUs: 600_000 } },
+      segments: [{ id: 'segment-later', startUs: 0, endUs: 600_000, wordIds: ['w2'] }],
+    };
+    history.apply({
+      label: 'Transcribe English',
+      commands: [
+        {
+          type: 'caption.replaceDocument',
+          payload: { documentId: 'doc', document: replacement },
+        },
+        {
+          type: 'caption.setClipTiming',
+          payload: {
+            documentId: 'doc',
+            clipId: 'caption-clip',
+            startUs: 4_000_000,
+            durationUs: 3_000_000,
+          },
+        },
+      ],
+    });
+    expect(history.present.captionDocuments.doc).toEqual(replacement);
+    expect(history.present.compositions.root!.tracks[0]!.clips[0]).toMatchObject({
+      startUs: 4_000_000,
+      durationUs: 3_000_000,
+    });
+
+    expect(history.undo().project).toEqual(project);
+    const redone = history.redo().project;
+    expect(redone.captionDocuments.doc).toEqual(replacement);
+    expect(redone.compositions.root!.tracks[0]!.clips[0]).toMatchObject({
+      startUs: 4_000_000,
+      durationUs: 3_000_000,
+    });
   });
 });

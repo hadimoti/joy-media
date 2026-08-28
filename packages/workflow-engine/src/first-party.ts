@@ -14,6 +14,8 @@ import { buildNodeLibrary } from './library.js';
 
 /** Version of every production pipeline pack; bump when any definition changes. */
 export const FIRST_PARTY_WORKFLOWS_VERSION = '2.0.0';
+export const REFERENCE_SOCIAL_CUTDOWN_SLICE_WORKFLOW_ID =
+  'joy.first-party.reference-social-cutdown.slice' as const;
 
 const CAPTION_TEMPLATE_ID = 'joy.caption.clean';
 const EXPORT_FOLDER_ID = 'exports';
@@ -93,6 +95,23 @@ const CONTENT_INPUTS = {
 const REFERENCE_CONTENT_INPUTS = {
   ...CONTENT_INPUTS,
   required: ['brief', 'selectedMedia', 'references'],
+} as const;
+
+/**
+ * Inputs for the certified editor-only reference cutdown slice.  The broad
+ * reference pack above remains provider-backed; this smaller graph is the
+ * deliberately bounded path that can be run with a connected EditorSession
+ * and a plain file-backed clip. Commands arrive in the human approval response
+ * so the approval is the authority for the mutation.
+ */
+const REFERENCE_CUTDOWN_SLICE_INPUTS = {
+  type: 'object',
+  required: ['selectedMedia', 'references'],
+  properties: {
+    selectedMedia: { type: 'object', description: 'Selected file-backed video reference.' },
+    references: { type: 'array', items: { type: 'object' } },
+  },
+  additionalProperties: false,
 } as const;
 
 const MANIFEST_OUTPUTS = {
@@ -718,6 +737,63 @@ export function buildReferenceSocialCutdownWorkflow(): FirstPartyWorkflow {
   return addPackPermissions(builder).permission('provider.reference-analysis').build();
 }
 
+/**
+ * The smallest real reference → social cutdown workflow.
+ *
+ * It intentionally contains no synthetic research/render/provider result. A
+ * human approves a concrete timeline command list, and the connected editor
+ * port applies that list as one durable, undoable transaction. Rendering and
+ * delivery remain downstream concerns owned by the verified Worker path.
+ */
+export function buildReferenceSocialCutdownSliceWorkflow(): FirstPartyWorkflow {
+  const { registry } = buildNodeLibrary();
+  const builder = new WorkflowBuilder(registry, {
+    id: REFERENCE_SOCIAL_CUTDOWN_SLICE_WORKFLOW_ID,
+    version: FIRST_PARTY_WORKFLOWS_VERSION,
+    name: 'Reference social cutdown (certified editor slice)',
+    inputs: REFERENCE_CUTDOWN_SLICE_INPUTS,
+    outputs: {
+      type: 'object',
+      required: ['transaction', 'selectedMedia', 'references'],
+    },
+  })
+    .node('selected-media', 'input.item', { path: 'selectedMedia' })
+    .node('references', 'input.item', { path: 'references' })
+    .node('review', 'transform.compose', {
+      fields: {
+        selectedMedia: upstream('selected-media'),
+        references: upstream('references'),
+      },
+    })
+    .node('approve-cutdown', 'decision.approval', {
+      kind: 'choose-candidates',
+      prompt:
+        'Approve the reference-derived cut. Respond with {commands: [...]} containing only timeline commands for the selected file-backed video.',
+      payloadFrom: upstream('review'),
+    })
+    .node('apply-cutdown', 'editor.commandTransaction', {
+      label: 'Apply approved reference social cutdown',
+      commandsFrom: upstream('approve-cutdown', 'response.commands'),
+    })
+    .node('result', 'transform.compose', {
+      fields: {
+        transaction: upstream('apply-cutdown'),
+        selectedMedia: upstream('selected-media'),
+        references: upstream('references'),
+        approval: upstream('approve-cutdown', 'response'),
+      },
+    })
+    .edge('selected-media', 'review')
+    .edge('references', 'review')
+    .edge('review', 'approve-cutdown')
+    .edge('approve-cutdown', 'apply-cutdown')
+    .edge('selected-media', 'result')
+    .edge('references', 'result')
+    .edge('approve-cutdown', 'result')
+    .edge('apply-cutdown', 'result');
+  return builder.permission('editor.command').build();
+}
+
 export function buildInterviewDocumentaryAssemblyWorkflow(): FirstPartyWorkflow {
   const { registry } = buildNodeLibrary();
   const builder = baseContentPipeline(
@@ -796,6 +872,7 @@ export const FIRST_PARTY_WORKFLOW_IDS = [
   'joy.first-party.multilingual-promo',
   'joy.first-party.podcast-cleanup',
   'joy.first-party.reference-social-cutdown',
+  REFERENCE_SOCIAL_CUTDOWN_SLICE_WORKFLOW_ID,
   'joy.first-party.interview-documentary-assembly',
 ] as const;
 
@@ -871,6 +948,17 @@ const PACK_DESCRIPTORS: readonly PackDescriptor[] = [
     approvals: ['confirm-cost', 'choose-candidates'],
     reportRefs: ['joy.first-party.reference-social-cutdown.delivery.qa-report'],
     build: buildReferenceSocialCutdownWorkflow,
+  },
+  {
+    id: REFERENCE_SOCIAL_CUTDOWN_SLICE_WORKFLOW_ID,
+    fileName: 'reference-social-cutdown.slice.json',
+    label: 'Certified editor slice',
+    summary: 'Certified editor-only reference cutdown with one durable timeline transaction.',
+    requiredPorts: ['editor.executeCommandTransaction'],
+    capabilities: ['editor.command'],
+    approvals: ['choose-candidates'],
+    reportRefs: ['joy.first-party.reference-social-cutdown.slice.qa-report'],
+    build: buildReferenceSocialCutdownSliceWorkflow,
   },
   {
     id: 'joy.first-party.interview-documentary-assembly',

@@ -188,6 +188,10 @@ export interface VisualObjectV1 {
   readonly motionBlur?: MotionBlurV1;
   readonly assetId?: string;
   readonly text?: string;
+  /** Published pre-rasterized text binding consumed by the V2 render planner. */
+  readonly bitmapAssetId?: string;
+  readonly fontId?: string;
+  readonly sourceSha256?: string;
   readonly shape?: 'rectangle' | 'ellipse';
   /** Present iff `kind === 'camera'` (ADR-0015). */
   readonly camera?: CameraParamsV1;
@@ -237,6 +241,13 @@ export interface VideoClipV1 extends ClipV1Base {
   readonly playbackRate?: number;
 }
 
+/** An audio-only clip on an audio track; it does not fake a video source. */
+export interface AudioClipV1 extends ClipV1Base {
+  readonly kind: 'audio';
+  readonly assetId: string;
+  readonly sourceInUs: TimeUs;
+}
+
 export interface CompositionClipV1 extends ClipV1Base {
   readonly kind: 'composition';
   readonly compositionId: CompositionId;
@@ -252,7 +263,7 @@ export interface CaptionClipV1 extends ClipV1Base {
   readonly captionDocumentId: string;
 }
 
-export type ClipV1 = VideoClipV1 | CompositionClipV1 | CaptionClipV1;
+export type ClipV1 = VideoClipV1 | AudioClipV1 | CompositionClipV1 | CaptionClipV1;
 
 /**
  * Caption model (§20.5): captions are structured language data before they are
@@ -1160,6 +1171,17 @@ function validateTrack(
             'PROJECT_SCHEMA_V1_CAPTION_CLIP',
             `caption clip references unknown document "${String(clip.captionDocumentId)}"`,
             clipPath,
+          ),
+        );
+    }
+    if (clip.kind === 'audio') {
+      const clipPath = `${path}.${value.id}.clips.${clip.id}`;
+      if (!isNonNegativeSafeInteger(clip.sourceInUs))
+        diagnostics.push(
+          diagnostic(
+            'PROJECT_SCHEMA_V1_AUDIO_CLIP',
+            'audio sourceInUs must be a non-negative safe integer',
+            `${clipPath}.sourceInUs`,
           ),
         );
     }

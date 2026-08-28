@@ -1,6 +1,8 @@
 /** P00.5 Worker protocol spike: outbound pairing, capability snapshots, and local-only thumbnails. */
 
 import type { RenderJob, RenderReceipt } from './render-jobs.js';
+import type { DeliveryPromiseV1, RenderReportV1 } from '@joy-media/production-quality';
+import { validateRenderBundleV2 } from '@joy-media/render-planner';
 import type {
   MediaAnalysisJob,
   MediaSemanticIndexReceipt,
@@ -238,7 +240,10 @@ export function validateWorkerReceiptForJob(
   validateJsonBudget(
     receipt,
     'receipt',
-    jobType === 'render.export' && 'qualityReport' in receipt ? 65_536 : undefined,
+    (jobType === 'render.export' || jobType === 'render.inspect') &&
+      ('qualityReport' in receipt || 'report' in receipt)
+      ? 65_536
+      : undefined,
   );
   assertJsonHasNoPaths(receipt, 'receipt');
   if (receipt.kind !== jobType) {
@@ -612,6 +617,14 @@ function validateThumbnailJob(job: ThumbnailJob): void {
   }
 }
 
+function isV2RenderBundle(value: unknown): boolean {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    (value as { readonly version?: unknown }).version === 2
+  );
+}
+
 function validateWorkerJobPayload(job: WorkerJobV1): void {
   switch (job.type) {
     case 'asset.thumbnail':
@@ -644,12 +657,50 @@ function validateWorkerJobPayload(job: WorkerJobV1): void {
       ) {
         throw new WorkerProtocolError('WORKER_JOB_INVALID', 'payload frameLimit is invalid');
       }
+      if (job.payload.bundle !== undefined && isV2RenderBundle(job.payload.bundle)) {
+        try {
+          validateRenderBundleV2(job.payload.bundle);
+        } catch (error) {
+          throw new WorkerProtocolError(
+            'WORKER_JOB_INVALID',
+            error instanceof Error ? error.message : 'render.export bundle is invalid',
+          );
+        }
+      }
       return;
     case 'render.inspect':
+      if ('legacyVersion' in job.payload) {
+        assertObjectKeys(
+          job.payload,
+          ['projectRef', 'compositionId', 'presetId', 'reportRef', 'legacyVersion'],
+          [],
+          'payload',
+        );
+        if (job.payload.legacyVersion !== 0)
+          throw new WorkerProtocolError('WORKER_JOB_INVALID', 'legacy inspect version is invalid');
+        assertOpaqueIds(
+          [
+            job.payload.projectRef,
+            job.payload.compositionId,
+            job.payload.presetId,
+            job.payload.reportRef,
+          ],
+          'payload references',
+        );
+        return;
+      }
       assertObjectKeys(
         job.payload,
-        ['projectRef', 'compositionId', 'presetId', 'reportRef'],
-        [],
+        [
+          'projectRef',
+          'compositionId',
+          'presetId',
+          'reportRef',
+          'artifactId',
+          'outputRef',
+          'promise',
+        ],
+        ['mode'],
         'payload',
       );
       assertOpaqueIds(
@@ -658,9 +709,14 @@ function validateWorkerJobPayload(job: WorkerJobV1): void {
           job.payload.compositionId,
           job.payload.presetId,
           job.payload.reportRef,
+          job.payload.artifactId!,
+          job.payload.outputRef!,
         ],
         'payload references',
       );
+      if (job.payload.mode !== undefined && job.payload.mode !== 'sampled')
+        throw new WorkerProtocolError('WORKER_JOB_INVALID', 'payload inspection mode is invalid');
+      assertRenderPromise(job.payload.promise);
       return;
     case 'video.reference-analyze':
       try {
@@ -769,15 +825,33 @@ function validateWorkerReceiptShape(jobType: WorkerJobType, receipt: WorkerResul
         'receipt',
       );
       assertOpaqueIds([value.reportRef, value.outputRef], 'receipt references');
+      if (value.qualityReport !== undefined) assertRenderReport(value.qualityReport);
       return;
     }
     case 'render.inspect': {
       const value = receipt as Extract<WorkerResultReceiptV1, { readonly kind: 'render.inspect' }>;
-      assertObjectKeys(value, ['kind', 'reportRef', 'findings'], [], 'receipt');
-      assertOpaqueIds([value.reportRef], 'receipt references');
-      if (!Number.isSafeInteger(value.findings) || value.findings < 0) {
-        throw new WorkerProtocolError('WORKER_RECEIPT_INVALID', 'receipt findings are invalid');
+      if (
+        'findings' in value &&
+        !('outputRef' in value) &&
+        !('report' in value) &&
+        Number.isSafeInteger(value.findings) &&
+        value.findings >= 0
+      ) {
+        assertObjectKeys(value, ['kind', 'reportRef', 'findings'], [], 'receipt');
+        assertOpaqueIds([value.reportRef], 'receipt references');
+        return;
       }
+      assertObjectKeys(value, ['kind', 'reportRef', 'outputRef', 'report'], [], 'receipt');
+      assertOpaqueIds([value.reportRef, value.outputRef!], 'receipt references');
+      assertRenderReport(value.report!);
+      if (
+        value.report!.artifact === undefined ||
+        value.report!.artifact.outputRef !== value.outputRef
+      )
+        throw new WorkerProtocolError(
+          'WORKER_RECEIPT_INVALID',
+          'inspection report artifact mismatch',
+        );
       return;
     }
     case 'video.reference-analyze': {
@@ -928,6 +1002,61 @@ function assertPlainObject(
 ): asserts value is Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new WorkerProtocolError('WORKER_JOB_INVALID', `${label} must be an object`);
+  }
+}
+
+function assertRenderPromise(value: unknown): asserts value is DeliveryPromiseV1 {
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    throw new WorkerProtocolError('WORKER_JOB_INVALID', 'payload promise is invalid');
+  const promise = value as Record<string, unknown>;
+  if (promise.version !== 1 || typeof promise.id !== 'string' || promise.id.length === 0)
+    throw new WorkerProtocolError('WORKER_JOB_INVALID', 'payload promise is invalid');
+  for (const key of ['video', 'audio', 'captions', 'deterministic']) {
+    if (promise[key] === null || typeof promise[key] !== 'object' || Array.isArray(promise[key]))
+      throw new WorkerProtocolError('WORKER_JOB_INVALID', `payload promise ${key} is invalid`);
+  }
+}
+
+function assertRenderReport(value: unknown): asserts value is RenderReportV1 {
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    throw new WorkerProtocolError('WORKER_RECEIPT_INVALID', 'inspection report is invalid');
+  const report = value as Record<string, unknown>;
+  if (
+    report.version !== 1 ||
+    typeof report.promiseId !== 'string' ||
+    typeof report.checkedAt !== 'string' ||
+    !Array.isArray(report.findings) ||
+    report.artifact === null ||
+    typeof report.artifact !== 'object' ||
+    Array.isArray(report.artifact)
+  )
+    throw new WorkerProtocolError('WORKER_RECEIPT_INVALID', 'inspection report is invalid');
+  const artifact = report.artifact as Record<string, unknown>;
+  if (
+    typeof artifact.outputRef !== 'string' ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(artifact.outputRef) ||
+    typeof artifact.sha256 !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(artifact.sha256) ||
+    !Number.isSafeInteger(artifact.bytes) ||
+    (artifact.bytes as number) < 1
+  )
+    throw new WorkerProtocolError(
+      'WORKER_RECEIPT_INVALID',
+      'inspection report artifact is invalid',
+    );
+  for (const finding of report.findings) {
+    if (
+      finding === null ||
+      typeof finding !== 'object' ||
+      Array.isArray(finding) ||
+      !['pass', 'warn', 'fail'].includes(String((finding as Record<string, unknown>).status)) ||
+      typeof (finding as Record<string, unknown>).code !== 'string' ||
+      typeof (finding as Record<string, unknown>).message !== 'string'
+    )
+      throw new WorkerProtocolError(
+        'WORKER_RECEIPT_INVALID',
+        'inspection report finding is invalid',
+      );
   }
 }
 

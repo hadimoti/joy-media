@@ -217,11 +217,35 @@ describe('delivery gate', () => {
     );
 
     expect(markup).toContain('Quick browser export');
-    expect(markup).toContain('Not verified');
+    expect(markup).toContain('Browser export complete');
+    expect(markup).toContain('no delivery inspection was requested');
+    expect(markup).not.toContain('Not verified');
     expect(markup).toContain('Verified delivery');
-    expect(markup).toContain('report-render-inspect-7');
-    expect(markup).toContain('render-export-7');
+    expect(markup).not.toContain('report-render-inspect-7');
+    expect(markup).not.toContain('render-export-7');
     expect(markup).toContain('1 warning');
+  });
+
+  it('shows completed quick exports as process completion, without verification copy', () => {
+    const markup = renderToStaticMarkup(
+      <DeliveryReportPanel
+        entries={[
+          entry({
+            id: 'quick-complete',
+            filename: 'نما_rough-cut.mp4',
+            channel: 'quick-browser-export',
+            status: 'completed',
+            totalBytes: 42,
+          }),
+        ]}
+      />,
+    );
+
+    expect(markup).toContain('Browser export complete');
+    expect(markup).toContain('no delivery inspection was requested');
+    expect(markup).not.toContain('Not verified');
+    expect(markup).not.toContain('No render inspection report is linked');
+    expect(markup).toContain('<bdi dir="auto"><strong>نما_rough-cut.mp4</strong></bdi>');
   });
 
   it('reconciles completed, failed, and canceled render jobs into delivery inspection evidence', () => {
@@ -296,7 +320,10 @@ describe('delivery gate', () => {
     expect(deliveryGate(reconciled[2]!)).toMatchObject({ status: 'canceled', canDeliver: false });
     expect(reconciled[3]).toMatchObject({
       status: 'failed',
-      inspection: { state: 'failed', error: 'worker failed' },
+      inspection: {
+        state: 'failed',
+        error: 'Render inspection failed. Please retry verification.',
+      },
     });
     expect(deliveryGate(reconciled[3]!)).toMatchObject({ status: 'failed', canDeliver: false });
     expect(reconciled[4]).toMatchObject({

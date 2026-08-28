@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
+import { validateProjectDocumentV2 } from '@joy-media/project-schema';
 import {
   isWorkerJobType,
   validateWorkerJobV1,
@@ -7,12 +9,15 @@ import {
   WORKER_PROTOCOL_VERSION,
 } from '@joy-media/job-protocol';
 import type {
+  RenderInspectPayload,
   VideoReferenceAnalyzeReceipt,
   WorkerJobType,
   WorkerJobV1,
 } from '@joy-media/job-protocol';
 import {
   ControlPlaneError,
+  EXPLICIT_SHARED_LIBRARY_OWNER_ID,
+  EXPLICIT_SHARED_LIBRARY_PROJECT_ID,
   type AssetLocationRecord,
   type AssetRegistration,
   type Actor,
@@ -41,6 +46,7 @@ import {
   validateWorkerRenderArtifactRegistration,
 } from './control-plane.js';
 import { POSTGRES_SCHEMA } from './postgres-schema.js';
+import type { PrivateObjectStore } from './private-object-store.js';
 import {
   PostgresProductionRunStore,
   type CancelProductionRunInput,
@@ -52,6 +58,25 @@ import {
   type ProductionRunStore,
   type RespondToProductionApprovalInput,
 } from './production-runs.js';
+import {
+  documentHash,
+  rewriteRecoveredDocument,
+  revisionConflict,
+  validateAppendInput,
+  validateBaseRevision,
+  validateIdempotencyKey,
+  validateRecoveredCopyInput,
+  validateRevisionNumber,
+  type AppendProjectRevisionInput,
+  type CreateRecoveredCopyInput,
+  type ProjectDocumentV2,
+  type ProjectDocumentSnapshotV2,
+  type ProjectRevisionV1,
+  type ProjectRevisionStore,
+  type RecoveredCopy,
+  type RecoveredCopyProvenance,
+  type RestoreProjectRevisionInput,
+} from './project-revisions.js';
 
 const FIXTURE_THUMBNAIL_SHA256 = '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735';
 const FIXTURE_THUMBNAIL_BYTES = 14;
@@ -62,6 +87,34 @@ interface ProjectRow {
   readonly title: string;
   readonly revision: number;
   readonly asset_sync_enabled: boolean;
+}
+
+interface ProjectRevisionRow {
+  readonly project_id: string;
+  readonly revision: number;
+  readonly base_revision: number;
+  readonly idempotency_key: string;
+  readonly operation: unknown;
+  readonly document: unknown;
+  readonly document_hash: string;
+  readonly created_at: Date;
+}
+
+interface ProjectDocumentRow {
+  readonly project_id: string;
+  readonly revision: number;
+  readonly document: unknown;
+  readonly document_hash: string;
+  readonly updated_at: Date;
+}
+
+interface ProjectRecoveryCopyRow {
+  readonly source_project_id: string;
+  readonly idempotency_key: string;
+  readonly request_fingerprint: string;
+  readonly recovered_project_id: string;
+  readonly response: unknown;
+  readonly created_at: Date;
 }
 
 interface WorkerRow {
@@ -96,6 +149,7 @@ interface JobRow {
   readonly lease_expires_at: Date | null;
   readonly progress: number;
   readonly cancel_requested: boolean;
+  readonly asset_revoked: boolean;
   readonly result_kind: string | null;
   readonly result_sha256: string | null;
   readonly result_bytes: number | null;
@@ -139,6 +193,38 @@ interface MediaDerivativeRow {
   readonly verified_at: Date;
 }
 
+interface AssetRevocationAuditRow {
+  readonly revoke_id: string | number;
+  readonly project_id: string;
+  readonly asset_id: string;
+  readonly actor_id: string;
+  readonly asset_snapshot: unknown;
+  readonly derivative_snapshot: unknown;
+  readonly object_refs: unknown;
+  readonly canceled_job_ids: unknown;
+  readonly purge_state: 'pending' | 'complete' | 'failed';
+  readonly purge_error: string | null;
+  readonly requested_at: Date;
+  readonly purged_at: Date | null;
+  readonly updated_at: Date;
+}
+
+export interface AssetRevocationAudit {
+  readonly revokeId: number;
+  readonly projectId: string;
+  readonly assetId: string;
+  readonly actorId: string;
+  readonly assetSnapshot: MediaAssetRecord;
+  readonly derivativeSnapshot: readonly MediaDerivativeRecord[];
+  readonly objectRefs: readonly string[];
+  readonly canceledJobIds: readonly string[];
+  readonly purgeState: 'pending' | 'complete' | 'failed';
+  readonly purgeError?: string;
+  readonly requestedAt: string;
+  readonly purgedAt?: string;
+  readonly updatedAt: string;
+}
+
 interface RenderArtifactRow {
   readonly id: string;
   readonly project_id: string;
@@ -161,11 +247,16 @@ interface EventRow {
 export interface PostgresControlPlaneOptions {
   /** Test emulators may not implement PostgreSQL's queue-safe SKIP LOCKED. */
   readonly skipLocked?: boolean;
+  /** Server-side object store used by post-commit asset revocation. */
+  readonly privateObjectStore?: PrivateObjectStore;
 }
 
 /** Durable PostgreSQL implementation of the control-plane contract. */
-export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
+export class PostgresControlPlane
+  implements ControlPlane, ProductionRunStore, ProjectRevisionStore
+{
   readonly #skipLocked: boolean;
+  #privateObjectStore: PrivateObjectStore | undefined;
   readonly #productionRuns: PostgresProductionRunStore;
 
   constructor(
@@ -173,11 +264,407 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
     options: PostgresControlPlaneOptions = {},
   ) {
     this.#skipLocked = options.skipLocked ?? true;
+    this.#privateObjectStore = options.privateObjectStore;
     this.#productionRuns = new PostgresProductionRunStore(pool);
   }
 
   async initialize(): Promise<void> {
     await this.pool.query(POSTGRES_SCHEMA);
+    await this.ensureAssetRevocationPrimaryKey();
+  }
+
+  private async ensureAssetRevocationPrimaryKey(): Promise<void> {
+    let result: { rows: readonly { indexname: string; indexdef: string }[] };
+    try {
+      result = await this.pool.query<{
+        readonly indexname: string;
+        readonly indexdef: string;
+      }>(
+        `SELECT indexname, indexdef FROM pg_indexes
+       WHERE schemaname = current_schema() AND tablename = 'asset_revocation_audits'`,
+      );
+    } catch (error) {
+      // pg-mem does not expose PostgreSQL's catalog views. Fresh installs
+      // already have the correct primary key, so there is nothing to migrate.
+      if (
+        error instanceof Error &&
+        /(relation|table) [^ ]*pg_indexes[^ ]* does not exist/i.test(error.message)
+      ) {
+        return;
+      }
+      throw error;
+    }
+    const primaryIndexes = result.rows.filter((row) => /_pkey$/i.test(row.indexname));
+    const actual = primaryIndexes.find((row) => /revoke_id/i.test(row.indexdef));
+    const legacy = primaryIndexes.find((row) => !/revoke_id/i.test(row.indexdef));
+    if (legacy !== undefined) {
+      await this.pool.query(
+        `ALTER TABLE asset_revocation_audits DROP CONSTRAINT "${legacy.indexname.replace(/"/g, '""')}"`,
+      );
+    }
+    if (actual === undefined) {
+      try {
+        await this.pool.query(
+          'ALTER TABLE asset_revocation_audits ADD CONSTRAINT asset_revocation_audits_revoke_id_pkey PRIMARY KEY (revoke_id)',
+        );
+      } catch (error) {
+        // Some test emulators do not expose pg_constraint rows. If they still
+        // report an existing primary key, preserve it rather than replacing it.
+        if (!(error instanceof Error) || !/already has a primary key/i.test(error.message))
+          throw error;
+      }
+    }
+  }
+
+  /** Bind the API's server-only store when the HTTP transport owns construction. */
+  setPrivateObjectStore(store: PrivateObjectStore): void {
+    this.#privateObjectStore = store;
+  }
+
+  /** Record a server-upload ref before bytes are written, so cleanup failures remain durable. */
+  async stagePrivateObjectReference(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+    objectKind: 'original' | 'derivative' | 'artifact',
+    objectRef: string,
+  ): Promise<void> {
+    await this.transaction(async (client) => {
+      await this.asset(actor, projectId, assetId, client);
+      await lockAssetForJob(client, projectId, assetId);
+      await insertCleanupReference(client, projectId, assetId, undefined, objectKind, objectRef);
+    });
+  }
+
+  async stageWorkerPrivateObjectReference(
+    workerId: string,
+    jobId: string,
+    assetId: string | undefined,
+    objectKind: 'derivative' | 'artifact',
+    objectRef: string,
+    now = Date.now(),
+  ): Promise<void> {
+    const result = await this.pool.query<{ readonly id: string }>(
+      `INSERT INTO private_object_cleanup_refs
+         (project_id, asset_id, job_id, object_kind, object_ref, state, created_at, updated_at)
+       SELECT jobs.project_id, $3, jobs.id, $4, $5, 'pending', $6, $6
+       FROM jobs WHERE jobs.id = $1 AND jobs.lease_owner = $2 AND jobs.state = 'leased'
+       RETURNING id`,
+      [jobId, workerId, assetId ?? null, objectKind, objectRef, new Date(now)],
+    );
+    if (result.rows[0] === undefined) throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
+  }
+
+  async markPrivateObjectReferenceRegistered(objectRef: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE private_object_cleanup_refs SET state = 'registered', last_error = NULL, updated_at = NOW()
+       WHERE object_ref = $1 AND state = 'pending'`,
+      [objectRef],
+    );
+  }
+
+  async markPrivateObjectReferenceCleanupFailed(objectRef: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE private_object_cleanup_refs SET state = 'pending', last_error = 'OBJECT_CLEANUP_FAILED', updated_at = NOW()
+       WHERE object_ref = $1 AND state IN ('pending', 'registered')`,
+      [objectRef],
+    );
+  }
+
+  /** Bounded server-only retry seam for objects staged before a failed promote/cleanup. */
+  async retryPendingObjectCleanup(limit = 100): Promise<number> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
+      throw new TypeError('cleanup retry limit must be between 1 and 100');
+    if (this.#privateObjectStore === undefined) return 0;
+    const result = await this.pool.query<{ readonly id: string; readonly object_ref: string }>(
+      `SELECT id, object_ref FROM private_object_cleanup_refs
+       WHERE state = 'pending' ORDER BY updated_at, id LIMIT $1`,
+      [limit],
+    );
+    let cleaned = 0;
+    for (const row of result.rows) {
+      try {
+        await this.#privateObjectStore.remove(row.object_ref);
+        await this.pool.query(
+          `UPDATE private_object_cleanup_refs SET state = 'cleaned', last_error = NULL,
+             cleaned_at = NOW(), updated_at = NOW() WHERE id = $1`,
+          [row.id],
+        );
+        cleaned += 1;
+      } catch {
+        await this.pool.query(
+          `UPDATE private_object_cleanup_refs SET last_error = 'OBJECT_CLEANUP_FAILED', updated_at = NOW()
+           WHERE id = $1`,
+          [row.id],
+        );
+      }
+    }
+    return cleaned;
+  }
+
+  async getProject(actor: Actor, id: string): Promise<ProjectMetadata> {
+    return this.project(actor, id);
+  }
+
+  async getProjectDocument(actor: Actor, projectId: string): Promise<ProjectDocumentSnapshotV2> {
+    await this.project(actor, projectId);
+    const result = await this.pool.query<ProjectDocumentRow>(
+      `SELECT project_id, revision, document, document_hash, updated_at
+       FROM project_documents WHERE project_id = $1`,
+      [projectId],
+    );
+    const row = result.rows[0];
+    if (row === undefined) throw new ControlPlaneError('DOCUMENT_NOT_FOUND', projectId);
+    return {
+      projectId: row.project_id,
+      revision: row.revision,
+      document: parseProjectDocument(row.document),
+      documentHash: row.document_hash,
+      updatedAt: row.updated_at.toISOString(),
+    };
+  }
+
+  async appendProjectRevision(
+    actor: Actor,
+    projectId: string,
+    input: AppendProjectRevisionInput,
+  ): Promise<ProjectRevisionV1> {
+    await this.project(actor, projectId);
+    validateAppendInput(projectId, input);
+    return this.transaction(async (client) => {
+      await this.project(actor, projectId, client);
+      // Lock before checking idempotency so concurrent identical retries see
+      // the committed first revision instead of a stale head.
+      await client.query('SELECT id FROM projects WHERE id = $1 FOR UPDATE', [projectId]);
+      const priorResult = await client.query<ProjectRevisionRow>(
+        `SELECT project_id, revision, base_revision, idempotency_key, operation, document, document_hash, created_at
+         FROM project_revisions WHERE project_id = $1 AND idempotency_key = $2`,
+        [projectId, input.idempotencyKey],
+      );
+      const prior = priorResult.rows[0];
+      if (prior !== undefined) {
+        const priorDocument = parseProjectDocument(prior.document);
+        if (
+          prior.base_revision !== input.baseRevision ||
+          prior.document_hash !== documentHash(input.document) ||
+          revisionKind(prior.operation) !== (input.operation ?? 'replace') ||
+          revisionTarget(prior.operation) !== (input.targetRevision ?? undefined) ||
+          revisionLabel(prior.operation) !== (input.label ?? '')
+        )
+          throw new ControlPlaneError(
+            'IDEMPOTENCY_CONFLICT',
+            'idempotency key was already used for another revision',
+          );
+        void priorDocument;
+        return projectRevisionOf(prior);
+      }
+      const currentResult = await client.query<{ readonly revision: number }>(
+        'SELECT revision FROM project_documents WHERE project_id = $1 FOR UPDATE',
+        [projectId],
+      );
+      const currentRevision = currentResult.rows[0]?.revision ?? 0;
+      if (currentRevision !== input.baseRevision)
+        throw revisionConflict(input.baseRevision, currentRevision);
+      const nextRevision = currentRevision + 1;
+      const createdAt = new Date();
+      const operation = {
+        kind: input.operation ?? ('replace' as const),
+        idempotencyKey: input.idempotencyKey,
+        ...(input.label === undefined ? {} : { label: input.label }),
+        ...(input.targetRevision === undefined ? {} : { targetRevision: input.targetRevision }),
+      };
+      const hash = documentHash(input.document);
+      const inserted = await client.query<ProjectRevisionRow>(
+        `INSERT INTO project_revisions
+           (project_id, revision, base_revision, idempotency_key, operation, document, document_hash, created_at)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)
+         RETURNING project_id, revision, base_revision, idempotency_key, operation, document, document_hash, created_at`,
+        [
+          projectId,
+          nextRevision,
+          input.baseRevision,
+          input.idempotencyKey,
+          JSON.stringify(operation),
+          JSON.stringify(input.document),
+          hash,
+          createdAt,
+        ],
+      );
+      await client.query(
+        `INSERT INTO project_documents (project_id, revision, document, document_hash, updated_at)
+         VALUES ($1, $2, $3::jsonb, $4, $5)
+         ON CONFLICT (project_id) DO UPDATE SET revision = EXCLUDED.revision,
+           document = EXCLUDED.document, document_hash = EXCLUDED.document_hash, updated_at = EXCLUDED.updated_at`,
+        [projectId, nextRevision, JSON.stringify(input.document), hash, createdAt],
+      );
+      return projectRevisionOf(requiredRow(inserted.rows[0], 'REVISION_CREATE_FAILED'));
+    }).catch((error) => {
+      if (isPostgresError(error) && error.code === '23505')
+        throw new ControlPlaneError('IDEMPOTENCY_CONFLICT', 'idempotency key was already used');
+      throw error;
+    });
+  }
+
+  async getProjectRevision(
+    actor: Actor,
+    projectId: string,
+    revision: number,
+  ): Promise<ProjectRevisionV1> {
+    await this.project(actor, projectId);
+    validateRevisionNumber(revision);
+    const result = await this.pool.query<ProjectRevisionRow>(
+      `SELECT project_id, revision, base_revision, idempotency_key, operation, document, document_hash, created_at
+       FROM project_revisions WHERE project_id = $1 AND revision = $2`,
+      [projectId, revision],
+    );
+    const row = result.rows[0];
+    if (row === undefined)
+      throw new ControlPlaneError('REVISION_NOT_FOUND', `revision ${revision} was not found`);
+    return projectRevisionOf(row);
+  }
+
+  async restoreProjectRevision(
+    actor: Actor,
+    projectId: string,
+    input: RestoreProjectRevisionInput,
+  ): Promise<ProjectRevisionV1> {
+    await this.project(actor, projectId);
+    validateRevisionNumber(input.revision);
+    validateBaseRevision(input.baseRevision);
+    validateIdempotencyKey(input.idempotencyKey);
+    const source = await this.getProjectRevision(actor, projectId, input.revision);
+    const result = await this.appendProjectRevision(actor, projectId, {
+      baseRevision: input.baseRevision,
+      idempotencyKey: input.idempotencyKey,
+      document: source.document,
+      operation: 'restore',
+      targetRevision: input.revision,
+      label: input.label ?? `restore revision ${String(input.revision)}`,
+    });
+    return result;
+  }
+
+  async createRecoveredCopy(
+    actor: Actor,
+    sourceProjectId: string,
+    input: CreateRecoveredCopyInput,
+  ): Promise<RecoveredCopy> {
+    await this.project(actor, sourceProjectId);
+    validateRecoveredCopyInput(input);
+    return this.transaction(async (client) => {
+      await this.project(actor, sourceProjectId, client);
+      await client.query('SELECT id FROM projects WHERE id = $1 FOR UPDATE', [sourceProjectId]);
+      const priorResult = await client.query<ProjectRecoveryCopyRow>(
+        `SELECT source_project_id, idempotency_key, request_fingerprint, recovered_project_id, response, created_at
+         FROM project_recovery_copies WHERE source_project_id = $1 AND idempotency_key = $2`,
+        [sourceProjectId, input.idempotencyKey],
+      );
+      const prior = priorResult.rows[0];
+      const fingerprint = recoveryRequestFingerprint(input);
+      if (prior !== undefined) {
+        if (prior.request_fingerprint !== fingerprint)
+          throw new ControlPlaneError(
+            'IDEMPOTENCY_CONFLICT',
+            'idempotency key was already used for another recovered copy',
+          );
+        return parseRecoveredCopy(prior.response);
+      }
+      const currentResult = await client.query<{ readonly revision: number }>(
+        'SELECT revision FROM project_documents WHERE project_id = $1 FOR UPDATE',
+        [sourceProjectId],
+      );
+      const sourceHeadRevision = currentResult.rows[0]?.revision ?? 0;
+      if (sourceHeadRevision <= input.baseRevision)
+        throw revisionConflict(input.baseRevision, sourceHeadRevision);
+
+      let requestedDocument: ProjectDocumentV2;
+      if (input.operation.kind === 'append') {
+        // The incoming project identity is deliberately rewritten below. Validate its
+        // schema and transport safety before doing so, but do not require the old ID
+        // to equal the source route.
+        const diagnostics = validateProjectDocumentV2Safe(input.operation.document);
+        if (diagnostics !== undefined) throw diagnostics;
+        requestedDocument = cloneProjectDocument(input.operation.document);
+      } else {
+        const target = await client.query<ProjectRevisionRow>(
+          `SELECT project_id, revision, base_revision, idempotency_key, operation, document, document_hash, created_at
+           FROM project_revisions WHERE project_id = $1 AND revision = $2`,
+          [sourceProjectId, input.operation.targetRevision],
+        );
+        const row = target.rows[0];
+        if (row === undefined)
+          throw new ControlPlaneError(
+            'REVISION_NOT_FOUND',
+            `revision ${String(input.operation.targetRevision)} was not found`,
+          );
+        requestedDocument = parseProjectDocument(row.document);
+      }
+      const recoveredProjectId = `recovered-${randomUUID()}`;
+      const document = rewriteRecoveredDocument(
+        requestedDocument,
+        recoveredProjectId,
+        input.suggestedName,
+      );
+      const createdAt = new Date();
+      const provenance: RecoveredCopyProvenance = {
+        sourceProjectId,
+        baseRevision: input.baseRevision,
+        sourceHeadRevision,
+        operation: cloneJson(input.operation),
+        requestedDocumentHash: documentHash(requestedDocument),
+      };
+      const response: RecoveredCopy = {
+        kind: 'recovered-copy',
+        projectId: recoveredProjectId,
+        name: input.suggestedName,
+        document,
+        basedOnRevision: input.baseRevision,
+        serverRevision: 1,
+        createdAt: createdAt.toISOString(),
+        provenance,
+      };
+      await client.query(
+        'INSERT INTO projects (id, owner_id, title, revision) VALUES ($1, $2, $3, 0)',
+        [recoveredProjectId, actor.id, input.suggestedName],
+      );
+      const revisionOperation = {
+        kind: 'replace' as const,
+        idempotencyKey: input.idempotencyKey,
+        label: 'recovered copy',
+      };
+      await client.query(
+        `INSERT INTO project_revisions
+           (project_id, revision, base_revision, idempotency_key, operation, document, document_hash, created_at)
+         VALUES ($1, 1, 0, $2, $3::jsonb, $4::jsonb, $5, $6)`,
+        [
+          recoveredProjectId,
+          input.idempotencyKey,
+          JSON.stringify(revisionOperation),
+          JSON.stringify(document),
+          documentHash(document),
+          createdAt,
+        ],
+      );
+      await client.query(
+        `INSERT INTO project_documents (project_id, revision, document, document_hash, updated_at)
+         VALUES ($1, 1, $2::jsonb, $3, $4)`,
+        [recoveredProjectId, JSON.stringify(document), documentHash(document), createdAt],
+      );
+      await client.query(
+        `INSERT INTO project_recovery_copies
+           (source_project_id, idempotency_key, request_fingerprint, recovered_project_id, response, created_at)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
+        [
+          sourceProjectId,
+          input.idempotencyKey,
+          fingerprint,
+          recoveredProjectId,
+          JSON.stringify(response),
+          createdAt,
+        ],
+      );
+      return response;
+    });
   }
 
   async createProject(actor: Actor, id: string, title: string): Promise<ProjectMetadata> {
@@ -189,6 +676,16 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
       );
       return projectOf(requiredRow(result.rows[0], 'PROJECT_CREATE_FAILED'));
     } catch (error) {
+      if (isPostgresError(error) && error.code === '23505') {
+        const existing = await this.pool.query<{ readonly owner_id: string }>(
+          'SELECT owner_id FROM projects WHERE id = $1',
+          [id],
+        );
+        if (existing.rows[0]?.owner_id === actor.id)
+          throw new ControlPlaneError('PROJECT_EXISTS', id);
+        // Do not reveal that an opaque project ID belongs to another owner.
+        throw new ControlPlaneError('PROJECT_NOT_FOUND', id);
+      }
       throw databaseError(error, 'PROJECT_EXISTS', id);
     }
   }
@@ -255,7 +752,9 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
             new Date(now),
           ],
         );
-        return mediaAssetOf(requiredRow(result.rows[0], 'ASSET_CREATE_FAILED'));
+        const created = requiredRow(result.rows[0], 'ASSET_CREATE_FAILED');
+        await recordObjectReferences(client, projectId, asset.id, undefined, asset.locations, now);
+        return mediaAssetOf(created);
       } catch (error) {
         throw databaseError(error, 'ASSET_EXISTS', asset.id);
       }
@@ -273,9 +772,21 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(location.ref))
       throw new ControlPlaneError('ASSET_INVALID', 'asset location is invalid');
     return this.transaction(async (client) => {
-      await this.project(actor, projectId, client);
+      assertActor(actor);
+      const projectResult = await client.query<ProjectRow>(
+        'SELECT * FROM projects WHERE id = $1 AND owner_id = $2 FOR UPDATE',
+        [projectId, actor.id],
+      );
+      if (projectResult.rows[0] === undefined)
+        throw new ControlPlaneError('PROJECT_NOT_FOUND', projectId);
+      const project = projectOf(projectResult.rows[0]);
+      if (!project.assetSyncEnabled)
+        throw new ControlPlaneError(
+          'ASSET_SYNC_DISABLED',
+          'private backup requires explicit project consent',
+        );
       const existing = await client.query<MediaAssetRow>(
-        'SELECT * FROM media_assets WHERE id = $1 AND project_id = $2',
+        'SELECT * FROM media_assets WHERE id = $1 AND project_id = $2 FOR SHARE',
         [assetId, projectId],
       );
       if (existing.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
@@ -291,6 +802,7 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
          WHERE id = $1 AND project_id = $2 RETURNING *`,
         [assetId, projectId, JSON.stringify(locations)],
       );
+      await recordObjectReferences(client, projectId, assetId, undefined, locations, Date.now());
       return mediaAssetOf(requiredRow(result.rows[0], 'ASSET_UPDATE_FAILED'));
     });
   }
@@ -340,13 +852,109 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
     projectId: string,
     assetId: string,
   ): Promise<{ readonly id: string }> {
-    return this.transaction(async (client) => {
+    const plan = await this.transaction(async (client) => {
       await this.project(actor, projectId, client);
-      const existing = await client.query<{ id: string }>(
-        'SELECT id FROM media_assets WHERE id = $1 AND project_id = $2',
+      const existing = await client.query<MediaAssetRow>(
+        'SELECT * FROM media_assets WHERE id = $1 AND project_id = $2 FOR UPDATE',
         [assetId, projectId],
       );
-      if (existing.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+      if (existing.rows[0] === undefined) {
+        const prior = await client.query<{ readonly asset_id: string }>(
+          'SELECT asset_id FROM asset_revocation_audits WHERE project_id = $1 AND asset_id = $2 ORDER BY revoke_id DESC LIMIT 1',
+          [projectId, assetId],
+        );
+        if (prior.rows[0] !== undefined)
+          return { id: assetId, revokeId: undefined, refs: [] as readonly string[] };
+        throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+      }
+      const asset = mediaAssetOf(existing.rows[0]);
+      const derivatives = await client.query<MediaDerivativeRow>(
+        'SELECT * FROM media_derivatives WHERE project_id = $1 AND asset_id = $2 ORDER BY id',
+        [projectId, assetId],
+      );
+      const derivativeRecords = derivatives.rows.map(mediaDerivativeOf);
+      const historical = await client.query<{ readonly object_ref: string }>(
+        'SELECT object_ref FROM asset_object_references WHERE project_id = $1 AND asset_id = $2 AND revoked_at IS NULL ORDER BY id',
+        [projectId, assetId],
+      );
+      const pendingCleanup = await client.query<{ readonly object_ref: string }>(
+        `SELECT object_ref FROM private_object_cleanup_refs
+         WHERE project_id = $1 AND asset_id = $2 AND revocation_id IS NULL
+           AND state = 'registered' ORDER BY id`,
+        [projectId, assetId],
+      );
+      const refs = uniqueOpaqueRefs([
+        ...historical.rows.map((row) => row.object_ref),
+        ...pendingCleanup.rows.map((row) => row.object_ref),
+        ...privateObjectRefs(asset.locations),
+        ...derivativeRecords.flatMap((derivative) => privateObjectRefs(derivative.locations)),
+      ]);
+      const canceled = await client.query<{ readonly id: string; readonly state: Job['state'] }>(
+        `UPDATE jobs SET state = CASE WHEN state = 'queued' THEN 'canceled' ELSE state END,
+             cancel_requested = CASE WHEN state = 'leased' THEN true ELSE cancel_requested END,
+             asset_revoked = true
+         WHERE project_id = $1 AND asset_id = $2 AND state IN ('queued', 'leased')
+         RETURNING id, state`,
+        [projectId, assetId],
+      );
+      for (const job of canceled.rows) {
+        await this.event(
+          client,
+          job.id,
+          job.state === 'leased' ? 'cancel-requested' : 'canceled',
+          Date.now(),
+        );
+      }
+      const canceledJobIds = canceled.rows.map((job) => job.id).sort();
+      const audit = await client.query<{ readonly revoke_id: string | number }>(
+        `INSERT INTO asset_revocation_audits
+           (project_id, asset_id, actor_id, asset_snapshot, derivative_snapshot, object_refs,
+            canceled_job_ids, purge_state, purge_error, requested_at, purged_at, updated_at)
+         VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, 'pending', NULL, $8, NULL, $8)
+         RETURNING revoke_id`,
+        [
+          projectId,
+          assetId,
+          actor.id,
+          JSON.stringify(asset),
+          JSON.stringify(derivativeRecords),
+          JSON.stringify(refs),
+          JSON.stringify(canceledJobIds),
+          new Date(),
+        ],
+      );
+      const revokeId = audit.rows[0]?.revoke_id;
+      if (revokeId === undefined)
+        throw new ControlPlaneError('DATABASE_ERROR', 'revocation audit was not recorded');
+      for (const ref of privateObjectRefs(asset.locations)) {
+        await client.query(
+          `INSERT INTO asset_object_references
+             (project_id, asset_id, derivative_id, object_kind, object_ref, revocation_id, revoked_at, created_at)
+           VALUES ($1, $2, NULL, 'original', $3, NULL, NULL, $4)`,
+          [projectId, assetId, ref, new Date()],
+        );
+      }
+      for (const derivative of derivativeRecords) {
+        for (const ref of privateObjectRefs(derivative.locations)) {
+          await client.query(
+            `INSERT INTO asset_object_references
+               (project_id, asset_id, derivative_id, object_kind, object_ref, revocation_id, revoked_at, created_at)
+             VALUES ($1, $2, $3, 'derivative', $4, NULL, NULL, $5)`,
+            [projectId, assetId, derivative.id, ref, new Date()],
+          );
+        }
+      }
+      await client.query(
+        `UPDATE asset_object_references
+         SET revocation_id = $3, revoked_at = $4
+         WHERE project_id = $1 AND asset_id = $2 AND revoked_at IS NULL`,
+        [projectId, assetId, revokeId, new Date()],
+      );
+      await client.query(
+        `UPDATE private_object_cleanup_refs SET revocation_id = $3, updated_at = NOW()
+         WHERE project_id = $1 AND asset_id = $2 AND revocation_id IS NULL`,
+        [projectId, assetId, revokeId],
+      );
       await client.query('DELETE FROM media_derivatives WHERE project_id = $1 AND asset_id = $2', [
         projectId,
         assetId,
@@ -355,8 +963,50 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
         assetId,
         projectId,
       ]);
-      return { id: assetId };
+      return { id: assetId, revokeId: Number(revokeId), refs };
     });
+    if (this.#privateObjectStore !== undefined)
+      await this.purgeAssetReferences(projectId, assetId, plan.revokeId, plan.refs);
+    return { id: plan.id };
+  }
+
+  /** Durable audit seam for operators/tests; ownership is still enforced. */
+  async assetRevocationAudit(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+  ): Promise<AssetRevocationAudit> {
+    await this.project(actor, projectId);
+    const result = await this.pool.query<AssetRevocationAuditRow>(
+      'SELECT * FROM asset_revocation_audits WHERE project_id = $1 AND asset_id = $2 ORDER BY revoke_id DESC LIMIT 1',
+      [projectId, assetId],
+    );
+    const row = result.rows[0];
+    if (row === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    return assetRevocationAuditOf(row);
+  }
+
+  async retryAssetPurge(
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+  ): Promise<{ readonly id: string }> {
+    await this.project(actor, projectId);
+    const result = await this.pool.query<{
+      readonly revoke_id: string | number;
+      readonly object_refs: unknown;
+    }>(
+      'SELECT revoke_id, object_refs FROM asset_revocation_audits WHERE project_id = $1 AND asset_id = $2 ORDER BY revoke_id DESC LIMIT 1',
+      [projectId, assetId],
+    );
+    const row = result.rows[0];
+    if (row === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    const refs = uniqueOpaqueRefs(
+      jsonArray(row.object_refs).filter((value): value is string => typeof value === 'string'),
+    );
+    if (this.#privateObjectStore !== undefined)
+      await this.purgeAssetReferences(projectId, assetId, Number(row.revoke_id), refs);
+    return { id: assetId };
   }
 
   async assetsForProject(actor: Actor, projectId: string): Promise<readonly MediaAssetRecord[]> {
@@ -384,29 +1034,31 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
   async sharedCloudAssets(actor: Actor): Promise<readonly MediaAssetRecord[]> {
     assertActor(actor);
     const result = await this.pool.query<MediaAssetRow>(
-      `SELECT * FROM media_assets
-       WHERE EXISTS (
-         SELECT 1 FROM jsonb_array_elements(locations) AS loc
-         WHERE loc->>'kind' = 'private-object'
-       )
-       ORDER BY COALESCE(CASE WHEN sort_name = '' THEN NULL ELSE sort_name END, lower(display_name)), id`,
+      `SELECT a.* FROM media_assets a
+       JOIN projects p ON p.id = a.project_id
+       WHERE (p.owner_id = $1 OR (p.id = $2 AND p.owner_id = $3))
+       ORDER BY COALESCE(CASE WHEN a.sort_name = '' THEN NULL ELSE a.sort_name END, lower(a.display_name)), a.id`,
+      [actor.id, EXPLICIT_SHARED_LIBRARY_PROJECT_ID, EXPLICIT_SHARED_LIBRARY_OWNER_ID],
     );
-    return result.rows.map(mediaAssetOf);
+    return result.rows
+      .map(mediaAssetOf)
+      .filter((asset) => asset.locations.some((location) => location.kind === 'private-object'));
   }
 
   async sharedCloudAsset(actor: Actor, assetId: string): Promise<MediaAssetRecord> {
     assertActor(actor);
     const result = await this.pool.query<MediaAssetRow>(
-      `SELECT * FROM media_assets
-       WHERE id = $1
-         AND EXISTS (
-           SELECT 1 FROM jsonb_array_elements(locations) AS loc
-           WHERE loc->>'kind' = 'private-object'
-         )`,
-      [assetId],
+      `SELECT a.* FROM media_assets a
+       JOIN projects p ON p.id = a.project_id
+       WHERE a.id = $1
+         AND (p.owner_id = $2 OR (p.id = $3 AND p.owner_id = $4))`,
+      [assetId, actor.id, EXPLICIT_SHARED_LIBRARY_PROJECT_ID, EXPLICIT_SHARED_LIBRARY_OWNER_ID],
     );
     if (result.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
-    return mediaAssetOf(result.rows[0]);
+    const asset = mediaAssetOf(result.rows[0]);
+    if (!asset.locations.some((location) => location.kind === 'private-object'))
+      throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+    return asset;
   }
 
   async registerLocalDerivative(
@@ -429,6 +1081,7 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
     else validateLocalDerivativeRegistration(derivative as LocalDerivativeRegistration);
     return this.transaction(async (client) => {
       await this.asset(actor, projectId, derivative.assetId, client);
+      await lockAssetForJob(client, projectId, derivative.assetId);
       try {
         const result = await client.query<MediaDerivativeRow>(
           `INSERT INTO media_derivatives
@@ -448,7 +1101,16 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
             new Date(now),
           ],
         );
-        return mediaDerivativeOf(requiredRow(result.rows[0], 'DERIVATIVE_CREATE_FAILED'));
+        const created = requiredRow(result.rows[0], 'DERIVATIVE_CREATE_FAILED');
+        await recordObjectReferences(
+          client,
+          projectId,
+          derivative.assetId,
+          derivative.id,
+          derivative.locations,
+          now,
+        );
+        return mediaDerivativeOf(created);
       } catch (error) {
         throw databaseError(error, 'DERIVATIVE_EXISTS', derivative.id);
       }
@@ -542,6 +1204,25 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
       const row = lease.rows[0];
       if (row === undefined || row.type !== 'render.export' || row.revoked_at !== null)
         throw new ControlPlaneError('ARTIFACT_UPLOAD_DENIED', jobId);
+      const existing = await client.query<RenderArtifactRow>(
+        'SELECT * FROM render_artifacts WHERE id = $1',
+        [artifact.id],
+      );
+      const prior = existing.rows[0];
+      if (prior !== undefined) {
+        const priorLocation = jsonObject(prior.location);
+        if (
+          prior.project_id === row.project_id &&
+          prior.job_id === jobId &&
+          prior.output_ref === artifact.outputRef &&
+          prior.sha256 === artifact.sha256 &&
+          safeByteLength(prior.byte_length) === artifact.bytes &&
+          priorLocation.kind === 'private-object' &&
+          priorLocation.ref === artifact.location.ref
+        )
+          return renderArtifactOf(prior);
+        throw new ControlPlaneError('ARTIFACT_EXISTS', artifact.id);
+      }
       try {
         const inserted = await client.query<RenderArtifactRow>(
           `INSERT INTO render_artifacts
@@ -585,6 +1266,60 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
     );
     const row = result.rows[0];
     if (row === undefined) throw new ControlPlaneError('ARTIFACT_NOT_FOUND', artifactId);
+    return renderArtifactOf(row);
+  }
+
+  async renderArtifactForWorker(
+    workerId: string,
+    jobId: string,
+    outputRef: string,
+  ): Promise<RenderArtifactRecord> {
+    const worker = await this.pool.query<{ readonly owner_id: string }>(
+      'SELECT owner_id FROM workers WHERE id = $1 AND revoked_at IS NULL',
+      [workerId],
+    );
+    const ownerId = worker.rows[0]?.owner_id;
+    if (ownerId === undefined) throw new ControlPlaneError('ARTIFACT_NOT_FOUND', outputRef);
+    const inspect = await this.pool.query<{ readonly project_id: string }>(
+      `SELECT project_id FROM jobs
+       WHERE id = $1 AND type = 'render.inspect'
+         AND state = 'leased' AND lease_owner = $2
+         AND lease_expires_at > NOW()`,
+      [jobId, workerId],
+    );
+    const projectId = inspect.rows[0]?.project_id;
+    if (projectId === undefined) throw new ControlPlaneError('ARTIFACT_NOT_FOUND', outputRef);
+    const project = await this.pool.query<{ readonly owner_id: string }>(
+      'SELECT owner_id FROM projects WHERE id = $1',
+      [projectId],
+    );
+    if (project.rows[0]?.owner_id !== ownerId)
+      throw new ControlPlaneError('ARTIFACT_NOT_FOUND', outputRef);
+    const result = await this.pool.query<RenderArtifactRow>(
+      `SELECT * FROM render_artifacts
+       WHERE project_id = $1 AND output_ref = $2`,
+      [projectId, outputRef],
+    );
+    const row = result.rows[0];
+    if (row === undefined) throw new ControlPlaneError('ARTIFACT_NOT_FOUND', outputRef);
+    const exported = await this.pool.query<{
+      readonly state: string;
+      readonly type: string;
+      readonly result_sha256: string | null;
+      readonly result_bytes: string | number | null;
+      readonly result_receipt: unknown;
+    }>('SELECT state, type, result_sha256, result_bytes, result_receipt FROM jobs WHERE id = $1', [
+      row.job_id,
+    ]);
+    const exportRow = exported.rows[0];
+    if (
+      exportRow?.state !== 'completed' ||
+      exportRow.type !== 'render.export' ||
+      exportRow.result_sha256 !== row.sha256 ||
+      safeByteLength(exportRow.result_bytes ?? 0) !== row.byte_length ||
+      jsonObject(exportRow.result_receipt).outputRef !== row.output_ref
+    )
+      throw new ControlPlaneError('ARTIFACT_NOT_FOUND', outputRef);
     return renderArtifactOf(row);
   }
 
@@ -733,10 +1468,32 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
       const existing = await client.query<JobRow>('SELECT * FROM jobs WHERE id = $1', [id]);
       if (existing.rows[0] !== undefined) return jobOf(existing.rows[0]);
       const typedJob = workerJobFor(id, projectId, type, assetId, workerJob);
+      if (type === 'render.inspect' && typedJob !== undefined) {
+        const payload = typedJob.payload as RenderInspectPayload;
+        if (payload.artifactId !== undefined || payload.outputRef !== undefined) {
+          const artifact = await client.query<{ readonly id: string }>(
+            `SELECT artifacts.id FROM render_artifacts AS artifacts
+             JOIN jobs AS exported ON exported.id = artifacts.job_id
+             WHERE artifacts.id = $1 AND artifacts.project_id = $2
+               AND artifacts.output_ref = $3
+               AND exported.state = 'completed' AND exported.type = 'render.export'
+               AND exported.result_sha256 = artifacts.sha256
+               AND exported.result_bytes = artifacts.byte_length
+               AND exported.result_receipt->>'outputRef' = artifacts.output_ref`,
+            [payload.artifactId, projectId, payload.outputRef],
+          );
+          if (artifact.rows[0] === undefined)
+            throw new ControlPlaneError(
+              'ARTIFACT_NOT_FOUND',
+              payload.outputRef ?? payload.artifactId!,
+            );
+        }
+      }
       if ((type === 'image.comfy' || type === 'audio.ml-denoise') && assetId === undefined)
         throw new ControlPlaneError('ASSET_JOB_INVALID', 'Worker generation requires an asset ID');
       if ((type === 'image.comfy' || type === 'audio.ml-denoise') && assetId !== undefined) {
         await this.asset(actor, projectId, assetId, client);
+        await lockAssetForJob(client, projectId, assetId);
       }
       try {
         const result = await client.query<JobRow>(
@@ -774,6 +1531,7 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
   ): Promise<Job> {
     return this.transaction(async (client) => {
       await this.asset(actor, projectId, assetId, client);
+      await lockAssetForJob(client, projectId, assetId);
       const existing = await client.query<JobRow>('SELECT * FROM jobs WHERE id = $1', [id]);
       if (existing.rows[0] !== undefined) return jobOf(existing.rows[0]);
       const typedJob = workerJobFor(id, projectId, 'asset.thumbnail', assetId);
@@ -815,7 +1573,8 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
       const workerRecord = workerOf(worker.rows[0]);
       const candidate = await client.query<JobRow>(
         `SELECT * FROM jobs
-         WHERE (state = 'queued' OR (state = 'leased' AND lease_expires_at <= $1))
+         WHERE asset_revoked = false
+           AND (state = 'queued' OR (state = 'leased' AND lease_expires_at <= $1))
          ORDER BY id LIMIT 64 FOR UPDATE${this.#skipLocked ? ' SKIP LOCKED' : ''}`,
         [new Date(now)],
       );
@@ -911,6 +1670,51 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
       );
       if (artifact.rows[0] === undefined) throw new ControlPlaneError('RESULT_INVALID', jobId);
     }
+    if (leasedJob?.type === 'render.inspect') {
+      const payload = jsonObject(leasedJob.job_payload);
+      const artifactBacked = 'artifactId' in payload;
+      if (
+        artifactBacked &&
+        (receipt?.kind !== 'render.inspect' ||
+          receipt.outputRef === undefined ||
+          receipt.report === undefined)
+      )
+        throw new ControlPlaneError('RESULT_INVALID', jobId);
+      if (
+        !artifactBacked &&
+        (payload.legacyVersion !== 0 ||
+          receipt?.kind !== 'render.inspect' ||
+          receipt.findings === undefined)
+      )
+        throw new ControlPlaneError('RESULT_INVALID', jobId);
+      if (!artifactBacked) {
+        // Explicit legacyVersion=0 jobs retain their historical count receipt.
+      } else {
+        const inspectReceipt = receipt as Extract<
+          WorkerResultReceipt,
+          { readonly kind: 'render.inspect' }
+        >;
+        const artifact = await this.pool.query<{ readonly id: string }>(
+          `SELECT artifacts.id FROM render_artifacts AS artifacts
+         JOIN jobs AS exported ON exported.id = artifacts.job_id
+         WHERE artifacts.id = $1 AND artifacts.project_id = $2
+           AND artifacts.output_ref = $3
+           AND artifacts.sha256 = $4 AND artifacts.byte_length = $5
+           AND exported.state = 'completed' AND exported.type = 'render.export'
+           AND exported.result_sha256 = artifacts.sha256
+           AND exported.result_bytes = artifacts.byte_length
+           AND exported.result_receipt->>'outputRef' = artifacts.output_ref`,
+          [
+            payload.artifactId,
+            leasedJob.project_id,
+            inspectReceipt.outputRef,
+            inspectReceipt.report!.artifact?.sha256,
+            inspectReceipt.report!.artifact?.bytes,
+          ],
+        );
+        if (artifact.rows[0] === undefined) throw new ControlPlaneError('RESULT_INVALID', jobId);
+      }
+    }
     const isThumb = receipt?.kind === 'asset.thumbnail';
     const isGpu = receipt?.kind === 'image.comfy' || receipt?.kind === 'audio.ml-denoise';
     const isMediaAi = receipt?.kind === 'video.runway' || receipt?.kind === 'edit.higgsfield';
@@ -918,6 +1722,13 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
     const storesHashAndBytes = receipt !== undefined && 'sha256' in receipt && 'bytes' in receipt;
     const storesDescriptor = storesAsset && receipt !== undefined && 'descriptor' in receipt;
     return this.transaction(async (client) => {
+      if (leasedJob?.asset_id !== null && leasedJob?.asset_id !== undefined) {
+        const asset = await client.query<{ readonly id: string }>(
+          'SELECT id FROM media_assets WHERE id = $1 AND project_id = $2 FOR SHARE',
+          [leasedJob.asset_id, leasedJob.project_id],
+        );
+        if (asset.rows[0] === undefined) throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
+      }
       const result = await client.query<JobRow>(
         `UPDATE jobs SET state = 'completed', progress = 100, cancel_requested = false,
              result_kind = $4, result_sha256 = $5, result_bytes = $6,
@@ -925,6 +1736,7 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
              result_asset_id = $10, result_local_ref = $11, result_mime_type = $12,
              result_width = $13, result_height = $14, result_receipt = $15::jsonb
          WHERE id = $1 AND state = 'leased' AND lease_owner = $2 AND lease_expires_at > $3
+           AND cancel_requested = false AND asset_revoked = false
            AND (type <> 'fixture.thumbnail' OR $4 = 'fixture.thumbnail')
            AND (type <> 'asset.thumbnail' OR ($4 = 'asset.thumbnail' AND asset_id = $10))
            AND (type <> 'image.comfy' OR $4 = 'image.comfy')
@@ -1011,7 +1823,8 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
              result_worker_ref = NULL, result_verified_at = NULL, result_asset_id = NULL,
              result_local_ref = NULL, result_mime_type = NULL, result_width = NULL,
              result_height = NULL, result_receipt = NULL, error = NULL
-         WHERE id = $1 AND project_id = $2 AND state IN ('completed', 'canceled', 'failed')
+         WHERE id = $1 AND project_id = $2 AND asset_revoked = false
+           AND state IN ('completed', 'canceled', 'failed')
          RETURNING *`,
         [jobId, projectId],
       );
@@ -1132,6 +1945,45 @@ export class PostgresControlPlane implements ControlPlane, ProductionRunStore {
       type,
       new Date(at),
     ]);
+  }
+
+  private async purgeAssetReferences(
+    projectId: string,
+    assetId: string,
+    revokeId: number | undefined,
+    refs: readonly string[],
+  ): Promise<void> {
+    let failed = false;
+    for (const ref of refs) {
+      try {
+        await this.#privateObjectStore!.remove(ref);
+      } catch {
+        // Object-store errors are intentionally redacted: refs are opaque but
+        // must never be echoed through API errors or logs.
+        failed = true;
+      }
+    }
+    if (revokeId === undefined) return;
+    await this.pool.query(
+      `UPDATE asset_revocation_audits
+       SET purge_state = $3, purge_error = $4, purged_at = CASE WHEN $3 = 'complete' THEN NOW() ELSE NULL END,
+           updated_at = NOW()
+       WHERE revoke_id = $5 AND project_id = $1 AND asset_id = $2`,
+      [
+        projectId,
+        assetId,
+        failed ? 'failed' : 'complete',
+        failed ? 'OBJECT_PURGE_FAILED' : null,
+        revokeId,
+      ],
+    );
+    if (!failed)
+      await this.pool.query(
+        `UPDATE private_object_cleanup_refs SET state = 'cleaned', last_error = NULL,
+           cleaned_at = NOW(), updated_at = NOW()
+         WHERE project_id = $1 AND revocation_id = $3 AND state IN ('pending', 'registered')`,
+        [projectId, assetId, revokeId],
+      );
   }
 
   private async transaction<T>(operation: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -1504,8 +2356,16 @@ function isRenderReceipt(value: WorkerResultReceipt): boolean {
   return (
     value.kind === 'render.inspect' &&
     /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.reportRef) &&
-    Number.isSafeInteger(value.findings) &&
-    value.findings >= 0
+    ((value.outputRef === undefined &&
+      value.report === undefined &&
+      Number.isSafeInteger(value.findings) &&
+      value.findings! >= 0) ||
+      (value.outputRef !== undefined &&
+        value.report !== undefined &&
+        /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.outputRef) &&
+        value.report.version === 1 &&
+        value.report.artifact?.outputRef === value.outputRef &&
+        Array.isArray(value.report.findings)))
   );
 }
 
@@ -1575,7 +2435,7 @@ function legacyWorkerJob(
       maxAttempts: 3,
     });
   }
-  if (type === 'render.export' || type === 'render.inspect') {
+  if (type === 'render.export') {
     return validateWorkerJobV1({
       protocolVersion: WORKER_PROTOCOL_VERSION,
       jobId: id,
@@ -1585,6 +2445,23 @@ function legacyWorkerJob(
         compositionId: id,
         presetId: 'default',
         reportRef: `report-${id}`,
+      },
+      requirements: { capabilities: [type], privacy: 'local-only' },
+      idempotencyKey: id,
+      maxAttempts: 3,
+    });
+  }
+  if (type === 'render.inspect') {
+    return validateWorkerJobV1({
+      protocolVersion: WORKER_PROTOCOL_VERSION,
+      jobId: id,
+      type,
+      payload: {
+        projectRef: projectId,
+        compositionId: id,
+        presetId: 'default',
+        reportRef: `report-${id}`,
+        legacyVersion: 0,
       },
       requirements: { capabilities: [type], privacy: 'local-only' },
       idempotencyKey: id,
@@ -1640,8 +2517,224 @@ function databaseError(error: unknown, duplicateCode: string, id: string): Contr
   return new ControlPlaneError('DATABASE_ERROR', 'durable control-plane operation failed');
 }
 
+async function recordObjectReferences(
+  client: PoolClient,
+  projectId: string,
+  assetId: string,
+  derivativeId: string | undefined,
+  locations: readonly AssetLocationRecord[],
+  now: number,
+): Promise<void> {
+  for (const ref of privateObjectRefs(locations)) {
+    await client.query(
+      `INSERT INTO asset_object_references
+         (project_id, asset_id, derivative_id, object_kind, object_ref, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        projectId,
+        assetId,
+        derivativeId ?? null,
+        derivativeId === undefined ? 'original' : 'derivative',
+        ref,
+        new Date(now),
+      ],
+    );
+  }
+}
+
+async function insertCleanupReference(
+  client: PoolClient,
+  projectId: string,
+  assetId: string | null,
+  jobId: string | undefined,
+  objectKind: 'original' | 'derivative' | 'artifact',
+  objectRef: string,
+): Promise<void> {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(objectRef))
+    throw new ControlPlaneError('ASSET_INVALID', 'object reference must be opaque');
+  await client.query(
+    `INSERT INTO private_object_cleanup_refs
+       (project_id, asset_id, job_id, object_kind, object_ref, state, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, 'pending', NOW(), NOW())`,
+    [projectId, assetId, jobId ?? null, objectKind, objectRef],
+  );
+}
+
+function privateObjectRefs(locations: readonly AssetLocationRecord[]): readonly string[] {
+  return locations
+    .filter(
+      (location): location is AssetLocationRecord & { readonly kind: 'private-object' } =>
+        location.kind === 'private-object',
+    )
+    .map((location) => location.ref);
+}
+
+async function lockAssetForJob(
+  client: PoolClient,
+  projectId: string,
+  assetId: string,
+): Promise<void> {
+  const result = await client.query<{ readonly id: string }>(
+    'SELECT id FROM media_assets WHERE id = $1 AND project_id = $2 FOR SHARE',
+    [assetId, projectId],
+  );
+  if (result.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+}
+
+function uniqueOpaqueRefs(refs: readonly string[]): readonly string[] {
+  return [...new Set(refs)].filter((ref) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(ref)).sort();
+}
+
+function assetRevocationAuditOf(row: AssetRevocationAuditRow): AssetRevocationAudit {
+  const assetSnapshot = cloneJson(row.asset_snapshot as MediaAssetRecord);
+  const derivativesRaw = jsonArray(row.derivative_snapshot);
+  const derivativeSnapshot = derivativesRaw.map((value) => {
+    const item = value as MediaDerivativeRecord;
+    return cloneJson(item);
+  });
+  const refs = jsonArray(row.object_refs).filter(
+    (value): value is string => typeof value === 'string',
+  );
+  const canceledJobIds = jsonArray(row.canceled_job_ids).filter(
+    (value): value is string => typeof value === 'string',
+  );
+  return {
+    revokeId: Number(row.revoke_id),
+    projectId: row.project_id,
+    assetId: row.asset_id,
+    actorId: row.actor_id,
+    assetSnapshot: cloneJson(assetSnapshot),
+    derivativeSnapshot,
+    objectRefs: refs,
+    canceledJobIds,
+    purgeState: row.purge_state,
+    ...(row.purge_error === null ? {} : { purgeError: row.purge_error }),
+    requestedAt: row.requested_at.toISOString(),
+    ...(row.purged_at === null ? {} : { purgedAt: row.purged_at.toISOString() }),
+    updatedAt: row.updated_at.toISOString(),
+  };
+}
+
 function isPostgresError(value: unknown): value is { readonly code: string } {
   return (
     value !== null && typeof value === 'object' && 'code' in value && typeof value.code === 'string'
   );
+}
+
+function parseProjectDocument(value: unknown): ProjectDocumentV2 {
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value) as unknown;
+    } catch {
+      throw new ControlPlaneError('DATABASE_ERROR', 'stored project document is invalid');
+    }
+  }
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    throw new ControlPlaneError('DATABASE_ERROR', 'stored project document is invalid');
+  const document = value as ProjectDocumentV2;
+  if (document.schemaVersion !== 2 || typeof document.projectId !== 'string')
+    throw new ControlPlaneError('DATABASE_ERROR', 'stored project document is invalid');
+  return JSON.parse(JSON.stringify(document)) as ProjectDocumentV2;
+}
+
+function validateProjectDocumentV2Safe(value: unknown): ControlPlaneError | undefined {
+  const diagnostics = validateProjectDocumentV2(value);
+  return diagnostics.length === 0
+    ? undefined
+    : new ControlPlaneError('REQUEST_INVALID', diagnostics[0]!.message);
+}
+
+function cloneProjectDocument(value: ProjectDocumentV2): ProjectDocumentV2 {
+  return JSON.parse(JSON.stringify(value)) as ProjectDocumentV2;
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function recoveryRequestFingerprint(input: CreateRecoveredCopyInput): string {
+  const operation = input.operation;
+  const requestedHash =
+    operation.kind === 'append'
+      ? documentHash(operation.document)
+      : `revision:${String(operation.targetRevision)}`;
+  return `${String(input.baseRevision)}:${input.suggestedName}:${operation.kind}:${requestedHash}:${operation.label ?? ''}`;
+}
+
+function parseRecoveredCopy(value: unknown): RecoveredCopy {
+  let candidate = value;
+  if (typeof candidate === 'string') {
+    try {
+      candidate = JSON.parse(candidate) as unknown;
+    } catch {
+      throw new ControlPlaneError('DATABASE_ERROR', 'stored recovered copy is invalid');
+    }
+  }
+  if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate))
+    throw new ControlPlaneError('DATABASE_ERROR', 'stored recovered copy is invalid');
+  const result = candidate as RecoveredCopy;
+  if (
+    result.kind !== 'recovered-copy' ||
+    typeof result.projectId !== 'string' ||
+    typeof result.name !== 'string' ||
+    result.document === undefined ||
+    result.provenance === undefined
+  )
+    throw new ControlPlaneError('DATABASE_ERROR', 'stored recovered copy is invalid');
+  return cloneJson(result);
+}
+
+function projectRevisionOf(row: ProjectRevisionRow): ProjectRevisionV1 {
+  const operation = row.operation;
+  if (operation === null || typeof operation !== 'object' || Array.isArray(operation))
+    throw new ControlPlaneError('DATABASE_ERROR', 'stored project operation is invalid');
+  const operationRecord = operation as Record<string, unknown>;
+  const kind = operationRecord.kind;
+  const idempotencyKey = operationRecord.idempotencyKey;
+  if (
+    (kind !== 'replace' && kind !== 'restore') ||
+    typeof idempotencyKey !== 'string' ||
+    idempotencyKey !== row.idempotency_key
+  )
+    throw new ControlPlaneError('DATABASE_ERROR', 'stored project operation is invalid');
+  const label = operationRecord.label;
+  const operationValue = {
+    kind,
+    idempotencyKey,
+    ...(typeof label === 'string' ? { label } : {}),
+    ...(Number.isSafeInteger(operationRecord.targetRevision)
+      ? { targetRevision: operationRecord.targetRevision as number }
+      : {}),
+  } as ProjectRevisionV1['operation'];
+  const document = parseProjectDocument(row.document);
+  if (document.projectId !== row.project_id || documentHash(document) !== row.document_hash)
+    throw new ControlPlaneError('DATABASE_ERROR', 'stored project document digest is invalid');
+  return {
+    projectId: row.project_id,
+    revision: row.revision,
+    baseRevision: row.base_revision,
+    idempotencyKey: row.idempotency_key,
+    operation: operationValue,
+    document,
+    documentHash: row.document_hash,
+    createdAt: row.created_at.toISOString(),
+  };
+}
+
+function revisionLabel(value: unknown): string {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return '';
+  const label = (value as Record<string, unknown>).label;
+  return typeof label === 'string' ? label : '';
+}
+
+function revisionKind(value: unknown): 'replace' | 'restore' | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const kind = (value as Record<string, unknown>).kind;
+  return kind === 'replace' || kind === 'restore' ? kind : undefined;
+}
+
+function revisionTarget(value: unknown): number | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const target = (value as Record<string, unknown>).targetRevision;
+  return Number.isSafeInteger(target) ? (target as number) : undefined;
 }

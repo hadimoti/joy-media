@@ -26,3 +26,9 @@ export type {
   EditorOverlayIR,
 } from './model.js';
 export { flattenRenderNodes, validateRenderFrameIR } from './model.js';
+export {
+  PINNED_TEXT_GLYPHS,
+  pinnedTextGlyph,
+  visualTextGlyphs,
+  type VisualTextGlyph,
+} from './text-layout.js';

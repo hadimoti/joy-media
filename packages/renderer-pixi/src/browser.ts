@@ -243,9 +243,7 @@ export async function createBrowserPixiRenderer(
   const updateLayerTransform = (layer: LayerContainer, node: VisualRenderNode): void => {
     layer.position.set(node.transform.translateX, node.transform.translateY);
     layer.scale.set(node.transform.scaleX, node.transform.scaleY);
-    // `Transform2D` does not currently carry rotation; wired through so a
-    // future IR revision can populate it without an API change.
-    layer.rotation = 0;
+    layer.rotation = ((node.transform.rotationDeg ?? 0) * Math.PI) / 180;
     layer.alpha = node.opacity;
     layer.zIndex = node.zIndex;
   };

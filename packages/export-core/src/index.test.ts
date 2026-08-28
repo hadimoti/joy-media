@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { REFERENCE_PROJECT } from '@joy-media/test-fixtures';
+import { deliveryPromiseForManifest as browserDeliveryPromiseForManifest } from './browser.js';
 import {
   deliveryPromiseForManifest,
   ffmpegArgs,
@@ -26,6 +27,21 @@ describe('deterministic export contract', () => {
     expect(freezeManifest(manifest)).toEqual(manifest);
     expect(ffmpegArgs(manifest, 'out.mp4')).toContain('libx264');
   });
+  it('keeps the browser delivery projection in parity with the Node entry', () => {
+    const nodePromise = deliveryPromiseForManifest(manifest);
+    const browserPromise = browserDeliveryPromiseForManifest(manifest);
+    expect(browserPromise).toEqual(nodePromise);
+    expect(Object.isFrozen(browserPromise)).toBe(true);
+    expect(Object.isFrozen(browserPromise.video)).toBe(true);
+  });
+  it.each([{ revision: -1 }, { width: 0 }, { height: 0 }, { frameRate: 0 }, { durationUs: 0 }])(
+    'rejects invalid manifests in both entries (%s)',
+    (invalid) => {
+      const candidate = { ...manifest, ...invalid } as typeof manifest;
+      expect(() => deliveryPromiseForManifest(candidate)).toThrow(RangeError);
+      expect(() => browserDeliveryPromiseForManifest(candidate)).toThrow(RangeError);
+    },
+  );
   it('produces a verified H.264/AAC fixture through ffmpeg', () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-export-'));
     const output = join(directory, 'fixture.mp4');

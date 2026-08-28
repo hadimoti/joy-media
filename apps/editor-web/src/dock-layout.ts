@@ -27,7 +27,7 @@
  * against `grid.width` / `grid.height`.
  */
 
-import { PANEL_IDS, type PanelId } from './workspace.js';
+import { PERSISTED_LAYOUT_PANEL_IDS, type PanelId } from './workspace.js';
 import { panelLabel } from './panel-tab-icons.js';
 
 export type EditorViewMode = 'vertical' | 'widescreen';
@@ -107,7 +107,7 @@ export function defaultDockLayout(): unknown {
 /** Dockview serialises every panel the same way; derive it so nothing drifts. */
 function panelEntries(): Record<string, unknown> {
   const entries: Record<string, unknown> = {};
-  for (const id of PANEL_IDS) {
+  for (const id of PERSISTED_LAYOUT_PANEL_IDS) {
     entries[id] = {
       id,
       contentComponent: 'editor-panel',
@@ -130,8 +130,8 @@ export function normalizeDockLayoutConstraints(layout: unknown): unknown {
   let changed = false;
   const panels: Record<string, unknown> = {};
   for (const [id, panel] of Object.entries(layout.panels)) {
-    if (!PANEL_IDS.includes(id as PanelId) || !isRecord(panel)) {
-      panels[id] = panel;
+    if (!PERSISTED_LAYOUT_PANEL_IDS.includes(id as PanelId) || !isRecord(panel)) {
+      changed = true;
       continue;
     }
 
@@ -143,7 +143,67 @@ export function normalizeDockLayoutConstraints(layout: unknown): unknown {
     changed = true;
   }
 
-  return changed ? { ...layout, panels } : layout;
+  const sanitized = sanitizeHiddenViews(layout.grid);
+  if (sanitized.changed) changed = true;
+  return changed ? { ...layout, grid: sanitized.value, panels } : layout;
+}
+
+function sanitizeHiddenViews(value: unknown): {
+  readonly value: unknown;
+  readonly changed: boolean;
+} {
+  if (Array.isArray(value)) {
+    let changed = false;
+    const next = value.flatMap((entry) => {
+      const sanitized = sanitizeHiddenViews(entry);
+      changed ||= sanitized.changed;
+      return sanitized.value === undefined ? [] : [sanitized.value];
+    });
+    return { value: next, changed };
+  }
+  if (!isRecord(value)) return { value, changed: false };
+
+  // A stale leaf containing only hidden/unknown panels is not a valid
+  // Dockview node. Remove it instead of allowing Dockview to mount a
+  // fallback placeholder component for one of its invalid views.
+  if (value.type === 'leaf' && isRecord(value.data) && Array.isArray(value.data.views)) {
+    const validViews = value.data.views.filter(
+      (view): view is string =>
+        typeof view === 'string' && PERSISTED_LAYOUT_PANEL_IDS.includes(view as PanelId),
+    );
+    if (validViews.length === 0) return { value: undefined, changed: true };
+  }
+
+  let changed = false;
+  const next: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (key === 'views' && Array.isArray(child)) {
+      const filtered = child.filter(
+        (view): view is string =>
+          typeof view === 'string' && PERSISTED_LAYOUT_PANEL_IDS.includes(view as PanelId),
+      );
+      changed ||= filtered.length !== child.length;
+      next[key] = filtered;
+      continue;
+    }
+    const sanitized = sanitizeHiddenViews(child);
+    changed ||= sanitized.changed;
+    next[key] = sanitized.value;
+  }
+  if (value.type === 'branch' && Array.isArray(next.data) && next.data.length === 0) {
+    return { value: undefined, changed: true };
+  }
+  if (Array.isArray(next.views) && next.views.length > 0) {
+    const activeView = next.activeView;
+    if (
+      typeof activeView === 'string' &&
+      !PERSISTED_LAYOUT_PANEL_IDS.includes(activeView as PanelId)
+    ) {
+      next.activeView = next.views[0];
+      changed = true;
+    }
+  }
+  return { value: changed ? next : value, changed };
 }
 
 export function verticalDockLayout(): unknown {
@@ -178,14 +238,17 @@ export function verticalDockLayout(): unknown {
                   {
                     type: 'leaf',
                     size: 567,
-                    data: { views: ['agent'], activeView: 'agent', id: 'agent-col' },
+                    // Production stays in the Joy Code utility stack so it is
+                    // present on first launch without displacing the monitor
+                    // or timeline from their primary positions.
+                    data: { views: ['agent', 'production'], activeView: 'agent', id: 'agent-col' },
                   },
                 ],
               },
               {
                 type: 'leaf',
                 size: 476,
-                data: { views: ['timeline', 'flow'], activeView: 'timeline', id: 'timeline-row' },
+                data: { views: ['timeline'], activeView: 'timeline', id: 'timeline-row' },
               },
             ],
           },
@@ -241,12 +304,13 @@ export function widescreenDockLayout(): unknown {
               {
                 type: 'leaf',
                 size: 1496,
-                data: { views: ['timeline', 'flow'], activeView: 'timeline', id: 'timeline-row' },
+                data: { views: ['timeline'], activeView: 'timeline', id: 'timeline-row' },
               },
               {
                 type: 'leaf',
                 size: 704,
-                data: { views: ['agent'], activeView: 'agent', id: 'agent-col' },
+                // Keep the board discoverable beside Joy Code in widescreen.
+                data: { views: ['agent', 'production'], activeView: 'agent', id: 'agent-col' },
               },
             ],
           },

@@ -4,6 +4,11 @@ import {
   assetCollectionsForCategory,
   filterAssetLibrary,
   preferredDerivative,
+  ASSET_RENDER_MAX,
+  ASSET_RENDER_PAGE_SIZE,
+  assetLibraryPageCount,
+  nextAssetRenderLimit,
+  renderAssetLibraryItems,
   type AssetLibraryItem,
 } from './asset-library-state.js';
 
@@ -103,5 +108,34 @@ describe('asset library state', () => {
 
   it('prefers verified cloud playback over a newer local cache record', () => {
     expect(preferredDerivative(items[0]!.derivatives)?.id).toBe('cloud-1');
+  });
+
+  it('keeps the panel card window bounded while paging through 501 matching assets', () => {
+    const largeLibrary = Array.from({ length: 501 }, (_, index) => ({
+      ...items[1]!,
+      asset: { ...items[1]!.asset, id: `image-${index + 1}`, displayName: `Asset ${index + 1}` },
+    }));
+    const initial = renderAssetLibraryItems(largeLibrary, ASSET_RENDER_PAGE_SIZE);
+    expect(initial).toHaveLength(120);
+
+    const afterLoadMoreLimit = nextAssetRenderLimit(initial.length, largeLibrary.length);
+    expect(renderAssetLibraryItems(largeLibrary, afterLoadMoreLimit)).toHaveLength(240);
+    expect(afterLoadMoreLimit).toBeLessThanOrEqual(ASSET_RENDER_MAX);
+
+    const afterRepeatedLoads = nextAssetRenderLimit(
+      nextAssetRenderLimit(afterLoadMoreLimit, largeLibrary.length),
+      largeLibrary.length,
+    );
+    expect(renderAssetLibraryItems(largeLibrary, afterRepeatedLoads)).toHaveLength(250);
+    expect(afterRepeatedLoads).toBeLessThanOrEqual(ASSET_RENDER_MAX);
+    expect(assetLibraryPageCount(501)).toBe(3);
+    expect(renderAssetLibraryItems(largeLibrary, ASSET_RENDER_MAX, 1)[0]).toBe(largeLibrary[250]);
+    expect(renderAssetLibraryItems(largeLibrary, ASSET_RENDER_MAX, 2)).toHaveLength(1);
+    expect(renderAssetLibraryItems(largeLibrary, ASSET_RENDER_MAX, 2)[0]).toBe(largeLibrary[500]);
+    for (const page of [0, 1, 2]) {
+      expect(
+        renderAssetLibraryItems(largeLibrary, ASSET_RENDER_MAX, page).length,
+      ).toBeLessThanOrEqual(250);
+    }
   });
 });

@@ -19,9 +19,15 @@ import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
 import { BrowserProductionRunStore } from './browser-production-run-store.js';
 import {
   createFixtureFirstPartyLibrary,
+  createEditorSessionFirstPartyLibrary,
   createProductionFirstPartyLibrary,
 } from './first-party-handlers.js';
 import { parametersFromSchema } from './WorkflowsPanel.js';
+import {
+  deliveryMediaStateFromEvidence,
+  deliveryPreflight,
+  type VerifiedRenderEnvelope,
+} from './delivery-preflight.js';
 
 const owner: ProductionRunAuthority = {
   principalId: 'local-owner',
@@ -513,7 +519,299 @@ describe('workflow-runner', () => {
       });
     }
   });
+
+  it('runs the certified reference cutdown through one real durable editor transaction', async () => {
+    const storage = memoryStorage();
+    const session = new EditorSession(
+      storage,
+      buildReferenceSpikeProject(),
+      verifiedEditorProject(),
+    );
+    const store = productionRunStore(storage, session.timelineProject.id);
+    const options = {
+      productionRunStore: store,
+      authority: owner,
+      firstPartyLibrary: createEditorSessionFirstPartyLibrary(session),
+    } as const;
+    const before = session.timelineProject.compositions.root?.tracks[0]?.clips.map((clip) => ({
+      id: clip.id,
+      startUs: clip.startUs,
+      durationUs: clip.durationUs,
+    }));
+
+    const parked = await runWorkflow(
+      session,
+      'joy.first-party.reference-social-cutdown.slice',
+      {
+        selectedMedia: { assetId: 'asset-intro', mimeType: 'video/mp4', fileBacked: true },
+        references: [{ referenceId: 'ref-fast-open' }],
+      },
+      options,
+    );
+    expect(parked.status).toBe('waiting_for_input');
+    if (parked.status !== 'waiting_for_input') return;
+    expect(
+      session.timelineProject.compositions.root?.tracks[0]?.clips.map((clip) => clip.id),
+    ).toEqual(before?.map((clip) => clip.id));
+
+    const resumed = await resumeWorkflow(
+      session,
+      parked.runId,
+      {
+        'approve-cutdown': {
+          commands: [
+            {
+              type: 'timeline.trimClipEnd',
+              payload: {
+                compositionId: 'root',
+                trackId: 'track-0',
+                clipId: 'intro',
+                newEndUs: 8_000_000,
+              },
+            },
+            {
+              type: 'timeline.moveClip',
+              payload: {
+                compositionId: 'root',
+                trackId: 'track-0',
+                clipId: 'product',
+                newStartUs: 8_000_000,
+              },
+            },
+            {
+              type: 'timeline.moveClip',
+              payload: {
+                compositionId: 'root',
+                trackId: 'track-0',
+                clipId: 'outro',
+                newStartUs: 18_000_000,
+              },
+            },
+          ],
+        },
+      },
+      { ...options, ...approvalResumeOptions(parked) },
+    );
+    expect(resumed).toMatchObject({ status: 'succeeded' });
+    expect(session.timelineProject.compositions.root?.tracks[0]?.clips[0]).toMatchObject({
+      id: 'intro',
+      startUs: 0,
+      durationUs: 8_000_000,
+    });
+    expect(session.canUndo).toBe(true);
+
+    session.undo();
+    expect(session.timelineProject.compositions.root?.tracks[0]?.clips[0]).toMatchObject({
+      id: 'intro',
+      durationUs: 10_000_000,
+    });
+    session.redo();
+    expect(session.timelineProject.compositions.root?.tracks[0]?.clips[0]).toMatchObject({
+      id: 'intro',
+      durationUs: 8_000_000,
+    });
+
+    const reopened = new EditorSession(
+      storage,
+      buildReferenceSpikeProject(),
+      verifiedEditorProject(),
+    );
+    expect(reopened.timelineProject.compositions.root?.tracks[0]?.clips[0]).toMatchObject({
+      id: 'intro',
+      durationUs: 8_000_000,
+    });
+    const reopenedClips = videoClips(reopened);
+    const reopenedAssetEvidence = new Map(
+      [...new Set(reopenedClips.map((clip) => clip.assetId))].map((assetId) => [
+        assetId,
+        { state: 'ready' as const, url: `fixture-asset:${assetId}`, mimeType: 'video/mp4' },
+      ]),
+    );
+    const reopenedPreflight = deliveryPreflight({
+      channel: 'verified-delivery',
+      clips: reopenedClips,
+      mediaStates: new Map(
+        reopenedClips.map((clip) => [
+          clip.id,
+          deliveryMediaStateFromEvidence(reopenedAssetEvidence.get(clip.assetId)!),
+        ]),
+      ),
+      capabilities: ['worker-render-export'],
+      verifiedRenderEnvelope: envelopeFor(reopened, reopenedClips),
+    });
+    expect(reopenedPreflight).toEqual({ channel: 'verified-delivery', allowed: true });
+    expect(reopenedClips.map((clip) => clip.startUs)).toEqual([0, 8_000_000, 18_000_000]);
+    const persisted = await store.load(resumed.runId);
+    const transactionOutput = persisted?.checkpoint?.nodes['apply-cutdown']?.output;
+    expect(transactionOutput).toMatchObject({
+      transactionId: expect.stringMatching(/^editor-tx-/),
+    });
+    expect(JSON.stringify(transactionOutput)).not.toMatch(
+      /local-editor-project|projectRevisionId|projectId/,
+    );
+  });
+
+  it('rejects an add-track payload before commit and leaves the timeline unchanged', async () => {
+    const storage = memoryStorage();
+    const session = new EditorSession(
+      storage,
+      buildReferenceSpikeProject(),
+      verifiedEditorProject(),
+    );
+    const store = productionRunStore(storage, session.timelineProject.id);
+    const options = {
+      productionRunStore: store,
+      authority: owner,
+      firstPartyLibrary: createEditorSessionFirstPartyLibrary(session),
+    } as const;
+    const before = JSON.stringify(session.timelineProject);
+    const parked = await runWorkflow(
+      session,
+      'joy.first-party.reference-social-cutdown.slice',
+      {
+        selectedMedia: { assetId: 'asset-intro', mimeType: 'video/mp4', fileBacked: true },
+        references: [{ referenceId: 'ref-malicious-track' }],
+      },
+      options,
+    );
+    expect(parked.status).toBe('waiting_for_input');
+    if (parked.status !== 'waiting_for_input') return;
+    const rejected = await resumeWorkflow(
+      session,
+      parked.runId,
+      {
+        'approve-cutdown': {
+          commands: [
+            {
+              type: 'timeline.addTrack',
+              payload: {
+                compositionId: 'root',
+                track: {
+                  id: 'malicious-track',
+                  kind: 'video',
+                  order: 9,
+                  enabled: true,
+                  clips: [
+                    {
+                      kind: 'video',
+                      id: 'malicious-gap',
+                      startUs: 1_000_000,
+                      durationUs: 1_000_000,
+                      assetId: 'asset-intro',
+                      sourceInUs: 0,
+                      playbackRate: 2,
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+        },
+      },
+      { ...options, ...approvalResumeOptions(parked) },
+    );
+    expect(rejected.status).toBe('failed');
+    expect(JSON.stringify(session.timelineProject)).toBe(before);
+    expect(
+      session.timelineProject.compositions.root?.tracks.some(
+        (track) => track.id === 'malicious-track',
+      ),
+    ).toBe(false);
+  });
+
+  it('fails the certified cutdown when the real editor port is not connected', async () => {
+    const storage = memoryStorage();
+    const session = new EditorSession(
+      storage,
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const store = productionRunStore(storage, session.timelineProject.id);
+    const parked = await runWorkflow(
+      session,
+      'joy.first-party.reference-social-cutdown.slice',
+      {
+        selectedMedia: { assetId: 'asset-intro' },
+        references: [{ referenceId: 'ref-1' }],
+      },
+      {
+        productionRunStore: store,
+        authority: owner,
+        firstPartyLibrary: createProductionFirstPartyLibrary(),
+      },
+    );
+    expect(parked.status).toBe('failed');
+    if (parked.status !== 'failed') return;
+    expect(parked.error).toContain('no connected first-party production ports');
+    expect(await store.load(parked.runId)).toBeUndefined();
+  });
 });
+
+function verifiedEditorProject() {
+  return {
+    ...INITIAL_EDITOR_PROJECT,
+    assets: {},
+    visualObjects: {},
+    captionDocuments: {},
+    compositions: {
+      ...INITIAL_EDITOR_PROJECT.compositions,
+      root: {
+        ...INITIAL_EDITOR_PROJECT.compositions.root!,
+        tracks: [],
+      },
+    },
+    audio: { clips: {}, buses: [], effects: [] },
+  } as typeof INITIAL_EDITOR_PROJECT;
+}
+
+function videoClips(session: EditorSession) {
+  const clips = session.timelineProject.compositions.root?.tracks[0]?.clips ?? [];
+  return clips
+    .filter(
+      (clip): clip is Extract<typeof clip, { readonly kind: 'video' }> => clip.kind === 'video',
+    )
+    .map((clip) => ({
+      id: clip.id,
+      assetId: clip.assetId,
+      durationUs: clip.durationUs,
+      startUs: clip.startUs,
+      sourceInUs: clip.sourceInUs,
+      kind: clip.kind,
+      ...(clip.playbackRate === undefined ? {} : { playbackRate: clip.playbackRate }),
+    }));
+}
+
+function envelopeFor(
+  session: EditorSession,
+  clips: readonly {
+    readonly startUs?: number;
+    readonly durationUs: number;
+    readonly playbackRate?: number;
+  }[],
+): VerifiedRenderEnvelope {
+  const sorted = [...clips].sort((left, right) => (left.startUs ?? 0) - (right.startUs ?? 0));
+  let cursor = 0;
+  let nonContiguous = false;
+  for (const clip of sorted) {
+    if (clip.startUs !== cursor) nonContiguous = true;
+    cursor = (clip.startUs ?? 0) + clip.durationUs;
+  }
+  const visual = session.visualProject;
+  return {
+    visualObjectCount: Object.keys(visual.visualObjects).length,
+    transitionCount: visual.transitions?.length ?? 0,
+    captionBurnIn: visual.pluginData['joy.captions.burnIn'] === true,
+    audioEffectCount: visual.audio?.effects.length ?? 0,
+    audioBusCount: visual.audio?.buses.length ?? 0,
+    audioFadeCount: Object.values(visual.audio?.clips ?? {}).filter(
+      (clip) => clip.fadeInUs !== undefined || clip.fadeOutUs !== undefined,
+    ).length,
+    nonContiguous,
+    nonOneXPlaybackCount: clips.filter(
+      (clip) => clip.playbackRate !== undefined && clip.playbackRate !== 1,
+    ).length,
+  };
+}
 
 function memoryStorage() {
   const values = new Map<string, string>();

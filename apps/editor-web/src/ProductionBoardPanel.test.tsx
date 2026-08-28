@@ -19,6 +19,11 @@ describe('ProductionBoardPanel', () => {
     ).toContain('Production Board unavailable: network down');
     expect(
       renderToStaticMarkup(
+        <ProductionBoardPanelView loadState="error" errorMessage="network down" />,
+      ),
+    ).toContain('Unable to load production runs: network down');
+    expect(
+      renderToStaticMarkup(
         <ProductionBoardPanelView
           loadState="loaded"
           model={buildProductionBoardModel({
@@ -80,6 +85,35 @@ describe('ProductionBoardPanel', () => {
     expect(markup).toContain('>Retry</button>');
     expect(markup).toContain('>Cancel</button>');
     expect(markup).toContain('disabled=""><svg');
+    expect(markup).toContain('role="listbox" aria-label="Production runs"');
+    expect(markup).toContain('role="option"');
+    expect(markup).toContain('aria-selected="true"');
+    expect(markup).toContain('aria-label="Run actions"');
+    expect(markup).toContain('aria-label="Retry production run run-1"');
+    expect(markup).toContain('aria-label="Cancel production run run-1"');
+  });
+
+  it('announces recoverable loading, empty, and error states accessibly', () => {
+    const loading = renderToStaticMarkup(<ProductionBoardPanelView loadState="loading" />);
+    const error = renderToStaticMarkup(
+      <ProductionBoardPanelView loadState="error" errorMessage="store unavailable" />,
+    );
+    const empty = renderToStaticMarkup(
+      <ProductionBoardPanelView
+        loadState="loaded"
+        model={buildProductionBoardModel({
+          records: [],
+          currentProjectRevision: 'rev-1',
+          artifacts: emptyArtifacts,
+          dataLanes: [],
+        })}
+      />,
+    );
+
+    expect(loading).toContain('role="status"');
+    expect(loading).toContain('aria-live="polite"');
+    expect(error).toContain('role="alert"');
+    expect(empty).toContain('role="status"');
   });
 
   it('renders stale revision conflicts and artifact/provider/report links', () => {

@@ -134,6 +134,10 @@ export function migrateToLatest(project: AnyJoyProject): JoyProjectV2 {
 
 function migrateClip(clip: Clip, assets: Record<string, AssetRecordV1>): ClipV1 {
   if (clip.kind === 'composition') return { ...clip };
-  assets[clip.assetId] ??= { id: clip.assetId, kind: 'video', displayName: clip.assetId };
+  assets[clip.assetId] ??= {
+    id: clip.assetId,
+    kind: clip.kind === 'audio' ? 'audio' : 'video',
+    displayName: clip.assetId,
+  };
   return { ...clip };
 }

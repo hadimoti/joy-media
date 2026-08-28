@@ -6,6 +6,7 @@ import {
   type AssetRegistration,
   type ControlPlane,
   type LocalDerivativeRegistration,
+  type MediaAssetRecord,
 } from './control-plane.js';
 import {
   DisabledMediaAuth,
@@ -31,14 +32,28 @@ import {
   type ProductionRunStore,
 } from './production-runs.js';
 import type { PrivateObjectStore } from './private-object-store.js';
+import {
+  tagAssetWithHermes,
+  type HermesTagInput,
+  type HermesTagResult,
+} from './asset-hermes-tags.js';
 import { WORKER_PROTOCOL_VERSION } from '@joy-media/job-protocol';
 import type { WorkerJobV1, WorkerResultReceiptV1 } from '@joy-media/job-protocol';
+import type { RenderReportV1 } from '@joy-media/production-quality';
 import {
   computeProviderApprovalPreflight,
   type ProviderApprovalGrant,
 } from '@joy-media/provider-sdk';
+import type {
+  CreateRecoveredCopyInput,
+  ProjectDocumentV2,
+  RecoveredCopyOperation,
+} from './project-revisions.js';
 
 const MAX_RENDER_ARTIFACT_BYTES = 512 * 1024 * 1024;
+const MAX_JSON_BODY_BYTES = 2 * 1024 * 1024;
+const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
+const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 600;
 
 export interface ApiAuthentication {
   authenticate(request: IncomingMessage): Actor | undefined | Promise<Actor | undefined>;
@@ -49,10 +64,36 @@ export interface ControlPlaneHttpServerOptions {
   readonly authentication: ApiAuthentication;
   readonly mediaAuth?: MediaAuthApi;
   readonly privateObjectStore?: PrivateObjectStore;
+  /** Injectable only to verify original-backup failure boundaries. */
+  readonly assetTagger?: (input: HermesTagInput) => Promise<HermesTagResult>;
   /** Server-only provider registry; it never serializes a credential. */
   readonly mistral?: MistralProviderRegistry;
   readonly providerApprovals?: ProviderApprovalService;
+  /** Process-local abuse guard; production deployments should also enforce an edge limit. */
+  readonly rateLimit?: {
+    readonly windowMs?: number;
+    readonly maxRequests?: number;
+  };
 }
+
+type ObjectReferenceLifecycle = ControlPlane & {
+  readonly stagePrivateObjectReference?: (
+    actor: Actor,
+    projectId: string,
+    assetId: string,
+    objectKind: 'original' | 'derivative' | 'artifact',
+    objectRef: string,
+  ) => Promise<void>;
+  readonly stageWorkerPrivateObjectReference?: (
+    workerId: string,
+    jobId: string,
+    assetId: string | undefined,
+    objectKind: 'derivative' | 'artifact',
+    objectRef: string,
+  ) => Promise<void>;
+  readonly markPrivateObjectReferenceRegistered?: (objectRef: string) => Promise<void>;
+  readonly markPrivateObjectReferenceCleanupFailed?: (objectRef: string) => Promise<void>;
+};
 
 /**
  * Versioned transport boundary for the control-plane contract. Authentication
@@ -65,10 +106,25 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
     ...options,
     mediaAuth: options.mediaAuth ?? new DisabledMediaAuth(),
     providerApprovals,
+    assetTagger: options.assetTagger ?? tagAssetWithHermes,
     mistral:
       options.mistral ?? createRuntimeMistralProviderRegistry({ approvals: providerApprovals }),
   };
+  const rateLimitWindowMs = options.rateLimit?.windowMs ?? DEFAULT_RATE_LIMIT_WINDOW_MS;
+  const rateLimitMaxRequests = options.rateLimit?.maxRequests ?? DEFAULT_RATE_LIMIT_MAX_REQUESTS;
+  const rateLimitBuckets = new Map<string, { windowStart: number; count: number }>();
   return createServer(async (request, response) => {
+    response.setHeader('x-request-id', randomBytes(8).toString('hex'));
+    applySecurityHeaders(response);
+    const path = request.url?.split('?', 1)[0] ?? '/';
+    if (
+      (path.startsWith('/v1/') || path.startsWith('/v2/')) &&
+      !consumeRateLimit(request, rateLimitBuckets, rateLimitWindowMs, rateLimitMaxRequests)
+    ) {
+      response.setHeader('retry-after', String(Math.ceil(rateLimitWindowMs / 1000)));
+      respondJson(response, 429, { error: { code: 'RATE_LIMITED' } });
+      return;
+    }
     try {
       await route(resolvedOptions, request, response);
     } catch (error) {
@@ -82,16 +138,30 @@ async function route(
     readonly mistral: MistralProviderRegistry;
     readonly mediaAuth: MediaAuthApi;
     readonly providerApprovals: ProviderApprovalService;
+    readonly assetTagger: (input: HermesTagInput) => Promise<HermesTagResult>;
   },
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
   const url = new URL(request.url ?? '/', 'http://joy-media.invalid');
+  if (request.method === 'GET' && (url.pathname === '/live' || url.pathname === '/health/live')) {
+    respondJson(response, 200, { ok: true, service: 'joy-media-api', liveness: true });
+    return;
+  }
+  if (request.method === 'GET' && (url.pathname === '/ready' || url.pathname === '/health/ready')) {
+    respondJson(response, 200, {
+      ok: true,
+      service: 'joy-media-api',
+      readiness: true,
+      controlPlane: true,
+    });
+    return;
+  }
   if (request.method === 'GET' && url.pathname === '/health') {
     respondJson(response, 200, { ok: true, service: 'joy-media-api', controlPlane: true });
     return;
   }
-  if (!url.pathname.startsWith('/v1/')) {
+  if (!url.pathname.startsWith('/v1/') && !url.pathname.startsWith('/v2/')) {
     respondJson(response, 404, { error: { code: 'ROUTE_NOT_FOUND' } });
     return;
   }
@@ -225,16 +295,24 @@ async function route(
           'derivative byte length does not match receipt',
         );
       const ref = `thumb-${decodeURIComponent(workerDerivativeUploadMatch[2]!)}-${receipt.sha256.slice(0, 16)}`;
-      await store.put(
-        {
-          ref,
-          sha256: receipt.sha256,
-          bytes: receipt.bytes,
-          mimeType: receipt.descriptor.mimeType,
-        },
-        bytes,
+      const lifecycle = options.controlPlane as ObjectReferenceLifecycle;
+      await lifecycle.stageWorkerPrivateObjectReference?.(
+        decodeURIComponent(workerId),
+        decodeURIComponent(workerDerivativeUploadMatch[2]!),
+        receipt.assetId,
+        'derivative',
+        ref,
       );
       try {
+        await store.put(
+          {
+            ref,
+            sha256: receipt.sha256,
+            bytes: receipt.bytes,
+            mimeType: receipt.descriptor.mimeType,
+          },
+          bytes,
+        );
         const derivative = await options.controlPlane.registerWorkerCloudDerivative(
           decodeURIComponent(workerId),
           decodeURIComponent(workerDerivativeUploadMatch[2]!),
@@ -250,9 +328,10 @@ async function route(
             locations: [{ kind: 'private-object', ref }],
           },
         );
+        await lifecycle.markPrivateObjectReferenceRegistered?.(ref);
         respondJson(response, 201, { data: derivative });
       } catch (error) {
-        await store.remove(ref).catch(() => undefined);
+        await cleanupUploadedObject(store, lifecycle, ref);
         throw error;
       }
       return;
@@ -275,6 +354,14 @@ async function route(
         throw new ControlPlaneError('REQUEST_INVALID', 'artifact hash does not match receipt');
       const jobId = decodeURIComponent(workerRenderArtifactUploadMatch[2]!);
       const ref = `render-${jobId}-${headers.sha256.slice(0, 16)}`;
+      const lifecycle = options.controlPlane as ObjectReferenceLifecycle;
+      await lifecycle.stageWorkerPrivateObjectReference?.(
+        decodeURIComponent(workerId),
+        jobId,
+        undefined,
+        'artifact',
+        ref,
+      );
       await store.put(
         { ref, sha256: headers.sha256, bytes: headers.bytes, mimeType: 'video/mp4' },
         bytes,
@@ -292,9 +379,10 @@ async function route(
             location: { kind: 'private-object', ref },
           },
         );
+        await lifecycle.markPrivateObjectReferenceRegistered?.(ref);
         respondJson(response, 201, { data: artifact });
       } catch (error) {
-        await store.remove(ref).catch(() => undefined);
+        await cleanupUploadedObject(store, lifecycle, ref);
         throw error;
       }
       return;
@@ -307,6 +395,54 @@ async function route(
         requiredWorkerResult(await readJson(request)),
       ),
     });
+    return;
+  }
+
+  const workerRenderArtifactReadMatch = /^\/v1\/workers\/([^/]+)\/jobs\/([^/]+)\/artifact$/.exec(
+    url.pathname,
+  );
+  if (request.method === 'GET' && workerRenderArtifactReadMatch !== null) {
+    const workerId = decodeURIComponent(workerRenderArtifactReadMatch[1]!);
+    const sessionWorkerId = await options.controlPlane.authenticateWorker(
+      workerSessionHash(request),
+    );
+    if (sessionWorkerId !== workerId)
+      throw new ControlPlaneError('WORKER_SESSION_REQUIRED', 'worker session required');
+    const store = options.privateObjectStore;
+    if (store === undefined)
+      throw new ControlPlaneError(
+        'PRIVATE_STORE_UNAVAILABLE',
+        'private media storage is unavailable',
+      );
+    const outputRef = url.searchParams.get('outputRef');
+    if (outputRef === null || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(outputRef))
+      throw new ControlPlaneError('REQUEST_INVALID', 'outputRef query parameter is required');
+    const artifact = await options.controlPlane.renderArtifactForWorker(
+      workerId,
+      decodeURIComponent(workerRenderArtifactReadMatch[2]!),
+      outputRef,
+    );
+    const bytes = await store.get({
+      ref: artifact.location.ref,
+      sha256: artifact.sha256,
+      bytes: artifact.bytes,
+      mimeType: artifact.descriptor.mimeType,
+    });
+    if (
+      bytes.byteLength !== artifact.bytes ||
+      createHash('sha256').update(bytes).digest('hex') !== artifact.sha256
+    )
+      throw new ControlPlaneError('ARTIFACT_UNAVAILABLE', artifact.id);
+    response.writeHead(200, {
+      'content-type': artifact.descriptor.mimeType,
+      'content-length': String(bytes.byteLength),
+      'x-joy-output-ref': artifact.outputRef,
+      'x-joy-sha256': artifact.sha256,
+      'x-joy-bytes': String(artifact.bytes),
+      'cache-control': 'private, no-store',
+      'x-content-type-options': 'nosniff',
+    });
+    response.end(Buffer.from(bytes));
     return;
   }
 
@@ -386,15 +522,17 @@ async function route(
   if (request.method === 'POST' && url.pathname === '/v1/providers/approvals/grants') {
     const body = await readJson(request);
     const grantRequest = providerApprovalGrantRequest(body);
+    const grant = options.providerApprovals.createGrant({
+      actorId: actor.id,
+      providerId: grantRequest.providerId,
+      capability: grantRequest.capability,
+      requestDigest: grantRequest.requestDigest,
+      expiresAt: grantRequest.expiresAt,
+      ...(grantRequest.costCap === undefined ? {} : { costCap: grantRequest.costCap }),
+    });
+    await options.providerApprovals.persistGrant(grant);
     respondJson(response, 201, {
-      data: options.providerApprovals.createGrant({
-        actorId: actor.id,
-        providerId: grantRequest.providerId,
-        capability: grantRequest.capability,
-        requestDigest: grantRequest.requestDigest,
-        expiresAt: grantRequest.expiresAt,
-        ...(grantRequest.costCap === undefined ? {} : { costCap: grantRequest.costCap }),
-      }),
+      data: grant,
     });
     return;
   }
@@ -534,6 +672,90 @@ async function route(
         requiredString(body, 'id'),
         requiredString(body, 'title'),
       ),
+    });
+    return;
+  }
+
+  const documentMatch = /^\/v2\/projects\/([^/]+)\/document$/.exec(url.pathname);
+  if (request.method === 'GET' && documentMatch !== null) {
+    respondJson(response, 200, {
+      data: await options.controlPlane.getProjectDocument(
+        actor,
+        decodeURIComponent(documentMatch[1]!),
+      ),
+    });
+    return;
+  }
+
+  const revisionsMatch = /^\/v2\/projects\/([^/]+)\/revisions$/.exec(url.pathname);
+  if (request.method === 'POST' && revisionsMatch !== null) {
+    const body = await readJson(request);
+    respondJson(response, 201, {
+      data: await options.controlPlane.appendProjectRevision(
+        actor,
+        decodeURIComponent(revisionsMatch[1]!),
+        {
+          baseRevision: requiredNonNegativeInteger(body, 'baseRevision'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+          document: body.document as ProjectDocumentV2,
+          ...(typeof body.label === 'string' ? { label: body.label } : {}),
+        },
+      ),
+    });
+    return;
+  }
+
+  const recoveredCopiesMatch = /^\/v2\/projects\/([^/]+)\/recovered-copies$/.exec(url.pathname);
+  if (request.method === 'POST' && recoveredCopiesMatch !== null) {
+    const body = await readJson(request);
+    const sourceProjectId = decodeURIComponent(recoveredCopiesMatch[1]!);
+    const operation = recoveredCopyOperation(body.operation);
+    const input: CreateRecoveredCopyInput = {
+      baseRevision: requiredNonNegativeInteger(body, 'baseRevision'),
+      idempotencyKey: requiredString(body, 'idempotencyKey'),
+      suggestedName: requiredString(body, 'suggestedName'),
+      operation,
+    };
+    respondJson(response, 201, {
+      data: await options.controlPlane.createRecoveredCopy(actor, sourceProjectId, input),
+    });
+    return;
+  }
+
+  const revisionMatch = /^\/v2\/projects\/([^/]+)\/revisions\/(\d+)$/.exec(url.pathname);
+  if (request.method === 'GET' && revisionMatch !== null) {
+    respondJson(response, 200, {
+      data: await options.controlPlane.getProjectRevision(
+        actor,
+        decodeURIComponent(revisionMatch[1]!),
+        Number(revisionMatch[2]),
+      ),
+    });
+    return;
+  }
+
+  const restoreMatch = /^\/v2\/projects\/([^/]+)\/restore$/.exec(url.pathname);
+  if (request.method === 'POST' && restoreMatch !== null) {
+    const body = await readJson(request);
+    respondJson(response, 201, {
+      data: await options.controlPlane.restoreProjectRevision(
+        actor,
+        decodeURIComponent(restoreMatch[1]!),
+        {
+          baseRevision: requiredNonNegativeInteger(body, 'baseRevision'),
+          revision: requiredPositiveInteger(body, 'revision'),
+          idempotencyKey: requiredString(body, 'idempotencyKey'),
+          ...(typeof body.label === 'string' ? { label: body.label } : {}),
+        },
+      ),
+    });
+    return;
+  }
+
+  const projectMatch = /^\/v1\/projects\/([^/]+)$/.exec(url.pathname);
+  if (request.method === 'GET' && projectMatch !== null) {
+    respondJson(response, 200, {
+      data: await options.controlPlane.getProject(actor, decodeURIComponent(projectMatch[1]!)),
     });
     return;
   }
@@ -840,6 +1062,19 @@ async function route(
   }
   if (request.method === 'POST' && assetMatch !== null) {
     const body = await readJson(request);
+    if (
+      Array.isArray(body.locations) &&
+      body.locations.some(
+        (location: unknown) =>
+          location !== null &&
+          typeof location === 'object' &&
+          (location as { readonly kind?: unknown }).kind === 'private-object',
+      )
+    )
+      throw new ControlPlaneError(
+        'ASSET_INVALID',
+        'private-object locations are server-owned and cannot be supplied at registration',
+      );
     respondJson(response, 201, {
       data: await options.controlPlane.registerAsset(
         actor,
@@ -852,6 +1087,13 @@ async function route(
 
   const assetByIdMatch = /^\/v1\/projects\/([^/]+)\/assets\/([^/]+)$/.exec(url.pathname);
   if (request.method === 'DELETE' && assetByIdMatch !== null) {
+    const bindStore = (
+      options.controlPlane as ControlPlane & {
+        readonly setPrivateObjectStore?: (store: PrivateObjectStore) => void;
+      }
+    ).setPrivateObjectStore;
+    if (bindStore !== undefined && options.privateObjectStore !== undefined)
+      bindStore.call(options.controlPlane, options.privateObjectStore);
     respondJson(response, 200, {
       data: await options.controlPlane.deleteAsset(
         actor,
@@ -874,11 +1116,17 @@ async function route(
       );
     const projectId = decodeURIComponent(assetOriginalMatch[1]!);
     const assetId = decodeURIComponent(assetOriginalMatch[2]!);
+    const project = await options.controlPlane.getProject(actor, projectId);
+    if (!project.assetSyncEnabled)
+      throw new ControlPlaneError(
+        'ASSET_SYNC_DISABLED',
+        'private backup requires explicit project consent',
+      );
     const assets = await options.controlPlane.assetsForProject(actor, projectId);
     const asset = assets.find((entry) => entry.id === assetId);
     if (asset === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
     if (asset.kind !== 'image')
-      throw new ControlPlaneError('ASSET_INVALID', 'cloud original backup is image-only in v1');
+      throw new ControlPlaneError('ASSET_INVALID', 'private backup is image-only in v1');
     const mimeType = request.headers['content-type']?.split(';')[0]?.trim().toLowerCase() ?? '';
     if (!/^image\/[a-z0-9.+-]+$/.test(mimeType))
       throw new ControlPlaneError('REQUEST_INVALID', 'original upload must be an image MIME type');
@@ -898,12 +1146,16 @@ async function route(
     const digest = createHash('sha256').update(bytes).digest('hex');
     if (digest !== asset.sha256)
       throw new ControlPlaneError('REQUEST_INVALID', 'original sha256 does not match asset');
-    await options.controlPlane.setAssetSync(actor, projectId, true);
-    const ref = `orig-${asset.sha256.slice(0, 32)}`;
-    await store.put({ ref, sha256: asset.sha256, bytes: asset.bytes, mimeType }, bytes);
+    // Every attempt owns a unique opaque object key. Cleanup can therefore
+    // never delete a prior successful backup of identical bytes.
+    const ref = `orig-${randomBytes(24).toString('hex')}`;
+    const lifecycle = options.controlPlane as ObjectReferenceLifecycle;
+    let tagged: HermesTagResult;
+    let updated: MediaAssetRecord;
+    await lifecycle.stagePrivateObjectReference?.(actor, projectId, assetId, 'original', ref);
     try {
-      const { tagAssetWithHermes } = await import('./asset-hermes-tags.js');
-      const tagged = await tagAssetWithHermes({
+      await store.put({ ref, sha256: asset.sha256, bytes: asset.bytes, mimeType }, bytes);
+      tagged = await options.assetTagger({
         kind: asset.kind,
         displayName: asset.displayName,
         mimeType: asset.descriptor.mimeType,
@@ -912,25 +1164,26 @@ async function route(
         ...(asset.descriptor.height !== undefined ? { height: asset.descriptor.height } : {}),
         imageBytes: bytes,
       });
-      let updated = await options.controlPlane.attachCloudOriginal(actor, projectId, assetId, {
-        kind: 'private-object',
-        ref,
-      });
-      updated = await options.controlPlane.updateAssetMetadata(actor, projectId, assetId, {
+      await options.controlPlane.updateAssetMetadata(actor, projectId, assetId, {
         tags: tagged.tags,
         sortName: tagged.sortName,
       });
-      respondJson(response, 201, {
-        data: {
-          asset: updated,
-          cloudRef: ref,
-          tagProvenance: tagged.provenance,
-        },
+      updated = await options.controlPlane.attachCloudOriginal(actor, projectId, assetId, {
+        kind: 'private-object',
+        ref,
       });
+      await lifecycle.markPrivateObjectReferenceRegistered?.(ref);
     } catch (error) {
-      await store.remove(ref).catch(() => undefined);
+      await cleanupUploadedObject(store, lifecycle, ref);
       throw error;
     }
+    respondJson(response, 201, {
+      data: {
+        asset: updated,
+        cloudRef: ref,
+        tagProvenance: tagged.provenance,
+      },
+    });
     return;
   }
 
@@ -1095,9 +1348,25 @@ async function route(
   respondJson(response, 404, { error: { code: 'ROUTE_NOT_FOUND' } });
 }
 
-async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJson(
+  request: IncomingMessage,
+  maximumBytes = MAX_JSON_BODY_BYTES,
+): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
-  for await (const chunk of request) chunks.push(Buffer.from(chunk));
+  let length = 0;
+  const contentLength = request.headers['content-length'];
+  if (typeof contentLength === 'string') {
+    const declared = Number(contentLength);
+    if (Number.isSafeInteger(declared) && declared > maximumBytes)
+      throw new ControlPlaneError('REQUEST_INVALID', 'request body exceeds the size limit');
+  }
+  for await (const chunk of request) {
+    const bytes = Buffer.from(chunk);
+    length += bytes.length;
+    if (length > maximumBytes)
+      throw new ControlPlaneError('REQUEST_INVALID', 'request body exceeds the size limit');
+    chunks.push(bytes);
+  }
   if (chunks.length === 0) return {};
   try {
     const value: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
@@ -1494,7 +1763,9 @@ function requiredWorkerResult(body: Record<string, unknown>): WorkerResultReceip
       outputRef: result.outputRef,
       sha256: result.sha256,
       bytes: result.bytes,
-      ...(result.qualityReport === undefined ? {} : { qualityReport: result.qualityReport }),
+      ...(result.qualityReport === undefined
+        ? {}
+        : { qualityReport: result.qualityReport as unknown as RenderReportV1 }),
     };
   }
   if (
@@ -1506,6 +1777,30 @@ function requiredWorkerResult(body: Record<string, unknown>): WorkerResultReceip
     result.findings >= 0
   ) {
     return { kind: result.kind, reportRef: result.reportRef, findings: result.findings };
+  }
+  if (
+    result.kind === 'render.inspect' &&
+    hasOnlyKeys(result, ['kind', 'reportRef', 'outputRef', 'report']) &&
+    typeof result.reportRef === 'string' &&
+    typeof result.outputRef === 'string' &&
+    isRecord(result.report) &&
+    result.report.version === 1 &&
+    typeof result.report.promiseId === 'string' &&
+    typeof result.report.checkedAt === 'string' &&
+    isRecord(result.report.artifact) &&
+    result.report.artifact.outputRef === result.outputRef &&
+    typeof result.report.artifact.sha256 === 'string' &&
+    /^[a-f0-9]{64}$/.test(result.report.artifact.sha256) &&
+    Number.isSafeInteger(result.report.artifact.bytes) &&
+    Number(result.report.artifact.bytes) > 0 &&
+    Array.isArray(result.report.findings)
+  ) {
+    return {
+      kind: result.kind,
+      reportRef: result.reportRef,
+      outputRef: result.outputRef,
+      report: result.report as unknown as RenderReportV1,
+    };
   }
   if (
     (result.kind === 'text.lm-studio' || result.kind === 'text.openrouter') &&
@@ -1936,6 +2231,42 @@ function requiredPositiveInteger(body: Record<string, unknown>, field: string): 
   return value;
 }
 
+function requiredNonNegativeInteger(body: Record<string, unknown>, field: string): number {
+  const value = body[field];
+  if (!Number.isSafeInteger(value) || (value as number) < 0)
+    throw new ControlPlaneError('REQUEST_INVALID', `${field} must be a non-negative integer`);
+  return value as number;
+}
+
+function recoveredCopyOperation(value: unknown): RecoveredCopyOperation {
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    throw new ControlPlaneError('REQUEST_INVALID', 'operation must be an object');
+  const operation = value as Record<string, unknown>;
+  const label = operation.label;
+  if (label !== undefined && (typeof label !== 'string' || label.length === 0))
+    throw new ControlPlaneError('REQUEST_INVALID', 'operation label must be a non-empty string');
+  if (operation.kind === 'append') {
+    if (!('document' in operation))
+      throw new ControlPlaneError('REQUEST_INVALID', 'append operation document is required');
+    return {
+      kind: 'append',
+      document: operation.document as ProjectDocumentV2,
+      ...(label === undefined ? {} : { label }),
+    };
+  }
+  if (operation.kind === 'restore') {
+    const targetRevision = operation.targetRevision;
+    if (!Number.isSafeInteger(targetRevision) || (targetRevision as number) < 1)
+      throw new ControlPlaneError('REQUEST_INVALID', 'targetRevision must be a positive integer');
+    return {
+      kind: 'restore',
+      targetRevision: targetRevision as number,
+      ...(label === undefined ? {} : { label }),
+    };
+  }
+  throw new ControlPlaneError('REQUEST_INVALID', 'operation kind must be append or restore');
+}
+
 function invalidRequest(message: string): never {
   throw new ControlPlaneError('REQUEST_INVALID', message);
 }
@@ -1947,9 +2278,58 @@ function requiredObject(body: Record<string, unknown>, field: string): Record<st
   return value as Record<string, unknown>;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+async function cleanupUploadedObject(
+  store: PrivateObjectStore,
+  lifecycle: ObjectReferenceLifecycle,
+  ref: string,
+): Promise<void> {
+  try {
+    await store.remove(ref);
+  } catch {
+    await lifecycle.markPrivateObjectReferenceCleanupFailed?.(ref);
+    throw new ControlPlaneError('OBJECT_CLEANUP_PENDING', 'uploaded object cleanup is pending');
+  }
+}
+
 function respondJson(response: ServerResponse, status: number, payload: unknown): void {
-  response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
+  response.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+  });
   response.end(JSON.stringify(payload));
+}
+
+function applySecurityHeaders(response: ServerResponse): void {
+  response.setHeader('x-content-type-options', 'nosniff');
+  response.setHeader('x-frame-options', 'DENY');
+  response.setHeader('referrer-policy', 'no-referrer');
+  response.setHeader('permissions-policy', 'camera=(), microphone=(), geolocation=()');
+  response.setHeader(
+    'content-security-policy',
+    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+  );
+}
+
+function consumeRateLimit(
+  request: IncomingMessage,
+  buckets: Map<string, { windowStart: number; count: number }>,
+  windowMs: number,
+  maxRequests: number,
+): boolean {
+  const key = request.socket.remoteAddress ?? 'unknown';
+  const now = Date.now();
+  const existing = buckets.get(key);
+  if (existing === undefined || now - existing.windowStart >= windowMs) {
+    buckets.set(key, { windowStart: now, count: 1 });
+    return true;
+  }
+  if (existing.count >= maxRequests) return false;
+  existing.count += 1;
+  return true;
 }
 
 function respondError(response: ServerResponse, error: unknown): void {
@@ -1962,7 +2342,9 @@ function respondError(response: ServerResponse, error: unknown): void {
       error.code === 'PROVIDER_APPROVAL_DENIED' ||
       error.code === 'PROVIDER_SPEND_CAP_EXCEEDED'
         ? 409
-        : 502;
+        : error.code === 'PROVIDER_APPROVAL_UNAVAILABLE'
+          ? 503
+          : 502;
     respondJson(response, status, { error: providerApprovalRequiredPayload(error) });
     return;
   }
@@ -1975,7 +2357,9 @@ function respondError(response: ServerResponse, error: unknown): void {
         : error.code.endsWith('APPROVAL_REQUIRED') || error.code === 'REMOTE_PROCESSING_BLOCKED'
           ? 409
           : 502;
-    respondJson(response, status, { error: { code: error.code, message: error.message } });
+    respondJson(response, status, {
+      error: { code: error.code, message: publicMistralErrorMessage(error.code) },
+    });
     return;
   }
   if (error instanceof MediaAuthError) {
@@ -1990,15 +2374,42 @@ function respondError(response: ServerResponse, error: unknown): void {
         ? 401
         : error.code === 'REQUEST_INVALID'
           ? 400
-          : error.code === 'PROVIDER_UNAVAILABLE' || error.code === 'PROVIDER_FAILED'
-            ? 503
-            : error.code.startsWith('PAIRING_')
-              ? 403
-              : 409;
-    respondJson(response, status, { error: { code: error.code, message: error.message } });
+          : error.code === 'DOCUMENT_NOT_FOUND' || error.code === 'REVISION_NOT_FOUND'
+            ? 404
+            : error.code === 'PROVIDER_UNAVAILABLE' || error.code === 'PROVIDER_FAILED'
+              ? 503
+              : error.code.startsWith('PAIRING_')
+                ? 403
+                : 409;
+    respondJson(response, status, {
+      error: {
+        code: error.code,
+        message: error.message,
+        ...(error.details === undefined ? {} : { details: error.details }),
+      },
+    });
     return;
   }
   respondJson(response, 500, { error: { code: 'INTERNAL_ERROR' } });
+}
+
+function publicMistralErrorMessage(errorCode: MistralProviderError['code']): string {
+  switch (errorCode) {
+    case 'PROVIDER_UNCONFIGURED':
+      return 'Provider is not configured.';
+    case 'REMOTE_PROCESSING_BLOCKED':
+      return 'Remote provider processing is blocked.';
+    case 'REMOTE_PROCESSING_APPROVAL_REQUIRED':
+      return 'Remote provider approval is required.';
+    case 'PROVIDER_SPEND_APPROVAL_REQUIRED':
+      return 'Provider spend approval is required.';
+    case 'MISTRAL_UNAUTHORIZED':
+      return 'Provider authorization failed.';
+    case 'MISTRAL_UNAVAILABLE':
+      return 'Provider is unavailable.';
+    case 'MISTRAL_REQUEST_FAILED':
+      return 'Provider request failed.';
+  }
 }
 
 function bearerToken(request: IncomingMessage): string | undefined {

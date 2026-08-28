@@ -7,9 +7,12 @@
   },
   "include": ["src"],
   "references": [
+    { "path": "../../packages/captions-core" },
     { "path": "../../packages/export-core" },
     { "path": "../../packages/render-planner" },
+    { "path": "../../packages/render-ir" },
     { "path": "../../packages/renderer-headless" },
-    { "path": "../../packages/renderer-pixi" }
+    { "path": "../../packages/renderer-pixi" },
+    { "path": "../../packages/html-scene-runtime" }
   ]
 }

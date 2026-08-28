@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { findFirstPartyScene } from '../../../packages/html-scene-runtime/src/first-party.js';
 
 export type WorkerResolvedMedia =
   | { readonly kind: 'file'; readonly path: string }
@@ -21,7 +22,11 @@ export class StaticWorkerMediaResolver implements WorkerMediaResolver {
   require(opaqueRef: string): WorkerResolvedMedia {
     const value = this.#refs.get(opaqueRef);
     if (value === undefined) throw new Error(`required Worker media is unavailable: ${opaqueRef}`);
-    if (opaqueRef.startsWith('html-scene:')) return { kind: 'html-scene', packageId: value };
+    if (opaqueRef.startsWith('html-scene:')) {
+      if (findFirstPartyScene(value) === undefined)
+        throw new Error(`required published HTML scene is unavailable: ${opaqueRef}`);
+      return { kind: 'html-scene', packageId: value };
+    }
     if (!existsSync(value)) throw new Error(`required Worker media is unavailable: ${opaqueRef}`);
     return { kind: 'file', path: value };
   }
@@ -39,7 +44,10 @@ export function mediaResolverFromAssetSourceRegistry(source: {
   return {
     require(opaqueRef) {
       if (opaqueRef.startsWith('html-scene:')) {
-        return { kind: 'html-scene', packageId: opaqueRef.slice('html-scene:'.length) };
+        const packageId = opaqueRef.slice('html-scene:'.length);
+        if (findFirstPartyScene(packageId) === undefined)
+          throw new Error(`required published HTML scene is unavailable: ${opaqueRef}`);
+        return { kind: 'html-scene', packageId };
       }
       if (opaqueRef.startsWith('motion-scene:')) {
         // Motion Studio scenes are published as renderable media before a

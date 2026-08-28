@@ -1,0 +1,174 @@
+{
+  "formatVersion": 1,
+  "id": "joy.first-party.reference-social-cutdown.slice",
+  "version": "2.0.0",
+  "name": "Reference social cutdown (certified editor slice)",
+  "inputs": {
+    "type": "object",
+    "required": [
+      "selectedMedia",
+      "references"
+    ],
+    "properties": {
+      "selectedMedia": {
+        "type": "object",
+        "description": "Selected file-backed video reference."
+      },
+      "references": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "additionalProperties": false
+  },
+  "outputs": {
+    "type": "object",
+    "required": [
+      "transaction",
+      "selectedMedia",
+      "references"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "selected-media",
+      "category": "input",
+      "type": "input.item",
+      "params": {
+        "path": "selectedMedia"
+      },
+      "deterministic": true
+    },
+    {
+      "id": "references",
+      "category": "input",
+      "type": "input.item",
+      "params": {
+        "path": "references"
+      },
+      "deterministic": true
+    },
+    {
+      "id": "review",
+      "category": "transform",
+      "type": "transform.compose",
+      "params": {
+        "fields": {
+          "selectedMedia": {
+            "kind": "upstream",
+            "node": "selected-media"
+          },
+          "references": {
+            "kind": "upstream",
+            "node": "references"
+          }
+        }
+      },
+      "deterministic": true
+    },
+    {
+      "id": "approve-cutdown",
+      "category": "decision",
+      "type": "decision.approval",
+      "params": {
+        "kind": "choose-candidates",
+        "prompt": "Approve the reference-derived cut. Respond with {commands: [...]} containing only timeline commands for the selected file-backed video.",
+        "payloadFrom": {
+          "kind": "upstream",
+          "node": "review"
+        }
+      },
+      "deterministic": false
+    },
+    {
+      "id": "apply-cutdown",
+      "category": "editor",
+      "type": "editor.commandTransaction",
+      "params": {
+        "label": "Apply approved reference social cutdown",
+        "commandsFrom": {
+          "kind": "upstream",
+          "node": "approve-cutdown",
+          "path": "response.commands"
+        }
+      },
+      "deterministic": true
+    },
+    {
+      "id": "result",
+      "category": "transform",
+      "type": "transform.compose",
+      "params": {
+        "fields": {
+          "transaction": {
+            "kind": "upstream",
+            "node": "apply-cutdown"
+          },
+          "selectedMedia": {
+            "kind": "upstream",
+            "node": "selected-media"
+          },
+          "references": {
+            "kind": "upstream",
+            "node": "references"
+          },
+          "approval": {
+            "kind": "upstream",
+            "node": "approve-cutdown",
+            "path": "response"
+          }
+        }
+      },
+      "deterministic": true
+    }
+  ],
+  "edges": [
+    {
+      "from": "selected-media",
+      "to": "review"
+    },
+    {
+      "from": "references",
+      "to": "review"
+    },
+    {
+      "from": "review",
+      "to": "approve-cutdown"
+    },
+    {
+      "from": "approve-cutdown",
+      "to": "apply-cutdown"
+    },
+    {
+      "from": "selected-media",
+      "to": "result"
+    },
+    {
+      "from": "references",
+      "to": "result"
+    },
+    {
+      "from": "approve-cutdown",
+      "to": "result"
+    },
+    {
+      "from": "apply-cutdown",
+      "to": "result"
+    }
+  ],
+  "permissions": [
+    {
+      "capability": "editor.command"
+    }
+  ],
+  "policy": {
+    "concurrency": 1,
+    "failure": "stop",
+    "defaultRetry": {
+      "maxAttempts": 1,
+      "backoffMs": 0
+    }
+  }
+}

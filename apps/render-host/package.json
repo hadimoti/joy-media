@@ -23,8 +23,10 @@
     "build": "tsc -b"
   },
   "dependencies": {
+    "@joy-media/captions-core": "workspace:*",
     "@joy-media/export-core": "workspace:*",
     "@joy-media/project-schema": "workspace:*",
+    "@joy-media/render-ir": "workspace:*",
     "@joy-media/render-planner": "workspace:*",
     "@joy-media/renderer-headless": "workspace:*",
     "@joy-media/renderer-pixi": "workspace:*"

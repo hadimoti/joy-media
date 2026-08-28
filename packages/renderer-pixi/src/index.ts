@@ -20,12 +20,19 @@ import type {
   TransitionNode,
   VisualRenderNode,
 } from '@joy-media/render-ir';
-import { flattenRenderNodes, validateRenderFrameIR } from '@joy-media/render-ir';
+import {
+  flattenRenderNodes,
+  pinnedTextGlyph,
+  validateRenderFrameIR,
+  visualTextGlyphs,
+} from '@joy-media/render-ir';
 import {
   applyColorGradeToPixels,
   applyCpuEffectsToColor,
   applyVignetteToPixels,
 } from './effects-cpu.js';
+
+export { applyColorGradeToPixels, isIdentityColorGrade } from './effects-cpu.js';
 
 export const PACKAGE_NAME = '@joy-media/renderer-pixi' as const;
 
@@ -123,13 +130,39 @@ function paintText(
   node: Extract<VisualRenderNode, { kind: 'text' }>,
   effects: readonly EffectInstanceIR[] | undefined,
 ): void {
+  const characters = visualTextGlyphs(node.text, node.direction ?? 'ltr');
+  const glyphWidth =
+    node.fontSizePx === undefined ? 4 : Math.max(4, Math.round(node.fontSizePx / 12));
+  const glyphHeight =
+    node.fontSizePx === undefined ? 5 : Math.max(5, Math.round(node.fontSizePx / 12) * 5);
+  const contentWidth = characters.length * glyphWidth;
+  const originX =
+    node.align === 'center' ? -contentWidth / 2 : node.align === 'right' ? -contentWidth : 0;
+  const padding = node.background === undefined ? 0 : Math.max(1, Math.round(glyphHeight * 0.12));
   forEachLocalPixel(pixels, frameWidth, frameHeight, node, (localX, localY) => {
-    const x = Math.floor(localX);
-    const y = Math.floor(localY);
-    const character = Math.floor(x / 4);
-    const glyphX = x % 4;
-    if (!glyph(node.text[character] ?? ' ', glyphX, y)) return null;
-    return applyCpuEffectsToColor(node.color, effects, localX, localY);
+    const positionedX = localX - originX;
+    if (positionedX >= 0 && localY >= 0 && positionedX < contentWidth && localY < glyphHeight) {
+      const visualIndex = Math.floor(positionedX / glyphWidth);
+      const visualGlyph = characters[visualIndex];
+      const glyphX = Math.min(3, Math.floor(((positionedX % glyphWidth) * 4) / glyphWidth));
+      const glyphY = Math.min(4, Math.floor((localY * 5) / glyphHeight));
+      if (visualGlyph !== undefined && glyph(visualGlyph.character, glyphX, glyphY))
+        return applyCpuEffectsToColor(
+          textColorAt(node, visualGlyph.sourceIndex),
+          effects,
+          localX,
+          localY,
+        );
+    }
+    if (
+      node.background !== undefined &&
+      localX >= originX - padding &&
+      localX < originX + contentWidth + padding &&
+      localY >= -padding &&
+      localY < glyphHeight + padding
+    )
+      return node.background;
+    return null;
   });
 }
 
@@ -178,8 +211,13 @@ function forEachLocalPixel(
 ): void {
   for (let y = 0; y < frameHeight; y++) {
     for (let x = 0; x < frameWidth; x++) {
-      const localX = (x + 0.5 - node.transform.translateX) / node.transform.scaleX;
-      const localY = (y + 0.5 - node.transform.translateY) / node.transform.scaleY;
+      const radians = ((node.transform.rotationDeg ?? 0) * Math.PI) / 180;
+      const cos = Math.cos(radians);
+      const sin = Math.sin(radians);
+      const dx = x + 0.5 - node.transform.translateX;
+      const dy = y + 0.5 - node.transform.translateY;
+      const localX = (cos * dx + sin * dy) / node.transform.scaleX;
+      const localY = (-sin * dx + cos * dy) / node.transform.scaleY;
       const color = sample(localX, localY);
       if (color !== null) blendPixel(pixels, (y * frameWidth + x) * 4, color, node.opacity);
     }
@@ -223,14 +261,32 @@ function enabledVignetteAmount(effects: readonly EffectInstanceIR[] | undefined)
   return max;
 }
 
-const GLYPHS: Readonly<Record<string, readonly string[]>> = {
-  J: ['011', '001', '001', '101', '010'],
-  O: ['010', '101', '101', '101', '010'],
-  Y: ['101', '101', '010', '010', '010'],
-};
-
 function glyph(character: string, x: number, y: number): boolean {
-  return GLYPHS[character]?.[y]?.[x] === '1';
+  const pinned = pinnedTextGlyph(character, x, y);
+  if (pinned !== undefined) return pinned;
+  if (/^\s$/u.test(character)) return false;
+  const seed = hash32(`glyph:${character}`);
+  return ((seed >>> ((x + y * 4) % 24)) & 1) === 1;
+}
+
+function textColorAt(node: Extract<VisualRenderNode, { kind: 'text' }>, sourceIndex: number): Rgba {
+  if (node.spans === undefined || sourceIndex < 0) return node.color;
+  let offset = 0;
+  for (const span of node.spans) {
+    const end = offset + [...span.text].length;
+    if (sourceIndex >= offset && sourceIndex < end) return span.color;
+    offset = end;
+  }
+  return node.color;
+}
+
+function hash32(value: string): number {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return hash >>> 0;
 }
 
 /**

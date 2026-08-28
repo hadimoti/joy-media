@@ -46,6 +46,8 @@ export type {
   RenderInspectReceipt,
   RenderJob,
   RenderJobPayload,
+  RenderInspectPayload,
+  LegacyRenderInspectPayload,
   RenderJobType,
   RenderReceipt,
 } from './render-jobs.js';

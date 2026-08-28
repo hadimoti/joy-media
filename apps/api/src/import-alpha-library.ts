@@ -49,7 +49,11 @@ export interface AlphaLibraryImportResult {
 export async function importAlphaLibrary(
   controlPlane: Pick<
     ControlPlane,
-    'createProject' | 'registerAsset' | 'attachCloudOriginal' | 'updateAssetMetadata'
+    | 'createProject'
+    | 'setAssetSync'
+    | 'registerAsset'
+    | 'attachCloudOriginal'
+    | 'updateAssetMetadata'
   >,
   manifest: AlphaLibraryManifest,
 ): Promise<AlphaLibraryImportResult> {
@@ -60,6 +64,9 @@ export async function importAlphaLibrary(
   } catch (error) {
     if (!(error instanceof ControlPlaneError) || error.code !== 'PROJECT_EXISTS') throw error;
   }
+  // This is an explicit operator-controlled cloud-library import. The consent
+  // is recorded before any existing private-object reference is reattached.
+  await controlPlane.setAssetSync(owner, PROJECT_ID, true);
 
   let created = 0;
   let updated = 0;

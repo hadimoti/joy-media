@@ -1,6 +1,7 @@
 import {
   WORKER_PROTOCOL_VERSION,
   type RenderJobPayload,
+  type RenderInspectPayload,
   type VideoReferenceAnalyzePayload,
 } from '@joy-media/job-protocol';
 import type {
@@ -17,8 +18,11 @@ import type {
   ProviderApprovalGrant,
   ProviderApprovalPreflight,
 } from '@joy-media/provider-sdk';
+import type { ProjectDocumentV2 } from '@joy-media/project-schema';
 import { DerivativeAuthorityRevokedError } from './asset-resolver.js';
 import { getStoredMediaToken } from './media-session.js';
+import { BrowserControlPlaneError } from './control-plane-errors.js';
+export { BrowserControlPlaneError } from './control-plane-errors.js';
 
 export interface BrowserWorker {
   readonly id: string;
@@ -26,6 +30,74 @@ export interface BrowserWorker {
   readonly revoked: boolean;
   readonly capabilities: readonly string[];
   readonly lastSeenAt?: number;
+}
+
+export interface BrowserProject {
+  readonly id: string;
+  readonly title: string;
+  readonly revision: number;
+  readonly ownerId: string;
+  readonly assetSyncEnabled: boolean;
+}
+
+export interface BrowserProjectDocumentSnapshot {
+  readonly projectId: string;
+  readonly revision: number;
+  readonly document: ProjectDocumentV2;
+  readonly documentHash: string;
+  readonly updatedAt: string;
+}
+
+export interface BrowserProjectRevision {
+  readonly projectId: string;
+  readonly revision: number;
+  readonly baseRevision: number;
+  readonly idempotencyKey: string;
+  readonly operation: {
+    readonly kind: 'replace' | 'restore';
+    readonly idempotencyKey: string;
+    readonly label?: string;
+    readonly targetRevision?: number;
+  };
+  readonly document: ProjectDocumentV2;
+  readonly documentHash: string;
+  readonly createdAt: string;
+}
+
+export type BrowserRecoveredCopyOperation =
+  | {
+      readonly kind: 'append';
+      readonly document: ProjectDocumentV2;
+      readonly label?: string;
+    }
+  | {
+      readonly kind: 'restore';
+      readonly targetRevision: number;
+      readonly label?: string;
+    };
+
+export interface BrowserProjectRecoveredCopy {
+  readonly kind: 'recovered-copy';
+  readonly projectId: string;
+  readonly name: string;
+  readonly document: ProjectDocumentV2;
+  readonly basedOnRevision: number;
+  readonly serverRevision: number;
+  readonly createdAt: string;
+  readonly provenance: {
+    readonly sourceProjectId: string;
+    readonly baseRevision: number;
+    readonly sourceHeadRevision: number;
+    readonly operation: BrowserRecoveredCopyOperation;
+    readonly requestedDocumentHash: string;
+  };
+}
+
+export interface BrowserProjectRecoveredCopyInput {
+  readonly baseRevision: number;
+  readonly idempotencyKey: string;
+  readonly suggestedName: string;
+  readonly operation: BrowserRecoveredCopyOperation;
 }
 
 export interface BrowserJob {
@@ -46,6 +118,7 @@ export interface BrowserJob {
     readonly outputRef?: string;
     readonly findings?: number | readonly unknown[];
     readonly qualityReport?: BrowserRenderReport;
+    readonly report?: BrowserRenderReport;
     readonly sha256?: string;
     readonly bytes?: number;
     readonly descriptor?: {
@@ -74,6 +147,7 @@ export interface BrowserJob {
 
 export interface BrowserRenderReport {
   readonly version?: number;
+  readonly evidenceLevel?: 'sampled';
   readonly findings: readonly {
     readonly status: 'pass' | 'warn' | 'fail';
   }[];
@@ -108,6 +182,20 @@ export interface BrowserMediaDescriptor {
   readonly height?: number;
 }
 
+/**
+ * Source media for authenticated speech transcription. The current HTTP API
+ * accepts either a server reference or raw media bytes. Source ranges are
+ * intentionally retained here for callers and are applied by the caption
+ * adapter after transcription; the server does not claim to trim media.
+ */
+export interface BrowserSpeechTranscriptionOptions {
+  readonly referenceAssetId?: string;
+  readonly media?: Blob;
+  readonly mediaType?: string;
+  readonly sourceStartUs?: number;
+  readonly sourceDurationUs?: number;
+}
+
 export interface BrowserDerivative {
   readonly id: string;
   readonly projectId: string;
@@ -135,18 +223,6 @@ export interface BrowserReasoningProvider {
 
 export type BrowserProviderApprovalPreflight = ProviderApprovalPreflight;
 export type BrowserProviderApprovalGrant = ProviderApprovalGrant;
-
-export class BrowserControlPlaneError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-    readonly status: number,
-    readonly preflight?: BrowserProviderApprovalPreflight,
-  ) {
-    super(message);
-    this.name = 'BrowserControlPlaneError';
-  }
-}
 
 export interface BrowserJoyCodeReasoningEvidence {
   readonly evidenceId: string;
@@ -252,7 +328,7 @@ export class BrowserControlPlaneClient {
   async assets(projectId: string): Promise<readonly BrowserAsset[]> {
     return this.get(`/v1/projects/${encodeURIComponent(projectId)}/assets`);
   }
-  /** Shared cloud library visible to any logged-in Joy user (private-object originals). */
+  /** Owner's private backups plus the explicitly shared curated library. */
   async sharedCloudAssets(): Promise<readonly BrowserAsset[]> {
     return this.get('/v1/library/cloud-assets');
   }
@@ -293,11 +369,53 @@ export class BrowserControlPlaneClient {
     if (!response.ok) throw new Error(`cloud original request failed (${response.status})`);
     return response.blob();
   }
-  async ensureProject(id: string, title: string): Promise<void> {
+  async project(id: string): Promise<BrowserProject> {
+    return this.get(`/v1/projects/${encodeURIComponent(id)}`);
+  }
+  async projectDocument(id: string): Promise<BrowserProjectDocumentSnapshot> {
+    return this.get(`/v2/projects/${encodeURIComponent(id)}/document`);
+  }
+  async appendProjectRevision(
+    projectId: string,
+    input: {
+      readonly baseRevision: number;
+      readonly idempotencyKey: string;
+      readonly document: ProjectDocumentV2;
+      readonly label?: string;
+    },
+  ): Promise<BrowserProjectRevision> {
+    return this.post(`/v2/projects/${encodeURIComponent(projectId)}/revisions`, input);
+  }
+  async projectRevision(projectId: string, revision: number): Promise<BrowserProjectRevision> {
+    return this.get(`/v2/projects/${encodeURIComponent(projectId)}/revisions/${revision}`);
+  }
+  async restoreProjectRevision(
+    projectId: string,
+    input: {
+      readonly baseRevision: number;
+      readonly revision: number;
+      readonly idempotencyKey: string;
+      readonly label?: string;
+    },
+  ): Promise<BrowserProjectRevision> {
+    return this.post(`/v2/projects/${encodeURIComponent(projectId)}/restore`, input);
+  }
+  async recoverStaleRevision(
+    sourceProjectId: string,
+    input: BrowserProjectRecoveredCopyInput,
+  ): Promise<BrowserProjectRecoveredCopy> {
+    return this.post(`/v2/projects/${encodeURIComponent(sourceProjectId)}/recovered-copies`, input);
+  }
+  async ensureProject(id: string, title: string): Promise<BrowserProject> {
     try {
-      await this.createProject(id, title);
+      return await this.createProject(id, title);
     } catch (error) {
-      if (!messageIncludes(error, 'PROJECT_EXISTS')) throw error;
+      if (
+        !(error instanceof BrowserControlPlaneError && error.code === 'PROJECT_EXISTS') &&
+        !messageIncludes(error, 'PROJECT_EXISTS')
+      )
+        throw error;
+      return this.project(id);
     }
   }
   async derivatives(projectId: string, assetId: string): Promise<readonly BrowserDerivative[]> {
@@ -362,8 +480,8 @@ export class BrowserControlPlaneClient {
   ): Promise<{ readonly assetSyncEnabled: boolean }> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/asset-sync`, { enabled });
   }
-  async createProject(id: string, title: string): Promise<void> {
-    await this.post('/v1/projects', { id, title });
+  async createProject(id: string, title: string): Promise<BrowserProject> {
+    return this.post('/v1/projects', { id, title });
   }
   async enqueueFixture(projectId: string, id: string): Promise<BrowserJob> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
@@ -388,12 +506,9 @@ export class BrowserControlPlaneClient {
   async enqueueRenderInspection(
     projectId: string,
     id: string,
-    payload: RenderJobPayload,
+    payload: RenderInspectPayload,
   ): Promise<BrowserJob> {
-    void projectId;
-    void id;
-    void payload;
-    throw new Error('render.inspect is not executable by the current Worker runtime');
+    return this.enqueueRenderJob(projectId, id, 'render.inspect', payload);
   }
   /** Queues a local-GPU Comfy RemBG job when a Worker advertises `image.comfy`. */
   async enqueueComfyRemoveBg(projectId: string, id: string, assetId: string): Promise<BrowserJob> {
@@ -506,11 +621,7 @@ export class BrowserControlPlaneClient {
   /** Live faster-whisper transcription (authenticated). Falls back is caller's job. */
   async transcribeSpeech(
     language: string,
-    options: {
-      readonly referenceAssetId?: string;
-      readonly media?: Blob;
-      readonly mediaType?: string;
-    } = {},
+    options: BrowserSpeechTranscriptionOptions = {},
   ): Promise<{
     readonly language: string;
     readonly words: readonly {
@@ -528,6 +639,8 @@ export class BrowserControlPlaneClient {
     };
   }> {
     if (options.referenceAssetId !== undefined) {
+      // The reference endpoint currently accepts only the source identity.
+      // Optional source ranges are normalized client-side by local-transcription.
       return this.post('/v1/providers/speech/transcribe', {
         language,
         referenceAssetId: options.referenceAssetId,
@@ -666,7 +779,7 @@ export class BrowserControlPlaneClient {
     projectId: string,
     id: string,
     type: 'render.export' | 'render.inspect',
-    payload: RenderJobPayload,
+    payload: RenderJobPayload | RenderInspectPayload,
   ): Promise<BrowserJob> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
       id,

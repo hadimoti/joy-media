@@ -82,7 +82,13 @@ export function planRenderFrame(input: PlanRenderFrameInput): RenderFramePlan {
     resolved,
     renderOptions,
   );
-  const captionNodes = captionBurnInNodes(bundle.visualProject, visualComposition, timeUs);
+  const captionNodes = captionBurnInNodes(
+    bundle.visualProject,
+    visualComposition,
+    timeUs,
+    width,
+    height,
+  );
   const frame =
     captionNodes.length === 0
       ? baseFrame
@@ -155,12 +161,14 @@ function captionBurnInNodes(
   project: JoyProjectV1,
   composition: CompositionV1,
   timeUs: TimeUs,
+  viewportWidth: number,
+  viewportHeight: number,
 ): readonly TextNode[] {
   if (project.pluginData[CAPTION_BURN_IN_KEY] !== true) return [];
   const cues = captionCuesAt(composition, project.captionDocuments, timeUs);
   return layoutTemplatedCaptionNodes(cues, {
-    viewportWidth: composition.width,
-    viewportHeight: composition.height,
+    viewportWidth,
+    viewportHeight,
   }) as readonly TextNode[];
 }
 

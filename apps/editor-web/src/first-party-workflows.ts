@@ -35,18 +35,29 @@ export function loadFirstPartyWorkflows(): readonly FirstPartyWorkflow[] {
   const packs = buildFirstPartyPipelinePacks();
   const builtWorkflows = buildFirstPartyWorkflows();
   const definitionFiles = firstPartyDefinitionFiles();
+  const packsById = new Map(packs.map((pack) => [pack.workflow.id, pack]));
+  const definitionFilesById = new Map(
+    definitionFiles.map((file) => {
+      const parsed = JSON.parse(file.json) as { readonly id?: unknown };
+      return [typeof parsed.id === 'string' ? parsed.id : file.fileName, file] as const;
+    }),
+  );
 
-  cachedWorkflows = builtWorkflows.map((built, index) => ({
-    workflow: built.workflow,
-    fileName: definitionFiles[index]?.fileName ?? `${built.workflow.id}.json`,
-    label: packs[index]?.label ?? 'Production pack',
-    summary: packs[index]?.summary ?? built.workflow.name,
-    requiredPorts: packs[index]?.requiredPorts ?? [],
-    optionalPorts: packs[index]?.optionalPorts ?? [],
-    capabilities: packs[index]?.capabilities ?? built.workflow.permissions.map((p) => p.capability),
-    approvals: packs[index]?.approvals ?? [],
-    reportRefs: packs[index]?.reportRefs ?? [],
-  }));
+  cachedWorkflows = builtWorkflows.map((built) => {
+    const pack = packsById.get(built.workflow.id);
+    const definitionFile = definitionFilesById.get(built.workflow.id);
+    return {
+      workflow: built.workflow,
+      fileName: definitionFile?.fileName ?? `${built.workflow.id}.json`,
+      label: pack?.label ?? 'Unavailable system workflow',
+      summary: pack?.summary ?? built.workflow.name,
+      requiredPorts: pack?.requiredPorts ?? [],
+      optionalPorts: pack?.optionalPorts ?? [],
+      capabilities: pack?.capabilities ?? built.workflow.permissions.map((p) => p.capability),
+      approvals: pack?.approvals ?? [],
+      reportRefs: pack?.reportRefs ?? [],
+    };
+  });
 
   return cachedWorkflows;
 }

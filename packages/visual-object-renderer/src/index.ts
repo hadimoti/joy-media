@@ -278,6 +278,7 @@ export function transformToRenderTransform(t: VisualObjectTransformV1): Transfor
     translateY: t.y,
     scaleX: t.scaleX,
     scaleY: t.scaleY,
+    rotationDeg: t.rotationDeg,
   };
 }
 

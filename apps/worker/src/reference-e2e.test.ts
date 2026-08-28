@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,6 +13,9 @@ import { validateSpikeProject } from '@joy-media/project-schema';
 import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
 import { createRenderBundle } from '@joy-media/render-planner';
 import { buildReferenceSpikeProject, REFERENCE_PROJECT } from '@joy-media/test-fixtures';
+import { renderBundleToFile } from '@joy-media/render-host';
+import type { RenderHostExportRequestV1 } from '@joy-media/render-host';
+import type { OfflineRenderPage } from '@joy-media/render-host/render-page';
 import { executeLeasedExport } from './export-job.js';
 import { StaticWorkerMediaResolver } from './worker-media-resolver.js';
 
@@ -85,34 +88,111 @@ describe('P02 reference social-edit end-to-end workflow', () => {
 
     api.enqueue(owner, 'landscape', REFERENCE_PROJECT.id, 'render.export', now);
     expect(api.lease('interrupted-worker', now + 1, 5)?.id).toBe('landscape');
-    expect(api.lease('recovery-worker', now + 6, 30_000)?.id).toBe('landscape');
     const resolver = referenceResolver(outputDirectory);
-    expect(
-      await executeLeasedExport(
+    const landscapeBundle = createRenderBundle({
+      timelineProject: sourceBackedReferenceTimeline(),
+      visualProject: referenceVisualProject(64, 36),
+      outputPreset: 'social-h264-aac',
+      seed: 'reference-landscape',
+    });
+    const interruptingPage = {
+      paint() {
+        return new Uint8Array(0);
+      },
+      destroy() {},
+      __joyMediaAfterCompositeStagedForTest: () => {
+        throw new Error('simulated worker interruption after composite staging');
+      },
+    } as OfflineRenderPage & { readonly __joyMediaAfterCompositeStagedForTest: () => void };
+    const interruptingRenderHost = {
+      export: async (request: RenderHostExportRequestV1) => {
+        return renderBundleToFile(request, {
+          page: interruptingPage,
+        });
+      },
+    };
+    await expect(
+      executeLeasedExport(
         {
-          complete: (workerId, jobId, receipt) => {
-            api.registerWorkerRenderArtifact(workerId, jobId, {
-              id: `artifact-${jobId}-${receipt.sha256.slice(0, 16)}`,
-              outputRef: receipt.outputRef,
-              sha256: receipt.sha256,
-              bytes: receipt.bytes,
-              descriptor: { mimeType: 'video/mp4' },
-              location: { kind: 'private-object', ref: `render-${jobId}` },
-            });
-            return api.complete(workerId, jobId, Date.now(), receipt);
+          complete: () => {
+            throw new Error('interrupted worker must not complete the lease');
           },
         },
-        'recovery-worker',
+        'interrupted-worker',
         'landscape',
-        createRenderBundle({
-          timelineProject: sourceBackedReferenceTimeline(),
-          visualProject: referenceVisualProject(64, 36),
-          outputPreset: 'social-h264-aac',
-          seed: 'reference-landscape',
-        }),
-        { outputDirectory, mediaResolver: resolver },
+        landscapeBundle,
+        {
+          outputDirectory,
+          mediaResolver: resolver,
+          renderHostDriver: interruptingRenderHost,
+        },
       ),
-    ).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
+    ).rejects.toThrow(/interruption/);
+    expect(() => readFileSync(join(outputDirectory, 'landscape.mp4'))).toThrow();
+    expect(
+      readdirSync(outputDirectory).filter((name) => name.startsWith('landscape.mp4.')),
+    ).toEqual([]);
+    expect(api.lease('recovery-worker', now + 6, 30_000)?.id).toBe('landscape');
+    const landscapeReceipt = await executeLeasedExport(
+      {
+        complete: (workerId, jobId, receipt) => {
+          api.registerWorkerRenderArtifact(workerId, jobId, {
+            id: `artifact-${jobId}-${receipt.sha256.slice(0, 16)}`,
+            outputRef: receipt.outputRef,
+            sha256: receipt.sha256,
+            bytes: receipt.bytes,
+            descriptor: { mimeType: 'video/mp4' },
+            location: { kind: 'private-object', ref: `render-${jobId}` },
+          });
+          return api.complete(workerId, jobId, Date.now(), receipt);
+        },
+      },
+      'recovery-worker',
+      'landscape',
+      landscapeBundle,
+      { outputDirectory, mediaResolver: resolver },
+    );
+    expect(landscapeReceipt).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
+    const landscapeFrame = spawnSync(
+      'ffmpeg',
+      [
+        '-v',
+        'error',
+        '-i',
+        join(outputDirectory, 'landscape.mp4'),
+        '-frames:v',
+        '1',
+        '-f',
+        'rawvideo',
+        '-pix_fmt',
+        'rgb24',
+        'pipe:1',
+      ],
+      { shell: false },
+    );
+    expect(landscapeFrame.status).toBe(0);
+    const landscapePixels = landscapeFrame.stdout as Buffer;
+    const overlayOffset = (6 * 64 + 6) * 3;
+    expect(landscapePixels[overlayOffset + 2]).toBeGreaterThan(landscapePixels[overlayOffset]!);
+    const landscapeAudio = spawnSync(
+      'ffmpeg',
+      [
+        '-v',
+        'error',
+        '-i',
+        join(outputDirectory, 'landscape.mp4'),
+        '-map',
+        '0:a:0',
+        '-t',
+        '0.05',
+        '-f',
+        's16le',
+        'pipe:1',
+      ],
+      { shell: false },
+    );
+    expect(landscapeAudio.status).toBe(0);
+    expect(Array.from(landscapeAudio.stdout as Buffer).some((sample) => sample !== 0)).toBe(true);
 
     api.enqueue(owner, 'vertical', REFERENCE_PROJECT.id, 'render.export', now + 10);
     expect(api.lease('recovery-worker', now + 11)?.id).toBe('vertical');
@@ -185,12 +265,20 @@ function referenceResolver(directory: string): StaticWorkerMediaResolver {
     { shell: false, encoding: 'utf8' },
   );
   if (generated.status !== 0) throw new Error(`failed to create test media: ${generated.stderr}`);
+  const overlayPath = join(directory, 'reference-overlay.png');
+  const overlay = spawnSync(
+    'ffmpeg',
+    ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=8x8', '-frames:v', '1', overlayPath],
+    { shell: false, encoding: 'utf8' },
+  );
+  if (overlay.status !== 0) throw new Error(`failed to create test overlay: ${overlay.stderr}`);
   return new StaticWorkerMediaResolver({
     'asset:asset-intro': path,
     'asset:asset-product': path,
     'asset:asset-outro': path,
     'asset:asset-b-roll-a': path,
     'asset:asset-b-roll-b': path,
+    'asset:asset-overlay': overlayPath,
   });
 }
 
@@ -258,10 +346,27 @@ function referenceVisualProject(width: number, height: number): JoyProjectV1 {
       'asset-outro': { id: 'asset-outro', kind: 'video', displayName: 'Outro' },
       'asset-b-roll-a': { id: 'asset-b-roll-a', kind: 'video', displayName: 'B-roll A' },
       'asset-b-roll-b': { id: 'asset-b-roll-b', kind: 'video', displayName: 'B-roll B' },
+      'asset-overlay': { id: 'asset-overlay', kind: 'image', displayName: 'Overlay' },
     },
     variables: {},
     markers: [],
-    visualObjects: {},
+    visualObjects: {
+      overlay: {
+        id: 'overlay',
+        kind: 'image',
+        assetId: 'asset-overlay',
+        transform: {
+          x: 4,
+          y: 4,
+          scaleX: 1,
+          scaleY: 1,
+          rotationDeg: 0,
+          opacity: 1,
+          positionZ: 0,
+          crop: { left: 0, top: 0, right: 0, bottom: 0 },
+        },
+      },
+    },
     captionDocuments: {},
     pluginData: {},
     audio: {

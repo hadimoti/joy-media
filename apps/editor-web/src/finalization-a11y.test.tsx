@@ -143,8 +143,8 @@ describe('Task 28 finalization accessibility and localization', () => {
     expect(markup).toContain('aria-label="Remove Demo Project from library"');
     expect(markup).toContain('title="Remove from library"');
     expect(markup).not.toContain('aria-label="Delete Demo Project"');
-    expect(projectLibraryRemovalCopy('Demo Project')).toContain('فقط از فهرست پروژه‌ها حذف می‌شود');
-    expect(projectLibraryRemovalCopy('Demo Project')).toContain('پاک نمی‌شوند');
+    expect(projectLibraryRemovalCopy('Demo Project')).toContain('Remove “Demo Project”');
+    expect(projectLibraryRemovalCopy('Demo Project')).toContain('are not deleted');
   });
 
   it('preserves Persian explainer copy without forcing layout direction', () => {
@@ -196,6 +196,21 @@ describe('Task 28 finalization accessibility and localization', () => {
     expect(appSource).toContain('aria-modal="true"');
     expect(workflowSource).toContain('useAccessibleDialog');
     expect(workflowSource).toContain('aria-modal="true"');
+    expect(workflowSource).toContain('aria-labelledby="workflow-run-dialog-title"');
+    expect(workflowSource).toContain('aria-labelledby="workflow-approval-dialog-title"');
+    expect(workflowSource).toContain('No saved workflows yet.');
+
+    const productionSource = readFileSync(
+      fileURLToPath(new URL('./ProductionBoardPanel.tsx', import.meta.url)),
+      'utf8',
+    );
+    const agentSource = readFileSync(
+      fileURLToPath(new URL('./AgentPanel.tsx', import.meta.url)),
+      'utf8',
+    );
+    expect(productionSource).toContain('aria-live="assertive"');
+    expect(productionSource).toContain("event.key === 'Home'");
+    expect(agentSource).toContain('role="alert" aria-live="assertive"');
   });
 
   it('uses token-driven styling for the finalized workflow and project-library surfaces', () => {

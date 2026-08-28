@@ -181,6 +181,24 @@ describe('style and document replacement commands', () => {
       }),
     ).toThrowError(CaptionCommandError);
   });
+
+  it('retimes a specific caption clip and restores its placement exactly', () => {
+    const base = project();
+    const placed = applyCaptionProjectCommand(base, {
+      type: 'caption.setClipTiming',
+      payload: {
+        documentId: 'doc',
+        clipId: 'clip-1',
+        startUs: 4_000_000,
+        durationUs: 3_000_000,
+      },
+    });
+    expect(placed.project.compositions.root!.tracks[0]!.clips[0]).toMatchObject({
+      startUs: 4_000_000,
+      durationUs: 3_000_000,
+    });
+    expect(applyCaptionProjectCommand(placed.project, placed.inverse).project).toEqual(base);
+  });
 });
 
 describe('editing surface helpers', () => {

@@ -39,7 +39,7 @@ describe('leased export job', () => {
       { complete: (workerId, jobId) => calls.push(`${workerId}:${jobId}`) },
       'worker-1',
       'job-1',
-      renderBundle(),
+      renderBundle({ lift: 0, gamma: 1, gain: 0.65, saturation: 0.8 }),
       {
         outputDirectory: directory,
         mediaResolver: new StaticWorkerMediaResolver({
@@ -71,7 +71,102 @@ describe('leased export job', () => {
     expect(pageEvents).toEqual(['destroy']);
     expect(existsSync(join(directory, 'job-1.mp4'))).toBe(true);
     expect(readFileSync(join(directory, 'job-1.mp4')).length).toBe(result.bytes);
+    const standaloneReport = exportCore.verifyExportDelivery(
+      join(directory, 'job-1.mp4'),
+      exportCore.deliveryPromiseForManifest(result.manifest),
+      { outputRef: result.outputRef },
+    );
+    expect(standaloneReport.findings.filter((finding) => finding.status === 'fail')).toEqual([]);
     expect(calls).toEqual(['worker-1:job-1']);
+  });
+
+  it('accepts basic visual objects and preserves their pixels in the leased export', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-leased-overlay-'));
+    const video = writeSourceVideo(directory);
+    const image = join(directory, 'overlay.png');
+    const generated = spawnSync(
+      'ffmpeg',
+      ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=8x8', '-frames:v', '1', image],
+      { shell: false, encoding: 'utf8' },
+    );
+    expect(generated.status).toBe(0);
+    const base = renderBundle();
+    const bundle = {
+      ...base,
+      assets: {
+        ...base.assets,
+        'image-a': {
+          id: 'image-a',
+          kind: 'image' as const,
+          displayName: 'Overlay',
+          opaqueRef: 'asset:image-a',
+        },
+      },
+      visualProject: {
+        ...base.visualProject,
+        assets: {
+          ...base.visualProject.assets,
+          'image-a': { id: 'image-a', kind: 'image' as const, displayName: 'Overlay' },
+        },
+        visualObjects: {
+          image: {
+            id: 'image',
+            kind: 'image' as const,
+            assetId: 'image-a',
+            transform: {
+              x: 4,
+              y: 4,
+              scaleX: 1,
+              scaleY: 1,
+              rotationDeg: 0,
+              opacity: 1,
+              positionZ: 0,
+              crop: { left: 0, top: 0, right: 0, bottom: 0 },
+            },
+          },
+        },
+      },
+    };
+    const calls: string[] = [];
+    const receipt = await executeLeasedExport(
+      { complete: (workerId, jobId) => calls.push(`${workerId}:${jobId}`) },
+      'worker-overlay',
+      'job-overlay',
+      bundle,
+      {
+        outputDirectory: directory,
+        mediaResolver: new StaticWorkerMediaResolver({
+          'asset:video-a': video,
+          'asset:video-b': video,
+          'asset:image-a': image,
+        }),
+      },
+    );
+    const frame = spawnSync(
+      'ffmpeg',
+      [
+        '-v',
+        'error',
+        '-i',
+        join(directory, 'job-overlay.mp4'),
+        '-frames:v',
+        '1',
+        '-f',
+        'rawvideo',
+        '-pix_fmt',
+        'rgb24',
+        'pipe:1',
+      ],
+      { shell: false },
+    );
+    expect(frame.status).toBe(0);
+    const pixels = frame.stdout as Buffer;
+    const offset = (6 * 64 + 6) * 3;
+    expect(pixels[offset + 2]).toBeGreaterThan(pixels[offset]!);
+    expect(receipt.qualityReport.findings.filter((finding) => finding.status === 'fail')).toEqual(
+      [],
+    );
+    expect(calls).toEqual(['worker-overlay:job-overlay']);
   });
 
   it('rejects truncated renders against the original delivery promise before completing', async () => {
@@ -172,10 +267,13 @@ describe('leased export job', () => {
   });
 });
 
-function renderBundle() {
+function renderBundle(colorGrade?: JoyProjectV1['colorGrade']) {
   return createRenderBundle({
     timelineProject: timelineProject(),
-    visualProject: visualProject(),
+    visualProject: {
+      ...visualProject(),
+      ...(colorGrade === undefined ? {} : { colorGrade }),
+    },
     outputPreset: 'social-h264-aac',
     seed: 'worker-render',
   });

@@ -4,6 +4,7 @@ import {
   addTimelineMarkerAtPlayhead,
   buildTimelineFileImportTransactions,
   openTimelineAssetLibrary,
+  pinFocusedTimelineTrack,
 } from './TimelinePanel.js';
 import {
   extractTimelineDroppedFiles,
@@ -11,6 +12,19 @@ import {
 } from './TimelineEmptyState.js';
 
 describe('timeline media intake', () => {
+  it('pins a focused off-window track so its keyboard action stays mounted during scroll', () => {
+    const tracks = [
+      { id: 'a', heightPx: 44, locked: false, muted: false, solo: false },
+      { id: 'b', heightPx: 44, locked: false, muted: false, solo: false },
+      { id: 'c', heightPx: 44, locked: false, muted: false, solo: false },
+    ];
+    expect(pinFocusedTimelineTrack(tracks, [tracks[2]!], 'a').map((track) => track.id)).toEqual([
+      'a',
+      'c',
+    ]);
+    expect(pinFocusedTimelineTrack(tracks, [tracks[2]!], undefined)).toEqual([tracks[2]]);
+  });
+
   it('builds one real-track insertion per dropped file, opens Assets on request, and routes marker additions through the shared command helper', () => {
     const project = emptySpikeProject({ trackCount: 2, durationUs: 30_000_000 });
     const composition = project.compositions[project.rootCompositionId]!;
@@ -76,6 +90,22 @@ describe('timeline media intake', () => {
     expect(isTimelineEmptyStateActivationKey('Escape')).toBe(false);
   });
 
+  it('does not coerce a still image into a video clip during timeline intake', () => {
+    const project = emptySpikeProject({ trackCount: 1, durationUs: 30_000_000 });
+    const composition = project.compositions[project.rootCompositionId]!;
+    const transactions = buildTimelineFileImportTransactions({
+      composition,
+      trackFlags: [{ id: 'track-0', heightPx: 44, locked: false, muted: false, solo: false }],
+      playheadUs: 0,
+      files: [new File(['still'], 'poster.png', { type: 'image/png' })],
+      createAssetId: () => 'asset-poster',
+    });
+    expect(transactions).toEqual([]);
+    expect(transactions.flatMap((tx) => tx.commands)).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'timeline.insertClip' })]),
+    );
+  });
+
   it('skips an incompatible first row and inserts audio onto a later compatible track', () => {
     const project = emptySpikeProject({ trackCount: 0, durationUs: 30_000_000 });
     const composition = {
@@ -139,6 +169,29 @@ describe('timeline media intake', () => {
             },
           ],
         },
+      },
+    });
+  });
+
+  it('uses an explicitly typed generic audio track instead of creating a new lane', () => {
+    const project = emptySpikeProject({ trackCount: 0, durationUs: 30_000_000 });
+    const composition = {
+      ...project.compositions[project.rootCompositionId]!,
+      tracks: [{ id: 'track-7', kind: 'audio' as const, order: 0, enabled: true, clips: [] }],
+    };
+    const transactions = buildTimelineFileImportTransactions({
+      composition,
+      trackFlags: [{ id: 'track-7', heightPx: 44, locked: false, muted: false, solo: false }],
+      playheadUs: 3_000_000,
+      files: [new File(['audio'], 'music.wav', { type: 'audio/wav' })],
+      createAssetId: () => 'asset-generic-audio',
+      now: () => 4444,
+    });
+    expect(transactions[0]?.commands[0]).toMatchObject({
+      type: 'timeline.insertClip',
+      payload: {
+        trackId: 'track-7',
+        clip: { kind: 'audio', assetId: 'asset-generic-audio' },
       },
     });
   });

@@ -38,13 +38,19 @@ describe('app-menu catalog', () => {
     expect(panelIdFromMenuAction('edit.undo')).toBeUndefined();
   });
 
-  it('does not advertise experimental platform panels in the default View menu', () => {
+  it('advertises Production in View and Window while keeping experimental panels hidden', () => {
     const view = APP_MENU_GROUPS.find((group) => group.id === 'view');
+    const window = APP_MENU_GROUPS.find((group) => group.id === 'window');
+    expect(view?.items.map((item) => item.id)).toEqual(
+      expect.arrayContaining(['view.panel.production']),
+    );
+    expect(window?.items.map((item) => item.id)).toEqual(
+      expect.arrayContaining(['window.panel.production']),
+    );
     expect(view?.items.map((item) => item.id)).not.toEqual(
       expect.arrayContaining([
         'view.panel.jobs',
         'view.panel.workflows',
-        'view.panel.production',
         'view.panel.plugins',
         'view.panel.templates',
       ]),

@@ -1,0 +1,22 @@
+{
+  "input_path": "H:\\1 - start new win\\files\\momentum\\posts\\RAW GRAPHICS\\New folder\\ae\\fotage\\crypto-stock-trading-intro-609904-TimeCode.iR\\After Effects\\(Footage)\\Motion Array\\03. Other\\intro\\bg\\world_map.png",
+  "output_path": "C:\\Users\\HadiMoti\\joy-media\\test-output\\world-map-publish-check",
+  "processed_sources": 1,
+  "skipped_sources": 0,
+  "exported_assets": 1,
+  "exact_duplicates": 0,
+  "visual_duplicates": 0,
+  "failed_sources": 0,
+  "source_results": [
+    {
+      "source_path": "world_map.png",
+      "source_hash": "950926a9422565f76df2bb8c159e1994c38cbd966bd8f17dcb9de1b549ee4c28",
+      "status": "complete",
+      "extracted_assets": 1,
+      "skipped_exact_duplicates": 0,
+      "error": null
+    }
+  ],
+  "processing_version": "1.0.0",
+  "generatedAt": "2026-07-29T09:15:22.560123+00:00"
+}

@@ -13,15 +13,19 @@ Run from a clean checkout after installing Node 22 and pnpm:
    artifact hashes, browser screenshots, and golden evidence.
 
 The gate must fail for zero tests, dirty generated output, fixture production handlers, missing
-builds/manifest/SBOM, stale feature status, or an unverified journey. Do not waive real-media,
-actual-render, persistence, privacy, or authentication checks.
+builds/manifest/SBOM, stale feature status, or an unverified journey. A quick browser export,
+mocked API evidence, or an export without a passed inspection can never be marked as verified
+delivery. Do not waive real-media, actual-render, persistence, privacy, or authentication checks.
 
 ## Scope
 
 - Production: authenticated editor shell, project library, timeline, monitor/export, Joy Code
-  deterministic edits, Motion Studio scene round-trip, and Effect Studio.
+  deterministic edits, Motion Studio scene round-trip, Effect Studio, and the durable Production
+  Board read surface with governed approval/cancel/retry actions.
 - Demo-only: plugin demo panel and other fixture-backed demonstrations.
-- Experimental: templates, workflow authoring, 3D preview, and Worker/provider jobs.
+- Experimental: templates, workflow authoring, 3D preview, and Worker/provider jobs. The Production
+  Board does not promote those capabilities; unavailable adapters and execution paths remain
+  fail-closed and are explained in the board.
 - Hidden: PSD import, durable 3D authoring, MCP authoring, and marketplace/collaboration transport.
 
 ## Operations

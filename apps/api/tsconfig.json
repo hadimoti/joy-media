@@ -4,7 +4,9 @@
   "include": ["src"],
   "references": [
     { "path": "../../packages/job-protocol" },
+    { "path": "../../packages/project-schema" },
     { "path": "../../packages/provider-sdk" },
+    { "path": "../../packages/production-quality" },
     { "path": "../../packages/adapter-mistral" }
   ]
 }

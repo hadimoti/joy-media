@@ -1,0 +1,2 @@
+id,filename,title,category,description,tags,colors,orientation,confidence,source_file,source_relative_path,source_x,source_y,source_width,source_height,export_width,export_height,exact_hash,perceptual_hash,duplicate_of
+asset-386acec772,unknown-visual-0001.png,Unknown Visual 0001,unknown,An isolated transparent visual awaiting semantic review.,unknown|transparent|review-needed,gray,none,0.0,world_map.png,world_map.png,211,0,1450,940,1466,940,d78526785db6639f0e217661f797bca2a2155569646e425610d358428300b84d,ee1991e66f4d10b1,

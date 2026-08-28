@@ -33,6 +33,7 @@ export type {
   Track,
   Clip,
   VideoClip,
+  AudioClip,
   CompositionClip,
   ProjectDiagnostic,
 } from './model.js';
@@ -50,6 +51,7 @@ export type {
   TrackV1,
   ClipV1,
   VideoClipV1,
+  AudioClipV1,
   CompositionClipV1,
   CaptionClipV1,
   CaptionWordV1,
@@ -120,6 +122,9 @@ export {
 
 export type { JoyProjectV2, AnyJoyProject } from './v2.js';
 export { LATEST_PROJECT_SCHEMA_VERSION, isJoyProjectV2, validateJoyProjectV2 } from './v2.js';
+
+export type { ProjectDocumentV2 } from './document-v2.js';
+export { validateProjectDocumentV2 } from './document-v2.js';
 
 export type { DualLensFlags, FlagSource } from './dual-lens-flag.js';
 export {

@@ -1,4 +1,4 @@
-import { registerEffect } from '../EffectRegistry.js';
+import { hasEffect, registerEffect } from '../EffectRegistry.js';
 import type { EffectDescriptor } from '../types.js';
 import { CREATIVE_PIXEL_DESCRIPTORS } from './creativePixel.js';
 
@@ -766,6 +766,9 @@ const ALL_DESCRIPTORS: readonly EffectDescriptor[] = [
 
 export function registerBuiltins(): void {
   for (const desc of ALL_DESCRIPTORS) {
-    registerEffect(desc);
+    // The editor can evaluate this module more than once during Vite HMR.
+    // Built-ins are process-wide, so registration must be idempotent while
+    // still leaving explicit registrations strict elsewhere in the registry.
+    if (!hasEffect(desc.id)) registerEffect(desc);
   }
 }

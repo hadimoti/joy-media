@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -11,6 +11,7 @@ import {
   reportSummary,
   type DeliveryPromiseV1,
 } from './index.js';
+import { captionAssDocument } from '@joy-media/captions-core';
 
 describe('bounded render inspection', () => {
   it('passes a moving H.264/AAC render that satisfies the delivery promise', () => {
@@ -39,7 +40,7 @@ describe('bounded render inspection', () => {
     ]);
 
     const report = inspectRenderedDelivery(output, promise(), {
-      mode: 'strict',
+      mode: 'sampled',
       outputRef: 'render-good-aaaaaaaaaaaaaaaa',
     });
 
@@ -74,7 +75,7 @@ describe('bounded render inspection', () => {
         ...promise(),
         captions: { mode: 'sidecar', required: true },
       },
-      { mode: 'strict', outputRef: 'render-bad-bbbbbbbbbbbbbbbb' },
+      { mode: 'sampled', outputRef: 'render-bad-bbbbbbbbbbbbbbbb' },
     );
 
     expect(failCodes(report)).toEqual(
@@ -178,6 +179,144 @@ describe('bounded render inspection', () => {
       expect.arrayContaining(['black-frames', 'blank-frames', 'duplicate-frames']),
     );
   });
+
+  it('reports sampled caption-pixel evidence only when a burn-in promise carries cue evidence', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-quality-caption-'));
+    const output = join(directory, 'caption-missing.mp4');
+    ffmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'color=c=0x404040:s=64x36:r=30:d=1',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=440:sample_rate=48000:duration=1',
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      '-ac',
+      '2',
+      '-shortest',
+      output,
+    ]);
+    const base = promise();
+    const report = inspectRenderedDelivery(
+      output,
+      {
+        ...base,
+        captions: {
+          mode: 'burned-in',
+          required: true,
+          burnIn: {
+            styleRef: 'joy-clean',
+            segments: [{ startUs: 0, endUs: 1_000_000, text: 'JOY', direction: 'ltr' }],
+          },
+        },
+      },
+      { mode: 'sampled', outputRef: 'render-caption-missing-ffffffff' },
+    );
+    expect(failCodes(report)).toContain('caption-pixels');
+    const generic = inspectRenderedDelivery(
+      output,
+      {
+        ...base,
+        captions: { mode: 'burned-in', required: true },
+      },
+      { mode: 'sampled', outputRef: 'render-caption-generic-gggggggg' },
+    );
+    expect(
+      generic.findings.find((finding) => finding.code === 'caption-pixels-unproven')?.status,
+    ).toBe('warn');
+
+    const assPath = join(directory, 'caption-fixture.ass');
+    writeFileSync(assPath, captionAssFixture());
+    const retained = join(directory, 'caption-retained.mp4');
+    ffmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'color=c=0x404040:s=64x36:r=30:d=1',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=440:sample_rate=48000:duration=1',
+      '-vf',
+      `subtitles=${escapeFilterPath(assPath)}:fontsdir=${escapeFilterPath(fontsDirectory())}`,
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      '-ac',
+      '2',
+      '-shortest',
+      retained,
+    ]);
+    const positive = inspectRenderedDelivery(
+      retained,
+      {
+        ...base,
+        captions: {
+          mode: 'burned-in',
+          required: true,
+          burnIn: {
+            styleRef: 'joy-clean',
+            segments: [{ startUs: 0, endUs: 1_000_000, text: 'JOY', direction: 'ltr' }],
+          },
+        },
+      },
+      { mode: 'sampled', outputRef: 'render-caption-retained-hhhhhhhh' },
+    );
+    expect(failCodes(positive)).not.toContain('caption-pixels');
+
+    const unrelated = join(directory, 'caption-drawbox.mp4');
+    ffmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'color=c=0x404040:s=64x36:r=30:d=1',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=440:sample_rate=48000:duration=1',
+      '-vf',
+      'drawbox=x=18:y=26:w=28:h=8:color=white:t=fill',
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      '-ac',
+      '2',
+      '-shortest',
+      unrelated,
+    ]);
+    const falsePositive = inspectRenderedDelivery(
+      unrelated,
+      {
+        ...base,
+        captions: {
+          mode: 'burned-in',
+          required: true,
+          burnIn: {
+            styleRef: 'joy-clean',
+            segments: [{ startUs: 0, endUs: 1_000_000, text: 'JOY', direction: 'ltr' }],
+          },
+        },
+      },
+      { mode: 'sampled', outputRef: 'render-caption-drawbox-iiiiiiii' },
+    );
+    expect(failCodes(falsePositive)).toContain('caption-pixels');
+  });
 });
 
 function promise(): DeliveryPromiseV1 {
@@ -233,4 +372,19 @@ function fileHash(path: string): string {
   const probe = spawnSync('ffprobe', ['-v', 'error', path], { shell: false });
   expect(probe.status).toBe(0);
   return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+function fontsDirectory(): string {
+  return join(process.cwd(), 'apps', 'editor-web', 'public', 'assets', 'fonts', 'falsafeh');
+}
+
+function escapeFilterPath(path: string): string {
+  return `'${path.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'")}'`;
+}
+
+function captionAssFixture(): string {
+  return captionAssDocument(
+    { styleRef: 'joy-clean', segments: [{ startUs: 0, endUs: 1_000_000, text: 'JOY' }] },
+    { width: 64, height: 36 },
+  );
 }

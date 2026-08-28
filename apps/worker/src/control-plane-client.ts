@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import type {
   MediaSemanticIndexEvidence,
   ReferenceAnalysisEvidence,
@@ -235,6 +235,41 @@ export class WorkerControlPlaneClient {
       throw new Error('Worker session expired or was revoked');
     }
     if (!response.ok) throw new Error(`Worker render artifact upload failed (${response.status})`);
+  }
+
+  /** Resolves an existing export through the authenticated private-store broker. */
+  async downloadRenderArtifact(jobId: string, outputRef: string): Promise<Uint8Array> {
+    const sessionToken = this.options.sessionStore.loadWorkerSession();
+    if (sessionToken === undefined) throw new Error('Worker is not paired');
+    const response = await this.#fetch(
+      `${this.options.apiUrl.replace(/\/$/, '')}/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/artifact?outputRef=${encodeURIComponent(outputRef)}`,
+      {
+        method: 'GET',
+        headers: {
+          authorization: `Bearer ${sessionToken}`,
+          accept: 'video/mp4',
+          'user-agent': process.env.JOY_MEDIA_WORKER_USER_AGENT?.trim() || 'JOY-Media-Worker/0.1',
+        },
+      },
+    );
+    if (response.status === 401) {
+      this.options.sessionStore.clearWorkerSession();
+      throw new Error('Worker session expired or was revoked');
+    }
+    if (!response.ok)
+      throw new Error(`Worker render artifact download failed (${response.status})`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const expectedBytes = Number(response.headers.get('x-joy-bytes'));
+    const expectedHash = response.headers.get('x-joy-sha256');
+    if (
+      !Number.isSafeInteger(expectedBytes) ||
+      expectedBytes !== bytes.byteLength ||
+      expectedHash === null
+    )
+      throw new Error('Worker render artifact response metadata is invalid');
+    if (createHash('sha256').update(bytes).digest('hex') !== expectedHash)
+      throw new Error('Worker render artifact response integrity check failed');
+    return bytes;
   }
 
   async fail(jobId: string, error: string): Promise<void> {

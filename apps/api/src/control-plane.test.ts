@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { LocalControlPlane } from './control-plane.js';
+import { deliveryPromiseFromManifest } from '@joy-media/production-quality';
 describe('local control plane', () => {
   it('enforces revisions, revocation, leases, and cursored events', () => {
     const api = new LocalControlPlane();
@@ -41,6 +42,101 @@ describe('local control plane', () => {
     expect(() => api.lease('w')).toThrow(expect.objectContaining({ code: 'WORKER_UNAUTHORIZED' }));
   });
 
+  it('protects artifact reads by lease expiry and requires typed evidence for new inspect jobs', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'owner' };
+    api.createProject(owner, 'inspect-project', 'Project');
+    api.pairWorker(owner, 'worker-a');
+    api.pairWorker(owner, 'worker-b');
+    api.helloWorker('worker-a', ['render.export', 'render.inspect'], [], 100);
+    api.helloWorker('worker-b', ['render.inspect'], [], 100);
+    api.enqueue(owner, 'export-artifact', 'inspect-project', 'render.export', 100);
+    api.lease('worker-a', 101, 10_000);
+    api.registerWorkerRenderArtifact(
+      'worker-a',
+      'export-artifact',
+      {
+        id: 'artifact-export-artifact',
+        outputRef: 'output-export-artifact',
+        sha256: 'a'.repeat(64),
+        bytes: 1024,
+        descriptor: { mimeType: 'video/mp4' },
+        location: { kind: 'private-object', ref: 'render-export-artifact' },
+      },
+      101,
+    );
+    api.complete('worker-a', 'export-artifact', 102, {
+      kind: 'render.export',
+      reportRef: 'report-export-artifact',
+      outputRef: 'output-export-artifact',
+      sha256: 'a'.repeat(64),
+      bytes: 1024,
+    });
+    const promise = deliveryPromiseFromManifest({
+      projectId: 'inspect-project',
+      revision: 0,
+      width: 640,
+      height: 360,
+      frameRate: 30,
+      durationUs: 1_000_000,
+      preset: 'social-h264-aac',
+    });
+    api.enqueue(owner, 'inspect-artifact', 'inspect-project', 'render.inspect', 103, undefined, {
+      protocolVersion: 1,
+      jobId: 'inspect-artifact',
+      type: 'render.inspect',
+      payload: {
+        projectRef: 'project-inspect',
+        compositionId: 'composition-root',
+        presetId: 'preset-social',
+        reportRef: 'report-inspect-artifact',
+        artifactId: 'artifact-export-artifact',
+        outputRef: 'output-export-artifact',
+        promise,
+      },
+      requirements: { capabilities: ['render.inspect'], privacy: 'local-only' },
+      idempotencyKey: 'inspect-artifact',
+      maxAttempts: 3,
+    });
+    api.lease('worker-a', 200, 1);
+    expect(() =>
+      api.renderArtifactForWorker('worker-a', 'inspect-artifact', 'output-export-artifact', 202),
+    ).toThrow(expect.objectContaining({ code: 'LEASE_NOT_OWNED' }));
+    expect(api.lease('worker-b', 300, 100)).toMatchObject({ id: 'inspect-artifact' });
+    expect(
+      api.renderArtifactForWorker('worker-b', 'inspect-artifact', 'output-export-artifact', 301),
+    ).toMatchObject({
+      id: 'artifact-export-artifact',
+    });
+    expect(() =>
+      api.complete('worker-b', 'inspect-artifact', 302, {
+        kind: 'render.inspect',
+        reportRef: 'report-inspect-artifact',
+        findings: 0,
+      }),
+    ).toThrow(expect.objectContaining({ code: 'RESULT_INVALID' }));
+    expect(
+      api.complete('worker-b', 'inspect-artifact', 303, {
+        kind: 'render.inspect',
+        reportRef: 'report-inspect-artifact',
+        outputRef: 'output-export-artifact',
+        report: {
+          version: 1,
+          promiseId: promise.id,
+          checkedAt: '2026-08-26T00:00:00.000Z',
+          evidenceLevel: 'sampled',
+          artifact: {
+            outputRef: 'output-export-artifact',
+            sha256: 'a'.repeat(64),
+            bytes: 1024,
+          },
+          facts: {},
+          findings: [],
+        },
+      }),
+    ).toMatchObject({ state: 'completed' });
+  });
+
   it('rejects unknown job types, capability-mismatched leases, and duplicate enqueue overwrites', () => {
     const api = new LocalControlPlane();
     const owner = { id: 'owner' };
@@ -77,6 +173,7 @@ describe('local control plane', () => {
         compositionId: 'composition-main',
         presetId: 'inspect',
         reportRef: 'report-render-inspect-1',
+        legacyVersion: 0,
       },
       requirements: { capabilities: ['render.inspect'], privacy: 'local-only' },
       idempotencyKey: 'idem-render-inspect-1',
@@ -119,6 +216,7 @@ describe('local control plane', () => {
           compositionId: 'composition-main',
           presetId: 'inspect',
           reportRef: 'report-bad',
+          legacyVersion: 0,
         },
         requirements: { capabilities: ['render.inspect'], privacy: 'local-only' },
         idempotencyKey: 'idem-bad-render',
@@ -132,6 +230,10 @@ describe('local control plane', () => {
     const owner = { id: 'owner' };
     api.createProject(owner, 'project-1', 'Project');
     expect(api.setAssetSync(owner, 'project-1', true)).toMatchObject({ assetSyncEnabled: true });
+    expect(api.getProject(owner, 'project-1')).toMatchObject({
+      id: 'project-1',
+      assetSyncEnabled: true,
+    });
     const asset = api.registerAsset(owner, 'project-1', assetRegistration(), 100);
     expect(asset).toMatchObject({
       id: 'asset-1',
@@ -188,7 +290,7 @@ describe('local control plane', () => {
     );
   });
 
-  it('lists private-object assets in the shared cloud library for any authenticated Joy user', () => {
+  it('owner-binds private backups while retaining the explicit curated library', () => {
     const api = new LocalControlPlane();
     const owner = { id: 'owner-a' };
     const peer = { id: 'owner-b' };
@@ -208,14 +310,39 @@ describe('local control plane', () => {
       200,
     );
     expect(api.sharedCloudAssets(peer)).toHaveLength(0);
+    expect(() =>
+      api.attachCloudOriginal(owner, 'project-a', image.id, {
+        kind: 'private-object',
+        ref: 'orig-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      }),
+    ).toThrow(expect.objectContaining({ code: 'ASSET_SYNC_DISABLED' }));
+    api.setAssetSync(owner, 'project-a', true);
     api.attachCloudOriginal(owner, 'project-a', image.id, {
       kind: 'private-object',
       ref: 'orig-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     });
-    expect(api.sharedCloudAssets(peer)).toMatchObject([
+    expect(api.sharedCloudAssets(owner)).toMatchObject([
       { id: 'img-1', kind: 'image', displayName: 'shot.png' },
     ]);
-    expect(api.sharedCloudAsset(peer, 'img-1').id).toBe('img-1');
+    expect(api.sharedCloudAsset(owner, 'img-1').id).toBe('img-1');
+    expect(api.sharedCloudAssets(peer)).toHaveLength(0);
+    expect(() => api.sharedCloudAsset(peer, 'img-1')).toThrow(
+      expect.objectContaining({ code: 'ASSET_NOT_FOUND' }),
+    );
+
+    const libraryOwner = { id: 'joy-media-library' };
+    api.createProject(libraryOwner, 'joy-media-alpha-library', 'Curated');
+    api.registerAsset(libraryOwner, 'joy-media-alpha-library', {
+      id: 'curated-img',
+      kind: 'image',
+      displayName: 'Curated.png',
+      sha256: SHA256,
+      bytes: 1200,
+      descriptor: { mimeType: 'image/png' },
+      locations: [{ kind: 'private-object', ref: 'joylib-' + SHA256 }],
+    });
+    expect(api.sharedCloudAssets(peer)).toMatchObject([{ id: 'curated-img' }]);
+    expect(api.sharedCloudAsset(peer, 'curated-img').id).toBe('curated-img');
   });
 
   it('lists every owned asset across projects for the same Joy identity', () => {

@@ -28,10 +28,76 @@ interface JourneyOptions {
 export interface AuthenticatedEditorJourneyEvidence {
   readonly journeyId: 'authenticated-editor-1.0';
   readonly status: 'verified';
+  /** This runner deliberately intercepts API calls and is never release evidence. */
+  readonly execution: 'mocked';
   readonly verifiedAt: string;
   readonly assertions: Readonly<Record<string, unknown>>;
   readonly screenshots: readonly string[];
 }
+
+/** Viewports covered by the authenticated shell contract. Keep this matrix
+ * small and representative so evidence remains useful in CI. */
+export const AUTHENTICATED_SHELL_VIEWPORTS = [
+  { width: 1024, height: 768 },
+  { width: 1280, height: 720 },
+  { width: 1440, height: 900 },
+] as const;
+
+export interface ViewportShellEvidence {
+  readonly viewport: { readonly width: number; readonly height: number };
+  readonly document: {
+    readonly innerWidth: number;
+    readonly scrollWidth: number;
+    readonly scrollHeight: number;
+  };
+  readonly coreControls: readonly CoreControlEvidence[];
+  readonly clippedControls: readonly CoreControlEvidence[];
+  readonly keyboardShortcuts: 'opened-focused-and-escaped';
+}
+
+export interface CoreControlEvidence {
+  readonly name: string;
+  readonly index: number;
+  readonly rect: {
+    readonly left: number;
+    readonly top: number;
+    readonly right: number;
+    readonly bottom: number;
+  };
+}
+
+export interface ViewportDocumentMetrics {
+  readonly innerWidth: number;
+  readonly innerHeight: number;
+  readonly scrollWidth: number;
+  readonly scrollHeight: number;
+}
+
+/** Document overflow excludes intentional scrolling inside panels/canvases. */
+export function hasPageOverflow(metrics: ViewportDocumentMetrics): boolean {
+  return metrics.scrollWidth > metrics.innerWidth || metrics.scrollHeight > metrics.innerHeight;
+}
+
+export function clippedCoreControls(
+  controls: readonly CoreControlEvidence[],
+  viewport: { readonly width: number; readonly height: number },
+): readonly CoreControlEvidence[] {
+  return controls.filter(
+    ({ rect }) =>
+      rect.left < -1 ||
+      rect.top < -1 ||
+      rect.right > viewport.width + 1 ||
+      rect.bottom > viewport.height + 1,
+  );
+}
+
+export const AUTHENTICATED_CORE_CONTROL_SPECS = [
+  { name: 'Import media', selector: 'button[aria-label="Import media"]' },
+  { name: 'Export action', selector: 'button.header-export-btn' },
+  { name: 'Delivery action', selector: 'button.header-deliver-btn' },
+  { name: 'Timeline seek', selector: 'button[aria-label="Seek forward 1s"]' },
+  { name: 'Timeline clip', selector: '.timeline-clip' },
+] as const;
 
 interface BrowserAsset {
   readonly id: string;
@@ -468,13 +534,95 @@ export async function runAuthenticatedEditorJourney({
   assertions.undoRedoAfterReopen = 'reopened persisted timeline after the verified undo/redo cycle';
   await captureJourneyScreenshot(page, evidenceDirectory, screenshots, '06-reopen-undo-redo');
 
+  assertions.shellViewports = await verifyAuthenticatedShellViewports(
+    page,
+    evidenceDirectory,
+    screenshots,
+  );
+
   return {
     journeyId: 'authenticated-editor-1.0',
     status: 'verified',
+    execution: 'mocked',
     verifiedAt: new Date().toISOString(),
     assertions,
     screenshots,
   };
+}
+
+/** Run deterministic shell layout checks at each supported desktop viewport. */
+export async function verifyAuthenticatedShellViewports(
+  page: Page,
+  evidenceDirectory: string,
+  screenshots: string[],
+): Promise<readonly ViewportShellEvidence[]> {
+  const evidence: ViewportShellEvidence[] = [];
+  for (const viewport of AUTHENTICATED_SHELL_VIEWPORTS) {
+    await page.setViewportSize(viewport);
+    const shell = await page.evaluate((specs) => {
+      const coreControls: CoreControlEvidence[] = [];
+      for (const { name, selector } of specs) {
+        const elements = Array.from(document.querySelectorAll<HTMLElement>(selector));
+        if (elements.length === 0) throw new Error(`missing core shell control: ${name}`);
+        elements.forEach((element, index) => {
+          const rect = element.getBoundingClientRect();
+          coreControls.push({
+            name,
+            index,
+            rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+          });
+        });
+      }
+      const clippedControls = coreControls.filter(
+        ({ rect }) =>
+          rect.left < -1 ||
+          rect.top < -1 ||
+          rect.right > innerWidth + 1 ||
+          rect.bottom > innerHeight + 1,
+      );
+      return {
+        document: {
+          innerWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+          scrollHeight: document.documentElement.scrollHeight,
+        },
+        coreControls,
+        clippedControls,
+      };
+    }, AUTHENTICATED_CORE_CONTROL_SPECS);
+    expect(
+      hasPageOverflow({
+        ...shell.document,
+        innerHeight: viewport.height,
+      }),
+    ).toBe(false);
+    expect(clippedCoreControls(shell.coreControls, viewport)).toEqual([]);
+
+    const shortcutButton = page.getByRole('button', { name: 'Keyboard shortcuts' });
+    await expect(shortcutButton).toBeVisible();
+    await shortcutButton.click();
+    const dialog = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Close shortcuts' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+
+    const item: ViewportShellEvidence = {
+      viewport,
+      document: shell.document,
+      coreControls: shell.coreControls,
+      clippedControls: shell.clippedControls,
+      keyboardShortcuts: 'opened-focused-and-escaped',
+    };
+    evidence.push(item);
+    await captureJourneyScreenshot(
+      page,
+      evidenceDirectory,
+      screenshots,
+      `07-shell-${viewport.width}x${viewport.height}`,
+    );
+  }
+  return evidence;
 }
 
 async function captureJourneyScreenshot(

@@ -25,6 +25,8 @@
   "dependencies": {
     "@joy-media/adapter-mistral": "workspace:*",
     "@joy-media/job-protocol": "workspace:*",
+    "@joy-media/project-schema": "workspace:*",
+    "@joy-media/production-quality": "workspace:*",
     "@joy-media/provider-sdk": "workspace:*",
     "nodemailer": "^6.9.16",
     "pg": "^8.22.0"
