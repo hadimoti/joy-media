@@ -77,13 +77,13 @@ Codex in-app-browser findings below remain valid independent evidence.
 
 ### Repository and branch state
 
-| Surface | Observed tip/state | Consequence |
-| --- | --- | --- |
-| Local checkpoint branch | `aec01ef` on `codex/joy-studio-1.0-release-20260825` | Existing work is preserved, but is not a release candidate. |
-| Deployed/VPS release branch | `b3c1866` | The checkpoint is one commit ahead of the deployed release branch. |
-| GitHub `main` | `2083ffc` | 407 main-only commits versus 127 checkpoint-only commits. |
-| VPS `main` | `1e4657f` | 225 VPS-main-only commits versus 127 checkpoint-only commits. |
-| Common merge base | `73744bb` | A blind merge is unsafe; simulated reconciliation has extensive overlap/conflict. |
+| Surface                     | Observed tip/state                                   | Consequence                                                                       |
+| --------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Local checkpoint branch     | `aec01ef` on `codex/joy-studio-1.0-release-20260825` | Existing work is preserved, but is not a release candidate.                       |
+| Deployed/VPS release branch | `b3c1866`                                            | The checkpoint is one commit ahead of the deployed release branch.                |
+| GitHub `main`               | `2083ffc`                                            | 407 main-only commits versus 127 checkpoint-only commits.                         |
+| VPS `main`                  | `1e4657f`                                            | 225 VPS-main-only commits versus 127 checkpoint-only commits.                     |
+| Common merge base           | `73744bb`                                            | A blind merge is unsafe; simulated reconciliation has extensive overlap/conflict. |
 
 `aec01ef` contains 324 changed files and a large quantity of transient evidence, debug files, and
 generated JavaScript/declaration siblings that can shadow TypeScript source. It must remain an
