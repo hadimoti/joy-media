@@ -1,674 +1,288 @@
-# JOY Media convergence and finish plan — 2026-08-28
+# JOY Media finish plan — 2026-08-28
 
-Status: execution-ready plan; current release verdict is **NO-GO**.
+Status: **execution-ready; current production verdict is NO-GO**.
 
-This is the delta plan for finishing the standalone `joy-media` repository and the public JOY
-Studio application at `https://joyst.ir/` and `https://www.joyst.ir/`. It does not authorize or
-modify `joy-vps`. The older `plan/P18-joy-media-finalization.md` remains the historical capability
-roadmap; this document supersedes its integration, residual-gap, release, and deployment sequence.
+This plan finishes the standalone `joy-media` repository and JOY Studio at
+`https://joyst.ir/` and `https://www.joyst.ir/`. It does not authorize work in the `joy-vps`
+repository or changes to unrelated VPS services. The detailed branch choices are in
+`plan/JOY-MEDIA-RECONCILIATION-MATRIX-2026-08-28.md`.
 
-The domain-by-domain branch decisions are tracked in
-`plan/JOY-MEDIA-RECONCILIATION-MATRIX-2026-08-28.md`; that matrix is a working reconciliation
-artifact and does not waive any release gate.
+## Completion contract
 
-## Objective and release definition
+The next execution goal is complete only when all of the following are true on the same immutable
+source revision:
 
-Finish the currently implemented product, close every confirmed production/UI/backend gap, make
-all visible actions truthful and testable, converge the canonical branches, merge the verified
-candidate to `main`, push the same commit to GitHub and the JOY Media VPS bare remote, deploy one
-immutable release, verify it at the VPS origin and public domains, and retain a rehearsed rollback.
+1. every production-visible action has working success, empty, loading, permission, failure, and
+   retry behavior, or the action is hidden with truthful product status;
+2. no reproducible P0/P1 issue remains in the production scope;
+3. typecheck, lint, formatting, all tests, goldens, editor/API/Worker builds, static-asset checks,
+   security scans, SBOM, and release provenance pass from two clean checkouts;
+4. additive PostgreSQL migration and rollback rehearsals pass against a copy of the live schema;
+5. a real authenticated project can save/reopen, import and play real media, edit, caption, apply an
+   effect and transition, publish/place Motion, run Joy Code approval, render through a real Worker,
+   pass retained inspection, and download/reopen the artifact;
+6. the exact candidate is merged to `main`, pushed to the JOY Media remotes, deployed as an
+   immutable JOY Media release, and verified at the origin plus both public hostnames;
+7. the post-deploy canary and 30-minute observation window meet the numeric release budgets below,
+   with zero unexpected page/console errors, wrong MIME/static fallbacks, readiness failures, or
+   data-loss symptoms;
+8. `deploy/joy-media-rollback.sh` is rehearsed against the previous immutable release and retained.
+   Any named post-deploy gate failure runs it immediately without user input, then rechecks origin
+   and both public hostnames.
 
-“Without bugs” has the following measurable release meaning:
+“No bugs” means the measurable contract above. It must never be inferred only from unit tests or a
+mocked browser run.
 
-- zero reproducible P0 or P1 defects;
-- zero failed required tests, builds, migrations, browser journeys, inspections, or security gates;
-- zero unexpected page errors, console errors/warnings, failed static requests, wrong MIME types,
-  private-reference leaks, or dirty generated output;
-- every visible production action works through its real backend or is removed/disabled with an
-  honest reason;
-- experimental/demo/hidden capabilities are not marketed or mounted as production;
-- a verified render is produced by a real Worker, passes retained inspection, survives reload, and
-  is recoverable after a controlled failure;
-- the exact released SHA and artifacts are reproducible twice from clean clones.
+## Non-negotiable operating rules
 
-Absolute absence of all future defects cannot be proven; no agent may weaken the measurable gates
-above or translate “tests pass” into a stronger claim.
+- Use the local Gbrain page `joy-vps-agent-brief` and the redacted
+  `C:\Users\HadiMoti\Desktop\VPS-AGENT-BRIEF.md` before infrastructure work. Never copy secrets,
+  cookies, OTPs, tokens, private object references, or customer data into Git or reports.
+- For any completed VPS change, write the confirmed non-secret operational result back to Gbrain.
+  Treat an origin request made with `curl --noproxy '*' --resolve ...` as the authoritative routing
+  check; obtain its private values from the brief at execution time and never copy them into Git.
+- The next `/goal` run is pre-authorized to make normal in-scope implementation decisions and must
+  **not wait for user confirmation or approvals**. It may merge/push/deploy only after the gates in
+  this plan pass. It must not force-push, weaken a gate, destroy user data, or touch unrelated VPS
+  services.
+- Database work is additive/expand-contract until old-binary rollback is proven. Back up PostgreSQL
+  and object-store metadata before production migration.
+- Build once from a clean, capable runner; promote the same verified archive. Do not rebuild a
+  different artifact on the memory-constrained VPS.
+- Never conceal a failing capability behind optimistic UI copy. Hidden/experimental source is not a
+  release blocker; a visible non-working promise is.
 
-## Hard boundaries
+## Agent topology for the next goal
 
-- Canonical product source is this standalone repository. VPS checkout: `/opt/joy-media/repo`;
-  bare remote: `/opt/joy-media.git`; runtime secrets: `/etc/joy-media/api.env`.
-- Never copy credentials, OTPs, cookies, tokens, private object references, environment values,
-  customer data, or secret-bearing traces into Git, CI artifacts, chat, screenshots, or Gbrain.
-- Do not merge or cherry-pick the large checkpoint wholesale. Reconcile by domain and behavior.
-- Run destructive/mutation browser journeys against disposable local/staging fixtures. Production
-  receives read-only smoke plus one narrowly scoped canary only after the release candidate passes.
-- Database changes must be additive/expand-contract until old-binary rollback is proven.
-- Build once on a capable runner and promote the same verified archive. Do not reconstruct a
-  different release manually on the memory-constrained VPS.
-- If any release or post-deploy gate fails, stop and roll back; never “document around” a blocker.
+The Codex orchestrator owns integration, decisions, and **all browser work**. Sub-agents are
+code/test/review workers only.
 
-## Agent execution policy
+| Role                         | Route                                       | Work                                                                                                     | Browser policy                                                                                                                  |
+| ---------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Orchestrator                 | Codex primary                               | Coordinate, integrate, run all authenticated/local/staging/live browser journeys, promote and deploy     | Sole browser operator; use Codex in-app browser by default. If OpenCLI is needed, profile `cefd9k77` remains orchestrator-only. |
+| Backend implementer          | Kilo CLI free route (`kilo/kilo-auto/free`) | API, schema, sync, polling, Worker and delivery fixes                                                    | No browser or browser profile access                                                                                            |
+| Adversarial reviewer         | Hermes CLI free route (`openrouter/free`)   | Security, failure modes, regression and release challenge                                                | No browser or browser profile access                                                                                            |
+| UI implementer               | Codex in-app sub-agent, Luna                | UI state machines, performance, accessibility, and non-browser source/unit/integration interaction tests | No browser                                                                                                                      |
+| Integration/release reviewer | Codex in-app sub-agent, GPT-5.4             | Main reconciliation, tests, provenance, deployment review                                                | No browser                                                                                                                      |
 
-The execution round uses Codex sub-agents and a consensus review after each milestone:
+After each tranche, at least one different agent reviews the diff and test evidence. The
+orchestrator resolves disagreements and records accepted/rejected findings. Sub-agents may exchange
+source reports through the orchestrator, but no sub-agent may run Playwright/OpenCLI/Chrome/Codex
+browser tests. This restriction is for execution speed and reliability, not access.
 
-1. Backend/domain specialist: API, migrations, auth, privacy, control plane, Worker protocol.
-2. Frontend/UX specialist: library/editor journeys, accessibility, errors, feature truth.
-3. Release/QA/operations specialist: clean CI, provenance, security, deployment, rollback.
-4. Codex browser QA agent A: read-only live/staging smoke and accessibility/error inspection.
-5. Codex browser QA agent B: independent journey review and release-evidence challenge.
-
-The user subsequently narrowed execution to Codex sub-agents and the Codex in-app browser. The
-earlier Kilo/Hermes/OpenCLI experiments are historical diagnostics only and are not required for
-this implementation pass. Codex browser agents must use the existing user-controlled authenticated
-browser session when available, must not inspect or copy credentials/session bodies, and must keep
-mutation journeys to disposable local/staging fixtures. Each specialist reads the other reports,
-challenges unsupported findings, and records the accepted/rejected resolution before promotion.
+Use the named routes when they are available. If a named route/model is unavailable, the
+orchestrator must continue with the nearest same-scope non-browser substitute, record the
+substitution, and cross-review its output; route availability is never a reason to wait for the
+user.
 
 ## Evidence baseline
 
-### Repository and branch state
+### Source and release state
 
-| Surface                     | Observed tip/state                                | Consequence                                                                       |
-| --------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Local checkpoint branch     | `d781bf5` on `codex/joy-media-implement-20260828` | Clean tested candidate, published for review; not yet promoted to `main`.         |
-| Deployed/VPS release branch | `b3c1866`                                         | Older certified release; candidate has additional hardening and is not deployed.  |
-| GitHub `main`               | `2083ffc`                                         | 407 main-only commits versus 192 candidate-only commits.                          |
-| VPS `main`                  | `1e4657f`                                         | 225 VPS-main-only commits versus 192 candidate-only commits.                      |
-| Common merge base           | `73744bb`                                         | A blind merge is unsafe; simulated reconciliation has extensive overlap/conflict. |
+| Evidence                | Current fact                                                                                                 | Release consequence                                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| Candidate line          | `codex/joy-media-implement-20260828`; baseline `abcb7d1`, with confirmed local fixes `71a98de` and `b5b7404` | Tested work exists but is not canonical or live.                                                                |
+| GitHub main             | `2083ffc`; candidate divergence at capture: 407 main-only / 223 candidate-only commits                       | Blind merge or candidate overwrite is forbidden.                                                                |
+| Main-native integration | `b6aa47e`, nine focused commits ahead of `github/main`                                                       | Use this as the reviewed starting line, then port remaining behavior with tests.                                |
+| VPS main                | `1e4657f`                                                                                                    | VPS drift is evidence, not canonical product source.                                                            |
+| Latest release gate     | `2026-08-28T17:53:26.723Z`, `passed:false`                                                                   | Commands/builds/2,442 tests/static/SBOM pass; provenance and real authenticated verified-delivery journey fail. |
+| Existing journey        | `execution: mocked`, quick browser export, no inspection                                                     | Diagnostic only; cannot authorize release.                                                                      |
 
-`aec01ef` contains 324 changed files and a large quantity of transient evidence, debug files, and
-generated JavaScript/declaration siblings that can shadow TypeScript source. It must remain an
-immutable recovery reference until all unique behavior is classified, then the transient artifacts
-must be removed on the reconciliation branch.
+### Authenticated live-browser findings
 
-### Live and release evidence
+The orchestrator inspected the user-owned authenticated JOY Studio tab without reading session
+storage or credential-bearing response bodies.
 
-- Public `/api/health` returns HTTP 200 with `controlPlane:true`, but the authenticated UI reports
-  cloud sync unavailable and Verified delivery unavailable. Current health is therefore not a
-  readiness signal.
-- A fresh public GET of `/api/ready` still returns HTTP 200 with only the legacy
-  `ok/service/readiness/controlPlane` fields; it does not expose dependency checks or release
-  identity. The candidate's new `/ready` contract is therefore not live until an approved deploy.
-- The currently deployed release references `/transitions/preview/transition1.png` and
-  `transition2.png`, which return the SPA body instead of image bytes; the browser records a
-  transition preview load error. The checkpoint now ships deterministic source-controlled SVG
-  frames at `/assets/transition-preview-frame-a.svg` and
-  `/assets/transition-preview-frame-b.svg` so clean builds do not depend on optional generated
-  PNGs.
-- The committed release report has `result.passed=false`. The critical journey records quick browser
-  export, real-service execution unknown, and inspection not requested.
-- The report/journey/build manifest predates `aec01ef`. It is not SHA-bound evidence for the
-  checkpoint.
-- The editor build-budget test reads ignored `dist/.vite/manifest.json`, while current CI/gate order
-  can run tests before building. Passing locally with stale `dist` is not clean-clone proof.
-- A production dependency audit reported two high-severity advisories among eight total; the locked
-  Nodemailer release is one required upgrade target.
+| ID      | Observed production issue                                                                                            | Evidence and current interpretation                                                                                                                                                                                                                                                                              |
+| ------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| LIVE-01 | Effects opens with `Pixel / B&W (0)` and an empty result although built-ins exist. All category counts remain `(0)`. | Proven React readiness/memo invalidation bug. `71a98de` recomputes descriptors/counts after built-in registration and adds a failing-before/fixed-after test. Not live.                                                                                                                                          |
+| LIVE-02 | User reports Effects category clicks can make the site go down.                                                      | One controlled pass through all nine categories did not navigate or throw; it loaded many PNG/WebM previews and produced one aborted media request. Keep open until candidate soak/performance evidence passes. Direct path is preview media/GPU/static delivery, not a database call.                           |
+| LIVE-03 | Transition cards are blank and console repeatedly reports failed legacy `transition1.png`/`transition2.png` loads.   | Live release is stale and falls back incorrectly. Main-native line already carries source-controlled SVG previews and accessible failure/retry handling. Must be deployed and reverified.                                                                                                                        |
+| LIVE-04 | Banner says local recovery backup is available and cloud sync is unavailable.                                        | Consistent with the live legacy `project_documents` schema collision. Candidate `124f359` isolates V2 heads in additive `project_document_heads_v2`; migration/readiness/live proof remains open.                                                                                                                |
+| LIVE-05 | Quick export and Verified delivery are unavailable.                                                                  | Real capable Worker plus retained inspection path is not proven in the deployed environment. P0 blocker.                                                                                                                                                                                                         |
+| LIVE-06 | The app requested `/api/v1/workers` every two seconds; 58 successful responses appeared in one diagnostic window.    | `App.tsx` polls unconditionally and the PostgreSQL route queries `workers` each time. Add visibility/failure backoff or event-driven presence and prove bounded load.                                                                                                                                            |
+| LIVE-07 | Three untitled, zero-effect recipes are visible.                                                                     | Empty recipe creation is allowed and creates clutter. Define draft semantics, prevent accidental duplicate empty recipes, and test delete/rename/reopen.                                                                                                                                                         |
+| LIVE-08 | Timeline track identity loses a row after a non-tail remove/add sequence.                                            | Orchestrator reproduced `2 → 4 → 3 → expected 4, observed 3`: after adding V3/V4, removing non-last `track-0`, then adding, length-based generation reused existing ID `V4`; React keyed state hid/replaced a row. The sequence was fully undone to the two-track baseline. This is a P0 data-integrity blocker. |
+| LIVE-09 | Timeline lock/mute state is disconnected from destructive commands and undo.                                         | A locked empty track remained removable (`2 → 1` tracks); undo restored it still locked. Muting then Undo left `aria-pressed=true`, proving local track flags did not reconcile with the project command. All diagnostic mutations were restored.                                                                |
+| LIVE-10 | Empty-timeline and insertion affordances have silent/no-keyboard paths.                                              | Clicking the Persian child text produced no dialog/status/action; 12 virtual insertion lanes expose only a `title`, with no role or tab stop. `Play proxy` remains enabled on the empty timeline but produces no playback or explanation.                                                                        |
 
-## Dependency graph
+No agent may claim the reported Effects outage is closed merely because the single live pass did not
+reproduce it.
 
-```text
-canonical convergence
-  -> clean/reproducible CI
-     -> migrations + readiness + privacy
-        -> Worker lease/render/delivery closure
-           -> integrated UX and feature truth
-              -> real-service E2E + security/performance gates
-                 -> merge/push/tag
-                    -> backup/migrate/immutable deploy
-                       -> origin/public/canary verification or rollback
-```
+## Authoritative gap register
 
-No downstream phase may start its release acceptance before all dependencies to its left are green.
-Independent implementation slices inside a phase may run in parallel.
+### P0 — release blockers
 
-## Phase 0 — Canonical convergence and repository hygiene (P0)
+| ID    | Gap                                                                                                                                       | Required closure and acceptance                                                                                                                                                                                                                                                                                                                                                        |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0-01 | Canonical lines diverge.                                                                                                                  | Start from `b6aa47e`; classify every candidate-only/main-only behavior by the reconciliation matrix; port focused contracts; no large blind merge. Final integration branch must be clean, reviewable, and based on current `github/main`.                                                                                                                                             |
+| P0-02 | V2 project document storage is not proven against the live legacy schema, and schema changes still run from one mutable startup DDL blob. | Keep legacy table untouched, use additive `project_document_heads_v2`, introduce immutable ordered migrations plus a durable schema-version ledger/lock, remove runtime primary-key surgery, make application startup verify rather than invent migration order, add real old-schema→new-binary and new-schema→old-binary tests, and rehearse rollback on a production-schema copy.    |
+| P0-03 | Project bootstrap and cloud sync fail live.                                                                                               | Make project ensure idempotent without routine POST→409→GET traffic; bootstrap a fresh V2 head, hydrate an existing head, preserve local recovery on all failures, and prove save/reload/restart/conflict/recovered-copy behavior.                                                                                                                                                     |
+| P0-04 | Retry and polling amplifiers can load API/PostgreSQL.                                                                                     | Integrate `b5b7404` (2s→60s sync failure backoff with stable idempotency), add failure backoff/visibility pause to Worker, Jobs and delivery polling, deduplicate concurrent requests, add jitter, and load-test request/query rates.                                                                                                                                                  |
+| P0-05 | Verified delivery is unavailable.                                                                                                         | Pair a real Worker, prove durable hello/lease/heartbeat/attempt exhaustion/manual retry/cancel, export a real artifact, retain it, run deep inspection, persist terminal state, and survive API/Worker restart.                                                                                                                                                                        |
+| P0-06 | Release evidence is mocked and not source-bound.                                                                                          | Orchestrator runs `authenticated-editor-1.0` on real services, records commit/tree/lockfile/archive hashes, verified-delivery channel, passed inspection and post-Motion placement. Evidence must be <24h old and match a clean checkout.                                                                                                                                              |
+| P0-07 | Static release gate is incomplete.                                                                                                        | Gate every emitted JS/CSS/font/Worker asset, both transition SVGs, all 33 effect PNGs, all 19 effect WebMs, manifest references, non-empty bytes, hashes and MIME signatures. Unknown asset-like paths must 404, never return SPA HTML.                                                                                                                                                |
+| P0-08 | Current production source/release identity is stale or unavailable.                                                                       | `/live` proves process liveness; `/ready` proves PostgreSQL, schema version, object store where required, and validated non-secret release identity. Origin and public responses must identify the same released SHA/archive.                                                                                                                                                          |
+| P0-09 | No final main/deploy proof.                                                                                                               | Run the full gate twice, fast-forward/merge reviewed integration to `main`, push GitHub and JOY Media VPS remotes without force, deploy the exact archive, canary, observe, and automatically roll back on any failure.                                                                                                                                                                |
+| P0-10 | CI does not produce real PostgreSQL/object-store/API/Worker/authenticated-browser release evidence.                                       | Add an isolated real-service CI/release lane with PostgreSQL, private-object test storage, API, Worker/render host and orchestrator-produced authenticated evidence. Mock/`pg-mem` suites remain useful but cannot satisfy this gate.                                                                                                                                                  |
+| P0-11 | Timeline track IDs are derived from current array length and can collide, hide, or overwrite rows after removal.                          | Replace every toolbar/context/drop-created ID with one durable collision-free allocator shared by all command paths. Reject duplicate IDs in validators/loaders. Add randomized add/remove/import plus rapid-repeat tests, then prove exact track/clip identity through undo/redo, save/reopen, project switch, render, and browser reproduction of the live `2 → 4 → 3 → 4` sequence. |
 
-### 0.1 Preserve evidence and create the integration line
+### P1 — production function and UX closure
 
-1. Keep branch/commit `aec01ef` reachable as the checkpoint; do not push it to `main`.
-2. Fetch/prune both remotes and record tips plus merge base in the reconciliation report.
-3. Create `codex/joy-media-finish-20260828` from fresh `github/main`, not from the checkpoint.
-4. Audit the newer VPS-main-only history separately. Do not assume VPS drift is canonical merely
-   because it is deployed or present in the bare remote.
+| ID    | Surface                                | Remaining work and acceptance                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ----- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1-01 | Effects catalog                        | Port `71a98de`; interaction-test every category, search, favorites, add/drag, default params, recipe apply/reopen, and category counts. Initial render may never show a false empty state.                                                                                                                                                                                                                                                                  |
+| P1-02 | Effects preview stability              | Only load/play previews in or near viewport; pause on hidden tab/panel; cap concurrent decoded videos; use poster fallback and accessible retry; cycle all categories repeatedly under memory/CPU/network observation with zero crash or unbounded growth.                                                                                                                                                                                                  |
+| P1-03 | Effect recipes                         | Specify draft vs published recipe lifecycle; prevent accidental duplicate empty drafts; support rename/delete/close/reopen; preserve applied effect stack and autosave.                                                                                                                                                                                                                                                                                     |
+| P1-04 | Transitions                            | Deploy SVG preview fix; distinguish duplicate-label transitions or consolidate them; stop ignoring `project.transitions` and edit/remove callbacks; track the actual selected transition; make cards keyboard-operable; test search/favorites/drag/click/edit/remove/reopen/adjacency errors, all preview pixels, retry fallback and preview/export parity.                                                                                                 |
+| P1-05 | Project Library/recovery               | Test create/open/rename/duplicate/trash/restore, 100-project scrolling, offline/quota/corruption, local backup download, cloud reconnect, conflict/recovered copy and safe return from editor. No operation may replace recoverable local data.                                                                                                                                                                                                             |
+| P1-06 | Media import/library                   | Prove image/video/audio and mixed invalid batches, atomic or per-file cleanup semantics, OPFS/private backup states, preview/reconnect/revoke, filtering/paging, no orphaned bytes/catalog rows and no private-reference leakage. If registration fails after cache write, remove only the exact just-written original and prove retry safety.                                                                                                              |
+| P1-07 | Timeline/monitor                       | Prove every visible toolbar/menu/context/keyboard command through one transaction path: rapid add, remove, split/trim/ripple, markers and DnD. Lock must block destructive clip/track edits; lock/mute/solo must persist or be truthfully session-only and must reconcile with undo/redo. Prove save/reopen, real moving pixels/audio, actionable keyboard-operable missing/revoked-media recovery, handled fullscreen rejection and preview/export parity. |
+| P1-08 | Canvas/aspect ratio                    | Reconcile the candidate ratio selector with main, persist named ratios as one reversible visual/timeline transaction, keep Fit view-only, and test reopen/export dimensions.                                                                                                                                                                                                                                                                                |
+| P1-09 | Captions/transcription                 | Prove manual/SRT/VTT/provider transcription; an all-invalid import must preserve the current document, mixed-valid import must retain valid cues plus diagnostics, and undo/redo must work. Prove Persian/English `lang`/`dir`, text-span styles/background plates, browser/headless preview-export parity, edit/revert/delete, burn-in/sidecar, source unavailable/retry and provider consent/failure.                                                     |
+| P1-10 | Joy Code                               | Reconcile main’s newer consent/session/planner contracts with candidate stale-response/duplicate-submit guards. Registered query tools must return real deterministic context or be hidden/unsupported—never “success” plus “not implemented,” fabricated empty selection, or false missing-media claims. Test bounded egress, attachment privacy, dry-run/reject/approve/apply/undo, project switch, timeout/cancel/provider failure and history.          |
+| P1-11 | Motion/Effect Studio                   | Prove open/edit/save/publish/place/preview/reopen/undo/redo with real project persistence. Motion Code mode must be editable/apply/persisted with validation or hidden/truthfully unavailable; Add Image/Video must select a real asset rather than create source-less layers; save errors must preserve edits and offer accessible Retry. Keep unfinished advanced manipulation experimental.                                                              |
+| P1-12 | Production Board                       | Prove loading/empty/error/retry, keyboard listbox, stale-revision fail-closed behavior, approve/cancel/retry pending state and request deduplication, live error recovery, lease-expired state and durable event/QA projections.                                                                                                                                                                                                                            |
+| P1-13 | Delivery UX                            | Every blocked channel shows the exact reason and recovery action. Quick export and verified delivery must not share ambiguous state; concurrent submits deduplicate; history survives reload and reconciles terminal inspection.                                                                                                                                                                                                                            |
+| P1-14 | Authentication/privacy                 | Test every supported login method, invalid/expired/rate-limited cases, reload/logout/back, trusted-proxy client IP, CSRF/origin/session policy, request limits and redacted logs. Never expose worker/local/private object references to browser DTOs.                                                                                                                                                                                                      |
+| P1-15 | Accessibility/keyboard                 | Run axe plus real Tab/Shift+Tab/arrows/Escape/Enter/Space/focus-return journeys for login, menus, dock/panels, dialogs, category tabs, timeline, approvals and recovery alerts. Disabled controls need discoverable reasons.                                                                                                                                                                                                                                |
+| P1-16 | Desktop layouts                        | Pass 1440×900, 1280×720 and 1024×768 with no clipped core controls or document overflow. At unsupported mobile width show a safe desktop requirement and backup/project access instead of a crushed editor.                                                                                                                                                                                                                                                 |
+| P1-17 | Observability/performance              | Add bounded client error/resource/long-task metrics and server request/query latency/cardinality. Meet the numeric release budgets below for idle editor, category cycling, timeline mutation, import, playback and render. Code-split until the initial editor JS chunk is at most 500 kB minified and prevent per-route budget regression.                                                                                                                |
+| P1-18 | Rate limiting                          | Either move API abuse/rate-limit buckets to a durable shared/edge store or make and enforce a documented single-instance invariant. Prove restarts and multiple peers cannot reset or split limits; verify trusted-proxy spoof resistance live.                                                                                                                                                                                                             |
+| P1-19 | Provider approvals                     | Remove the fire-and-forget grant-persistence seam. No grant may become externally usable before durable save/audit succeeds; test storage failure, duplicate issue, expiry, revoke and redacted audit.                                                                                                                                                                                                                                                      |
+| P1-20 | Worker manual retry                    | Exhausted attempts already terminalize, but explicit retry must create a fresh durable attempt/generation with an intact audit trail and must reject stale completion from older leases.                                                                                                                                                                                                                                                                    |
+| P1-21 | Readiness depth                        | Private-object readiness must prove safe reachability (bounded stat/list/sentinel read) instead of only checking that a store object is configured. Keep the probe non-mutating and timeout-bounded.                                                                                                                                                                                                                                                        |
+| P1-22 | Timeline empty/insertion state         | Clicking the container, icon, or explanatory text must all open the same import action; Enter/Space and drag/drop remain functional. Give virtual insertion lanes a semantic keyboard action or remove their false affordance. Disable empty playback or announce why it cannot start. Remove target-only click logic that makes child content inert.                                                                                                       |
+| P1-23 | Effects keyboard/reduced motion        | Effect cards need a semantic keyboard add action and discoverable unavailable reason. Autoplay rejection/reduced-motion/hidden-tab paths must show a deterministic poster or fallback instead of silently blank media.                                                                                                                                                                                                                                      |
+| P1-24 | Library destructive-operation recovery | Replace blocking-only removal UX with focus-safe confirmation/status; storage failure must keep the project card/data intact and expose accessible retry.                                                                                                                                                                                                                                                                                                   |
+| P1-25 | Product identity                       | Choose JOY Studio or JOY Media as the canonical user-facing name and make HTML title, shell, login, project library, manifest, release docs and browser assertions agree.                                                                                                                                                                                                                                                                                   |
 
-Suggested diagnostics:
+## Numeric release budgets and retained evidence
+
+These are stop/go gates, not optional targets:
+
+| Surface               | Budget                                                                                                                                                                                                                                   | Retained artifact                                                                        |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Idle polling          | After a 60-second warm-up, each polling endpoint is at most 6 requests/minute while visible and at most 1 request/minute after the document has been hidden for 10 seconds; no duplicate in-flight request per key.                      | `test-output/release-performance/polling.json` with endpoint and PostgreSQL query counts |
+| Effects               | A 30-minute all-category/search/favorites cycle has 0 uncaught exceptions or forced navigations, at most 6 concurrently playing previews and 12 mounted preview media nodes, and JS heap no more than 20% above the five-minute plateau. | `test-output/release-performance/effects-soak.json` plus sanitized trace summary         |
+| Timeline identity     | A deterministic 100-operation add/remove/import sequence and the live `2 → 4 → 3 → 4` reproduction end with exact expected counts, globally unique durable IDs, correct clips, and identical save/reopen plus undo/redo state.           | `test-output/release-performance/timeline-integrity.json`                                |
+| Editor responsiveness | During effects cycling, timeline edits and playback, long tasks consume less than 5% of measured wall time; the initial editor JS chunk is at most 500 kB minified.                                                                      | `test-output/release-performance/editor.json` and build manifest                         |
+| Static inventory      | Every manifest reference plus all 33 effect PNGs, 19 effect WebMs and transition SVGs has source/dist SHA-256, non-empty size, expected signature/MIME, and public/origin result; unknown asset-like paths return 404.                   | `test-output/release-gate/static-assets.json`                                            |
+| Production canary     | For 30 continuous minutes the isolated canary has 0 unexpected console/page exceptions, 0 canary HTTP 5xx, 0 readiness failures, 0 release-identity/hash/MIME mismatches, and all request/query rates remain within the polling budget.  | `test-output/release-performance/canary.json` bound to SHA/archive                       |
+
+### P2 / explicitly non-GA surfaces
+
+Templates, workflow authoring/provider ports, local/GPU job panels, plugin marketplace/demo, Dual
+Lens durable graph, PSD apply flow, 3D authoring and MCP authoring remain hidden or experimental
+unless their own real-service persistence/security/accessibility/browser matrices pass. Update
+`docs/product/FEATURE-STATUS.md` from final mounted routes and flags. Source presence is not enough to
+promote a feature. Replace synchronous FFmpeg/FFprobe subprocesses on long-lived API/Worker/render
+hot paths, or prove by profiling that each remaining synchronous call is isolated outside service
+event loops and cannot starve heartbeats/readiness.
+
+## Execution waves
+
+### Wave 0 — freeze evidence and create the canonical integration line
+
+1. Refresh Gbrain brief, remotes, branch tips, merge base and clean status.
+2. Preserve the current candidate and main-native branches as immutable recovery references.
+3. Create the finish branch from reviewed main-native `b6aa47e` (or current `github/main` plus those
+   nine reviewed commits if main moved).
+4. Update the reconciliation matrix from `git range-diff`, contract tests and final agent reports.
+
+Exit: every unique behavior has one owner/decision; no unclassified commit family remains.
+
+### Wave 1 — database, sync, polling and static/runtime stability
+
+Land P0-02 through P0-08, P0-10, P0-11, P1-01 through P1-04, and the supporting P1-17 through
+P1-21 work in small tranches. Each tranche needs focused tests, cross-review, full
+typecheck/lint/format, affected builds and a clean diff. Run schema tests against real PostgreSQL,
+not only mocks.
+
+Exit: local/staging editor saves to V2 and the named retained artifacts prove every numeric polling,
+Effects-soak, editor-responsiveness and static-inventory budget above.
+
+### Wave 2 — complete every production journey
+
+Close every remaining P1 item through P1-25. The orchestrator runs browser journeys after
+source/unit/integration checks pass; sub-agents never run browser tools. Fix observed failures
+immediately and repeat the entire affected journey, not only the last click.
+
+Exit: all production surfaces satisfy success/empty/loading/error/retry/permission and persistence
+contracts with zero P0/P1 defects.
+
+### Wave 3 — clean release candidate
+
+Run from two clean checkouts:
 
 ```powershell
-git fetch --prune github
-git fetch --prune vps
-git rev-list --left-right --count github/main...aec01ef
-git rev-list --left-right --count vps/main...aec01ef
-git merge-base github/main aec01ef
-git range-diff 73744bb..github/main 73744bb..aec01ef
-git switch -c codex/joy-media-finish-20260828 github/main
-```
-
-### 0.2 Reconcile by domain
-
-Build a parity matrix for each unique checkpoint/main/VPS behavior. Assign exactly one resolution:
-keep main, port checkpoint behavior, port VPS behavior, combine behind a shared contract, or remove
-as obsolete. Reconcile in this order:
-
-1. release/CI/tooling and dependency graph;
-2. database schema and migration ownership;
-3. auth/provider approval/rate limiting/private object boundaries;
-4. project revisions/recovery/control-plane persistence;
-5. Worker protocol/render-host/inspection/delivery;
-6. asset import/resolution/backup/privacy;
-7. editor workspace, Joy Code, panels, timeline, captions, Effects, Motion, Production Board;
-8. static assets, E2E harness, docs, and feature-status matrix.
-
-For every port, add/retain a contract test before moving code. Main already contains partial fixes
-for Worker periodic hello/failure persistence and browser-safe asset DTOs; preserve and complete
-them rather than reimplementing the checkpoint version.
-
-### 0.3 Remove source shadows and transient evidence
-
-- Delete the checkpoint-only `.tmp-p3-debug.mts`, tracked `.last-run.json`, Playwright/MCP outputs,
-  checkpoint SQLite data, raw task-review dumps, and other transient test output from the candidate.
-- Remove generated `.js`, `.js.map`, `.d.ts`, and `.d.ts.map` siblings from TypeScript source unless
-  an explicit package contract proves they are hand-maintained source.
-- Move intentionally retained release evidence to short-retention CI artifacts or one curated,
-  redacted evidence bundle; do not commit per-run screenshots, traces, databases, or reports.
-- Extend `.gitignore`, generated-output detection, privacy scanning, and TS/JS sibling-shadow tests.
-- Make `git diff --check` pass on the complete candidate.
-
-### Phase 0 exit gate
-
-- The parity matrix accounts for all 127 checkpoint-only and relevant VPS-only commits by behavior.
-- Candidate is based on current GitHub main and has focused, reviewable commits.
-- No transient/source-shadow file is tracked; clean status and `git diff --check` pass.
-- Backend, UX, and release specialists sign the same reconciliation report.
-
-## Phase 1 — Reproducible clean-clone CI and release evidence (P0)
-
-1. Change the budget test/gate ordering so editor build output is created in the same run before any
-   test reads its manifest. Never consume an ignored pre-existing `dist`.
-2. Split CI into visible jobs: format/lint/typecheck, unit, real-PostgreSQL integration, builds and
-   budget, Playwright E2E, release gate, production dependency audit, provenance/SBOM.
-3. Add PostgreSQL 17 and isolated object-store services. The Worker “integration” gate may not use
-   only `LocalControlPlane`.
-4. Bind every release report and browser journey to Git commit SHA, tree id, lockfile digest,
-   Node/pnpm versions, build host/runner, artifact digests, and generation time.
-5. Produce browser evidence in the same CI run. Reject stale, missing, cross-SHA, quick-export-only,
-   mocked-service, or inspection-not-requested evidence.
-6. Add explicit workflow permissions, concurrency/cancellation, timeouts, minimal artifact retention,
-   failure-only sanitized traces, and immutable action SHAs where practical.
-7. Require zero unwaived high/critical production advisories. Upgrade Nodemailer and verify OTP mail
-   compatibility before closing the audit.
-8. Run the complete pipeline twice in separate clean clones. The second run proves there is no hidden
-   cache/artifact dependency or flake.
-
-Core clean-clone sequence, adjusted to the reconciled package scripts:
-
-```powershell
-corepack enable
 pnpm install --frozen-lockfile
+pnpm check
 pnpm --filter @joy-media/editor-web build
 pnpm --filter @joy-media/api build
 pnpm --filter @joy-media/worker build
-pnpm --filter @joy-media/render-host build
-pnpm check
 pnpm test:release
-pnpm release:gate:test
-pnpm audit --prod --audit-level=high
+pnpm audit --prod --audit-level high
 pnpm release:gate
-git status --porcelain --untracked-files=all
+git diff --check
+git status --short
 ```
 
-Exit gate: two clean runs produce matching source-bound manifests and `result.passed=true`, with a
-clean tree and no stale artifact input.
-
-## Phase 2 — Backend, persistence, privacy, and readiness closure
-
-### 2.1 Versioned migrations and blue/green compatibility (P0)
-
-- Replace mutable startup DDL and ad-hoc primary-key changes with immutable ordered migrations,
-  checksums, one advisory-locked migrator, and an expected-schema-version readiness check.
-- Consolidate control-plane, provider-approval, and Mistral schema ownership.
-- Test a sanitized prior-production restore, apply twice, concurrent migrators, interrupted migration,
-  previous/candidate API coexistence, backup restore, and expand/contract rollback.
-- Refuse release if an old binary cannot safely run against the expanded schema.
-
-### 2.2 Real health and release identity (P0)
-
-- `/live`: process/event-loop only.
-- `/ready`: expected release SHA/schema version, PostgreSQL critical query, private object-store
-  availability, required signing/provider configuration, and control-plane readiness.
-- Keep optional providers explicitly degraded without marking core storage/delivery ready.
-- Deployment and orchestration use `/ready`, not the current unconditional health response.
-
-### 2.3 Browser-safe asset boundary (P1/security)
-
-- Apply one `assetForBrowser`/schema projection to list, register, upload, metadata, retag, recovery,
-  and every nested asset response.
-- Recursively prove that `locations`, `cloudRef`, filesystem paths, object keys, and credentials never
-  cross the browser boundary.
-- Frontend parses/projects the DTO as defense-in-depth instead of casting/spreading raw API data.
-- Add logged-out, wrong-owner, shared-curated, revoked, and signed-link-expiry tests.
-
-### 2.4 Control-plane contract completion (P1)
-
-- Make provider grant creation one awaited durable commit; no duplicate unawaited save.
-- Run one shared Local/PostgreSQL adapter contract suite, including retry payload/requirements/
-  idempotency/max-attempt preservation.
-- Add paginated project-document revision metadata, clear retention/compaction, exact restore
-  semantics, concurrent update/recovery, and storage-quota failure behavior.
-- Fix the trusted-proxy boundary. Validate forwarded addresses only from configured proxies and use
-  bounded actor/route-specific rate-limit buckets so users and Workers do not share localhost state.
-- Test spoofed `X-Forwarded-For`, multiple clients, OTP abuse, Worker traffic, and bucket eviction.
-
-Exit gate: real PostgreSQL/object-store integration passes, `/ready` reflects dependency failures,
-browser DTOs leak no private references, and previous/candidate binaries pass compatibility tests.
-
-## Phase 3 — Worker, render, inspection, and Verified delivery closure (P0)
-
-1. Keep idle Workers connected with periodic capability hello independent of leased-job progress.
-   Test presence across several 35-second editor windows and prompt disconnect after shutdown.
-2. Replace event-loop-blocking `spawnSync` FFmpeg/FFprobe paths with supervised async child processes
-   or move lease renewal to an independent watchdog that cannot be starved by rendering.
-3. Renew leases throughout renders longer than multiple lease periods; support bounded cancellation,
-   process cleanup, exactly-once completion, and duplicate-worker exclusion.
-4. Persist caught runtime/upload/complete failures through the `/fail` contract. Enforce
-   `attempt_count >= maxAttempts` in PostgreSQL and dead-letter/expose actionable retry.
-5. Remove `fixture.thumbnail` from production protocol/API/lease surfaces or compile it exclusively
-   into a test registry. Strengthen the release scan beyond its current narrow fixture regex.
-6. Persist render receipts and retained inspection reports; reconcile the UI after reload/service
-   restart. Never promote quick browser export to Verified delivery.
-7. Add failure injection for Worker crash, lease expiry, upload failure, inspection failure, stale
-   revision, retry, duplicate completion, and API restart.
-
-Phase journey: authenticated disposable project -> real source media -> Worker idle longer than the
-presence threshold -> render longer than one lease -> one artifact -> deep inspection pass ->
-download/reopen -> Worker/API restart -> retained terminal delivery state.
-
-Exit gate: the live-candidate UI no longer reports Verified delivery unavailable when a capable
-Worker is healthy, and every failure reaches a durable, intelligible terminal/retry state.
-
-## Phase 4 — Static packaging, complete UI journeys, and product truth
-
-### 4.1 Static release correctness (P0)
-
-- Guarantee that all Vite public assets, transitions, fonts, Workers, JS, CSS, and media are present
-  in the immutable archive with correct permissions, MIME types, and hashes.
-- Configure Nginx so unknown asset-like paths return 404 instead of SPA `index.html`; SPA fallback is
-  allowed only for real application routes.
-- Make `TransitionPreviewCard` catch load/decode rejection and render an accessible retry/failure
-  fallback instead of a transparent canvas.
-- Add build/archive/origin tests for PNG magic and a browser pixel assertion for each transition.
-
-### 4.2 Auth, library, recovery, and import (P1)
-
-- Give login contact/token inputs persistent labels, named OTP groups, selected-method semantics,
-  correct combobox behavior, live errors, busy state, focus management, and keyboard coverage.
-- Implement or remove the Project Library’s disabled Import Media/Start from Template promises.
-- Handle storage/quota/corruption errors per action; test empty, 100-project, scroll, create/open,
-  rename/duplicate/trash/restore, recovered-copy, offline, conflict, and cloud reconnect states.
-- Make multi-file import atomic, or explicitly report per-file success/failure with cleanup and retry.
-  Prove no orphaned catalog objects or cached bytes after failure.
-
-### 4.3 Timeline, captions, preview, and Board (P1)
-
-- Remove/implement the disabled Remove Track TODO and every other visible dead action.
-- Prove split/trim/ripple/track/marker/DnD/keyboard commands through one transaction path, then
-  save/reopen/undo/redo and preview/export parity.
-- Apply authored caption `lang`/`dir` to editors; preserve the previous document after invalid SRT/
-  VTT; cover transcription/import/edit/revert/delete/export and Persian/English direction.
-- Turn “Reconnect media”/“Sign in again” recovery copy into keyboard-operable actions with live
-  announcements. Handle fullscreen rejection and missing/revoked/cloud-only source states.
-- Add busy/deduplication/error/confirmation states to Production Board approve/cancel/retry; expose
-  lease-expired distinctly and never swallow reconciliation failures into indefinite pending.
-
-### 4.4 Effects, Motion, Joy Code, workflows, and feature status (P1/P2)
-
-- Run integrated real-document journeys for Effects, Motion publish/place/reopen, and Joy Code
-  dry-run/reject/approve/apply/undo plus provider/attachment failures.
-- Audit agent query tools that still return “not implemented” warnings. Implement production-visible
-  queries or keep their invoking surfaces hidden; never fabricate results.
-- Workflows, Jobs, Templates, Flow, plugins, PSD, 3D, and advanced Motion remain hidden/experimental
-  unless their complete real-service journeys and persistence contracts pass. Hidden source is not a
-  release defect; visible false affordances are.
-- Regenerate `docs/product/FEATURE-STATUS.md` from the final manifest and verify every mounted panel,
-  command, menu item, backend route, Worker capability, and flag agrees with it.
-
-### 4.5 Accessibility, language, and supported viewport (P1/P2)
-
-- Preserve the intentionally English shell (`lang=en`, LTR) unless product policy changes; tag/apply
-  direction to Persian authored/explainer content locally. Do not force global RTL based on market.
-- Add axe plus real Tab/Shift+Tab/arrow/Escape/Enter/Space/focus-return tests for dialogs, app menus,
-  dock overflow, timeline, caption cells, approvals, and error recovery.
-- Normalize desktop pointer targets/focus visibility where 24 px controls are not tightly scoped NLE
-  precision controls.
-- Product ADRs exclude mobile from 1.0. At unsupported small widths, show an accessible desktop/
-  tablet requirement and safe project/download actions instead of a crushed 390 px editor. If mobile
-  is promoted, fund a separate single-panel layout with 16 px inputs, 44 px actions, operable toolbar
-  overflow, no clipped focusables, and the full mobile journey matrix.
-- Align the document title/branding choice (`JOY Media` versus `JOY Studio`) deliberately.
-
-Exit gate: every visible action has a real success, empty, pending, error, retry, and permission state;
-integrated desktop journeys pass with no unexpected accessibility or console errors.
-
-## Phase 5 — End-to-end, security, performance, and observability gates
-
-### Required isolated E2E matrix
-
-- Auth: request/verify for supported methods, invalid/expired/rate-limited cases, session reload,
-  logout/back/reload, no credential logging.
-- Projects: create/open/rename/duplicate/trash/restore/recovery/conflict/offline/quota.
-- Assets: image/video/audio import, mixed invalid batch, private backup, catalog filtering, preview,
-  revoked/missing source, no private refs.
-- Editor: all production timeline commands, keyboard intake, preview, save/reopen, undo/redo.
-- Captions: manual/import/transcribe, Persian/English direction, failure preservation, render burn-in.
-- Effects/transitions/Motion: preview/render parity, static assets, publish/place/reopen.
-- Joy Code: consent, bounded egress, dry-run, approval, compound apply, rejection, failure, undo.
-- Production/delivery: Board states/actions, idle Worker, long render, crash/retry/cancel, inspection,
-  artifact reopen/download and persisted terminal state.
-- Global: title/lang/dir, supported viewport, axe, tab order, no page errors, no unexpected console
-  messages, no failed static/font/Worker requests, loading/empty/error states.
-
-Run at least desktop `1440x900`, compact desktop/tablet `1024x768`, and the unsupported-width guard
-at `390x844`. Keep screenshots/traces only on failure, sanitized and short-retention.
-
-### Security and supply chain
-
-- `gitleaks` (redacted output), production advisory audit, lockfile integrity, license review, and a
-  validated CycloneDX SBOM with component graph/hashes.
-- Pin/supervise FFmpeg, browser, and native tool versions; record them in provenance.
-- Verify auth/session/CSRF/origin policy, provider consent and egress redaction, object ownership,
-  signed-link expiry, rate limiting, request-size limits, and log/trace redaction.
-- Require zero high/critical unwaived production advisories and no committed/session artifact.
-
-### Performance and reliability
-
-- Enforce editor chunk/bundle budget from fresh build output, initial-load budget, panel lazy loading,
-  100-project/large-asset virtualization, long-timeline interaction latency, and memory/URL cleanup.
-- Soak API/Worker presence and delivery beyond lease/session thresholds; test reconnect and service
-  restart without data loss.
-- Add release-SHA/schema/dependency fields to safe health/metrics, plus alerts for sync failure,
-  Worker loss, lease expiry, render/inspection failure, static MIME fallback, and error-rate change.
-
-Exit gate: the entire matrix passes twice on one exact SHA; the second clean run is non-flaky and
-produces a clean tree plus a signed/hash-verified release archive.
-
-## Phase 6 — Commit to main, push, tag, deploy, verify, or roll back
-
-### 6.1 Main integration
-
-1. Keep implementation commits focused by domain; squash only review noise, never evidence-bearing
-   behavioral boundaries.
-2. Rebase/merge the verified candidate onto the then-current GitHub `main`; rerun the full gate if
-   the tree id changes.
-3. Merge to `main` only after all required checks and the three-specialist consensus are green.
-4. Push the exact `main` SHA to GitHub and the JOY Media VPS bare remote. Verify both refs resolve to
-   the same commit and the working trees are clean.
-5. Create one annotated release tag referencing the source-bound manifest and rollback record; push
-   the tag to both remotes.
-
-No deployment may originate from `aec01ef`, the old release branch, a dirty checkout, or a SHA that
-differs from the passed manifest.
-
-### 6.2 Backup and migration rehearsal
-
-- Record the current API/web symlink targets and service state.
-- Back up PostgreSQL and object-store metadata/objects without printing credentials.
-- Restore the database backup into a scratch database and verify object manifest/checksums.
-- Apply migrations to the scratch restore, start previous and candidate APIs against the expanded
-  schema, and pass the signed-in core journey.
-- Keep prior immutable releases and the verified backup until the production acceptance window ends.
-
-### 6.3 Immutable activation
-
-1. Verify the promoted archive SHA, manifest, SBOM/provenance, file permissions, and static inventory
-   on the VPS before activation.
-2. Apply only the rehearsed additive migrations.
-3. Create immutable API and web release directories from the verified archive.
-4. Atomically switch `current-api` and `web` symlinks.
-5. Restart only `joy-media@api` if API/runtime changed; reload Nginx only after `nginx -t` passes.
-6. Keep `gbrain-http` and unrelated JOY/VPS services untouched.
-
-### 6.4 Origin and public verification
-
-Run direct-origin checks with `curl --noproxy '*' --resolve ...` for both hostnames before trusting
-Cloudflare/public results:
-
-- `/live`, dependency-aware `/ready`, release SHA, schema version;
-- root application, session boundary, project/control-plane read paths;
-- every emitted JS/CSS/font/Worker/image asset from the manifest;
-- both transition PNGs: HTTP 2xx, `image/png`, non-HTML body, PNG magic
-  `89504e470d0a1a0a`, and drawn browser pixels;
-- unknown asset path returns 404, never SPA HTML.
-
-Then repeat against `https://joyst.ir/` and `https://www.joyst.ir/` and compare release assets/SHA.
-
-### 6.5 Browser and delivery canary
-
-- Codex in-app browser: authenticated, read-only shell/console/network/static checks using the
-  existing session. Current implementation/review execution is Codex-subagent-only per the latest
-  handoff; earlier Kilo/Hermes/OpenCLI notes below are historical diagnostics, not release proof.
-- Run the full destructive journey against staging fixtures. Production receives one prefixed,
-  isolated canary project only if its exact ownership and cleanup are safe: import known test media,
-  edit, caption/effect/Motion, Joy Code approval, save/reopen, long Worker render, inspection, and
-  artifact download. Remove only exact canary-owned data after verifying no shared references.
-- Require zero unexpected console warnings/errors, failed requests, framework overlays, blank
-  previews, sync warnings, or unavailable Verified delivery state.
-
-### 6.6 Automatic rollback criteria
-
-Immediately restore prior API/web symlinks if any of these occur:
-
-- Nginx validation failure, service restart loop, `/live` or `/ready` failure, schema/release mismatch;
-- static 4xx/5xx, wrong MIME, HTML asset fallback, console/page error, blank transition/preview;
-- auth/session, project save/reload/revision, cloud sync, private object, Worker lease/completion,
-  render, inspection, or Verified delivery failure;
-- new database errors, cleanup inconsistency, elevated latency/error rate, or unredacted data in logs.
-
-Binary rollback is allowed only after old-binary compatibility passes. If the schema is not backward
-compatible, halt before activation; do not restore a database over new production writes without an
-explicit data-loss decision. After rollback, repeat health, origin/public static checks, authenticated
-smoke, and an observation window.
-
-### 6.7 Completion record
-
-After successful acceptance, update `STATE.md`, release docs, and the authoritative Gbrain JOY Media
-ops page with confirmed non-secret facts only:
-
-- final main SHA/tag and matching remote refs;
-- migration versions, release directories, symlink targets, artifact/manifest hashes;
-- clean-clone/CI/E2E/inspection/security results and OpenCLI/Codex browser outcomes;
-- origin/public route and MIME matrix, Worker/delivery canary result;
-- backup verification, rollback targets, observation result, and any accepted P2 item.
-
-Do not record credentials, hashes of credentials, cookies, OTPs, private object refs, customer data,
-or raw secret-bearing artifacts.
-
-## Final acceptance checklist
-
-## Execution checkpoint — 2026-08-28
-
-- Continuation checkpoint: the candidate now includes `2c70057`, a safe subset of the Kilo
-  review that preserves optional visual-effect factory semantics and adds four focused tests.
-  The focused visual-effects suite passes and the repository typecheck remains green. The
-  detached Kilo commit also contained unrelated generated/tsconfig changes and was not
-  cherry-picked wholesale.
-- The latest clean `pnpm release:gate` run at `2026-08-28T12:40:41Z` reports command health,
-  2,393 scoped tests, generated-artifact hygiene, fixture registries, builds, manifest, SBOM, and
-  feature-status as passed. It remains **NO-GO** only because source-bound authenticated browser
-  provenance and the required `authenticated-editor-1.0` journey are absent.
-- A fresh read-only OpenCLI probe using profile `cefd9k77` against `https://www.joyst.ir/` found
-  zero browser console messages and a Projects shell with a Local editor project. The same
-  browser fetch returned `GET /api/live` 200 JSON and the legacy 74-byte `GET /api/ready` 200
-  response, while `/transitions/preview/transition2.png` still returned 200 `text/html` (SPA
-  fallback). Clicking the Local editor project did not leave the Projects route, so this remains
-  public-shell evidence rather than an authenticated editor journey and no mutation was made.
-- The frontend specialist's additive, namespaced Creative Brief v2 contract landed as `eda8d64`
-  with the diagnostic-label follow-up in `70e38f3`. It preserves all current v1 exports and its
-  focused suite passes 11/11; the isolated worktree's
-  package build could not resolve an unrelated workspace declaration, so the candidate's full
-  typecheck was run after integration and passed. No incompatible GitHub-main contract was copied.
-- Backend and release cross-review accepted this contract as safe/additive but explicitly rejected
-  treating it as a complete Creative Brief runtime or as release evidence. They also rejected a
-  wholesale WP-37/WP-38 merge, blind promotion, or any VPS mutation until the parity matrix,
-  migrations/readiness, live static routes, and source-bound authenticated journey are green.
-
-- The local JOY Media hardening checkpoint is committed through `70e38f3` on
-  `codex/joy-media-implement-20260828`; its pre-merge state is preserved at
-  `backup/joy-media-before-main-merge-20260828`.
-- The checkpoint passes `pnpm typecheck`, `pnpm format:check`, and the latest full `pnpm test`
-  suite (313 files, 2,439 passed tests, 1 skipped). Focused API, asset-library, timeline,
-  and Joy Code lifecycle tests pass (68 tests).
-- `pnpm audit --prod --audit-level high` reports no known vulnerabilities.
-- The candidate now includes `ef86e87`, which adds validated non-secret release identity and
-  dependency probes to `/ready`, and `d8c0be6`/`8eeba0e`, which discard stale Joy Code
-  reasoning responses after project/revision changes, prevent duplicate submits, and expose
-  accessible failure alerts. Asset-library audio/video insertion is wired by `ecbdd56` and
-  `e06c4cc` with routing/type-contract tests.
-- Deployment documentation now requires the four generated `JOY_MEDIA_RELEASE_*` values in
-  `/etc/joy-media/api.env`, sourced from the exact release manifest, so the new readiness gate
-  cannot be bypassed by a stale or partial deployment.
-- A GitHub branch has been published at
-  `codex/joy-media-implement-20260828` for review.
-- The release evaluator run at 2026-08-28T11:58:05Z passes command health, tests,
-  generated-artifact hygiene, fixture registry, builds, manifest, SBOM, and feature-status
-  checks. It still fails only source-bound authenticated browser provenance and the missing
-  `authenticated-editor-1.0` journey.
-- Reconciliation with GitHub `main` is currently a release blocker: the two lines
-  diverge from a July common base and the remote line's creative-brief, Joy Code,
-  and universal-timeline additions do not type-check against the deployed
-  checkpoint when merged. The merge was aborted without changing either remote;
-  no force-push, VPS mutation, or live deployment has been performed.
-- Before promotion, an explicit reconciliation decision is required: port the
-  remote `main` feature line onto the tested checkpoint (with a new full gate), or
-  promote the tested checkpoint as the new `main` while preserving the remote
-  feature line in a review branch. Until that decision and a clean merge are
-  complete, the final acceptance checklist remains intentionally unchecked.
-- Live Codex-browser inspection of the authenticated `https://www.joyst.ir/` tab
-  still shows `Saved locally; cloud sync is unavailable`, `Verified delivery is
-unavailable`, and a console error loading `/transitions/preview/transition2.png`.
-  This is evidence of the currently deployed release, not evidence for the new
-  checkpoint; no browser mutation was performed.
-- The transition preview defect is fixed on the checkpoint in `e2e7838` (with the formatted
-  release note in `63c6511`). OpenCLI profile `cefd9k77` verified both stable SVG endpoints from
-  a local production build with HTTP 200 and `image/svg+xml`; transition preview tests, the latest
-  full test suite (2,439 passed, 1 skipped), and editor build passed.
-- Kilo was invoked with `kilo/kilo-auto/free` and OpenCLI profile `cefd9k77` for an independent
-  review. Its run was stopped after it began reviewing a stale detached checkpoint, so its
-  observations are advisory only. Hermes was invoked with `openrouter/free` for bounded review;
-  its attempts did not return usable source-bound evidence. Neither agent was granted secret or
-  VPS access, and neither supports a promotion claim.
-
-- The second bounded Kilo/Hermes QA round used the requested free routes and OpenCLI profile
-  `cefd9k77`. Kilo reached the public Projects shell and observed zero console messages, but the
-  run was stopped immediately after it began inspecting an auth-session response body; no session
-  values were retained and the run is invalid as release evidence. Hermes returned no usable
-  report before its bounded run was stopped. This confirms the profile is reachable, not that an
-  authenticated editor journey or delivery flow passed.
-- The monitor-ratio reconciliation tranche is integrated at `9f91e4e`. It adds an accessible
-  Program Monitor ratio selector, keeps `Fit` view-only, and atomically updates visual/timeline
-  composition dimensions through one undoable command for named presets. Focused coverage is
-  24/24, and repository typecheck, lint, format, and editor build pass.
-- The visible timeline Remove Track TODO is now closed at `c7d2320`: the context-menu action is
-  enabled only for an empty non-last track, matching the existing command validator; invalid
-  removals remain disabled. The focused editor/command suite is 26/26 after this change.
-- The bounded async Creative Brief v2 execution boundary is integrated at `129edba`. Its
-  provider-facing interface is additive, cancellable, timeout-bounded, redacts audit payloads,
-  and returns typed/sanitized failure outcomes; it does not claim the coupled main-branch
-  Creative Brief runtime is reconciled. The agent-tools package suite passes 324/324.
-- The latest clean `pnpm release:gate` run at `2026-08-28T13:56:56Z` passes command health,
-  2,423 scoped tests, generated-artifact hygiene, fixture registries, builds, static-assets,
-  manifest, SBOM, and feature status. It remains **NO-GO** because source-bound authenticated
-  browser provenance and the required `authenticated-editor-1.0` journey are missing.
-- A fresh read-only Codex in-app-browser inspection of the user-owned JOY Media tab at
-  `2026-08-28T13:18:52Z` confirms the authenticated editor shell is reachable, but it still shows
-  local-only save/cloud-sync-unavailable and Verified delivery unavailable states. Its console
-  contains one transition preview error for the deployed `/transitions/preview/transition2.png`.
-  No browser mutation was performed.
-- A fresh read-only Codex browser smoke at `2026-08-28T13:50:50Z` reached the authenticated live
-  editor shell, but the deployed release still reports local-only save/cloud-sync unavailable and
-  Verified delivery unavailable. The live UI has no candidate ratio selector, and its transition
-  surface is the older deployment; this is diagnostic evidence only, not candidate evidence.
-- The local candidate build at `http://127.0.0.1:4177/` was opened read-only in Codex browser and
-  showed the Projects shell plus the normal login dialog without mutation. Both candidate transition
-  SVG routes returned HTTP 200 with `image/svg+xml` and an `<svg` body.
-- The candidate now includes `85cde92`, which centralizes an exact-IP trusted-proxy resolver and
-  uses it for both HTTP transport and OTP throttles, and `0fefdab`, which durably terminalizes
-  expired Worker leases after their attempt budget (including cancellation and PostgreSQL attempt
-  closure). The focused API/control-plane suites pass 79/79; repository typecheck, lint, and
-  format checks pass.
-- The candidate includes `3d3f009` static-asset packaging enforcement and `daff729` truthful,
-  accessible captions-transcription unavailable messaging. The full release gate's static-assets
-  check passes and the scoped test count is now 2,423.
-- The disposable browser-smoke runner exposed and fixed one stale selector in `ed54e5a` (token
-  login is a labeled textbox, not a combobox). A subsequent run reaches authenticated project
-  creation but still times out while assigning the hidden media-file input after the auto-open
-  import drawer; this remains an actionable local journey gap, not release evidence.
-- The legacy `fixture.thumbnail` production path was retired in `f485bbc`. The
-  release evaluator now passes command health, tests, generated-artifact hygiene,
-  fixture registry, builds, manifest, SBOM, and feature-status checks. It still
-  fails only the required fresh source-bound authenticated browser evidence and
-  browser-journey checks, which cannot be honestly synthesized from the current
-  live tab.
-
-### Continuation checkpoint — 2026-08-28
-
-- Candidate implementation tip `124f359` is clean locally and is pushed at
-  `github/codex/joy-media-implement-20260828`. Since the prior checkpoint it adds CI
-  FFmpeg/FFprobe preflight, removes the Monitor scene-sync feedback loop, makes Motion placement
-  assertions await the async commit, constrains Dockview to the workspace height, and isolates
-  V2 document heads from the legacy `project_documents` schema. The local browser-smoke journey now passes
-  import, playback/audio, export, Motion publish/place, undo/redo/reopen, and all 1024×768,
-  1280×720, and 1440×900 shell checks with no clipped controls or page overflow.
-- The latest release gate run on implementation tip `124f359` at `2026-08-28T17:15:59.168Z` is a
-  truthful **NO-GO**: command health, 2,440 scoped tests, builds, static assets, manifest, SBOM,
-  generated-artifact hygiene, fixture registry, and feature-status checks pass. Critical failures
-  remain for source provenance and the required journey because the available evidence is mocked,
-  not real-service/source-bound, lacks verified delivery and passed inspection, and is not bound to
-  the clean checkout. No `main` promotion, VPS bare-remote update, or deployment was performed.
-
-- A live-schema audit confirmed the authenticated V2 document 500 is caused by the deployed
-  legacy `project_documents(project_id, revision_id, schema_version, document, created_at)`
-  table. Candidate commit `124f359` moves every V2 head read/lock/upsert/recovery path to the
-  additive `project_document_heads_v2` table, leaves the legacy table untouched, adds a regression
-  fixture for the exact old shape, and proxies `/live`, `/ready`, and `/health/ready` around the
-  SPA fallback. The fix passed focused 85/85 coverage plus typecheck/build/lint/format checks.
-
-- The latest implementation tip is `cead951` (with the browser-smoke readback cleanup at
-  `c199ba3`); the candidate documentation tip is `6c06e6c`. A
-  fresh local authenticated mocked browser-smoke run completed successfully across 1024×768,
-  1280×720, and 1440×900 with no clipped controls or page overflow. The generated evidence remains
-  explicitly `execution: mocked` and therefore cannot satisfy the real-service release gate.
-
-- Main-native trusted-proxy parity is prepared separately at `be06596` on
-  `codex/main-trusted-proxy-boundary`; it was based exactly on `github/main` and adds a bounded
-  forwarded-IP resolver shared by HTTP and OTP throttling with adversarial tests. It remains a
-  review branch because the candidate already contains equivalent behavior and the two lines are
-  not safe for blind merging. A conflict-free combined main-native review line is also available
-  at `b6aa47e` on `codex/main-native-integration-trusted-proxy`, based on the main-native UI/asset/job
-  branch `bea4ba6`; its focused API/editor tests, typecheck, and builds pass.
-
-- Promotion review confirms `github/main` remains `2083ffc` while the candidate is 407 commits
-  behind and 211 commits ahead from common base `73744bb`; simulated merge conflicts make a direct
-  merge unsafe. Main-native review branches are available for controlled reconciliation:
-  `codex/main-backend-reconcile-v2-combined` (`a1b1210`),
-  `codex/main-ui-release-reconcile-v2-asset-job` (`bea4ba6`), and
-  `codex/main-creative-brief-typecheck-20260828` (`7761504`).
-
-- [ ] GitHub `main`, local `main`, VPS bare `main`, release tag, manifest, and deployed release all
-      resolve to the same verified source SHA/tree.
-- [ ] No checkpoint behavior is lost or duplicated; the reconciliation/parity matrix is complete.
-- [ ] Clean-clone pipeline passes twice with no stale outputs or dirty tree.
-- [ ] Real PostgreSQL migrations/readiness/rollback compatibility pass.
-- [ ] Browser asset DTOs expose no private references; auth/rate limits use a trusted-proxy model.
-- [ ] Idle Worker presence, long-render lease, failure/dead-letter, retry/cancel, and restart tests pass.
-- [ ] Verified delivery produces one real artifact with a retained passed inspection.
-- [ ] Every visible production action and full desktop journey succeeds or is honestly removed/gated.
-- [ ] Auth, recovery, captions, preview, Production Board, accessibility, and supported-width behavior
-      pass integrated browser tests.
-- [ ] Transition/static assets return correct MIME/magic; unknown assets return 404; browser console
-      and network gates are clean.
-- [ ] Zero unwaived high/critical production advisories; secret/privacy/SBOM/provenance gates pass.
-- [ ] Database/object backups are restored/verified; prior immutable releases remain available.
-- [ ] Origin and public smoke plus the isolated production canary pass after activation.
-- [ ] Gbrain and repository completion records contain only confirmed non-secret facts.
-
-Only when every checked item is true is JOY Media finished for this release.
+Also run gitleaks with redacted output, license review, CycloneDX validation, migration/rollback,
+static archive/MIME checks and performance/soak budgets. Required result: zero failed critical gate,
+zero high/critical unwaived production advisory, clean tree, matching reproducible hashes.
+
+### Wave 4 — orchestrator-only browser certification
+
+The orchestrator alone executes:
+
+- real auth/session reload;
+- project create/open/rename/recovery/conflict;
+- real media import, playback and audio;
+- every Effects category/search/favorite/add/drag plus repeated category soak;
+- every transition preview and add path;
+- timeline/monitor/captions/Motion/Effect Studio/Joy Code/Production Board journeys;
+- real Worker verified delivery, passed inspection, download/reopen and restart recovery;
+- 1440×900, 1280×720, 1024×768 and unsupported-width guard;
+- console/page/network/MIME/accessibility/performance inspection.
+
+Capture only sanitized failure artifacts plus final source-bound evidence. No browser evidence from a
+sub-agent is admissible.
+
+### Wave 5 — promote, deploy, verify, observe
+
+1. Rebase/merge only reviewed changes; rerun the complete release gate on the final SHA.
+2. Verify the `github` and `vps` remote URLs both identify this standalone JOY Media repository,
+   then merge to `main` without force and push the same SHA to those two remotes only.
+3. Verify database/object metadata backups and the tested rollback target.
+4. Upload and verify the immutable archive/manifest/SBOM/hashes before activation. Rehearse
+   `deploy/joy-media-rollback.sh` against the previous immutable release pointer.
+5. Apply only rehearsed additive migration; activate API/web release atomically; restart only
+   `joy-media@api` when required; reload Nginx only after `nginx -t`.
+6. Verify direct origin first using `curl --noproxy '*' --resolve <hostname>:443:<origin-ip> ...`
+   with private values read at runtime, then verify `joyst.ir` and `www.joyst.ir`: release identity,
+   `/live`, dependency-aware `/ready`, auth/project reads, every manifest asset/MIME, and
+   unknown-asset 404.
+7. Run one isolated production canary and the full read-only smoke for 30 minutes. Any readiness,
+   source/hash/MIME, authenticated journey, Worker/inspection, console/page-error, request/query
+   budget, or canary-5xx failure immediately runs `deploy/joy-media-rollback.sh` without user input;
+   verify the restored release at origin and both public hostnames.
+8. Record the confirmed non-secret release/rollback result and relevant service state in Gbrain.
+
+Exit: the completion contract is satisfied and a concise final report names the exact main SHA,
+release archive/hash, migration, canary, inspection, public checks and rollback target.
+
+## Stop/continue rules for the autonomous goal
+
+- Do not stop for ordinary design choices, review comments, test failures or retryable service
+  errors; diagnose, fix and continue.
+- Do not ask the sleeping user for confirmation. Existing task authorization covers scoped commits,
+  branch reconciliation, main push, additive migration, JOY Media deployment and rollback after the
+  gates pass.
+- Never bypass authentication, security, destructive-data or release gates. Use the authenticated
+  session already provided and safe disposable fixtures.
+- If an external condition is genuinely impossible to change (for example an expired session that
+  requires a human-only OTP), continue every independent task and retry safe alternatives. Mark the
+  goal blocked only after the same external human-only blocker persists across three consecutive
+  goal turns/runs, counting the original occurrence, after all independent work and safe retries are
+  exhausted. Do not spin indefinitely and do not falsely mark complete.
