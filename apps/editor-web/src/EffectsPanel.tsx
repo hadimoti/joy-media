@@ -106,16 +106,20 @@ export function EffectsPanel({
     wasStudioOpen.current = effectStudioOpen;
   }, [effectStudioOpen]);
 
-  const descriptors = useMemo(() => effectsInCategory(category, favorites), [category, favorites]);
+  const descriptors = useMemo(
+    () => (builtinsReady ? effectsInCategory(category, favorites) : []),
+    [builtinsReady, category, favorites],
+  );
 
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = { recipes: recipes.length };
+    if (!builtinsReady) return counts;
     for (const entry of CATEGORIES) {
       if (entry.id === 'recipes') continue;
       counts[entry.id] = effectsInCategory(entry.id, favorites).length;
     }
     return counts;
-  }, [favorites, recipes.length]);
+  }, [builtinsReady, favorites, recipes.length]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return descriptors;
