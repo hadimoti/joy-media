@@ -500,9 +500,9 @@ function buildSbom(root: string): Readonly<Record<string, unknown>> {
 }
 
 function dirtyGeneratedArtifacts(root: string): readonly string[] {
-  const pnpm = process.platform === 'win32' ? 'git.exe' : 'git';
+  const git = process.platform === 'win32' ? 'git.exe' : 'git';
   const result = spawnSync(
-    pnpm,
+    git,
     ['status', '--porcelain', '--', 'apps/editor-web/dist', 'apps/api/dist', 'apps/worker/dist'],
     {
       cwd: root,
@@ -510,10 +510,40 @@ function dirtyGeneratedArtifacts(root: string): readonly string[] {
       shell: false,
     },
   );
-  return (result.stdout ?? '')
+  const dirtyBuildOutput = (result.stdout ?? '')
     .split(/\r?\n/u)
     .map((line) => line.trim())
     .filter(Boolean);
+  const tracked = spawnSync(git, ['ls-files', '-z'], {
+    cwd: root,
+    encoding: 'utf8',
+    shell: false,
+  });
+  const trackedArtifacts =
+    tracked.status === 0 && typeof tracked.stdout === 'string'
+      ? findTrackedArtifactViolations(tracked.stdout.split('\0').filter(Boolean))
+      : ['git ls-files failed while checking repository artifact hygiene'];
+  return [...new Set([...dirtyBuildOutput, ...trackedArtifacts])];
+}
+
+export function findTrackedArtifactViolations(trackedFiles: readonly string[]): readonly string[] {
+  const files = new Set(trackedFiles.map((path) => path.replaceAll('\\', '/')));
+  return [...files]
+    .filter(
+      (path) =>
+        /(?:^|\/)(?:test-output|test-results)\//u.test(path) ||
+        /(?:^|\/)\.tmp-[^/]+$/u.test(path) ||
+        isCompiledSourceSibling(path, files),
+    )
+    .sort();
+}
+
+function isCompiledSourceSibling(path: string, trackedFiles: ReadonlySet<string>): boolean {
+  if (!path.includes('/src/')) return false;
+  const emittedSuffix = ['.js.map', '.d.ts', '.js'].find((suffix) => path.endsWith(suffix));
+  if (emittedSuffix === undefined) return false;
+  const stem = path.slice(0, -emittedSuffix.length);
+  return trackedFiles.has(`${stem}.ts`) || trackedFiles.has(`${stem}.tsx`);
 }
 
 const PRODUCTION_FIXTURE_REGISTRATION =

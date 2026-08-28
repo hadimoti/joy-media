@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   evaluateReleaseGate,
   findProductionFixtureRegistrations,
+  findTrackedArtifactViolations,
   RELEASE_COMMANDS,
   REQUIRED_BUILD_IDS,
   REQUIRED_JOURNEY_ID,
@@ -165,6 +166,30 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(result.checks.find((check) => check.id === 'generated-artifacts')?.status).toBe(
       'failed',
     );
+  });
+
+  it('rejects tracked test, debug, and compiled TypeScript artifacts', () => {
+    expect(
+      findTrackedArtifactViolations([
+        '.tmp-p3-debug.mts',
+        'test-output/browser/journey.png',
+        'tooling/browser-smoke/test-results/.last-run.json',
+        'apps/editor-web/src/session.ts',
+        'apps/editor-web/src/session.js',
+        'apps/editor-web/src/session.js.map',
+        'apps/editor-web/src/session.d.ts',
+        'apps/editor-web/src/intentional-runtime.js',
+        'types/vendor.d.ts',
+        'packages/test-fixtures/src/index.ts',
+      ]),
+    ).toEqual([
+      '.tmp-p3-debug.mts',
+      'apps/editor-web/src/session.d.ts',
+      'apps/editor-web/src/session.js',
+      'apps/editor-web/src/session.js.map',
+      'test-output/browser/journey.png',
+      'tooling/browser-smoke/test-results/.last-run.json',
+    ]);
   });
 
   it('rejects fixture handlers in production registries', () => {
