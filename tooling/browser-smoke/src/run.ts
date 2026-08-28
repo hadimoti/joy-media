@@ -497,6 +497,7 @@ export async function runAuthenticatedEditorJourney({
   });
   await expect(placeButton).toBeEnabled();
   await placeButton.click();
+  await expect(page.locator('.timeline-clip')).toHaveCount(2);
   const timelineAfterPlacement = await timelineClipSummary(page);
   if (!Array.isArray(timelineAfterPlacement) || timelineAfterPlacement.length < 2) {
     throw new Error('Published Motion Studio scene was not placed on the timeline');
