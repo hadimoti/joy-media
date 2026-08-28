@@ -4468,8 +4468,13 @@ function EditorWorkspace({
       };
     }) => {
       const composition =
+        context.timelineProject.compositions[context.activeTimelineCompositionId] ??
         context.timelineProject.compositions[context.timelineProject.rootCompositionId];
-      if (composition === undefined) return;
+      if (composition === undefined) {
+        throw new Error(
+          'The active timeline composition is unavailable. Refresh the project and retry.',
+        );
+      }
       const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`;
       const controllerId = `media-controller-${clipId}`;
       context.replaceVisualProject(
