@@ -916,7 +916,7 @@ async function probeChangingFrames(page: Page): Promise<FrameProbe> {
       const canvas = document.createElement('canvas');
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
-      const context = canvas.getContext('2d');
+      const context = canvas.getContext('2d', { willReadFrequently: true });
       if (context === null) throw new Error('2d canvas unavailable');
       context.drawImage(video, 0, 0);
       return context.getImageData(0, 0, canvas.width, canvas.height);
