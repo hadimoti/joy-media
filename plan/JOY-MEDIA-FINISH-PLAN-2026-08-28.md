@@ -611,18 +611,32 @@ unavailable`, and a console error loading `/transitions/preview/transition2.png`
 
 ### Continuation checkpoint — 2026-08-28
 
-- Candidate implementation tip `26b53e0` is clean locally and is ready to push after this
-  documentation update. Since the prior checkpoint it adds CI FFmpeg/FFprobe preflight, removes
-  the Monitor scene-sync feedback loop, makes Motion placement assertions await the async commit,
-  and constrains Dockview to the workspace height. The local browser-smoke journey now passes
+- Candidate implementation tip `124f359` is clean locally and is pushed at
+  `github/codex/joy-media-implement-20260828`. Since the prior checkpoint it adds CI
+  FFmpeg/FFprobe preflight, removes the Monitor scene-sync feedback loop, makes Motion placement
+  assertions await the async commit, constrains Dockview to the workspace height, and isolates
+  V2 document heads from the legacy `project_documents` schema. The local browser-smoke journey now passes
   import, playback/audio, export, Motion publish/place, undo/redo/reopen, and all 1024×768,
   1280×720, and 1440×900 shell checks with no clipped controls or page overflow.
-- The latest release gate run on implementation tip `26b53e0` at `2026-08-28T16:59:26.839Z` is a
-  truthful **NO-GO**: command health, 2,438 scoped tests, builds, static assets, manifest, SBOM,
+- The latest release gate run on implementation tip `124f359` at `2026-08-28T17:15:59.168Z` is a
+  truthful **NO-GO**: command health, 2,440 scoped tests, builds, static assets, manifest, SBOM,
   generated-artifact hygiene, fixture registry, and feature-status checks pass. Critical failures
   remain for source provenance and the required journey because the available evidence is mocked,
   not real-service/source-bound, lacks verified delivery and passed inspection, and is not bound to
   the clean checkout. No `main` promotion, VPS bare-remote update, or deployment was performed.
+
+- A live-schema audit confirmed the authenticated V2 document 500 is caused by the deployed
+  legacy `project_documents(project_id, revision_id, schema_version, document, created_at)`
+  table. Candidate commit `124f359` moves every V2 head read/lock/upsert/recovery path to the
+  additive `project_document_heads_v2` table, leaves the legacy table untouched, adds a regression
+  fixture for the exact old shape, and proxies `/live`, `/ready`, and `/health/ready` around the
+  SPA fallback. The fix passed focused 85/85 coverage plus typecheck/build/lint/format checks.
+
+- Main-native trusted-proxy parity is prepared separately at `be06596` on
+  `codex/main-trusted-proxy-boundary`; it was based exactly on `github/main` and adds a bounded
+  forwarded-IP resolver shared by HTTP and OTP throttling with adversarial tests. It remains a
+  review branch because the candidate already contains equivalent behavior and the two lines are
+  not safe for blind merging.
 
 - Promotion review confirms `github/main` remains `2083ffc` while the candidate is 407 commits
   behind and 211 commits ahead from common base `73744bb`; simulated merge conflicts make a direct
