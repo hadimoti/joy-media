@@ -28,10 +28,7 @@ import {
   isCreativeBriefErrorState,
   isCreativeBriefStaleState,
 } from './creative-brief-controller.js';
-import type {
-  CreativeBriefState,
-  CreativeBriefEvent,
-} from './creative-brief-controller.js';
+import type { CreativeBriefState, CreativeBriefEvent } from './creative-brief-controller.js';
 
 // ==========================================================================
 // Fixtures
@@ -53,11 +50,15 @@ const MOCK_BRIEF: CreativeBriefV1 = {
     confidence: 'high',
   },
   distinction: {
-    facts: [
-      { id: 'fact-001', statement: 'Scene 1 has 3 clips', source: 's2', evidence: [] },
-    ],
+    facts: [{ id: 'fact-001', statement: 'Scene 1 has 3 clips', source: 's2', evidence: [] }],
     inferences: [
-      { id: 'inf-001', statement: 'Adding b-roll would help', confidence: 'medium', rationale: 'Visual interest', evidence: [] },
+      {
+        id: 'inf-001',
+        statement: 'Adding b-roll would help',
+        confidence: 'medium',
+        rationale: 'Visual interest',
+        evidence: [],
+      },
     ],
   },
   assumptions: [],
@@ -66,9 +67,48 @@ const MOCK_BRIEF: CreativeBriefV1 = {
   requiresHumanDecision: [],
   warnings: [],
   intelligence: {
-    brand: { projectId: 'test-project-001', revisionId: 'rev-abc123', colorsAvailable: false, fontsAvailable: false, logoAvailable: false, voiceInstructionsAvailable: false, toneInstructionsAvailable: false, hasBrandKit: false, brandCompleteness: 'none', missingComponents: [], warnings: [], evidence: [] },
+    brand: {
+      projectId: 'test-project-001',
+      revisionId: 'rev-abc123',
+      colorsAvailable: false,
+      fontsAvailable: false,
+      logoAvailable: false,
+      voiceInstructionsAvailable: false,
+      toneInstructionsAvailable: false,
+      prohibitedClaims: [],
+      prohibitedEffects: [],
+      hasBrandKit: false,
+      brandCompleteness: 'none',
+      missingComponents: [],
+      warnings: [],
+      evidence: [],
+    },
     scenes: [],
-    project: { projectId: 'test-project-001', revisionId: 'rev-abc123', destination: undefined, destinationAligned: false, durationTargetUs: undefined, compositionDurationUs: 0, durationAligned: false, aspectRatio: '0:0', aspectRatioAligned: false, capabilities: {}, blockers: [], evidence: [] },
+    project: {
+      projectId: 'test-project-001',
+      revisionId: 'rev-abc123',
+      destination: undefined,
+      destinationAligned: false,
+      destinationMismatch: undefined,
+      durationTargetUs: undefined,
+      compositionDurationUs: 0,
+      durationAligned: false,
+      durationGapUs: undefined,
+      aspectRatio: '0:0',
+      aspectRatioAligned: false,
+      aspectRatioMismatch: undefined,
+      captionAvailable: false,
+      audioAvailable: false,
+      generatedAssetsAvailable: false,
+      readinessLevel: 'unknown',
+      blockers: [],
+      warnings: [],
+      sceneCount: 0,
+      scenesWithVisuals: 0,
+      scenesWithAudio: 0,
+      scenesWithCaptions: 0,
+      evidence: [],
+    },
     rules: [],
   },
   meta: { generatedAt: '2026-08-18T10:00:00.000Z', modelAdapter: 'fake-v1', processingTimeMs: 100 },
@@ -93,7 +133,12 @@ const PERSIAN_REQUEST = 'ویدیو من رو سریع‌تر کنید';
 const PERSIAN_BRIEF: CreativeBriefV1 = {
   ...MOCK_BRIEF,
   request: PERSIAN_REQUEST,
-  interpretedGoal: { userIntent: PERSIAN_REQUEST, inferredGoal: 'کاهش مدت', resolvedGoal: 'حذف مقاطع', confidence: 'high' },
+  interpretedGoal: {
+    userIntent: PERSIAN_REQUEST,
+    inferredGoal: 'کاهش مدت',
+    resolvedGoal: 'حذف مقاطع',
+    confidence: 'high',
+  },
 };
 
 // ==========================================================================
@@ -531,12 +576,21 @@ describe('error state transitions', () => {
 
 describe('state selectors', () => {
   it('hasBrief returns true for brief-ready', () => {
-    const state: CreativeBriefState = { type: 'brief-ready', brief: MOCK_BRIEF_WITH_REV_A, revisionId: REVISION_ID_A };
+    const state: CreativeBriefState = {
+      type: 'brief-ready',
+      brief: MOCK_BRIEF_WITH_REV_A,
+      revisionId: REVISION_ID_A,
+    };
     expect(hasBrief(state)).toBe(true);
   });
 
   it('hasBrief returns true for stale', () => {
-    const state: CreativeBriefState = { type: 'stale', brief: MOCK_BRIEF_WITH_REV_A, revisionId: REVISION_ID_A, currentRevisionId: REVISION_ID_B };
+    const state: CreativeBriefState = {
+      type: 'stale',
+      brief: MOCK_BRIEF_WITH_REV_A,
+      revisionId: REVISION_ID_A,
+      currentRevisionId: REVISION_ID_B,
+    };
     expect(hasBrief(state)).toBe(true);
   });
 
@@ -544,16 +598,32 @@ describe('state selectors', () => {
     expect(hasBrief(IDLE_BRIEF_STATE)).toBe(false);
     expect(hasBrief(INITIAL_BRIEF_STATE)).toBe(false);
     expect(hasBrief({ type: 'error', error: 'test' })).toBe(false);
-    expect(hasBrief({ type: 'collecting', request: 'test', revisionId: REVISION_ID_A, projectId: PROJECT_ID })).toBe(false);
+    expect(
+      hasBrief({
+        type: 'collecting',
+        request: 'test',
+        revisionId: REVISION_ID_A,
+        projectId: PROJECT_ID,
+      }),
+    ).toBe(false);
   });
 
   it('getBrief returns the brief for brief-ready', () => {
-    const state: CreativeBriefState = { type: 'brief-ready', brief: MOCK_BRIEF_WITH_REV_A, revisionId: REVISION_ID_A };
+    const state: CreativeBriefState = {
+      type: 'brief-ready',
+      brief: MOCK_BRIEF_WITH_REV_A,
+      revisionId: REVISION_ID_A,
+    };
     expect(getBrief(state)).toBe(MOCK_BRIEF_WITH_REV_A);
   });
 
   it('getBrief returns the brief for stale', () => {
-    const state: CreativeBriefState = { type: 'stale', brief: MOCK_BRIEF_WITH_REV_A, revisionId: REVISION_ID_A, currentRevisionId: REVISION_ID_B };
+    const state: CreativeBriefState = {
+      type: 'stale',
+      brief: MOCK_BRIEF_WITH_REV_A,
+      revisionId: REVISION_ID_A,
+      currentRevisionId: REVISION_ID_B,
+    };
     expect(getBrief(state)).toBe(MOCK_BRIEF_WITH_REV_A);
   });
 
@@ -563,13 +633,29 @@ describe('state selectors', () => {
   });
 
   it('isStale returns true only for stale state', () => {
-    expect(isStale({ type: 'stale', brief: MOCK_BRIEF_WITH_REV_A, revisionId: REVISION_ID_A, currentRevisionId: REVISION_ID_B })).toBe(true);
-    expect(isStale({ type: 'brief-ready', brief: MOCK_BRIEF_WITH_REV_A, revisionId: REVISION_ID_A })).toBe(false);
+    expect(
+      isStale({
+        type: 'stale',
+        brief: MOCK_BRIEF_WITH_REV_A,
+        revisionId: REVISION_ID_A,
+        currentRevisionId: REVISION_ID_B,
+      }),
+    ).toBe(true);
+    expect(
+      isStale({ type: 'brief-ready', brief: MOCK_BRIEF_WITH_REV_A, revisionId: REVISION_ID_A }),
+    ).toBe(false);
     expect(isStale(IDLE_BRIEF_STATE)).toBe(false);
   });
 
   it('isCollecting returns true only for collecting state', () => {
-    expect(isCollecting({ type: 'collecting', request: 'test', revisionId: REVISION_ID_A, projectId: PROJECT_ID })).toBe(true);
+    expect(
+      isCollecting({
+        type: 'collecting',
+        request: 'test',
+        revisionId: REVISION_ID_A,
+        projectId: PROJECT_ID,
+      }),
+    ).toBe(true);
     expect(isCollecting(IDLE_BRIEF_STATE)).toBe(false);
   });
 
@@ -589,21 +675,53 @@ describe('state selectors', () => {
   });
 
   it('getRequest returns request only for collecting state', () => {
-    const collecting: CreativeBriefState = { type: 'collecting', request: 'test request', revisionId: REVISION_ID_A, projectId: PROJECT_ID };
+    const collecting: CreativeBriefState = {
+      type: 'collecting',
+      request: 'test request',
+      revisionId: REVISION_ID_A,
+      projectId: PROJECT_ID,
+    };
     expect(getRequest(collecting)).toBe('test request');
-    expect(getRequest({ type: 'brief-ready', brief: MOCK_BRIEF_WITH_REV_A, revisionId: REVISION_ID_A })).toBeNull();
+    expect(
+      getRequest({ type: 'brief-ready', brief: MOCK_BRIEF_WITH_REV_A, revisionId: REVISION_ID_A }),
+    ).toBeNull();
     expect(getRequest(IDLE_BRIEF_STATE)).toBeNull();
   });
 
   it('getRequest preserves Persian text', () => {
-    const collecting: CreativeBriefState = { type: 'collecting', request: PERSIAN_REQUEST, revisionId: REVISION_ID_A, projectId: PROJECT_ID };
+    const collecting: CreativeBriefState = {
+      type: 'collecting',
+      request: PERSIAN_REQUEST,
+      revisionId: REVISION_ID_A,
+      projectId: PROJECT_ID,
+    };
     expect(getRequest(collecting)).toBe(PERSIAN_REQUEST);
   });
 
   it('getRevisionId returns revision for states that have one', () => {
-    expect(getRevisionId({ type: 'collecting', request: 'test', revisionId: REVISION_ID_A, projectId: PROJECT_ID })).toBe(REVISION_ID_A);
-    expect(getRevisionId({ type: 'brief-ready', brief: MOCK_BRIEF_WITH_REV_A, revisionId: REVISION_ID_A })).toBe(REVISION_ID_A);
-    expect(getRevisionId({ type: 'stale', brief: MOCK_BRIEF_WITH_REV_A, revisionId: REVISION_ID_A, currentRevisionId: REVISION_ID_B })).toBe(REVISION_ID_A);
+    expect(
+      getRevisionId({
+        type: 'collecting',
+        request: 'test',
+        revisionId: REVISION_ID_A,
+        projectId: PROJECT_ID,
+      }),
+    ).toBe(REVISION_ID_A);
+    expect(
+      getRevisionId({
+        type: 'brief-ready',
+        brief: MOCK_BRIEF_WITH_REV_A,
+        revisionId: REVISION_ID_A,
+      }),
+    ).toBe(REVISION_ID_A);
+    expect(
+      getRevisionId({
+        type: 'stale',
+        brief: MOCK_BRIEF_WITH_REV_A,
+        revisionId: REVISION_ID_A,
+        currentRevisionId: REVISION_ID_B,
+      }),
+    ).toBe(REVISION_ID_A);
     expect(getRevisionId(IDLE_BRIEF_STATE)).toBeNull();
   });
 });
@@ -619,13 +737,22 @@ describe('type guards', () => {
   });
 
   it('isCreativeBriefCollectingState correctly identifies collecting', () => {
-    const state: CreativeBriefState = { type: 'collecting', request: 'test', revisionId: REVISION_ID_A, projectId: PROJECT_ID };
+    const state: CreativeBriefState = {
+      type: 'collecting',
+      request: 'test',
+      revisionId: REVISION_ID_A,
+      projectId: PROJECT_ID,
+    };
     expect(isCreativeBriefCollectingState(state)).toBe(true);
     expect(isCreativeBriefCollectingState(IDLE_BRIEF_STATE)).toBe(false);
   });
 
   it('isCreativeBriefReadyState correctly identifies brief-ready', () => {
-    const state: CreativeBriefState = { type: 'brief-ready', brief: MOCK_BRIEF_WITH_REV_A, revisionId: REVISION_ID_A };
+    const state: CreativeBriefState = {
+      type: 'brief-ready',
+      brief: MOCK_BRIEF_WITH_REV_A,
+      revisionId: REVISION_ID_A,
+    };
     expect(isCreativeBriefReadyState(state)).toBe(true);
     expect(isCreativeBriefReadyState(IDLE_BRIEF_STATE)).toBe(false);
   });
@@ -642,7 +769,12 @@ describe('type guards', () => {
   });
 
   it('isCreativeBriefStaleState correctly identifies stale', () => {
-    const state: CreativeBriefState = { type: 'stale', brief: MOCK_BRIEF_WITH_REV_A, revisionId: REVISION_ID_A, currentRevisionId: REVISION_ID_B };
+    const state: CreativeBriefState = {
+      type: 'stale',
+      brief: MOCK_BRIEF_WITH_REV_A,
+      revisionId: REVISION_ID_A,
+      currentRevisionId: REVISION_ID_B,
+    };
     expect(isCreativeBriefStaleState(state)).toBe(true);
     expect(isCreativeBriefStaleState(IDLE_BRIEF_STATE)).toBe(false);
   });
@@ -654,7 +786,11 @@ describe('type guards', () => {
 
 describe('immutability', () => {
   it('does not mutate state object during transitions', () => {
-    const originalState: CreativeBriefState = { type: 'brief-ready', brief: MOCK_BRIEF, revisionId: REVISION_ID_A };
+    const originalState: CreativeBriefState = {
+      type: 'brief-ready',
+      brief: MOCK_BRIEF,
+      revisionId: REVISION_ID_A,
+    };
     const originalBrief = originalState.brief;
 
     const newState = dispatch(originalState, {
@@ -692,13 +828,18 @@ describe('immutability', () => {
       ...MOCK_BRIEF_WITH_REV_A,
       recommendations: [{ ...MOCK_BRIEF_WITH_REV_A.recommendations[0]! }],
     };
-    const state: CreativeBriefState = { type: 'brief-ready', brief: briefWithMutableArray, revisionId: REVISION_ID_A };
+    const state: CreativeBriefState = {
+      type: 'brief-ready',
+      brief: briefWithMutableArray,
+      revisionId: REVISION_ID_A,
+    };
     const originalRecs = state.brief.recommendations;
 
     const newState = dispatch(state, { type: 'reset' });
 
     // Original brief's array should be unchanged
     expect(state.brief.recommendations).toBe(originalRecs);
+    expect(newState).toEqual(IDLE_BRIEF_STATE);
   });
 });
 
@@ -794,10 +935,19 @@ describe('full round-trip transitions', () => {
   it('idle → collecting → brief-ready → stale → idle', () => {
     let state: CreativeBriefState = IDLE_BRIEF_STATE;
 
-    state = dispatch(state, { type: 'collect-start', request: 'test', revisionId: REVISION_ID_A, projectId: PROJECT_ID });
+    state = dispatch(state, {
+      type: 'collect-start',
+      request: 'test',
+      revisionId: REVISION_ID_A,
+      projectId: PROJECT_ID,
+    });
     expect(isCollecting(state)).toBe(true);
 
-    state = dispatch(state, { type: 'collect-success', brief: MOCK_BRIEF_WITH_REV_A, revisionId: REVISION_ID_A });
+    state = dispatch(state, {
+      type: 'collect-success',
+      brief: MOCK_BRIEF_WITH_REV_A,
+      revisionId: REVISION_ID_A,
+    });
     expect(isCreativeBriefReadyState(state)).toBe(true);
 
     state = dispatch(state, { type: 'revision-change', newRevisionId: REVISION_ID_B });
@@ -810,23 +960,42 @@ describe('full round-trip transitions', () => {
   it('idle → collecting → error → collecting → brief-ready', () => {
     let state: CreativeBriefState = IDLE_BRIEF_STATE;
 
-    state = dispatch(state, { type: 'collect-start', request: 'test', revisionId: REVISION_ID_A, projectId: PROJECT_ID });
+    state = dispatch(state, {
+      type: 'collect-start',
+      request: 'test',
+      revisionId: REVISION_ID_A,
+      projectId: PROJECT_ID,
+    });
     expect(isCollecting(state)).toBe(true);
 
     state = dispatch(state, { type: 'collect-error', error: 'Network error' });
     expect(hasError(state)).toBe(true);
 
-    state = dispatch(state, { type: 'retry', request: 'test', revisionId: REVISION_ID_A, projectId: PROJECT_ID });
+    state = dispatch(state, {
+      type: 'retry',
+      request: 'test',
+      revisionId: REVISION_ID_A,
+      projectId: PROJECT_ID,
+    });
     expect(isCollecting(state)).toBe(true);
 
-    state = dispatch(state, { type: 'collect-success', brief: MOCK_BRIEF_WITH_REV_A, revisionId: REVISION_ID_A });
+    state = dispatch(state, {
+      type: 'collect-success',
+      brief: MOCK_BRIEF_WITH_REV_A,
+      revisionId: REVISION_ID_A,
+    });
     expect(isCreativeBriefReadyState(state)).toBe(true);
   });
 
   it('unavailable → collecting → unavailable → idle', () => {
     let state: CreativeBriefState = INITIAL_BRIEF_STATE;
 
-    state = dispatch(state, { type: 'collect-start', request: 'test', revisionId: REVISION_ID_A, projectId: PROJECT_ID });
+    state = dispatch(state, {
+      type: 'collect-start',
+      request: 'test',
+      revisionId: REVISION_ID_A,
+      projectId: PROJECT_ID,
+    });
     expect(isCollecting(state)).toBe(true);
 
     state = dispatch(state, { type: 'collect-unavailable', reason: 'Adapter not loaded' });

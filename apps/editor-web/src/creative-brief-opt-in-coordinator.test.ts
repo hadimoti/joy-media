@@ -1,11 +1,10 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, type MockedFunction } from 'vitest';
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import type { ControlPlaneProjectBinding } from './project-control-plane.js';
 import { getControlPlaneProjectBinding } from './project-control-plane.js';
 import {
   coordinateCreativeBriefOptIn,
   type CreativeBriefOptInTransport,
-  type CreativeBriefOptInResult,
 } from './creative-brief-opt-in-coordinator.js';
 
 const MOCK_EDITOR_PROJECT_ID = 'local-edit-1';
@@ -22,11 +21,6 @@ function memoryStorage(): BrowserKeyValueStore {
     removeItem: (key: string) => {
       delete store[key];
     },
-    clear: () => {
-      Object.keys(store).forEach((k) => delete store[k]);
-    },
-    key: (index: number) => Object.keys(store)[index] ?? null,
-    length: Object.keys(store).length,
   };
 }
 
@@ -35,13 +29,13 @@ function baseBinding(revision?: number): ControlPlaneProjectBinding {
     editorProjectId: MOCK_EDITOR_PROJECT_ID,
     controlPlaneProjectId: MOCK_CONTROL_PLANE_PROJECT_ID,
     title: MOCK_TITLE,
-    revision,
+    ...(revision === undefined ? {} : { revision }),
   };
 }
 
 describe('coordinateCreativeBriefOptIn', () => {
   let storage: BrowserKeyValueStore;
-  let mockTransport: CreativeBriefOptInTransport;
+  let mockTransport: MockedFunction<CreativeBriefOptInTransport>;
 
   beforeEach(() => {
     storage = memoryStorage();
@@ -57,11 +51,7 @@ describe('coordinateCreativeBriefOptIn', () => {
       await coordinateCreativeBriefOptIn(binding, true, storage, mockTransport);
 
       expect(mockTransport).toHaveBeenCalledTimes(1);
-      expect(mockTransport).toHaveBeenCalledWith(
-        MOCK_CONTROL_PLANE_PROJECT_ID,
-        true,
-        0,
-      );
+      expect(mockTransport).toHaveBeenCalledWith(MOCK_CONTROL_PLANE_PROJECT_ID, true, 0);
     });
 
     it('persists binding with new revision on matching response', async () => {
@@ -95,11 +85,7 @@ describe('coordinateCreativeBriefOptIn', () => {
       await coordinateCreativeBriefOptIn(binding, false, storage, mockTransport);
 
       expect(mockTransport).toHaveBeenCalledTimes(1);
-      expect(mockTransport).toHaveBeenCalledWith(
-        MOCK_CONTROL_PLANE_PROJECT_ID,
-        false,
-        3,
-      );
+      expect(mockTransport).toHaveBeenCalledWith(MOCK_CONTROL_PLANE_PROJECT_ID, false, 3);
     });
 
     it('persists binding with new revision on matching disable response', async () => {
@@ -133,11 +119,7 @@ describe('coordinateCreativeBriefOptIn', () => {
 
       await coordinateCreativeBriefOptIn(binding, true, storage, mockTransport);
 
-      expect(mockTransport).toHaveBeenCalledWith(
-        MOCK_CONTROL_PLANE_PROJECT_ID,
-        true,
-        0,
-      );
+      expect(mockTransport).toHaveBeenCalledWith(MOCK_CONTROL_PLANE_PROJECT_ID, true, 0);
     });
   });
 
@@ -151,7 +133,11 @@ describe('coordinateCreativeBriefOptIn', () => {
         ownerKey: 'gmail-user',
       });
 
-      const persisted = getControlPlaneProjectBinding(storage, MOCK_EDITOR_PROJECT_ID, 'gmail-user');
+      const persisted = getControlPlaneProjectBinding(
+        storage,
+        MOCK_EDITOR_PROJECT_ID,
+        'gmail-user',
+      );
       expect(persisted).toBeDefined();
       expect(persisted?.revision).toBe(1);
 
@@ -207,7 +193,7 @@ describe('coordinateCreativeBriefOptIn', () => {
     it('returns invalid-revision result for non-number revision', async () => {
       const binding = baseBinding(0);
       const expectedResponse = { creativeBriefOptIn: true, revision: 'not-a-number' };
-      mockTransport.mockResolvedValue(expectedResponse);
+      mockTransport.mockResolvedValue(expectedResponse as never);
 
       const result = await coordinateCreativeBriefOptIn(binding, true, storage, mockTransport);
 
@@ -345,11 +331,7 @@ describe('coordinateCreativeBriefOptIn', () => {
 
       await coordinateCreativeBriefOptIn(binding, true, storage, mockTransport);
 
-      expect(mockTransport).toHaveBeenCalledWith(
-        customControlPlaneId,
-        true,
-        5,
-      );
+      expect(mockTransport).toHaveBeenCalledWith(customControlPlaneId, true, 5);
     });
 
     it('passes enabled state as-is', async () => {
@@ -357,21 +339,13 @@ describe('coordinateCreativeBriefOptIn', () => {
       mockTransport.mockResolvedValue({ creativeBriefOptIn: true, revision: 1 });
 
       await coordinateCreativeBriefOptIn(binding, true, storage, mockTransport);
-      expect(mockTransport).toHaveBeenCalledWith(
-        MOCK_CONTROL_PLANE_PROJECT_ID,
-        true,
-        0,
-      );
+      expect(mockTransport).toHaveBeenCalledWith(MOCK_CONTROL_PLANE_PROJECT_ID, true, 0);
 
       mockTransport.mockReset();
       mockTransport.mockResolvedValue({ creativeBriefOptIn: false, revision: 1 });
 
       await coordinateCreativeBriefOptIn(binding, false, storage, mockTransport);
-      expect(mockTransport).toHaveBeenCalledWith(
-        MOCK_CONTROL_PLANE_PROJECT_ID,
-        false,
-        0,
-      );
+      expect(mockTransport).toHaveBeenCalledWith(MOCK_CONTROL_PLANE_PROJECT_ID, false, 0);
     });
 
     it('passes baseRevision from binding.revision', async () => {
@@ -380,11 +354,7 @@ describe('coordinateCreativeBriefOptIn', () => {
 
       await coordinateCreativeBriefOptIn(binding, true, storage, mockTransport);
 
-      expect(mockTransport).toHaveBeenCalledWith(
-        MOCK_CONTROL_PLANE_PROJECT_ID,
-        true,
-        42,
-      );
+      expect(mockTransport).toHaveBeenCalledWith(MOCK_CONTROL_PLANE_PROJECT_ID, true, 42);
     });
   });
 });

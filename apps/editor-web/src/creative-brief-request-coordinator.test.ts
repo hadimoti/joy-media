@@ -1,10 +1,18 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, type MockedFunction } from 'vitest';
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
-import type { JoyProjectV1, ProjectRevisionId } from '@joy-media/project-schema';
-import type { CreativeBriefRequestV1, CreativeBriefV1, CreativeBriefScope } from '@joy-media/agent-tools';
+import type { JoyProjectV1 } from '@joy-media/project-schema';
+import type {
+  CreativeBriefRequestV1,
+  CreativeBriefV1,
+  CreativeBriefScope,
+} from '@joy-media/agent-tools';
 import type { ControlPlaneProjectBinding } from './project-control-plane.js';
 import type { SyncProjectDocument, DocumentSyncResult } from './project-document-sync.js';
-import { coordinateCreativeBriefRequest, type CreativeBriefTransport } from './creative-brief-request-coordinator.js';
+import {
+  coordinateCreativeBriefRequest,
+  type CreativeBriefCoordinationResult,
+  type CreativeBriefTransport,
+} from './creative-brief-request-coordinator.js';
 
 const MOCK_PROJECT_ID = 'local-edit-1';
 const MOCK_CONTROL_PLANE_PROJECT_ID = 'project-server-1';
@@ -74,6 +82,8 @@ const mockBrief = {
       hasBrandKit: false,
       brandCompleteness: 'none',
       missingComponents: [],
+      warnings: [],
+      evidence: [],
     },
     scenes: [],
     project: {
@@ -94,6 +104,12 @@ const mockBrief = {
       generatedAssetsAvailable: false,
       readinessLevel: 'unknown',
       blockers: [],
+      warnings: [],
+      sceneCount: 0,
+      scenesWithVisuals: 0,
+      scenesWithAudio: 0,
+      scenesWithCaptions: 0,
+      evidence: [],
     },
     rules: [],
   },
@@ -115,7 +131,7 @@ function memoryStorage(): BrowserKeyValueStore {
 
 // Conflict error (409 DOCUMENT_REVISION_CONFLICT)
 class ConflictError extends Error {
-  constructor(readonly message: string) {
+  constructor(override readonly message: string) {
     super(message);
     this.name = 'ConflictError';
   }
@@ -125,7 +141,7 @@ class ConflictError extends Error {
 
 // Generic network error
 class NetworkError extends Error {
-  constructor(readonly message: string) {
+  constructor(override readonly message: string) {
     super(message);
     this.name = 'NetworkError';
   }
@@ -133,7 +149,7 @@ class NetworkError extends Error {
 
 // Generic brief error
 class BriefError extends Error {
-  constructor(readonly message: string) {
+  constructor(override readonly message: string) {
     super(message);
     this.name = 'BriefError';
   }
@@ -143,16 +159,6 @@ const SUCCESS_SYNC_RESULT: DocumentSyncResult = {
   kind: 'success',
   projectId: MOCK_CONTROL_PLANE_PROJECT_ID,
   revisionId: MOCK_REVISION_ID,
-};
-
-const CONFLICT_SYNC_RESULT: DocumentSyncResult = {
-  kind: 'conflict',
-  message: 'Revision conflict',
-};
-
-const FAILURE_SYNC_RESULT: DocumentSyncResult = {
-  kind: 'request-failure',
-  error: new NetworkError('Network failed'),
 };
 
 const FAILURE_ERROR = new NetworkError('Network failed');
@@ -172,10 +178,18 @@ function createRequest(
   };
 }
 
+function expectResultKind<K extends CreativeBriefCoordinationResult['kind']>(
+  result: CreativeBriefCoordinationResult,
+  kind: K,
+): asserts result is Extract<CreativeBriefCoordinationResult, { readonly kind: K }> {
+  expect(result.kind).toBe(kind);
+  if (result.kind !== kind) throw new Error(`Expected ${kind}, received ${result.kind}`);
+}
+
 describe('coordinateCreativeBriefRequest', () => {
   let storage: BrowserKeyValueStore;
-  let syncProjectDocument: SyncProjectDocument;
-  let creativeBriefTransport: CreativeBriefTransport;
+  let syncProjectDocument: MockedFunction<SyncProjectDocument>;
+  let creativeBriefTransport: MockedFunction<CreativeBriefTransport>;
 
   beforeEach(() => {
     storage = memoryStorage();
@@ -215,7 +229,7 @@ describe('coordinateCreativeBriefRequest', () => {
         baseRequest,
       );
 
-      expect(result.kind).toBe('success');
+      expectResultKind(result, 'success');
       expect(result.syncResult).toEqual(SUCCESS_SYNC_RESULT);
       expect(result.brief).toEqual(mockBrief);
     });
@@ -262,12 +276,9 @@ describe('coordinateCreativeBriefRequest', () => {
         creativeBriefTransport,
       );
 
-      expect(creativeBriefTransport).toHaveBeenCalledWith(
-        MOCK_CONTROL_PLANE_PROJECT_ID,
-        request,
-      );
+      expect(creativeBriefTransport).toHaveBeenCalledWith(MOCK_CONTROL_PLANE_PROJECT_ID, request);
       // Verify the request object is the same reference
-      expect(creativeBriefTransport.mock.calls[0][1]).toBe(request);
+      expect(creativeBriefTransport.mock.calls[0]![1]).toBe(request);
     });
   });
 
@@ -296,14 +307,8 @@ describe('coordinateCreativeBriefRequest', () => {
         creativeBriefTransport,
       );
 
-      expect(syncProjectDocument).toHaveBeenCalledWith(
-        'different-server-id',
-        expect.any(Object),
-      );
-      expect(creativeBriefTransport).toHaveBeenCalledWith(
-        'different-server-id',
-        baseRequest,
-      );
+      expect(syncProjectDocument).toHaveBeenCalledWith('different-server-id', expect.any(Object));
+      expect(creativeBriefTransport).toHaveBeenCalledWith('different-server-id', baseRequest);
     });
   });
 
@@ -324,7 +329,7 @@ describe('coordinateCreativeBriefRequest', () => {
       expect(syncProjectDocument).not.toHaveBeenCalled();
       expect(creativeBriefTransport).not.toHaveBeenCalled();
 
-      expect(result.kind).toBe('parity-failure');
+      expectResultKind(result, 'parity-failure');
       expect(result.reason).toBe('projectId-mismatch');
       expect(result.expectedProjectId).toBe(MOCK_PROJECT_ID);
       expect(result.actualProjectId).toBe('different-project-id');
@@ -348,7 +353,7 @@ describe('coordinateCreativeBriefRequest', () => {
       expect(syncProjectDocument).not.toHaveBeenCalled();
       expect(creativeBriefTransport).not.toHaveBeenCalled();
 
-      expect(result.kind).toBe('parity-failure');
+      expectResultKind(result, 'parity-failure');
       expect(result.reason).toBe('snapshotRevisionId-mismatch');
       expect(result.expectedProjectId).toBe(MOCK_PROJECT_ID);
       expect(result.actualProjectId).toBe(MOCK_PROJECT_ID);
@@ -370,7 +375,7 @@ describe('coordinateCreativeBriefRequest', () => {
         creativeBriefTransport,
       );
 
-      expect(result.kind).toBe('success');
+      expectResultKind(result, 'success');
     });
   });
 
@@ -391,7 +396,7 @@ describe('coordinateCreativeBriefRequest', () => {
       expect(syncProjectDocument).toHaveBeenCalledTimes(1);
       expect(creativeBriefTransport).not.toHaveBeenCalled();
 
-      expect(result.kind).toBe('stale');
+      expectResultKind(result, 'stale');
       expect(result.syncConflict.kind).toBe('conflict');
       expect(result.syncConflict.message).toBe('Revision conflict');
     });
@@ -412,7 +417,7 @@ describe('coordinateCreativeBriefRequest', () => {
       expect(syncProjectDocument).toHaveBeenCalledTimes(1);
       expect(creativeBriefTransport).not.toHaveBeenCalled();
 
-      expect(result.kind).toBe('stale');
+      expectResultKind(result, 'stale');
       expect(result.syncConflict.kind).toBe('conflict');
       expect(result.syncConflict.message).toBe('Revision conflict');
     });
@@ -435,7 +440,7 @@ describe('coordinateCreativeBriefRequest', () => {
       expect(syncProjectDocument).toHaveBeenCalledTimes(1);
       expect(creativeBriefTransport).not.toHaveBeenCalled();
 
-      expect(result.kind).toBe('sync-failure');
+      expectResultKind(result, 'sync-failure');
       expect(result.syncResult.kind).toBe('request-failure');
       expect(result.syncResult.error).toBe(FAILURE_ERROR);
     });
@@ -456,7 +461,7 @@ describe('coordinateCreativeBriefRequest', () => {
       expect(syncProjectDocument).toHaveBeenCalledTimes(1);
       expect(creativeBriefTransport).not.toHaveBeenCalled();
 
-      expect(result.kind).toBe('sync-failure');
+      expectResultKind(result, 'sync-failure');
       expect(result.syncResult.kind).toBe('request-failure');
       expect(result.syncResult.error).toBe(FAILURE_ERROR);
     });
@@ -480,7 +485,7 @@ describe('coordinateCreativeBriefRequest', () => {
       expect(syncProjectDocument).toHaveBeenCalledTimes(1);
       expect(creativeBriefTransport).toHaveBeenCalledTimes(1);
 
-      expect(result.kind).toBe('brief-failure');
+      expectResultKind(result, 'brief-failure');
       expect(result.syncResult).toEqual(SUCCESS_SYNC_RESULT);
       expect(result.error).toBe(BRIEF_ERROR);
     });
@@ -500,7 +505,7 @@ describe('coordinateCreativeBriefRequest', () => {
         creativeBriefTransport,
       );
 
-      expect(result.kind).toBe('brief-failure');
+      expectResultKind(result, 'brief-failure');
       expect(result.error).toBe(briefError);
     });
   });
@@ -532,8 +537,8 @@ describe('coordinateCreativeBriefRequest', () => {
         MOCK_CONTROL_PLANE_PROJECT_ID,
         persianRequest,
       );
-      expect(result.kind).toBe('success');
-      expect((creativeBriefTransport.mock.calls[0][1] as CreativeBriefRequestV1).request).toBe(
+      expectResultKind(result, 'success');
+      expect((creativeBriefTransport.mock.calls[0]![1] as CreativeBriefRequestV1).request).toBe(
         'تست فارسی با متن راست به چپ',
       );
     });
@@ -582,7 +587,7 @@ describe('coordinateCreativeBriefRequest', () => {
         creativeBriefTransport,
       );
 
-      expect(result.kind).toBe('success');
+      expectResultKind(result, 'success');
       expect(result.syncResult).toEqual(SUCCESS_SYNC_RESULT);
       expect(result.brief).toEqual(mockBrief);
     });
@@ -609,7 +614,7 @@ describe('coordinateCreativeBriefRequest', () => {
         creativeBriefTransport,
       );
 
-      expect(result.kind).toBe('success');
+      expectResultKind(result, 'success');
       expect(result.brief).toEqual(brief);
       expect(result.brief).toBe(brief);
     });

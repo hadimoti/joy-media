@@ -4,11 +4,8 @@ import {
   getControlPlaneProjectBinding,
   upsertControlPlaneProjectBinding,
 } from './project-control-plane.js';
-import {
-  syncProjectDocumentBinding,
-  type DocumentSyncResult,
-  type SyncProjectDocument,
-} from './project-document-sync.js';
+import { syncProjectDocumentBinding, type SyncProjectDocument } from './project-document-sync.js';
+import type { JoyProjectV1 } from '@joy-media/project-schema';
 
 function memoryStorage() {
   const values = new Map<string, string>();
@@ -24,11 +21,21 @@ const binding: ControlPlaneProjectBinding = {
   title: 'Campaign cut',
 };
 
-const document = {
+const document: JoyProjectV1 = {
+  schemaVersion: 1,
   id: 'local-edit-1',
   title: 'Campaign cut',
-  revision: 1,
-  timeline: { tracks: [], markers: [] },
+  createdAt: '2024-01-01T00:00:00Z',
+  updatedAt: '2024-01-01T00:00:00Z',
+  rootCompositionId: 'comp-1',
+  settings: { defaultLocale: 'en' },
+  compositions: {},
+  assets: {},
+  variables: {},
+  markers: [],
+  visualObjects: {},
+  captionDocuments: {},
+  pluginData: {},
 };
 
 const revisionId = 'cas-rev-abc123';
@@ -41,7 +48,7 @@ const successResponse = {
 
 // Conflict error (409 DOCUMENT_REVISION_CONFLICT)
 class ConflictError extends Error {
-  constructor(readonly message: string) {
+  constructor(override readonly message: string) {
     super(message);
     this.name = 'ConflictError';
   }
@@ -51,7 +58,7 @@ class ConflictError extends Error {
 
 // Generic network error
 class NetworkError extends Error {
-  constructor(readonly message: string) {
+  constructor(override readonly message: string) {
     super(message);
     this.name = 'NetworkError';
   }
@@ -194,9 +201,9 @@ describe('project-document-sync', () => {
     expect(syncProjectDocument).not.toHaveBeenCalled();
     expect(result.kind).toBe('request-failure');
     expect((result as { kind: 'request-failure'; error: Error }).error).toBeInstanceOf(Error);
-    expect(
-      (result as { kind: 'request-failure'; error: Error }).error.message,
-    ).toContain('does not match');
+    expect((result as { kind: 'request-failure'; error: Error }).error.message).toContain(
+      'does not match',
+    );
   });
 
   it('fails without persistence when sync response projectId does not match', async () => {
@@ -249,14 +256,9 @@ describe('project-document-sync', () => {
     const storage = memoryStorage();
     const syncProjectDocument: SyncProjectDocument = vi.fn().mockResolvedValue(successResponse);
 
-    await syncProjectDocumentBinding(
-      binding,
-      document,
-      revisionId,
-      storage,
-      syncProjectDocument,
-      { ownerKey: 'gmail-user' },
-    );
+    await syncProjectDocumentBinding(binding, document, revisionId, storage, syncProjectDocument, {
+      ownerKey: 'gmail-user',
+    });
 
     // Should be persisted under gmail-user
     const persistedGmail = getControlPlaneProjectBinding(storage, 'local-edit-1', 'gmail-user');
