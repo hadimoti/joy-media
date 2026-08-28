@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TransitionShaderEntry } from '@joy-media/transition-shaders';
 
-const TRANSITION_A = '/transitions/preview/transition1.png';
-const TRANSITION_B = '/transitions/preview/transition2.png';
+// Keep the source frames text-based and source-controlled so clean installs do
+// not depend on optional generated PNGs just to render the transition catalog.
+const TRANSITION_A = '/transitions/preview/transition1.svg';
+const TRANSITION_B = '/transitions/preview/transition2.svg';
 
 let sharedImageA: HTMLImageElement | null = null;
 let sharedImageB: HTMLImageElement | null = null;
