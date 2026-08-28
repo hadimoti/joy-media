@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" role="img" aria-label="JOY transition preview frame one">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="0.48" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.22" cy="0.2" r="0.8">
+      <stop offset="0" stop-color="#fef3c7" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#fef3c7" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="320" height="180" rx="18" fill="url(#sky)"/>
+  <circle cx="70" cy="52" r="80" fill="url(#glow)"/>
+  <path d="M0 142 Q72 96 144 132 T320 112 V180 H0Z" fill="#0f172a" fill-opacity="0.46"/>
+  <circle cx="242" cy="54" r="24" fill="#f8fafc" fill-opacity="0.86"/>
+  <path d="M220 134h72" stroke="#f8fafc" stroke-linecap="round" stroke-width="8" stroke-opacity="0.72"/>
+</svg>
