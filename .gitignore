@@ -6,5 +6,14 @@ coverage/
 .env.*
 .vscode/
 
+# Local release/test evidence and compiler sidecars are disposable outputs.
+test-output/
+test-results/
+tooling/**/test-results/
+apps/**/src/**/*.js
+apps/**/src/**/*.js.map
+apps/**/src/**/*.d.ts
+.tmp-p3-debug.mts
+
 # Captured worker stdout from local debugging runs, not source.
 worker_output.txt
