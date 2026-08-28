@@ -7,6 +7,107 @@ import { WorkerDaemon } from './worker-daemon.js';
 import { StaticLocalAssetSourceRegistry, WorkerRuntime } from './runtime.js';
 
 describe('WorkerDaemon', () => {
+  it('re-announces idle presence on a configurable interval', async () => {
+    let helloCount = 0;
+    let stop = false;
+    const client = {
+      hello: async () => {
+        helloCount += 1;
+        if (helloCount >= 2) stop = true;
+      },
+      lease: async () => undefined,
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = {
+      hello: () => ({ capabilities: ['render.export'] }),
+      localAssetIds: () => [],
+      log: { write: () => undefined },
+    } as never;
+
+    await new WorkerDaemon(client, runtime).run({
+      pollIntervalMs: 0,
+      presenceIntervalMs: 0,
+      stopped: () => stop,
+    });
+
+    expect(helloCount).toBe(2);
+  });
+
+  it('reports runtime failures exactly once with an actionable message and sanitized diagnostics', async () => {
+    const failures: string[] = [];
+    const logs: string[] = [];
+    let stop = false;
+    let leased = false;
+    const client = {
+      hello: async () => undefined,
+      lease: async () => {
+        if (leased) return undefined;
+        leased = true;
+        return { id: 'runtime-job', projectId: 'project-1', type: 'render.export' };
+      },
+      fail: async (_jobId: string, error: string) => {
+        failures.push(error);
+        stop = true;
+      },
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = {
+      hello: () => ({ capabilities: ['render.export'] }),
+      localAssetIds: () => [],
+      run: async () => {
+        throw new Error('Bearer super-secret https://private.example/path password=secret');
+      },
+      log: { write: (message: string) => logs.push(message) },
+    } as never;
+
+    await new WorkerDaemon(client, runtime).run({ pollIntervalMs: 0, stopped: () => stop });
+
+    expect(failures).toEqual([
+      'Worker execution failed; inspect local Worker logs and retry the job',
+    ]);
+    expect(failures).toHaveLength(1);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).not.toContain('super-secret');
+    expect(logs[0]).not.toContain('private.example');
+    expect(logs[0]).not.toContain('secret');
+  });
+
+  it('reports control-plane failures once per leased job', async () => {
+    const failures: string[] = [];
+    let stop = false;
+    let leased = false;
+    const client = {
+      hello: async () => undefined,
+      lease: async () => {
+        if (leased) return undefined;
+        leased = true;
+        return { id: 'control-plane-job', projectId: 'project-1', type: 'render.export' };
+      },
+      heartbeat: async () => {
+        throw new Error('heartbeat unavailable');
+      },
+      fail: async (_jobId: string, error: string) => {
+        failures.push(error);
+        stop = true;
+      },
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = {
+      hello: () => ({ capabilities: ['render.export'] }),
+      localAssetIds: () => [],
+      run: async (
+        _job: unknown,
+        options: { readonly progress: (progress: number) => Promise<void> },
+      ) => {
+        await options.progress(10);
+        return { state: 'completed' as const, result: { kind: 'render.export' as const } };
+      },
+      log: { write: () => undefined },
+    } as never;
+
+    await new WorkerDaemon(client, runtime).run({ pollIntervalMs: 0, stopped: () => stop });
+
+    expect(failures).toEqual([
+      'Worker control-plane communication failed; check API connectivity and retry the job',
+    ]);
+  });
   it('announces local assets, renews progress, and reports a real thumbnail receipt', async () => {
     const calls: string[] = [];
     let stop = false;

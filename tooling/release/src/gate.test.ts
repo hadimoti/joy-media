@@ -63,6 +63,25 @@ describe('JOY Studio 1.0 release gate', () => {
     );
   });
 
+  it('keeps missing static assets out of the SPA fallback in nginx', () => {
+    const config = readFileSync(
+      resolve(import.meta.dirname, '../../../deploy/joy-media.nginx.conf'),
+      'utf8',
+    );
+    const staticPrefixes =
+      'location ~* ^/(?:assets|effects|fonts|images|media|transitions|workers?|worklets?)/ {';
+    const staticExtensions = 'location ~* \\.(?:avif|bmp|css|gif|ico|jpe?g|js|json|mjs|map|';
+    const spaFallback = 'try_files $uri $uri/ /index.html;';
+
+    expect(config).toContain(`${staticPrefixes}\n        try_files $uri =404;`);
+    expect(config).toContain(staticExtensions);
+    expect(config.indexOf(staticPrefixes)).toBeLessThan(config.indexOf(spaFallback));
+    expect(config.indexOf(staticExtensions)).toBeLessThan(config.indexOf(spaFallback));
+    expect(config).toContain('location ^~ /api/ {');
+    expect(config.match(/try_files \$uri =404;/gu)).toHaveLength(2);
+    expect(config.match(/try_files \$uri \$uri\/ \/index\.html;/gu)).toHaveLength(1);
+  });
+
   it('rejects dirty, missing, stale, or cross-revision browser provenance', () => {
     const now = new Date('2026-08-28T12:00:00.000Z');
     const current = sourceProvenance();
