@@ -82,10 +82,10 @@ Codex in-app-browser findings below remain valid independent evidence.
 
 | Surface                     | Observed tip/state                                | Consequence                                                                       |
 | --------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Local checkpoint branch     | `9f91e4e` on `codex/joy-media-implement-20260828` | Clean tested candidate, published for review; not yet promoted to `main`.         |
+| Local checkpoint branch     | `39d723e` on `codex/joy-media-implement-20260828` | Clean tested candidate, published for review; not yet promoted to `main`.         |
 | Deployed/VPS release branch | `b3c1866`                                         | Older certified release; candidate has additional hardening and is not deployed.  |
-| GitHub `main`               | `2083ffc`                                         | 407 main-only commits versus 179 candidate-only commits.                          |
-| VPS `main`                  | `1e4657f`                                         | 225 VPS-main-only commits versus 179 candidate-only commits.                      |
+| GitHub `main`               | `2083ffc`                                         | 407 main-only commits versus 184 candidate-only commits.                          |
+| VPS `main`                  | `1e4657f`                                         | 225 VPS-main-only commits versus 184 candidate-only commits.                      |
 | Common merge base           | `73744bb`                                         | A blind merge is unsafe; simulated reconciliation has extensive overlap/conflict. |
 
 `aec01ef` contains 324 changed files and a large quantity of transient evidence, debug files, and
@@ -587,7 +587,7 @@ unavailable`, and a console error loading `/transitions/preview/transition2.png`
   and returns typed/sanitized failure outcomes; it does not claim the coupled main-branch
   Creative Brief runtime is reconciled. The agent-tools package suite passes 324/324.
 - The latest full repository test run passes 315 files (2,457 tests) with one skipped test. The
-  clean `pnpm release:gate` run at `2026-08-28T13:14:40Z` passes command health, 2,410 scoped
+  clean `pnpm release:gate` run at `2026-08-28T13:25:12Z` passes command health, 2,412 scoped
   tests, generated-artifact hygiene, fixture registries, builds, manifest, SBOM, and feature
   status. It remains **NO-GO** because source-bound authenticated browser provenance and the
   required `authenticated-editor-1.0` journey are missing.
