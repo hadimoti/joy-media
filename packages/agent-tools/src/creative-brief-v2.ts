@@ -209,7 +209,7 @@ function addIdentifierError(errors: string[], value: unknown, path: string): voi
     typeof value !== 'string' ||
     value.trim().length === 0 ||
     value.length > MAX_ID_LENGTH ||
-    /[\u0000-\u001f\u007f]/u.test(value)
+    hasControlCharacters(value)
   )
     errors.push(`${path} must be a bounded non-empty identifier`);
 }
@@ -219,7 +219,7 @@ function addRevisionError(errors: string[], value: unknown, path: string): void 
     typeof value !== 'string' ||
     value.trim().length === 0 ||
     value.length > MAX_REVISION_LENGTH ||
-    /[\u0000-\u001f\u007f]/u.test(value)
+    hasControlCharacters(value)
   )
     errors.push(`${path} must be a bounded non-empty revision`);
 }
@@ -227,6 +227,14 @@ function addRevisionError(errors: string[], value: unknown, path: string): void 
 function addTextError(errors: string[], value: unknown, path: string, max: number): void {
   if (typeof value !== 'string' || value.trim().length === 0 || value.length > max)
     errors.push(`${path} must be a bounded non-empty string`);
+}
+
+function hasControlCharacters(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
 }
 
 function addStringArrayErrors(
