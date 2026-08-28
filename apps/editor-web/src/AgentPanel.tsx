@@ -88,6 +88,12 @@ interface PendingReasoningApproval {
   readonly preflight: BrowserProviderApprovalPreflight;
 }
 
+interface ReasoningRequestScope {
+  readonly token: number;
+  readonly projectId: string;
+  readonly projectRevision: ProjectRevisionId;
+}
+
 interface JoyCodeState {
   readonly threads: readonly JoyCodeThread[];
   readonly activeThreadId: string;
@@ -479,6 +485,14 @@ export function AgentPanel({
   const auditRef = useRef(createAuditTrail());
   const handledCommandRef = useRef<number | undefined>(undefined);
   const thinkingTimerRef = useRef<number | undefined>(undefined);
+  const mountedRef = useRef(true);
+  const requestTokenRef = useRef(0);
+  const submissionInProgressRef = useRef(false);
+  const previousReasoningIdentityRef = useRef<string>();
+  const currentReasoningIdentityRef = useRef({
+    projectId: project.id,
+    projectRevision: session.projectRevisionId,
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const attachInputRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<PendingPlan | undefined>(undefined);
@@ -493,6 +507,7 @@ export function AgentPanel({
   const [tab, setTab] = useState('composer');
   const [draft, setDraft] = useState('');
   const [attachError, setAttachError] = useState<string | undefined>(undefined);
+  const [reasoningError, setReasoningError] = useState<string | undefined>(undefined);
   const [attaching, setAttaching] = useState(false);
   const [joyCode, setJoyCode] = useState<JoyCodeState>(() => initialJoyCodeState(project.id));
 
@@ -503,6 +518,11 @@ export function AgentPanel({
 
   const activeThread =
     joyCode.threads.find((thread) => thread.id === joyCode.activeThreadId) ?? joyCode.threads[0];
+  const currentProjectRevision = session.projectRevisionId;
+  currentReasoningIdentityRef.current = {
+    projectId: project.id,
+    projectRevision: currentProjectRevision,
+  };
 
   useEffect(() => {
     try {
@@ -523,14 +543,42 @@ export function AgentPanel({
     thinkingThreadId,
   ]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      requestTokenRef.current += 1;
+      submissionInProgressRef.current = false;
       if (thinkingTimerRef.current !== undefined) {
         window.clearTimeout(thinkingTimerRef.current);
+        thinkingTimerRef.current = undefined;
       }
-    },
-    [],
-  );
+    };
+  }, []);
+
+  useEffect(() => {
+    const identity = `${project.id}\u0000${currentProjectRevision}`;
+    const previousIdentity = previousReasoningIdentityRef.current;
+    previousReasoningIdentityRef.current = identity;
+    if (previousIdentity === undefined || previousIdentity === identity) return;
+
+    const discardedPendingRequest = submissionInProgressRef.current;
+    requestTokenRef.current += 1;
+    submissionInProgressRef.current = false;
+    if (thinkingTimerRef.current !== undefined) {
+      window.clearTimeout(thinkingTimerRef.current);
+      thinkingTimerRef.current = undefined;
+    }
+    setThinkingThreadId(undefined);
+    setPendingReasoningApproval(undefined);
+    setPending((current) => (current?.reasoning === undefined ? current : undefined));
+    setLastReasoning(undefined);
+    if (discardedPendingRequest) {
+      setReasoningError(
+        'The project changed while Joy Code was reasoning. The stale response was discarded.',
+      );
+    }
+  }, [currentProjectRevision, project.id]);
 
   useEffect(() => {
     if (command === undefined || handledCommandRef.current === command.serial) return;
@@ -563,6 +611,8 @@ export function AgentPanel({
   }, [command, pending, pendingReasoningApproval]);
 
   function startNewTask() {
+    requestTokenRef.current += 1;
+    submissionInProgressRef.current = false;
     if (thinkingTimerRef.current !== undefined) {
       window.clearTimeout(thinkingTimerRef.current);
       thinkingTimerRef.current = undefined;
@@ -577,9 +627,48 @@ export function AgentPanel({
     setPendingReasoningApproval(undefined);
     setLastRun(undefined);
     setLastReasoning(undefined);
+    setReasoningError(undefined);
     setThinkingThreadId(undefined);
     setDraft('');
     setTab('composer');
+  }
+
+  function beginReasoningRequest(): ReasoningRequestScope | undefined {
+    if (submissionInProgressRef.current) return undefined;
+    submissionInProgressRef.current = true;
+    const token = requestTokenRef.current + 1;
+    requestTokenRef.current = token;
+    setReasoningError(undefined);
+    return {
+      token,
+      projectId: project.id,
+      projectRevision: currentProjectRevision,
+    };
+  }
+
+  function isCurrentReasoningRequest(scope: ReasoningRequestScope): boolean {
+    const identity = currentReasoningIdentityRef.current;
+    return (
+      mountedRef.current &&
+      requestTokenRef.current === scope.token &&
+      identity.projectId === scope.projectId &&
+      identity.projectRevision === scope.projectRevision
+    );
+  }
+
+  function finishReasoningRequest(scope: ReasoningRequestScope, threadId: string): void {
+    if (requestTokenRef.current !== scope.token) return;
+    submissionInProgressRef.current = false;
+    if (!mountedRef.current) return;
+    setThinkingThreadId((current) => (current === threadId ? undefined : current));
+  }
+
+  function surfaceReasoningError(threadId: string, error: unknown): void {
+    const message =
+      error instanceof Error ? error.message : 'Bounded reasoning is unavailable right now.';
+    setReasoningError(message);
+    appendMessage(threadId, 'assistant', message);
+    updateThreadStatus(threadId, 'failed');
   }
 
   function appendMessage(threadId: string, role: 'user' | 'assistant', body: string): void {
@@ -684,9 +773,11 @@ export function AgentPanel({
   async function runReasoningRequest(
     request: BrowserJoyCodeReasoningRequest,
     threadId: string,
+    scope: ReasoningRequestScope,
   ): Promise<void> {
     try {
       const reasoning = await controlPlaneClient.joyCodeReasoning(request);
+      if (!isCurrentReasoningRequest(scope)) return;
       setPendingReasoningApproval(undefined);
       setLastReasoning(reasoning);
       appendMessage(threadId, 'assistant', reasoning.brief.summary);
@@ -710,6 +801,7 @@ export function AgentPanel({
       }
       updateThreadStatus(threadId, 'draft');
     } catch (error) {
+      if (!isCurrentReasoningRequest(scope)) return;
       if (
         error instanceof BrowserControlPlaneError &&
         error.code === 'PROVIDER_APPROVAL_REQUIRED' &&
@@ -725,16 +817,15 @@ export function AgentPanel({
         updateThreadStatus(threadId, 'planning');
         return;
       }
-      appendMessage(
-        threadId,
-        'assistant',
-        error instanceof Error ? error.message : 'Bounded reasoning is unavailable right now.',
-      );
-      updateThreadStatus(threadId, 'failed');
+      surfaceReasoningError(threadId, error);
     }
   }
 
-  async function requestReasoning(prompt: string, threadId: string): Promise<void> {
+  async function requestReasoning(
+    prompt: string,
+    threadId: string,
+    scope: ReasoningRequestScope,
+  ): Promise<void> {
     if (settings.reasoningModel === '') {
       appendMessage(
         threadId,
@@ -754,11 +845,14 @@ export function AgentPanel({
         goal: prompt,
       }),
       threadId,
+      scope,
     );
   }
 
   async function approveReasoning(): Promise<void> {
     if (pendingReasoningApproval === undefined) return;
+    const scope = beginReasoningRequest();
+    if (scope === undefined) return;
     const { threadId, request, preflight } = pendingReasoningApproval;
     setThinkingThreadId(threadId);
     try {
@@ -768,15 +862,24 @@ export function AgentPanel({
         requestDigest: preflight.requestDigest,
         ...(preflight.estimatedCost === undefined ? {} : { costCap: preflight.estimatedCost }),
       });
-      await runReasoningRequest({ ...request, providerApprovalGrant: grant }, threadId);
+      if (!isCurrentReasoningRequest(scope)) return;
+      await runReasoningRequest({ ...request, providerApprovalGrant: grant }, threadId, scope);
+    } catch (error) {
+      if (isCurrentReasoningRequest(scope)) surfaceReasoningError(threadId, error);
     } finally {
-      setThinkingThreadId((current) => (current === threadId ? undefined : current));
+      finishReasoningRequest(scope, threadId);
     }
   }
 
   function submitPrompt(prompt: string) {
     const body = prompt.trim();
-    if (body.length === 0 || activeThread === undefined || thinkingThreadId !== undefined) return;
+    if (
+      body.length === 0 ||
+      activeThread === undefined ||
+      thinkingThreadId !== undefined ||
+      submissionInProgressRef.current
+    )
+      return;
     const threadId = activeThread.id;
     setDraft('');
     setTab('composer');
@@ -798,15 +901,18 @@ export function AgentPanel({
       return;
     }
     const route = routeJoyCodePrompt(body);
+    const scope = beginReasoningRequest();
+    if (scope === undefined) return;
     setThinkingThreadId(threadId);
     thinkingTimerRef.current = window.setTimeout(() => {
       thinkingTimerRef.current = undefined;
+      if (!isCurrentReasoningRequest(scope)) return;
       const action =
         route.kind === 'intent'
           ? Promise.resolve().then(() => plan(route.intent, threadId))
-          : requestReasoning(body, threadId);
+          : requestReasoning(body, threadId, scope);
       void action.finally(() => {
-        setThinkingThreadId((current) => (current === threadId ? undefined : current));
+        finishReasoningRequest(scope, threadId);
       });
     }, THINKING_REVEAL_MS);
   }
@@ -1329,6 +1435,11 @@ export function AgentPanel({
               {attachError !== undefined && (
                 <p className="joy-code-attach-error" role="alert">
                   {attachError}
+                </p>
+              )}
+              {reasoningError !== undefined && (
+                <p className="agent-error" role="alert" aria-live="assertive">
+                  {reasoningError}
                 </p>
               )}
               <input
