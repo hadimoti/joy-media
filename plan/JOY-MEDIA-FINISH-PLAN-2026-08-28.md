@@ -444,9 +444,8 @@ Then repeat against `https://joyst.ir/` and `https://www.joyst.ir/` and compare 
 ### 6.5 Browser and delivery canary
 
 - Codex in-app browser: authenticated, read-only shell/console/network/static checks using the
-  existing session.
-- Kilo and Hermes: parallel OpenCLI-only audits on authenticated profile `cefd9k77`, with independent
-  reports and a cross-review. They must not inspect or print session/credential storage.
+  existing session. Current implementation/review execution is Codex-subagent-only per the latest
+  handoff; earlier Kilo/Hermes/OpenCLI notes below are historical diagnostics, not release proof.
 - Run the full destructive journey against staging fixtures. Production receives one prefixed,
   isolated canary project only if its exact ownership and cleanup are safe: import known test media,
   edit, caption/effect/Motion, Joy Code approval, save/reopen, long Worker render, inspection, and
