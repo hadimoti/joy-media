@@ -6,6 +6,7 @@ import {
   validateWorkerJobV1,
   validateWorkerReceiptForJob,
   workerCanRunJob,
+  WORKER_JOB_TYPES,
   WORKER_PROTOCOL_VERSION,
 } from '@joy-media/job-protocol';
 import type {
@@ -78,9 +79,9 @@ import {
   type RestoreProjectRevisionInput,
 } from './project-revisions.js';
 
-const FIXTURE_THUMBNAIL_SHA256 = '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735';
-const FIXTURE_THUMBNAIL_BYTES = 14;
 const POSTGRES_SCHEMA_LOCK_ID = 1_245_665_613;
+const UNSUPPORTED_JOB_ERROR =
+  'Worker job type is no longer supported; enqueue a currently supported job';
 
 async function acquireSchemaMigrationLock(client: PoolClient): Promise<void> {
   try {
@@ -92,6 +93,16 @@ async function acquireSchemaMigrationLock(client: PoolClient): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     if (!/function\s+pg_advisory_xact_lock\b.*does not exist/iu.test(message)) throw error;
   }
+}
+
+async function retireUnsupportedActiveJobs(database: Pool | PoolClient): Promise<void> {
+  const supportedTypeParameters = WORKER_JOB_TYPES.map((_, index) => `$${index + 2}`).join(', ');
+  await database.query(
+    `UPDATE jobs SET state = 'failed', lease_owner = NULL, lease_expires_at = NULL,
+         cancel_requested = false, error = $1
+     WHERE state IN ('queued', 'leased') AND type NOT IN (${supportedTypeParameters})`,
+    [UNSUPPORTED_JOB_ERROR, ...WORKER_JOB_TYPES],
+  );
 }
 
 interface ProjectRow {
@@ -287,12 +298,14 @@ export class PostgresControlPlane
     if (typeof this.pool.connect !== 'function') {
       await this.pool.query(POSTGRES_SCHEMA);
       await this.ensureAssetRevocationPrimaryKey();
+      await retireUnsupportedActiveJobs(this.pool);
       return;
     }
     await this.transaction(async (client) => {
       await acquireSchemaMigrationLock(client);
       await client.query(POSTGRES_SCHEMA);
       await this.ensureAssetRevocationPrimaryKey(client);
+      await retireUnsupportedActiveJobs(client);
     });
   }
 
@@ -1481,7 +1494,7 @@ export class PostgresControlPlane
     assetId?: string,
     workerJob?: WorkerJobV1,
   ): Promise<Job> {
-    if (!isWorkerJobType(type) && type !== 'fixture.thumbnail')
+    if (!isWorkerJobType(type))
       throw new ControlPlaneError('WORKER_JOB_INVALID', 'unsupported Worker job type');
     if (type === 'asset.thumbnail')
       throw new ControlPlaneError(
@@ -1618,7 +1631,6 @@ export class PostgresControlPlane
         } else if (item.type === 'image.comfy') compatible = caps.includes('image.comfy');
         else if (item.type === 'audio.ml-denoise') compatible = caps.includes('audio.ml-denoise');
         else if (isWorkerJobType(item.type)) compatible = workerCanRunJob(caps, item.type);
-        else compatible = item.type === 'fixture.thumbnail';
         if (!compatible) continue;
         if (item.max_attempts !== null) {
           const attempts = await client.query<{ readonly count: number | string }>(
@@ -1773,7 +1785,6 @@ export class PostgresControlPlane
              result_width = $13, result_height = $14, result_receipt = $15::jsonb
          WHERE id = $1 AND state = 'leased' AND lease_owner = $2 AND lease_expires_at > $3
            AND cancel_requested = false AND asset_revoked = false
-           AND (type <> 'fixture.thumbnail' OR $4 = 'fixture.thumbnail')
            AND (type <> 'asset.thumbnail' OR ($4 = 'asset.thumbnail' AND asset_id = $10))
            AND (type <> 'image.comfy' OR $4 = 'image.comfy')
            AND (type <> 'audio.ml-denoise' OR $4 = 'audio.ml-denoise')
@@ -2082,7 +2093,8 @@ function jobOf(row: JobRow): Job {
     cancelRequested: row.cancel_requested,
     ...(row.lease_owner === null ? {} : { leaseOwner: row.lease_owner }),
     ...(row.lease_expires_at === null ? {} : { leaseExpiresAt: row.lease_expires_at.getTime() }),
-    ...(row.result_kind === null ||
+    ...(!isWorkerJobType(row.type) ||
+    row.result_kind === null ||
     row.result_ref === null ||
     row.result_worker_ref === null ||
     row.result_verified_at === null
@@ -2111,8 +2123,6 @@ function derivativeOfRow(row: JobRow): NonNullable<Job['derivative']> {
     return { ...base, ...receipt };
   }
   const hashAndBytes = resultHashAndBytesOf(row);
-  if (row.result_kind === 'fixture.thumbnail')
-    return { ...base, ...hashAndBytes, kind: row.result_kind };
   if (
     row.result_kind === 'asset.thumbnail' &&
     row.result_asset_id !== null &&
@@ -2264,19 +2274,8 @@ function jsonArray(value: unknown): readonly unknown[] {
   return value;
 }
 
-function isFixtureReceipt(
-  value: WorkerResultReceipt,
-): value is WorkerResultReceipt & { readonly kind: 'fixture.thumbnail' } {
-  return (
-    value.kind === 'fixture.thumbnail' &&
-    value.sha256 === FIXTURE_THUMBNAIL_SHA256 &&
-    value.bytes === FIXTURE_THUMBNAIL_BYTES
-  );
-}
-
 function isWorkerReceipt(value: WorkerResultReceipt): boolean {
   return (
-    isFixtureReceipt(value) ||
     isAssetThumbnailReceipt(value) ||
     isLocalGpuReceipt(value) ||
     isTextAiReceipt(value) ||

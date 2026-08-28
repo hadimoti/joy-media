@@ -178,12 +178,6 @@ export interface Job {
   readonly derivative?: DerivativeRecord;
   readonly error?: string;
 }
-export interface FixtureThumbnailReceipt {
-  /** A receipt only: local paths and media bytes never leave the Worker. */
-  readonly kind: 'fixture.thumbnail';
-  readonly sha256: string;
-  readonly bytes: number;
-}
 export interface AssetThumbnailReceipt {
   /** A verified local thumbnail result; `localRef` is opaque and Worker-local. */
   readonly kind: 'asset.thumbnail';
@@ -248,7 +242,6 @@ export interface MediaAiWorkerReceipt {
 export type ReferenceAnalysisWorkerReceipt = VideoReferenceAnalyzeReceipt;
 export type SemanticIndexWorkerReceipt = MediaSemanticIndexReceipt;
 export type WorkerResultReceipt =
-  | FixtureThumbnailReceipt
   | AssetThumbnailReceipt
   | LocalGpuWorkerReceipt
   | TextAiWorkerReceipt
@@ -267,8 +260,6 @@ export type DerivativeRecord = WorkerResultReceipt & {
   readonly resultRef: string;
   readonly verifiedAt: number;
 };
-const FIXTURE_THUMBNAIL_SHA256 = '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735';
-const FIXTURE_THUMBNAIL_BYTES = 14;
 export interface JobEvent {
   readonly cursor: number;
   readonly jobId: string;
@@ -1033,7 +1024,7 @@ export class LocalControlPlane implements ControlPlane {
     workerJob?: WorkerJobV1,
   ): Job {
     this.project(actor, projectId);
-    if (!isWorkerJobType(type) && type !== 'fixture.thumbnail')
+    if (!isWorkerJobType(type))
       throw new ControlPlaneError('WORKER_JOB_INVALID', 'unsupported Worker job type');
     const existing = this.#jobs.get(id);
     if (existing !== undefined) return existing;
@@ -1178,8 +1169,6 @@ export class LocalControlPlane implements ControlPlane {
         throw error;
       }
     }
-    if (job.type === 'fixture.thumbnail' && !isFixtureReceipt(receipt))
-      throw new ControlPlaneError('RESULT_INVALID', jobId);
     if (
       job.type === 'asset.thumbnail' &&
       (!isAssetThumbnailReceipt(receipt) || receipt.assetId !== job.assetId)
@@ -1298,6 +1287,17 @@ export class LocalControlPlane implements ControlPlane {
       projectId: job.projectId,
       type: job.type,
       ...(job.assetId === undefined ? {} : { assetId: job.assetId }),
+      ...(job.payload === undefined ? {} : { payload: cloneJson(job.payload) }),
+      ...(job.requirements === undefined
+        ? {}
+        : {
+            requirements: {
+              capabilities: [...job.requirements.capabilities],
+              privacy: job.requirements.privacy,
+            },
+          }),
+      ...(job.idempotencyKey === undefined ? {} : { idempotencyKey: job.idempotencyKey }),
+      ...(job.maxAttempts === undefined ? {} : { maxAttempts: job.maxAttempts }),
       state: 'queued',
       progress: 0,
       cancelRequested: false,
@@ -1369,16 +1369,6 @@ export class LocalControlPlane implements ControlPlane {
     }
     return legacyWorkerJob(id, projectId, type, assetId);
   }
-}
-
-function isFixtureReceipt(
-  value: WorkerResultReceipt | undefined,
-): value is FixtureThumbnailReceipt {
-  return (
-    value?.kind === 'fixture.thumbnail' &&
-    value.sha256 === FIXTURE_THUMBNAIL_SHA256 &&
-    value.bytes === FIXTURE_THUMBNAIL_BYTES
-  );
 }
 
 function isAssetThumbnailReceipt(
@@ -1490,7 +1480,7 @@ function isWorkerCompatible(worker: WorkerRecord, job: Job): boolean {
   if (job.type === 'image.comfy') return worker.capabilities.includes('image.comfy');
   if (job.type === 'audio.ml-denoise') return worker.capabilities.includes('audio.ml-denoise');
   if (isWorkerJobType(job.type)) return workerCanRunJob(worker.capabilities, job.type);
-  return job.type === 'fixture.thumbnail';
+  return false;
 }
 
 function legacyWorkerJob(

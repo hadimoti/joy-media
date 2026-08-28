@@ -1156,18 +1156,24 @@ describe('control-plane HTTP transport', () => {
         origin,
         'POST',
         '/v1/workers/w/hello',
-        { capabilities: ['asset.thumbnail'] },
+        { capabilities: ['render.inspect'] },
         workerToken,
       ),
     ).toMatchObject({
       status: 200,
-      body: { data: { id: 'w', capabilities: ['asset.thumbnail'] } },
+      body: { data: { id: 'w', capabilities: ['render.inspect'] } },
     });
     expect(
       await request(origin, 'POST', '/v1/projects/p/jobs', { id: 'j', type: 'fixture.thumbnail' }),
     ).toMatchObject({
+      status: 409,
+      body: { error: { code: 'WORKER_JOB_INVALID' } },
+    });
+    expect(
+      await request(origin, 'POST', '/v1/projects/p/jobs', { id: 'j', type: 'render.inspect' }),
+    ).toMatchObject({
       status: 201,
-      body: { data: { id: 'j', state: 'queued' } },
+      body: { data: { id: 'j', type: 'render.inspect', state: 'queued' } },
     });
     expect(await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken)).toMatchObject({
       status: 200,
@@ -1212,15 +1218,30 @@ describe('control-plane HTTP transport', () => {
       body: { data: { state: 'queued', progress: 0 } },
     });
     await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken);
+    expect(
+      await request(
+        origin,
+        'POST',
+        '/v1/workers/w/jobs/j/complete',
+        {
+          result: {
+            kind: 'fixture.thumbnail',
+            sha256: '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735',
+            bytes: 14,
+          },
+        },
+        workerToken,
+      ),
+    ).toMatchObject({ status: 400, body: { error: { code: 'REQUEST_INVALID' } } });
     const completion = await request(
       origin,
       'POST',
       '/v1/workers/w/jobs/j/complete',
       {
         result: {
-          kind: 'fixture.thumbnail',
-          sha256: '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735',
-          bytes: 14,
+          kind: 'render.inspect',
+          reportRef: 'report-j',
+          findings: 2,
         },
       },
       workerToken,
@@ -1234,8 +1255,9 @@ describe('control-plane HTTP transport', () => {
           progress: 100,
           derivative: {
             jobId: 'j',
-            kind: 'fixture.thumbnail',
-            bytes: 14,
+            kind: 'render.inspect',
+            reportRef: 'report-j',
+            findings: 2,
             workerRef: 'w',
             resultRef: 'derivative:j',
           },

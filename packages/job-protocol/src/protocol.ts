@@ -261,11 +261,6 @@ export function validateWorkerReceiptForJob(
 
 export type WorkerResultReceiptV1 =
   | {
-      readonly kind: 'fixture.thumbnail';
-      readonly sha256: string;
-      readonly bytes: number;
-    }
-  | {
       readonly kind: 'asset.thumbnail';
       readonly assetId: string;
       readonly sha256: string;

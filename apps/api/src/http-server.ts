@@ -1841,13 +1841,6 @@ function requiredWorkerResult(body: Record<string, unknown>): WorkerResultReceip
     throw new ControlPlaneError('REQUEST_INVALID', 'result must be an object');
   const result = value as Record<string, unknown>;
   if (
-    result.kind === 'fixture.thumbnail' &&
-    hasOnlyKeys(result, ['kind', 'sha256', 'bytes']) &&
-    isReceiptHashAndBytes(result)
-  ) {
-    return { kind: result.kind, sha256: result.sha256, bytes: result.bytes };
-  }
-  if (
     result.kind === 'render.export' &&
     hasOnlyKeys(result, ['kind', 'reportRef', 'outputRef', 'sha256', 'bytes', 'qualityReport']) &&
     typeof result.reportRef === 'string' &&

@@ -292,13 +292,71 @@ describe('PostgresControlPlane', () => {
     await controlPlane.createProject(owner, 'project-1', 'Reference');
     await controlPlane.pairWorker(owner, 'worker-old');
     await controlPlane.pairWorker(owner, 'worker-new');
-    await controlPlane.enqueue(owner, 'job-1', 'project-1', 'fixture.thumbnail', 100);
+    await controlPlane.helloWorker('worker-old', ['render.inspect'], [], 99);
+    await controlPlane.helloWorker('worker-new', ['render.inspect'], [], 99);
+    await controlPlane.enqueue(owner, 'job-1', 'project-1', 'render.inspect', 100);
     await controlPlane.lease('worker-old', 101, 5);
     await controlPlane.lease('worker-new', 106, 5);
 
     await expect(controlPlane.complete('worker-old', 'job-1', 107)).rejects.toMatchObject({
       code: 'LEASE_NOT_OWNED',
     });
+    await pool.end();
+  });
+
+  it('retires unsupported active jobs while keeping completed legacy history readable', async () => {
+    const database = newDb({ noAstCoverageCheck: true });
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const controlPlane = new PostgresControlPlane(pool, { skipLocked: false });
+    await controlPlane.initialize();
+    const owner = { id: 'joy-user-1' };
+    await controlPlane.createProject(owner, 'legacy-project', 'Legacy jobs');
+    const retiredType = 'fixture.thumbnail';
+    await pool.query(
+      `INSERT INTO jobs
+         (id, project_id, type, state, lease_owner, lease_expires_at, result_kind,
+          result_sha256, result_bytes, result_ref, result_worker_ref, result_verified_at,
+          result_receipt)
+       VALUES
+         ('legacy-queued', 'legacy-project', $1, 'queued', NULL, NULL, NULL,
+          NULL, NULL, NULL, NULL, NULL, NULL),
+         ('legacy-leased', 'legacy-project', $1, 'leased', 'old-worker', $2, NULL,
+          NULL, NULL, NULL, NULL, NULL, NULL),
+         ('legacy-completed', 'legacy-project', $1, 'completed', 'old-worker', $2, $1,
+          $3, 14, 'derivative:legacy-completed', 'old-worker', $2,
+          $4::jsonb)`,
+      [
+        retiredType,
+        new Date(1_000),
+        '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735',
+        JSON.stringify({
+          kind: retiredType,
+          sha256: '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735',
+          bytes: 14,
+        }),
+      ],
+    );
+
+    const restarted = new PostgresControlPlane(pool, { skipLocked: false });
+    await restarted.initialize();
+    const jobs = await restarted.jobsForProject(owner, 'legacy-project');
+    const byId = new Map(jobs.map((job) => [job.id, job]));
+    expect(byId.get('legacy-queued')).toMatchObject({
+      state: 'failed',
+      error: 'Worker job type is no longer supported; enqueue a currently supported job',
+    });
+    expect(byId.get('legacy-leased')).toMatchObject({
+      state: 'failed',
+      error: 'Worker job type is no longer supported; enqueue a currently supported job',
+    });
+    expect(byId.get('legacy-leased')).not.toHaveProperty('leaseOwner');
+    expect(byId.get('legacy-leased')).not.toHaveProperty('leaseExpiresAt');
+    expect(byId.get('legacy-completed')).toMatchObject({ state: 'completed' });
+    expect(byId.get('legacy-completed')).not.toHaveProperty('derivative');
+    await expect(
+      restarted.enqueue(owner, 'legacy-new', 'legacy-project', retiredType),
+    ).rejects.toMatchObject({ code: 'WORKER_JOB_INVALID' });
     await pool.end();
   });
 
