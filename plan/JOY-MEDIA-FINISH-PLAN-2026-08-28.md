@@ -579,6 +579,9 @@ unavailable`, and a console error loading `/transitions/preview/transition2.png`
   Program Monitor ratio selector, keeps `Fit` view-only, and atomically updates visual/timeline
   composition dimensions through one undoable command for named presets. Focused coverage is
   24/24, and repository typecheck, lint, format, and editor build pass.
+- The visible timeline Remove Track TODO is now closed at `c7d2320`: the context-menu action is
+  enabled only for an empty non-last track, matching the existing command validator; invalid
+  removals remain disabled. The focused editor/command suite is 26/26 after this change.
 - The bounded async Creative Brief v2 execution boundary is integrated at `129edba`. Its
   provider-facing interface is additive, cancellable, timeout-bounded, redacts audit payloads,
   and returns typed/sanitized failure outcomes; it does not claim the coupled main-branch
