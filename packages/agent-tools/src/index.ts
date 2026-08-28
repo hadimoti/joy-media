@@ -287,6 +287,24 @@ export {
   validateCreativeBriefV2Result,
 } from './creative-brief-v2.js';
 export type {
+  CreativeBriefV2AdapterContext,
+  CreativeBriefV2AdapterFailureCategory,
+  CreativeBriefV2AdapterOutcome,
+  CreativeBriefV2AsyncAdapter,
+  CreativeBriefV2AuditEvent,
+  CreativeBriefV2AuditSink,
+  CreativeBriefV2RuntimeCategory,
+  CreativeBriefV2RuntimeFailureOutcome,
+  CreativeBriefV2RuntimeOptions,
+  CreativeBriefV2RuntimeOutcome,
+  CreativeBriefV2RuntimeReadyOutcome,
+} from './creative-brief-v2-runtime.js';
+export {
+  DEFAULT_CREATIVE_BRIEF_V2_TIMEOUT_MS,
+  MAX_CREATIVE_BRIEF_V2_TIMEOUT_MS,
+  executeCreativeBriefV2,
+} from './creative-brief-v2-runtime.js';
+export type {
   BoundedModelInputV1,
   StructuredModelOutputV1,
   CreativeModelAdapter,
