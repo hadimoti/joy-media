@@ -71,10 +71,10 @@ challenges unsupported findings, and records the accepted/rejected resolution be
 
 | Surface                     | Observed tip/state                                | Consequence                                                                       |
 | --------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Local checkpoint branch     | `0fefdab` on `codex/joy-media-implement-20260828` | Clean tested candidate, published for review; not yet promoted to `main`.         |
+| Local checkpoint branch     | `d781bf5` on `codex/joy-media-implement-20260828` | Clean tested candidate, published for review; not yet promoted to `main`.         |
 | Deployed/VPS release branch | `b3c1866`                                         | Older certified release; candidate has additional hardening and is not deployed.  |
-| GitHub `main`               | `2083ffc`                                         | 407 main-only commits versus 191 candidate-only commits.                          |
-| VPS `main`                  | `1e4657f`                                         | 225 VPS-main-only commits versus 191 candidate-only commits.                      |
+| GitHub `main`               | `2083ffc`                                         | 407 main-only commits versus 192 candidate-only commits.                          |
+| VPS `main`                  | `1e4657f`                                         | 225 VPS-main-only commits versus 192 candidate-only commits.                      |
 | Common merge base           | `73744bb`                                         | A blind merge is unsafe; simulated reconciliation has extensive overlap/conflict. |
 
 `aec01ef` contains 324 changed files and a large quantity of transient evidence, debug files, and
@@ -575,7 +575,7 @@ unavailable`, and a console error loading `/transitions/preview/transition2.png`
   provider-facing interface is additive, cancellable, timeout-bounded, redacts audit payloads,
   and returns typed/sanitized failure outcomes; it does not claim the coupled main-branch
   Creative Brief runtime is reconciled. The agent-tools package suite passes 324/324.
-- The latest clean `pnpm release:gate` run at `2026-08-28T13:49:04Z` passes command health,
+- The latest clean `pnpm release:gate` run at `2026-08-28T13:56:56Z` passes command health,
   2,423 scoped tests, generated-artifact hygiene, fixture registries, builds, static-assets,
   manifest, SBOM, and feature status. It remains **NO-GO** because source-bound authenticated
   browser provenance and the required `authenticated-editor-1.0` journey are missing.
@@ -605,7 +605,7 @@ unavailable`, and a console error loading `/transitions/preview/transition2.png`
 
 ### Continuation checkpoint — 2026-08-28
 
-- Candidate tip `0fefdab` is pushed to `github/codex/joy-media-implement-20260828`; the worktree
+- Candidate tip `d781bf5` is pushed to `github/codex/joy-media-implement-20260828`; the worktree
   is clean. The candidate remains intentionally separate from `main` (`2083ffc`) while the
   407-commit divergence and coupled Joy Code/Creative Brief families are reconciled by behavior.
 - The release gate is a truthful **NO-GO**: implementation checks are green, while source-bound

@@ -2,7 +2,7 @@
 
 This is a working parity matrix for the standalone `joy-media` repository. It is intentionally
 not an exit-gate claim: GitHub `main` and the tested candidate diverge from common base
-`73744bb` (`407` main-only and `191` candidate-only commits at capture time). No `joy-vps` files,
+`73744bb` (`407` main-only and `192` candidate-only commits at capture time). No `joy-vps` files,
 remote refs, or deployed releases were changed while preparing this matrix.
 
 | Domain                           | GitHub-main behavior family                                                                                                    | Candidate decision                                                                                                                                                                            | Required follow-up before promotion                                                                                                                           |
