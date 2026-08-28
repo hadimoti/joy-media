@@ -78,7 +78,7 @@ Codex in-app-browser findings below remain valid independent evidence.
 
 | Surface                     | Observed tip/state                                | Consequence                                                                       |
 | --------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Local checkpoint branch     | `244691b` on `codex/joy-media-implement-20260828` | Clean tested candidate, published for review; not yet promoted to `main`.         |
+| Local checkpoint branch     | `1379a39` on `codex/joy-media-implement-20260828` | Clean tested candidate, published for review; not yet promoted to `main`.         |
 | Deployed/VPS release branch | `b3c1866`                                         | The checkpoint is one commit ahead of the deployed release branch.                |
 | GitHub `main`               | `2083ffc`                                         | 407 main-only commits versus 162 candidate-only commits.                          |
 | VPS `main`                  | `1e4657f`                                         | 225 VPS-main-only commits versus 162 candidate-only commits.                      |
@@ -491,7 +491,7 @@ or raw secret-bearing artifacts.
 
 ## Execution checkpoint — 2026-08-28
 
-- The local JOY Media hardening checkpoint is committed through `d3ad59b` on
+- The local JOY Media hardening checkpoint is committed through `1379a39` on
   `codex/joy-media-implement-20260828`; its pre-merge state is preserved at
   `backup/joy-media-before-main-merge-20260828`.
 - The checkpoint passes `pnpm typecheck`, `pnpm format:check`, and the full `pnpm test`
