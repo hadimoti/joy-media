@@ -84,7 +84,10 @@ export class EffectRegistryImpl implements EffectRegistry {
     if (this.#effects.has(descriptor.id)) {
       throw new Error(`Effect "${descriptor.id}" is already registered`);
     }
-    this.#effects.set(descriptor.id, { descriptor, factory });
+    this.#effects.set(descriptor.id, {
+      descriptor,
+      ...(factory !== undefined ? { factory } : {}),
+    });
   }
 
   getEffect(id: string): EffectDescriptor | undefined {
