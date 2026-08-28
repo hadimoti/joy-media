@@ -16,6 +16,7 @@ import {
   providerApprovalSigningConfigFromEnv,
 } from './provider-approval.js';
 import { productionReadinessOptions, releaseIdentityFromEnvironment } from './server-readiness.js';
+import { createClientAddressResolver, trustedProxyAddressesFromEnv } from './client-address.js';
 
 await start();
 
@@ -57,6 +58,9 @@ async function start(): Promise<void> {
   const mailer = createMailer();
   const telegram = createTelegramSender();
   const mediaAuthHashKeys = mediaAuthHashKeysForDatabase(databaseUrl);
+  const clientAddressResolver = createClientAddressResolver({
+    trustedProxyAddresses: trustedProxyAddressesFromEnv(),
+  });
   const mediaAuth =
     pool === undefined
       ? new DisabledMediaAuth()
@@ -65,6 +69,7 @@ async function start(): Promise<void> {
           ...(mediaAuthHashKeys === undefined ? {} : { hashKeys: mediaAuthHashKeys }),
           ...(mailer === undefined ? {} : { mailer }),
           ...(telegram === undefined ? {} : { telegram }),
+          clientAddressResolver,
         });
   createControlPlaneHttpServer({
     controlPlane: durableControlPlane ?? new LocalControlPlane(),
@@ -76,6 +81,7 @@ async function start(): Promise<void> {
         durableControlPlane === undefined ? undefined : mediaAuth.authenticate(request),
     },
     mediaAuth,
+    clientAddressResolver,
     providerApprovals,
     mistral: createRuntimeMistralProviderRegistry({
       ...(process.env.JOY_MEDIA_MISTRAL_API_KEY === undefined

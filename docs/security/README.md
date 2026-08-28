@@ -17,6 +17,8 @@ worker pairing codes, session tokens, filesystem paths, or object-store credenti
   startup when signing keys are not configured.
 - OTP request throttles are stored in PostgreSQL/shared durable storage and keyed by a hashed client
   address plus a fixed time window, not by raw IP text.
+- Client addresses come from the direct socket peer unless that exact peer is configured as a trusted
+  reverse proxy. Untrusted or malformed `X-Forwarded-For` values cannot select a throttle bucket.
 - Browser requests authenticate with bearer sessions. Project, asset, worker-owner, provider, and
   production-run APIs use the authenticated actor from the server-side auth boundary rather than a
   browser-supplied authority claim.

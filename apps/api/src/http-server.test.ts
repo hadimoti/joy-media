@@ -30,6 +30,7 @@ import type { PrivateObjectDescriptor, PrivateObjectStore } from './private-obje
 import type { WorkerResultReceiptV1, WorkerJobType } from '@joy-media/job-protocol';
 import { PostgresControlPlane } from './postgres-control-plane.js';
 import type { ProductionRunAuthority, ProductionRunRecordV1 } from './production-runs.js';
+import { createClientAddressResolver, type ClientAddressResolver } from './client-address.js';
 
 const servers: Server[] = [];
 const releaseIdentity: ApiReleaseIdentity = {
@@ -254,7 +255,7 @@ describe('control-plane HTTP transport', () => {
     expect(first.status).toBe(401);
     const second = await fetch(`${limitedOrigin}/v1/projects`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.2' },
       body: JSON.stringify({ id: 'limited-2', title: 'Limited' }),
     });
     expect(second.status).toBe(429);
@@ -265,6 +266,27 @@ describe('control-plane HTTP transport', () => {
       body: JSON.stringify({}),
     });
     expect(v2Limited.status).toBe(429);
+
+    const trustedProxyOrigin = await start(
+      { authenticate: () => undefined },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { windowMs: 60_000, maxRequests: 1 },
+      undefined,
+      createClientAddressResolver({ trustedProxyAddresses: ['127.0.0.1'] }),
+    );
+    const proxiedRequest = (forwardedFor: string) =>
+      fetch(`${trustedProxyOrigin}/v1/projects`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': forwardedFor },
+        body: JSON.stringify({ id: forwardedFor, title: 'Limited' }),
+      });
+    expect((await proxiedRequest('198.51.100.1')).status).toBe(401);
+    expect((await proxiedRequest('198.51.100.2')).status).toBe(401);
+    expect((await proxiedRequest('198.51.100.1')).status).toBe(429);
 
     const origin = await start({ authenticate: () => ({ id: 'owner' }) });
     const response = await fetch(`${origin}/v1/projects`, {
@@ -2619,6 +2641,7 @@ async function start(
   assetTagger?: (input: HermesTagInput) => Promise<HermesTagResult>,
   rateLimit?: { readonly windowMs?: number; readonly maxRequests?: number },
   readiness?: ApiReadinessOptions,
+  clientAddressResolver?: ClientAddressResolver,
 ): Promise<string> {
   const server = createControlPlaneHttpServer({
     controlPlane: controlPlane ?? new LocalControlPlane(),
@@ -2630,6 +2653,7 @@ async function start(
     ...(assetTagger === undefined ? {} : { assetTagger }),
     ...(rateLimit === undefined ? {} : { rateLimit }),
     ...(readiness === undefined ? {} : { readiness }),
+    ...(clientAddressResolver === undefined ? {} : { clientAddressResolver }),
   });
   servers.push(server);
   server.listen(0, '127.0.0.1');

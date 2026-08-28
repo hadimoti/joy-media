@@ -29,6 +29,9 @@ The environment file is created on the VPS with mode `0600` and contains (see
 - `JOY_MEDIA_RELEASE_TREE_HASH` — the exact Git tree id used to build the release
 - `JOY_MEDIA_RELEASE_LOCKFILE_SHA256` — SHA-256 of the committed `pnpm-lock.yaml`
 - `JOY_MEDIA_RELEASE_SCHEMA_VERSION` — positive integer for the deployed control-plane schema
+- `JOY_MEDIA_TRUSTED_PROXY_ADDRESSES` — comma-separated exact IP addresses of the reverse-proxy
+  peers permitted to supply `X-Forwarded-For`. Add only the address actually used to reach the API;
+  when omitted, the API deliberately keys abuse controls by the direct socket peer.
 
 The four release-identity values are generated from the source-bound release
 manifest during deployment and are safe to expose through `/ready`. Do not

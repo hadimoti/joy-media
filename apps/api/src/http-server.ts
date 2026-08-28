@@ -50,6 +50,7 @@ import type {
   ProjectDocumentV2,
   RecoveredCopyOperation,
 } from './project-revisions.js';
+import { createClientAddressResolver, type ClientAddressResolver } from './client-address.js';
 
 const MAX_RENDER_ARTIFACT_BYTES = 512 * 1024 * 1024;
 const MAX_JSON_BODY_BYTES = 2 * 1024 * 1024;
@@ -91,6 +92,8 @@ export interface ControlPlaneHttpServerOptions {
     readonly windowMs?: number;
     readonly maxRequests?: number;
   };
+  /** Shared trusted-proxy boundary used to key process-local abuse controls. */
+  readonly clientAddressResolver?: ClientAddressResolver;
   /** Injectable dependency probes for /ready. Omitted checks preserve the legacy ready state. */
   readonly readiness?: ApiReadinessOptions;
 }
@@ -132,13 +135,20 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
   const rateLimitWindowMs = options.rateLimit?.windowMs ?? DEFAULT_RATE_LIMIT_WINDOW_MS;
   const rateLimitMaxRequests = options.rateLimit?.maxRequests ?? DEFAULT_RATE_LIMIT_MAX_REQUESTS;
   const rateLimitBuckets = new Map<string, { windowStart: number; count: number }>();
+  const clientAddressResolver = options.clientAddressResolver ?? createClientAddressResolver();
   return createServer(async (request, response) => {
     response.setHeader('x-request-id', randomBytes(8).toString('hex'));
     applySecurityHeaders(response);
     const path = request.url?.split('?', 1)[0] ?? '/';
     if (
       (path.startsWith('/v1/') || path.startsWith('/v2/')) &&
-      !consumeRateLimit(request, rateLimitBuckets, rateLimitWindowMs, rateLimitMaxRequests)
+      !consumeRateLimit(
+        request,
+        rateLimitBuckets,
+        rateLimitWindowMs,
+        rateLimitMaxRequests,
+        clientAddressResolver,
+      )
     ) {
       response.setHeader('retry-after', String(Math.ceil(rateLimitWindowMs / 1000)));
       respondJson(response, 429, { error: { code: 'RATE_LIMITED' } });
@@ -2419,8 +2429,9 @@ function consumeRateLimit(
   buckets: Map<string, { windowStart: number; count: number }>,
   windowMs: number,
   maxRequests: number,
+  clientAddressResolver: ClientAddressResolver,
 ): boolean {
-  const key = request.socket.remoteAddress ?? 'unknown';
+  const key = clientAddressResolver(request);
   const now = Date.now();
   const existing = buckets.get(key);
   if (existing === undefined || now - existing.windowStart >= windowMs) {

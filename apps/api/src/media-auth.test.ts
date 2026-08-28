@@ -9,6 +9,7 @@ import {
   requireMediaAuthHashKeysFromEnv,
   type MediaAuthHashKey,
 } from './media-auth.js';
+import { createClientAddressResolver, type ClientAddressResolver } from './client-address.js';
 
 function pool(): Pool {
   const database = newDb();
@@ -33,10 +34,20 @@ async function service(
   return { auth: auth.service, db, mailer, telegram };
 }
 
-function createAuth(db: Pool, hashKeys: readonly MediaAuthHashKey[] = HASH_KEYS) {
+function createAuth(
+  db: Pool,
+  hashKeys: readonly MediaAuthHashKey[] = HASH_KEYS,
+  clientAddressResolver?: ClientAddressResolver,
+) {
   const mailer = { sendOtp: vi.fn(async () => undefined) };
   const telegram = { sendOtp: vi.fn(async () => undefined) };
-  const service = new MediaAuthService({ pool: db, mailer, telegram, hashKeys });
+  const service = new MediaAuthService({
+    pool: db,
+    mailer,
+    telegram,
+    hashKeys,
+    ...(clientAddressResolver === undefined ? {} : { clientAddressResolver }),
+  });
   return { service, mailer, telegram };
 }
 
@@ -156,6 +167,49 @@ describe('MediaAuthService', () => {
       code: 'RATE_LIMITED',
     });
     expect(mailer.sendOtp).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not let spoofed forwarding headers select new OTP throttle buckets by default', async () => {
+    const { auth } = await service();
+    await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
+    const requestFrom = (forwardedFor: string) =>
+      ({
+        headers: { 'x-forwarded-for': forwardedFor },
+        socket: { remoteAddress: '203.0.113.10' },
+      }) as never;
+
+    await auth.requestOtp('user@example.com', 'gmail', requestFrom('198.51.100.1'));
+    await auth.requestOtp('user@example.com', 'gmail', requestFrom('198.51.100.2'));
+    await auth.requestOtp('user@example.com', 'gmail', requestFrom('198.51.100.3'));
+    await expect(
+      auth.requestOtp('user@example.com', 'gmail', requestFrom('198.51.100.4')),
+    ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+  });
+
+  it('separates OTP buckets by forwarded client only behind an explicitly trusted proxy', async () => {
+    const db = pool();
+    await installSchema(db);
+    const { service: auth } = createAuth(
+      db,
+      HASH_KEYS,
+      createClientAddressResolver({ trustedProxyAddresses: ['127.0.0.1'] }),
+    );
+    await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
+    const requestFrom = (forwardedFor: string) =>
+      ({
+        headers: { 'x-forwarded-for': forwardedFor },
+        socket: { remoteAddress: '127.0.0.1' },
+      }) as never;
+
+    await auth.requestOtp('user@example.com', 'gmail', requestFrom('198.51.100.1'));
+    await auth.requestOtp('user@example.com', 'gmail', requestFrom('198.51.100.1'));
+    await auth.requestOtp('user@example.com', 'gmail', requestFrom('198.51.100.1'));
+    await expect(
+      auth.requestOtp('user@example.com', 'gmail', requestFrom('198.51.100.1')),
+    ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+    await expect(
+      auth.requestOtp('user@example.com', 'gmail', requestFrom('198.51.100.2')),
+    ).resolves.toMatchObject({ message: expect.any(String) });
   });
 
   it('persists OTP throttles across auth service reconstruction', async () => {

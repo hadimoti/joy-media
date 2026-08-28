@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 
 import type { IncomingMessage } from 'node:http';
 import type { Pool } from 'pg';
 import type { Actor } from './control-plane.js';
+import { createClientAddressResolver, type ClientAddressResolver } from './client-address.js';
 import type { MediaMailerLike } from './media-mailer.js';
 import type { MediaTelegramSenderLike } from './media-telegram.js';
 
@@ -57,6 +58,8 @@ export interface MediaAuthServiceOptions {
    * keys are accepted for migration until their rows expire or are revoked.
    */
   readonly hashKeys?: readonly MediaAuthHashKey[];
+  /** Shared trusted-proxy boundary for durable OTP abuse buckets. */
+  readonly clientAddressResolver?: ClientAddressResolver;
 }
 
 export interface MediaAuthHashKey {
@@ -134,12 +137,14 @@ export class MediaAuthService implements MediaAuthApi {
   private readonly mailer: MediaMailerLike | undefined;
   private readonly telegram: MediaTelegramSenderLike | undefined;
   private readonly hashKeys: readonly MediaAuthHashKey[];
+  private readonly clientAddressResolver: ClientAddressResolver;
 
   constructor(options: MediaAuthServiceOptions) {
     this.pool = options.pool;
     this.mailer = options.mailer;
     this.telegram = options.telegram;
     this.hashKeys = normalizeHashKeys(options.hashKeys);
+    this.clientAddressResolver = options.clientAddressResolver ?? createClientAddressResolver();
   }
 
   async listAllowed(): Promise<readonly MediaAllowedUser[]> {
@@ -194,7 +199,7 @@ export class MediaAuthService implements MediaAuthApi {
     request?: IncomingMessage,
   ): Promise<{ message: string }> {
     if (request !== undefined) {
-      await this.checkOtpRateLimit(requestIp(request));
+      await this.checkOtpRateLimit(this.clientAddressResolver(request));
     }
     const contact = normalizeContact(rawContact, method);
     const allowed = await this.findAllowed(contact, method);
@@ -625,17 +630,4 @@ function normalizeHashKeys(
 function bearerToken(request: IncomingMessage): string | undefined {
   const value = request.headers.authorization;
   return typeof value === 'string' && value.startsWith('Bearer ') ? value.slice(7) : undefined;
-}
-
-function requestIp(request: IncomingMessage): string {
-  const headers = request.headers;
-  if (headers === undefined || headers === null) return 'unknown';
-  const forwarded = headers['x-forwarded-for'];
-  if (typeof forwarded === 'string' && forwarded.length > 0) {
-    return forwarded.split(',')[0]!.trim();
-  }
-  if (Array.isArray(forwarded) && forwarded.length > 0) {
-    return forwarded[0]!.trim();
-  }
-  return request.socket.remoteAddress ?? 'unknown';
 }

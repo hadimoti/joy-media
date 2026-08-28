@@ -12,6 +12,8 @@
 - `JOY_MEDIA_PROVIDER_APPROVAL_SIGNING_SECRET` — provider-approval HMAC secret; runtime environment only
 - `JOY_MEDIA_SMTP_HOST` / `JOY_MEDIA_SMTP_PORT` / `JOY_MEDIA_SMTP_USER` / `JOY_MEDIA_SMTP_PASS` / `JOY_MEDIA_SMTP_FROM` — OTP email delivery (optional; gmail login is silently unavailable without it)
 - `JOY_MEDIA_BOT_TOKEN` — dedicated Telegram bot for OTP delivery (optional; telegram login is silently unavailable without it)
+- `JOY_MEDIA_TRUSTED_PROXY_ADDRESSES` — optional comma-separated exact IP allow-list for reverse
+  proxies permitted to supply `X-Forwarded-For`. Forwarded addresses are ignored by default.
 
 At startup the durable adapter applies the idempotent schema (including the
 `media_allowed_users` / `media_otp_codes` / `media_sessions` auth tables and
