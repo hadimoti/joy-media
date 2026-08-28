@@ -10,6 +10,7 @@ import {
   REQUIRED_BUILD_IDS,
   REQUIRED_JOURNEY_ID,
   sha256File,
+  verifyBrowserJourneyEvidence,
   writeReleaseEvidence,
   type ReleaseGateInput,
   type ReleaseSourceProvenance,
@@ -122,6 +123,42 @@ describe('JOY Studio 1.0 release gate', () => {
         'failed',
       );
     }
+  });
+
+  it.each([
+    ['a mismatched journey id', { journeyId: 'different-journey', status: 'verified' }],
+    ['a failed evidence status', { journeyId: REQUIRED_JOURNEY_ID, status: 'failed' }],
+  ])('rejects browser index entries backed by %s', (_description, identity) => {
+    const root = mkdtempSync(join(tmpdir(), 'joy-release-browser-binding-'));
+    const evidencePath = join(root, 'test-output/browser/journey-evidence.json');
+    mkdirSync(resolve(evidencePath, '..'), { recursive: true });
+    writeFileSync(
+      evidencePath,
+      JSON.stringify({
+        ...identity,
+        verifiedAt: '2026-08-28T11:00:00.000Z',
+        execution: 'real-services',
+        sourceProvenance: sourceProvenance(),
+        assertions: {
+          motionPlacement: [{}, {}],
+          verifiedExport: {
+            channel: 'verified-delivery',
+            inspection: { state: 'passed' },
+          },
+        },
+      }),
+    );
+    const [journey] = verifyBrowserJourneyEvidence(root, [
+      {
+        ...passingInput().browserJourneys[0]!,
+        evidencePath: 'test-output/browser/journey-evidence.json',
+        sourceProvenance: sourceProvenance(),
+      },
+    ]);
+
+    expect(journey?.status).toBe('unverified');
+    expect(journey?.execution).toBe('unknown');
+    expect(journey?.sourceProvenance).toBeUndefined();
   });
 
   it('fails closed when test collection is empty', () => {

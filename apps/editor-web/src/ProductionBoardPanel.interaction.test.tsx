@@ -4,7 +4,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ArtifactStore } from '@joy-media/commands';
 import type { ProductionRunRecordV1 } from '@joy-media/workflow-engine';
-import { ProductionBoardPanelView } from './ProductionBoardPanel.js';
+import {
+  ProductionBoardPanel,
+  ProductionBoardPanelView,
+  type ProductionBoardRunStore,
+} from './ProductionBoardPanel.js';
 import { buildProductionBoardModel } from './production-board-model.js';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -58,12 +62,63 @@ describe('ProductionBoardPanel keyboard interaction', () => {
       'production-run-run-failed',
     );
   });
+
+  it('ignores an older load result that resolves after a newer refresh', async () => {
+    type Page = { readonly runs: readonly ProductionRunRecordV1[]; readonly nextCursor?: string };
+    const requests: Array<{ resolve: (page: Page) => void }> = [];
+    const store: ProductionBoardRunStore = {
+      list: () =>
+        new Promise<Page>((resolve) => {
+          requests.push({ resolve });
+        }),
+    };
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    mounted.push({ root, container });
+    await act(async () => {
+      root.render(
+        <ProductionBoardPanel
+          store={store}
+          authority={{ principalId: 'owner-1', role: 'owner' }}
+          currentProjectRevision="rev-1"
+          artifacts={emptyArtifacts}
+          dataLanes={[]}
+        />,
+      );
+    });
+    expect(requests).toHaveLength(1);
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Refresh Production Board"]')
+        ?.click();
+    });
+    expect(requests).toHaveLength(2);
+
+    await act(async () => {
+      requests[1]?.resolve({ runs: [] });
+      await settle();
+    });
+    expect(container.textContent).toContain('Start a Workflow');
+
+    await act(async () => {
+      requests[0]?.resolve({ runs: [record('running', 1)] });
+      await settle();
+    });
+    expect(container.textContent).toContain('Start a Workflow');
+    expect(container.querySelector('[role="option"]')).toBeNull();
+  });
 });
 
 async function press(element: HTMLElement, key: string): Promise<void> {
   await act(async () => {
     element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key }));
   });
+}
+
+async function settle(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function action(container: HTMLElement, label: 'Retry' | 'Cancel'): boolean {

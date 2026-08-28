@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   HumanInputRequest,
   ProductionApprovalV1,
@@ -84,19 +84,27 @@ export function ProductionBoardPanel({
 }: ProductionBoardPanelProps) {
   const [loadState, setLoadState] = useState<BoardLoadState>({ kind: 'loading' });
   const [status, setStatus] = useState<string | undefined>(undefined);
+  const refreshSequenceRef = useRef(0);
 
   const refresh = useCallback(async () => {
+    const requestId = ++refreshSequenceRef.current;
     setLoadState({ kind: 'loading' });
     try {
-      setLoadState({ kind: 'loaded', records: await loadProductionBoardRecords(store) });
+      const records = await loadProductionBoardRecords(store);
+      if (requestId !== refreshSequenceRef.current) return;
+      setLoadState({ kind: 'loaded', records });
       setStatus(undefined);
     } catch (error) {
+      if (requestId !== refreshSequenceRef.current) return;
       setLoadState({ kind: 'error', message: message(error) });
     }
   }, [store]);
 
   useEffect(() => {
     void refresh();
+    return () => {
+      refreshSequenceRef.current += 1;
+    };
   }, [refresh]);
 
   const model = useMemo(() => {

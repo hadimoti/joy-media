@@ -564,7 +564,7 @@ function readBrowserJourneys(root: string): readonly ReleaseBrowserJourney[] {
   const path = join(root, 'test-output/browser/journeys.json');
   if (!existsSync(path)) return [];
   try {
-    return verifiedBrowserJourneys(
+    return verifyBrowserJourneyEvidence(
       root,
       JSON.parse(readFileSync(path, 'utf8')) as ReleaseGateInput['browserJourneys'],
     );
@@ -573,7 +573,7 @@ function readBrowserJourneys(root: string): readonly ReleaseBrowserJourney[] {
   }
 }
 
-function verifiedBrowserJourneys(
+export function verifyBrowserJourneyEvidence(
   root: string,
   journeys: readonly ReleaseBrowserJourney[],
 ): readonly ReleaseBrowserJourney[] {
@@ -581,10 +581,18 @@ function verifiedBrowserJourneys(
     const {
       sourceProvenance: claimedSource,
       verifiedAt: claimedVerificationTime,
+      execution: claimedExecution,
+      deliveryChannel: claimedDeliveryChannel,
+      inspectionState: claimedInspectionState,
+      postMotionPlacement: claimedMotionPlacement,
       ...unboundJourney
     } = journey;
     void claimedSource;
     void claimedVerificationTime;
+    void claimedExecution;
+    void claimedDeliveryChannel;
+    void claimedInspectionState;
+    void claimedMotionPlacement;
     if (journey.status !== 'verified') return unboundJourney;
     if (journey.evidencePath === undefined) return { ...unboundJourney, execution: 'unknown' };
     const evidencePath = resolve(root, journey.evidencePath);
@@ -597,6 +605,9 @@ function verifiedBrowserJourneys(
       return { ...unboundJourney, execution: 'unknown' };
     try {
       const evidence = JSON.parse(readFileSync(evidencePath, 'utf8')) as unknown;
+      const evidenceRecord = record(evidence);
+      if (evidenceRecord.journeyId !== journey.id || evidenceRecord.status !== 'verified')
+        return { ...unboundJourney, status: 'unverified', execution: 'unknown' };
       return { ...unboundJourney, ...journeyReleaseAttributes(evidence) };
     } catch {
       return { ...unboundJourney, execution: 'unknown' };
@@ -763,7 +774,7 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
     ...(supplied === undefined
       ? {}
       : {
-          browserJourneys: verifiedBrowserJourneys(root, supplied.browserJourneys ?? []),
+          browserJourneys: verifyBrowserJourneyEvidence(root, supplied.browserJourneys ?? []),
           ...(supplied.waivers !== undefined ? { waivers: supplied.waivers } : {}),
         }),
   };
