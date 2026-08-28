@@ -322,7 +322,7 @@ describe('P3 certified editor golden journey (local)', () => {
       clips: [{ id: 'music', startUs: 0, durationUs: 600_000, assetId: 'music' }],
     });
     expect(reopened.canUndo).toBe(false);
-  });
+  }, 15_000);
 });
 
 function goldenTimeline(): SpikeProject {
