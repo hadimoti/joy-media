@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import { newDb } from 'pg-mem';
 import { describe, expect, it, vi } from 'vitest';
 import { MediaAuthError, MediaAuthService } from './media-auth.js';
+import { createClientAddressResolver, type ClientAddressResolver } from './client-address.js';
 
 function pool(): Pool {
   const database = newDb();
@@ -9,17 +10,23 @@ function pool(): Pool {
   return new adapter.Pool() as Pool;
 }
 
-async function service(overrides: Partial<{ mailerCode: string }> = {}) {
+async function service(overrides: { readonly clientAddressResolver?: ClientAddressResolver } = {}) {
   const db = pool();
   const mailer = { sendOtp: vi.fn(async () => undefined) };
   const telegram = { sendOtp: vi.fn(async () => undefined) };
-  const auth = new MediaAuthService({ pool: db, mailer, telegram });
+  const auth = new MediaAuthService({
+    pool: db,
+    mailer,
+    telegram,
+    ...(overrides.clientAddressResolver === undefined
+      ? {}
+      : { clientAddressResolver: overrides.clientAddressResolver }),
+  });
   await db.query(`
     CREATE TABLE IF NOT EXISTS media_allowed_users (id bigserial primary key, gmail text, telegram_id text, telegram_username text, added_by text not null, added_at timestamptz not null, enabled boolean not null default true);
     CREATE TABLE IF NOT EXISTS media_otp_codes (id bigserial primary key, contact text not null, method text not null, code_hash text not null, created_at timestamptz not null, expires_at timestamptz not null, used boolean not null default false);
     CREATE TABLE IF NOT EXISTS media_sessions (id bigserial primary key, token_hash text not null, contact text not null, method text not null, created_at timestamptz not null, expires_at timestamptz not null, revoked_at timestamptz);
   `);
-  void overrides;
   return { auth, db, mailer, telegram };
 }
 
@@ -94,6 +101,47 @@ describe('MediaAuthService', () => {
       code: 'RATE_LIMITED',
     });
     expect(mailer.sendOtp).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not let spoofed forwarding headers select new OTP throttle buckets by default', async () => {
+    const { auth } = await service();
+    await auth.addAllowed({ gmail: 'spoof-test@example.com', addedBy: 'admin' });
+    const requestFrom = (forwardedFor: string) =>
+      ({
+        headers: { 'x-forwarded-for': forwardedFor },
+        socket: { remoteAddress: '203.0.113.210' },
+      }) as never;
+
+    await auth.requestOtp('spoof-test@example.com', 'gmail', requestFrom('198.51.100.1'));
+    await auth.requestOtp('spoof-test@example.com', 'gmail', requestFrom('198.51.100.2'));
+    await auth.requestOtp('spoof-test@example.com', 'gmail', requestFrom('198.51.100.3'));
+    await expect(
+      auth.requestOtp('spoof-test@example.com', 'gmail', requestFrom('198.51.100.4')),
+    ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+  });
+
+  it('separates OTP buckets by forwarded client only behind an explicitly trusted proxy', async () => {
+    const { auth } = await service({
+      clientAddressResolver: createClientAddressResolver({
+        trustedProxyAddresses: ['127.0.0.1'],
+      }),
+    });
+    await auth.addAllowed({ gmail: 'trusted-proxy-test@example.com', addedBy: 'admin' });
+    const requestFrom = (forwardedFor: string) =>
+      ({
+        headers: { 'x-forwarded-for': forwardedFor },
+        socket: { remoteAddress: '127.0.0.1' },
+      }) as never;
+
+    await auth.requestOtp('trusted-proxy-test@example.com', 'gmail', requestFrom('198.51.100.21'));
+    await auth.requestOtp('trusted-proxy-test@example.com', 'gmail', requestFrom('198.51.100.21'));
+    await auth.requestOtp('trusted-proxy-test@example.com', 'gmail', requestFrom('198.51.100.21'));
+    await expect(
+      auth.requestOtp('trusted-proxy-test@example.com', 'gmail', requestFrom('198.51.100.21')),
+    ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+    await expect(
+      auth.requestOtp('trusted-proxy-test@example.com', 'gmail', requestFrom('198.51.100.22')),
+    ).resolves.toMatchObject({ message: expect.any(String) });
   });
 
   it('delivers Telegram OTP by telegram_id and rejects gmail login for a Telegram-only user', async () => {

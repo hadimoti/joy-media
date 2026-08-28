@@ -21,6 +21,9 @@ The environment file is created on the VPS with mode `0600` and contains (see
 - `JOY_MEDIA_MISTRAL_API_KEY` — optional, dedicated JOY Media Mistral key for
   the server-side `llm.complete` provider. Leave it absent until the owner
   provisions one; never reuse, print, or copy the Hermes credential.
+- `JOY_MEDIA_TRUSTED_PROXY_ADDRESSES` — comma-separated exact IP addresses of reverse-proxy
+  peers permitted to supply `X-Forwarded-For`. Add only the address actually used to reach the API;
+  when omitted, OTP abuse controls deliberately use the direct socket peer.
 
 It is never committed. There is no signing key or JWKS endpoint to provision
 any more — the JWT identity bridge from the now-superseded ADR-0016 is

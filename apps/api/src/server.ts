@@ -22,6 +22,7 @@ import { ProjectIntelligenceService } from './project-intelligence-service.js';
 import { createProductionCreativeBriefRuntime } from './creative-brief-production-runtime.js';
 import { createProductionJoyCodeRuntime } from './joy-code-production-runtime.js';
 import { CanonicalJoyCodeInputResolver } from './joy-code-input-resolver.js';
+import { createClientAddressResolver, trustedProxyAddressesFromEnv } from './client-address.js';
 
 await start();
 
@@ -88,6 +89,9 @@ async function start(): Promise<void> {
   );
   const mailer = createMailer();
   const telegram = createTelegramSender();
+  const clientAddressResolver = createClientAddressResolver({
+    trustedProxyAddresses: trustedProxyAddressesFromEnv(),
+  });
   const mediaAuth =
     pool === undefined
       ? new DisabledMediaAuth()
@@ -95,6 +99,7 @@ async function start(): Promise<void> {
           pool,
           ...(mailer === undefined ? {} : { mailer }),
           ...(telegram === undefined ? {} : { telegram }),
+          clientAddressResolver,
         });
   createControlPlaneHttpServer({
     controlPlane,
