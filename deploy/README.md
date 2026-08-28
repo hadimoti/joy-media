@@ -1,7 +1,8 @@
 # WP-12 deployment manifests
 
-`joy-media.nginx.conf` serves the editor and maps public `/api/v1/*` to the
-Node server's `/v1/*` route. `joy-media-api.override.conf` starts an immutable
+`joy-media.nginx.conf` serves the editor, maps public `/api/v1/*` and `/api/v2/*` to the
+Node server's versioned routes, and sends `/live`, `/ready`, and `/health/ready` directly to
+the API instead of the SPA fallback. `joy-media-api.override.conf` starts an immutable
 `pnpm deploy --prod` API release and reads only `/etc/joy-media/api.env`.
 
 **Domain (as of 2026-07-30):** `joyst.ir` is the canonical public domain,

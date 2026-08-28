@@ -450,7 +450,7 @@ export class PostgresControlPlane
     await this.project(actor, projectId);
     const result = await this.pool.query<ProjectDocumentRow>(
       `SELECT project_id, revision, document, document_hash, updated_at
-       FROM project_documents WHERE project_id = $1`,
+       FROM project_document_heads_v2 WHERE project_id = $1`,
       [projectId],
     );
     const row = result.rows[0];
@@ -499,7 +499,7 @@ export class PostgresControlPlane
         return projectRevisionOf(prior);
       }
       const currentResult = await client.query<{ readonly revision: number }>(
-        'SELECT revision FROM project_documents WHERE project_id = $1 FOR UPDATE',
+        'SELECT revision FROM project_document_heads_v2 WHERE project_id = $1 FOR UPDATE',
         [projectId],
       );
       const currentRevision = currentResult.rows[0]?.revision ?? 0;
@@ -531,7 +531,7 @@ export class PostgresControlPlane
         ],
       );
       await client.query(
-        `INSERT INTO project_documents (project_id, revision, document, document_hash, updated_at)
+        `INSERT INTO project_document_heads_v2 (project_id, revision, document, document_hash, updated_at)
          VALUES ($1, $2, $3::jsonb, $4, $5)
          ON CONFLICT (project_id) DO UPDATE SET revision = EXCLUDED.revision,
            document = EXCLUDED.document, document_hash = EXCLUDED.document_hash, updated_at = EXCLUDED.updated_at`,
@@ -610,7 +610,7 @@ export class PostgresControlPlane
         return parseRecoveredCopy(prior.response);
       }
       const currentResult = await client.query<{ readonly revision: number }>(
-        'SELECT revision FROM project_documents WHERE project_id = $1 FOR UPDATE',
+        'SELECT revision FROM project_document_heads_v2 WHERE project_id = $1 FOR UPDATE',
         [sourceProjectId],
       );
       const sourceHeadRevision = currentResult.rows[0]?.revision ?? 0;
@@ -686,7 +686,7 @@ export class PostgresControlPlane
         ],
       );
       await client.query(
-        `INSERT INTO project_documents (project_id, revision, document, document_hash, updated_at)
+        `INSERT INTO project_document_heads_v2 (project_id, revision, document, document_hash, updated_at)
          VALUES ($1, 1, $2::jsonb, $3, $4)`,
         [recoveredProjectId, JSON.stringify(document), documentHash(document), createdAt],
       );

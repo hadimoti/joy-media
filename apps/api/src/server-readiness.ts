@@ -70,7 +70,7 @@ export function productionReadinessOptions(
         if (dependencies.pool === undefined || dependencies.durableControlPlane === undefined)
           return false;
         await dependencies.pool.query(
-          'SELECT 1 FROM projects, project_documents, media_assets, jobs LIMIT 0',
+          'SELECT 1 FROM projects, project_document_heads_v2, project_revisions, media_assets, jobs LIMIT 0',
         );
         return true;
       },

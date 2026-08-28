@@ -124,6 +124,13 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(config.indexOf(staticPrefixes)).toBeLessThan(config.indexOf(spaFallback));
     expect(config.indexOf(staticExtensions)).toBeLessThan(config.indexOf(spaFallback));
     expect(config).toContain('location ^~ /api/ {');
+    expect(config).toContain('location = /live {\n        proxy_pass http://127.0.0.1:8790/live;');
+    expect(config).toContain(
+      'location = /ready {\n        proxy_pass http://127.0.0.1:8790/ready;',
+    );
+    expect(config).toContain(
+      'location = /health/ready {\n        proxy_pass http://127.0.0.1:8790/health/ready;',
+    );
     expect(config.match(/try_files \$uri =404;/gu)).toHaveLength(2);
     expect(config.match(/try_files \$uri \$uri\/ \/index\.html;/gu)).toHaveLength(1);
   });

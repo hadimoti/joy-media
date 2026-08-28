@@ -1,6 +1,14 @@
 import type { Pool } from 'pg';
 import { describe, expect, it } from 'vitest';
 import { PostgresControlPlane } from './postgres-control-plane.js';
+import { POSTGRES_SCHEMA } from './postgres-schema.js';
+
+describe('project document schema migration', () => {
+  it('creates an additive V2 head table without redefining the legacy project_documents table', () => {
+    expect(POSTGRES_SCHEMA).toContain('CREATE TABLE IF NOT EXISTS project_document_heads_v2');
+    expect(POSTGRES_SCHEMA).not.toContain('CREATE TABLE IF NOT EXISTS project_documents (');
+  });
+});
 
 describe('asset revocation schema migration', () => {
   it('replaces only a legacy composite audit primary key with revoke_id primary key', async () => {
