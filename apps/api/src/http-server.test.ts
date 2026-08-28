@@ -12,7 +12,11 @@ import {
   type ControlPlane,
   type MediaAssetRecord,
 } from './control-plane.js';
-import { createControlPlaneHttpServer, type ApiAuthentication } from './http-server.js';
+import {
+  createControlPlaneHttpServer,
+  type ApiAuthentication,
+  type ApiReadinessOptions,
+} from './http-server.js';
 import { DisabledMediaAuth } from './media-auth.js';
 import type { HermesTagInput, HermesTagResult } from './asset-hermes-tags.js';
 import {
@@ -78,7 +82,7 @@ describe('control-plane HTTP transport', () => {
 
     expect(await request(origin, 'GET', '/health')).toMatchObject({
       status: 200,
-      body: { ok: true, controlPlane: true },
+      body: { ok: true, liveness: true },
     });
     expect(
       await request(origin, 'POST', '/v1/projects', { id: 'p', title: 'Project' }),
@@ -106,8 +110,96 @@ describe('control-plane HTTP transport', () => {
     expect(health.headers.get('x-frame-options')).toBe('DENY');
     expect(health.headers.get('cache-control')).toBe('no-store');
     expect(health.headers.get('content-security-policy')).toContain("default-src 'none'");
+    expect(await health.json()).toEqual({
+      ok: true,
+      service: 'joy-media-api',
+      liveness: true,
+    });
     expect(await (await fetch(`${origin}/live`)).json()).toMatchObject({ liveness: true });
     expect(await (await fetch(`${origin}/ready`)).json()).toMatchObject({ readiness: true });
+  });
+
+  it('keeps liveness process-only and reports injected dependency readiness without error details', async () => {
+    let databaseChecks = 0;
+    let objectStoreChecks = 0;
+    const origin = await start(
+      { authenticate: () => undefined },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        checks: {
+          database: async () => {
+            databaseChecks++;
+            return true;
+          },
+          objectStore: () => {
+            objectStoreChecks++;
+            throw new Error('sensitive dependency detail');
+          },
+        },
+      },
+    );
+
+    expect(await request(origin, 'GET', '/live')).toMatchObject({
+      status: 200,
+      body: { ok: true, liveness: true },
+    });
+    expect(await request(origin, 'GET', '/health')).toMatchObject({
+      status: 200,
+      body: { ok: true, liveness: true },
+    });
+    expect(databaseChecks).toBe(0);
+    expect(objectStoreChecks).toBe(0);
+
+    const readiness = await request(origin, 'GET', '/ready');
+    expect(readiness).toMatchObject({
+      status: 503,
+      body: {
+        ok: false,
+        readiness: false,
+        controlPlane: false,
+        checks: { database: true, objectStore: false },
+      },
+    });
+    expect(JSON.stringify(readiness.body)).not.toContain('sensitive dependency detail');
+    expect(databaseChecks).toBe(1);
+    expect(objectStoreChecks).toBe(1);
+  });
+
+  it('requires every injected readiness check to pass for both readiness routes', async () => {
+    const origin = await start(
+      { authenticate: () => undefined },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        checks: {
+          database: () => true,
+          objectStore: async () => true,
+        },
+      },
+    );
+
+    expect(await request(origin, 'GET', '/ready')).toMatchObject({
+      status: 200,
+      body: {
+        ok: true,
+        readiness: true,
+        controlPlane: true,
+        checks: { database: true, objectStore: true },
+      },
+    });
+    expect(await request(origin, 'GET', '/health/ready')).toMatchObject({
+      status: 200,
+      body: { readiness: true },
+    });
   });
 
   it('rejects oversized JSON and applies a bounded per-process request limit', async () => {
@@ -2278,6 +2370,7 @@ async function start(
   providerApprovals?: ProviderApprovalService,
   assetTagger?: (input: HermesTagInput) => Promise<HermesTagResult>,
   rateLimit?: { readonly windowMs?: number; readonly maxRequests?: number },
+  readiness?: ApiReadinessOptions,
 ): Promise<string> {
   const server = createControlPlaneHttpServer({
     controlPlane: controlPlane ?? new LocalControlPlane(),
@@ -2288,6 +2381,7 @@ async function start(
     ...(providerApprovals === undefined ? {} : { providerApprovals }),
     ...(assetTagger === undefined ? {} : { assetTagger }),
     ...(rateLimit === undefined ? {} : { rateLimit }),
+    ...(readiness === undefined ? {} : { readiness }),
   });
   servers.push(server);
   server.listen(0, '127.0.0.1');

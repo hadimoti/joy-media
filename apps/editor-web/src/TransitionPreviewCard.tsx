@@ -41,21 +41,27 @@ export function TransitionPreviewCard({ entry, isActive }: TransitionPreviewCard
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | undefined>(undefined);
   const startRef = useRef<number>(0);
-  const loadedRef = useRef(false);
-  const [loaded, setLoaded] = useState(false);
+  const loadAttemptRef = useRef(0);
+  const [loadState, setLoadState] = useState<'loading' | 'loaded' | 'failed'>('loading');
+
+  const loadPreview = useCallback(() => {
+    const attempt = ++loadAttemptRef.current;
+    setLoadState('loading');
+    void loadSharedImages()
+      .then(() => {
+        if (attempt === loadAttemptRef.current) setLoadState('loaded');
+      })
+      .catch(() => {
+        if (attempt === loadAttemptRef.current) setLoadState('failed');
+      });
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    void loadSharedImages().then(() => {
-      if (!cancelled) {
-        loadedRef.current = true;
-        setLoaded(true);
-      }
-    });
+    loadPreview();
     return () => {
-      cancelled = true;
+      loadAttemptRef.current += 1;
     };
-  }, []);
+  }, [loadPreview]);
 
   const paint = useCallback(
     (time: number) => {
@@ -82,19 +88,19 @@ export function TransitionPreviewCard({ entry, isActive }: TransitionPreviewCard
   );
 
   useEffect(() => {
-    if (!loaded || !isActive) return;
+    if (loadState !== 'loaded' || !isActive) return;
     startRef.current = 0;
     rafRef.current = requestAnimationFrame(paint);
     return () => {
       if (rafRef.current !== undefined) cancelAnimationFrame(rafRef.current);
     };
-  }, [loaded, isActive, paint]);
+  }, [loadState, isActive, paint]);
 
   const handleMouseEnter = useCallback(() => {
-    if (!loaded) return;
+    if (loadState !== 'loaded') return;
     startRef.current = 0;
     rafRef.current = requestAnimationFrame(paint);
-  }, [loaded, paint]);
+  }, [loadState, paint]);
 
   const handleMouseLeave = useCallback(() => {
     if (rafRef.current !== undefined) {
@@ -103,15 +109,51 @@ export function TransitionPreviewCard({ entry, isActive }: TransitionPreviewCard
     }
   }, []);
 
+  if (loadState === 'failed') {
+    return (
+      <div
+        className="transition-preview-canvas transition-card-fallback"
+        role="alert"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '0.25rem',
+        }}
+      >
+        <span>Preview unavailable.</span>
+        <button
+          type="button"
+          className="icon-button icon-button-labeled"
+          aria-label={`Retry ${entry.label} transition preview`}
+          onClick={(event) => {
+            event.stopPropagation();
+            loadPreview();
+          }}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
   return (
     <canvas
       ref={canvasRef}
       className="transition-preview-canvas"
+      role="img"
+      aria-label={
+        loadState === 'loaded'
+          ? `${entry.label} transition preview`
+          : `Loading ${entry.label} transition preview`
+      }
+      aria-busy={loadState === 'loading'}
       width={120}
       height={90}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      style={{ opacity: loaded ? 1 : 0 }}
+      style={{ opacity: loadState === 'loaded' ? 1 : 0 }}
     />
   );
 }

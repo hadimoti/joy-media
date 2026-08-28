@@ -59,6 +59,13 @@ export interface ApiAuthentication {
   authenticate(request: IncomingMessage): Actor | undefined | Promise<Actor | undefined>;
 }
 
+export type ApiReadinessCheck = () => boolean | Promise<boolean>;
+
+export interface ApiReadinessOptions {
+  /** Named dependency probes. Failures are reported by name without exposing error details. */
+  readonly checks?: Readonly<Record<string, ApiReadinessCheck>>;
+}
+
 export interface ControlPlaneHttpServerOptions {
   readonly controlPlane: ControlPlane;
   readonly authentication: ApiAuthentication;
@@ -74,6 +81,8 @@ export interface ControlPlaneHttpServerOptions {
     readonly windowMs?: number;
     readonly maxRequests?: number;
   };
+  /** Injectable dependency probes for /ready. Omitted checks preserve the legacy ready state. */
+  readonly readiness?: ApiReadinessOptions;
 }
 
 type ObjectReferenceLifecycle = ControlPlane & {
@@ -149,16 +158,18 @@ async function route(
     return;
   }
   if (request.method === 'GET' && (url.pathname === '/ready' || url.pathname === '/health/ready')) {
-    respondJson(response, 200, {
-      ok: true,
+    const readiness = await evaluateReadiness(options.readiness);
+    respondJson(response, readiness.ready ? 200 : 503, {
+      ok: readiness.ready,
       service: 'joy-media-api',
-      readiness: true,
-      controlPlane: true,
+      readiness: readiness.ready,
+      controlPlane: readiness.ready,
+      ...(Object.keys(readiness.checks).length === 0 ? {} : { checks: readiness.checks }),
     });
     return;
   }
   if (request.method === 'GET' && url.pathname === '/health') {
-    respondJson(response, 200, { ok: true, service: 'joy-media-api', controlPlane: true });
+    respondJson(response, 200, { ok: true, service: 'joy-media-api', liveness: true });
     return;
   }
   if (!url.pathname.startsWith('/v1/') && !url.pathname.startsWith('/v2/')) {
@@ -1346,6 +1357,23 @@ async function route(
   }
 
   respondJson(response, 404, { error: { code: 'ROUTE_NOT_FOUND' } });
+}
+
+async function evaluateReadiness(
+  options: ApiReadinessOptions | undefined,
+): Promise<{ readonly ready: boolean; readonly checks: Readonly<Record<string, boolean>> }> {
+  const entries = Object.entries(options?.checks ?? {});
+  const results = await Promise.all(
+    entries.map(async ([name, check]) => {
+      try {
+        return [name, (await check()) === true] as const;
+      } catch {
+        return [name, false] as const;
+      }
+    }),
+  );
+  const checks = Object.fromEntries(results) as Readonly<Record<string, boolean>>;
+  return { ready: results.every(([, ready]) => ready), checks };
 }
 
 async function readJson(

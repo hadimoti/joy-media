@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 export const REQUIRED_BUILD_IDS = ['editor', 'api', 'worker'] as const;
 export const REQUIRED_JOURNEY_ID = 'authenticated-editor-1.0' as const;
 export const RELEASE_STATUS_MAX_AGE_DAYS = 45;
+export const RELEASE_EVIDENCE_MAX_AGE_HOURS = 24;
 
 export type ReleaseCheckStatus = 'passed' | 'failed' | 'waived';
 
@@ -35,6 +36,15 @@ export interface ReleaseGateInput {
   readonly featureStatus: { readonly auditedOn: string; readonly statuses: readonly string[] };
   readonly waivers?: readonly ReleaseWaiver[];
   readonly commandResults?: readonly ReleaseCommandResult[];
+  /** Present for real workspace evidence; omitted by the pure evaluator. */
+  readonly sourceProvenance?: ReleaseSourceProvenance;
+}
+
+export interface ReleaseSourceProvenance {
+  readonly commitSha: string;
+  readonly treeHash: string;
+  readonly lockfileSha256: string;
+  readonly worktreeClean: boolean;
 }
 
 /** Release evidence that is safe to evaluate without reading the evidence file. */
@@ -47,6 +57,7 @@ export interface ReleaseBrowserJourney {
   readonly deliveryChannel?: 'verified-delivery' | 'quick-browser-export' | 'unknown';
   readonly inspectionState?: 'passed' | 'failed' | 'not-requested' | 'unknown';
   readonly postMotionPlacement?: boolean;
+  readonly sourceProvenance?: ReleaseSourceProvenance;
 }
 
 export interface ReleaseGateResult {
@@ -80,6 +91,11 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
         : commandHealth
           ? 'typecheck, lint, format, tests, builds, and goldens passed'
           : 'one or more required release commands failed',
+    ),
+    check(
+      'source-provenance',
+      sourceProvenanceReady(input, now),
+      sourceProvenanceMessage(input, now),
     ),
     check(
       'tests',
@@ -118,9 +134,11 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
     check(
       'browser-journey',
       input.browserJourneys.some(
-        (journey) => journey.id === REQUIRED_JOURNEY_ID && browserJourneyReleaseReady(journey),
+        (journey) =>
+          journey.id === REQUIRED_JOURNEY_ID &&
+          browserJourneyReleaseReady(journey, input.sourceProvenance, now),
       ),
-      browserJourneyMessage(input.browserJourneys),
+      browserJourneyMessage(input.browserJourneys, input.sourceProvenance, now),
     ),
     check(
       'feature-status',
@@ -188,21 +206,31 @@ export interface ReleaseCommandResult {
   readonly output?: string;
 }
 
-function browserJourneyReleaseReady(journey: ReleaseBrowserJourney): boolean {
+function browserJourneyReleaseReady(
+  journey: ReleaseBrowserJourney,
+  expectedSource?: ReleaseSourceProvenance,
+  now = new Date(),
+): boolean {
   return (
     journey.status === 'verified' &&
     journey.evidencePath !== undefined &&
     journey.execution === 'real-services' &&
     journey.deliveryChannel === 'verified-delivery' &&
     journey.inspectionState === 'passed' &&
-    journey.postMotionPlacement === true
+    journey.postMotionPlacement === true &&
+    (expectedSource === undefined ||
+      (sameSource(journey.sourceProvenance, expectedSource) && browserJourneyFresh(journey, now)))
   );
 }
 
-function browserJourneyMessage(journeys: readonly ReleaseBrowserJourney[]): string {
+function browserJourneyMessage(
+  journeys: readonly ReleaseBrowserJourney[],
+  expectedSource?: ReleaseSourceProvenance,
+  now = new Date(),
+): string {
   const journey = journeys.find((candidate) => candidate.id === REQUIRED_JOURNEY_ID);
   if (journey === undefined) return `required journey ${REQUIRED_JOURNEY_ID} is missing`;
-  if (browserJourneyReleaseReady(journey))
+  if (browserJourneyReleaseReady(journey, expectedSource, now))
     return 'authenticated editor 1.0 journey verified against real services and inspected delivery';
   const reasons: string[] = [];
   if (journey.status !== 'verified') reasons.push(`status=${journey.status}`);
@@ -212,7 +240,72 @@ function browserJourneyMessage(journeys: readonly ReleaseBrowserJourney[]): stri
     reasons.push('verified delivery channel missing');
   if (journey.inspectionState !== 'passed') reasons.push('passed inspection missing');
   if (journey.postMotionPlacement !== true) reasons.push('post-Motion placement missing');
+  if (expectedSource !== undefined && !sameSource(journey.sourceProvenance, expectedSource))
+    reasons.push('journey source does not match the current clean checkout');
+  if (expectedSource !== undefined && !browserJourneyFresh(journey, now))
+    reasons.push(`journey evidence is older than ${RELEASE_EVIDENCE_MAX_AGE_HOURS} hours`);
   return `required journey ${REQUIRED_JOURNEY_ID} is not release-ready: ${reasons.join(', ')}`;
+}
+
+function sourceProvenanceReady(input: ReleaseGateInput, now: Date): boolean {
+  const source = input.sourceProvenance;
+  if (source === undefined) return true;
+  const journey = input.browserJourneys.find((candidate) => candidate.id === REQUIRED_JOURNEY_ID);
+  return (
+    validSource(source) &&
+    source.worktreeClean &&
+    sameSource(journey?.sourceProvenance, source) &&
+    journey !== undefined &&
+    browserJourneyFresh(journey, now)
+  );
+}
+
+function sourceProvenanceMessage(input: ReleaseGateInput, now: Date): string {
+  const source = input.sourceProvenance;
+  if (source === undefined) return 'source provenance not supplied to pure evaluator';
+  if (!validSource(source)) return 'workspace source provenance is malformed or incomplete';
+  if (!source.worktreeClean) return 'workspace contains tracked or untracked source changes';
+  const journey = input.browserJourneys.find((candidate) => candidate.id === REQUIRED_JOURNEY_ID);
+  if (journey?.sourceProvenance === undefined)
+    return 'authenticated browser evidence is not bound to a source revision';
+  if (!sameSource(journey.sourceProvenance, source))
+    return 'authenticated browser evidence was produced from a different source revision';
+  if (!browserJourneyFresh(journey, now))
+    return `authenticated browser evidence is older than ${RELEASE_EVIDENCE_MAX_AGE_HOURS} hours`;
+  return `clean source and browser evidence match commit ${source.commitSha}`;
+}
+
+function browserJourneyFresh(journey: ReleaseBrowserJourney, now: Date): boolean {
+  const verifiedAt = Date.parse(journey.verifiedAt ?? '');
+  const age = now.getTime() - verifiedAt;
+  return (
+    Number.isFinite(verifiedAt) &&
+    age >= 0 &&
+    age <= RELEASE_EVIDENCE_MAX_AGE_HOURS * 60 * 60 * 1000
+  );
+}
+
+function validSource(source: ReleaseSourceProvenance): boolean {
+  return (
+    /^[0-9a-f]{40,64}$/u.test(source.commitSha) &&
+    /^[0-9a-f]{40,64}$/u.test(source.treeHash) &&
+    /^[0-9a-f]{64}$/u.test(source.lockfileSha256)
+  );
+}
+
+function sameSource(
+  actual: ReleaseSourceProvenance | undefined,
+  expected: ReleaseSourceProvenance,
+): boolean {
+  return (
+    actual !== undefined &&
+    validSource(actual) &&
+    validSource(expected) &&
+    actual.commitSha === expected.commitSha &&
+    actual.treeHash === expected.treeHash &&
+    actual.lockfileSha256 === expected.lockfileSha256 &&
+    actual.worktreeClean === expected.worktreeClean
+  );
 }
 
 export function sha256File(path: string): string {
@@ -227,7 +320,7 @@ export function writeReleaseEvidence(
 ): ReleaseGateResult {
   mkdirSync(outputDirectory, { recursive: true });
   verifyArtifactHashes(root, evidence.artifactHashes, evidence.manifest);
-  verifyReleaseDocuments(evidence.manifest, evidence.sbom);
+  verifyReleaseDocuments(evidence.manifest, evidence.sbom, evidence.sourceProvenance);
   const result = evaluateReleaseGate(evidence, now);
   const manifestText = JSON.stringify(evidence.manifest, null, 2);
   writeFileSync(
@@ -263,6 +356,7 @@ function collectFiles(root: string, directory: string): readonly string[] {
 
 export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
   const commandResults = runReleaseCommands(root);
+  const sourceProvenance = workspaceSourceProvenance(root);
   const artifacts = ['apps/editor-web/dist', 'apps/api/dist', 'apps/worker/dist'];
   const buildSuccess = Object.fromEntries(
     REQUIRED_BUILD_IDS.map((id) => {
@@ -291,8 +385,9 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
   ].map((match) => match[1]!);
   const browserJourneys = readBrowserJourneys(root);
   const manifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: new Date().toISOString(),
+    sourceProvenance,
     artifacts: artifactHashes,
     commands: commandResults,
   };
@@ -311,22 +406,24 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     manifest,
     sbom,
     commandResults,
+    sourceProvenance,
   };
 }
 
+export const RELEASE_COMMANDS: readonly [string, readonly string[]][] = [
+  ['editor-build', ['--filter', '@joy-media/editor-web', 'build']],
+  ['typecheck', ['typecheck']],
+  ['lint', ['lint']],
+  ['format', ['format:check']],
+  ['tests', ['test:release']],
+  ['api-build', ['--filter', '@joy-media/api', 'build']],
+  ['worker-build', ['--filter', '@joy-media/worker', 'build']],
+  ['goldens', ['exec', 'vitest', 'run', 'tooling/golden-render/src']],
+];
+
 function runReleaseCommands(root: string): readonly ReleaseCommandResult[] {
   const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
-  const commands: readonly [string, readonly string[]][] = [
-    ['typecheck', ['typecheck']],
-    ['lint', ['lint']],
-    ['format', ['format:check']],
-    ['tests', ['test:release']],
-    ['editor-build', ['--filter', '@joy-media/editor-web', 'build']],
-    ['api-build', ['--filter', '@joy-media/api', 'build']],
-    ['worker-build', ['--filter', '@joy-media/worker', 'build']],
-    ['goldens', ['exec', 'vitest', 'run', 'tooling/golden-render/src']],
-  ];
-  return commands.map(([id, args]) => {
+  return RELEASE_COMMANDS.map(([id, args]) => {
     const started = Date.now();
     // On Windows, pnpm is exposed as a .cmd shim and Node cannot spawn that
     // file directly with shell:false (it returns EINVAL before the command
@@ -450,20 +547,28 @@ function verifiedBrowserJourneys(
   journeys: readonly ReleaseBrowserJourney[],
 ): readonly ReleaseBrowserJourney[] {
   return journeys.map((journey) => {
-    if (journey.status !== 'verified') return journey;
-    if (journey.evidencePath === undefined) return { ...journey, execution: 'unknown' };
+    const {
+      sourceProvenance: claimedSource,
+      verifiedAt: claimedVerificationTime,
+      ...unboundJourney
+    } = journey;
+    void claimedSource;
+    void claimedVerificationTime;
+    if (journey.status !== 'verified') return unboundJourney;
+    if (journey.evidencePath === undefined) return { ...unboundJourney, execution: 'unknown' };
     const evidencePath = resolve(root, journey.evidencePath);
     const repositoryRoot = resolve(root);
     const insideRepository =
       evidencePath === repositoryRoot ||
       evidencePath.startsWith(`${repositoryRoot}/`) ||
       evidencePath.startsWith(`${repositoryRoot}\\`);
-    if (!insideRepository || !existsSync(evidencePath)) return { ...journey, execution: 'unknown' };
+    if (!insideRepository || !existsSync(evidencePath))
+      return { ...unboundJourney, execution: 'unknown' };
     try {
       const evidence = JSON.parse(readFileSync(evidencePath, 'utf8')) as unknown;
-      return { ...journey, ...journeyReleaseAttributes(evidence) };
+      return { ...unboundJourney, ...journeyReleaseAttributes(evidence) };
     } catch {
-      return { ...journey, execution: 'unknown' };
+      return { ...unboundJourney, execution: 'unknown' };
     }
   });
 }
@@ -476,7 +581,9 @@ function journeyReleaseAttributes(value: unknown): Partial<ReleaseBrowserJourney
   const channel = verifiedExport.channel;
   const inspectionState = inspection.state;
   const execution = evidence.execution;
+  const verifiedAt = evidence.verifiedAt;
   const motionPlacement = assertions.motionPlacement;
+  const sourceProvenance = parseSourceProvenance(evidence.sourceProvenance);
   return {
     ...(execution === 'real-services' || execution === 'mocked' || execution === 'unknown'
       ? { execution }
@@ -490,7 +597,54 @@ function journeyReleaseAttributes(value: unknown): Partial<ReleaseBrowserJourney
       ? { inspectionState }
       : { inspectionState: 'unknown' as const }),
     postMotionPlacement: Array.isArray(motionPlacement) && motionPlacement.length >= 2,
+    ...(typeof verifiedAt === 'string' ? { verifiedAt } : {}),
+    ...(sourceProvenance === undefined ? {} : { sourceProvenance }),
   };
+}
+
+function parseSourceProvenance(value: unknown): ReleaseSourceProvenance | undefined {
+  const source = record(value);
+  if (
+    typeof source.commitSha !== 'string' ||
+    typeof source.treeHash !== 'string' ||
+    typeof source.lockfileSha256 !== 'string' ||
+    typeof source.worktreeClean !== 'boolean'
+  )
+    return undefined;
+  return {
+    commitSha: source.commitSha,
+    treeHash: source.treeHash,
+    lockfileSha256: source.lockfileSha256,
+    worktreeClean: source.worktreeClean,
+  };
+}
+
+function workspaceSourceProvenance(root: string): ReleaseSourceProvenance {
+  const commitSha = gitOutput(root, ['rev-parse', 'HEAD']);
+  const treeHash = gitOutput(root, ['rev-parse', 'HEAD^{tree}']);
+  const status = gitOutput(root, [
+    'status',
+    '--porcelain=v1',
+    '--untracked-files=all',
+    '--',
+    '.',
+    ':(exclude)test-output/**',
+    ':(exclude)test-results/**',
+    ':(exclude)playwright-report/**',
+  ]);
+  const lockfile = join(root, 'pnpm-lock.yaml');
+  return {
+    commitSha,
+    treeHash,
+    lockfileSha256: existsSync(lockfile) ? sha256File(lockfile) : '',
+    worktreeClean: status.length === 0,
+  };
+}
+
+function gitOutput(root: string, args: readonly string[]): string {
+  const git = process.platform === 'win32' ? 'git.exe' : 'git';
+  const result = spawnSync(git, args, { cwd: root, encoding: 'utf8', shell: false });
+  return result.status === 0 && typeof result.stdout === 'string' ? result.stdout.trim() : '';
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -537,8 +691,17 @@ function verifyArtifactHashes(
 function verifyReleaseDocuments(
   manifest: Readonly<Record<string, unknown>>,
   sbom: Readonly<Record<string, unknown>>,
+  sourceProvenance?: ReleaseSourceProvenance,
 ): void {
-  if (manifest.schemaVersion !== 1) throw new Error('release manifest schemaVersion must be 1');
+  if (sourceProvenance === undefined) {
+    if (manifest.schemaVersion !== 1) throw new Error('release manifest schemaVersion must be 1');
+  } else {
+    if (manifest.schemaVersion !== 2)
+      throw new Error('source-bound release manifest must use schemaVersion 2');
+    const manifestSource = parseSourceProvenance(manifest.sourceProvenance);
+    if (manifestSource === undefined || !sameSource(manifestSource, sourceProvenance))
+      throw new Error('release manifest source provenance does not match the workspace evidence');
+  }
   if (
     (sbom.bomFormat !== 'cyclonedx' && sbom.bomFormat !== 'CycloneDX') ||
     !Array.isArray(sbom.components) ||

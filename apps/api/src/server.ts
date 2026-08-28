@@ -15,6 +15,7 @@ import {
   ProviderApprovalService,
   providerApprovalSigningConfigFromEnv,
 } from './provider-approval.js';
+import { productionReadinessOptions } from './server-readiness.js';
 
 await start();
 
@@ -84,6 +85,11 @@ async function start(): Promise<void> {
       approvals: providerApprovals,
     }),
     ...(privateObjectStore === undefined ? {} : { privateObjectStore }),
+    readiness: productionReadinessOptions({
+      pool,
+      durableControlPlane,
+      privateObjectStore,
+    }),
   }).listen(port, host);
   console.log(`JOY Media API listening on ${host}:${port}`);
 }

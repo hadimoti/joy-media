@@ -1,15 +1,24 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   evaluateReleaseGate,
+  RELEASE_COMMANDS,
   REQUIRED_BUILD_IDS,
   REQUIRED_JOURNEY_ID,
   sha256File,
   writeReleaseEvidence,
   type ReleaseGateInput,
+  type ReleaseSourceProvenance,
 } from './gate.js';
+
+const sourceProvenance = (commit = 'a'.repeat(40)): ReleaseSourceProvenance => ({
+  commitSha: commit,
+  treeHash: 'b'.repeat(40),
+  lockfileSha256: 'c'.repeat(64),
+  worktreeClean: true,
+});
 
 const passingInput = (): ReleaseGateInput => ({
   testSummary: { collected: 12, failed: 0 },
@@ -37,6 +46,63 @@ const passingInput = (): ReleaseGateInput => ({
 });
 
 describe('JOY Studio 1.0 release gate', () => {
+  it('builds the editor before tests evaluate the generated budget manifest', () => {
+    const editorBuild = RELEASE_COMMANDS.findIndex(([id]) => id === 'editor-build');
+    const tests = RELEASE_COMMANDS.findIndex(([id]) => id === 'tests');
+    expect(editorBuild).toBeGreaterThanOrEqual(0);
+    expect(editorBuild).toBeLessThan(tests);
+
+    const workflow = readFileSync(
+      resolve(import.meta.dirname, '../../../.github/workflows/ci.yml'),
+      'utf8',
+    );
+    const workflowLines = workflow.split(/\r?\n/u).map((line) => line.trim());
+    expect(workflowLines.indexOf('- run: pnpm --filter @joy-media/editor-web build')).toBeLessThan(
+      workflowLines.indexOf('- run: pnpm check'),
+    );
+  });
+
+  it('rejects dirty, missing, stale, or cross-revision browser provenance', () => {
+    const now = new Date('2026-08-28T12:00:00.000Z');
+    const current = sourceProvenance();
+    const journey = {
+      ...passingInput().browserJourneys[0]!,
+      verifiedAt: '2026-08-28T11:00:00.000Z',
+      sourceProvenance: current,
+    };
+    const { sourceProvenance: omittedSource, ...journeyWithoutSource } = journey;
+    void omittedSource;
+    expect(
+      evaluateReleaseGate(
+        {
+          ...passingInput(),
+          sourceProvenance: current,
+          browserJourneys: [journey],
+        },
+        now,
+      ).passed,
+    ).toBe(true);
+
+    for (const input of [
+      { sourceProvenance: { ...current, worktreeClean: false }, browserJourneys: [journey] },
+      { sourceProvenance: current, browserJourneys: [journeyWithoutSource] },
+      {
+        sourceProvenance: current,
+        browserJourneys: [{ ...journey, sourceProvenance: sourceProvenance('d'.repeat(40)) }],
+      },
+      {
+        sourceProvenance: current,
+        browserJourneys: [{ ...journey, verifiedAt: '2026-08-26T11:00:00.000Z' }],
+      },
+    ]) {
+      const result = evaluateReleaseGate({ ...passingInput(), ...input }, now);
+      expect(result.passed).toBe(false);
+      expect(result.checks.find((check) => check.id === 'source-provenance')?.status).toBe(
+        'failed',
+      );
+    }
+  });
+
   it('fails closed when test collection is empty', () => {
     const result = evaluateReleaseGate({
       ...passingInput(),
@@ -177,5 +243,72 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(JSON.parse(readFileSync(join(output, 'artifact-hashes.json'), 'utf8'))).toEqual(
       evidence.artifactHashes,
     );
+  });
+
+  it('rejects a source-bound manifest from a different commit', () => {
+    const root = mkdtempSync(join(tmpdir(), 'joy-release-source-root-'));
+    const output = mkdtempSync(join(tmpdir(), 'joy-release-source-gate-'));
+    mkdirSync(join(root, 'apps/api/dist'), { recursive: true });
+    writeFileSync(join(root, 'apps/api/dist/server.js'), 'release artifact');
+    const current = sourceProvenance();
+    const artifactHash = sha256File(join(root, 'apps/api/dist/server.js'));
+    const evidence = {
+      ...passingInput(),
+      sourceProvenance: current,
+      browserJourneys: [{ ...passingInput().browserJourneys[0]!, sourceProvenance: current }],
+      artifactHashes: { 'apps/api/dist/server.js': artifactHash },
+      manifest: {
+        schemaVersion: 2,
+        sourceProvenance: sourceProvenance('d'.repeat(40)),
+        artifacts: { 'apps/api/dist/server.js': artifactHash },
+      },
+      sbom: {
+        bomFormat: 'cyclonedx',
+        components: [{ type: 'library', name: 'joy-media', version: '1.0.0' }],
+      },
+    };
+
+    expect(() => writeReleaseEvidence(root, output, evidence)).toThrow(
+      'release manifest source provenance does not match the workspace evidence',
+    );
+  });
+
+  it('reports a dirty source-bound checkout as a failed gate', () => {
+    const root = mkdtempSync(join(tmpdir(), 'joy-release-dirty-root-'));
+    const output = mkdtempSync(join(tmpdir(), 'joy-release-dirty-gate-'));
+    mkdirSync(join(root, 'apps/api/dist'), { recursive: true });
+    writeFileSync(join(root, 'apps/api/dist/server.js'), 'release artifact');
+    const dirtySource = { ...sourceProvenance(), worktreeClean: false };
+    const artifactHash = sha256File(join(root, 'apps/api/dist/server.js'));
+    const evidence = {
+      ...passingInput(),
+      sourceProvenance: dirtySource,
+      browserJourneys: [
+        {
+          ...passingInput().browserJourneys[0]!,
+          verifiedAt: '2026-08-28T11:00:00.000Z',
+          sourceProvenance: dirtySource,
+        },
+      ],
+      artifactHashes: { 'apps/api/dist/server.js': artifactHash },
+      manifest: {
+        schemaVersion: 2,
+        sourceProvenance: dirtySource,
+        artifacts: { 'apps/api/dist/server.js': artifactHash },
+      },
+      sbom: {
+        bomFormat: 'cyclonedx',
+        components: [{ type: 'library', name: 'joy-media', version: '1.0.0' }],
+      },
+    };
+
+    const result = writeReleaseEvidence(
+      root,
+      output,
+      evidence,
+      new Date('2026-08-28T12:00:00.000Z'),
+    );
+    expect(result.passed).toBe(false);
+    expect(result.checks.find((check) => check.id === 'source-provenance')?.status).toBe('failed');
   });
 });
