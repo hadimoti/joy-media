@@ -86,6 +86,17 @@ describe('Creative Brief v2 compatibility contract', () => {
     expect(validation.valid).toBe(false);
     expect(validation.errors.join('\n')).toMatch(/projectId|snapshot revision/i);
   });
+
+  it('labels unknown result fields as result diagnostics', () => {
+    const request = requestFixture();
+    const validation = validateCreativeBriefV2Result(
+      { ...resultFixture(request), unexpected: true },
+      request,
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(validation.errors).toContain('result contains unknown field unexpected');
+  });
 });
 
 function requestFixture(): CreativeBriefV2Request {

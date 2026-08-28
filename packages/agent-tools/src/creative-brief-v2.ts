@@ -122,17 +122,22 @@ export function validateCreativeBriefV2Result(
 ): CreativeBriefV2ValidationResult {
   const errors: string[] = [];
   if (!isRecord(value)) return invalid('result must be an object');
-  addUnknownFields(errors, value, [
-    'schemaVersion',
-    'requestId',
-    'projectId',
-    'projectRevisionId',
-    'summary',
-    'rationale',
-    'evidenceIds',
-    'recommendations',
-    'warnings',
-  ]);
+  addUnknownFields(
+    errors,
+    value,
+    [
+      'schemaVersion',
+      'requestId',
+      'projectId',
+      'projectRevisionId',
+      'summary',
+      'rationale',
+      'evidenceIds',
+      'recommendations',
+      'warnings',
+    ],
+    'result',
+  );
   if (value.schemaVersion !== CREATIVE_BRIEF_V2_SCHEMA_VERSION)
     errors.push('schemaVersion must be 2');
   if (value.requestId !== request.requestId) errors.push('requestId must match the request');
