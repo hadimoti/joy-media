@@ -178,6 +178,7 @@ reproduce it.
 | P1-29 | Timeline marker insertion              | Fixed in `856612f`: Classic and Dual Lens now allocate deterministic collision-free IDs from the current session marker list, with focused rapid-repeat coverage. Post-deploy browser verification on `8e1df6d` at 320px inserted a second marker successfully, collapsed the More menu (`aria-expanded=false`), kept the editor on `https://joyst.ir/`, and emitted no new console errors. Retain this assertion in the source-bound release journey.                                                                                                                                                 |
 | P1-30 | Jobs source-ready worker selection     | Fixed in `2a321d8`: queue readiness now evaluates every connected Worker and enables an operation when any capability-compatible Worker also advertises the selected source asset, instead of failing on the first capability-only Worker. Focused Jobs/polling coverage (19 tests) passed. Retain a live multi-Worker assertion and the source-bound delivery journey before closing P0-12.                                                                                                                                                                                                           |
 | P1-31 | Timeline marker label uniqueness       | Fixed in `82290df`: generated `Marker N` labels now advance above all existing generated labels across Classic, Dual Lens, toolbar, overflow and ruler paths, while custom labels remain unchanged. Focused marker/context/timeline coverage (17 tests), typecheck, lint and formatting passed. Retain a save/reopen and non-tail-delete/reinsert assertion so visible labels remain unambiguous.                                                                                                                                                                                                      |
+| P1-32 | 3D workspace lifecycle                 | The authenticated 3D tab is stable and truthful when empty: it reports “Scene ready — load a GLB/GLTF file to preview,” exposes Import 3D model, and keeps Add current 3D view to timeline disabled until a scene exists. A real GLB/GLTF import, preview/render, placement, save/reopen, undo/redo and missing/revoked-source recovery journey is still required; keep 3D authoring experimental until that evidence exists.                                                                                                                                                                          |
 
 ### LIVE-13 — timeline browser certification (2026-08-29)
 
@@ -554,6 +555,16 @@ closure still requires the authenticated source-bound Worker delivery/inspection
 save/reopen evidence, and the performance/accessibility gates listed below. The Effects audit also
 confirms the remaining P1-02/LIVE-02 risk is preview-load pressure (all filtered cards mount and
 attempt playback without viewport/concurrency gating), not evidence of a PostgreSQL crash loop.
+
+### LIVE-42 — authenticated 3D tab audit (2026-08-29)
+
+The orchestrator opened the authenticated 3D tab on the deployed editor. The scene surface stayed
+on `https://joyst.ir/`, displayed the truthful empty-state message “Scene ready — load a GLB/GLTF
+file to preview,” exposed an accessible Import 3D model action, and kept Add current 3D view to
+timeline disabled until a model is loaded. No new browser console errors, recovery surface, or
+forced navigation occurred. This closes the empty-state crash question but not P1-32: the real
+GLB/GLTF import, render/preview, timeline placement, durable save/reopen, undo/redo, and
+missing/revoked-source recovery journey remains unverified, so 3D authoring stays experimental.
 
 ## Numeric release budgets and retained evidence
 
