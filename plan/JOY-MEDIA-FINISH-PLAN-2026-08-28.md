@@ -402,7 +402,7 @@ cycles, and the preview action remained on the editor URL without recovery/datab
 zoom, 100ms keyboard playhead movement, and reload all remained stable; the 3D Scene lane exposed
 the expected 10.3s empty span from 12.5s to 22.8s and the striped keyboard-focusable `timeline gap`
 note remained present after reload. Evidence is retained in the ignored local artifact
-`test-output/browser/timeline-c5acb9d.json`; this closes the reported Effects-subtab crash as
+`test-output/browser/timeline-5725c49e08c5.json`; this closes the reported Effects-subtab crash as
 unreproduced and keeps only the source-bound editor/Worker journeys and final keyboard matrix open.
 
 ### LIVE-28 — stable promotion and canary (2026-08-29)
