@@ -84,6 +84,14 @@ export class RclonePrivateObjectStore implements PrivateObjectStore {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)
       throw new RangeError('private object store readiness timeout must be positive');
     const target = parseRemotePrefix(this.options.remotePrefix);
+    if (this.s3?.probeReadiness !== undefined) {
+      await withTimeout(
+        this.s3.probeReadiness({ timeoutMs }),
+        timeoutMs,
+        'private object store readiness probe timed out',
+      );
+      return;
+    }
     const probeTarget = target
       ? `${target.remoteName}:${target.bucket}`
       : this.options.remotePrefix;
@@ -157,6 +165,7 @@ export interface S3ObjectClient {
   put(ref: string, bytes: Uint8Array): Promise<void>;
   get(ref: string): Promise<Uint8Array>;
   remove(ref: string): Promise<void>;
+  probeReadiness?(options: PrivateObjectStoreReadinessOptions): Promise<void>;
 }
 
 interface S3RemoteTarget {
@@ -269,6 +278,18 @@ class SigV4S3ObjectClient implements S3ObjectClient {
   async remove(ref: string): Promise<void> {
     if (!isOpaqueRef(ref)) throw new TypeError('object-store ref is invalid');
     await this.request('DELETE', ref);
+  }
+
+  async probeReadiness(): Promise<void> {
+    try {
+      await this.request('GET', 'joy-media-readiness-probe');
+    } catch (error) {
+      // A signed 404 proves the bucket endpoint and credentials are reachable
+      // without mutating or disclosing any private object. Other failures are
+      // genuine readiness failures and must remain fail-closed.
+      if (error instanceof Error && /s3 object request failed \(404\)/u.test(error.message)) return;
+      throw error;
+    }
   }
 
   private request(
