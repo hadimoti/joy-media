@@ -2604,6 +2604,22 @@ function EditorWorkspace({
         throw new Error('The main timeline is unavailable.');
       }
 
+      // A generated 3D render is a real image asset, not just a transient
+      // canvas frame. Persist its bytes in the same integrity-checked OPFS
+      // original cache used by imported media before the document points at
+      // it; otherwise a reload would restore metadata with no pixels.
+      const mimeType = asset.blob.type || 'image/png';
+      const assetSha256 = await sha256Hex(new Uint8Array(await asset.blob.arrayBuffer()));
+      const originalAssetCache = await originalAssetCachePromise;
+      await originalAssetCache.put(
+        {
+          assetId: asset.assetId,
+          sha256: assetSha256,
+          bytes: asset.blob.size,
+          mimeType,
+        },
+        asset.blob,
+      );
       stickerImageCache.rememberBlob(asset.assetId, asset.blob);
       const insertion = buildThreeDRenderLayerInsertion({
         timeline: session.timelineProject,
@@ -2614,7 +2630,7 @@ function EditorWorkspace({
           assetId: asset.assetId,
           displayName: asset.displayName,
           bytes: asset.blob.size,
-          mimeType: asset.blob.type || 'image/png',
+          mimeType,
         },
       });
       session.dispatchCompound(insertion.label, {
