@@ -275,6 +275,16 @@ Jobs rendered with Workers/Queue/Pair tabs and the current project context; the 
 no browser errors were recorded. This closes the preset-wiring defect, but P1-26 remains open for the
 compact edit/zoom affordances, unique clip names, labelled track groups, and the full responsive matrix.
 
+### LIVE-19 — timeline semantic identity repair (2026-08-29)
+
+Commit `4c0f4a1` closes the ambiguity portion of P1-26. Timeline clips now expose a unique accessible
+name containing the display label, duration, time range, and durable clip ID, and are described as
+`timeline clip`; track wrappers expose labelled `group` semantics (`V10 Video 1 track`, etc.). The
+playhead slider advertises its Arrow/Home/End keyboard contract. The deployed browser verified distinct
+names for the two split `Intro` clips and all three `Black Brush Stroke` clips, labelled track groups,
+and the shortcut metadata with no recovery UI or console errors. Compact primary-toolbar hiding and the
+missing compact zoom replacement remain open under P1-26 until the complete width matrix passes.
+
 ## Numeric release budgets and retained evidence
 
 These are stop/go gates, not optional targets:
