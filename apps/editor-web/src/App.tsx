@@ -1147,9 +1147,11 @@ function EditorWorkspace({
   const [, setPluginRevision] = useState(0);
   const sessionRef = useRef<EditorSession | null>(null);
   const remoteDocumentHydrationRef = useRef<Set<string>>(new Set());
+  const remoteDocumentHydrationFailuresRef = useRef<Map<string, number>>(new Map());
   const [remoteDocumentBootstrapProjectId, setRemoteDocumentBootstrapProjectId] = useState<
     string | undefined
   >(undefined);
+  const [remoteDocumentBootstrapRetry, setRemoteDocumentBootstrapRetry] = useState(0);
   const remoteDocumentAutosyncRef = useRef<ProjectDocumentAutosync | null>(null);
   if (remoteDocumentAutosyncRef.current === null) {
     remoteDocumentAutosyncRef.current = new ProjectDocumentAutosync({
@@ -1392,6 +1394,7 @@ function EditorWorkspace({
     const autosync = remoteDocumentAutosyncRef.current;
     if (autosync === null) return;
     let cancelled = false;
+    let retryTimer: number | undefined;
     void autosync
       .bootstrap(
         session,
@@ -1401,11 +1404,15 @@ function EditorWorkspace({
       )
       .then((result) => {
         if (cancelled) return;
+        remoteDocumentHydrationFailuresRef.current.delete(controlPlaneProjectId);
         if (result.kind === 'local-changed') {
           showToast(
             'A newer local edit was kept; the cloud document was not applied. Save again to reconcile it.',
             'error',
           );
+          // The remote read completed and ProjectDocumentAutosync retained its
+          // revision as the next write's CAS base. Permit that recovery write.
+          setRemoteDocumentBootstrapProjectId(controlPlaneProjectId);
           return;
         }
         // Both an existing remote head and an explicit missing-document read
@@ -1416,15 +1423,34 @@ function EditorWorkspace({
       })
       .catch((error: unknown) => {
         if (cancelled) return;
+        // A failed bootstrap must not leave this project permanently marked as
+        // hydrated. Retry the read with the same bounded cadence as autosync;
+        // writes stay behind the bootstrap barrier until it succeeds.
+        remoteDocumentHydrationRef.current.delete(controlPlaneProjectId);
+        const failures =
+          (remoteDocumentHydrationFailuresRef.current.get(controlPlaneProjectId) ?? 0) + 1;
+        remoteDocumentHydrationFailuresRef.current.set(controlPlaneProjectId, failures);
+        const retryDelayMs = Math.min(2_000 * 2 ** Math.max(0, failures - 1), 60_000);
+        retryTimer = window.setTimeout(() => {
+          if (!cancelled) setRemoteDocumentBootstrapRetry((retry) => retry + 1);
+        }, retryDelayMs);
         showToast(
-          `Cloud document could not be hydrated: ${error instanceof Error ? error.message : String(error)}`,
+          `Cloud document could not be hydrated: ${error instanceof Error ? error.message : String(error)}. Retrying shortly.`,
           'error',
         );
       });
     return () => {
       cancelled = true;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
     };
-  }, [controlPlaneOwnerKey, controlPlaneProject, joySession.kind, session, showToast]);
+  }, [
+    controlPlaneOwnerKey,
+    controlPlaneProject,
+    joySession.kind,
+    remoteDocumentBootstrapRetry,
+    session,
+    showToast,
+  ]);
   useEffect(() => {
     if (joySession.kind !== 'ready') return;
     if (remoteDocumentBootstrapProjectId !== controlPlaneProject.controlPlaneProjectId) return;

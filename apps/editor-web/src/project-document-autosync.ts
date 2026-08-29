@@ -97,19 +97,25 @@ export class ProjectDocumentAutosync {
       throw error;
     }
 
-    if (result.kind === 'local-changed') return result;
-
     const entry = this.entryFor(binding, ownerKey);
     this.clearTimer(entry);
     entry.queued = undefined;
     entry.failures = 0;
     entry.conflicted = false;
     entry.binding = { ...binding, documentRevisionId: result.revisionId };
+    upsertControlPlaneProjectBinding(this.options.storage, entry.binding, ownerKey);
+    if (result.kind === 'local-changed') {
+      // Hydration deliberately did not overwrite a newer local edit, but the
+      // completed read is still the authoritative CAS base for reconciling it.
+      // Do not mark this local revision as confirmed: the next schedule must
+      // persist it against the observed remote head.
+      delete entry.confirmedRevisionId;
+      return result;
+    }
     // `synchronizeVisualProject` may have advanced this ID. Capturing it only
     // after hydration means the remote document cannot be written back as a
     // fresh local revision on the next render.
     entry.confirmedRevisionId = session.projectRevisionId;
-    upsertControlPlaneProjectBinding(this.options.storage, entry.binding, ownerKey);
     return result;
   }
 

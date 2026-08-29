@@ -147,6 +147,50 @@ describe('ordinary project document autosync', () => {
     }
   });
 
+  it('uses the observed remote head as the CAS base when a local edit wins a slow hydration', async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = memoryStorage();
+      const sync = syncTransport();
+      const autosync = new ProjectDocumentAutosync({ storage, syncProjectDocument: sync });
+      const local = document('Local recovery');
+      const session = sessionFor(local);
+
+      await expect(
+        autosync.bootstrap(
+          session,
+          binding,
+          async () => {
+            session.revision = 'local-recovery-2';
+            return {
+              projectId: binding.controlPlaneProjectId,
+              revisionId: 'remote-head-1',
+              document: document('Remote head'),
+            };
+          },
+          'owner-1',
+        ),
+      ).resolves.toEqual({ kind: 'local-changed', revisionId: 'remote-head-1' });
+
+      autosync.schedule(binding, local, session.projectRevisionId, 'owner-1');
+      await vi.advanceTimersByTimeAsync(DOCUMENT_AUTOSYNC_DEBOUNCE_MS);
+
+      expect(sync).toHaveBeenCalledWith(
+        binding.controlPlaneProjectId,
+        expect.objectContaining({
+          baseRevisionId: 'remote-head-1',
+          revisionId: 'local-recovery-2',
+          document: local,
+        }),
+      );
+      expect(
+        getControlPlaneProjectBinding(storage, binding.editorProjectId, 'owner-1'),
+      ).toMatchObject({ documentRevisionId: 'local-recovery-2' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps local recovery untouched and stops automatic writes on a CAS conflict', async () => {
     vi.useFakeTimers();
     try {
