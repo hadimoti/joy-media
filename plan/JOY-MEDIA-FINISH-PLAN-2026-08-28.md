@@ -765,6 +765,30 @@ tests, full tests, typecheck, lint, formatting, CodeRabbit, executable rebuild/s
 task replacement verification pass. Strict release closure still requires owner-paired source-bound
 delivery/inspection evidence and the current-SHA production canary.
 
+### LIVE-48 — source-bound browser closure and release completion (2026-08-29)
+
+Owner pairing was completed in the authenticated JOY Studio session. The hidden Windows Worker
+reported `asset.thumbnail` and `render.preview.gpu`, and the real owner asset
+`media-9ffcf5b9-486d-48f8-91ad-542141172263` completed thumbnail job
+`asset-thumbnail-0756ce86-ff23-4242-9c66-117a359dd784` at 100% with a retained 17,029-byte
+receipt and browser inspection showing `Verified private derivative`. The authenticated editor
+journey also reloaded successfully with both Motion placements persisted: Fade In on the imported
+owner clip and Zoom In on the screen-recording clip. Inspector Visual/AI/Mask/Effects/Audio/Speed
+subtabs stayed on `https://joyst.ir/`, the reported Effects outage did not recur, Joy Code 3D opened
+and returned to Composer, and the browser console contained zero errors or warnings.
+
+Source-bound evidence is retained in
+`test-output/browser/authenticated-editor-1.0/journey-evidence.json` with index
+`test-output/browser/journeys.json`. Two independent strict release gates passed at
+`2026-08-29T17:27:35Z` and `2026-08-29T17:29:35Z`; each recorded 3,606 tests collected and zero
+failures, matching clean source commit `6a7794012064857faf45551868fe08bf69bfb8ba`, tree
+`b0ec440dc5a2af29c793f2813fdfd07d6fb285fd`, and lock hash
+`5743a844c653ba43d29c237f50f582ff1f69f9300d1449e2932049d8b8aa127b`. The immutable API/web
+promotion, migration backup/rollback rehearsal, origin plus `joyst.ir`/`www.joyst.ir` identity
+checks, and the real-services 30-minute canary all passed for that same SHA. This closes the
+remaining source-bound Worker, inspection, Motion, Effects, 3D, persistence, and release-gate
+items for JOY Media; historical NO-GO notes above are superseded by this final entry.
+
 ## Stop/continue rules for the autonomous goal
 
 - Do not stop for ordinary design choices, review comments, test failures or retryable service
