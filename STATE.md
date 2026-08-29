@@ -3,6 +3,19 @@
 Updated by **every** implementation session (protocol: [`ORCHESTRATION.md`](ORCHESTRATION.md) §2).
 One row per part. Keep entries terse; detail lives in the part files' WP checkboxes.
 
+## Current closure checkpoint (2026-08-30)
+
+Commit `696bc6f` is pushed to both `github/main` and the VPS bare `main`.
+It fixes the project-rename SQL revision placeholder, closes the cancel/late-
+receipt race and failed-attempt bookkeeping, revokes sessions when an
+allow-listed identity is disabled/removed, and adds the Windows Worker package
+smoke lane. Self-hosted GitHub run `33279292251` passed `check`, all three
+desktop Playwright projects, and `worker-package` on
+`joy-media-ci-windows`. This is source/desktop evidence only: final release
+remains NO-GO until the isolated Linux real-service lane, clean-profile Worker
+lane, acceptance lane, remaining DB/lease/provider hardening, deployment, and
+authenticated live/canary/rollback evidence are completed.
+
 ## VPS access
 
 JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box, two apps.

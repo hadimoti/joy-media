@@ -95,3 +95,12 @@ Get-ScheduledTask -TaskName 'JOY Media Self-Hosted CI Runner'
 ```
 
 The runner must be `online` before pushing a release commit. If it is offline, repair the runner or run the checks locally; do not switch CI to the production VPS.
+
+## Latest verified run
+
+On 2026-08-30, self-hosted run `33279292251` passed on `main` at commit
+`696bc6f`: `check`, `browser-e2e` (`desktop-minimum`, `desktop-primary`, and
+`desktop-compact`), and `worker-package` all completed successfully. This
+confirms the Windows source/browser/package lane is operational; it does not
+substitute for the release-candidate Linux, clean-profile Worker, or acceptance
+lanes described above.
