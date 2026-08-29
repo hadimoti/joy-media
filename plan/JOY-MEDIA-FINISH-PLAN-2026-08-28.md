@@ -307,6 +307,17 @@ header stacking/hit-area defect that can make timeline undo, layout, and workspa
 unreachable on small screens; it is tracked as P1-27 and must be closed before the compact timeline
 matrix can be certified. No URL change or browser warning/error was observed during this pass.
 
+### LIVE-22 — compact header repair verification (2026-08-29)
+
+Commit `2dc53c7` separates the Brand, Edit, and Deliver header rows at compact widths, constrains
+each scrollable group, and preserves Brand → Edit → Deliver DOM order. The fix was deployed in
+release `9379250e28df232ea138b19446cf08b81fe62075`. A fresh authenticated browser verified the
+center hit targets at 320×900, 480×900, 768×900, and 1280×720: Undo, Redo, Command palette,
+layout toggle, and Workspace preset no longer resolve to a neighboring menu. The layout toggle
+also changed between Widescreen and Vertical at 480px without navigation or console warnings.
+This closes the hit-target portion of P1-27; the remaining closure is the full 320/375/480/600/768
+keyboard/focus matrix and regression coverage in the final release gate.
+
 ## Numeric release budgets and retained evidence
 
 These are stop/go gates, not optional targets:
