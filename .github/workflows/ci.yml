@@ -2,20 +2,18 @@ name: ci
 on:
   push:
     branches: [main]
-  pull_request:
+  workflow_dispatch:
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, windows, x64, joy-media-ci]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
       - run: corepack enable pnpm
       - name: Install media toolchain
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes ffmpeg
           ffmpeg -version
           ffprobe -version
       - run: pnpm install --frozen-lockfile
@@ -23,7 +21,7 @@ jobs:
       - run: pnpm run release:gate
       - name: Upload release gate evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-gate
           path: test-output/release-gate/
@@ -34,30 +32,28 @@ jobs:
       fail-fast: false
       matrix:
         project: [desktop-primary, desktop-compact, desktop-minimum]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, windows, x64, joy-media-ci]
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
       - run: corepack enable pnpm
       - name: Install media toolchain
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes ffmpeg
           ffmpeg -version
           ffprobe -version
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec playwright install chromium
       - name: Run browser audit (${{ matrix.project }})
         run: pnpm exec playwright test tests/e2e --project=${{ matrix.project }} --workers=1
         env:
           CI: true
       - name: Upload browser evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: playwright-evidence-${{ matrix.project }}
           path: |

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Server } from 'node:http';
+import type { IncomingMessage, Server } from 'node:http';
 import { once } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -156,7 +156,13 @@ describe('control-plane HTTP transport', () => {
   });
 
   it('exposes the owner-authorized project lifecycle routes with revision and trash guards', async () => {
-    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    const controlPlane = new LocalControlPlane();
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
     expect(
       await request(origin, 'POST', '/v1/projects/ensure', {
         id: 'ensured',
@@ -178,17 +184,15 @@ describe('control-plane HTTP transport', () => {
     expect(
       await request(origin, 'POST', '/v1/projects', { id: 'source', title: 'Source' }),
     ).toMatchObject({ status: 201, body: { data: { revision: 0, title: 'Source' } } });
-    expect(
-      await request(origin, 'POST', '/v1/projects/source/assets', {
-        id: 'source-asset',
-        kind: 'video',
-        displayName: 'clip.mp4',
-        sha256: SHA256,
-        bytes: 12,
-        descriptor: { mimeType: 'video/mp4' },
-        locations: [{ kind: 'private-object', ref: 'source-object' }],
-      }),
-    ).toMatchObject({ status: 201 });
+    await controlPlane.registerAsset({ id: 'owner' }, 'source', {
+      id: 'source-asset',
+      kind: 'video',
+      displayName: 'clip.mp4',
+      sha256: SHA256,
+      bytes: 12,
+      descriptor: { mimeType: 'video/mp4' },
+      locations: [{ kind: 'private-object', ref: 'source-object' }],
+    });
     expect(
       await request(origin, 'PATCH', '/v1/projects/source', {
         title: 'Renamed',
@@ -261,10 +265,16 @@ describe('control-plane HTTP transport', () => {
   });
 
   it('associates a durable catalog asset before it is used by a project-scoped Worker job', async () => {
-    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    const controlPlane = new LocalControlPlane();
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
     await request(origin, 'POST', '/v1/projects', { id: 'source', title: 'Source' });
     await request(origin, 'POST', '/v1/projects', { id: 'target', title: 'Target' });
-    await request(origin, 'POST', '/v1/projects/source/assets', {
+    await controlPlane.registerAsset({ id: 'owner' }, 'source', {
       id: 'catalog-video',
       kind: 'video',
       displayName: 'catalog.mp4',
@@ -934,6 +944,197 @@ describe('control-plane HTTP transport', () => {
     });
     expect(store.objects).toHaveLength(0);
     expect(store.removed).toHaveLength(1);
+  });
+
+  it('rejects browser-supplied private-object claims for asset and local derivative registration', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    await request(origin, 'POST', '/v1/projects', { id: 'p', title: 'Project' });
+
+    const assetRegistrationAttempt = await request(origin, 'POST', '/v1/projects/p/assets', {
+      id: 'asset-private-claim',
+      kind: 'video',
+      displayName: 'clip.mp4',
+      sha256: SHA256,
+      bytes: 12,
+      descriptor: { mimeType: 'video/mp4', durationUs: 1_000_000 },
+      locations: [{ kind: 'private-object', ref: 'orig-shared-content' }],
+    });
+    expect(assetRegistrationAttempt).toMatchObject({
+      status: 400,
+      body: {
+        error: {
+          code: 'REQUEST_INVALID',
+          message: 'asset registration must provide exactly one local cache location',
+        },
+      },
+    });
+
+    await request(origin, 'POST', '/v1/projects/p/assets', {
+      id: 'asset-local',
+      kind: 'video',
+      displayName: 'clip.mp4',
+      sha256: SHA256,
+      bytes: 12,
+      descriptor: { mimeType: 'video/mp4', durationUs: 1_000_000 },
+      locations: [{ kind: 'opfs-cache', ref: 'opfs-video' }],
+    });
+
+    const derivativeRegistrationAttempt = await request(
+      origin,
+      'POST',
+      '/v1/projects/p/assets/asset-local/derivatives',
+      {
+        id: 'derivative-private-claim',
+        assetId: 'asset-local',
+        kind: 'proxy',
+        profile: 'h264-720p',
+        sha256: 'b'.repeat(64),
+        bytes: 1234,
+        descriptor: { mimeType: 'video/mp4', durationUs: 1_000_000, width: 1280, height: 720 },
+        availability: 'available-local',
+        locations: [
+          { kind: 'opfs-cache', ref: 'opfs-derivative' },
+          { kind: 'private-object', ref: 'derivative-shared-content' },
+        ],
+      },
+    );
+    expect(derivativeRegistrationAttempt).toMatchObject({
+      status: 400,
+      body: {
+        error: {
+          code: 'REQUEST_INVALID',
+          message: 'derivative registration must provide exactly one local cache location',
+        },
+      },
+    });
+  });
+
+  it('blocks cross-tenant registration, read, write, and delete attempts against owner-only originals', async () => {
+    const store = new MemoryPrivateObjectStore();
+    const auth = {
+      authenticate(request: IncomingMessage) {
+        const value = request.headers.authorization;
+        if (typeof value !== 'string') return { id: 'owner-a' };
+        const match = /^Bearer\s+(.+)$/i.exec(value);
+        return { id: match?.[1] ?? 'owner-a' };
+      },
+    };
+    const origin = await start(auth, store);
+    const bytes = new TextEncoder().encode('tenant-private-bytes');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+
+    await request(
+      origin,
+      'POST',
+      '/v1/projects',
+      { id: 'owner-project', title: 'Owner' },
+      'owner-a',
+    );
+    await request(
+      origin,
+      'POST',
+      '/v1/projects/owner-project/assets',
+      {
+        id: 'owner-asset',
+        kind: 'video',
+        displayName: 'clip.mp4',
+        sha256,
+        bytes: bytes.byteLength,
+        descriptor: { mimeType: 'video/mp4', durationUs: 1_000_000 },
+        locations: [{ kind: 'opfs-cache', ref: 'opfs-owner-asset' }],
+      },
+      'owner-a',
+    );
+    const upload = await fetch(`${origin}/v1/projects/owner-project/assets/owner-asset/original`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer owner-a',
+        'content-type': 'video/mp4',
+        'x-joy-sha256': sha256,
+        'x-joy-bytes': String(bytes.byteLength),
+      },
+      body: bytes,
+    });
+    expect(upload.status).toBe(201);
+    const ownerRef = store.objects[0]?.descriptor.ref;
+    expect(ownerRef).toBeDefined();
+
+    await request(origin, 'POST', '/v1/projects', { id: 'peer-project', title: 'Peer' }, 'owner-b');
+
+    expect(
+      await request(
+        origin,
+        'POST',
+        '/v1/projects/peer-project/assets',
+        {
+          id: 'stolen-asset',
+          kind: 'video',
+          displayName: 'stolen.mp4',
+          sha256,
+          bytes: bytes.byteLength,
+          descriptor: { mimeType: 'video/mp4', durationUs: 1_000_000 },
+          locations: [{ kind: 'private-object', ref: ownerRef! }],
+        },
+        'owner-b',
+      ),
+    ).toMatchObject({
+      status: 400,
+      body: { error: { code: 'REQUEST_INVALID' } },
+    });
+
+    expect(
+      await request(
+        origin,
+        'GET',
+        '/v1/projects/owner-project/assets/owner-asset/original',
+        undefined,
+        'owner-b',
+      ),
+    ).toMatchObject({
+      status: 409,
+      body: { error: { code: 'PROJECT_NOT_FOUND' } },
+    });
+
+    const overwriteAttempt = await fetch(
+      `${origin}/v1/projects/owner-project/assets/owner-asset/original`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer owner-b',
+          'content-type': 'video/mp4',
+          'x-joy-sha256': sha256,
+          'x-joy-bytes': String(bytes.byteLength),
+        },
+        body: bytes,
+      },
+    );
+    expect(overwriteAttempt.status).toBe(409);
+    expect(await overwriteAttempt.json()).toMatchObject({
+      error: { code: 'PROJECT_NOT_FOUND' },
+    });
+
+    expect(
+      await request(
+        origin,
+        'DELETE',
+        '/v1/projects/owner-project/assets/owner-asset',
+        undefined,
+        'owner-b',
+      ),
+    ).toMatchObject({
+      status: 409,
+      body: { error: { code: 'PROJECT_NOT_FOUND' } },
+    });
+
+    expect(store.objects).toHaveLength(1);
+    const ownerReadback = await fetch(
+      `${origin}/v1/projects/owner-project/assets/owner-asset/original`,
+      {
+        headers: { authorization: 'Bearer owner-a' },
+      },
+    );
+    expect(ownerReadback.status).toBe(200);
+    expect(new Uint8Array(await ownerReadback.arrayBuffer())).toEqual(bytes);
   });
 
   it('does not purge shared content-addressed bytes when a later metadata attach fails', async () => {

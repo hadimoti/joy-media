@@ -6047,7 +6047,7 @@ function EditorWorkspace({
       return (
         <Suspense
           fallback={
-            <PanelShell title="Creative Brief" iconUrl={undefined}>
+            <PanelShell title="Creative Brief" iconUrl={panelTabIconUrl('creative-brief')}>
               {null}
             </PanelShell>
           }

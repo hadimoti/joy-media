@@ -155,7 +155,7 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(workflowLines).toContain('path: test-output/release-gate/');
   });
 
-  it('installs and verifies the FFmpeg/FFprobe toolchain before CI dependencies', () => {
+  it('verifies the self-hosted FFmpeg/FFprobe toolchain before CI dependencies', () => {
     const workflow = readFileSync(
       resolve(import.meta.dirname, '../../../.github/workflows/ci.yml'),
       'utf8',
@@ -166,16 +166,12 @@ describe('JOY Studio 1.0 release gate', () => {
 
     expect(toolchain).toBeGreaterThanOrEqual(0);
     expect(install).toBeGreaterThan(toolchain);
-    for (const command of [
-      'sudo apt-get update',
-      'sudo apt-get install --yes ffmpeg',
-      'ffmpeg -version',
-      'ffprobe -version',
-    ]) {
+    for (const command of ['ffmpeg -version', 'ffprobe -version']) {
       const index = workflowLines.indexOf(command);
       expect(index, `${command} must be present`).toBeGreaterThan(toolchain);
       expect(index).toBeLessThan(install);
     }
+    expect(workflow).not.toContain('sudo apt-get');
   });
 
   it('keeps missing static assets out of the SPA fallback in nginx', () => {

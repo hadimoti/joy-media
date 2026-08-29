@@ -4,6 +4,7 @@ import {
   ControlPlaneError,
   MAX_WORKER_ATTEMPTS,
   type Actor,
+  type AssetLocationRecord,
   type AssetRegistration,
   type ControlPlane,
   type Job,
@@ -2334,7 +2335,7 @@ function jobForBrowser(job: Job) {
 }
 
 function assetRegistration(body: Record<string, unknown>): AssetRegistration {
-  return {
+  const registration: AssetRegistration = {
     id: requiredString(body, 'id'),
     kind: requiredAssetKind(body, 'kind'),
     displayName: requiredString(body, 'displayName'),
@@ -2343,6 +2344,8 @@ function assetRegistration(body: Record<string, unknown>): AssetRegistration {
     descriptor: mediaDescriptor(body),
     locations: assetLocations(body),
   };
+  validateBrowserAssetLocations(registration.locations, 'asset');
+  return registration;
 }
 
 function localDerivativeRegistration(body: Record<string, unknown>): LocalDerivativeRegistration {
@@ -2355,7 +2358,7 @@ function localDerivativeRegistration(body: Record<string, unknown>): LocalDeriva
   const kind = body.kind;
   if (kind !== 'thumbnail' && kind !== 'proxy' && kind !== 'audio')
     throw new ControlPlaneError('REQUEST_INVALID', 'derivative kind is invalid');
-  return {
+  const registration: LocalDerivativeRegistration = {
     id: requiredString(body, 'id'),
     assetId: requiredString(body, 'assetId'),
     kind,
@@ -2366,6 +2369,8 @@ function localDerivativeRegistration(body: Record<string, unknown>): LocalDeriva
     availability,
     locations: assetLocations(body),
   };
+  validateBrowserAssetLocations(registration.locations, 'derivative');
+  return registration;
 }
 
 function mediaDescriptor(body: Record<string, unknown>): AssetRegistration['descriptor'] {
@@ -2425,6 +2430,22 @@ function assetLocations(body: Record<string, unknown>): AssetRegistration['locat
       throw new ControlPlaneError('REQUEST_INVALID', 'location kind is invalid');
     return { kind, ref: requiredString(location, 'ref') };
   });
+}
+
+function validateBrowserAssetLocations(
+  locations: readonly AssetLocationRecord[],
+  subject: 'asset' | 'derivative',
+): void {
+  if (
+    locations.length !== 1 ||
+    locations[0]?.kind !== 'opfs-cache' ||
+    locations[0].ref.length === 0
+  ) {
+    throw new ControlPlaneError(
+      'REQUEST_INVALID',
+      `${subject} registration must provide exactly one local cache location`,
+    );
+  }
 }
 
 function requiredAssetKind(
