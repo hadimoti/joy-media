@@ -70,6 +70,38 @@ interface Preview {
   readonly revoke: () => void;
 }
 
+const ASSET_TIMELINE_OPERATION_TIMEOUT_MS = 15_000;
+
+/**
+ * Bound catalog association/insertion work so a stalled control-plane request
+ * cannot leave the panel claiming that an asset is still being prepared
+ * forever. The underlying request is intentionally not aborted: the API may
+ * complete successfully after the UI timeout, but the caller gets a bounded,
+ * actionable failure and can retry safely.
+ */
+export function withAssetTimelineTimeout<T>(
+  operation: PromiseLike<T> | T,
+  label: string,
+  timeoutMs = ASSET_TIMELINE_OPERATION_TIMEOUT_MS,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${timeoutMs / 1_000} seconds`)),
+      timeoutMs,
+    );
+    Promise.resolve(operation).then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 /**
  * Asset discovery stays metadata-only. A preview is hydrated through the
  * authenticated API, verified, then cached in OPFS by AuthorizedDerivativeResolver.
@@ -116,6 +148,7 @@ export function AssetLibraryPanel({
   const originalAssetCache = useMemo(() => openOpfsOriginalAssetCache(), []);
   const cloudPreviewQueue = useMemo(() => new CloudPreviewQueue(), []);
   const previewRef = useRef<Preview | undefined>(undefined);
+  const timelineAddRef = useRef<Set<string>>(new Set());
   const refreshSeqRef = useRef(0);
   const previewSeqRef = useRef(0);
   const initialUiPreferences = useRef(loadEditorUiPreferences(window.localStorage));
@@ -412,6 +445,11 @@ export function AssetLibraryPanel({
       readonly displayName: string;
       readonly descriptor: BrowserAsset['descriptor'];
     }) => {
+      if (timelineAddRef.current.has(asset.assetId)) {
+        setStatus(`${asset.displayName} is already being prepared for this project.`);
+        return;
+      }
+      timelineAddRef.current.add(asset.assetId);
       try {
         let descriptor = asset.descriptor;
         if (
@@ -441,7 +479,10 @@ export function AssetLibraryPanel({
         let scopedAsset = asset;
         if (catalogAsset !== undefined && catalogAsset.projectId !== projectId) {
           setStatus(`Preparing ${asset.displayName} for this project…`);
-          const associated = await client.associateAsset(projectId, catalogAsset.id);
+          const associated = await withAssetTimelineTimeout(
+            client.associateAsset(projectId, catalogAsset.id),
+            `Preparing ${asset.displayName}`,
+          );
           scopedAsset = {
             ...asset,
             assetId: associated.id,
@@ -450,10 +491,17 @@ export function AssetLibraryPanel({
             descriptor: associated.descriptor,
           };
         }
-        onAddToTimeline?.({ ...scopedAsset, descriptor });
+        if (onAddToTimeline === undefined)
+          throw new Error('Timeline insertion is unavailable; refresh the editor and retry.');
+        await withAssetTimelineTimeout(
+          onAddToTimeline({ ...scopedAsset, descriptor }),
+          `Adding ${scopedAsset.displayName} to the timeline`,
+        );
         setStatus(`${scopedAsset.displayName} added to the timeline.`);
       } catch (error) {
         setStatus(`Could not add ${asset.displayName} to this project: ${message(error)}`);
+      } finally {
+        timelineAddRef.current.delete(asset.assetId);
       }
     },
     [client, items, onAddToTimeline, originalAssetCache, projectId],

@@ -48,12 +48,21 @@ describe('AssetLibraryPanel successful import contract', () => {
 
   it('associates a cross-project catalog asset before adding it to the timeline', () => {
     expect(panelSource).toContain('const catalogAsset = items.find');
-    expect(panelSource).toContain(
-      'const associated = await client.associateAsset(projectId, catalogAsset.id);',
-    );
+    expect(panelSource).toContain('client.associateAsset(projectId, catalogAsset.id),');
+    expect(panelSource).toContain('const associated = await withAssetTimelineTimeout(');
     expect(panelSource).toContain(
       'setStatus(`${scopedAsset.displayName} added to the timeline.`);',
     );
     expect(panelSource).toContain('Could not add ${asset.displayName} to this project');
+  });
+
+  it('bounds and deduplicates catalog-to-timeline transactions', () => {
+    expect(panelSource).toContain('const ASSET_TIMELINE_OPERATION_TIMEOUT_MS = 15_000;');
+    expect(panelSource).toContain('withAssetTimelineTimeout(');
+    expect(panelSource).toContain('timelineAddRef.current.has(asset.assetId)');
+    expect(panelSource).toContain(
+      'Timeline insertion is unavailable; refresh the editor and retry.',
+    );
+    expect(panelSource).toContain('timelineAddRef.current.delete(asset.assetId);');
   });
 });

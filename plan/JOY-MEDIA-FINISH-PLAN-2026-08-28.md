@@ -339,6 +339,19 @@ verified the corresponding 3D Scene gap at 12.5s–22.8s without changing clip i
 the implementation portion of P1-28; the final release evidence must still retain the gap assertion
 alongside the full timeline keyboard/focus matrix.
 
+### LIVE-25 — bounded cloud-asset timeline insertion (2026-08-29)
+
+The earlier cloud-asset pass showed that association could succeed while the
+timeline insertion callback remained unbounded, leaving the library on
+“Preparing …” if the active composition or document transaction stalled. The
+editor now treats association and insertion as one bounded operation (15-second
+timeouts), refuses duplicate clicks for the same asset while work is pending,
+and reports an actionable retry message when no insertion target is available.
+The contract test covers the timeout, deduplication, and failure-status paths.
+The authenticated browser journey still must verify image, video, and audio
+catalog assets end-to-end with a persisted document revision and Undo; this
+source fix does not replace that real-service evidence.
+
 ## Numeric release budgets and retained evidence
 
 These are stop/go gates, not optional targets:
