@@ -174,6 +174,43 @@ describe('BrowserControlPlaneClient', () => {
     ]);
   });
 
+  it('loads the owner-authorized canonical project document and optional revision', async () => {
+    const requests: Array<{ readonly url: string; readonly method?: string }> = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({
+        url: String(input),
+        ...(init?.method === undefined ? {} : { method: init.method }),
+      });
+      return json(200, {
+        data: {
+          projectId: 'project-1',
+          revisionId: 'server-rev-2',
+          document: { schemaVersion: 1, id: 'editor-doc-1', title: 'Recovered' },
+        },
+      });
+    };
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => 'joy-session-token',
+      );
+      await expect(client.projectDocument('project / one', 'server rev 1')).resolves.toMatchObject({
+        projectId: 'project-1',
+        revisionId: 'server-rev-2',
+        document: { id: 'editor-doc-1' },
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(requests).toEqual([
+      {
+        url: 'https://media.joyteam.ir/api/v1/projects/project%20%2F%20one/document?revisionId=server%20rev%201',
+        method: 'GET',
+      },
+    ]);
+  });
+
   it('accepts an idempotent ensure response when the project already exists', async () => {
     const original = globalThis.fetch;
     globalThis.fetch = async () =>

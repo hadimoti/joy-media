@@ -171,9 +171,11 @@ import type { VerifiedWorkerAudioResult } from './worker-result.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
 import {
   BrowserControlPlaneClient,
+  BrowserControlPlaneRequestError,
   type BrowserGpuPreviewSession,
   type BrowserJob,
 } from './control-plane-client.js';
+import { hydrateProjectDocument } from './project-document-hydration.js';
 import { importMediaFile } from './media-import.js';
 import { AudioPanel, type AudioEnhanceScopeOption } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
@@ -234,6 +236,7 @@ import { createAgentCommandBus } from './agent-command-bus.js';
 import { resumeWorkflow, runWorkflow } from './workflow-runner.js';
 import {
   getOrCreateControlPlaneProjectBinding,
+  upsertControlPlaneProjectBinding,
   type ControlPlaneProjectBinding,
 } from './project-control-plane.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
@@ -1143,6 +1146,7 @@ function EditorWorkspace({
   const [pluginHost] = useState(() => createEditorPluginHost());
   const [, setPluginRevision] = useState(0);
   const sessionRef = useRef<EditorSession | null>(null);
+  const remoteDocumentHydrationRef = useRef<Set<string>>(new Set());
   const dockviewApiRef = useRef<DockviewApi | null>(null);
   const dockviewComponentsRef = useRef<{ readonly 'editor-panel': typeof Panel } | null>(null);
   const scheduler = useRef(new PlaybackScheduler());
@@ -1353,6 +1357,47 @@ function EditorWorkspace({
       }),
     [controlPlaneOwnerKey, session.visualProject],
   );
+  useEffect(() => {
+    if (joySession.kind !== 'ready') return;
+    const controlPlaneProjectId = controlPlaneProject.controlPlaneProjectId;
+    if (remoteDocumentHydrationRef.current.has(controlPlaneProjectId)) return;
+    remoteDocumentHydrationRef.current.add(controlPlaneProjectId);
+    let cancelled = false;
+    void hydrateProjectDocument(session, controlPlaneProject, () =>
+      mediaControlPlaneClient.projectDocument(controlPlaneProjectId),
+    )
+      .then((result) => {
+        if (cancelled) return;
+        if (result.kind === 'local-changed') {
+          showToast(
+            'A newer local edit was kept; the cloud document was not applied. Save again to reconcile it.',
+            'error',
+          );
+          return;
+        }
+        upsertControlPlaneProjectBinding(
+          window.localStorage,
+          { ...controlPlaneProject, documentRevisionId: result.revisionId },
+          controlPlaneOwnerKey,
+        );
+        if (result.kind === 'hydrated') setRevision((revision) => revision + 1);
+      })
+      .catch((error: unknown) => {
+        if (
+          cancelled ||
+          (error instanceof BrowserControlPlaneRequestError &&
+            error.code === 'PROJECT_DOCUMENT_NOT_FOUND')
+        )
+          return;
+        showToast(
+          `Cloud document could not be hydrated: ${error instanceof Error ? error.message : String(error)}`,
+          'error',
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [controlPlaneOwnerKey, controlPlaneProject, joySession.kind, session, showToast]);
   useEffect(() => {
     let cancelled = false;
     setCreativeBriefOptedIn(false);

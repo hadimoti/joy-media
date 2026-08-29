@@ -939,6 +939,44 @@ async function route(
   }
 
   const projectDocumentSyncMatch = /^\/v1\/projects\/([^/]+)\/document$/.exec(url.pathname);
+  if (request.method === 'GET' && projectDocumentSyncMatch !== null) {
+    const pathProjectId = decodeURIComponent(projectDocumentSyncMatch[1]!);
+    const requestedRevisionId = url.searchParams.get('revisionId') ?? undefined;
+    const result = await options.controlPlane.readProjectDocument(
+      actor,
+      pathProjectId,
+      requestedRevisionId,
+    );
+    if (result.kind === 'ready') {
+      respondJson(response, 200, {
+        data: {
+          projectId: result.record.projectId,
+          revisionId: result.record.revisionId,
+          document: result.record.document,
+        },
+      });
+      return;
+    }
+    if (result.kind === 'not-found') {
+      respondJson(response, 404, { error: { code: 'PROJECT_DOCUMENT_NOT_FOUND' } });
+      return;
+    }
+    if (result.kind === 'stale-revision') {
+      respondJson(response, 409, {
+        error: {
+          code: 'DOCUMENT_REVISION_STALE',
+          currentRevisionId: result.currentRevisionId,
+        },
+      });
+      return;
+    }
+    if (result.kind === 'unavailable') {
+      respondJson(response, 503, { error: { code: 'PROJECT_DOCUMENT_STORE_UNAVAILABLE' } });
+      return;
+    }
+    respondJson(response, 500, { error: { code: 'INTERNAL_ERROR' } });
+    return;
+  }
   if (request.method === 'PUT' && projectDocumentSyncMatch !== null) {
     const pathProjectId = decodeURIComponent(projectDocumentSyncMatch[1]!);
     const body = await readJson(request, MAX_PROJECT_DOCUMENT_SYNC_BYTES);

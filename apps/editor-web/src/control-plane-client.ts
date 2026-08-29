@@ -148,6 +148,13 @@ export interface BrowserProjectMetadata {
   readonly activeJobCount: number;
 }
 
+/** Owner-authorized canonical document returned by the control plane. */
+export interface BrowserProjectDocument {
+  readonly projectId: string;
+  readonly revisionId: ProjectRevisionId;
+  readonly document: JoyProjectV1;
+}
+
 export interface BrowserJoyCodeOptIn {
   readonly enabled: boolean;
   readonly consentVersion?: string;
@@ -487,6 +494,13 @@ export class BrowserControlPlaneClient {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(params),
     });
+  }
+  async projectDocument(
+    projectId: string,
+    revisionId?: ProjectRevisionId,
+  ): Promise<BrowserProjectDocument> {
+    const query = revisionId === undefined ? '' : `?revisionId=${encodeURIComponent(revisionId)}`;
+    return this.get(`/v1/projects/${encodeURIComponent(projectId)}/document${query}`);
   }
   async enqueueAssetThumbnail(projectId: string, id: string, assetId: string): Promise<BrowserJob> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {

@@ -3064,6 +3064,102 @@ describe('PUT /v1/projects/:projectId/document - project document sync route', (
   });
 });
 
+describe('GET /v1/projects/:projectId/document - project document hydration route', () => {
+  it('returns 401 when unauthenticated', async () => {
+    const origin = await start({ authenticate: () => undefined });
+    const result = await request(origin, 'GET', '/v1/projects/project-1/document');
+    expect(result.status).toBe(401);
+    expect(result.body).toMatchObject({ error: { code: 'AUTH_REQUIRED' } });
+  });
+
+  it('returns the latest owner-authorized document and revision', async () => {
+    const controlPlane = new LocalControlPlane();
+    await controlPlane.createProject({ id: 'owner-1' }, 'project-1', 'Test Project');
+    const envelope = validProjectDocumentSyncEnvelope('editor-doc-1', INITIAL_REVISION, 'rev-1');
+    await controlPlane.writeProjectDocument(
+      { id: 'owner-1' },
+      {
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+        revisionId: envelope.revisionId,
+        document: envelope.document,
+      },
+      INITIAL_REVISION,
+    );
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner-1' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
+    const result = await request(origin, 'GET', '/v1/projects/project-1/document');
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      data: {
+        projectId: 'project-1',
+        revisionId: 'rev-1',
+        document: { id: 'editor-doc-1', title: 'Test Project' },
+      },
+    });
+  });
+
+  it('does not disclose a document to another owner', async () => {
+    const controlPlane = new LocalControlPlane();
+    await controlPlane.createProject({ id: 'owner-1' }, 'project-1', 'Test Project');
+    const envelope = validProjectDocumentSyncEnvelope('editor-doc-1');
+    await controlPlane.writeProjectDocument(
+      { id: 'owner-1' },
+      {
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+        revisionId: envelope.revisionId,
+        document: envelope.document,
+      },
+      INITIAL_REVISION,
+    );
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner-2' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
+    const result = await request(origin, 'GET', '/v1/projects/project-1/document');
+    expect(result.status).toBe(404);
+    expect(result.body).toMatchObject({ error: { code: 'PROJECT_DOCUMENT_NOT_FOUND' } });
+  });
+
+  it('returns the current revision when a requested revision is stale', async () => {
+    const controlPlane = new LocalControlPlane();
+    await controlPlane.createProject({ id: 'owner-1' }, 'project-1', 'Test Project');
+    const envelope = validProjectDocumentSyncEnvelope('editor-doc-1');
+    await controlPlane.writeProjectDocument(
+      { id: 'owner-1' },
+      {
+        projectId: 'project-1',
+        ownerId: 'owner-1',
+        revisionId: envelope.revisionId,
+        document: envelope.document,
+      },
+      INITIAL_REVISION,
+    );
+    const origin = await start(
+      { authenticate: () => ({ id: 'owner-1' }) },
+      undefined,
+      undefined,
+      controlPlane,
+    );
+    const result = await request(
+      origin,
+      'GET',
+      '/v1/projects/project-1/document?revisionId=old-revision',
+    );
+    expect(result.status).toBe(409);
+    expect(result.body).toMatchObject({
+      error: { code: 'DOCUMENT_REVISION_STALE', currentRevisionId: 'rev-1' },
+    });
+  });
+});
+
 class MemoryPrivateObjectStore implements PrivateObjectStore {
   readonly objects: Array<{
     readonly descriptor: PrivateObjectDescriptor;
