@@ -117,9 +117,10 @@ describe('CaptionsPanel empty state', () => {
     const describedByIds = actions.map((button) => button.getAttribute('aria-describedby'));
     expect(describedByIds.every((id) => id !== null)).toBe(true);
     expect(new Set(describedByIds).size).toBe(1);
-    expect(container.querySelector(`#${CSS.escape(describedByIds[0]!)}`)?.textContent).toContain(
-      'Transcription unavailable:',
+    const description = [...container.querySelectorAll<HTMLElement>('[id]')].find(
+      (element) => element.id === describedByIds[0],
     );
+    expect(description?.textContent).toContain('Transcription unavailable:');
 
     await act(async () => root.unmount());
     container.remove();
