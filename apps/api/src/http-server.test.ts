@@ -17,6 +17,7 @@ import {
 } from './control-plane.js';
 import {
   createControlPlaneHttpServer,
+  DEFAULT_MAX_JSON_BODY_BYTES,
   type ApiAuthentication,
   type ApiReadinessOptions,
 } from './http-server.js';
@@ -3317,6 +3318,18 @@ describe('PUT /v1/projects/:projectId/document - project document sync route', (
     const result = await request(origin, 'PUT', '/v1/projects/project-1/document', envelope);
     expect(result.status).toBe(400);
     expect(result.body).toMatchObject({ error: { code: 'REQUEST_INVALID' } });
+  });
+
+  it('bounds ordinary JSON routes before parsing oversized bodies', async () => {
+    const origin = await start({ authenticate: () => ({ id: 'owner-1' }) });
+    const result = await request(origin, 'POST', '/v1/projects', {
+      id: 'project-1',
+      title: 'A'.repeat(DEFAULT_MAX_JSON_BODY_BYTES),
+    });
+    expect(result.status).toBe(400);
+    expect(result.body).toMatchObject({
+      error: { code: 'REQUEST_INVALID', message: 'request body exceeds the size limit' },
+    });
   });
 
   it('derives ownerId only from authenticated actor - ignores body ownerId', async () => {

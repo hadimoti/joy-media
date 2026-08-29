@@ -77,6 +77,11 @@ import { createClientAddressResolver, type ClientAddressResolver } from './clien
 
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
 const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 600;
+/**
+ * Bound ordinary JSON requests before parsing them. Routes carrying media or
+ * project documents opt into their larger, explicit limits below.
+ */
+export const DEFAULT_MAX_JSON_BODY_BYTES = 1 * 1024 * 1024;
 
 export interface ApiAuthentication {
   authenticate(request: IncomingMessage): Actor | undefined | Promise<Actor | undefined>;
@@ -130,6 +135,8 @@ export interface ControlPlaneHttpServerOptions {
     readonly windowMs?: number;
     readonly maxRequests?: number;
   };
+  /** Maximum size for ordinary JSON request bodies. Media/document routes have explicit limits. */
+  readonly maxJsonBodyBytes?: number;
   /** Shared trusted-proxy boundary used to key process-local abuse controls. */
   readonly clientAddressResolver?: ClientAddressResolver;
   /** Injectable dependency probes for /ready. Omitted checks preserve legacy readiness. */
@@ -161,6 +168,9 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
   };
   const rateLimitWindowMs = options.rateLimit?.windowMs ?? DEFAULT_RATE_LIMIT_WINDOW_MS;
   const rateLimitMaxRequests = options.rateLimit?.maxRequests ?? DEFAULT_RATE_LIMIT_MAX_REQUESTS;
+  const maxJsonBodyBytes = options.maxJsonBodyBytes ?? DEFAULT_MAX_JSON_BODY_BYTES;
+  if (!Number.isSafeInteger(maxJsonBodyBytes) || maxJsonBodyBytes < 1)
+    throw new RangeError('maxJsonBodyBytes must be a positive safe integer');
   const rateLimitBuckets = new Map<string, { windowStart: number; count: number }>();
   const clientAddressResolver = options.clientAddressResolver ?? createClientAddressResolver();
   return createServer(async (request, response) => {
@@ -180,7 +190,7 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
       return;
     }
     try {
-      await route(resolvedOptions, request, response);
+      await route(resolvedOptions, request, response, maxJsonBodyBytes);
     } catch (error) {
       respondError(response, error);
     }
@@ -202,6 +212,7 @@ async function route(
   },
   request: IncomingMessage,
   response: ServerResponse,
+  maxJsonBodyBytes: number,
 ): Promise<void> {
   const url = new URL(request.url ?? '/', 'http://joy-media.invalid');
   if (request.method === 'GET' && (url.pathname === '/live' || url.pathname === '/health/live')) {
@@ -230,7 +241,7 @@ async function route(
   }
 
   if (request.method === 'POST' && url.pathname === '/v1/worker-pair/offers') {
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     const workerId = requiredString(body, 'workerId');
     const pairingCode = requiredString(body, 'pairingCode');
     const expiresAt = Date.now() + 5 * 60_000;
@@ -245,7 +256,7 @@ async function route(
   }
 
   if (request.method === 'POST' && url.pathname === '/v1/worker-pair/claim') {
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     const workerId = requiredString(body, 'workerId');
     const pairingCode = requiredString(body, 'pairingCode');
     const sessionToken = randomBytes(32).toString('base64url');
@@ -302,7 +313,7 @@ async function route(
     if (workerId === undefined || sessionWorkerId !== workerId)
       throw new ControlPlaneError('WORKER_SESSION_REQUIRED', 'worker session required');
     if (workerLeaseMatch !== null) {
-      const body = await readJson(request);
+      const body = await readJson(request, maxJsonBodyBytes);
       const durationMs = optionalPositiveInteger(body, 'durationMs') ?? 30_000;
       const job = await options.controlPlane.lease(
         decodeURIComponent(workerId),
@@ -335,7 +346,7 @@ async function route(
       return;
     }
     if (workerHelloMatch !== null) {
-      const body = await readJson(request);
+      const body = await readJson(request, maxJsonBodyBytes);
       respondJson(response, 200, {
         data: await options.controlPlane.helloWorker(
           decodeURIComponent(workerId),
@@ -348,7 +359,7 @@ async function route(
       return;
     }
     if (workerHeartbeatMatch !== null) {
-      const body = await readJson(request);
+      const body = await readJson(request, maxJsonBodyBytes);
       respondJson(response, 200, {
         data: await options.controlPlane.heartbeat(
           decodeURIComponent(workerId),
@@ -362,7 +373,7 @@ async function route(
       return;
     }
     if (workerFailMatch !== null) {
-      const body = await readJson(request);
+      const body = await readJson(request, maxJsonBodyBytes);
       respondJson(response, 200, {
         data: await options.controlPlane.fail(
           decodeURIComponent(workerId),
@@ -445,7 +456,7 @@ async function route(
         throw error;
       }
     }
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     const result = optionalWorkerResult(body);
     const completeJobId = decodeURIComponent(workerCompleteMatch![2]!);
     if (isCloudDerivativeResult(result)) {
@@ -495,7 +506,7 @@ async function route(
   }
 
   if (request.method === 'POST' && url.pathname === '/v1/auth/request-otp') {
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     const data = await options.mediaAuth.requestOtp(
       requiredString(body, 'contact'),
       requiredAuthMethod(body),
@@ -506,7 +517,7 @@ async function route(
   }
 
   if (request.method === 'POST' && url.pathname === '/v1/auth/verify-otp') {
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     const token = await options.mediaAuth.verifyOtp(
       requiredString(body, 'contact'),
       requiredAuthMethod(body),
@@ -560,7 +571,7 @@ async function route(
         'POLICY_DENIED',
         'Joy Code planning is not opted in for this project',
       );
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     const validation = validateJoyCodeClientRequest(body);
     if (!validation.valid)
       throw new ControlPlaneError(
@@ -643,7 +654,7 @@ async function route(
     }
 
     // Step 3: Strict client-envelope validation (browser-safe envelope only)
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     const clientValidation = validateCreativeBriefClientRequest(body);
     if (!clientValidation.valid) {
       const firstError = clientValidation.errors[0];
@@ -856,7 +867,7 @@ async function route(
   }
 
   if (request.method === 'POST' && url.pathname === '/v1/providers/mistral/complete') {
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     const result = await options.mistral.complete(actor.id, mistralCompletionRequest(body));
     respondJson(response, 200, { data: result });
     return;
@@ -954,7 +965,7 @@ async function route(
   }
 
   if (request.method === 'POST' && url.pathname === '/v1/projects/ensure') {
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     const id = requiredString(body, 'id');
     const title = requiredString(body, 'title');
     let project;
@@ -975,7 +986,7 @@ async function route(
   }
 
   if (request.method === 'POST' && url.pathname === '/v1/projects') {
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     respondJson(response, 201, {
       data: await options.controlPlane.createProject(
         actor,
@@ -1086,7 +1097,7 @@ async function route(
       return;
     }
     if (request.method === 'PATCH') {
-      const body = await readJson(request);
+      const body = await readJson(request, maxJsonBodyBytes);
       respondJson(response, 200, {
         data: await options.controlPlane.updateProject(
           actor,
@@ -1120,7 +1131,7 @@ async function route(
 
   const duplicateProjectMatch = /^\/v1\/projects\/([^/]+)\/duplicate$/.exec(url.pathname);
   if (request.method === 'POST' && duplicateProjectMatch !== null) {
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     respondJson(response, 201, {
       data: await options.controlPlane.duplicateProject(
         actor,
@@ -1135,7 +1146,7 @@ async function route(
 
   const projectStateMatch = /^\/v1\/projects\/([^/]+)\/(trash|restore)$/.exec(url.pathname);
   if (request.method === 'POST' && projectStateMatch !== null) {
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     const projectId = decodeURIComponent(projectStateMatch[1]!);
     const baseRevision = requiredNonNegativeInteger(body, 'baseRevision');
     const data =
@@ -1161,7 +1172,7 @@ async function route(
     return;
   }
   if (request.method === 'PUT' && creativeBriefOptInMatch !== null) {
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     // Validate exact JSON body: { enabled: boolean, baseRevision: non-negative safe integer }
     const keys = Object.keys(body);
     if (keys.length !== 2 || !keys.includes('enabled') || !keys.includes('baseRevision'))
@@ -1201,7 +1212,7 @@ async function route(
     return;
   }
   if (request.method === 'PUT' && joyCodeOptInMatch !== null) {
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     const keys = Object.keys(body);
     if (
       keys.length !== 3 ||
@@ -1245,7 +1256,7 @@ async function route(
     const contentType = request.headers['content-type'] ?? '';
     let transcript;
     if (contentType.includes('application/json')) {
-      const body = await readJson(request);
+      const body = await readJson(request, maxJsonBodyBytes);
       const language = requiredString(body, 'language');
       const referenceAssetId =
         typeof body.referenceAssetId === 'string' ? body.referenceAssetId : undefined;
@@ -1292,7 +1303,7 @@ async function route(
 
   if (request.method === 'POST' && url.pathname === '/v1/providers/speech/synthesize') {
     const { runSpeechSynthesis, resolveSpeechEngine } = await import('./speech-synthesize.js');
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     const text = requiredString(body, 'text');
     const language = typeof body.language === 'string' ? body.language : undefined;
     const voiceId = typeof body.voiceId === 'string' ? body.voiceId : undefined;
@@ -1351,7 +1362,7 @@ async function route(
 
   const assetSyncMatch = /^\/v1\/projects\/([^/]+)\/asset-sync$/.exec(url.pathname);
   if (request.method === 'POST' && assetSyncMatch !== null) {
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     if (typeof body.enabled !== 'boolean')
       throw new ControlPlaneError('REQUEST_INVALID', 'enabled must be boolean');
     respondJson(response, 200, {
@@ -1367,7 +1378,7 @@ async function route(
   const workerPairMatch = /^\/v1\/workers\/([^/]+)\/pair$/.exec(url.pathname);
   if (request.method === 'POST' && workerPairMatch !== null) {
     const [, workerId] = workerPairMatch;
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     respondJson(response, 200, {
       data: await options.controlPlane.approvePairing(
         actor,
@@ -1401,7 +1412,7 @@ async function route(
     return;
   }
   if (request.method === 'POST' && assetMatch !== null) {
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     const asset = await options.controlPlane.registerAsset(
       actor,
       decodeURIComponent(assetMatch[1]!),
@@ -1550,7 +1561,7 @@ async function route(
     url.pathname,
   );
   if (request.method === 'POST' && assetMetadataMatch !== null) {
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     const tags = Array.isArray(body.tags)
       ? body.tags.filter((item): item is string => typeof item === 'string')
       : undefined;
@@ -1609,7 +1620,7 @@ async function route(
     return;
   }
   if (request.method === 'POST' && derivativeMatch !== null) {
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     const derivative = localDerivativeRegistration(body);
     if (derivative.assetId !== decodeURIComponent(derivativeMatch[2]!))
       throw new ControlPlaneError('REQUEST_INVALID', 'derivative assetId must match the route');
@@ -1633,7 +1644,7 @@ async function route(
     return;
   }
   if (request.method === 'POST' && jobMatch !== null) {
-    const body = await readJson(request);
+    const body = await readJson(request, maxJsonBodyBytes);
     const type = requiredString(body, 'type');
     const maxAttempts = optionalPositiveInteger(body, 'maxAttempts', MAX_WORKER_ATTEMPTS);
     const job =
@@ -1732,10 +1743,13 @@ async function evaluateReadiness(
 
 async function readJson(
   request: IncomingMessage,
-  maximumBytes = Number.POSITIVE_INFINITY,
+  maximumBytes = DEFAULT_MAX_JSON_BODY_BYTES,
 ): Promise<Record<string, unknown>> {
   const declaredLength = Number(request.headers['content-length'] ?? NaN);
   if (Number.isFinite(maximumBytes) && declaredLength > maximumBytes) {
+    // Keep consuming the request so the connection can be reused while the
+    // caller receives the structured validation error immediately.
+    request.resume();
     throw new ControlPlaneError('REQUEST_INVALID', 'request body exceeds the size limit');
   }
   const chunks: Buffer[] = [];
@@ -1744,6 +1758,7 @@ async function readJson(
     const bytes = Buffer.from(chunk);
     length += bytes.byteLength;
     if (length > maximumBytes) {
+      request.resume();
       throw new ControlPlaneError('REQUEST_INVALID', 'request body exceeds the size limit');
     }
     chunks.push(bytes);
