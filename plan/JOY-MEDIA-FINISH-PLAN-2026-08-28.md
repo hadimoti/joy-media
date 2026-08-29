@@ -383,6 +383,22 @@ authenticated source-backed Worker journey leases a selected asset, uploads a de
 inspection, and places at least two results in Motion. These are implementation/evidence gaps,
 not evidence of the reported Effects-subtab crash; the Effects and timeline retests remain stable.
 
+### LIVE-28 — stable promotion and canary (2026-08-29)
+
+Commit `99510e0a5f96802184d2f3a43020d06bd836cfd4` is on local/main, GitHub `main`, and the VPS
+bare `main`, and is deployed as immutable API/web release `joy-media-99510e0`. Origin and both
+public domains return healthy `/live` and `/ready` responses with matching commit, tree, lockfile,
+and schema identity. The guarded rollback rehearsal passes. A detached 30-minute canary is running
+against local origin plus `joyst.ir` and `www.joyst.ir`; its retained JSON is
+`C:\Users\HadiMoti\joy-media-temp-release-artifacts\canary-99510e0.json`.
+
+The release gate is clean for commands, tests, generated artifacts, manifests, builds, static
+inventory, manifest, SBOM, and feature status. It intentionally remains NO-GO only for the two
+linked browser evidence checks: source-bound `authenticated-editor-1.0` evidence is absent, and
+the real authenticated Worker lease/upload/inspection/Motion journey (P0-12) still requires the
+browser pairing safety step before it can be recorded. No new Effects-subtab or timeline crash was
+observed in the prior authenticated matrix.
+
 ## Numeric release budgets and retained evidence
 
 These are stop/go gates, not optional targets:
