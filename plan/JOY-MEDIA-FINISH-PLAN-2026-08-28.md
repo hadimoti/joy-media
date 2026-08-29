@@ -371,11 +371,12 @@ release gaps that must stay visible in this plan. P0-04 now coalesces concurrent
 reads per project and token, and repeated polling-loop starts are idempotent, but the four
 panel-specific polling loops still require one visibility-aware rate-budget evidence artifact.
 P0-02 now serializes migration startup with a single transaction and PostgreSQL advisory lock,
-with concurrent-startup coverage; the real PostgreSQL rehearsal remains required. P1-21 has a
-bounded, non-mutating object-store stat probe implemented in the adapter, but the production
-readiness gate intentionally remains the proven configuration check until a staged deployment
-demonstrates the probe under cold-start conditions; the real object-store rehearsal and retained
-readiness evidence remain required.
+with concurrent-startup coverage. A real PostgreSQL schema-copy rehearsal removed ledger rows
+003/004 and their objects, ran the deployed migration binary twice, restored all four ledger rows
+and objects, and left production data unchanged. P1-21 now wires the bounded, non-mutating
+object-store probe into production readiness with a fixed 2500ms timeout; a real deployed probe
+reached the configured store in 192ms. A staged cold-start/release-canary proof and retained
+readiness artifact remain required.
 
 P0-03 and the persistence half of LIVE-25 remain partially open: document saves now serialize per
 owner/project and later writes reread the persisted CAS head, but the browser still needs GET
@@ -392,6 +393,17 @@ queued compare-and-swap update, and coalesces duplicate in-flight revisions. `Bo
 is idempotent, preventing duplicate timers when panels remount or re-enter view. Focused document-sync,
 control-plane, creative-brief, Joy Code, polling, and timeline tests pass. Browser proof is still
 required for GET hydration, reload/conflict recovery, Undo, and visibility-aware polling budgets.
+
+### LIVE-30 — authenticated timeline browser certification (2026-08-29)
+
+The orchestrator retested the deployed editor with a selected Effects clip: Inspector → Effects
+rendered Glow controls, Assets → Effects (21) and all 12 asset categories survived four alternating
+cycles, and the preview action remained on the editor URL without recovery/database errors. Timeline
+zoom, 100ms keyboard playhead movement, and reload all remained stable; the 3D Scene lane exposed
+the expected 10.3s empty span from 12.5s to 22.8s and the striped keyboard-focusable `timeline gap`
+note remained present after reload. Evidence is retained in the ignored local artifact
+`test-output/browser/timeline-c5acb9d.json`; this closes the reported Effects-subtab crash as
+unreproduced and keeps only the source-bound editor/Worker journeys and final keyboard matrix open.
 
 ### LIVE-28 — stable promotion and canary (2026-08-29)
 

@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { LocalControlPlane } from './control-plane.js';
 import type { PrivateObjectStore } from './private-object-store.js';
 import {
   EXPECTED_RELEASE_SCHEMA_VERSION,
+  PRIVATE_OBJECT_STORE_PROBE_TIMEOUT_MS,
   productionReadinessOptions,
   releaseIdentityFromEnvironment,
 } from './server-readiness.js';
@@ -36,11 +37,39 @@ describe('production readiness wiring', () => {
     expect(readiness.releaseIdentity).toEqual(releaseIdentity);
     await expect(checks.database!()).resolves.toBe(true);
     await expect(checks.controlPlane!()).resolves.toBe(true);
-    expect(checks.privateObjectStore!()).toBe(true);
+    await expect(checks.privateObjectStore!()).resolves.toBe(true);
     expect(queries).toEqual([
       'SELECT 1',
       'SELECT 1 FROM projects, project_documents, media_assets, jobs LIMIT 0',
     ]);
+  });
+
+  it('probes a capable private object store with the bounded production timeout', async () => {
+    const probe = vi.fn(async () => undefined);
+    const checks = productionReadinessOptions({
+      pool: undefined,
+      durableControlPlane: undefined,
+      privateObjectStore: { probeReadiness: probe } as unknown as PrivateObjectStore,
+      releaseIdentity,
+    }).checks!;
+
+    await expect(checks.privateObjectStore!()).resolves.toBe(true);
+    expect(probe).toHaveBeenCalledOnce();
+    expect(probe).toHaveBeenCalledWith({ timeoutMs: PRIVATE_OBJECT_STORE_PROBE_TIMEOUT_MS });
+  });
+
+  it('fails closed when a capable private object store probe rejects', async () => {
+    const failure = new Error('object store unavailable');
+    const checks = productionReadinessOptions({
+      pool: undefined,
+      durableControlPlane: undefined,
+      privateObjectStore: {
+        probeReadiness: async () => Promise.reject(failure),
+      } as unknown as PrivateObjectStore,
+      releaseIdentity,
+    }).checks!;
+
+    await expect(checks.privateObjectStore!()).rejects.toBe(failure);
   });
 
   it('fails closed when production dependencies are not configured', async () => {
@@ -54,7 +83,7 @@ describe('production readiness wiring', () => {
     expect(checks.releaseIdentity!()).toBe(false);
     await expect(checks.database!()).resolves.toBe(false);
     await expect(checks.controlPlane!()).resolves.toBe(false);
-    expect(checks.privateObjectStore!()).toBe(false);
+    await expect(checks.privateObjectStore!()).resolves.toBe(false);
   });
 
   it('propagates database and schema probe failures to the readiness boundary', async () => {
@@ -89,7 +118,7 @@ describe('production readiness wiring', () => {
     expect(queries).toBe(1);
   });
 
-  it('fails closed when private object storage is not configured', () => {
+  it('fails closed when private object storage is not configured', async () => {
     const checks = productionReadinessOptions({
       pool: undefined,
       durableControlPlane: undefined,
@@ -97,7 +126,7 @@ describe('production readiness wiring', () => {
       releaseIdentity,
     }).checks!;
 
-    expect(checks.privateObjectStore!()).toBe(false);
+    await expect(checks.privateObjectStore!()).resolves.toBe(false);
   });
 
   it('accepts complete, validated non-secret release metadata', () => {
