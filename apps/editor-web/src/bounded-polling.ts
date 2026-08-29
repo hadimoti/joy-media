@@ -5,6 +5,8 @@
  */
 export const VISIBLE_POLL_INTERVAL_MS = 10_000;
 export const MAX_POLL_BACKOFF_MS = 60_000;
+/** Desynchronizes clients that fail at the same time without changing the success cadence. */
+export const FAILURE_POLL_JITTER_RATIO = 0.1;
 
 export interface PollingTimer {
   setTimeout(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>;
@@ -23,6 +25,7 @@ export class BoundedPollingLoop {
   constructor(
     private readonly poll: () => Promise<void>,
     private readonly timer: PollingTimer = globalThis,
+    private readonly random: () => number = Math.random,
   ) {}
 
   /** Starts with an immediate request. Repeated starts are intentionally harmless. */
@@ -94,7 +97,18 @@ export class BoundedPollingLoop {
   }
 
   #schedule(): void {
-    const delay = Math.min(MAX_POLL_BACKOFF_MS, VISIBLE_POLL_INTERVAL_MS * 2 ** this.#failureCount);
+    const baseDelay = Math.min(
+      MAX_POLL_BACKOFF_MS,
+      VISIBLE_POLL_INTERVAL_MS * 2 ** this.#failureCount,
+    );
+    // Keep healthy clients on the exact 10-second budget, but spread retries
+    // after failures so one outage does not make every mounted panel wake up
+    // on the same tick. Clamp the upper edge to the one-minute budget.
+    const jitter =
+      this.#failureCount === 0
+        ? 0
+        : (this.random() * 2 - 1) * FAILURE_POLL_JITTER_RATIO * baseDelay;
+    const delay = Math.min(MAX_POLL_BACKOFF_MS, Math.max(0, baseDelay + jitter));
     this.#timer = this.timer.setTimeout(() => {
       this.#timer = undefined;
       if (this.#visible && !this.#stopped) void this.#run().catch(() => undefined);

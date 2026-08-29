@@ -44,7 +44,9 @@ describe('BoundedPollingLoop', () => {
   it('backs off failed requests and caps retries at one minute', async () => {
     vi.useFakeTimers();
     const poll = vi.fn().mockRejectedValue(new Error('offline'));
-    const loop = new BoundedPollingLoop(poll);
+    // Keep the retry schedule deterministic; production uses Math.random for
+    // a small failure-only jitter that prevents synchronized retry storms.
+    const loop = new BoundedPollingLoop(poll, globalThis, () => 0.5);
 
     loop.start();
     await vi.runAllTicks();
@@ -55,6 +57,21 @@ describe('BoundedPollingLoop', () => {
 
     await vi.advanceTimersByTimeAsync(MAX_POLL_BACKOFF_MS);
     expect(poll).toHaveBeenCalledTimes(3);
+    loop.stop();
+  });
+
+  it('jitters failure retries within ten percent while retaining the one-minute cap', async () => {
+    vi.useFakeTimers();
+    const poll = vi.fn().mockRejectedValue(new Error('offline'));
+    const loop = new BoundedPollingLoop(poll, globalThis, () => 0);
+
+    loop.start();
+    await vi.runAllTicks();
+    // First failure: 20 seconds with the lower 10% jitter bound.
+    await vi.advanceTimersByTimeAsync(VISIBLE_POLL_INTERVAL_MS * 2 * 0.9 - 1);
+    expect(poll).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(poll).toHaveBeenCalledTimes(2);
     loop.stop();
   });
 
