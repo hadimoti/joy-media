@@ -36,7 +36,9 @@ authenticated live-browser evidence has been recorded for the exact candidate re
 run by the basic CI jobs, because a clean CI checkout cannot legitimately claim an authenticated
 production journey. The workflow does not upload GitHub artifacts: the repository's artifact quota
 is separate from runner-minute quota, and evidence remains on the trusted runner for the release
-review. Secrets must never be written to logs or artifacts.
+review. The disposable E2E API harness uses a high request ceiling so a long single-owner browser
+run does not cascade into unrelated `429` failures; transport rate-limit behavior remains covered
+by the API security tests. Secrets must never be written to logs or artifacts.
 
 ## Re-registering a runner
 

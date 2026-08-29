@@ -381,7 +381,12 @@ function TimelineClip({
         // item now so the drag moves exactly the item the user grabbed rather
         // than the prior selection. Modifier-click remains additive/toggle on
         // the subsequent click event.
-        if (!selected && !event.ctrlKey && !event.metaKey) onSelect(clip.id, false);
+        // Composition clips use their click stream to detect a resilient
+        // double-click. Calling onSelect here as well would make one physical
+        // click look like two clicks after Dockview remounts the clip.
+        if (clip.kind !== 'composition' && !selected && !event.ctrlKey && !event.metaKey) {
+          onSelect(clip.id, false);
+        }
         event.currentTarget.setPointerCapture(event.pointerId);
         dragRef.current = { originX: event.clientX, originY: event.clientY, moved: false };
       }}
@@ -727,6 +732,10 @@ export function TimelinePanel({
   const [showAnimatedProperties, setShowAnimatedProperties] = useState(true);
   /** Clip being dragged over by an effect or transition — shows amber highlight. */
   const [dragEffectOverClipId, setDragEffectOverClipId] = useState<string | null>(null);
+  // Dockview can remount a clip after its first selection click. Keep the
+  // double-click window at the panel level so a composition still opens when
+  // the browser reports two independent detail=1 events.
+  const compoundClickRef = useRef<{ readonly clipId: string; readonly at: number } | undefined>();
   // §6.2: collapsed by default, so standard editing is visually unchanged.
   const [dataLanesOpen, setDataLanesOpen] = useState(false);
   const { selectedMarkerId, selectMarker, removeMarker } = useTimelineMarkerSelection(markers, {
@@ -784,6 +793,7 @@ export function TimelinePanel({
   const openCompoundComposition = useCallback(
     (compositionId: string) => {
       if (project.compositions[compositionId] === undefined) return;
+      compoundClickRef.current = undefined;
       setCompositionPath((path) => {
         const current = path[path.length - 1];
         return current === compositionId ? path : [...path, compositionId];
@@ -861,10 +871,24 @@ export function TimelinePanel({
   );
   const selectClip = useCallback(
     (clipId: string, additive: boolean) => {
+      const clickedClip = composition.tracks
+        .flatMap((track) => track.clips)
+        .find((clip) => clip.id === clipId);
+      if (!additive && clickedClip?.kind === 'composition') {
+        const now = Date.now();
+        const previous = compoundClickRef.current;
+        if (previous?.clipId === clipId && now - previous.at < 650) {
+          openCompoundComposition(clickedClip.compositionId);
+          return;
+        }
+        compoundClickRef.current = { clipId, at: now };
+      } else {
+        compoundClickRef.current = undefined;
+      }
       if (additive) onToggleSelection(clipId);
       else replaceSelection([clipId]);
     },
-    [onToggleSelection, replaceSelection],
+    [composition.tracks, onToggleSelection, openCompoundComposition, replaceSelection],
   );
   const compositionRef = useRef(composition);
   const tracksRef = useRef(tracks);
