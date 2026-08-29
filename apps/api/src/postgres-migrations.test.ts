@@ -7,11 +7,107 @@ function createRecordingPool(appliedRows: readonly { id: string; checksum: strin
   const pool = {
     query: async <T>(text: string) => {
       queries.push(text);
+      if (text === 'SELECT pg_advisory_xact_lock($1, $2)') return { rows: [] } as { rows: T[] };
       if (text.startsWith('SELECT id, checksum')) return { rows: appliedRows } as { rows: T[] };
       return { rows: [] } as { rows: T[] };
     },
   } as unknown as Pool;
   return { pool, queries };
+}
+
+function createConcurrentPool() {
+  type MigrationRow = { id: string; checksum: string };
+  const queries: string[] = [];
+  let nextClientId = 0;
+  let lockOwner: number | null = null;
+  const waiting: Array<() => void> = [];
+  const appliedRows: MigrationRow[] = [];
+  let baselineRuns = 0;
+  let workerLeaseRuns = 0;
+  let projectAssetRuns = 0;
+  let releaseCalls = 0;
+
+  const wakeNext = () => {
+    const next = waiting.shift();
+    if (next !== undefined) next();
+  };
+
+  const createClient = () => {
+    const clientId = ++nextClientId;
+    return {
+      query: async <T>(text: string, values?: readonly unknown[]) => {
+        queries.push(`client-${clientId}:${text}`);
+        if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK')
+          return { rows: [] } as { rows: T[] };
+        if (text === 'SELECT pg_advisory_xact_lock($1, $2)') {
+          if (lockOwner === null) {
+            lockOwner = clientId;
+            return { rows: [] } as { rows: T[] };
+          }
+          await new Promise<void>((resolve) => waiting.push(resolve));
+          lockOwner = clientId;
+          return { rows: [] } as { rows: T[] };
+        }
+        if (text.startsWith('CREATE TABLE IF NOT EXISTS joy_media_schema_migrations'))
+          return { rows: [] } as { rows: T[] };
+        if (text.startsWith('SELECT id, checksum FROM joy_media_schema_migrations'))
+          return { rows: [...appliedRows] } as { rows: T[] };
+        if (text.startsWith('INSERT INTO joy_media_schema_migrations')) {
+          appliedRows.push({
+            id: String(values?.[0] ?? ''),
+            checksum: String(values?.[1] ?? ''),
+          });
+          return { rows: [] } as { rows: T[] };
+        }
+        if (text.includes("SELECT to_regclass('public.asset_revocation_audits')"))
+          return { rows: [{ exists: false }] } as { rows: T[] };
+        if (text.includes('CREATE TABLE IF NOT EXISTS projects')) {
+          baselineRuns += 1;
+          return { rows: [] } as { rows: T[] };
+        }
+        if (text.includes('ALTER TABLE jobs ADD COLUMN IF NOT EXISTS generation')) {
+          workerLeaseRuns += 1;
+          return { rows: [] } as { rows: T[] };
+        }
+        if (text.includes('CREATE TABLE IF NOT EXISTS media_asset_access')) {
+          projectAssetRuns += 1;
+          return { rows: [] } as { rows: T[] };
+        }
+        return { rows: [] } as { rows: T[] };
+      },
+      release: () => {
+        if (lockOwner === clientId) {
+          lockOwner = null;
+          wakeNext();
+        }
+        releaseCalls += 1;
+      },
+    };
+  };
+
+  const pool = {
+    connect: async () => createClient(),
+  } as unknown as Pool;
+
+  return {
+    pool,
+    queries,
+    get baselineRuns() {
+      return baselineRuns;
+    },
+    get workerLeaseRuns() {
+      return workerLeaseRuns;
+    },
+    get projectAssetRuns() {
+      return projectAssetRuns;
+    },
+    get releaseCalls() {
+      return releaseCalls;
+    },
+    get appliedRows() {
+      return [...appliedRows];
+    },
+  };
 }
 
 describe('ordered PostgreSQL migrations', () => {
@@ -20,7 +116,9 @@ describe('ordered PostgreSQL migrations', () => {
 
     await runPostgresMigrations(pool);
 
-    expect(queries[0]).toContain('CREATE TABLE IF NOT EXISTS joy_media_schema_migrations');
+    expect(queries[0]).toBe('BEGIN');
+    expect(queries[1]).toBe('SELECT pg_advisory_xact_lock($1, $2)');
+    expect(queries[2]).toContain('CREATE TABLE IF NOT EXISTS joy_media_schema_migrations');
     expect(
       queries.filter((query) => query.startsWith('INSERT INTO joy_media_schema_migrations')),
     ).toHaveLength(POSTGRES_MIGRATIONS.length);
@@ -32,6 +130,7 @@ describe('ordered PostgreSQL migrations', () => {
         query.includes('ALTER TABLE jobs ADD COLUMN IF NOT EXISTS generation'),
       ),
     ).toBe(true);
+    expect(queries.at(-1)).toBe('COMMIT');
   });
 
   it('does not rerun an already applied migration with the same checksum', async () => {
@@ -46,6 +145,55 @@ describe('ordered PostgreSQL migrations', () => {
     expect(
       queries.some((query) => query.startsWith('INSERT INTO joy_media_schema_migrations')),
     ).toBe(false);
+  });
+
+  it('uses a dedicated transaction session and advisory lock when a pool can connect', async () => {
+    const { pool, queries } = createConcurrentPool();
+
+    await runPostgresMigrations(pool);
+
+    expect(queries[0]).toBe('client-1:BEGIN');
+    expect(queries[1]).toBe('client-1:SELECT pg_advisory_xact_lock($1, $2)');
+    expect(queries.at(-1)).toBe('client-1:COMMIT');
+  });
+
+  it('serializes concurrent startup migrations and records each migration once', async () => {
+    const concurrent = createConcurrentPool();
+
+    await Promise.all([
+      runPostgresMigrations(concurrent.pool),
+      runPostgresMigrations(concurrent.pool),
+    ]);
+
+    expect(concurrent.baselineRuns).toBe(1);
+    expect(concurrent.workerLeaseRuns).toBe(1);
+    expect(concurrent.projectAssetRuns).toBe(1);
+    expect(concurrent.appliedRows).toEqual(
+      POSTGRES_MIGRATIONS.map(({ id, checksum }) => ({ id, checksum })),
+    );
+    expect(
+      concurrent.queries.filter((query) => query.includes('SELECT pg_advisory_xact_lock($1, $2)')),
+    ).toHaveLength(2);
+    expect(concurrent.releaseCalls).toBe(2);
+  });
+
+  it('tolerates adapters that do not implement advisory locks', async () => {
+    const queries: string[] = [];
+    const pool = {
+      query: async <T>(text: string) => {
+        queries.push(text);
+        if (text === 'SELECT pg_advisory_xact_lock($1, $2)')
+          throw new Error('Unknown function pg_advisory_xact_lock');
+        if (text.startsWith('SELECT id, checksum')) return { rows: [] } as { rows: T[] };
+        return { rows: [] } as { rows: T[] };
+      },
+    } as unknown as Pool;
+
+    await expect(runPostgresMigrations(pool)).resolves.toBeUndefined();
+    expect(queries).toContain('SELECT pg_advisory_xact_lock($1, $2)');
+    expect(
+      queries.filter((query) => query.startsWith('INSERT INTO joy_media_schema_migrations')),
+    ).toHaveLength(POSTGRES_MIGRATIONS.length);
   });
 
   it('does not attempt the legacy revocation repair on a fresh current schema', async () => {

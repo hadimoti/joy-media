@@ -2,11 +2,13 @@ import type { Pool, PoolClient } from 'pg';
 import { POSTGRES_SCHEMA } from './postgres-schema.js';
 
 type MigrationDatabase = Pool | PoolClient;
+type MigrationSession = Pick<PoolClient, 'query'>;
+type MigrationQueryable = Pick<MigrationDatabase, 'query'>;
 
 export interface PostgresMigration {
   readonly id: string;
   readonly checksum: string;
-  readonly up: (database: MigrationDatabase) => Promise<void>;
+  readonly up: (database: MigrationQueryable) => Promise<void>;
 }
 
 const MIGRATION_LEDGER_SQL = `
@@ -15,6 +17,8 @@ CREATE TABLE IF NOT EXISTS joy_media_schema_migrations (
   checksum text NOT NULL,
   applied_at timestamptz NOT NULL
 );`;
+const MIGRATION_LOCK_NAMESPACE = 0x4a4f59;
+const MIGRATION_LOCK_KEY = 0x4d454449;
 
 /**
  * The baseline is intentionally kept as a frozen source snapshot. New schema
@@ -33,7 +37,7 @@ const BASELINE_MIGRATION: PostgresMigration = {
   },
 };
 
-async function repairAssetRevocationPrimaryKey(database: MigrationDatabase): Promise<void> {
+async function repairAssetRevocationPrimaryKey(database: MigrationQueryable): Promise<void> {
   // The current JOY Media schema does not create the historical revocation
   // audit table. Only repair it when it exists on a legacy installation;
   // otherwise a fresh install must not fail while altering a missing table.
@@ -159,25 +163,78 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
 ];
 
 export async function runPostgresMigrations(database: MigrationDatabase): Promise<void> {
-  await database.query(MIGRATION_LEDGER_SQL);
-  const applied = await database.query<{ id: string; checksum: string }>(
-    'SELECT id, checksum FROM joy_media_schema_migrations ORDER BY id',
-  );
-  const appliedById = new Map(applied.rows.map((row) => [row.id, row.checksum]));
+  await withMigrationSession(database, async (session) => {
+    await session.query('BEGIN');
+    try {
+      await acquireMigrationLock(session);
+      await session.query(MIGRATION_LEDGER_SQL);
+      const applied = await session.query<{ id: string; checksum: string }>(
+        'SELECT id, checksum FROM joy_media_schema_migrations ORDER BY id',
+      );
+      const appliedById = new Map(applied.rows.map((row) => [row.id, row.checksum]));
 
-  for (const migration of POSTGRES_MIGRATIONS) {
-    const previous = appliedById.get(migration.id);
-    if (previous !== undefined) {
-      if (previous !== migration.checksum) {
-        throw new Error(`PostgreSQL migration checksum mismatch for ${migration.id}`);
+      for (const migration of POSTGRES_MIGRATIONS) {
+        const previous = appliedById.get(migration.id);
+        if (previous !== undefined) {
+          if (previous !== migration.checksum) {
+            throw new Error(`PostgreSQL migration checksum mismatch for ${migration.id}`);
+          }
+          continue;
+        }
+
+        await migration.up(session);
+        await session.query(
+          'INSERT INTO joy_media_schema_migrations (id, checksum, applied_at) VALUES ($1, $2, CURRENT_TIMESTAMP)',
+          [migration.id, migration.checksum],
+        );
+        appliedById.set(migration.id, migration.checksum);
       }
-      continue;
-    }
 
-    await migration.up(database);
-    await database.query(
-      'INSERT INTO joy_media_schema_migrations (id, checksum, applied_at) VALUES ($1, $2, CURRENT_TIMESTAMP)',
-      [migration.id, migration.checksum],
-    );
+      await session.query('COMMIT');
+    } catch (error) {
+      try {
+        await session.query('ROLLBACK');
+      } catch {
+        // Preserve the original migration failure if the transaction is already aborted.
+      }
+      throw error;
+    }
+  });
+}
+
+async function withMigrationSession(
+  database: MigrationDatabase,
+  action: (session: MigrationSession) => Promise<void>,
+): Promise<void> {
+  if (!hasConnect(database)) {
+    await action(database);
+    return;
   }
+  const client = await database.connect();
+  try {
+    await action(client);
+  } finally {
+    client.release();
+  }
+}
+
+async function acquireMigrationLock(session: MigrationSession): Promise<void> {
+  try {
+    await session.query('SELECT pg_advisory_xact_lock($1, $2)', [
+      MIGRATION_LOCK_NAMESPACE,
+      MIGRATION_LOCK_KEY,
+    ]);
+  } catch (error) {
+    if (isUnsupportedAdvisoryLockError(error)) return;
+    throw error;
+  }
+}
+
+function hasConnect(database: MigrationDatabase): database is Pool {
+  return typeof (database as Pool).connect === 'function';
+}
+
+function isUnsupportedAdvisoryLockError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /(pg_advisory_xact_lock|unknown function|not supported|unsupported)/iu.test(error.message);
 }
