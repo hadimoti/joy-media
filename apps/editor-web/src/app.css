@@ -2351,6 +2351,11 @@ label {
   font-size: 1.2rem;
   line-height: 1;
 }
+.action-overflow-trigger-label {
+  font-size: var(--joy-type-xs);
+  line-height: 1.2;
+  white-space: nowrap;
+}
 .action-overflow-popover {
   position: absolute;
   top: calc(100% + 0.25rem);

@@ -60,7 +60,7 @@ export function ActionOverflowMenu({
     <div className="action-overflow-menu" ref={rootRef}>
       <button
         type="button"
-        className="icon-button action-overflow-trigger"
+        className="icon-button icon-button-labeled action-overflow-trigger"
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -68,6 +68,7 @@ export function ActionOverflowMenu({
         onClick={() => setOpen((current) => !current)}
       >
         <span aria-hidden="true">⋯</span>
+        <span className="action-overflow-trigger-label">More</span>
       </button>
       {open && (
         <div className="action-overflow-popover" ref={menuRef} role="menu" aria-label={label}>
