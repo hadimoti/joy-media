@@ -263,6 +263,17 @@ label track groups and playhead keyboard semantics, and rerun the responsive mat
 project plus save/reopen and undo evidence. This pass does not reproduce the reported Effects
 subtab crash, but it does not close the broader Effects soak or release gates.
 
+### LIVE-18 — Automate workspace panel wiring (2026-08-29)
+
+The same browser pass found that the Automate preset could not show Jobs even though the panel was
+registered: the seeded `context` group contained only `inspector`, so selecting the preset's requested
+`jobs` view was a no-op. Commit `6d98bff` adds the specialist context views (`inspector`, `motion`,
+`audio`, and `jobs`) to that group and adds preset contracts for Enhance, Audio & Captions, and
+Automate. After resetting the saved dock layout and selecting Automate in the authenticated browser,
+Jobs rendered with Workers/Queue/Pair tabs and the current project context; the URL remained stable and
+no browser errors were recorded. This closes the preset-wiring defect, but P1-26 remains open for the
+compact edit/zoom affordances, unique clip names, labelled track groups, and the full responsive matrix.
+
 ## Numeric release budgets and retained evidence
 
 These are stop/go gates, not optional targets:
