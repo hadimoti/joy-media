@@ -428,11 +428,12 @@ rehearsal passes, and each final promotion has a detached 30-minute canary with 
 checks against local origin plus `joyst.ir` and `www.joyst.ir`.
 
 The release gate is clean for commands, tests, generated artifacts, manifests, builds, static
-inventory, manifest, SBOM, and feature status. It intentionally remains NO-GO only for the two
-linked browser evidence checks: source-bound `authenticated-editor-1.0` evidence is absent, and
-the real authenticated Worker lease/upload/inspection/Motion journey (P0-12) still requires the
-browser pairing safety step before it can be recorded. No new Effects-subtab or timeline crash was
-observed in the prior authenticated matrix.
+inventory, manifest, SBOM, and feature status. It intentionally remains NO-GO for the linked
+browser evidence checks—source-bound `authenticated-editor-1.0` evidence is absent, and the real
+authenticated Worker lease/upload/inspection/Motion journey (P0-12) still requires the browser
+pairing safety step before it can be recorded—and for the backend derivative-integrity controls
+tracked as P0-14/LIVE-31. No new Effects-subtab or timeline crash was observed in the prior
+authenticated matrix.
 
 ## Numeric release budgets and retained evidence
 
