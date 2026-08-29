@@ -364,6 +364,23 @@ Jobs contract tests cover this fail-closed behavior. A real authenticated
 journey must still exercise a source-backed asset through lease, upload,
 inspection, and Motion placement before P0-12 is closed.
 
+### LIVE-27 — post-fix backend gap audit (2026-08-29)
+
+The non-browser audit after the timeline and Worker preflight repairs found the remaining
+release gaps that must stay visible in this plan. P0-04 now coalesces concurrent Workers/Jobs
+reads per project and token, but the four panel-specific polling loops still require one
+visibility-aware rate-budget evidence artifact. P0-02 now serializes migration startup with a
+single transaction and PostgreSQL advisory lock, with concurrent-startup coverage; the real
+PostgreSQL rehearsal remains required. P1-21 now performs a bounded, non-mutating object-store
+stat probe and fails readiness closed on timeout or malformed metadata.
+
+P0-03 and the persistence half of LIVE-25 remain open: the browser still needs GET hydration and
+an awaited, serialized document-save transaction so cloud-asset insertion can prove revision,
+reload, conflict recovery, and Undo for image/video/audio. P0-12 also remains open until a real
+authenticated source-backed Worker journey leases a selected asset, uploads a derivative, passes
+inspection, and places at least two results in Motion. These are implementation/evidence gaps,
+not evidence of the reported Effects-subtab crash; the Effects and timeline retests remain stable.
+
 ## Numeric release budgets and retained evidence
 
 These are stop/go gates, not optional targets:
