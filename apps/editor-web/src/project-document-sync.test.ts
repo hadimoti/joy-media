@@ -152,6 +152,121 @@ describe('project-document-sync', () => {
     expect(persisted?.documentRevisionId).toBe('cas-rev-abc123');
   });
 
+  it('serializes concurrent syncs and advances the later request to the persisted CAS head', async () => {
+    const storage = memoryStorage();
+    upsertControlPlaneProjectBinding(storage, { ...binding, documentRevisionId: 'cas-rev-old' }, 'local');
+
+    let releaseFirst: (() => void) | undefined;
+    const firstStarted = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const syncProjectDocument: SyncProjectDocument = vi
+      .fn()
+      .mockImplementationOnce(async (_projectId, params) => {
+        await firstStarted;
+        return { projectId: binding.controlPlaneProjectId, revisionId: params.revisionId };
+      })
+      .mockImplementationOnce(async (_projectId, params) => ({
+        projectId: binding.controlPlaneProjectId,
+        revisionId: params.revisionId,
+      }));
+
+    const first = syncProjectDocumentBinding(
+      { ...binding, documentRevisionId: 'cas-rev-old' },
+      document,
+      'cas-rev-first',
+      storage,
+      syncProjectDocument,
+    );
+    const second = syncProjectDocumentBinding(
+      { ...binding, documentRevisionId: 'cas-rev-old' },
+      document,
+      'cas-rev-second',
+      storage,
+      syncProjectDocument,
+    );
+
+    await vi.waitFor(() => expect(syncProjectDocument).toHaveBeenCalledTimes(1));
+    releaseFirst?.();
+    try {
+      await expect(first).resolves.toEqual({
+        kind: 'success',
+        projectId: binding.controlPlaneProjectId,
+        revisionId: 'cas-rev-first',
+      });
+      await expect(second).resolves.toEqual({
+        kind: 'success',
+        projectId: binding.controlPlaneProjectId,
+        revisionId: 'cas-rev-second',
+      });
+    } finally {
+      releaseFirst?.();
+      await Promise.allSettled([first, second]);
+    }
+
+    expect(syncProjectDocument).toHaveBeenNthCalledWith(1, binding.controlPlaneProjectId, {
+      baseRevisionId: 'cas-rev-old',
+      revisionId: 'cas-rev-first',
+      document,
+    });
+    expect(syncProjectDocument).toHaveBeenNthCalledWith(2, binding.controlPlaneProjectId, {
+      baseRevisionId: 'cas-rev-first',
+      revisionId: 'cas-rev-second',
+      document,
+    });
+    expect(getControlPlaneProjectBinding(storage, 'local-edit-1', 'local')?.documentRevisionId).toBe(
+      'cas-rev-second',
+    );
+  });
+
+  it('coalesces a repeated in-flight revision after the first sync persists it', async () => {
+    const storage = memoryStorage();
+    upsertControlPlaneProjectBinding(storage, { ...binding, documentRevisionId: 'cas-rev-old' }, 'local');
+
+    let releaseFirst: (() => void) | undefined;
+    const firstStarted = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const syncProjectDocument: SyncProjectDocument = vi.fn().mockImplementation(async (_projectId, params) => {
+      await firstStarted;
+      return { projectId: binding.controlPlaneProjectId, revisionId: params.revisionId };
+    });
+
+    const first = syncProjectDocumentBinding(
+      { ...binding, documentRevisionId: 'cas-rev-old' },
+      document,
+      'cas-rev-next',
+      storage,
+      syncProjectDocument,
+    );
+    const second = syncProjectDocumentBinding(
+      { ...binding, documentRevisionId: 'cas-rev-old' },
+      document,
+      'cas-rev-next',
+      storage,
+      syncProjectDocument,
+    );
+
+    await vi.waitFor(() => expect(syncProjectDocument).toHaveBeenCalledTimes(1));
+    releaseFirst?.();
+    try {
+      await expect(first).resolves.toEqual({
+        kind: 'success',
+        projectId: binding.controlPlaneProjectId,
+        revisionId: 'cas-rev-next',
+      });
+      await expect(second).resolves.toEqual({
+        kind: 'success',
+        projectId: binding.controlPlaneProjectId,
+        revisionId: 'cas-rev-next',
+      });
+    } finally {
+      releaseFirst?.();
+      await Promise.allSettled([first, second]);
+    }
+    expect(syncProjectDocument).toHaveBeenCalledTimes(1);
+  });
+
   it('returns conflict result and leaves binding unchanged on 409 DOCUMENT_REVISION_CONFLICT', async () => {
     const storage = memoryStorage();
     const bindingWithRevision: ControlPlaneProjectBinding = {

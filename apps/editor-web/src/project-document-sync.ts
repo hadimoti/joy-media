@@ -2,6 +2,7 @@ import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import type { JoyProjectV1, ProjectRevisionId } from '@joy-media/project-schema';
 import {
   type ControlPlaneProjectBinding,
+  getControlPlaneProjectBinding,
   upsertControlPlaneProjectBinding,
 } from './project-control-plane.js';
 
@@ -56,6 +57,7 @@ export interface DocumentSyncOptions {
 }
 
 const DOCUMENT_REVISION_CONFLICT = 'DOCUMENT_REVISION_CONFLICT';
+const inFlightDocumentSyncs = new Map<string, Promise<DocumentSyncResult>>();
 
 function isDocumentRevisionConflictError(error: unknown): error is {
   readonly status: 409;
@@ -91,13 +93,46 @@ export function syncProjectDocumentBinding(
   options: DocumentSyncOptions = {},
 ): Promise<DocumentSyncResult> {
   const ownerKey = options.ownerKey ?? 'local';
+  const queueKey = `${ownerKey}:${binding.editorProjectId}`;
+
+  const previous = inFlightDocumentSyncs.get(queueKey);
+  const run = () =>
+    performProjectDocumentSync(
+      binding,
+      document,
+      revisionId,
+      storage,
+      syncProjectDocument,
+      ownerKey,
+    );
+  // Start the first request synchronously so callers can observe immediate
+  // transport invocation; only later requests wait behind the current CAS
+  // write. This preserves ordering without adding a microtask delay to the
+  // common path.
+  const queued = previous === undefined ? run() : previous.catch(() => undefined).then(run);
+  inFlightDocumentSyncs.set(queueKey, queued);
+  return queued.finally(() => {
+    if (inFlightDocumentSyncs.get(queueKey) === queued) inFlightDocumentSyncs.delete(queueKey);
+  });
+}
+
+function performProjectDocumentSync(
+  binding: ControlPlaneProjectBinding,
+  document: JoyProjectV1,
+  revisionId: ProjectRevisionId,
+  storage: BrowserKeyValueStore,
+  syncProjectDocument: SyncProjectDocument,
+  ownerKey: string,
+): Promise<DocumentSyncResult> {
+  const latestBinding =
+    getControlPlaneProjectBinding(storage, binding.editorProjectId, ownerKey) ?? binding;
 
   // Fail closed: if document and binding IDs don't match, do NOT make a network call.
-  if (document.id !== binding.editorProjectId) {
+  if (document.id !== latestBinding.editorProjectId) {
     return Promise.resolve({
       kind: 'request-failure',
       error: new Error(
-        `Document id (${document.id}) does not match binding editorProjectId (${binding.editorProjectId})`,
+        `Document id (${document.id}) does not match binding editorProjectId (${latestBinding.editorProjectId})`,
       ),
     });
   }
@@ -105,17 +140,17 @@ export function syncProjectDocumentBinding(
   // Repeating a request for the same immutable revision is a safe no-op.
   // This matters after a client disconnects after the server committed the
   // document but before the Creative Brief response was received.
-  if (binding.documentRevisionId === revisionId) {
+  if (latestBinding.documentRevisionId === revisionId) {
     return Promise.resolve({
       kind: 'success',
-      projectId: binding.controlPlaneProjectId,
+      projectId: latestBinding.controlPlaneProjectId,
       revisionId,
     });
   }
 
-  const baseRevisionId: ProjectRevisionId = binding.documentRevisionId ?? '';
+  const baseRevisionId: ProjectRevisionId = latestBinding.documentRevisionId ?? '';
 
-  return syncProjectDocument(binding.controlPlaneProjectId, {
+  return syncProjectDocument(latestBinding.controlPlaneProjectId, {
     baseRevisionId,
     revisionId,
     document,
@@ -124,20 +159,20 @@ export function syncProjectDocumentBinding(
       // Only persist if the response matches both the binding's control-plane
       // project ID and the requested revision.
       if (
-        response.projectId !== binding.controlPlaneProjectId ||
+        response.projectId !== latestBinding.controlPlaneProjectId ||
         response.revisionId !== revisionId
       ) {
         return {
           kind: 'request-failure' as const,
           error: new Error(
-            `Sync response mismatch: expected projectId=${binding.controlPlaneProjectId}, revisionId=${revisionId}; got projectId=${response.projectId}, revisionId=${response.revisionId}`,
+            `Sync response mismatch: expected projectId=${latestBinding.controlPlaneProjectId}, revisionId=${revisionId}; got projectId=${response.projectId}, revisionId=${response.revisionId}`,
           ),
         } satisfies DocumentSyncRequestFailure;
       }
 
       // Persist the updated binding with the new document revision ID.
       const updatedBinding: ControlPlaneProjectBinding = {
-        ...binding,
+        ...latestBinding,
         documentRevisionId: revisionId,
       };
       upsertControlPlaneProjectBinding(storage, updatedBinding, ownerKey);
