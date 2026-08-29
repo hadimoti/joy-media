@@ -102,10 +102,7 @@ interface WorkflowOutcomeSignals {
   readonly hasFixtureOutput: boolean;
 }
 
-function collectOutcomeSignals(
-  value: unknown,
-  seen = new Set<object>(),
-): WorkflowOutcomeSignals {
+function collectOutcomeSignals(value: unknown, seen = new Set<object>()): WorkflowOutcomeSignals {
   if (value === null || value === undefined) {
     return { hasDeferredOutput: false, hasFixtureOutput: false };
   }
