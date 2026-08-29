@@ -3,7 +3,7 @@
 Updated by **every** implementation session (protocol: [`ORCHESTRATION.md`](ORCHESTRATION.md) §2).
 One row per part. Keep entries terse; detail lives in the part files' WP checkboxes.
 
-## Current closure checkpoint (2026-08-30)
+## Current closure checkpoint (2026-08-29 UTC / 2026-08-30 local)
 
 Commit `696bc6f` is pushed to both `github/main` and the VPS bare `main`.
 It fixes the project-rename SQL revision placeholder, closes the cancel/late-
