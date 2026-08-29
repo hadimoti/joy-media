@@ -30,6 +30,9 @@ describe('TimelinePanel clip interaction semantics', () => {
     expect(markup).toContain('data-track-id=');
     expect(markup).toContain('data-clip-id=');
     expect(markup).toContain('role="button"');
+    expect(markup).toContain('aria-roledescription="timeline track"');
+    expect(markup).toContain('aria-roledescription="timeline clip"');
+    expect(markup).toContain('aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown');
     expect(markup).toContain('data-trim-edge="start"');
     expect(markup).toContain('data-trim-edge="end"');
     expect(markup).toContain(

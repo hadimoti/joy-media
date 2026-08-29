@@ -60,6 +60,7 @@ export function TimelineRuler({
       aria-valuemax={durationUs}
       aria-valuenow={playheadUs}
       aria-valuetext={formatRulerLabel(playheadUs)}
+      aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Home End"
       onPointerDown={(event) => {
         event.currentTarget.setPointerCapture(event.pointerId);
         dragging.current = true;

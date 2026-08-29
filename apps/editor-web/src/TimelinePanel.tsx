@@ -258,6 +258,8 @@ function TimelineClip({
   const label =
     displayName?.trim() || clipDisplayName(clip.id.replace(/^voice-/, '').replace(/^clip-/, ''));
   const durationLabel = `${(displayDurationUs / 1_000_000).toFixed(1)}s`;
+  const startLabel = `${(clip.startUs / 1_000_000).toFixed(1)}s`;
+  const endLabel = `${((clip.startUs + clip.durationUs) / 1_000_000).toFixed(1)}s`;
   const showChrome = layoutWidthPx >= 48;
   const showDuration = layoutWidthPx >= 100;
   const kindClass =
@@ -270,7 +272,8 @@ function TimelineClip({
       tabIndex={0}
       className={`timeline-clip ${kindClass} ${laneClass}${dragPx !== undefined || trimPreview !== undefined ? ' dragging' : ''}${isDragOver ? ' is-drag-over' : ''}`}
       aria-pressed={selected}
-      aria-label={`${label}, ${durationLabel}`}
+      aria-label={`${label}, ${durationLabel}, ${startLabel}–${endLabel}, clip ${clip.id}`}
+      aria-roledescription="timeline clip"
       data-clip-id={clip.id}
       data-element-kind={elementKind}
       title={`${label} · ${(clip.startUs / 1_000_000).toFixed(1)}s–${((clip.startUs + clip.durationUs) / 1_000_000).toFixed(1)}s${clip.kind === 'composition' ? ' · Double-click to edit the merged timeline' : ''}`}
@@ -2254,6 +2257,12 @@ export function TimelinePanel({
             const trackLabelColor =
               localTrackLabelColors[track.id] ?? trackLabelColors?.[track.id] ?? source.labelColor;
             const kind: TimelineTrackKind = track.family === 'audio' ? 'audio' : 'video';
+            const trackName = professionalTrackName(
+              track.family,
+              track.familyIndex,
+              source.name ?? source.id,
+            );
+            const trackCode = professionalTrackCode(track.family, track.familyIndex);
             const startsAudioStack =
               track.family === 'audio' && (index === 0 || visible[index - 1]?.family !== 'audio');
             return (
@@ -2267,6 +2276,9 @@ export function TimelinePanel({
                 data-track-id={track.id}
                 data-track-family={track.family}
                 data-track-label-color={trackLabelColor ?? 'default'}
+                role="group"
+                aria-roledescription="timeline track"
+                aria-label={`${trackCode} ${trackName} track`}
                 style={{ height: track.heightPx }}
               >
                 <div
@@ -2386,11 +2398,7 @@ export function TimelinePanel({
                       {professionalTrackCode(track.family, track.familyIndex)}
                     </span>
                     <span className="track-name" dir="ltr" title={track.id}>
-                      {professionalTrackName(
-                        track.family,
-                        track.familyIndex,
-                        source.name ?? source.id,
-                      )}
+                      {trackName}
                     </span>
                   </div>
                   <button
