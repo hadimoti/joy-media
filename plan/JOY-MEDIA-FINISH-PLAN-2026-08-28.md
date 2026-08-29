@@ -285,6 +285,15 @@ names for the two split `Intro` clips and all three `Black Brush Stroke` clips, 
 and the shortcut metadata with no recovery UI or console errors. Compact primary-toolbar hiding and the
 missing compact zoom replacement remain open under P1-26 until the complete width matrix passes.
 
+### LIVE-20 — compact zoom affordance repair (2026-08-29)
+
+Commit `94c842d` adds Zoom out and Zoom in to the compact timeline overflow menu. The live
+480×1370 browser verified both entries are enabled and that Zoom in changes the slider to Follow
+mode; Fit then restores the prior Fit state. This closes the missing-compact-zoom portion of P1-26.
+The primary edit toolbar remains intentionally collapsed at this breakpoint (Duplicate/Ripple
+Delete/Add Marker are available in the overflow), so the visual affordance and full responsive
+matrix at 320/480/768/1024/1280/1440 remain release work.
+
 ## Numeric release budgets and retained evidence
 
 These are stop/go gates, not optional targets:
