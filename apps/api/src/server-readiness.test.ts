@@ -116,7 +116,7 @@ describe('production readiness wiring', () => {
       releaseIdentity,
     }).checks!;
 
-    await expect(checks.privateObjectStore!()).rejects.toBe(failure);
+    await expect(checks.privateObjectStore!()).resolves.toBe(false);
   });
 
   it('preserves legacy in-memory private object store test doubles without a readiness probe', async () => {

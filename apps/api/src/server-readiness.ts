@@ -5,7 +5,9 @@ import { POSTGRES_MIGRATIONS } from './postgres-migrations.js';
 
 /** Schema version emitted by the release tooling and required by readiness. */
 export const EXPECTED_RELEASE_SCHEMA_VERSION = POSTGRES_MIGRATIONS.length;
-export const PRIVATE_OBJECT_STORE_READINESS_TIMEOUT_MS = 2_500;
+export const PRIVATE_OBJECT_STORE_READINESS_TIMEOUT_MS = 10_000;
+const PRIVATE_OBJECT_STORE_READINESS_RESPONSE_TIMEOUT_MS = 1_000;
+const PRIVATE_OBJECT_STORE_READINESS_CACHE_MS = 15_000;
 
 interface ReadinessQueryClient {
   query(sql: string): Promise<unknown>;
@@ -60,6 +62,9 @@ export function releaseIdentityFromEnvironment(
 export function productionReadinessOptions(
   dependencies: ProductionReadinessDependencies,
 ): ApiReadinessOptions {
+  const privateObjectStoreCheck = createPrivateObjectStoreReadinessCheck(
+    dependencies.privateObjectStore,
+  );
   return {
     ...(dependencies.releaseIdentity === undefined
       ? {}
@@ -81,13 +86,53 @@ export function productionReadinessOptions(
         );
         return true;
       },
-      privateObjectStore: async () => {
-        const store = dependencies.privateObjectStore;
-        if (store === undefined) return false;
-        if (typeof store.probeReadiness !== 'function') return true;
-        await store.probeReadiness({ timeoutMs: PRIVATE_OBJECT_STORE_READINESS_TIMEOUT_MS });
-        return true;
-      },
+      privateObjectStore: privateObjectStoreCheck,
     },
   };
+}
+
+function createPrivateObjectStoreReadinessCheck(
+  store: PrivateObjectStore | undefined,
+): () => Promise<boolean> {
+  let inFlight: Promise<boolean> | undefined;
+  let cached: { readonly value: boolean; readonly at: number } | undefined;
+
+  return async () => {
+    if (store === undefined) return false;
+    if (typeof store.probeReadiness !== 'function') return true;
+    const now = Date.now();
+    if (cached !== undefined && now - cached.at < PRIVATE_OBJECT_STORE_READINESS_CACHE_MS)
+      return cached.value;
+
+    if (inFlight === undefined) {
+      inFlight = store
+        .probeReadiness({ timeoutMs: PRIVATE_OBJECT_STORE_READINESS_TIMEOUT_MS })
+        .then(
+          () => true,
+          () => false,
+        )
+        .then((value) => {
+          cached = { value, at: Date.now() };
+          return value;
+        })
+        .finally(() => {
+          inFlight = undefined;
+        });
+    }
+    return raceReadiness(inFlight, PRIVATE_OBJECT_STORE_READINESS_RESPONSE_TIMEOUT_MS);
+  };
+}
+
+async function raceReadiness(promise: Promise<boolean>, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }

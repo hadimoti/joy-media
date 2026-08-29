@@ -91,13 +91,7 @@ describe('RclonePrivateObjectStore', () => {
         async run(args) {
           calls.push(args);
           return new TextEncoder().encode(
-            JSON.stringify({
-              Path: 'sweden-backups/joy-media',
-              Name: 'joy-media',
-              IsDir: true,
-              Size: 0,
-              Hashes: {},
-            }),
+            JSON.stringify([{ Path: 'sweden-backups', Name: 'sweden-backups', IsDir: true }]),
           );
         },
       },
@@ -107,9 +101,15 @@ describe('RclonePrivateObjectStore', () => {
     expect(calls).toEqual([
       [
         'lsjson',
-        'parspack:c212734/sweden-backups/joy-media',
-        '--stat',
-        '--hash',
+        'parspack:c212734',
+        '--max-depth',
+        '1',
+        '--dirs-only',
+        '--no-modtime',
+        '--timeout',
+        '2s',
+        '--contimeout',
+        '2s',
         '--log-level',
         'ERROR',
       ],
@@ -119,11 +119,16 @@ describe('RclonePrivateObjectStore', () => {
   it('rejects invalid readiness probe metadata instead of claiming reachability', async () => {
     const store = new RclonePrivateObjectStore({
       remotePrefix: 'parspack:c212734/sweden-backups/joy-media',
-      run: { run: async () => new TextEncoder().encode(JSON.stringify({ invalid: true })) },
+      run: {
+        run: async () =>
+          new TextEncoder().encode(
+            JSON.stringify([{ Path: 'not-a-dir', Name: 'x', IsDir: false }]),
+          ),
+      },
     });
 
     await expect(store.probeReadiness?.({ timeoutMs: 250 })).rejects.toThrow(
-      'private object store readiness probe returned invalid path',
+      'private object store readiness probe returned non-directory entry',
     );
   });
 

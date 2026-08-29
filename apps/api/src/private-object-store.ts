@@ -83,19 +83,29 @@ export class RclonePrivateObjectStore implements PrivateObjectStore {
     const timeoutMs = options.timeoutMs ?? 2_500;
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)
       throw new RangeError('private object store readiness timeout must be positive');
+    const target = parseRemotePrefix(this.options.remotePrefix);
+    const probeTarget = target
+      ? `${target.remoteName}:${target.bucket}`
+      : this.options.remotePrefix;
     const output = await withTimeout(
       this.rclone().run([
         'lsjson',
-        this.options.remotePrefix,
-        '--stat',
-        '--hash',
+        probeTarget,
+        '--max-depth',
+        '1',
+        '--dirs-only',
+        '--no-modtime',
+        '--timeout',
+        '2s',
+        '--contimeout',
+        '2s',
         '--log-level',
         'ERROR',
       ]),
       timeoutMs,
       'private object store readiness probe timed out',
     );
-    validateProbeStat(output);
+    validateProbeListing(output, target?.prefix);
   }
 
   private pathFor(ref: string): string {
@@ -397,27 +407,25 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
   });
 }
 
-function validateProbeStat(bytes: Uint8Array): void {
+function validateProbeListing(bytes: Uint8Array, prefix = ''): void {
   const value: unknown = JSON.parse(Buffer.from(bytes).toString('utf8'));
-  if (value === null || typeof value !== 'object' || Array.isArray(value))
-    throw new Error('private object store readiness probe returned invalid JSON');
-  const stat = value as Record<string, unknown>;
-  if (typeof stat.Path !== 'string')
-    throw new Error('private object store readiness probe returned invalid path');
-  if (typeof stat.Name !== 'string')
-    throw new Error('private object store readiness probe returned invalid name');
-  if (typeof stat.IsDir !== 'boolean')
-    throw new Error('private object store readiness probe returned invalid directory flag');
-  if (!Number.isSafeInteger(stat.Size) || (stat.Size as number) < 0)
-    throw new Error('private object store readiness probe returned invalid size');
-  if (stat.Hashes !== undefined) {
-    if (stat.Hashes === null || typeof stat.Hashes !== 'object' || Array.isArray(stat.Hashes))
-      throw new Error('private object store readiness probe returned invalid hashes');
-    for (const hash of Object.values(stat.Hashes as Record<string, unknown>)) {
-      if (typeof hash !== 'string')
-        throw new Error('private object store readiness probe returned invalid hash value');
-    }
-  }
+  if (!Array.isArray(value))
+    throw new Error('private object store readiness probe returned invalid listing');
+  const entries = value.map((entry) => {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry))
+      throw new Error('private object store readiness probe returned invalid entry');
+    const record = entry as Record<string, unknown>;
+    if (typeof record.Path !== 'string')
+      throw new Error('private object store readiness probe returned invalid path');
+    if (typeof record.Name !== 'string')
+      throw new Error('private object store readiness probe returned invalid name');
+    if (record.IsDir !== true)
+      throw new Error('private object store readiness probe returned non-directory entry');
+    return record;
+  });
+  const root = prefix.split('/')[0];
+  if (root !== undefined && root !== '' && !entries.some((entry) => entry.Name === root))
+    throw new Error('private object store readiness probe could not find configured prefix');
 }
 
 function isRemotePrefix(value: string): boolean {
