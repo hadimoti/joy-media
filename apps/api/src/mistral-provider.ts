@@ -1,4 +1,5 @@
-import type { Pool } from 'pg';
+import { randomUUID } from 'node:crypto';
+import type { Pool, PoolClient } from 'pg';
 import {
   createMistralAdapter,
   MISTRAL_PROVIDER_ID,
@@ -58,6 +59,43 @@ export interface MistralInvocationLedger {
   record(actorId: string, result: CapabilityResult): Promise<CapabilityResult>;
 }
 
+interface ClaimableMistralInvocationLedger extends MistralInvocationLedger {
+  runClaimed(
+    actorId: string,
+    idempotencyKey: string,
+    requestHash: string,
+    invoke: () => Promise<CapabilityResult>,
+  ): Promise<CapabilityResult>;
+}
+
+type MistralInvocationClaimStatus = 'running' | 'failed' | 'completed';
+
+interface MistralInvocationClaim {
+  readonly actorId: string;
+  readonly idempotencyKey: string;
+  readonly requestHash: string;
+  readonly status: MistralInvocationClaimStatus;
+  readonly leaseToken?: string;
+  readonly leaseExpiresAt?: number;
+}
+
+interface MistralInvocationClaimRow {
+  readonly actor_id: string;
+  readonly idempotency_key: string;
+  readonly request_hash: string;
+  readonly status: MistralInvocationClaimStatus;
+  readonly lease_token: string | null;
+  readonly lease_expires_at: Date | null;
+}
+
+interface MistralInvocationClaimAttempt {
+  readonly claimed: boolean;
+  readonly claim: MistralInvocationClaim;
+}
+
+const MISTRAL_INVOCATION_LEASE_MS = 5 * 60_000;
+const MISTRAL_INVOCATION_POLL_MS = 250;
+
 /** Safe fallback for local/dev runs without PostgreSQL. Production uses the Postgres ledger. */
 export class MemoryMistralInvocationLedger implements MistralInvocationLedger {
   readonly #records = new Map<string, CapabilityResult>();
@@ -95,6 +133,35 @@ export class PostgresMistralInvocationLedger implements MistralInvocationLedger 
         PRIMARY KEY (actor_id, idempotency_key)
       )
     `);
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS provider_invocation_claims (
+        actor_id TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        request_hash TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'running',
+        lease_token TEXT,
+        lease_expires_at TIMESTAMPTZ,
+        error TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (actor_id, idempotency_key)
+      )
+    `);
+    await this.pool.query(
+      "ALTER TABLE provider_invocation_claims ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'running'",
+    );
+    await this.pool.query(
+      'ALTER TABLE provider_invocation_claims ADD COLUMN IF NOT EXISTS lease_token TEXT',
+    );
+    await this.pool.query(
+      'ALTER TABLE provider_invocation_claims ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ',
+    );
+    await this.pool.query(
+      'ALTER TABLE provider_invocation_claims ADD COLUMN IF NOT EXISTS error TEXT',
+    );
+    await this.pool.query(
+      'ALTER TABLE provider_invocation_claims ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()',
+    );
   }
 
   async find(actorId: string, idempotencyKey: string): Promise<CapabilityResult | undefined> {
@@ -106,25 +173,45 @@ export class PostgresMistralInvocationLedger implements MistralInvocationLedger 
   }
 
   async record(actorId: string, result: CapabilityResult): Promise<CapabilityResult> {
-    const stored = await this.pool.query<{ readonly result: CapabilityResult }>(
-      `INSERT INTO provider_invocations
-       (actor_id, idempotency_key, provider_id, model_id, request_hash, result)
-       VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-       ON CONFLICT (actor_id, idempotency_key) DO NOTHING
-       RETURNING result`,
-      [
-        actorId,
-        result.provenance.idempotencyKey,
-        result.provenance.providerId,
-        result.provenance.modelId,
-        result.provenance.requestHash,
-        JSON.stringify(result),
-      ],
-    );
-    if (stored.rows[0] !== undefined) return stored.rows[0].result;
-    const existing = await this.find(actorId, result.provenance.idempotencyKey);
-    if (existing === undefined) throw new Error('provider invocation record was not persisted');
-    return ensureMatchingInvocation(existing, result.provenance.requestHash);
+    return persistInvocation(this.pool, actorId, result);
+  }
+
+  async runClaimed(
+    actorId: string,
+    idempotencyKey: string,
+    requestHash: string,
+    invoke: () => Promise<CapabilityResult>,
+  ): Promise<CapabilityResult> {
+    for (;;) {
+      const existing = await findInvocation(this.pool, actorId, idempotencyKey);
+      if (existing !== undefined) return ensureMatchingInvocation(existing, requestHash);
+      const claim = await claimInvocation(this.pool, actorId, idempotencyKey, requestHash);
+      if (!claim.claimed) {
+        const replayed = await waitForInvocationReplay(
+          this.pool,
+          actorId,
+          idempotencyKey,
+          requestHash,
+          claim.claim,
+        );
+        if (replayed !== undefined) return ensureMatchingInvocation(replayed, requestHash);
+        continue;
+      }
+      const leaseToken = requiredLeaseToken(claim.claim);
+      try {
+        const result = await invoke();
+        const stored = await persistInvocationAndCompleteClaim(
+          this.pool,
+          actorId,
+          result,
+          leaseToken,
+        );
+        return ensureMatchingInvocation(stored, requestHash);
+      } catch (error) {
+        await releaseClaim(this.pool, actorId, idempotencyKey, requestHash, leaseToken);
+        throw error;
+      }
+    }
   }
 }
 
@@ -237,7 +324,13 @@ export class MistralProviderRegistry {
         'Remote processing requires explicit approval.',
       );
     }
-    const promise = this.#completeRemote(actorId, request);
+    const durableLedger = claimableLedger(this.ledger);
+    const promise =
+      durableLedger === undefined
+        ? this.#completeRemote(request).then((result) => this.ledger.record(actorId, result))
+        : durableLedger.runClaimed(actorId, input.idempotencyKey, requestHash, () =>
+            this.#completeRemote(request),
+          );
     this.#inFlight.set(invocationKey, { requestHash, promise });
     try {
       return await promise;
@@ -247,31 +340,28 @@ export class MistralProviderRegistry {
     }
   }
 
-  async #completeRemote(
-    actorId: string,
-    request: {
-      readonly requestVersion: 1;
-      readonly capability: 'llm.complete';
-      readonly input: {
-        readonly model: string;
-        readonly messages: readonly MistralChatMessage[];
-        readonly maxTokens?: number;
-        readonly temperature?: number;
-      };
-      readonly constraints: {
-        readonly executionPreference: readonly ['remote'];
-        readonly modelAllowlist: readonly string[];
-      };
-      readonly idempotencyKey: string;
-    },
-  ): Promise<CapabilityResult> {
+  async #completeRemote(request: {
+    readonly requestVersion: 1;
+    readonly capability: 'llm.complete';
+    readonly input: {
+      readonly model: string;
+      readonly messages: readonly MistralChatMessage[];
+      readonly maxTokens?: number;
+      readonly temperature?: number;
+    };
+    readonly constraints: {
+      readonly executionPreference: readonly ['remote'];
+      readonly modelAllowlist: readonly string[];
+    };
+    readonly idempotencyKey: string;
+  }): Promise<CapabilityResult> {
     this.#lifecycle.recordJobStart(MISTRAL_PROVIDER_ID);
     try {
       const result = await this.#provider.invoke('llm.complete', request.input, request);
       if (result.status === 'succeeded') {
         this.#lifecycle.markHealthy(MISTRAL_PROVIDER_ID);
         this.#lifecycle.recordJobEnd(MISTRAL_PROVIDER_ID, true);
-        return this.ledger.record(actorId, result);
+        return result;
       }
       const code = result.diagnostics[0]?.code;
       this.#lifecycle.recordJobEnd(MISTRAL_PROVIDER_ID, false);
@@ -317,6 +407,182 @@ function ensureMatchingInvocation(result: CapabilityResult, requestHash: string)
     );
   }
   return result;
+}
+
+async function claimInvocation(
+  pool: Pool,
+  actorId: string,
+  idempotencyKey: string,
+  requestHash: string,
+): Promise<MistralInvocationClaimAttempt> {
+  const leaseToken = randomUUID();
+  const leaseExpiresAt = new Date(Date.now() + MISTRAL_INVOCATION_LEASE_MS);
+  const inserted = await pool.query<MistralInvocationClaimRow>(
+    `INSERT INTO provider_invocation_claims
+       (actor_id, idempotency_key, request_hash, status, lease_token, lease_expires_at, error)
+     VALUES ($1, $2, $3, 'running', $4, $5, NULL)
+     ON CONFLICT (actor_id, idempotency_key) DO NOTHING
+     RETURNING actor_id, idempotency_key, request_hash, status, lease_token, lease_expires_at`,
+    [actorId, idempotencyKey, requestHash, leaseToken, leaseExpiresAt],
+  );
+  if (inserted.rows[0] !== undefined)
+    return { claimed: true, claim: claimFromRow(inserted.rows[0]) };
+
+  const current = await selectClaim(pool, actorId, idempotencyKey);
+  if (current === undefined) return claimInvocation(pool, actorId, idempotencyKey, requestHash);
+  const claim = claimFromRow(current);
+  if (claim.requestHash !== requestHash) return { claimed: false, claim };
+  if (claim.status === 'running' && (claim.leaseExpiresAt ?? 0) > Date.now())
+    return { claimed: false, claim };
+
+  const recovered = await pool.query<MistralInvocationClaimRow>(
+    `UPDATE provider_invocation_claims
+     SET status = 'running', lease_token = $4, lease_expires_at = $5,
+         error = NULL, updated_at = NOW()
+     WHERE actor_id = $1 AND idempotency_key = $2 AND request_hash = $3
+       AND (status <> 'running' OR lease_expires_at IS NULL OR lease_expires_at <= NOW())
+     RETURNING actor_id, idempotency_key, request_hash, status, lease_token, lease_expires_at`,
+    [actorId, idempotencyKey, requestHash, leaseToken, leaseExpiresAt],
+  );
+  if (recovered.rows[0] !== undefined)
+    return { claimed: true, claim: claimFromRow(recovered.rows[0]) };
+  const latest = await selectClaim(pool, actorId, idempotencyKey);
+  if (latest === undefined) return claimInvocation(pool, actorId, idempotencyKey, requestHash);
+  return { claimed: false, claim: claimFromRow(latest) };
+}
+
+async function selectClaim(
+  pool: Pool,
+  actorId: string,
+  idempotencyKey: string,
+): Promise<MistralInvocationClaimRow | undefined> {
+  const result = await pool.query<MistralInvocationClaimRow>(
+    `SELECT actor_id, idempotency_key, request_hash, status, lease_token, lease_expires_at
+     FROM provider_invocation_claims
+     WHERE actor_id = $1 AND idempotency_key = $2`,
+    [actorId, idempotencyKey],
+  );
+  return result.rows[0];
+}
+
+function claimFromRow(row: MistralInvocationClaimRow): MistralInvocationClaim {
+  return {
+    actorId: row.actor_id,
+    idempotencyKey: row.idempotency_key,
+    requestHash: row.request_hash,
+    status: row.status,
+    ...(row.lease_token === null ? {} : { leaseToken: row.lease_token }),
+    ...(row.lease_expires_at === null ? {} : { leaseExpiresAt: row.lease_expires_at.getTime() }),
+  };
+}
+
+function requiredLeaseToken(claim: MistralInvocationClaim): string {
+  if (claim.leaseToken === undefined)
+    throw new Error('provider invocation claim has no lease token');
+  return claim.leaseToken;
+}
+
+async function waitForInvocationReplay(
+  pool: Pool,
+  actorId: string,
+  idempotencyKey: string,
+  requestHash: string,
+  claim: MistralInvocationClaim,
+): Promise<CapabilityResult | undefined> {
+  const deadline = Math.max(Date.now() + MISTRAL_INVOCATION_LEASE_MS, claim.leaseExpiresAt ?? 0);
+  for (;;) {
+    const existing = await findInvocation(pool, actorId, idempotencyKey);
+    if (existing !== undefined) return ensureMatchingInvocation(existing, requestHash);
+    const current = await selectClaim(pool, actorId, idempotencyKey);
+    if (current === undefined) return undefined;
+    const currentClaim = claimFromRow(current);
+    if (currentClaim.requestHash !== requestHash)
+      throw new MistralProviderError(
+        'IDEMPOTENCY_CONFLICT',
+        'idempotencyKey was already used for different Mistral input',
+      );
+    if (currentClaim.status !== 'running' || (currentClaim.leaseExpiresAt ?? 0) <= Date.now())
+      return undefined;
+    if (Date.now() >= deadline) return undefined;
+    await new Promise<void>((resolve) => setTimeout(resolve, MISTRAL_INVOCATION_POLL_MS));
+  }
+}
+
+async function persistInvocationAndCompleteClaim(
+  pool: Pool,
+  actorId: string,
+  result: CapabilityResult,
+  leaseToken: string,
+): Promise<CapabilityResult> {
+  const stored = await persistInvocation(pool, actorId, result);
+  await pool.query(
+    `UPDATE provider_invocation_claims
+     SET status = 'completed', lease_token = NULL, lease_expires_at = NULL,
+         error = NULL, updated_at = NOW()
+     WHERE actor_id = $1 AND idempotency_key = $2 AND lease_token = $3`,
+    [actorId, result.provenance.idempotencyKey, leaseToken],
+  );
+  return stored;
+}
+
+async function releaseClaim(
+  pool: Pool,
+  actorId: string,
+  idempotencyKey: string,
+  requestHash: string,
+  leaseToken: string,
+): Promise<void> {
+  await pool.query(
+    `UPDATE provider_invocation_claims
+     SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
+         error = $4, updated_at = NOW()
+     WHERE actor_id = $1 AND idempotency_key = $2 AND request_hash = $3 AND lease_token = $5`,
+    [actorId, idempotencyKey, requestHash, 'remote invocation failed', leaseToken],
+  );
+}
+
+function claimableLedger(
+  ledger: MistralInvocationLedger,
+): ClaimableMistralInvocationLedger | undefined {
+  return 'runClaimed' in ledger ? (ledger as ClaimableMistralInvocationLedger) : undefined;
+}
+
+async function findInvocation(
+  client: Pick<Pool, 'query'> | PoolClient,
+  actorId: string,
+  idempotencyKey: string,
+): Promise<CapabilityResult | undefined> {
+  const result = await client.query<{ readonly result: CapabilityResult }>(
+    'SELECT result FROM provider_invocations WHERE actor_id = $1 AND idempotency_key = $2',
+    [actorId, idempotencyKey],
+  );
+  return result.rows[0]?.result;
+}
+
+async function persistInvocation(
+  client: Pick<Pool, 'query'> | PoolClient,
+  actorId: string,
+  result: CapabilityResult,
+): Promise<CapabilityResult> {
+  const stored = await client.query<{ readonly result: CapabilityResult }>(
+    `INSERT INTO provider_invocations
+     (actor_id, idempotency_key, provider_id, model_id, request_hash, result)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+     ON CONFLICT (actor_id, idempotency_key) DO NOTHING
+     RETURNING result`,
+    [
+      actorId,
+      result.provenance.idempotencyKey,
+      result.provenance.providerId,
+      result.provenance.modelId,
+      result.provenance.requestHash,
+      JSON.stringify(result),
+    ],
+  );
+  if (stored.rows[0] !== undefined) return stored.rows[0].result;
+  const existing = await findInvocation(client, actorId, result.provenance.idempotencyKey);
+  if (existing === undefined) throw new Error('provider invocation record was not persisted');
+  return ensureMatchingInvocation(existing, result.provenance.requestHash);
 }
 
 function mistralCompletionRequestHash(input: MistralCompletionRequest): string {

@@ -131,6 +131,59 @@ describe('MistralProviderRegistry idempotency', () => {
     expect(calls).toBe(1);
     await pool.end();
   });
+
+  it('reuses one durable remote invocation across registry instances', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const ledger = new PostgresMistralInvocationLedger(pool);
+    await ledger.initialize();
+
+    let resolveFetch: ((response: Response) => void) | undefined;
+    let calls = 0;
+    const fetchImpl = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          calls += 1;
+          resolveFetch = resolve;
+        }),
+    );
+    const firstRegistry = new MistralProviderRegistry(
+      'test-only-mistral-secret',
+      ledger,
+      fetchImpl,
+    );
+    const secondRegistry = new MistralProviderRegistry(
+      'test-only-mistral-secret',
+      new PostgresMistralInvocationLedger(pool),
+      fetchImpl,
+    );
+
+    const first = firstRegistry.complete('owner-1', completionRequest());
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+    const second = secondRegistry.complete('owner-1', completionRequest());
+    resolveFetch?.(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: 'Durable concurrent result.' } }],
+          usage: { prompt_tokens: 3, completion_tokens: 4 },
+        }),
+      ),
+    );
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({
+        status: 'succeeded',
+        provenance: expect.objectContaining({ idempotencyKey: 'mistral-1' }),
+      }),
+      expect.objectContaining({
+        status: 'succeeded',
+        provenance: expect.objectContaining({ idempotencyKey: 'mistral-1' }),
+      }),
+    ]);
+    expect(calls).toBe(1);
+    await pool.end();
+  });
 });
 
 function completionRequest(
