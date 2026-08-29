@@ -2785,6 +2785,33 @@ label {
     0 4px 10px rgb(0 0 0 / 32%);
   --clip-rail: var(--joy-accent);
 }
+.timeline-gap-indicator {
+  position: absolute;
+  top: 0.2rem;
+  bottom: 0.2rem;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  min-width: 4px;
+  overflow: hidden;
+  border: 1px dashed color-mix(in srgb, var(--joy-text-muted) 72%, transparent);
+  border-radius: var(--radius-sm);
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--joy-text-muted) 12%, transparent) 0 4px,
+    transparent 4px 8px
+  );
+  color: var(--joy-text-muted);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  text-transform: uppercase;
+}
+.timeline-gap-indicator:focus-visible {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: 1px;
+}
 .timeline-track[data-track-label-color='violet'] .timeline-clip {
   --clip-rail: #a78bfa;
 }

@@ -112,6 +112,7 @@ import {
   type TimelinePoint,
   type TimelineRect,
 } from './timeline-marquee-selection.js';
+import { timelineGapsForClips, type TimelineGap } from './timeline-gaps.js';
 /** Drags snap to a 100 ms grid, matching the playhead slider's step. */
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
@@ -147,6 +148,38 @@ function clipDisplayName(id: string): string {
 function TimelineTrackKindIcon({ kind }: { readonly kind: TimelineTrackKind }) {
   if (kind === 'script') return <TimelineScriptTrackIcon />;
   return <TimelineElementGlyph kind={kind} />;
+}
+
+function TimelineGapIndicator({
+  gap,
+  trackLabel,
+  viewport,
+}: {
+  readonly gap: TimelineGap;
+  readonly trackLabel: string;
+  readonly viewport: TimelineViewport;
+}) {
+  const leftPx = timeToPixel(gap.startUs, viewport);
+  const widthPx = Math.max(4, timeToPixel(gap.endUs, viewport) - leftPx - 2);
+  const durationLabel = `${(gap.durationUs / 1_000_000).toFixed(1)}s`;
+  const startLabel = `${(gap.startUs / 1_000_000).toFixed(1)}s`;
+  const endLabel = `${(gap.endUs / 1_000_000).toFixed(1)}s`;
+  return (
+    <span
+      className="timeline-gap-indicator"
+      data-timeline-gap="true"
+      data-gap-start-us={gap.startUs}
+      data-gap-end-us={gap.endUs}
+      role="note"
+      tabIndex={0}
+      aria-roledescription="timeline gap"
+      aria-label={`Gap in ${trackLabel}, ${durationLabel}, ${startLabel}–${endLabel}; no media in this span`}
+      title={`Gap · ${startLabel}–${endLabel} · ${durationLabel}`}
+      style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+    >
+      <span aria-hidden="true">Gap</span>
+    </span>
+  );
 }
 
 function TimelineClip({
@@ -2635,6 +2668,14 @@ export function TimelinePanel({
                     }
                   }}
                 >
+                  {timelineGapsForClips(source.clips, frameUs).map((gap) => (
+                    <TimelineGapIndicator
+                      key={`${gap.startUs}-${gap.endUs}`}
+                      gap={gap}
+                      trackLabel={`${trackCode} ${trackName}`}
+                      viewport={{ ...viewport, originUs: 0 }}
+                    />
+                  ))}
                   {index === 0 &&
                     markers.map((marker) => {
                       const selected = selectedMarkerId === marker.id;
