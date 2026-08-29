@@ -28,7 +28,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project: [desktop-primary, desktop-compact, desktop-minimum]
+        include:
+          - project: desktop-primary
+            spec: tests/e2e
+          - project: desktop-compact
+            spec: tests/e2e/wp32-responsive-checkpoints.spec.ts
+          - project: desktop-minimum
+            spec: tests/e2e/wp32-responsive-checkpoints.spec.ts
     runs-on: [self-hosted, windows, x64, joy-media-ci]
     timeout-minutes: 60
     steps:
@@ -50,6 +56,6 @@ jobs:
       - run: pnpm build
       - run: pnpm exec playwright install chromium
       - name: Run browser audit (${{ matrix.project }})
-        run: pnpm exec playwright test tests/e2e --project=${{ matrix.project }} --workers=1
+        run: pnpm exec playwright test ${{ matrix.spec }} --project=${{ matrix.project }} --workers=1
         env:
           CI: true
