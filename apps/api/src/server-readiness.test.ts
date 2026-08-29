@@ -1,13 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { LocalControlPlane } from './control-plane.js';
 import type { PrivateObjectStore } from './private-object-store.js';
 import {
   EXPECTED_RELEASE_SCHEMA_VERSION,
+  PRIVATE_OBJECT_STORE_READINESS_TIMEOUT_MS,
   productionReadinessOptions,
   releaseIdentityFromEnvironment,
 } from './server-readiness.js';
 
-const configuredPrivateObjectStore = {} as PrivateObjectStore;
 const releaseIdentity = {
   commitSha: 'a'.repeat(40),
   treeHash: 'b'.repeat(40),
@@ -15,9 +15,25 @@ const releaseIdentity = {
   schemaVersion: EXPECTED_RELEASE_SCHEMA_VERSION,
 } as const;
 
+function readinessStore(probeReadiness?: PrivateObjectStore['probeReadiness']): PrivateObjectStore {
+  return {
+    async put() {
+      throw new Error('not implemented');
+    },
+    async get() {
+      throw new Error('not implemented');
+    },
+    async remove() {
+      throw new Error('not implemented');
+    },
+    ...(probeReadiness === undefined ? {} : { probeReadiness }),
+  };
+}
+
 describe('production readiness wiring', () => {
   it('probes PostgreSQL and the critical control-plane schema without reading rows', async () => {
     const queries: string[] = [];
+    const probeReadiness = vi.fn(async () => undefined);
     const readiness = productionReadinessOptions({
       pool: {
         async query(sql) {
@@ -26,7 +42,7 @@ describe('production readiness wiring', () => {
         },
       },
       durableControlPlane: new LocalControlPlane(),
-      privateObjectStore: configuredPrivateObjectStore,
+      privateObjectStore: readinessStore(probeReadiness),
       releaseIdentity,
     });
     const checks = readiness.checks!;
@@ -35,7 +51,10 @@ describe('production readiness wiring', () => {
     expect(readiness.releaseIdentity).toEqual(releaseIdentity);
     await expect(checks.database!()).resolves.toBe(true);
     await expect(checks.controlPlane!()).resolves.toBe(true);
-    expect(checks.privateObjectStore!()).toBe(true);
+    await expect(checks.privateObjectStore!()).resolves.toBe(true);
+    expect(probeReadiness).toHaveBeenCalledWith({
+      timeoutMs: PRIVATE_OBJECT_STORE_READINESS_TIMEOUT_MS,
+    });
     expect(queries).toEqual([
       'SELECT 1',
       'SELECT 1 FROM projects, project_documents, media_assets, jobs LIMIT 0',
@@ -53,7 +72,7 @@ describe('production readiness wiring', () => {
     expect(checks.releaseIdentity!()).toBe(false);
     await expect(checks.database!()).resolves.toBe(false);
     await expect(checks.controlPlane!()).resolves.toBe(false);
-    expect(checks.privateObjectStore!()).toBe(false);
+    await expect(checks.privateObjectStore!()).resolves.toBe(false);
   });
 
   it('propagates database and schema probe failures to the readiness boundary', async () => {
@@ -61,7 +80,7 @@ describe('production readiness wiring', () => {
     const checks = productionReadinessOptions({
       pool: { query: async () => Promise.reject(failure) },
       durableControlPlane: new LocalControlPlane(),
-      privateObjectStore: configuredPrivateObjectStore,
+      privateObjectStore: readinessStore(async () => undefined),
       releaseIdentity,
     }).checks!;
 
@@ -79,13 +98,36 @@ describe('production readiness wiring', () => {
         },
       },
       durableControlPlane: undefined,
-      privateObjectStore: configuredPrivateObjectStore,
+      privateObjectStore: readinessStore(async () => undefined),
       releaseIdentity,
     }).checks!;
 
     await expect(checks.database!()).resolves.toBe(true);
     await expect(checks.controlPlane!()).resolves.toBe(false);
     expect(queries).toBe(1);
+  });
+
+  it('fails closed when the private object-store readiness probe rejects', async () => {
+    const failure = new Error('object store unavailable');
+    const checks = productionReadinessOptions({
+      pool: undefined,
+      durableControlPlane: undefined,
+      privateObjectStore: readinessStore(async () => Promise.reject(failure)),
+      releaseIdentity,
+    }).checks!;
+
+    await expect(checks.privateObjectStore!()).rejects.toBe(failure);
+  });
+
+  it('preserves legacy in-memory private object store test doubles without a readiness probe', async () => {
+    const checks = productionReadinessOptions({
+      pool: undefined,
+      durableControlPlane: undefined,
+      privateObjectStore: readinessStore(),
+      releaseIdentity,
+    }).checks!;
+
+    await expect(checks.privateObjectStore!()).resolves.toBe(true);
   });
 
   it('accepts complete, validated non-secret release metadata', () => {

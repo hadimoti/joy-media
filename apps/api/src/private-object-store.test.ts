@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   PrivateObjectIntegrityError,
   RclonePrivateObjectStore,
@@ -14,6 +14,10 @@ const descriptor = {
   bytes: bytes.byteLength,
   mimeType: 'image/jpeg',
 };
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('RclonePrivateObjectStore', () => {
   it('keeps the configured remote private and verifies bytes on both write and read', async () => {
@@ -77,5 +81,63 @@ describe('RclonePrivateObjectStore', () => {
       run: { run: async () => new TextEncoder().encode('tampered') },
     });
     await expect(store.get(descriptor)).rejects.toBeInstanceOf(PrivateObjectIntegrityError);
+  });
+
+  it('probes remote readiness with a bounded non-mutating stat call', async () => {
+    const calls: Array<readonly string[]> = [];
+    const store = new RclonePrivateObjectStore({
+      remotePrefix: 'parspack:c212734/sweden-backups/joy-media',
+      run: {
+        async run(args) {
+          calls.push(args);
+          return new TextEncoder().encode(
+            JSON.stringify({
+              Path: 'sweden-backups/joy-media',
+              Name: 'joy-media',
+              IsDir: true,
+              Size: 0,
+              Hashes: {},
+            }),
+          );
+        },
+      },
+    });
+
+    await expect(store.probeReadiness?.({ timeoutMs: 250 })).resolves.toBeUndefined();
+    expect(calls).toEqual([
+      [
+        'lsjson',
+        'parspack:c212734/sweden-backups/joy-media',
+        '--stat',
+        '--hash',
+        '--log-level',
+        'ERROR',
+      ],
+    ]);
+  });
+
+  it('rejects invalid readiness probe metadata instead of claiming reachability', async () => {
+    const store = new RclonePrivateObjectStore({
+      remotePrefix: 'parspack:c212734/sweden-backups/joy-media',
+      run: { run: async () => new TextEncoder().encode(JSON.stringify({ invalid: true })) },
+    });
+
+    await expect(store.probeReadiness?.({ timeoutMs: 250 })).rejects.toThrow(
+      'private object store readiness probe returned invalid path',
+    );
+  });
+
+  it('times out a stalled readiness probe', async () => {
+    vi.useFakeTimers();
+    const store = new RclonePrivateObjectStore({
+      remotePrefix: 'parspack:c212734/sweden-backups/joy-media',
+      run: { run: () => new Promise<Uint8Array>(() => undefined) },
+    });
+
+    const pending = expect(store.probeReadiness?.({ timeoutMs: 25 })).rejects.toThrow(
+      'private object store readiness probe timed out',
+    );
+    await vi.advanceTimersByTimeAsync(25);
+    await pending;
   });
 });

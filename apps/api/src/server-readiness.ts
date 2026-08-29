@@ -5,6 +5,7 @@ import { POSTGRES_MIGRATIONS } from './postgres-migrations.js';
 
 /** Schema version emitted by the release tooling and required by readiness. */
 export const EXPECTED_RELEASE_SCHEMA_VERSION = POSTGRES_MIGRATIONS.length;
+export const PRIVATE_OBJECT_STORE_READINESS_TIMEOUT_MS = 2_500;
 
 interface ReadinessQueryClient {
   query(sql: string): Promise<unknown>;
@@ -80,9 +81,13 @@ export function productionReadinessOptions(
         );
         return true;
       },
-      // The current adapter has no non-mutating remote health operation. Still
-      // fail closed when private cloud storage is not configured at all.
-      privateObjectStore: () => dependencies.privateObjectStore !== undefined,
+      privateObjectStore: async () => {
+        const store = dependencies.privateObjectStore;
+        if (store === undefined) return false;
+        if (typeof store.probeReadiness !== 'function') return true;
+        await store.probeReadiness({ timeoutMs: PRIVATE_OBJECT_STORE_READINESS_TIMEOUT_MS });
+        return true;
+      },
     },
   };
 }
