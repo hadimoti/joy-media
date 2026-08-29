@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { HumanInputRequest } from '@joy-media/workflow-engine';
-import { humanInputsForApproval } from './WorkflowsPanel.js';
+import {
+  humanInputsForApproval,
+  parametersFromSchema,
+  summarizeWorkflowOutcome,
+} from './WorkflowsPanel.js';
 
 describe('humanInputsForApproval', () => {
   it('preserves the workflow field for speaker candidate approvals', () => {
@@ -36,5 +40,97 @@ describe('humanInputsForApproval', () => {
     expect(humanInputsForApproval(request, 'approve-drafts', new Set())).toEqual({
       'approve-drafts': { approved: items },
     });
+  });
+});
+
+describe('parametersFromSchema', () => {
+  it('does not prefill first-party asset inputs with the demo fixture id', () => {
+    expect(
+      parametersFromSchema(
+        {
+          type: 'object',
+          required: ['asset'],
+          properties: {
+            asset: { type: 'object', description: 'Opaque source video asset reference.' },
+          },
+        },
+        undefined,
+      ),
+    ).toEqual([
+      {
+        name: 'assetId',
+        type: 'string',
+        description: 'Opaque source video asset reference.',
+        default: undefined,
+      },
+    ]);
+  });
+});
+
+describe('summarizeWorkflowOutcome', () => {
+  it('marks deferred workflow outputs as not yet finished', () => {
+    expect(
+      summarizeWorkflowOutcome({
+        status: 'succeeded',
+        workflowId: 'joy.first-party.long-video-draft-reels',
+        runId: 'run-1',
+        outputs: {
+          deferred: true,
+          reason: 'Use Export',
+        },
+      }),
+    ).toBe(
+      'Workflow joy.first-party.long-video-draft-reels completed with deferred outputs. Inspect the result before treating it as finished.',
+    );
+  });
+
+  it('marks fixture-backed workflow outputs as not yet finished', () => {
+    expect(
+      summarizeWorkflowOutcome({
+        status: 'succeeded',
+        workflowId: 'joy.first-party.podcast-cleanup',
+        runId: 'run-2',
+        outputs: {
+          method: 'fixture',
+          note: 'Fixture transcript',
+        },
+      }),
+    ).toBe(
+      'Workflow joy.first-party.podcast-cleanup completed with fixture-backed outputs. Inspect the result before treating it as finished.',
+    );
+  });
+
+  it('detects deferred signals nested inside manifest outputs', () => {
+    expect(
+      summarizeWorkflowOutcome({
+        status: 'succeeded',
+        workflowId: 'joy.first-party.multilingual-promo',
+        runId: 'run-3',
+        outputs: {
+          metadata: {
+            items: [
+              {
+                deferredEndpoint: '/v1/providers/speech/synthesize',
+              },
+            ],
+          },
+        },
+      }),
+    ).toBe(
+      'Workflow joy.first-party.multilingual-promo completed with deferred outputs. Inspect the result before treating it as finished.',
+    );
+  });
+
+  it('keeps durable recorded workflows marked as finished', () => {
+    expect(
+      summarizeWorkflowOutcome({
+        status: 'succeeded',
+        workflowId: 'workflow-recorded-1',
+        runId: 'run-4',
+        outputs: {
+          written: true,
+        },
+      }),
+    ).toBe('Workflow workflow-recorded-1 finished.');
   });
 });

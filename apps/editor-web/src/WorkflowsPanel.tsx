@@ -38,7 +38,7 @@ interface ApprovalState {
   readonly selected: ReadonlySet<string>;
 }
 
-function parametersFromSchema(
+export function parametersFromSchema(
   schema: Record<string, unknown>,
   selectedClip:
     | {
@@ -72,7 +72,6 @@ function parametersFromSchema(
         defaultValue = selectedClip.clip.startUs + selectedClip.clip.durationUs;
       else if (name === 'newClipId' && selectedClip !== undefined)
         defaultValue = `${selectedClip.clip.id}-split-${selectedClip.clip.startUs}`;
-      else if (name === 'asset' || name === 'assetId') defaultValue = 'asset-demo-1';
     }
     const schemaType = propertySchema.type;
     const type: 'string' | 'number' =
@@ -96,6 +95,74 @@ function candidateKey(candidate: unknown, index: number): string {
     if (typeof record.id === 'string') return record.id;
   }
   return `candidate-${String(index)}`;
+}
+
+interface WorkflowOutcomeSignals {
+  readonly hasDeferredOutput: boolean;
+  readonly hasFixtureOutput: boolean;
+}
+
+function collectOutcomeSignals(
+  value: unknown,
+  seen = new Set<object>(),
+): WorkflowOutcomeSignals {
+  if (value === null || value === undefined) {
+    return { hasDeferredOutput: false, hasFixtureOutput: false };
+  }
+  if (Array.isArray(value)) {
+    return value.reduce<WorkflowOutcomeSignals>(
+      (combined, item) => {
+        const next = collectOutcomeSignals(item, seen);
+        return {
+          hasDeferredOutput: combined.hasDeferredOutput || next.hasDeferredOutput,
+          hasFixtureOutput: combined.hasFixtureOutput || next.hasFixtureOutput,
+        };
+      },
+      { hasDeferredOutput: false, hasFixtureOutput: false },
+    );
+  }
+  if (typeof value !== 'object') {
+    return { hasDeferredOutput: false, hasFixtureOutput: false };
+  }
+  if (seen.has(value)) {
+    return { hasDeferredOutput: false, hasFixtureOutput: false };
+  }
+  seen.add(value);
+  const record = value as Record<string, unknown>;
+  let hasDeferredOutput =
+    record.deferred === true ||
+    record.deferredToEditor === true ||
+    typeof record.deferredEndpoint === 'string' ||
+    typeof record.deferredJobType === 'string' ||
+    typeof record.deferredCommand === 'string' ||
+    record.inMemoryManifest === true;
+  let hasFixtureOutput = record.method === 'fixture';
+  for (const nested of Object.values(record)) {
+    const next = collectOutcomeSignals(nested, seen);
+    hasDeferredOutput ||= next.hasDeferredOutput;
+    hasFixtureOutput ||= next.hasFixtureOutput;
+  }
+  return { hasDeferredOutput, hasFixtureOutput };
+}
+
+export function summarizeWorkflowOutcome(outcome: WorkflowRunOutcome): string {
+  if (outcome.status === 'waiting_for_input') {
+    return `Awaiting approval: ${outcome.request.kind}`;
+  }
+  if (outcome.status === 'failed') {
+    return `Workflow run failed: ${outcome.error}`;
+  }
+  const signals = collectOutcomeSignals(outcome.outputs);
+  if (signals.hasDeferredOutput && signals.hasFixtureOutput) {
+    return `Workflow ${outcome.workflowId} completed with deferred and fixture-backed outputs. Inspect the result before treating it as finished.`;
+  }
+  if (signals.hasDeferredOutput) {
+    return `Workflow ${outcome.workflowId} completed with deferred outputs. Inspect the result before treating it as finished.`;
+  }
+  if (signals.hasFixtureOutput) {
+    return `Workflow ${outcome.workflowId} completed with fixture-backed outputs. Inspect the result before treating it as finished.`;
+  }
+  return `Workflow ${outcome.workflowId} finished.`;
 }
 
 /** Map each approval request to the response shape its workflow declares. */
@@ -198,15 +265,11 @@ export function WorkflowsPanel({
           candidates.map((candidate, index) => candidateKey(candidate, index)).slice(0, 2),
         ),
       });
-      setStatusMessage(`Awaiting approval: ${outcome.request.kind}`);
+      setStatusMessage(summarizeWorkflowOutcome(outcome));
       return;
     }
     setApproval(undefined);
-    if (outcome.status === 'succeeded') {
-      setStatusMessage(`Workflow ${outcome.workflowId} finished.`);
-      return;
-    }
-    setStatusMessage(`Workflow run failed: ${outcome.error}`);
+    setStatusMessage(summarizeWorkflowOutcome(outcome));
   }
 
   function openRunModal(workflowId: string) {
