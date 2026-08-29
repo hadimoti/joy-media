@@ -175,7 +175,7 @@ reproduce it.
 | P1-26 | Responsive timeline semantics          | Compact edit/zoom actions, unique clip labels, labelled track groups, keyboard metadata, and the visible overflow affordance are implemented. Commit `24436c9` adds the visible `More` label while preserving accessible menu semantics; the authenticated 320/375/480/600/768/1024/1280/1440 matrix now passes center-hit, focus, and action-coverage checks with no console errors (retained in `test-output/browser/timeline-a56bb0d.json`).                                                                                                                                                        |
 | P1-27 | Compact header hit-target overlap      | At 320px and 480px authenticated widths, the header's Brand menubar overlaps the Edit controls. Hit-testing the visible centers shows Undo/Redo/Command palette/layout toggles landing on File/Edit/Clip/Joy Code/View/Window menu buttons; the layout toggle is therefore visibly present but not operable, and the workspace preset can also be intercepted at 320px. Reflow the header into a bounded horizontal scroller or compact icon groups with non-overlapping hit targets, preserve accessible names/focus order, and add an automated center-hit/keyboard matrix at 320/375/480/600/768px. |
 | P1-28 | Timeline continuity cues               | The authenticated showcase timeline contains a 10.3-second visual gap in the 3D Scene lane (12.5s–22.8s) while adjacent lanes continue. The gap may be intentional, but the empty span has no explicit “gap”/coverage cue or lane-level continuity summary, making it difficult to distinguish planned silence from missing media. Preserve intentional gaps, expose them to keyboard/screen-reader users, and add a visual/accessible continuity indicator plus a regression assertion for gap boundaries.                                                                                            |
-| P1-29 | Timeline marker insertion              | The live compact timeline exposed an existing `marker-0` at the 0:00 playhead. Activating More → Add Marker attempted to reuse that ID, threw `RangeError: marker "marker-0" already exists`, and left the menu open. Allocate collision-free IDs from the current session marker list for every Classic/Dual Lens/context/toolbar path; add rapid-repeat and browser assertions that insertion succeeds, the menu closes, and no uncaught error is emitted. |
+| P1-29 | Timeline marker insertion              | Fixed in `856612f`: Classic and Dual Lens now allocate deterministic collision-free IDs from the current session marker list, with focused rapid-repeat coverage. Post-deploy browser verification on `8e1df6d` at 320px inserted a second marker successfully, collapsed the More menu (`aria-expanded=false`), kept the editor on `https://joyst.ir/`, and emitted no new console errors. Retain this assertion in the source-bound release journey. |
 
 ### LIVE-13 — timeline browser certification (2026-08-29)
 
@@ -532,7 +532,10 @@ Commit `856612f` adds the pure `nextTimelineMarkerId` allocator, reads the curre
 list at dispatch time, and applies deterministic suffixes to both Classic and Dual Lens creation
 paths. Focused marker/helper/context/timeline/overflow tests (17), typecheck, lint, formatting,
 and diff checks pass. A post-deploy browser assertion that Add Marker succeeds without a new console
-error and closes the menu is still required before P1-29 can close.
+error and closes the menu is now green on the deployed `8e1df6d` release: the marker count advanced
+from one to two, `aria-expanded` returned to `false`, the editor URL stayed stable, and no fresh
+console error was recorded. P1-29 is closed for implementation and browser behavior; the remaining
+release NO-GO is the separate source-bound Worker journey and its required end-to-end evidence.
 
 ## Numeric release budgets and retained evidence
 
