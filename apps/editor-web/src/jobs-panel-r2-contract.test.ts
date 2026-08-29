@@ -56,6 +56,14 @@ describe('JobsPanel R2 pairing and exactly-once contract', () => {
     expect(panelSource).not.toContain('enqueueFixture');
   });
 
+  it('disables queueing when the connected Worker lacks the selected source', () => {
+    expect(panelSource).toContain('const workerSourceReady =');
+    expect(panelSource).toContain(
+      'The connected Worker does not have this media source locally yet.',
+    );
+    expect(panelSource).toContain('queueUnavailableReason !== undefined');
+  });
+
   it('associates audio sources before queueing a project-scoped Worker operation', () => {
     expect(panelSource).toContain('await client.associateAsset(projectId, audioAssetId);');
     expect(panelSource).toContain(

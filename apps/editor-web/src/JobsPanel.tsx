@@ -151,6 +151,27 @@ export function JobsPanel({
   const revokedWorkers = sortedWorkers.filter((w) => w.revoked);
   const visibleWorkers = showRevoked ? sortedWorkers : activeWorkers;
   const connectedCount = workers.filter((w) => workerPresence(w) === 'connected').length;
+  const queuedAssetId = audioAssetId ?? thumbnailAssetId;
+  const queuedCapability = audioAssetId === undefined ? 'asset.thumbnail' : 'audio.ml-denoise';
+  const compatibleWorker = useMemo(
+    () =>
+      workers.find(
+        (worker) =>
+          workerPresence(worker) === 'connected' && worker.capabilities.includes(queuedCapability),
+      ),
+    [queuedCapability, workers],
+  );
+  const workerSourceReady =
+    queuedAssetId !== undefined &&
+    compatibleWorker?.localAssetIds?.includes(queuedAssetId) === true;
+  const queueUnavailableReason =
+    queuedAssetId === undefined
+      ? 'Select a media clip before queueing a derivative.'
+      : compatibleWorker === undefined
+        ? `No connected Worker advertises ${queuedCapability}.`
+        : workerSourceReady
+          ? undefined
+          : 'The connected Worker does not have this media source locally yet.';
   // A ready authenticated session initializes its opaque project binding during
   // refresh. Do not briefly mount an action that that same refresh immediately
   // removes; it produces a real UI flicker and can detach a user's click.
@@ -397,16 +418,11 @@ export function JobsPanel({
               audioAssetId === undefined ? 'Queue thumbnail derivative' : 'Run audio denoise'
             }
             title={
-              audioAssetId === undefined
-                ? 'Select a media clip before queueing a thumbnail'
-                : 'Run audio denoise'
+              queueUnavailableReason ??
+              (audioAssetId === undefined ? 'Queue thumbnail derivative' : 'Run audio denoise')
             }
             data-guide={audioAssetId === undefined ? 'Queue thumbnail' : 'Run audio denoise'}
-            disabled={
-              !projectInitialized ||
-              submitting ||
-              (audioAssetId === undefined && thumbnailAssetId === undefined)
-            }
+            disabled={!projectInitialized || submitting || queueUnavailableReason !== undefined}
             onClick={() => void submit()}
           >
             <ImageIcon />

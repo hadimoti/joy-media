@@ -352,6 +352,18 @@ The authenticated browser journey still must verify image, video, and audio
 catalog assets end-to-end with a persisted document revision and Undo; this
 source fix does not replace that real-service evidence.
 
+### LIVE-26 — Worker source preflight (2026-08-29)
+
+The non-browser release audit confirmed that a Worker can lease a source-backed
+job only when its hello advertises the selected asset ID in `localAssetIds`.
+The Jobs panel previously enabled thumbnail/audio queue actions based only on
+capability, allowing a guaranteed queued-but-unprocessable job for a cloud
+catalog asset. Queueing now stays disabled with an explicit reason until a
+connected compatible Worker advertises the selected source, and the focused
+Jobs contract tests cover this fail-closed behavior. A real authenticated
+journey must still exercise a source-backed asset through lease, upload,
+inspection, and Motion placement before P0-12 is closed.
+
 ## Numeric release budgets and retained evidence
 
 These are stop/go gates, not optional targets:
