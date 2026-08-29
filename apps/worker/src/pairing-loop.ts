@@ -33,11 +33,18 @@ export async function waitForWorkerPairing(
   const log = options.log ?? (() => undefined);
 
   let pending = store.loadPendingPairing();
+  let announcedCode: string | undefined;
+  const announce = (offer: { readonly code: string }): void => {
+    if (announcedCode === offer.code) return;
+    announcedCode = offer.code;
+    log(`Approve this Worker in JOY Media with pairing code: ${offer.code}`);
+  };
+  if (pending !== undefined && pending.expiresAt > now()) announce(pending);
   while (store.loadWorkerSession() === undefined) {
     if (pending === undefined || pending.expiresAt <= now()) {
       try {
         pending = await publishFreshOffer(client, store, options.createPairingCode);
-        log(`Approve this Worker in JOY Media with pairing code: ${pending.code}`);
+        announce(pending);
       } catch (error) {
         log(
           `Unable to publish Worker pairing offer; retrying: ${

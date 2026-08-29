@@ -48,6 +48,27 @@ describe('waitForWorkerPairing', () => {
     expect(store.pending()).toBeUndefined();
   });
 
+  it('announces an unexpired persisted offer once after a restart', async () => {
+    const store = pairingStore({ code: 'persisted-code', expiresAt: 200 });
+    const logs: string[] = [];
+    const client: WorkerPairingClient = {
+      publishPairingOffer: async () => 250,
+      claimPairing: async () => {
+        store.establishSession();
+        return true;
+      },
+    };
+
+    await waitForWorkerPairing(client, store, {
+      createPairingCode: () => 'unused-code',
+      now: () => 100,
+      sleep: async () => undefined,
+      log: (message) => logs.push(message),
+    });
+
+    expect(logs).toEqual(['Approve this Worker in JOY Media with pairing code: persisted-code']);
+  });
+
   it('claims the refreshed code after an active offer expires while polling', async () => {
     const store = pairingStore({ code: 'first-code', expiresAt: 100 });
     const claimed: string[] = [];
