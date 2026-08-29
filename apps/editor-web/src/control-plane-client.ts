@@ -196,6 +196,13 @@ export interface BrowserAssetRegistration {
 }
 
 export class BrowserControlPlaneClient {
+  /**
+   * Coalesce concurrent read polls made by mounted panels. Dockview can keep
+   * Jobs, Audio, Enhance, and Mask mounted at the same time, so a shared
+   * client must not turn one refresh tick into duplicate API requests.
+   */
+  private readonly inFlightReads = new Map<string, Promise<unknown>>();
+
   constructor(
     private readonly apiUrl = '/api',
     private readonly tokenProvider: () => string | undefined = () =>
@@ -203,7 +210,7 @@ export class BrowserControlPlaneClient {
   ) {}
 
   async workers(): Promise<readonly BrowserWorker[]> {
-    return this.get('/v1/workers');
+    return this.coalescedGet('/v1/workers');
   }
   async openGpuPreviewSession(projectId: string): Promise<BrowserGpuPreviewSession> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/preview-sessions`, {});
@@ -263,7 +270,7 @@ export class BrowserControlPlaneClient {
   async jobs(projectId: string): Promise<readonly BrowserJob[]> {
     const { browserJobList } = await browserProjections;
     return browserJobList(
-      await this.get<unknown>(`/v1/projects/${encodeURIComponent(projectId)}/jobs`),
+      await this.coalescedGet<unknown>(`/v1/projects/${encodeURIComponent(projectId)}/jobs`),
     );
   }
   async assets(projectId: string): Promise<readonly BrowserAsset[]> {
@@ -773,6 +780,20 @@ export class BrowserControlPlaneClient {
   private async get<T>(path: string): Promise<T> {
     return this.request<T>(path, { method: 'GET' });
   }
+  private async coalescedGet<T>(path: string): Promise<T> {
+    const token = this.assertion();
+    const key = `${this.apiUrl.replace(/\/$/, '')}\u0000${path}\u0000${token}`;
+    const existing = this.inFlightReads.get(key);
+    if (existing !== undefined) return (await existing) as T;
+
+    const request = this.requestWithToken<T>(path, { method: 'GET' }, token);
+    this.inFlightReads.set(key, request);
+    try {
+      return await request;
+    } finally {
+      if (this.inFlightReads.get(key) === request) this.inFlightReads.delete(key);
+    }
+  }
   private async post<T>(path: string, body: object): Promise<T> {
     return this.request<T>(path, {
       method: 'POST',
@@ -781,7 +802,9 @@ export class BrowserControlPlaneClient {
     });
   }
   private async request<T>(path: string, init: RequestInit): Promise<T> {
-    const token = await this.assertion();
+    return this.requestWithToken(path, init, this.assertion());
+  }
+  private async requestWithToken<T>(path: string, init: RequestInit, token: string): Promise<T> {
     const response = await fetch(`${this.apiUrl.replace(/\/$/, '')}${path}`, {
       ...init,
       headers: { ...init.headers, authorization: `Bearer ${token}` },

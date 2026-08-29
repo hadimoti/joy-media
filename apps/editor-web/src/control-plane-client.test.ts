@@ -38,6 +38,40 @@ describe('BrowserControlPlaneClient', () => {
     ]);
   });
 
+  it('coalesces concurrent worker and same-project job reads', async () => {
+    const requests: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const original = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      requests.push(String(input));
+      await gate;
+      return json(200, { data: [] });
+    };
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => 'joy-session-token',
+      );
+      const workerReads = [client.workers(), client.workers(), client.workers()];
+      const jobReads = [client.jobs('project-1'), client.jobs('project-1')];
+      // Different project scopes remain independent reads.
+      const otherProjectJobs = client.jobs('project-2');
+      await Promise.resolve();
+      expect(requests).toEqual([
+        'https://media.joyteam.ir/api/v1/workers',
+        'https://media.joyteam.ir/api/v1/projects/project-1/jobs',
+        'https://media.joyteam.ir/api/v1/projects/project-2/jobs',
+      ]);
+      release();
+      await Promise.all([...workerReads, ...jobReads, otherProjectJobs]);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
   it('rejects with no network call when there is no stored session', async () => {
     const original = globalThis.fetch;
     globalThis.fetch = async () => {
