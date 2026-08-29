@@ -131,6 +131,7 @@ import { TimelinePanel } from './TimelinePanel.js';
 import { buildTimelineMediaImportTransaction } from './timeline-media-import.js';
 import { buildTimelineElementDocument } from './place-timeline-element.js';
 import { nextProfessionalTrackId } from './timeline-track-family.js';
+import { nextTimelineMarkerId } from './timeline-marker-id.js';
 import { buildTimelineDeletePlan } from './delete-timeline-elements.js';
 import { DualLensPanel } from './DualLensPanel.js';
 import { buildDualLensProjection, type DualLensProjection } from './dual-lens-model.js';
@@ -5740,7 +5741,8 @@ function EditorWorkspace({
           {...(selectedObject === undefined
             ? {}
             : { selectedObject, onPropertyDispatch: context.dispatchProject })}
-          onAddMarker={(timeUs, label) =>
+          onAddMarker={(timeUs, label) => {
+            const rootTimeUs = timelineViewRootTime(activeTimelineView, timeUs);
             context.dispatchProject({
               label: `Add ${label}`,
               commands: [
@@ -5748,8 +5750,8 @@ function EditorWorkspace({
                   type: 'marker.add',
                   payload: {
                     marker: {
-                      id: `marker-${timeUs}`,
-                      timeUs: timelineViewRootTime(activeTimelineView, timeUs),
+                      id: nextTimelineMarkerId(session.visualProject.markers, rootTimeUs),
+                      timeUs: rootTimeUs,
                       label,
                       kind: 'marker',
                       color: JOY_COLORS.accent,
@@ -5757,8 +5759,8 @@ function EditorWorkspace({
                   },
                 },
               ],
-            })
-          }
+            });
+          }}
           onRemoveMarker={(id) =>
             context.dispatchProject({
               label: `Remove marker ${id}`,
@@ -5823,7 +5825,7 @@ function EditorWorkspace({
           onSelectClips={context.selectClips}
           onRevealOnTimeline={context.revealOnTimeline}
           markers={visualProject.markers}
-          onAddMarker={(timeUs, label) =>
+          onAddMarker={(timeUs, label) => {
             context.dispatchProject({
               label: `Add ${label}`,
               commands: [
@@ -5831,7 +5833,7 @@ function EditorWorkspace({
                   type: 'marker.add',
                   payload: {
                     marker: {
-                      id: `marker-${timeUs}-${Date.now()}`,
+                      id: nextTimelineMarkerId(session.visualProject.markers, timeUs),
                       timeUs,
                       label,
                       kind: 'marker',
@@ -5840,8 +5842,8 @@ function EditorWorkspace({
                   },
                 },
               ],
-            })
-          }
+            });
+          }}
           onRemoveMarker={(id) =>
             context.dispatchProject({
               label: `Remove marker ${id}`,
