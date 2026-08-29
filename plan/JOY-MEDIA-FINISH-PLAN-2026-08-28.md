@@ -330,6 +330,15 @@ between `showcase-scene3d` and `24 7 Badge`. This is not a crash or database fai
 release UX/accessibility gap tracked as P1-28 until the product communicates planned empty spans and
 the final keyboard/focus matrix asserts their boundaries.
 
+### LIVE-24 — timeline gap indicator repair (2026-08-29)
+
+Commit `7f75c76` adds deterministic interior-gap detection and renders each meaningful gap as a
+striped, keyboard-focusable `timeline gap` note with start/end/duration labels. The helper merges
+overlaps, ignores sub-frame slivers, and has focused unit coverage; the authenticated browser matrix
+verified the corresponding 3D Scene gap at 12.5s–22.8s without changing clip identity. This closes
+the implementation portion of P1-28; the final release evidence must still retain the gap assertion
+alongside the full timeline keyboard/focus matrix.
+
 ## Numeric release budgets and retained evidence
 
 These are stop/go gates, not optional targets:
