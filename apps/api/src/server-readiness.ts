@@ -8,6 +8,7 @@ export const EXPECTED_RELEASE_SCHEMA_VERSION = POSTGRES_MIGRATIONS.length;
 export const PRIVATE_OBJECT_STORE_READINESS_TIMEOUT_MS = 10_000;
 const PRIVATE_OBJECT_STORE_READINESS_RESPONSE_TIMEOUT_MS = 2_800;
 const PRIVATE_OBJECT_STORE_READINESS_CACHE_MS = 15_000;
+const PRIVATE_OBJECT_STORE_READINESS_FAILURE_RETRY_MS = 1_000;
 
 interface ReadinessQueryClient {
   query(sql: string): Promise<unknown>;
@@ -118,7 +119,10 @@ function createPrivateObjectStoreReadinessCheck(
         });
     };
     if (cached !== undefined) {
-      if (now - cached.at >= PRIVATE_OBJECT_STORE_READINESS_CACHE_MS) startProbe();
+      const cacheMs = cached.value
+        ? PRIVATE_OBJECT_STORE_READINESS_CACHE_MS
+        : PRIVATE_OBJECT_STORE_READINESS_FAILURE_RETRY_MS;
+      if (now - cached.at >= cacheMs) startProbe();
       // Keep the last known result while a stale value is refreshed in the
       // background; this keeps /ready responsive without emitting a false
       // transient outage at every cache boundary.
