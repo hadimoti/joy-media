@@ -168,10 +168,10 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(workflow).toContain('JOY_MEDIA_E2E_API_PORT: ${{ matrix.api_port }}');
     expect(workflow).toContain('JOY_MEDIA_E2E_WEB_PORT: ${{ matrix.web_port }}');
     expect(workflow).toContain(
-      'PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/playwright-report-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}',
+      'PLAYWRIGHT_HTML_REPORT: playwright-report-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}',
     );
     expect(workflow).toContain(
-      'PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/playwright-test-results-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}',
+      'PLAYWRIGHT_TEST_RESULTS_DIR: playwright-test-results-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}',
     );
     expect(workflow).toContain(
       'joy-worker-" + $env:GITHUB_SHA + "-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + ".exe"',
