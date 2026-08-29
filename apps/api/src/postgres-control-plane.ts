@@ -953,21 +953,23 @@ export class PostgresControlPlane implements ControlPlane {
   ): Promise<AssetDeletionResult> {
     return this.transaction(async (client) => {
       await this.project(actor, projectId, client);
-      const existing = await client.query<MediaAssetRow>(
-        'SELECT * FROM media_assets WHERE id = $1 AND project_id = $2',
-        [assetId, projectId],
-      );
-      if (existing.rows[0] === undefined) {
+      const canonical = await this.lockCanonicalAsset(assetId, client);
+      if (canonical === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+      if (canonical.project_id !== projectId) {
         const access = await client.query<{ readonly source_project_id: string }>(
-          `SELECT asset_access.source_project_id
-           FROM media_asset_access asset_access
-           JOIN media_assets a ON a.id = asset_access.asset_id AND a.project_id = asset_access.source_project_id
-           JOIN projects source ON source.id = asset_access.source_project_id
-           WHERE asset_access.project_id = $1 AND asset_access.asset_id = $2
-             AND source.owner_id IN ($3, $4) AND source.trashed_at IS NULL`,
-          [projectId, assetId, actor.id, SHARED_LIBRARY_OWNER_ID],
+          `SELECT source_project_id
+           FROM media_asset_access
+           WHERE project_id = $1 AND asset_id = $2 AND source_project_id = $3`,
+          [projectId, assetId, canonical.project_id],
         );
-        if (access.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+        if (
+          access.rows[0] === undefined ||
+          canonical.source_trashed_at !== null ||
+          (canonical.source_owner_id !== actor.id &&
+            canonical.source_owner_id !== SHARED_LIBRARY_OWNER_ID)
+        ) {
+          throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+        }
         const queuedForAsset = await client.query<{ readonly id: string }>(
           `UPDATE jobs SET state = 'canceled', cancel_requested = true
            WHERE project_id = $1 AND asset_id = $2 AND state = 'queued' RETURNING id`,
@@ -1040,7 +1042,7 @@ export class PostgresControlPlane implements ControlPlane {
         [projectId, assetId],
       );
       const candidateRefs = new Set([
-        ...privateRefsFromLocations(existing.rows[0].locations),
+        ...privateRefsFromLocations(canonical.locations),
         ...derivatives.rows.flatMap((row) => privateRefsFromLocations(row.locations)),
       ]);
       await client.query('DELETE FROM media_derivatives WHERE project_id = $1 AND asset_id = $2', [
@@ -1101,18 +1103,7 @@ export class PostgresControlPlane implements ControlPlane {
   ): Promise<MediaAssetRecord> {
     return this.transaction(async (client) => {
       await this.project(actor, projectId, client);
-      const result = await client.query<
-        MediaAssetRow & {
-          readonly source_owner_id: string;
-          readonly source_trashed_at: Date | null;
-        }
-      >(
-        `SELECT a.*, p.owner_id AS source_owner_id, p.trashed_at AS source_trashed_at
-         FROM media_assets a JOIN projects p ON p.id = a.project_id
-         WHERE a.id = $1`,
-        [assetId],
-      );
-      const row = result.rows[0];
+      const row = await this.lockCanonicalAsset(assetId, client);
       if (row !== undefined && row.project_id === projectId) return mediaAssetOf(row);
       if (
         row === undefined ||
@@ -1985,6 +1976,32 @@ export class PostgresControlPlane implements ControlPlane {
       [assetId, projectId, actor.id, SHARED_LIBRARY_OWNER_ID],
     );
     if (result.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+  }
+
+  private async lockCanonicalAsset(
+    assetId: string,
+    client: Pool | PoolClient,
+  ): Promise<
+    | (MediaAssetRow & {
+        readonly source_owner_id: string;
+        readonly source_trashed_at: Date | null;
+      })
+    | undefined
+  > {
+    const result = await client.query<
+      MediaAssetRow & {
+        readonly source_owner_id: string;
+        readonly source_trashed_at: Date | null;
+      }
+    >(
+      `SELECT a.*, p.owner_id AS source_owner_id, p.trashed_at AS source_trashed_at
+       FROM media_assets a
+       JOIN projects p ON p.id = a.project_id
+       WHERE a.id = $1
+       FOR UPDATE`,
+      [assetId],
+    );
+    return result.rows[0];
   }
 
   private async event(client: PoolClient, jobId: string, type: string, at: number): Promise<void> {
