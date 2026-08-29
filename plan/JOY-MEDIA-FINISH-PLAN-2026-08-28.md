@@ -172,6 +172,7 @@ reproduce it.
 | P1-24 | Library destructive-operation recovery | Replace blocking-only removal UX with focus-safe confirmation/status; storage failure must keep the project card/data intact and expose accessible retry.                                                                                                                                                                                                                                                                                                   |
 | P1-25 | Product identity                       | Choose JOY Studio or JOY Media as the canonical user-facing name and make HTML title, shell, login, project library, manifest, release docs and browser assertions agree.                                                                                                                                                                                                                                                                                   |
 | P1-26 | Responsive timeline semantics           | At the authenticated 480×1370 breakpoint, the timeline's Duplicate, Ripple Delete and Add Marker controls leave the primary toolbar (`display:none`) and are reachable only through an icon-only overflow trigger; Zoom in/out and the `Timeline zoom` range input have no compact replacement at all. Repeated clips also expose duplicate accessible names (for example `Intro, 3.0s` and `Black Brush Stroke, 5.0s`), while track containers have no semantic role or accessible name. Give the overflow trigger a visible text affordance and complete compact action coverage (including zoom), add unique clip labels/IDs and labelled track groups, then rerun the responsive matrix at 320/480/768/1024/1280/1440 widths. |
+| P1-27 | Compact header hit-target overlap         | At 320px and 480px authenticated widths, the header's Brand menubar overlaps the Edit controls. Hit-testing the visible centers shows Undo/Redo/Command palette/layout toggles landing on File/Edit/Clip/Joy Code/View/Window menu buttons; the layout toggle is therefore visibly present but not operable, and the workspace preset can also be intercepted at 320px. Reflow the header into a bounded horizontal scroller or compact icon groups with non-overlapping hit targets, preserve accessible names/focus order, and add an automated center-hit/keyboard matrix at 320/375/480/600/768px. |
 
 ### LIVE-13 — timeline browser certification (2026-08-29)
 
@@ -293,6 +294,18 @@ mode; Fit then restores the prior Fit state. This closes the missing-compact-zoo
 The primary edit toolbar remains intentionally collapsed at this breakpoint (Duplicate/Ripple
 Delete/Add Marker are available in the overflow), so the visual affordance and full responsive
 matrix at 320/480/768/1024/1280/1440 remain release work.
+
+### LIVE-21 — compact header hit-target regression (2026-08-29)
+
+The authenticated Codex in-app browser was exercised with the timeline visible at 320×900,
+480×900, and 768×900. At 320px, the layout toggle center is intercepted by the Clip menu and the
+workspace preset center by Joy Code; at 480px, Undo and Redo are intercepted by Joy Code/File,
+Command palette by View, and the layout toggle by Window. The controls report enabled, visible
+geometry, and correct accessible names, but a real pointer at their centers activates the menu
+layer instead. At 768px the same centers resolve to their intended controls. This is a responsive
+header stacking/hit-area defect that can make timeline undo, layout, and workspace recovery paths
+unreachable on small screens; it is tracked as P1-27 and must be closed before the compact timeline
+matrix can be certified. No URL change or browser warning/error was observed during this pass.
 
 ## Numeric release budgets and retained evidence
 
