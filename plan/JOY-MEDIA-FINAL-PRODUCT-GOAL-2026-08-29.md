@@ -65,6 +65,20 @@ Execute the dependency waves in order:
    desktop viewport, authenticated browser, export, rollback, origin, and canary gates from the
    plan. Fix every failure and rerun.
 
+Self-hosted CI is the primary hard release gate because the private repository's GitHub-hosted
+Actions minutes are exhausted. GitHub Actions remains the scheduler, but the jobs run on registered
+owner-controlled runners and consume no GitHub-hosted runner minutes. Implement the three lanes
+specified in the closure plan: isolated Linux/PostgreSQL/S3/API integration; clean-profile Windows
+Worker package, startup, recovery, CPU/GPU, update and rollback; and candidate acceptance against
+disposable real services plus a real isolated Worker. The supported zero-extra-host setup is a
+dedicated low-privilege native Windows runner plus an isolated WSL2 Linux runner on this PC, with
+serialized jobs; never install a general-purpose runner on the production VPS. Pin actions by
+immutable SHA, reject untrusted-fork and `pull_request_target` access, use per-run namespaces/
+credentials, terminate every child process, verify zero leaked DB/object/Worker state, and retain
+only redacted hashes/SBOM/provenance/signature evidence. The owner browser profile is forbidden in
+CI. Self-hosted source/release checks and all three lanes must pass twice on the exact candidate;
+GitHub-hosted runs are optional when quota returns, and CI never deploys automatically.
+
 The browser viewport matrix is 1024×768, 1280×800, 1440×900, and 1920×1080; phone view is out of
 scope. Browser testing must include every top-level workspace and hub subtab, empty/populated/
 inactive/loading/error/retry states, timeline editing/playback, every Effects category, GLB/GLTF

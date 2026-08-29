@@ -122,6 +122,7 @@ What the old gate did not prove:
 | WIN-03 | `joy-worker.exe` depends on a source checkout and ambient runtimes. | Signed, versioned installer with bundled/verified runtime, update, repair, uninstall, rollback, and clean-VM CI. |
 | WIN-04 | Current autostart can remain stopped after interruption until manually restarted. | Logon start, `StartWhenAvailable`, crash/network recovery, singleton, health/version check, and bounded restart pass without a visible console. |
 | OPS-01 | Code rollback has no schema N/N-1 or verified restore gate. | Backup/restore rehearsal, schema compatibility policy, write-stop rule, and automated rollback evidence. |
+| CI-01 | The owner reports the private repository's GitHub-hosted Actions minutes are exhausted. The only current workflow uses hosted `ubuntu-latest`; it also does not exercise real PostgreSQL/object storage, a real Worker, `joy-worker.exe`, clean Windows install/startup, or rollback, and its actions use movable `@v7` tags. | Self-hosted CI becomes the primary required path and consumes no GitHub-hosted runner minutes. Mandatory isolated Linux, Windows Worker, and real-service acceptance lanes in section 9 pass twice on the exact candidate with pinned action SHAs, sanitized evidence, verified cleanup, and no production credentials or data access. |
 
 ## 5. Whole-application UI closure register
 
@@ -288,7 +289,8 @@ verification, and a clean worktree. Do not deploy between waves.
 ### Wave 6 — Windows Worker productization
 
 - Secure session/logging, signed installer, autostart/recovery, capability protocol, notifications
-  and approval assertions, resource limits, local IPC, update/repair/uninstall/rollback, Windows CI.
+  and approval assertions, resource limits, local IPC, update/repair/uninstall/rollback, and
+  self-hosted Windows CI.
 
 ### Wave 7 — release engineering and production proof
 
@@ -302,9 +304,13 @@ verification, and a clean worktree. Do not deploy between waves.
 
 - Typecheck, lint, formatting/diff check, dependency audit, secret scan, SAST, all unit/integration
   suites, all production builds, and CodeRabbit review with no unresolved blocking finding.
-- Hosted CI and self-hosted CI must both validate the exact candidate commit. Self-hosted lanes are
-  required for JOY Media release evidence: Linux release/integration checks and Windows Worker or
-  package tests run on controlled self-hosted runners with retained sanitized logs.
+- Self-hosted CI is the primary required path because the GitHub-hosted minute allowance is
+  exhausted. GitHub Actions remains the scheduler, but each `runs-on: [self-hosted, ...]` job runs
+  on owner-controlled hardware and consumes no GitHub-hosted runner minutes. A GitHub-hosted run is
+  optional when quota is available and is never required for completion. The current hosted
+  workflow is not release proof: its browser server uses a memory control plane/object store and
+  test authentication, its Worker tests use stubs/`pg-mem`, and it does not build
+  `joy-worker.exe`.
 - Real PostgreSQL migrations + CRUD/CAS + two-tenant/two-project adversarial isolation.
 - Real S3-compatible object store with slow, hanging, partial, checksum, orphan, cleanup, and outage
   cases.
@@ -317,6 +323,56 @@ verification, and a clean worktree. Do not deploy between waves.
 - Windows 10/11 clean user profiles: install, sign/hash, pair, autostart, offline, crash, sleep/resume,
   session renewal, capability change, command notification/consent, update, repair, uninstall, and
   rollback. These tests run in self-hosted CI before release promotion.
+
+### Mandatory self-hosted CI lanes
+
+Register repository-scoped runners only for the private `hadimoti/joy-media` repository. The
+practical zero-extra-host layout is one native Windows runner under a dedicated low-privilege
+Windows account plus one isolated WSL2 Linux runner on the same PC, with all jobs serialized. A
+separate disposable Linux VM is preferable when available. Do not install a general-purpose Actions
+runner on the production Sweden VPS, and never run repository PR code on a machine that holds owner
+browser sessions, production credentials, or writable production mounts.
+
+1. **Linux real-services lane** — labels `self-hosted`, `linux`, `x64`, `joy-media-ci` on an
+   ephemeral or freshly reset non-root runner. Pin Node 22, pnpm 11.15.0, FFmpeg, and FFprobe;
+   install with `pnpm install --frozen-lockfile`; run `pnpm run verify:ci`, `pnpm run release:gate`,
+   real migrations, API/readiness, two-tenant/two-project isolation, lease/queue/cleanup,
+   provider-fake idempotency, export-headless, and N/N-1/rollback-compatibility tests against an
+   isolated PostgreSQL 17 database and S3-compatible store.
+2. **Windows Worker lane** — labels `self-hosted`, `windows`, `x64`, `joy-media-worker`; add `gpu`
+   only on the recorded GPU runner. From a clean standard-user profile, run install/typecheck/lint/
+   tests, the Worker TypeScript build, `pnpm worker:exe`, and the built
+   `joy-worker.exe --joy-worker-self-test`. Then exercise the signed installer/portable package,
+   isolated state, hidden Task Scheduler startup, singleton, reconnect/renewal, heartbeat/lease,
+   completion/retry/cancel, notification/approval, bounded child-process termination, redacted log
+   rotation, capability detection, crash/offline/sleep recovery, update, repair, uninstall, and
+   previous-version rollback. Retain separate required CPU-only and GPU results.
+3. **Real-service acceptance lane** — start the candidate API/editor against disposable real
+   services and a real isolated Worker identity. Prove source-bound export, durable re-download,
+   Effects soak, Timeline, 3D, Audio, Captions, Jobs, keyboard, and accessibility fixtures. Any
+   automated browser is orchestrator-owned CI, uses only isolated non-production credentials, and
+   never receives OpenCLI profile `cefd9k77`, owner cookies, or owner auth state. It supplements;
+   it does not replace the orchestrator's authenticated production gate.
+4. **Isolation and teardown** — assign one run ID to database/schema, bucket/object prefix,
+   projects, Worker identity/state, ports, and temporary paths. In an unconditional finalizer,
+   terminate API, Worker, FFmpeg, browser, and child process trees; drop run-owned DB/object state;
+   release ports/locks; and fail the job if any process, object, volume, credential, or state file
+   leaks. Serialize main/release candidates and GPU use; cancel superseded PR runs.
+5. **Runner and artifact security** — never expose self-hosted runners or secrets to untrusted fork
+   code or `pull_request_target`. Pin every GitHub Action by immutable commit SHA, use least-
+   privilege workflow permissions and protected signing/deployment environments, and keep runners
+   outside production trust paths. Upload only redacted JUnit/gate summaries, sanitized logs,
+   manifests, hashes, SBOM, signatures, and provenance. Never upload `.env`, DB URLs/dumps, Worker
+   state, pairing/session material, prompts/user media, owner auth state, or unredacted full logs.
+6. **Workflow and quota rule** — trusted `main`/release pushes and manual `workflow_dispatch` may
+   use the self-hosted runners; pull-request workflows stay source-only on an isolated disposable
+   runner or remain disabled while hosted minutes are unavailable. Keep uploaded GitHub artifacts
+   minimal because artifact/cache storage quotas are separate from runner minutes. A hosted mirror
+   may run when allowance returns, but it is optional.
+7. **Promotion rule** — the self-hosted source/release checks and all three self-hosted lanes pass
+   twice consecutively on the exact clean candidate SHA and artifact manifest. CI never deploys
+   automatically. Codex primary reviews provenance and owns promotion, direct-origin checks,
+   authenticated browser verification, canary, and rollback.
 
 ### Orchestrator-only authenticated browser gate
 
@@ -351,7 +407,10 @@ Promotion is blocked unless all are true:
 - Git worktree is clean; local `main`, remote `github`, remote `vps`, and deployment checkout
   `/opt/joy-media/repo` share the exact commit/tree/lockfile/schema identity. None of these
   checks may be satisfied by `joy-vps` or any legacy JOY Media pointer path.
-- Hosted CI and the required self-hosted CI lanes pass on the exact release candidate commit.
+- The self-hosted source/release checks and all three self-hosted CI lanes pass twice on the exact
+  release candidate commit; teardown, redaction, hashes, signatures, SBOM, and provenance are
+  verified. GitHub-hosted execution is optional and cannot block completion while its allowance is
+  exhausted.
 - Database backup restores in isolation; code rollback is proven safe against current schema.
 - The signed Windows artifact and web/API artifacts have hashes, SBOM, provenance, and retained
   test evidence.
