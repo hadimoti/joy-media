@@ -154,7 +154,11 @@ describe('project-document-sync', () => {
 
   it('serializes concurrent syncs and advances the later request to the persisted CAS head', async () => {
     const storage = memoryStorage();
-    upsertControlPlaneProjectBinding(storage, { ...binding, documentRevisionId: 'cas-rev-old' }, 'local');
+    upsertControlPlaneProjectBinding(
+      storage,
+      { ...binding, documentRevisionId: 'cas-rev-old' },
+      'local',
+    );
 
     let releaseFirst: (() => void) | undefined;
     const firstStarted = new Promise<void>((resolve) => {
@@ -214,23 +218,29 @@ describe('project-document-sync', () => {
       revisionId: 'cas-rev-second',
       document,
     });
-    expect(getControlPlaneProjectBinding(storage, 'local-edit-1', 'local')?.documentRevisionId).toBe(
-      'cas-rev-second',
-    );
+    expect(
+      getControlPlaneProjectBinding(storage, 'local-edit-1', 'local')?.documentRevisionId,
+    ).toBe('cas-rev-second');
   });
 
   it('coalesces a repeated in-flight revision after the first sync persists it', async () => {
     const storage = memoryStorage();
-    upsertControlPlaneProjectBinding(storage, { ...binding, documentRevisionId: 'cas-rev-old' }, 'local');
+    upsertControlPlaneProjectBinding(
+      storage,
+      { ...binding, documentRevisionId: 'cas-rev-old' },
+      'local',
+    );
 
     let releaseFirst: (() => void) | undefined;
     const firstStarted = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
-    const syncProjectDocument: SyncProjectDocument = vi.fn().mockImplementation(async (_projectId, params) => {
-      await firstStarted;
-      return { projectId: binding.controlPlaneProjectId, revisionId: params.revisionId };
-    });
+    const syncProjectDocument: SyncProjectDocument = vi
+      .fn()
+      .mockImplementation(async (_projectId, params) => {
+        await firstStarted;
+        return { projectId: binding.controlPlaneProjectId, revisionId: params.revisionId };
+      });
 
     const first = syncProjectDocumentBinding(
       { ...binding, documentRevisionId: 'cas-rev-old' },
