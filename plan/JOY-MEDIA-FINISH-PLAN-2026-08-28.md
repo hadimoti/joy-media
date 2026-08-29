@@ -385,12 +385,12 @@ not evidence of the reported Effects-subtab crash; the Effects and timeline rete
 
 ### LIVE-28 — stable promotion and canary (2026-08-29)
 
-Commit `99510e0a5f96802184d2f3a43020d06bd836cfd4` is on local/main, GitHub `main`, and the VPS
-bare `main`, and is deployed as immutable API/web release `joy-media-99510e0`. Origin and both
+Commit `6e2286dfc29139f9319511f9c68de22e66fd9dbc` is on local/main, GitHub `main`, and the VPS
+bare `main`, and is deployed as immutable API/web release `joy-media-6e2286d`. Origin and both
 public domains return healthy `/live` and `/ready` responses with matching commit, tree, lockfile,
 and schema identity. The guarded rollback rehearsal passes. A detached 30-minute canary is running
 against local origin plus `joyst.ir` and `www.joyst.ir`; its retained JSON is
-`C:\Users\HadiMoti\joy-media-temp-release-artifacts\canary-99510e0.json`.
+`C:\Users\HadiMoti\joy-media-temp-release-artifacts\canary-6e2286d.json`.
 
 The release gate is clean for commands, tests, generated artifacts, manifests, builds, static
 inventory, manifest, SBOM, and feature status. It intentionally remains NO-GO only for the two
