@@ -1068,7 +1068,7 @@ describe('control-plane HTTP transport', () => {
     const audioLeaseToken = (audioLease.body as { data: { leaseToken: string } }).data.leaseToken;
     const audio = new Uint8Array([1, 2, 3, 4]);
     const audioSha256 = createHash('sha256').update(audio).digest('hex');
-    const uploadAudio = (mimeType = 'audio/wav') =>
+    const uploadAudio = (mimeType = 'audio/wav', token = audioLeaseToken) =>
       fetch(
         `${origin}/v1/workers/w/jobs/${encodeURIComponent(projectScopedAudioJobId)}/derivative`,
         {
@@ -1079,7 +1079,7 @@ describe('control-plane HTTP transport', () => {
             'x-joy-asset-id': 'asset-1',
             'x-joy-sha256': audioSha256,
             'x-joy-bytes': String(audio.byteLength),
-            'x-joy-lease-token': audioLeaseToken,
+            'x-joy-lease-token': token,
           },
           body: audio,
         },
@@ -1093,6 +1093,7 @@ describe('control-plane HTTP transport', () => {
         assetId: 'asset-1',
       },
     });
+    const retainedAudioRef = store.objects.at(-1)?.descriptor.ref;
     // Simulate a lost 201: an exact retry is idempotent, retains one private
     // object, and still lets the Worker complete the lease exactly once.
     const audioRetry = await uploadAudio();
@@ -1107,35 +1108,82 @@ describe('control-plane HTTP transport', () => {
       error: { code: 'DERIVATIVE_EXISTS' },
     });
     expect(store.objects).toHaveLength(2);
+    expect(store.removed).toHaveLength(1);
+    expect(store.removed[0]).not.toBe(retainedAudioRef);
 
-    const localRef = `gpu-${createHash('sha256')
-      .update(projectScopedAudioJobId)
-      .digest('hex')
-      .slice(0, 32)}-${audioSha256.slice(0, 16)}`;
+    const completionBody = {
+      result: {
+        kind: 'audio.ml-denoise',
+        assetId: 'asset-1',
+        sha256: audioSha256,
+        bytes: audio.byteLength,
+        localRef: `gpu-${createHash('sha256')
+          .update(projectScopedAudioJobId)
+          .digest('hex')
+          .slice(0, 32)}-${audioSha256.slice(0, 16)}`,
+        descriptor: { mimeType: 'audio/wav' },
+      },
+      leaseToken: audioLeaseToken,
+    };
+    const audioObjectIndex = store.objects.findIndex(
+      (candidate) => candidate.descriptor.ref === retainedAudioRef,
+    );
+    expect(audioObjectIndex).toBeGreaterThanOrEqual(0);
+    store.objects.splice(audioObjectIndex, 1);
+    const missingObjectCompletion = await request(
+      origin,
+      'POST',
+      `/v1/workers/w/jobs/${encodeURIComponent(projectScopedAudioJobId)}/complete`,
+      completionBody,
+      workerToken,
+    );
+    expect(missingObjectCompletion).toMatchObject({
+      status: 409,
+      body: { error: { code: 'DERIVATIVE_NOT_READY' } },
+    });
+    expect((await uploadAudio()).status).toBe(201);
+
     const completed = await request(
       origin,
       'POST',
       `/v1/workers/w/jobs/${encodeURIComponent(projectScopedAudioJobId)}/complete`,
-      {
-        result: {
-          kind: 'audio.ml-denoise',
-          assetId: 'asset-1',
-          sha256: audioSha256,
-          bytes: audio.byteLength,
-          localRef,
-          descriptor: { mimeType: 'audio/wav' },
-        },
-        leaseToken: audioLeaseToken,
-      },
+      completionBody,
       workerToken,
     );
     expect(completed).toMatchObject({ status: 200, body: { data: { state: 'completed' } } });
+    await request(origin, 'POST', `/v1/projects/p/jobs/${projectScopedAudioJobId}/retry`, {});
+    const retryLeaseResponse = await request(
+      origin,
+      'POST',
+      '/v1/workers/w/leases',
+      {},
+      workerToken,
+    );
+    const retryLeaseToken = (retryLeaseResponse.body as { data: { leaseToken: string } }).data
+      .leaseToken;
+    const retryUpload = await uploadAudio('audio/wav', retryLeaseToken);
+    expect(retryUpload.status).toBe(201);
+    expect(await retryUpload.json()).toMatchObject({
+      data: { id: `derivative-${projectScopedAudioJobId}-g1`, sha256: audioSha256 },
+    });
+    expect(store.objects).toHaveLength(3);
+    const retryCompletion = await request(
+      origin,
+      'POST',
+      `/v1/workers/w/jobs/${encodeURIComponent(projectScopedAudioJobId)}/complete`,
+      { ...completionBody, leaseToken: retryLeaseToken },
+      workerToken,
+    );
+    expect(retryCompletion).toMatchObject({
+      status: 200,
+      body: { data: { state: 'completed', generation: 1 } },
+    });
     const audioEvents = await request(origin, 'GET', '/v1/projects/p/events?cursor=0');
     expect(
       (audioEvents.body as { data: readonly { jobId: string; type: string }[] }).data.filter(
         (event) => event.jobId === projectScopedAudioJobId && event.type === 'completed',
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     expect(content.url).toContain('/content');
     expect(content.url).not.toContain('parspack');
   });

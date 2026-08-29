@@ -388,13 +388,10 @@ async function route(
           'derivative byte length does not match receipt',
         );
       const jobId = decodeURIComponent(workerDerivativeUploadMatch[2]!);
-      // Job ids are project-scoped and may already approach the opaque-id
-      // limit. Hash the job id for the private-object key so adding the
-      // derivative prefix and content digest can never create an invalid
-      // location, while the public derivative record still retains the exact
-      // job id below.
-      const jobDigest = createHash('sha256').update(jobId).digest('hex').slice(0, 32);
-      const ref = `derivative-${jobDigest}-${receipt.sha256.slice(0, 16)}`;
+      // Keep the object key stable for an exact retry, but include every
+      // integrity field so a conflicting retry cannot overwrite an object
+      // referenced by a prior registration.
+      const ref = workerDerivativeObjectRef(jobId, receipt.leaseToken, receipt);
       await store.put(
         {
           ref,
@@ -404,42 +401,92 @@ async function route(
         },
         bytes,
       );
-      const derivative = await options.controlPlane.registerWorkerCloudDerivative(
-        decodeURIComponent(workerId),
-        jobId,
-        {
-          id: `derivative-${jobId}`,
-          assetId: receipt.assetId,
-          kind: receipt.kind,
-          profile:
-            receipt.kind === 'thumbnail'
-              ? 'jpeg-640'
-              : receipt.kind === 'mask'
-                ? receipt.descriptor.mimeType === 'video/webm'
-                  ? 'tracked-alpha-webm-v1'
-                  : 'alpha-matte-png-v1'
-                : receipt.kind === 'upscale'
-                  ? 'ai-upscale-v1'
-                  : 'audio-processed',
-          sha256: receipt.sha256,
-          bytes: receipt.bytes,
-          descriptor: receipt.descriptor,
-          availability: 'available-cloud',
-          locations: [{ kind: 'private-object', ref }],
-        },
-        undefined,
-        receipt.leaseToken,
-      );
-      respondJson(response, 201, { data: derivativeForBrowser(derivative) });
-      return;
+      try {
+        const derivative = await options.controlPlane.registerWorkerCloudDerivative(
+          decodeURIComponent(workerId),
+          jobId,
+          {
+            id: `derivative-${jobId}`,
+            assetId: receipt.assetId,
+            kind: receipt.kind,
+            profile:
+              receipt.kind === 'thumbnail'
+                ? 'jpeg-640'
+                : receipt.kind === 'mask'
+                  ? receipt.descriptor.mimeType === 'video/webm'
+                    ? 'tracked-alpha-webm-v1'
+                    : 'alpha-matte-png-v1'
+                  : receipt.kind === 'upscale'
+                    ? 'ai-upscale-v1'
+                    : 'audio-processed',
+            sha256: receipt.sha256,
+            bytes: receipt.bytes,
+            descriptor: receipt.descriptor,
+            availability: 'available-cloud',
+            locations: [{ kind: 'private-object', ref }],
+          },
+          undefined,
+          receipt.leaseToken,
+        );
+        respondJson(response, 201, { data: derivativeForBrowser(derivative) });
+        return;
+      } catch (error) {
+        // Remove only the object written by this attempt. Prefix cleanup could
+        // delete a valid result from a previous generation.
+        try {
+          await store.remove(ref);
+        } catch (cleanupError) {
+          throw new ControlPlaneError(
+            'DERIVATIVE_CLEANUP_FAILED',
+            cleanupError instanceof Error ? cleanupError.message.slice(0, 200) : 'cleanup failed',
+          );
+        }
+        throw error;
+      }
     }
     const body = await readJson(request);
+    const result = optionalWorkerResult(body);
+    const completeJobId = decodeURIComponent(workerCompleteMatch![2]!);
+    if (isCloudDerivativeResult(result)) {
+      const store = options.privateObjectStore;
+      if (store === undefined)
+        throw new ControlPlaneError(
+          'PRIVATE_STORE_UNAVAILABLE',
+          'private media storage is unavailable',
+        );
+      const leaseToken = requiredString(body, 'leaseToken');
+      const registered = await options.controlPlane.workerCloudDerivativeForCompletion(
+        decodeURIComponent(workerId),
+        completeJobId,
+        result,
+        undefined,
+        leaseToken,
+      );
+      const location = registered.locations.find(
+        (candidate) => candidate.kind === 'private-object',
+      );
+      if (
+        location === undefined ||
+        location.ref !== workerDerivativeObjectRef(completeJobId, leaseToken, result)
+      )
+        throw new ControlPlaneError('DERIVATIVE_NOT_READY', completeJobId);
+      try {
+        await store.get({
+          ref: location.ref,
+          sha256: result.sha256,
+          bytes: result.bytes,
+          mimeType: result.descriptor.mimeType,
+        });
+      } catch {
+        throw new ControlPlaneError('DERIVATIVE_NOT_READY', completeJobId);
+      }
+    }
     respondJson(response, 200, {
       data: await options.controlPlane.complete(
         decodeURIComponent(workerId),
-        decodeURIComponent(workerCompleteMatch![2]!),
+        completeJobId,
         undefined,
-        optionalWorkerResult(body),
+        result,
         requiredString(body, 'leaseToken'),
       ),
     });
@@ -2018,6 +2065,72 @@ function optionalWorkerResult(body: Record<string, unknown>):
   };
 }
 
+type WorkerCloudResult = Exclude<
+  NonNullable<ReturnType<typeof optionalWorkerResult>>,
+  { readonly kind: 'fixture.thumbnail' }
+>;
+
+function isCloudDerivativeResult(
+  value: ReturnType<typeof optionalWorkerResult>,
+): value is WorkerCloudResult {
+  return (
+    value !== undefined &&
+    (value.kind === 'asset.thumbnail' ||
+      value.kind === 'audio.ml-denoise' ||
+      value.kind === 'mask.image' ||
+      value.kind === 'mask.video' ||
+      value.kind === 'upscale.image' ||
+      value.kind === 'upscale.video')
+  );
+}
+
+/** Stable, integrity-scoped private object key shared by upload and complete. */
+function workerDerivativeObjectRef(
+  jobId: string,
+  leaseToken: string,
+  result: {
+    readonly assetId: string;
+    readonly kind: string;
+    readonly sha256: string;
+    readonly bytes: number;
+    readonly descriptor: {
+      readonly mimeType: string;
+      readonly width?: number;
+      readonly height?: number;
+      readonly durationUs?: number;
+    };
+  },
+): string {
+  const jobDigest = createHash('sha256').update(jobId).digest('hex').slice(0, 32);
+  const leaseDigest = createHash('sha256').update(leaseToken).digest('hex').slice(0, 24);
+  const kind =
+    result.kind === 'asset.thumbnail'
+      ? 'thumbnail'
+      : result.kind === 'audio.ml-denoise'
+        ? 'audio'
+        : result.kind === 'mask.image' || result.kind === 'mask.video'
+          ? 'mask'
+          : result.kind === 'upscale.image' || result.kind === 'upscale.video'
+            ? 'upscale'
+            : result.kind;
+  const metadataDigest = createHash('sha256')
+    .update(
+      JSON.stringify({
+        assetId: result.assetId,
+        kind,
+        sha256: result.sha256,
+        bytes: result.bytes,
+        mimeType: result.descriptor.mimeType,
+        width: result.descriptor.width ?? null,
+        height: result.descriptor.height ?? null,
+        durationUs: result.descriptor.durationUs ?? null,
+      }),
+    )
+    .digest('hex')
+    .slice(0, 32);
+  return `derivative-${jobDigest}-${leaseDigest}-${metadataDigest}`;
+}
+
 function workerDerivativeHeaders(request: IncomingMessage): {
   readonly assetId: string;
   readonly sha256: string;
@@ -2453,15 +2566,18 @@ function respondError(response: ServerResponse, error: unknown): void {
             ? 404
             : error.code === 'REQUEST_INVALID'
               ? 400
-              : error.code === 'PROVIDER_UNAVAILABLE' ||
-                  error.code === 'PROVIDER_FAILED' ||
-                  error.code === 'PROJECT_DOCUMENT_STORE_UNAVAILABLE'
-                ? 503
-                : error.code === 'DOCUMENT_REVISION_CONFLICT'
-                  ? 409
-                  : error.code.startsWith('PAIRING_')
-                    ? 403
-                    : 409;
+              : error.code === 'DERIVATIVE_NOT_READY'
+                ? 409
+                : error.code === 'PROVIDER_UNAVAILABLE' ||
+                    error.code === 'DERIVATIVE_CLEANUP_FAILED' ||
+                    error.code === 'PROVIDER_FAILED' ||
+                    error.code === 'PROJECT_DOCUMENT_STORE_UNAVAILABLE'
+                  ? 503
+                  : error.code === 'DOCUMENT_REVISION_CONFLICT'
+                    ? 409
+                    : error.code.startsWith('PAIRING_')
+                      ? 403
+                      : 409;
     respondJson(response, status, { error: { code: error.code, message: error.message } });
     return;
   }

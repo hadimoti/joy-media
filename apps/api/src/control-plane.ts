@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { CREATIVE_BRIEF_CONSENT_VERSION } from './creative-brief-runtime-config.js';
 import { JOY_CODE_CONSENT_VERSION } from './joy-code-consent.js';
 
@@ -556,6 +557,14 @@ export interface ControlPlane {
     workerId: string,
     jobId: string,
     derivative: CloudDerivativeRegistration,
+    now?: number,
+    leaseToken?: string,
+  ): MediaDerivativeRecord | Promise<MediaDerivativeRecord>;
+  /** Resolve the exact cloud derivative for an active Worker lease/result. */
+  workerCloudDerivativeForCompletion(
+    workerId: string,
+    jobId: string,
+    receipt: WorkerResultReceipt,
     now?: number,
     leaseToken?: string,
   ): MediaDerivativeRecord | Promise<MediaDerivativeRecord>;
@@ -1180,35 +1189,55 @@ export class LocalControlPlane implements ControlPlane {
     now = Date.now(),
     leaseToken?: string,
   ): MediaDerivativeRecord {
-    validateCloudDerivativeRegistration(derivative);
     const job = this.ownedLease(workerId, jobId, now, leaseToken);
+    // The logical derivative identity is scoped to the job generation.  A
+    // manual retry must never collide with a row left by an earlier result.
+    const canonicalDerivative = {
+      ...derivative,
+      id: workerDerivativeId(job.id, job.generation),
+    };
+    validateCloudDerivativeRegistration(canonicalDerivative);
     const worker = this.#workers.get(workerId);
     if (
       worker === undefined ||
-      job.assetId !== derivative.assetId ||
-      derivativeKindForJob(job.type) !== derivative.kind ||
-      derivative.availability !== 'available-cloud'
+      job.assetId !== canonicalDerivative.assetId ||
+      derivativeKindForJob(job.type) !== canonicalDerivative.kind ||
+      canonicalDerivative.availability !== 'available-cloud'
     )
       throw new ControlPlaneError('DERIVATIVE_UPLOAD_DENIED', jobId);
     const project = this.project({ id: worker.ownerId }, job.projectId);
     if (!project.assetSyncEnabled) throw new ControlPlaneError('DERIVATIVE_UPLOAD_DENIED', jobId);
     if (
-      this.assetInProject({ id: worker.ownerId }, job.projectId, derivative.assetId) === undefined
+      this.assetInProject({ id: worker.ownerId }, job.projectId, canonicalDerivative.assetId) ===
+      undefined
     )
-      throw new ControlPlaneError('ASSET_NOT_FOUND', derivative.assetId);
-    const existing = this.#derivatives.get(derivative.id);
+      throw new ControlPlaneError('ASSET_NOT_FOUND', canonicalDerivative.assetId);
+    const existing = this.#derivatives.get(canonicalDerivative.id);
     if (existing !== undefined) {
-      if (matchesCloudDerivativeRegistration(existing, job.projectId, derivative))
+      if (matchesCloudDerivativeRegistration(existing, job.projectId, canonicalDerivative))
         return cloneDerivative(existing);
-      throw new ControlPlaneError('DERIVATIVE_EXISTS', derivative.id);
+      throw new ControlPlaneError('DERIVATIVE_EXISTS', canonicalDerivative.id);
     }
     const record: MediaDerivativeRecord = {
-      ...cloneDerivativeRegistration(derivative),
+      ...cloneDerivativeRegistration(canonicalDerivative),
       projectId: job.projectId,
       verifiedAt: now,
     };
     this.#derivatives.set(record.id, record);
     return cloneDerivative(record);
+  }
+  workerCloudDerivativeForCompletion(
+    workerId: string,
+    jobId: string,
+    receipt: WorkerResultReceipt,
+    now = Date.now(),
+    leaseToken?: string,
+  ): MediaDerivativeRecord {
+    const job = this.ownedLease(workerId, jobId, now, leaseToken);
+    const derivative = this.#derivatives.get(workerDerivativeId(job.id, job.generation));
+    if (derivative === undefined || !matchesWorkerDerivativeCompletion(derivative, job, receipt))
+      throw new ControlPlaneError('DERIVATIVE_NOT_READY', jobId);
+    return cloneDerivative(derivative);
   }
   derivativesForAsset(
     actor: Actor,
@@ -1492,7 +1521,7 @@ export class LocalControlPlane implements ControlPlane {
       throw new ControlPlaneError('RESULT_INVALID', jobId);
     if (
       (job.type === 'image.comfy' || job.type === 'audio.ml-denoise') &&
-      (!isLocalGpuReceipt(receipt) || receipt.kind !== job.type)
+      (!isLocalGpuReceipt(receipt) || receipt.kind !== job.type || receipt.assetId !== job.assetId)
     )
       throw new ControlPlaneError('RESULT_INVALID', jobId);
     if (
@@ -1505,8 +1534,15 @@ export class LocalControlPlane implements ControlPlane {
       (!isUpscaleReceipt(receipt) || receipt.kind !== job.type || receipt.assetId !== job.assetId)
     )
       throw new ControlPlaneError('RESULT_INVALID', jobId);
+    if (receipt !== undefined && derivativeKindForJob(job.type) !== undefined) {
+      const registered = this.#derivatives.get(workerDerivativeId(job.id, job.generation));
+      if (registered === undefined || !matchesWorkerDerivativeCompletion(registered, job, receipt))
+        throw new ControlPlaneError('DERIVATIVE_NOT_READY', jobId);
+    }
     const derivative =
-      receipt === undefined ? undefined : derivativeOf(jobId, workerId, receipt, now);
+      receipt === undefined
+        ? undefined
+        : derivativeOf(jobId, job.generation, workerId, receipt, now);
     const done: Job = {
       ...job,
       state: 'completed',
@@ -1785,6 +1821,41 @@ function derivativeKindForJob(type: string): DerivativeKind | undefined {
   return undefined;
 }
 
+/** Stable opaque row identity for one Worker result generation. */
+export function workerDerivativeId(jobId: string, generation: number): string {
+  const suffix = generation === 0 ? '' : `-g${generation}`;
+  const direct = `derivative-${jobId}${suffix}`;
+  if (direct.length <= 128) return direct;
+  return `derivative-${createHash('sha256').update(jobId).digest('hex').slice(0, 48)}-g${generation}`;
+}
+
+export function matchesWorkerDerivativeCompletion(
+  derivative: MediaDerivativeRecord,
+  job: Job,
+  receipt: WorkerResultReceipt,
+): boolean {
+  const kind = derivativeKindForJob(job.type);
+  const descriptor = 'descriptor' in receipt ? receipt.descriptor : undefined;
+  const durationUs =
+    descriptor !== undefined && 'durationUs' in descriptor ? descriptor.durationUs : undefined;
+  return (
+    kind !== undefined &&
+    derivative.id === workerDerivativeId(job.id, job.generation) &&
+    derivative.projectId === job.projectId &&
+    derivative.assetId === job.assetId &&
+    derivative.kind === kind &&
+    derivative.sha256 === receipt.sha256 &&
+    derivative.bytes === receipt.bytes &&
+    descriptor !== undefined &&
+    derivative.descriptor.mimeType === descriptor.mimeType &&
+    derivative.descriptor.width === descriptor.width &&
+    derivative.descriptor.height === descriptor.height &&
+    derivative.descriptor.durationUs === durationUs &&
+    derivative.availability === 'available-cloud' &&
+    derivative.locations.some((location) => location.kind === 'private-object')
+  );
+}
+
 function requiresSourceAsset(type: string): boolean {
   return (
     type === 'image.comfy' ||
@@ -1876,6 +1947,7 @@ function validatedOpaqueIds(values: readonly string[]): readonly string[] {
 
 function derivativeOf(
   jobId: string,
+  generation: number,
   workerRef: string,
   receipt: WorkerResultReceipt,
   verifiedAt: number,
@@ -1883,10 +1955,19 @@ function derivativeOf(
   return {
     jobId,
     workerRef,
-    resultRef: `derivative:${jobId}`,
+    resultRef:
+      receipt.kind === 'fixture.thumbnail'
+        ? `derivative:${jobId}`
+        : workerDerivativeResultRef(jobId, generation),
     verifiedAt,
     ...receipt,
   };
+}
+
+/** Browser-safe generated-asset identity scoped to the Worker generation. */
+function workerDerivativeResultRef(jobId: string, generation: number): string {
+  const id = workerDerivativeId(jobId, generation);
+  return `derivative:${id.slice('derivative-'.length)}`;
 }
 
 export function validateAssetRegistration(value: AssetRegistration): void {

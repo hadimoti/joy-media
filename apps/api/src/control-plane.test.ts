@@ -3,8 +3,82 @@ import {
   LocalControlPlane,
   MAX_WORKER_ATTEMPTS,
   SHARED_LIBRARY_OWNER_ID,
+  workerDerivativeId,
 } from './control-plane.js';
 describe('local control plane', () => {
+  it('requires a registered cloud derivative for each source-job generation', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'derivative-owner' };
+    api.createProject(owner, 'derivative-project', 'Derivatives');
+    api.registerAsset(owner, 'derivative-project', assetRegistration());
+    api.pairWorker(owner, 'derivative-worker');
+    api.helloWorker('derivative-worker', ['asset.thumbnail'], ['asset-1'], 100);
+    api.enqueueAssetThumbnail(owner, 'derivative-job', 'derivative-project', 'asset-1', 101);
+    const firstLease = api.lease('derivative-worker', 102);
+    const receipt = {
+      kind: 'asset.thumbnail' as const,
+      assetId: 'asset-1',
+      sha256: 'b'.repeat(64),
+      bytes: 1024,
+      localRef: 'thumb-derivative-job-bbbbbbbbbbbbbbbb',
+      descriptor: { mimeType: 'image/jpeg' as const, width: 640, height: 360 },
+    };
+
+    expect(() =>
+      api.complete('derivative-worker', 'derivative-job', 103, receipt, firstLease?.leaseToken),
+    ).toThrow(expect.objectContaining({ code: 'DERIVATIVE_NOT_READY' }));
+    expect(
+      api.registerWorkerCloudDerivative(
+        'derivative-worker',
+        'derivative-job',
+        {
+          id: 'ignored-client-id',
+          assetId: receipt.assetId,
+          kind: 'thumbnail',
+          profile: 'jpeg-640',
+          sha256: receipt.sha256,
+          bytes: receipt.bytes,
+          descriptor: receipt.descriptor,
+          availability: 'available-cloud',
+          locations: [{ kind: 'private-object', ref: 'derivative-object' }],
+        },
+        103,
+        firstLease?.leaseToken,
+      ).id,
+    ).toBe(workerDerivativeId('derivative-job', 0));
+    expect(
+      api.complete('derivative-worker', 'derivative-job', 104, receipt, firstLease?.leaseToken),
+    ).toMatchObject({ state: 'completed', generation: 0 });
+
+    api.retry(owner, 'derivative-project', 'derivative-job', 105);
+    const retryLease = api.lease('derivative-worker', 106);
+    expect(() =>
+      api.complete('derivative-worker', 'derivative-job', 107, receipt, retryLease?.leaseToken),
+    ).toThrow(expect.objectContaining({ code: 'DERIVATIVE_NOT_READY' }));
+    expect(
+      api.registerWorkerCloudDerivative(
+        'derivative-worker',
+        'derivative-job',
+        {
+          id: 'ignored-client-id',
+          assetId: receipt.assetId,
+          kind: 'thumbnail',
+          profile: 'jpeg-640',
+          sha256: receipt.sha256,
+          bytes: receipt.bytes,
+          descriptor: receipt.descriptor,
+          availability: 'available-cloud',
+          locations: [{ kind: 'private-object', ref: 'derivative-object' }],
+        },
+        108,
+        retryLease?.leaseToken,
+      ).id,
+    ).toBe(workerDerivativeId('derivative-job', 1));
+    expect(
+      api.complete('derivative-worker', 'derivative-job', 109, receipt, retryLease?.leaseToken),
+    ).toMatchObject({ state: 'completed', generation: 1 });
+  });
+
   it('leases private mask parameters only to a capable Worker with the source asset', () => {
     const api = new LocalControlPlane();
     const owner = { id: 'owner-mask' };

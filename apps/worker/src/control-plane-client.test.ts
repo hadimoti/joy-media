@@ -121,10 +121,23 @@ describe('WorkerControlPlaneClient', () => {
   });
 
   it('pairs and completes a job over the real versioned HTTP transport', async () => {
+    const objects = new Set<string>();
     const server = createControlPlaneHttpServer({
       controlPlane: new LocalControlPlane(),
       authentication: { authenticate: () => ({ id: 'joy-user-1' }) },
       mediaAuth: stubMediaAuth,
+      privateObjectStore: {
+        put: async (descriptor) => {
+          objects.add(descriptor.ref);
+        },
+        get: async (descriptor) => {
+          if (!objects.has(descriptor.ref)) throw new Error('private object missing');
+          return new Uint8Array(1024);
+        },
+        remove: async (ref) => {
+          objects.delete(ref);
+        },
+      },
     });
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
@@ -177,6 +190,12 @@ describe('WorkerControlPlaneClient', () => {
       );
       const lease = await client.lease();
       expect(lease).toMatchObject({ id: 'job-1' });
+      await client.uploadDerivative(
+        'job-1',
+        realThumbnailReceipt(),
+        new Uint8Array(1024),
+        lease?.leaseToken,
+      );
       await expect(
         client.complete('job-1', realThumbnailReceipt(), lease?.leaseToken),
       ).resolves.toBeUndefined();

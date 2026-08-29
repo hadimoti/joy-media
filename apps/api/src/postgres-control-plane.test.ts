@@ -55,7 +55,7 @@ describe('PostgresControlPlane', () => {
       assetId: 'asset-1',
       kind: 'thumbnail' as const,
       profile: 'jpeg-640',
-      sha256: 'b'.repeat(64),
+      sha256: 'a'.repeat(64),
       bytes: 1024,
       descriptor: { mimeType: 'image/jpeg', width: 640, height: 360 },
       availability: 'available-cloud' as const,
@@ -155,6 +155,24 @@ describe('PostgresControlPlane', () => {
         'worker-1',
         'job-1',
         106,
+        realThumbnailReceipt(),
+        retriedLease?.leaseToken,
+      ),
+    ).rejects.toMatchObject({ code: 'DERIVATIVE_NOT_READY' });
+    await expect(
+      afterCompletionRestart.registerWorkerCloudDerivative(
+        'worker-1',
+        'job-1',
+        workerDerivative,
+        106,
+        retriedLease?.leaseToken,
+      ),
+    ).resolves.toMatchObject({ id: 'derivative-job-1-g1' });
+    await expect(
+      afterCompletionRestart.complete(
+        'worker-1',
+        'job-1',
+        107,
         realThumbnailReceipt(),
         retriedLease?.leaseToken,
       ),

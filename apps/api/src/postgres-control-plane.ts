@@ -37,6 +37,8 @@ import {
   validateSortName,
   validateWorkerMaxAttempts,
   matchesCloudDerivativeRegistration,
+  matchesWorkerDerivativeCompletion,
+  workerDerivativeId,
 } from './control-plane.js';
 import { runPostgresMigrations } from './postgres-migrations.js';
 import { validateProjectDocumentRecord } from './project-document-store.js';
@@ -1233,15 +1235,15 @@ export class PostgresControlPlane implements ControlPlane {
     now = Date.now(),
     leaseToken?: string,
   ): Promise<MediaDerivativeRecord> {
-    validateCloudDerivativeRegistration(derivative);
     const result = await this.pool.query<{
       readonly project_id: string;
       readonly asset_id: string | null;
       readonly type: string;
+      readonly generation: number;
       readonly owner_id: string;
       readonly asset_sync_enabled: boolean;
     }>(
-      `SELECT jobs.project_id, jobs.asset_id, jobs.type, workers.owner_id, projects.asset_sync_enabled
+      `SELECT jobs.project_id, jobs.asset_id, jobs.type, jobs.generation, workers.owner_id, projects.asset_sync_enabled
        FROM jobs JOIN workers ON workers.id = jobs.lease_owner
        JOIN projects ON projects.id = jobs.project_id
        WHERE jobs.id = $1 AND jobs.state = 'leased' AND jobs.lease_owner = $2
@@ -1249,14 +1251,56 @@ export class PostgresControlPlane implements ControlPlane {
       [jobId, workerId, new Date(now), leaseToken ?? ''],
     );
     const job = result.rows[0];
+    const canonicalDerivative =
+      job === undefined
+        ? derivative
+        : { ...derivative, id: workerDerivativeId(jobId, job.generation) };
     if (
       job === undefined ||
-      job.asset_id !== derivative.assetId ||
-      derivativeKindForJob(job.type) !== derivative.kind ||
+      job.asset_id !== canonicalDerivative.assetId ||
+      derivativeKindForJob(job.type) !== canonicalDerivative.kind ||
       !job.asset_sync_enabled
     )
       throw new ControlPlaneError('DERIVATIVE_UPLOAD_DENIED', jobId);
-    return this.registerDerivative({ id: job.owner_id }, job.project_id, derivative, now, true);
+    validateCloudDerivativeRegistration(canonicalDerivative);
+    return this.registerDerivative(
+      { id: job.owner_id },
+      job.project_id,
+      canonicalDerivative,
+      now,
+      true,
+    );
+  }
+
+  async workerCloudDerivativeForCompletion(
+    workerId: string,
+    jobId: string,
+    receipt: WorkerResultReceipt,
+    now = Date.now(),
+    leaseToken?: string,
+  ): Promise<MediaDerivativeRecord> {
+    const jobResult = await this.pool.query<JobRow>(
+      `SELECT jobs.* FROM jobs
+       JOIN workers ON workers.id = jobs.lease_owner
+       WHERE jobs.id = $1 AND jobs.state = 'leased' AND jobs.lease_owner = $2
+         AND jobs.lease_expires_at > $3 AND jobs.lease_token = $4
+         AND workers.revoked_at IS NULL`,
+      [jobId, workerId, new Date(now), leaseToken ?? ''],
+    );
+    const jobRow = jobResult.rows[0];
+    if (jobRow === undefined) throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
+    const job = jobOf(jobRow);
+    const derivativeResult = await this.pool.query<MediaDerivativeRow>(
+      'SELECT * FROM media_derivatives WHERE id = $1 AND project_id = $2 AND asset_id = $3',
+      [workerDerivativeId(job.id, job.generation), job.projectId, job.assetId ?? ''],
+    );
+    const row = derivativeResult.rows[0];
+    if (
+      row === undefined ||
+      !matchesWorkerDerivativeCompletion(mediaDerivativeOf(row), job, receipt)
+    )
+      throw new ControlPlaneError('DERIVATIVE_NOT_READY', jobId);
+    return mediaDerivativeOf(row);
   }
 
   async derivativesForAsset(
@@ -1642,6 +1686,33 @@ export class PostgresControlPlane implements ControlPlane {
     const isUpscale = receipt?.kind === 'upscale.image' || receipt?.kind === 'upscale.video';
     const storesAsset = isThumb || isGpu || isMask || isUpscale;
     return this.transaction(async (client) => {
+      // Lock the leased row while checking its generation's durable cloud
+      // derivative.  The completion update below is intentionally not allowed
+      // to race a retry/re-lease or to project a receipt that was never stored.
+      const leasedResult = await client.query<JobRow>(
+        `SELECT * FROM jobs
+         WHERE id = $1 AND state = 'leased' AND lease_owner = $2
+           AND lease_expires_at > $3 AND lease_token = $4
+         FOR UPDATE`,
+        [jobId, workerId, new Date(now), leaseToken ?? ''],
+      );
+      const leasedRow = leasedResult.rows[0];
+      if (leasedRow === undefined) throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
+      const leasedJob = jobOf(leasedRow);
+      if (derivativeKindForJob(leasedJob.type) !== undefined) {
+        const expectedId = workerDerivativeId(leasedJob.id, leasedJob.generation);
+        const derivativeResult = await client.query<MediaDerivativeRow>(
+          'SELECT * FROM media_derivatives WHERE id = $1 AND project_id = $2 AND asset_id = $3',
+          [expectedId, leasedJob.projectId, leasedJob.assetId ?? ''],
+        );
+        const stored = derivativeResult.rows[0];
+        if (
+          stored === undefined ||
+          receipt === undefined ||
+          !matchesWorkerDerivativeCompletion(mediaDerivativeOf(stored), leasedJob, receipt)
+        )
+          throw new ControlPlaneError('DERIVATIVE_NOT_READY', jobId);
+      }
       const result = await client.query<JobRow>(
         `UPDATE jobs SET state = 'completed', progress = 100, cancel_requested = false,
              result_kind = $4, result_sha256 = $5, result_bytes = $6,
@@ -1651,8 +1722,8 @@ export class PostgresControlPlane implements ControlPlane {
          WHERE id = $1 AND state = 'leased' AND lease_owner = $2 AND lease_expires_at > $3
            AND (type <> 'fixture.thumbnail' OR $4 = 'fixture.thumbnail')
            AND (type <> 'asset.thumbnail' OR ($4 = 'asset.thumbnail' AND asset_id = $10))
-           AND (type <> 'image.comfy' OR $4 = 'image.comfy')
-           AND (type <> 'audio.ml-denoise' OR $4 = 'audio.ml-denoise')
+           AND (type <> 'image.comfy' OR ($4 = 'image.comfy' AND asset_id = $10))
+           AND (type <> 'audio.ml-denoise' OR ($4 = 'audio.ml-denoise' AND asset_id = $10))
             AND (type <> 'mask.image' OR ($4 = 'mask.image' AND asset_id = $10))
             AND (type <> 'mask.video' OR ($4 = 'mask.video' AND asset_id = $10))
             AND (type <> 'upscale.image' OR ($4 = 'upscale.image' AND asset_id = $10))
@@ -1666,7 +1737,11 @@ export class PostgresControlPlane implements ControlPlane {
           receipt?.kind ?? null,
           receipt?.sha256 ?? null,
           receipt?.bytes ?? null,
-          receipt === undefined ? null : `derivative:${jobId}`,
+          receipt === undefined
+            ? null
+            : receipt?.kind === 'fixture.thumbnail'
+              ? `derivative:${jobId}`
+              : `derivative:${workerDerivativeId(leasedJob.id, leasedJob.generation).slice('derivative-'.length)}`,
           receipt === undefined ? null : workerId,
           receipt === undefined ? null : new Date(now),
           storesAsset && receipt !== undefined ? receipt.assetId : null,
