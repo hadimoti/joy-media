@@ -403,6 +403,17 @@ the first run still waits for one-time approval, after which the authenticated e
 connected Worker on open. A real source-bound lease/upload, retained inspection, Motion placement,
 and final release evidence remain open until that owner-only pairing step is completed.
 
+### LIVE-45 — final promotion evidence for the headless-worker tranche (2026-08-29)
+
+Release `252393edf0041c00a47cc521d1bcdf1f549e0ed5` is active on both canonical public hostnames and
+its origin. The API `/live`/`/ready` checks, database/object-store readiness, release identity, and
+zero-restart service state all pass. Full repository tests pass (3,603 passed, 2 documented skips),
+CodeRabbit reports zero findings, and the authenticated browser recheck cycles all nine Effects
+categories plus the 3D surface without a crash, forced navigation, or console error. The release gate
+therefore has only two intentional failures: missing source-bound `authenticated-editor-1.0` evidence
+and its required `sourceProvenance`. Those cannot be manufactured; they require the owner-approved
+Worker session and a real lease/upload/inspection/Motion journey.
+
 ### LIVE-29 — editor race hardening (2026-08-29)
 
 The final source audit closed two deterministic editor races. `syncProjectDocumentBinding` now
