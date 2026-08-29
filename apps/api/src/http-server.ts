@@ -2574,7 +2574,9 @@ function respondError(response: ServerResponse, error: unknown): void {
       error.code === 'MISTRAL_UNAUTHORIZED' ||
       error.code === 'MISTRAL_UNAVAILABLE'
         ? 503
-        : error.code.endsWith('APPROVAL_REQUIRED') || error.code === 'REMOTE_PROCESSING_BLOCKED'
+        : error.code.endsWith('APPROVAL_REQUIRED') ||
+            error.code === 'REMOTE_PROCESSING_BLOCKED' ||
+            error.code === 'IDEMPOTENCY_CONFLICT'
           ? 409
           : 502;
     respondJson(response, status, { error: { code: error.code, message: error.message } });

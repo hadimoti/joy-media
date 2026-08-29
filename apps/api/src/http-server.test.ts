@@ -379,6 +379,49 @@ describe('control-plane HTTP transport', () => {
     expect(JSON.stringify(first.body)).not.toContain('Do not persist this prompt.');
   });
 
+  it('rejects a reused Mistral idempotency key when the request body changes', async () => {
+    let calls = 0;
+    const registry = new MistralProviderRegistry(
+      'test-only-mistral-secret',
+      new MemoryMistralInvocationLedger(),
+      async () => {
+        calls++;
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: 'Guarded result.' } }],
+            usage: { prompt_tokens: 3, completion_tokens: 4 },
+          }),
+        );
+      },
+    );
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) }, undefined, registry);
+    expect(
+      await request(origin, 'POST', '/v1/providers/mistral/complete', {
+        model: 'mistral-small-latest',
+        messages: [{ role: 'user', content: 'First request.' }],
+        idempotencyKey: 'mistral-conflict-1',
+        privacyMode: 'ask-before-remote',
+        approvedRemoteProcessing: true,
+        approvedSpend: true,
+      }),
+    ).toMatchObject({ status: 200 });
+
+    expect(
+      await request(origin, 'POST', '/v1/providers/mistral/complete', {
+        model: 'mistral-small-latest',
+        messages: [{ role: 'user', content: 'Second request.' }],
+        idempotencyKey: 'mistral-conflict-1',
+        privacyMode: 'ask-before-remote',
+        approvedRemoteProcessing: true,
+        approvedSpend: true,
+      }),
+    ).toMatchObject({
+      status: 409,
+      body: { error: { code: 'IDEMPOTENCY_CONFLICT' } },
+    });
+    expect(calls).toBe(1);
+  });
+
   it('rejects an oversized Cloud denoise JSON body before decoding or spawning ffmpeg', async () => {
     const origin = await start({ authenticate: () => ({ id: 'owner' }) });
     const response = await request(origin, 'POST', '/v1/providers/audio/denoise', {

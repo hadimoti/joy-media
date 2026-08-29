@@ -42,6 +42,7 @@ export class MistralProviderError extends Error {
       | 'REMOTE_PROCESSING_BLOCKED'
       | 'REMOTE_PROCESSING_APPROVAL_REQUIRED'
       | 'PROVIDER_SPEND_APPROVAL_REQUIRED'
+      | 'IDEMPOTENCY_CONFLICT'
       | 'MISTRAL_UNAUTHORIZED'
       | 'MISTRAL_UNAVAILABLE'
       | 'MISTRAL_REQUEST_FAILED',
@@ -66,7 +67,8 @@ export class MemoryMistralInvocationLedger implements MistralInvocationLedger {
   async record(actorId: string, result: CapabilityResult): Promise<CapabilityResult> {
     const key = `${actorId}:${result.provenance.idempotencyKey}`;
     const existing = this.#records.get(key);
-    if (existing !== undefined) return existing;
+    if (existing !== undefined)
+      return ensureMatchingInvocation(existing, result.provenance.requestHash);
     this.#records.set(key, result);
     return result;
   }
@@ -122,13 +124,17 @@ export class PostgresMistralInvocationLedger implements MistralInvocationLedger 
     if (stored.rows[0] !== undefined) return stored.rows[0].result;
     const existing = await this.find(actorId, result.provenance.idempotencyKey);
     if (existing === undefined) throw new Error('provider invocation record was not persisted');
-    return existing;
+    return ensureMatchingInvocation(existing, result.provenance.requestHash);
   }
 }
 
 export class MistralProviderRegistry {
   readonly #provider;
   readonly #lifecycle = new ProviderLifecycle();
+  readonly #inFlight = new Map<
+    string,
+    { readonly requestHash: string; readonly promise: Promise<CapabilityResult> }
+  >();
 
   constructor(
     apiKey: string | undefined,
@@ -183,8 +189,20 @@ export class MistralProviderRegistry {
         'Provider spend requires explicit approval.',
       );
     }
+    const requestHash = mistralCompletionRequestHash(input);
     const previous = await this.ledger.find(actorId, input.idempotencyKey);
-    if (previous !== undefined) return previous;
+    if (previous !== undefined) return ensureMatchingInvocation(previous, requestHash);
+    const invocationKey = `${actorId}:${input.idempotencyKey}`;
+    const running = this.#inFlight.get(invocationKey);
+    if (running !== undefined) {
+      if (running.requestHash !== requestHash) {
+        throw new MistralProviderError(
+          'IDEMPOTENCY_CONFLICT',
+          'idempotencyKey was already used for different Mistral input',
+        );
+      }
+      return running.promise;
+    }
 
     const request = {
       requestVersion: 1 as const,
@@ -219,7 +237,34 @@ export class MistralProviderRegistry {
         'Remote processing requires explicit approval.',
       );
     }
+    const promise = this.#completeRemote(actorId, request);
+    this.#inFlight.set(invocationKey, { requestHash, promise });
+    try {
+      return await promise;
+    } finally {
+      const current = this.#inFlight.get(invocationKey);
+      if (current?.promise === promise) this.#inFlight.delete(invocationKey);
+    }
+  }
 
+  async #completeRemote(
+    actorId: string,
+    request: {
+      readonly requestVersion: 1;
+      readonly capability: 'llm.complete';
+      readonly input: {
+        readonly model: string;
+        readonly messages: readonly MistralChatMessage[];
+        readonly maxTokens?: number;
+        readonly temperature?: number;
+      };
+      readonly constraints: {
+        readonly executionPreference: readonly ['remote'];
+        readonly modelAllowlist: readonly string[];
+      };
+      readonly idempotencyKey: string;
+    },
+  ): Promise<CapabilityResult> {
     this.#lifecycle.recordJobStart(MISTRAL_PROVIDER_ID);
     try {
       const result = await this.#provider.invoke('llm.complete', request.input, request);
@@ -262,4 +307,32 @@ export function createRuntimeMistralProviderRegistry(
   } = {},
 ): MistralProviderRegistry {
   return new MistralProviderRegistry(options.apiKey, options.ledger, options.fetchImpl);
+}
+
+function ensureMatchingInvocation(result: CapabilityResult, requestHash: string): CapabilityResult {
+  if (result.provenance.requestHash !== requestHash) {
+    throw new MistralProviderError(
+      'IDEMPOTENCY_CONFLICT',
+      'idempotencyKey was already used for different Mistral input',
+    );
+  }
+  return result;
+}
+
+function mistralCompletionRequestHash(input: MistralCompletionRequest): string {
+  const text = JSON.stringify({
+    input: {
+      model: input.model,
+      messages: input.messages,
+      ...(input.maxTokens === undefined ? {} : { maxTokens: input.maxTokens }),
+      ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
+    },
+    idempotencyKey: input.idempotencyKey,
+  });
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `fnv1a-${(hash >>> 0).toString(16)}`;
 }
