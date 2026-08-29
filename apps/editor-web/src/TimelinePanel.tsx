@@ -735,7 +735,9 @@ export function TimelinePanel({
   // Dockview can remount a clip after its first selection click. Keep the
   // double-click window at the panel level so a composition still opens when
   // the browser reports two independent detail=1 events.
-  const compoundClickRef = useRef<{ readonly clipId: string; readonly at: number } | undefined>();
+  const compoundClickRef = useRef<{ readonly clipId: string; readonly at: number } | undefined>(
+    undefined,
+  );
   // §6.2: collapsed by default, so standard editing is visually unchanged.
   const [dataLanesOpen, setDataLanesOpen] = useState(false);
   const { selectedMarkerId, selectMarker, removeMarker } = useTimelineMarkerSelection(markers, {
