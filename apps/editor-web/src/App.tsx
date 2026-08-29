@@ -972,6 +972,10 @@ export function App() {
   );
 }
 
+const CONTROL_PLANE_PROJECT_ENSURE_MAX_ATTEMPTS = 8;
+const CONTROL_PLANE_PROJECT_ENSURE_RETRY_INITIAL_MS = 2_000;
+const CONTROL_PLANE_PROJECT_ENSURE_RETRY_MAX_MS = 60_000;
+
 function EditorWorkspace({
   projectId,
   onBackToLibrary,
@@ -1148,6 +1152,8 @@ function EditorWorkspace({
   const sessionRef = useRef<EditorSession | null>(null);
   const remoteDocumentHydrationRef = useRef<Set<string>>(new Set());
   const remoteDocumentHydrationFailuresRef = useRef<Map<string, number>>(new Map());
+  const controlPlaneProjectEnsureFailuresRef = useRef<Map<string, number>>(new Map());
+  const [controlPlaneProjectEnsureRetry, setControlPlaneProjectEnsureRetry] = useState(0);
   const [remoteDocumentBootstrapProjectId, setRemoteDocumentBootstrapProjectId] = useState<
     string | undefined
   >(undefined);
@@ -1393,21 +1399,48 @@ function EditorWorkspace({
   const [controlPlaneProjectReady, setControlPlaneProjectReady] = useState(false);
   useEffect(() => {
     let cancelled = false;
+    let retryTimer: number | undefined;
+    const controlPlaneProjectId = controlPlaneProject.controlPlaneProjectId;
     setControlPlaneProjectReady(false);
     if (joySession.kind !== 'ready') return () => undefined;
     void mediaControlPlaneClient
       .ensureProject(controlPlaneProject.controlPlaneProjectId, controlPlaneProject.title)
       .then(() => {
-        if (!cancelled) setControlPlaneProjectReady(true);
+        if (cancelled) return;
+        controlPlaneProjectEnsureFailuresRef.current.delete(controlPlaneProjectId);
+        setControlPlaneProjectReady(true);
       })
       .catch(() => {
-        // Keep API consumers gated until the bounded retry path can establish
-        // this project's durable control-plane row.
+        if (cancelled) return;
+        const failures =
+          (controlPlaneProjectEnsureFailuresRef.current.get(controlPlaneProjectId) ?? 0) + 1;
+        controlPlaneProjectEnsureFailuresRef.current.set(controlPlaneProjectId, failures);
+        if (failures >= CONTROL_PLANE_PROJECT_ENSURE_MAX_ATTEMPTS) {
+          showToast(
+            'Cloud project setup is temporarily unavailable. Reload to retry when the service recovers.',
+            'error',
+          );
+          return;
+        }
+        const retryDelayMs = Math.min(
+          CONTROL_PLANE_PROJECT_ENSURE_RETRY_INITIAL_MS * 2 ** Math.max(0, failures - 1),
+          CONTROL_PLANE_PROJECT_ENSURE_RETRY_MAX_MS,
+        );
+        retryTimer = window.setTimeout(() => {
+          if (!cancelled) setControlPlaneProjectEnsureRetry((retry) => retry + 1);
+        }, retryDelayMs);
       });
     return () => {
       cancelled = true;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
     };
-  }, [controlPlaneProject.controlPlaneProjectId, controlPlaneProject.title, joySession.kind]);
+  }, [
+    controlPlaneProject.controlPlaneProjectId,
+    controlPlaneProject.title,
+    controlPlaneProjectEnsureRetry,
+    joySession.kind,
+    showToast,
+  ]);
   useEffect(() => {
     if (!controlPlaneProjectReady || joySession.kind !== 'ready') return;
     const controlPlaneProjectId = controlPlaneProject.controlPlaneProjectId;
