@@ -98,6 +98,7 @@ export class ProjectDocumentAutosync {
     }
 
     const entry = this.entryFor(binding, ownerKey);
+    if (result.kind === 'missing') return result;
     this.clearTimer(entry);
     entry.queued = undefined;
     entry.failures = 0;

@@ -32,10 +32,12 @@ import {
   SkipBackIcon,
   SkipForwardIcon,
   SoloIcon,
+  SpeakerOnIcon,
   TrashIcon,
   ZoomInIcon,
   ZoomOutIcon,
   MarkerIcon,
+  PlusIcon,
   TimelineMarkerIcon,
   CloseIcon,
   TimelineScriptTrackIcon,
@@ -429,9 +431,17 @@ function TimelineClip({
         const drag = dragRef.current;
         setDragPx(undefined);
         if (drag === null || !drag.moved) return;
-        const targetTrackId = document
-          .elementFromPoint(event.clientX, event.clientY)
-          ?.closest<HTMLElement>('[data-track-id]')?.dataset.trackId;
+        const hitTrack = document
+          .elementsFromPoint(event.clientX, event.clientY)
+          .map((element) => element.closest<HTMLElement>('[data-track-id]'))
+          .find((element): element is HTMLElement => element?.dataset.trackId !== undefined);
+        const fallbackTrack = Array.from(
+          document.querySelectorAll<HTMLElement>('[data-track-id]'),
+        ).find((element) => {
+          const rect = element.getBoundingClientRect();
+          return event.clientY >= rect.top && event.clientY <= rect.bottom;
+        });
+        const targetTrackId = (hitTrack ?? fallbackTrack)?.dataset.trackId;
         onMove(clip.id, dropTimeUs(event.clientX - drag.originX), targetTrackId);
       }}
       onPointerCancel={() => {
@@ -1442,6 +1452,35 @@ export function TimelinePanel({
     dispatchSplitAt(trackId, clipId, playheadUs);
   };
 
+  const addTrack = (family: ProfessionalTrackFamily) => {
+    const order =
+      composition.tracks.reduce((highest, track) => Math.max(highest, track.order), -1) + 1;
+    const familyIndex =
+      composition.tracks.filter((track) => timelineTrackFamily(track, elementKinds) === family)
+        .length + 1;
+    const trackId = nextProfessionalTrackId(composition.tracks, family);
+    onDispatch({
+      label: `Add ${family === 'audio' ? 'audio' : 'visual'} track`,
+      commands: [
+        {
+          type: 'timeline.addTrack',
+          payload: {
+            compositionId: composition.id,
+            track: {
+              id: trackId,
+              kind: 'video',
+              family,
+              name: professionalTrackName(family, familyIndex),
+              order,
+              enabled: true,
+              clips: [],
+            },
+          },
+        },
+      ],
+    });
+  };
+
   const dispatchDuplicate = (trackId: string, clip: Clip) => {
     const source = composition.tracks.find((t) => t.id === trackId);
     if (source === undefined || source.locked === true) return;
@@ -2077,6 +2116,26 @@ export function TimelinePanel({
               <MarkerIcon />
             </button>
           )}
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Add video track"
+            title="Add video track"
+            data-guide="Add video track"
+            onClick={() => addTrack('visual')}
+          >
+            <PlusIcon />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Add audio track"
+            title="Add audio track"
+            data-guide="Add audio track"
+            onClick={() => addTrack('audio')}
+          >
+            <SpeakerOnIcon />
+          </button>
         </div>
 
         <span className="timeline-toolbar-sep" aria-hidden="true" />

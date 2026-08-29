@@ -46,7 +46,9 @@ test.describe('WP-29 R5 batch B — shell and timeline gestures', () => {
     await expect(tracks).toHaveCount(3);
     const clip = page.locator('.timeline-clip[data-clip-id]').first();
     const clipId = await clip.getAttribute('data-clip-id');
-    const targetLane = tracks.nth(2).locator('.timeline-lane[data-track-id]');
+    // Visual rows are displayed top-to-bottom by compositing order; the newly
+    // added V3 row is therefore the first visible row, not the last.
+    const targetLane = tracks.nth(0).locator('.timeline-lane[data-track-id]');
     const sourceBox = await clip.boundingBox();
     const targetBox = await targetLane.boundingBox();
     expect(sourceBox).not.toBeNull();
@@ -58,7 +60,7 @@ test.describe('WP-29 R5 batch B — shell and timeline gestures', () => {
     await page.mouse.down();
     await page.mouse.move(targetBox!.x + 40, targetBox!.y + targetBox!.height / 2, { steps: 8 });
     await page.mouse.up();
-    await expect(tracks.nth(2).locator(`.timeline-clip[data-clip-id="${clipId}"]`)).toHaveCount(1);
+    await expect(tracks.nth(0).locator(`.timeline-clip[data-clip-id="${clipId}"]`)).toHaveCount(1);
     await recordEvidence(testInfo, {
       caseId: 32,
       functional: 'PASS',

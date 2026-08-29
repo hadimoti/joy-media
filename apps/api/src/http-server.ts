@@ -1006,6 +1006,15 @@ async function route(
       return;
     }
     if (result.kind === 'not-found') {
+      // Browser bootstrap treats an empty document as a normal first-run
+      // state. Keep the historical 404 contract for direct callers while
+      // allowing the authenticated editor to receive a non-error empty
+      // response (so monitoring and browser telemetry do not report a false
+      // failure during project creation).
+      if (url.searchParams.get('allowMissing') === 'true') {
+        respondJson(response, 200, { data: null });
+        return;
+      }
       respondJson(response, 404, { error: { code: 'PROJECT_DOCUMENT_NOT_FOUND' } });
       return;
     }

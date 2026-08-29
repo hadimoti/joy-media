@@ -269,7 +269,7 @@ test.describe('WP-32 real-project workflow acceptance', () => {
         await trimEnd.press('Shift+ArrowLeft');
         await trimEnd.press('Shift+ArrowLeft');
         for (let step = 0; step < 5; step += 1) await trimEnd.press('ArrowLeft');
-        await expect(videoClip).toHaveAttribute('aria-label', /, 0\.5s$/);
+        await expect(videoClip).toHaveAttribute('aria-label', /, 0\.5s, /);
         await page.getByRole('button', { name: 'Duplicate clip' }).click();
         await expect(page.locator('.timeline-clip[data-clip-id]')).toHaveCount(4);
       });

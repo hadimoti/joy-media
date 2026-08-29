@@ -12,12 +12,13 @@ export interface ProjectHydrationSession {
   synchronizeVisualProject(next: JoyProjectV1): JoyProjectV1;
 }
 
-export type LoadProjectDocument = () => Promise<BrowserProjectDocument>;
+export type LoadProjectDocument = () => Promise<BrowserProjectDocument | undefined>;
 
 export type ProjectHydrationResult =
   | { readonly kind: 'hydrated'; readonly revisionId: ProjectRevisionId }
   | { readonly kind: 'unchanged'; readonly revisionId: ProjectRevisionId }
-  | { readonly kind: 'local-changed'; readonly revisionId: ProjectRevisionId };
+  | { readonly kind: 'local-changed'; readonly revisionId: ProjectRevisionId }
+  | { readonly kind: 'missing' };
 
 /**
  * Applies a server document only when the local session is still at the exact
@@ -31,6 +32,7 @@ export async function hydrateProjectDocument(
 ): Promise<ProjectHydrationResult> {
   const localRevision = session.projectRevisionId;
   const remote = await load();
+  if (remote === undefined) return { kind: 'missing' };
   if (remote.projectId !== binding.controlPlaneProjectId) {
     throw new Error(
       `Project document response mismatch: expected projectId=${binding.controlPlaneProjectId}, got ${remote.projectId}`,

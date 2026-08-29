@@ -9,7 +9,6 @@ import {
   openPanel,
   openReferenceWorkspace,
   recordEvidence,
-  selectFirstTimelineClip,
 } from './wp29-r5-harness.js';
 
 interface CloudApplicationState {
@@ -79,6 +78,7 @@ async function readCloudApplicationState(
 async function offerAndPairWorker(
   page: Page,
   capabilities: readonly string[],
+  assetIds: readonly string[] = [],
 ): Promise<{ workerId: string; workerToken: string }> {
   const workerId = `worker-r5-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const pairingCode = `pair-${Math.random().toString(36).slice(2, 10)}`;
@@ -115,18 +115,18 @@ async function offerAndPairWorker(
   );
   const workerToken = claim.data.sessionToken;
   const hello = await page.evaluate(
-    async ({ workerId: id, workerToken: token, capabilities: caps }) => {
+    async ({ workerId: id, workerToken: token, capabilities: caps, assetIds: ids }) => {
       const response = await fetch(`/api/v1/workers/${encodeURIComponent(id)}/hello`, {
         method: 'POST',
         headers: {
           authorization: `Bearer ${token}`,
           'content-type': 'application/json',
         },
-        body: JSON.stringify({ capabilities: caps, assetIds: [] }),
+        body: JSON.stringify({ capabilities: caps, assetIds: ids }),
       });
       return response.status;
     },
-    { workerId, workerToken, capabilities },
+    { workerId, workerToken, capabilities, assetIds },
   );
   expect(hello).toBe(200);
   await page.getByRole('button', { name: 'Refresh jobs' }).click();
@@ -171,9 +171,14 @@ test.describe('WP-29 R5 batch D — Worker and audio execution routes', () => {
     await page
       .locator('.asset-card', { hasText: audioName })
       .first()
-      .dragTo(page.locator('.timeline-lane[data-track-id]').first(), {
-        targetPosition: { x: 70, y: 20 },
-      });
+      .dragTo(
+        page
+          .locator('.timeline-track[data-track-family="audio"] .timeline-lane[data-track-id]')
+          .first(),
+        {
+          targetPosition: { x: 70, y: 20 },
+        },
+      );
     await page.locator('.timeline-clip[data-clip-id]').first().click();
     await offerAndPairWorker(page, ['audio.ml-denoise']);
     await page.reload();
@@ -184,6 +189,9 @@ test.describe('WP-29 R5 batch D — Worker and audio execution routes', () => {
         .click();
     }
     await expect(page.getByRole('button', { name: 'File' })).toBeVisible();
+    // Selection is intentionally transient UI state; restore the audio target
+    // before routing an external Worker after the project reload.
+    await page.locator('.timeline-clip[data-clip-id]').first().click();
     await openPanel(page, 'Audio');
     await page.getByRole('tab', { name: 'Runtime' }).click();
     await expect(page.locator('.audio-runtime-cell', { hasText: 'Local Worker' })).toContainText(
@@ -214,7 +222,13 @@ test.describe('WP-29 R5 batch D — Worker and audio execution routes', () => {
     const outputAssetId = `cloud-denoise-${testInfo.project.name}`;
     const probe = await installDeterministicCloudDenoiseProvider(page, outputAssetId);
     await openReferenceWorkspace(page);
-    await selectFirstTimelineClip(page);
+    // The first rendered clip is the synthetic B-roll member. Use the
+    // reference Intro asset so the deterministic provider receives a real,
+    // allowlisted source and the assertion remains tied to asset-intro.
+    const introClip = page.locator('.timeline-clip').filter({ hasText: 'Intro' }).first();
+    await expect(introClip).toBeVisible();
+    await introClip.click();
+    await expect(introClip).toHaveAttribute('aria-pressed', 'true');
     await openPanel(page, 'Audio');
     await page.getByRole('button', { name: 'Review Voice Polish changes' }).click();
     const browserRun = page.getByRole('button', { name: 'Apply changes' });
@@ -308,7 +322,21 @@ test.describe('WP-29 R5 batch D — Worker and audio execution routes', () => {
     page,
   }, testInfo) => {
     await openDisposableWorkspace(page, `R5-89-${testInfo.project.name}`);
-    const { workerId } = await offerAndPairWorker(page, ['asset.thumbnail']);
+    const imageName = `wp29-case89-${testInfo.project.name}-${Date.now()}.png`;
+    await importMediaFixture(page, 'image.png', imageName);
+    await page
+      .locator('.asset-card', { hasText: imageName })
+      .first()
+      .dragTo(page.locator('.timeline-lane[data-track-id]').first(), {
+        targetPosition: { x: 80, y: 20 },
+      });
+    await page.locator('.timeline-clip[data-clip-id]').first().click();
+    const assetId = await page
+      .locator('.asset-card', { hasText: imageName })
+      .first()
+      .getAttribute('data-asset-id');
+    expect(assetId).toBeTruthy();
+    const { workerId } = await offerAndPairWorker(page, ['asset.thumbnail'], [assetId!]);
     const initialize = page.getByRole('button', { name: 'Initialize project' });
     if (await initialize.isVisible()) {
       await initialize.click();

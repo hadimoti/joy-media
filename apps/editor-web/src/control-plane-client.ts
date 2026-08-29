@@ -498,9 +498,15 @@ export class BrowserControlPlaneClient {
   async projectDocument(
     projectId: string,
     revisionId?: ProjectRevisionId,
-  ): Promise<BrowserProjectDocument> {
-    const query = revisionId === undefined ? '' : `?revisionId=${encodeURIComponent(revisionId)}`;
-    return this.get(`/v1/projects/${encodeURIComponent(projectId)}/document${query}`);
+  ): Promise<BrowserProjectDocument | undefined> {
+    const query =
+      revisionId === undefined
+        ? '?allowMissing=true'
+        : `?revisionId=${encodeURIComponent(revisionId)}`;
+    const document = await this.get<BrowserProjectDocument | null>(
+      `/v1/projects/${encodeURIComponent(projectId)}/document${query}`,
+    );
+    return document ?? undefined;
   }
   async enqueueAssetThumbnail(projectId: string, id: string, assetId: string): Promise<BrowserJob> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {

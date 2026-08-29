@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import {
   authenticate,
   importMediaFixture,
@@ -6,6 +6,58 @@ import {
   openPanel,
   recordEvidence,
 } from './wp29-r5-harness.js';
+
+async function pairThumbnailWorker(page: Page, assetId: string) {
+  const workerId = `worker-r5-100-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const pairingCode = `pair-${Math.random().toString(36).slice(2, 10)}`;
+  const offered = await page.evaluate(
+    async ({ workerId: id, pairingCode: code }) => {
+      const response = await fetch('/api/v1/worker-pair/offers', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workerId: id, pairingCode: code }),
+      });
+      return response.status;
+    },
+    { workerId, pairingCode },
+  );
+  expect(offered).toBe(201);
+  await openPanel(page, 'Jobs');
+  await page.getByRole('tab', { name: 'Pair' }).click();
+  await page.getByRole('textbox', { name: 'Worker ID', exact: true }).fill(workerId);
+  await page.getByRole('textbox', { name: 'One-time pairing code', exact: true }).fill(pairingCode);
+  await page.getByRole('button', { name: 'Approve' }).click();
+  await expect(page.locator('.jobs-panel .joy-panel-note')).toContainText('Pairing approved');
+  const workerToken = await page.evaluate(
+    async ({ workerId: id, pairingCode: code }) => {
+      const response = await fetch('/api/v1/worker-pair/claim', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workerId: id, pairingCode: code }),
+      });
+      const body = (await response.json()) as { data: { sessionToken: string } };
+      return body.data.sessionToken;
+    },
+    { workerId, pairingCode },
+  );
+  const hello = await page.evaluate(
+    async ({ workerId: id, workerToken: token, assetId: sourceAssetId }) => {
+      const response = await fetch(`/api/v1/workers/${encodeURIComponent(id)}/hello`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ capabilities: ['asset.thumbnail'], assetIds: [sourceAssetId] }),
+      });
+      return response.status;
+    },
+    { workerId, workerToken, assetId },
+  );
+  expect(hello).toBe(200);
+  await page.getByRole('button', { name: 'Refresh jobs' }).click();
+  return workerId;
+}
 
 test.describe('WP-29 R5 batch G — bulk assets and reload recovery', () => {
   test.beforeEach(async ({ page }) => authenticate(page));
@@ -56,6 +108,21 @@ test.describe('WP-29 R5 batch G — bulk assets and reload recovery', () => {
   }, testInfo) => {
     const title = `R5-100-${testInfo.project.name}-${Date.now()}`;
     await openDisposableWorkspace(page, title);
+    const imageName = `wp29-case100-${testInfo.project.name}-${Date.now()}.png`;
+    await importMediaFixture(page, 'image.png', imageName);
+    await page
+      .locator('.asset-card', { hasText: imageName })
+      .first()
+      .dragTo(page.locator('.timeline-lane[data-track-id]').first(), {
+        targetPosition: { x: 80, y: 20 },
+      });
+    await page.locator('.timeline-clip[data-clip-id]').first().click();
+    const assetId = await page
+      .locator('.asset-card', { hasText: imageName })
+      .first()
+      .getAttribute('data-asset-id');
+    expect(assetId).toBeTruthy();
+    await pairThumbnailWorker(page, assetId!);
     await openPanel(page, 'Jobs');
     const initialize = page.getByRole('button', { name: 'Initialize project' });
     if (await initialize.isVisible()) {

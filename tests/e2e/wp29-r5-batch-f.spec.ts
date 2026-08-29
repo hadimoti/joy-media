@@ -4,7 +4,6 @@ import {
   openPanel,
   openReferenceWorkspace,
   recordEvidence,
-  selectFirstTimelineClip,
   type R5Evidence,
 } from './wp29-r5-harness.js';
 
@@ -54,7 +53,13 @@ async function selectReferenceClip(page: Parameters<typeof openPanel>[0]): Promi
     await page.locator('.panel-tab[aria-label="Timeline"]').first().click();
   }
   await expect(timeline).toBeVisible();
-  await selectFirstTimelineClip(page);
+  // B-roll clips in the seeded timeline are intentionally media-only and do
+  // not have a visual-object target. Motion/Spatial authoring needs the
+  // object-backed Intro clip.
+  const introClip = page.locator('.timeline-clip').filter({ hasText: 'Intro' }).first();
+  await expect(introClip).toBeVisible();
+  await introClip.click();
+  await expect(introClip).toHaveAttribute('aria-pressed', 'true');
 }
 
 async function applyArcInPreset(page: Parameters<typeof openPanel>[0]): Promise<void> {

@@ -57,7 +57,7 @@ async function addFixtureVideo(page: Parameters<typeof authenticate>[0]): Promis
   await trimEnd.press('Shift+ArrowLeft');
   await trimEnd.press('Shift+ArrowLeft');
   for (let step = 0; step < 5; step += 1) await trimEnd.press('ArrowLeft');
-  await expect(timelineClip).toHaveAttribute('aria-label', /, 0\.5s$/);
+  await expect(timelineClip).toHaveAttribute('aria-label', /, 0\.5s, /);
 
   await expect
     .poll(() =>

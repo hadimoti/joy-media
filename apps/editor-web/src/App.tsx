@@ -298,6 +298,7 @@ import {
   ZoomInIcon,
 } from './icons.js';
 import { logoutJoySession, probeJoySession, type JoySessionState } from './identity.js';
+import { getStoredMediaToken } from './media-session.js';
 import {
   recoverInterruptedProjectExports,
   saveProjectExportHistory,
@@ -754,6 +755,8 @@ interface EditorPanelContextValue {
   readonly timelineProject: SpikeProject;
   readonly visualProject: JoyProjectV1;
   readonly controlPlaneProject: ControlPlaneProjectBinding;
+  /** Owner-authenticated project APIs are safe to call only after probing the session. */
+  readonly controlPlaneReady: boolean;
   /** Resolves an image's verified OPFS/cloud bytes for Monitor rendering. */
   readonly loadProjectAssetBlob: (assetId: string) => Promise<Blob | undefined>;
   readonly playback: PlaybackDiagnosticsSnapshot;
@@ -1375,7 +1378,11 @@ function EditorWorkspace({
     setAudioHydrated(true);
   }, [projectId, session]);
   const controlPlaneOwnerKey =
-    joySession.kind === 'ready' ? (joySession.subject ?? 'signed-in') : 'signed-out';
+    joySession.kind === 'ready'
+      ? (joySession.subject ?? 'signed-in')
+      : getStoredMediaToken(window.localStorage) !== undefined
+        ? 'signed-in'
+        : 'signed-out';
   const controlPlaneProject = useMemo(
     () =>
       getOrCreateControlPlaneProjectBinding(window.localStorage, session.visualProject, {
@@ -1383,8 +1390,26 @@ function EditorWorkspace({
       }),
     [controlPlaneOwnerKey, session.visualProject],
   );
+  const [controlPlaneProjectReady, setControlPlaneProjectReady] = useState(false);
   useEffect(() => {
-    if (joySession.kind !== 'ready') return;
+    let cancelled = false;
+    setControlPlaneProjectReady(false);
+    if (joySession.kind !== 'ready') return () => undefined;
+    void mediaControlPlaneClient
+      .ensureProject(controlPlaneProject.controlPlaneProjectId, controlPlaneProject.title)
+      .then(() => {
+        if (!cancelled) setControlPlaneProjectReady(true);
+      })
+      .catch(() => {
+        // Keep API consumers gated until the bounded retry path can establish
+        // this project's durable control-plane row.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [controlPlaneProject.controlPlaneProjectId, controlPlaneProject.title, joySession.kind]);
+  useEffect(() => {
+    if (!controlPlaneProjectReady || joySession.kind !== 'ready') return;
     const controlPlaneProjectId = controlPlaneProject.controlPlaneProjectId;
     if (remoteDocumentHydrationRef.current.has(controlPlaneProjectId)) return;
     remoteDocumentHydrationRef.current.add(controlPlaneProjectId);
@@ -1443,13 +1468,14 @@ function EditorWorkspace({
   }, [
     controlPlaneOwnerKey,
     controlPlaneProject,
+    controlPlaneProjectReady,
     joySession.kind,
     remoteDocumentBootstrapRetry,
     session,
     showToast,
   ]);
   useEffect(() => {
-    if (joySession.kind !== 'ready') return;
+    if (!controlPlaneProjectReady || joySession.kind !== 'ready') return;
     if (remoteDocumentBootstrapProjectId !== controlPlaneProject.controlPlaneProjectId) return;
     remoteDocumentAutosyncRef.current?.schedule(
       controlPlaneProject,
@@ -1460,6 +1486,7 @@ function EditorWorkspace({
   }, [
     controlPlaneOwnerKey,
     controlPlaneProject,
+    controlPlaneProjectReady,
     joySession.kind,
     remoteDocumentBootstrapProjectId,
     session.projectRevisionId,
@@ -1474,7 +1501,7 @@ function EditorWorkspace({
   useEffect(() => {
     let cancelled = false;
     setCreativeBriefOptedIn(false);
-    if (joySession.kind !== 'ready') return () => undefined;
+    if (!controlPlaneProjectReady || joySession.kind !== 'ready') return () => undefined;
     void mediaControlPlaneClient
       .getCreativeBriefOptIn(controlPlaneProject.controlPlaneProjectId)
       .then((result) => {
@@ -1486,7 +1513,7 @@ function EditorWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [controlPlaneProject.controlPlaneProjectId, joySession.kind]);
+  }, [controlPlaneProject.controlPlaneProjectId, controlPlaneProjectReady, joySession.kind]);
   const creativeBriefRunner = useMemo(
     () =>
       createCreativeBriefPanelRunner({
@@ -1550,7 +1577,7 @@ function EditorWorkspace({
   useEffect(() => {
     let cancelled = false;
     setJoyCodeOptedIn(false);
-    if (joySession.kind !== 'ready') return () => undefined;
+    if (!controlPlaneProjectReady || joySession.kind !== 'ready') return () => undefined;
     void mediaControlPlaneClient
       .getJoyCodeOptIn(controlPlaneProject.controlPlaneProjectId)
       .then((result) => {
@@ -1562,7 +1589,7 @@ function EditorWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [controlPlaneProject.controlPlaneProjectId, joySession.kind]);
+  }, [controlPlaneProject.controlPlaneProjectId, controlPlaneProjectReady, joySession.kind]);
   const onJoyCodeOptIn = useCallback(async () => {
     const current = await mediaControlPlaneClient.getJoyCodeOptIn(
       controlPlaneProject.controlPlaneProjectId,
@@ -1579,14 +1606,26 @@ function EditorWorkspace({
     () =>
       new ProjectMediaResolver({
         projectId: controlPlaneProject.controlPlaneProjectId,
-        controlPlaneReady: joySession.kind === 'ready',
+        // The auth probe runs asynchronously after the editor mounts. A valid
+        // stored token is already sufficient for owner-authorized media reads;
+        // waiting for the probe to flip to `ready` creates a real user-facing
+        // race where Cloud/Worker actions fail with a misleading "session is
+        // not ready" error immediately after opening a project.
+        controlPlaneReady:
+          controlPlaneProjectReady ||
+          (joySession.kind === 'unknown' && getStoredMediaToken(window.localStorage) !== undefined),
         project: session.visualProject,
         client: mediaControlPlaneClient,
         originalCache: {
           get: (assetId) => originalAssetCachePromise.then((cache) => cache.get(assetId)),
         },
       }),
-    [controlPlaneProject.controlPlaneProjectId, joySession.kind, session.visualProject],
+    [
+      controlPlaneProject.controlPlaneProjectId,
+      controlPlaneProjectReady,
+      joySession.kind,
+      session.visualProject,
+    ],
   );
   useEffect(() => () => mediaResolver.clear(), [mediaResolver]);
   /**
@@ -5405,6 +5444,10 @@ function EditorWorkspace({
                   'audio.ml-denoise',
                   selectedAudioClip.assetId,
                 );
+              // Jobs is a mounted Dockview panel, so activating it does not
+              // remount its polling loop. Notify it immediately instead of
+              // making a user wait for the next ten-second poll tick.
+              window.dispatchEvent(new Event('joy-media-jobs-changed'));
               context.showToast(`Local Worker ${workflowId} queued in Jobs.`, 'success');
               context.activatePanel('jobs');
             } catch (error) {
@@ -5994,7 +6037,7 @@ function EditorWorkspace({
         <JobsPanel
           projectId={controlPlaneProject.controlPlaneProjectId}
           projectTitle={controlPlaneProject.title}
-          controlPlaneReady={joySession.kind === 'ready'}
+          controlPlaneReady={controlPlaneProjectReady}
           {...(selectedAudioAssetId === undefined ? {} : { audioAssetId: selectedAudioAssetId })}
           {...(selectedThumbnailAssetId === undefined
             ? {}
@@ -6621,6 +6664,7 @@ function EditorWorkspace({
           timelineProject: session.timelineProject,
           visualProject: session.visualProject,
           controlPlaneProject,
+          controlPlaneReady: controlPlaneProjectReady,
           loadProjectAssetBlob,
           playback: playbackDiagnostics.current.snapshot(),
           canUndo: session.canUndo,
@@ -6838,6 +6882,7 @@ function MonitorPanel() {
     visualProject,
     timelineProject,
     controlPlaneProject,
+    controlPlaneReady,
     loadProjectAssetBlob,
     stickerTick,
     togglePlayback,
@@ -7068,15 +7113,41 @@ function MonitorPanel() {
   useEffect(() => {
     let cancelled = false;
     let opened: BrowserGpuPreviewSession | undefined;
-    if (previewRenderer === 'local') {
+    if (previewRenderer === 'local' || !controlPlaneReady) {
       setGpuSession(undefined);
-      setGpuPreviewStatus('local');
+      setGpuPreviewStatus(previewRenderer === 'local' ? 'local' : 'connecting');
       return;
     }
     setGpuPreviewStatus('connecting');
+    // Probe the owner-scoped Worker catalog before opening an ephemeral GPU
+    // session. A missing Worker is a supported local-preview fallback, not an
+    // API error, so avoid issuing a request that would intentionally return
+    // 409 and pollute browser telemetry on every editor mount.
     void mediaControlPlaneClient
-      .openGpuPreviewSession(controlPlaneProject.controlPlaneProjectId)
+      .workers()
+      .then((workers) => {
+        const now = Date.now();
+        const gpuWorkerAvailable = workers.some(
+          (worker) =>
+            worker.paired &&
+            !worker.revoked &&
+            worker.capabilities.includes('render.preview.gpu') &&
+            worker.lastSeenAt !== undefined &&
+            now - worker.lastSeenAt <= 45_000,
+        );
+        if (!gpuWorkerAvailable || cancelled) {
+          if (!cancelled) {
+            setGpuSession(undefined);
+            setGpuPreviewStatus('fallback');
+          }
+          return undefined;
+        }
+        return mediaControlPlaneClient.openGpuPreviewSession(
+          controlPlaneProject.controlPlaneProjectId,
+        );
+      })
       .then((session) => {
+        if (session === undefined) return;
         if (cancelled) {
           void mediaControlPlaneClient
             .closeGpuPreviewSession(session.sessionId)
@@ -7100,7 +7171,7 @@ function MonitorPanel() {
           .closeGpuPreviewSession(opened.sessionId)
           .catch(() => undefined);
     };
-  }, [controlPlaneProject.controlPlaneProjectId, previewRenderer]);
+  }, [controlPlaneProject.controlPlaneProjectId, controlPlaneReady, previewRenderer]);
 
   useEffect(() => {
     if (previewRenderer === 'local' || gpuSession === undefined || state.playing) return;

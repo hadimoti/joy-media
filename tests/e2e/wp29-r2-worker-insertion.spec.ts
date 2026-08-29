@@ -90,17 +90,21 @@ async function returnProtocolFixtureResult(
       'content-type': 'application/json',
     };
     let leasedExpectedJob = false;
+    let leaseToken: string | undefined;
     for (let attempt = 0; attempt < 25; attempt++) {
       const lease = await fetch(`/api/v1/workers/${encodeURIComponent(payload.workerId)}/leases`, {
         method: 'POST',
         headers: workerHeaders,
         body: JSON.stringify({ durationMs: 30_000 }),
       });
-      const leaseBody = (await lease.json()) as { data?: { id?: string } | null };
+      const leaseBody = (await lease.json()) as {
+        data?: { id?: string; leaseToken?: string } | null;
+      };
       if (lease.status !== 200 || leaseBody.data?.id === undefined)
         return { phase: 'lease', status: lease.status, body: leaseBody };
       if (leaseBody.data.id === payload.jobId) {
         leasedExpectedJob = true;
+        leaseToken = leaseBody.data.leaseToken;
         break;
       }
       // A long-lived deterministic server may retain queued jobs from an
@@ -112,13 +116,16 @@ async function returnProtocolFixtureResult(
         {
           method: 'POST',
           headers: workerHeaders,
-          body: JSON.stringify({ error: 'superseded disposable E2E job' }),
+          body: JSON.stringify({
+            error: 'superseded disposable E2E job',
+            leaseToken: leaseBody.data.leaseToken,
+          }),
         },
       );
       if (stale.status !== 200)
         return { phase: 'stale-cleanup', status: stale.status, body: await stale.json() };
     }
-    if (!leasedExpectedJob)
+    if (!leasedExpectedJob || leaseToken === undefined)
       return { phase: 'lease', status: 409, body: { error: 'expected job was not leased' } };
 
     const binary = atob(payload.wavBase64);
@@ -133,6 +140,7 @@ async function returnProtocolFixtureResult(
           'x-joy-asset-id': payload.sourceAssetId,
           'x-joy-sha256': payload.sha256,
           'x-joy-bytes': String(payload.bytes),
+          'x-joy-lease-token': leaseToken,
         },
         body: bytes,
       },
@@ -154,6 +162,7 @@ async function returnProtocolFixtureResult(
             localRef: `gpu-${payload.jobId}`,
             descriptor: { mimeType: 'audio/wav' },
           },
+          leaseToken,
         }),
       },
     );
@@ -191,9 +200,14 @@ test.describe('WP-29 R2 — Worker result insertion browser closeout', () => {
     await expect(assetCard).toBeVisible({ timeout: 15_000 });
     const sourceAssetId = await assetCard.getAttribute('data-asset-id');
     expect(sourceAssetId).toBeTruthy();
-    await assetCard.dragTo(page.locator('.timeline-lane[data-track-id]').first(), {
-      targetPosition: { x: 70, y: 20 },
-    });
+    await assetCard.dragTo(
+      page
+        .locator('.timeline-track[data-track-family="audio"] .timeline-lane[data-track-id]')
+        .first(),
+      {
+        targetPosition: { x: 70, y: 20 },
+      },
+    );
     const clip = page.locator('.timeline-clip[data-clip-id]').first();
     await clip.click();
     await expect(clip).toHaveAttribute('aria-pressed', 'true');

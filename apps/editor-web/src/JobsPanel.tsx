@@ -164,6 +164,14 @@ export function JobsPanel({
   const refresh = useCallback(() => pollingRef.current?.refresh() ?? load(), [load]);
 
   useEffect(() => {
+    const onJobsChanged = () => {
+      void refresh().catch(() => undefined);
+    };
+    window.addEventListener('joy-media-jobs-changed', onJobsChanged);
+    return () => window.removeEventListener('joy-media-jobs-changed', onJobsChanged);
+  }, [refresh]);
+
+  useEffect(() => {
     const polling = new BoundedPollingLoop(load);
     pollingRef.current = polling;
     const syncVisibility = () => {
