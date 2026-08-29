@@ -82,6 +82,28 @@ describe('BoundedPollingLoop', () => {
     loop.stop();
   });
 
+  it('keeps repeated starts idempotent while the first request is in flight', async () => {
+    let resolveRequest: (() => void) | undefined;
+    const poll = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRequest = resolve;
+        }),
+    );
+    const loop = new BoundedPollingLoop(poll);
+
+    loop.start();
+    await Promise.resolve();
+    loop.start();
+    expect(poll).toHaveBeenCalledTimes(1);
+
+    resolveRequest?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(poll).toHaveBeenCalledTimes(1);
+    loop.stop();
+  });
+
   it('drops a queued follow-up when the document becomes hidden', async () => {
     let resolveRequest: (() => void) | undefined;
     const poll = vi.fn(

@@ -18,6 +18,7 @@ export class BoundedPollingLoop {
   #failureCount = 0;
   #refreshAfterFlight = false;
   #stopped = false;
+  #started = false;
 
   constructor(
     private readonly poll: () => Promise<void>,
@@ -26,7 +27,8 @@ export class BoundedPollingLoop {
 
   /** Starts with an immediate request. Repeated starts are intentionally harmless. */
   start(): void {
-    if (this.#stopped) return;
+    if (this.#stopped || this.#started) return;
+    this.#started = true;
     void this.refresh().catch(() => undefined);
   }
 
