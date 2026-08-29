@@ -35,8 +35,12 @@ describe('JobsPanel R2 pairing and exactly-once contract', () => {
     expect(panelSource).toMatch(/if \(projectScopeReady\) \{\s+setJobs\(nextJobs\);/);
     expect(panelSource).toContain("projectId.startsWith('project-')");
     expect(panelSource).toContain('const projectInitialized = initializedProjectId === projectId;');
-    expect(panelSource).toContain('if (!projectInitialized) await client.ensureProject(projectId, projectTitle);');
-    expect(panelSource).toContain('setInitializedProjectId(projectMissing ? undefined : projectId);');
+    expect(panelSource).toContain(
+      'if (!projectInitialized) await client.ensureProject(projectId, projectTitle);',
+    );
+    expect(panelSource).toContain(
+      'setInitializedProjectId(projectMissing ? undefined : projectId);',
+    );
     expect(panelSource).toContain(
       'setConnectionStatus(projectJobStatus(projectMissing, nextWorkers));',
     );
