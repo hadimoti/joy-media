@@ -175,7 +175,7 @@ import {
   type BrowserGpuPreviewSession,
   type BrowserJob,
 } from './control-plane-client.js';
-import { hydrateProjectDocument } from './project-document-hydration.js';
+import { ProjectDocumentAutosync } from './project-document-autosync.js';
 import { importMediaFile } from './media-import.js';
 import { AudioPanel, type AudioEnhanceScopeOption } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
@@ -236,7 +236,6 @@ import { createAgentCommandBus } from './agent-command-bus.js';
 import { resumeWorkflow, runWorkflow } from './workflow-runner.js';
 import {
   getOrCreateControlPlaneProjectBinding,
-  upsertControlPlaneProjectBinding,
   type ControlPlaneProjectBinding,
 } from './project-control-plane.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
@@ -1147,6 +1146,33 @@ function EditorWorkspace({
   const [, setPluginRevision] = useState(0);
   const sessionRef = useRef<EditorSession | null>(null);
   const remoteDocumentHydrationRef = useRef<Set<string>>(new Set());
+  const [remoteDocumentBootstrapProjectId, setRemoteDocumentBootstrapProjectId] = useState<
+    string | undefined
+  >(undefined);
+  const remoteDocumentAutosyncRef = useRef<ProjectDocumentAutosync | null>(null);
+  if (remoteDocumentAutosyncRef.current === null) {
+    remoteDocumentAutosyncRef.current = new ProjectDocumentAutosync({
+      storage: window.localStorage,
+      syncProjectDocument: (controlPlaneProjectId, params) =>
+        mediaControlPlaneClient.syncProjectDocument(controlPlaneProjectId, params),
+      isDocumentMissing: (error) =>
+        error instanceof BrowserControlPlaneRequestError &&
+        error.code === 'PROJECT_DOCUMENT_NOT_FOUND',
+      onResult: (result) => {
+        if (result.kind === 'conflict') {
+          showToast(
+            'Cloud document changed elsewhere. Your local edits were kept; reload the project before saving again.',
+            'error',
+          );
+        } else if (result.kind === 'request-failure') {
+          showToast(
+            `Cloud document save failed; retrying in ${Math.ceil(result.retryDelayMs / 1000)}s. Local edits are safe in this browser.`,
+            'error',
+          );
+        }
+      },
+    });
+  }
   const dockviewApiRef = useRef<DockviewApi | null>(null);
   const dockviewComponentsRef = useRef<{ readonly 'editor-panel': typeof Panel } | null>(null);
   const scheduler = useRef(new PlaybackScheduler());
@@ -1362,10 +1388,16 @@ function EditorWorkspace({
     const controlPlaneProjectId = controlPlaneProject.controlPlaneProjectId;
     if (remoteDocumentHydrationRef.current.has(controlPlaneProjectId)) return;
     remoteDocumentHydrationRef.current.add(controlPlaneProjectId);
+    const autosync = remoteDocumentAutosyncRef.current;
+    if (autosync === null) return;
     let cancelled = false;
-    void hydrateProjectDocument(session, controlPlaneProject, () =>
-      mediaControlPlaneClient.projectDocument(controlPlaneProjectId),
-    )
+    void autosync
+      .bootstrap(
+        session,
+        controlPlaneProject,
+        () => mediaControlPlaneClient.projectDocument(controlPlaneProjectId),
+        controlPlaneOwnerKey,
+      )
       .then((result) => {
         if (cancelled) return;
         if (result.kind === 'local-changed') {
@@ -1375,20 +1407,14 @@ function EditorWorkspace({
           );
           return;
         }
-        upsertControlPlaneProjectBinding(
-          window.localStorage,
-          { ...controlPlaneProject, documentRevisionId: result.revisionId },
-          controlPlaneOwnerKey,
-        );
+        // Both an existing remote head and an explicit missing-document read
+        // are a write barrier: only after either result may ordinary editor
+        // mutations be auto-saved.
+        setRemoteDocumentBootstrapProjectId(controlPlaneProjectId);
         if (result.kind === 'hydrated') setRevision((revision) => revision + 1);
       })
       .catch((error: unknown) => {
-        if (
-          cancelled ||
-          (error instanceof BrowserControlPlaneRequestError &&
-            error.code === 'PROJECT_DOCUMENT_NOT_FOUND')
-        )
-          return;
+        if (cancelled) return;
         showToast(
           `Cloud document could not be hydrated: ${error instanceof Error ? error.message : String(error)}`,
           'error',
@@ -1398,6 +1424,29 @@ function EditorWorkspace({
       cancelled = true;
     };
   }, [controlPlaneOwnerKey, controlPlaneProject, joySession.kind, session, showToast]);
+  useEffect(() => {
+    if (joySession.kind !== 'ready') return;
+    if (remoteDocumentBootstrapProjectId !== controlPlaneProject.controlPlaneProjectId) return;
+    remoteDocumentAutosyncRef.current?.schedule(
+      controlPlaneProject,
+      session.visualProject,
+      session.projectRevisionId,
+      controlPlaneOwnerKey,
+    );
+  }, [
+    controlPlaneOwnerKey,
+    controlPlaneProject,
+    joySession.kind,
+    remoteDocumentBootstrapProjectId,
+    session.projectRevisionId,
+    session.visualProject,
+  ]);
+  useEffect(() => {
+    const autosync = remoteDocumentAutosyncRef.current;
+    return () => {
+      autosync?.stop();
+    };
+  }, []);
   useEffect(() => {
     let cancelled = false;
     setCreativeBriefOptedIn(false);
