@@ -26,6 +26,33 @@ jobs:
           ffprobe -version
       - run: pnpm install --frozen-lockfile
       - run: pnpm run verify:ci
+  worker-package:
+    needs: check
+    runs-on: [self-hosted, windows, x64, joy-media-ci]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Verify runner toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --version
+          corepack enable pnpm
+          pnpm --version
+          ffmpeg -version
+          ffprobe -version
+      - run: pnpm install --frozen-lockfile
+      - name: Build Worker and package self-test executable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          pnpm --filter @joy-media/worker build
+          $output = Join-Path $env:RUNNER_TEMP ("joy-worker-" + $env:GITHUB_SHA + ".exe")
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-worker-exe.ps1 -OutputPath $output
+          if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw 'Worker executable was not produced.' }
+          $result = & $output --joy-worker-self-test
+          if ($LASTEXITCODE -ne 0 -or $result -notmatch '"ok"\s*:\s*true') { throw 'Worker executable self-test failed.' }
+
   browser-e2e:
     needs: check
     strategy:

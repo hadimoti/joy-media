@@ -481,7 +481,7 @@ export class PostgresControlPlane implements ControlPlane {
     assertActor(actor);
     const result = await this.pool.query<ProjectRow>(
       `UPDATE projects SET title = $3, revision = revision + 1
-       WHERE id = $1 AND owner_id = $2 AND revision = $6 RETURNING *`,
+       WHERE id = $1 AND owner_id = $2 AND revision = $4 RETURNING *`,
       [id, actor.id, title, baseRevision],
     );
     if (result.rows[0] !== undefined) return projectOf(result.rows[0]);
@@ -1685,8 +1685,6 @@ export class PostgresControlPlane implements ControlPlane {
     receipt?: WorkerResultReceipt,
     leaseToken?: string,
   ): Promise<Job> {
-    if (receipt !== undefined && !isWorkerReceipt(receipt))
-      throw new ControlPlaneError('RESULT_INVALID', jobId);
     const isThumb = receipt?.kind === 'asset.thumbnail';
     const isGpu = receipt?.kind === 'image.comfy' || receipt?.kind === 'audio.ml-denoise';
     const isMask = receipt?.kind === 'mask.image' || receipt?.kind === 'mask.video';
@@ -1706,6 +1704,11 @@ export class PostgresControlPlane implements ControlPlane {
       const leasedRow = leasedResult.rows[0];
       if (leasedRow === undefined) throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
       const leasedJob = jobOf(leasedRow);
+      // Cancellation is a terminal intent for this lease. A late provider
+      // result must not overwrite it with a successful completion.
+      if (leasedJob.cancelRequested) throw new ControlPlaneError('JOB_CANCEL_REQUESTED', jobId);
+      if (receipt !== undefined && !isWorkerReceipt(receipt))
+        throw new ControlPlaneError('RESULT_INVALID', jobId);
       if (derivativeKindForJob(leasedJob.type) !== undefined) {
         const expectedId = workerDerivativeId(leasedJob.id, leasedJob.generation);
         const derivativeResult = await client.query<MediaDerivativeRow>(
@@ -1727,6 +1730,7 @@ export class PostgresControlPlane implements ControlPlane {
              result_asset_id = $10, result_local_ref = $11, result_mime_type = $12,
              result_width = $13, result_height = $14, result_duration_us = $15
          WHERE id = $1 AND state = 'leased' AND lease_owner = $2 AND lease_expires_at > $3
+           AND cancel_requested = false
            AND (type <> 'fixture.thumbnail' OR $4 = 'fixture.thumbnail')
            AND (type <> 'asset.thumbnail' OR ($4 = 'asset.thumbnail' AND asset_id = $10))
            AND (type <> 'image.comfy' OR ($4 = 'image.comfy' AND asset_id = $10))
@@ -1774,6 +1778,8 @@ export class PostgresControlPlane implements ControlPlane {
       await client.query(
         `UPDATE job_attempts SET completed_at = $3
          WHERE id = (SELECT id FROM job_attempts WHERE job_id = $1 AND worker_id = $2
+                     AND generation = (SELECT generation FROM jobs WHERE id = $1)
+                     AND completed_at IS NULL
                      ORDER BY id DESC LIMIT 1)`,
         [jobId, workerId, new Date(now)],
       );
@@ -1799,6 +1805,14 @@ export class PostgresControlPlane implements ControlPlane {
         [jobId, workerId, new Date(now), error.slice(0, 500), leaseToken ?? ''],
       );
       if (result.rows[0] === undefined) throw new ControlPlaneError('LEASE_NOT_OWNED', jobId);
+      await client.query(
+        `UPDATE job_attempts SET completed_at = $3
+         WHERE id = (SELECT id FROM job_attempts WHERE job_id = $1 AND worker_id = $2
+                     AND generation = (SELECT generation FROM jobs WHERE id = $1)
+                     AND completed_at IS NULL
+                     ORDER BY id DESC LIMIT 1)`,
+        [jobId, workerId, new Date(now)],
+      );
       await this.event(client, jobId, error === 'canceled' ? 'canceled' : 'failed', now);
       return jobOf(result.rows[0]);
     });

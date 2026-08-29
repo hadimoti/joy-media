@@ -269,8 +269,13 @@ export class MediaAuthService implements MediaAuthApi {
     const token = bearerToken(request);
     if (token === undefined) return undefined;
     const result = await this.pool.query<{ contact: string; method: string }>(
-      `SELECT contact, method FROM media_sessions
-       WHERE token_hash = $1 AND expires_at > $2 AND revoked_at IS NULL`,
+      `SELECT s.contact, s.method FROM media_sessions s
+       INNER JOIN media_allowed_users a ON (
+         (s.method = 'gmail' AND a.gmail = s.contact) OR
+         (s.method = 'telegram' AND a.telegram_id = s.contact)
+       )
+       WHERE s.token_hash = $1 AND s.expires_at > $2 AND s.revoked_at IS NULL
+         AND a.enabled = true`,
       [sessionHash(token), new Date()],
     );
     const row = result.rows[0];

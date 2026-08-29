@@ -9,6 +9,28 @@ import {
 import { PostgresControlPlane } from './postgres-control-plane.js';
 
 describe('PostgresControlPlane', () => {
+  it('renames a project with a real SQL revision CAS and rejects stale updates', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const controlPlane = new PostgresControlPlane(pool, { skipLocked: false });
+    await controlPlane.initialize();
+    const owner = { id: 'rename-owner' };
+
+    await controlPlane.createProject(owner, 'rename-project', 'Before');
+    await expect(
+      controlPlane.updateProject(owner, 'rename-project', 'After', 0),
+    ).resolves.toMatchObject({ title: 'After', revision: 1 });
+    await expect(
+      controlPlane.updateProject(owner, 'rename-project', 'Stale', 0),
+    ).rejects.toMatchObject({ code: 'REVISION_CONFLICT' });
+    await expect(controlPlane.getProject(owner, 'rename-project')).resolves.toMatchObject({
+      title: 'After',
+      revision: 1,
+    });
+    await pool.end();
+  });
+
   it('durably preserves project, lease, completion, and cursor events across instances', async () => {
     const database = newDb();
     const adapter = database.adapters.createPg();
@@ -196,6 +218,49 @@ describe('PostgresControlPlane', () => {
 
     await expect(controlPlane.complete('worker-old', 'job-1', 107)).rejects.toMatchObject({
       code: 'LEASE_NOT_OWNED',
+    });
+    await pool.end();
+  });
+
+  it('does not complete a job after cancellation and closes the attempt on fail', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const controlPlane = new PostgresControlPlane(pool, { skipLocked: false });
+    await controlPlane.initialize();
+    const owner = { id: 'cancel-race-owner' };
+    await controlPlane.createProject(owner, 'cancel-race-project', 'Cancel race');
+    await controlPlane.pairWorker(owner, 'cancel-race-worker');
+    await controlPlane.enqueue(owner, 'cancel-race-job', 'cancel-race-project', 'render', 100);
+    const lease = await controlPlane.lease('cancel-race-worker', 101, 30_000);
+    await expect(
+      controlPlane.cancel(owner, 'cancel-race-project', 'cancel-race-job', 102),
+    ).resolves.toMatchObject({ state: 'leased', cancelRequested: true });
+    await expect(
+      controlPlane.complete(
+        'cancel-race-worker',
+        'cancel-race-job',
+        103,
+        { kind: 'malformed' } as never,
+        lease?.leaseToken,
+      ),
+    ).rejects.toMatchObject({ code: 'JOB_CANCEL_REQUESTED' });
+    await expect(
+      controlPlane.fail(
+        'cancel-race-worker',
+        'cancel-race-job',
+        'canceled',
+        104,
+        lease?.leaseToken,
+      ),
+    ).resolves.toMatchObject({ state: 'canceled', cancelRequested: false });
+    await expect(
+      pool.query<{ completed_at: Date | null }>(
+        'SELECT completed_at FROM job_attempts WHERE job_id = $1',
+        ['cancel-race-job'],
+      ),
+    ).resolves.toMatchObject({
+      rows: [expect.objectContaining({ completed_at: expect.anything() })],
     });
     await pool.end();
   });

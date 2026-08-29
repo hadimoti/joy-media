@@ -252,6 +252,32 @@ describe('local control plane', () => {
     });
   });
 
+  it('does not let a late completion override a requested cancellation', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'cancel-owner' };
+    api.createProject(owner, 'cancel-project', 'Cancel race');
+    api.pairWorker(owner, 'cancel-worker');
+    api.enqueue(owner, 'cancel-job', 'cancel-project', 'render', 100);
+    const lease = api.lease('cancel-worker', 101, 30_000);
+    expect(api.cancel(owner, 'cancel-project', 'cancel-job', 102)).toMatchObject({
+      state: 'leased',
+      cancelRequested: true,
+    });
+    expect(() =>
+      api.complete('cancel-worker', 'cancel-job', 103, undefined, lease?.leaseToken),
+    ).toThrow(expect.objectContaining({ code: 'JOB_CANCEL_REQUESTED' }));
+    expect(api.jobsForProject(owner, 'cancel-project')[0]).toMatchObject({
+      state: 'leased',
+      cancelRequested: true,
+    });
+    expect(
+      api.fail('cancel-worker', 'cancel-job', 'canceled', 104, lease?.leaseToken),
+    ).toMatchObject({
+      state: 'canceled',
+      cancelRequested: false,
+    });
+  });
+
   it('rejects invalid Worker attempt budgets', () => {
     const api = new LocalControlPlane();
     const owner = { id: 'invalid-attempt-owner' };

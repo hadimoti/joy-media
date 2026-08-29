@@ -76,6 +76,24 @@ describe('MediaAuthService', () => {
     expect(mailer.sendOtp).not.toHaveBeenCalled();
   });
 
+  it('revokes existing sessions immediately when an allow-listed user is disabled or removed', async () => {
+    const { auth, mailer, db } = await service();
+    const user = await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
+    await auth.requestOtp('user@example.com', 'gmail');
+    const token = await auth.verifyOtp('user@example.com', 'gmail', sentCode(mailer));
+    const request = { headers: { authorization: `Bearer ${token}` } } as never;
+
+    await expect(auth.authenticate(request)).resolves.toEqual({ id: 'user@example.com' });
+    await auth.setEnabled(user.id, false);
+    await expect(auth.authenticate(request)).resolves.toBeUndefined();
+
+    await auth.setEnabled(user.id, true);
+    await expect(auth.authenticate(request)).resolves.toEqual({ id: 'user@example.com' });
+    await auth.removeAllowed(user.id);
+    await expect(auth.authenticate(request)).resolves.toBeUndefined();
+    await db.end();
+  });
+
   it('caps active codes at 3 per contact', async () => {
     const { auth, mailer } = await service();
     await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });

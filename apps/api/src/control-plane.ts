@@ -1512,6 +1512,7 @@ export class LocalControlPlane implements ControlPlane {
     leaseToken?: string,
   ): Job {
     const job = this.ownedLease(workerId, jobId, now, leaseToken);
+    if (job.cancelRequested) throw new ControlPlaneError('JOB_CANCEL_REQUESTED', jobId);
     if (job.type === 'fixture.thumbnail' && !isFixtureReceipt(receipt))
       throw new ControlPlaneError('RESULT_INVALID', jobId);
     if (
