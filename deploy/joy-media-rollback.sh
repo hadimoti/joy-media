@@ -175,8 +175,8 @@ systemctl reload nginx
 wait_for_endpoint() {
   local endpoint="$1"
   local attempt
-  for attempt in $(seq 1 20); do
-    if curl --fail --silent --show-error --max-time 2 "$endpoint" >/dev/null; then
+  for attempt in $(seq 1 45); do
+    if curl --fail --silent --show-error --max-time 3 "$endpoint" >/dev/null; then
       return 0
     fi
     sleep 1
