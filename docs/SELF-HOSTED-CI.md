@@ -28,10 +28,15 @@ pnpm exec playwright test tests/e2e --project=desktop-primary --workers=1
 
 The workflow has two jobs:
 
-1. `check` runs typecheck, lint, tests, the release gate, and uploads gate evidence.
+1. `check` runs typecheck, lint, tests, builds, and the production dependency audit.
 2. `browser-e2e` builds the app and runs the three desktop Playwright projects serially on the trusted runner.
 
-Actions are pinned to immutable commit SHAs. Artifact uploads are diagnostic evidence only; secrets must never be written to logs or artifacts.
+The source-bound `pnpm run release:gate` is intentionally run by the orchestrator only after
+authenticated live-browser evidence has been recorded for the exact candidate revision. It is not
+run by the basic CI jobs, because a clean CI checkout cannot legitimately claim an authenticated
+production journey. The workflow does not upload GitHub artifacts: the repository's artifact quota
+is separate from runner-minute quota, and evidence remains on the trusted runner for the release
+review. Secrets must never be written to logs or artifacts.
 
 ## Re-registering a runner
 

@@ -23,14 +23,6 @@ jobs:
           ffprobe -version
       - run: pnpm install --frozen-lockfile
       - run: pnpm run verify:ci
-      - run: pnpm run release:gate
-      - name: Upload release gate evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: release-gate
-          path: test-output/release-gate/
-          if-no-files-found: error
   browser-e2e:
     needs: check
     strategy:
@@ -61,12 +53,3 @@ jobs:
         run: pnpm exec playwright test tests/e2e --project=${{ matrix.project }} --workers=1
         env:
           CI: true
-      - name: Upload browser evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: playwright-evidence-${{ matrix.project }}
-          path: |
-            playwright-report/
-            test-results/
-          if-no-files-found: ignore

@@ -112,7 +112,7 @@ const passingInput = (): ReleaseGateInput => ({
 });
 
 describe('JOY Studio 1.0 release gate', () => {
-  it('builds the editor before tests evaluate the generated release evidence', () => {
+  it('keeps the self-hosted CI check before the browser audit', () => {
     const editorBuild = RELEASE_COMMANDS.findIndex(([id]) => id === 'editor-build');
     const tests = RELEASE_COMMANDS.findIndex(([id]) => id === 'tests');
     expect(editorBuild).toBeGreaterThanOrEqual(0);
@@ -124,9 +124,9 @@ describe('JOY Studio 1.0 release gate', () => {
     );
     const workflowLines = workflow.split(/\r?\n/u).map((line) => line.trim());
     const verifyCi = workflowLines.indexOf('- run: pnpm run verify:ci');
-    const releaseGate = workflowLines.indexOf('- run: pnpm run release:gate');
     expect(verifyCi).toBeGreaterThanOrEqual(0);
-    expect(releaseGate).toBeGreaterThan(verifyCi);
+    expect(workflowLines).toContain('browser-e2e:');
+    expect(workflowLines).toContain('needs: check');
   });
 
   it('keeps production dependency auditing in the CI verification contract', () => {
@@ -144,15 +144,17 @@ describe('JOY Studio 1.0 release gate', () => {
     );
   });
 
-  it('publishes the release-gate artifact from the CI check job', () => {
+  it('keeps source-bound release evidence outside the basic self-hosted CI check', () => {
     const workflow = readFileSync(
       resolve(import.meta.dirname, '../../../.github/workflows/ci.yml'),
       'utf8',
     );
     const workflowLines = workflow.split(/\r?\n/u).map((line) => line.trim());
-    expect(workflowLines).toContain('- name: Upload release gate evidence');
-    expect(workflowLines).toContain('name: release-gate');
-    expect(workflowLines).toContain('path: test-output/release-gate/');
+    expect(workflowLines).not.toContain('- run: pnpm run release:gate');
+    expect(workflow).not.toContain('actions/upload-artifact');
+    expect(readFileSync(resolve(import.meta.dirname, '../../../package.json'), 'utf8')).toContain(
+      '"release:gate": "node --experimental-strip-types tooling/release/src/gate.ts"',
+    );
   });
 
   it('verifies the self-hosted FFmpeg/FFprobe toolchain before CI dependencies', () => {
