@@ -19,6 +19,7 @@ export function ActionOverflowMenu({
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -29,9 +30,12 @@ export function ActionOverflowMenu({
       if (event.key === 'Escape') {
         event.preventDefault();
         setOpen(false);
+        triggerRef.current?.focus();
         return;
       }
-      const buttons = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('button') ?? [])];
+      const buttons = [
+        ...(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []),
+      ];
       if (buttons.length === 0) return;
       if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
       event.preventDefault();
@@ -47,7 +51,7 @@ export function ActionOverflowMenu({
     document.addEventListener('pointerdown', close);
     document.addEventListener('keydown', keys);
     window.setTimeout(
-      () => menuRef.current?.querySelector<HTMLButtonElement>('button')?.focus(),
+      () => menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus(),
       0,
     );
     return () => {
@@ -61,6 +65,7 @@ export function ActionOverflowMenu({
       <button
         type="button"
         className="icon-button icon-button-labeled action-overflow-trigger"
+        ref={triggerRef}
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -84,6 +89,7 @@ export function ActionOverflowMenu({
                 if (item.disabled) return;
                 item.onSelect();
                 setOpen(false);
+                triggerRef.current?.focus();
               }}
             >
               <span>{item.label}</span>
