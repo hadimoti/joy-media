@@ -16,20 +16,25 @@ export class WorkerDaemon {
   /** Polls from the local machine; the VPS never opens a connection to it. */
   async run(options: {
     readonly pollIntervalMs?: number;
+    /** Idle GPU preview polling is deliberately slower than job polling. */
+    readonly gpuPreviewPollIntervalMs?: number;
     readonly stopped: () => boolean;
   }): Promise<void> {
     const pollIntervalMs = options.pollIntervalMs ?? 1_000;
+    const gpuPreviewPollIntervalMs = Math.max(40, options.gpuPreviewPollIntervalMs ?? 1_000);
     let gpuPreviewError: WorkerSessionExpiredError | undefined;
     if (this.gpuPreviewHost !== undefined)
-      void this.runGpuPreviewLoop(options.stopped).catch((error: unknown) => {
-        if (error instanceof WorkerSessionExpiredError) {
-          gpuPreviewError = error;
-          return;
-        }
-        this.runtime.log.write(
-          `GPU preview loop stopped: ${error instanceof Error ? error.message.slice(0, 180) : 'unknown error'}`,
-        );
-      });
+      void this.runGpuPreviewLoop(options.stopped, gpuPreviewPollIntervalMs).catch(
+        (error: unknown) => {
+          if (error instanceof WorkerSessionExpiredError) {
+            gpuPreviewError = error;
+            return;
+          }
+          this.runtime.log.write(
+            `GPU preview loop stopped: ${error instanceof Error ? error.message.slice(0, 180) : 'unknown error'}`,
+          );
+        },
+      );
     await this.client.hello(
       this.runtime.hello(process.platform, process.arch).capabilities,
       this.runtime.localAssetIds(),
@@ -136,14 +141,21 @@ export class WorkerDaemon {
     }
   }
 
-  private async runGpuPreviewLoop(stopped: () => boolean): Promise<void> {
+  private async runGpuPreviewLoop(
+    stopped: () => boolean,
+    idlePollIntervalMs: number,
+  ): Promise<void> {
     const host = this.gpuPreviewHost;
     if (host === undefined) return;
     while (!stopped()) {
       try {
         const request = await this.client.nextGpuPreview();
         if (request === undefined) {
-          await sleep(40);
+          // Preview requests are pushed into the control plane. Polling at 25Hz
+          // while idle needlessly authenticates and queries Postgres thousands
+          // of times per minute. Keep the active path immediate, but bound idle
+          // traffic to the configured supervisor cadence.
+          await sleep(idlePollIntervalMs);
           continue;
         }
         const startedAt = Date.now();

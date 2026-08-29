@@ -17,6 +17,7 @@ if ([string]::IsNullOrWhiteSpace($StatePath)) {
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $runnerPath = Join-Path $PSScriptRoot 'run-worker-headless.ps1'
+$entryPoint = Join-Path $repoRoot 'apps\worker\dist\index.js'
 $workerExecutable = Join-Path $repoRoot 'apps\worker\bin\joy-worker.exe'
 $workerBuildScript = Join-Path $PSScriptRoot 'build-worker-exe.ps1'
 $powershellPath = (Get-Command powershell.exe -ErrorAction SilentlyContinue).Source
@@ -64,10 +65,47 @@ function Get-WorkerProcessTreeIds {
     return @($seen)
 }
 
+function Get-WorkerRootIds {
+    param(
+        [string]$WorkerPath,
+        [string]$EntryPoint
+    )
+
+    $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+    $entryPointPattern = '(?i)(?<!\S)"?' + [regex]::Escape($EntryPoint) + '"?(?=\s|$)'
+    $workerRootIds = @(
+        $processes |
+            Where-Object { $_.Name -eq 'joy-worker.exe' -and $_.CommandLine -eq ('"{0}"' -f $WorkerPath) } |
+            ForEach-Object { [int]$_.ProcessId }
+    )
+    $nodeRootIds = @(
+        $processes |
+            Where-Object {
+                ($_.Name -eq 'node.exe' -or $_.Name -eq 'node') -and
+                -not [string]::IsNullOrWhiteSpace($_.CommandLine) -and
+                $_.CommandLine -match $entryPointPattern
+            } |
+            ForEach-Object { [int]$_.ProcessId }
+    )
+    return @($workerRootIds + $nodeRootIds | Sort-Object -Unique)
+}
+
+function Get-WorkerProcessIds {
+    param(
+        [string]$WorkerPath,
+        [string]$EntryPoint
+    )
+
+    $rootIds = @(Get-WorkerRootIds -WorkerPath $WorkerPath -EntryPoint $EntryPoint)
+    if ($rootIds.Count -eq 0) { return @() }
+    return @(Get-WorkerProcessTreeIds -RootIds $rootIds)
+}
+
 $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($null -eq $existing) {
     Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Headless JOY Media local Worker; starts at Windows logon and reconnects to joyst.ir.' | Out-Null
 } else {
+    $workerProcessIds = @(Get-WorkerProcessIds -WorkerPath $workerExecutable -EntryPoint $entryPoint)
     if ($existing.State -eq 'Running') {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         for ($attempt = 0; $attempt -lt 120; $attempt += 1) {
@@ -79,25 +117,24 @@ if ($null -eq $existing) {
             throw "Scheduled task '$TaskName' did not stop before replacement."
         }
     }
-    $workerPathQuoted = '"{0}"' -f $workerExecutable
-    $workerRootIds = @(
-        Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -eq 'joy-worker.exe' -and $_.CommandLine -eq $workerPathQuoted } |
-            ForEach-Object { [int]$_.ProcessId }
-    )
-    $workerProcessIds = @(Get-WorkerProcessTreeIds -RootIds $workerRootIds)
-    foreach ($processId in $workerProcessIds) {
+
+    # The SEA parent can disappear with the scheduled-task wrapper while its
+    # fixed Node entrypoint child remains alive. Capture any late roots again
+    # after stopping the task, then terminate the complete exact process set.
+    $lateWorkerProcessIds = @(Get-WorkerProcessIds -WorkerPath $workerExecutable -EntryPoint $entryPoint)
+    $workerProcessIds = @($workerProcessIds + $lateWorkerProcessIds | Sort-Object -Unique)
+    foreach ($processId in ($workerProcessIds | Sort-Object -Descending -Unique)) {
         Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
     }
     for ($attempt = 0; $attempt -lt 120; $attempt += 1) {
-        $runningWorkerProcesses = @(
-            Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-                Where-Object { $workerProcessIds -contains [int]$_.ProcessId }
-        )
+        $runningWorkerProcesses = @(Get-WorkerProcessIds -WorkerPath $workerExecutable -EntryPoint $entryPoint)
         if ($runningWorkerProcesses.Count -eq 0) { break }
+        foreach ($processId in ($runningWorkerProcesses | Sort-Object -Descending -Unique)) {
+            Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+        }
         Start-Sleep -Milliseconds 250
     }
-    if (@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $workerProcessIds -contains [int]$_.ProcessId }).Count -gt 0) {
+    if (@(Get-WorkerProcessIds -WorkerPath $workerExecutable -EntryPoint $entryPoint).Count -gt 0) {
         throw "Worker process tree did not stop before replacement."
     }
     Set-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null

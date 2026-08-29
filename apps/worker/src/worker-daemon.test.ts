@@ -56,6 +56,44 @@ describe('WorkerDaemon', () => {
     ).rejects.toBeInstanceOf(WorkerSessionExpiredError);
   });
 
+  it('bounds idle GPU preview polling to the configured supervisor cadence', async () => {
+    let stop = false;
+    let previewCalls = 0;
+    const client = {
+      hello: async () => undefined,
+      lease: async () => undefined,
+      nextGpuPreview: async () => {
+        previewCalls += 1;
+        return undefined;
+      },
+      completeGpuPreview: async () => undefined,
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = new WorkerRuntime(
+      { workerId: 'worker-preview-idle', createdAt: '2026-08-29T00:00:00.000Z' },
+      { ffmpeg: false, ffprobe: false, comfy: false, mlDenoise: false, aiProviders: [] },
+    );
+    const gpuPreviewHost = {
+      render: async () => {
+        throw new Error('unreachable');
+      },
+    } as unknown as GpuPreviewHost;
+
+    const stopTimer = setTimeout(() => {
+      stop = true;
+    }, 85);
+    try {
+      await new WorkerDaemon(client, runtime, gpuPreviewHost).run({
+        pollIntervalMs: 1,
+        gpuPreviewPollIntervalMs: 60,
+        stopped: () => stop,
+      });
+    } finally {
+      clearTimeout(stopTimer);
+    }
+
+    expect(previewCalls).toBeLessThanOrEqual(2);
+  });
+
   it('cancels an active job when the preview session expires', async () => {
     let jobStarted = false;
     const client = {

@@ -754,6 +754,17 @@ is the Windows application-worker architecture described in
 does not execute arbitrary shell commands, and still requires source-bound
 Worker delivery evidence before the strict release gate can close.
 
+### LIVE-47 — Worker idle-poll and replacement hardening (2026-08-29)
+
+The current-SHA Worker audit found two operational risks beyond packaging. This change updates
+GPU preview polling from an idle 25Hz authenticated loop to a bounded one-second cadence while
+keeping the active request path immediate. The Windows installer now captures and terminates the
+exact SEA parent plus fixed Worker entrypoint process tree before and after task replacement, so a
+surviving Node child cannot hold the singleton pipe or suppress the replacement task. Focused Worker
+tests, full tests, typecheck, lint, formatting, CodeRabbit, executable rebuild/self-test, and live
+task replacement verification pass. Strict release closure still requires owner-paired source-bound
+delivery/inspection evidence and the current-SHA production canary.
+
 ## Stop/continue rules for the autonomous goal
 
 - Do not stop for ordinary design choices, review comments, test failures or retryable service

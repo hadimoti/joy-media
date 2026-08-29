@@ -40,10 +40,15 @@ Scheduler is the supported installation boundary.
 - `scripts/install-worker-autostart.ps1` builds the executable if needed and
   installs/updates the hidden `JOY Media Local Worker` AtLogOn task with
   `StartWhenAvailable`, one-minute restart recovery, and limited interactive
-  user scope.
+  user scope. Replacement captures the SEA parent and exact Worker entrypoint
+  process tree before and after stopping the task, so an orphaned Node child
+  cannot hold the singleton pipe or suppress the replacement Worker.
 - `scripts/run-worker-headless.ps1` remains a portable fallback and launches
   the executable when present, otherwise the audited Node entrypoint.
 - `run-worker.bat` prefers the executable while retaining the Node fallback.
+- GPU preview polling is immediate after an active request and uses a bounded
+  one-second idle cadence by default, avoiding an authenticated 25Hz/Postgres
+  polling amplifier while preserving live preview responsiveness.
 
 ## Safety and notification contract
 
@@ -65,7 +70,7 @@ Scheduler is the supported installation boundary.
 - Startup: Scheduled Task is `Running`, `Hidden`, `StartWhenAvailable`, and
   configured to restart after failure; the child process is `joy-worker.exe`.
 - Runtime: pairing persistence/retry tests, Worker control-plane tests,
-  typecheck, lint, and full test suite pass.
+  bounded idle-preview coverage, typecheck, lint, and full test suite pass.
 - Browser: the orchestrator alone rechecks the authenticated JOY page,
   Effects categories, Jobs/Worker panel, and 3D tab without a crash or console
   error. Sub-agents do not use browsers or OpenCLI.
