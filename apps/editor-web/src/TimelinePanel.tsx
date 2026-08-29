@@ -1511,6 +1511,16 @@ export function TimelinePanel({
       destructive: true,
     },
     {
+      id: 'zoom-out',
+      label: 'Zoom out',
+      onSelect: () => applyZoom(viewport.pixelsPerSecond / 1.25),
+    },
+    {
+      id: 'zoom-in',
+      label: 'Zoom in',
+      onSelect: () => applyZoom(viewport.pixelsPerSecond * 1.25),
+    },
+    {
       id: 'flow',
       label: dataLanesOpen ? 'Hide Data Lanes' : 'Show Data Lanes',
       onSelect: () => setDataLanesOpen((open) => !open),
