@@ -44,8 +44,6 @@ describe('workspace presets', () => {
   ] as const)('keeps the %s context view reachable', (preset, requestedView) => {
     const layout = workspacePresetLayout(preset, 'vertical');
     expect(leafViews(layout, 'context')).toContain(requestedView);
-    expect(
-      (layout as { grid: { root: unknown } }).grid.root,
-    ).toBeDefined();
+    expect((layout as { grid: { root: unknown } }).grid.root).toBeDefined();
   });
 });
