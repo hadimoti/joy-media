@@ -18,3 +18,27 @@ export function nextTimelineMarkerId(
   while (used.has(`${base}-${suffix}`)) suffix += 1;
   return `${base}-${suffix}`;
 }
+
+/**
+ * Return the next generated marker label without reusing a live label after a
+ * non-tail marker is removed. Non-generated labels supplied by a caller are
+ * preserved verbatim; existing custom labels are never rewritten.
+ */
+export function nextTimelineMarkerLabel(
+  markers: readonly { readonly label: string }[],
+  requestedLabel?: string,
+): string {
+  const requested = requestedLabel?.trim();
+  if (requested !== undefined && requested.length > 0 && !/^Marker \d+$/.test(requested)) {
+    return requestedLabel!;
+  }
+
+  const used = new Set(markers.map((marker) => marker.label.trim()));
+  let next = 1;
+  for (const label of used) {
+    const match = /^Marker (\d+)$/.exec(label);
+    if (match !== null) next = Math.max(next, Number(match[1]) + 1);
+  }
+  while (used.has(`Marker ${next}`)) next += 1;
+  return `Marker ${next}`;
+}

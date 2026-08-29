@@ -131,7 +131,7 @@ import { TimelinePanel } from './TimelinePanel.js';
 import { buildTimelineMediaImportTransaction } from './timeline-media-import.js';
 import { buildTimelineElementDocument } from './place-timeline-element.js';
 import { nextProfessionalTrackId } from './timeline-track-family.js';
-import { nextTimelineMarkerId } from './timeline-marker-id.js';
+import { nextTimelineMarkerId, nextTimelineMarkerLabel } from './timeline-marker-id.js';
 import { buildTimelineDeletePlan } from './delete-timeline-elements.js';
 import { DualLensPanel } from './DualLensPanel.js';
 import { buildDualLensProjection, type DualLensProjection } from './dual-lens-model.js';
@@ -5743,8 +5743,9 @@ function EditorWorkspace({
             : { selectedObject, onPropertyDispatch: context.dispatchProject })}
           onAddMarker={(timeUs, label) => {
             const rootTimeUs = timelineViewRootTime(activeTimelineView, timeUs);
+            const markerLabel = nextTimelineMarkerLabel(session.visualProject.markers, label);
             context.dispatchProject({
-              label: `Add ${label}`,
+              label: `Add ${markerLabel}`,
               commands: [
                 {
                   type: 'marker.add',
@@ -5752,7 +5753,7 @@ function EditorWorkspace({
                     marker: {
                       id: nextTimelineMarkerId(session.visualProject.markers, rootTimeUs),
                       timeUs: rootTimeUs,
-                      label,
+                      label: markerLabel,
                       kind: 'marker',
                       color: JOY_COLORS.accent,
                     },
@@ -5826,8 +5827,9 @@ function EditorWorkspace({
           onRevealOnTimeline={context.revealOnTimeline}
           markers={visualProject.markers}
           onAddMarker={(timeUs, label) => {
+            const markerLabel = nextTimelineMarkerLabel(session.visualProject.markers, label);
             context.dispatchProject({
-              label: `Add ${label}`,
+              label: `Add ${markerLabel}`,
               commands: [
                 {
                   type: 'marker.add',
@@ -5835,7 +5837,7 @@ function EditorWorkspace({
                     marker: {
                       id: nextTimelineMarkerId(session.visualProject.markers, timeUs),
                       timeUs,
-                      label,
+                      label: markerLabel,
                       kind: 'marker',
                       color: JOY_COLORS.accent,
                     },

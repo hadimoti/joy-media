@@ -113,6 +113,7 @@ import {
   type TimelineRect,
 } from './timeline-marquee-selection.js';
 import { timelineGapsForClips, type TimelineGap } from './timeline-gaps.js';
+import { nextTimelineMarkerLabel } from './timeline-marker-id.js';
 /** Drags snap to a 100 ms grid, matching the playhead slider's step. */
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
@@ -1519,7 +1520,7 @@ export function TimelinePanel({
     {
       id: 'marker',
       label: 'Add Marker',
-      onSelect: () => onAddMarker?.(playheadUs, `Marker ${markers.length + 1}`),
+      onSelect: () => onAddMarker?.(playheadUs, nextTimelineMarkerLabel(markers)),
       disabled: onAddMarker === undefined,
       disabledReason: 'Markers are unavailable in this view.',
     },
@@ -2045,7 +2046,7 @@ export function TimelinePanel({
               aria-label="Add marker at playhead"
               title="Add marker at playhead"
               data-guide="Add marker"
-              onClick={() => onAddMarker(playheadUs, `Marker ${markers.length + 1}`)}
+              onClick={() => onAddMarker(playheadUs, nextTimelineMarkerLabel(markers))}
             >
               <MarkerIcon />
             </button>
@@ -2238,7 +2239,7 @@ export function TimelinePanel({
             onSeek={onSeek}
             onContextMenu={(timeUs, clientX, clientY) => {
               const items = buildRulerContextMenu((t) => {
-                onAddMarker?.(t, `Marker ${markers.length + 1}`);
+                onAddMarker?.(t, nextTimelineMarkerLabel(markers));
               }, timeUs);
               setMenu({ x: clientX, y: clientY, items });
             }}

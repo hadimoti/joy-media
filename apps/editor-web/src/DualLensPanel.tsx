@@ -27,6 +27,7 @@ import {
 import { isTraversalKey, traverseGraph, type TraversalKey } from './graph-traversal.js';
 import { TimelineCanvas, type TimelineCanvasTrack } from './TimelineCanvas.js';
 import { timelineContentWidthPx } from './timeline-layout.js';
+import { nextTimelineMarkerLabel } from './timeline-marker-id.js';
 import {
   FitWidthIcon,
   MarkerIcon,
@@ -450,7 +451,7 @@ function TimeProjection({
                   aria-label="Add marker at playhead"
                   title="Add marker at playhead"
                   data-guide="Add marker"
-                  onClick={() => onAddMarker(playheadUs, `Marker ${markers.length + 1}`)}
+                  onClick={() => onAddMarker(playheadUs, nextTimelineMarkerLabel(markers))}
                 >
                   <MarkerIcon />
                 </button>
