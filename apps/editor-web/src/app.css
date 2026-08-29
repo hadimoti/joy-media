@@ -9112,6 +9112,13 @@ label {
   isolation: isolate;
   background: var(--joy-bg-deep);
 }
+.effect-preview-media-placeholder {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(110deg, transparent 20%, rgb(255 255 255 / 4%), transparent 80%),
+    var(--joy-bg-deep);
+}
 .effect-preview-media-video,
 .effect-preview-media-fallback,
 .effect-preview-media-treatment {
@@ -9131,9 +9138,32 @@ label {
   opacity: 0.35;
   mix-blend-mode: screen;
   pointer-events: none;
+  background-position: center;
+  background-size: cover;
 }
 .effect-preview-media.is-fallback .effect-preview-media-fallback {
   background: var(--joy-bg-inset);
+}
+.effect-preview-media-retry {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  z-index: 3;
+  width: 2rem;
+  height: 2rem;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgb(255 255 255 / 35%);
+  border-radius: 50%;
+  background: rgb(10 12 13 / 78%);
+  color: var(--joy-text);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+.effect-preview-media-retry:hover,
+.effect-preview-media-retry:focus-visible {
+  border-color: var(--joy-accent);
+  color: var(--joy-accent);
+  outline: none;
 }
 .effect-card:hover {
   border-color: var(--joy-accent);

@@ -24,6 +24,7 @@ function mediaQueryList(matches: boolean): MediaQueryList {
 describe('EffectPreviewMedia', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
+  const initialVisibilityState = document.visibilityState;
 
   afterEach(() => {
     act(() => root?.unmount());
@@ -32,6 +33,10 @@ describe('EffectPreviewMedia', () => {
     container = undefined;
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: initialVisibilityState,
+    });
   });
 
   function render(matchesReducedMotion = false): void {
@@ -56,6 +61,7 @@ describe('EffectPreviewMedia', () => {
 
   it('falls back to the poster when autoplay is rejected', async () => {
     vi.spyOn(HTMLMediaElement.prototype, 'play').mockRejectedValue(new Error('autoplay denied'));
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
     render();
     await act(async () => {
       await Promise.resolve();
@@ -77,6 +83,48 @@ describe('EffectPreviewMedia', () => {
     });
 
     expect(container?.querySelector('video')).toBeNull();
+    expect(container?.querySelector('img.effect-preview-media-fallback')).not.toBeNull();
+  });
+
+  it('bounds mounted and playing previews when a catalog has many effects', async () => {
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    vi.stubGlobal('matchMedia', () => mediaQueryList(false));
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(
+        <>
+          {Array.from({ length: 20 }, (_, index) => (
+            <EffectPreviewMedia key={index} effectId={`effect-${index}`} />
+          ))}
+        </>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const mounted = container.querySelectorAll('[data-preview-mounted="true"]');
+    const videos = container.querySelectorAll('video.effect-preview-media-video');
+    expect(mounted).toHaveLength(12);
+    expect(videos).toHaveLength(6);
+    expect(container.querySelectorAll('video, img')).toHaveLength(12);
+    expect(container.querySelectorAll('[data-preview-mounted="false"]')).toHaveLength(8);
+  });
+
+  it('offers an accessible retry after a motion preview fails', async () => {
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockRejectedValue(new Error('decode failed'));
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    render();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const retry = container?.querySelector<HTMLButtonElement>('.effect-preview-media-retry');
+    expect(retry?.getAttribute('aria-label')).toBe('Retry motion preview');
     expect(container?.querySelector('img.effect-preview-media-fallback')).not.toBeNull();
   });
 });

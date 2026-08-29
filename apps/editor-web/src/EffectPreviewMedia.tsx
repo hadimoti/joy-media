@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { effectMotionPreviewUrl, effectPreviewUrl } from './effect-preview-url.js';
+import {
+  acquireEffectPreviewMount,
+  acquireEffectPreviewPlayback,
+  createEffectPreviewToken,
+} from './effect-preview-coordinator.js';
 
 interface EffectPreviewMediaProps {
   readonly effectId: string;
@@ -18,71 +23,122 @@ function isDocumentHidden(): boolean {
   return typeof document !== 'undefined' && document.visibilityState === 'hidden';
 }
 
-/** A muted loop keeps the catalog alive without requiring a timeline selection. */
+/**
+ * A poster-first preview that only mounts near the viewport and participates
+ * in a bounded mount/playback queue. The catalog can contain many effects,
+ * but the browser never needs to decode all of them at once.
+ */
 export function EffectPreviewMedia({ effectId, className }: EffectPreviewMediaProps) {
+  const mediaRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [fallback, setFallback] = useState(() => prefersReducedMotion() || isDocumentHidden());
+  const tokenRef = useRef<string | undefined>(undefined);
+  if (tokenRef.current === undefined) tokenRef.current = createEffectPreviewToken();
+  const token = tokenRef.current;
+  const [nearViewport, setNearViewport] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const [playbackFailed, setPlaybackFailed] = useState(false);
+  const [documentHidden, setDocumentHidden] = useState(isDocumentHidden);
+  const [reducedMotion, setReducedMotion] = useState(prefersReducedMotion);
 
   useEffect(() => {
-    const video = videoRef.current;
-    if (video === null) return;
-    const shouldUseFallback = () => prefersReducedMotion() || isDocumentHidden();
-    setFallback(shouldUseFallback());
-    if (shouldUseFallback()) return;
+    const element = mediaRef.current;
+    if (element === null) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      setNearViewport(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => setNearViewport(entry?.isIntersecting === true),
+      { threshold: 0 },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
-    let disposed = false;
-    const showFallback = () => {
-      if (!disposed) setFallback(true);
-    };
-    const start = () => {
-      if (disposed || shouldUseFallback()) return;
-      // Autoplay can be rejected by browser policy. The poster is a stable,
-      // deterministic rendering path for that case rather than a blank card.
-      if (typeof video.play !== 'function') {
-        showFallback();
-        return;
-      }
-      void video.play().catch(showFallback);
-    };
-    const onVisibilityChange = () => {
-      if (isDocumentHidden()) showFallback();
-      else if (!shouldUseFallback()) start();
-    };
+  useEffect(() => {
     const mediaQuery =
       typeof window !== 'undefined' && typeof window.matchMedia === 'function'
         ? window.matchMedia('(prefers-reduced-motion: reduce)')
         : undefined;
-    const onMotionPreferenceChange = () => {
-      if (shouldUseFallback()) showFallback();
+    const updateVisibility = () => setDocumentHidden(isDocumentHidden());
+    const updateMotion = () => setReducedMotion(prefersReducedMotion());
+    document.addEventListener('visibilitychange', updateVisibility);
+    mediaQuery?.addEventListener?.('change', updateMotion);
+    if (mediaQuery?.addEventListener === undefined) mediaQuery?.addListener?.(updateMotion);
+    return () => {
+      document.removeEventListener('visibilitychange', updateVisibility);
+      mediaQuery?.removeEventListener?.('change', updateMotion);
+      if (mediaQuery?.removeEventListener === undefined) mediaQuery?.removeListener?.(updateMotion);
     };
+  }, []);
 
-    start();
-    video.addEventListener('canplay', start);
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    mediaQuery?.addEventListener?.('change', onMotionPreferenceChange);
-    mediaQuery?.addListener?.(onMotionPreferenceChange);
+  useEffect(() => {
+    if (!nearViewport) {
+      setMounted(false);
+      return;
+    }
+    return acquireEffectPreviewMount(token, () => setMounted(true));
+  }, [nearViewport, token]);
+
+  const blocked = documentHidden || reducedMotion || playbackFailed;
+  useEffect(() => {
+    if (!nearViewport || !mounted || blocked) {
+      setPlaying(false);
+      return;
+    }
+    return acquireEffectPreviewPlayback(token, () => setPlaying(true));
+  }, [blocked, mounted, nearViewport, token]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!playing || video === null) return;
+    let disposed = false;
+    const fail = () => {
+      if (!disposed) setPlaybackFailed(true);
+    };
+    try {
+      const result = video.play();
+      result?.catch(fail);
+    } catch {
+      fail();
+    }
     return () => {
       disposed = true;
-      video.removeEventListener('canplay', start);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-      mediaQuery?.removeEventListener?.('change', onMotionPreferenceChange);
-      mediaQuery?.removeListener?.(onMotionPreferenceChange);
+      video.pause();
     };
-  }, [effectId]);
+  }, [playing]);
 
-  const classes = ['effect-preview-media', className, fallback ? 'is-fallback' : undefined]
+  useEffect(() => {
+    if (!blocked) return;
+    videoRef.current?.pause();
+  }, [blocked]);
+
+  const showVideo = mounted && nearViewport && playing && !blocked;
+  const showPoster = mounted && !showVideo;
+  const classes = ['effect-preview-media', className, showPoster ? 'is-fallback' : undefined]
     .filter((value): value is string => value !== undefined)
     .join(' ');
 
   return (
-    <div className={classes} data-effect-id={effectId}>
-      {fallback ? (
+    <div
+      ref={mediaRef}
+      className={classes}
+      data-effect-id={effectId}
+      data-preview-mounted={mounted ? 'true' : 'false'}
+      data-preview-playing={showVideo ? 'true' : 'false'}
+    >
+      {!mounted ? (
+        <div className="effect-preview-media-placeholder" aria-hidden="true" />
+      ) : showPoster ? (
         <img
           className="effect-preview-media-fallback"
           src={effectPreviewUrl(effectId)}
           alt=""
           width="192"
           height="192"
+          loading="lazy"
+          decoding="async"
         />
       ) : (
         <video
@@ -96,18 +152,29 @@ export function EffectPreviewMedia({ effectId, className }: EffectPreviewMediaPr
           playsInline
           preload="metadata"
           aria-hidden="true"
-          onError={() => setFallback(true)}
+          onError={() => setPlaybackFailed(true)}
         />
       )}
-      {!fallback && (
-        <img
+      {showVideo && (
+        <span
           className="effect-preview-media-treatment"
-          src={effectPreviewUrl(effectId)}
-          alt=""
-          width="120"
-          height="120"
           aria-hidden="true"
+          style={{ backgroundImage: `url(${effectPreviewUrl(effectId)})` }}
         />
+      )}
+      {playbackFailed && mounted && nearViewport && (
+        <button
+          type="button"
+          className="effect-preview-media-retry"
+          aria-label="Retry motion preview"
+          title="Retry motion preview"
+          onClick={(event) => {
+            event.stopPropagation();
+            setPlaybackFailed(false);
+          }}
+        >
+          ↻
+        </button>
       )}
     </div>
   );
