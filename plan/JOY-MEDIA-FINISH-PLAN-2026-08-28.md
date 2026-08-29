@@ -141,6 +141,7 @@ reproduce it.
 | P0-11 | Timeline track IDs are derived from current array length and can collide, hide, or overwrite rows after removal.                                                                                                                                        | Replace every toolbar/context/drop-created ID with one durable collision-free allocator shared by all command paths. Reject duplicate IDs in validators/loaders. Add randomized add/remove/import plus rapid-repeat tests, then prove exact track/clip identity through undo/redo, save/reopen, project switch, render, and browser reproduction of the live `2 → 4 → 3 → 4` sequence.                                                                                                          |
 | P0-12 | Browser-visible My media/cloud assets are not always present in the active control-plane project. Selecting a real `assetId` and queueing a thumbnail currently returns `ASSET_NOT_FOUND`, so verified Worker delivery cannot complete from the editor. | Reconcile asset-library scope with job scope: either register/import the asset into the active project before enabling Queue thumbnail, or make the job API intentionally accept owner/shared-library assets with an audited project association. Add an authenticated browser test that selects a catalog asset, queues it, receives a Worker lease, uploads a derivative, and reaches verified inspection; never show an enabled queue action that is guaranteed to return `ASSET_NOT_FOUND`. |
 | P0-13 | The rollback script switches immutable API/web pointers but leaves the final release identity environment in place; the previous binary therefore binds and serves `/live` while `/ready` is 503 (`releaseIdentity=false`).                             | Make rollback atomic across pointers and release identity: store per-release non-secret identity metadata beside each archive, switch `/etc/joy-media/api.env` to the target commit/tree/lock/schema before restart, restore the final identity on re-promotion, and require both `/live` and dependency-aware `/ready` to pass in the rehearsal.                                                                                                                                               |
+| P0-14 | Worker derivative finalization is not fail-closed for every source-backed job. A completion receipt can be accepted without a registered/retained derivative; a private object can be orphaned when registration fails after upload; and retries can collide with a prior `media_derivatives` row instead of replacing the failed generation. | For derivative-producing job kinds, require a matching retained object and registered derivative (owner, job, generation, checksum, size and MIME) before accepting completion; reject receipts that have no durable derivative. If registration fails, delete only the exact object written by that attempt. Make retry generations explicit and supersede or safely isolate prior rows so a failed attempt cannot block a fresh result. Add API/PostgreSQL tests for missing-object completion, registration failure cleanup, stale-lease rejection, retry generations and restart recovery, then include the checks in the real Worker journey. |
 
 ### P1 — production function and UX closure
 
@@ -404,6 +405,20 @@ the expected 10.3s empty span from 12.5s to 22.8s and the striped keyboard-focus
 note remained present after reload. Evidence is retained in the ignored local artifact
 `test-output/browser/timeline-5725c49e08c5.json`; this closes the reported Effects-subtab crash as
 unreproduced and keeps only the source-bound editor/Worker journeys and final keyboard matrix open.
+
+### LIVE-31 — Worker derivative integrity audit (2026-08-29)
+
+The non-browser Worker audit found three remaining backend release hazards. The completion routes
+can currently issue a successful receipt for a source-backed derivative job without proving that a
+matching private object was uploaded and registered, which could expose a false Verified result.
+The upload path writes the private object before derivative registration and does not remove that
+exact object when registration fails, leaving orphaned bytes. Finally, retry generations are not
+fully isolated from an earlier `media_derivatives` row, so a failed upload can make the next retry
+hit `DERIVATIVE_EXISTS`. These findings are tracked as P0-14. The daemon's normal order
+(revalidate local derivative → upload → complete lease) is sound, but P0-14 remains open until the
+API rejects missing/unregistered derivatives, registration failures clean up only their own object,
+retry generations are durable and stale completions are rejected, with tests and a real
+authenticated Worker lease/upload/inspection/Motion journey.
 
 ### LIVE-28 — stable promotion and canary (2026-08-29)
 
