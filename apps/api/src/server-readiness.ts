@@ -6,7 +6,7 @@ import { POSTGRES_MIGRATIONS } from './postgres-migrations.js';
 /** Schema version emitted by the release tooling and required by readiness. */
 export const EXPECTED_RELEASE_SCHEMA_VERSION = POSTGRES_MIGRATIONS.length;
 export const PRIVATE_OBJECT_STORE_READINESS_TIMEOUT_MS = 10_000;
-const PRIVATE_OBJECT_STORE_READINESS_RESPONSE_TIMEOUT_MS = 1_000;
+const PRIVATE_OBJECT_STORE_READINESS_RESPONSE_TIMEOUT_MS = 1_800;
 const PRIVATE_OBJECT_STORE_READINESS_CACHE_MS = 15_000;
 
 interface ReadinessQueryClient {
