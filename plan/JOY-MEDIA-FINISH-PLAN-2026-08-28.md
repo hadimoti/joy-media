@@ -173,6 +173,7 @@ reproduce it.
 | P1-25 | Product identity                       | Choose JOY Studio or JOY Media as the canonical user-facing name and make HTML title, shell, login, project library, manifest, release docs and browser assertions agree.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | P1-26 | Responsive timeline semantics          | At the authenticated 480×1370 breakpoint, the timeline's Duplicate, Ripple Delete and Add Marker controls leave the primary toolbar (`display:none`) and are reachable only through an icon-only overflow trigger; Zoom in/out and the `Timeline zoom` range input have no compact replacement at all. Repeated clips also expose duplicate accessible names (for example `Intro, 3.0s` and `Black Brush Stroke, 5.0s`), while track containers have no semantic role or accessible name. Give the overflow trigger a visible text affordance and complete compact action coverage (including zoom), add unique clip labels/IDs and labelled track groups, then rerun the responsive matrix at 320/480/768/1024/1280/1440 widths. |
 | P1-27 | Compact header hit-target overlap      | At 320px and 480px authenticated widths, the header's Brand menubar overlaps the Edit controls. Hit-testing the visible centers shows Undo/Redo/Command palette/layout toggles landing on File/Edit/Clip/Joy Code/View/Window menu buttons; the layout toggle is therefore visibly present but not operable, and the workspace preset can also be intercepted at 320px. Reflow the header into a bounded horizontal scroller or compact icon groups with non-overlapping hit targets, preserve accessible names/focus order, and add an automated center-hit/keyboard matrix at 320/375/480/600/768px.                                                                                                                            |
+| P1-28 | Timeline continuity cues               | The authenticated showcase timeline contains a 10.3-second visual gap in the 3D Scene lane (12.5s–22.8s) while adjacent lanes continue. The gap may be intentional, but the empty span has no explicit “gap”/coverage cue or lane-level continuity summary, making it difficult to distinguish planned silence from missing media. Preserve intentional gaps, expose them to keyboard/screen-reader users, and add a visual/accessible continuity indicator plus a regression assertion for gap boundaries.                                                                                                                                                                                                                       |
 
 ### LIVE-13 — timeline browser certification (2026-08-29)
 
@@ -317,6 +318,17 @@ layout toggle, and Workspace preset no longer resolve to a neighboring menu. The
 also changed between Widescreen and Vertical at 480px without navigation or console warnings.
 This closes the hit-target portion of P1-27; the remaining closure is the full 320/375/480/600/768
 keyboard/focus matrix and regression coverage in the final release gate.
+
+### LIVE-23 — timeline continuity and Effects subtab retest (2026-08-29)
+
+On the authenticated live editor, the Inspector Effects tab and the Assets → Effects (21) category
+were each opened repeatedly (four alternating cycles) while a selected Effects clip was present.
+Every cycle retained `https://joyst.ir/`, rendered the expected Glow controls/catalog cards, and showed
+no recovery surface or error text. The timeline DOM exposed durable clip ranges for all visible clips;
+the only uncovered continuity gap is the 3D Scene lane's intentional-looking 12.5s–22.8s empty span
+between `showcase-scene3d` and `24 7 Badge`. This is not a crash or database failure, but it is a
+release UX/accessibility gap tracked as P1-28 until the product communicates planned empty spans and
+the final keyboard/focus matrix asserts their boundaries.
 
 ## Numeric release budgets and retained evidence
 
