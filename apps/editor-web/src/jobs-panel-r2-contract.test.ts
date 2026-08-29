@@ -31,11 +31,12 @@ describe('JobsPanel R2 pairing and exactly-once contract', () => {
     expect(panelSource).toContain('no restart is');
   });
 
-  it('does not reset initialized state during the pre-binding readiness probe', () => {
+  it('bootstraps each project once before polling jobs and never reuses a previous project state', () => {
     expect(panelSource).toMatch(/if \(projectScopeReady\) \{\s+setJobs\(nextJobs\);/);
     expect(panelSource).toContain("projectId.startsWith('project-')");
-    expect(panelSource).toContain('await client.ensureProject(projectId, projectTitle);');
-    expect(panelSource).toContain('setProjectInitialized(!projectMissing);');
+    expect(panelSource).toContain('const projectInitialized = initializedProjectId === projectId;');
+    expect(panelSource).toContain('if (!projectInitialized) await client.ensureProject(projectId, projectTitle);');
+    expect(panelSource).toContain('setInitializedProjectId(projectMissing ? undefined : projectId);');
     expect(panelSource).toContain(
       'setConnectionStatus(projectJobStatus(projectMissing, nextWorkers));',
     );

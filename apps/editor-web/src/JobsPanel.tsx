@@ -57,7 +57,10 @@ export function JobsPanel({
   const [jobs, setJobs] = useState<readonly BrowserJob[]>([]);
   const [workerId, setWorkerId] = useState('');
   const [pairingCode, setPairingCode] = useState('');
-  const [projectInitialized, setProjectInitialized] = useState(false);
+  // Track the initialized *project ID*, rather than a boolean. A panel can
+  // stay mounted while the editor switches projects; a boolean would let the
+  // next project's first poll skip its required idempotent bootstrap.
+  const [initializedProjectId, setInitializedProjectId] = useState<string>();
   const [connectionStatus, setConnectionStatus] = useState('Checking JOY Media connection…');
   const [status, setStatus] = useState<string>();
   const [guideOpen, setGuideOpen] = useState(false);
@@ -73,6 +76,7 @@ export function JobsPanel({
   const [submitting, setSubmitting] = useState(false);
   const refreshSeqRef = useRef(0);
   const pollingRef = useRef<BoundedPollingLoop | undefined>(undefined);
+  const projectInitialized = initializedProjectId === projectId;
 
   useEffect(() => {
     if (review === undefined) {
@@ -94,11 +98,12 @@ export function JobsPanel({
       let projectMissing = !projectScopeReady;
       if (projectScopeReady) {
         try {
-          // The binding is browser-local and may not have been initialized on
-          // this device yet. Reconcile it through the idempotent endpoint
-          // before polling jobs, so a missing record never becomes a visible
-          // 409 console error during normal workspace startup or reload.
-          await client.ensureProject(projectId, projectTitle);
+          // Bootstrap only the first poll for this project. Repeating an
+          // idempotent write on every ten-second status poll still creates
+          // avoidable API/PostgreSQL load. Switching projects makes
+          // projectInitialized false again, so the new binding is never
+          // assumed from the old project's successful bootstrap.
+          if (!projectInitialized) await client.ensureProject(projectId, projectTitle);
           nextJobs = await client.jobs(projectId);
         } catch (error) {
           if (!message(error).includes('PROJECT_NOT_FOUND')) throw error;
@@ -109,7 +114,7 @@ export function JobsPanel({
       setWorkers(nextWorkers);
       if (projectScopeReady) {
         setJobs(nextJobs);
-        setProjectInitialized(!projectMissing);
+        setInitializedProjectId(projectMissing ? undefined : projectId);
         setConnectionStatus(projectJobStatus(projectMissing, nextWorkers));
       }
     } catch (error) {
@@ -210,7 +215,7 @@ export function JobsPanel({
   const initialize = async () => {
     try {
       await client.ensureProject(projectId, projectTitle);
-      setProjectInitialized(true);
+      setInitializedProjectId(projectId);
       setStatus('Project is ready. Pair a Worker, then queue a job.');
       await refresh();
     } catch (error) {
