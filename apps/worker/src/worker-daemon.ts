@@ -1,5 +1,8 @@
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { WorkerControlPlaneClient } from './control-plane-client.js';
+import {
+  WorkerSessionExpiredError,
+  type WorkerControlPlaneClient,
+} from './control-plane-client.js';
 import type { WorkerRuntime } from './runtime.js';
 import type { GpuPreviewHost } from './gpu-preview-host.js';
 
@@ -100,6 +103,11 @@ export class WorkerDaemon {
         leasedJobId = undefined;
         leasedJobToken = undefined;
       } catch (error) {
+        // A revoked/expired session cannot recover through the current loop:
+        // the session store has already been cleared by the client, so keep
+        // polling would only produce an endless "not paired" loop. Exit and
+        // let the service supervisor restart through the pairing flow.
+        if (error instanceof WorkerSessionExpiredError) throw error;
         const message = error instanceof Error ? error.message : 'unknown Worker failure';
         this.runtime.log.write(`Worker job failed: ${message.slice(0, 240)}`);
         if (leasedJobId !== undefined) {

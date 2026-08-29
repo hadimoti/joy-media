@@ -53,6 +53,18 @@ export interface WorkerControlPlaneClientOptions {
   readonly fetch?: typeof fetch;
 }
 
+/**
+ * Signals that the persisted Worker session is no longer usable. The daemon
+ * must stop so its supervisor can restart it through the pairing flow instead
+ * of polling forever with an empty session.
+ */
+export class WorkerSessionExpiredError extends Error {
+  constructor() {
+    super('Worker session expired or was revoked');
+    this.name = 'WorkerSessionExpiredError';
+  }
+}
+
 /** Outbound-only Worker client. It never holds a JOY user session or password. */
 export class WorkerControlPlaneClient {
   readonly #fetch: typeof fetch;
@@ -205,7 +217,7 @@ export class WorkerControlPlaneClient {
     );
     if (response.status === 401) {
       this.options.sessionStore.clearWorkerSession();
-      throw new Error('Worker session expired or was revoked');
+      throw new WorkerSessionExpiredError();
     }
     if (!response.ok) throw new Error(`Worker derivative upload failed (${response.status})`);
   }
@@ -226,7 +238,7 @@ export class WorkerControlPlaneClient {
     const response = await this.fetchJson(pathname, body, sessionToken);
     if (response.status === 401) {
       this.options.sessionStore.clearWorkerSession();
-      throw new Error('Worker session expired or was revoked');
+      throw new WorkerSessionExpiredError();
     }
     if (!response.ok) throw new Error(`Worker control-plane request failed (${response.status})`);
     return response.body;

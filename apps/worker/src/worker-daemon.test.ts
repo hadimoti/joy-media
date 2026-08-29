@@ -3,10 +3,31 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { WorkerControlPlaneClient } from './control-plane-client.js';
+import { WorkerSessionExpiredError } from './control-plane-client.js';
 import { WorkerDaemon } from './worker-daemon.js';
 import { StaticLocalAssetSourceRegistry, WorkerRuntime } from './runtime.js';
 
 describe('WorkerDaemon', () => {
+  it('stops on session expiry so a supervisor can restart through pairing', async () => {
+    const client = {
+      hello: async () => undefined,
+      lease: async () => {
+        throw new WorkerSessionExpiredError();
+      },
+      heartbeat: async () => ({ cancelRequested: false }),
+      complete: async () => undefined,
+      fail: async () => undefined,
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = new WorkerRuntime(
+      { workerId: 'worker-expired', createdAt: '2026-08-29T00:00:00.000Z' },
+      { ffmpeg: false, ffprobe: false, comfy: false, mlDenoise: false, aiProviders: [] },
+    );
+
+    await expect(
+      new WorkerDaemon(client, runtime).run({ pollIntervalMs: 1, stopped: () => false }),
+    ).rejects.toBeInstanceOf(WorkerSessionExpiredError);
+  });
+
   it('completes the Jobs-panel fixture smoke job without uploading a derivative', async () => {
     const calls: string[] = [];
     let stop = false;
