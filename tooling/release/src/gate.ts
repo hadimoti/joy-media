@@ -159,7 +159,7 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
         ? 'command evidence not supplied to pure evaluator'
         : commandHealth
           ? 'typecheck, lint, format, tests, builds, and goldens passed'
-          : 'one or more required release commands failed',
+          : commandHealthMessage(requiredCommands, input.commandResults),
     ),
     check(
       'source-provenance',
@@ -264,6 +264,18 @@ function validWaiver(waiver: ReleaseWaiver, now: Date): boolean {
   );
 }
 
+function commandHealthMessage(
+  requiredCommands: readonly string[],
+  commandResults: readonly ReleaseCommandResult[],
+): string {
+  const failing = requiredCommands.filter((id) => {
+    const result = commandResults.find((candidate) => candidate.id === id);
+    return result === undefined || result.exitCode !== 0;
+  });
+  if (failing.length === 0) return 'typecheck, lint, format, tests, builds, and goldens passed';
+  return `one or more required release commands failed: ${failing.join(', ')}`;
+}
+
 function featureStatusFresh(auditedOn: string, now: Date): boolean {
   const timestamp = Date.parse(auditedOn);
   if (!Number.isFinite(timestamp)) return false;
@@ -321,7 +333,8 @@ function browserJourneyMessage(
   now = new Date(),
 ): string {
   const journey = journeys.find((candidate) => candidate.id === REQUIRED_JOURNEY_ID);
-  if (journey === undefined) return `required journey ${REQUIRED_JOURNEY_ID} is missing`;
+  if (journey === undefined)
+    return `required journey ${REQUIRED_JOURNEY_ID} is missing; supply test-output/browser/journeys.json or JOY_RELEASE_EVIDENCE.browserJourneys`;
   if (browserJourneyReleaseReady(journey, expectedSource, now))
     return 'authenticated editor 1.0 journey verified against real services and inspected delivery';
   const reasons: string[] = [];
@@ -359,7 +372,7 @@ function sourceProvenanceMessage(input: ReleaseGateInput, now: Date): string {
   if (!source.worktreeClean) return 'workspace contains tracked or untracked source changes';
   const journey = input.browserJourneys.find((candidate) => candidate.id === REQUIRED_JOURNEY_ID);
   if (journey?.sourceProvenance === undefined)
-    return 'authenticated browser evidence is not bound to a source revision';
+    return 'authenticated browser evidence is not bound to a source revision; the journey evidence JSON must contain sourceProvenance';
   if (!sameSource(journey.sourceProvenance, source))
     return 'authenticated browser evidence was produced from a different source revision';
   if (!browserJourneyFresh(journey, now))

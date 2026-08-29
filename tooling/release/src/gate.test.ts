@@ -432,6 +432,30 @@ describe('JOY Studio 1.0 release gate', () => {
     }
   });
 
+  it('explains when source provenance is missing from journey evidence', () => {
+    const now = new Date('2026-08-28T12:00:00.000Z');
+    const current = sourceProvenance();
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        sourceProvenance: current,
+        browserJourneys: [
+          {
+            ...passingInput().browserJourneys[0]!,
+            verifiedAt: '2026-08-28T11:00:00.000Z',
+          },
+        ],
+      },
+      now,
+    );
+
+    expect(result.checks.find((check) => check.id === 'source-provenance')).toMatchObject({
+      status: 'failed',
+      message:
+        'authenticated browser evidence is not bound to a source revision; the journey evidence JSON must contain sourceProvenance',
+    });
+  });
+
   it.each([
     ['a mismatched journey id', { journeyId: 'different-journey', status: 'verified' }],
     ['a failed evidence status', { journeyId: REQUIRED_JOURNEY_ID, status: 'failed' }],
@@ -499,6 +523,33 @@ describe('JOY Studio 1.0 release gate', () => {
     });
     expect(result.passed).toBe(false);
     expect(result.checks.find((check) => check.id === 'command-health')?.status).toBe('failed');
+  });
+
+  it('names the exact release command that failed', () => {
+    const commandIds = [
+      'typecheck',
+      'lint',
+      'format',
+      'tests',
+      'editor-build',
+      'api-build',
+      'worker-build',
+      'goldens',
+    ];
+    const result = evaluateReleaseGate({
+      ...passingInput(),
+      commandResults: commandIds.map((id) => ({
+        id,
+        command: id,
+        exitCode: id === 'format' ? 1 : 0,
+        durationMs: 1,
+      })),
+    });
+
+    expect(result.checks.find((check) => check.id === 'command-health')).toMatchObject({
+      status: 'failed',
+      message: 'one or more required release commands failed: format',
+    });
   });
 
   it('rejects dirty generated artifacts', () => {
@@ -615,7 +666,11 @@ describe('JOY Studio 1.0 release gate', () => {
   it('rejects an unverified or incomplete browser journey', () => {
     const result = evaluateReleaseGate({ ...passingInput(), browserJourneys: [] });
     expect(result.passed).toBe(false);
-    expect(result.checks.find((check) => check.id === 'browser-journey')?.status).toBe('failed');
+    expect(result.checks.find((check) => check.id === 'browser-journey')).toMatchObject({
+      status: 'failed',
+      message:
+        'required journey authenticated-editor-1.0 is missing; supply test-output/browser/journeys.json or JOY_RELEASE_EVIDENCE.browserJourneys',
+    });
   });
 
   it('rejects stale feature status', () => {
