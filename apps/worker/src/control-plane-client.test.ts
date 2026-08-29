@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import type { IncomingMessage } from 'node:http';
 import { describe, expect, it } from 'vitest';
 import { createControlPlaneHttpServer, LocalControlPlane } from '@joy-media/api';
-import { WorkerControlPlaneClient } from './control-plane-client.js';
+import { WorkerControlPlaneClient, WorkerSessionExpiredError } from './control-plane-client.js';
 
 const stubMediaAuth = {
   requestOtp: async () => ({ message: 'stub' }),
@@ -117,6 +117,29 @@ describe('WorkerControlPlaneClient', () => {
     });
 
     await expect(client.lease()).rejects.toThrow('Worker session expired or was revoked');
+    expect(session).toBeUndefined();
+  });
+
+  it('clears a revoked Worker session when a proxy returns a non-JSON 401', async () => {
+    let session: string | undefined = 'revoked-session';
+    const client = new WorkerControlPlaneClient({
+      apiUrl: 'https://media.joyteam.ir',
+      identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
+      sessionStore: {
+        loadWorkerSession: () => session,
+        saveWorkerSession: () => undefined,
+        clearWorkerSession: () => {
+          session = undefined;
+        },
+      },
+      fetch: async () =>
+        new Response('<html>unauthorized</html>', {
+          status: 401,
+          headers: { 'content-type': 'text/html' },
+        }),
+    });
+
+    await expect(client.lease()).rejects.toBeInstanceOf(WorkerSessionExpiredError);
     expect(session).toBeUndefined();
   });
 

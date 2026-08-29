@@ -275,6 +275,13 @@ export class WorkerControlPlaneClient {
       },
       body: JSON.stringify(body),
     });
+    // Authentication failures are actionable even when an upstream proxy
+    // returns an HTML/plain-text body instead of the JSON API envelope. Let
+    // authenticatedRequest inspect the status so it can clear the session.
+    if (response.status === 401) {
+      await response.text();
+      return { ok: false, status: response.status, body: null };
+    }
     const raw = await response.text();
     let envelope: unknown;
     try {

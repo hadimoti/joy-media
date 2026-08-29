@@ -6,6 +6,7 @@ import type { WorkerControlPlaneClient } from './control-plane-client.js';
 import { WorkerSessionExpiredError } from './control-plane-client.js';
 import { WorkerDaemon } from './worker-daemon.js';
 import { StaticLocalAssetSourceRegistry, WorkerRuntime } from './runtime.js';
+import type { GpuPreviewHost } from './gpu-preview-host.js';
 
 describe('WorkerDaemon', () => {
   it('stops on session expiry so a supervisor can restart through pairing', async () => {
@@ -25,6 +26,33 @@ describe('WorkerDaemon', () => {
 
     await expect(
       new WorkerDaemon(client, runtime).run({ pollIntervalMs: 1, stopped: () => false }),
+    ).rejects.toBeInstanceOf(WorkerSessionExpiredError);
+  });
+
+  it('propagates preview-loop session expiry to the daemon supervisor', async () => {
+    const client = {
+      hello: async () => undefined,
+      lease: async () => undefined,
+      nextGpuPreview: async () => {
+        throw new WorkerSessionExpiredError();
+      },
+      completeGpuPreview: async () => undefined,
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = new WorkerRuntime(
+      { workerId: 'worker-preview-expired', createdAt: '2026-08-29T00:00:00.000Z' },
+      { ffmpeg: false, ffprobe: false, comfy: false, mlDenoise: false, aiProviders: [] },
+    );
+    const gpuPreviewHost = {
+      render: async () => {
+        throw new Error('unreachable');
+      },
+    } as unknown as GpuPreviewHost;
+
+    await expect(
+      new WorkerDaemon(client, runtime, gpuPreviewHost).run({
+        pollIntervalMs: 1,
+        stopped: () => false,
+      }),
     ).rejects.toBeInstanceOf(WorkerSessionExpiredError);
   });
 

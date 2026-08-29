@@ -19,8 +19,13 @@ export class WorkerDaemon {
     readonly stopped: () => boolean;
   }): Promise<void> {
     const pollIntervalMs = options.pollIntervalMs ?? 1_000;
+    let gpuPreviewError: WorkerSessionExpiredError | undefined;
     if (this.gpuPreviewHost !== undefined)
       void this.runGpuPreviewLoop(options.stopped).catch((error: unknown) => {
+        if (error instanceof WorkerSessionExpiredError) {
+          gpuPreviewError = error;
+          return;
+        }
         this.runtime.log.write(
           `GPU preview loop stopped: ${error instanceof Error ? error.message.slice(0, 180) : 'unknown error'}`,
         );
@@ -29,10 +34,12 @@ export class WorkerDaemon {
       this.runtime.hello(process.platform, process.arch).capabilities,
       this.runtime.localAssetIds(),
     );
+    if (gpuPreviewError !== undefined) throw gpuPreviewError;
     let lastHelloAt = Date.now();
     let leasedJobId: string | undefined;
     let leasedJobToken: string | undefined;
     while (!options.stopped()) {
+      if (gpuPreviewError !== undefined) throw gpuPreviewError;
       try {
         if (Date.now() - lastHelloAt >= 15_000) {
           await this.client.hello(
@@ -145,6 +152,7 @@ export class WorkerDaemon {
           `GPU preview ${request.requestId} rendered ${response.width}x${response.height} in ${Date.now() - startedAt}ms`,
         );
       } catch (error) {
+        if (error instanceof WorkerSessionExpiredError) throw error;
         this.runtime.log.write(
           `GPU preview failed: ${error instanceof Error ? error.message.slice(0, 180) : 'unknown error'}`,
         );
