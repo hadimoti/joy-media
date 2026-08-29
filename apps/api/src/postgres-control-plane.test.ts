@@ -570,7 +570,9 @@ describe('PostgresControlPlane', () => {
       availability: 'available-local',
       locations: [{ kind: 'opfs-cache', ref: 'target-derivative-cache' }],
     });
-    await expect(controlPlane.deleteAsset(owner, 'target-a', 'lifecycle-cloud')).resolves.toMatchObject({
+    await expect(
+      controlPlane.deleteAsset(owner, 'target-a', 'lifecycle-cloud'),
+    ).resolves.toMatchObject({
       id: 'lifecycle-cloud',
       orphanedPrivateObjectRefs: [],
     });
@@ -606,7 +608,9 @@ describe('PostgresControlPlane', () => {
       ...cloudAsset('lifecycle-cloud', 'lifecycle-ref'),
     });
     await controlPlane.associateAsset(owner, 'target-2', 'lifecycle-cloud');
-    await expect(controlPlane.deleteAsset(owner, 'source', 'lifecycle-cloud')).rejects.toMatchObject({
+    await expect(
+      controlPlane.deleteAsset(owner, 'source', 'lifecycle-cloud'),
+    ).rejects.toMatchObject({
       code: 'ASSET_REFERENCED',
     });
     await controlPlane.trashProject(owner, 'source', 0, 20);

@@ -1021,7 +1021,8 @@ export class PostgresControlPlane implements ControlPlane {
          LIMIT 1`,
         [assetId, projectId],
       );
-      if (references.rows[0] !== undefined) throw new ControlPlaneError('ASSET_REFERENCED', assetId);
+      if (references.rows[0] !== undefined)
+        throw new ControlPlaneError('ASSET_REFERENCED', assetId);
       const queuedForAsset = await client.query<{ readonly id: string }>(
         `UPDATE jobs SET state = 'canceled', cancel_requested = true
          WHERE project_id = $1 AND asset_id = $2 AND state = 'queued' RETURNING id`,

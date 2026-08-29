@@ -853,7 +853,9 @@ export class LocalControlPlane implements ControlPlane {
     for (const asset of [...this.#assets.values()].filter((item) => item.projectId === id)) {
       for (const ref of privateRefs(asset.locations)) candidates.add(ref);
     }
-    for (const derivative of [...this.#derivatives.values()].filter((item) => item.projectId === id)) {
+    for (const derivative of [...this.#derivatives.values()].filter(
+      (item) => item.projectId === id,
+    )) {
       for (const ref of privateRefs(derivative.locations)) candidates.add(ref);
     }
     for (const [jobId, job] of this.#jobs.entries()) {
