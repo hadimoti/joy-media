@@ -371,8 +371,10 @@ release gaps that must stay visible in this plan. P0-04 now coalesces concurrent
 reads per project and token, but the four panel-specific polling loops still require one
 visibility-aware rate-budget evidence artifact. P0-02 now serializes migration startup with a
 single transaction and PostgreSQL advisory lock, with concurrent-startup coverage; the real
-PostgreSQL rehearsal remains required. P1-21 now performs a bounded, non-mutating object-store
-stat probe and fails readiness closed on timeout or malformed metadata.
+PostgreSQL rehearsal remains required. P1-21 has a bounded, non-mutating object-store stat probe
+implemented in the adapter, but the production readiness gate intentionally remains the proven
+configuration check until a staged deployment demonstrates the probe under cold-start conditions;
+the real object-store rehearsal and retained readiness evidence remain required.
 
 P0-03 and the persistence half of LIVE-25 remain open: the browser still needs GET hydration and
 an awaited, serialized document-save transaction so cloud-asset insertion can prove revision,
