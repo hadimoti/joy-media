@@ -5,18 +5,25 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 
 ## Current closure checkpoint (2026-08-29 UTC / 2026-08-30 local)
 
-Commits through `0fe3ee8` are pushed to both `github/main` and the VPS bare
+Commits through `cd140fb` are pushed to both `github/main` and the VPS bare
 `main`. They fix the project-rename SQL revision placeholder, close the
 cancel/late-receipt race and failed-attempt bookkeeping, revoke sessions when
 an allow-listed identity is disabled/removed, scope destructive asset cleanup
 with canonical-row locking, and serialize durable Mistral idempotency claims
 with lease recovery. The self-hosted Windows workflow now has run isolation,
-Worker package smoke coverage, and GitHub run `33280828851` passed `check`, all
+Worker package smoke coverage, and GitHub run `33281246784` passed `check`, all
 three desktop Playwright projects, and `worker-package` on
-`joy-media-ci-windows`. This is source/desktop evidence only: final release
-remains NO-GO until the isolated Linux real-service lane, clean-profile Worker
-lane, acceptance lane, remaining lease/runtime hardening, deployment, and
-authenticated live/canary/rollback evidence are completed.
+`joy-media-ci-windows`. The same `cd140fb` candidate is deployed through the
+standalone release paths (`current-api` and `web`) and `/health` plus
+`/api/health` are green. Authenticated Codex-browser smoke on `https://joyst.ir/`
+also passed: every Effects category, Joy Code 3D scene tab, 3D timeline clip
+selection, Timeline Time/Flow/Split, and Worker GPU status had no console errors;
+resetting the stale saved workspace removed the obsolete Creative Brief tab.
+This is still conditional evidence: final release remains NO-GO until the
+isolated Linux real-service lane, clean-profile Worker lane, acceptance lane,
+remaining lease/runtime hardening, and authenticated canary/rollback proof are
+completed. Gbrain recording is pending because the local gbrain transport was
+unavailable during this session.
 
 ## VPS access
 

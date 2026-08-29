@@ -103,8 +103,8 @@ The runner must be `online` before pushing a release commit. If it is offline, r
 
 ## Latest verified run
 
-On 2026-08-29 UTC (2026-08-30 local), self-hosted run `33280828851` passed on `main` at commit
-`0fe3ee8`: `check`, `browser-e2e` (`desktop-minimum`, `desktop-primary`, and
+On 2026-08-29 UTC (2026-08-30 local), self-hosted run `33281246784` passed on `main` at commit
+`cd140fb`: `check`, `browser-e2e` (`desktop-minimum`, `desktop-primary`, and
 `desktop-compact`), and `worker-package` all completed successfully. This
 confirms the Windows source/browser/package lane is operational; it does not
 substitute for the release-candidate Linux, clean-profile Worker, or acceptance
