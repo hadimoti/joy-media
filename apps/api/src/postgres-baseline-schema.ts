@@ -1,0 +1,74 @@
+/**
+ * Immutable PostgreSQL schema captured by migration 001-baseline.
+ *
+ * This is deliberately separate from postgres-schema.ts.  The latter is a
+ * current-schema convenience for fresh/test databases; changing it must never
+ * mutate the definition recorded by an already-deployed migration checksum.
+ */
+export const POSTGRES_BASELINE_SCHEMA = `
+CREATE TABLE IF NOT EXISTS projects (id text primary key, owner_id text not null, title text not null, revision integer not null, trashed_at timestamptz NULL);
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS asset_sync_enabled boolean NOT NULL DEFAULT true;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS trashed_at timestamptz NULL;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS creative_brief_opt_in boolean NOT NULL DEFAULT false;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS creative_brief_consent_version text NULL;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS creative_brief_consent_at timestamptz NULL;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS joy_code_consent_version text NULL;
+UPDATE projects SET asset_sync_enabled = true WHERE asset_sync_enabled = false;
+CREATE TABLE IF NOT EXISTS workers (id text primary key, owner_id text not null, revoked_at timestamptz);
+ALTER TABLE workers ADD COLUMN IF NOT EXISTS session_token_hash text;
+ALTER TABLE workers ADD COLUMN IF NOT EXISTS session_expires_at timestamptz;
+ALTER TABLE workers ADD COLUMN IF NOT EXISTS capabilities jsonb NOT NULL DEFAULT '[]';
+ALTER TABLE workers ADD COLUMN IF NOT EXISTS local_asset_ids jsonb NOT NULL DEFAULT '[]';
+ALTER TABLE workers ADD COLUMN IF NOT EXISTS last_seen_at timestamptz;
+ALTER TABLE workers ADD COLUMN IF NOT EXISTS model_inventory jsonb;
+CREATE TABLE IF NOT EXISTS jobs (id text primary key, project_id text not null, type text not null, state text not null, lease_owner text, lease_expires_at timestamptz);
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress integer NOT NULL DEFAULT 0;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cancel_requested boolean NOT NULL DEFAULT false;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_kind text;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_sha256 text;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_bytes integer;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_ref text;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_worker_ref text;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_verified_at timestamptz;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS asset_id text;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS payload jsonb NOT NULL DEFAULT '{}';
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS max_attempts integer;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_asset_id text;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_local_ref text;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_mime_type text;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_width integer;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_height integer;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS result_duration_us bigint;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS error text;
+CREATE TABLE IF NOT EXISTS job_attempts (id bigserial primary key, job_id text not null, worker_id text not null, started_at timestamptz not null, completed_at timestamptz);
+CREATE TABLE IF NOT EXISTS job_events (cursor bigserial primary key, job_id text not null, type text not null, created_at timestamptz not null);
+CREATE TABLE IF NOT EXISTS worker_pairing_offers (worker_id text primary key, pairing_code_hash text not null, owner_id text, expires_at timestamptz not null);
+CREATE TABLE IF NOT EXISTS media_assets (id text primary key, project_id text not null, kind text not null, display_name text not null, sha256 text not null, byte_length bigint not null, descriptor jsonb not null, locations jsonb not null, created_at timestamptz not null);
+ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS tags jsonb NOT NULL DEFAULT '[]';
+ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS sort_name text NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS media_derivatives (id text primary key, project_id text not null, asset_id text not null, kind text not null, profile text not null, sha256 text not null, byte_length bigint not null, descriptor jsonb not null, availability text not null, locations jsonb not null, verified_at timestamptz not null);
+CREATE INDEX IF NOT EXISTS jobs_lease_queue_idx ON jobs (state, lease_expires_at, id);
+CREATE INDEX IF NOT EXISTS jobs_project_idx ON jobs (project_id, id);
+CREATE INDEX IF NOT EXISTS media_assets_project_idx ON media_assets (project_id, id);
+CREATE INDEX IF NOT EXISTS media_derivatives_asset_idx ON media_derivatives (project_id, asset_id, id);
+CREATE INDEX IF NOT EXISTS job_events_job_cursor_idx ON job_events (job_id, cursor);
+CREATE INDEX IF NOT EXISTS job_attempts_job_idx ON job_attempts (job_id, id DESC);
+CREATE INDEX IF NOT EXISTS workers_session_idx ON workers (session_token_hash) WHERE session_token_hash IS NOT NULL;
+CREATE TABLE IF NOT EXISTS media_allowed_users (id bigserial primary key, gmail text, telegram_id text, telegram_username text, added_by text not null, added_at timestamptz not null, enabled boolean not null default true);
+CREATE UNIQUE INDEX IF NOT EXISTS media_allowed_users_gmail_idx ON media_allowed_users (gmail) WHERE gmail IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS media_allowed_users_telegram_idx ON media_allowed_users (telegram_id) WHERE telegram_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS media_otp_codes (id bigserial primary key, contact text not null, method text not null, code_hash text not null, created_at timestamptz not null, expires_at timestamptz not null, used boolean not null default false);
+CREATE INDEX IF NOT EXISTS media_otp_codes_contact_idx ON media_otp_codes (contact, method, used, expires_at);
+CREATE TABLE IF NOT EXISTS media_sessions (id bigserial primary key, token_hash text not null, contact text not null, method text not null, created_at timestamptz not null, expires_at timestamptz not null, revoked_at timestamptz);
+CREATE UNIQUE INDEX IF NOT EXISTS media_sessions_token_idx ON media_sessions (token_hash);
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS document_revision_id text NULL;
+CREATE TABLE IF NOT EXISTS project_documents (
+  project_id text NOT NULL,
+  revision_id text NOT NULL,
+  schema_version integer NOT NULL,
+  document jsonb NOT NULL,
+  created_at timestamptz NOT NULL,
+  PRIMARY KEY (project_id, revision_id)
+);
+CREATE INDEX IF NOT EXISTS project_documents_project_revision_idx ON project_documents (project_id, revision_id);
+`;

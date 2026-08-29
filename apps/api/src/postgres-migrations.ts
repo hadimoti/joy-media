@@ -1,5 +1,5 @@
 import type { Pool, PoolClient } from 'pg';
-import { POSTGRES_SCHEMA } from './postgres-schema.js';
+import { POSTGRES_BASELINE_SCHEMA } from './postgres-baseline-schema.js';
 
 type MigrationDatabase = Pool | PoolClient;
 type MigrationSession = Pick<PoolClient, 'query'>;
@@ -33,7 +33,7 @@ const BASELINE_MIGRATION: PostgresMigration = {
   // a new migration so an older release can still start during rollback.
   checksum: 'sha256:6044f0fbe21a3fb9ec46fc0a95f022842f1a0463fba94cdd53d4da844c4a23a1',
   up: async (database) => {
-    await database.query(POSTGRES_SCHEMA);
+    await database.query(POSTGRES_BASELINE_SCHEMA);
   },
 };
 

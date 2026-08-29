@@ -1,5 +1,7 @@
 import type { Pool } from 'pg';
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
+import { POSTGRES_BASELINE_SCHEMA } from './postgres-baseline-schema.js';
 import { POSTGRES_MIGRATIONS, runPostgresMigrations } from './postgres-migrations.js';
 
 function createRecordingPool(appliedRows: readonly { id: string; checksum: string }[] = []) {
@@ -111,6 +113,14 @@ function createConcurrentPool() {
 }
 
 describe('ordered PostgreSQL migrations', () => {
+  it('keeps the recorded baseline definition byte-for-byte stable', () => {
+    expect(createHash('sha256').update(POSTGRES_BASELINE_SCHEMA).digest('hex')).toBe(
+      '6044f0fbe21a3fb9ec46fc0a95f022842f1a0463fba94cdd53d4da844c4a23a1',
+    );
+    expect(POSTGRES_BASELINE_SCHEMA).not.toContain('lease_token');
+    expect(POSTGRES_BASELINE_SCHEMA).not.toContain('media_asset_access');
+  });
+
   it('creates the ledger, applies each migration once, and records checksums', async () => {
     const { pool, queries } = createRecordingPool();
 
