@@ -176,6 +176,8 @@ reproduce it.
 | P1-27 | Compact header hit-target overlap      | At 320px and 480px authenticated widths, the header's Brand menubar overlaps the Edit controls. Hit-testing the visible centers shows Undo/Redo/Command palette/layout toggles landing on File/Edit/Clip/Joy Code/View/Window menu buttons; the layout toggle is therefore visibly present but not operable, and the workspace preset can also be intercepted at 320px. Reflow the header into a bounded horizontal scroller or compact icon groups with non-overlapping hit targets, preserve accessible names/focus order, and add an automated center-hit/keyboard matrix at 320/375/480/600/768px. |
 | P1-28 | Timeline continuity cues               | The authenticated showcase timeline contains a 10.3-second visual gap in the 3D Scene lane (12.5s–22.8s) while adjacent lanes continue. The gap may be intentional, but the empty span has no explicit “gap”/coverage cue or lane-level continuity summary, making it difficult to distinguish planned silence from missing media. Preserve intentional gaps, expose them to keyboard/screen-reader users, and add a visual/accessible continuity indicator plus a regression assertion for gap boundaries.                                                                                            |
 | P1-29 | Timeline marker insertion              | Fixed in `856612f`: Classic and Dual Lens now allocate deterministic collision-free IDs from the current session marker list, with focused rapid-repeat coverage. Post-deploy browser verification on `8e1df6d` at 320px inserted a second marker successfully, collapsed the More menu (`aria-expanded=false`), kept the editor on `https://joyst.ir/`, and emitted no new console errors. Retain this assertion in the source-bound release journey.                                                                                                                                                 |
+| P1-30 | Jobs source-ready worker selection     | Fixed in `2a321d8`: queue readiness now evaluates every connected Worker and enables an operation when any capability-compatible Worker also advertises the selected source asset, instead of failing on the first capability-only Worker. Focused Jobs/polling coverage (19 tests) passed. Retain a live multi-Worker assertion and the source-bound delivery journey before closing P0-12.                                                                                                                                                                                                           |
+| P1-31 | Timeline marker label uniqueness       | Fixed in `82290df`: generated `Marker N` labels now advance above all existing generated labels across Classic, Dual Lens, toolbar, overflow and ruler paths, while custom labels remain unchanged. Focused marker/context/timeline coverage (17 tests), typecheck, lint and formatting passed. Retain a save/reopen and non-tail-delete/reinsert assertion so visible labels remain unambiguous.                                                                                                                                                                                                      |
 
 ### LIVE-13 — timeline browser certification (2026-08-29)
 
@@ -536,6 +538,22 @@ error and closes the menu is now green on the deployed `8e1df6d` release: the ma
 from one to two, `aria-expanded` returned to `false`, the editor URL stayed stable, and no fresh
 console error was recorded. P1-29 is closed for implementation and browser behavior; the remaining
 release NO-GO is the separate source-bound Worker journey and its required end-to-end evidence.
+
+### LIVE-41 — follow-up timeline and Jobs gap audit (2026-08-29)
+
+The non-browser follow-up audit found two concrete correctness gaps that were not visible in the
+earlier browser matrix. Jobs queue readiness used the first capability-compatible Worker, so a
+second connected Worker with the selected source could be ignored; commit `2a321d8` now evaluates
+all candidates and keeps queue actions fail-closed until one Worker has both capability and source.
+The focused Jobs/polling suites (19 tests) passed. Marker IDs were already collision-safe, but
+visible generated labels still reused `Marker N` after a non-tail deletion; commit `82290df`
+advances generated labels above all existing generated labels across every marker creation path,
+preserving custom labels. Focused marker/context/timeline suites (17 tests), typecheck, lint and
+formatting passed. These source fixes close P1-30/P1-31 at implementation level; final release
+closure still requires the authenticated source-bound Worker delivery/inspection/Motion journey,
+save/reopen evidence, and the performance/accessibility gates listed below. The Effects audit also
+confirms the remaining P1-02/LIVE-02 risk is preview-load pressure (all filtered cards mount and
+attempt playback without viewport/concurrency gating), not evidence of a PostgreSQL crash loop.
 
 ## Numeric release budgets and retained evidence
 
