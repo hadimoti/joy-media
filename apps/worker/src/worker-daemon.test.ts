@@ -56,6 +56,50 @@ describe('WorkerDaemon', () => {
     ).rejects.toBeInstanceOf(WorkerSessionExpiredError);
   });
 
+  it('cancels an active job when the preview session expires', async () => {
+    let jobStarted = false;
+    const client = {
+      hello: async () => undefined,
+      lease: async () => ({ id: 'job-active', projectId: 'project-1', type: 'fixture.thumbnail' }),
+      nextGpuPreview: async () => {
+        while (!jobStarted) await new Promise((resolve) => setTimeout(resolve, 1));
+        throw new WorkerSessionExpiredError();
+      },
+      completeGpuPreview: async () => undefined,
+      heartbeat: async () => ({ cancelRequested: false }),
+      complete: async () => undefined,
+      fail: async () => undefined,
+    } as unknown as WorkerControlPlaneClient;
+    const runtime = {
+      hello: () => ({ capabilities: [] }),
+      localAssetIds: () => [],
+      log: { write: () => undefined },
+      run: async (
+        _job: unknown,
+        options: {
+          readonly cancelled: () => boolean;
+          readonly progress: (value: number) => Promise<void>;
+        },
+      ) => {
+        jobStarted = true;
+        while (!options.cancelled()) await new Promise((resolve) => setTimeout(resolve, 1));
+        return { state: 'canceled' as const };
+      },
+    } as unknown as WorkerRuntime;
+    const gpuPreviewHost = {
+      render: async () => {
+        throw new Error('unreachable');
+      },
+    } as never;
+
+    await expect(
+      new WorkerDaemon(client, runtime, gpuPreviewHost).run({
+        pollIntervalMs: 1,
+        stopped: () => false,
+      }),
+    ).rejects.toBeInstanceOf(WorkerSessionExpiredError);
+  });
+
   it('completes the Jobs-panel fixture smoke job without uploading a derivative', async () => {
     const calls: string[] = [];
     let stop = false;

@@ -78,12 +78,13 @@ export class WorkerDaemon {
         let result: Awaited<ReturnType<WorkerRuntime['run']>>;
         try {
           result = await this.runtime.run(job, {
-            cancelled: () => options.stopped() || cancelRequested,
+            cancelled: () => options.stopped() || cancelRequested || gpuPreviewError !== undefined,
             progress: async (progress) => {
               currentProgress = progress;
               await sendHeartbeat();
             },
           });
+          if (gpuPreviewError !== undefined) throw gpuPreviewError;
         } finally {
           clearInterval(heartbeatTimer);
         }
