@@ -18,6 +18,7 @@ describe('buildThreeDRenderLayerInsertion', () => {
         displayName: 'Product Orbit · 3D Render',
         bytes: 2048,
         mimeType: 'image/png',
+        sha256: 'a'.repeat(64),
       },
     });
     const timeline = applyTransaction(seed.timeline, insertion.timeline).project;
@@ -39,6 +40,7 @@ describe('buildThreeDRenderLayerInsertion', () => {
     expect(insertion.project.assets['render-3d-test']).toMatchObject({
       kind: 'image',
       bytes: 2048,
+      sha256: 'a'.repeat(64),
       descriptor: { mimeType: 'image/png' },
     });
   });

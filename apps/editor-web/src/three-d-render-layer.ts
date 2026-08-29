@@ -29,6 +29,7 @@ export function buildThreeDRenderLayerInsertion({
     readonly displayName: string;
     readonly bytes: number;
     readonly mimeType: string;
+    readonly sha256?: string;
   };
 }): ThreeDRenderLayerInsertion {
   const composition = timeline.compositions[timeline.rootCompositionId];
@@ -68,6 +69,7 @@ export function buildThreeDRenderLayerInsertion({
         id: asset.assetId,
         kind: 'image',
         displayName: asset.displayName,
+        ...(asset.sha256 === undefined ? {} : { sha256: asset.sha256 }),
         bytes: asset.bytes,
         descriptor: { mimeType: asset.mimeType },
       },

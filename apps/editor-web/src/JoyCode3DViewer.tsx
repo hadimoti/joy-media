@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { createThreeDResourceResolver } from './three-d-resource-resolver.js';
 import { CubeIcon, UploadIcon } from './icons.js';
 
 export interface JoyCode3DRenderAsset {
@@ -33,6 +34,7 @@ export function JoyCode3DViewer({
   const loadSeqRef = useRef(0);
   const contextLostHandlerRef = useRef<((event: Event) => void) | undefined>(undefined);
   const contextRestoredHandlerRef = useRef<(() => void) | undefined>(undefined);
+  const resourceResolverRef = useRef<{ readonly revokeAll: () => void } | null>(null);
   const [status, setStatus] = useState('Ready — drag to orbit, scroll to zoom');
   const [fileList, setFileList] = useState<readonly string[]>([]);
   const [currentModelName, setCurrentModelName] = useState<string | undefined>(undefined);
@@ -156,6 +158,9 @@ export function JoyCode3DViewer({
     initScene();
     return () => {
       if (animFrameRef.current !== undefined) cancelAnimationFrame(animFrameRef.current);
+      loadSeqRef.current += 1;
+      resourceResolverRef.current?.revokeAll();
+      resourceResolverRef.current = null;
       resizeObserverRef.current?.disconnect();
       const canvas = rendererRef.current?.domElement;
       if (canvas && contextLostHandlerRef.current) {
@@ -178,33 +183,37 @@ export function JoyCode3DViewer({
 
   const handleFileSelect = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
+      const files = Array.from(event.target.files ?? []);
+      const file = files.find((candidate) => /\.(?:glb|gltf)$/i.test(candidate.name)) ?? files[0];
       if (!file) return;
-      const url = URL.createObjectURL(file);
       const requestId = ++loadSeqRef.current;
-      setFileList((prev) => [...prev, file.name]);
+      resourceResolverRef.current?.revokeAll();
+      const resources = createThreeDResourceResolver(files);
+      resourceResolverRef.current = resources;
       setCurrentModelName(undefined);
-      setStatus(`Loading ${file.name}…`);
+      setStatus(
+        files.length > 1
+          ? `Loading ${file.name} with ${files.length - 1} resource file(s)…`
+          : `Loading ${file.name}…`,
+      );
 
       clearScene();
 
       const loader = new GLTFLoader();
-      loader.load(
-        url,
-        (gltf) => {
-          if (requestId !== loadSeqRef.current) {
-            URL.revokeObjectURL(url);
-            return;
-          }
-          URL.revokeObjectURL(url);
+      loader.manager.setURLModifier(resources.resolve);
+      void (async () => {
+        try {
+          const gltf = await loader.parseAsync(await file.arrayBuffer(), '');
+          if (requestId !== loadSeqRef.current) return;
           const model = gltf.scene;
+          const box = new THREE.Box3().setFromObject(model);
+          if (box.isEmpty()) throw new Error('the model contains no renderable geometry');
           model.traverse((child) => {
             if (child instanceof THREE.Mesh) {
               child.castShadow = true;
               child.receiveShadow = true;
             }
           });
-          const box = new THREE.Box3().setFromObject(model);
           const size = box.getSize(new THREE.Vector3());
           const center = box.getCenter(new THREE.Vector3());
           const maxDim = Math.max(size.x, size.y, size.z, 1);
@@ -213,24 +222,18 @@ export function JoyCode3DViewer({
           model.position.sub(center.multiplyScalar(scale));
           model.position.y += size.y * scale * 0.5;
           sceneRef.current?.add(model);
+          setFileList((prev) => [...prev, file.name]);
           setCurrentModelName(file.name);
           setStatus(`Loaded: ${file.name}`);
-        },
-        (progress) => {
+        } catch (err: unknown) {
           if (requestId !== loadSeqRef.current) return;
-          const pct = progress.loaded / Math.max(1, progress.total);
-          setStatus(`Loading ${file.name}… ${Math.round(pct * 100)}%`);
-        },
-        (err: unknown) => {
-          if (requestId !== loadSeqRef.current) {
-            URL.revokeObjectURL(url);
-            return;
-          }
-          URL.revokeObjectURL(url);
           const msg = err instanceof Error ? err.message : String(err);
           setStatus(`Error loading ${file.name}: ${msg}`);
-        },
-      );
+        } finally {
+          resources.revokeAll();
+          if (resourceResolverRef.current === resources) resourceResolverRef.current = null;
+        }
+      })();
 
       event.target.value = '';
     },
@@ -299,7 +302,8 @@ export function JoyCode3DViewer({
         <input
           ref={fileInputRef}
           type="file"
-          accept=".glb,.gltf"
+          accept=".glb,.gltf,.bin,image/*"
+          multiple
           className="sr-only"
           aria-hidden="true"
           tabIndex={-1}

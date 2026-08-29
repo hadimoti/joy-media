@@ -96,6 +96,37 @@ describe('importMediaFile', () => {
     expect(upload).toHaveBeenCalledOnce();
   });
 
+  it('keeps a synthetic upload file while preserving its human-readable catalog name', async () => {
+    const input = new File(['render bytes'], 'joycode-render-1.png', { type: 'image/png' });
+    let registration: BrowserAssetRegistration | undefined;
+    const client = {
+      ensureProject: vi.fn(async () => undefined),
+      registerAsset: vi.fn(async (_projectId: string, next: BrowserAssetRegistration) => {
+        registration = next;
+        return browserAsset(next);
+      }),
+      assets: vi.fn(async () => []),
+      uploadAssetOriginal: vi.fn(async (_projectId, asset) => ({
+        ...browserAsset(registration!),
+        ...asset,
+      })),
+    } satisfies NonNullable<MediaImportOptions['client']>;
+
+    await importMediaFile({
+      projectId: 'project-1',
+      projectTitle: 'Project',
+      file: input,
+      displayName: 'Product Orbit · 3D Render',
+      assetId: 'render-1',
+      client,
+      originalAssetCache: { put: vi.fn(async () => undefined) },
+      describeMedia: async () => ({ mimeType: 'image/png', width: 32, height: 32 }),
+    });
+
+    expect(registration?.displayName).toBe('Product Orbit · 3D Render');
+    expect(client.uploadAssetOriginal).toHaveBeenCalledOnce();
+  });
+
   it('does not overwrite a colliding asset registration', async () => {
     const input = new File(['new bytes'], 'clip.png', { type: 'image/png' });
     const different = browserAsset({

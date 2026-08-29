@@ -19,6 +19,8 @@ export interface MediaImportOptions {
   readonly projectId: string;
   readonly projectTitle: string;
   readonly file: File;
+  /** Optional human-readable catalog name when the upload file is synthetic. */
+  readonly displayName?: string;
   readonly assetId?: string;
   readonly client?: Pick<
     BrowserControlPlaneClient,
@@ -74,6 +76,10 @@ export async function importMediaFile(options: MediaImportOptions): Promise<Brow
   }
 
   const declaredMimeType = normalizedMimeType(file);
+  const displayName = options.displayName ?? file.name;
+  if (displayName.length < 1 || displayName.length > 255 || /[\\/]/.test(displayName)) {
+    throw new Error('asset display name is invalid');
+  }
   report(options, 0.02, `Reading ${file.name}...`);
   const buffer = await readFileWithProgress(file, (ratio) => {
     report(options, 0.02 + 0.38 * ratio, `Reading ${file.name}...`);
@@ -89,7 +95,7 @@ export async function importMediaFile(options: MediaImportOptions): Promise<Brow
   const registration: BrowserAssetRegistration = {
     id,
     kind,
-    displayName: file.name,
+    displayName,
     sha256,
     bytes: file.size,
     descriptor: { ...descriptor, mimeType },

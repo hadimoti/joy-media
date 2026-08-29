@@ -397,11 +397,6 @@ const originalAssetCachePromise = openOpfsOriginalAssetCache();
 const exportCachePromise = openOpfsExportCache();
 const mediaControlPlaneClient = new BrowserControlPlaneClient();
 
-async function loadStickerAssetBlob(assetId: string): Promise<Blob | undefined> {
-  const cache = await originalAssetCachePromise;
-  return cache.get(assetId);
-}
-
 function imageSizesFromCache(
   timeUs = 0,
 ): Readonly<Record<string, { readonly width: number; readonly height: number }>> {
@@ -759,6 +754,8 @@ interface EditorPanelContextValue {
   readonly timelineProject: SpikeProject;
   readonly visualProject: JoyProjectV1;
   readonly controlPlaneProject: ControlPlaneProjectBinding;
+  /** Resolves an image's verified OPFS/cloud bytes for Monitor rendering. */
+  readonly loadProjectAssetBlob: (assetId: string) => Promise<Blob | undefined>;
   readonly playback: PlaybackDiagnosticsSnapshot;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
@@ -1592,6 +1589,28 @@ function EditorWorkspace({
     [controlPlaneProject.controlPlaneProjectId, joySession.kind, session.visualProject],
   );
   useEffect(() => () => mediaResolver.clear(), [mediaResolver]);
+  /**
+   * Sticker images are drawn from the local cache, but a reopened cloud
+   * document may not have that browser's OPFS bytes. Reuse the authenticated,
+   * integrity-checking resolver so cloud-backed 3D renders (and ordinary
+   * images) recover instead of appearing as blank layers after a reload.
+   */
+  const loadProjectAssetBlob = useCallback(
+    async (assetId: string): Promise<Blob | undefined> => {
+      try {
+        const source = await mediaResolver.resolve(assetId);
+        if (source.source === 'reference') {
+          const response = await fetch(source.url);
+          return response.ok ? response.blob() : undefined;
+        }
+        const response = await fetch(source.url);
+        return response.ok ? response.blob() : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    [mediaResolver],
+  );
   const agentCommandBusRef = useRef<ReturnType<typeof createAgentCommandBus> | null>(null);
   if (agentCommandBusRef.current === null)
     agentCommandBusRef.current = createAgentCommandBus(session, () =>
@@ -2512,13 +2531,13 @@ function EditorWorkspace({
             ...(assetRecord?.descriptor?.mimeType !== undefined
               ? { mimeType: assetRecord.descriptor.mimeType }
               : {}),
-            loadBlob: loadStickerAssetBlob,
+            loadBlob: loadProjectAssetBlob,
           });
         }),
       );
       setStickerTick((tick) => tick + 1);
     },
-    [session],
+    [loadProjectAssetBlob, session],
   );
 
   const addStickerFromAsset = useCallback(
@@ -2605,21 +2624,41 @@ function EditorWorkspace({
       }
 
       // A generated 3D render is a real image asset, not just a transient
-      // canvas frame. Persist its bytes in the same integrity-checked OPFS
-      // original cache used by imported media before the document points at
-      // it; otherwise a reload would restore metadata with no pixels.
+      // canvas frame. Authenticated sessions use the normal media-import
+      // pipeline so the exact PNG is registered and uploaded before the
+      // document points at it. Signed-out/offline sessions retain the local
+      // integrity-checked cache path and can be backed up later from Media.
       const mimeType = asset.blob.type || 'image/png';
-      const assetSha256 = await sha256Hex(new Uint8Array(await asset.blob.arrayBuffer()));
-      const originalAssetCache = await originalAssetCachePromise;
-      await originalAssetCache.put(
-        {
+      let persistedAsset:
+        | Awaited<ReturnType<typeof importMediaFile>>
+        | { readonly id: string; readonly sha256: string; readonly bytes: number };
+      if (joySession.kind === 'ready') {
+        const generatedFile = new File([asset.blob], `${asset.assetId}.png`, {
+          type: mimeType,
+        });
+        persistedAsset = await importMediaFile({
+          projectId: controlPlaneProject.controlPlaneProjectId,
+          projectTitle: controlPlaneProject.title,
+          file: generatedFile,
+          displayName: asset.displayName,
           assetId: asset.assetId,
-          sha256: assetSha256,
-          bytes: asset.blob.size,
-          mimeType,
-        },
-        asset.blob,
-      );
+          client: mediaControlPlaneClient,
+          originalAssetCache: originalAssetCachePromise,
+        });
+      } else {
+        const assetSha256 = await sha256Hex(new Uint8Array(await asset.blob.arrayBuffer()));
+        const originalAssetCache = await originalAssetCachePromise;
+        await originalAssetCache.put(
+          {
+            assetId: asset.assetId,
+            sha256: assetSha256,
+            bytes: asset.blob.size,
+            mimeType,
+          },
+          asset.blob,
+        );
+        persistedAsset = { id: asset.assetId, sha256: assetSha256, bytes: asset.blob.size };
+      }
       stickerImageCache.rememberBlob(asset.assetId, asset.blob);
       const insertion = buildThreeDRenderLayerInsertion({
         timeline: session.timelineProject,
@@ -2631,6 +2670,7 @@ function EditorWorkspace({
           displayName: asset.displayName,
           bytes: asset.blob.size,
           mimeType,
+          sha256: persistedAsset.sha256,
         },
       });
       session.dispatchCompound(insertion.label, {
@@ -2642,7 +2682,14 @@ function EditorWorkspace({
       setRevision((revision) => revision + 1);
       showToast('3D render added as an editable timeline layer.', 'success');
     },
-    [session, showToast, state.playheadUs, syncStickerBitmaps],
+    [
+      controlPlaneProject,
+      joySession.kind,
+      session,
+      showToast,
+      state.playheadUs,
+      syncStickerBitmaps,
+    ],
   );
 
   const addTreatmentLayer = useCallback(
@@ -6574,6 +6621,7 @@ function EditorWorkspace({
           timelineProject: session.timelineProject,
           visualProject: session.visualProject,
           controlPlaneProject,
+          loadProjectAssetBlob,
           playback: playbackDiagnostics.current.snapshot(),
           canUndo: session.canUndo,
           canRedo: session.canRedo,
@@ -6790,6 +6838,7 @@ function MonitorPanel() {
     visualProject,
     timelineProject,
     controlPlaneProject,
+    loadProjectAssetBlob,
     stickerTick,
     togglePlayback,
     seek,
@@ -6879,7 +6928,7 @@ function MonitorPanel() {
           assetId: object.assetId,
           ...(mattes[object.id] !== undefined ? { matteAssetId: mattes[object.id] } : {}),
           crop: object.transform.crop,
-          loadBlob: loadStickerAssetBlob,
+          loadBlob: loadProjectAssetBlob,
         });
       }),
     )
@@ -6894,7 +6943,7 @@ function MonitorPanel() {
     return () => {
       cancelled = true;
     };
-  }, [visualProject, stickerTick]);
+  }, [loadProjectAssetBlob, visualProject, stickerTick]);
 
   paintRef.current = (): void => {
     const renderer = rendererRef.current;
