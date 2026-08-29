@@ -2,7 +2,10 @@
 setlocal
 REM Set Joy Media Worker environment variables
 set "JOY_MEDIA_WORKER_ROOT=%~dp0"
-set "JOY_MEDIA_API_URL=https://media.joyteam.ir/api"
+REM Canonical standalone JOY Media control plane. media.joyteam.ir is a redirect only.
+set "JOY_MEDIA_API_URL=https://joyst.ir/api"
+set "JOY_MEDIA_WORKER_STATE_PATH=%USERPROFILE%\.joy-media\worker-state.json"
+if not exist "%USERPROFILE%\.joy-media\logs" mkdir "%USERPROFILE%\.joy-media\logs"
 set "JOY_MEDIA_LOCAL_COMFY_URL=http://127.0.0.1:8188"
 set "JOY_MEDIA_LOCAL_ML_DENOISE=1"
 set "JOY_MEDIA_MODEL_ROOT=%USERPROFILE%\JOY\models"

@@ -30,3 +30,20 @@ See [`masking/README.md`](masking/README.md). Mask model paths and source media
 paths remain Worker-only. The Worker advertises `mask.image` / `mask.video`
 only when the matching runner is explicitly configured, and the control plane
 leases work only when the source asset ID is present locally.
+
+## Windows headless startup
+
+The Worker is a background process, not a browser extension. From a built
+checkout, install an idempotent hidden Windows logon task with:
+
+```powershell
+powershell -NoProfile -File .\scripts\install-worker-autostart.ps1
+```
+
+The task starts the Worker from this checkout with `https://joyst.ir/api`,
+keeps its device identity in `%USERPROFILE%\.joy-media\worker-state.json`,
+restarts after an unexpected exit, and writes diagnostics to
+`%USERPROFILE%\.joy-media\logs\worker.log`. The first install still requires
+one owner-approved pairing code; after that, opening `https://www.joyst.ir/`
+discovers the connected Worker automatically. Silent pairing is intentionally
+not supported.

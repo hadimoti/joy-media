@@ -390,6 +390,19 @@ authenticated source-backed Worker journey leases a selected asset, uploads a de
 inspection, and places at least two results in Motion. These are implementation/evidence gaps,
 not evidence of the reported Effects-subtab crash; the Effects and timeline retests remain stable.
 
+### LIVE-44 — hidden Windows Worker startup (2026-08-29)
+
+The local Windows Worker now has a reproducible headless startup path. The existing `JOY Media Local
+Worker` logon task was repointed from the retired `joy-vps` checkout to this standalone `joy-media`
+checkout, configured with the canonical `https://joyst.ir/api`, a persisted Worker state path, hidden
+execution, `StartWhenAvailable`, and bounded restart settings. The task is running with one Worker
+process and no visible console window. This tranche adds `scripts/run-worker-headless.ps1`, an
+idempotent `scripts/install-worker-autostart.ps1`, and updates `run-worker.bat`/Worker docs so the
+setup is portable to the eventual Windows application package. This does not bypass owner pairing:
+the first run still waits for one-time approval, after which the authenticated editor discovers the
+connected Worker on open. A real source-bound lease/upload, retained inspection, Motion placement,
+and final release evidence remain open until that owner-only pairing step is completed.
+
 ### LIVE-29 — editor race hardening (2026-08-29)
 
 The final source audit closed two deterministic editor races. `syncProjectDocumentBinding` now
