@@ -157,6 +157,27 @@ describe('JOY Studio 1.0 release gate', () => {
     );
   });
 
+  it('serializes trusted mainline CI runs and isolates browser matrix outputs', () => {
+    const workflow = readFileSync(
+      resolve(import.meta.dirname, '../../../.github/workflows/ci.yml'),
+      'utf8',
+    );
+    expect(workflow).toContain('concurrency:');
+    expect(workflow).toContain('group: ci-${{ github.workflow }}-${{ github.ref }}');
+    expect(workflow).toContain('cancel-in-progress: true');
+    expect(workflow).toContain('JOY_MEDIA_E2E_API_PORT: ${{ matrix.api_port }}');
+    expect(workflow).toContain('JOY_MEDIA_E2E_WEB_PORT: ${{ matrix.web_port }}');
+    expect(workflow).toContain(
+      'PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/playwright-report-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}',
+    );
+    expect(workflow).toContain(
+      'PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/playwright-test-results-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}',
+    );
+    expect(workflow).toContain(
+      'joy-worker-" + $env:GITHUB_SHA + "-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + ".exe"',
+    );
+  });
+
   it('verifies the self-hosted FFmpeg/FFprobe toolchain before CI dependencies', () => {
     const workflow = readFileSync(
       resolve(import.meta.dirname, '../../../.github/workflows/ci.yml'),
@@ -174,6 +195,26 @@ describe('JOY Studio 1.0 release gate', () => {
       expect(index).toBeLessThan(install);
     }
     expect(workflow).not.toContain('sudo apt-get');
+  });
+
+  it('lets Playwright derive ports and output paths from the workflow environment', () => {
+    const config = readFileSync(
+      resolve(import.meta.dirname, '../../../playwright.config.ts'),
+      'utf8',
+    );
+    expect(config).toContain("const e2eApiPort = process.env.JOY_MEDIA_E2E_API_PORT ?? '4174';");
+    expect(config).toContain("const e2eWebPort = process.env.JOY_MEDIA_E2E_WEB_PORT ?? '4173';");
+    expect(config).toContain(
+      "const playwrightReportDirectory = process.env.PLAYWRIGHT_HTML_REPORT ?? 'playwright-report';",
+    );
+    expect(config).toContain(
+      "process.env.PLAYWRIGHT_TEST_RESULTS_DIR ?? 'test-results/playwright';",
+    );
+    expect(config).toContain('outputDir: playwrightOutputDirectory,');
+    expect(config).toContain('url: `${e2eApiUrl}/health`,');
+    expect(config).toContain(
+      'command: `pnpm --filter @joy-media/editor-web dev --host 127.0.0.1 --port ${e2eWebPort}`',
+    );
   });
 
   it('keeps missing static assets out of the SPA fallback in nginx', () => {

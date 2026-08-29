@@ -1,5 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const e2eApiPort = process.env.JOY_MEDIA_E2E_API_PORT ?? '4174';
+const e2eWebPort = process.env.JOY_MEDIA_E2E_WEB_PORT ?? '4173';
+const e2eApiUrl = process.env.JOY_MEDIA_E2E_API_URL ?? `http://127.0.0.1:${e2eApiPort}`;
+const e2eBaseUrl = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${e2eWebPort}`;
+const playwrightReportDirectory = process.env.PLAYWRIGHT_HTML_REPORT ?? 'playwright-report';
+const playwrightOutputDirectory =
+  process.env.PLAYWRIGHT_TEST_RESULTS_DIR ?? 'test-results/playwright';
+
 export default defineConfig({
   testDir: './tests/e2e',
   timeout: 30_000,
@@ -13,9 +21,12 @@ export default defineConfig({
     process.env.PLAYWRIGHT_WORKERS === undefined ? 3 : Number(process.env.PLAYWRIGHT_WORKERS),
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [['line'], ['html', { outputFolder: 'playwright-report' }]] : 'list',
+  reporter: process.env.CI
+    ? [['line'], ['html', { outputFolder: playwrightReportDirectory }]]
+    : 'list',
+  outputDir: playwrightOutputDirectory,
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:4173',
+    baseURL: e2eBaseUrl,
     ...(process.env.PLAYWRIGHT_USE_SYSTEM_CHROME === '1' ? { channel: 'chrome' as const } : {}),
     trace: 'retain-on-failure',
     video: 'retain-on-failure',
@@ -41,13 +52,13 @@ export default defineConfig({
       ? [
           {
             command: 'pnpm --filter @joy-media/api exec tsx ../../tooling/e2e-server.ts',
-            url: 'http://127.0.0.1:4174/health',
+            url: `${e2eApiUrl}/health`,
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,
           },
           {
-            command: 'pnpm --filter @joy-media/editor-web dev --host 127.0.0.1 --port 4173',
-            url: 'http://127.0.0.1:4173',
+            command: `pnpm --filter @joy-media/editor-web dev --host 127.0.0.1 --port ${e2eWebPort}`,
+            url: e2eBaseUrl,
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,
           },

@@ -3,6 +3,9 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -47,7 +50,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           pnpm --filter @joy-media/worker build
-          $output = Join-Path $env:RUNNER_TEMP ("joy-worker-" + $env:GITHUB_SHA + ".exe")
+          $output = Join-Path $env:RUNNER_TEMP ("joy-worker-" + $env:GITHUB_SHA + "-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + ".exe")
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-worker-exe.ps1 -OutputPath $output
           if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw 'Worker executable was not produced.' }
           $result = & $output --joy-worker-self-test
@@ -61,12 +64,27 @@ jobs:
         include:
           - project: desktop-primary
             spec: tests/e2e
+            api_port: 4174
+            web_port: 4173
           - project: desktop-compact
             spec: tests/e2e/wp32-responsive-checkpoints.spec.ts
+            api_port: 4274
+            web_port: 4273
           - project: desktop-minimum
             spec: tests/e2e/wp32-responsive-checkpoints.spec.ts
+            api_port: 4374
+            web_port: 4373
     runs-on: [self-hosted, windows, x64, joy-media-ci]
     timeout-minutes: 60
+    env:
+      CI: true
+      PLAYWRIGHT_WORKERS: 1
+      JOY_MEDIA_E2E_API_PORT: ${{ matrix.api_port }}
+      JOY_MEDIA_E2E_WEB_PORT: ${{ matrix.web_port }}
+      JOY_MEDIA_E2E_API_URL: http://127.0.0.1:${{ matrix.api_port }}
+      PLAYWRIGHT_BASE_URL: http://127.0.0.1:${{ matrix.web_port }}
+      PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/playwright-report-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}
+      PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/playwright-test-results-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Verify runner toolchain
@@ -87,5 +105,3 @@ jobs:
       - run: pnpm exec playwright install chromium
       - name: Run browser audit (${{ matrix.project }})
         run: pnpm exec playwright test ${{ matrix.spec }} --project=${{ matrix.project }} --workers=1
-        env:
-          CI: true

@@ -46,6 +46,11 @@ disposable E2E API harness uses a high request ceiling so a long single-owner br
 cascade into unrelated `429` failures; transport rate-limit behavior remains covered by the API
 security tests. Secrets must never be written to logs or artifacts.
 
+The trusted push workflow also serializes superseded `main` runs with a GitHub Actions
+`concurrency` group and gives each browser matrix job its own API port, editor port, HTML report
+directory, and Playwright output directory derived from the GitHub run identity. This keeps reruns
+and parallel trusted runners from reusing stale ports or overwriting another matrix leg's traces.
+
 ## Release-candidate lanes
 
 The closure plan requires a separate, manually dispatched release workflow before promotion. It
