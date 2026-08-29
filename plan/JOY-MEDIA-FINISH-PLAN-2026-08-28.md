@@ -368,20 +368,30 @@ inspection, and Motion placement before P0-12 is closed.
 
 The non-browser audit after the timeline and Worker preflight repairs found the remaining
 release gaps that must stay visible in this plan. P0-04 now coalesces concurrent Workers/Jobs
-reads per project and token, but the four panel-specific polling loops still require one
-visibility-aware rate-budget evidence artifact. P0-02 now serializes migration startup with a
-single transaction and PostgreSQL advisory lock, with concurrent-startup coverage; the real
-PostgreSQL rehearsal remains required. P1-21 has a bounded, non-mutating object-store stat probe
-implemented in the adapter, but the production readiness gate intentionally remains the proven
-configuration check until a staged deployment demonstrates the probe under cold-start conditions;
-the real object-store rehearsal and retained readiness evidence remain required.
+reads per project and token, and repeated polling-loop starts are idempotent, but the four
+panel-specific polling loops still require one visibility-aware rate-budget evidence artifact.
+P0-02 now serializes migration startup with a single transaction and PostgreSQL advisory lock,
+with concurrent-startup coverage; the real PostgreSQL rehearsal remains required. P1-21 has a
+bounded, non-mutating object-store stat probe implemented in the adapter, but the production
+readiness gate intentionally remains the proven configuration check until a staged deployment
+demonstrates the probe under cold-start conditions; the real object-store rehearsal and retained
+readiness evidence remain required.
 
-P0-03 and the persistence half of LIVE-25 remain open: the browser still needs GET hydration and
-an awaited, serialized document-save transaction so cloud-asset insertion can prove revision,
-reload, conflict recovery, and Undo for image/video/audio. P0-12 also remains open until a real
+P0-03 and the persistence half of LIVE-25 remain partially open: document saves now serialize per
+owner/project and later writes reread the persisted CAS head, but the browser still needs GET
+hydration plus reload, conflict recovery, and Undo evidence for image/video/audio. P0-12 also remains open until a real
 authenticated source-backed Worker journey leases a selected asset, uploads a derivative, passes
 inspection, and places at least two results in Motion. These are implementation/evidence gaps,
 not evidence of the reported Effects-subtab crash; the Effects and timeline retests remain stable.
+
+### LIVE-29 — editor race hardening (2026-08-29)
+
+The final source audit closed two deterministic editor races. `syncProjectDocumentBinding` now
+serializes concurrent writes per owner/project, rereads the latest persisted binding before each
+queued compare-and-swap update, and coalesces duplicate in-flight revisions. `BoundedPollingLoop.start()`
+is idempotent, preventing duplicate timers when panels remount or re-enter view. Focused document-sync,
+control-plane, creative-brief, Joy Code, polling, and timeline tests pass. Browser proof is still
+required for GET hydration, reload/conflict recovery, Undo, and visibility-aware polling budgets.
 
 ### LIVE-28 — stable promotion and canary (2026-08-29)
 
