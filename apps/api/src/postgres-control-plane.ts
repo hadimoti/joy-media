@@ -1490,8 +1490,15 @@ export class PostgresControlPlane implements ControlPlane {
         await this.asset(actor, projectId, assetId, client);
         if (type === 'mask.image' || type === 'mask.video') {
           const source = await client.query<{ readonly kind: MediaAssetRecord['kind'] }>(
-            'SELECT kind FROM media_assets WHERE id = $1 AND project_id = $2',
-            [assetId, projectId],
+            `SELECT kind FROM media_assets WHERE id = $1 AND project_id = $2
+             UNION ALL
+             SELECT a.kind FROM media_asset_access asset_access
+             JOIN media_assets a ON a.id = asset_access.asset_id
+               AND a.project_id = asset_access.source_project_id
+             JOIN projects source ON source.id = asset_access.source_project_id
+             WHERE asset_access.asset_id = $1 AND asset_access.project_id = $2
+               AND source.owner_id IN ($3, $4) AND source.trashed_at IS NULL`,
+            [assetId, projectId, actor.id, SHARED_LIBRARY_OWNER_ID],
           );
           const kind = requiredRow(source.rows[0], 'ASSET_NOT_FOUND').kind;
           if (

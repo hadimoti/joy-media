@@ -397,6 +397,12 @@ describe('PostgresControlPlane', () => {
     await controlPlane.registerAsset(owner, 'source', {
       ...cloudAsset('owner-cloud', 'owner-ref'),
     });
+    await controlPlane.registerAsset(owner, 'source', {
+      ...cloudAsset('owner-cloud-image', 'owner-image-ref'),
+      kind: 'image',
+      displayName: 'owner-image.png',
+      descriptor: { mimeType: 'image/png', width: 1920, height: 1080 },
+    });
     await controlPlane.registerAsset({ id: SHARED_LIBRARY_OWNER_ID }, 'library', {
       ...cloudAsset('shared-cloud', 'shared-ref'),
     });
@@ -408,6 +414,12 @@ describe('PostgresControlPlane', () => {
       projectId: 'target',
     });
     await expect(
+      controlPlane.associateAsset(owner, 'target', 'owner-cloud-image'),
+    ).resolves.toMatchObject({
+      id: 'owner-cloud-image',
+      projectId: 'target',
+    });
+    await expect(
       controlPlane.associateAsset(owner, 'target', 'shared-cloud'),
     ).resolves.toMatchObject({
       id: 'shared-cloud',
@@ -416,6 +428,7 @@ describe('PostgresControlPlane', () => {
     await expect(controlPlane.assetsForProject(owner, 'target')).resolves.toMatchObject([
       { id: 'owner-cloud', projectId: 'target' },
       { id: 'shared-cloud', projectId: 'target' },
+      { id: 'owner-cloud-image', projectId: 'target' },
     ]);
     await expect(controlPlane.associateAsset(peer, 'target', 'owner-cloud')).rejects.toMatchObject({
       code: 'PROJECT_NOT_FOUND',
@@ -424,6 +437,21 @@ describe('PostgresControlPlane', () => {
       controlPlane.enqueueAssetThumbnail(owner, 'associated-job', 'target', 'owner-cloud'),
     ).resolves.toMatchObject({ projectId: 'target', assetId: 'owner-cloud' });
     await expect(
+      controlPlane.enqueue(
+        owner,
+        'associated-mask',
+        'target',
+        'mask.image',
+        0,
+        'owner-cloud-image',
+        {
+          schemaVersion: 1,
+          provider: 'birefnet',
+          selection: { mode: 'subject' },
+        },
+      ),
+    ).resolves.toMatchObject({ projectId: 'target', assetId: 'owner-cloud-image' });
+    await expect(
       controlPlane.attachCloudOriginal(owner, 'target', 'owner-cloud', {
         kind: 'private-object',
         ref: 'must-not-replace-source',
@@ -431,6 +459,16 @@ describe('PostgresControlPlane', () => {
     ).rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
     await expect(controlPlane.deleteAsset(owner, 'target', 'owner-cloud')).resolves.toMatchObject({
       id: 'owner-cloud',
+      orphanedPrivateObjectRefs: [],
+    });
+    await expect(controlPlane.assetsForProject(owner, 'target')).resolves.toMatchObject([
+      { id: 'shared-cloud', projectId: 'target' },
+      { id: 'owner-cloud-image', projectId: 'target' },
+    ]);
+    await expect(
+      controlPlane.deleteAsset(owner, 'target', 'owner-cloud-image'),
+    ).resolves.toMatchObject({
+      id: 'owner-cloud-image',
       orphanedPrivateObjectRefs: [],
     });
     await expect(controlPlane.assetsForProject(owner, 'target')).resolves.toMatchObject([
