@@ -29,6 +29,43 @@ export function workerAudioDenoiseOperationId(projectId: string, assetId: string
   return `audio-denoise-${projectId}-${assetId}`;
 }
 
+export type QueueWorkerReadiness =
+  | { readonly kind: 'ready'; readonly worker: BrowserWorker }
+  | { readonly kind: 'missing-asset'; readonly reason: string }
+  | { readonly kind: 'missing-capability'; readonly reason: string }
+  | { readonly kind: 'source-unavailable'; readonly reason: string };
+
+/**
+ * A Worker is queueable only when the same connected Worker both advertises
+ * the operation and reports the selected source as local. Capability and
+ * source checks must not be satisfied by two different Workers.
+ */
+export function queueWorkerReadiness(
+  workers: readonly BrowserWorker[],
+  capability: string,
+  assetId: string | undefined,
+): QueueWorkerReadiness {
+  if (assetId === undefined)
+    return { kind: 'missing-asset', reason: 'Select a media clip before queueing a derivative.' };
+
+  const compatibleWorkers = workers.filter(
+    (worker) => workerPresence(worker) === 'connected' && worker.capabilities.includes(capability),
+  );
+  if (compatibleWorkers.length === 0)
+    return {
+      kind: 'missing-capability',
+      reason: `No connected Worker advertises ${capability}.`,
+    };
+
+  const worker = compatibleWorkers.find((candidate) => candidate.localAssetIds?.includes(assetId));
+  if (worker === undefined)
+    return {
+      kind: 'source-unavailable',
+      reason: 'No connected capable Worker has this media source locally yet.',
+    };
+  return { kind: 'ready', worker };
+}
+
 export function JobsPanel({
   projectId,
   projectTitle,
@@ -158,25 +195,12 @@ export function JobsPanel({
   const connectedCount = workers.filter((w) => workerPresence(w) === 'connected').length;
   const queuedAssetId = audioAssetId ?? thumbnailAssetId;
   const queuedCapability = audioAssetId === undefined ? 'asset.thumbnail' : 'audio.ml-denoise';
-  const compatibleWorker = useMemo(
-    () =>
-      workers.find(
-        (worker) =>
-          workerPresence(worker) === 'connected' && worker.capabilities.includes(queuedCapability),
-      ),
-    [queuedCapability, workers],
+  const queueReadiness = useMemo(
+    () => queueWorkerReadiness(workers, queuedCapability, queuedAssetId),
+    [queuedAssetId, queuedCapability, workers],
   );
-  const workerSourceReady =
-    queuedAssetId !== undefined &&
-    compatibleWorker?.localAssetIds?.includes(queuedAssetId) === true;
   const queueUnavailableReason =
-    queuedAssetId === undefined
-      ? 'Select a media clip before queueing a derivative.'
-      : compatibleWorker === undefined
-        ? `No connected Worker advertises ${queuedCapability}.`
-        : workerSourceReady
-          ? undefined
-          : 'The connected Worker does not have this media source locally yet.';
+    queueReadiness.kind === 'ready' ? undefined : queueReadiness.reason;
   // A ready authenticated session initializes its opaque project binding during
   // refresh. Do not briefly mount an action that that same refresh immediately
   // removes; it produces a real UI flicker and can detach a user's click.
@@ -228,18 +252,15 @@ export function JobsPanel({
       setStatus('Initialize this project before queueing a derivative job.');
       return;
     }
+    if (queueReadiness.kind !== 'ready') {
+      setStatus(queueReadiness.reason);
+      return;
+    }
     let operationId: string | undefined;
     let operationStarted = false;
     try {
       setSubmitting(true);
       if (audioAssetId !== undefined) {
-        const worker = workers.find(
-          (candidate) =>
-            workerPresence(candidate) === 'connected' &&
-            candidate.capabilities.includes('audio.ml-denoise'),
-        );
-        if (worker === undefined)
-          throw new Error('No connected Worker advertises audio.ml-denoise');
         const jobId = workerAudioDenoiseOperationId(projectId, audioAssetId);
         operationId = jobId;
         const existing = operationLedger?.get(jobId);

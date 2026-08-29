@@ -1,6 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { workerAudioDenoiseOperationId, workerResultWasApplied } from './JobsPanel.js';
+import type { BrowserWorker } from './control-plane-client.js';
+import {
+  queueWorkerReadiness,
+  workerAudioDenoiseOperationId,
+  workerResultWasApplied,
+} from './JobsPanel.js';
 
 const panelSource = readFileSync(new URL('./JobsPanel.tsx', import.meta.url), 'utf8');
 
@@ -61,11 +66,35 @@ describe('JobsPanel R2 pairing and exactly-once contract', () => {
     expect(panelSource).not.toContain('enqueueFixture');
   });
 
-  it('disables queueing when the connected Worker lacks the selected source', () => {
-    expect(panelSource).toContain('const workerSourceReady =');
-    expect(panelSource).toContain(
-      'The connected Worker does not have this media source locally yet.',
+  it('requires one connected Worker to have both the capability and selected source', () => {
+    const readiness = queueWorkerReadiness(
+      [
+        worker({ id: 'worker-capability-only', localAssetIds: ['another-asset'] }),
+        worker({ id: 'worker-ready', localAssetIds: ['asset-1'] }),
+      ],
+      'audio.ml-denoise',
+      'asset-1',
     );
+
+    expect(readiness).toMatchObject({ kind: 'ready', worker: { id: 'worker-ready' } });
+    expect(
+      queueWorkerReadiness(
+        [worker({ id: 'worker-capability-only', localAssetIds: ['another-asset'] })],
+        'audio.ml-denoise',
+        'asset-1',
+      ),
+    ).toEqual({
+      kind: 'source-unavailable',
+      reason: 'No connected capable Worker has this media source locally yet.',
+    });
+    expect(
+      queueWorkerReadiness([worker({ capabilities: [] })], 'audio.ml-denoise', 'asset-1'),
+    ).toEqual({
+      kind: 'missing-capability',
+      reason: 'No connected Worker advertises audio.ml-denoise.',
+    });
+    expect(panelSource).toContain('const queueReadiness = useMemo(');
+    expect(panelSource).toContain("if (queueReadiness.kind !== 'ready')");
     expect(panelSource).toContain('queueUnavailableReason !== undefined');
   });
 
@@ -76,3 +105,14 @@ describe('JobsPanel R2 pairing and exactly-once contract', () => {
     );
   });
 });
+
+function worker(input: Partial<BrowserWorker>): BrowserWorker {
+  return {
+    id: 'worker-1',
+    paired: true,
+    revoked: false,
+    capabilities: ['audio.ml-denoise'],
+    lastSeenAt: Date.now(),
+    ...input,
+  };
+}
