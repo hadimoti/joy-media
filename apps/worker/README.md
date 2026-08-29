@@ -34,16 +34,28 @@ leases work only when the source asset ID is present locally.
 ## Windows headless startup
 
 The Worker is a background process, not a browser extension. From a built
-checkout, install an idempotent hidden Windows logon task with:
+checkout, create the native `joy-worker.exe` launcher and install an idempotent
+hidden Windows logon task with:
 
 ```powershell
+pnpm worker:exe
 powershell -NoProfile -File .\scripts\install-worker-autostart.ps1
 ```
 
-The task starts the Worker from this checkout with `https://joyst.ir/api`,
-keeps its device identity in `%USERPROFILE%\.joy-media\worker-state.json`,
-restarts after an unexpected exit, and writes diagnostics to
-`%USERPROFILE%\.joy-media\logs\worker.log`. The first install still requires
-one owner-approved pairing code; after that, opening `https://www.joyst.ir/`
-discovers the connected Worker automatically. Silent pairing is intentionally
-not supported.
+`pnpm worker:exe` uses Node's single-executable application format. The
+resulting executable is a small runtime launcher that starts the audited Worker
+entrypoint with the local Node runtime, so Playwright/GPU and model
+dependencies remain external and upgradeable. The task starts this executable
+from the checkout with `https://joyst.ir/api`, keeps its device identity in
+`%USERPROFILE%\.joy-media\worker-state.json`, restarts after an unexpected exit,
+and writes diagnostics to `%USERPROFILE%\.joy-media\logs\worker.log`. The
+installer builds the executable automatically when it is missing. The first
+install still requires one owner-approved pairing code; after that, opening
+`https://www.joyst.ir/` discovers the connected Worker automatically. Silent
+pairing is intentionally not supported.
+
+The executable never accepts arbitrary shell commands. It launches one fixed
+Worker entrypoint and the Worker executes only typed, allowlisted job adapters.
+Any future local-command approval must surface a user-visible notification in
+the JOY UI before dispatch; Windows startup and health probes are background
+supervisor work, not user-authored commands.

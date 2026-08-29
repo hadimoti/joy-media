@@ -16,3 +16,5 @@ coverage/
 
 # Captured worker stdout from local debugging runs, not source.
 worker_output.txt
+# Generated native Worker launcher; rebuild with `pnpm worker:exe`.
+apps/worker/bin/

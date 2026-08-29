@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$ApiUrl,
-    [string]$StatePath
+    [string]$StatePath,
+    [string]$WorkerExecutable
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,7 +30,11 @@ if ($parsedApiUrl.Scheme -ne 'https' -or [string]::IsNullOrWhiteSpace($parsedApi
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $entryPoint = Join-Path $repoRoot 'apps\worker\dist\index.js'
-if (-not (Test-Path -LiteralPath $entryPoint -PathType Leaf)) {
+if ([string]::IsNullOrWhiteSpace($WorkerExecutable)) {
+    $WorkerExecutable = Join-Path $repoRoot 'apps\worker\bin\joy-worker.exe'
+}
+$workerExists = Test-Path -LiteralPath $WorkerExecutable -PathType Leaf
+if (-not $workerExists -and -not (Test-Path -LiteralPath $entryPoint -PathType Leaf)) {
     throw "Built Worker entry point not found: $entryPoint"
 }
 
@@ -51,11 +56,25 @@ if ([string]::IsNullOrWhiteSpace($nodePath)) {
 
 $env:JOY_MEDIA_API_URL = $ApiUrl
 $env:JOY_MEDIA_WORKER_STATE_PATH = $StatePath
+$env:JOY_MEDIA_WORKER_ROOT = $repoRoot
 Set-Location -LiteralPath $repoRoot
 
 try {
-    & $nodePath $entryPoint *>> $logPath
-    exit $LASTEXITCODE
+    # Windows PowerShell treats native stderr as an ErrorRecord. The Worker
+    # uses stderr for diagnostics (including retryable network failures), so
+    # never let that stream terminate the supervisor process.
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    if ($workerExists) {
+        # The SEA bootstrap owns worker.log. Redirecting the executable into
+        # the same file would open it twice and fail with EBUSY on Windows.
+        & $WorkerExecutable 1>$null 2>$null
+    } else {
+        & $nodePath $entryPoint *>> $logPath
+    }
+    $workerExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousErrorActionPreference
+    exit $workerExitCode
 } catch {
     $_ | Out-String | Add-Content -LiteralPath $logPath
     exit 1

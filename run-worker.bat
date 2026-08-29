@@ -2,6 +2,7 @@
 setlocal
 REM Set Joy Media Worker environment variables
 set "JOY_MEDIA_WORKER_ROOT=%~dp0"
+cd /d "%JOY_MEDIA_WORKER_ROOT%"
 REM Canonical standalone JOY Media control plane. media.joyteam.ir is a redirect only.
 set "JOY_MEDIA_API_URL=https://joyst.ir/api"
 set "JOY_MEDIA_WORKER_STATE_PATH=%USERPROFILE%\.joy-media\worker-state.json"
@@ -26,5 +27,9 @@ set "JOY_MEDIA_SAM2_MODEL=%JOY_MEDIA_MODEL_ROOT%\masking\sam2.1-hiera-large"
 set "JOY_MEDIA_GROUNDING_MODEL=%JOY_MEDIA_MODEL_ROOT%\masking\grounding-dino-tiny"
 set "JOY_MEDIA_SAM2_RUNTIME_READY=1"
 REM Run the worker
-node apps\worker\dist\index.js
+if exist "%JOY_MEDIA_WORKER_ROOT%apps\worker\bin\joy-worker.exe" (
+  "%JOY_MEDIA_WORKER_ROOT%apps\worker\bin\joy-worker.exe"
+) else (
+  node apps\worker\dist\index.js
+)
 endlocal

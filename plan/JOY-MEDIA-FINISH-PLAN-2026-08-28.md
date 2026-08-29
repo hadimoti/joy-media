@@ -417,6 +417,21 @@ source-bound `authenticated-editor-1.0` evidence and its required `sourceProvena
 manufactured; they require the owner-approved Worker session and a real lease/upload/inspection/Motion
 journey.
 
+### LIVE-46 — native Windows Worker executable (2026-08-29)
+
+The Worker now has a real Node 22 single-executable launcher at
+`apps/worker/bin/joy-worker.exe`, built reproducibly by
+`scripts/build-worker-exe.ps1` with pinned `postject@1.0.0-alpha.6`. The SEA
+bootstrap launches only the fixed audited Worker entrypoint, keeps GPU/model
+dependencies external, redirects diagnostics to the private Worker log, and
+passes a self-test. The hidden `JOY Media Local Worker` logon task builds the
+launcher when missing and starts it through the existing restart-safe runner;
+`run-worker.bat` prefers the executable while retaining a Node fallback. This
+is the Windows application-worker architecture described in
+`plan/JOY-WORKER-WINDOWS-PLAN-2026-08-29.md`. It does not bypass owner pairing,
+does not execute arbitrary shell commands, and still requires source-bound
+Worker delivery evidence before the strict release gate can close.
+
 ### LIVE-29 — editor race hardening (2026-08-29)
 
 The final source audit closed two deterministic editor races. `syncProjectDocumentBinding` now
@@ -723,6 +738,21 @@ sub-agent is admissible.
 
 Exit: the completion contract is satisfied and a concise final report names the exact main SHA,
 release archive/hash, migration, canary, inspection, public checks and rollback target.
+
+### LIVE-46 — native Windows Worker executable (2026-08-29)
+
+The Worker now has a real Node 22 single-executable launcher at
+`apps/worker/bin/joy-worker.exe`, built reproducibly by
+`scripts/build-worker-exe.ps1` with pinned `postject@1.0.0-alpha.6`. The SEA
+bootstrap launches only the fixed audited Worker entrypoint, keeps GPU/model
+dependencies external, redirects diagnostics to the private Worker log, and
+passes a self-test. The hidden `JOY Media Local Worker` logon task builds the
+launcher when missing and starts it through the existing restart-safe runner;
+`run-worker.bat` prefers the executable while retaining a Node fallback. This
+is the Windows application-worker architecture described in
+`plan/JOY-WORKER-WINDOWS-PLAN-2026-08-29.md`. It does not bypass owner pairing,
+does not execute arbitrary shell commands, and still requires source-bound
+Worker delivery evidence before the strict release gate can close.
 
 ## Stop/continue rules for the autonomous goal
 

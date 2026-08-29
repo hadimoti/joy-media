@@ -55,9 +55,10 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/bin/**/*.{mjs,cjs,js}', 'tooling/*.mjs'],
+    files: ['**/bin/**/*.{mjs,cjs,js}', 'tooling/*.mjs', 'scripts/*.cjs'],
     languageOptions: {
       globals: {
+        require: 'readonly',
         process: 'readonly',
         console: 'readonly',
         Buffer: 'readonly',
@@ -71,6 +72,7 @@ export default tseslint.config(
     },
     rules: {
       'no-redeclare': 'off',
+      '@typescript-eslint/no-require-imports': 'off',
     },
   },
 );
