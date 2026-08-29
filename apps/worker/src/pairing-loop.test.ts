@@ -79,4 +79,37 @@ describe('waitForWorkerPairing', () => {
     expect(claimed).toEqual(['first-code', 'second-code']);
     expect(store.pending()).toBeUndefined();
   });
+
+  it('keeps the headless Worker alive across transient network failures', async () => {
+    const store = pairingStore();
+    let publishAttempts = 0;
+    let claimAttempts = 0;
+    let sleeps = 0;
+    const client: WorkerPairingClient = {
+      publishPairingOffer: async () => {
+        publishAttempts += 1;
+        if (publishAttempts === 1) throw new Error('network unavailable');
+        return 250;
+      },
+      claimPairing: async () => {
+        claimAttempts += 1;
+        if (claimAttempts === 1) throw new Error('connection reset');
+        store.establishSession();
+        return true;
+      },
+    };
+
+    await waitForWorkerPairing(client, store, {
+      createPairingCode: () => 'retry-code',
+      now: () => 100,
+      sleep: async () => {
+        sleeps += 1;
+      },
+    });
+
+    expect(publishAttempts).toBe(2);
+    expect(claimAttempts).toBe(2);
+    expect(sleeps).toBe(2);
+    expect(store.pending()).toBeUndefined();
+  });
 });

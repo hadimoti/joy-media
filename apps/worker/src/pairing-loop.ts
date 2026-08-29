@@ -33,22 +33,38 @@ export async function waitForWorkerPairing(
   const log = options.log ?? (() => undefined);
 
   let pending = store.loadPendingPairing();
-  if (pending === undefined || pending.expiresAt <= now()) {
-    pending = await publishFreshOffer(client, store, options.createPairingCode);
-  }
-  log(`Approve this Worker in JOY Media with pairing code: ${pending.code}`);
-
   while (store.loadWorkerSession() === undefined) {
-    if (await client.claimPairing(pending.code)) {
-      store.clearPendingPairing();
-      return;
+    if (pending === undefined || pending.expiresAt <= now()) {
+      try {
+        pending = await publishFreshOffer(client, store, options.createPairingCode);
+        log(`Approve this Worker in JOY Media with pairing code: ${pending.code}`);
+      } catch (error) {
+        log(
+          `Unable to publish Worker pairing offer; retrying: ${
+            error instanceof Error ? error.message.slice(0, 160) : 'unknown error'
+          }`,
+        );
+        await sleep();
+        continue;
+      }
+    }
+
+    try {
+      if (await client.claimPairing(pending.code)) {
+        store.clearPendingPairing();
+        return;
+      }
+    } catch (error) {
+      log(
+        `Unable to check Worker pairing approval; retrying: ${
+          error instanceof Error ? error.message.slice(0, 160) : 'unknown error'
+        }`,
+      );
     }
 
     if (now() >= pending.expiresAt) {
-      pending = await publishFreshOffer(client, store, options.createPairingCode);
-      log(`Pairing code expired; new code: ${pending.code}`);
+      pending = undefined;
     }
-
     log('Waiting for approval; polling again in 5 seconds.');
     await sleep();
   }
