@@ -99,14 +99,12 @@ function createPrivateObjectStoreReadinessCheck(
 
   return async () => {
     if (store === undefined) return false;
-    if (typeof store.probeReadiness !== 'function') return true;
+    const probeReadiness = store.probeReadiness;
+    if (typeof probeReadiness !== 'function') return true;
     const now = Date.now();
-    if (cached !== undefined && now - cached.at < PRIVATE_OBJECT_STORE_READINESS_CACHE_MS)
-      return cached.value;
-
-    if (inFlight === undefined) {
-      inFlight = store
-        .probeReadiness({ timeoutMs: PRIVATE_OBJECT_STORE_READINESS_TIMEOUT_MS })
+    const startProbe = () => {
+      if (inFlight !== undefined) return;
+      inFlight = probeReadiness({ timeoutMs: PRIVATE_OBJECT_STORE_READINESS_TIMEOUT_MS })
         .then(
           () => true,
           () => false,
@@ -118,7 +116,16 @@ function createPrivateObjectStoreReadinessCheck(
         .finally(() => {
           inFlight = undefined;
         });
+    };
+    if (cached !== undefined) {
+      if (now - cached.at >= PRIVATE_OBJECT_STORE_READINESS_CACHE_MS) startProbe();
+      // Keep the last known result while a stale value is refreshed in the
+      // background; this keeps /ready responsive without emitting a false
+      // transient outage at every cache boundary.
+      return cached.value;
     }
+    startProbe();
+    if (inFlight === undefined) return false;
     return raceReadiness(inFlight, PRIVATE_OBJECT_STORE_READINESS_RESPONSE_TIMEOUT_MS);
   };
 }
