@@ -79,6 +79,58 @@ describe('local control plane', () => {
     ).toMatchObject({ state: 'completed', generation: 1 });
   });
 
+  it('accepts and completes an upscale cloud derivative for a source-backed job', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'upscale-owner' };
+    api.createProject(owner, 'upscale-project', 'Upscale');
+    api.registerAsset(owner, 'upscale-project', {
+      ...assetRegistration(),
+      id: 'upscale-source',
+      kind: 'image',
+      displayName: 'source.png',
+      descriptor: { mimeType: 'image/png', width: 640, height: 360 },
+    });
+    api.pairWorker(owner, 'upscale-worker');
+    api.helloWorker('upscale-worker', ['upscale.image'], ['upscale-source'], 100);
+    api.enqueue(owner, 'upscale-job', 'upscale-project', 'upscale.image', 101, 'upscale-source', {
+      schemaVersion: 1,
+      model: 'realesrgan',
+    });
+    const lease = api.lease('upscale-worker', 102);
+    expect(lease).toMatchObject({ id: 'upscale-job', type: 'upscale.image' });
+    const receipt = {
+      kind: 'upscale.image' as const,
+      assetId: 'upscale-source',
+      sha256: 'b'.repeat(64),
+      bytes: 2048,
+      localRef: 'upscale-result-bbbbbbbbbbbbbbbb',
+      descriptor: { mimeType: 'image/png', width: 1280, height: 720 },
+    };
+
+    expect(
+      api.registerWorkerCloudDerivative(
+        'upscale-worker',
+        'upscale-job',
+        {
+          id: 'ignored-client-id',
+          assetId: receipt.assetId,
+          kind: 'upscale',
+          profile: 'ai-upscale-v1',
+          sha256: receipt.sha256,
+          bytes: receipt.bytes,
+          descriptor: receipt.descriptor,
+          availability: 'available-cloud',
+          locations: [{ kind: 'private-object', ref: 'upscale-object' }],
+        },
+        103,
+        lease?.leaseToken,
+      ),
+    ).toMatchObject({ id: 'derivative-upscale-job', kind: 'upscale' });
+    expect(
+      api.complete('upscale-worker', 'upscale-job', 104, receipt, lease?.leaseToken),
+    ).toMatchObject({ state: 'completed', generation: 0 });
+  });
+
   it('leases private mask parameters only to a capable Worker with the source asset', () => {
     const api = new LocalControlPlane();
     const owner = { id: 'owner-mask' };

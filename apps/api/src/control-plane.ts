@@ -2034,7 +2034,7 @@ function validateDerivativeRegistration(
 ): void {
   validateOpaqueId(value.id, 'derivative id');
   validateOpaqueId(value.assetId, 'asset id');
-  if (!['thumbnail', 'proxy', 'audio', 'mask'].includes(value.kind))
+  if (!['thumbnail', 'proxy', 'audio', 'mask', 'upscale'].includes(value.kind))
     throw new ControlPlaneError('DERIVATIVE_INVALID', 'derivative kind is invalid');
   if (value.profile.length === 0 || value.profile.length > 128 || /[\\/]/.test(value.profile))
     throw new ControlPlaneError('DERIVATIVE_INVALID', 'derivative profile is invalid');
