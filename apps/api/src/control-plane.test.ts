@@ -561,24 +561,69 @@ describe('local control plane', () => {
     ]);
   });
 
-  it('removes asset associations when either the source or target project is deleted', () => {
+  it('scopes associated-asset deletion to the current target project', () => {
     const api = new LocalControlPlane();
     const owner = { id: 'owner-association-lifecycle' };
     api.createProject(owner, 'source', 'Source');
-    api.createProject(owner, 'target', 'Target');
+    api.createProject(owner, 'target-a', 'Target A');
     api.createProject(owner, 'target-2', 'Target 2');
     api.registerAsset(owner, 'source', {
       ...assetRegistration(),
       id: 'lifecycle-cloud',
       locations: [{ kind: 'private-object', ref: 'lifecycle-original' }],
     });
-    api.associateAsset(owner, 'target', 'lifecycle-cloud');
-    api.trashProject(owner, 'target', 0, 10);
-    expect(api.deleteProject(owner, 'target')).toMatchObject({ id: 'target' });
-    expect(api.assetsForProject(owner, 'source')).toMatchObject([{ id: 'lifecycle-cloud' }]);
+    api.associateAsset(owner, 'target-a', 'lifecycle-cloud');
     api.associateAsset(owner, 'target-2', 'lifecycle-cloud');
+    api.enqueueAssetThumbnail(owner, 'target-a-job', 'target-a', 'lifecycle-cloud');
+    api.enqueueAssetThumbnail(owner, 'target-2-job', 'target-2', 'lifecycle-cloud');
+    api.registerLocalDerivative(owner, 'target-2', {
+      id: 'target-2-derivative',
+      assetId: 'lifecycle-cloud',
+      kind: 'thumbnail',
+      profile: 'jpeg-640',
+      sha256: 'b'.repeat(64),
+      bytes: 1024,
+      descriptor: { mimeType: 'image/jpeg', width: 640, height: 360 },
+      availability: 'available-local',
+      locations: [{ kind: 'opfs-cache', ref: 'target-2-derivative-cache' }],
+    });
+    expect(api.deleteAsset(owner, 'target-a', 'lifecycle-cloud')).toMatchObject({
+      id: 'lifecycle-cloud',
+      orphanedPrivateObjectRefs: [],
+    });
+    expect(api.assetsForProject(owner, 'target-a')).toHaveLength(0);
+    expect(api.jobsForProject(owner, 'target-a')).toMatchObject([
+      { id: 'target-a-job', state: 'canceled' },
+    ]);
+    expect(api.assetsForProject(owner, 'target-2')).toMatchObject([
+      { id: 'lifecycle-cloud', projectId: 'target-2' },
+    ]);
+    expect(api.jobsForProject(owner, 'target-2')).toMatchObject([
+      { id: 'target-2-job', state: 'queued' },
+    ]);
+    expect(api.derivativesForAsset(owner, 'target-2', 'lifecycle-cloud')).toHaveLength(1);
+    expect(api.assetsForProject(owner, 'source')).toMatchObject([{ id: 'lifecycle-cloud' }]);
+  });
+
+  it('rejects deleting a source asset or project while another project still references it', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'owner-association-lifecycle' };
+    api.createProject(owner, 'source', 'Source');
+    api.createProject(owner, 'target-2', 'Target 2');
+    api.registerAsset(owner, 'source', {
+      ...assetRegistration(),
+      id: 'lifecycle-cloud',
+      locations: [{ kind: 'private-object', ref: 'lifecycle-original' }],
+    });
+    api.associateAsset(owner, 'target-2', 'lifecycle-cloud');
+    expect(() => api.deleteAsset(owner, 'source', 'lifecycle-cloud')).toThrow(
+      expect.objectContaining({ code: 'ASSET_REFERENCED' }),
+    );
     api.trashProject(owner, 'source', 0, 20);
-    expect(api.deleteProject(owner, 'source')).toMatchObject({ id: 'source' });
+    expect(() => api.deleteProject(owner, 'source')).toThrow(
+      expect.objectContaining({ code: 'PROJECT_REFERENCED' }),
+    );
+    expect(api.assetsForOwner(owner)).toMatchObject([{ id: 'lifecycle-cloud' }]);
     expect(api.assetsForProject(owner, 'target-2')).toHaveLength(0);
   });
 

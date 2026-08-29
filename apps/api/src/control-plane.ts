@@ -844,26 +844,16 @@ export class LocalControlPlane implements ControlPlane {
     const current = this.projectAllowTrashed(actor, id);
     if (current.trashedAt === undefined) throw new ControlPlaneError('PROJECT_NOT_TRASHED', id);
     if (this.activeJobCount(id) > 0) throw new ControlPlaneError('PROJECT_BUSY', id);
+    if ([...this.#assetAccess.values()].some((sourceProjectId) => sourceProjectId === id))
+      throw new ControlPlaneError('PROJECT_REFERENCED', id);
     const assetIds = new Set(
       [...this.#assets.values()].filter((asset) => asset.projectId === id).map((asset) => asset.id),
     );
-    for (const [jobId, job] of this.#jobs.entries()) {
-      if (job.assetId === undefined || !assetIds.has(job.assetId)) continue;
-      if (job.state === 'queued') {
-        this.#jobs.set(jobId, { ...job, state: 'canceled', cancelRequested: true });
-        this.event(jobId, 'canceled', Date.now());
-      } else if (job.state === 'leased' && !job.cancelRequested) {
-        this.#jobs.set(jobId, { ...job, cancelRequested: true });
-        this.event(jobId, 'cancel-requested', Date.now());
-      }
-    }
     const candidates = new Set<string>();
     for (const asset of [...this.#assets.values()].filter((item) => item.projectId === id)) {
       for (const ref of privateRefs(asset.locations)) candidates.add(ref);
     }
-    for (const derivative of [...this.#derivatives.values()].filter(
-      (item) => item.projectId === id || assetIds.has(item.assetId),
-    )) {
+    for (const derivative of [...this.#derivatives.values()].filter((item) => item.projectId === id)) {
       for (const ref of privateRefs(derivative.locations)) candidates.add(ref);
     }
     for (const [jobId, job] of this.#jobs.entries()) {
@@ -882,8 +872,7 @@ export class LocalControlPlane implements ControlPlane {
       if (targetProjectId === id || sourceProjectId === id) this.#assetAccess.delete(key);
     }
     for (const [derivativeId, derivative] of this.#derivatives.entries()) {
-      if (derivative.projectId === id || assetIds.has(derivative.assetId))
-        this.#derivatives.delete(derivativeId);
+      if (derivative.projectId === id) this.#derivatives.delete(derivativeId);
     }
     this.#projects.delete(id);
     const remaining = new Set<string>([
@@ -1034,7 +1023,7 @@ export class LocalControlPlane implements ControlPlane {
       const key = `${projectId}\u0000${assetId}`;
       if (this.#assetAccess.get(key) !== current.projectId)
         throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
-      this.cancelJobsForAsset(assetId);
+      this.cancelJobsForProjectAsset(projectId, assetId);
       const candidateRefs = new Set<string>();
       for (const [derivativeId, derivative] of this.#derivatives) {
         if (derivative.projectId === projectId && derivative.assetId === assetId) {
@@ -1054,10 +1043,12 @@ export class LocalControlPlane implements ControlPlane {
         orphanedPrivateObjectRefs: [...candidateRefs].filter((ref) => !remainingRefs.has(ref)),
       };
     }
-    this.cancelJobsForAsset(assetId);
+    if ([...this.#assetAccess.keys()].some((key) => key.endsWith(`\u0000${assetId}`)))
+      throw new ControlPlaneError('ASSET_REFERENCED', assetId);
+    this.cancelJobsForProjectAsset(projectId, assetId);
     const privateObjectRefs = new Set(privateRefs(current.locations));
     for (const [derivativeId, derivative] of this.#derivatives) {
-      if (derivative.assetId === assetId) {
+      if (derivative.assetId === assetId && derivative.projectId === projectId) {
         for (const ref of privateRefs(derivative.locations)) privateObjectRefs.add(ref);
         this.#derivatives.delete(derivativeId);
       }
@@ -1654,9 +1645,9 @@ export class LocalControlPlane implements ControlPlane {
       (job) => job.projectId === projectId && (job.state === 'queued' || job.state === 'leased'),
     ).length;
   }
-  private cancelJobsForAsset(assetId: string, at = Date.now()): void {
+  private cancelJobsForProjectAsset(projectId: string, assetId: string, at = Date.now()): void {
     for (const [jobId, job] of this.#jobs.entries()) {
-      if (job.assetId !== assetId) continue;
+      if (job.projectId !== projectId || job.assetId !== assetId) continue;
       if (job.state === 'queued') {
         this.#jobs.set(jobId, { ...job, state: 'canceled', cancelRequested: true });
         this.event(jobId, 'canceled', at);

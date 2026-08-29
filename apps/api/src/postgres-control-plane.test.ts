@@ -542,7 +542,7 @@ describe('PostgresControlPlane', () => {
     await pool.end();
   });
 
-  it('cleans project-asset access rows when source or target projects are deleted', async () => {
+  it('scopes associated-asset deletion to the current target project', async () => {
     const database = newDb();
     const adapter = database.adapters.createPg();
     const pool = new adapter.Pool() as Pool;
@@ -550,20 +550,15 @@ describe('PostgresControlPlane', () => {
     await controlPlane.initialize();
     const owner = { id: 'association-lifecycle-owner' };
     await controlPlane.createProject(owner, 'source', 'Source');
-    await controlPlane.createProject(owner, 'target', 'Target');
+    await controlPlane.createProject(owner, 'target-a', 'Target A');
     await controlPlane.createProject(owner, 'target-2', 'Target 2');
     await controlPlane.registerAsset(owner, 'source', {
       ...cloudAsset('lifecycle-cloud', 'lifecycle-ref'),
     });
-    await controlPlane.associateAsset(owner, 'target', 'lifecycle-cloud');
-    await controlPlane.trashProject(owner, 'target', 0, 10);
-    await expect(controlPlane.deleteProject(owner, 'target')).resolves.toMatchObject({
-      id: 'target',
-    });
-    await expect(controlPlane.assetsForProject(owner, 'source')).resolves.toMatchObject([
-      { id: 'lifecycle-cloud', projectId: 'source' },
-    ]);
+    await controlPlane.associateAsset(owner, 'target-a', 'lifecycle-cloud');
     await controlPlane.associateAsset(owner, 'target-2', 'lifecycle-cloud');
+    await controlPlane.enqueueAssetThumbnail(owner, 'target-a-job', 'target-a', 'lifecycle-cloud');
+    await controlPlane.enqueueAssetThumbnail(owner, 'target-2-job', 'target-2', 'lifecycle-cloud');
     await controlPlane.registerLocalDerivative(owner, 'target-2', {
       id: 'target-derivative',
       assetId: 'lifecycle-cloud',
@@ -575,14 +570,53 @@ describe('PostgresControlPlane', () => {
       availability: 'available-local',
       locations: [{ kind: 'opfs-cache', ref: 'target-derivative-cache' }],
     });
-    await controlPlane.trashProject(owner, 'source', 0, 20);
-    await expect(controlPlane.deleteProject(owner, 'source')).resolves.toMatchObject({
-      id: 'source',
+    await expect(controlPlane.deleteAsset(owner, 'target-a', 'lifecycle-cloud')).resolves.toMatchObject({
+      id: 'lifecycle-cloud',
+      orphanedPrivateObjectRefs: [],
     });
-    await expect(controlPlane.assetsForProject(owner, 'target-2')).resolves.toHaveLength(0);
+    await expect(controlPlane.assetsForProject(owner, 'target-a')).resolves.toHaveLength(0);
+    await expect(controlPlane.jobsForProject(owner, 'target-a')).resolves.toMatchObject([
+      { id: 'target-a-job', state: 'canceled' },
+    ]);
+    await expect(controlPlane.assetsForProject(owner, 'target-2')).resolves.toMatchObject([
+      { id: 'lifecycle-cloud', projectId: 'target-2' },
+    ]);
+    await expect(controlPlane.jobsForProject(owner, 'target-2')).resolves.toMatchObject([
+      { id: 'target-2-job', state: 'queued' },
+    ]);
     await expect(
       controlPlane.derivativesForAsset(owner, 'target-2', 'lifecycle-cloud'),
-    ).rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
+    ).resolves.toHaveLength(1);
+    await expect(controlPlane.assetsForProject(owner, 'source')).resolves.toMatchObject([
+      { id: 'lifecycle-cloud', projectId: 'source' },
+    ]);
+    await pool.end();
+  });
+
+  it('rejects deleting a source asset or project while another project still references it', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const controlPlane = new PostgresControlPlane(pool, { skipLocked: false });
+    await controlPlane.initialize();
+    const owner = { id: 'association-lifecycle-owner' };
+    await controlPlane.createProject(owner, 'source', 'Source');
+    await controlPlane.createProject(owner, 'target-2', 'Target 2');
+    await controlPlane.registerAsset(owner, 'source', {
+      ...cloudAsset('lifecycle-cloud', 'lifecycle-ref'),
+    });
+    await controlPlane.associateAsset(owner, 'target-2', 'lifecycle-cloud');
+    await expect(controlPlane.deleteAsset(owner, 'source', 'lifecycle-cloud')).rejects.toMatchObject({
+      code: 'ASSET_REFERENCED',
+    });
+    await controlPlane.trashProject(owner, 'source', 0, 20);
+    await expect(controlPlane.deleteProject(owner, 'source')).rejects.toMatchObject({
+      code: 'PROJECT_REFERENCED',
+    });
+    await expect(controlPlane.assetsForOwner(owner)).resolves.toMatchObject([
+      { id: 'lifecycle-cloud', projectId: 'source' },
+    ]);
+    await expect(controlPlane.assetsForProject(owner, 'target-2')).resolves.toHaveLength(0);
     await pool.end();
   });
 

@@ -668,18 +668,23 @@ export class PostgresControlPlane implements ControlPlane {
         [id],
       );
       if (Number(active.rows[0]?.count ?? 0) > 0) throw new ControlPlaneError('PROJECT_BUSY', id);
+      const references = await client.query<{ readonly asset_id: string }>(
+        `SELECT asset_id FROM media_asset_access
+         WHERE source_project_id = $1
+         LIMIT 1`,
+        [id],
+      );
+      if (references.rows[0] !== undefined) throw new ControlPlaneError('PROJECT_REFERENCED', id);
       const associatedQueued = await client.query<{ readonly id: string }>(
         `UPDATE jobs SET state = 'canceled', cancel_requested = true
-         WHERE asset_id IN (SELECT id FROM media_assets WHERE project_id = $1)
-           AND state = 'queued' RETURNING id`,
+         WHERE project_id = $1 AND state = 'queued' RETURNING id`,
         [id],
       );
       for (const job of associatedQueued.rows)
         await this.event(client, job.id, 'canceled', Date.now());
       const associatedLeased = await client.query<{ readonly id: string }>(
         `UPDATE jobs SET cancel_requested = true
-         WHERE asset_id IN (SELECT id FROM media_assets WHERE project_id = $1)
-           AND state = 'leased' AND cancel_requested = false RETURNING id`,
+         WHERE project_id = $1 AND state = 'leased' AND cancel_requested = false RETURNING id`,
         [id],
       );
       for (const job of associatedLeased.rows)
@@ -690,8 +695,7 @@ export class PostgresControlPlane implements ControlPlane {
       );
       const derivatives = await client.query<{ readonly locations: unknown }>(
         `SELECT locations FROM media_derivatives
-         WHERE project_id = $1
-            OR asset_id IN (SELECT id FROM media_assets WHERE project_id = $1)`,
+         WHERE project_id = $1`,
         [id],
       );
       const candidates = new Set<string>([
@@ -709,11 +713,6 @@ export class PostgresControlPlane implements ControlPlane {
         await client.query('DELETE FROM jobs WHERE project_id = $1', [id]);
       }
       await client.query('DELETE FROM media_derivatives WHERE project_id = $1', [id]);
-      await client.query(
-        `DELETE FROM media_derivatives
-         WHERE asset_id IN (SELECT id FROM media_assets WHERE project_id = $1)`,
-        [id],
-      );
       await client.query(
         'DELETE FROM media_asset_access WHERE project_id = $1 OR source_project_id = $1',
         [id],
@@ -954,20 +953,6 @@ export class PostgresControlPlane implements ControlPlane {
   ): Promise<AssetDeletionResult> {
     return this.transaction(async (client) => {
       await this.project(actor, projectId, client);
-      const queuedForAsset = await client.query<{ readonly id: string }>(
-        `UPDATE jobs SET state = 'canceled', cancel_requested = true
-         WHERE asset_id = $1 AND state = 'queued' RETURNING id`,
-        [assetId],
-      );
-      for (const job of queuedForAsset.rows)
-        await this.event(client, job.id, 'canceled', Date.now());
-      const leasedForAsset = await client.query<{ readonly id: string }>(
-        `UPDATE jobs SET cancel_requested = true
-         WHERE asset_id = $1 AND state = 'leased' AND cancel_requested = false RETURNING id`,
-        [assetId],
-      );
-      for (const job of leasedForAsset.rows)
-        await this.event(client, job.id, 'cancel-requested', Date.now());
       const existing = await client.query<MediaAssetRow>(
         'SELECT * FROM media_assets WHERE id = $1 AND project_id = $2',
         [assetId, projectId],
@@ -983,6 +968,21 @@ export class PostgresControlPlane implements ControlPlane {
           [projectId, assetId, actor.id, SHARED_LIBRARY_OWNER_ID],
         );
         if (access.rows[0] === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+        const queuedForAsset = await client.query<{ readonly id: string }>(
+          `UPDATE jobs SET state = 'canceled', cancel_requested = true
+           WHERE project_id = $1 AND asset_id = $2 AND state = 'queued' RETURNING id`,
+          [projectId, assetId],
+        );
+        for (const job of queuedForAsset.rows)
+          await this.event(client, job.id, 'canceled', Date.now());
+        const leasedForAsset = await client.query<{ readonly id: string }>(
+          `UPDATE jobs SET cancel_requested = true
+           WHERE project_id = $1 AND asset_id = $2
+             AND state = 'leased' AND cancel_requested = false RETURNING id`,
+          [projectId, assetId],
+        );
+        for (const job of leasedForAsset.rows)
+          await this.event(client, job.id, 'cancel-requested', Date.now());
         const derivatives = await client.query<MediaDerivativeRow>(
           'SELECT * FROM media_derivatives WHERE project_id = $1 AND asset_id = $2',
           [projectId, assetId],
@@ -1013,16 +1013,44 @@ export class PostgresControlPlane implements ControlPlane {
           orphanedPrivateObjectRefs: [...candidateRefs].filter((ref) => !remainingRefs.has(ref)),
         };
       }
+      const references = await client.query<{ readonly project_id: string }>(
+        `SELECT project_id FROM media_asset_access
+         WHERE asset_id = $1 AND source_project_id = $2
+         LIMIT 1`,
+        [assetId, projectId],
+      );
+      if (references.rows[0] !== undefined) throw new ControlPlaneError('ASSET_REFERENCED', assetId);
+      const queuedForAsset = await client.query<{ readonly id: string }>(
+        `UPDATE jobs SET state = 'canceled', cancel_requested = true
+         WHERE project_id = $1 AND asset_id = $2 AND state = 'queued' RETURNING id`,
+        [projectId, assetId],
+      );
+      for (const job of queuedForAsset.rows)
+        await this.event(client, job.id, 'canceled', Date.now());
+      const leasedForAsset = await client.query<{ readonly id: string }>(
+        `UPDATE jobs SET cancel_requested = true
+         WHERE project_id = $1 AND asset_id = $2
+           AND state = 'leased' AND cancel_requested = false RETURNING id`,
+        [projectId, assetId],
+      );
+      for (const job of leasedForAsset.rows)
+        await this.event(client, job.id, 'cancel-requested', Date.now());
       const derivatives = await client.query<MediaDerivativeRow>(
-        'SELECT * FROM media_derivatives WHERE asset_id = $1',
-        [assetId],
+        'SELECT * FROM media_derivatives WHERE project_id = $1 AND asset_id = $2',
+        [projectId, assetId],
       );
       const candidateRefs = new Set([
         ...privateRefsFromLocations(existing.rows[0].locations),
         ...derivatives.rows.flatMap((row) => privateRefsFromLocations(row.locations)),
       ]);
-      await client.query('DELETE FROM media_derivatives WHERE asset_id = $1', [assetId]);
-      await client.query('DELETE FROM media_asset_access WHERE asset_id = $1', [assetId]);
+      await client.query('DELETE FROM media_derivatives WHERE project_id = $1 AND asset_id = $2', [
+        projectId,
+        assetId,
+      ]);
+      await client.query(
+        'DELETE FROM media_asset_access WHERE source_project_id = $1 AND asset_id = $2',
+        [projectId, assetId],
+      );
       await client.query('DELETE FROM media_assets WHERE id = $1 AND project_id = $2', [
         assetId,
         projectId,
