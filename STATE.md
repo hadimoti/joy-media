@@ -5,15 +5,17 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 
 ## Current closure checkpoint (2026-08-29 UTC / 2026-08-30 local)
 
-Commit `696bc6f` is pushed to both `github/main` and the VPS bare `main`.
-It fixes the project-rename SQL revision placeholder, closes the cancel/late-
-receipt race and failed-attempt bookkeeping, revokes sessions when an
-allow-listed identity is disabled/removed, and adds the Windows Worker package
-smoke lane. Self-hosted GitHub run `33279292251` passed `check`, all three
-desktop Playwright projects, and `worker-package` on
+Commits through `0fe3ee8` are pushed to both `github/main` and the VPS bare
+`main`. They fix the project-rename SQL revision placeholder, close the
+cancel/late-receipt race and failed-attempt bookkeeping, revoke sessions when
+an allow-listed identity is disabled/removed, scope destructive asset cleanup
+with canonical-row locking, and serialize durable Mistral idempotency claims
+with lease recovery. The self-hosted Windows workflow now has run isolation,
+Worker package smoke coverage, and GitHub run `33280828851` passed `check`, all
+three desktop Playwright projects, and `worker-package` on
 `joy-media-ci-windows`. This is source/desktop evidence only: final release
 remains NO-GO until the isolated Linux real-service lane, clean-profile Worker
-lane, acceptance lane, remaining DB/lease/provider hardening, deployment, and
+lane, acceptance lane, remaining lease/runtime hardening, deployment, and
 authenticated live/canary/rollback evidence are completed.
 
 ## VPS access
