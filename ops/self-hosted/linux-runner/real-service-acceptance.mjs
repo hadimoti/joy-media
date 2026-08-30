@@ -299,6 +299,11 @@ async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activ
   await page.getByRole('article', { name: 'Inspector', exact: true }).waitFor();
   const joyCode = page.locator('.panel-tab[aria-label="Joy Code"]').first();
   await joyCode.click();
+  const joyCodeBrief = page
+    .getByRole('tablist', { name: 'Joy Code sections', exact: true })
+    .getByRole('tab', { name: 'Brief', exact: true });
+  await joyCodeBrief.click();
+  await page.getByRole('article', { name: 'Creative Brief', exact: true }).waitFor();
   const joyCode3d = page
     .getByRole('tablist', { name: 'Joy Code sections', exact: true })
     .getByRole('tab', { name: '3d', exact: true });
