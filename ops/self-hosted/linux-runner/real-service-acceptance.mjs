@@ -36,6 +36,7 @@ const execFile = promisify((file, args, options, callback) => {
       const error = new Error(`command ${file} exited with ${code ?? signal ?? 'unknown'}`);
       error.code = code;
       error.stderr = Buffer.concat(stderr).toString('utf8');
+      error.stdout = Buffer.concat(stdout).toString('utf8');
       callback(error);
     }
   });
@@ -221,7 +222,8 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
         },
       },
     ).catch((error) => {
-      error.message = `${error.message}${error.stderr ? `: ${error.stderr.slice(-4000)}` : ''}`;
+      const details = [error.stdout, error.stderr].filter(Boolean).join('\n');
+      error.message = `${error.message}${details ? `: ${details.slice(-4000)}` : ''}`;
       throw error;
     });
     void result;
