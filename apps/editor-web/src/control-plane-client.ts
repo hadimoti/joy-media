@@ -202,14 +202,18 @@ export interface BrowserAssetRegistration {
   readonly locations: readonly { readonly kind: 'opfs-cache'; readonly ref: string }[];
 }
 
+// Dockview keeps several panels mounted at once and each panel creates its own
+// client instance. Keep read coalescing at module scope so a status tick from
+// Jobs, Audio, Mask, and Enhance shares one request even when their polling
+// loops are not perfectly synchronized.
+const sharedInFlightReads = new Map<string, Promise<unknown>>();
+
 export class BrowserControlPlaneClient {
   /**
    * Coalesce concurrent read polls made by mounted panels. Dockview can keep
    * Jobs, Audio, Enhance, and Mask mounted at the same time, so a shared
    * client must not turn one refresh tick into duplicate API requests.
    */
-  private readonly inFlightReads = new Map<string, Promise<unknown>>();
-
   constructor(
     private readonly apiUrl = '/api',
     private readonly tokenProvider: () => string | undefined = () =>
@@ -803,15 +807,15 @@ export class BrowserControlPlaneClient {
   private async coalescedGet<T>(path: string): Promise<T> {
     const token = this.assertion();
     const key = `${this.apiUrl.replace(/\/$/, '')}\u0000${path}\u0000${token}`;
-    const existing = this.inFlightReads.get(key);
+    const existing = sharedInFlightReads.get(key);
     if (existing !== undefined) return (await existing) as T;
 
     const request = this.requestWithToken<T>(path, { method: 'GET' }, token);
-    this.inFlightReads.set(key, request);
+    sharedInFlightReads.set(key, request);
     try {
       return await request;
     } finally {
-      if (this.inFlightReads.get(key) === request) this.inFlightReads.delete(key);
+      if (sharedInFlightReads.get(key) === request) sharedInFlightReads.delete(key);
     }
   }
   private async post<T>(path: string, body: object): Promise<T> {

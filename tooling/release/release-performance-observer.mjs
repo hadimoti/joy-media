@@ -526,13 +526,28 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
     // evidence; observing the library shell would otherwise produce a clean
     // but meaningless zero-control sample.
     await enterEditor(page);
-    const resources = await page.evaluate(() =>
-      performance
+    // The release budget is for the entry bundle (the same bundle-size
+    // contract enforced by Vite), not the sum of every eagerly imported
+    // cacheable vendor/panel chunk. In dev this is /src/main.tsx; production
+    // builds expose /assets/index-*.js. Summing all scripts made the observer
+    // report a false regression whenever a healthy chunk was split out.
+    initialEditorJsBytes = await page.evaluate(() => {
+      const entry = performance
         .getEntriesByType('resource')
-        .filter((entry) => entry.name.includes('.js'))
-        .reduce((sum, entry) => sum + (entry.transferSize || entry.encodedBodySize || 0), 0),
-    );
-    initialEditorJsBytes = Number.isFinite(resources) ? resources : null;
+        .filter((candidate) => {
+          if (candidate.initiatorType !== 'script') return false;
+          try {
+            const pathname = new URL(candidate.name).pathname;
+            return /\/(?:main|index)(?:[-.][^/]*)?\.(?:m?js|jsx?|tsx?)$/u.test(pathname);
+          } catch {
+            return false;
+          }
+        })
+        .sort((left, right) => left.startTime - right.startTime)[0];
+      if (entry === undefined) return null;
+      const bytes = entry.transferSize || entry.encodedBodySize || 0;
+      return Number.isFinite(bytes) ? bytes : null;
+    });
     hiddenContext = await browser.newContext({ reducedMotion: 'no-preference' });
     await installObserverContext(hiddenContext);
     // Headless Chromium does not expose a real active-tab compositor, so a

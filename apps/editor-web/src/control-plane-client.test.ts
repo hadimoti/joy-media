@@ -72,6 +72,37 @@ describe('BrowserControlPlaneClient', () => {
     }
   });
 
+  it('coalesces worker reads across independently mounted panel clients', async () => {
+    const requests: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const original = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      requests.push(String(input));
+      await gate;
+      return json(200, { data: [] });
+    };
+    try {
+      const firstPanel = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => 'joy-session-token',
+      );
+      const secondPanel = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => 'joy-session-token',
+      );
+      const reads = [firstPanel.workers(), secondPanel.workers()];
+      await Promise.resolve();
+      expect(requests).toEqual(['https://media.joyteam.ir/api/v1/workers']);
+      release();
+      await Promise.all(reads);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
   it('rejects with no network call when there is no stored session', async () => {
     const original = globalThis.fetch;
     globalThis.fetch = async () => {
