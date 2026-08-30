@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* global process, setTimeout, clearTimeout */
+/* global process, setTimeout, URL, Buffer, window, fetch, atob, crypto, localStorage */
 
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -581,7 +581,9 @@ async function waitForHttp(url, timeout) {
     try {
       const response = await fetch(url);
       if (response.ok || response.status < 500) return;
-    } catch {}
+    } catch {
+      // Retry until the service is ready.
+    }
     await new Promise((resolveWait) => setTimeout(resolveWait, 500));
   }
   throw new Error(`timed out waiting for ${url}`);
@@ -592,6 +594,8 @@ function killTree(pid) {
   } catch {
     try {
       process.kill(pid, 'SIGTERM');
-    } catch {}
+    } catch {
+      // Best-effort process cleanup.
+    }
   }
 }
