@@ -5,21 +5,26 @@ One row per part. Keep entries terse; detail lives in the part files' WP checkbo
 
 ## Current closure checkpoint (2026-08-29 UTC / 2026-08-30 local)
 
-Commits through `cd140fb` are pushed to both `github/main` and the VPS bare
+Commits through `1e6fc86` are pushed to both `github/main` and the VPS bare
 `main`. They fix the project-rename SQL revision placeholder, close the
 cancel/late-receipt race and failed-attempt bookkeeping, revoke sessions when
 an allow-listed identity is disabled/removed, scope destructive asset cleanup
 with canonical-row locking, and serialize durable Mistral idempotency claims
-with lease recovery. The self-hosted Windows workflow now has run isolation,
-Worker package smoke coverage, and GitHub run `33281246784` passed `check`, all
-three desktop Playwright projects, and `worker-package` on
-`joy-media-ci-windows`. The same `cd140fb` candidate is deployed through the
+with lease recovery. Ordinary JSON API bodies now have a bounded 1 MiB default
+with explicit larger media/document limits, and bundled workflows no longer
+report fixture/deferred outputs as durable success. The self-hosted Windows
+workflow has run isolation and Worker package smoke coverage; GitHub run
+`33281246784` passed `check`, all three desktop Playwright projects, and
+`worker-package` on `joy-media-ci-windows`. The `1e6fc86` candidate is deployed through the
 standalone release paths (`current-api` and `web`) and `/health` plus
 `/api/health` are green. Authenticated Codex-browser smoke on `https://joyst.ir/`
 also passed: every Effects category, Joy Code 3D scene tab, 3D timeline clip
 selection, Timeline Time/Flow/Split, and Worker GPU status had no console errors;
 resetting the stale saved workspace removed the obsolete Creative Brief tab.
-This is still conditional evidence: final release remains NO-GO until the
+The same Effects/3D/Flow checks were repeated after the `1e6fc86` deploy, with
+no console errors. A compact 1024×768 desktop pass also kept Effects categories,
+the 3D tab, Timeline controls, and Worker state reachable. This is still
+conditional evidence: final release remains NO-GO until the
 isolated Linux real-service lane, clean-profile Worker lane, acceptance lane,
 remaining lease/runtime hardening, and authenticated canary/rollback proof are
 completed. Gbrain recording is pending because the local gbrain transport was

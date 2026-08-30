@@ -72,6 +72,15 @@ production Sweden VPS. Provision an isolated WSL2 Ubuntu runner (or disposable L
 dedicated Windows Worker runner before dispatching the release workflow; until then the release
 gate must remain NO-GO.
 
+The manually dispatched `.github/workflows/release-candidate.yml` is the executable contract for
+those lanes. Supply the full candidate SHA; it runs two exact passes for each lane. The Linux
+runner must provide `JOY_MEDIA_CI_DATABASE_URL`, `JOY_MEDIA_CI_S3_HEALTHCHECK_URL`, and an
+executable `JOY_MEDIA_CI_RELEASE_COMMAND` that creates a unique PostgreSQL/S3 namespace and
+unconditionally tears it down. The clean Windows runner must set
+`JOY_MEDIA_CI_WORKER_PROFILE=clean`; the fixture-only acceptance runner must set
+`JOY_MEDIA_CI_ACCEPTANCE_PROFILE=fixture-only` and must not expose `JOY_MEDIA_OPENCLI_PROFILE`.
+These values are runner-local configuration, never repository secrets or committed files.
+
 Every release lane must generate a unique run ID, namespace its database/schema, object prefix,
 ports, projects, Worker state, and temporary paths, and unconditionally tear them down. Retain only
 redacted summaries, manifests, hashes, SBOM, signatures, and provenance. Never upload `.env`, DB

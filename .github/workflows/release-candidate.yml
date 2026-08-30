@@ -1,0 +1,144 @@
+name: release-candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Full 40-character commit SHA to verify (must already be on main)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-candidate-${{ inputs.candidate_sha }}
+  cancel-in-progress: false
+
+env:
+  CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+
+jobs:
+  linux-real-services:
+    name: linux-real-services (pass ${{ matrix.pass }})
+    runs-on: [self-hosted, linux, x64, joy-media-ci]
+    strategy:
+      fail-fast: false
+      matrix:
+        pass: [1, 2]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+      - name: Verify isolated real-service prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          node --version
+          corepack enable pnpm
+          pnpm --version
+          command -v psql >/dev/null || { echo 'psql is required on the Linux release runner' >&2; exit 1; }
+          command -v pg_isready >/dev/null || { echo 'pg_isready is required on the Linux release runner' >&2; exit 1; }
+          test -n "${JOY_MEDIA_CI_DATABASE_URL:-}" || { echo 'JOY_MEDIA_CI_DATABASE_URL is not configured on this isolated runner' >&2; exit 1; }
+          pg_isready --dbname="$JOY_MEDIA_CI_DATABASE_URL" >/dev/null
+          test -n "${JOY_MEDIA_CI_S3_HEALTHCHECK_URL:-}" || { echo 'JOY_MEDIA_CI_S3_HEALTHCHECK_URL is not configured on this isolated runner' >&2; exit 1; }
+          curl --fail --silent --show-error "$JOY_MEDIA_CI_S3_HEALTHCHECK_URL" >/dev/null
+      - run: pnpm install --frozen-lockfile
+      - name: Run source and real-service gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm run verify:ci
+          # The runner's isolated integration harness must exercise its
+          # namespaced PostgreSQL/S3 services and teardown contract.
+          release_command="${JOY_MEDIA_CI_RELEASE_COMMAND:-}"
+          test -x "$release_command" || { echo 'JOY_MEDIA_CI_RELEASE_COMMAND must point to the isolated Linux release harness' >&2; exit 1; }
+          "$release_command" "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "${{ matrix.pass }}"
+      - name: Verify no untracked teardown residue
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)"
+
+  windows-worker-clean:
+    name: windows-worker-clean (pass ${{ matrix.pass }})
+    runs-on: [self-hosted, windows, x64, joy-media-worker]
+    strategy:
+      fail-fast: false
+      matrix:
+        pass: [1, 2]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+      - name: Verify clean Worker host
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:CANDIDATE_SHA -notmatch '^[0-9a-f]{40}$') { throw 'candidate_sha must be a full lowercase commit SHA' }
+          node --version
+          corepack enable pnpm
+          pnpm --version
+          ffmpeg -version
+          ffprobe -version
+          if ($env:JOY_MEDIA_CI_WORKER_PROFILE -ne 'clean') { throw 'JOY_MEDIA_CI_WORKER_PROFILE=clean is required' }
+      - run: pnpm install --frozen-lockfile
+      - name: Build and self-test Worker package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          pnpm --filter @joy-media/worker build
+          $output = Join-Path $env:RUNNER_TEMP ("joy-worker-clean-" + $env:GITHUB_SHA + "-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + "-" + "${{ matrix.pass }}" + ".exe")
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-worker-exe.ps1 -OutputPath $output
+          if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw 'Worker executable was not produced.' }
+          $result = & $output --joy-worker-self-test
+          if ($LASTEXITCODE -ne 0 -or $result -notmatch '"ok"\s*:\s*true') { throw 'Worker executable self-test failed.' }
+      - name: Verify clean Worker teardown
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Test-Path -LiteralPath (Join-Path $env:RUNNER_TEMP 'joy-media-release-state')) { throw 'clean Worker state leaked into the runner temp directory' }
+
+  acceptance:
+    name: acceptance (pass ${{ matrix.pass }})
+    runs-on: [self-hosted, linux, x64, joy-media-acceptance]
+    needs: [linux-real-services, windows-worker-clean]
+    strategy:
+      fail-fast: false
+      matrix:
+        pass: [1, 2]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+      - name: Verify fixture-only acceptance boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          test "${JOY_MEDIA_CI_ACCEPTANCE_PROFILE:-}" = 'fixture-only' || { echo 'JOY_MEDIA_CI_ACCEPTANCE_PROFILE=fixture-only is required' >&2; exit 1; }
+          node --version
+          corepack enable pnpm
+          pnpm --version
+          test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}" || { echo 'OpenCLI profiles are forbidden on acceptance runners' >&2; exit 1; }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec playwright install chromium
+      - name: Run disposable desktop acceptance journeys
+        shell: bash
+        env:
+          CI: true
+          PLAYWRIGHT_WORKERS: 1
+          PLAYWRIGHT_HTML_REPORT: playwright-report-acceptance-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAYWRIGHT_TEST_RESULTS_DIR: playwright-test-results-acceptance-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: pnpm exec playwright test tests/e2e --project=desktop-primary --workers=1
+      - name: Verify acceptance teardown
+        shell: bash
+        run: test -z "$(git status --porcelain)"
