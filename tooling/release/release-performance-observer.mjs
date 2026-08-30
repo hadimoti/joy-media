@@ -474,12 +474,23 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
   });
 
   const enterEditor = async (target) => {
-    const projectCard = target.locator('button.project-library-card').first();
-    if (await projectCard.count()) {
-      await projectCard.click({ timeout: 10_000 });
-      await target.locator('[aria-label="Enhance"]').first().click({ timeout: 10_000 });
-      await target.locator('.feature-hub--enhance').waitFor({ state: 'visible', timeout: 10_000 });
+    // Give each tab its own disposable project. The API harness is shared by
+    // both tabs, so reusing a seeded project would make autosave revisions
+    // race and turn the observer itself into a source of 409 noise.
+    const newProject = target.getByRole('button', { name: 'New project', exact: true });
+    if (await newProject.count()) {
+      await newProject.click({ timeout: 10_000 });
+      const title = `Release observer ${randomUUID().slice(0, 8)}`;
+      await target.getByPlaceholder('Project name').fill(title);
+      await target.getByRole('button', { name: 'Create project', exact: true }).click({
+        timeout: 10_000,
+      });
+    } else {
+      const projectCard = target.locator('button.project-library-card').first();
+      if (await projectCard.count()) await projectCard.click({ timeout: 10_000 });
     }
+    await target.locator('[aria-label="Enhance"]').first().click({ timeout: 10_000 });
+    await target.locator('.feature-hub--enhance').waitFor({ state: 'visible', timeout: 10_000 });
     const searchToggle = target.getByRole('button', { name: 'Search Effects', exact: true });
     if (await searchToggle.count()) await searchToggle.click({ timeout: 5_000 });
   };
@@ -563,8 +574,9 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
     // legitimately produce zero cards, which must not turn a populated
     // favorites control into a false "missing hook" result.
     const favorites = page.locator(options.favoriteSelector);
-    if (await favorites.count()) {
-      for (let index = 0; index < Math.min(3, await favorites.count()); index += 1) {
+    const favoriteControlCount = await favorites.count();
+    if (favoriteControlCount > 0) {
+      for (let index = 0; index < Math.min(3, favoriteControlCount); index += 1) {
         try {
           await favorites.nth(index).click({ timeout: 3_000 });
           favoriteIterations += 1;
@@ -667,7 +679,7 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
       unmeasured.push('Long Tasks API unavailable; editor responsiveness not measured');
     if (categoryCount === 0) unmeasured.push('category hook selector matched no controls');
     if (!(await search.count())) unmeasured.push('search hook selector matched no control');
-    if (!(await favorites.count())) unmeasured.push('favorite hook selector matched no controls');
+    if (favoriteControlCount === 0) unmeasured.push('favorite hook selector matched no controls');
     // Hidden-tab and query-header measurements are release-contract metrics;
     // an uninstrumented run must remain failed instead of becoming a pass.
     if (hiddenRequestsPerMinute === null)
