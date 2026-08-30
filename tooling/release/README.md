@@ -17,7 +17,11 @@ share one `runId`, timestamp, generator, phase, and source provenance.
 
 Browser metrics use Playwright and explicit editor hooks. PostgreSQL query
 rate is read only from the local server's `x-joy-db-query-count` response
-header. Timeline integrity requires the read-only
+header; the local `tooling/e2e-server.ts` opts into this header while
+production startup leaves it disabled. Set the isolated staging-only
+`JOY_MEDIA_RELEASE_OBSERVER_TOKEN` environment variable to the disposable
+test session token before a real authenticated observer run; never pass an
+owner token or commit it. Timeline integrity requires the read-only
 `window.__JOY_RELEASE_TIMELINE_PROBE__` hook. Hidden-tab polling uses a second
 local tab and requires it to report `document.visibilityState=hidden`; query
 rate requires the server header on every measured response. If either cannot

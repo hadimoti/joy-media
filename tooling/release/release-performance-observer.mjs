@@ -383,6 +383,15 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
       window.__JOY_RELEASE_LONG_TASKS_UNAVAILABLE__ = true;
     }
   });
+  if (options.token !== undefined) {
+    await page.addInitScript((token) => {
+      window.localStorage.setItem('joy-media-session-token', token);
+    }, options.token);
+  } else {
+    unmeasured.push(
+      'authenticated observer token is missing; set JOY_MEDIA_RELEASE_OBSERVER_TOKEN in the isolated staging environment',
+    );
+  }
   page.on('pageerror', () => {
     uncaughtExceptions += 1;
   });
@@ -739,7 +748,20 @@ export async function observe({
       throw new Error(`duration must be between 0 and ${MAX_EFFECTS_DURATION_MS}ms`);
     } else {
       measured = true;
-      await runBrowser(options.url, { ...options }, metrics, unmeasured, notes);
+      await runBrowser(
+        options.url,
+        {
+          ...options,
+          token:
+            typeof process.env.JOY_MEDIA_RELEASE_OBSERVER_TOKEN === 'string' &&
+            process.env.JOY_MEDIA_RELEASE_OBSERVER_TOKEN.trim().length > 0
+              ? process.env.JOY_MEDIA_RELEASE_OBSERVER_TOKEN.trim()
+              : undefined,
+        },
+        metrics,
+        unmeasured,
+        notes,
+      );
     }
     status =
       measured && unmeasured.length === 0 && hasPassingMetrics(metrics) ? 'passed' : 'failed';
