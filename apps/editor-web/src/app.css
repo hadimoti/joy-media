@@ -804,7 +804,7 @@ main {
   height: 1rem;
 }
 .header-export-preset-trigger,
-.app-header .header-processes-trigger {
+.app-header .header-export-preset-trigger {
   width: auto !important;
   min-width: 0 !important;
   gap: 0.3rem;

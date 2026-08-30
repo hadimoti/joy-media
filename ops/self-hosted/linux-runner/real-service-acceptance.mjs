@@ -67,6 +67,7 @@ const apiUrl = `http://127.0.0.1:${apiPort}`;
 const webUrl = `http://127.0.0.1:${webPort}`;
 const token = 'joy-media-e2e-token';
 const owner = 'e2e-owner@example.test';
+const smokeOnly = process.env.JOY_MEDIA_REAL_ACCEPTANCE_SMOKE_ONLY === '1';
 let pool;
 let apiServer;
 let webProcess;
@@ -164,7 +165,7 @@ try {
   await waitForHttp(webUrl, 120_000);
   await runDesktopMatrix(webUrl, apiUrl);
   const deliveryEvidence = await recordJourney(webUrl, apiUrl, token, candidateSha, pool);
-  if (process.env.JOY_MEDIA_REAL_ACCEPTANCE_SMOKE_ONLY !== '1') {
+  if (!smokeOnly) {
     await runObserver(webUrl, token);
   }
   const restoreEvidence = await verifyRestoreCompatibility(databaseUrl, namespace);
@@ -447,11 +448,15 @@ async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activ
         new Uint8Array(await crypto.subtle.digest('SHA-256', content)),
         (byte) => byte.toString(16).padStart(2, '0'),
       ).join('');
+      let binary = '';
+      for (let offset = 0; offset < content.length; offset += 0x8000) {
+        binary += String.fromCharCode(...content.subarray(offset, offset + 0x8000));
+      }
       return {
         status: response.status,
         bytes: content.byteLength,
         digest,
-        payload: btoa(String.fromCharCode(...content)),
+        payload: btoa(binary),
       };
     },
     { projectId, assetId: exportAssetId, sessionToken },
@@ -644,24 +649,7 @@ async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activ
   });
   if (visualStorage.motionChannels < 2)
     throw new Error('real-service journey did not observe persisted Motion data');
-  const source = {
-    commitSha: sourceSha,
-    treeHash: await git(['rev-parse', 'HEAD^{tree}']),
-    lockfileSha256: createHash('sha256')
-      .update(await readFile(join(root, 'pnpm-lock.yaml')))
-      .digest('hex'),
-    worktreeClean:
-      (await git([
-        'status',
-        '--porcelain=v1',
-        '--untracked-files=all',
-        '--',
-        '.',
-        ':(exclude)test-output/**',
-        ':(exclude)test-results/**',
-        ':(exclude)playwright-report/**',
-      ])) === '',
-  };
+  const source = await currentSourceProvenance(sourceSha);
   const evidenceDirectory = join(root, 'test-output/browser/authenticated-editor-1.0');
   await mkdir(evidenceDirectory, { recursive: true });
   const verifiedAt = new Date().toISOString();
@@ -860,18 +848,13 @@ async function recordOperationalEvidence(
   await mkdir(join(output, 'delivery'), { recursive: true });
   await mkdir(join(output, 'windows'), { recursive: true });
   await mkdir(join(output, 'operations'), { recursive: true });
+  const sourceProvenance = await currentSourceProvenance(sourceSha);
   const common = {
     schemaVersion: 1,
-    status: 'verified',
+    status: smokeOnly ? 'smoke-only' : 'verified',
     execution: 'real-services',
-    sourceProvenance: {
-      commitSha: sourceSha,
-      treeHash: await git(['rev-parse', 'HEAD^{tree}']),
-      lockfileSha256: createHash('sha256')
-        .update(await readFile(join(root, 'pnpm-lock.yaml')))
-        .digest('hex'),
-      worktreeClean: true,
-    },
+    scope: smokeOnly ? 'smoke-only' : 'full',
+    sourceProvenance,
     workflowRunId,
     attempt,
     lanePass,
@@ -928,6 +911,26 @@ function mediaAuth(expectedToken, subject) {
 async function git(args) {
   const result = await execFile('git', args, { cwd: root });
   return result.stdout.toString('utf8').trim();
+}
+async function currentSourceProvenance(commitSha) {
+  return {
+    commitSha,
+    treeHash: await git(['rev-parse', 'HEAD^{tree}']),
+    lockfileSha256: createHash('sha256')
+      .update(await readFile(join(root, 'pnpm-lock.yaml')))
+      .digest('hex'),
+    worktreeClean:
+      (await git([
+        'status',
+        '--porcelain=v1',
+        '--untracked-files=all',
+        '--',
+        '.',
+        ':(exclude)test-output/**',
+        ':(exclude)test-results/**',
+        ':(exclude)playwright-report/**',
+      ])) === '',
+  };
 }
 async function freePort() {
   return await new Promise((resolvePort, reject) => {

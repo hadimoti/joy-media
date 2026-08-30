@@ -664,9 +664,10 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
             navigationFailures += 1;
           }
         }
-        if (await favorites.count()) {
+        const favoriteCount = await favorites.count();
+        if (favoriteCount > 0) {
           try {
-            await favorites.nth(actionStep % (await favorites.count())).click({ timeout: 3_000 });
+            await favorites.nth(actionStep % favoriteCount).click({ timeout: 3_000 });
             favoriteIterations += 1;
           } catch {
             navigationFailures += 1;

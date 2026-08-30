@@ -493,9 +493,9 @@ function performanceEvidenceReady(
       timeline.operations >= 100,
       timeline.countSequence.length === 4 &&
         timeline.countSequence.every((count, index) => count === [2, 4, 3, 4][index]),
-      timeline.uniqueIds,
+      timeline.uniqueIds === true,
       timeline.orphanReferences === 0,
-      timeline.canonicalModelEqualAfterReload,
+      timeline.canonicalModelEqualAfterReload === true,
       editor.measuredWallTimeMs > 0,
       editor.longTaskPercent >= 0 && editor.longTaskPercent < 5,
       editor.initialEditorJsBytes >= 0 && editor.initialEditorJsBytes <= 500_000,

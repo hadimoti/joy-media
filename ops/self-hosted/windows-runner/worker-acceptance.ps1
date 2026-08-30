@@ -111,16 +111,26 @@ try {
     $trigger = New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(1))
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
     $taskCreated = $true
+    $previousTaskInfo = Get-ScheduledTaskInfo -TaskName $taskName
+    $previousLastRunTime = $previousTaskInfo.LastRunTime
     Start-ScheduledTask -TaskName $taskName
     $taskInfo = $null
     $taskState = $null
+    $taskRan = $false
     $startupDeadline = (Get-Date).AddSeconds(10)
     do {
         Start-Sleep -Milliseconds 250
         $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName
         $taskState = (Get-ScheduledTask -TaskName $taskName).State
-    } while ($taskState -eq 'Running' -and (Get-Date) -lt $startupDeadline)
-    $startupPassed = $taskState -eq 'Ready' -and $taskInfo.LastTaskResult -eq 0
+        $taskRan = $taskInfo.LastRunTime -ne $previousLastRunTime
+    } while (
+        (
+            -not $taskRan -or
+            $taskState -eq 'Running'
+        ) -and
+        (Get-Date) -lt $startupDeadline
+    )
+    $startupPassed = $taskRan -and $taskState -eq 'Ready' -and $taskInfo.LastTaskResult -eq 0
     $probeStatePath = Join-Path $acceptanceRoot 'probe-state.json'
     $daemonProbe = Invoke-WorkerDaemonProbe -Path $installedPath -Root $PWD.Path -State $probeStatePath
     if (-not $daemonProbe.started -or -not $daemonProbe.terminated) { throw 'Worker daemon did not start and stop cleanly' }
@@ -158,9 +168,10 @@ try {
     $uninstalled = -not (Test-Path -LiteralPath $acceptanceRoot)
     if (-not $uninstalled) { throw 'Worker acceptance install directory was not removed' }
 
+    $status = if ($startupPassed -and $daemonProbe.started -and $daemonProbe.terminated -and $renewalProbe.started -and $renewalProbe.terminated -and $repairPassed -and $uninstalled) { 'verified' } else { 'failed' }
     $evidence = [ordered]@{
         schemaVersion = 1
-        status = if ($startupPassed -and $daemonProbe.started -and $daemonProbe.terminated -and $renewalProbe.started -and $renewalProbe.terminated -and $repairPassed -and $uninstalled) { 'verified' } else { 'failed' }
+        status = $status
         execution = 'windows-clean-worker'
         sourceProvenance = Get-SourceProvenance
         workflowRunId = $RunId
@@ -170,7 +181,7 @@ try {
         package = [ordered]@{ path = 'joy-worker.exe'; sha256 = $installedHash; selfTest = ($selfTest | ConvertFrom-Json) }
         lifecycle = [ordered]@{
             install = [ordered]@{ status = 'passed'; isolated = $true }
-            startup = [ordered]@{ status = if ($startupPassed -and $daemonProbe.started -and $daemonProbe.terminated) { 'passed' } else { 'failed' }; scheduledTask = $taskName; lastTaskResult = $taskInfo.LastTaskResult; daemon = $daemonProbe }
+            startup = [ordered]@{ status = if ($startupPassed -and $daemonProbe.started -and $daemonProbe.terminated) { 'passed' } else { 'failed' }; scheduledTask = $taskName; lastRunTime = $taskInfo.LastRunTime; lastTaskResult = $taskInfo.LastTaskResult; daemon = $daemonProbe }
             session = [ordered]@{ status = 'passed'; stateIsolated = $true; ownerSessionUsed = $false; persistedSession = $false; credentialMode = 'disposable-loopback'; note = 'The clean-host probe intentionally does not authenticate an owner or contact production.' }
             renewal = [ordered]@{ status = if ($renewalProbe.started -and $renewalProbe.terminated) { 'passed' } else { 'failed' }; restarted = $renewalProbe.started -and $renewalProbe.terminated; statePath = 'probe-state.json'; previousPid = $daemonProbe.pid; daemon = $renewalProbe }
             recovery = [ordered]@{ status = 'passed'; repeatedSelfTests = 2; first = ($recoveryFirst | ConvertFrom-Json); second = ($recoverySecond | ConvertFrom-Json) }
@@ -183,6 +194,7 @@ try {
     }
     New-Item -ItemType Directory -Path (Split-Path -Parent $OutputPath) -Force | Out-Null
     $evidence | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $OutputPath -Encoding utf8
+    if ($status -ne 'verified') { throw 'Worker acceptance evidence was generated with failed status' }
 }
 finally {
     if ($taskCreated) { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue }

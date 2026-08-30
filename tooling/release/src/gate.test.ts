@@ -1008,6 +1008,40 @@ describe('JOY Studio 1.0 release gate', () => {
     );
   });
 
+  it('rejects non-verified operational evidence statuses', () => {
+    const evidence = operationalEvidence();
+    const result = evaluateReleaseGate({
+      ...passingInput(),
+      operationalEvidence: {
+        ...evidence,
+        delivery: {
+          ...evidence.delivery,
+          status: 'smoke-only',
+        },
+      },
+    });
+    expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
+      'failed',
+    );
+  });
+
+  it('requires strict boolean timeline integrity evidence', () => {
+    const evidence = performanceEvidence();
+    const result = evaluateReleaseGate({
+      ...passingInput(),
+      performanceEvidence: {
+        ...evidence,
+        timelineIntegrity: {
+          ...evidence.timelineIntegrity,
+          uniqueIds: 1 as unknown as boolean,
+        },
+      },
+    });
+    expect(result.checks.find((check) => check.id === 'performance-evidence')?.status).toBe(
+      'failed',
+    );
+  });
+
   it('fails explicitly when the feature-status document is missing', () => {
     const result = evaluateReleaseGate(
       {
