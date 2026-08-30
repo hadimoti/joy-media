@@ -198,7 +198,16 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
     const results = join('/tmp', `joy-media-real-results-${project}-${runId}-${pass}`);
     const result = await execFile(
       'pnpm',
-      ['exec', 'playwright', 'test', 'tests/e2e', `--project=${project}`, '--workers=1'],
+      [
+        'exec',
+        'playwright',
+        'test',
+        ...(process.env.JOY_MEDIA_REAL_ACCEPTANCE_SMOKE_ONLY === '1'
+          ? ['tests/e2e/authenticated-smoke.spec.ts']
+          : ['tests/e2e']),
+        `--project=${project}`,
+        '--workers=1',
+      ],
       {
         cwd: root,
         env: {
