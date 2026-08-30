@@ -207,6 +207,24 @@ export interface BrowserAssetRegistration {
 // Jobs, Audio, Mask, and Enhance shares one request even when their polling
 // loops are not perfectly synchronized.
 const sharedInFlightReads = new Map<string, Promise<unknown>>();
+const sharedReadCache = new Map<
+  string,
+  { readonly promise: Promise<unknown>; readonly expiresAt: number }
+>();
+// Slightly exceeds the ten-second polling cadence so independently mounted
+// panels cannot turn timer jitter into more than six worker reads per minute.
+const WORKER_READ_CACHE_TTL_MS = 12_000;
+const fetchInstanceIds = new WeakMap<typeof globalThis.fetch, number>();
+let nextFetchInstanceId = 1;
+
+function fetchInstanceId(): number {
+  const current = globalThis.fetch;
+  const existing = fetchInstanceIds.get(current);
+  if (existing !== undefined) return existing;
+  const id = nextFetchInstanceId++;
+  fetchInstanceIds.set(current, id);
+  return id;
+}
 
 export class BrowserControlPlaneClient {
   /**
@@ -221,7 +239,7 @@ export class BrowserControlPlaneClient {
   ) {}
 
   async workers(): Promise<readonly BrowserWorker[]> {
-    return this.coalescedGet('/v1/workers');
+    return this.coalescedGet('/v1/workers', WORKER_READ_CACHE_TTL_MS);
   }
   async openGpuPreviewSession(projectId: string): Promise<BrowserGpuPreviewSession> {
     return this.post(`/v1/projects/${encodeURIComponent(projectId)}/preview-sessions`, {});
@@ -804,14 +822,28 @@ export class BrowserControlPlaneClient {
   private async get<T>(path: string): Promise<T> {
     return this.request<T>(path, { method: 'GET' });
   }
-  private async coalescedGet<T>(path: string): Promise<T> {
+  private async coalescedGet<T>(path: string, cacheTtlMs = 0): Promise<T> {
     const token = this.assertion();
-    const key = `${this.apiUrl.replace(/\/$/, '')}\u0000${path}\u0000${token}`;
+    const key = `${this.apiUrl.replace(/\/$/, '')}\u0000${path}\u0000${token}\u0000${fetchInstanceId()}`;
     const existing = sharedInFlightReads.get(key);
     if (existing !== undefined) return (await existing) as T;
+    if (cacheTtlMs > 0) {
+      const cached = sharedReadCache.get(key);
+      if (cached !== undefined) {
+        if (cached.expiresAt > Date.now()) return (await cached.promise) as T;
+        sharedReadCache.delete(key);
+      }
+    }
 
     const request = this.requestWithToken<T>(path, { method: 'GET' }, token);
     sharedInFlightReads.set(key, request);
+    if (cacheTtlMs > 0) {
+      sharedReadCache.set(key, { promise: request, expiresAt: Date.now() + cacheTtlMs });
+      request.catch(() => {
+        const cached = sharedReadCache.get(key);
+        if (cached?.promise === request) sharedReadCache.delete(key);
+      });
+    }
     try {
       return await request;
     } finally {
