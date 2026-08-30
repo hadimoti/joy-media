@@ -112,6 +112,16 @@ jobs:
       fail-fast: false
       matrix:
         pass: [1, 2]
+        profile:
+          [
+            desktop-primary,
+            desktop-compact,
+            desktop-minimum,
+            desktop-1280,
+            desktop-1440,
+            desktop-1581,
+            desktop-1920,
+          ]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -136,15 +146,15 @@ jobs:
         env:
           CI: true
           PLAYWRIGHT_WORKERS: 1
-          PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-playwright-report-acceptance-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
-          PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-playwright-results-acceptance-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
-        run: pnpm exec playwright test tests/e2e --project=desktop-primary --workers=1
+          PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-playwright-report-acceptance-${{ matrix.profile }}-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-playwright-results-acceptance-${{ matrix.profile }}-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: pnpm exec playwright test tests/e2e --project=${{ matrix.profile }} --workers=1
       - name: Verify acceptance teardown
         if: always()
         shell: bash
         env:
-          PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-playwright-report-acceptance-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
-          PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-playwright-results-acceptance-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-playwright-report-acceptance-${{ matrix.profile }}-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-playwright-results-acceptance-${{ matrix.profile }}-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
           for output_path in "$PLAYWRIGHT_HTML_REPORT" "$PLAYWRIGHT_TEST_RESULTS_DIR"; do

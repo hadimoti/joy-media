@@ -12,7 +12,7 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
-    "test:e2e:audit": "playwright test tests/e2e --project=desktop-primary --project=desktop-compact --project=desktop-minimum",
+    "test:e2e:audit": "playwright test tests/e2e --project=desktop-primary --project=desktop-compact --project=desktop-minimum --project=desktop-1280 --project=desktop-1440 --project=desktop-1581 --project=desktop-1920",
     "test:fixtures:media": "node tooling/generate-media-fixtures.mjs",
     "worker:exe": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-worker-exe.ps1",
     "lint": "eslint .",
