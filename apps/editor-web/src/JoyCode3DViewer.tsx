@@ -11,6 +11,63 @@ export interface JoyCode3DRenderAsset {
   readonly blob: Blob;
 }
 
+/** Dispose a loaded model and every GPU-owned geometry/material/texture once. */
+export function disposeThreeDModel(model: THREE.Object3D): void {
+  const disposedGeometries = new Set<THREE.BufferGeometry>();
+  const disposedMaterials = new Set<THREE.Material>();
+  const disposedTextures = new Set<THREE.Texture>();
+  const visited = new Set<object>();
+  const disposeTextures = (value: unknown, depth = 0): void => {
+    if (depth > 4 || value === null || typeof value !== 'object') return;
+    if (value instanceof THREE.Texture) {
+      if (!disposedTextures.has(value)) {
+        disposedTextures.add(value);
+        value.dispose();
+      }
+      return;
+    }
+    if (visited.has(value)) return;
+    visited.add(value);
+    if (Array.isArray(value)) {
+      value.forEach((entry) => disposeTextures(entry, depth + 1));
+      return;
+    }
+    Object.values(value as Record<string, unknown>).forEach((entry) =>
+      disposeTextures(entry, depth + 1),
+    );
+  };
+  model.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    if (child.geometry !== undefined && !disposedGeometries.has(child.geometry)) {
+      disposedGeometries.add(child.geometry);
+      child.geometry.dispose();
+    }
+    const materials = child.material instanceof THREE.Material ? [child.material] : child.material;
+    if (!Array.isArray(materials)) return;
+    materials.forEach((material) => {
+      if (disposedMaterials.has(material)) return;
+      disposedMaterials.add(material);
+      disposeTextures(material);
+      material.dispose();
+    });
+  });
+}
+
+/** Remove only loaded model roots, preserving scene lights and grid helpers. */
+export function clearThreeDModelRoots(
+  scene: THREE.Scene,
+  dispose: (model: THREE.Object3D) => void = disposeThreeDModel,
+): number {
+  const toRemove = scene.children.filter(
+    (child) => !(child instanceof THREE.Light) && !(child instanceof THREE.GridHelper),
+  );
+  toRemove.forEach((child) => {
+    scene.remove(child);
+    dispose(child);
+  });
+  return toRemove.length;
+}
+
 function renderAssetId(): string {
   const suffix =
     typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -41,32 +98,14 @@ export function JoyCode3DViewer({
   const [adding, setAdding] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const disposeModel = useCallback((model: THREE.Object3D) => {
-    model.traverse((child) => {
-      if (child instanceof THREE.Mesh) {
-        child.geometry?.dispose();
-        if (child.material instanceof THREE.Material) {
-          child.material.dispose();
-        } else if (Array.isArray(child.material)) {
-          child.material.forEach((m) => m.dispose());
-        }
-      }
-    });
-  }, []);
+  const disposeModel = useCallback(disposeThreeDModel, []);
 
   const clearScene = useCallback(() => {
     const scene = sceneRef.current;
     if (!scene) return;
-    const toRemove: THREE.Object3D[] = [];
-    scene.traverse((child) => {
-      if (child instanceof THREE.Mesh || child instanceof THREE.Group) {
-        toRemove.push(child);
-      }
-    });
-    toRemove.forEach((child) => {
-      scene.remove(child);
-      disposeModel(child);
-    });
+    // Remove only model roots. Traversing and removing every mesh separately
+    // can double-dispose child resources and accidentally detach scene helpers.
+    clearThreeDModelRoots(scene, disposeModel);
   }, [disposeModel]);
 
   const initScene = useCallback(() => {

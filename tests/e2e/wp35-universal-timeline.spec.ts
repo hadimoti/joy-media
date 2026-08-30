@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import {
   authenticate,
+  openPanel,
   openReferenceWorkspace,
   openTimelineShowcaseWorkspace,
   recordEvidence,
@@ -8,6 +9,73 @@ import {
 
 test.describe('WP-35 universal timeline closeout', () => {
   test.beforeEach(async ({ page }) => authenticate(page));
+
+  test('imports a valid GLTF, previews it, and inserts a durable rendered layer', async ({
+    page,
+  }, testInfo) => {
+    await openReferenceWorkspace(page);
+    await openPanel(page, 'Joy Code');
+    await page
+      .getByRole('tablist', { name: 'Joy Code sections' })
+      .getByRole('tab', { name: '3d', exact: true })
+      .click();
+    const triangle = JSON.stringify({
+      asset: { version: '2.0', generator: 'JOY Media e2e' },
+      scene: 0,
+      scenes: [{ nodes: [0] }],
+      nodes: [{ mesh: 0 }],
+      meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] }],
+      buffers: [
+        {
+          uri: 'data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAABAAIA',
+          byteLength: 42,
+        },
+      ],
+      bufferViews: [
+        { buffer: 0, byteOffset: 0, byteLength: 36, target: 34962 },
+        { buffer: 0, byteOffset: 36, byteLength: 6, target: 34963 },
+      ],
+      accessors: [
+        {
+          bufferView: 0,
+          componentType: 5126,
+          count: 3,
+          type: 'VEC3',
+          min: [0, 0, 0],
+          max: [1, 1, 0],
+        },
+        { bufferView: 1, componentType: 5123, count: 3, type: 'SCALAR', min: [0], max: [2] },
+      ],
+    });
+    const viewer = page.locator('.joy-code-3d');
+    await viewer.locator('input[type="file"]').setInputFiles({
+      name: 'e2e-triangle.gltf',
+      mimeType: 'model/gltf+json',
+      buffer: Buffer.from(triangle),
+    });
+    await expect(viewer.getByText('Loaded: e2e-triangle.gltf', { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(
+      viewer.getByRole('button', { name: 'Add current 3D view to timeline' }),
+    ).toBeEnabled();
+    await viewer.getByRole('button', { name: 'Add current 3D view to timeline' }).click();
+    await expect(
+      page.locator('.timeline-clip[aria-label^="e2e-triangle · 3D Render,"]'),
+    ).toHaveCount(1);
+    await page.reload();
+    await expect(
+      page.locator('.timeline-clip[aria-label^="e2e-triangle · 3D Render,"]'),
+    ).toHaveCount(1);
+    await recordEvidence(testInfo, {
+      caseId: 38,
+      functional: 'PASS',
+      uiA11y: 'PASS',
+      expected: 'A valid GLTF loads in the 3D viewer and inserts a durable rendered layer.',
+      actual:
+        'The inline triangle GLTF loaded, became actionable, inserted one rendered timeline clip, and survived reload.',
+    });
+  });
 
   test('marquee-selects mixed timeline clips and Delete removes/restores the batch atomically', async ({
     page,

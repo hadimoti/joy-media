@@ -194,6 +194,7 @@ export function PanelShell({
             placeholder={search.placeholder ?? 'Search…'}
             aria-label={`Search ${title}`}
             aria-controls={`${searchFieldId}-results`}
+            data-release-observer-search={title === 'Effects' ? 'true' : undefined}
             value={search.value}
             onChange={(event) => search.onChange(event.currentTarget.value)}
             onKeyDown={(event) => {

@@ -239,6 +239,7 @@ export function EffectsPanel({
                   type="button"
                   role="tab"
                   className="effects-panel-category-tab"
+                  data-release-observer-category="true"
                   aria-label={`${entry.label} (${categoryCounts[entry.id] ?? 0})`}
                   title={`${entry.label} (${categoryCounts[entry.id] ?? 0})`}
                   aria-selected={category === entry.id}
@@ -389,6 +390,7 @@ function EffectCard({
           <button
             type="button"
             className="icon-button card-fav-btn"
+            data-release-observer-favorite="true"
             aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
             onClick={(e) => {
               e.stopPropagation();
