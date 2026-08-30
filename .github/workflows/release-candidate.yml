@@ -31,11 +31,13 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
-          response="$(curl --fail --silent --show-error \
-            --header "Authorization: Bearer ${GITHUB_TOKEN}" \
-            --header 'Accept: application/vnd.github+json' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/${CANDIDATE_SHA}")"
-          resolved_sha="$(printf '%s' "$response" | node -e "let raw=''; process.stdin.on('data', chunk => raw += chunk); process.stdin.on('end', () => { const value = JSON.parse(raw); process.stdout.write(typeof value.sha === 'string' ? value.sha : ''); });")"
+          candidate_dir="$(mktemp -d)"
+          trap 'rm -rf -- "$candidate_dir"' EXIT
+          git -C "$candidate_dir" init --quiet
+          git -C "$candidate_dir" remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git -C "$candidate_dir" -c "http.extraheader=AUTHORIZATION: bearer ${GITHUB_TOKEN}" \
+            fetch --no-tags --depth=1 origin "$CANDIDATE_SHA"
+          resolved_sha="$(git -C "$candidate_dir" rev-parse 'FETCH_HEAD^{commit}')"
           [[ "$resolved_sha" == "$CANDIDATE_SHA" ]] || { echo 'candidate_sha is not reachable from this repository' >&2; exit 1; }
 
   linux-real-services:

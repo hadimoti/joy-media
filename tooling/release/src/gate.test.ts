@@ -275,9 +275,8 @@ describe('JOY Studio 1.0 release gate', () => {
     const validation = workflow.slice(workflow.indexOf('\n  validate-candidate:'));
     expect(validation).toContain('Validate immutable candidate input before checkout');
     expect(validation).toContain('^[0-9a-f]{40}$');
-    expect(validation).toContain(
-      'https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/${CANDIDATE_SHA}',
-    );
+    expect(validation).toContain('git -C "$candidate_dir" init --quiet');
+    expect(validation).toContain('fetch --no-tags --depth=1 origin "$CANDIDATE_SHA"');
     expect(validation).toContain('resolved_sha');
     const windows = workflow.slice(workflow.indexOf('\n  windows-worker-clean:'));
     expect(windows).toContain('needs: [validate-candidate]');
