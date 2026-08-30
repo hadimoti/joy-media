@@ -77,11 +77,15 @@ container; they are not repository secrets, logs, artifacts, or Gbrain data.
 unconditionally drops a run/schema and bucket namespace.
 
 The acceptance runner `joy-media-ci-acceptance` is a separate repository-scoped
-Linux runner on network `joy-media-acceptance`, with its own runner volume and
-labels `self-hosted`, `linux`, `x64`, `joy-media-acceptance`. It sets only
-`JOY_MEDIA_CI_ACCEPTANCE_PROFILE=fixture-only` and has no OpenCLI/browser
-profile or production credentials. Both Linux runners are currently online and
-idle; query the inventory with the health-check command below.
+Linux runner on networks `joy-media-acceptance` and `joy-media-ci`, with its own
+runner volume and labels `self-hosted`, `linux`, `x64`, `joy-media-acceptance`.
+It is configured for the isolated real-services lane with
+`JOY_MEDIA_CI_ACCEPTANCE_PROFILE=real-services`,
+`JOY_MEDIA_CI_ACCEPTANCE_WORKER=disposable`, and the executable
+`ops/self-hosted/linux-runner/real-service-acceptance.sh` command. Its database
+and MinIO settings are runner-local only; it has no OpenCLI profile, owner
+cookies, or production credentials. Both Linux runners are currently online
+and idle; query the inventory with the health-check command below.
 
 ## Release-candidate lanes
 
@@ -108,8 +112,10 @@ those lanes. Supply the full candidate SHA; it runs two exact passes for each la
 runner must provide `JOY_MEDIA_CI_DATABASE_URL`, `JOY_MEDIA_CI_S3_HEALTHCHECK_URL`, and an
 executable `JOY_MEDIA_CI_RELEASE_COMMAND` that creates a unique PostgreSQL/S3 namespace and
 unconditionally tears it down. The clean Windows runner must set
-`JOY_MEDIA_CI_WORKER_PROFILE=clean`; the fixture-only acceptance runner must set
-`JOY_MEDIA_CI_ACCEPTANCE_PROFILE=fixture-only` and must not expose `JOY_MEDIA_OPENCLI_PROFILE`.
+`JOY_MEDIA_CI_WORKER_PROFILE=clean`; the acceptance runner must set
+`JOY_MEDIA_CI_ACCEPTANCE_PROFILE=real-services`,
+`JOY_MEDIA_CI_ACCEPTANCE_WORKER=disposable`, and must not expose
+`JOY_MEDIA_OPENCLI_PROFILE`.
 These values are runner-local configuration, never repository secrets or committed files.
 
 After the fixture matrix, the same workflow runs a separate `real-service-acceptance` job twice
