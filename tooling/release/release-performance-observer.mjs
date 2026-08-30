@@ -349,6 +349,7 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
   const context = await browser.newContext({ reducedMotion: 'no-preference' });
   const page = await context.newPage();
   let hiddenPage = null;
+  let hiddenContext = null;
   const startedAt = Date.now();
   const pollStartedAt = { value: 0 };
   const endpointCounts = new Map();
@@ -371,23 +372,38 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
   let initialEditorJsBytes = null;
   let longTaskDurations = null;
 
-  await context.addInitScript(() => {
-    window.__JOY_RELEASE_OBSERVER__ = true;
-    window.__JOY_RELEASE_LONG_TASKS__ = [];
-    try {
-      new PerformanceObserver((list) => {
-        for (const entry of list.getEntries())
-          window.__JOY_RELEASE_LONG_TASKS__.push(entry.duration);
-      }).observe({ type: 'longtask', buffered: true });
-    } catch {
-      window.__JOY_RELEASE_LONG_TASKS_UNAVAILABLE__ = true;
+  const installObserverContext = async (targetContext) => {
+    await targetContext.addInitScript(() => {
+      window.__JOY_RELEASE_OBSERVER__ = true;
+      window.__JOY_RELEASE_LONG_TASKS__ = [];
+      try {
+        new PerformanceObserver((list) => {
+          for (const entry of list.getEntries())
+            window.__JOY_RELEASE_LONG_TASKS__.push(entry.duration);
+        }).observe({ type: 'longtask', buffered: true });
+      } catch {
+        window.__JOY_RELEASE_LONG_TASKS_UNAVAILABLE__ = true;
+      }
+    });
+    if (options.token !== undefined) {
+      await targetContext.addInitScript((token) => {
+        window.localStorage.setItem('joy-media-session-token', token);
+      }, options.token);
     }
-  });
-  if (options.token !== undefined) {
-    await context.addInitScript((token) => {
-      window.localStorage.setItem('joy-media-session-token', token);
-    }, options.token);
-  } else {
+    // Never let an accidentally embedded CDN or production asset turn this
+    // local-only observer into live access. Loopback origins (including a
+    // separate local API port) are allowed; every other origin is blocked.
+    await targetContext.route('**/*', async (route) => {
+      try {
+        if (isLoopbackUrl(route.request().url())) await route.continue();
+        else await route.abort('blockedbyclient');
+      } catch {
+        await route.abort('blockedbyclient');
+      }
+    });
+  };
+  await installObserverContext(context);
+  if (options.token === undefined) {
     unmeasured.push(
       'authenticated observer token is missing; set JOY_MEDIA_RELEASE_OBSERVER_TOKEN in the isolated staging environment',
     );
@@ -461,18 +477,6 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
     });
   };
 
-  // Never let an accidentally embedded CDN or production asset turn this
-  // local-only observer into live access. Loopback origins (including a
-  // separate local API port) are allowed; every other origin is blocked.
-  await context.route('**/*', async (route) => {
-    try {
-      if (isLoopbackUrl(route.request().url())) await route.continue();
-      else await route.abort('blockedbyclient');
-    } catch {
-      await route.abort('blockedbyclient');
-    }
-  });
-
   const enterEditor = async (target) => {
     // Give each tab its own disposable project. The API harness is shared by
     // both tabs, so reusing a seeded project would make autosave revisions
@@ -509,7 +513,9 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
         .reduce((sum, entry) => sum + (entry.transferSize || entry.encodedBodySize || 0), 0),
     );
     initialEditorJsBytes = Number.isFinite(resources) ? resources : null;
-    hiddenPage = await context.newPage();
+    hiddenContext = await browser.newContext({ reducedMotion: 'no-preference' });
+    await installObserverContext(hiddenContext);
+    hiddenPage = await hiddenContext.newPage();
     attachHiddenTelemetry(hiddenPage);
     await hiddenPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await enterEditor(hiddenPage);
@@ -733,6 +739,7 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
     notes.push('browser run failed closed; partial values are not promoted to passing metrics');
   } finally {
     if (hiddenPage !== null) await hiddenPage.close().catch(() => undefined);
+    if (hiddenContext !== null) await hiddenContext.close().catch(() => undefined);
     await browser.close();
   }
 }
