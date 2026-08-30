@@ -765,7 +765,7 @@ tests, full tests, typecheck, lint, formatting, CodeRabbit, executable rebuild/s
 task replacement verification pass. Strict release closure still requires owner-paired source-bound
 delivery/inspection evidence and the current-SHA production canary.
 
-### LIVE-48 — source-bound browser closure and release completion (2026-08-29)
+### LIVE-48 — source-bound browser closure and release completion (2026-08-29, prior candidate)
 
 Owner pairing was completed in the authenticated JOY Studio session. The hidden Windows Worker
 reported `asset.thumbnail` and `render.preview.gpu`, and the real owner asset
@@ -787,7 +787,23 @@ failures, matching clean source commit `6a7794012064857faf45551868fe08bf69bfb8ba
 promotion, migration backup/rollback rehearsal, origin plus `joyst.ir`/`www.joyst.ir` identity
 checks, and the real-services 30-minute canary all passed for that same SHA. This closes the
 remaining source-bound Worker, inspection, Motion, Effects, 3D, persistence, and release-gate
-items for JOY Media; historical NO-GO notes above are superseded by this final entry.
+items for that prior candidate; the newer candidate and CI evidence are recorded in LIVE-49.
+
+### LIVE-49 — current self-hosted release-candidate evidence (2026-08-30)
+
+Candidate `570c8d3b38cd2e9e1a2cad980c4a30a78e5339a2` passed release-candidate run
+`33287852067` on both exact passes for Linux real services, the clean Windows Worker,
+and isolated desktop acceptance. Linux completed the source/real-service gates and
+clean namespace teardown; Worker built and self-tested the clean-profile executable;
+acceptance completed 56 desktop-primary journeys per pass (55 passed and one
+intentional skip), including Effects/Inspector, timeline, 3D Joy Code, Worker,
+animated export, and reload coverage. The acceptance Playwright report/results were
+created under runner temp, removed by the always-run teardown step, and both passes
+ended with clean checkouts. This evidence supersedes the earlier queued-worker and
+acceptance-residue NO-GO entries. It is a release-candidate gate, not a claim of
+production deployment; the orchestrator must still perform exact-SHA promotion,
+backup/rollback verification, origin/public checks, authenticated browser
+certification, and the canary before declaring the goal complete.
 
 ## Stop/continue rules for the autonomous goal
 

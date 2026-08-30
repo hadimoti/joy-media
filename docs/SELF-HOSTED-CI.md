@@ -97,14 +97,11 @@ must run twice on the exact candidate SHA and use repository-scoped runners with
   Any automated browser uses fixture credentials only and never receives the owner's cookies or
   OpenCLI profile `cefd9k77`.
 
-The inventory now has the trusted Windows source runner plus the isolated Linux
-real-services and acceptance runners described above. The Windows source runner
-is sufficient for push checks, but it is not a clean-profile Worker runner and
-does not satisfy `joy-media-worker`. Do not point release jobs at the production
-Sweden VPS. A dedicated Windows Worker runner with
-`JOY_MEDIA_CI_WORKER_PROFILE=clean` is still required before the release
-workflow can be dispatched; until that lane exists, the release gate remains
-NO-GO.
+The inventory now has the trusted Windows source runner, the dedicated clean-profile
+Worker runner, and the isolated Linux real-services and acceptance runners described
+above. The Windows source runner remains the push-check lane; release jobs use the
+separate `joy-media-worker` label for clean Worker evidence. Do not point release
+jobs at the production Sweden VPS.
 
 The manually dispatched `.github/workflows/release-candidate.yml` is the executable contract for
 those lanes. Supply the full candidate SHA; it runs two exact passes for each lane. The Linux
@@ -146,16 +143,28 @@ The runner must be `online` before pushing a release commit. If it is offline, r
 
 ## Latest verified runs
 
-On 2026-08-30 UTC, release-candidate run `33285506563` verified commit
+On 2026-08-30 UTC, release-candidate run `33287852067` verified commit
+`570c8d3b38cd2e9e1a2cad980c4a30a78e5339a2` on both exact passes for all three
+release lanes. Both Linux real-service passes completed the source, migration,
+PostgreSQL/S3 namespace, export, and clean-teardown checks. Both clean Windows
+Worker passes built and self-tested the Worker package/executable with a clean
+profile. Both isolated acceptance passes completed 56 desktop-primary journeys
+(55 passed, 1 intentional skip each), including Effects, Inspector, timeline,
+3D/Joy Code, Worker, animated export, and reload paths; both removed their
+Playwright output directories and ended with clean checkouts. This is the first
+fully green release-candidate evidence for the current candidate SHA; production
+promotion and the authenticated live canary remain orchestrator-owned steps.
+
+On 2026-08-30 UTC, the earlier release-candidate run `33285506563` verified commit
 `41b024a677b29131ffd0868f7449bceb591f4bbe` on both Linux passes. Each pass
 completed the full source gate (typecheck, lint, format, 414 test files / 3,608
 tests, build, and production audit), ran the real Postgres migration smoke,
 created and removed a DNS-safe MinIO bucket, uploaded candidate provenance, and
-finished with a clean checkout. The run was then cancelled while the two
-`joy-media-worker` jobs were queued because no runner currently has that label;
-acceptance consequently did not start. This is positive Linux evidence, not a
-release approval: the clean-profile Windows Worker and dependent acceptance
-lanes remain required.
+finished with a clean checkout. At that time the two `joy-media-worker` jobs were
+queued because no runner had that label; the run was cancelled and acceptance did
+not start. This is retained as historical Linux evidence; the dedicated Worker
+runner has since been provisioned and the fully green run `33287852067` above is
+the current release-candidate evidence.
 
 The earlier self-hosted run `33282484240` passed on `main` at commit
 `c514e5efdc24080e042450499eab75c74aebef81`: `check`, `browser-e2e`
