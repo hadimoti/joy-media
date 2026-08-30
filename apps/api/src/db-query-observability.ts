@@ -71,6 +71,7 @@ export function instrumentPostgresPool(pool: Pool): Pool {
 export function attachDbQueryCountHeader(response: {
   hasHeader(name: string): boolean;
   setHeader(name: string, value: string): unknown;
+  readonly headersSent?: boolean;
   writeHead: ServerResponse['writeHead'];
   end: ServerResponse['end'];
 }): void {
@@ -106,7 +107,9 @@ export function attachDbQueryCountHeader(response: {
 function setHeader(response: {
   hasHeader(name: string): boolean;
   setHeader(name: string, value: string): unknown;
+  readonly headersSent?: boolean;
 }): void {
+  if (response.headersSent === true) return;
   if (!response.hasHeader('x-joy-db-query-count'))
     response.setHeader('x-joy-db-query-count', String(currentDbQueryCount()));
 }

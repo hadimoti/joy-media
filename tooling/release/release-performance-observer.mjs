@@ -473,23 +473,24 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
     }
   });
 
+  const enterEditor = async (target) => {
+    const projectCard = target.locator('button.project-library-card').first();
+    if (await projectCard.count()) {
+      await projectCard.click({ timeout: 10_000 });
+      await target.locator('[aria-label="Enhance"]').first().click({ timeout: 10_000 });
+      await target.locator('.feature-hub--enhance').waitFor({ state: 'visible', timeout: 10_000 });
+    }
+    const searchToggle = target.getByRole('button', { name: 'Search Effects', exact: true });
+    if (await searchToggle.count()) await searchToggle.click({ timeout: 5_000 });
+  };
+
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     // The editor route intentionally opens at the project library. Enter a
     // disposable local project before collecting editor/effects/timeline
     // evidence; observing the library shell would otherwise produce a clean
     // but meaningless zero-control sample.
-    const projectCard = page.locator('button.project-library-card').first();
-    if (await projectCard.count()) {
-      await projectCard.click({ timeout: 10_000 });
-      await page.locator('[aria-label="Enhance"]').first().click({ timeout: 10_000 });
-      await page.locator('.feature-hub--enhance').waitFor({ state: 'visible', timeout: 10_000 });
-    }
-    // Search is a compact toggle by design; open it before resolving the
-    // input hook so the soak can exercise search terms without guessing a
-    // panel-specific DOM shape.
-    const searchToggle = page.getByRole('button', { name: 'Search Effects', exact: true });
-    if (await searchToggle.count()) await searchToggle.click({ timeout: 5_000 });
+    await enterEditor(page);
     const resources = await page.evaluate(() =>
       performance
         .getEntriesByType('resource')
@@ -500,6 +501,7 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
     hiddenPage = await context.newPage();
     attachHiddenTelemetry(hiddenPage);
     await hiddenPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await enterEditor(hiddenPage);
     await page.bringToFront();
     hiddenVisibilityObserved =
       (await hiddenPage.evaluate(() => document.visibilityState)) === 'hidden';
@@ -557,23 +559,26 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
         navigationFailures += 1;
       }
     }
-    const search = page.locator(options.searchSelector);
-    if (await search.count()) {
-      for (const term of ['joy', 'video', 'effects']) {
-        try {
-          await search.first().fill(term);
-          searchIterations += 1;
-        } catch {
-          navigationFailures += 1;
-        }
-      }
-    }
+    // Capture favorites before filtering the grid. A search term may
+    // legitimately produce zero cards, which must not turn a populated
+    // favorites control into a false "missing hook" result.
     const favorites = page.locator(options.favoriteSelector);
     if (await favorites.count()) {
       for (let index = 0; index < Math.min(3, await favorites.count()); index += 1) {
         try {
           await favorites.nth(index).click({ timeout: 3_000 });
           favoriteIterations += 1;
+        } catch {
+          navigationFailures += 1;
+        }
+      }
+    }
+    const search = page.locator(options.searchSelector);
+    if (await search.count()) {
+      for (const term of ['joy', 'video', 'effects']) {
+        try {
+          await search.first().fill(term);
+          searchIterations += 1;
         } catch {
           navigationFailures += 1;
         }
