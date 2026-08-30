@@ -388,11 +388,11 @@ class SigV4S3ObjectClient implements S3ObjectClient {
 
     return new Promise((resolve, reject) => {
       let settled = false;
-      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const timeoutRef: { value?: ReturnType<typeof setTimeout> } = {};
       const finish = (callback: () => void): void => {
         if (settled) return;
         settled = true;
-        if (timeout !== undefined) clearTimeout(timeout);
+        if (timeoutRef.value !== undefined) clearTimeout(timeoutRef.value);
         callback();
       };
       const req = httpsRequest(
@@ -428,7 +428,7 @@ class SigV4S3ObjectClient implements S3ObjectClient {
           });
         },
       );
-      timeout = setTimeout(() => {
+      timeoutRef.value = setTimeout(() => {
         req.destroy(new Error(`s3 object request timed out after ${timeoutMs}ms`));
       }, timeoutMs);
       req.once('error', (error) => finish(() => reject(error)));

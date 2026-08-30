@@ -3,11 +3,8 @@ import { once } from 'node:events';
 import type { IncomingMessage } from 'node:http';
 import { describe, expect, it } from 'vitest';
 import { createControlPlaneHttpServer, LocalControlPlane } from '@joy-media/api';
-import {
-  WorkerControlPlaneClient,
-  WorkerRequestTimeoutError,
-  WorkerSessionExpiredError,
-} from './control-plane-client.js';
+import { WorkerControlPlaneClient, WorkerSessionExpiredError } from './control-plane-client.js';
+import type { WorkerRequestTimeoutError } from './control-plane-client.js';
 
 const stubMediaAuth = {
   requestOtp: async () => ({ message: 'stub' }),
