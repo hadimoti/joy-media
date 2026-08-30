@@ -554,7 +554,9 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
     attachHiddenTelemetry(hiddenPage);
     await hiddenPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await enterEditor(hiddenPage);
-    await hiddenPage.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await hiddenPage.evaluate(() =>
+      document.dispatchEvent(new globalThis.Event('visibilitychange')),
+    );
     await page.bringToFront();
     hiddenVisibilityObserved =
       (await hiddenPage.evaluate(() => document.visibilityState)) === 'hidden';
