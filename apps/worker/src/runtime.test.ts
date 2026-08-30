@@ -7,11 +7,11 @@ import {
   JsonFileWorkerStore,
   StaticLocalAssetSourceRegistry,
   WorkerRuntime,
-  UnsupportedWorkerJobError,
   detectMediaTools,
   getDeviceIdentity,
   localAssetSourcesFromEnvironment,
 } from './runtime.js';
+import type { UnsupportedWorkerJobError } from './runtime.js';
 import { ffmpegFilterPath, gpuDerivativeLocalRef, rnnoiseFilter } from './local-gpu.js';
 describe('Worker runtime', () => {
   it.each(['text.openrouter', 'video.runway', 'edit.higgsfield'])(

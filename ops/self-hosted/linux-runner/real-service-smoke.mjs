@@ -1,3 +1,5 @@
+/* global process, URL */
+
 import pg from 'pg';
 
 const connectionString = process.env.JOY_MEDIA_CI_DATABASE_URL;
@@ -9,9 +11,7 @@ try {
     new URL('../../../apps/api/dist/postgres-migrations.js', import.meta.url)
   );
   await migrationModule.runPostgresMigrations(pool);
-  const ledger = await pool.query(
-    'SELECT id FROM joy_media_schema_migrations ORDER BY id',
-  );
+  const ledger = await pool.query('SELECT id FROM joy_media_schema_migrations ORDER BY id');
   const ids = ledger.rows.map((row) => row.id);
   const expected = [
     '001-baseline',
