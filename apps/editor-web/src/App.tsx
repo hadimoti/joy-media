@@ -3788,7 +3788,8 @@ function EditorWorkspace({
           return {
             clipId: clip.id,
             visualAssetId,
-            visualAssetLabel: exportVisualProject.assets[visualAssetId]?.displayName ?? visualAssetId,
+            visualAssetLabel:
+              exportVisualProject.assets[visualAssetId]?.displayName ?? visualAssetId,
             audioAssetId,
             audioAssetLabel: exportVisualProject.assets[audioAssetId]?.displayName ?? audioAssetId,
           };

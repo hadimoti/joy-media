@@ -30,14 +30,17 @@ export function formatExportClipAssetFailure(
   detail: string,
 ): string {
   const clipReference =
-    clip.clipLabel !== undefined && clip.clipLabel.trim().length > 0 && clip.clipLabel !== clip.clipId
+    clip.clipLabel !== undefined &&
+    clip.clipLabel.trim().length > 0 &&
+    clip.clipLabel !== clip.clipId
       ? `Clip "${clip.clipLabel}" (${clip.clipId})`
       : `Clip ${clip.clipId}`;
-  const assetId = role === 'visual' ? clip.visualAssetId : clip.audioAssetId ?? clip.visualAssetId;
+  const assetId =
+    role === 'visual' ? clip.visualAssetId : (clip.audioAssetId ?? clip.visualAssetId);
   const assetLabel =
     role === 'visual'
-      ? clip.visualAssetLabel ?? assetId
-      : clip.audioAssetLabel ?? clip.visualAssetLabel ?? assetId;
+      ? (clip.visualAssetLabel ?? assetId)
+      : (clip.audioAssetLabel ?? clip.visualAssetLabel ?? assetId);
   const recovery =
     role === 'audio'
       ? 'Restore the original media in Project Assets, reconnect owner storage if needed, or replace the clip audio before exporting.'

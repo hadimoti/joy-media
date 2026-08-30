@@ -33,8 +33,10 @@ afterEach(() => vi.useRealTimers());
 describe('export preload stages', () => {
   it('preflights clip sources in timeline order and reports the first offending clip with recovery', async () => {
     const resolve = vi.fn(async (assetId: string) => {
-      if (assetId === 'asset-intro') throw new Error('Media Intro is unavailable in local cache and owner storage');
-      if (assetId === 'asset-product') throw new Error('Media Product is unavailable in local cache and owner storage');
+      if (assetId === 'asset-intro')
+        throw new Error('Media Intro is unavailable in local cache and owner storage');
+      if (assetId === 'asset-product')
+        throw new Error('Media Product is unavailable in local cache and owner storage');
       return { url: `blob:${assetId}` };
     });
 
