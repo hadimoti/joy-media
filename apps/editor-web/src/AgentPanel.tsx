@@ -18,7 +18,7 @@ import {
   RevisionConflictError,
 } from '@joy-media/agent-tools';
 import type { AgentActor, AtomicRunResult, ProjectRevisionId } from '@joy-media/agent-tools';
-import type { JoyCodePlanProposalV1 } from '@joy-media/agent-tools';
+import type { CreativeBriefV1, JoyCodePlanProposalV1 } from '@joy-media/agent-tools';
 import {
   AGENT_INTENTS,
   buildShortenIntroRecipe,
@@ -49,6 +49,7 @@ import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
 import type { JoyCodeServerSession } from './joy-code-server-session.js';
 import type { JoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
 import { JoyCodeCompoundRunner } from './joy-code-compound-runner.js';
+import { CreativeBriefPanel } from './CreativeBriefPanel.js';
 
 /** Every edit this panel commits is attributed to the KiloCode adapter. */
 const AGENT_ACTOR: AgentActor = { type: 'agent', id: 'kilocode' };
@@ -60,6 +61,7 @@ const JoyCode3DViewer = lazy(() =>
 const TABS: readonly PanelTabSpec[] = [
   { id: 'history', label: 'History' },
   { id: 'composer', label: 'Composer' },
+  { id: 'brief', label: 'Brief', ariaLabel: 'Creative Brief' },
   { id: '3d', label: '', iconUrl: '/assets/24_3d.png' },
 ];
 
@@ -188,6 +190,9 @@ export function AgentPanel({
   joyCodeServerSession,
   joyCodeOptedIn = false,
   onJoyCodeOptIn,
+  creativeBriefOptedIn = false,
+  creativeBriefRunner,
+  onCreativeBriefOptIn,
 }: {
   readonly project: SpikeProject;
   readonly selectedClipIds: readonly string[];
@@ -205,6 +210,9 @@ export function AgentPanel({
   readonly joyCodeServerSession?: JoyCodeServerSession;
   readonly joyCodeOptedIn?: boolean;
   readonly onJoyCodeOptIn?: () => Promise<void>;
+  readonly creativeBriefOptedIn?: boolean;
+  readonly creativeBriefRunner?: (requestText: string) => Promise<CreativeBriefV1>;
+  readonly onCreativeBriefOptIn?: () => Promise<void>;
 }) {
   const registry = useMemo(() => createToolRegistry(), []);
   const auditRef = useRef(createAuditTrail());
@@ -1069,6 +1077,14 @@ export function AgentPanel({
               {...(onAdd3DRender === undefined ? {} : { onAddToTimeline: onAdd3DRender })}
             />
           </Suspense>
+        )}
+        {tab === 'brief' && (
+          <CreativeBriefPanel
+            revisionId={session.projectRevisionId}
+            optedIn={creativeBriefOptedIn}
+            {...(onCreativeBriefOptIn === undefined ? {} : { onOptIn: onCreativeBriefOptIn })}
+            {...(creativeBriefRunner === undefined ? {} : { runBrief: creativeBriefRunner })}
+          />
         )}
       </div>
     </PanelShell>

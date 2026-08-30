@@ -354,7 +354,6 @@ function EffectCard({
       {...(unavailableReason === undefined
         ? {}
         : {
-            'aria-disabled': true,
             'aria-describedby': unavailableReasonId,
           })}
       draggable={true}

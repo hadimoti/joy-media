@@ -26,7 +26,7 @@ export interface PanelTabSpec {
 }
 
 export interface PanelShellProps {
-  /** Panel name, centered. Keep it to one word where the tab icon carries meaning. */
+  /** Accessible panel name. Visible dock labels already identify the panel. */
   readonly title: string;
   /** Same glyph as the panel's dockview tab — pass `panelTabIconUrl(id)`. */
   readonly iconUrl?: string | undefined;
@@ -65,8 +65,6 @@ export interface PanelShellProps {
 
 export function PanelShell({
   title,
-  iconUrl,
-  icon,
   className,
   leadingActions,
   actions,
@@ -143,12 +141,15 @@ export function PanelShell({
         ))
       : null;
 
+  const hasHeaderActions =
+    leadingActions !== undefined || actions !== undefined || search !== undefined;
+
   return (
     <article
       className={className === undefined ? 'joy-panel-root' : `joy-panel-root ${className}`}
-      aria-label={hideHeader || tabsInHeader ? title : undefined}
+      aria-label={title}
     >
-      {!hideHeader && (
+      {!hideHeader && (tabsInHeader || hasHeaderActions) && (
         <div className="joy-panel-header">
           {leadingActions !== undefined && (
             <div className="joy-panel-leading-actions">{leadingActions}</div>
@@ -161,27 +162,9 @@ export function PanelShell({
             >
               {tabButtons}
             </div>
-          ) : (
-            <h3 className="joy-panel-title">
-              {icon !== undefined ? (
-                <span className="joy-panel-title-icon" aria-hidden="true">
-                  {icon}
-                </span>
-              ) : (
-                iconUrl !== undefined && (
-                  // The panel-tab PNGs are black-on-transparent and are meant to be
-                  // masked with currentColor (DESIGN.md §3) — as a plain <img> they
-                  // render black on a black panel and vanish.
-                  <span
-                    className="joy-panel-title-icon joy-panel-title-icon-mask"
-                    style={{ maskImage: `url(${iconUrl})`, WebkitMaskImage: `url(${iconUrl})` }}
-                    aria-hidden="true"
-                  />
-                )
-              )}
-              {title}
-            </h3>
-          )}
+          ) : !tabsInHeader ? (
+            <span className="sr-only">{title}</span>
+          ) : null}
           <div className="joy-panel-actions">
             {actions}
             {search !== undefined && (

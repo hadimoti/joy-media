@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       candidate_sha:
-        description: Full 40-character commit SHA to verify (must already be on main)
+        description: Full 40-character commit SHA to verify (must already be reachable from this repository remote)
         required: true
         type: string
 

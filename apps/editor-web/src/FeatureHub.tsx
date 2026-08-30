@@ -57,19 +57,44 @@ export function FeatureHub({
   readonly children: ReactNode;
 }) {
   const definition = FEATURE_HUBS[hub];
+  const contentId = `feature-hub-${hub}-content`;
+  const hasActiveTool = definition.tools.some((tool) => tool.id === activeTool);
   return (
     <section className={`feature-hub feature-hub--${hub}`} aria-label={`${definition.label} tools`}>
       <nav className="feature-hub-nav" role="tablist" aria-label={`${definition.label} tools`}>
-        {definition.tools.map((tool) => (
+        {definition.tools.map((tool, index) => (
           <button
             key={tool.id}
             type="button"
             role="tab"
             aria-selected={activeTool === tool.id}
+            aria-controls={contentId}
+            tabIndex={activeTool === tool.id || (!hasActiveTool && index === 0) ? 0 : -1}
             aria-label={tool.label}
             title={tool.label}
             data-feature-tool={tool.id}
             onClick={() => onToolChange(tool.id)}
+            onKeyDown={(event) => {
+              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+              const buttons = Array.from(
+                event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+                  '[role="tab"]:not(:disabled)',
+                ) ?? [],
+              );
+              if (buttons.length === 0) return;
+              event.preventDefault();
+              const current = buttons.indexOf(event.currentTarget);
+              const next =
+                event.key === 'Home'
+                  ? 0
+                  : event.key === 'End'
+                    ? buttons.length - 1
+                    : (current + (event.key === 'ArrowLeft' ? -1 : 1) + buttons.length) %
+                      buttons.length;
+              buttons[next]?.focus();
+              const nextId = buttons[next]?.dataset.featureTool;
+              if (nextId !== undefined) onToolChange(nextId as FeatureToolId);
+            }}
           >
             <span className="feature-hub-icon" aria-hidden="true">
               <FeatureGlyph id={tool.id} />
@@ -78,7 +103,14 @@ export function FeatureHub({
           </button>
         ))}
       </nav>
-      <div className="feature-hub-content">{children}</div>
+      <div
+        id={contentId}
+        role="tabpanel"
+        aria-label={`${definition.label} tools`}
+        className="feature-hub-content"
+      >
+        {children}
+      </div>
     </section>
   );
 }

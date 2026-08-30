@@ -81,6 +81,49 @@ const staticAssetInventory = () => ({
   },
 });
 
+const performanceEvidence = () => ({
+  runId: 'test-run',
+  generatedAt: '2026-08-28T11:00:00.000Z',
+  generator: 'joy-media-release-observer' as const,
+  phase: 'staging' as const,
+  sourceProvenance: sourceProvenance(),
+  polling: {
+    artifactPath: 'test-output/release-performance/polling.json',
+    warmupMs: 60_000,
+    durationMs: 60_000,
+    visibleRequestsPerMinute: 1,
+    hiddenRequestsPerMinute: 0,
+    duplicateInFlightRequests: 0,
+    queryRatePerMinute: 1,
+  },
+  effectsSoak: {
+    artifactPath: 'test-output/release-performance/effects-soak.json',
+    durationMs: 30 * 60_000,
+    categoriesVisited: 9,
+    searchIterations: 1,
+    favoriteIterations: 1,
+    uncaughtExceptions: 0,
+    navigationFailures: 0,
+    maxMountedPreviews: 12,
+    maxPlayingPreviews: 6,
+    heapGrowthPercent: 20,
+  },
+  timelineIntegrity: {
+    artifactPath: 'test-output/release-performance/timeline-integrity.json',
+    operations: 100,
+    countSequence: [2, 4, 3, 4],
+    uniqueIds: true,
+    orphanReferences: 0,
+    canonicalModelEqualAfterReload: true,
+  },
+  editor: {
+    artifactPath: 'test-output/release-performance/editor.json',
+    measuredWallTimeMs: 60_000,
+    longTaskPercent: 0,
+    initialEditorJsBytes: 500_000,
+  },
+});
+
 const passingInput = (): ReleaseGateInput => ({
   testSummary: { collected: 12, failed: 0 },
   dirtyGeneratedArtifacts: [],
@@ -109,6 +152,7 @@ const passingInput = (): ReleaseGateInput => ({
     sourcePath: FEATURE_STATUS_PATH,
     present: true,
   },
+  performanceEvidence: performanceEvidence(),
 });
 
 describe('JOY Studio 1.0 release gate', () => {
@@ -561,6 +605,39 @@ describe('JOY Studio 1.0 release gate', () => {
     });
     expect(result.passed).toBe(false);
     expect(result.checks.find((check) => check.id === 'tests')?.status).toBe('failed');
+  });
+
+  it('requires all provenance-bound quantitative release evidence', () => {
+    const missing = evaluateReleaseGate({ ...passingInput(), performanceEvidence: undefined });
+    expect(missing.passed).toBe(false);
+    expect(missing.checks.find((check) => check.id === 'performance-evidence')).toMatchObject({
+      status: 'failed',
+      message: 'quantitative performance evidence is missing',
+    });
+
+    const overBudget = evaluateReleaseGate({
+      ...passingInput(),
+      performanceEvidence: {
+        ...performanceEvidence(),
+        effectsSoak: { ...performanceEvidence().effectsSoak, maxPlayingPreviews: 7 },
+      },
+    });
+    expect(overBudget.passed).toBe(false);
+    expect(overBudget.checks.find((check) => check.id === 'performance-evidence')?.status).toBe(
+      'failed',
+    );
+
+    const malformed = evaluateReleaseGate({
+      ...passingInput(),
+      performanceEvidence: {
+        ...performanceEvidence(),
+        polling: undefined,
+      } as unknown as ReleaseGateInput['performanceEvidence'],
+    });
+    expect(malformed.passed).toBe(false);
+    expect(malformed.checks.find((check) => check.id === 'performance-evidence')?.message).toBe(
+      'performance evidence metric blocks are malformed',
+    );
   });
 
   it('rejects a failed typecheck, lint, format, build, or golden command', () => {

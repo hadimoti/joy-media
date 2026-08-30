@@ -23,7 +23,7 @@ export function PluginsPanel({
       note={
         safeMode
           ? 'Safe mode is on; UI plugin inputs stay disabled.'
-          : 'Safe mode is off. Enable it to show the plugin UI.'
+          : 'Safe mode is off. Plugin UI inputs are available.'
       }
       actions={
         <button

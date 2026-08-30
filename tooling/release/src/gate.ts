@@ -75,8 +75,53 @@ export interface ReleaseGateInput {
   };
   readonly waivers?: readonly ReleaseWaiver[];
   readonly commandResults?: readonly ReleaseCommandResult[];
+  /** Quantitative, provenance-bound desktop performance/integrity evidence. */
+  readonly performanceEvidence?: ReleasePerformanceEvidence;
   /** Present for real workspace evidence; omitted by the pure evaluator. */
   readonly sourceProvenance?: ReleaseSourceProvenance;
+}
+
+export interface ReleasePerformanceEvidence {
+  readonly runId: string;
+  readonly generatedAt: string;
+  readonly generator: 'joy-media-release-observer';
+  readonly phase: 'staging' | 'production';
+  readonly sourceProvenance: ReleaseSourceProvenance;
+  readonly polling: {
+    readonly artifactPath: string;
+    readonly warmupMs: number;
+    readonly durationMs: number;
+    readonly visibleRequestsPerMinute: number;
+    readonly hiddenRequestsPerMinute: number;
+    readonly duplicateInFlightRequests: number;
+    readonly queryRatePerMinute: number;
+  };
+  readonly effectsSoak: {
+    readonly artifactPath: string;
+    readonly durationMs: number;
+    readonly categoriesVisited: number;
+    readonly searchIterations: number;
+    readonly favoriteIterations: number;
+    readonly uncaughtExceptions: number;
+    readonly navigationFailures: number;
+    readonly maxMountedPreviews: number;
+    readonly maxPlayingPreviews: number;
+    readonly heapGrowthPercent: number;
+  };
+  readonly timelineIntegrity: {
+    readonly artifactPath: string;
+    readonly operations: number;
+    readonly countSequence: readonly number[];
+    readonly uniqueIds: boolean;
+    readonly orphanReferences: number;
+    readonly canonicalModelEqualAfterReload: boolean;
+  };
+  readonly editor: {
+    readonly artifactPath: string;
+    readonly measuredWallTimeMs: number;
+    readonly longTaskPercent: number;
+    readonly initialEditorJsBytes: number;
+  };
 }
 
 export interface ReleaseSourceProvenance {
@@ -220,6 +265,11 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
           browserJourneyReleaseReady(journey, input.sourceProvenance, now),
       ),
       browserJourneyMessage(input.browserJourneys, input.sourceProvenance, now),
+    ),
+    check(
+      'performance-evidence',
+      performanceEvidenceReady(input.performanceEvidence, input.sourceProvenance, now),
+      performanceEvidenceMessage(input.performanceEvidence, input.sourceProvenance, now),
     ),
     check(
       'feature-status',
@@ -380,6 +430,122 @@ function sourceProvenanceMessage(input: ReleaseGateInput, now: Date): string {
   return `clean source and browser evidence match commit ${source.commitSha}`;
 }
 
+function performanceEvidenceReady(
+  evidence: ReleasePerformanceEvidence | undefined,
+  expectedSource: ReleaseSourceProvenance | undefined,
+  now: Date,
+): boolean {
+  if (evidence === undefined) return false;
+  if (evidence.generator !== 'joy-media-release-observer' || evidence.runId.trim() === '')
+    return false;
+  if (!Number.isFinite(Date.parse(evidence.generatedAt))) return false;
+  const age = now.getTime() - Date.parse(evidence.generatedAt);
+  // Pure unit callers may omit source provenance and use a fixed historical clock.
+  // Workspace evidence always carries source provenance and is freshness-bound.
+  if (
+    expectedSource !== undefined &&
+    (age < 0 || age > RELEASE_EVIDENCE_MAX_AGE_HOURS * 60 * 60 * 1000)
+  )
+    return false;
+  if (expectedSource !== undefined && !sameSource(evidence.sourceProvenance, expectedSource))
+    return false;
+  if (!performanceMetricBlocksPresent(evidence)) return false;
+  const polling = evidence.polling;
+  const effects = evidence.effectsSoak;
+  const timeline = evidence.timelineIntegrity;
+  const editor = evidence.editor;
+  if (!Array.isArray(timeline.countSequence)) return false;
+  return (
+    (evidence.phase === 'staging' || evidence.phase === 'production') &&
+    validSource(evidence.sourceProvenance) &&
+    evidence.sourceProvenance.worktreeClean &&
+    [
+      polling.warmupMs >= 60_000,
+      polling.durationMs >= 60_000,
+      polling.visibleRequestsPerMinute >= 0 && polling.visibleRequestsPerMinute <= 6,
+      polling.hiddenRequestsPerMinute >= 0 && polling.hiddenRequestsPerMinute <= 1,
+      polling.duplicateInFlightRequests === 0,
+      polling.queryRatePerMinute >= 0,
+      effects.durationMs >= 30 * 60_000,
+      effects.categoriesVisited >= 9,
+      effects.searchIterations > 0,
+      effects.favoriteIterations > 0,
+      effects.uncaughtExceptions === 0,
+      effects.navigationFailures === 0,
+      effects.maxMountedPreviews <= 12,
+      effects.maxPlayingPreviews <= 6,
+      effects.heapGrowthPercent >= 0 && effects.heapGrowthPercent <= 20,
+      timeline.operations >= 100,
+      timeline.countSequence.length === 4 &&
+        timeline.countSequence.every((count, index) => count === [2, 4, 3, 4][index]),
+      timeline.uniqueIds,
+      timeline.orphanReferences === 0,
+      timeline.canonicalModelEqualAfterReload,
+      editor.measuredWallTimeMs > 0,
+      editor.longTaskPercent >= 0 && editor.longTaskPercent < 5,
+      editor.initialEditorJsBytes >= 0 && editor.initialEditorJsBytes <= 500_000,
+      Number.isFinite(polling.warmupMs),
+      Number.isFinite(polling.durationMs),
+      Number.isFinite(polling.visibleRequestsPerMinute),
+      Number.isFinite(polling.hiddenRequestsPerMinute),
+      Number.isFinite(polling.duplicateInFlightRequests),
+      Number.isFinite(polling.queryRatePerMinute),
+      Number.isFinite(effects.durationMs),
+      Number.isFinite(effects.categoriesVisited),
+      Number.isFinite(effects.searchIterations),
+      Number.isFinite(effects.favoriteIterations),
+      Number.isFinite(effects.uncaughtExceptions),
+      Number.isFinite(effects.navigationFailures),
+      Number.isFinite(effects.maxMountedPreviews),
+      Number.isFinite(effects.maxPlayingPreviews),
+      Number.isFinite(effects.heapGrowthPercent),
+      Number.isFinite(timeline.operations),
+      Number.isFinite(timeline.orphanReferences),
+      Number.isFinite(editor.measuredWallTimeMs),
+      Number.isFinite(editor.longTaskPercent),
+      Number.isFinite(editor.initialEditorJsBytes),
+    ].every(Boolean) &&
+    [polling, effects, timeline, editor].every((artifact) => artifact.artifactPath.trim() !== '')
+  );
+}
+
+function performanceMetricBlocksPresent(evidence: ReleasePerformanceEvidence): boolean {
+  return [
+    evidence.polling,
+    evidence.effectsSoak,
+    evidence.timelineIntegrity,
+    evidence.editor,
+  ].every(
+    (metric) =>
+      metric !== null && typeof metric === 'object' && typeof metric.artifactPath === 'string',
+  );
+}
+
+function performanceEvidenceMessage(
+  evidence: ReleasePerformanceEvidence | undefined,
+  expectedSource: ReleaseSourceProvenance | undefined,
+  now: Date,
+): string {
+  if (evidence === undefined) return 'quantitative performance evidence is missing';
+  if (evidence.generator !== 'joy-media-release-observer')
+    return 'performance evidence generator identity is invalid';
+  if (!validSource(evidence.sourceProvenance) || !evidence.sourceProvenance.worktreeClean)
+    return 'performance evidence source provenance is invalid or dirty';
+  if (expectedSource !== undefined && !sameSource(evidence.sourceProvenance, expectedSource))
+    return 'performance evidence was produced from a different source revision';
+  const age = now.getTime() - Date.parse(evidence.generatedAt);
+  if (
+    expectedSource !== undefined &&
+    (!Number.isFinite(age) || age < 0 || age > RELEASE_EVIDENCE_MAX_AGE_HOURS * 60 * 60 * 1000)
+  )
+    return `performance evidence is older than ${RELEASE_EVIDENCE_MAX_AGE_HOURS} hours or from the future`;
+  if (!performanceMetricBlocksPresent(evidence))
+    return 'performance evidence metric blocks are malformed';
+  if (!performanceEvidenceReady(evidence, expectedSource, now))
+    return 'performance evidence is incomplete or exceeds a required numeric budget';
+  return `staging/production performance evidence ${evidence.runId} passed required budgets`;
+}
+
 function browserJourneyFresh(journey: ReleaseBrowserJourney, now: Date): boolean {
   const verifiedAt = Date.parse(journey.verifiedAt ?? '');
   const age = now.getTime() - verifiedAt;
@@ -390,7 +556,8 @@ function browserJourneyFresh(journey: ReleaseBrowserJourney, now: Date): boolean
   );
 }
 
-function validSource(source: ReleaseSourceProvenance): boolean {
+function validSource(source: ReleaseSourceProvenance | null | undefined): boolean {
+  if (source === null || source === undefined || typeof source !== 'object') return false;
   return (
     /^[0-9a-f]{40,64}$/u.test(source.commitSha) &&
     /^[0-9a-f]{40,64}$/u.test(source.treeHash) &&
@@ -765,8 +932,14 @@ function staticAssetMessage(input: ReleaseGateInput): string {
 export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
   const commandResults = runReleaseCommands(root);
   const sourceProvenance = workspaceSourceProvenance(root);
+  const performanceEvidence = readPerformanceEvidence(root);
   const staticAssets = buildStaticAssetInventory(root);
-  const artifacts = ['apps/editor-web/dist', 'apps/api/dist', 'apps/worker/dist'];
+  const artifacts = [
+    'apps/editor-web/dist',
+    'apps/api/dist',
+    'apps/worker/dist',
+    'test-output/release-performance',
+  ];
   const buildSuccess = Object.fromEntries(
     REQUIRED_BUILD_IDS.map((id) => {
       const commandId = `${id}-build`;
@@ -824,7 +997,85 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     manifest,
     sbom,
     commandResults,
+    performanceEvidence,
     sourceProvenance,
+  };
+}
+
+function readPerformanceEvidence(root: string): ReleasePerformanceEvidence | undefined {
+  const directory = join(root, 'test-output/release-performance');
+  const read = (name: string): Record<string, unknown> | undefined => {
+    const path = join(directory, name);
+    if (!existsSync(path)) return undefined;
+    try {
+      const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
+      return value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const polling = read('polling.json');
+  const effectsSoak = read('effects-soak.json');
+  const timelineIntegrity = read('timeline-integrity.json');
+  const editor = read('editor.json');
+  if (
+    polling === undefined ||
+    effectsSoak === undefined ||
+    timelineIntegrity === undefined ||
+    editor === undefined
+  )
+    return undefined;
+  const metricBlocks = [
+    polling.metrics,
+    effectsSoak.metrics,
+    timelineIntegrity.metrics,
+    editor.metrics,
+  ];
+  if (
+    metricBlocks.some(
+      (metrics) => metrics === null || typeof metrics !== 'object' || Array.isArray(metrics),
+    )
+  )
+    return undefined;
+  const metadata = [polling, effectsSoak, timelineIntegrity, editor];
+  const runId = metadata[0]?.runId;
+  const generatedAt = metadata[0]?.generatedAt;
+  const generator = metadata[0]?.generator;
+  const phase = metadata[0]?.phase;
+  const source = metadata[0]?.sourceProvenance;
+  if (
+    typeof runId !== 'string' ||
+    typeof generatedAt !== 'string' ||
+    generator !== 'joy-media-release-observer' ||
+    (phase !== 'staging' && phase !== 'production') ||
+    source === null ||
+    typeof source !== 'object' ||
+    Array.isArray(source)
+  )
+    return undefined;
+  if (
+    !metadata.every(
+      (item) =>
+        item.runId === runId &&
+        item.generatedAt === generatedAt &&
+        item.generator === generator &&
+        item.phase === phase &&
+        JSON.stringify(item.sourceProvenance) === JSON.stringify(source),
+    )
+  )
+    return undefined;
+  return {
+    runId,
+    generatedAt,
+    generator,
+    phase,
+    sourceProvenance: source as ReleaseSourceProvenance,
+    polling: polling.metrics as ReleasePerformanceEvidence['polling'],
+    effectsSoak: effectsSoak.metrics as ReleasePerformanceEvidence['effectsSoak'],
+    timelineIntegrity: timelineIntegrity.metrics as ReleasePerformanceEvidence['timelineIntegrity'],
+    editor: editor.metrics as ReleasePerformanceEvidence['editor'],
   };
 }
 

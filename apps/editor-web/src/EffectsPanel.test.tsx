@@ -138,7 +138,7 @@ describe('EffectsPanel', () => {
 
     const card = container.querySelector<HTMLElement>('.effect-card');
     const reasonId = card?.getAttribute('aria-describedby');
-    expect(card?.getAttribute('aria-disabled')).toBe('true');
+    expect(card?.getAttribute('aria-disabled')).toBeNull();
     expect(reasonId).toBeTruthy();
     expect(container.querySelector(`#${reasonId}`)?.textContent).toContain('Select a video clip');
   });

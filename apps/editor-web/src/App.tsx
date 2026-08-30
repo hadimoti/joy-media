@@ -6177,6 +6177,9 @@ function EditorWorkspace({
           onAdd3DRender={context.addJoyCode3DRender}
           joyCodeOptedIn={context.joyCodeOptedIn}
           onJoyCodeOptIn={context.onJoyCodeOptIn}
+          creativeBriefOptedIn={context.creativeBriefOptedIn}
+          creativeBriefRunner={context.creativeBriefRunner}
+          onCreativeBriefOptIn={context.onCreativeBriefOptIn}
           {...(context.joyCodeServerSession === undefined
             ? {}
             : { joyCodeServerSession: context.joyCodeServerSession })}
@@ -6660,8 +6663,10 @@ function EditorWorkspace({
                 refreshJoySession();
               }}
             >
-              <UserIcon />
-              <span className={`session-dot session-${joySession.kind}`} aria-hidden="true" />
+              <span className="session-icon-wrap">
+                <UserIcon />
+                <span className={`session-dot session-${joySession.kind}`} aria-hidden="true" />
+              </span>
             </button>
             {accountOpen && (
               <section

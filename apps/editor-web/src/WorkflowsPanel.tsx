@@ -14,7 +14,7 @@ import {
   detectDerivedFrom,
 } from './first-party-workflows.js';
 import type { WorkflowRunOutcome } from './workflow-runner.js';
-import { PlayIcon, RefreshIcon, TrashIcon, BadgeIcon } from './icons.js';
+import { CloseIcon, PlayIcon, RefreshIcon, TrashIcon, BadgeIcon } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 
@@ -474,7 +474,7 @@ export function WorkflowsPanel({
               title="Cancel"
               aria-label="Cancel"
             >
-              <TrashIcon />
+              <CloseIcon />
             </button>
           </div>
         </div>
@@ -523,7 +523,7 @@ export function WorkflowsPanel({
               title="Dismiss"
               aria-label="Dismiss approval"
             >
-              <TrashIcon />
+              <CloseIcon />
             </button>
           </div>
         </div>
