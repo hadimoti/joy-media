@@ -150,7 +150,7 @@ jobs:
             desktop-1280,
             desktop-1440,
             desktop-1581,
-           desktop-1920,
+            desktop-1920,
           ]
     timeout-minutes: 60
     env:
