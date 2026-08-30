@@ -887,24 +887,6 @@ main {
   pointer-events: none;
 }
 
-@media (min-width: 90rem) {
-  #root .workspace .dv-active-tab:not(.dv-tabs-overflow-dropdown-default) .panel-tab {
-    width: auto;
-    min-width: 4.75rem;
-    justify-content: flex-start;
-    gap: 0.35rem;
-    padding-inline: 0.45rem;
-  }
-  #root .workspace .dv-active-tab:not(.dv-tabs-overflow-dropdown-default) .panel-tab-label {
-    display: block;
-    max-width: 7.5rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: var(--joy-type-2xs);
-  }
-}
-
 @media (max-width: 75rem) {
   .header-export-preset-label {
     display: none;
