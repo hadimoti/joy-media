@@ -1528,7 +1528,9 @@ async function route(
     if (digest !== asset.sha256)
       throw new ControlPlaneError('REQUEST_INVALID', 'original sha256 does not match asset');
     await options.controlPlane.setAssetSync(actor, projectId, true);
-    const ref = `orig-${asset.sha256.slice(0, 32)}`;
+    // Keep originals content-addressed within one owner for retry/deduplication,
+    // while preventing equal content in another tenant from sharing a storage key.
+    const ref = ownerScopedOriginalRef(actor.id, asset.sha256);
     await store.put({ ref, sha256: asset.sha256, bytes: asset.bytes, mimeType }, bytes);
     const { tagAssetWithHermes } = await import('./asset-hermes-tags.js');
     const tagged = await tagAssetWithHermes({
@@ -2154,6 +2156,12 @@ function workerDerivativeObjectRef(
     .digest('hex')
     .slice(0, 32);
   return `derivative-${jobDigest}-${leaseDigest}-${metadataDigest}`;
+}
+
+/** Stable opaque original key isolated by authenticated owner identity. */
+function ownerScopedOriginalRef(ownerId: string, sha256: string): string {
+  const ownerDigest = createHash('sha256').update(ownerId).digest('hex').slice(0, 32);
+  return `orig-${ownerDigest}-${sha256}`;
 }
 
 function workerDerivativeHeaders(request: IncomingMessage): {

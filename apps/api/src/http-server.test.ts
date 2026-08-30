@@ -1105,6 +1105,41 @@ describe('control-plane HTTP transport', () => {
 
     await request(origin, 'POST', '/v1/projects', { id: 'peer-project', title: 'Peer' }, 'owner-b');
 
+    await request(
+      origin,
+      'POST',
+      '/v1/projects/peer-project/assets',
+      {
+        id: 'peer-asset',
+        kind: 'video',
+        displayName: 'peer-copy.mp4',
+        sha256,
+        bytes: bytes.byteLength,
+        descriptor: { mimeType: 'video/mp4', durationUs: 1_000_000 },
+        locations: [{ kind: 'opfs-cache', ref: 'opfs-peer-asset' }],
+      },
+      'owner-b',
+    );
+    const peerUpload = await fetch(
+      `${origin}/v1/projects/peer-project/assets/peer-asset/original`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer owner-b',
+          'content-type': 'video/mp4',
+          'x-joy-sha256': sha256,
+          'x-joy-bytes': String(bytes.byteLength),
+        },
+        body: bytes,
+      },
+    );
+    expect(peerUpload.status).toBe(201);
+    const peerRef = store.objects.find((candidate) => candidate.descriptor.ref !== ownerRef)
+      ?.descriptor.ref;
+    expect(peerRef).toBeDefined();
+    expect(peerRef).not.toBe(ownerRef);
+    expect(store.objects).toHaveLength(2);
+
     expect(
       await request(
         origin,
@@ -1170,15 +1205,39 @@ describe('control-plane HTTP transport', () => {
       body: { error: { code: 'PROJECT_NOT_FOUND' } },
     });
 
+    expect(
+      await request(
+        origin,
+        'DELETE',
+        '/v1/projects/owner-project/assets/owner-asset',
+        undefined,
+        'owner-a',
+      ),
+    ).toMatchObject({
+      status: 200,
+      body: { data: { id: 'owner-asset', cloudObjectsPurged: 1, cloudObjectPurgeFailures: 0 } },
+    });
     expect(store.objects).toHaveLength(1);
-    const ownerReadback = await fetch(
-      `${origin}/v1/projects/owner-project/assets/owner-asset/original`,
+    expect(store.objects[0]?.descriptor.ref).toBe(peerRef);
+
+    const peerReadback = await fetch(
+      `${origin}/v1/projects/peer-project/assets/peer-asset/original`,
       {
-        headers: { authorization: 'Bearer owner-a' },
+        headers: { authorization: 'Bearer owner-b' },
       },
     );
-    expect(ownerReadback.status).toBe(200);
-    expect(new Uint8Array(await ownerReadback.arrayBuffer())).toEqual(bytes);
+    expect(peerReadback.status).toBe(200);
+    expect(new Uint8Array(await peerReadback.arrayBuffer())).toEqual(bytes);
+
+    expect(
+      await request(
+        origin,
+        'GET',
+        '/v1/projects/owner-project/assets/owner-asset/original',
+        undefined,
+        'owner-a',
+      ),
+    ).toMatchObject({ status: 409, body: { error: { code: 'ASSET_NOT_FOUND' } } });
   });
 
   it('does not purge shared content-addressed bytes when a later metadata attach fails', async () => {
