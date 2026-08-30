@@ -10,9 +10,13 @@ const exportCallback = appSource.slice(
 describe('App MP4 export negotiation contract', () => {
   it('preflights with the shared selector before export mutation or capture', () => {
     const selector = exportCallback.indexOf('selectBrowserMp4MimeType()');
+    const sourcePreflight = exportCallback.indexOf('preflightExportClipSources(');
     expect(selector).toBeGreaterThanOrEqual(0);
+    expect(sourcePreflight).toBeGreaterThanOrEqual(0);
     expect(selector).toBeLessThan(exportCallback.indexOf('new AbortController()'));
     expect(selector).toBeLessThan(exportCallback.indexOf('setExporting(true)'));
+    expect(sourcePreflight).toBeLessThan(exportCallback.indexOf('const audioContext = new AudioContext()'));
+    expect(sourcePreflight).toBeLessThan(exportCallback.indexOf('recordExportEntry({'));
     expect(exportCallback).not.toContain('MediaRecorder.isTypeSupported');
     expect(exportCallback).not.toContain('BROWSER_MP4_MIME_TYPE');
   });

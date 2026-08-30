@@ -7,6 +7,77 @@ export type ExportPreloadStage =
   | 'fetching authored audio bytes'
   | 'decoding authored audio';
 
+export interface ExportClipSourcePreflight {
+  readonly clipId: string;
+  readonly clipLabel?: string;
+  readonly visualAssetId: string;
+  readonly visualAssetLabel?: string;
+  readonly audioAssetId?: string;
+  readonly audioAssetLabel?: string;
+}
+
+export interface ExportClipPreflightSources<T> {
+  readonly visualSource: T;
+  readonly audioSource: T;
+}
+
+type ExportClipAssetRole = 'visual' | 'audio';
+
+export function formatExportClipAssetFailure(
+  clip: ExportClipSourcePreflight,
+  role: ExportClipAssetRole,
+  phase: 'resolve' | 'prepare',
+  detail: string,
+): string {
+  const clipReference =
+    clip.clipLabel !== undefined && clip.clipLabel.trim().length > 0 && clip.clipLabel !== clip.clipId
+      ? `Clip "${clip.clipLabel}" (${clip.clipId})`
+      : `Clip ${clip.clipId}`;
+  const assetId = role === 'visual' ? clip.visualAssetId : clip.audioAssetId ?? clip.visualAssetId;
+  const assetLabel =
+    role === 'visual'
+      ? clip.visualAssetLabel ?? assetId
+      : clip.audioAssetLabel ?? clip.visualAssetLabel ?? assetId;
+  const recovery =
+    role === 'audio'
+      ? 'Restore the original media in Project Assets, reconnect owner storage if needed, or replace the clip audio before exporting.'
+      : 'Restore the original media in Project Assets, reconnect owner storage if needed, or replace the clip before exporting.';
+  return `${clipReference} cannot ${phase} ${role} asset "${assetLabel}" (${assetId}). ${recovery} ${detail}`;
+}
+
+export async function preflightExportClipSources<T>(
+  clips: readonly ExportClipSourcePreflight[],
+  resolveSource: (assetId: string) => Promise<T>,
+): Promise<ReadonlyMap<string, ExportClipPreflightSources<T>>> {
+  const prepared = new Map<string, ExportClipPreflightSources<T>>();
+  for (const clip of clips) {
+    let visualSource: T;
+    try {
+      visualSource = await resolveSource(clip.visualAssetId);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(formatExportClipAssetFailure(clip, 'visual', 'resolve', detail), {
+        cause: error,
+      });
+    }
+    const audioAssetId = clip.audioAssetId ?? clip.visualAssetId;
+    if (audioAssetId === clip.visualAssetId) {
+      prepared.set(clip.clipId, { visualSource, audioSource: visualSource });
+      continue;
+    }
+    try {
+      const audioSource = await resolveSource(audioAssetId);
+      prepared.set(clip.clipId, { visualSource, audioSource });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(formatExportClipAssetFailure(clip, 'audio', 'resolve', detail), {
+        cause: error,
+      });
+    }
+  }
+  return prepared;
+}
+
 export async function runExportPreloadStage<T>(
   stage: ExportPreloadStage,
   operation: (signal: AbortSignal) => Promise<T>,

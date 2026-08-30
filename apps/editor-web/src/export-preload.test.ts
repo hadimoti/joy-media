@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { loadDetachedVideo, runExportPreloadStage } from './export-preload.js';
+import {
+  loadDetachedVideo,
+  preflightExportClipSources,
+  runExportPreloadStage,
+} from './export-preload.js';
 
 class FakeVideo extends EventTarget {
   preload = '';
@@ -27,6 +31,88 @@ class FakeVideo extends EventTarget {
 afterEach(() => vi.useRealTimers());
 
 describe('export preload stages', () => {
+  it('preflights clip sources in timeline order and reports the first offending clip with recovery', async () => {
+    const resolve = vi.fn(async (assetId: string) => {
+      if (assetId === 'asset-intro') throw new Error('Media Intro is unavailable in local cache and owner storage');
+      if (assetId === 'asset-product') throw new Error('Media Product is unavailable in local cache and owner storage');
+      return { url: `blob:${assetId}` };
+    });
+
+    await expect(
+      preflightExportClipSources(
+        [
+          {
+            clipId: 'showcase-intro',
+            clipLabel: 'Showcase Intro',
+            visualAssetId: 'asset-intro',
+            visualAssetLabel: 'Intro',
+            audioAssetId: 'asset-intro',
+            audioAssetLabel: 'Intro',
+          },
+          {
+            clipId: 'showcase-product',
+            clipLabel: 'Showcase Product',
+            visualAssetId: 'asset-product',
+            visualAssetLabel: 'Product',
+            audioAssetId: 'asset-product',
+            audioAssetLabel: 'Product',
+          },
+        ],
+        resolve,
+      ),
+    ).rejects.toThrow(
+      'Clip "Showcase Intro" (showcase-intro) cannot resolve visual asset "Intro" (asset-intro). Restore the original media in Project Assets, reconnect owner storage if needed, or replace the clip before exporting. Media Intro is unavailable in local cache and owner storage',
+    );
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(resolve).toHaveBeenCalledWith('asset-intro');
+  });
+
+  it('reuses one resolved source when a clip audio source matches its visual asset', async () => {
+    const resolve = vi.fn(async (assetId: string) => ({ url: `blob:${assetId}` }));
+
+    const prepared = await preflightExportClipSources(
+      [
+        {
+          clipId: 'clip-1',
+          visualAssetId: 'asset-1',
+          audioAssetId: 'asset-1',
+        },
+      ],
+      resolve,
+    );
+
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(prepared.get('clip-1')).toEqual({
+      visualSource: { url: 'blob:asset-1' },
+      audioSource: { url: 'blob:asset-1' },
+    });
+  });
+
+  it('names an alternate clip audio asset when audio preflight fails', async () => {
+    const resolve = vi.fn(async (assetId: string) => {
+      if (assetId === 'voiceover-1') throw new Error('Authenticated media session is not ready');
+      return { url: `blob:${assetId}` };
+    });
+
+    await expect(
+      preflightExportClipSources(
+        [
+          {
+            clipId: 'clip-voiceover',
+            clipLabel: 'Voiceover Clip',
+            visualAssetId: 'video-1',
+            visualAssetLabel: 'Main take',
+            audioAssetId: 'voiceover-1',
+            audioAssetLabel: 'Voiceover stem',
+          },
+        ],
+        resolve,
+      ),
+    ).rejects.toThrow(
+      'Clip "Voiceover Clip" (clip-voiceover) cannot resolve audio asset "Voiceover stem" (voiceover-1). Restore the original media in Project Assets, reconnect owner storage if needed, or replace the clip audio before exporting. Authenticated media session is not ready',
+    );
+  });
+
   it('accepts video that became ready before listener registration and removes listeners', async () => {
     vi.useFakeTimers();
     const video = new FakeVideo();

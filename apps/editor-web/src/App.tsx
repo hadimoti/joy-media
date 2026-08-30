@@ -308,7 +308,9 @@ import {
 } from './export-history.js';
 import { openOpfsExportCache } from './opfs-export-cache.js';
 import {
+  formatExportClipAssetFailure,
   loadDetachedVideo,
+  preflightExportClipSources,
   runExportPreloadStage,
   seekDetachedVideo as seekExportDetachedVideo,
   type ExportPreloadStage,
@@ -3647,6 +3649,13 @@ function EditorWorkspace({
       let operationStarted = false;
       let exportCompleted = false;
       let pendingExportUrl: string | undefined;
+      const preloadStage = <T,>(
+        stage: ExportPreloadStage,
+        operation: (signal: AbortSignal) => Promise<T>,
+      ) => {
+        setExportStatus(`${stage[0]!.toUpperCase()}${stage.slice(1)}…`);
+        return runExportPreloadStage(stage, operation, abortController.signal);
+      };
       try {
         const estimate = await navigator.storage?.estimate?.();
         if (
@@ -3713,26 +3722,6 @@ function EditorWorkspace({
         )
           throw new Error('The project changed since this export attempt. Start a new export.');
         retryInputsAccepted = true;
-        recordExportEntry({
-          id: entryId,
-          projectId,
-          filename: exportFilename,
-          status: 'running',
-          cacheState: 'none',
-          startedAt,
-          mimeType: selectedMimeType,
-          fingerprint: exportFingerprint,
-          revision: sourceRevision,
-          presetId: activeExportPreset,
-          manifest: retryManifest,
-        });
-        operationLedger.begin({
-          id: entryId,
-          type: 'export',
-          fingerprint: exportFingerprint,
-          revision: sourceRevision,
-        });
-        operationStarted = true;
         const cameraId = compositionV1?.activeCameraId;
         const objectsById = exportVisualProject.visualObjects as Readonly<
           Record<string, VisualObjectV1>
@@ -3780,40 +3769,96 @@ function EditorWorkspace({
         );
         if (exportClips.length === 0)
           throw new Error('No playable visual clips are available for export');
+        const defaultClipAudioConfig: {
+          readonly gain: number;
+          readonly pan: number;
+          readonly mute: boolean;
+          readonly solo: boolean;
+          readonly sourceAssetId?: string;
+        } = {
+          gain: 1,
+          pan: 0,
+          mute: false,
+          solo: false,
+        };
+        const exportClipPreflight = exportClips.map((clip) => {
+          const clipAudioConfig = exportAudioState.clips[clip.id] ?? defaultClipAudioConfig;
+          const visualAssetId = playbackAssetId(exportVisualProject, clip);
+          const audioAssetId = clipAudioConfig.sourceAssetId ?? clip.assetId;
+          return {
+            clipId: clip.id,
+            visualAssetId,
+            visualAssetLabel: exportVisualProject.assets[visualAssetId]?.displayName ?? visualAssetId,
+            audioAssetId,
+            audioAssetLabel: exportVisualProject.assets[audioAssetId]?.displayName ?? audioAssetId,
+          };
+        });
+        const exportClipPreflightById = new Map(
+          exportClipPreflight.map((clip) => [clip.clipId, clip] as const),
+        );
+        setExportStatus('Preflighting export media sources…');
+        setExportProgress(0.04);
+        const preflightSources = await preflightExportClipSources(exportClipPreflight, (assetId) =>
+          preloadStage('resolving source', () => mediaResolver.resolve(assetId)),
+        );
+        recordExportEntry({
+          id: entryId,
+          projectId,
+          filename: exportFilename,
+          status: 'running',
+          cacheState: 'none',
+          startedAt,
+          mimeType: selectedMimeType,
+          fingerprint: exportFingerprint,
+          revision: sourceRevision,
+          presetId: activeExportPreset,
+          manifest: retryManifest,
+        });
+        operationLedger.begin({
+          id: entryId,
+          type: 'export',
+          fingerprint: exportFingerprint,
+          revision: sourceRevision,
+        });
+        operationStarted = true;
 
         setExportStatus('Preloading preview-equivalent video and audio…');
         setExportProgress(0.05);
         const audioContext = new AudioContext();
         activeAudioContext = audioContext;
         const audioDestination = audioContext.createMediaStreamDestination();
-        const preloadStage = <T,>(
-          stage: ExportPreloadStage,
-          operation: (signal: AbortSignal) => Promise<T>,
-        ) => {
-          setExportStatus(`${stage[0]!.toUpperCase()}${stage.slice(1)}…`);
-          return runExportPreloadStage(stage, operation, abortController.signal);
-        };
-        const exportMedia = await Promise.all(
-          exportClips.map(async (clip) => {
-            const clipAudioConfig = exportAudioState.clips[clip.id] ?? {
-              gain: 1,
-              pan: 0,
-              mute: false,
-              solo: false,
+        const exportMedia: Array<{
+          readonly clip: VideoClip;
+          readonly video: HTMLVideoElement | undefined;
+          readonly decoder: ReturnType<typeof createHtmlMediaDecoder> | undefined;
+          readonly stillFrame: ImageDataLike | undefined;
+          readonly animatedFrameSource: AnimatedImageFrameSource | undefined;
+          readonly audio: {
+            readonly samples: Float32Array<ArrayBufferLike>;
+            readonly sampleRate: number;
+            readonly config: {
+              readonly gain: number;
+              readonly pan: number;
+              readonly mute: boolean;
+              readonly solo: boolean;
+              readonly sourceAssetId?: string;
             };
-            const audioAssetId = clipAudioConfig.sourceAssetId ?? clip.assetId;
-            const source = await preloadStage('resolving source', () =>
-              mediaResolver.resolve(playbackAssetId(session.visualProject, clip)),
-            );
-            const audioSource =
-              audioAssetId === clip.assetId
-                ? source
-                : await preloadStage('resolving source', () => mediaResolver.resolve(audioAssetId));
-            const assetKind = exportVisualProject.assets[clip.assetId]?.kind ?? 'video';
-            let video: HTMLVideoElement | undefined;
-            let decoder: ReturnType<typeof createHtmlMediaDecoder> | undefined;
-            let stillFrame: ImageDataLike | undefined;
-            let animatedFrameSource: AnimatedImageFrameSource | undefined;
+          };
+        }> = [];
+        for (const clip of exportClips) {
+          const clipAudioConfig = exportAudioState.clips[clip.id] ?? defaultClipAudioConfig;
+          const preflightSource = preflightSources.get(clip.id);
+          const clipPreflight = exportClipPreflightById.get(clip.id);
+          if (preflightSource === undefined || clipPreflight === undefined)
+            throw new Error(`Export source preflight did not prepare ${clip.id}`);
+          const source = preflightSource.visualSource;
+          const audioSource = preflightSource.audioSource;
+          const assetKind = exportVisualProject.assets[clip.assetId]?.kind ?? 'video';
+          let video: HTMLVideoElement | undefined;
+          let decoder: ReturnType<typeof createHtmlMediaDecoder> | undefined;
+          let stillFrame: ImageDataLike | undefined;
+          let animatedFrameSource: AnimatedImageFrameSource | undefined;
+          try {
             if (assetKind !== 'audio') {
               if (assetKind === 'image') {
                 abortController.signal.throwIfAborted();
@@ -3846,16 +3891,27 @@ function EditorWorkspace({
                 decoder = createHtmlMediaDecoder(video, captureCanvas);
               }
             }
-            let sampleRate = 48_000;
-            let fullSamples: Float32Array | undefined;
-            const hasAuthoredAudio = assetKind !== 'image' || clipAudioConfig.sourceAssetId != null;
-            if (hasAuthoredAudio) {
+          } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') throw error;
+            const detail = error instanceof Error ? error.message : String(error);
+            throw new Error(
+              formatExportClipAssetFailure(clipPreflight, 'visual', 'prepare', detail),
+              { cause: error },
+            );
+          }
+          let sampleRate = 48_000;
+          let fullSamples: Float32Array | undefined;
+          const hasAuthoredAudio = assetKind !== 'image' || clipAudioConfig.sourceAssetId != null;
+          if (hasAuthoredAudio) {
+            try {
               const authoredAudioBytes = await preloadStage(
                 'fetching authored audio bytes',
                 async (signal) => {
                   const audioResponse = await fetch(audioSource.url, { signal });
                   if (!audioResponse.ok)
-                    throw new Error(`Unable to fetch export audio for ${audioAssetId}`);
+                    throw new Error(
+                      `Unable to fetch export audio for ${clipPreflight.audioAssetId}`,
+                    );
                   return audioResponse.arrayBuffer();
                 },
               );
@@ -3872,47 +3928,54 @@ function EditorWorkspace({
                   fullSamples[index] = fullSamples[index]! + monoChannel[index]! / channels;
                 }
               }
+            } catch (error) {
+              if (error instanceof DOMException && error.name === 'AbortError') throw error;
+              const detail = error instanceof Error ? error.message : String(error);
+              throw new Error(
+                formatExportClipAssetFailure(clipPreflight, 'audio', 'prepare', detail),
+                { cause: error },
+              );
             }
-            const rate = normalizePlaybackRate(clip.playbackRate);
-            const sourceSpanUs = Math.max(1, Math.round(clip.durationUs * rate));
-            const sourceStartUs =
-              clip.reversed === true
-                ? Math.max(0, clip.sourceInUs - sourceSpanUs + 1)
-                : clip.sourceInUs;
-            const sourceStartSample = Math.max(
-              0,
-              Math.floor((sourceStartUs * sampleRate) / 1_000_000),
-            );
-            const sourceLength = Math.max(1, Math.ceil((sourceSpanUs * sampleRate) / 1_000_000));
-            let samples: Float32Array<ArrayBufferLike> =
-              fullSamples?.slice(
-                sourceStartSample,
-                Math.min(fullSamples.length, sourceStartSample + sourceLength),
-              ) ?? new Float32Array(sourceLength);
-            if (clip.reversed === true) {
-              const reversed = new Float32Array(samples.length);
-              for (let index = 0; index < samples.length; index++)
-                reversed[index] = samples[samples.length - 1 - index]!;
-              samples = reversed;
-            }
-            // The offline mixer uses the clip's timeline duration. Resample
-            // the selected source window to that duration so rate edits and
-            // reverse export stay synchronized with the rendered frames.
-            if (rate !== 1) samples = resampleMonoSamples(samples, sampleRate, sampleRate / rate);
-            return {
-              clip,
-              video,
-              decoder,
-              stillFrame,
-              animatedFrameSource,
-              audio: {
-                samples,
-                sampleRate,
-                config: clipAudioConfig,
-              },
-            };
-          }),
-        );
+          }
+          const rate = normalizePlaybackRate(clip.playbackRate);
+          const sourceSpanUs = Math.max(1, Math.round(clip.durationUs * rate));
+          const sourceStartUs =
+            clip.reversed === true
+              ? Math.max(0, clip.sourceInUs - sourceSpanUs + 1)
+              : clip.sourceInUs;
+          const sourceStartSample = Math.max(
+            0,
+            Math.floor((sourceStartUs * sampleRate) / 1_000_000),
+          );
+          const sourceLength = Math.max(1, Math.ceil((sourceSpanUs * sampleRate) / 1_000_000));
+          let samples: Float32Array<ArrayBufferLike> =
+            fullSamples?.slice(
+              sourceStartSample,
+              Math.min(fullSamples.length, sourceStartSample + sourceLength),
+            ) ?? new Float32Array(sourceLength);
+          if (clip.reversed === true) {
+            const reversed = new Float32Array(samples.length);
+            for (let index = 0; index < samples.length; index++)
+              reversed[index] = samples[samples.length - 1 - index]!;
+            samples = reversed;
+          }
+          // The offline mixer uses the clip's timeline duration. Resample
+          // the selected source window to that duration so rate edits and
+          // reverse export stay synchronized with the rendered frames.
+          if (rate !== 1) samples = resampleMonoSamples(samples, sampleRate, sampleRate / rate);
+          exportMedia.push({
+            clip,
+            video,
+            decoder,
+            stillFrame,
+            animatedFrameSource,
+            audio: {
+              samples,
+              sampleRate,
+              config: clipAudioConfig,
+            },
+          });
+        }
         const mediaForClip = new Map(exportMedia.map((media) => [media.clip.id, media]));
         const audioSampleRate = exportMedia[0]?.audio.sampleRate ?? 48000;
         const offlineAudio = renderOfflineAudio(
