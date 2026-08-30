@@ -635,7 +635,12 @@ function operationalEvidenceReady(
   const daemon = record(startup.daemon);
   if (daemon.started !== true || daemon.terminated !== true) return false;
   const session = record(lifecycle.session);
-  if (session.stateIsolated !== true || session.ownerSessionUsed !== false) return false;
+  if (
+    session.stateIsolated !== true ||
+    session.ownerSessionUsed !== false ||
+    session.persistedSession !== false
+  )
+    return false;
   const renewal = record(lifecycle.renewal);
   if (renewal.restarted !== true) return false;
   const repair = record(lifecycle.repair);

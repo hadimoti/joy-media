@@ -156,6 +156,7 @@ const operationalEvidence = (): ReleaseOperationalEvidence => ({
         status: 'passed',
         stateIsolated: true,
         ownerSessionUsed: false,
+        persistedSession: false,
       },
       renewal: { status: 'passed', restarted: true },
       recovery: { status: 'passed' },
