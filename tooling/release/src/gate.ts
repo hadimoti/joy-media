@@ -607,6 +607,10 @@ function operationalEvidenceReady(
     record(reimport).downloadStatus !== 200 ||
     !positiveNumber(record(reimport).bytes) ||
     !sha256(record(reimport).sha256) ||
+    record(downloaded).bytes !== record(mixed).bytes ||
+    record(downloaded).sha256 !== record(mixed).sha256 ||
+    record(reimport).bytes !== record(mixed).bytes ||
+    record(reimport).sha256 !== record(mixed).sha256 ||
     record(cancelRetry).canceledState !== 'canceled' ||
     record(cancelRetry).retriedState !== 'queued' ||
     (record(missingSource).status !== 404 && record(missingSource).status !== 409)
@@ -614,14 +618,28 @@ function operationalEvidenceReady(
     return false;
   const lifecycle = record(evidence.windows.lifecycle);
   if (
-    ['install', 'startup', 'recovery', 'update', 'rollback', 'uninstall'].some(
-      (key) => record(lifecycle[key]).status !== 'passed',
-    )
+    [
+      'install',
+      'startup',
+      'session',
+      'renewal',
+      'recovery',
+      'repair',
+      'update',
+      'rollback',
+      'uninstall',
+    ].some((key) => record(lifecycle[key]).status !== 'passed')
   )
     return false;
   const startup = record(lifecycle.startup);
   const daemon = record(startup.daemon);
   if (daemon.started !== true || daemon.terminated !== true) return false;
+  const session = record(lifecycle.session);
+  if (session.stateIsolated !== true || session.ownerSessionUsed !== false) return false;
+  const renewal = record(lifecycle.renewal);
+  if (renewal.restarted !== true) return false;
+  const repair = record(lifecycle.repair);
+  if (repair.restored !== true) return false;
   const update = record(lifecycle.update);
   if (update.atomicReplacement !== true || update.distinctPackageBytes !== true) return false;
   const signing = record(evidence.windows.signing);

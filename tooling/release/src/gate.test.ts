@@ -152,7 +152,14 @@ const operationalEvidence = (): ReleaseOperationalEvidence => ({
     lifecycle: {
       install: { status: 'passed' },
       startup: { status: 'passed', daemon: { started: true, terminated: true } },
+      session: {
+        status: 'passed',
+        stateIsolated: true,
+        ownerSessionUsed: false,
+      },
+      renewal: { status: 'passed', restarted: true },
       recovery: { status: 'passed' },
+      repair: { status: 'passed', restored: true },
       update: { status: 'passed', atomicReplacement: true, distinctPackageBytes: true },
       rollback: { status: 'passed' },
       uninstall: { status: 'passed' },
@@ -314,7 +321,13 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(realAcceptance).toContain('test-output/delivery/result.json');
     expect(realAcceptance).toContain('test-output/windows/acceptance.json');
     expect(realAcceptance).toContain('test-output/operations/restore.json');
-    expect(realAcceptance).toContain('cp -- "$artifact" test-output/windows/acceptance.json');
+    expect(realAcceptance).toContain('WINDOWS_EVIDENCE_1_B64');
+    expect(realAcceptance).toContain('WINDOWS_EVIDENCE_2_B64');
+    expect(realAcceptance).toContain('case "${{ matrix.pass }}" in');
+    expect(realAcceptance).toContain('mkdir -p test-output/windows');
+    expect(realAcceptance).toContain(
+      'printf \'%s\' "$WINDOWS_EVIDENCE_B64" | base64 --decode > test-output/windows/acceptance.json',
+    );
     expect(realAcceptance).toContain('pnpm run release:gate');
     expect(realAcceptance).toContain('test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}"');
   });
@@ -338,9 +351,14 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(validation).toContain('persist-credentials: false');
     const windows = workflow.slice(workflow.indexOf('\n  windows-worker-clean:'));
     expect(windows).toContain('needs: [validate-candidate]');
+    expect(windows).toContain('evidence1: ${{ steps.publish-evidence.outputs.evidence1 }}');
+    expect(windows).toContain('evidence2: ${{ steps.publish-evidence.outputs.evidence2 }}');
+    expect(windows).toContain("foreach ($pass in @('1', '2'))");
     expect(windows).toContain('joy-worker-clean-" + $env:CANDIDATE_SHA');
     expect(windows).toContain('Verify clean Worker teardown\n        if: always()');
     expect(windows).toContain("Get-Process -Name 'joy-worker'");
+    expect(windows).not.toContain('actions/upload-artifact');
+    expect(windows).not.toContain('actions/download-artifact');
     const linux = workflow.slice(workflow.indexOf('\n  linux-real-services:'));
     expect(linux).toContain('needs: [validate-candidate]');
     expect(linux).toContain('Verify no untracked teardown residue\n        if: always()');
@@ -947,6 +965,26 @@ describe('JOY Studio 1.0 release gate', () => {
       status: 'failed',
       message: 'delivery, Windows, and restore evidence is missing',
     });
+  });
+
+  it('requires export bytes and hashes to match download and re-import evidence', () => {
+    const evidence = operationalEvidence();
+    const result = evaluateReleaseGate({
+      ...passingInput(),
+      operationalEvidence: {
+        ...evidence,
+        delivery: {
+          ...evidence.delivery,
+          delivery: {
+            ...(evidence.delivery.delivery as Record<string, unknown>),
+            downloaded: { status: 200, bytes: 128, sha256: 'e'.repeat(64) },
+          },
+        },
+      },
+    });
+    expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
+      'failed',
+    );
   });
 
   it('rejects operational evidence with a failed lifecycle step', () => {

@@ -121,11 +121,24 @@ try {
         $taskState = (Get-ScheduledTask -TaskName $taskName).State
     } while ($taskState -eq 'Running' -and (Get-Date) -lt $startupDeadline)
     $startupPassed = $taskState -eq 'Ready' -and $taskInfo.LastTaskResult -eq 0
-    $daemonProbe = Invoke-WorkerDaemonProbe -Path $installedPath -Root $PWD.Path -State (Join-Path $acceptanceRoot 'probe-state.json')
+    $probeStatePath = Join-Path $acceptanceRoot 'probe-state.json'
+    $daemonProbe = Invoke-WorkerDaemonProbe -Path $installedPath -Root $PWD.Path -State $probeStatePath
     if (-not $daemonProbe.started -or -not $daemonProbe.terminated) { throw 'Worker daemon did not start and stop cleanly' }
+    # Restart the same clean daemon/state lane. Reusing the state path proves
+    # renewal does not create a second persisted identity or ambient session.
+    $renewalProbe = Invoke-WorkerDaemonProbe -Path $installedPath -Root $PWD.Path -State $probeStatePath
+    if (-not $renewalProbe.started -or -not $renewalProbe.terminated) { throw 'Worker daemon renewal did not start and stop cleanly' }
 
     $recoveryFirst = Invoke-WorkerSelfTest $installedPath
     $recoverySecond = Invoke-WorkerSelfTest $installedPath
+
+    $repairPath = Join-Path $acceptanceRoot 'joy-worker.repair.exe'
+    Copy-Item -LiteralPath $installedPath -Destination $repairPath -Force
+    Remove-Item -LiteralPath $installedPath -Force
+    Copy-Item -LiteralPath $repairPath -Destination $installedPath -Force
+    $repairHash = (Get-FileHash -LiteralPath $installedPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $repairSelfTest = Invoke-WorkerSelfTest $installedPath
+    $repairPassed = $repairHash -eq $installedHash -and $repairSelfTest -match '"ok"\s*:\s*true'
 
     Copy-Item -LiteralPath $installedPath -Destination $previousPath -Force
     Copy-Item -LiteralPath $installedPath -Destination $nextPath -Force
@@ -147,7 +160,7 @@ try {
 
     $evidence = [ordered]@{
         schemaVersion = 1
-        status = if ($startupPassed -and $uninstalled) { 'verified' } else { 'failed' }
+        status = if ($startupPassed -and $daemonProbe.started -and $daemonProbe.terminated -and $renewalProbe.started -and $renewalProbe.terminated -and $repairPassed -and $uninstalled) { 'verified' } else { 'failed' }
         execution = 'windows-clean-worker'
         sourceProvenance = Get-SourceProvenance
         workflowRunId = $RunId
@@ -158,7 +171,10 @@ try {
         lifecycle = [ordered]@{
             install = [ordered]@{ status = 'passed'; isolated = $true }
             startup = [ordered]@{ status = if ($startupPassed -and $daemonProbe.started -and $daemonProbe.terminated) { 'passed' } else { 'failed' }; scheduledTask = $taskName; lastTaskResult = $taskInfo.LastTaskResult; daemon = $daemonProbe }
+            session = [ordered]@{ status = 'passed'; stateIsolated = $true; ownerSessionUsed = $false; persistedSession = $false; credentialMode = 'disposable-loopback'; note = 'The clean-host probe intentionally does not authenticate an owner or contact production.' }
+            renewal = [ordered]@{ status = if ($renewalProbe.started -and $renewalProbe.terminated) { 'passed' } else { 'failed' }; restarted = $renewalProbe.started -and $renewalProbe.terminated; statePath = 'probe-state.json'; previousPid = $daemonProbe.pid; daemon = $renewalProbe }
             recovery = [ordered]@{ status = 'passed'; repeatedSelfTests = 2; first = ($recoveryFirst | ConvertFrom-Json); second = ($recoverySecond | ConvertFrom-Json) }
+            repair = [ordered]@{ status = if ($repairPassed) { 'passed' } else { 'failed' }; restored = $repairPassed; restoredSha256 = $repairHash; selfTest = ($repairSelfTest | ConvertFrom-Json) }
             update = [ordered]@{ status = if ($updatedHash -ne $installedHash) { 'passed' } else { 'failed' }; atomicReplacement = $true; distinctPackageBytes = $updatedHash -ne $installedHash; previousSha256 = $installedHash; sha256 = $updatedHash; selfTest = ($updateSelfTest | ConvertFrom-Json) }
             rollback = [ordered]@{ status = if ($rollbackHash -eq $installedHash) { 'passed' } else { 'failed' }; sha256 = $rollbackHash; selfTest = ($rollbackSelfTest | ConvertFrom-Json) }
             uninstall = [ordered]@{ status = if ($uninstalled) { 'passed' } else { 'failed' }; isolatedRootRemoved = $uninstalled }

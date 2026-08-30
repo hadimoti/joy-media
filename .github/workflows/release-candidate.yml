@@ -85,14 +85,13 @@ jobs:
           test -z "$(git status --porcelain)"
 
   windows-worker-clean:
-    name: windows-worker-clean (pass ${{ matrix.pass }})
+    name: windows-worker-clean (two exact passes)
     runs-on: [self-hosted, windows, x64, joy-media-worker]
     needs: [validate-candidate]
-    strategy:
-      fail-fast: false
-      matrix:
-        pass: [1, 2]
-    timeout-minutes: 60
+    timeout-minutes: 120
+    outputs:
+      evidence1: ${{ steps.publish-evidence.outputs.evidence1 }}
+      evidence2: ${{ steps.publish-evidence.outputs.evidence2 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -116,27 +115,33 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           pnpm --filter @joy-media/worker build
-          $output = Join-Path $env:RUNNER_TEMP ("joy-worker-clean-" + $env:CANDIDATE_SHA + "-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + "-" + "${{ matrix.pass }}" + ".exe")
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-worker-exe.ps1 -OutputPath $output
-          if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw 'Worker executable was not produced.' }
-          $result = & $output --joy-worker-self-test
-          if ($LASTEXITCODE -ne 0 -or $result -notmatch '"ok"\s*:\s*true') { throw 'Worker executable self-test failed.' }
-          $evidence = Join-Path $env:RUNNER_TEMP ("joy-media-windows-acceptance-" + "${{ matrix.pass }}.json")
-          & powershell -NoProfile -ExecutionPolicy Bypass -File ops/self-hosted/windows-runner/worker-acceptance.ps1 `
-            -CandidateSha $env:CANDIDATE_SHA `
-            -RunId $env:GITHUB_RUN_ID `
-            -Attempt $env:GITHUB_RUN_ATTEMPT `
-            -Pass "${{ matrix.pass }}" `
-            -ExecutablePath $output `
-            -OutputPath $evidence
-          if (-not (Test-Path -LiteralPath $evidence -PathType Leaf)) { throw 'Windows Worker acceptance evidence was not produced.' }
-      - name: Publish Windows Worker acceptance evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: joy-media-windows-acceptance-${{ matrix.pass }}
-          path: ${{ runner.temp }}/joy-media-windows-acceptance-${{ matrix.pass }}.json
-          if-no-files-found: error
-          retention-days: 7
+          $results = @{}
+          foreach ($pass in @('1', '2')) {
+            $output = Join-Path $env:RUNNER_TEMP ("joy-worker-clean-" + $env:CANDIDATE_SHA + "-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + "-" + $pass + ".exe")
+            powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-worker-exe.ps1 -OutputPath $output
+            if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw "Worker executable was not produced for pass $pass." }
+            $result = & $output --joy-worker-self-test
+            if ($LASTEXITCODE -ne 0 -or $result -notmatch '"ok"\s*:\s*true') { throw "Worker executable self-test failed for pass $pass." }
+            $evidence = Join-Path $env:RUNNER_TEMP ("joy-media-windows-acceptance-" + $pass + ".json")
+            & powershell -NoProfile -ExecutionPolicy Bypass -File ops/self-hosted/windows-runner/worker-acceptance.ps1 `
+              -CandidateSha $env:CANDIDATE_SHA `
+              -RunId $env:GITHUB_RUN_ID `
+              -Attempt $env:GITHUB_RUN_ATTEMPT `
+              -Pass $pass `
+              -ExecutablePath $output `
+              -OutputPath $evidence
+            if (-not (Test-Path -LiteralPath $evidence -PathType Leaf)) { throw "Windows Worker acceptance evidence was not produced for pass $pass." }
+            $results[$pass] = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Content -LiteralPath $evidence -Raw)))
+          }
+          Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'joy-media-windows-acceptance-outputs.json') -Value ($results | ConvertTo-Json) -Encoding utf8
+      - name: Publish Windows Worker acceptance outputs
+        id: publish-evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $results = Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'joy-media-windows-acceptance-outputs.json') -Raw | ConvertFrom-Json
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "evidence1=$($results.'1')$([Environment]::NewLine)")
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "evidence2=$($results.'2')$([Environment]::NewLine)")
       - name: Verify clean Worker teardown
         if: always()
         shell: pwsh
@@ -253,18 +258,21 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm exec playwright install chromium
-      - name: Fetch Windows Worker acceptance evidence
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: joy-media-windows-acceptance-${{ matrix.pass }}
-          path: test-output/windows
       - name: Bind Windows evidence to the gate contract
+        env:
+          WINDOWS_EVIDENCE_1_B64: ${{ needs.windows-worker-clean.outputs.evidence1 }}
+          WINDOWS_EVIDENCE_2_B64: ${{ needs.windows-worker-clean.outputs.evidence2 }}
         shell: bash
         run: |
           set -euo pipefail
-          artifact="test-output/windows/joy-media-windows-acceptance-${{ matrix.pass }}.json"
-          test -s "$artifact" || { echo "Windows acceptance artifact is missing: $artifact" >&2; exit 1; }
-          cp -- "$artifact" test-output/windows/acceptance.json
+          case "${{ matrix.pass }}" in
+            1) WINDOWS_EVIDENCE_B64="${WINDOWS_EVIDENCE_1_B64:-}" ;;
+            2) WINDOWS_EVIDENCE_B64="${WINDOWS_EVIDENCE_2_B64:-}" ;;
+            *) echo "unexpected real-service pass: ${{ matrix.pass }}" >&2; exit 1 ;;
+          esac
+          test -n "${WINDOWS_EVIDENCE_B64:-}" || { echo 'Windows acceptance output is missing for this pass' >&2; exit 1; }
+          mkdir -p test-output/windows
+          printf '%s' "$WINDOWS_EVIDENCE_B64" | base64 --decode > test-output/windows/acceptance.json
           test -s test-output/windows/acceptance.json
       - name: Run authenticated real-service desktop acceptance and evidence
         shell: bash
