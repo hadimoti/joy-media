@@ -371,6 +371,7 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
   let hiddenVisibilityObserved = false;
   let initialEditorJsBytes = null;
   let longTaskDurations = null;
+  const debugBrowserErrors = process.env.JOY_MEDIA_RELEASE_OBSERVER_DEBUG === '1';
 
   const installObserverContext = async (targetContext) => {
     await targetContext.addInitScript(() => {
@@ -408,11 +409,15 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
       'authenticated observer token is missing; set JOY_MEDIA_RELEASE_OBSERVER_TOKEN in the isolated staging environment',
     );
   }
-  page.on('pageerror', () => {
+  page.on('pageerror', (error) => {
     uncaughtExceptions += 1;
+    if (debugBrowserErrors) console.error(`[release-observer:visible:pageerror] ${error.message}`);
   });
   page.on('console', (message) => {
-    if (message.type() === 'error') uncaughtExceptions += 1;
+    if (message.type() === 'error') {
+      uncaughtExceptions += 1;
+      if (debugBrowserErrors) console.error(`[release-observer:visible:console] ${message.text()}`);
+    }
   });
   page.on('requestfailed', (request) => {
     if (request.isNavigationRequest()) navigationFailures += 1;
@@ -443,11 +448,16 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
   });
 
   const attachHiddenTelemetry = (target) => {
-    target.on('pageerror', () => {
+    target.on('pageerror', (error) => {
       uncaughtExceptions += 1;
+      if (debugBrowserErrors) console.error(`[release-observer:hidden:pageerror] ${error.message}`);
     });
     target.on('console', (message) => {
-      if (message.type() === 'error') uncaughtExceptions += 1;
+      if (message.type() === 'error') {
+        uncaughtExceptions += 1;
+        if (debugBrowserErrors)
+          console.error(`[release-observer:hidden:console] ${message.text()}`);
+      }
     });
     target.on('requestfailed', (request) => {
       if (request.isNavigationRequest()) navigationFailures += 1;
