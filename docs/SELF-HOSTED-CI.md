@@ -51,6 +51,37 @@ The trusted push workflow also serializes superseded `main` runs with a GitHub A
 directory, and Playwright output directory derived from the GitHub run identity. This keeps reruns
 and parallel trusted runners from reusing stale ports or overwriting another matrix leg's traces.
 
+## Linux real-services runner (owner-controlled Docker Desktop)
+
+The Linux lane is now provisioned on the owner-controlled Docker Desktop Linux
+engine; it is not installed on the Sweden production VPS. The repository-scoped
+runner `joy-media-ci-linux` is online with labels `self-hosted`, `linux`, `x64`,
+`joy-media-ci`, runs as uid `1001` (`joyci`), and uses the digest-pinned image
+`sha256:8dd5d2bcdfcebe2948382eff2bf0aff8abc8c20c418dd9bf54de3489bfaade11`.
+The image contains Node `v22.14.0`, pnpm `11.15.0`, FFmpeg/FFprobe, PostgreSQL
+client tools, and MinIO `mc`; all downloaded binaries are hash-verified.
+
+The runner is attached to the private Docker network `joy-media-ci` with
+restart-safe, non-published service containers:
+
+- PostgreSQL 17 image digest `sha256:00bc86618629af00d2937fdc5a5d63db3ff8450acf52f0636ec813c7f4902929`
+  (`joy-media-ci-postgres`, persistent named volume).
+- MinIO image digest `sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e`
+  (`joy-media-ci-minio`, persistent named volume).
+
+Database/S3 credentials are generated locally and passed only to the runner
+container; they are not repository secrets, logs, artifacts, or Gbrain data.
+`JOY_MEDIA_CI_RELEASE_COMMAND` points at the checked-out
+`ops/self-hosted/linux-runner/release-real-services.sh`, which creates and
+unconditionally drops a run/schema and bucket namespace.
+
+The acceptance runner `joy-media-ci-acceptance` is a separate repository-scoped
+Linux runner on network `joy-media-acceptance`, with its own runner volume and
+labels `self-hosted`, `linux`, `x64`, `joy-media-acceptance`. It sets only
+`JOY_MEDIA_CI_ACCEPTANCE_PROFILE=fixture-only` and has no OpenCLI/browser
+profile or production credentials. Both Linux runners are currently online and
+idle; query the inventory with the health-check command below.
+
 ## Release-candidate lanes
 
 The closure plan requires a separate, manually dispatched release workflow before promotion. It
@@ -65,12 +96,14 @@ must run twice on the exact candidate SHA and use repository-scoped runners with
   Any automated browser uses fixture credentials only and never receives the owner's cookies or
   OpenCLI profile `cefd9k77`.
 
-The current GitHub runner inventory has only the trusted Windows `joy-media-ci` runner. It is
-online and is sufficient for the push checks above, but it is not a Linux real-services runner and
-does not satisfy the Worker label or clean-profile release lane. Do not point these jobs at the
-production Sweden VPS. Provision an isolated WSL2 Ubuntu runner (or disposable Linux VM) and a
-dedicated Windows Worker runner before dispatching the release workflow; until then the release
-gate must remain NO-GO.
+The inventory now has the trusted Windows source runner plus the isolated Linux
+real-services and acceptance runners described above. The Windows source runner
+is sufficient for push checks, but it is not a clean-profile Worker runner and
+does not satisfy `joy-media-worker`. Do not point release jobs at the production
+Sweden VPS. A dedicated Windows Worker runner with
+`JOY_MEDIA_CI_WORKER_PROFILE=clean` is still required before the release
+workflow can be dispatched; until that lane exists, the release gate remains
+NO-GO.
 
 The manually dispatched `.github/workflows/release-candidate.yml` is the executable contract for
 those lanes. Supply the full candidate SHA; it runs two exact passes for each lane. The Linux
