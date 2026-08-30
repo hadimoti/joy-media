@@ -230,10 +230,10 @@ describe('JOY Studio 1.0 release gate', () => {
     const acceptance = workflow.slice(workflow.indexOf('\n  acceptance:'));
 
     expect(acceptance).toContain(
-      'PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-playwright-report-acceptance-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}',
+      'PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-playwright-report-acceptance-${{ matrix.profile }}-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}',
     );
     expect(acceptance).toContain(
-      'PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-playwright-results-acceptance-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}',
+      'PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-playwright-results-acceptance-${{ matrix.profile }}-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}',
     );
     expect(acceptance).toContain('- name: Verify acceptance teardown\n        if: always()');
     expect(acceptance).toContain(
