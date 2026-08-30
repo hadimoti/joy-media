@@ -66,7 +66,7 @@ const webPort = await freePort();
 const apiUrl = `http://127.0.0.1:${apiPort}`;
 const webUrl = `http://127.0.0.1:${webPort}`;
 const token = 'joy-media-e2e-token';
-const owner = 'joy-real-service-e2e@example.test';
+const owner = 'e2e-owner@example.test';
 let pool;
 let apiServer;
 let webProcess;
@@ -544,7 +544,7 @@ function mediaAuth(expectedToken, subject) {
         ? {
             contact: subject,
             method: 'gmail',
-            displayName: 'JOY real-service E2E',
+            displayName: 'JOY E2E',
             avatarAvailable: false,
           }
         : undefined,
