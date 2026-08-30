@@ -57,9 +57,10 @@ The Linux lane is now provisioned on the owner-controlled Docker Desktop Linux
 engine; it is not installed on the Sweden production VPS. The repository-scoped
 runner `joy-media-ci-linux` is online with labels `self-hosted`, `linux`, `x64`,
 `joy-media-ci`, runs as uid `1001` (`joyci`), and uses the digest-pinned image
-`sha256:8dd5d2bcdfcebe2948382eff2bf0aff8abc8c20c418dd9bf54de3489bfaade11`.
+`sha256:fe6a3c657e9d9c7ee0b0c823eeaa2bcecac75041ff104ecc52ab37fc36f97b61`.
 The image contains Node `v22.14.0`, pnpm `11.15.0`, FFmpeg/FFprobe, PostgreSQL
-client tools, and MinIO `mc`; all downloaded binaries are hash-verified.
+client tools, MinIO `mc`, and the system libraries required by headless Chromium;
+all downloaded binaries are hash-verified.
 
 The runner is attached to the private Docker network `joy-media-ci` with
 restart-safe, non-published service containers:

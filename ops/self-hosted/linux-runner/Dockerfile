@@ -16,6 +16,10 @@ RUN apt-get update \
   && apt-get install --no-install-recommends -y \
     ca-certificates curl git jq unzip tar gzip xz-utils ffmpeg postgresql-client \
     python3 make g++ libicu-dev libssl-dev libkrb5-3 zlib1g libstdc++6 \
+    libnspr4 libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 \
+    libcups2t64 libdrm2 libgbm1 libgtk-3-0t64 libasound2t64 libx11-xcb1 \
+    libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxkbcommon0 \
+    libpango-1.0-0 libcairo2 libxcb-dri3-0 libxshmfence1 libwayland-client0 \
   && rm -rf /var/lib/apt/lists/* \
   && useradd --create-home --uid 1001 --shell /usr/sbin/nologin joyci \
   && mkdir -p /opt/actions-runner /opt/node /opt/corepack \
