@@ -157,6 +157,22 @@ export interface ToolAvailability {
   readonly upscaling?: UpscalingAvailability;
 }
 
+/** A queued provider job cannot run until the API can durably verify its result. */
+export class UnsupportedWorkerJobError extends Error {
+  readonly code = 'JOB_TYPE_UNSUPPORTED';
+
+  constructor(readonly jobType: string) {
+    super(`${jobType} is unavailable until its durable Worker result contract is implemented`);
+    this.name = 'UnsupportedWorkerJobError';
+  }
+}
+
+const UNSUPPORTED_PROVIDER_JOB_TYPES = new Set([
+  'text.openrouter',
+  'video.runway',
+  'edit.higgsfield',
+]);
+
 /** Private mapping held only by the Worker; it is never serialized to the API. */
 export interface LocalAssetSourceRegistry {
   assetIds(): readonly string[];
@@ -316,6 +332,7 @@ export class WorkerRuntime {
       }
     | { readonly state: 'canceled' }
   > {
+    if (UNSUPPORTED_PROVIDER_JOB_TYPES.has(job.type)) throw new UnsupportedWorkerJobError(job.type);
     if (job.type === 'fixture.thumbnail') return this.runFixtureThumbnail(job.id, options);
     if (job.type === 'upscale.image' || job.type === 'upscale.video') {
       if (!this.tools.ffprobe) throw new Error('FFprobe is required for upscaling outputs');

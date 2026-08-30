@@ -812,6 +812,36 @@ describe('control-plane HTTP transport', () => {
     });
   });
 
+  it.each(['text.openrouter', 'video.runway', 'edit.higgsfield'])(
+    'returns a typed rejection for unsupported provider job %s',
+    async (type) => {
+      const controlPlane = new LocalControlPlane();
+      const owner = { id: 'provider-owner' };
+      controlPlane.createProject(owner, 'provider-project', 'Provider jobs');
+      const origin = await start({ authenticate: () => owner }, undefined, undefined, controlPlane);
+
+      expect(
+        await request(origin, 'POST', '/v1/projects/provider-project/jobs', {
+          id: `job-${type}`,
+          type,
+          payload: { prompt: 'must not be sent to a provider' },
+        }),
+      ).toMatchObject({
+        status: 400,
+        body: {
+          error: {
+            code: 'JOB_TYPE_UNSUPPORTED',
+            message: `${type} is unavailable until its durable Worker result contract is implemented`,
+          },
+        },
+      });
+      expect(await request(origin, 'GET', '/v1/projects/provider-project/jobs')).toMatchObject({
+        status: 200,
+        body: { data: [] },
+      });
+    },
+  );
+
   it('forwards bounded Worker attempts and allows an explicit retry generation after exhaustion', async () => {
     const controlPlane = new LocalControlPlane();
     const owner = { id: 'attempt-owner' };

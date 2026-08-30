@@ -4,6 +4,7 @@ import {
   ControlPlaneError,
   SHARED_LIBRARY_OWNER_ID,
   MAX_WORKER_ATTEMPTS,
+  assertSupportedWorkerJobType,
   type AssetDeletionResult,
   type AssetLocationRecord,
   type AssetRegistration,
@@ -1496,6 +1497,7 @@ export class PostgresControlPlane implements ControlPlane {
     payload?: Readonly<Record<string, unknown>>,
     maxAttempts?: number,
   ): Promise<Job> {
+    assertSupportedWorkerJobType(type);
     if (type === 'asset.thumbnail')
       throw new ControlPlaneError(
         'ASSET_JOB_INVALID',

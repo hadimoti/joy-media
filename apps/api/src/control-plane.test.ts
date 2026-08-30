@@ -333,6 +333,36 @@ describe('local control plane', () => {
     ).toThrow(expect.objectContaining({ code: 'JOB_PAYLOAD_INVALID' }));
   });
 
+  it.each(['text.openrouter', 'video.runway', 'edit.higgsfield'])(
+    'rejects provider job type %s before it can be queued or billed',
+    (type) => {
+      const api = new LocalControlPlane();
+      const owner = { id: 'provider-owner' };
+      api.createProject(owner, 'provider-project', 'Provider jobs');
+
+      expect(() => api.enqueue(owner, `job-${type}`, 'provider-project', type, 100)).toThrow(
+        expect.objectContaining({
+          code: 'JOB_TYPE_UNSUPPORTED',
+          message: `${type} is unavailable until its durable Worker result contract is implemented`,
+        }),
+      );
+      expect(api.jobsForProject(owner, 'provider-project')).toEqual([]);
+    },
+  );
+
+  it('keeps image.comfy in the admitted local-GPU contract', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'gpu-owner' };
+    api.createProject(owner, 'gpu-project', 'Local GPU');
+    api.registerAsset(owner, 'gpu-project', assetRegistration());
+
+    expect(
+      api.enqueue(owner, 'comfy-job', 'gpu-project', 'image.comfy', 100, 'asset-1', {
+        prompt: 'remove background',
+      }),
+    ).toMatchObject({ id: 'comfy-job', type: 'image.comfy', state: 'queued' });
+  });
+
   it('records opaque asset and local-derivative metadata without accepting paths or cloud claims', () => {
     const api = new LocalControlPlane();
     const owner = { id: 'owner' };

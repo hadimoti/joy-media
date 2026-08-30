@@ -7,12 +7,40 @@ import {
   JsonFileWorkerStore,
   StaticLocalAssetSourceRegistry,
   WorkerRuntime,
+  UnsupportedWorkerJobError,
   detectMediaTools,
   getDeviceIdentity,
   localAssetSourcesFromEnvironment,
 } from './runtime.js';
 import { ffmpegFilterPath, gpuDerivativeLocalRef, rnnoiseFilter } from './local-gpu.js';
 describe('Worker runtime', () => {
+  it.each(['text.openrouter', 'video.runway', 'edit.higgsfield'])(
+    'fails closed before invoking provider job %s',
+    async (type) => {
+      const runtime = new WorkerRuntime(
+        { workerId: 'provider-worker', createdAt: '2026-01-01T00:00:00.000Z' },
+        {
+          ffmpeg: false,
+          ffprobe: false,
+          comfy: false,
+          mlDenoise: false,
+          aiProviders: ['openrouter', 'runway', 'higgsfield'],
+        },
+      );
+
+      await expect(
+        runtime.run(
+          { id: `job-${type}`, type, payload: { prompt: 'must not reach a provider' } },
+          { cancelled: () => false, progress: async () => undefined },
+        ),
+      ).rejects.toMatchObject({
+        name: 'UnsupportedWorkerJobError',
+        code: 'JOB_TYPE_UNSUPPORTED',
+        jobType: type,
+      } satisfies Partial<UnsupportedWorkerJobError>);
+    },
+  );
+
   it('escapes a Windows RNNoise path for ffmpeg filter syntax', () => {
     const path = 'C:\\Users\\JOY Media\\models\\rnnoise\\mp.rnnn';
     expect(ffmpegFilterPath(path)).toBe("'C\\:/Users/JOY Media/models/rnnoise/mp.rnnn'");

@@ -10,6 +10,25 @@ export interface Actor {
 export const SHARED_LIBRARY_OWNER_ID = 'joy-media-library';
 export const MAX_WORKER_ATTEMPTS = 2_147_483_647;
 const WORKER_ATTEMPT_BUDGET_EXHAUSTED = 'Worker attempt budget exhausted';
+/**
+ * Provider jobs are intentionally fail-closed until their result contract is
+ * durable in the control plane. Local GPU jobs (including image.comfy) have
+ * verified receipt and derivative paths and are therefore not listed here.
+ */
+export const UNSUPPORTED_PROVIDER_JOB_TYPES = [
+  'text.openrouter',
+  'video.runway',
+  'edit.higgsfield',
+] as const;
+const UNSUPPORTED_PROVIDER_JOB_TYPE_SET = new Set<string>(UNSUPPORTED_PROVIDER_JOB_TYPES);
+
+export function assertSupportedWorkerJobType(type: string): void {
+  if (UNSUPPORTED_PROVIDER_JOB_TYPE_SET.has(type))
+    throw new ControlPlaneError(
+      'JOB_TYPE_UNSUPPORTED',
+      `${type} is unavailable until its durable Worker result contract is implemented`,
+    );
+}
 
 // Project Document Store types and implementations
 // Using local types to avoid module resolution issues with verbatimModuleSyntax
@@ -1376,6 +1395,7 @@ export class LocalControlPlane implements ControlPlane {
     payload?: Readonly<Record<string, unknown>>,
     maxAttempts?: number,
   ): Job {
+    assertSupportedWorkerJobType(type);
     this.project(actor, projectId);
     validateWorkerMaxAttempts(maxAttempts);
     if (type === 'asset.thumbnail')

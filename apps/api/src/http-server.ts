@@ -2615,24 +2615,26 @@ function respondError(response: ServerResponse, error: unknown): void {
     const status =
       error.code === 'AUTH_REQUIRED' || error.code === 'WORKER_SESSION_REQUIRED'
         ? 401
-        : error.code === 'PROVIDER_BUSY'
-          ? 429
-          : error.code === 'PROVIDER_OPERATION_NOT_FOUND'
-            ? 404
-            : error.code === 'REQUEST_INVALID'
-              ? 400
-              : error.code === 'DERIVATIVE_NOT_READY'
-                ? 409
-                : error.code === 'PROVIDER_UNAVAILABLE' ||
-                    error.code === 'DERIVATIVE_CLEANUP_FAILED' ||
-                    error.code === 'PROVIDER_FAILED' ||
-                    error.code === 'PROJECT_DOCUMENT_STORE_UNAVAILABLE'
-                  ? 503
-                  : error.code === 'DOCUMENT_REVISION_CONFLICT'
-                    ? 409
-                    : error.code.startsWith('PAIRING_')
-                      ? 403
-                      : 409;
+        : error.code === 'JOB_TYPE_UNSUPPORTED'
+          ? 400
+          : error.code === 'PROVIDER_BUSY'
+            ? 429
+            : error.code === 'PROVIDER_OPERATION_NOT_FOUND'
+              ? 404
+              : error.code === 'REQUEST_INVALID'
+                ? 400
+                : error.code === 'DERIVATIVE_NOT_READY'
+                  ? 409
+                  : error.code === 'PROVIDER_UNAVAILABLE' ||
+                      error.code === 'DERIVATIVE_CLEANUP_FAILED' ||
+                      error.code === 'PROVIDER_FAILED' ||
+                      error.code === 'PROJECT_DOCUMENT_STORE_UNAVAILABLE'
+                    ? 503
+                    : error.code === 'DOCUMENT_REVISION_CONFLICT'
+                      ? 409
+                      : error.code.startsWith('PAIRING_')
+                        ? 403
+                        : 409;
     respondJson(response, status, { error: { code: error.code, message: error.message } });
     return;
   }
