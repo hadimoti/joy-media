@@ -707,6 +707,15 @@ describe('control-plane HTTP transport', () => {
       status: 201,
       body: { data: { id: 'j', state: 'queued' } },
     });
+    expect(
+      await request(
+        origin,
+        'POST',
+        '/v1/workers/w/leases',
+        { durationMs: 5 * 60_000 + 1 },
+        workerToken,
+      ),
+    ).toMatchObject({ status: 400, body: { error: { code: 'REQUEST_INVALID' } } });
     const lease = await request(origin, 'POST', '/v1/workers/w/leases', {}, workerToken);
     expect(lease).toMatchObject({
       status: 200,

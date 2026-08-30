@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -7,6 +7,7 @@ import {
   JsonFileWorkerStore,
   StaticLocalAssetSourceRegistry,
   WorkerRuntime,
+  WindowsDpapiSecretProtector,
   detectMediaTools,
   getDeviceIdentity,
   localAssetSourcesFromEnvironment,
@@ -221,6 +222,53 @@ describe('Worker runtime', () => {
     restarted.clearPendingPairing();
     expect(restarted.loadPendingPairing()).toBeUndefined();
   });
+
+  it('stores Worker session and pending pairing through the configured secret protector', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'joy-media-worker-protected-')), 'state.json');
+    const protector = {
+      protect: (value: string) => Buffer.from(value).toString('base64url'),
+      unprotect: (value: string) => Buffer.from(value, 'base64url').toString('utf8'),
+    };
+    const store = new JsonFileWorkerStore(path, { secretProtector: protector });
+    store.save({ workerId: 'worker-protected', createdAt: '2026-07-22T00:00:00.000Z' });
+    store.saveWorkerSession('worker-session-secret');
+    store.savePendingPairing('pairing-code-secret', Date.now() + 60_000);
+    const raw = readFileSync(path, 'utf8');
+    expect(raw).not.toContain('worker-session-secret');
+    expect(raw).not.toContain('pairing-code-secret');
+    const restarted = new JsonFileWorkerStore(path, { secretProtector: protector });
+    expect(restarted.loadWorkerSession()).toBe('worker-session-secret');
+    expect(restarted.loadPendingPairing()?.code).toBe('pairing-code-secret');
+  });
+
+  it('migrates legacy plaintext Worker secrets when protection is enabled', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'joy-media-worker-migrate-')), 'state.json');
+    const legacy = new JsonFileWorkerStore(path);
+    legacy.save({ workerId: 'worker-legacy', createdAt: '2026-07-22T00:00:00.000Z' });
+    legacy.saveWorkerSession('legacy-session-secret');
+    legacy.savePendingPairing('legacy-pairing-secret', Date.now() + 60_000);
+    const protector = {
+      protect: (value: string) => Buffer.from(value).toString('base64url'),
+      unprotect: (value: string) => Buffer.from(value, 'base64url').toString('utf8'),
+    };
+    const protectedStore = new JsonFileWorkerStore(path, { secretProtector: protector });
+    protectedStore.migrateLegacySecrets();
+    const raw = readFileSync(path, 'utf8');
+    expect(raw).not.toContain('legacy-session-secret');
+    expect(raw).not.toContain('legacy-pairing-secret');
+    expect(protectedStore.loadWorkerSession()).toBe('legacy-session-secret');
+    expect(protectedStore.loadPendingPairing()?.code).toBe('legacy-pairing-secret');
+  });
+
+  it.runIf(process.platform === 'win32')(
+    'preserves exact Windows DPAPI-protected secret values',
+    () => {
+      const protector = new WindowsDpapiSecretProtector();
+      const value = '  worker-secret with spaces  \n';
+      const encrypted = protector.protect(value);
+      expect(protector.unprotect(encrypted)).toBe(value);
+    },
+  );
 
   it('keeps source paths local while advertising configured opaque IDs only', () => {
     const registry = localAssetSourcesFromEnvironment(

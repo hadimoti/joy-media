@@ -4,13 +4,18 @@ import { WorkerDaemon } from './worker-daemon.js';
 import {
   getDeviceIdentity,
   JsonFileWorkerStore,
+  WindowsDpapiSecretProtector,
   WorkerRuntime,
   detectMediaTools,
   localAssetSourcesFromEnvironment,
 } from './runtime.js';
 import { GpuPreviewHost } from './gpu-preview-host.js';
 
-const store = new JsonFileWorkerStore(process.env.JOY_MEDIA_WORKER_STATE_PATH);
+const store = new JsonFileWorkerStore(
+  process.env.JOY_MEDIA_WORKER_STATE_PATH,
+  process.platform === 'win32' ? { secretProtector: new WindowsDpapiSecretProtector() } : {},
+);
+store.migrateLegacySecrets();
 const identity = getDeviceIdentity(store);
 const sources = localAssetSourcesFromEnvironment(process.env.JOY_MEDIA_LOCAL_ASSETS_JSON);
 let gpuPreviewHost: GpuPreviewHost | undefined;

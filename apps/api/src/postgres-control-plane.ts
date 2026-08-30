@@ -37,6 +37,7 @@ import {
   validateLocalDerivativeRegistration,
   validateSortName,
   validateWorkerMaxAttempts,
+  validateWorkerLeaseDuration,
   matchesCloudDerivativeRegistration,
   matchesWorkerDerivativeCompletion,
   workerDerivativeId,
@@ -1575,6 +1576,7 @@ export class PostgresControlPlane implements ControlPlane {
   }
 
   async lease(workerId: string, now = Date.now(), durationMs = 30_000): Promise<Job | undefined> {
+    validateWorkerLeaseDuration(durationMs);
     return this.transaction(async (client) => {
       const worker = await client.query<WorkerRow>(
         'SELECT * FROM workers WHERE id = $1 AND revoked_at IS NULL FOR UPDATE',
@@ -1678,6 +1680,7 @@ export class PostgresControlPlane implements ControlPlane {
     durationMs = 30_000,
     leaseToken?: string,
   ): Promise<{ readonly job: Job; readonly cancelRequested: boolean }> {
+    validateWorkerLeaseDuration(durationMs);
     if (!Number.isSafeInteger(progress) || progress < 0 || progress > 100)
       throw new ControlPlaneError('PROGRESS_INVALID', jobId);
     return this.transaction(async (client) => {

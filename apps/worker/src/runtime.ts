@@ -58,8 +58,68 @@ export interface PersistentWorkerStore extends IdentityStore {
   clearPendingPairing(): void;
 }
 
+/** Protects Worker-only secrets before they leave process memory. */
+export interface WorkerSecretProtector {
+  protect(value: string): string;
+  unprotect(value: string): string | undefined;
+}
+
+/**
+ * Uses the Windows user DPAPI through PowerShell without placing a secret in
+ * command-line arguments or logs. The portable JSON store remains injectable
+ * for non-Windows/test environments; the packaged Windows Worker selects this
+ * protector from index.ts and fails closed if DPAPI cannot complete an action.
+ */
+export class WindowsDpapiSecretProtector implements WorkerSecretProtector {
+  protect(value: string): string {
+    const result = spawnSync(
+      'powershell.exe',
+      [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        '$plain=[Console]::In.ReadToEnd(); Add-Type -AssemblyName System.Security; $bytes=[Text.Encoding]::UTF8.GetBytes($plain); $protected=[Security.Cryptography.ProtectedData]::Protect($bytes,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Out.Write([Convert]::ToBase64String($protected))',
+      ],
+      { input: value, encoding: 'utf8', timeout: 5_000, windowsHide: true },
+    );
+    const encrypted = result.status === 0 ? result.stdout.trim() : '';
+    if (encrypted.length === 0) throw new Error('Windows DPAPI protection failed');
+    return encrypted;
+  }
+
+  unprotect(value: string): string | undefined {
+    const result = spawnSync(
+      'powershell.exe',
+      [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        '$encrypted=[Convert]::FromBase64String([Console]::In.ReadToEnd().Trim()); Add-Type -AssemblyName System.Security; $plain=[Security.Cryptography.ProtectedData]::Unprotect($encrypted,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Out.Write([Convert]::ToBase64String($plain))',
+      ],
+      { input: value, encoding: 'utf8', timeout: 5_000, windowsHide: true },
+    );
+    if (result.status !== 0) return undefined;
+    const encoded = result.stdout;
+    if (encoded.length === 0) return undefined;
+    try {
+      return Buffer.from(encoded, 'base64').toString('utf8');
+    } catch {
+      return undefined;
+    }
+  }
+}
+
 export class JsonFileWorkerStore implements PersistentWorkerStore {
-  constructor(private readonly path = join(homedir(), '.joy-media', 'worker-state.json')) {}
+  constructor(
+    private readonly path = join(homedir(), '.joy-media', 'worker-state.json'),
+    private readonly options: { readonly secretProtector?: WorkerSecretProtector } = {},
+  ) {}
 
   load(): DeviceIdentity | undefined {
     return this.read().identity;
@@ -92,6 +152,25 @@ export class JsonFileWorkerStore implements PersistentWorkerStore {
     });
   }
 
+  /** Rewrite pre-DPAPI state once during Windows Worker startup. */
+  migrateLegacySecrets(): void {
+    if (this.options.secretProtector === undefined || !existsSync(this.path)) return;
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(this.path, 'utf8'));
+    } catch {
+      // A malformed/locked state is handled by the ordinary fail-closed reads.
+      return;
+    }
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return;
+    const record = raw as Record<string, unknown>;
+    const hasLegacySession = typeof record.sessionToken === 'string';
+    const hasLegacyPairing = isPendingPairing(record.pendingPairing);
+    // Deliberately let protection errors surface: retaining plaintext would be
+    // worse than refusing to start the packaged Worker.
+    if (hasLegacySession || hasLegacyPairing) this.write(this.read());
+  }
+
   private read(): {
     readonly identity?: DeviceIdentity;
     readonly sessionToken?: string;
@@ -103,10 +182,46 @@ export class JsonFileWorkerStore implements PersistentWorkerStore {
       if (value === null || typeof value !== 'object' || Array.isArray(value)) return {};
       const raw = value as Record<string, unknown>;
       const identity = raw.identity;
+      const protectedSessionToken =
+        typeof raw.protectedSessionToken === 'string'
+          ? this.options.secretProtector?.unprotect(raw.protectedSessionToken)
+          : undefined;
+      const protectedPairing = raw.protectedPendingPairing;
+      const protectedPairingCode =
+        protectedPairing !== null &&
+        typeof protectedPairing === 'object' &&
+        !Array.isArray(protectedPairing) &&
+        typeof (protectedPairing as Record<string, unknown>).ciphertext === 'string'
+          ? this.options.secretProtector?.unprotect(
+              (protectedPairing as Record<string, unknown>).ciphertext as string,
+            )
+          : undefined;
+      const protectedPairingExpiresAt =
+        protectedPairing !== null &&
+        typeof protectedPairing === 'object' &&
+        !Array.isArray(protectedPairing) &&
+        typeof (protectedPairing as Record<string, unknown>).expiresAt === 'number'
+          ? ((protectedPairing as Record<string, unknown>).expiresAt as number)
+          : undefined;
       return {
         ...(isDeviceIdentity(identity) ? { identity } : {}),
-        ...(typeof raw.sessionToken === 'string' ? { sessionToken: raw.sessionToken } : {}),
-        ...(isPendingPairing(raw.pendingPairing) ? { pendingPairing: raw.pendingPairing } : {}),
+        ...(protectedSessionToken !== undefined
+          ? { sessionToken: protectedSessionToken }
+          : typeof raw.sessionToken === 'string'
+            ? { sessionToken: raw.sessionToken }
+            : {}),
+        ...(protectedPairingCode !== undefined &&
+        protectedPairingExpiresAt !== undefined &&
+        Number.isSafeInteger(protectedPairingExpiresAt)
+          ? {
+              pendingPairing: {
+                code: protectedPairingCode,
+                expiresAt: protectedPairingExpiresAt,
+              },
+            }
+          : isPendingPairing(raw.pendingPairing)
+            ? { pendingPairing: raw.pendingPairing }
+            : {}),
       };
     } catch {
       return {};
@@ -120,7 +235,24 @@ export class JsonFileWorkerStore implements PersistentWorkerStore {
   }): void {
     mkdirSync(dirname(this.path), { recursive: true });
     const temporaryPath = `${this.path}.tmp-${randomUUID()}`;
-    writeFileSync(temporaryPath, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 });
+    const persisted: Record<string, unknown> = {
+      ...(state.identity === undefined ? {} : { identity: state.identity }),
+    };
+    if (state.sessionToken !== undefined) {
+      if (this.options.secretProtector === undefined) persisted.sessionToken = state.sessionToken;
+      else
+        persisted.protectedSessionToken = this.options.secretProtector.protect(state.sessionToken);
+    }
+    if (state.pendingPairing !== undefined) {
+      if (this.options.secretProtector === undefined)
+        persisted.pendingPairing = state.pendingPairing;
+      else
+        persisted.protectedPendingPairing = {
+          ciphertext: this.options.secretProtector.protect(state.pendingPairing.code),
+          expiresAt: state.pendingPairing.expiresAt,
+        };
+    }
+    writeFileSync(temporaryPath, JSON.stringify(persisted), { encoding: 'utf8', mode: 0o600 });
     renameSync(temporaryPath, this.path);
   }
 }

@@ -9,6 +9,8 @@ export interface Actor {
 /** Only this service identity may publish cross-account library media. */
 export const SHARED_LIBRARY_OWNER_ID = 'joy-media-library';
 export const MAX_WORKER_ATTEMPTS = 2_147_483_647;
+/** Prevent a Worker from pinning a lease indefinitely through a client value. */
+export const MAX_WORKER_LEASE_DURATION_MS = 5 * 60_000;
 const WORKER_ATTEMPT_BUDGET_EXHAUSTED = 'Worker attempt budget exhausted';
 /**
  * Provider jobs are intentionally fail-closed until their result contract is
@@ -1458,6 +1460,7 @@ export class LocalControlPlane implements ControlPlane {
     return job;
   }
   lease(workerId: string, now = Date.now(), durationMs = 30_000): Job | undefined {
+    validateWorkerLeaseDuration(durationMs);
     const worker = this.#workers.get(workerId);
     if (worker === undefined || worker.revoked || !worker.paired)
       throw new ControlPlaneError('WORKER_UNAUTHORIZED', workerId);
@@ -1507,6 +1510,7 @@ export class LocalControlPlane implements ControlPlane {
     durationMs = 30_000,
     leaseToken?: string,
   ): { readonly job: Job; readonly cancelRequested: boolean } {
+    validateWorkerLeaseDuration(durationMs);
     const job = this.ownedLease(workerId, jobId, now, leaseToken);
     if (!Number.isSafeInteger(progress) || progress < job.progress || progress > 100)
       throw new ControlPlaneError('PROGRESS_INVALID', jobId);
@@ -1946,6 +1950,14 @@ export function validateWorkerMaxAttempts(value: number | undefined): void {
     throw new ControlPlaneError(
       'JOB_PAYLOAD_INVALID',
       `maxAttempts must be an integer from 1 to ${MAX_WORKER_ATTEMPTS}`,
+    );
+}
+
+export function validateWorkerLeaseDuration(value: number): void {
+  if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_WORKER_LEASE_DURATION_MS)
+    throw new ControlPlaneError(
+      'REQUEST_INVALID',
+      `worker lease duration must be between 1ms and ${MAX_WORKER_LEASE_DURATION_MS}ms`,
     );
 }
 

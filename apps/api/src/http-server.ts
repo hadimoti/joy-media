@@ -3,6 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import {
   ControlPlaneError,
   MAX_WORKER_ATTEMPTS,
+  MAX_WORKER_LEASE_DURATION_MS,
   type Actor,
   type AssetLocationRecord,
   type AssetRegistration,
@@ -314,7 +315,8 @@ async function route(
       throw new ControlPlaneError('WORKER_SESSION_REQUIRED', 'worker session required');
     if (workerLeaseMatch !== null) {
       const body = await readJson(request, maxJsonBodyBytes);
-      const durationMs = optionalPositiveInteger(body, 'durationMs') ?? 30_000;
+      const durationMs =
+        optionalPositiveInteger(body, 'durationMs', MAX_WORKER_LEASE_DURATION_MS) ?? 30_000;
       const job = await options.controlPlane.lease(
         decodeURIComponent(workerId),
         Date.now(),

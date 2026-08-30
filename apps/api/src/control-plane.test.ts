@@ -2,10 +2,24 @@ import { describe, expect, it } from 'vitest';
 import {
   LocalControlPlane,
   MAX_WORKER_ATTEMPTS,
+  MAX_WORKER_LEASE_DURATION_MS,
   SHARED_LIBRARY_OWNER_ID,
   workerDerivativeId,
 } from './control-plane.js';
 describe('local control plane', () => {
+  it('bounds Worker lease and heartbeat durations', () => {
+    const api = new LocalControlPlane();
+    const owner = { id: 'lease-owner' };
+    api.createProject(owner, 'lease-project', 'Lease');
+    api.pairWorker(owner, 'lease-worker');
+    expect(() => api.lease('lease-worker', 100, MAX_WORKER_LEASE_DURATION_MS + 1)).toThrow(
+      'worker lease duration must be between 1ms and 300000ms',
+    );
+    expect(() => api.heartbeat('lease-worker', 'missing-job', 0, 100, -1)).toThrow(
+      'worker lease duration must be between 1ms and 300000ms',
+    );
+  });
+
   it('requires a registered cloud derivative for each source-job generation', () => {
     const api = new LocalControlPlane();
     const owner = { id: 'derivative-owner' };
