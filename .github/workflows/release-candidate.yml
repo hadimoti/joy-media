@@ -230,6 +230,8 @@ jobs:
             exit 1
           }
       - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec playwright install chromium
       - name: Run authenticated real-service desktop acceptance and evidence
         shell: bash
         run: |
