@@ -17,7 +17,9 @@ pass=${4:-}
 : "${JOY_MEDIA_CI_S3_ACCESS_KEY:?JOY_MEDIA_CI_S3_ACCESS_KEY is required}"
 : "${JOY_MEDIA_CI_S3_SECRET_KEY:?JOY_MEDIA_CI_S3_SECRET_KEY is required}"
 
-namespace="joy_${run_id}_${run_attempt}_${pass}"
+# S3 bucket names must be DNS-compatible; keep the same run/pass uniqueness
+# while avoiding underscores, which MinIO rejects as invalid bucket names.
+namespace="joy-${run_id}-${run_attempt}-${pass}"
 schema="ci_${run_id}_${run_attempt}_${pass}"
 bucket="joy-media-${namespace}"
 tmp_dir=$(mktemp -d)
