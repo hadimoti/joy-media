@@ -23,6 +23,28 @@ describe('JoyCode3DViewer resource lifecycle', () => {
     expect(textureDispose).toHaveBeenCalledTimes(1);
   });
 
+  it('disposes line and points renderables', () => {
+    const lineGeometry = new THREE.BufferGeometry();
+    const pointsGeometry = new THREE.BufferGeometry();
+    const lineMaterial = new THREE.LineBasicMaterial();
+    const pointsMaterial = new THREE.PointsMaterial();
+    const line = new THREE.Line(lineGeometry, lineMaterial);
+    const points = new THREE.Points(pointsGeometry, pointsMaterial);
+    const model = new THREE.Group();
+    model.add(line, points);
+    const lineGeometryDispose = vi.spyOn(lineGeometry, 'dispose');
+    const pointsGeometryDispose = vi.spyOn(pointsGeometry, 'dispose');
+    const lineMaterialDispose = vi.spyOn(lineMaterial, 'dispose');
+    const pointsMaterialDispose = vi.spyOn(pointsMaterial, 'dispose');
+
+    disposeThreeDModel(model);
+
+    expect(lineGeometryDispose).toHaveBeenCalledTimes(1);
+    expect(pointsGeometryDispose).toHaveBeenCalledTimes(1);
+    expect(lineMaterialDispose).toHaveBeenCalledTimes(1);
+    expect(pointsMaterialDispose).toHaveBeenCalledTimes(1);
+  });
+
   it('removes loaded roots without detaching scene helpers', () => {
     const scene = new THREE.Scene();
     const model = new THREE.Group();

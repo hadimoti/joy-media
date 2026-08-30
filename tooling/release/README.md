@@ -18,12 +18,13 @@ share one `runId`, timestamp, generator, phase, and source provenance.
 Browser metrics use Playwright and explicit editor hooks. PostgreSQL query
 rate is read only from the local server's `x-joy-db-query-count` response
 header. Timeline integrity requires the read-only
-`window.__JOY_RELEASE_TIMELINE_PROBE__` hook. Hidden-tab polling, query rate
-without that header, heap when `performance.memory` is unavailable, and any
-missing editor hook are emitted as unmeasured (`null`) and fail closed; no
-zero/pass placeholder is written. Omitting `--url` deliberately emits all
-four failed, provenance-bound artifacts so a missing run is visible to the
-release gate.
+`window.__JOY_RELEASE_TIMELINE_PROBE__` hook. Hidden-tab polling uses a second
+local tab and requires it to report `document.visibilityState=hidden`; query
+rate requires the server header on every measured response. If either cannot
+be measured (or heap/editor instrumentation is unavailable), the value is
+emitted as unmeasured (`null`) and fails closed; no zero/pass placeholder is
+written. Omitting `--url` deliberately emits all four failed,
+provenance-bound artifacts so a missing run is visible to the release gate.
 
 **Browser evidence contract.** The gate reads browser journeys from either `test-output/browser/journeys.json` in the repository or from `JOY_RELEASE_EVIDENCE.browserJourneys`. Each entry must point at an in-repo `evidencePath`, and the gate re-derives `verifiedAt`, `execution`, `deliveryChannel`, `inspectionState`, `postMotionPlacement`, and `sourceProvenance` from that evidence JSON rather than trusting the index entry. Release-ready evidence therefore needs both files: a journey index entry for `authenticated-editor-1.0`, and a matching journey evidence JSON whose `journeyId`/`status` are `authenticated-editor-1.0`/`verified` and whose assertions prove `verified-delivery`, passed inspection, at least two Motion placements, and a clean matching `sourceProvenance`.
 

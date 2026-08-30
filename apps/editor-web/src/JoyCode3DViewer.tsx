@@ -37,12 +37,19 @@ export function disposeThreeDModel(model: THREE.Object3D): void {
     );
   };
   model.traverse((child) => {
-    if (!(child instanceof THREE.Mesh)) return;
-    if (child.geometry !== undefined && !disposedGeometries.has(child.geometry)) {
-      disposedGeometries.add(child.geometry);
-      child.geometry.dispose();
+    if (
+      !(child instanceof THREE.Mesh) &&
+      !(child instanceof THREE.Line) &&
+      !(child instanceof THREE.Points)
+    )
+      return;
+    const renderable = child as THREE.Mesh | THREE.Line | THREE.Points;
+    if (renderable.geometry !== undefined && !disposedGeometries.has(renderable.geometry)) {
+      disposedGeometries.add(renderable.geometry);
+      renderable.geometry.dispose();
     }
-    const materials = child.material instanceof THREE.Material ? [child.material] : child.material;
+    const materials =
+      renderable.material instanceof THREE.Material ? [renderable.material] : renderable.material;
     if (!Array.isArray(materials)) return;
     materials.forEach((material) => {
       if (disposedMaterials.has(material)) return;

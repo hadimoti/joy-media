@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* global URL, process, console, setInterval, clearInterval, performance, window, document, PerformanceObserver */
 
 /**
  * Bounded, machine-generated PROOF-01 observer.
@@ -90,15 +91,31 @@ function parseArgs(argv) {
     const key = argv[i];
     const value = argv[i + 1];
     if (key === '--help' || key === '-h') args.help = true;
-    else if (key === '--url') ((args.url = value), (i += 1));
-    else if (key === '--output') ((args.output = value), (i += 1));
-    else if (key === '--phase') ((args.phase = value), (i += 1));
-    else if (key === '--warmup-ms') ((args.warmupMs = Number(value)), (i += 1));
-    else if (key === '--duration-ms') ((args.durationMs = Number(value)), (i += 1));
-    else if (key === '--category-selector') ((args.categorySelector = value), (i += 1));
-    else if (key === '--search-selector') ((args.searchSelector = value), (i += 1));
-    else if (key === '--favorite-selector') ((args.favoriteSelector = value), (i += 1));
-    else throw new Error(`unknown option: ${key}`);
+    else if (key === '--url') {
+      args.url = value;
+      i += 1;
+    } else if (key === '--output') {
+      args.output = value;
+      i += 1;
+    } else if (key === '--phase') {
+      args.phase = value;
+      i += 1;
+    } else if (key === '--warmup-ms') {
+      args.warmupMs = Number(value);
+      i += 1;
+    } else if (key === '--duration-ms') {
+      args.durationMs = Number(value);
+      i += 1;
+    } else if (key === '--category-selector') {
+      args.categorySelector = value;
+      i += 1;
+    } else if (key === '--search-selector') {
+      args.searchSelector = value;
+      i += 1;
+    } else if (key === '--favorite-selector') {
+      args.favoriteSelector = value;
+      i += 1;
+    } else throw new Error(`unknown option: ${key}`);
   }
   return args;
 }
@@ -328,14 +345,18 @@ async function probeTimeline(page, unmeasured) {
 
 async function runBrowser(url, options, metrics, unmeasured, notes) {
   const { chromium } = await loadPlaywright();
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, args: ['--enable-precise-memory-info'] });
   const context = await browser.newContext({ reducedMotion: 'no-preference' });
   const page = await context.newPage();
+  let hiddenPage = null;
   const startedAt = Date.now();
   const pollStartedAt = { value: 0 };
   const endpointCounts = new Map();
+  const hiddenEndpointCounts = new Map();
   const inflight = new Set();
+  const hiddenInflight = new Set();
   const requestKeys = new WeakMap();
+  const hiddenRequestKeys = new WeakMap();
   let duplicateInFlightRequests = 0;
   let uncaughtExceptions = 0;
   let navigationFailures = 0;
@@ -343,6 +364,10 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
   let maxPlayingPreviews = null;
   const heapSamples = [];
   let queryCount = 0;
+  let pollResponses = 0;
+  let queryHeaderResponses = 0;
+  let hiddenStartedAt = 0;
+  let hiddenVisibilityObserved = false;
   let initialEditorJsBytes = null;
   let longTaskDurations = null;
 
@@ -383,9 +408,48 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
   page.on('requestfailed', clearRequest);
   page.on('response', (response) => {
     if (!requestKeys.has(response.request())) return;
+    pollResponses += 1;
     const header = response.headers()['x-joy-db-query-count'];
-    if (header !== undefined && /^\d+$/u.test(header)) queryCount += Number(header);
+    if (header !== undefined && /^\d+$/u.test(header)) {
+      queryHeaderResponses += 1;
+      queryCount += Number(header);
+    }
   });
+
+  const attachHiddenTelemetry = (target) => {
+    target.on('pageerror', () => {
+      uncaughtExceptions += 1;
+    });
+    target.on('console', (message) => {
+      if (message.type() === 'error') uncaughtExceptions += 1;
+    });
+    target.on('requestfailed', (request) => {
+      if (request.isNavigationRequest()) navigationFailures += 1;
+      const key = hiddenRequestKeys.get(request);
+      if (key !== undefined) hiddenInflight.delete(key);
+    });
+    target.on('request', (request) => {
+      if (!requestIsPollable(request) || hiddenStartedAt <= 0) return;
+      const key = endpointKey(request);
+      hiddenRequestKeys.set(request, key);
+      if (hiddenInflight.has(key)) duplicateInFlightRequests += 1;
+      hiddenInflight.add(key);
+      hiddenEndpointCounts.set(key, (hiddenEndpointCounts.get(key) ?? 0) + 1);
+    });
+    target.on('requestfinished', (request) => {
+      const key = hiddenRequestKeys.get(request);
+      if (key !== undefined) hiddenInflight.delete(key);
+    });
+    target.on('response', (response) => {
+      if (!hiddenRequestKeys.has(response.request())) return;
+      pollResponses += 1;
+      const header = response.headers()['x-joy-db-query-count'];
+      if (header !== undefined && /^\d+$/u.test(header)) {
+        queryHeaderResponses += 1;
+        queryCount += Number(header);
+      }
+    });
+  };
 
   // Never let an accidentally embedded CDN or production asset turn this
   // local-only observer into live access. Loopback origins (including a
@@ -408,10 +472,25 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
         .reduce((sum, entry) => sum + (entry.transferSize || entry.encodedBodySize || 0), 0),
     );
     initialEditorJsBytes = Number.isFinite(resources) ? resources : null;
+    hiddenPage = await context.newPage();
+    attachHiddenTelemetry(hiddenPage);
+    await hiddenPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.bringToFront();
+    hiddenVisibilityObserved =
+      (await hiddenPage.evaluate(() => document.visibilityState)) === 'hidden';
+    if (!hiddenVisibilityObserved)
+      unmeasured.push('second local tab did not report document.visibilityState=hidden');
     await page.waitForTimeout(options.warmupMs);
     queryCount = 0;
+    pollResponses = 0;
+    queryHeaderResponses = 0;
     pollStartedAt.value = Date.now();
+    hiddenStartedAt = hiddenVisibilityObserved ? pollStartedAt.value : 0;
     const soakStartedAt = Date.now();
+    const longTaskBaselineDuration = await page.evaluate(() => {
+      if (!Array.isArray(window.__JOY_RELEASE_LONG_TASKS__)) return null;
+      return window.__JOY_RELEASE_LONG_TASKS__.reduce((sum, duration) => sum + duration, 0);
+    });
     const sample = async () => {
       const value = await page.evaluate(() => {
         const mounted = document.querySelectorAll('[data-preview-mounted="true"]').length;
@@ -526,15 +605,29 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
       (count) => count / (pollingDurationMs / 60_000),
     );
     const visibleRequestsPerMinute = endpointRates.length ? Math.max(...endpointRates) : 0;
+    const hiddenDurationMs = hiddenStartedAt > 0 ? Date.now() - hiddenStartedAt : 0;
+    const hiddenEndpointRates = [...hiddenEndpointCounts.values()].map(
+      (count) => count / (hiddenDurationMs / 60_000),
+    );
+    const hiddenRequestsPerMinute =
+      hiddenVisibilityObserved && hiddenDurationMs >= 10_000
+        ? hiddenEndpointRates.length
+          ? Math.max(...hiddenEndpointRates)
+          : 0
+        : null;
     const baseline = heapSamples
       .filter((item) => item.at >= 0 && item.at < 5 * 60_000)
       .map((item) => item.bytes);
     const plateau = median(baseline);
     const peak = heapSamples.length ? Math.max(...heapSamples.map((item) => item.bytes)) : null;
     const heapGrowthPercent = plateau && peak !== null ? ((peak - plateau) / plateau) * 100 : null;
-    const longTaskPercent = Array.isArray(longTaskDurations)
-      ? (longTaskDurations.reduce((sum, item) => sum + item, 0) / options.durationMs) * 100
+    const longTaskTotalDuration = Array.isArray(longTaskDurations)
+      ? longTaskDurations.reduce((sum, item) => sum + item, 0)
       : null;
+    const longTaskPercent =
+      longTaskTotalDuration !== null && longTaskBaselineDuration !== null && options.durationMs > 0
+        ? (Math.max(0, longTaskTotalDuration - longTaskBaselineDuration) / options.durationMs) * 100
+        : null;
     if (maxMountedPreviews === 0) unmeasured.push('preview mount hook observed zero nodes');
     if (maxMountedPreviews === null || maxPlayingPreviews === null)
       unmeasured.push('preview mount/play metrics unavailable');
@@ -545,16 +638,28 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
     if (categoryCount === 0) unmeasured.push('category hook selector matched no controls');
     if (!(await search.count())) unmeasured.push('search hook selector matched no control');
     if (!(await favorites.count())) unmeasured.push('favorite hook selector matched no controls');
-    unmeasured.push('hidden-tab polling rate is not safely emulatable by this observer');
-    unmeasured.push('PostgreSQL query rate requires server-side query instrumentation');
+    // Hidden-tab and query-header measurements are release-contract metrics;
+    // an uninstrumented run must remain failed instead of becoming a pass.
+    if (hiddenRequestsPerMinute === null)
+      unmeasured.push(
+        'hidden-tab polling requires a second local tab reporting visibilityState=hidden for at least 10s',
+      );
+    const queryRatePerMinute =
+      pollResponses > 0 && queryHeaderResponses === pollResponses
+        ? queryCount / (pollingDurationMs / 60_000)
+        : null;
+    if (queryRatePerMinute === null)
+      unmeasured.push(
+        'PostgreSQL query rate requires x-joy-db-query-count on every measured local response',
+      );
     metrics.polling = {
       artifactPath: 'test-output/release-performance/polling.json',
       warmupMs: options.warmupMs,
       durationMs: pollingDurationMs,
       visibleRequestsPerMinute,
-      hiddenRequestsPerMinute: null,
+      hiddenRequestsPerMinute,
       duplicateInFlightRequests,
-      queryRatePerMinute: queryCount / (pollingDurationMs / 60_000),
+      queryRatePerMinute,
     };
     metrics.effectsSoak = {
       artifactPath: 'test-output/release-performance/effects-soak.json',
@@ -585,6 +690,7 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
     );
     notes.push('browser run failed closed; partial values are not promoted to passing metrics');
   } finally {
+    if (hiddenPage !== null) await hiddenPage.close().catch(() => undefined);
     await browser.close();
   }
 }

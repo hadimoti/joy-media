@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { observe, isLoopbackUrl } from '../release-performance-observer.mjs';
 
@@ -15,13 +16,21 @@ describe('release performance observer safety contract', () => {
 
   it('emits all four shared-metadata artifacts when browser evidence is unavailable', async () => {
     const output = mkdtempSync(join(tmpdir(), 'joy-release-observer-'));
-    const result = await observe({ root: output, output: 'evidence' });
+    const root = resolve(fileURLToPath(new URL('../../../', import.meta.url)));
+    const result = await observe({ root, output });
     expect(result.status).toBe('failed');
     expect(result.measured).toBe(false);
+    if (result.unmeasured.some((item: string) => item.includes('source worktree is dirty'))) {
+      expect(result.unmeasured).toContain(
+        'source worktree is dirty; observer refuses to produce release evidence',
+      );
+    } else {
+      expect(result.unmeasured).toContain(
+        'no --url supplied; Playwright/browser behavior was not measured',
+      );
+    }
     const names = ['polling.json', 'effects-soak.json', 'timeline-integrity.json', 'editor.json'];
-    const documents = names.map((name) =>
-      JSON.parse(readFileSync(join(output, 'evidence', name), 'utf8')),
-    );
+    const documents = names.map((name) => JSON.parse(readFileSync(join(output, name), 'utf8')));
     expect(documents).toHaveLength(4);
     for (const document of documents) {
       expect(document.runId).toBe(result.runId);
