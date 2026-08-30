@@ -6990,6 +6990,10 @@ function MonitorPanel() {
         <p className="empty-hint">Loading monitor…</p>
       </article>
     );
+  return <MonitorPanelContent context={context} />;
+}
+
+function MonitorPanelContent({ context }: { readonly context: EditorPanelContextValue }) {
   const {
     state,
     previewVideoFrame,
