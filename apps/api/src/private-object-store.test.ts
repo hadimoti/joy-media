@@ -161,6 +161,30 @@ describe('RclonePrivateObjectStore', () => {
     await pending;
   });
 
+  it('aborts a stalled injected S3 operation at the configured deadline', async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    const store = new RclonePrivateObjectStore({
+      remotePrefix: 'parspack:c212734/sweden-backups/joy-media',
+      operationTimeoutMs: 1_000,
+      s3: {
+        async put() {},
+        async get(_ref, options) {
+          signal = options?.signal;
+          return new Promise<Uint8Array>(() => undefined);
+        },
+        async remove() {},
+      },
+    });
+
+    const pending = expect(store.get(descriptor)).rejects.toThrow(
+      'private object store operation timed out',
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    await pending;
+    expect(signal?.aborted).toBe(true);
+  });
+
   it('rejects unsafe object operation timeout configuration', () => {
     expect(
       () =>

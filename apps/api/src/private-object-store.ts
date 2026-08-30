@@ -32,6 +32,13 @@ export interface RclonePrivateObjectStoreOptions {
   readonly operationTimeoutMs?: number;
 }
 
+/** Cancellation and deadline passed to an S3 operation. Implementations must
+ * stop any network/body work when the signal is aborted. */
+export interface S3ObjectOperationOptions {
+  readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
+}
+
 export interface RcloneRunner {
   run(args: readonly string[], input?: Uint8Array, options?: RcloneRunOptions): Promise<Uint8Array>;
 }
@@ -72,7 +79,7 @@ export class RclonePrivateObjectStore implements PrivateObjectStore {
     validateDescriptor(descriptor);
     verify(descriptor, bytes);
     if (this.s3) {
-      await this.s3.put(descriptor.ref, bytes);
+      await this.runS3((options) => this.s3!.put(descriptor.ref, bytes, options));
       return;
     }
     await this.runRclone(['rcat', this.pathFor(descriptor.ref), '--log-level', 'ERROR'], bytes);
@@ -81,7 +88,7 @@ export class RclonePrivateObjectStore implements PrivateObjectStore {
   async get(descriptor: PrivateObjectDescriptor): Promise<Uint8Array> {
     validateDescriptor(descriptor);
     const bytes = this.s3
-      ? await this.s3.get(descriptor.ref)
+      ? await this.runS3((options) => this.s3!.get(descriptor.ref, options))
       : await this.runRclone(['cat', this.pathFor(descriptor.ref), '--log-level', 'ERROR']);
     verify(descriptor, bytes);
     return bytes;
@@ -90,7 +97,7 @@ export class RclonePrivateObjectStore implements PrivateObjectStore {
   async remove(ref: string): Promise<void> {
     if (!isOpaqueRef(ref)) throw new TypeError('object-store ref is invalid');
     if (this.s3) {
-      await this.s3.remove(ref);
+      await this.runS3((options) => this.s3!.remove(ref, options));
       return;
     }
     await this.runRclone(['deletefile', this.pathFor(ref), '--log-level', 'ERROR']);
@@ -152,6 +159,25 @@ export class RclonePrivateObjectStore implements PrivateObjectStore {
       'private object store operation timed out',
     );
   }
+
+  private async runS3<T>(operation: (options: S3ObjectOperationOptions) => Promise<T>): Promise<T> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new Error('private object store operation timed out'));
+      }, this.operationTimeoutMs);
+    });
+    try {
+      return await Promise.race([
+        operation({ timeoutMs: this.operationTimeoutMs, signal: controller.signal }),
+        timeout,
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
 }
 
 export class PrivateObjectIntegrityError extends Error {
@@ -211,9 +237,9 @@ class SpawnRcloneRunner implements RcloneRunner {
 }
 
 export interface S3ObjectClient {
-  put(ref: string, bytes: Uint8Array): Promise<void>;
-  get(ref: string): Promise<Uint8Array>;
-  remove(ref: string): Promise<void>;
+  put(ref: string, bytes: Uint8Array, options?: S3ObjectOperationOptions): Promise<void>;
+  get(ref: string, options?: S3ObjectOperationOptions): Promise<Uint8Array>;
+  remove(ref: string, options?: S3ObjectOperationOptions): Promise<void>;
   probeReadiness?(options: PrivateObjectStoreReadinessOptions): Promise<void>;
 }
 
@@ -315,24 +341,29 @@ class SigV4S3ObjectClient implements S3ObjectClient {
       throw new TypeError('private object store endpoint must use https');
   }
 
-  async put(ref: string, bytes: Uint8Array): Promise<void> {
+  async put(ref: string, bytes: Uint8Array, options: S3ObjectOperationOptions = {}): Promise<void> {
     if (!isOpaqueRef(ref)) throw new TypeError('object-store ref is invalid');
-    await this.request('PUT', ref, bytes);
+    await this.request('PUT', ref, bytes, options);
   }
 
-  async get(ref: string): Promise<Uint8Array> {
+  async get(ref: string, options: S3ObjectOperationOptions = {}): Promise<Uint8Array> {
     if (!isOpaqueRef(ref)) throw new TypeError('object-store ref is invalid');
-    return this.request('GET', ref);
+    return this.request('GET', ref, undefined, options);
   }
 
-  async remove(ref: string): Promise<void> {
+  async remove(ref: string, options: S3ObjectOperationOptions = {}): Promise<void> {
     if (!isOpaqueRef(ref)) throw new TypeError('object-store ref is invalid');
-    await this.request('DELETE', ref);
+    await this.request('DELETE', ref, undefined, options);
   }
 
   async probeReadiness(options: PrivateObjectStoreReadinessOptions = {}): Promise<void> {
     try {
-      await this.request('GET', 'joy-media-readiness-probe', undefined, options.timeoutMs);
+      await this.request(
+        'GET',
+        'joy-media-readiness-probe',
+        undefined,
+        options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs },
+      );
     } catch (error) {
       // A signed 404 proves the bucket endpoint and credentials are reachable
       // without mutating or disclosing any private object. Other failures are
@@ -346,8 +377,9 @@ class SigV4S3ObjectClient implements S3ObjectClient {
     method: 'PUT' | 'GET' | 'DELETE',
     ref: string,
     bytes?: Uint8Array,
-    timeoutMs = this.operationTimeoutMs,
+    options: S3ObjectOperationOptions = {},
   ): Promise<Uint8Array> {
+    const timeoutMs = options.timeoutMs ?? this.operationTimeoutMs;
     const body = bytes ? Buffer.from(bytes) : undefined;
     const payloadHash = createHash('sha256')
       .update(body ?? '')
@@ -407,6 +439,7 @@ class SigV4S3ObjectClient implements S3ObjectClient {
             authorization,
             ...(body ? { 'content-length': String(body.byteLength) } : {}),
           },
+          signal: options.signal,
         },
         (res) => {
           const chunks: Buffer[] = [];
