@@ -269,7 +269,12 @@ export function remuxBrowserMp4(
         ? []
         : [
             '-vf',
-            `setpts=N/(${frameRate}*TB)`,
+            // CanvasCaptureMediaStreamTrack is realtime and may deliver one
+            // fewer frame on a cold/software Chromium encoder. Keep the
+            // authored cadence and clone the terminal decoded frame when the
+            // recorder is short, so the remuxed contract is exactly the
+            // manifest's frame count rather than silently truncating it.
+            `setpts=N/(${frameRate}*TB),tpad=stop_mode=clone:stop=-1`,
             '-af',
             'asetpts=PTS-STARTPTS,apad',
             '-frames:v',

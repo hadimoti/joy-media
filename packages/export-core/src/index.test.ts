@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -107,5 +108,43 @@ describe('deterministic export contract', () => {
     expect(probe.frameRate).toBe(30);
     expect(probe.durationUs).toBeGreaterThanOrEqual(60_000);
     expect(probe.durationUs).toBeLessThanOrEqual(100_000);
+  });
+
+  it('pads a short browser capture to the authored frame count', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-remux-short-capture-'));
+    const fixturePath = join(directory, 'short-browser.mp4');
+    const outputPath = join(directory, 'normalized.mp4');
+    const frames = Array.from({ length: 29 }, (_, index) => {
+      const frame = new Uint8Array(manifest.width * manifest.height * 4);
+      for (let offset = 0; offset < frame.length; offset += 4) {
+        frame[offset] = index * 8;
+        frame[offset + 1] = 220;
+        frame[offset + 3] = 255;
+      }
+      return frame;
+    });
+    renderRgbaFrames({ ...manifest, durationUs: 1_000_000 }, frames, fixturePath);
+
+    const probe = remuxBrowserMp4(fixturePath, outputPath, manifest.frameRate, 30);
+    const countResult = spawnSync(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        '-count_frames',
+        '-select_streams',
+        'v:0',
+        '-show_entries',
+        'stream=nb_read_frames',
+        '-of',
+        'default=nw=1:nk=1',
+        outputPath,
+      ],
+      { encoding: 'utf8', shell: false },
+    );
+    expect(countResult.status).toBe(0);
+    expect(Number(countResult.stdout.trim())).toBe(30);
+    expect(probe.durationUs).toBeGreaterThanOrEqual(950_000);
+    expect(probe.durationUs).toBeLessThanOrEqual(1_050_000);
   });
 });
