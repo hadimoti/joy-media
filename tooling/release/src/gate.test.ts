@@ -245,6 +245,50 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(acceptance).toContain('test -z "$(git status --porcelain)"');
   });
 
+  it('requires a separate real-service acceptance/evidence pass before release proof', () => {
+    const workflow = readFileSync(
+      resolve(import.meta.dirname, '../../../.github/workflows/release-candidate.yml'),
+      'utf8',
+    );
+    const realAcceptance = workflow.slice(workflow.indexOf('\n  real-service-acceptance:'));
+    expect(realAcceptance).toContain('runs-on: [self-hosted, linux, x64, joy-media-acceptance]');
+    expect(realAcceptance).toContain('needs: [validate-candidate, acceptance]');
+    expect(realAcceptance).toContain(
+      'test "${JOY_MEDIA_CI_ACCEPTANCE_PROFILE:-}" = \'real-services\'',
+    );
+    expect(realAcceptance).toContain('test "${JOY_MEDIA_CI_ACCEPTANCE_WORKER:-}" = \'disposable\'');
+    expect(realAcceptance).toContain('JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND');
+    expect(realAcceptance).toContain('test-output/browser/journeys.json');
+    expect(realAcceptance).toContain('test-output/release-performance/polling.json');
+    expect(realAcceptance).toContain('test-output/delivery/result.json');
+    expect(realAcceptance).toContain('test-output/windows/acceptance.json');
+    expect(realAcceptance).toContain('test-output/operations/restore.json');
+    expect(realAcceptance).toContain('pnpm run release:gate');
+    expect(realAcceptance).toContain('test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}"');
+  });
+
+  it('validates the candidate before checkout and always checks Worker teardown', () => {
+    const workflow = readFileSync(
+      resolve(import.meta.dirname, '../../../.github/workflows/release-candidate.yml'),
+      'utf8',
+    );
+    const validation = workflow.slice(workflow.indexOf('\n  validate-candidate:'));
+    expect(validation).toContain('Validate immutable candidate input before checkout');
+    expect(validation).toContain('^[0-9a-f]{40}$');
+    expect(validation).toContain(
+      'https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/${CANDIDATE_SHA}',
+    );
+    expect(validation).toContain('resolved_sha');
+    const windows = workflow.slice(workflow.indexOf('\n  windows-worker-clean:'));
+    expect(windows).toContain('needs: [validate-candidate]');
+    expect(windows).toContain('joy-worker-clean-" + $env:CANDIDATE_SHA');
+    expect(windows).toContain('Verify clean Worker teardown\n        if: always()');
+    expect(windows).toContain("Get-Process -Name 'joy-worker'");
+    const linux = workflow.slice(workflow.indexOf('\n  linux-real-services:'));
+    expect(linux).toContain('needs: [validate-candidate]');
+    expect(linux).toContain('Verify no untracked teardown residue\n        if: always()');
+  });
+
   it('verifies the self-hosted FFmpeg/FFprobe toolchain before CI dependencies', () => {
     const workflow = readFileSync(
       resolve(import.meta.dirname, '../../../.github/workflows/ci.yml'),

@@ -112,6 +112,21 @@ unconditionally tears it down. The clean Windows runner must set
 `JOY_MEDIA_CI_ACCEPTANCE_PROFILE=fixture-only` and must not expose `JOY_MEDIA_OPENCLI_PROFILE`.
 These values are runner-local configuration, never repository secrets or committed files.
 
+After the fixture matrix, the same workflow runs a separate `real-service-acceptance` job twice
+on the isolated acceptance runner. That job is deliberately fail-closed: it requires
+`JOY_MEDIA_CI_ACCEPTANCE_PROFILE=real-services`,
+`JOY_MEDIA_CI_ACCEPTANCE_WORKER=disposable`, and an executable runner-local
+`JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND`. The command receives
+`<candidate-sha> <run-id> <run-attempt> <pass>` and must provision disposable authenticated
+services/Worker state, exercise all seven desktop profiles, run the bounded performance observer,
+and emit only redacted, candidate-bound evidence at
+`test-output/browser/journeys.json`, `test-output/release-performance/{polling,effects-soak,timeline-integrity,editor}.json`,
+`test-output/delivery/result.json`, `test-output/windows/acceptance.json`, and
+`test-output/operations/restore.json`. The job then runs `pnpm run release:gate` against that
+evidence, so a green fixture matrix cannot be mistaken for real-service release proof. The
+acceptance harness must never use `JOY_MEDIA_OPENCLI_PROFILE`, owner cookies, production
+credentials, or a production bucket.
+
 Every release lane must generate a unique run ID, namespace its database/schema, object prefix,
 ports, projects, Worker state, and temporary paths, and unconditionally tear them down. Retain only
 redacted summaries, manifests, hashes, SBOM, signatures, and provenance. Never upload `.env`, DB

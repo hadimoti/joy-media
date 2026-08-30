@@ -34,4 +34,15 @@ provenance-bound artifacts so a missing run is visible to the release gate.
 
 **Must not:** Shipping when §32.7 release gates fail.
 
+**Self-hosted candidate workflow.** The manually dispatched release workflow keeps the inexpensive
+fixture matrix separate from the real-service acceptance lane. The acceptance runner must set
+`JOY_MEDIA_CI_ACCEPTANCE_PROFILE=real-services`,
+`JOY_MEDIA_CI_ACCEPTANCE_WORKER=disposable`, and an executable
+`JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND`; the command receives the candidate SHA, run ID, run
+attempt, and pass number. It is responsible for isolated PostgreSQL/object storage/Worker
+credentials and all seven desktop profiles, then emits the redacted browser, performance,
+delivery, Windows, and restore files documented above. The workflow invokes `pnpm run release:gate`
+on those files for both passes and fails if the command or any required evidence is absent. It
+never receives the owner OpenCLI profile or production credentials.
+
 Dependency rule (§9.1): the graph points inward — apps depend on packages, packages depend on schema/primitives, never the reverse, and core packages never import from `apps/*`.
