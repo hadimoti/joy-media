@@ -475,6 +475,21 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
 
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    // The editor route intentionally opens at the project library. Enter a
+    // disposable local project before collecting editor/effects/timeline
+    // evidence; observing the library shell would otherwise produce a clean
+    // but meaningless zero-control sample.
+    const projectCard = page.locator('button.project-library-card').first();
+    if (await projectCard.count()) {
+      await projectCard.click({ timeout: 10_000 });
+      await page.locator('[aria-label="Enhance"]').first().click({ timeout: 10_000 });
+      await page.locator('.feature-hub--enhance').waitFor({ state: 'visible', timeout: 10_000 });
+    }
+    // Search is a compact toggle by design; open it before resolving the
+    // input hook so the soak can exercise search terms without guessing a
+    // panel-specific DOM shape.
+    const searchToggle = page.getByRole('button', { name: 'Search Effects', exact: true });
+    if (await searchToggle.count()) await searchToggle.click({ timeout: 5_000 });
     const resources = await page.evaluate(() =>
       performance
         .getEntriesByType('resource')

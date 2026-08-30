@@ -50,12 +50,35 @@ describe('db query observability', () => {
         return response;
       },
       writeHead: (_status: number, _headers?: Record<string, string>) => response,
+      end: (_chunk?: unknown) => response,
     } as unknown as Parameters<typeof attachDbQueryCountHeader>[0];
     attachDbQueryCountHeader(response);
 
     await withDbQueryContext(async () => {
       await pool.query('select 1');
       response.writeHead(200, { 'content-type': 'application/json' });
+    });
+
+    expect(headers.get('x-joy-db-query-count')).toBe('1');
+  });
+
+  it('writes the count before implicit headers are committed by response.end', async () => {
+    const pool = instrumentPostgresPool(fakePool());
+    const headers = new Map<string, string>();
+    const response = {
+      hasHeader: (name: string) => headers.has(name),
+      setHeader: (name: string, value: string) => {
+        headers.set(name, value);
+        return response;
+      },
+      writeHead: (_status: number, _headers?: Record<string, string>) => response,
+      end: (_chunk?: unknown) => response,
+    } as unknown as Parameters<typeof attachDbQueryCountHeader>[0];
+    attachDbQueryCountHeader(response);
+
+    await withDbQueryContext(async () => {
+      await pool.query('select 1');
+      response.end(JSON.stringify({ ok: true }));
     });
 
     expect(headers.get('x-joy-db-query-count')).toBe('1');

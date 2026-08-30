@@ -72,8 +72,10 @@ export function attachDbQueryCountHeader(response: {
   hasHeader(name: string): boolean;
   setHeader(name: string, value: string): unknown;
   writeHead: ServerResponse['writeHead'];
+  end: ServerResponse['end'];
 }): void {
   const writeHead = response.writeHead.bind(response);
+  const end = response.end.bind(response);
   response.writeHead = ((
     statusCode: number,
     statusMessageOrHeaders?: string | OutgoingHttpHeaders,
@@ -87,6 +89,18 @@ export function attachDbQueryCountHeader(response: {
     }
     return writeHead(statusCode, statusMessageOrHeaders);
   }) as typeof response.writeHead;
+  response.end = ((
+    chunk?: unknown,
+    encoding?: BufferEncoding | (() => void),
+    callback?: () => void,
+  ) => {
+    setHeader(response);
+    if (typeof encoding === 'function') return end(chunk as never, encoding);
+    if (encoding === undefined) return end(chunk as never);
+    return callback === undefined
+      ? end(chunk as never, encoding)
+      : end(chunk as never, encoding, callback);
+  }) as typeof response.end;
 }
 
 function setHeader(response: {
