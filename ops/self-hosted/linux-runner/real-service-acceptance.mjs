@@ -164,7 +164,9 @@ try {
   await waitForHttp(webUrl, 120_000);
   await runDesktopMatrix(webUrl, apiUrl);
   await recordJourney(webUrl, apiUrl, token, candidateSha, pool);
-  await runObserver(webUrl, token);
+  if (process.env.JOY_MEDIA_REAL_ACCEPTANCE_SMOKE_ONLY !== '1') {
+    await runObserver(webUrl, token);
+  }
   await recordOperationalEvidence(candidateSha, runId, runAttempt, pass);
 } finally {
   if (browser) await browser.close().catch(() => undefined);
