@@ -228,7 +228,10 @@ export async function openPanel(page: Page, label: string): Promise<Locator> {
     await featureTab.click();
     const panelTitle = PANEL_TITLE_BY_ID[panelId];
     if (panelTitle === undefined) throw new Error(`Unknown panel title for ${label}`);
-    await expect(hub.locator('.joy-panel-title', { hasText: panelTitle }).first()).toBeVisible();
+    // Panel titles are intentionally not rendered as duplicate visible chrome.
+    // Assert the accessible panel root instead so this journey follows the
+    // same contract as the desktop UI (dock/tab identity + aria-label).
+    await expect(hub.getByRole('article', { name: panelTitle, exact: true })).toBeVisible();
     return featureTab;
   }
 
@@ -248,7 +251,9 @@ export async function openPanel(page: Page, label: string): Promise<Locator> {
   } else if (liveLabel === 'Joy Code') {
     await expect(page.locator('.joy-code-panel')).toBeVisible();
   } else {
-    await expect(page.locator('.joy-panel-title', { hasText: liveLabel }).first()).toBeVisible();
+    // The shared shell keeps the panel name accessible while omitting the
+    // redundant visible title row.
+    await expect(page.getByRole('article', { name: liveLabel, exact: true })).toBeVisible();
   }
   return tab;
 }
