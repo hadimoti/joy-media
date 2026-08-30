@@ -217,6 +217,19 @@ const WORKER_READ_CACHE_TTL_MS = 12_000;
 const fetchInstanceIds = new WeakMap<typeof globalThis.fetch, number>();
 let nextFetchInstanceId = 1;
 
+/**
+ * A Worker hello/pairing can be completed by a protocol client outside the
+ * BrowserControlPlaneClient instance (the pairing UI and acceptance journeys
+ * intentionally exercise the raw protocol).  Drop the short-lived shared
+ * projection before an explicit refresh so that a newly connected Worker is
+ * visible immediately instead of waiting for the cache TTL.
+ */
+export function invalidateWorkerReadCache(): void {
+  for (const key of sharedReadCache.keys()) {
+    if (key.split('\u0000')[1] === '/v1/workers') sharedReadCache.delete(key);
+  }
+}
+
 function fetchInstanceId(): number {
   const current = globalThis.fetch;
   const existing = fetchInstanceIds.get(current);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BrowserControlPlaneClient } from './control-plane-client.js';
+import { BrowserControlPlaneClient, invalidateWorkerReadCache } from './control-plane-client.js';
 
 describe('BrowserControlPlaneClient', () => {
   it('sends the local session token only to the Media API', async () => {
@@ -101,6 +101,30 @@ describe('BrowserControlPlaneClient', () => {
     } finally {
       globalThis.fetch = original;
     }
+  });
+
+  it('invalidates the worker projection cache for explicit pairing refreshes', async () => {
+    const requests: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      requests.push(String(input));
+      return json(200, { data: [] });
+    };
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => 'joy-session-token',
+      );
+      await client.workers();
+      invalidateWorkerReadCache();
+      await client.workers();
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(requests).toEqual([
+      'https://media.joyteam.ir/api/v1/workers',
+      'https://media.joyteam.ir/api/v1/workers',
+    ]);
   });
 
   it('rejects with no network call when there is no stored session', async () => {

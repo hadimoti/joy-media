@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BrowserControlPlaneClient,
+  invalidateWorkerReadCache,
   type BrowserJob,
   type BrowserWorker,
 } from './control-plane-client.js';
@@ -161,7 +162,13 @@ export function JobsPanel({
     }
   }, [client, controlPlaneReady, projectId, projectInitialized, projectTitle]);
 
-  const refresh = useCallback(() => pollingRef.current?.refresh() ?? load(), [load]);
+  const refresh = useCallback(() => {
+    // Pair/hello is also used directly by the protocol acceptance journeys;
+    // an explicit user refresh must bypass the cross-panel worker projection
+    // cache so newly connected capabilities become actionable immediately.
+    invalidateWorkerReadCache();
+    return pollingRef.current?.refresh() ?? load();
+  }, [load]);
 
   useEffect(() => {
     const onJobsChanged = () => {
