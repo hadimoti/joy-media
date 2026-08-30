@@ -178,6 +178,29 @@ describe('JOY Studio 1.0 release gate', () => {
     );
   });
 
+  it('isolates and always cleans release acceptance Playwright outputs', () => {
+    const workflow = readFileSync(
+      resolve(import.meta.dirname, '../../../.github/workflows/release-candidate.yml'),
+      'utf8',
+    );
+    const acceptance = workflow.slice(workflow.indexOf('\n  acceptance:'));
+
+    expect(acceptance).toContain(
+      'PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-playwright-report-acceptance-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}',
+    );
+    expect(acceptance).toContain(
+      'PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-playwright-results-acceptance-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}',
+    );
+    expect(acceptance).toContain('- name: Verify acceptance teardown\n        if: always()');
+    expect(acceptance).toContain(
+      'for output_path in "$PLAYWRIGHT_HTML_REPORT" "$PLAYWRIGHT_TEST_RESULTS_DIR"; do',
+    );
+    expect(acceptance).toContain('"$RUNNER_TEMP"/*) ;;');
+    expect(acceptance).toContain('rm -rf -- "$output_path"');
+    expect(acceptance).toContain('test ! -e "$output_path"');
+    expect(acceptance).toContain('test -z "$(git status --porcelain)"');
+  });
+
   it('verifies the self-hosted FFmpeg/FFprobe toolchain before CI dependencies', () => {
     const workflow = readFileSync(
       resolve(import.meta.dirname, '../../../.github/workflows/ci.yml'),

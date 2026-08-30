@@ -136,9 +136,23 @@ jobs:
         env:
           CI: true
           PLAYWRIGHT_WORKERS: 1
-          PLAYWRIGHT_HTML_REPORT: playwright-report-acceptance-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
-          PLAYWRIGHT_TEST_RESULTS_DIR: playwright-test-results-acceptance-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-playwright-report-acceptance-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-playwright-results-acceptance-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
         run: pnpm exec playwright test tests/e2e --project=desktop-primary --workers=1
       - name: Verify acceptance teardown
+        if: always()
         shell: bash
-        run: test -z "$(git status --porcelain)"
+        env:
+          PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-playwright-report-acceptance-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-playwright-results-acceptance-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          for output_path in "$PLAYWRIGHT_HTML_REPORT" "$PLAYWRIGHT_TEST_RESULTS_DIR"; do
+            case "$output_path" in
+              "$RUNNER_TEMP"/*) ;;
+              *) echo "refusing to clean output outside RUNNER_TEMP: $output_path" >&2; exit 1 ;;
+            esac
+            rm -rf -- "$output_path"
+            test ! -e "$output_path"
+          done
+          test -z "$(git status --porcelain)"
