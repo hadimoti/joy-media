@@ -371,7 +371,7 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
   let initialEditorJsBytes = null;
   let longTaskDurations = null;
 
-  await page.addInitScript(() => {
+  await context.addInitScript(() => {
     window.__JOY_RELEASE_OBSERVER__ = true;
     window.__JOY_RELEASE_LONG_TASKS__ = [];
     try {
@@ -384,7 +384,7 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
     }
   });
   if (options.token !== undefined) {
-    await page.addInitScript((token) => {
+    await context.addInitScript((token) => {
       window.localStorage.setItem('joy-media-session-token', token);
     }, options.token);
   } else {
