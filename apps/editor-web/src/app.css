@@ -314,6 +314,15 @@ input[type='checkbox']:focus-visible {
   text-align: center;
 }
 
+.joy-panel-hint {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0.15rem 0;
+  color: var(--joy-text-faint);
+  font-size: var(--joy-type-2xs);
+  text-align: center;
+}
+
 /* The body is the only thing that scrolls. */
 .joy-panel-body,
 .joy-panel-scroll {

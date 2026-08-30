@@ -58,6 +58,8 @@ export interface PanelShellProps {
   readonly inactive?: boolean | undefined;
   /** One short line under the tabs saying why (§3c.4). Usually paired with `inactive`. */
   readonly note?: string | undefined;
+  /** Dynamic status notes announce; passive hints stay quiet. */
+  readonly noteMode?: 'status' | 'hint' | undefined;
   /** Skip the centered title row (dock tab already names the panel). */
   readonly hideHeader?: boolean | undefined;
   readonly children: ReactNode;
@@ -75,6 +77,7 @@ export function PanelShell({
   tabsInHeader = false,
   inactive = false,
   note,
+  noteMode = 'status',
   hideHeader = false,
   children,
 }: PanelShellProps) {
@@ -211,7 +214,11 @@ export function PanelShell({
       )}
 
       {note !== undefined && (
-        <p className="joy-panel-note" role="status" aria-live="polite">
+        <p
+          className={noteMode === 'hint' ? 'joy-panel-hint' : 'joy-panel-note'}
+          role={noteMode === 'hint' ? undefined : 'status'}
+          aria-live={noteMode === 'hint' ? undefined : 'polite'}
+        >
           {note}
         </p>
       )}

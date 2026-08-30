@@ -58,4 +58,16 @@ describe('PanelShell header actions', () => {
     expect(markup).toContain('class="joy-panel-note"');
     expect(markup).not.toContain('lang=');
   });
+
+  it('renders passive hints without the live status contract', () => {
+    const markup = renderToStaticMarkup(
+      <PanelShell title="Inspector" note="Select a clip to edit its properties." noteMode="hint">
+        <p>Body</p>
+      </PanelShell>,
+    );
+
+    expect(markup).toContain('class="joy-panel-hint"');
+    expect(markup).not.toContain('role="status"');
+    expect(markup).not.toContain('aria-live=');
+  });
 });
