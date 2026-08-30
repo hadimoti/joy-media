@@ -4533,7 +4533,16 @@ function EditorWorkspace({
 
   function Panel({ api }: IDockviewPanelProps) {
     const context = useContext(EditorPanelContext);
-    if (context === undefined) throw new Error('editor panel context is unavailable');
+    // Dockview can mount a cached panel one frame before its provider is
+    // attached (notably during StrictMode/HMR and layout restoration). Keep
+    // that transient state inside the panel instead of tripping the global
+    // error boundary and logging a false application error.
+    if (context === undefined)
+      return (
+        <article className="joy-panel-root" aria-label={panelLabel(api.id)}>
+          <p className="empty-hint">Loading panel…</p>
+        </article>
+      );
     const createHub = api.id === 'media';
     const enhanceHub = api.id === 'effects';
     const effectivePanelId = createHub
@@ -6975,7 +6984,12 @@ function EditorWorkspace({
 
 function MonitorPanel() {
   const context = useContext(EditorPanelContext);
-  if (context === undefined) throw new Error('editor panel context is unavailable');
+  if (context === undefined)
+    return (
+      <article className="joy-panel-root" aria-label="Monitor">
+        <p className="empty-hint">Loading monitor…</p>
+      </article>
+    );
   const {
     state,
     previewVideoFrame,
