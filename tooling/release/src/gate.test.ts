@@ -267,17 +267,23 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(realAcceptance).toContain('test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}"');
   });
 
-  it('validates the candidate before checkout and always checks Worker teardown', () => {
+  it('validates the checked-out candidate and always checks Worker teardown', () => {
     const workflow = readFileSync(
       resolve(import.meta.dirname, '../../../.github/workflows/release-candidate.yml'),
       'utf8',
     );
-    const validation = workflow.slice(workflow.indexOf('\n  validate-candidate:'));
-    expect(validation).toContain('Validate immutable candidate input before checkout');
+    const validationStart = workflow.indexOf('\n  validate-candidate:');
+    const validationEnd = workflow.indexOf('\n  linux-real-services:');
+    const validation = workflow.slice(validationStart, validationEnd);
+    expect(validation).toContain('Validate immutable candidate input');
     expect(validation).toContain('^[0-9a-f]{40}$');
-    expect(validation).toContain('git -C "$candidate_dir" init --quiet');
-    expect(validation).toContain('fetch --no-tags --depth=1 origin "$CANDIDATE_SHA"');
+    expect(validation).toContain('ref: ${{ env.CANDIDATE_SHA }}');
+    expect(validation).toContain('resolved_sha="$(git rev-parse HEAD)"');
     expect(validation).toContain('resolved_sha');
+    expect(validation.indexOf('uses: actions/checkout@')).toBeLessThan(
+      validation.indexOf('Validate immutable candidate input'),
+    );
+    expect(validation).toContain('persist-credentials: false');
     const windows = workflow.slice(workflow.indexOf('\n  windows-worker-clean:'));
     expect(windows).toContain('needs: [validate-candidate]');
     expect(windows).toContain('joy-worker-clean-" + $env:CANDIDATE_SHA');
