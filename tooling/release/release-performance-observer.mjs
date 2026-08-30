@@ -496,14 +496,20 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
     // both tabs, so reusing a seeded project would make autosave revisions
     // race and turn the observer itself into a source of 409 noise.
     const newProject = target.getByRole('button', { name: 'New project', exact: true });
-    if (await newProject.count()) {
+    let createdProject = false;
+    try {
+      await newProject.waitFor({ state: 'visible', timeout: 30_000 });
       await newProject.click({ timeout: 10_000 });
       const title = `Release observer ${randomUUID().slice(0, 8)}`;
       await target.getByPlaceholder('Project name').fill(title);
       await target.getByRole('button', { name: 'Create project', exact: true }).click({
         timeout: 10_000,
       });
-    } else {
+      createdProject = true;
+    } catch {
+      // A caller may provide a page that is already in an editor session.
+    }
+    if (!createdProject) {
       const projectCard = target.locator('button.project-library-card').first();
       if (await projectCard.count()) await projectCard.click({ timeout: 10_000 });
     }
