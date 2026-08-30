@@ -54,26 +54,50 @@ mocked browser run.
 
 ## Agent topology for the next goal
 
-The Codex orchestrator owns integration, decisions, and **all browser work**. Sub-agents are
-code/test/review workers only.
+The Codex Desktop orchestrator owns integration, decisions, promotion/deployment, and **all browser
+work**. Sub-agents are code/test/review workers only.
 
-| Role                         | Route                                       | Work                                                                                                     | Browser policy                                                                                                                  |
-| ---------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Orchestrator                 | Codex primary                               | Coordinate, integrate, run all authenticated/local/staging/live browser journeys, promote and deploy     | Sole browser operator; use Codex in-app browser by default. If OpenCLI is needed, profile `cefd9k77` remains orchestrator-only. |
-| Backend implementer          | Kilo CLI free route (`kilo/kilo-auto/free`) | API, schema, sync, polling, Worker and delivery fixes                                                    | No browser or browser profile access                                                                                            |
-| Adversarial reviewer         | Hermes CLI free route (`openrouter/free`)   | Security, failure modes, regression and release challenge                                                | No browser or browser profile access                                                                                            |
-| UI implementer               | Codex in-app sub-agent, Luna                | UI state machines, performance, accessibility, and non-browser source/unit/integration interaction tests | No browser                                                                                                                      |
-| Integration/release reviewer | Codex in-app sub-agent, GPT-5.4             | Main reconciliation, tests, provenance, deployment review                                                | No browser                                                                                                                      |
+| Role                         | Route                                       | Work                                                                                                                    | Browser policy                                                                                                                   |
+| ---------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Orchestrator                 | Codex Desktop / Sol                         | Coordinate, integrate, run all authenticated/local/staging/live browser journeys, resolve disagreements, promote/deploy | Sole browser operator; use Codex in-app browser by default. If OpenCLI is needed, profile `cefd9k77` remains orchestrator-only. |
+| Backend + adversarial team   | SuperPlane advisory pipeline                | Repository-grounded backend, schema, sync, polling, Worker, delivery, failure-mode and regression review               | No browser or browser profile access. SuperPlane is advisory only and may not implement, commit, deploy, or access owner tabs.  |
+| UI implementer               | Codex in-app sub-agent, Luna                | UI state machines, performance, accessibility, and non-browser source/unit/integration interaction tests                | No browser                                                                                                                       |
+| Integration/release reviewer | Codex in-app sub-agent, GPT-5.4             | Main reconciliation, tests, provenance, deployment review                                                               | No browser                                                                                                                       |
 
 After each tranche, at least one different agent reviews the diff and test evidence. The
 orchestrator resolves disagreements and records accepted/rejected findings. Sub-agents may exchange
 source reports through the orchestrator, but no sub-agent may run Playwright/OpenCLI/Chrome/Codex
 browser tests. This restriction is for execution speed and reliability, not access.
 
-Use the named routes when they are available. If a named route/model is unavailable, the
-orchestrator must continue with the nearest same-scope non-browser substitute, record the
-substitution, and cross-review its output; route availability is never a reason to wait for the
-user.
+The older direct Kilo/Hermes Desktop topology is retired. Do not launch Kilo or Hermes directly
+from Codex Desktop for this goal; if SuperPlane is unavailable, continue with the nearest same-scope
+non-browser substitute, record the substitution, and cross-review the result rather than waiting for
+the user.
+
+## Current execution snapshot — 2026-08-30
+
+- Active integration branch: `codex/joy-media-closure-2026-08-30`.
+- Current candidate head: `5b81d4ef62904fe3faf2c0b956a1de42c4228480`
+  (`fix: keep process header control square`), on top of `4232b0c`
+  (`release: tighten acceptance evidence integrity`) and `cc6e66c`
+  (`ci: make acceptance teardown retry-safe`).
+- Authoritative self-hosted release workflow: GitHub Actions run `33328223111`
+  on the exact candidate SHA above. Validation, both Linux real-services passes,
+  and Windows Worker clean-host acceptance were green before disposable browser
+  acceptance fanned out.
+- Available self-hosted lanes now include:
+  - Windows source/desktop runner: `joy-media-ci-windows`
+    (`self-hosted`, `Windows`, `X64`, `joy-media-ci`)
+  - Windows Worker runner: `joy-media-ci-worker`
+    (`self-hosted`, `Windows`, `X64`, `joy-media-worker`)
+  - Linux real-services runner: `joy-media-ci-linux`
+    (`self-hosted`, `Linux`, `X64`, `joy-media-ci`)
+  - Linux acceptance runner: `joy-media-ci-acceptance`
+    (`self-hosted`, `Linux`, `X64`, `joy-media-acceptance`)
+- CodeRabbit review on the pre-`5b81d4e` tranche produced accepted evidence-integrity fixes for the
+  real-service acceptance recorder, Windows Worker acceptance startup detection, strict release-gate
+  booleans, modulo-zero protection in performance soak automation, and the square process-trigger
+  header sizing regression.
 
 ## Evidence baseline
 
@@ -107,6 +131,9 @@ storage or credential-bearing response bodies.
 | LIVE-10 | Empty-timeline and insertion affordances have silent/no-keyboard paths.                                                          | The empty-state root is focusable, but clicking its Persian child produced no visible dialog/status/action. Each of the 12 insertion lanes is a plain `SPAN` with only a `title` (`role=null`, `tabindex=null`) and a click produced no action. `Play proxy` remains enabled and becomes active on the empty timeline without playback or explanation.                                                                                                                                                                                                                 |
 | LIVE-11 | Deployed timeline lanes are not fully discoverable to assistive technology, and the Effects path needs final release proof.      | Fresh authenticated smoke on 2026-08-29 (deployed `04c63b2`) opened the Inspector Effects tab and the Assets→Effects category, added an effect clip, and saw no recovery screen or alert. Locking `track-0` blocked Delete and mute toggled pressed/unpressed correctly. However, the empty visual lane exposed `role="button"`/`tabindex="0"` without an accessible name or keyboard shortcut, and repeated asset additions remained on the existing `track-0`; the pending UI tranche adds the missing lane/runway semantics and must be rechecked on the final SHA. |
 | LIVE-12 | Worker lease-generation deployment initially failed at API startup because the new fields changed the mutable baseline checksum. | During the 2026-08-29 promotion, the new binary failed closed against the live ledger (`001-baseline` stored checksum `6044f0…`), and the rollback-safe service restored the prior pair. The fix is now an additive `003-worker-lease-generation` migration with the deployed baseline checksum pinned; startup must be rechecked as `joy-media` before the release is eligible again.                                                                                                                                                                                 |
+| LIVE-48 | Duplicate panel-title chrome is still visible above tabbed panel content.                                                         | A fresh in-app-browser audit on 2026-08-30 loaded `https://joyst.ir/` and still showed visible `.joy-panel-title` headings for `Effects` and `Inspector` above their tab/content areas. The owner requested these visual titles removed. The next UI tranche must remove the duplicate title row from panel bodies while preserving accessibility names/tooltips on dock tabs and truthful panel structure. |
+| LIVE-49 | Header chrome is closer, but still visually inconsistent and violates the minimum target geometry in multiple controls.           | The same 2026-08-30 audit confirmed the stray visible `Creative Brief` dock-tab label is **not** present in the current live view, and the process button remains square after `5b81d4e`. However, many header controls are still under the `1.9rem` target rule from `DESIGN.md`: `Undo`, `Redo`, `Command palette`, `Switch to Widescreen layout`, `Keyboard shortcuts`, `Export MP4`, `Recent processes`, and `JOY Studio account` measured `28px` wide, while text triggers such as `File`, `Edit`, `Clip`, `Joy Code`, `View`, `Window`, and `Workspace preset` measured only `28px` tall. The next shell pass must make these controls visually aligned and target-size compliant without regressing menu overlap or the square process trigger. |
+| LIVE-50 | Joy Code 3D empty-state behavior is truthful; the remaining 3D gap is the full persisted authoring journey.                     | On 2026-08-30 the authenticated in-app-browser check opened Joy Code `3d`, stayed on `https://joyst.ir/`, showed `Scene ready — load a GLB/GLTF file to preview`, exposed `Import 3D model`, and kept `Add current 3D view to timeline` disabled. No console warnings/errors were captured. This closes the empty-state truthfulness concern but not the real import → preview/render → placement → save/reopen → recovery path. |
 
 Timeline browser follow-up is now an explicit certification sequence, not a visual spot-check:
 reload the authenticated editor, verify the empty-state copy and every virtual lane by mouse and
@@ -179,6 +206,7 @@ reproduce it.
 | P1-30 | Jobs source-ready worker selection     | Fixed in `2a321d8`: queue readiness now evaluates every connected Worker and enables an operation when any capability-compatible Worker also advertises the selected source asset, instead of failing on the first capability-only Worker. Focused Jobs/polling coverage (19 tests) passed. Retain a live multi-Worker assertion and the source-bound delivery journey before closing P0-12.                                                                                                                                                                                                                                   |
 | P1-31 | Timeline marker label uniqueness       | Fixed in `82290df`: generated `Marker N` labels now advance above all existing generated labels across Classic, Dual Lens, toolbar, overflow and ruler paths, while custom labels remain unchanged. Focused marker/context/timeline coverage (17 tests), typecheck, lint and formatting passed. Retain a save/reopen and non-tail-delete/reinsert assertion so visible labels remain unambiguous.                                                                                                                                                                                                                              |
 | P1-32 | 3D workspace lifecycle                 | The authenticated 3D tab is stable and truthful when empty: it reports “Scene ready — load a GLB/GLTF file to preview,” exposes Import 3D model, and keeps Add current 3D view to timeline disabled until a scene exists. Commit `e81919e` now persists generated 3D PNG renders through the integrity-checked OPFS original cache before inserting their document metadata, closing the reload-without-pixels hole. A real GLB/GLTF import, preview/render, placement, cloud save/reopen, undo/redo and missing/revoked-source recovery journey is still required; keep 3D authoring experimental until that evidence exists. |
+| P1-33 | Panel/header shell minimalism          | Remove duplicate visible panel-title chrome (`Effects`, `Inspector`, and any similar top-of-panel headings) when a dock tab or local sub-tab already names the surface. Keep truthful structure and accessibility names, but do not spend vertical space on repeated labels. In the same tranche, bring header/menu/icon controls back into `DESIGN.md` geometry compliance (`≥1.9rem` interactive targets, aligned rows, no overlap, no reintroduced visible dock-tab text such as `Creative Brief`). |
 
 ### LIVE-13 — timeline browser certification (2026-08-29)
 
