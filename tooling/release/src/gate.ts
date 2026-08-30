@@ -77,8 +77,16 @@ export interface ReleaseGateInput {
   readonly commandResults?: readonly ReleaseCommandResult[];
   /** Quantitative, provenance-bound desktop performance/integrity evidence. */
   readonly performanceEvidence?: ReleasePerformanceEvidence;
+  /** Real-service delivery, Worker lifecycle, and restore evidence. */
+  readonly operationalEvidence?: ReleaseOperationalEvidence | null;
   /** Present for real workspace evidence; omitted by the pure evaluator. */
   readonly sourceProvenance?: ReleaseSourceProvenance;
+}
+
+export interface ReleaseOperationalEvidence {
+  readonly delivery: Readonly<Record<string, unknown>>;
+  readonly windows: Readonly<Record<string, unknown>>;
+  readonly restore: Readonly<Record<string, unknown>>;
 }
 
 export interface ReleasePerformanceEvidence {
@@ -270,6 +278,13 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
       'performance-evidence',
       performanceEvidenceReady(input.performanceEvidence, input.sourceProvenance, now),
       performanceEvidenceMessage(input.performanceEvidence, input.sourceProvenance, now),
+    ),
+    check(
+      'operational-evidence',
+      input.operationalEvidence === undefined ||
+        (input.operationalEvidence !== null &&
+          operationalEvidenceReady(input.operationalEvidence, input.sourceProvenance)),
+      operationalEvidenceMessage(input.operationalEvidence, input.sourceProvenance),
     ),
     check(
       'feature-status',
@@ -544,6 +559,100 @@ function performanceEvidenceMessage(
   if (!performanceEvidenceReady(evidence, expectedSource, now))
     return 'performance evidence is incomplete or exceeds a required numeric budget';
   return `staging/production performance evidence ${evidence.runId} passed required budgets`;
+}
+
+function operationalEvidenceReady(
+  evidence: ReleaseOperationalEvidence,
+  expectedSource: ReleaseSourceProvenance | undefined,
+): boolean {
+  const blocks = [evidence.delivery, evidence.windows, evidence.restore];
+  if (
+    blocks.some(
+      (block) =>
+        block === null ||
+        typeof block !== 'object' ||
+        block.schemaVersion !== 1 ||
+        block.status !== 'verified' ||
+        (block.execution !== 'real-services' && block.execution !== 'windows-clean-worker'),
+    )
+  )
+    return false;
+  if (
+    expectedSource !== undefined &&
+    blocks.some(
+      (block) => !sameSource(parseSourceProvenance(block.sourceProvenance), expectedSource),
+    )
+  )
+    return false;
+  const delivery = evidence.delivery.delivery;
+  const mixed = record(delivery).mixedSourceExport;
+  const downloaded = record(delivery).downloaded;
+  const ffprobe = record(delivery).ffprobe;
+  const reimport = record(delivery).reimport;
+  const cancelRetry = record(delivery).cancelRetry;
+  const missingSource = record(delivery).missingSource;
+  if (
+    record(mixed).status !== 'passed' ||
+    !positiveNumber(record(mixed).bytes) ||
+    !sha256(record(mixed).sha256) ||
+    record(downloaded).status !== 200 ||
+    !positiveNumber(record(downloaded).bytes) ||
+    !sha256(record(downloaded).sha256) ||
+    record(ffprobe).status !== 'passed' ||
+    !Array.isArray(record(ffprobe).streamTypes) ||
+    !record(ffprobe).streamTypes.includes('video') ||
+    !record(ffprobe).streamTypes.includes('audio') ||
+    record(reimport).status !== 201 ||
+    record(reimport).uploadStatus !== 201 ||
+    record(reimport).downloadStatus !== 200 ||
+    !positiveNumber(record(reimport).bytes) ||
+    !sha256(record(reimport).sha256) ||
+    record(cancelRetry).canceledState !== 'canceled' ||
+    record(cancelRetry).retriedState !== 'queued' ||
+    (record(missingSource).status !== 404 && record(missingSource).status !== 409)
+  )
+    return false;
+  const lifecycle = record(evidence.windows.lifecycle);
+  if (
+    ['install', 'startup', 'recovery', 'update', 'rollback', 'uninstall'].some(
+      (key) => record(lifecycle[key]).status !== 'passed',
+    )
+  )
+    return false;
+  const startup = record(lifecycle.startup);
+  const daemon = record(startup.daemon);
+  if (daemon.started !== true || daemon.terminated !== true) return false;
+  const update = record(lifecycle.update);
+  if (update.atomicReplacement !== true || update.distinctPackageBytes !== true) return false;
+  const signing = record(evidence.windows.signing);
+  if (signing.status !== 'signed' && signing.status !== 'unsigned') return false;
+  const restore = record(evidence.restore.restore);
+  return (
+    restore.status === 'passed' &&
+    restore.schemaIsolation === true &&
+    record(restore.nVersion).status === 'passed' &&
+    record(restore.nMinusOneVersion).status === 'passed' &&
+    record(restore.cleanup).status === 'passed'
+  );
+}
+
+function operationalEvidenceMessage(
+  evidence: ReleaseOperationalEvidence | null | undefined,
+  expectedSource: ReleaseSourceProvenance | undefined,
+): string {
+  if (evidence === undefined) return 'operational evidence not supplied to pure evaluator';
+  if (evidence === null) return 'delivery, Windows, and restore evidence is missing';
+  return operationalEvidenceReady(evidence, expectedSource)
+    ? 'delivery, Worker lifecycle, and N/N-1 restore evidence passed'
+    : 'delivery, Worker lifecycle, or N/N-1 restore evidence is incomplete or unbound';
+}
+
+function positiveNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+function sha256(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/u.test(value);
 }
 
 function browserJourneyFresh(journey: ReleaseBrowserJourney, now: Date): boolean {
@@ -939,6 +1048,12 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     'apps/api/dist',
     'apps/worker/dist',
     'test-output/release-performance',
+    // Operational acceptance records are release artifacts too. Hash them in
+    // the manifest so delivery, Worker lifecycle, and restore evidence cannot
+    // be swapped after the candidate was evaluated.
+    'test-output/delivery',
+    'test-output/windows',
+    'test-output/operations',
   ];
   const buildSuccess = Object.fromEntries(
     REQUIRED_BUILD_IDS.map((id) => {
@@ -987,6 +1102,7 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     manifestGenerated: true,
     sbomGenerated: true,
     browserJourneys,
+    operationalEvidence: readOperationalEvidence(root),
     featureStatus: {
       auditedOn,
       statuses,
@@ -1000,6 +1116,26 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     performanceEvidence,
     sourceProvenance,
   };
+}
+
+function readOperationalEvidence(root: string): ReleaseOperationalEvidence | null {
+  const read = (relativePath: string): Record<string, unknown> | undefined => {
+    const path = join(root, relativePath);
+    if (!existsSync(path)) return undefined;
+    try {
+      const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
+      return value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const delivery = read('test-output/delivery/result.json');
+  const windows = read('test-output/windows/acceptance.json');
+  const restore = read('test-output/operations/restore.json');
+  if (delivery === undefined || windows === undefined || restore === undefined) return null;
+  return { delivery, windows, restore };
 }
 
 function readPerformanceEvidence(root: string): ReleasePerformanceEvidence | undefined {

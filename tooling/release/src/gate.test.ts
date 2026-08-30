@@ -18,6 +18,7 @@ import {
   verifyBrowserJourneyEvidence,
   writeReleaseEvidence,
   type ReleaseGateInput,
+  type ReleaseOperationalEvidence,
   type ReleaseSourceProvenance,
 } from './gate.js';
 
@@ -121,6 +122,54 @@ const performanceEvidence = () => ({
     measuredWallTimeMs: 60_000,
     longTaskPercent: 0,
     initialEditorJsBytes: 500_000,
+  },
+});
+
+const operationalEvidence = (): ReleaseOperationalEvidence => ({
+  delivery: {
+    schemaVersion: 1,
+    status: 'verified',
+    execution: 'real-services',
+    delivery: {
+      mixedSourceExport: { status: 'passed', bytes: 128, sha256: 'd'.repeat(64) },
+      downloaded: { status: 200, bytes: 128, sha256: 'd'.repeat(64) },
+      ffprobe: { status: 'passed', streamTypes: ['video', 'audio'] },
+      reimport: {
+        status: 201,
+        uploadStatus: 201,
+        downloadStatus: 200,
+        bytes: 128,
+        sha256: 'd'.repeat(64),
+      },
+      cancelRetry: { canceledState: 'canceled', retriedState: 'queued' },
+      missingSource: { status: 409 },
+    },
+  },
+  windows: {
+    schemaVersion: 1,
+    status: 'verified',
+    execution: 'windows-clean-worker',
+    lifecycle: {
+      install: { status: 'passed' },
+      startup: { status: 'passed', daemon: { started: true, terminated: true } },
+      recovery: { status: 'passed' },
+      update: { status: 'passed', atomicReplacement: true, distinctPackageBytes: true },
+      rollback: { status: 'passed' },
+      uninstall: { status: 'passed' },
+    },
+    signing: { status: 'unsigned' },
+  },
+  restore: {
+    schemaVersion: 1,
+    status: 'verified',
+    execution: 'real-services',
+    restore: {
+      status: 'passed',
+      schemaIsolation: true,
+      nVersion: { status: 'passed' },
+      nMinusOneVersion: { status: 'passed' },
+      cleanup: { status: 'passed' },
+    },
   },
 });
 
@@ -252,7 +301,9 @@ describe('JOY Studio 1.0 release gate', () => {
     );
     const realAcceptance = workflow.slice(workflow.indexOf('\n  real-service-acceptance:'));
     expect(realAcceptance).toContain('runs-on: [self-hosted, linux, x64, joy-media-acceptance]');
-    expect(realAcceptance).toContain('needs: [validate-candidate, acceptance]');
+    expect(realAcceptance).toContain(
+      'needs: [validate-candidate, acceptance, windows-worker-clean]',
+    );
     expect(realAcceptance).toContain(
       'test "${JOY_MEDIA_CI_ACCEPTANCE_PROFILE:-}" = \'real-services\'',
     );
@@ -263,6 +314,7 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(realAcceptance).toContain('test-output/delivery/result.json');
     expect(realAcceptance).toContain('test-output/windows/acceptance.json');
     expect(realAcceptance).toContain('test-output/operations/restore.json');
+    expect(realAcceptance).toContain('cp -- "$artifact" test-output/windows/acceptance.json');
     expect(realAcceptance).toContain('pnpm run release:gate');
     expect(realAcceptance).toContain('test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}"');
   });
@@ -876,6 +928,45 @@ describe('JOY Studio 1.0 release gate', () => {
     );
     expect(result.passed).toBe(false);
     expect(result.checks.find((check) => check.id === 'feature-status')?.status).toBe('failed');
+  });
+
+  it('requires complete operational evidence when a real workspace supplies it', () => {
+    const passed = evaluateReleaseGate({
+      ...passingInput(),
+      operationalEvidence: operationalEvidence(),
+    });
+    expect(passed.checks.find((check) => check.id === 'operational-evidence')).toMatchObject({
+      status: 'passed',
+    });
+
+    const incomplete = evaluateReleaseGate({
+      ...passingInput(),
+      operationalEvidence: null,
+    });
+    expect(incomplete.checks.find((check) => check.id === 'operational-evidence')).toMatchObject({
+      status: 'failed',
+      message: 'delivery, Windows, and restore evidence is missing',
+    });
+  });
+
+  it('rejects operational evidence with a failed lifecycle step', () => {
+    const evidence = operationalEvidence();
+    const result = evaluateReleaseGate({
+      ...passingInput(),
+      operationalEvidence: {
+        ...evidence,
+        windows: {
+          ...evidence.windows,
+          lifecycle: {
+            ...evidence.windows.lifecycle,
+            startup: { status: 'failed' },
+          },
+        },
+      },
+    });
+    expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
+      'failed',
+    );
   });
 
   it('fails explicitly when the feature-status document is missing', () => {

@@ -525,6 +525,7 @@ export function InspectorPanel({
       activeTab={tab}
       onTabChange={setTab}
       inactive={inspectorInactive}
+      note={inspectorInactive ? 'Select a clip to edit its properties.' : undefined}
     >
       <div className="inspector-selection-row">
         <h2 className="inspector-selected-name" dir="ltr">

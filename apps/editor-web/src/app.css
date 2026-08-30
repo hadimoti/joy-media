@@ -417,9 +417,9 @@ main {
   box-sizing: border-box;
 }
 .app-header .icon-button {
-  width: 1.75rem;
+  width: 1.9rem;
   height: 100%;
-  min-width: 1.75rem;
+  min-width: 1.9rem;
   min-height: 0;
   padding: 0;
   border: 0;
@@ -5912,12 +5912,6 @@ label {
   border: none;
   cursor: pointer;
 }
-.motion-panel-header .panel-section-title {
-  grid-column: 2;
-  justify-self: center;
-  margin: 0;
-  min-width: 0;
-}
 .motion-fav-active {
   color: var(--joy-accent);
 }
@@ -8926,16 +8920,6 @@ label {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
-}
-.effects-panel-header .panel-section-title {
-  grid-column: 2;
-  justify-self: center;
-  margin: 0;
-  min-width: 0;
-}
-.effects-panel-header > .icon-button {
-  grid-column: 3;
-  justify-self: end;
 }
 .effects-grid {
   display: grid;

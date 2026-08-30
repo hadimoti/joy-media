@@ -121,6 +121,22 @@ jobs:
           if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw 'Worker executable was not produced.' }
           $result = & $output --joy-worker-self-test
           if ($LASTEXITCODE -ne 0 -or $result -notmatch '"ok"\s*:\s*true') { throw 'Worker executable self-test failed.' }
+          $evidence = Join-Path $env:RUNNER_TEMP ("joy-media-windows-acceptance-" + "${{ matrix.pass }}.json")
+          & powershell -NoProfile -ExecutionPolicy Bypass -File ops/self-hosted/windows-runner/worker-acceptance.ps1 `
+            -CandidateSha $env:CANDIDATE_SHA `
+            -RunId $env:GITHUB_RUN_ID `
+            -Attempt $env:GITHUB_RUN_ATTEMPT `
+            -Pass "${{ matrix.pass }}" `
+            -ExecutablePath $output `
+            -OutputPath $evidence
+          if (-not (Test-Path -LiteralPath $evidence -PathType Leaf)) { throw 'Windows Worker acceptance evidence was not produced.' }
+      - name: Publish Windows Worker acceptance evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: joy-media-windows-acceptance-${{ matrix.pass }}
+          path: ${{ runner.temp }}/joy-media-windows-acceptance-${{ matrix.pass }}.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Verify clean Worker teardown
         if: always()
         shell: pwsh
@@ -206,7 +222,7 @@ jobs:
   real-service-acceptance:
     name: real-service-acceptance (pass ${{ matrix.pass }})
     runs-on: [self-hosted, linux, x64, joy-media-acceptance]
-    needs: [validate-candidate, acceptance]
+    needs: [validate-candidate, acceptance, windows-worker-clean]
     strategy:
       fail-fast: false
       matrix:
@@ -237,6 +253,19 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm exec playwright install chromium
+      - name: Fetch Windows Worker acceptance evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: joy-media-windows-acceptance-${{ matrix.pass }}
+          path: test-output/windows
+      - name: Bind Windows evidence to the gate contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact="test-output/windows/joy-media-windows-acceptance-${{ matrix.pass }}.json"
+          test -s "$artifact" || { echo "Windows acceptance artifact is missing: $artifact" >&2; exit 1; }
+          cp -- "$artifact" test-output/windows/acceptance.json
+          test -s test-output/windows/acceptance.json
       - name: Run authenticated real-service desktop acceptance and evidence
         shell: bash
         run: |

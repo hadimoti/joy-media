@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* global process, setTimeout, URL, Buffer, window, fetch, atob, crypto, localStorage */
+/* global process, setTimeout, URL, Buffer, window, fetch, atob, btoa, crypto, localStorage */
 
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -163,11 +163,19 @@ try {
   );
   await waitForHttp(webUrl, 120_000);
   await runDesktopMatrix(webUrl, apiUrl);
-  await recordJourney(webUrl, apiUrl, token, candidateSha, pool);
+  const deliveryEvidence = await recordJourney(webUrl, apiUrl, token, candidateSha, pool);
   if (process.env.JOY_MEDIA_REAL_ACCEPTANCE_SMOKE_ONLY !== '1') {
     await runObserver(webUrl, token);
   }
-  await recordOperationalEvidence(candidateSha, runId, runAttempt, pass);
+  const restoreEvidence = await verifyRestoreCompatibility(databaseUrl, namespace);
+  await recordOperationalEvidence(
+    candidateSha,
+    runId,
+    runAttempt,
+    pass,
+    deliveryEvidence,
+    restoreEvidence,
+  );
 } finally {
   if (browser) await browser.close().catch(() => undefined);
   if (webProcess?.pid) killTree(webProcess.pid);
@@ -343,6 +351,281 @@ async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activ
   )
     throw new Error('real-service object delivery failed integrity verification');
 
+  // Produce a real mixed-source export, then exercise the same private
+  // object path for download, ffprobe inspection, and re-import.  Keeping
+  // this in the disposable project makes the acceptance proof meaningful
+  // without touching owner media or a production bucket.
+  const mixedPath = join(tempRoot, `mixed-${runId}-${pass}.mp4`);
+  await execFile(
+    'ffmpeg',
+    [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-y',
+      '-i',
+      join(root, 'packages/test-fixtures/media/video.mp4'),
+      '-i',
+      join(root, 'packages/test-fixtures/media/audio.mp3'),
+      '-map',
+      '0:v:0',
+      '-map',
+      '1:a:0',
+      '-c:v',
+      'copy',
+      '-c:a',
+      'aac',
+      '-shortest',
+      mixedPath,
+    ],
+    { cwd: root },
+  );
+  const mixedBytes = await readFile(mixedPath);
+  const mixedDigest = createHash('sha256').update(mixedBytes).digest('hex');
+  const exportAssetId = `real-export-${runId}-${pass}`;
+  const reimportAssetId = `real-reimport-${runId}-${pass}`;
+  const exportRegistered = await page.evaluate(
+    async ({ projectId: id, assetId: mediaId, digest: sha, byteLength, requestHeaders }) => {
+      const response = await fetch(`/api/v1/projects/${id}/assets`, {
+        method: 'POST',
+        headers: requestHeaders,
+        body: JSON.stringify({
+          id: mediaId,
+          kind: 'video',
+          displayName: 'mixed-export.mp4',
+          sha256: sha,
+          bytes: byteLength,
+          descriptor: { mimeType: 'video/mp4', durationUs: 3_000_000, width: 320, height: 180 },
+          locations: [{ kind: 'opfs-cache', ref: `real-export-${mediaId}` }],
+        }),
+      });
+      return response.status;
+    },
+    {
+      projectId,
+      assetId: exportAssetId,
+      digest: mixedDigest,
+      byteLength: mixedBytes.byteLength,
+      requestHeaders: headers,
+    },
+  );
+  if (exportRegistered !== 201)
+    throw new Error(`real-service mixed export registration returned ${exportRegistered}`);
+  const exportUploaded = await page.evaluate(
+    async ({ projectId: id, assetId: mediaId, digest: sha, payload, sessionToken }) => {
+      const raw = atob(payload);
+      const body = Uint8Array.from(raw, (character) => character.charCodeAt(0));
+      const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${sessionToken}`,
+          'content-type': 'video/mp4',
+          'x-joy-sha256': sha,
+          'x-joy-bytes': String(body.byteLength),
+        },
+        body,
+      });
+      return response.status;
+    },
+    {
+      projectId,
+      assetId: exportAssetId,
+      digest: mixedDigest,
+      payload: mixedBytes.toString('base64'),
+      sessionToken,
+    },
+  );
+  if (exportUploaded !== 201)
+    throw new Error(`real-service mixed export upload returned ${exportUploaded}`);
+  const exportedDownload = await page.evaluate(
+    async ({ projectId: id, assetId: mediaId, sessionToken }) => {
+      const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
+        headers: { authorization: `Bearer ${sessionToken}` },
+      });
+      const content = new Uint8Array(await response.arrayBuffer());
+      const digest = Array.from(
+        new Uint8Array(await crypto.subtle.digest('SHA-256', content)),
+        (byte) => byte.toString(16).padStart(2, '0'),
+      ).join('');
+      return {
+        status: response.status,
+        bytes: content.byteLength,
+        digest,
+        payload: btoa(String.fromCharCode(...content)),
+      };
+    },
+    { projectId, assetId: exportAssetId, sessionToken },
+  );
+  if (
+    exportedDownload.status !== 200 ||
+    exportedDownload.bytes !== mixedBytes.byteLength ||
+    exportedDownload.digest !== mixedDigest
+  )
+    throw new Error('mixed export download failed integrity verification');
+  const exportedPath = join(tempRoot, `downloaded-${runId}-${pass}.mp4`);
+  await writeFile(exportedPath, Buffer.from(exportedDownload.payload, 'base64'));
+  const ffprobeResult = await execFile(
+    'ffprobe',
+    ['-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', exportedPath],
+    { cwd: root },
+  );
+  const ffprobe = JSON.parse(ffprobeResult.stdout.toString('utf8'));
+  const streamTypes = (Array.isArray(ffprobe.streams) ? ffprobe.streams : []).map(
+    (stream) => stream.codec_type,
+  );
+  if (!streamTypes.includes('video') || !streamTypes.includes('audio'))
+    throw new Error('mixed export ffprobe did not find both video and audio streams');
+  const reimported = await page.evaluate(
+    async ({ projectId: id, assetId: mediaId, digest: sha, byteLength, requestHeaders }) => {
+      const response = await fetch(`/api/v1/projects/${id}/assets`, {
+        method: 'POST',
+        headers: requestHeaders,
+        body: JSON.stringify({
+          id: mediaId,
+          kind: 'video',
+          displayName: 'reimported-mixed-export.mp4',
+          sha256: sha,
+          bytes: byteLength,
+          descriptor: { mimeType: 'video/mp4', durationUs: 3_000_000, width: 320, height: 180 },
+          locations: [{ kind: 'opfs-cache', ref: `real-reimport-${mediaId}` }],
+        }),
+      });
+      return response.status;
+    },
+    {
+      projectId,
+      assetId: reimportAssetId,
+      digest: mixedDigest,
+      byteLength: mixedBytes.byteLength,
+      requestHeaders: headers,
+    },
+  );
+  if (reimported !== 201) throw new Error(`real-service re-import returned ${reimported}`);
+  const reimportUploaded = await page.evaluate(
+    async ({ projectId: id, assetId: mediaId, digest: sha, payload, sessionToken }) => {
+      const raw = atob(payload);
+      const body = Uint8Array.from(raw, (character) => character.charCodeAt(0));
+      const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${sessionToken}`,
+          'content-type': 'video/mp4',
+          'x-joy-sha256': sha,
+          'x-joy-bytes': String(body.byteLength),
+        },
+        body,
+      });
+      return response.status;
+    },
+    {
+      projectId,
+      assetId: reimportAssetId,
+      digest: mixedDigest,
+      payload: mixedBytes.toString('base64'),
+      sessionToken,
+    },
+  );
+  if (reimportUploaded !== 201)
+    throw new Error(`real-service re-import upload returned ${reimportUploaded}`);
+  const reimportDownloaded = await page.evaluate(
+    async ({ projectId: id, assetId: mediaId, sessionToken }) => {
+      const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
+        headers: { authorization: `Bearer ${sessionToken}` },
+      });
+      const content = new Uint8Array(await response.arrayBuffer());
+      const digest = Array.from(
+        new Uint8Array(await crypto.subtle.digest('SHA-256', content)),
+        (byte) => byte.toString(16).padStart(2, '0'),
+      ).join('');
+      return { status: response.status, bytes: content.byteLength, digest };
+    },
+    { projectId, assetId: reimportAssetId, sessionToken },
+  );
+  if (
+    reimportDownloaded.status !== 200 ||
+    reimportDownloaded.bytes !== mixedBytes.byteLength ||
+    reimportDownloaded.digest !== mixedDigest
+  )
+    throw new Error('real-service re-import download failed integrity verification');
+  const missingSourceStatus = await page.evaluate(
+    async ({ projectId: id, sessionToken }) =>
+      (
+        await fetch(`/api/v1/projects/${id}/assets/missing-source/original`, {
+          headers: { authorization: `Bearer ${sessionToken}` },
+        })
+      ).status,
+    { projectId, sessionToken },
+  );
+  // The API maps a missing asset to its conflict-safe control-plane error
+  // (409) rather than leaking a storage existence signal; both statuses are
+  // accepted across the current local/production adapters.
+  if (missingSourceStatus !== 404 && missingSourceStatus !== 409)
+    throw new Error(`missing-source recovery returned ${missingSourceStatus}, expected 404/409`);
+  const deliveryRecovery = await page.evaluate(
+    async ({ projectId: id, sessionToken }) => {
+      const requestHeaders = {
+        authorization: `Bearer ${sessionToken}`,
+        'content-type': 'application/json',
+      };
+      const createdResponse = await fetch(`/api/v1/projects/${id}/jobs`, {
+        method: 'POST',
+        headers: requestHeaders,
+        body: JSON.stringify({ id: `delivery-recovery-${Date.now()}`, type: 'render' }),
+      });
+      if (createdResponse.status !== 201) return { created: createdResponse.status };
+      const created = await createdResponse.json();
+      const jobId = created.data?.id;
+      const canceledResponse = await fetch(`/api/v1/projects/${id}/jobs/${jobId}/cancel`, {
+        method: 'POST',
+        headers: requestHeaders,
+        body: '{}',
+      });
+      const canceled = await canceledResponse.json();
+      const retryResponse = await fetch(`/api/v1/projects/${id}/jobs/${jobId}/retry`, {
+        method: 'POST',
+        headers: requestHeaders,
+        body: '{}',
+      });
+      const retried = await retryResponse.json();
+      return {
+        created: createdResponse.status,
+        canceled: canceledResponse.status,
+        canceledState: canceled.data?.state,
+        retried: retryResponse.status,
+        retriedState: retried.data?.state,
+      };
+    },
+    { projectId, sessionToken },
+  );
+  if (
+    deliveryRecovery.created !== 201 ||
+    ![200, 201].includes(deliveryRecovery.canceled) ||
+    deliveryRecovery.canceledState !== 'canceled' ||
+    ![200, 201].includes(deliveryRecovery.retried) ||
+    deliveryRecovery.retriedState !== 'queued'
+  )
+    throw new Error(`delivery cancel/retry recovery failed: ${JSON.stringify(deliveryRecovery)}`);
+  var deliveryEvidence = {
+    sourceAssets: { video: true, audio: true },
+    mixedSourceExport: { status: 'passed', bytes: mixedBytes.byteLength, sha256: mixedDigest },
+    downloaded: { status: 200, bytes: exportedDownload.bytes, sha256: exportedDownload.digest },
+    ffprobe: {
+      status: 'passed',
+      streamTypes,
+      formatName: ffprobe.format?.format_name ?? null,
+    },
+    reimport: {
+      status: reimported,
+      assetId: reimportAssetId,
+      uploadStatus: reimportUploaded,
+      downloadStatus: reimportDownloaded.status,
+      bytes: reimportDownloaded.bytes,
+      sha256: reimportDownloaded.digest,
+    },
+    cancelRetry: deliveryRecovery,
+    missingSource: { status: missingSourceStatus },
+  };
+
   const visualStorage = await page.evaluate(() => {
     const raw = localStorage.getItem('joy-media.visual-object-project-log.v1');
     if (!raw) return { motionChannels: 0 };
@@ -469,6 +752,7 @@ async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activ
   );
   await activePool.query('SELECT 1');
   await context.close();
+  return deliveryEvidence;
 }
 
 async function runObserver(baseUrl, sessionToken) {
@@ -483,7 +767,95 @@ async function runObserver(baseUrl, sessionToken) {
   void result;
 }
 
-async function recordOperationalEvidence(sourceSha, workflowRunId, attempt, lanePass) {
+async function verifyRestoreCompatibility(databaseUrl, namespace) {
+  const legacySchema = `ci_legacy_${namespace}`;
+  const legacyPool = new Pool({
+    connectionString: databaseUrl,
+    options: `-c search_path=${legacySchema},public`,
+  });
+  let evidence;
+  let operationError;
+  let cleanupError;
+  try {
+    const currentSchemaCheck = await pool.query(
+      "SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'projects' LIMIT 1",
+      [schema],
+    );
+    if ((currentSchemaCheck.rowCount ?? 0) !== 1)
+      throw new Error('current schema project table is not readable');
+    await pool.query(`CREATE SCHEMA "${legacySchema}"`);
+    // Recreate the pre-expansion (N-1) shape: initialize() must add the
+    // optional columns/tables and preserve rows when the current binary opens
+    // an older deployment's metadata.
+    await pool.query(`
+      CREATE TABLE "${legacySchema}".projects (id text primary key, owner_id text not null, title text not null, revision integer not null);
+      CREATE TABLE "${legacySchema}".workers (id text primary key, owner_id text not null, revoked_at timestamptz NULL);
+      CREATE TABLE "${legacySchema}".jobs (id text primary key, project_id text not null, type text not null, state text not null, lease_owner text, lease_expires_at timestamptz);
+      CREATE TABLE "${legacySchema}".job_attempts (id bigserial primary key, job_id text not null, worker_id text not null, started_at timestamptz not null, completed_at timestamptz);
+      CREATE TABLE "${legacySchema}".job_events (cursor bigserial primary key, job_id text not null, type text not null, created_at timestamptz not null);
+      CREATE TABLE "${legacySchema}".worker_pairing_offers (worker_id text primary key, pairing_code_hash text not null, owner_id text, expires_at timestamptz not null);
+      CREATE TABLE "${legacySchema}".media_assets (id text primary key, project_id text not null, kind text not null, display_name text not null, sha256 text not null, byte_length bigint not null, descriptor jsonb not null, locations jsonb not null, created_at timestamptz not null);
+      CREATE TABLE "${legacySchema}".media_derivatives (id text primary key, project_id text not null, asset_id text not null, kind text not null, profile text not null, sha256 text not null, byte_length bigint not null, descriptor jsonb not null, availability text not null, locations jsonb not null, verified_at timestamptz not null);
+    `);
+    const legacyControlPlane = new PostgresControlPlane(legacyPool, { skipLocked: false });
+    await legacyControlPlane.initialize();
+    const actor = { id: `restore-owner-${namespace}` };
+    const projectId = `restore-project-${namespace}`;
+    await legacyControlPlane.createProject(actor, projectId, 'N-1 restore compatibility');
+    const restored = await legacyControlPlane.getProject(actor, projectId);
+    if (restored.id !== projectId || restored.revision !== 0)
+      throw new Error('N-1 restore did not preserve the project row');
+    evidence = {
+      status: 'passed',
+      schemaIsolation: true,
+      nVersion: { status: 'passed', initialized: true, projectReadable: true },
+      nMinusOneVersion: {
+        status: 'passed',
+        legacyBaseSchemaInitialized: true,
+        migratedInPlace: true,
+        projectReadable: true,
+      },
+    };
+  } catch (error) {
+    operationError = error;
+  } finally {
+    try {
+      await pool.query(`DROP SCHEMA IF EXISTS "${legacySchema}" CASCADE`);
+      const remaining = await pool.query('SELECT 1 FROM pg_namespace WHERE nspname = $1 LIMIT 1', [
+        legacySchema,
+      ]);
+      if ((remaining.rowCount ?? 0) !== 0) {
+        cleanupError = new Error('legacy restore schema still exists');
+      } else if (evidence !== undefined) {
+        evidence.cleanup = { status: 'passed', schema: 'disposable' };
+      }
+    } catch (error) {
+      cleanupError = error;
+      if (evidence !== undefined)
+        evidence.cleanup = {
+          status: 'failed',
+          schema: 'disposable',
+          error: error instanceof Error ? error.message : String(error),
+        };
+    }
+    await legacyPool.end().catch(() => undefined);
+  }
+  if (cleanupError !== undefined)
+    throw cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError));
+  if (operationError !== undefined)
+    throw operationError instanceof Error ? operationError : new Error(String(operationError));
+  if (evidence === undefined) throw new Error('restore compatibility did not produce evidence');
+  return evidence;
+}
+
+async function recordOperationalEvidence(
+  sourceSha,
+  workflowRunId,
+  attempt,
+  lanePass,
+  deliveryEvidence,
+  restoreEvidence,
+) {
   const output = join(root, 'test-output');
   await mkdir(join(output, 'delivery'), { recursive: true });
   await mkdir(join(output, 'windows'), { recursive: true });
@@ -506,15 +878,17 @@ async function recordOperationalEvidence(sourceSha, workflowRunId, attempt, lane
   };
   await writeFile(
     join(output, 'delivery/result.json'),
-    `${JSON.stringify({ ...common, delivery: 'PostgreSQL-backed project and MinIO object upload/download integrity verified' }, null, 2)}\n`,
+    `${JSON.stringify({ ...common, delivery: deliveryEvidence }, null, 2)}\n`,
   );
-  await writeFile(
-    join(output, 'windows/acceptance.json'),
-    `${JSON.stringify({ ...common, worker: 'disposable Worker identity; no process or state leaked' }, null, 2)}\n`,
-  );
+  const windowsEvidencePath = join(output, 'windows/acceptance.json');
+  try {
+    await readFile(windowsEvidencePath);
+  } catch {
+    throw new Error('Windows Worker acceptance evidence was not downloaded for this pass');
+  }
   await writeFile(
     join(output, 'operations/restore.json'),
-    `${JSON.stringify({ ...common, restore: 'disposable schema and bucket teardown verified' }, null, 2)}\n`,
+    `${JSON.stringify({ ...common, restore: restoreEvidence }, null, 2)}\n`,
   );
 }
 

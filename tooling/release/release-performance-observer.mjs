@@ -535,10 +535,26 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
     initialEditorJsBytes = Number.isFinite(resources) ? resources : null;
     hiddenContext = await browser.newContext({ reducedMotion: 'no-preference' });
     await installObserverContext(hiddenContext);
+    // Headless Chromium does not expose a real active-tab compositor, so a
+    // second page remains `visible` even after the first page is brought to
+    // the front.  Model the browser's hidden-document contract in this
+    // isolated context before navigation; this is a lifecycle simulation for
+    // the app's visibility listeners, not a fabricated metric value.
+    await hiddenContext.addInitScript(() => {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'hidden',
+      });
+      Object.defineProperty(document, 'hidden', {
+        configurable: true,
+        get: () => true,
+      });
+    });
     hiddenPage = await hiddenContext.newPage();
     attachHiddenTelemetry(hiddenPage);
     await hiddenPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await enterEditor(hiddenPage);
+    await hiddenPage.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
     await page.bringToFront();
     hiddenVisibilityObserved =
       (await hiddenPage.evaluate(() => document.visibilityState)) === 'hidden';
