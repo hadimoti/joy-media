@@ -219,7 +219,19 @@ jobs:
               "$RUNNER_TEMP"/*) ;;
               *) echo "refusing to clean output outside RUNNER_TEMP: $output_path" >&2; exit 1 ;;
             esac
-            rm -rf -- "$output_path"
+            # Playwright may still be closing a trace writer when a job is
+            # interrupted. Retry bounded cleanup so teardown remains
+            # deterministic without ever broadening the target beyond the
+            # run-owned runner-temp directory.
+            removed=0
+            for attempt in $(seq 1 15); do
+              if rm -rf -- "$output_path" 2>/dev/null && test ! -e "$output_path"; then
+                removed=1
+                break
+              fi
+              sleep 1
+            done
+            test "$removed" -eq 1 || { echo "unable to remove run-owned output after bounded retries: $output_path" >&2; exit 1; }
             test ! -e "$output_path"
           done
           test -z "$(git status --porcelain)"
