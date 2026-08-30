@@ -697,7 +697,9 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
 }
 
 export async function observe({
-  root = resolve(fileURLToPath(new URL('.', import.meta.url)), '../../..'),
+  // This module lives at tooling/release; two parents reach the repository
+  // root (release -> tooling -> joy-media).
+  root = resolve(fileURLToPath(new URL('.', import.meta.url)), '../..'),
   ...options
 }) {
   const runId = `release-observer-${new Date().toISOString().replace(/[-:.TZ]/g, '')}-${randomUUID().slice(0, 8)}`;
