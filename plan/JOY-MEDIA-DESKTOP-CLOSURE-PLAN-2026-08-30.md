@@ -1,11 +1,27 @@
 # JOY Media desktop closure: evidence, implementation, and release plan
 
 - Date: 2026-08-30
-- Status: **REVIEWED PLAN READY FOR NEXT GOAL; PRODUCT NO-GO pending implementation and evidence**
+- Status: **IMPLEMENTATION IN PROGRESS; PRODUCT NO-GO pending exact-candidate external evidence**
 - Repository: `C:\Users\HadiMoti\joy-media` only; not `joy-vps` or `hadipc-agent`.
 - Audited source: `bd0439e3e2e3811b5e65cd09f046a62e651debd8` (clean before these planning files).
 - Public `/ready` during this audit reported the same SHA, schema 4, and healthy readiness checks.
-- Deliverable now: diagnosis and a next-goal handoff. This audit does not implement, commit, push, deploy, restart the Worker, or run a SuperPlane pipeline.
+- Deliverable now: diagnosis, implementation ledger, and an exact-candidate release handoff. Source changes are implemented on the candidate branch, but this document does not treat local/fixture evidence as production acceptance.
+
+### Current implementation ledger (2026-08-30)
+
+- Candidate branch: `codex/joy-media-closure-2026-08-30`.
+- Source baseline commit: `6c4b16522c27c0c642f4a6db3207646a5a4bada4`; this ledger update is tracked documentation and therefore requires a fresh exact-SHA release run before promotion.
+- Source baseline tree SHA: `830b932f9e4560d5ec056062d9c360e2f2fa2141`; lockfile SHA: `d41b5ca4ed293ed4935162c19eb7b4c13b264bc3`.
+- Source checks on this candidate: `pnpm run check` green (421 files, 3,670 passed, 2 skipped), production build green (editor Vite 1,406 modules), `pnpm audit --prod --audit-level=moderate` green, and the seven-project local desktop Playwright matrix green (399 tests, 392 passed, 7 documented external-audio skips).
+- Implemented source closures include shared duplicate-title removal and nested-tab semantics, Creative Brief routing, header target/badge fixes, Effects preview caps/fallbacks, timeline/3D cleanup, Worker/API deadline and state protections, and release-gate provenance/teardown enforcement. The effects stability tranche is recorded at commit `268e441` in the candidate history.
+- The release-candidate workflow now fails closed on an unreachable or malformed SHA, requires two exact passes for Linux real services, clean Windows Worker, fixture acceptance, and a separate disposable real-service acceptance command, and always performs Worker/acceptance teardown checks. The real-service command is intentionally runner-local and must emit redacted candidate-bound evidence before `release:gate` can pass.
+- Latest bounded observer evidence (run against the prior source candidate) measured 9 Effects categories, 3 searches, 1 favorites iteration, 0 uncaught exceptions/navigation failures, 11 mounted and 6 playing previews, about 1.86% heap growth, and 100 timeline operations with no orphaned clips. Hidden-tab visibility/query-rate proof and production-preview JS budget remain unmeasured because the headless capability did not provide the required hidden-state/polling window; these are not passes.
+
+### Remaining release blockers for this candidate
+
+The product remains **NO-GO** until the exact candidate SHA has fresh, machine-generated evidence for: (1) two self-hosted Linux real-service passes with PostgreSQL/private-object/auth/Worker/delivery and cleanup; (2) two clean Windows Worker install/startup/recovery/update/rollback/uninstall passes; (3) two disposable authenticated real-service browser acceptance passes across all seven desktop profiles; (4) all four performance artifacts, including hidden-tab behavior and query-rate budget; (5) mixed-source export/download/ffprobe/re-import and delivery receipts; (6) isolated schema N/N-1 restore evidence; (7) primary authenticated staging/live browser verification and a 30-minute post-deploy service/interactive canary; and (8) exact-SHA promotion/deploy records.
+
+At ledger time the candidate had not been pushed or promoted, the runner-local `JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND` was not confirmed, the Windows source runner was offline, and the VPS Gbrain export remained sync-pending after the prior no-verifiable-SHA result. These are explicit external gates, not silently skipped requirements. No production deployment or owner-browser mutation is claimed.
 
 ## 1. Authority, scope, and what completion means
 
