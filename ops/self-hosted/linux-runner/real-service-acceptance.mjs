@@ -20,15 +20,22 @@ const requireFromApi = createRequire(new URL('../../../apps/api/package.json', i
 const { Pool } = requireFromApi('pg');
 
 const execFile = promisify((file, args, options, callback) => {
-  const child = spawn(file, args, { ...options, stdio: ['pipe', 'pipe', 'pipe'] });
+  const { input, ...spawnOptions } = options ?? {};
+  const child = spawn(file, args, { ...spawnOptions, stdio: ['pipe', 'pipe', 'pipe'] });
   const stdout = [];
   const stderr = [];
+  let settled = false;
+  const finish = (error, result) => {
+    if (settled) return;
+    settled = true;
+    callback(error, result);
+  };
   child.stdout.on('data', (chunk) => stdout.push(chunk));
   child.stderr.on('data', (chunk) => stderr.push(chunk));
-  child.once('error', (error) => callback(error));
+  child.once('error', (error) => finish(error));
   child.once('close', (code, signal) => {
     if (code === 0)
-      callback(null, {
+      finish(null, {
         stdout: Buffer.concat(stdout),
         stderr: Buffer.concat(stderr),
       });
@@ -37,9 +44,10 @@ const execFile = promisify((file, args, options, callback) => {
       error.code = code;
       error.stderr = Buffer.concat(stderr).toString('utf8');
       error.stdout = Buffer.concat(stdout).toString('utf8');
-      callback(error);
+      finish(error);
     }
   });
+  child.stdin.end(input);
 });
 
 const root = resolve(fileURLToPath(new URL('../../../', import.meta.url)));
@@ -70,7 +78,9 @@ const mcEnvironment = {
   'MC_HOST_joy-ci': mcHostUrl.toString(),
 };
 const apiPort = await freePort();
-const webPort = await freePort();
+let webPort = await freePort();
+for (let attempt = 0; webPort === apiPort && attempt < 10; attempt += 1) webPort = await freePort();
+if (webPort === apiPort) throw new Error('could not allocate two distinct ports');
 const apiUrl = `http://127.0.0.1:${apiPort}`;
 const webUrl = `http://127.0.0.1:${webPort}`;
 const token = 'joy-media-e2e-token';
@@ -79,6 +89,7 @@ const smokeOnly = process.env.JOY_MEDIA_REAL_ACCEPTANCE_SMOKE_ONLY === '1';
 let pool;
 let apiServer;
 let webProcess;
+let webProcessError;
 let browser;
 
 class MinioObjectStore {
@@ -169,7 +180,19 @@ try {
       stdio: ['ignore', 'ignore', 'ignore'],
     },
   );
-  await waitForHttp(webUrl, 120_000);
+  webProcess.once('error', (error) => {
+    webProcessError = error;
+  });
+  try {
+    await waitForHttp(webUrl, 120_000);
+  } catch (error) {
+    if (webProcessError !== undefined) {
+      const detail =
+        webProcessError instanceof Error ? webProcessError.message : String(webProcessError);
+      error.message = `${error.message}; web process failed to spawn: ${detail}`;
+    }
+    throw error;
+  }
   await runDesktopMatrix(webUrl, apiUrl);
   const deliveryEvidence = await recordJourney(webUrl, apiUrl, token, candidateSha, pool);
   if (!smokeOnly) {
