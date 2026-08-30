@@ -275,24 +275,20 @@ Monitor chrome: resolution · timecode, Fit/50/100/200 zoom, fullscreen, transpo
 - Motion presets (Fade/Pop/Slide) and Effects apply to the selected sticker via the clip↔object map.
 - **Remove background**: Assets action queues `image.comfy` / RemBG when a paired Worker advertises `image.comfy`; otherwise disabled with an honest tooltip. Matte alpha can bind via `pluginData['joy.imageMatte']`.
 
-## 4d. Persian explainer copy (centered and layout-neutral)
+## 4d. Product copy and user content
 
-Visible panel titles, menu labels, tab labels, action labels, technical names, and
-product/domain identifiers stay English. Explanatory paragraphs, guidance,
-empty states, live status messages, and text-entry placeholders are Persian.
-
-Persian explainer elements carry `lang="fa"` and inherit `--joy-font-ui`
-(Modam Pro). The shared `[lang='fa']` rule centers the copy and applies
-`unicode-bidi: plaintext`; it does **not** set `direction`. Do not put explicit
-`dir="rtl"` or `dir="ltr"` on explainer blocks: those direction overrides have
-broken otherwise neutral panel layouts. Inline filenames, ids, API names, and
-code tokens stay isolated with `<bdi>` or `<code>` when embedded in Persian.
+The editor's shipped interface is English-only: visible panel titles, menu labels,
+tab labels, action labels, technical names, guidance, empty states, live status
+messages, and text-entry placeholders all follow the binding language rule above.
+Do not add Persian or Arabic-script product copy or language wrappers to the
+editor. Imported or user-authored multilingual media, captions, filenames, and
+text remain user data and must be preserved exactly.
 
 Text fields that hold user content (`input[type=text]`, untyped inputs, search,
-textarea) keep `unicode-bidi: plaintext` so the user's own text remains
-readable. Explainers and empty states use `.empty-hint` or their panel-specific
-equivalent (centered, muted, line-height 1.5); never leave a bare left-aligned
-guidance paragraph floating in a panel.
+textarea) keep `unicode-bidi: plaintext` so user-authored text remains readable.
+Empty states use `.empty-hint` or their panel-specific equivalent (centered,
+muted, line-height 1.5); never leave a bare left-aligned guidance paragraph
+floating in a panel.
 
 ## 4f. Typography (Eng / Fa / Arabic)
 
