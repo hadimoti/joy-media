@@ -143,12 +143,22 @@ Get-ScheduledTask -TaskName 'JOY Media Self-Hosted CI Runner'
 
 The runner must be `online` before pushing a release commit. If it is offline, repair the runner or run the checks locally; do not switch CI to the production VPS.
 
-## Latest verified run
+## Latest verified runs
 
-On 2026-08-30 UTC, self-hosted run `33282484240` passed on `main` at commit
+On 2026-08-30 UTC, release-candidate run `33285506563` verified commit
+`41b024a677b29131ffd0868f7449bceb591f4bbe` on both Linux passes. Each pass
+completed the full source gate (typecheck, lint, format, 414 test files / 3,608
+tests, build, and production audit), ran the real Postgres migration smoke,
+created and removed a DNS-safe MinIO bucket, uploaded candidate provenance, and
+finished with a clean checkout. The run was then cancelled while the two
+`joy-media-worker` jobs were queued because no runner currently has that label;
+acceptance consequently did not start. This is positive Linux evidence, not a
+release approval: the clean-profile Windows Worker and dependent acceptance
+lanes remain required.
+
+The earlier self-hosted run `33282484240` passed on `main` at commit
 `c514e5efdc24080e042450499eab75c74aebef81`: `check`, `browser-e2e`
 (`desktop-minimum`, `desktop-primary`, and `desktop-compact`), and
 `worker-package` all completed successfully. This confirms the Windows
 source/browser/package lane is operational; it does not substitute for the
-release-candidate Linux, clean-profile Worker, or acceptance lanes described
-above.
+release-candidate clean-profile Worker or acceptance lanes described above.
