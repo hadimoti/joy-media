@@ -150,6 +150,37 @@ describe('dock layout constraints', () => {
     });
     expect(JSON.parse(serializeDockLayout(migrated)).joyLayoutVersion).toBe(2);
   });
+
+  it('migrates legacy Creative Brief tabs into Joy Code without duplicate tabs', () => {
+    const migrated = migrateDockLayoutAliases({
+      panels: {
+        agent: { id: 'agent' },
+        'creative-brief': { id: 'creative-brief' },
+      },
+      grid: {
+        root: {
+          type: 'leaf',
+          data: {
+            id: 'agent-col',
+            views: ['agent', 'creative-brief'],
+            activeView: 'creative-brief',
+          },
+        },
+      },
+    }) as Record<string, unknown>;
+
+    expect((migrated.panels as Record<string, unknown>).agent).toBeDefined();
+    expect((migrated.panels as Record<string, unknown>)['creative-brief']).toBeUndefined();
+    expect(JSON.stringify(migrated)).not.toContain('creative-brief');
+    expect(migrated.grid).toMatchObject({
+      root: {
+        data: {
+          views: ['agent'],
+          activeView: 'agent',
+        },
+      },
+    });
+  });
 });
 
 describe('view modes', () => {

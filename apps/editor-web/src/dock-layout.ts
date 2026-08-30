@@ -159,6 +159,7 @@ const PANEL_ALIASES: Readonly<Record<string, string>> = {
   'dual-lens': 'flow',
   processes: 'jobs',
   library: 'templates',
+  'creative-brief': 'agent',
 };
 
 /** Migrates renamed panels while retaining every unrelated Dockview field. */
@@ -170,8 +171,8 @@ export function migrateDockLayoutAliases(layout: unknown): unknown {
     const next: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(value)) next[key] = migrate(child);
     if (Array.isArray(next.views))
-      next.views = next.views.map((id) =>
-        typeof id === 'string' ? (PANEL_ALIASES[id] ?? id) : id,
+      next.views = dedupeViewIds(
+        next.views.map((id) => (typeof id === 'string' ? (PANEL_ALIASES[id] ?? id) : id)),
       );
     if (typeof next.activeView === 'string')
       next.activeView = PANEL_ALIASES[next.activeView] ?? next.activeView;
@@ -313,4 +314,19 @@ export function widescreenDockLayout(): unknown {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function dedupeViewIds(values: readonly unknown[]): readonly unknown[] {
+  const seen = new Set<string>();
+  const next: unknown[] = [];
+  for (const value of values) {
+    if (typeof value !== 'string') {
+      next.push(value);
+      continue;
+    }
+    if (seen.has(value)) continue;
+    seen.add(value);
+    next.push(value);
+  }
+  return next;
 }

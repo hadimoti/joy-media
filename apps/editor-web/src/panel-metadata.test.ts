@@ -29,7 +29,13 @@ describe('panel metadata registry', () => {
       'Joy Code',
       'Workflows',
       'Jobs',
-      'Creative Brief',
     ]);
+  });
+
+  it('keeps Creative Brief nested until the Joy Code shell owns that workflow', () => {
+    expect(PANEL_METADATA_BY_ID['creative-brief']).toMatchObject({
+      nested: true,
+      label: 'Creative Brief',
+    });
   });
 });
