@@ -14,6 +14,13 @@ import react from '@vitejs/plugin-react';
 const pkg = (relative: string): string =>
   fileURLToPath(new URL(`../../packages/${relative}`, import.meta.url));
 
+// Dockview imports react-dom as an undeclared optional peer. pnpm's strict
+// linker therefore does not place it beside Dockview's package, even though
+// the editor declares react-dom directly. Resolve it from this app's manifest
+// so clean Windows and Linux installs produce the same deterministic bundle.
+const editorDependency = (name: string): string =>
+  fileURLToPath(new URL(`./node_modules/${name}`, import.meta.url));
+
 const CHUNK_BUDGET_KIB = 640;
 
 function editorChunk(id: string): string | undefined {
@@ -149,6 +156,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      'react-dom': editorDependency('react-dom'),
       '@joy-media/workflow-engine': pkg('workflow-engine/dist/index.js'),
       '@joy-media/plugin-sdk/browser': pkg('plugin-sdk/dist/browser.js'),
       '@joy-media/plugin-sdk': pkg('plugin-sdk/dist/index.js'),
