@@ -290,9 +290,11 @@ Empty states use `.empty-hint` or their panel-specific equivalent (centered,
 muted, line-height 1.5); never leave a bare left-aligned guidance paragraph
 floating in a panel.
 
-## 4f. Typography (Eng / Fa / Arabic)
+## 4f. Typography
 
-**UI chrome face is Fontiran Modam Pro** for English, Persian (Farsi), and Arabic UI strings — same licensed webfont pack as JOY Agent.
+**UI chrome face is Fontiran Modam Pro** for the English-only interface. The
+same font may render imported or user-authored multilingual content; that data
+must be preserved without adding multilingual product copy to the shell.
 
 | Token / face            | Value                                               | Use                                                                    |
 | ----------------------- | --------------------------------------------------- | ---------------------------------------------------------------------- |
