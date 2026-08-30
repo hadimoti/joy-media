@@ -805,6 +805,17 @@ production deployment; the orchestrator must still perform exact-SHA promotion,
 backup/rollback verification, origin/public checks, authenticated browser
 certification, and the canary before declaring the goal complete.
 
+### LIVE-50 — documentation-inclusive exact-SHA release gate (2026-08-30)
+
+The documentation-inclusive successor `6a6384596e74ef24137483639fa47f3d4110d900`
+passed release-candidate run `33288503169` on both exact passes for Linux real
+services, clean Windows Worker, and isolated desktop acceptance. Each acceptance
+pass completed 56 desktop-primary journeys (55 passed and one intentional skip),
+including Effects/Inspector, timeline, 3D Joy Code, Worker, animated export, and
+reload coverage; runner-temp Playwright outputs were removed and checkouts were
+clean. This is the exact candidate gate for promotion; deployment, authenticated
+live certification, and canary observation remain outstanding.
+
 ## Stop/continue rules for the autonomous goal
 
 - Do not stop for ordinary design choices, review comments, test failures or retryable service

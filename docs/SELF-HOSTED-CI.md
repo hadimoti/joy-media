@@ -143,6 +143,13 @@ The runner must be `online` before pushing a release commit. If it is offline, r
 
 ## Latest verified runs
 
+On 2026-08-30 UTC, the exact-SHA rerun `33288503169` verified documentation-inclusive
+commit `6a6384596e74ef24137483639fa47f3d4110d900` on both passes for all three
+release lanes. Linux real services, the clean Windows Worker, and isolated acceptance
+all completed successfully; each acceptance pass ran 56 desktop-primary journeys
+(55 passed, 1 intentional skip), removed runner-temp Playwright outputs, and ended
+with a clean checkout. This is the candidate gate for the promotion step below.
+
 On 2026-08-30 UTC, release-candidate run `33287852067` verified commit
 `570c8d3b38cd2e9e1a2cad980c4a30a78e5339a2` on both exact passes for all three
 release lanes. Both Linux real-service passes completed the source, migration,
