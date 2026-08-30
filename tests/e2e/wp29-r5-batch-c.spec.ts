@@ -415,7 +415,7 @@ test.describe('WP-29 R5 batch C — captions', () => {
     probe.failNext = true;
     await page.getByRole('tab', { name: 'Generate' }).click();
     await page.getByRole('button', { name: 'Generate English' }).click();
-    await expect(page.locator('.joy-panel-note')).toContainText(
+    await expect(page.locator('.captions-panel .joy-panel-note')).toContainText(
       'Live transcription could not process the selected media. You can continue editing captions manually.',
     );
     await page.getByRole('tab', { name: 'Transcript' }).click();

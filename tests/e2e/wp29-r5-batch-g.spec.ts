@@ -76,7 +76,9 @@ test.describe('WP-29 R5 batch G — bulk assets and reload recovery', () => {
     const toolbar = page.getByRole('toolbar', { name: 'Bulk asset actions' });
     await expect(toolbar).toContainText('1');
     await toolbar.getByRole('button', { name: 'Share selected media to cloud' }).click();
-    await expect(page.locator('.joy-panel-note')).toContainText('No selected media needs backup');
+    await expect(page.locator('.asset-library .joy-panel-note')).toContainText(
+      'No selected media needs backup',
+    );
     await toolbar.getByRole('button', { name: 'Edit selected with AI' }).click();
     await expect(page.locator('.joy-code-panel')).toBeVisible();
     await expect(page.getByRole('list', { name: 'Attached media' })).toContainText(imageName);
@@ -89,7 +91,7 @@ test.describe('WP-29 R5 batch G — bulk assets and reload recovery', () => {
       .getByRole('button', { name: 'Delete selected assets' })
       .click();
     await expect(page.locator(`.asset-card[data-asset-id="${assetId}"]`)).toHaveCount(0);
-    await expect(page.locator('.joy-panel-note')).toContainText(
+    await expect(page.locator('.asset-library .joy-panel-note')).toContainText(
       'Deleted 1 of 1 selected media items',
     );
     await recordEvidence(testInfo, {
@@ -127,7 +129,7 @@ test.describe('WP-29 R5 batch G — bulk assets and reload recovery', () => {
     const initialize = page.getByRole('button', { name: 'Initialize project' });
     if (await initialize.isVisible()) {
       await initialize.click();
-      await expect(page.locator('.joy-panel-note')).toContainText('Project is ready');
+      await expect(page.locator('.jobs-panel .joy-panel-note')).toContainText('Project is ready');
     }
     const queue = page.getByRole('button', { name: 'Queue thumbnail derivative' });
     await expect(queue).toBeEnabled();

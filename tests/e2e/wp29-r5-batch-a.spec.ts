@@ -165,9 +165,12 @@ test.describe('WP-29 R5 batch A — file bridge', () => {
         .locator('input[type="file"][aria-label="Media file"]')
         .setInputFiles(join(MEDIA_FIXTURE_DIR, fileName));
       await drawer.getByRole('button', { name: 'Confirm import' }).click();
-      await expect(page.locator('.joy-panel-note')).toContainText(/Failed to register media:/, {
-        timeout: 10_000,
-      });
+      await expect(page.locator('.asset-library .joy-panel-note')).toContainText(
+        /Failed to register media:/,
+        {
+          timeout: 10_000,
+        },
+      );
       await expect(page.locator('.asset-card', { hasText: fileName })).toHaveCount(0);
     }
     await recordEvidence(testInfo, {
