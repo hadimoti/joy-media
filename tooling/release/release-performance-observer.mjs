@@ -354,8 +354,8 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
   const pollStartedAt = { value: 0 };
   const endpointCounts = new Map();
   const hiddenEndpointCounts = new Map();
-  const inflight = new Set();
-  const hiddenInflight = new Set();
+  const inflight = new Map();
+  const hiddenInflight = new Map();
   const requestKeys = new WeakMap();
   const hiddenRequestKeys = new WeakMap();
   let duplicateInFlightRequests = 0;
@@ -427,13 +427,17 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
     if (pollStartedAt.value <= 0) return;
     const key = endpointKey(request);
     requestKeys.set(request, key);
-    if (inflight.has(key)) duplicateInFlightRequests += 1;
-    inflight.add(key);
+    const active = inflight.get(key) ?? 0;
+    if (active > 0) duplicateInFlightRequests += 1;
+    inflight.set(key, active + 1);
     endpointCounts.set(key, (endpointCounts.get(key) ?? 0) + 1);
   });
   const clearRequest = (request) => {
     const key = requestKeys.get(request);
-    if (key !== undefined) inflight.delete(key);
+    if (key === undefined) return;
+    const active = inflight.get(key);
+    if (active === undefined || active <= 1) inflight.delete(key);
+    else inflight.set(key, active - 1);
   };
   page.on('requestfinished', clearRequest);
   page.on('requestfailed', clearRequest);
@@ -464,19 +468,26 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
     target.on('requestfailed', (request) => {
       if (request.isNavigationRequest()) navigationFailures += 1;
       const key = hiddenRequestKeys.get(request);
-      if (key !== undefined) hiddenInflight.delete(key);
+      if (key === undefined) return;
+      const active = hiddenInflight.get(key);
+      if (active === undefined || active <= 1) hiddenInflight.delete(key);
+      else hiddenInflight.set(key, active - 1);
     });
     target.on('request', (request) => {
       if (!requestIsPollable(request) || hiddenStartedAt <= 0) return;
       const key = endpointKey(request);
       hiddenRequestKeys.set(request, key);
-      if (hiddenInflight.has(key)) duplicateInFlightRequests += 1;
-      hiddenInflight.add(key);
+      const active = hiddenInflight.get(key) ?? 0;
+      if (active > 0) duplicateInFlightRequests += 1;
+      hiddenInflight.set(key, active + 1);
       hiddenEndpointCounts.set(key, (hiddenEndpointCounts.get(key) ?? 0) + 1);
     });
     target.on('requestfinished', (request) => {
       const key = hiddenRequestKeys.get(request);
-      if (key !== undefined) hiddenInflight.delete(key);
+      if (key === undefined) return;
+      const active = hiddenInflight.get(key);
+      if (active === undefined || active <= 1) hiddenInflight.delete(key);
+      else hiddenInflight.set(key, active - 1);
     });
     target.on('response', (response) => {
       if (debugBrowserErrors && response.status() >= 400)

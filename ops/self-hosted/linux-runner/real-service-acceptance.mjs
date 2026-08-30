@@ -61,6 +61,14 @@ const bucket = `joy-media-${runId}-${runAttempt}-${pass}`;
 const tempRoot = await mkdtemp('/tmp/joy-media-real-acceptance-');
 const mcConfig = join(tempRoot, 'mc');
 await mkdir(mcConfig, { recursive: true });
+const mcHostUrl = new URL(s3Endpoint);
+mcHostUrl.username = s3AccessKey;
+mcHostUrl.password = s3SecretKey;
+const mcEnvironment = {
+  ...process.env,
+  MC_CONFIG_DIR: mcConfig,
+  'MC_HOST_joy-ci': mcHostUrl.toString(),
+};
 const apiPort = await freePort();
 const webPort = await freePort();
 const apiUrl = `http://127.0.0.1:${apiPort}`;
@@ -118,7 +126,7 @@ class MinioObjectStore {
 const runMc = async (args, input) => {
   await execFile('mc', args, {
     cwd: root,
-    env: { ...process.env, MC_CONFIG_DIR: mcConfig },
+    env: mcEnvironment,
     input,
   });
 };
@@ -126,7 +134,6 @@ const runMc = async (args, input) => {
 try {
   pool = new Pool({ connectionString: databaseUrl, options: `-c search_path=${schema},public` });
   await pool.query(`CREATE SCHEMA "${schema}"`);
-  await runMc(['alias', 'set', 'joy-ci', s3Endpoint, s3AccessKey, s3SecretKey, '--api', 'S3v4']);
   await runMc(['mb', '--ignore-existing', `joy-ci/${bucket}`]);
 
   const objectStore = new MinioObjectStore({
@@ -876,7 +883,10 @@ async function recordOperationalEvidence(
 }
 
 async function runMcWithConfig(config, args) {
-  await execFile('mc', args, { cwd: root, env: { ...process.env, MC_CONFIG_DIR: config } });
+  await execFile('mc', args, {
+    cwd: root,
+    env: { ...mcEnvironment, MC_CONFIG_DIR: config },
+  });
 }
 function required(name) {
   const value = process.env[name];
