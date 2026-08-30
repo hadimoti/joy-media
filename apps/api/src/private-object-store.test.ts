@@ -145,4 +145,30 @@ describe('RclonePrivateObjectStore', () => {
     await vi.advanceTimersByTimeAsync(25);
     await pending;
   });
+
+  it('bounds object operations instead of leaving a stalled rclone call in flight', async () => {
+    vi.useFakeTimers();
+    const store = new RclonePrivateObjectStore({
+      remotePrefix: 'parspack:c212734/sweden-backups/joy-media',
+      operationTimeoutMs: 1_000,
+      run: { run: () => new Promise<Uint8Array>(() => undefined) },
+    });
+
+    const pending = expect(store.get(descriptor)).rejects.toThrow(
+      'private object store operation timed out',
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    await pending;
+  });
+
+  it('rejects unsafe object operation timeout configuration', () => {
+    expect(
+      () =>
+        new RclonePrivateObjectStore({
+          remotePrefix: 'parspack:c212734/sweden-backups/joy-media',
+          operationTimeoutMs: 999,
+          run: { run: async () => bytes },
+        }),
+    ).toThrow('private object store operation timeout must be between 1000ms and 600000ms');
+  });
 });

@@ -3,7 +3,11 @@ import { once } from 'node:events';
 import type { IncomingMessage } from 'node:http';
 import { describe, expect, it } from 'vitest';
 import { createControlPlaneHttpServer, LocalControlPlane } from '@joy-media/api';
-import { WorkerControlPlaneClient, WorkerSessionExpiredError } from './control-plane-client.js';
+import {
+  WorkerControlPlaneClient,
+  WorkerRequestTimeoutError,
+  WorkerSessionExpiredError,
+} from './control-plane-client.js';
 
 const stubMediaAuth = {
   requestOtp: async () => ({ message: 'stub' }),
@@ -141,6 +145,68 @@ describe('WorkerControlPlaneClient', () => {
 
     await expect(client.lease()).rejects.toBeInstanceOf(WorkerSessionExpiredError);
     expect(session).toBeUndefined();
+  });
+
+  it('aborts and rejects a control-plane request that exceeds its deadline', async () => {
+    let aborted = false;
+    const client = new WorkerControlPlaneClient({
+      apiUrl: 'https://media.joyteam.ir',
+      identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
+      sessionStore: {
+        loadWorkerSession: () => 'worker-session',
+        saveWorkerSession: () => undefined,
+        clearWorkerSession: () => undefined,
+      },
+      requestTimeoutMs: 100,
+      fetch: async (_input, init) =>
+        await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            aborted = true;
+            reject(new Error('aborted by test'));
+          });
+        }),
+    });
+
+    await expect(client.lease()).rejects.toMatchObject({
+      name: 'WorkerRequestTimeoutError',
+      timeoutMs: 100,
+    } satisfies Partial<WorkerRequestTimeoutError>);
+    expect(aborted).toBe(true);
+  });
+
+  it('bounds a response body that stalls after headers arrive', async () => {
+    const client = new WorkerControlPlaneClient({
+      apiUrl: 'https://media.joyteam.ir',
+      identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
+      sessionStore: {
+        loadWorkerSession: () => 'worker-session',
+        saveWorkerSession: () => undefined,
+        clearWorkerSession: () => undefined,
+      },
+      requestTimeoutMs: 100,
+      fetch: async () => new Response(new ReadableStream<Uint8Array>()),
+    });
+
+    await expect(client.lease()).rejects.toMatchObject({
+      name: 'WorkerRequestTimeoutError',
+      timeoutMs: 100,
+    } satisfies Partial<WorkerRequestTimeoutError>);
+  });
+
+  it('rejects invalid request timeout configuration instead of allowing unbounded I/O', () => {
+    expect(
+      () =>
+        new WorkerControlPlaneClient({
+          apiUrl: 'https://media.joyteam.ir',
+          identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
+          sessionStore: {
+            loadWorkerSession: () => undefined,
+            saveWorkerSession: () => undefined,
+            clearWorkerSession: () => undefined,
+          },
+          requestTimeoutMs: 0,
+        }),
+    ).toThrow('Worker request timeout must be between 100ms and 120000ms');
   });
 
   it('pairs and completes a job over the real versioned HTTP transport', async () => {

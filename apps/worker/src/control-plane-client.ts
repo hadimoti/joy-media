@@ -51,6 +51,8 @@ export interface WorkerControlPlaneClientOptions {
   readonly identity: DeviceIdentity;
   readonly sessionStore: WorkerSessionStore;
   readonly fetch?: typeof fetch;
+  /** Maximum time a control-plane HTTP request may remain in flight. */
+  readonly requestTimeoutMs?: number;
 }
 
 /**
@@ -65,12 +67,28 @@ export class WorkerSessionExpiredError extends Error {
   }
 }
 
+/** A bounded request protects the daemon from hanging sockets and proxies. */
+export class WorkerRequestTimeoutError extends Error {
+  constructor(
+    readonly url: string,
+    readonly timeoutMs: number,
+  ) {
+    super(`Worker request timed out after ${timeoutMs}ms: ${url}`);
+    this.name = 'WorkerRequestTimeoutError';
+  }
+}
+
 /** Outbound-only Worker client. It never holds a JOY user session or password. */
 export class WorkerControlPlaneClient {
   readonly #fetch: typeof fetch;
+  readonly #requestTimeoutMs: number;
 
   constructor(private readonly options: WorkerControlPlaneClientOptions) {
     this.#fetch = options.fetch ?? fetch;
+    const requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
+    if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs < 100 || requestTimeoutMs > 120_000)
+      throw new Error('Worker request timeout must be between 100ms and 120000ms');
+    this.#requestTimeoutMs = Math.round(requestTimeoutMs);
   }
 
   static createPairingCode(): string {
@@ -204,7 +222,7 @@ export class WorkerControlPlaneClient {
       headers['x-joy-height'] = String(result.descriptor.height);
     if (result.descriptor?.durationUs !== undefined)
       headers['x-joy-duration-us'] = String(result.descriptor.durationUs);
-    const response = await this.#fetch(
+    const response = await this.runTimedRequest(
       `${this.options.apiUrl.replace(/\/$/, '')}/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/derivative`,
       {
         method: 'POST',
@@ -214,6 +232,7 @@ export class WorkerControlPlaneClient {
           bytes.byteOffset + bytes.byteLength,
         ) as ArrayBuffer,
       },
+      async (result) => result,
     );
     if (response.status === 401) {
       this.options.sessionStore.clearWorkerSession();
@@ -263,26 +282,38 @@ export class WorkerControlPlaneClient {
     sessionToken?: string,
   ): Promise<{ readonly ok: boolean; readonly status: number; readonly body: unknown }> {
     const url = `${this.options.apiUrl.replace(/\/$/, '')}${pathname}`;
-    const response = await this.#fetch(url, {
-      method: 'POST',
-      headers: {
-        accept: 'application/json',
-        'content-type': 'application/json',
-        // Cloudflare bot checks sometimes challenge bare undici/Node UAs from
-        // residential networks; identify as JOY Worker and prefer JSON.
-        'user-agent': process.env.JOY_MEDIA_WORKER_USER_AGENT?.trim() || 'JOY-Media-Worker/0.1',
-        ...(sessionToken === undefined ? {} : { authorization: `Bearer ${sessionToken}` }),
+    const responseBody = await this.runTimedRequest(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/json',
+          // Cloudflare bot checks sometimes challenge bare undici/Node UAs from
+          // residential networks; identify as JOY Worker and prefer JSON.
+          'user-agent': process.env.JOY_MEDIA_WORKER_USER_AGENT?.trim() || 'JOY-Media-Worker/0.1',
+          ...(sessionToken === undefined ? {} : { authorization: `Bearer ${sessionToken}` }),
+        },
+        body: JSON.stringify(body),
       },
-      body: JSON.stringify(body),
-    });
+      async (result) => {
+        // Keep the response body read inside the same deadline as fetch(). A
+        // proxy can deliver headers and then leave the stream open forever.
+        if (result.status === 401) {
+          await result.text();
+          return { response: result, raw: undefined };
+        }
+        return { response: result, raw: await result.text() };
+      },
+    );
+    const response = responseBody.response;
     // Authentication failures are actionable even when an upstream proxy
     // returns an HTML/plain-text body instead of the JSON API envelope. Let
     // authenticatedRequest inspect the status so it can clear the session.
     if (response.status === 401) {
-      await response.text();
       return { ok: false, status: response.status, body: null };
     }
-    const raw = await response.text();
+    const raw = responseBody.raw ?? '';
     let envelope: unknown;
     try {
       envelope = raw.length === 0 ? null : JSON.parse(raw);
@@ -294,6 +325,37 @@ export class WorkerControlPlaneClient {
     }
     const bodyValue = isRecord(envelope) && 'data' in envelope ? envelope.data : envelope;
     return { ok: response.ok, status: response.status, body: bodyValue };
+  }
+
+  private async runTimedRequest<T>(
+    input: RequestInfo | URL,
+    init: RequestInit | undefined,
+    consume: (response: Response) => Promise<T>,
+  ): Promise<T> {
+    const url = String(input);
+    const controller = new AbortController();
+    const callerSignal = init?.signal ?? undefined;
+    const abortFromCaller = (): void => controller.abort();
+    if (callerSignal !== undefined) {
+      if (callerSignal.aborted) controller.abort();
+      else callerSignal.addEventListener('abort', abortFromCaller, { once: true });
+    }
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const timeout = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new WorkerRequestTimeoutError(url, this.#requestTimeoutMs));
+          controller.abort();
+        }, this.#requestTimeoutMs);
+      });
+      return await Promise.race([
+        this.#fetch(input, { ...init, signal: controller.signal }).then(consume),
+        timeout,
+      ]);
+    } finally {
+      if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+      callerSignal?.removeEventListener('abort', abortFromCaller);
+    }
   }
 }
 

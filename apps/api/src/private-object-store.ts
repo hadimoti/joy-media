@@ -28,10 +28,16 @@ export interface RclonePrivateObjectStoreOptions {
   readonly run?: RcloneRunner;
   readonly s3?: S3ObjectClient;
   readonly rcloneConfigPath?: string;
+  /** Deadline for put/get/remove operations, including object-store response bodies. */
+  readonly operationTimeoutMs?: number;
 }
 
 export interface RcloneRunner {
-  run(args: readonly string[], input?: Uint8Array): Promise<Uint8Array>;
+  run(args: readonly string[], input?: Uint8Array, options?: RcloneRunOptions): Promise<Uint8Array>;
+}
+
+export interface RcloneRunOptions {
+  readonly timeoutMs?: number;
 }
 
 /**
@@ -42,11 +48,22 @@ export class RclonePrivateObjectStore implements PrivateObjectStore {
   private readonly command: string;
   private readonly runner: RcloneRunner;
   private readonly s3: S3ObjectClient | undefined;
+  private readonly operationTimeoutMs: number;
 
   constructor(private readonly options: RclonePrivateObjectStoreOptions) {
     if (!isRemotePrefix(options.remotePrefix))
       throw new TypeError('object-store remote prefix is invalid');
     this.command = options.command ?? 'rclone';
+    const operationTimeoutMs = options.operationTimeoutMs ?? 120_000;
+    if (
+      !Number.isSafeInteger(operationTimeoutMs) ||
+      operationTimeoutMs < 1_000 ||
+      operationTimeoutMs > 600_000
+    )
+      throw new RangeError(
+        'private object store operation timeout must be between 1000ms and 600000ms',
+      );
+    this.operationTimeoutMs = operationTimeoutMs;
     this.s3 = options.s3 ?? (options.run ? undefined : createParsPackClient(options));
     this.runner = options.run ?? new SpawnRcloneRunner(this.command);
   }
@@ -58,14 +75,14 @@ export class RclonePrivateObjectStore implements PrivateObjectStore {
       await this.s3.put(descriptor.ref, bytes);
       return;
     }
-    await this.rclone().run(['rcat', this.pathFor(descriptor.ref), '--log-level', 'ERROR'], bytes);
+    await this.runRclone(['rcat', this.pathFor(descriptor.ref), '--log-level', 'ERROR'], bytes);
   }
 
   async get(descriptor: PrivateObjectDescriptor): Promise<Uint8Array> {
     validateDescriptor(descriptor);
     const bytes = this.s3
       ? await this.s3.get(descriptor.ref)
-      : await this.rclone().run(['cat', this.pathFor(descriptor.ref), '--log-level', 'ERROR']);
+      : await this.runRclone(['cat', this.pathFor(descriptor.ref), '--log-level', 'ERROR']);
     verify(descriptor, bytes);
     return bytes;
   }
@@ -76,7 +93,7 @@ export class RclonePrivateObjectStore implements PrivateObjectStore {
       await this.s3.remove(ref);
       return;
     }
-    await this.rclone().run(['deletefile', this.pathFor(ref), '--log-level', 'ERROR']);
+    await this.runRclone(['deletefile', this.pathFor(ref), '--log-level', 'ERROR']);
   }
 
   async probeReadiness(options: PrivateObjectStoreReadinessOptions = {}): Promise<void> {
@@ -96,20 +113,24 @@ export class RclonePrivateObjectStore implements PrivateObjectStore {
       ? `${target.remoteName}:${target.bucket}`
       : this.options.remotePrefix;
     const output = await withTimeout(
-      this.rclone().run([
-        'lsjson',
-        probeTarget,
-        '--max-depth',
-        '1',
-        '--dirs-only',
-        '--no-modtime',
-        '--timeout',
-        '2s',
-        '--contimeout',
-        '2s',
-        '--log-level',
-        'ERROR',
-      ]),
+      this.rclone().run(
+        [
+          'lsjson',
+          probeTarget,
+          '--max-depth',
+          '1',
+          '--dirs-only',
+          '--no-modtime',
+          '--timeout',
+          '2s',
+          '--contimeout',
+          '2s',
+          '--log-level',
+          'ERROR',
+        ],
+        undefined,
+        { timeoutMs },
+      ),
       timeoutMs,
       'private object store readiness probe timed out',
     );
@@ -123,6 +144,14 @@ export class RclonePrivateObjectStore implements PrivateObjectStore {
   private rclone(): RcloneRunner {
     return this.runner;
   }
+
+  private async runRclone(args: readonly string[], input?: Uint8Array): Promise<Uint8Array> {
+    return withTimeout(
+      this.rclone().run(args, input, { timeoutMs: this.operationTimeoutMs }),
+      this.operationTimeoutMs,
+      'private object store operation timed out',
+    );
+  }
 }
 
 export class PrivateObjectIntegrityError extends Error {
@@ -135,7 +164,11 @@ export class PrivateObjectIntegrityError extends Error {
 class SpawnRcloneRunner implements RcloneRunner {
   constructor(private readonly command: string) {}
 
-  run(args: readonly string[], input?: Uint8Array): Promise<Uint8Array> {
+  run(
+    args: readonly string[],
+    input?: Uint8Array,
+    options: RcloneRunOptions = {},
+  ): Promise<Uint8Array> {
     return new Promise((resolve, reject) => {
       const child = spawn(this.command, [...args], {
         shell: false,
@@ -143,17 +176,33 @@ class SpawnRcloneRunner implements RcloneRunner {
       });
       const stdout: Buffer[] = [];
       const stderr: Buffer[] = [];
+      let settled = false;
+      const timeout =
+        options.timeoutMs === undefined
+          ? undefined
+          : setTimeout(() => {
+              child.kill();
+              reject(new Error(`rclone operation timed out after ${options.timeoutMs}ms`));
+            }, options.timeoutMs);
+      const finish = (callback: () => void): void => {
+        if (settled) return;
+        settled = true;
+        if (timeout !== undefined) clearTimeout(timeout);
+        callback();
+      };
       child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
       child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
-      child.once('error', reject);
+      child.once('error', (error) => finish(() => reject(error)));
       child.once('close', (status) => {
-        if (status === 0) resolve(new Uint8Array(Buffer.concat(stdout)));
-        else
-          reject(
-            new Error(
-              `rclone failed (${status ?? 'signal'}): ${Buffer.concat(stderr).toString('utf8').trim()}`,
-            ),
-          );
+        finish(() => {
+          if (status === 0) resolve(new Uint8Array(Buffer.concat(stdout)));
+          else
+            reject(
+              new Error(
+                `rclone failed (${status ?? 'signal'}): ${Buffer.concat(stderr).toString('utf8').trim()}`,
+              ),
+            );
+        });
       });
       if (input === undefined) child.stdin.end();
       else child.stdin.end(input);
@@ -188,7 +237,7 @@ function createParsPackClient(
   if (!target || target.remoteName !== 'parspack') return undefined;
   const credentials = readS3Credentials(target.remoteName, options.rcloneConfigPath);
   if (!credentials) return undefined;
-  return new SigV4S3ObjectClient(target, credentials);
+  return new SigV4S3ObjectClient(target, credentials, options.operationTimeoutMs ?? 120_000);
 }
 
 function parseRemotePrefix(value: string): S3RemoteTarget | undefined {
@@ -259,6 +308,7 @@ class SigV4S3ObjectClient implements S3ObjectClient {
   constructor(
     private readonly target: S3RemoteTarget,
     private readonly credentials: S3Credentials,
+    private readonly operationTimeoutMs: number,
   ) {
     this.endpoint = new URL(credentials.endpoint);
     if (this.endpoint.protocol !== 'https:')
@@ -280,9 +330,9 @@ class SigV4S3ObjectClient implements S3ObjectClient {
     await this.request('DELETE', ref);
   }
 
-  async probeReadiness(): Promise<void> {
+  async probeReadiness(options: PrivateObjectStoreReadinessOptions = {}): Promise<void> {
     try {
-      await this.request('GET', 'joy-media-readiness-probe');
+      await this.request('GET', 'joy-media-readiness-probe', undefined, options.timeoutMs);
     } catch (error) {
       // A signed 404 proves the bucket endpoint and credentials are reachable
       // without mutating or disclosing any private object. Other failures are
@@ -296,6 +346,7 @@ class SigV4S3ObjectClient implements S3ObjectClient {
     method: 'PUT' | 'GET' | 'DELETE',
     ref: string,
     bytes?: Uint8Array,
+    timeoutMs = this.operationTimeoutMs,
   ): Promise<Uint8Array> {
     const body = bytes ? Buffer.from(bytes) : undefined;
     const payloadHash = createHash('sha256')
@@ -336,6 +387,14 @@ class SigV4S3ObjectClient implements S3ObjectClient {
     const authorization = `AWS4-HMAC-SHA256 Credential=${this.credentials.accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
 
     return new Promise((resolve, reject) => {
+      let settled = false;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const finish = (callback: () => void): void => {
+        if (settled) return;
+        settled = true;
+        if (timeout !== undefined) clearTimeout(timeout);
+        callback();
+      };
       const req = httpsRequest(
         {
           protocol: this.endpoint.protocol,
@@ -352,21 +411,27 @@ class SigV4S3ObjectClient implements S3ObjectClient {
         (res) => {
           const chunks: Buffer[] = [];
           res.on('data', (chunk: Buffer) => chunks.push(chunk));
-          res.once('error', reject);
+          res.once('error', (error) => finish(() => reject(error)));
           res.once('end', () => {
             const statusCode = res.statusCode ?? 0;
             const response = Buffer.concat(chunks);
-            if (statusCode >= 200 && statusCode < 300) resolve(new Uint8Array(response));
+            if (statusCode >= 200 && statusCode < 300)
+              finish(() => resolve(new Uint8Array(response)));
             else
-              reject(
-                new Error(
-                  `s3 object request failed (${statusCode}) for ${this.target.bucket}/${this.objectKey(ref)}`,
+              finish(() =>
+                reject(
+                  new Error(
+                    `s3 object request failed (${statusCode}) for ${this.target.bucket}/${this.objectKey(ref)}`,
+                  ),
                 ),
               );
           });
         },
       );
-      req.once('error', reject);
+      timeout = setTimeout(() => {
+        req.destroy(new Error(`s3 object request timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      req.once('error', (error) => finish(() => reject(error)));
       if (body) req.end(body);
       else req.end();
     });
