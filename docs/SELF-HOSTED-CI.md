@@ -143,7 +143,7 @@ The runner must be `online` before pushing a release commit. If it is offline, r
 
 ## Latest verified runs
 
-On 2026-08-30 UTC, the exact-SHA rerun `33288503169` verified documentation-inclusive
+On 2026-08-30 UTC, workflow-dispatch exact-SHA run `33288503169` verified documentation-inclusive
 commit `6a6384596e74ef24137483639fa47f3d4110d900` on both passes for all three
 release lanes. Linux real services, the clean Windows Worker, and isolated acceptance
 all completed successfully; each acceptance pass ran 56 desktop-primary journeys
@@ -158,8 +158,8 @@ Worker passes built and self-tested the Worker package/executable with a clean
 profile. Both isolated acceptance passes completed 56 desktop-primary journeys
 (55 passed, 1 intentional skip each), including Effects, Inspector, timeline,
 3D/Joy Code, Worker, animated export, and reload paths; both removed their
-Playwright output directories and ended with clean checkouts. This is the first
-fully green release-candidate evidence for the current candidate SHA; production
+Playwright output directories and ended with clean checkouts. This is fully green
+release-candidate evidence for that documentation-inclusive SHA; production
 promotion and the authenticated live canary remain orchestrator-owned steps.
 
 On 2026-08-30 UTC, the earlier release-candidate run `33285506563` verified commit
@@ -170,8 +170,8 @@ created and removed a DNS-safe MinIO bucket, uploaded candidate provenance, and
 finished with a clean checkout. At that time the two `joy-media-worker` jobs were
 queued because no runner had that label; the run was cancelled and acceptance did
 not start. This is retained as historical Linux evidence; the dedicated Worker
-runner has since been provisioned and the fully green run `33287852067` above is
-the current release-candidate evidence.
+runner has since been provisioned, and runs `33287852067` and `33288503169` above
+supersede this historical partial evidence.
 
 The earlier self-hosted run `33282484240` passed on `main` at commit
 `c514e5efdc24080e042450499eab75c74aebef81`: `check`, `browser-e2e`

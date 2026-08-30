@@ -789,7 +789,7 @@ checks, and the real-services 30-minute canary all passed for that same SHA. Thi
 remaining source-bound Worker, inspection, Motion, Effects, 3D, persistence, and release-gate
 items for that prior candidate; the newer candidate and CI evidence are recorded in LIVE-49.
 
-### LIVE-49 — current self-hosted release-candidate evidence (2026-08-30)
+### LIVE-49 — prior self-hosted release-candidate evidence (2026-08-30)
 
 Candidate `570c8d3b38cd2e9e1a2cad980c4a30a78e5339a2` passed release-candidate run
 `33287852067` on both exact passes for Linux real services, the clean Windows Worker,
