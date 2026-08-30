@@ -12872,8 +12872,11 @@ label {
 }
 
 .dual-lens-trace strong {
+  display: block;
   justify-self: end;
   min-width: 0;
+  width: 100%;
+  max-width: 100%;
   overflow: hidden;
   color: var(--joy-text);
   text-overflow: ellipsis;
