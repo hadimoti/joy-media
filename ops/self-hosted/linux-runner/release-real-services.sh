@@ -22,7 +22,20 @@ schema="ci_${run_id}_${run_attempt}_${pass}"
 bucket="joy-media-${namespace}"
 tmp_dir=$(mktemp -d)
 mc_config=$(mktemp -d)
-trap 'rm -rf -- "$tmp_dir" "$mc_config"; PGOPTIONS="" psql "$JOY_MEDIA_CI_DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS \"$schema\" CASCADE" >/dev/null 2>&1 || true' EXIT
+
+cleanup() {
+  local exit_code=$?
+  export MC_CONFIG_DIR="$mc_config"
+  mc alias set joy-ci "$JOY_MEDIA_CI_S3_ENDPOINT" "$JOY_MEDIA_CI_S3_ACCESS_KEY" "$JOY_MEDIA_CI_S3_SECRET_KEY" --api S3v4 >/dev/null 2>&1 || true
+  mc rm --quiet --recursive --force "joy-ci/$bucket" >/dev/null 2>&1 || true
+  mc rb --quiet "joy-ci/$bucket" >/dev/null 2>&1 || true
+  unset MC_CONFIG_DIR
+  PGOPTIONS="" psql "$JOY_MEDIA_CI_DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS \"$schema\" CASCADE" >/dev/null 2>&1 || true
+  rm -rf -- "$tmp_dir" "$mc_config"
+  exit "$exit_code"
+}
+
+trap cleanup EXIT
 
 psql "$JOY_MEDIA_CI_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE SCHEMA \"$schema\"" >/dev/null
 
