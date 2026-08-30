@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 import { randomUUID } from 'node:crypto';
+import { instrumentPostgresPool } from './db-query-observability.js';
 import {
   ControlPlaneError,
   SHARED_LIBRARY_OWNER_ID,
@@ -448,13 +449,12 @@ export interface PostgresControlPlaneOptions {
 export class PostgresControlPlane implements ControlPlane {
   readonly #skipLocked: boolean;
   readonly #documentStore: PostgresProjectDocumentStore;
+  private readonly pool: Pool;
 
-  constructor(
-    private readonly pool: Pool,
-    options: PostgresControlPlaneOptions = {},
-  ) {
+  constructor(pool: Pool, options: PostgresControlPlaneOptions = {}) {
+    this.pool = instrumentPostgresPool(pool);
     this.#skipLocked = options.skipLocked ?? true;
-    this.#documentStore = new PostgresProjectDocumentStore(pool);
+    this.#documentStore = new PostgresProjectDocumentStore(this.pool);
   }
 
   async initialize(): Promise<void> {

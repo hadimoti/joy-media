@@ -75,6 +75,7 @@ import {
 } from './joy-code-client-request-validation.js';
 import { JoyCodeAdmissionGate } from './joy-code-admission-gate.js';
 import { createClientAddressResolver, type ClientAddressResolver } from './client-address.js';
+import { attachDbQueryCountHeader, withDbQueryContext } from './db-query-observability.js';
 
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
 const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 600;
@@ -138,6 +139,11 @@ export interface ControlPlaneHttpServerOptions {
   };
   /** Maximum size for ordinary JSON request bodies. Media/document routes have explicit limits. */
   readonly maxJsonBodyBytes?: number;
+  /**
+   * Opt-in, loopback test instrumentation. Production deployments leave this
+   * off so database load never becomes a public response side channel.
+   */
+  readonly queryObservability?: boolean;
   /** Shared trusted-proxy boundary used to key process-local abuse controls. */
   readonly clientAddressResolver?: ClientAddressResolver;
   /** Injectable dependency probes for /ready. Omitted checks preserve legacy readiness. */
@@ -175,26 +181,29 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
   const rateLimitBuckets = new Map<string, { windowStart: number; count: number }>();
   const clientAddressResolver = options.clientAddressResolver ?? createClientAddressResolver();
   return createServer(async (request, response) => {
-    const path = request.url?.split('?', 1)[0] ?? '/';
-    if (
-      (path.startsWith('/v1/') || path.startsWith('/v2/')) &&
-      !consumeRateLimit(
-        request,
-        rateLimitBuckets,
-        rateLimitWindowMs,
-        rateLimitMaxRequests,
-        clientAddressResolver,
-      )
-    ) {
-      response.setHeader('retry-after', String(Math.ceil(rateLimitWindowMs / 1000)));
-      respondJson(response, 429, { error: { code: 'RATE_LIMITED' } });
-      return;
-    }
-    try {
-      await route(resolvedOptions, request, response, maxJsonBodyBytes);
-    } catch (error) {
-      respondError(response, error);
-    }
+    if (options.queryObservability === true) attachDbQueryCountHeader(response);
+    await withDbQueryContext(async () => {
+      const path = request.url?.split('?', 1)[0] ?? '/';
+      if (
+        (path.startsWith('/v1/') || path.startsWith('/v2/')) &&
+        !consumeRateLimit(
+          request,
+          rateLimitBuckets,
+          rateLimitWindowMs,
+          rateLimitMaxRequests,
+          clientAddressResolver,
+        )
+      ) {
+        response.setHeader('retry-after', String(Math.ceil(rateLimitWindowMs / 1000)));
+        respondJson(response, 429, { error: { code: 'RATE_LIMITED' } });
+        return;
+      }
+      try {
+        await route(resolvedOptions, request, response, maxJsonBodyBytes);
+      } catch (error) {
+        respondError(response, error);
+      }
+    });
   });
 }
 

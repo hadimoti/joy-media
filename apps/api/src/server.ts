@@ -24,6 +24,7 @@ import { createProductionJoyCodeRuntime } from './joy-code-production-runtime.js
 import { CanonicalJoyCodeInputResolver } from './joy-code-input-resolver.js';
 import { createClientAddressResolver, trustedProxyAddressesFromEnv } from './client-address.js';
 import { productionReadinessOptions, releaseIdentityFromEnvironment } from './server-readiness.js';
+import { instrumentPostgresPool } from './db-query-observability.js';
 
 await start();
 
@@ -31,7 +32,9 @@ async function start(): Promise<void> {
   const host = process.env.JOY_MEDIA_API_HOST ?? '127.0.0.1';
   const port = Number(process.env.JOY_MEDIA_API_PORT ?? 8790);
   const databaseUrl = process.env.JOY_MEDIA_DATABASE_URL;
-  const pool = databaseUrl === undefined ? undefined : new Pool({ connectionString: databaseUrl });
+  const rawPool =
+    databaseUrl === undefined ? undefined : new Pool({ connectionString: databaseUrl });
+  const pool = rawPool === undefined ? undefined : instrumentPostgresPool(rawPool);
   const durableControlPlane = pool === undefined ? undefined : new PostgresControlPlane(pool);
   if (durableControlPlane !== undefined) await durableControlPlane.initialize();
   const mistralLedger = pool === undefined ? undefined : new PostgresMistralInvocationLedger(pool);

@@ -372,6 +372,7 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
   let longTaskDurations = null;
 
   await page.addInitScript(() => {
+    window.__JOY_RELEASE_OBSERVER__ = true;
     window.__JOY_RELEASE_LONG_TASKS__ = [];
     try {
       new PerformanceObserver((list) => {

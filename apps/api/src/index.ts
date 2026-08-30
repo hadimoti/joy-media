@@ -17,6 +17,11 @@ export type {
 } from './control-plane.js';
 export { createControlPlaneHttpServer, type ApiAuthentication } from './http-server.js';
 export {
+  currentDbQueryCount,
+  instrumentPostgresPool,
+  withDbQueryContext,
+} from './db-query-observability.js';
+export {
   composeCreativeBriefRuntime,
   type CreativeBriefRuntimeCompositionOptions,
 } from './creative-brief-runtime-composition.js';

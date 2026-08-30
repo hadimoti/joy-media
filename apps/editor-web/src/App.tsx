@@ -126,6 +126,7 @@ import { HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
 import { waitForContentFonts } from './font-readiness.js';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
+import { runReleaseObserverTimelineProbe } from './release-observer-timeline.js';
 import { updateUniversalTimelineForTransaction } from './universal-placement.js';
 import { TimelinePanel } from './TimelinePanel.js';
 import { buildTimelineMediaImportTransaction } from './timeline-media-import.js';
@@ -1301,6 +1302,14 @@ function EditorWorkspace({
     sessionRef.current = new EditorSession(window.localStorage, seeds.timeline, seeds.visual);
   }
   const session = sessionRef.current;
+  useEffect(() => {
+    if (window.__JOY_RELEASE_OBSERVER__ !== true) return;
+    window.__JOY_RELEASE_TIMELINE_PROBE__ = () =>
+      runReleaseObserverTimelineProbe(session.timelineProject, session.visualProject);
+    return () => {
+      delete window.__JOY_RELEASE_TIMELINE_PROBE__;
+    };
+  }, [session]);
   // Audio commands keep static mixer state in the project. Universal
   // automation is sampled only for the current playback instant, so it never
   // mutates that durable mixer state while the playhead advances.

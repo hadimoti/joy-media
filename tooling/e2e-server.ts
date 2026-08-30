@@ -81,6 +81,7 @@ const server = createControlPlaneHttpServer({
   // tests; keep this deterministic harness from turning a long suite into a
   // cascade of unrelated 429s.
   rateLimit: { maxRequests: 100_000 },
+  queryObservability: true,
 });
 
 server.listen(Number(process.env.JOY_MEDIA_E2E_API_PORT ?? 4174), '127.0.0.1');
