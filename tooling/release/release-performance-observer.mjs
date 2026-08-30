@@ -438,6 +438,8 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
   page.on('requestfinished', clearRequest);
   page.on('requestfailed', clearRequest);
   page.on('response', (response) => {
+    if (debugBrowserErrors && response.status() >= 400)
+      console.error(`[release-observer:visible:http] ${response.status()} ${response.url()}`);
     if (!requestKeys.has(response.request())) return;
     pollResponses += 1;
     const header = response.headers()['x-joy-db-query-count'];
@@ -477,6 +479,8 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
       if (key !== undefined) hiddenInflight.delete(key);
     });
     target.on('response', (response) => {
+      if (debugBrowserErrors && response.status() >= 400)
+        console.error(`[release-observer:hidden:http] ${response.status()} ${response.url()}`);
       if (!hiddenRequestKeys.has(response.request())) return;
       pollResponses += 1;
       const header = response.headers()['x-joy-db-query-count'];
