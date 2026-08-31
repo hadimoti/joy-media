@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   EXPECTED_SANDBOX_STORAGE_ERROR,
   assertJourneyTelemetryClean,
@@ -6,6 +6,7 @@ import {
   createJourneyTelemetry,
   summarizeJourneyTelemetry,
 } from '../../../ops/self-hosted/linux-runner/real-service-evidence.mjs';
+import { createLeaseHeartbeatLoop } from '../../../ops/self-hosted/linux-runner/lease-heartbeat.mjs';
 
 describe('real-service evidence helpers', () => {
   it('keeps expected sandbox page errors out of the failing telemetry summary', () => {
@@ -93,5 +94,26 @@ describe('real-service evidence helpers', () => {
       exitCode: 1,
       stats: { reportParseError: true },
     });
+  });
+
+  it('serializes overlapping lease heartbeats and flushes the in-flight request on stop', async () => {
+    let resolveHeartbeat: ((value: { cancelRequested: boolean }) => void) | undefined;
+    const heartbeat = vi.fn(
+      () =>
+        new Promise<{ cancelRequested: boolean }>((resolve) => {
+          resolveHeartbeat = resolve;
+        }),
+    );
+    const loop = createLeaseHeartbeatLoop({ heartbeat, intervalMs: 1 });
+
+    const first = loop.send();
+    await vi.waitFor(() => expect(heartbeat).toHaveBeenCalledTimes(1));
+    const second = loop.send();
+    expect(heartbeat).toHaveBeenCalledTimes(1);
+    resolveHeartbeat?.({ cancelRequested: false });
+    await Promise.all([first, second]);
+
+    await loop.stop();
+    expect(heartbeat).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* global process, setTimeout, setInterval, clearInterval, URL, Buffer, window, fetch, atob, btoa, crypto, localStorage */
+/* global process, setTimeout, URL, Buffer, window, fetch, atob, btoa, crypto, localStorage */
 
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -22,6 +22,7 @@ import {
   buildProfileSummary,
   createJourneyTelemetry,
 } from './real-service-evidence.mjs';
+import { createLeaseHeartbeatLoop } from './lease-heartbeat.mjs';
 
 const requireFromApi = createRequire(new URL('../../../apps/api/package.json', import.meta.url));
 const { Pool } = requireFromApi('pg');
@@ -391,33 +392,26 @@ async function runLeasedExportWithHeartbeats(
 ) {
   let cancelRequested = false;
   let heartbeatError;
-  const sendHeartbeat = async () => {
-    try {
-      const result = await controlPlane.heartbeat(
-        workerId,
-        jobId,
-        10,
-        Date.now(),
-        30_000,
-        leaseToken,
-      );
+  const heartbeatLoop = createLeaseHeartbeatLoop({
+    heartbeat: () => controlPlane.heartbeat(workerId, jobId, 10, Date.now(), 30_000, leaseToken),
+    onHeartbeat: (result) => {
       cancelRequested ||= result.cancelRequested;
+    },
+  });
+  await heartbeatLoop.send();
+  heartbeatLoop.start();
+  try {
+    await executeExportInWorkerThread(input, outputPath);
+    if (heartbeatLoop.lastError !== undefined) throw heartbeatLoop.lastError;
+    if (cancelRequested) throw new Error('render export was canceled by the control plane');
+  } finally {
+    try {
+      await heartbeatLoop.stop();
     } catch (error) {
       heartbeatError = error;
     }
-  };
-  await sendHeartbeat();
-  if (heartbeatError !== undefined) throw heartbeatError;
-  const heartbeatTimer = setInterval(() => {
-    void sendHeartbeat();
-  }, 10_000);
-  try {
-    await executeExportInWorkerThread(input, outputPath);
-    if (heartbeatError !== undefined) throw heartbeatError;
-    if (cancelRequested) throw new Error('render export was canceled by the control plane');
-  } finally {
-    clearInterval(heartbeatTimer);
   }
+  if (heartbeatError !== undefined) throw heartbeatError;
 }
 
 async function executeExportInWorkerThread(input, outputPath) {
