@@ -22,6 +22,16 @@ export interface ThreeDSceneStateV1 {
   readonly material: { readonly colors: readonly string[] };
 }
 
+export function readThreeDSceneState(
+  project: Pick<JoyProjectV1, 'pluginData'>,
+  sceneId: string,
+): ThreeDSceneStateV1 | undefined {
+  const value = pluginRecord(project.pluginData[THREE_D_PLUGIN_KEY])[sceneId];
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const candidate = value as Partial<ThreeDSceneStateV1>;
+  return candidate.version === 1 && candidate.sceneId === sceneId ? (value as unknown as ThreeDSceneStateV1) : undefined;
+}
+
 export interface ThreeDRenderLayerInsertion {
   readonly label: string;
   readonly clipId: string;

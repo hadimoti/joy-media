@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { resolveObjectIdForSelection } from './sticker-bindings.js';
 import { readTimelineElementKindMap } from './timeline-element-kind.js';
 import { buildTimelineElementsShowcase } from './timeline-elements-showcase.js';
-import { buildThreeDRenderLayerInsertion, THREE_D_PLUGIN_KEY } from './three-d-render-layer.js';
+import {
+  buildThreeDRenderLayerInsertion,
+  readThreeDSceneState,
+  THREE_D_PLUGIN_KEY,
+} from './three-d-render-layer.js';
 
 describe('buildThreeDRenderLayerInsertion', () => {
   it('creates one image-backed 3D track with durable timeline semantics', () => {
@@ -55,5 +59,10 @@ describe('buildThreeDRenderLayerInsertion', () => {
     expect(insertion.project.pluginData[THREE_D_PLUGIN_KEY]).toMatchObject({
       'scene-orbit': { version: 1, sourceRefs: ['product.glb', 'product.bin'] },
     });
+    expect(readThreeDSceneState(insertion.project, 'scene-orbit')).toMatchObject({
+      camera: { position: [1, 2, 6] },
+      model: { rotation: [0, 0.5, 0] },
+    });
+    expect(readThreeDSceneState(insertion.project, 'missing')).toBeUndefined();
   });
 });
