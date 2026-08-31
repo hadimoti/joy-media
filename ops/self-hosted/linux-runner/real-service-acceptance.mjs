@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* global process, setTimeout, URL, Buffer, window, fetch, atob, btoa, crypto, localStorage */
+/* global process, setTimeout, setInterval, clearInterval, URL, Buffer, window, fetch, atob, btoa, crypto, localStorage */
 
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -9,9 +9,9 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
+import { Worker } from 'node:worker_threads';
 
 import { chromium } from '@playwright/test';
-import { executeLeasedExport } from '../../../apps/worker/dist/export-job.js';
 import { verifyExport } from '../../../packages/export-core/dist/index.js';
 import {
   PostgresControlPlane,
@@ -303,13 +303,13 @@ async function runRealServiceExportWorker(
         const sourceBytes = await objectStore.get(sourceDescriptor);
         await writeFile(sourcePath, Buffer.from(sourceBytes), { mode: 0o600 });
         const payload = job.payload;
-        executeLeasedExport(
-          { complete: () => undefined },
+        await runLeasedExportWithHeartbeats(
+          controlPlane,
           workerId,
           job.id,
+          job.leaseToken,
           { sourcePath, payload },
           outputPath,
-          job.leaseToken,
         );
         const bytes = await readFile(outputPath);
         const sha256 = createHash('sha256').update(bytes).digest('hex');
@@ -379,6 +379,99 @@ async function runRealServiceExportWorker(
       if (!lifecycle.stopped) await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
+}
+
+async function runLeasedExportWithHeartbeats(
+  controlPlane,
+  workerId,
+  jobId,
+  leaseToken,
+  input,
+  outputPath,
+) {
+  let cancelRequested = false;
+  let heartbeatError;
+  const sendHeartbeat = async () => {
+    try {
+      const result = await controlPlane.heartbeat(
+        workerId,
+        jobId,
+        10,
+        Date.now(),
+        30_000,
+        leaseToken,
+      );
+      cancelRequested ||= result.cancelRequested;
+    } catch (error) {
+      heartbeatError = error;
+    }
+  };
+  await sendHeartbeat();
+  if (heartbeatError !== undefined) throw heartbeatError;
+  const heartbeatTimer = setInterval(() => {
+    void sendHeartbeat();
+  }, 10_000);
+  try {
+    await executeExportInWorkerThread(input, outputPath);
+    if (heartbeatError !== undefined) throw heartbeatError;
+    if (cancelRequested) throw new Error('render export was canceled by the control plane');
+  } finally {
+    clearInterval(heartbeatTimer);
+  }
+}
+
+async function executeExportInWorkerThread(input, outputPath) {
+  const workerModule = new URL('../../../apps/worker/dist/export-job.js', import.meta.url).href;
+  const worker = new Worker(
+    `
+      const { parentPort, workerData } = require('node:worker_threads');
+      (async () => {
+        const { executeLeasedExport } = await import(workerData.workerModule);
+        try {
+          executeLeasedExport(
+            { complete: () => undefined },
+            'real-service-export-thread',
+            'real-service-export-job',
+            workerData.input,
+            workerData.outputPath,
+          );
+          parentPort.postMessage({ ok: true });
+        } catch (error) {
+          parentPort.postMessage({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      })().catch((error) => {
+        parentPort.postMessage({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    `,
+    { eval: true, workerData: { workerModule, input, outputPath } },
+  );
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    worker.once('message', (message) => {
+      if (settled) return;
+      settled = true;
+      if (message?.ok === true) resolve();
+      else reject(new Error(message?.error ?? 'real-service export thread failed'));
+      void worker.terminate();
+    });
+    worker.once('error', (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
+    worker.once('exit', (code) => {
+      if (!settled && code !== 0) {
+        settled = true;
+        reject(new Error(`real-service export thread exited with ${code}`));
+      }
+    });
+  });
 }
 
 function privateDescriptor(asset) {

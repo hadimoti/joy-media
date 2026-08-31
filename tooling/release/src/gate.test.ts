@@ -364,11 +364,13 @@ describe('JOY Studio 1.0 release gate', () => {
       'utf8',
     );
     expect(harness).toContain(
-      "import { executeLeasedExport } from '../../../apps/worker/dist/export-job.js'",
+      "new URL('../../../apps/worker/dist/export-job.js', import.meta.url).href",
     );
     expect(harness).toContain('await controlPlane.pairWorker({ id: owner }, realWorkerId)');
     expect(harness).toContain("await controlPlane.helloWorker(realWorkerId, ['render.export']");
     expect(harness).toContain('runRealServiceExportWorker(');
+    expect(harness).toContain('runLeasedExportWithHeartbeats(');
+    expect(harness).toContain('controlPlane.heartbeat(');
     expect(harness).toContain("kind: 'render.export'");
     expect(harness).toContain("availability: 'available-cloud'");
   });
