@@ -46,4 +46,10 @@ describe('compact application header layout contract', () => {
     expect(edit).toBeGreaterThan(brand);
     expect(deliver).toBeGreaterThan(edit);
   });
+
+  it('keeps the primary export target at the shared 1.9rem hit size', () => {
+    expect(appCss).toMatch(
+      /\.header-export-btn\s*\{[\s\S]*width:\s*1\.9rem;[\s\S]*height:\s*1\.9rem;[\s\S]*min-width:\s*1\.9rem;[\s\S]*min-height:\s*1\.9rem;/,
+    );
+  });
 });
