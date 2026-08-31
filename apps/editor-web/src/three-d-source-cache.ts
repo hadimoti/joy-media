@@ -9,7 +9,7 @@ const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 function safeName(name: string): string {
   const base = name.replaceAll('\\', '/').split('/').at(-1)?.trim() ?? '';
-  return base.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'source.bin';
+  return encodeURIComponent(base).slice(0, 180) || 'source.bin';
 }
 
 export function createThreeDSourceRef(sceneId: string, index: number, name: string): string {
@@ -18,8 +18,12 @@ export function createThreeDSourceRef(sceneId: string, index: number, name: stri
 }
 
 export function sourceRefDisplayName(sourceRef: string): string {
-  const name = sourceRef.slice(sourceRef.indexOf('/') + 1).replace(/^\d+-/, '');
-  return name || 'source.bin';
+  const encoded = sourceRef.slice(sourceRef.indexOf('/') + 1).replace(/^\d+-/, '');
+  try {
+    return decodeURIComponent(encoded) || 'source.bin';
+  } catch {
+    return 'source.bin';
+  }
 }
 
 export class OpfsThreeDSourceStore implements ThreeDSourceStore {

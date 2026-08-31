@@ -6,6 +6,7 @@ import { buildTimelineElementsShowcase } from './timeline-elements-showcase.js';
 import {
   buildThreeDRenderLayerInsertion,
   readThreeDSceneState,
+  readThreeDSceneStates,
   THREE_D_PLUGIN_KEY,
 } from './three-d-render-layer.js';
 
@@ -64,5 +65,17 @@ describe('buildThreeDRenderLayerInsertion', () => {
       model: { rotation: [0, 0.5, 0] },
     });
     expect(readThreeDSceneState(insertion.project, 'missing')).toBeUndefined();
+  });
+
+  it('rejects malformed persisted scene state before viewer hydration', () => {
+    const project = {
+      pluginData: {
+        [THREE_D_PLUGIN_KEY]: {
+          broken: { version: 1, sceneId: 'broken', sourceRefs: [] },
+        },
+      },
+    } as never;
+    expect(readThreeDSceneState(project, 'broken')).toBeUndefined();
+    expect(readThreeDSceneStates(project)).toEqual([]);
   });
 });

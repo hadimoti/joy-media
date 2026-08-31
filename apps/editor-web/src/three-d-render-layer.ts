@@ -28,17 +28,34 @@ export function readThreeDSceneState(
 ): ThreeDSceneStateV1 | undefined {
   const value = pluginRecord(project.pluginData[THREE_D_PLUGIN_KEY])[sceneId];
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
-  const candidate = value as Partial<ThreeDSceneStateV1>;
-  return candidate.version === 1 && candidate.sceneId === sceneId ? (value as unknown as ThreeDSceneStateV1) : undefined;
+  return isThreeDSceneState(value, sceneId) ? (value as unknown as ThreeDSceneStateV1) : undefined;
 }
 
 export function readThreeDSceneStates(project: Pick<JoyProjectV1, 'pluginData'>): readonly ThreeDSceneStateV1[] {
-  return Object.values(pluginRecord(project.pluginData[THREE_D_PLUGIN_KEY])).filter(
-    (value): value is JsonValue =>
-      typeof value === 'object' && value !== null && !Array.isArray(value) &&
-      (value as Partial<ThreeDSceneStateV1>).version === 1 &&
-      typeof (value as Partial<ThreeDSceneStateV1>).sceneId === 'string',
-  ).map((value) => value as unknown as ThreeDSceneStateV1);
+  return Object.values(pluginRecord(project.pluginData[THREE_D_PLUGIN_KEY]))
+    .filter((value): value is JsonValue => isThreeDSceneState(value))
+    .map((value) => value as unknown as ThreeDSceneStateV1);
+}
+
+function isTuple3(value: unknown): value is readonly [number, number, number] {
+  return Array.isArray(value) && value.length === 3 && value.every((entry) => typeof entry === 'number' && Number.isFinite(entry));
+}
+
+function isThreeDSceneState(value: JsonValue, sceneId?: string): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const candidate = value as Partial<ThreeDSceneStateV1>;
+  return candidate.version === 1 && typeof candidate.sceneId === 'string' &&
+    (sceneId === undefined || candidate.sceneId === sceneId) &&
+    Array.isArray(candidate.sourceRefs) && candidate.sourceRefs.every((ref) => typeof ref === 'string') &&
+    typeof candidate.camera === 'object' && candidate.camera !== null &&
+    isTuple3(candidate.camera.position) && isTuple3(candidate.camera.target) &&
+    typeof candidate.model === 'object' && candidate.model !== null &&
+    isTuple3(candidate.model.position) && isTuple3(candidate.model.rotation) && isTuple3(candidate.model.scale) &&
+    typeof candidate.light === 'object' && candidate.light !== null &&
+    typeof candidate.light.intensity === 'number' && Number.isFinite(candidate.light.intensity) &&
+    typeof candidate.light.color === 'string' &&
+    typeof candidate.material === 'object' && candidate.material !== null &&
+    Array.isArray(candidate.material.colors) && candidate.material.colors.every((color) => typeof color === 'string');
 }
 
 export interface ThreeDRenderLayerInsertion {

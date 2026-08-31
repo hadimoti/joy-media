@@ -111,6 +111,7 @@ export function JoyCode3DViewer({
   const [sourceRefs, setSourceRefs] = useState<readonly string[]>([]);
   const [currentModelName, setCurrentModelName] = useState<string | undefined>(undefined);
   const [adding, setAdding] = useState(false);
+  const [persistingSources, setPersistingSources] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const sceneIdRef = useRef(savedScene?.sceneId ?? `scene-${Date.now().toString(36)}`);
 
@@ -298,6 +299,7 @@ export function JoyCode3DViewer({
       );
 
       const sceneId = sceneIdRef.current;
+      setPersistingSources(true);
       void (async () => {
         try {
           const store = sourceStore ?? await openThreeDSourceStore();
@@ -306,6 +308,8 @@ export function JoyCode3DViewer({
         } catch {
           setSourceRefs([]);
           setStatus('Model loaded for this session only; local source persistence is unavailable.');
+        } finally {
+          setPersistingSources(false);
         }
       })();
 
@@ -362,6 +366,7 @@ export function JoyCode3DViewer({
       scene === null ||
       camera === null ||
       currentModelName === undefined ||
+      persistingSources ||
       onAddToTimeline === undefined
     ) {
       return;
@@ -389,7 +394,7 @@ export function JoyCode3DViewer({
     } finally {
       setAdding(false);
     }
-  }, [currentModelName, onAddToTimeline, sourceRefs]);
+  }, [currentModelName, onAddToTimeline, persistingSources, sourceRefs]);
 
   return (
     <div className="joy-code-3d">
@@ -408,7 +413,7 @@ export function JoyCode3DViewer({
           className="icon-button"
           aria-label="Add current 3D view to timeline"
           title="Add current 3D view to timeline"
-          disabled={currentModelName === undefined || onAddToTimeline === undefined || adding}
+          disabled={currentModelName === undefined || onAddToTimeline === undefined || adding || persistingSources}
           onClick={() => void addCurrentView()}
         >
           <CubeIcon />
