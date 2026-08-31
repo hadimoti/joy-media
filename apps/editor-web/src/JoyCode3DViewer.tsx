@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createThreeDResourceResolver } from './three-d-resource-resolver.js';
+import { openThreeDSourceStore, sourceRefDisplayName, type ThreeDSourceStore } from './three-d-source-cache.js';
 import type { ThreeDSceneStateV1 } from './three-d-render-layer.js';
 import { CubeIcon, UploadIcon } from './icons.js';
 
@@ -87,8 +88,12 @@ function renderAssetId(): string {
 
 export function JoyCode3DViewer({
   onAddToTimeline,
+  savedScene,
+  sourceStore,
 }: {
   readonly onAddToTimeline?: (asset: JoyCode3DRenderAsset) => Promise<void>;
+  readonly savedScene?: ThreeDSceneStateV1;
+  readonly sourceStore?: ThreeDSourceStore;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -103,9 +108,11 @@ export function JoyCode3DViewer({
   const resourceResolverRef = useRef<{ readonly revokeAll: () => void } | null>(null);
   const [status, setStatus] = useState('Ready — drag to orbit, scroll to zoom');
   const [fileList, setFileList] = useState<readonly string[]>([]);
+  const [sourceRefs, setSourceRefs] = useState<readonly string[]>([]);
   const [currentModelName, setCurrentModelName] = useState<string | undefined>(undefined);
   const [adding, setAdding] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const sceneIdRef = useRef(savedScene?.sceneId ?? `scene-${Date.now().toString(36)}`);
 
   const disposeModel = useCallback(disposeThreeDModel, []);
 
@@ -229,6 +236,51 @@ export function JoyCode3DViewer({
     };
   }, [initScene, clearScene]);
 
+  useEffect(() => {
+    if (savedScene === undefined) return;
+    let cancelled = false;
+    void (async () => {
+      if (savedScene.sourceRefs.length === 0) {
+        setStatus('Saved 3D scene has no local source files — import the GLB/GLTF again to recover it.');
+        return;
+      }
+      const store = sourceStore ?? await openThreeDSourceStore();
+      const blobs = await Promise.all(savedScene.sourceRefs.map((ref) => store.get(ref)));
+      if (cancelled) return;
+      if (blobs.some((blob) => blob === undefined)) {
+        setStatus('Saved 3D scene needs its source files — import the GLB/GLTF again to recover it.');
+        return;
+      }
+      const files = blobs.map((blob, index) => new File([blob!], sourceRefDisplayName(savedScene.sourceRefs[index]!), { type: blob!.type || 'application/octet-stream' }));
+      const modelFile = files.find((file) => /\.(?:glb|gltf)$/i.test(file.name)) ?? files[0];
+      if (modelFile === undefined || sceneRef.current === null || cameraRef.current === null) return;
+      try {
+        const resources = createThreeDResourceResolver(files);
+        const loader = new GLTFLoader();
+        loader.manager.setURLModifier(resources.resolve);
+        const gltf = await loader.parseAsync(await modelFile.arrayBuffer(), '');
+        if (cancelled) return;
+        const model = gltf.scene;
+        model.userData.joyThreeDModel = true;
+        sceneRef.current.add(model);
+        model.position.set(...savedScene.model.position);
+        model.rotation.set(...savedScene.model.rotation);
+        model.scale.set(...savedScene.model.scale);
+        cameraRef.current.position.set(...savedScene.camera.position);
+        controlsRef.current?.target.set(...savedScene.camera.target);
+        controlsRef.current?.update();
+        setSourceRefs(savedScene.sourceRefs);
+        setFileList(files.map((file) => file.name));
+        setCurrentModelName(modelFile.name);
+        setStatus(`Restored: ${modelFile.name}`);
+        resources.revokeAll();
+      } catch (error) {
+        setStatus(`Saved 3D scene could not be restored: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [savedScene, sourceStore]);
+
   const handleFileSelect = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(event.target.files ?? []);
@@ -244,6 +296,18 @@ export function JoyCode3DViewer({
           ? `Loading ${file.name} with ${files.length - 1} resource file(s)…`
           : `Loading ${file.name}…`,
       );
+
+      const sceneId = sceneIdRef.current;
+      void (async () => {
+        try {
+          const store = sourceStore ?? await openThreeDSourceStore();
+          const refs = await store.put(sceneId, files);
+          setSourceRefs(refs);
+        } catch {
+          setSourceRefs([]);
+          setStatus('Model loaded for this session only; local source persistence is unavailable.');
+        }
+      })();
 
       clearScene();
 
@@ -317,7 +381,7 @@ export function JoyCode3DViewer({
         assetId: renderAssetId(),
         displayName: `${baseName} · 3D Render`,
         blob,
-        scene: captureSceneState(scene, camera, controlsRef.current, fileList),
+        scene: { ...captureSceneState(scene, camera, controlsRef.current, sourceRefs), sceneId: sceneIdRef.current },
       });
       setStatus(`Added ${baseName} to the timeline`);
     } catch (reason) {
@@ -325,7 +389,7 @@ export function JoyCode3DViewer({
     } finally {
       setAdding(false);
     }
-  }, [currentModelName, fileList, onAddToTimeline]);
+  }, [currentModelName, onAddToTimeline, sourceRefs]);
 
   return (
     <div className="joy-code-3d">

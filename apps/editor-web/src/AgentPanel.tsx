@@ -47,6 +47,7 @@ import {
 } from './joy-code-history.js';
 import { CheckIcon, CloseIcon, PlayIcon, PlusIcon, SaveIcon, UndoIcon } from './icons.js';
 import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
+import { readThreeDSceneStates } from './three-d-render-layer.js';
 import type { JoyCodeServerSession } from './joy-code-server-session.js';
 import type { JoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
 import { JoyCodeCompoundRunner } from './joy-code-compound-runner.js';
@@ -1106,6 +1107,10 @@ export function AgentPanel({
         {tab === '3d' && (
           <Suspense fallback={null}>
             <JoyCode3DViewer
+              {...(() => {
+                const savedScene = readThreeDSceneStates(session.visualProject)[0];
+                return savedScene === undefined ? {} : { savedScene };
+              })()}
               {...(onAdd3DRender === undefined ? {} : { onAddToTimeline: onAdd3DRender })}
             />
           </Suspense>

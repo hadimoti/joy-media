@@ -32,6 +32,15 @@ export function readThreeDSceneState(
   return candidate.version === 1 && candidate.sceneId === sceneId ? (value as unknown as ThreeDSceneStateV1) : undefined;
 }
 
+export function readThreeDSceneStates(project: Pick<JoyProjectV1, 'pluginData'>): readonly ThreeDSceneStateV1[] {
+  return Object.values(pluginRecord(project.pluginData[THREE_D_PLUGIN_KEY])).filter(
+    (value): value is JsonValue =>
+      typeof value === 'object' && value !== null && !Array.isArray(value) &&
+      (value as Partial<ThreeDSceneStateV1>).version === 1 &&
+      typeof (value as Partial<ThreeDSceneStateV1>).sceneId === 'string',
+  ).map((value) => value as unknown as ThreeDSceneStateV1);
+}
+
 export interface ThreeDRenderLayerInsertion {
   readonly label: string;
   readonly clipId: string;
