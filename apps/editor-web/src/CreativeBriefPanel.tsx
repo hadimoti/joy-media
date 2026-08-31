@@ -23,7 +23,11 @@ import {
 import { CreativeBriefDisplay } from './CreativeBriefDisplay.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
-import { loadCreativeBrief, removeCreativeBrief, saveCreativeBrief } from './creative-brief-storage.js';
+import {
+  loadCreativeBrief,
+  removeCreativeBrief,
+  saveCreativeBrief,
+} from './creative-brief-storage.js';
 
 /**
  * Props for CreativeBriefPanel.

@@ -4,7 +4,7 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -199,7 +199,14 @@ try {
     throw error;
   }
   const profileSummaries = await runDesktopMatrix(webUrl, apiUrl);
-  const deliveryEvidence = await recordJourney(webUrl, apiUrl, token, candidateSha, pool, profileSummaries);
+  const deliveryEvidence = await recordJourney(
+    webUrl,
+    apiUrl,
+    token,
+    candidateSha,
+    pool,
+    profileSummaries,
+  );
   if (!smokeOnly) {
     await runObserver(webUrl, token);
   }
@@ -242,58 +249,113 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
         ];
   const sourceProvenance = await currentSourceProvenance(candidateSha);
   const summaries = [];
+  const matrixEvidencePath = join(root, 'test-output/browser/real-service-profile-matrix.json');
+  await mkdir(dirname(matrixEvidencePath), { recursive: true });
+  await rm(matrixEvidencePath, { force: true });
   for (const project of projects) {
     const report = join('/tmp', `joy-media-real-report-${project}-${runId}-${pass}`);
     const results = join('/tmp', `joy-media-real-results-${project}-${runId}-${pass}`);
     const startedAt = new Date().toISOString();
-    const result = await execFile(
-      'pnpm',
-      [
-        'exec',
-        'playwright',
-        'test',
-        ...(process.env.JOY_MEDIA_REAL_ACCEPTANCE_SMOKE_ONLY === '1'
-          ? ['tests/e2e/authenticated-smoke.spec.ts']
-          : ['tests/e2e']),
-        `--project=${project}`,
-        '--workers=1',
-        '--reporter=json',
-      ],
-      {
-        cwd: root,
-        env: {
-          ...process.env,
-          CI: 'true',
-          PLAYWRIGHT_BASE_URL: baseUrl,
-          JOY_MEDIA_E2E_API_URL: apiBaseUrl,
-          PLAYWRIGHT_HTML_REPORT: report,
-          PLAYWRIGHT_TEST_RESULTS_DIR: results,
-          PLAYWRIGHT_WORKERS: '1',
+    let result;
+    let exitCode = 0;
+    let failure;
+    try {
+      result = await execFile(
+        'pnpm',
+        [
+          'exec',
+          'playwright',
+          'test',
+          ...(process.env.JOY_MEDIA_REAL_ACCEPTANCE_SMOKE_ONLY === '1'
+            ? ['tests/e2e/authenticated-smoke.spec.ts']
+            : ['tests/e2e']),
+          `--project=${project}`,
+          '--workers=1',
+          '--reporter=json',
+        ],
+        {
+          cwd: root,
+          env: {
+            ...process.env,
+            CI: 'true',
+            PLAYWRIGHT_BASE_URL: baseUrl,
+            JOY_MEDIA_E2E_API_URL: apiBaseUrl,
+            PLAYWRIGHT_HTML_REPORT: report,
+            PLAYWRIGHT_TEST_RESULTS_DIR: results,
+            PLAYWRIGHT_WORKERS: '1',
+          },
         },
-      },
-    ).catch((error) => {
-      const details = [error.stdout, error.stderr].filter(Boolean).join('\n');
-      error.message = `${error.message}${details ? `: ${details.slice(-4000)}` : ''}`;
-      throw error;
-    });
+      );
+    } catch (error) {
+      failure = error;
+      exitCode = typeof error?.code === 'number' ? error.code : 1;
+      result = {
+        stdout: Buffer.from(typeof error?.stdout === 'string' ? error.stdout : ''),
+        stderr: Buffer.from(typeof error?.stderr === 'string' ? error.stderr : ''),
+      };
+    }
     const finishedAt = new Date().toISOString();
     summaries.push(
       buildProfileSummary({
         project,
         reportText: result.stdout.toString('utf8'),
-        exitCode: 0,
+        exitCode,
         startedAt,
         finishedAt,
         sourceProvenance,
       }),
     );
+    await writeProfileMatrixEvidence(
+      matrixEvidencePath,
+      sourceProvenance,
+      summaries,
+      'in-progress',
+    );
     await rm(report, { recursive: true, force: true });
     await rm(results, { recursive: true, force: true });
+    if (failure !== undefined) {
+      await writeProfileMatrixEvidence(matrixEvidencePath, sourceProvenance, summaries, 'failed');
+      const details = [failure.stdout, failure.stderr].filter(Boolean).join('\n');
+      failure.message = `${failure.message}${details ? `: ${details.slice(-4000)}` : ''}`;
+      failure.profileSummaries = summaries;
+      throw failure;
+    }
   }
+  await writeProfileMatrixEvidence(matrixEvidencePath, sourceProvenance, summaries, 'passed');
   return summaries;
 }
 
-async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activePool, profileSummaries) {
+async function writeProfileMatrixEvidence(path, sourceProvenance, profiles, status) {
+  await writeFile(
+    path,
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        status,
+        execution: 'real-services',
+        candidateSha,
+        workflowRunId: runId,
+        attempt: runAttempt,
+        lanePass: pass,
+        sourceProvenance,
+        profiles,
+        updatedAt: new Date().toISOString(),
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  );
+}
+
+async function recordJourney(
+  baseUrl,
+  apiBaseUrl,
+  sessionToken,
+  sourceSha,
+  activePool,
+  profileSummaries,
+) {
   browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1639, height: 1066 } });
   await context.addInitScript((value) => {
@@ -319,7 +381,9 @@ async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activ
   page.on('response', (response) => {
     if (!captureBrowserTelemetry) return;
     if (response.status() >= 400)
-      telemetry.httpErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+      telemetry.httpErrors.push(
+        `${response.status()} ${response.request().method()} ${response.url()}`,
+      );
   });
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
   await page.getByRole('heading', { name: 'Projects' }).waitFor();
@@ -355,7 +419,8 @@ async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activ
   await page.locator('.joy-code-3d').waitFor();
 
   const projectId = await readControlPlaneProjectId(page);
-  if (!projectId) throw new Error('real-service acceptance did not resolve a control-plane project id');
+  if (!projectId)
+    throw new Error('real-service acceptance did not resolve a control-plane project id');
   const headers = { authorization: `Bearer ${sessionToken}`, 'content-type': 'application/json' };
   const videoName = `real-video-${runId}-${pass}.mp4`;
   const audioName = `real-audio-${runId}-${pass}.wav`;
@@ -373,7 +438,15 @@ async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activ
     (
       await execFile(
         'ffprobe',
-        ['-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', firstDownload.path],
+        [
+          '-v',
+          'error',
+          '-print_format',
+          'json',
+          '-show_streams',
+          '-show_format',
+          firstDownload.path,
+        ],
         { cwd: root },
       )
     ).stdout.toString('utf8'),
@@ -697,7 +770,10 @@ async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activ
             assetId: exportAssetId,
             state: 'completed',
             progress: 100,
-            receipt: { bytes: exportedDownload.bytes, sha256Prefix: exportedDownload.digest.slice(0, 12) },
+            receipt: {
+              bytes: exportedDownload.bytes,
+              sha256Prefix: exportedDownload.digest.slice(0, 12),
+            },
             inspection: 'verified',
             browserPreview: 'Verified private derivative',
           },

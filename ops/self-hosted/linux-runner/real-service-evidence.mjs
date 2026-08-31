@@ -52,13 +52,21 @@ export function assertJourneyTelemetryClean(telemetry) {
     );
   }
   if (summary.network.httpErrors > 0) {
-    throw new Error(`browser HTTP errors observed: ${summary.network.httpErrorSamples.join(' | ')}`);
+    throw new Error(
+      `browser HTTP errors observed: ${summary.network.httpErrorSamples.join(' | ')}`,
+    );
   }
   return summary;
 }
 
 export function summarizePlaywrightProjectReport(reportText) {
-  const report = JSON.parse(reportText);
+  let report;
+  let reportParseError = false;
+  try {
+    report = JSON.parse(reportText);
+  } catch {
+    reportParseError = true;
+  }
   const stats = {
     total: 0,
     passed: 0,
@@ -66,6 +74,7 @@ export function summarizePlaywrightProjectReport(reportText) {
     skipped: 0,
     timedOut: 0,
     interrupted: 0,
+    reportParseError,
   };
   visitSuites(report?.suites, stats);
   return stats;
@@ -85,7 +94,8 @@ function visitSpecs(specs, stats) {
     const tests = Array.isArray(spec?.tests) ? spec.tests : [];
     for (const test of tests) {
       stats.total += 1;
-      const result = Array.isArray(test?.results) && test.results.length > 0 ? test.results.at(-1) : null;
+      const result =
+        Array.isArray(test?.results) && test.results.length > 0 ? test.results.at(-1) : null;
       const status = result?.status ?? test?.outcome ?? 'unknown';
       if (status === 'passed' || status === 'expected') stats.passed += 1;
       else if (status === 'skipped') stats.skipped += 1;
@@ -107,9 +117,15 @@ export function buildProfileSummary({
   const stats = summarizePlaywrightProjectReport(reportText);
   return {
     project,
-    status: exitCode === 0 && stats.failed === 0 && stats.timedOut === 0 && stats.interrupted === 0
-      ? 'passed'
-      : 'failed',
+    status:
+      exitCode === 0 &&
+      !stats.reportParseError &&
+      stats.total > 0 &&
+      stats.failed === 0 &&
+      stats.timedOut === 0 &&
+      stats.interrupted === 0
+        ? 'passed'
+        : 'failed',
     exitCode,
     startedAt,
     finishedAt,

@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { stdout } from 'node:process';
 const output = resolve(import.meta.dirname, '../dist/joy-media-desktop-dev.json');
 const manifest = {
   format: 'joy-media-desktop-dev-package/v1',
@@ -21,4 +22,4 @@ const manifest = {
 };
 await mkdir(dirname(output), { recursive: true });
 await writeFile(output, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-console.log(`Wrote unsigned development package manifest: ${output}`);
+stdout.write(`Wrote unsigned development package manifest: ${output}\n`);

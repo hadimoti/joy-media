@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SpikeProject } from '@joy-media/project-schema';
 import type {
   AgentEditPlan,
@@ -315,15 +315,18 @@ export function AgentPanel({
     }));
   }
 
-  const handOffCreativeBrief = useCallback((brief: CreativeBriefV1): void => {
-    const threadId = joyCode.activeThreadId;
-    appendMessage(
-      threadId,
-      'user',
-      `Creative Brief hand-off (review only): ${brief.request}\n\nUse this brief as context for a guarded Joy Code plan. No recommendation was executed.`,
-    );
-    setTab('composer');
-  }, [joyCode.activeThreadId]);
+  const handOffCreativeBrief = useCallback(
+    (brief: CreativeBriefV1): void => {
+      const threadId = joyCode.activeThreadId;
+      appendMessage(
+        threadId,
+        'user',
+        `Creative Brief hand-off (review only): ${brief.request}\n\nUse this brief as context for a guarded Joy Code plan. No recommendation was executed.`,
+      );
+      setTab('composer');
+    },
+    [joyCode.activeThreadId],
+  );
 
   function updateThreadStatus(threadId: string, status: JoyCodeThread['status']): void {
     setJoyCode((current) => ({

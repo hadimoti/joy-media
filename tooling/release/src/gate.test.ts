@@ -1005,10 +1005,8 @@ describe('JOY Studio 1.0 release gate', () => {
           delivery: {
             ...(evidence.delivery.delivery as Record<string, unknown>),
             mixedSourceExport: {
-              ...((evidence.delivery.delivery as Record<string, unknown>).mixedSourceExport as Record<
-                string,
-                unknown
-              >),
+              ...((evidence.delivery.delivery as Record<string, unknown>)
+                .mixedSourceExport as Record<string, unknown>),
               producer: 'standalone-ffmpeg',
             },
           },
@@ -1031,10 +1029,8 @@ describe('JOY Studio 1.0 release gate', () => {
           delivery: {
             ...(evidence.delivery.delivery as Record<string, unknown>),
             mixedSourceExport: {
-              ...((evidence.delivery.delivery as Record<string, unknown>).mixedSourceExport as Record<
-                string,
-                unknown
-              >),
+              ...((evidence.delivery.delivery as Record<string, unknown>)
+                .mixedSourceExport as Record<string, unknown>),
               durableRedownloadMatched: false,
             },
           },

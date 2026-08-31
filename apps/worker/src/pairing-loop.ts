@@ -10,6 +10,8 @@ export interface WorkerPairingLoopOptions {
   readonly now?: () => number;
   readonly sleep?: () => Promise<void>;
   readonly log?: (message: string) => void;
+  /** Owner-facing channel; pairing secrets must never enter diagnostics. */
+  readonly notify?: (offer: { readonly code: string; readonly expiresAt: number }) => void;
 }
 
 /**
@@ -34,10 +36,15 @@ export async function waitForWorkerPairing(
 
   let pending = store.loadPendingPairing();
   let announcedCode: string | undefined;
-  const announce = (offer: { readonly code: string }): void => {
+  const announce = (offer: { readonly code: string; readonly expiresAt: number }): void => {
     if (announcedCode === offer.code) return;
     announcedCode = offer.code;
-    log(`Approve this Worker in JOY Media with pairing code: ${offer.code}`);
+    try {
+      options.notify?.(offer);
+      log('Worker pairing approval required; open the JOY Media notification to continue.');
+    } catch {
+      log('Worker pairing notification could not be displayed; retrying safely.');
+    }
   };
   if (pending !== undefined && pending.expiresAt > now()) announce(pending);
   while (store.loadWorkerSession() === undefined) {

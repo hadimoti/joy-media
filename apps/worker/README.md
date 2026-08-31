@@ -9,9 +9,11 @@
 **First built in part:** P00 (spike) then P01. Do not scaffold code here before that part is marked active in [`STATE.md`](../../STATE.md).
 
 Set `JOY_MEDIA_API_URL` to run the daemon against the versioned API. On its
-first run it prints a high-entropy pairing code; the signed-in owner approves
-that code in the Media UI/API before the Worker can claim its token. The code
-is retained until its five-minute offer expires, so restarting after approval
+first run it writes an ephemeral owner-facing pairing notification beside the
+private state file (override with `JOY_MEDIA_WORKER_PAIRING_NOTIFICATION_PATH`)
+and emits only a redacted diagnostic message. The signed-in owner approves the
+code in the Media UI/API before the Worker can claim its token. The code is
+retained until its five-minute offer expires, so restarting after approval
 claims the same approved offer rather than replacing it. The local
 state path defaults to `~/.joy-media/worker-state.json` and can be overridden
 with `JOY_MEDIA_WORKER_STATE_PATH`. It contains only the device identity and
@@ -58,4 +60,6 @@ The executable never accepts arbitrary shell commands. It launches one fixed
 Worker entrypoint and the Worker executes only typed, allowlisted job adapters.
 Any future local-command approval must surface a user-visible notification in
 the JOY UI before dispatch; Windows startup and health probes are background
-supervisor work, not user-authored commands.
+supervisor work, not user-authored commands. If a future exceptional command
+window is unavoidable, the application must explain it in a notification before
+opening that window; ordinary startup and recovery never open CMD.

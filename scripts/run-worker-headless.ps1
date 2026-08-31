@@ -42,18 +42,6 @@ $stateDirectory = Split-Path -Parent $StatePath
 $logPath = Join-Path $stateDirectory 'logs\worker.log'
 New-Item -ItemType Directory -Force -Path $stateDirectory, (Split-Path -Parent $logPath) | Out-Null
 
-$nodeCandidates = @(
-    $env:JOY_MEDIA_NODE_PATH,
-    (Join-Path $env:LOCALAPPDATA 'hermes\node\node.exe'),
-    ((Get-Command node.exe -ErrorAction SilentlyContinue).Source)
-) | Where-Object {
-    -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf)
-}
-$nodePath = $nodeCandidates | Select-Object -First 1
-if ([string]::IsNullOrWhiteSpace($nodePath)) {
-    throw 'Node.js was not found. Install Node 22+ or set JOY_MEDIA_NODE_PATH.'
-}
-
 $env:JOY_MEDIA_API_URL = $ApiUrl
 $env:JOY_MEDIA_WORKER_STATE_PATH = $StatePath
 $env:JOY_MEDIA_WORKER_ROOT = $repoRoot
@@ -70,6 +58,17 @@ try {
         # the same file would open it twice and fail with EBUSY on Windows.
         & $WorkerExecutable 1>$null 2>$null
     } else {
+        $nodeCandidates = @(
+            $env:JOY_MEDIA_NODE_PATH,
+            (Join-Path $env:LOCALAPPDATA 'hermes\node\node.exe'),
+            ((Get-Command node.exe -ErrorAction SilentlyContinue).Source)
+        ) | Where-Object {
+            -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf)
+        }
+        $nodePath = $nodeCandidates | Select-Object -First 1
+        if ([string]::IsNullOrWhiteSpace($nodePath)) {
+            throw 'Node.js was not found. Install Node 22+ or set JOY_MEDIA_NODE_PATH.'
+        }
         & $nodePath $entryPoint *>> $logPath
     }
     $workerExitCode = $LASTEXITCODE

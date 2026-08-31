@@ -71,4 +71,27 @@ describe('real-service evidence helpers', () => {
       },
     });
   });
+
+  it('retains a failed profile when Playwright exits before producing JSON', () => {
+    const summary = buildProfileSummary({
+      project: 'desktop-1920',
+      reportText: 'playwright failed to start',
+      exitCode: 1,
+      startedAt: '2026-08-31T08:00:00.000Z',
+      finishedAt: '2026-08-31T08:00:01.000Z',
+      sourceProvenance: {
+        commitSha: 'a'.repeat(40),
+        treeHash: 'b'.repeat(40),
+        lockfileSha256: 'c'.repeat(64),
+        worktreeClean: true,
+      },
+    });
+
+    expect(summary).toMatchObject({
+      project: 'desktop-1920',
+      status: 'failed',
+      exitCode: 1,
+      stats: { reportParseError: true },
+    });
+  });
 });
