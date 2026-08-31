@@ -3,6 +3,7 @@ import type { EffectInstanceV1 } from '@joy-media/visual-effects';
 
 export const EFFECT_RECIPE_CATALOG_KEY = 'joy-media.effect-recipe-catalog.v1';
 export const EFFECT_RECIPE_PUBLISHED_KEY = 'joy-media.effect-recipe-published.v1';
+export const UNTITLED_EFFECT_RECIPE_NAME = 'Untitled Effect Recipe';
 
 export interface EffectRecipeDocument {
   readonly schemaVersion: 1;
@@ -49,7 +50,7 @@ export function cloneEffectInstances(
 }
 
 export function createEffectRecipeDocument(
-  name = 'Untitled Effect Recipe',
+  name = UNTITLED_EFFECT_RECIPE_NAME,
   effects: readonly EffectInstanceV1[] = [],
   objectId?: string,
   now = new Date().toISOString(),
@@ -69,10 +70,27 @@ export function createEffectRecipeDocument(
 
 export function createEffectRecipe(
   storage: BrowserKeyValueStore,
-  name = 'Untitled Effect Recipe',
+  name = UNTITLED_EFFECT_RECIPE_NAME,
   effects: readonly EffectInstanceV1[] = [],
   objectId?: string,
 ): EffectRecipeDocument {
+  // Opening Effect Studio is not itself a user-created recipe. Reuse the
+  // latest untouched draft for the same preview context so a cancelled/empty
+  // launch cannot accumulate duplicate "Untitled" records in the catalog.
+  if (name === UNTITLED_EFFECT_RECIPE_NAME && effects.length === 0) {
+    const existing = Object.values(readRecipes(storage).recipes)
+      .filter(
+        (recipe) =>
+          recipe.name === UNTITLED_EFFECT_RECIPE_NAME &&
+          recipe.effects.length === 0 &&
+          ((objectId === undefined && recipe.previewSource.kind === 'studio-gradient') ||
+            (objectId !== undefined &&
+              recipe.previewSource.kind === 'selected-object' &&
+              recipe.previewSource.objectId === objectId)),
+      )
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+    if (existing !== undefined) return existing;
+  }
   const document = createEffectRecipeDocument(name, effects, objectId);
   saveEffectRecipe(storage, document);
   return document;
