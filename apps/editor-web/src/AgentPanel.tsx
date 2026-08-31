@@ -315,6 +315,16 @@ export function AgentPanel({
     }));
   }
 
+  const handOffCreativeBrief = useCallback((brief: CreativeBriefV1): void => {
+    const threadId = joyCode.activeThreadId;
+    appendMessage(
+      threadId,
+      'user',
+      `Creative Brief hand-off (review only): ${brief.request}\n\nUse this brief as context for a guarded Joy Code plan. No recommendation was executed.`,
+    );
+    setTab('composer');
+  }, [joyCode.activeThreadId]);
+
   function updateThreadStatus(threadId: string, status: JoyCodeThread['status']): void {
     setJoyCode((current) => ({
       ...current,
@@ -1081,7 +1091,9 @@ export function AgentPanel({
         {tab === 'brief' && (
           <CreativeBriefPanel
             revisionId={session.projectRevisionId}
+            projectId={project.id}
             optedIn={creativeBriefOptedIn}
+            onHandOff={handOffCreativeBrief}
             {...(onCreativeBriefOptIn === undefined ? {} : { onOptIn: onCreativeBriefOptIn })}
             {...(creativeBriefRunner === undefined ? {} : { runBrief: creativeBriefRunner })}
           />
