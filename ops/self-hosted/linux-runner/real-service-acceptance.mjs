@@ -1108,7 +1108,14 @@ async function importFixture(page, fileNameOrPath, displayName) {
     fileNameOrPath.includes('/') || fileNameOrPath.includes('\\')
       ? fileNameOrPath
       : join(root, 'packages/test-fixtures/media', fileNameOrPath);
-  await drawer.locator('input[type="file"][aria-label="Media file"]').setInputFiles(sourcePath);
+  // Upload the fixture bytes under the display name used by the journey. A
+  // path-only Playwright upload preserves the fixture's on-disk basename
+  // (for example, `video.mp4`), which makes the subsequent catalog assertion
+  // miss the intentionally unique real-service asset name.
+  const mimeType = displayName.toLowerCase().endsWith('.wav') ? 'audio/wav' : 'video/mp4';
+  await drawer
+    .locator('input[type="file"][aria-label="Media file"]')
+    .setInputFiles({ name: displayName, mimeType, buffer: await readFile(sourcePath) });
   await drawer.getByRole('button', { name: 'Confirm import' }).click();
   await page.locator('.asset-card', { hasText: displayName }).first().waitFor({ timeout: 15_000 });
 }
