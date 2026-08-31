@@ -131,7 +131,13 @@ const operationalEvidence = (): ReleaseOperationalEvidence => ({
     status: 'verified',
     execution: 'real-services',
     delivery: {
-      mixedSourceExport: { status: 'passed', bytes: 128, sha256: 'd'.repeat(64) },
+      mixedSourceExport: {
+        status: 'passed',
+        producer: 'joy-export-mp4',
+        bytes: 128,
+        sha256: 'd'.repeat(64),
+        durableRedownloadMatched: true,
+      },
       downloaded: { status: 200, bytes: 128, sha256: 'd'.repeat(64) },
       ffprobe: { status: 'passed', streamTypes: ['video', 'audio'] },
       reimport: {
@@ -151,12 +157,28 @@ const operationalEvidence = (): ReleaseOperationalEvidence => ({
     execution: 'windows-clean-worker',
     lifecycle: {
       install: { status: 'passed' },
-      startup: { status: 'passed', daemon: { started: true, terminated: true } },
+      startup: {
+        status: 'passed',
+        trigger: 'at-logon',
+        triggerVerified: true,
+        action: 'normal-daemon',
+        taskRan: true,
+        daemon: {
+          started: true,
+          terminated: true,
+          paired: true,
+          notificationCleared: true,
+          hello: 1,
+          leases: 1,
+        },
+      },
       session: {
         status: 'passed',
         stateIsolated: true,
         ownerSessionUsed: false,
-        persistedSession: false,
+        fixtureSessionUsed: true,
+        persistedSession: true,
+        protectedState: true,
       },
       renewal: { status: 'passed', restarted: true },
       recovery: { status: 'passed' },
@@ -988,6 +1010,54 @@ describe('JOY Studio 1.0 release gate', () => {
     );
   });
 
+  it('rejects delivery evidence that is not bound to the JOY export path', () => {
+    const evidence = operationalEvidence();
+    const result = evaluateReleaseGate({
+      ...passingInput(),
+      operationalEvidence: {
+        ...evidence,
+        delivery: {
+          ...evidence.delivery,
+          delivery: {
+            ...(evidence.delivery.delivery as Record<string, unknown>),
+            mixedSourceExport: {
+              ...((evidence.delivery.delivery as Record<string, unknown>)
+                .mixedSourceExport as Record<string, unknown>),
+              producer: 'standalone-ffmpeg',
+            },
+          },
+        },
+      },
+    });
+    expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
+      'failed',
+    );
+  });
+
+  it('rejects delivery evidence when the retained export cannot be redownloaded byte-for-byte', () => {
+    const evidence = operationalEvidence();
+    const result = evaluateReleaseGate({
+      ...passingInput(),
+      operationalEvidence: {
+        ...evidence,
+        delivery: {
+          ...evidence.delivery,
+          delivery: {
+            ...(evidence.delivery.delivery as Record<string, unknown>),
+            mixedSourceExport: {
+              ...((evidence.delivery.delivery as Record<string, unknown>)
+                .mixedSourceExport as Record<string, unknown>),
+              durableRedownloadMatched: false,
+            },
+          },
+        },
+      },
+    });
+    expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
+      'failed',
+    );
+  });
+
   it('rejects operational evidence with a failed lifecycle step', () => {
     const evidence = operationalEvidence();
     const result = evaluateReleaseGate({
@@ -999,6 +1069,57 @@ describe('JOY Studio 1.0 release gate', () => {
           lifecycle: {
             ...evidence.windows.lifecycle,
             startup: { status: 'failed' },
+          },
+        },
+      },
+    });
+    expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
+      'failed',
+    );
+  });
+
+  it('rejects Windows evidence without a protected disposable fixture session', () => {
+    const evidence = operationalEvidence();
+    const result = evaluateReleaseGate({
+      ...passingInput(),
+      operationalEvidence: {
+        ...evidence,
+        windows: {
+          ...evidence.windows,
+          lifecycle: {
+            ...evidence.windows.lifecycle,
+            session: {
+              ...evidence.windows.lifecycle.session,
+              fixtureSessionUsed: false,
+              protectedState: false,
+            },
+          },
+        },
+      },
+    });
+    expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
+      'failed',
+    );
+  });
+
+  it('rejects Windows evidence when startup trigger or notification proof disagrees', () => {
+    const evidence = operationalEvidence();
+    const result = evaluateReleaseGate({
+      ...passingInput(),
+      operationalEvidence: {
+        ...evidence,
+        windows: {
+          ...evidence.windows,
+          lifecycle: {
+            ...evidence.windows.lifecycle,
+            startup: {
+              ...evidence.windows.lifecycle.startup,
+              triggerVerified: false,
+              daemon: {
+                ...(evidence.windows.lifecycle.startup.daemon as Record<string, unknown>),
+                notificationCleared: false,
+              },
+            },
           },
         },
       },

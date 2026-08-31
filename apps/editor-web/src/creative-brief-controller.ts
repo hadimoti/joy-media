@@ -141,6 +141,12 @@ export interface BriefRetryEvent {
   readonly projectId: string;
 }
 
+export interface BriefHydrateEvent {
+  readonly type: 'hydrate';
+  readonly brief: CreativeBriefV1;
+  readonly revisionId: ProjectRevisionId;
+}
+
 /**
  * Union type of all possible Creative Brief UI events.
  */
@@ -151,7 +157,8 @@ export type CreativeBriefEvent =
   | BriefCollectErrorEvent
   | BriefRevisionChangeEvent
   | BriefResetEvent
-  | BriefRetryEvent;
+  | BriefRetryEvent
+  | BriefHydrateEvent;
 
 // ==========================================================================
 // Initial State
@@ -206,6 +213,17 @@ export function creativeBriefReducer(
     Object.freeze(event);
   }
 
+  if (event.type === 'hydrate') {
+    if (event.brief.snapshotRevisionId !== event.revisionId)
+      return {
+        type: 'stale',
+        brief: event.brief,
+        revisionId: event.brief.snapshotRevisionId,
+        currentRevisionId: event.revisionId,
+      };
+    return { type: 'brief-ready', brief: event.brief, revisionId: event.revisionId };
+  }
+
   switch (state.type) {
     case 'idle':
       return reduceIdleState(state, event);
@@ -250,6 +268,7 @@ function reduceIdleState(
     case 'collect-unavailable':
     case 'collect-error':
     case 'revision-change':
+    case 'hydrate':
       return _state;
   }
 }
@@ -298,6 +317,8 @@ function reduceCollectingState(
     case 'collect-start':
       // Already collecting - ignore new requests
       return state;
+    case 'hydrate':
+      return state;
   }
 }
 
@@ -335,6 +356,7 @@ function reduceBriefReadyState(
     case 'collect-success':
     case 'collect-unavailable':
     case 'collect-error':
+    case 'hydrate':
       return state;
   }
 }
@@ -361,6 +383,7 @@ function reduceUnavailableState(
     case 'collect-unavailable':
     case 'collect-error':
     case 'revision-change':
+    case 'hydrate':
       return _state;
   }
 }
@@ -387,6 +410,7 @@ function reduceErrorState(
     case 'collect-unavailable':
     case 'collect-error':
     case 'revision-change':
+    case 'hydrate':
       return _state;
   }
 }
@@ -421,6 +445,7 @@ function reduceStaleState(
     case 'collect-success':
     case 'collect-unavailable':
     case 'collect-error':
+    case 'hydrate':
       return state;
   }
 }

@@ -1,10 +1,12 @@
 import type { AsyncAdapterOptions, AsyncOutcome } from './async-model-adapter.js';
 import type { JoyCodeModelPlanV1 } from './joy-code-plan.js';
+import type { CreativeBriefV1 } from './creative-brief.js';
 
 export interface JoyCodePlannerInputV1 {
   readonly projectId: string;
   readonly snapshotRevisionId: string;
   readonly prompt: string;
+  readonly creativeBrief?: CreativeBriefV1;
   readonly selection: {
     readonly clipIds: readonly string[];
     readonly objectIds?: readonly string[];

@@ -1583,6 +1583,113 @@ describe('control-plane HTTP transport', () => {
     }
   });
 
+  it('streams a render export source only to its active lease holder', async () => {
+    const controlPlane = new LocalControlPlane();
+    const owner = { id: 'owner' };
+    const sourceBytes = new Uint8Array([1, 2, 3, 4]);
+    const sourceSha256 = createHash('sha256').update(sourceBytes).digest('hex');
+    controlPlane.createProject(owner, 'source-project', 'Source project');
+    controlPlane.registerAsset(owner, 'source-project', {
+      id: 'source-video',
+      kind: 'video',
+      displayName: 'source.mp4',
+      sha256: sourceSha256,
+      bytes: sourceBytes.byteLength,
+      descriptor: { mimeType: 'video/mp4', width: 64, height: 36, durationUs: 100_000 },
+      locations: [{ kind: 'private-object', ref: 'source-object' }],
+    });
+    const store = new MemoryPrivateObjectStore();
+    await store.put(
+      {
+        ref: 'source-object',
+        sha256: sourceSha256,
+        bytes: sourceBytes.byteLength,
+        mimeType: 'video/mp4',
+      },
+      sourceBytes,
+    );
+    const origin = await start({ authenticate: () => owner }, store, undefined, controlPlane);
+    await request(origin, 'POST', '/v1/worker-pair/offers', {
+      workerId: 'source-worker',
+      pairingCode: 'source-pairing-code',
+    });
+    await request(origin, 'POST', '/v1/workers/source-worker/pair', {
+      pairingCode: 'source-pairing-code',
+    });
+    const claim = await request(origin, 'POST', '/v1/worker-pair/claim', {
+      workerId: 'source-worker',
+      pairingCode: 'source-pairing-code',
+    });
+    const workerToken = (claim.body as { data: { sessionToken: string } }).data.sessionToken;
+    await request(
+      origin,
+      'POST',
+      '/v1/workers/source-worker/hello',
+      { capabilities: ['render.export'] },
+      workerToken,
+    );
+    await request(origin, 'POST', '/v1/projects/source-project/jobs', {
+      id: 'source-job',
+      type: 'render.export',
+      assetId: 'source-video',
+      payload: {
+        schemaVersion: 1,
+        producer: 'browser-staged-preview-export',
+        frameCount: 3,
+        manifest: {
+          projectId: 'source-project',
+          revision: 0,
+          width: 64,
+          height: 36,
+          frameRate: 30,
+          durationUs: 100_000,
+          preset: 'social-h264-aac',
+        },
+      },
+    });
+    const lease = await request(
+      origin,
+      'POST',
+      '/v1/workers/source-worker/leases',
+      {},
+      workerToken,
+    );
+    const leaseToken = (lease.body as { data: { leaseToken: string } }).data.leaseToken;
+    const endpoint = `${origin}/v1/workers/source-worker/jobs/source-job/source`;
+    const missingToken = await fetch(endpoint, {
+      headers: { authorization: `Bearer ${workerToken}` },
+    });
+    expect(missingToken.status).toBe(400);
+    await missingToken.arrayBuffer();
+    const wrongToken = await fetch(endpoint, {
+      headers: {
+        authorization: `Bearer ${workerToken}`,
+        'x-joy-lease-token': 'not-the-lease',
+      },
+    });
+    expect(wrongToken.status).toBe(409);
+    await wrongToken.arrayBuffer();
+    const source = await fetch(endpoint, {
+      headers: {
+        authorization: `Bearer ${workerToken}`,
+        'x-joy-lease-token': leaseToken,
+      },
+    });
+    expect(source.status).toBe(200);
+    expect(source.headers.get('cache-control')).toBe('private, no-store');
+    expect(source.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(new Uint8Array(await source.arrayBuffer())).toEqual(sourceBytes);
+    controlPlane.fail('source-worker', 'source-job', 'canceled', Date.now(), leaseToken);
+    const afterCancel = await fetch(endpoint, {
+      headers: {
+        authorization: `Bearer ${workerToken}`,
+        'x-joy-lease-token': leaseToken,
+      },
+    });
+    expect(afterCancel.status).toBe(409);
+    await afterCancel.arrayBuffer();
+  });
+
   it('relays an authenticated no-store GPU frame without creating a durable job', async () => {
     const controlPlane = new LocalControlPlane();
     const origin = await start(

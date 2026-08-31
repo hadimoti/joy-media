@@ -1,4 +1,4 @@
-import type { JoyCodePlannerInputV1 } from '@joy-media/agent-tools';
+import type { CreativeBriefV1, JoyCodePlannerInputV1 } from '@joy-media/agent-tools';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { validateJoyProjectV1 } from '@joy-media/project-schema';
 import type { Actor, ControlPlane } from './control-plane.js';
@@ -9,6 +9,7 @@ export interface JoyCodeInputResolverRequest {
   readonly projectId: string;
   readonly snapshotRevisionId: string;
   readonly prompt: string;
+  readonly creativeBrief?: CreativeBriefV1;
   readonly selection: JoyCodePlannerInputV1['selection'];
 }
 export type JoyCodeResolvedInput = JoyCodePlannerInputV1 & {
@@ -88,6 +89,7 @@ export class CanonicalJoyCodeInputResolver implements JoyCodeInputResolver {
           projectId: request.projectId,
           snapshotRevisionId: request.snapshotRevisionId,
           prompt: request.prompt,
+          ...(request.creativeBrief === undefined ? {} : { creativeBrief: request.creativeBrief }),
           selection: request.selection,
           contextSummary: 'Canonical semantic project context resolved for Joy Code planning',
           semanticSnapshot,

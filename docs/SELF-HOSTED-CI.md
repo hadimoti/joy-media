@@ -96,7 +96,11 @@ must run twice on the exact candidate SHA and use repository-scoped runners with
   S3-compatible storage, migrations, tenant/project isolation, queue/lease/cleanup, provider
   idempotency, export, and rollback compatibility).
 - `self-hosted`, `windows`, `x64`, `joy-media-worker`: clean-profile Worker/package lane. A GPU
-  result uses the additional `gpu` label; CPU and GPU evidence are retained separately.
+  result uses the additional `gpu` label; CPU and GPU evidence are retained separately. The
+  Windows acceptance script schedules the normal hidden daemon (not only `--joy-worker-self-test`)
+  against a unique loopback control-plane fixture, verifies pairing/hello/lease traffic and
+  protected state, then bounds process-tree termination before teardown. The fixture is explicitly
+  test-only; production HTTPS validation remains enforced for ordinary startup.
 - An isolated acceptance runner: disposable API/editor services plus a disposable Worker identity.
   Any automated browser uses fixture credentials only and never receives the owner's cookies or
   OpenCLI profile `cefd9k77`.

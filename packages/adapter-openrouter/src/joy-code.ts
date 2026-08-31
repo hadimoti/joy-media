@@ -74,6 +74,7 @@ export function buildJoyCodeRequest(
     projectId: input.projectId,
     snapshotRevisionId: input.snapshotRevisionId,
     prompt: input.prompt,
+    ...(input.creativeBrief === undefined ? {} : { creativeBrief: input.creativeBrief }),
     semanticSnapshot: input.semanticSnapshot,
     intelligenceSummary: input.intelligenceSummary,
     catalogs: input.catalogs,

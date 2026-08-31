@@ -20,6 +20,7 @@ export interface WorkerJobResult {
   readonly kind:
     | 'asset.thumbnail'
     | 'fixture.thumbnail'
+    | 'render.export'
     | 'image.comfy'
     | 'upscale.image'
     | 'upscale.video'
@@ -190,6 +191,31 @@ export class WorkerControlPlaneClient {
     );
   }
 
+  async downloadJobAsset(jobId: string, leaseToken?: string): Promise<Uint8Array> {
+    const sessionToken = this.options.sessionStore.loadWorkerSession();
+    if (sessionToken === undefined) throw new Error('Worker is not paired');
+    const response = await this.runTimedRequest(
+      `${this.options.apiUrl.replace(/\/$/, '')}/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/source`,
+      {
+        method: 'GET',
+        headers: {
+          authorization: `Bearer ${sessionToken}`,
+          accept: 'application/octet-stream',
+          'x-joy-lease-token': leaseToken ?? '',
+          'user-agent': process.env.JOY_MEDIA_WORKER_USER_AGENT?.trim() || 'JOY-Media-Worker/0.1',
+        },
+      },
+      async (result) => ({ response: result, bytes: new Uint8Array(await result.arrayBuffer()) }),
+    );
+    if (response.response.status === 401) {
+      this.options.sessionStore.clearWorkerSession();
+      throw new WorkerSessionExpiredError();
+    }
+    if (!response.response.ok)
+      throw new Error(`Worker source download failed (${response.response.status})`);
+    return response.bytes;
+  }
+
   async uploadDerivative(
     jobId: string,
     result: WorkerJobResult,
@@ -209,11 +235,13 @@ export class WorkerControlPlaneClient {
       'x-joy-derivative-kind':
         result.kind === 'asset.thumbnail'
           ? 'thumbnail'
-          : result.kind === 'mask.image' || result.kind === 'mask.video'
-            ? 'mask'
-            : result.kind === 'upscale.image' || result.kind === 'upscale.video'
-              ? 'upscale'
-              : 'audio',
+          : result.kind === 'render.export'
+            ? 'proxy'
+            : result.kind === 'mask.image' || result.kind === 'mask.video'
+              ? 'mask'
+              : result.kind === 'upscale.image' || result.kind === 'upscale.video'
+                ? 'upscale'
+                : 'audio',
       'x-joy-lease-token': leaseToken ?? '',
     };
     if (result.descriptor?.width !== undefined)

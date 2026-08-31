@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SpikeProject } from '@joy-media/project-schema';
 import type {
   AgentEditPlan,
@@ -16,6 +16,7 @@ import {
   buildEditorContext,
   runPlanAtomically,
   RevisionConflictError,
+  validateCreativeBrief,
 } from '@joy-media/agent-tools';
 import type { AgentActor, AtomicRunResult, ProjectRevisionId } from '@joy-media/agent-tools';
 import type { CreativeBriefV1, JoyCodePlanProposalV1 } from '@joy-media/agent-tools';
@@ -46,6 +47,7 @@ import {
 } from './joy-code-history.js';
 import { CheckIcon, CloseIcon, PlayIcon, PlusIcon, SaveIcon, UndoIcon } from './icons.js';
 import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
+import { readThreeDSceneStates } from './three-d-render-layer.js';
 import type { JoyCodeServerSession } from './joy-code-server-session.js';
 import type { JoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
 import { JoyCodeCompoundRunner } from './joy-code-compound-runner.js';
@@ -231,8 +233,15 @@ export function AgentPanel({
   const [serverProposal, setServerProposal] = useState<JoyCodePlanProposalV1 | undefined>(
     undefined,
   );
+  const [creativeBriefContext, setCreativeBriefContext] = useState<CreativeBriefV1 | undefined>(
+    undefined,
+  );
   const [serverDraft, setServerDraft] = useState<JoyCodeCompoundDraft | undefined>(undefined);
   const serverRunnerRef = useRef(new JoyCodeCompoundRunner());
+
+  useEffect(() => {
+    setCreativeBriefContext(undefined);
+  }, [project.id]);
 
   const approvalEngine = useMemo(
     () => new ApprovalEngine(approvalPolicyForAgentSettings(settings)),
@@ -314,6 +323,28 @@ export function AgentPanel({
       }),
     }));
   }
+
+  const handOffCreativeBrief = useCallback(
+    (brief: CreativeBriefV1): void => {
+      const threadId = joyCode.activeThreadId;
+      if (!validateCreativeBrief(brief).valid) {
+        appendMessage(
+          threadId,
+          'assistant',
+          'Creative Brief hand-off was rejected because the brief failed validation. No planner context was queued.',
+        );
+        return;
+      }
+      setCreativeBriefContext(brief);
+      appendMessage(
+        threadId,
+        'user',
+        `Creative Brief hand-off (review only): ${brief.request}\n\nValidated brief context queued for the next guarded Joy Code plan. No recommendation was executed.`,
+      );
+      setTab('composer');
+    },
+    [joyCode.activeThreadId],
+  );
 
   function updateThreadStatus(threadId: string, status: JoyCodeThread['status']): void {
     setJoyCode((current) => ({
@@ -408,11 +439,13 @@ export function AgentPanel({
     const intentId = matchJoyCodeIntentId(body);
     const intent = AGENT_INTENTS.find((candidate) => candidate.id === intentId);
     if (intent === undefined && joyCodeServerSession !== undefined) {
+      const briefContext = creativeBriefContext;
       setThinkingThreadId(threadId);
       void joyCodeServerSession
-        .plan(body, { clipIds: selectedClipIds })
+        .plan(body, { clipIds: selectedClipIds }, undefined, undefined, briefContext)
         .then((result) => {
           if (result.kind === 'success') {
+            setCreativeBriefContext(undefined);
             setServerProposal(result.proposal);
             return import('./joy-code-compound-compiler.js').then(
               ({ compileJoyCodeCompoundDraft }) => {
@@ -435,7 +468,7 @@ export function AgentPanel({
                   appendMessage(
                     threadId,
                     'assistant',
-                    `A guarded Joy Code proposal is ready: ${result.proposal.summary}. Review and explicitly approve the bounded changes.`,
+                    `A guarded Joy Code proposal is ready: ${result.proposal.summary}. ${briefContext === undefined ? '' : 'The validated Creative Brief context was included. '}Review and explicitly approve the bounded changes.`,
                   );
                 }
               },
@@ -1074,6 +1107,10 @@ export function AgentPanel({
         {tab === '3d' && (
           <Suspense fallback={null}>
             <JoyCode3DViewer
+              {...(() => {
+                const savedScene = readThreeDSceneStates(session.visualProject)[0];
+                return savedScene === undefined ? {} : { savedScene };
+              })()}
               {...(onAdd3DRender === undefined ? {} : { onAddToTimeline: onAdd3DRender })}
             />
           </Suspense>
@@ -1081,7 +1118,9 @@ export function AgentPanel({
         {tab === 'brief' && (
           <CreativeBriefPanel
             revisionId={session.projectRevisionId}
+            projectId={project.id}
             optedIn={creativeBriefOptedIn}
+            onHandOff={handOffCreativeBrief}
             {...(onCreativeBriefOptIn === undefined ? {} : { onOptIn: onCreativeBriefOptIn })}
             {...(creativeBriefRunner === undefined ? {} : { runBrief: creativeBriefRunner })}
           />

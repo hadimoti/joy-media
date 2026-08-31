@@ -3,12 +3,15 @@ import type {
   JoyCodePlanProposalV1,
   JoyCodeValidationOptions,
 } from './joy-code-plan.js';
+import type { CreativeBriefV1 } from './creative-brief.js';
 import { validateJoyCodeModelPlan, validateJoyCodePlanProposal } from './joy-code-plan.js';
 
 export interface JoyCodePlannerInputV1 {
   readonly projectId: string;
   readonly snapshotRevisionId: string;
   readonly prompt: string;
+  /** Optional validated Creative Brief context explicitly handed off by the owner. */
+  readonly creativeBrief?: CreativeBriefV1;
   readonly selection: {
     readonly clipIds: readonly string[];
     readonly objectIds?: readonly string[];

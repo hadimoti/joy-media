@@ -7,6 +7,7 @@ import {
   loadEffectRecipe,
   publishEffectRecipe,
   removeEffectRecipe,
+  UNTITLED_EFFECT_RECIPE_NAME,
 } from './effect-recipe-catalog.js';
 
 class MemoryStorage {
@@ -22,6 +23,21 @@ class MemoryStorage {
 }
 
 describe('effect recipe catalog', () => {
+  it('reuses one untouched untitled draft per preview context', () => {
+    const storage = new MemoryStorage();
+    const first = createEffectRecipe(storage);
+    const second = createEffectRecipe(storage);
+
+    expect(first.id).toBe(second.id);
+    expect(first.name).toBe(UNTITLED_EFFECT_RECIPE_NAME);
+    expect(listEffectRecipes(storage)).toHaveLength(1);
+
+    const selected = createEffectRecipe(storage, UNTITLED_EFFECT_RECIPE_NAME, [], 'object-1');
+    const selectedAgain = createEffectRecipe(storage, UNTITLED_EFFECT_RECIPE_NAME, [], 'object-1');
+    expect(selectedAgain.id).toBe(selected.id);
+    expect(listEffectRecipes(storage)).toHaveLength(2);
+  });
+
   it('creates, lists, publishes, duplicates, and removes recipes', () => {
     const storage = new MemoryStorage();
     const recipe = createEffectRecipe(storage, 'Neon Room', [

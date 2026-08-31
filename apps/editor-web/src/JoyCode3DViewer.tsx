@@ -3,12 +3,19 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createThreeDResourceResolver } from './three-d-resource-resolver.js';
+import {
+  openThreeDSourceStore,
+  sourceRefDisplayName,
+  type ThreeDSourceStore,
+} from './three-d-source-cache.js';
+import type { ThreeDSceneStateV1 } from './three-d-render-layer.js';
 import { CubeIcon, UploadIcon } from './icons.js';
 
 export interface JoyCode3DRenderAsset {
   readonly assetId: string;
   readonly displayName: string;
   readonly blob: Blob;
+  readonly scene: ThreeDSceneStateV1;
 }
 
 /** Dispose a loaded model and every GPU-owned geometry/material/texture once. */
@@ -85,8 +92,12 @@ function renderAssetId(): string {
 
 export function JoyCode3DViewer({
   onAddToTimeline,
+  savedScene,
+  sourceStore,
 }: {
   readonly onAddToTimeline?: (asset: JoyCode3DRenderAsset) => Promise<void>;
+  readonly savedScene?: ThreeDSceneStateV1;
+  readonly sourceStore?: ThreeDSourceStore;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -101,9 +112,12 @@ export function JoyCode3DViewer({
   const resourceResolverRef = useRef<{ readonly revokeAll: () => void } | null>(null);
   const [status, setStatus] = useState('Ready — drag to orbit, scroll to zoom');
   const [fileList, setFileList] = useState<readonly string[]>([]);
+  const [sourceRefs, setSourceRefs] = useState<readonly string[]>([]);
   const [currentModelName, setCurrentModelName] = useState<string | undefined>(undefined);
   const [adding, setAdding] = useState(false);
+  const [persistingSources, setPersistingSources] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const sceneIdRef = useRef(savedScene?.sceneId ?? `scene-${Date.now().toString(36)}`);
 
   const disposeModel = useCallback(disposeThreeDModel, []);
 
@@ -227,6 +241,78 @@ export function JoyCode3DViewer({
     };
   }, [initScene, clearScene]);
 
+  useEffect(() => {
+    if (savedScene === undefined) return;
+    let cancelled = false;
+    const requestId = ++loadSeqRef.current;
+    resourceResolverRef.current?.revokeAll();
+    resourceResolverRef.current = null;
+    clearScene();
+    setSourceRefs([]);
+    setFileList([]);
+    setCurrentModelName(undefined);
+    void (async () => {
+      if (savedScene.sourceRefs.length === 0) {
+        setStatus(
+          'Saved 3D scene has no local source files — import the GLB/GLTF again to recover it.',
+        );
+        return;
+      }
+      const store = sourceStore ?? (await openThreeDSourceStore());
+      const blobs = await Promise.all(savedScene.sourceRefs.map((ref) => store.get(ref)));
+      if (cancelled || requestId !== loadSeqRef.current) return;
+      if (blobs.some((blob) => blob === undefined)) {
+        setStatus(
+          'Saved 3D scene needs its source files — import the GLB/GLTF again to recover it.',
+        );
+        return;
+      }
+      const files = blobs.map(
+        (blob, index) =>
+          new File([blob!], sourceRefDisplayName(savedScene.sourceRefs[index]!), {
+            type: blob!.type || 'application/octet-stream',
+          }),
+      );
+      const modelFile = files.find((file) => /\.(?:glb|gltf)$/i.test(file.name)) ?? files[0];
+      if (modelFile === undefined || sceneRef.current === null || cameraRef.current === null)
+        return;
+      let resources: ReturnType<typeof createThreeDResourceResolver> | undefined;
+      try {
+        resources = createThreeDResourceResolver(files);
+        resourceResolverRef.current = resources;
+        const loader = new GLTFLoader();
+        loader.manager.setURLModifier(resources.resolve);
+        const gltf = await loader.parseAsync(await modelFile.arrayBuffer(), '');
+        if (cancelled || requestId !== loadSeqRef.current) return;
+        const model = gltf.scene;
+        model.userData.joyThreeDModel = true;
+        sceneRef.current.add(model);
+        model.position.set(...savedScene.model.position);
+        model.rotation.set(...savedScene.model.rotation);
+        model.scale.set(...savedScene.model.scale);
+        cameraRef.current.position.set(...savedScene.camera.position);
+        controlsRef.current?.target.set(...savedScene.camera.target);
+        controlsRef.current?.update();
+        setSourceRefs(savedScene.sourceRefs);
+        setFileList(files.map((file) => file.name));
+        setCurrentModelName(modelFile.name);
+        setStatus(`Restored: ${modelFile.name}`);
+      } catch (error) {
+        if (!cancelled && requestId === loadSeqRef.current)
+          setStatus(
+            `Saved 3D scene could not be restored: ${error instanceof Error ? error.message : String(error)}`,
+          );
+      } finally {
+        resources?.revokeAll();
+        if (resourceResolverRef.current === resources) resourceResolverRef.current = null;
+      }
+    })();
+    return () => {
+      cancelled = true;
+      loadSeqRef.current += 1;
+    };
+  }, [clearScene, savedScene, sourceStore]);
+
   const handleFileSelect = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(event.target.files ?? []);
@@ -243,6 +329,21 @@ export function JoyCode3DViewer({
           : `Loading ${file.name}…`,
       );
 
+      const sceneId = sceneIdRef.current;
+      setPersistingSources(true);
+      void (async () => {
+        try {
+          const store = sourceStore ?? (await openThreeDSourceStore());
+          const refs = await store.put(sceneId, files);
+          setSourceRefs(refs);
+        } catch {
+          setSourceRefs([]);
+          setStatus('Model loaded for this session only; local source persistence is unavailable.');
+        } finally {
+          setPersistingSources(false);
+        }
+      })();
+
       clearScene();
 
       const loader = new GLTFLoader();
@@ -252,6 +353,7 @@ export function JoyCode3DViewer({
           const gltf = await loader.parseAsync(await file.arrayBuffer(), '');
           if (requestId !== loadSeqRef.current) return;
           const model = gltf.scene;
+          model.userData.joyThreeDModel = true;
           const box = new THREE.Box3().setFromObject(model);
           if (box.isEmpty()) throw new Error('the model contains no renderable geometry');
           model.traverse((child) => {
@@ -283,7 +385,7 @@ export function JoyCode3DViewer({
 
       event.target.value = '';
     },
-    [clearScene],
+    [clearScene, sourceStore],
   );
 
   const addCurrentView = useCallback(async () => {
@@ -295,6 +397,7 @@ export function JoyCode3DViewer({
       scene === null ||
       camera === null ||
       currentModelName === undefined ||
+      persistingSources ||
       onAddToTimeline === undefined
     ) {
       return;
@@ -314,6 +417,10 @@ export function JoyCode3DViewer({
         assetId: renderAssetId(),
         displayName: `${baseName} · 3D Render`,
         blob,
+        scene: {
+          ...captureSceneState(scene, camera, controlsRef.current, sourceRefs),
+          sceneId: sceneIdRef.current,
+        },
       });
       setStatus(`Added ${baseName} to the timeline`);
     } catch (reason) {
@@ -321,7 +428,7 @@ export function JoyCode3DViewer({
     } finally {
       setAdding(false);
     }
-  }, [currentModelName, onAddToTimeline]);
+  }, [currentModelName, onAddToTimeline, persistingSources, sourceRefs]);
 
   return (
     <div className="joy-code-3d">
@@ -340,7 +447,12 @@ export function JoyCode3DViewer({
           className="icon-button"
           aria-label="Add current 3D view to timeline"
           title="Add current 3D view to timeline"
-          disabled={currentModelName === undefined || onAddToTimeline === undefined || adding}
+          disabled={
+            currentModelName === undefined ||
+            onAddToTimeline === undefined ||
+            adding ||
+            persistingSources
+          }
           onClick={() => void addCurrentView()}
         >
           <CubeIcon />
@@ -363,4 +475,44 @@ export function JoyCode3DViewer({
       )}
     </div>
   );
+}
+
+function captureSceneState(
+  scene: THREE.Scene,
+  camera: THREE.Camera,
+  controls: OrbitControls | null,
+  sourceRefs: readonly string[],
+): ThreeDSceneStateV1 {
+  const model = scene.children.find((child) => child.userData.joyThreeDModel === true) ?? scene;
+  const position = (value: THREE.Vector3) => [value.x, value.y, value.z] as const;
+  const rotation = [model.rotation.x, model.rotation.y, model.rotation.z] as const;
+  const materialColors: string[] = [];
+  let lightIntensity = 1;
+  let lightColor = '#ffffff';
+  scene.traverse((child) => {
+    if (child instanceof THREE.Light) {
+      lightIntensity = child.intensity;
+      lightColor = `#${child.color.getHexString()}`;
+    }
+  });
+  model.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    for (const material of materials) {
+      if ('color' in material && material.color instanceof THREE.Color)
+        materialColors.push(`#${material.color.getHexString()}`);
+    }
+  });
+  return {
+    version: 1,
+    sceneId: `scene-${Date.now().toString(36)}`,
+    sourceRefs: [...sourceRefs],
+    camera: {
+      position: position(camera.position),
+      target: position(controls?.target ?? new THREE.Vector3()),
+    },
+    model: { position: position(model.position), rotation, scale: position(model.scale) },
+    light: { intensity: lightIntensity, color: lightColor },
+    material: { colors: materialColors },
+  };
 }

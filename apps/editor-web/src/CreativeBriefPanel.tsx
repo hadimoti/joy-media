@@ -6,7 +6,7 @@
  * mutate state, persist data, create plans/commands/jobs, or execute recommendations.
  */
 
-import { useReducer, useEffect, useState, useCallback } from 'react';
+import { useReducer, useEffect, useState, useCallback, useRef } from 'react';
 import type { CreativeBriefV1, ProjectRevisionId } from '@joy-media/agent-tools';
 import {
   creativeBriefReducer,
@@ -23,6 +23,25 @@ import {
 import { CreativeBriefDisplay } from './CreativeBriefDisplay.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
+import {
+  loadCreativeBrief,
+  removeCreativeBrief,
+  saveCreativeBrief,
+  type CreativeBriefStorage,
+} from './creative-brief-storage.js';
+
+/**
+ * Browser storage is an optional cache. Some privacy modes expose a
+ * localStorage property whose getter itself throws, so acquire it behind the
+ * same fail-closed boundary as the storage operations.
+ */
+function getCreativeBriefStorage(): CreativeBriefStorage | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Props for CreativeBriefPanel.
@@ -38,6 +57,10 @@ export interface CreativeBriefPanelProps {
   readonly optedIn?: boolean;
   /** Optional async callback to request opt-in. */
   readonly onOptIn?: () => Promise<void> | void;
+  /** Stable project key used for local durable reopen state. */
+  readonly projectId?: string;
+  /** Hands a generated brief to the guarded Joy Code composer; never executes it. */
+  readonly onHandOff?: (brief: CreativeBriefV1) => void;
 }
 
 /** Versioned disclosure shown immediately before project-level opt-in. */
@@ -62,11 +85,30 @@ export function CreativeBriefPanel({
   runBrief,
   optedIn = false,
   onOptIn,
+  projectId,
+  onHandOff,
 }: CreativeBriefPanelProps) {
   const [state, dispatch] = useReducer(creativeBriefReducer, INITIAL_BRIEF_STATE);
   const [requestText, setRequestText] = useState('');
   const [optInError, setOptInError] = useState<string | null>(null);
   const [isOptingIn, setIsOptingIn] = useState(false);
+  const storageProjectId = projectId ?? `revision:${revisionId}`;
+  const previousStorageProjectIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const previousStorageProjectId = previousStorageProjectIdRef.current;
+    if (previousStorageProjectId !== null && previousStorageProjectId !== storageProjectId) {
+      dispatch({ type: 'reset' });
+      setRequestText('');
+    }
+    previousStorageProjectIdRef.current = storageProjectId;
+    const storage = getCreativeBriefStorage();
+    const saved = storage ? loadCreativeBrief(storage, storageProjectId) : undefined;
+    if (saved !== undefined) {
+      dispatch({ type: 'hydrate', brief: saved, revisionId });
+      setRequestText(saved.request);
+    }
+  }, [revisionId, storageProjectId]);
 
   // Track previous revision to detect changes
   const [previousRevisionId, setPreviousRevisionId] = useState<ProjectRevisionId | null>(null);
@@ -142,6 +184,9 @@ export function CreativeBriefPanel({
       const brief = await runBrief(request);
       // Verify the brief matches the requested revision
       if (brief.snapshotRevisionId === revisionId) {
+        const storage = getCreativeBriefStorage();
+        if (storage) saveCreativeBrief(storage, storageProjectId, brief);
+        setRequestText(brief.request);
         dispatch({
           type: 'collect-success',
           brief,
@@ -160,13 +205,15 @@ export function CreativeBriefPanel({
         error: errorMessage,
       });
     }
-  }, [requestText, revisionId, runBrief, optedIn]);
+  }, [requestText, revisionId, runBrief, optedIn, storageProjectId]);
 
   // Handle reset
   const handleReset = useCallback(() => {
     dispatch({ type: 'reset' });
     setRequestText('');
-  }, []);
+    const storage = getCreativeBriefStorage();
+    if (storage) removeCreativeBrief(storage, storageProjectId);
+  }, [storageProjectId]);
 
   // Handle retry
   const handleRetry = useCallback(async () => {
@@ -201,6 +248,9 @@ export function CreativeBriefPanel({
     try {
       const brief = await runBrief(request);
       if (brief.snapshotRevisionId === revisionId) {
+        const storage = getCreativeBriefStorage();
+        if (storage) saveCreativeBrief(storage, storageProjectId, brief);
+        setRequestText(brief.request);
         dispatch({
           type: 'collect-success',
           brief,
@@ -219,7 +269,7 @@ export function CreativeBriefPanel({
         error: errorMessage,
       });
     }
-  }, [displayedRequest, requestText, revisionId, runBrief, optedIn]);
+  }, [displayedRequest, requestText, revisionId, runBrief, optedIn, storageProjectId]);
 
   // Render based on current state
   return (
@@ -352,6 +402,17 @@ export function CreativeBriefPanel({
 
           {optedIn && isStale(state) && getBrief(state) && (
             <CreativeBriefDisplay brief={getBrief(state)!} />
+          )}
+
+          {optedIn && hasBrief(state) && getBrief(state) && onHandOff && (
+            <button
+              className="creative-brief-panel-button"
+              type="button"
+              onClick={() => onHandOff(getBrief(state)!)}
+              aria-label="Send brief to Joy Code"
+            >
+              Send to Joy Code
+            </button>
           )}
         </div>
       </div>

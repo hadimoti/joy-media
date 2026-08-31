@@ -2754,6 +2754,7 @@ function EditorWorkspace({
           bytes: asset.blob.size,
           mimeType,
           sha256: persistedAsset.sha256,
+          scene: asset.scene,
         },
       });
       session.dispatchCompound(insertion.label, {
@@ -3639,6 +3640,13 @@ function EditorWorkspace({
       setExportStatus('Building render manifest…');
       setExportProgress(0.02);
       const entryId = retryEntry?.id ?? `export-${Date.now()}`;
+      const attemptNonce =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID().replaceAll('-', '').slice(0, 20)
+          : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+      // Keep the logical history entry stable for retry, but never reuse the
+      // server asset/job identity from a crashed attempt.
+      const attemptKey = `${entryId.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 64)}-${attemptNonce}`;
       const startedAt = retryEntry?.startedAt ?? new Date().toISOString();
       const exportFilename = retryEntry?.filename ?? `joy-media-export-${Date.now()}.mp4`;
       let retryManifest: ExportRetryManifest | undefined;
@@ -3650,6 +3658,7 @@ function EditorWorkspace({
       let mixedAudioStarted = false;
       let activeRenderer: BrowserPixiRenderer | undefined;
       let activeRecorderCanvas: HTMLCanvasElement | undefined;
+      let stagedExportAssetId: string | undefined = retryEntry?.stagedAssetId;
       const exportMediaCleanup: Array<{
         readonly video?: HTMLVideoElement;
         readonly animated?: AnimatedImageFrameSource;
@@ -3666,6 +3675,14 @@ function EditorWorkspace({
         return runExportPreloadStage(stage, operation, abortController.signal);
       };
       try {
+        if (retryEntry?.stagedAssetId !== undefined) {
+          // Recover a staged asset left by a browser crash before starting a
+          // fresh server attempt. Failure is best-effort because the asset may
+          // already have been removed by the Worker/control-plane cleanup.
+          await mediaControlPlaneClient
+            .deleteAsset(controlPlaneProject.controlPlaneProjectId, retryEntry.stagedAssetId)
+            .catch(() => undefined);
+        }
         const estimate = await navigator.storage?.estimate?.();
         if (
           estimate?.quota !== undefined &&
@@ -3823,6 +3840,8 @@ function EditorWorkspace({
           revision: sourceRevision,
           presetId: activeExportPreset,
           manifest: retryManifest,
+          producer: 'browser-staged-preview-export',
+          ...(stagedExportAssetId === undefined ? {} : { stagedAssetId: stagedExportAssetId }),
         });
         operationLedger.begin({
           id: entryId,
@@ -4248,13 +4267,125 @@ function EditorWorkspace({
         });
         if (browserExportResult.blob === undefined)
           throw new Error('Browser export did not produce a downloadable MP4');
-        setExportStatus('Finalizing H.264/AAC export…');
-        const remuxedBlob = await mediaControlPlaneClient.remuxBrowserMp4(
+        setExportStatus('Staging export for Worker verification…');
+        const stagedBytes = new Uint8Array(await browserExportResult.blob.arrayBuffer());
+        abortController.signal.throwIfAborted();
+        const stagedSha256 = await sha256Hex(stagedBytes);
+        abortController.signal.throwIfAborted();
+        stagedExportAssetId = `export-source-${attemptKey}`;
+        const workerJobId = `render-${attemptKey}`;
+        // Persist both server identities before the first network mutation.
+        // If the tab dies during registration/upload/enqueue, reload recovery
+        // can remove the abandoned private asset before the next retry.
+        recordExportEntry({
+          id: entryId,
+          projectId,
+          filename: exportFilename,
+          status: 'running',
+          cacheState: 'none',
+          startedAt,
+          mimeType: selectedMimeType,
+          fingerprint: exportFingerprint,
+          revision: sourceRevision,
+          presetId: activeExportPreset,
+          manifest: retryManifest,
+          producer: 'browser-staged-preview-export',
+          workerJobId,
+          stagedAssetId: stagedExportAssetId,
+        });
+        const stagedAsset = await mediaControlPlaneClient.registerAsset(
           controlPlaneProject.controlPlaneProjectId,
+          {
+            id: stagedExportAssetId,
+            kind: 'video',
+            displayName: `${exportFilename}.stage`,
+            sha256: stagedSha256,
+            bytes: stagedBytes.byteLength,
+            descriptor: {
+              mimeType: browserExportResult.mimeType || 'video/mp4',
+              width,
+              height,
+              durationUs,
+            },
+            locations: [{ kind: 'opfs-cache', ref: `export-stage-${entryId}` }],
+          },
+        );
+        await mediaControlPlaneClient.uploadAssetOriginal(
+          controlPlaneProject.controlPlaneProjectId,
+          stagedAsset,
           browserExportResult.blob,
-          frameRate,
-          totalFrames,
-          abortController.signal,
+        );
+        abortController.signal.throwIfAborted();
+        await mediaControlPlaneClient.enqueueRenderExport(
+          controlPlaneProject.controlPlaneProjectId,
+          workerJobId,
+          stagedExportAssetId,
+          {
+            schemaVersion: 1,
+            producer: 'browser-staged-preview-export',
+            frameCount: totalFrames,
+            manifest: {
+              projectId,
+              revision: sourceRevision,
+              width,
+              height,
+              frameRate,
+              durationUs,
+              preset: activeExportPreset,
+            },
+          },
+        );
+        setExportStatus('Waiting for Worker export verification…');
+        let workerJob: BrowserJob | undefined;
+        // A Worker outage must surface as a retryable export failure instead
+        // of leaving the editor in an unbounded polling loop.  The browser
+        // encode has already completed, so a generous bounded window gives a
+        // normal headless Worker time to recover without pinning the tab.
+        const workerExportDeadline = Date.now() + 30 * 60_000;
+        while (!abortController.signal.aborted) {
+          workerJob = (
+            await mediaControlPlaneClient.jobs(controlPlaneProject.controlPlaneProjectId)
+          ).find((candidate) => candidate.id === workerJobId);
+          if (workerJob === undefined) throw new Error('Export Worker job disappeared');
+          if (
+            workerJob.state === 'completed' ||
+            workerJob.state === 'failed' ||
+            workerJob.state === 'canceled'
+          )
+            break;
+          if (Date.now() >= workerExportDeadline)
+            throw new Error(
+              'Export Worker verification timed out. Check Worker connectivity and retry.',
+            );
+          setExportProgress(0.98);
+          await new Promise<void>((resolve, reject) => {
+            let settled = false;
+            const timer = window.setTimeout(() => {
+              settled = true;
+              abortController.signal.removeEventListener('abort', onAbort);
+              resolve();
+            }, 500);
+            const onAbort = () => {
+              if (settled) return;
+              settled = true;
+              window.clearTimeout(timer);
+              abortController.signal.removeEventListener('abort', onAbort);
+              reject(new DOMException('Aborted', 'AbortError'));
+            };
+            abortController.signal.addEventListener('abort', onAbort, { once: true });
+          });
+        }
+        abortController.signal.throwIfAborted();
+        if (workerJob === undefined) throw new Error('Export Worker job was not found');
+        if (workerJob.state === 'failed')
+          throw new Error(workerJob.error ?? 'Worker export verification failed');
+        if (workerJob.state === 'canceled') throw new Error('Worker export was canceled');
+        if (workerJob.derivative === undefined)
+          throw new Error('Worker export completed without a verified derivative');
+        const remuxedBlob = await mediaControlPlaneClient.derivativeBytes(
+          controlPlaneProject.controlPlaneProjectId,
+          stagedExportAssetId,
+          workerJob.derivative.id,
         );
         abortController.signal.throwIfAborted();
         if (
@@ -4303,11 +4434,20 @@ function EditorWorkspace({
           revision: sourceRevision,
           presetId: activeExportPreset,
           manifest: retryManifest,
+          producer: 'browser-staged-preview-export',
+          workerJobId,
+          derivativeId: workerJob.derivative.id,
         });
         operationLedger.finish(entryId, 'completed', { resultRef: entryId });
         exportCompleted = true;
         const previousExport = lastExportRef.current;
         lastExportRef.current = { entryId, url: pendingExportUrl };
+        if (stagedExportAssetId !== undefined) {
+          await mediaControlPlaneClient
+            .deleteAsset(controlPlaneProject.controlPlaneProjectId, stagedExportAssetId)
+            .catch(() => undefined);
+          stagedExportAssetId = undefined;
+        }
         pendingExportUrl = undefined;
         if (previousExport !== null && previousExport.url !== lastExportRef.current.url) {
           try {
@@ -4355,6 +4495,7 @@ function EditorWorkspace({
               revision: sourceRevision,
               presetId: activeExportPreset,
               manifest: retryManifest,
+              ...(stagedExportAssetId === undefined ? {} : { stagedAssetId: stagedExportAssetId }),
             });
           } catch {
             // Storage quota failures must not prevent partial-output cleanup.
@@ -4402,6 +4543,15 @@ function EditorWorkspace({
           await activeAudioContext.close().catch(() => undefined);
         activeExportAudioTrack?.stop();
         if (!exportCompleted) {
+          if (stagedExportAssetId !== undefined) {
+            // Staged originals are private cloud objects.  Always remove the
+            // temporary asset on failure/cancellation so retries cannot leave
+            // orphaned media or collide with a previous attempt.
+            await mediaControlPlaneClient
+              .deleteAsset(controlPlaneProject.controlPlaneProjectId, stagedExportAssetId)
+              .catch(() => undefined);
+            stagedExportAssetId = undefined;
+          }
           if (pendingExportUrl !== undefined) {
             try {
               URL.revokeObjectURL(pendingExportUrl);

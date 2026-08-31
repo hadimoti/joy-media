@@ -593,8 +593,10 @@ function operationalEvidenceReady(
   const missingSource = record(delivery).missingSource;
   if (
     record(mixed).status !== 'passed' ||
+    record(mixed).producer !== 'joy-export-mp4' ||
     !positiveNumber(record(mixed).bytes) ||
     !sha256(record(mixed).sha256) ||
+    record(mixed).durableRedownloadMatched !== true ||
     record(downloaded).status !== 200 ||
     !positiveNumber(record(downloaded).bytes) ||
     !sha256(record(downloaded).sha256) ||
@@ -633,12 +635,28 @@ function operationalEvidenceReady(
     return false;
   const startup = record(lifecycle.startup);
   const daemon = record(startup.daemon);
-  if (daemon.started !== true || daemon.terminated !== true) return false;
+  if (
+    startup.trigger !== 'at-logon' ||
+    startup.triggerVerified !== true ||
+    startup.action !== 'normal-daemon' ||
+    startup.taskRan !== true ||
+    daemon.started !== true ||
+    daemon.terminated !== true ||
+    daemon.paired !== true ||
+    daemon.notificationCleared !== true ||
+    typeof daemon.hello !== 'number' ||
+    daemon.hello < 1 ||
+    typeof daemon.leases !== 'number' ||
+    daemon.leases < 1
+  )
+    return false;
   const session = record(lifecycle.session);
   if (
     session.stateIsolated !== true ||
     session.ownerSessionUsed !== false ||
-    session.persistedSession !== false
+    session.fixtureSessionUsed !== true ||
+    session.persistedSession !== true ||
+    session.protectedState !== true
   )
     return false;
   const renewal = record(lifecycle.renewal);

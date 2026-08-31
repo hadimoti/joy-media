@@ -36,6 +36,7 @@ function job(state: BrowserJob['state'], progress: number): BrowserJob {
     ...(state === 'completed'
       ? {
           derivative: {
+            id: `derivative-${request.jobId}`,
             jobId: request.jobId,
             kind: request.jobType,
             sha256: 'b'.repeat(64),

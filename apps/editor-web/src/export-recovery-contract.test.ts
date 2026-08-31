@@ -41,14 +41,20 @@ describe('App export recovery contract', () => {
     expect(runningEntrySource).toContain('manifest: retryManifest');
   });
 
-  it('threads one AbortSignal through encoding, remux, and durable cache verification', () => {
+  it('threads one AbortSignal through encoding, Worker staging, and durable cache verification', () => {
     const encode = exportCallback.indexOf('downloadBrowserMp4({');
     const encodeSignal = exportCallback.indexOf('signal: abortController.signal', encode);
-    const remux = exportCallback.indexOf('mediaControlPlaneClient.remuxBrowserMp4(', encodeSignal);
-    const remuxSignal = exportCallback.indexOf('abortController.signal,', remux);
-    const remuxAbortCheck = exportCallback.indexOf(
+    const stage = exportCallback.indexOf(
+      "setExportStatus('Staging export for Worker verification…')",
+      encodeSignal,
+    );
+    const workerEnqueue = exportCallback.indexOf(
+      'mediaControlPlaneClient.enqueueRenderExport(',
+      stage,
+    );
+    const workerAbortCheck = exportCallback.indexOf(
       'abortController.signal.throwIfAborted()',
-      remuxSignal,
+      workerEnqueue,
     );
     const verifiedPut = exportCallback.indexOf('cache.putVerified(entryId, exportResult.blob)');
     const cacheAbortCheck = exportCallback.indexOf(
@@ -56,12 +62,21 @@ describe('App export recovery contract', () => {
       verifiedPut,
     );
 
-    expect(encode).toBeGreaterThanOrEqual(0);
+    for (const index of [
+      encode,
+      encodeSignal,
+      stage,
+      workerEnqueue,
+      workerAbortCheck,
+      verifiedPut,
+    ]) {
+      expect(index).toBeGreaterThanOrEqual(0);
+    }
     expect(encodeSignal).toBeGreaterThan(encode);
-    expect(remux).toBeGreaterThan(encodeSignal);
-    expect(remuxSignal).toBeGreaterThan(remux);
-    expect(remuxAbortCheck).toBeGreaterThan(remuxSignal);
-    expect(verifiedPut).toBeGreaterThan(remuxAbortCheck);
+    expect(stage).toBeGreaterThan(encodeSignal);
+    expect(workerEnqueue).toBeGreaterThan(stage);
+    expect(workerAbortCheck).toBeGreaterThan(workerEnqueue);
+    expect(verifiedPut).toBeGreaterThan(workerAbortCheck);
     expect(cacheAbortCheck).toBeGreaterThan(verifiedPut);
   });
 

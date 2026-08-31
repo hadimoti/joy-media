@@ -22,6 +22,7 @@ import {
   type JobEvent,
   type LocalGpuWorkerReceipt,
   type MaskWorkerReceipt,
+  type RenderExportReceipt,
   type UpscaleWorkerReceipt,
   type WorkerResultReceipt,
   type ProjectMetadata,
@@ -39,6 +40,7 @@ import {
   validateSortName,
   validateWorkerMaxAttempts,
   validateWorkerLeaseDuration,
+  validateRenderExportPayload,
   matchesCloudDerivativeRegistration,
   matchesWorkerDerivativeCompletion,
   workerDerivativeId,
@@ -1169,6 +1171,29 @@ export class PostgresControlPlane implements ControlPlane {
     return asset;
   }
 
+  async workerJobAsset(
+    workerId: string,
+    jobId: string,
+    now = Date.now(),
+    leaseToken?: string,
+  ): Promise<MediaAssetRecord> {
+    const result = await this.pool.query<MediaAssetRow>(
+      `SELECT a.* FROM jobs
+       JOIN workers ON workers.id = jobs.lease_owner
+       JOIN media_assets a ON a.id = jobs.asset_id AND a.project_id = jobs.project_id
+       WHERE jobs.id = $1 AND jobs.state = 'leased' AND jobs.lease_owner = $2
+         AND jobs.lease_expires_at > $3 AND jobs.lease_token = $4
+         AND workers.revoked_at IS NULL`,
+      [jobId, workerId, new Date(now), leaseToken ?? ''],
+    );
+    const row = result.rows[0];
+    if (row === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', jobId);
+    const asset = mediaAssetOf(row);
+    if (!asset.locations.some((location) => location.kind === 'private-object'))
+      throw new ControlPlaneError('ASSET_NOT_FOUND', asset.id);
+    return asset;
+  }
+
   async registerLocalDerivative(
     actor: Actor,
     projectId: string,
@@ -1532,6 +1557,7 @@ export class PostgresControlPlane implements ControlPlane {
         }
       }
       const safePayload = validatedJobPayload(payload ?? {});
+      if (type === 'render.export') validateRenderExportPayload(projectId, safePayload);
       try {
         const result = await client.query<JobRow>(
           `INSERT INTO jobs
@@ -1711,10 +1737,11 @@ export class PostgresControlPlane implements ControlPlane {
     leaseToken?: string,
   ): Promise<Job> {
     const isThumb = receipt?.kind === 'asset.thumbnail';
+    const isExport = receipt?.kind === 'render.export';
     const isGpu = receipt?.kind === 'image.comfy' || receipt?.kind === 'audio.ml-denoise';
     const isMask = receipt?.kind === 'mask.image' || receipt?.kind === 'mask.video';
     const isUpscale = receipt?.kind === 'upscale.image' || receipt?.kind === 'upscale.video';
-    const storesAsset = isThumb || isGpu || isMask || isUpscale;
+    const storesAsset = isThumb || isExport || isGpu || isMask || isUpscale;
     return this.transaction(async (client) => {
       // Lock the leased row while checking its generation's durable cloud
       // derivative.  The completion update below is intentionally not allowed
@@ -2121,6 +2148,7 @@ function jobPayloadOf(value: unknown): Readonly<Record<string, unknown>> {
 
 function derivativeOfRow(row: JobRow): NonNullable<Job['derivative']> {
   const base = {
+    id: workerDerivativeId(row.id, row.generation),
     jobId: row.id,
     sha256: row.result_sha256!,
     bytes: row.result_bytes!,
@@ -2262,6 +2290,7 @@ function isWorkerReceipt(value: WorkerResultReceipt): boolean {
   return (
     isFixtureReceipt(value) ||
     isAssetThumbnailReceipt(value) ||
+    isRenderExportReceipt(value) ||
     isLocalGpuReceipt(value) ||
     isMaskReceipt(value) ||
     isUpscaleReceipt(value)
@@ -2294,6 +2323,31 @@ function isLocalGpuReceipt(value: WorkerResultReceipt): value is LocalGpuWorkerR
     /^gpu-[A-Za-z0-9._-]{1,110}$/.test(value.localRef) &&
     typeof value.descriptor.mimeType === 'string' &&
     value.descriptor.mimeType.length > 0
+  );
+}
+
+function isRenderExportReceipt(value: WorkerResultReceipt): value is RenderExportReceipt {
+  const descriptor =
+    value.kind === 'render.export' &&
+    typeof value.descriptor === 'object' &&
+    value.descriptor !== null &&
+    !Array.isArray(value.descriptor)
+      ? value.descriptor
+      : undefined;
+  return (
+    value.kind === 'render.export' &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.assetId) &&
+    /^[a-f0-9]{64}$/.test(value.sha256) &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes > 0 &&
+    /^export-[A-Za-z0-9._-]{1,120}$/.test(value.localRef) &&
+    descriptor?.mimeType === 'video/mp4' &&
+    Number.isSafeInteger(descriptor.width) &&
+    (descriptor.width ?? 0) > 0 &&
+    Number.isSafeInteger(descriptor.height) &&
+    (descriptor.height ?? 0) > 0 &&
+    Number.isSafeInteger(descriptor.durationUs) &&
+    (descriptor.durationUs ?? 0) > 0
   );
 }
 

@@ -51,6 +51,7 @@ describe('waitForWorkerPairing', () => {
   it('announces an unexpired persisted offer once after a restart', async () => {
     const store = pairingStore({ code: 'persisted-code', expiresAt: 200 });
     const logs: string[] = [];
+    const notifications: { readonly code: string; readonly expiresAt: number }[] = [];
     let publishAttempts = 0;
     const client: WorkerPairingClient = {
       publishPairingOffer: async () => {
@@ -68,10 +69,68 @@ describe('waitForWorkerPairing', () => {
       now: () => 100,
       sleep: async () => undefined,
       log: (message) => logs.push(message),
+      notify: (offer) => notifications.push(offer),
     });
 
-    expect(logs).toEqual(['Approve this Worker in JOY Media with pairing code: persisted-code']);
+    expect(logs).toEqual([
+      'Worker pairing approval required; open the JOY Media notification to continue.',
+    ]);
+    expect(notifications).toEqual([{ code: 'persisted-code', expiresAt: 200 }]);
     expect(publishAttempts).toBe(0);
+  });
+
+  it('never writes the pairing secret to diagnostics when the notification channel fails', async () => {
+    const store = pairingStore({ code: 'secret-code', expiresAt: 200 });
+    const logs: string[] = [];
+    const client: WorkerPairingClient = {
+      publishPairingOffer: async () => 250,
+      claimPairing: async () => {
+        store.establishSession();
+        return true;
+      },
+    };
+
+    await waitForWorkerPairing(client, store, {
+      createPairingCode: () => 'unused-code',
+      now: () => 100,
+      sleep: async () => undefined,
+      log: (message) => logs.push(message),
+      notify: () => {
+        throw new Error('desktop host unavailable');
+      },
+    });
+
+    expect(logs.join('\n')).not.toContain('secret-code');
+    expect(logs).toContain('Worker pairing notification could not be displayed; retrying safely.');
+  });
+
+  it('retries the same pairing offer when the notification channel recovers', async () => {
+    const store = pairingStore({ code: 'retry-notification-code', expiresAt: 200 });
+    const notifications: string[] = [];
+    let notifyAttempts = 0;
+    let claims = 0;
+    const client: WorkerPairingClient = {
+      publishPairingOffer: async () => 200,
+      claimPairing: async () => {
+        claims += 1;
+        if (claims === 2) store.establishSession();
+        return claims === 2;
+      },
+    };
+
+    await waitForWorkerPairing(client, store, {
+      createPairingCode: () => 'unused-code',
+      now: () => 100,
+      sleep: async () => undefined,
+      notify: (offer) => {
+        notifyAttempts += 1;
+        if (notifyAttempts === 1) throw new Error('desktop host unavailable');
+        notifications.push(offer.code);
+      },
+    });
+
+    expect(notifyAttempts).toBe(2);
+    expect(notifications).toEqual(['retry-notification-code']);
   });
 
   it('claims the refreshed code after an active offer expires while polling', async () => {
