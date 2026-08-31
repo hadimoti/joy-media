@@ -1123,6 +1123,7 @@ export function AgentPanel({
             onHandOff={handOffCreativeBrief}
             {...(onCreativeBriefOptIn === undefined ? {} : { onOptIn: onCreativeBriefOptIn })}
             {...(creativeBriefRunner === undefined ? {} : { runBrief: creativeBriefRunner })}
+            embedded
           />
         )}
       </div>

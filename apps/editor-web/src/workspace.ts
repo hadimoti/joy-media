@@ -19,7 +19,6 @@ export const PANEL_IDS = [
   'workflows',
   'plugins',
   'templates',
-  'creative-brief',
 ] as const;
 export type PanelId = (typeof PANEL_IDS)[number];
 

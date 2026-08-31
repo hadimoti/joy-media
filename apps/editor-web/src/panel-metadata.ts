@@ -59,7 +59,6 @@ export const PANEL_METADATA: readonly PanelMetadata[] = [
   panel('jobs', 'automation', 'Open Jobs', ['automate']),
   panel('diagnostics', 'system', 'Open Diagnostics', ['edit', 'automate']),
   panel('plugins', 'system', 'Open Plugins', ['edit', 'automate']),
-  panel('creative-brief', 'automation', 'Open Creative Brief', ['automate'], true),
 ];
 
 export const PANEL_METADATA_BY_ID: Readonly<Record<PanelId, PanelMetadata>> = Object.fromEntries(

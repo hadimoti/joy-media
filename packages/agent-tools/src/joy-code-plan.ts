@@ -205,7 +205,7 @@ export interface JoyCodeModelPlanV1 {
 }
 
 export interface JoyCodePlanProvenanceV1 {
-  readonly actor: 'joy-code-server';
+  readonly actor: 'joy-code-server' | 'joy-code-client';
   readonly adapterName: string;
   readonly modelId: string;
 }
@@ -933,11 +933,11 @@ export function validateJoyCodePlanProposal(
     error(errors, 'invalid-provenance', 'provenance must be an object', 'provenance');
   } else {
     checkKnownKeys(provenance, ['actor', 'adapterName', 'modelId'], errors, 'provenance');
-    if (provenance.actor !== 'joy-code-server')
+    if (provenance.actor !== 'joy-code-server' && provenance.actor !== 'joy-code-client')
       error(
         errors,
         'invalid-actor',
-        'Only joy-code-server may create a proposal',
+        'Proposal actor must be joy-code-server or joy-code-client',
         'provenance.actor',
       );
     const adapterName = readNonEmptyString(
@@ -985,7 +985,12 @@ export function validateJoyCodePlanProposal(
   }
   const adapterName = provenance.adapterName;
   const modelId = provenance.modelId;
-  if (typeof adapterName !== 'string' || typeof modelId !== 'string')
+  const actor = provenance.actor;
+  if (
+    typeof adapterName !== 'string' ||
+    typeof modelId !== 'string' ||
+    (actor !== 'joy-code-server' && actor !== 'joy-code-client')
+  )
     return { valid: false, errors };
   return {
     valid: true,
@@ -997,7 +1002,7 @@ export function validateJoyCodePlanProposal(
       createdAt,
       consentVersion,
       catalogVersion,
-      provenance: { actor: 'joy-code-server', adapterName, modelId },
+      provenance: { actor, adapterName, modelId },
     },
     errors: [],
   };

@@ -33,6 +33,8 @@ export interface JoyCodePlanFinalizerMetadata {
   readonly consentVersion: string;
   readonly adapterName: string;
   readonly modelId: string;
+  /** Defaults to the cloud server actor for backwards-compatible callers. */
+  readonly actor?: JoyCodePlanProposalV1['provenance']['actor'];
 }
 
 export function finalizeJoyCodePlan(
@@ -52,7 +54,7 @@ export function finalizeJoyCodePlan(
     consentVersion: metadata.consentVersion,
     catalogVersion: metadata.catalogVersion,
     provenance: {
-      actor: 'joy-code-server',
+      actor: metadata.actor ?? 'joy-code-server',
       adapterName: metadata.adapterName,
       modelId: metadata.modelId,
     },

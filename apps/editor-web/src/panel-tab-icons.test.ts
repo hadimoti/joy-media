@@ -8,11 +8,6 @@ import {
 } from './panel-tab-icons.js';
 
 describe('dock panel tab icons', () => {
-  it('maps Creative Brief to a shared icon mask', () => {
-    expect(panelTabIconUrl('creative-brief')).toBe(PANEL_TAB_ICONS['creative-brief']);
-    expect(panelTabIconUrl('creative-brief')).toBeTruthy();
-  });
-
   it('gives each durable panel either a shared mask or inline SVG icon', () => {
     for (const panelId of PANEL_IDS) {
       expect(

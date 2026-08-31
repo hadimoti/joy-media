@@ -26,7 +26,6 @@ export const PANEL_LABELS: Readonly<Record<PanelId, string>> = {
   workflows: 'Workflows',
   plugins: 'Plugins',
   templates: 'Library',
-  'creative-brief': 'Creative Brief',
 };
 
 /**
@@ -54,9 +53,6 @@ export const PANEL_TAB_ICONS: Readonly<Partial<Record<PanelId, string>>> = {
   workflows: iconUrl('workflow.png'),
   plugins: iconUrl('plugin.png'),
   templates: iconUrl('24_library.png'),
-  // Creative Brief is an analysis surface, so keep it on the shared mask
-  // registry rather than letting Dockview render its text fallback.
-  'creative-brief': iconUrl('ui/analysis.png'),
 };
 
 /** Inline SVG tab icons (preferred over PNG masks when present). */

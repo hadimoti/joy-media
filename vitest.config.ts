@@ -52,6 +52,9 @@ export default defineConfig({
       '@joy-media/workflow-engine': pkg('./packages/workflow-engine/src/index.ts'),
       '@joy-media/worker': pkg('./apps/worker/src/index.ts'),
       '@joy-media/adapter-openrouter': pkg('./packages/adapter-openrouter/src/index.ts'),
+      '@joy-media/adapter-deepseek-harness': pkg(
+        './packages/adapter-deepseek-harness/src/index.ts',
+      ),
     },
   },
   test: {

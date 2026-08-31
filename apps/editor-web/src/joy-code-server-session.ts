@@ -19,6 +19,11 @@ export interface JoyCodeServerSessionOptions {
   readonly syncProjectDocument: SyncProjectDocument;
   readonly joyCodeTransport: JoyCodePlanTransport;
   readonly ownerKey?: string;
+  /** Optional local Windows-client planner. When present, no cloud sync/request occurs. */
+  readonly localJoyCodePlanner?: (
+    request: BrowserJoyCodePlanRequest,
+    signal?: AbortSignal,
+  ) => Promise<import('@joy-media/agent-tools').JoyCodePlanProposalV1>;
 }
 
 export class JoyCodeServerSession {
@@ -38,6 +43,31 @@ export class JoyCodeServerSession {
       selection,
       ...(creativeBrief === undefined ? {} : { creativeBrief }),
     };
+    if (this.options.localJoyCodePlanner !== undefined) {
+      try {
+        const proposal = await this.options.localJoyCodePlanner(request, signal);
+        return {
+          kind: 'success',
+          syncResult: {
+            kind: 'success',
+            projectId: this.options.binding.controlPlaneProjectId,
+            revisionId: this.options.revisionId,
+          },
+          proposal,
+        };
+      } catch (error) {
+        if (isAbortError(error) || signal?.aborted) return { kind: 'cancelled' };
+        return {
+          kind: 'plan-failure',
+          syncResult: {
+            kind: 'success',
+            projectId: this.options.binding.controlPlaneProjectId,
+            revisionId: this.options.revisionId,
+          },
+          error,
+        };
+      }
+    }
     try {
       const coordinationOptions =
         this.options.ownerKey === undefined ? {} : { ownerKey: this.options.ownerKey };

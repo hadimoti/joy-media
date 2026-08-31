@@ -4,6 +4,7 @@ import {
   approvalPolicyForAgentSettings,
   DEFAULT_AGENT_SETTINGS,
   loadAgentSettings,
+  localDeepSeekHarnessSettings,
   saveAgentSettings,
 } from './agent-settings.js';
 
@@ -29,7 +30,7 @@ describe('agent settings', () => {
 
     saveAgentSettings(storage, settings);
     expect(loadAgentSettings(storage)).toEqual(settings);
-    expect(storage.value).not.toMatch(/apiKey|token|password|secret/i);
+    expect(storage.value).not.toContain('credential-value');
 
     const policy = approvalPolicyForAgentSettings(settings);
     expect(policy.executionMode).toBe('full-auto-limited');
@@ -56,5 +57,33 @@ describe('agent settings', () => {
       reasoningModel: 'anything-from-user-input',
     });
     expect(loadAgentSettings(storage).reasoningModel).toBe('');
+  });
+
+  it('keeps DeepSeek-harness credentials in local settings and projects only a complete local config', () => {
+    const storage = new MemoryStorage();
+    const settings = {
+      ...DEFAULT_AGENT_SETTINGS,
+      joyCodeEngine: 'local-deepseek-harness' as const,
+      deepSeekHarnessEndpoint: ' https://openrouter.example/v1/chat/completions ',
+      deepSeekHarnessModel: 'deepseek-chat',
+      deepSeekHarnessApiKey: 'credential-value',
+    };
+    saveAgentSettings(storage, settings);
+    expect(localDeepSeekHarnessSettings(loadAgentSettings(storage))).toEqual({
+      endpointUrl: 'https://openrouter.example/v1/chat/completions',
+      modelId: 'deepseek-chat',
+      apiKey: 'credential-value',
+    });
+    expect(storage.value).toContain('credential-value');
+  });
+
+  it('does not activate an incomplete local engine configuration', () => {
+    expect(
+      localDeepSeekHarnessSettings({
+        ...DEFAULT_AGENT_SETTINGS,
+        joyCodeEngine: 'local-deepseek-harness',
+        deepSeekHarnessEndpoint: 'https://openrouter.example/v1/chat/completions',
+      }),
+    ).toBeUndefined();
   });
 });

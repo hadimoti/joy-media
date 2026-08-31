@@ -32,10 +32,8 @@ describe('panel metadata registry', () => {
     ]);
   });
 
-  it('keeps Creative Brief nested until the Joy Code shell owns that workflow', () => {
-    expect(PANEL_METADATA_BY_ID['creative-brief']).toMatchObject({
-      nested: true,
-      label: 'Creative Brief',
-    });
+  it('exposes Creative Brief only as a Joy Code section, not a duplicate dock panel', () => {
+    expect(PANEL_IDS).not.toContain('creative-brief');
+    expect(PANEL_METADATA.map((entry) => entry.label)).not.toContain('Creative Brief');
   });
 });

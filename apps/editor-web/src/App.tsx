@@ -110,9 +110,6 @@ const MotionStudioShell = lazy(() =>
 const EffectStudioShell = lazy(() =>
   import('./effect-studio/index.js').then((module) => ({ default: module.EffectStudioShell })),
 );
-const CreativeBriefPanel = lazy(() =>
-  import('./CreativeBriefPanel.js').then((module) => ({ default: module.CreativeBriefPanel })),
-);
 
 import {
   createBrowserPixiRenderer,
@@ -232,6 +229,8 @@ import { AgentSettingsDialog } from './AgentSettingsDialog.js';
 import { coordinateCreativeBriefOptIn } from './creative-brief-opt-in-coordinator.js';
 import { createCreativeBriefPanelRunner } from './creative-brief-panel-runner.js';
 import { loadAgentSettings, saveAgentSettings, type AgentSettings } from './agent-settings.js';
+import { localDeepSeekHarnessSettings } from './agent-settings.js';
+import { createLocalDeepSeekHarnessPlanner } from './local-deepseek-harness.js';
 import { HistoryPanel } from './HistoryPanel.js';
 import { WorkflowsPanel } from './WorkflowsPanel.js';
 import { PluginsPanel } from './PluginsPanel.js';
@@ -1588,6 +1587,21 @@ function EditorWorkspace({
     [controlPlaneOwnerKey, controlPlaneProject, session.projectRevisionId, session.visualProject],
   );
   const joyCodeServerSession = useMemo(() => {
+    const localSettings = localDeepSeekHarnessSettings(agentSettings);
+    if (localSettings !== undefined) {
+      return new JoyCodeServerSession({
+        binding: controlPlaneProject,
+        document: session.visualProject,
+        revisionId: session.projectRevisionId,
+        storage: window.localStorage,
+        syncProjectDocument: (controlPlaneProjectId, params) =>
+          mediaControlPlaneClient.syncProjectDocument(controlPlaneProjectId, params),
+        joyCodeTransport: (controlPlaneProjectId, request, signal) =>
+          mediaControlPlaneClient.createJoyCodePlan(controlPlaneProjectId, request, signal),
+        localJoyCodePlanner: createLocalDeepSeekHarnessPlanner(localSettings),
+        ownerKey: controlPlaneOwnerKey,
+      });
+    }
     if (!joyCodeOptedIn || joySession.kind !== 'ready') return undefined;
     return new JoyCodeServerSession({
       binding: controlPlaneProject,
@@ -1603,6 +1617,7 @@ function EditorWorkspace({
   }, [
     controlPlaneOwnerKey,
     controlPlaneProject,
+    agentSettings,
     joyCodeOptedIn,
     joySession.kind,
     session.projectRevisionId,
@@ -6353,24 +6368,6 @@ function EditorWorkspace({
             ? {}
             : { joyCodeServerSession: context.joyCodeServerSession })}
         />
-      );
-    }
-    if (api.id === 'creative-brief') {
-      return (
-        <Suspense
-          fallback={
-            <PanelShell title="Creative Brief" iconUrl={panelTabIconUrl('creative-brief')}>
-              {null}
-            </PanelShell>
-          }
-        >
-          <CreativeBriefPanel
-            revisionId={context.session.projectRevisionId}
-            optedIn={context.creativeBriefOptedIn}
-            onOptIn={context.onCreativeBriefOptIn}
-            {...(context.creativeBriefOptedIn ? { runBrief: context.creativeBriefRunner } : {})}
-          />
-        </Suspense>
       );
     }
     if (api.id === 'history') {

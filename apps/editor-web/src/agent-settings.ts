@@ -23,6 +23,12 @@ export interface AgentSettings {
   readonly maxCostPerRunUsd: number;
   readonly privacyMode: 'ask-before-remote' | 'local-only';
   readonly workerPreference: 'prefer-local' | 'any-approved';
+  /** Local Windows-client Joy Code engine. Credentials never enter API requests. */
+  readonly joyCodeEngine: 'cloud-openrouter' | 'local-deepseek-harness';
+  readonly deepSeekHarnessEndpoint: string;
+  readonly deepSeekHarnessModel: string;
+  /** Kept only in the local settings store; never included in a project/request envelope. */
+  readonly deepSeekHarnessApiKey: string;
 }
 
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
@@ -35,6 +41,10 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   maxCostPerRunUsd: 10,
   privacyMode: 'ask-before-remote',
   workerPreference: 'prefer-local',
+  joyCodeEngine: 'cloud-openrouter',
+  deepSeekHarnessEndpoint: '',
+  deepSeekHarnessModel: 'deepseek-chat',
+  deepSeekHarnessApiKey: '',
 };
 
 export interface AgentSettingsStorage {
@@ -54,6 +64,28 @@ export function loadAgentSettings(storage: AgentSettingsStorage): AgentSettings 
 
 export function saveAgentSettings(storage: AgentSettingsStorage, settings: AgentSettings): void {
   storage.setItem(AGENT_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+}
+
+/**
+ * Returns the local provider settings needed by the future Windows shell.
+ * This is intentionally a separate, explicit projection: callers cannot
+ * accidentally pass the complete AgentSettings object to cloud APIs.
+ */
+export interface LocalDeepSeekHarnessSettings {
+  readonly endpointUrl: string;
+  readonly modelId: string;
+  readonly apiKey: string;
+}
+
+export function localDeepSeekHarnessSettings(
+  settings: AgentSettings,
+): LocalDeepSeekHarnessSettings | undefined {
+  if (settings.joyCodeEngine !== 'local-deepseek-harness') return undefined;
+  const endpointUrl = settings.deepSeekHarnessEndpoint.trim();
+  const modelId = settings.deepSeekHarnessModel.trim();
+  const apiKey = settings.deepSeekHarnessApiKey;
+  if (endpointUrl === '' || modelId === '' || apiKey.trim() === '') return undefined;
+  return { endpointUrl, modelId, apiKey };
 }
 
 export function approvalPolicyForAgentSettings(settings: AgentSettings): ApprovalPolicy {
@@ -132,5 +164,21 @@ function normalizeAgentSettings(value: unknown): AgentSettings {
     privacyMode: candidate.privacyMode === 'local-only' ? 'local-only' : 'ask-before-remote',
     workerPreference:
       candidate.workerPreference === 'any-approved' ? 'any-approved' : 'prefer-local',
+    joyCodeEngine:
+      candidate.joyCodeEngine === 'local-deepseek-harness'
+        ? 'local-deepseek-harness'
+        : 'cloud-openrouter',
+    deepSeekHarnessEndpoint:
+      typeof candidate.deepSeekHarnessEndpoint === 'string'
+        ? candidate.deepSeekHarnessEndpoint.trim()
+        : DEFAULT_AGENT_SETTINGS.deepSeekHarnessEndpoint,
+    deepSeekHarnessModel:
+      typeof candidate.deepSeekHarnessModel === 'string' && candidate.deepSeekHarnessModel.trim()
+        ? candidate.deepSeekHarnessModel.trim().slice(0, 160)
+        : DEFAULT_AGENT_SETTINGS.deepSeekHarnessModel,
+    deepSeekHarnessApiKey:
+      typeof candidate.deepSeekHarnessApiKey === 'string'
+        ? candidate.deepSeekHarnessApiKey
+        : DEFAULT_AGENT_SETTINGS.deepSeekHarnessApiKey,
   };
 }

@@ -146,6 +146,57 @@ export function AgentSettingsDialog({
           </section>
 
           <section>
+            <h3>Joy Code Engine</h3>
+            <label>
+              Planning engine
+              <select
+                value={settings.joyCodeEngine}
+                onChange={(event) =>
+                  update('joyCodeEngine', event.target.value as AgentSettings['joyCodeEngine'])
+                }
+              >
+                <option value="cloud-openrouter">JOY cloud planner</option>
+                <option value="local-deepseek-harness">Local DeepSeek harness</option>
+              </select>
+            </label>
+            {settings.joyCodeEngine === 'local-deepseek-harness' && (
+              <>
+                <label>
+                  OpenRouter-compatible endpoint
+                  <input
+                    type="url"
+                    value={settings.deepSeekHarnessEndpoint}
+                    placeholder="https://provider.example/v1/chat/completions"
+                    autoComplete="off"
+                    onChange={(event) => update('deepSeekHarnessEndpoint', event.target.value)}
+                  />
+                </label>
+                <label>
+                  Model ID
+                  <input
+                    value={settings.deepSeekHarnessModel}
+                    autoComplete="off"
+                    onChange={(event) => update('deepSeekHarnessModel', event.target.value)}
+                  />
+                </label>
+                <label>
+                  API key (stored on this PC)
+                  <input
+                    type="password"
+                    value={settings.deepSeekHarnessApiKey}
+                    autoComplete="new-password"
+                    onChange={(event) => update('deepSeekHarnessApiKey', event.target.value)}
+                  />
+                </label>
+                <p>
+                  Only the future Windows app reads this key. It is never sent to JOY cloud,
+                  projects, logs, or reports.
+                </p>
+              </>
+            )}
+          </section>
+
+          <section>
             <h3>Media Providers</h3>
             <label>
               Preferred provider
