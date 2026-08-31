@@ -198,6 +198,14 @@ export function AgentSettingsDialog({
                   />{' '}
                   I understand this provider may receive project context
                 </label>
+                {(settings.deepSeekHarnessEndpoint.trim() === '' ||
+                  settings.deepSeekHarnessModel.trim() === '' ||
+                  settings.deepSeekHarnessApiKey.trim() === '') && (
+                  <p role="status">
+                    Local DSH is unavailable until its endpoint, model, and API key are configured;
+                    it will not fall back to JOY cloud.
+                  </p>
+                )}
                 <p>
                   This app keeps the key in this browser session’s memory only. Packaged JoyStudio
                   Windows/Linux desktop and CLI builds must inject a native OS vault. The key is

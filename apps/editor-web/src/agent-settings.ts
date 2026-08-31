@@ -87,6 +87,7 @@ export function canUseLocalDeepSeekHarness(
   settings: Pick<AgentSettings, 'privacyMode'>,
   context: LocalProviderPolicyContext,
 ): boolean {
+  if (!isAllowedProviderEndpoint(context.endpointUrl)) return false;
   const loopback = isLoopbackEndpoint(context.endpointUrl);
   if (loopback) return true;
   return (
@@ -252,6 +253,17 @@ function isLoopbackEndpoint(value: string): boolean {
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
     const host = url.hostname.toLowerCase();
     return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1';
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedProviderEndpoint(value: string): boolean {
+  try {
+    const url = new URL(value);
+    const loopback = isLoopbackEndpoint(value);
+    if (url.protocol !== 'https:' && !(loopback && url.protocol === 'http:')) return false;
+    return url.username === '' && url.password === '' && url.search === '' && url.hash === '';
   } catch {
     return false;
   }

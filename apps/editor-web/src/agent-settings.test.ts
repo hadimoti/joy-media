@@ -133,6 +133,27 @@ describe('agent settings', () => {
         disclosureAccepted: false,
       }),
     ).toBe(false);
+    expect(
+      canUseLocalDeepSeekHarness(asksBeforeRemote, {
+        endpointUrl: 'not-an-endpoint',
+        authenticatedSessionReady: true,
+        disclosureAccepted: true,
+      }),
+    ).toBe(false);
+    expect(
+      canUseLocalDeepSeekHarness(asksBeforeRemote, {
+        endpointUrl: 'http://provider.example/v1/chat/completions',
+        authenticatedSessionReady: true,
+        disclosureAccepted: true,
+      }),
+    ).toBe(false);
+    expect(
+      canUseLocalDeepSeekHarness(asksBeforeRemote, {
+        endpointUrl: 'https://provider.example/v1/chat/completions?key=secret',
+        authenticatedSessionReady: true,
+        disclosureAccepted: true,
+      }),
+    ).toBe(false);
   });
 
   it('fails closed instead of falling back when local DSH selection is incomplete', () => {
