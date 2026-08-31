@@ -344,7 +344,9 @@ try {
     $sessionPassed = $scheduledStateProtected -and $probeStateProtected -and $fixturePassed
     $status = if ($startupPassed -and $scheduledDaemon.terminated -and $daemonProbePassed -and $renewalProbePassed -and $sessionPassed -and $repairPassed -and $uninstalled) { 'verified' } else { 'failed' }
     $evidence = [ordered]@{
-        schemaVersion = 2
+        # Operational evidence blocks use schemaVersion 1, matching the
+        # delivery/restore records consumed by the source-bound release gate.
+        schemaVersion = 1
         status = $status
         execution = 'windows-clean-worker'
         sourceProvenance = Get-SourceProvenance

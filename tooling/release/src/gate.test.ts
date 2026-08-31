@@ -157,7 +157,21 @@ const operationalEvidence = (): ReleaseOperationalEvidence => ({
     execution: 'windows-clean-worker',
     lifecycle: {
       install: { status: 'passed' },
-      startup: { status: 'passed', daemon: { started: true, terminated: true } },
+      startup: {
+        status: 'passed',
+        trigger: 'at-logon',
+        triggerVerified: true,
+        action: 'normal-daemon',
+        taskRan: true,
+        daemon: {
+          started: true,
+          terminated: true,
+          paired: true,
+          notificationCleared: true,
+          hello: 1,
+          leases: 1,
+        },
+      },
       session: {
         status: 'passed',
         stateIsolated: true,
@@ -1078,6 +1092,33 @@ describe('JOY Studio 1.0 release gate', () => {
               ...evidence.windows.lifecycle.session,
               fixtureSessionUsed: false,
               protectedState: false,
+            },
+          },
+        },
+      },
+    });
+    expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
+      'failed',
+    );
+  });
+
+  it('rejects Windows evidence when startup trigger or notification proof disagrees', () => {
+    const evidence = operationalEvidence();
+    const result = evaluateReleaseGate({
+      ...passingInput(),
+      operationalEvidence: {
+        ...evidence,
+        windows: {
+          ...evidence.windows,
+          lifecycle: {
+            ...evidence.windows.lifecycle,
+            startup: {
+              ...evidence.windows.lifecycle.startup,
+              triggerVerified: false,
+              daemon: {
+                ...(evidence.windows.lifecycle.startup.daemon as Record<string, unknown>),
+                notificationCleared: false,
+              },
             },
           },
         },
