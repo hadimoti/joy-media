@@ -168,10 +168,10 @@ export class JsonFileWorkerStore implements PersistentWorkerStore {
     const hasLegacyPairing = isPendingPairing(record.pendingPairing);
     // Deliberately let protection errors surface: retaining plaintext would be
     // worse than refusing to start the packaged Worker.
-    if (hasLegacySession || hasLegacyPairing) this.write(this.read());
+    if (hasLegacySession || hasLegacyPairing) this.write(this.read(true));
   }
 
-  private read(): {
+  private read(allowLegacyPlaintext = false): {
     readonly identity?: DeviceIdentity;
     readonly sessionToken?: string;
     readonly pendingPairing?: { readonly code: string; readonly expiresAt: number };
@@ -207,7 +207,8 @@ export class JsonFileWorkerStore implements PersistentWorkerStore {
         ...(isDeviceIdentity(identity) ? { identity } : {}),
         ...(protectedSessionToken !== undefined
           ? { sessionToken: protectedSessionToken }
-          : typeof raw.sessionToken === 'string'
+          : (this.options.secretProtector === undefined || allowLegacyPlaintext) &&
+              typeof raw.sessionToken === 'string'
             ? { sessionToken: raw.sessionToken }
             : {}),
         ...(protectedPairingCode !== undefined &&
@@ -219,7 +220,8 @@ export class JsonFileWorkerStore implements PersistentWorkerStore {
                 expiresAt: protectedPairingExpiresAt,
               },
             }
-          : isPendingPairing(raw.pendingPairing)
+          : (this.options.secretProtector === undefined || allowLegacyPlaintext) &&
+              isPendingPairing(raw.pendingPairing)
             ? { pendingPairing: raw.pendingPairing }
             : {}),
       };

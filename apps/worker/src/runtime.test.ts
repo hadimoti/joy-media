@@ -260,6 +260,20 @@ describe('Worker runtime', () => {
     expect(protectedStore.loadPendingPairing()?.code).toBe('legacy-pairing-secret');
   });
 
+  it('does not expose legacy plaintext secrets when configured protection cannot decrypt them', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'joy-media-worker-fail-closed-')), 'state.json');
+    const legacy = new JsonFileWorkerStore(path);
+    legacy.save({ workerId: 'worker-legacy', createdAt: '2026-07-22T00:00:00.000Z' });
+    legacy.saveWorkerSession('legacy-session-secret');
+    legacy.savePendingPairing('legacy-pairing-secret', Date.now() + 60_000);
+    const protectedStore = new JsonFileWorkerStore(path, {
+      secretProtector: { protect: () => 'ciphertext', unprotect: () => undefined },
+    });
+
+    expect(protectedStore.loadWorkerSession()).toBeUndefined();
+    expect(protectedStore.loadPendingPairing()).toBeUndefined();
+  });
+
   it.runIf(process.platform === 'win32')(
     'preserves exact Windows DPAPI-protected secret values',
     () => {
