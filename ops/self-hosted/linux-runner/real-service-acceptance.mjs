@@ -11,6 +11,8 @@ import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 
 import { chromium } from '@playwright/test';
+import { executeLeasedExport } from '../../../apps/worker/dist/export-job.js';
+import { verifyExport } from '../../../packages/export-core/dist/index.js';
 import {
   PostgresControlPlane,
   createControlPlaneHttpServer,
@@ -96,6 +98,8 @@ let apiServer;
 let webProcess;
 let webProcessError;
 let browser;
+let realWorkerLifecycle;
+let realWorkerPromise;
 
 class MinioObjectStore {
   constructor(options) {
@@ -161,6 +165,23 @@ try {
   });
   const controlPlane = new PostgresControlPlane(pool, { skipLocked: false });
   await controlPlane.initialize();
+  // Real-service acceptance must exercise the same Worker-backed export
+  // contract as production.  Keep the Worker disposable and in-process so
+  // the lane remains isolated from owner machines while still leasing,
+  // downloading, verifying, and completing jobs through PostgreSQL.
+  const realWorkerId = `real-service-render-worker-${runId}-${pass}`;
+  await controlPlane.pairWorker({ id: owner }, realWorkerId);
+  await controlPlane.helloWorker(realWorkerId, ['render.export'], [], Date.now());
+  realWorkerLifecycle = { stopped: false };
+  const realWorkerDirectory = join(tempRoot, 'worker');
+  await mkdir(realWorkerDirectory, { recursive: true });
+  realWorkerPromise = runRealServiceExportWorker(
+    controlPlane,
+    objectStore,
+    realWorkerId,
+    realWorkerDirectory,
+    realWorkerLifecycle,
+  );
   apiServer = createControlPlaneHttpServer({
     controlPlane,
     authentication: { authenticate: (request) => authenticate(request, token, owner) },
@@ -224,6 +245,11 @@ try {
   if (webProcess?.pid) killTree(webProcess.pid);
   if (apiServer) await close(apiServer);
   if (pool) {
+    if (realWorkerLifecycle !== undefined) {
+      realWorkerLifecycle.stopped = true;
+      await realWorkerPromise?.catch(() => undefined);
+      realWorkerLifecycle = undefined;
+    }
     await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined);
     await pool.end().catch(() => undefined);
   }
@@ -232,6 +258,142 @@ try {
   );
   await runMc(['rb', '--quiet', `joy-ci/${bucket}`]).catch(() => undefined);
   await rm(tempRoot, { recursive: true, force: true });
+}
+
+async function runRealServiceExportWorker(
+  controlPlane,
+  objectStore,
+  workerId,
+  workerDirectory,
+  lifecycle,
+) {
+  let lastHelloAt = 0;
+  while (!lifecycle.stopped) {
+    const now = Date.now();
+    try {
+      if (now - lastHelloAt >= 10_000) {
+        await controlPlane.helloWorker(workerId, ['render.export'], [], now);
+        lastHelloAt = now;
+      }
+      const job = await controlPlane.lease(workerId, now, 300_000);
+      if (job === undefined) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        continue;
+      }
+      if (job.type !== 'render.export' || job.assetId === undefined || job.payload === undefined) {
+        await controlPlane.fail(
+          workerId,
+          job.id,
+          'real-service Worker received unsupported job',
+          Date.now(),
+          job.leaseToken,
+        );
+        continue;
+      }
+      const sourcePath = join(workerDirectory, `${safeToken(job.id)}-${job.generation}.source`);
+      const outputPath = join(workerDirectory, `${safeToken(job.id)}-${job.generation}.export.mp4`);
+      try {
+        const asset = await controlPlane.workerJobAsset(
+          workerId,
+          job.id,
+          Date.now(),
+          job.leaseToken,
+        );
+        const sourceDescriptor = privateDescriptor(asset);
+        const sourceBytes = await objectStore.get(sourceDescriptor);
+        await writeFile(sourcePath, Buffer.from(sourceBytes), { mode: 0o600 });
+        const payload = job.payload;
+        executeLeasedExport(
+          { complete: () => undefined },
+          workerId,
+          job.id,
+          { sourcePath, payload },
+          outputPath,
+          job.leaseToken,
+        );
+        const bytes = await readFile(outputPath);
+        const sha256 = createHash('sha256').update(bytes).digest('hex');
+        const probe = verifyExport(outputPath);
+        const localRef = `export-real-${sha256.slice(0, 40)}`;
+        const objectRef = `real-${localRef}`;
+        await objectStore.put(
+          { ref: objectRef, sha256, bytes: bytes.byteLength, mimeType: 'video/mp4' },
+          new Uint8Array(bytes),
+        );
+        await controlPlane.registerWorkerCloudDerivative(
+          workerId,
+          job.id,
+          {
+            id: `upload-${sha256.slice(0, 32)}`,
+            assetId: job.assetId,
+            kind: 'proxy',
+            profile: 'render.export',
+            sha256,
+            bytes: bytes.byteLength,
+            descriptor: {
+              mimeType: 'video/mp4',
+              width: probe.width,
+              height: probe.height,
+              durationUs: probe.durationUs,
+            },
+            availability: 'available-cloud',
+            locations: [{ kind: 'private-object', ref: objectRef }],
+          },
+          Date.now(),
+          job.leaseToken,
+        );
+        await controlPlane.complete(
+          workerId,
+          job.id,
+          Date.now(),
+          {
+            kind: 'render.export',
+            assetId: job.assetId,
+            sha256,
+            bytes: bytes.byteLength,
+            localRef,
+            descriptor: {
+              mimeType: 'video/mp4',
+              width: probe.width,
+              height: probe.height,
+              durationUs: probe.durationUs,
+            },
+          },
+          job.leaseToken,
+        );
+      } catch (error) {
+        await controlPlane
+          .fail(
+            workerId,
+            job.id,
+            error instanceof Error ? error.message.slice(0, 500) : 'real-service export failed',
+            Date.now(),
+            job.leaseToken,
+          )
+          .catch(() => undefined);
+      } finally {
+        await rm(sourcePath, { force: true });
+        await rm(outputPath, { force: true });
+      }
+    } catch {
+      if (!lifecycle.stopped) await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+}
+
+function privateDescriptor(asset) {
+  const location = asset.locations.find((candidate) => candidate.kind === 'private-object');
+  if (location === undefined) throw new Error(`asset ${asset.id} has no private source`);
+  return {
+    ref: location.ref,
+    sha256: asset.sha256,
+    bytes: asset.bytes,
+    mimeType: asset.descriptor.mimeType,
+  };
+}
+
+function safeToken(value) {
+  return value.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 96);
 }
 
 async function runDesktopMatrix(baseUrl, apiBaseUrl) {
@@ -765,7 +927,11 @@ async function recordJourney(
             returnedToComposer: true,
             urlStayed: baseUrl,
           },
-          worker: { status: 'disposable-real-service', connectedCount: 0 },
+          worker: {
+            status: 'disposable-real-service',
+            connectedCount: 1,
+            capabilities: ['render.export'],
+          },
           verifiedDelivery: {
             assetId: exportAssetId,
             state: 'completed',

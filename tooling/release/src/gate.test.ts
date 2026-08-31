@@ -355,6 +355,24 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(realAcceptance).toContain('test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}"');
   });
 
+  it('binds real-service export acceptance to a disposable Worker', () => {
+    const harness = readFileSync(
+      resolve(
+        import.meta.dirname,
+        '../../../ops/self-hosted/linux-runner/real-service-acceptance.mjs',
+      ),
+      'utf8',
+    );
+    expect(harness).toContain(
+      "import { executeLeasedExport } from '../../../apps/worker/dist/export-job.js'",
+    );
+    expect(harness).toContain('await controlPlane.pairWorker({ id: owner }, realWorkerId)');
+    expect(harness).toContain("await controlPlane.helloWorker(realWorkerId, ['render.export']");
+    expect(harness).toContain('runRealServiceExportWorker(');
+    expect(harness).toContain("kind: 'render.export'");
+    expect(harness).toContain("availability: 'available-cloud'");
+  });
+
   it('validates the checked-out candidate and always checks Worker teardown', () => {
     const workflow = readFileSync(
       resolve(import.meta.dirname, '../../../.github/workflows/release-candidate.yml'),
