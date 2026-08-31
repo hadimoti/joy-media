@@ -1786,6 +1786,7 @@ export class PostgresControlPlane implements ControlPlane {
            AND cancel_requested = false
            AND (type <> 'fixture.thumbnail' OR $4 = 'fixture.thumbnail')
            AND (type <> 'asset.thumbnail' OR ($4 = 'asset.thumbnail' AND asset_id = $10))
+           AND (type <> 'render.export' OR ($4 = 'render.export' AND asset_id = $10))
            AND (type <> 'image.comfy' OR ($4 = 'image.comfy' AND asset_id = $10))
            AND (type <> 'audio.ml-denoise' OR ($4 = 'audio.ml-denoise' AND asset_id = $10))
             AND (type <> 'mask.image' OR ($4 = 'mask.image' AND asset_id = $10))
