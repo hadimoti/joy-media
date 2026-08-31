@@ -15,6 +15,11 @@ import {
   PostgresControlPlane,
   createControlPlaneHttpServer,
 } from '../../../apps/api/dist/index.js';
+import {
+  assertJourneyTelemetryClean,
+  buildProfileSummary,
+  createJourneyTelemetry,
+} from './real-service-evidence.mjs';
 
 const requireFromApi = createRequire(new URL('../../../apps/api/package.json', import.meta.url));
 const { Pool } = requireFromApi('pg');
@@ -193,8 +198,8 @@ try {
     }
     throw error;
   }
-  await runDesktopMatrix(webUrl, apiUrl);
-  const deliveryEvidence = await recordJourney(webUrl, apiUrl, token, candidateSha, pool);
+  const profileSummaries = await runDesktopMatrix(webUrl, apiUrl);
+  const deliveryEvidence = await recordJourney(webUrl, apiUrl, token, candidateSha, pool, profileSummaries);
   if (!smokeOnly) {
     await runObserver(webUrl, token);
   }
@@ -235,9 +240,12 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
           'desktop-1581',
           'desktop-1920',
         ];
+  const sourceProvenance = await currentSourceProvenance(candidateSha);
+  const summaries = [];
   for (const project of projects) {
     const report = join('/tmp', `joy-media-real-report-${project}-${runId}-${pass}`);
     const results = join('/tmp', `joy-media-real-results-${project}-${runId}-${pass}`);
+    const startedAt = new Date().toISOString();
     const result = await execFile(
       'pnpm',
       [
@@ -249,6 +257,7 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
           : ['tests/e2e']),
         `--project=${project}`,
         '--workers=1',
+        '--reporter=json',
       ],
       {
         cwd: root,
@@ -267,25 +276,57 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
       error.message = `${error.message}${details ? `: ${details.slice(-4000)}` : ''}`;
       throw error;
     });
-    void result;
+    const finishedAt = new Date().toISOString();
+    summaries.push(
+      buildProfileSummary({
+        project,
+        reportText: result.stdout.toString('utf8'),
+        exitCode: 0,
+        startedAt,
+        finishedAt,
+        sourceProvenance,
+      }),
+    );
     await rm(report, { recursive: true, force: true });
     await rm(results, { recursive: true, force: true });
   }
+  return summaries;
 }
 
-async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activePool) {
+async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activePool, profileSummaries) {
   browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1639, height: 1066 } });
   await context.addInitScript((value) => {
     window.localStorage.setItem('joy-media-session-token', value);
   }, sessionToken);
   const page = await context.newPage();
+  const telemetry = createJourneyTelemetry();
+  let captureBrowserTelemetry = true;
+  page.on('console', (message) => {
+    if (!captureBrowserTelemetry) return;
+    if (message.type() === 'error') telemetry.consoleErrors.push(message.text());
+    if (message.type() === 'warning') telemetry.consoleWarnings.push(message.text());
+  });
+  page.on('pageerror', (error) => {
+    if (!captureBrowserTelemetry) return;
+    telemetry.pageErrors.push(error.message);
+  });
+  page.on('requestfailed', (request) => {
+    if (!captureBrowserTelemetry) return;
+    if (request.url().startsWith('http'))
+      telemetry.failedRequests.push(`${request.url()} ${request.failure()?.errorText ?? ''}`);
+  });
+  page.on('response', (response) => {
+    if (!captureBrowserTelemetry) return;
+    if (response.status() >= 400)
+      telemetry.httpErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+  });
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
   await page.getByRole('heading', { name: 'Projects' }).waitFor();
-  await page
-    .getByRole('button', { name: /Timeline Elements Showcase/ })
-    .first()
-    .click();
+  const title = `Real service acceptance ${runId}-${pass}`;
+  await page.getByRole('button', { name: 'New project' }).click();
+  await page.getByPlaceholder('Project name').fill(title);
+  await page.getByRole('button', { name: 'Create project' }).click();
   await page.getByRole('button', { name: 'File', exact: true }).waitFor();
 
   const enhance = page.locator('.panel-tab[aria-label="Enhance"]').first();
@@ -313,116 +354,30 @@ async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activ
   await joyCode3d.click();
   await page.locator('.joy-code-3d').waitFor();
 
-  const projectId = `real-service-${runId}-${pass}`;
-  const assetId = `real-video-${runId}-${pass}`;
-  const bytes = await readFile(join(root, 'packages/test-fixtures/media/video.mp4'));
-  const digest = createHash('sha256').update(bytes).digest('hex');
+  const projectId = await readControlPlaneProjectId(page);
+  if (!projectId) throw new Error('real-service acceptance did not resolve a control-plane project id');
   const headers = { authorization: `Bearer ${sessionToken}`, 'content-type': 'application/json' };
-  const created = await page.evaluate(
-    async ({ id, requestHeaders }) => {
-      const response = await fetch('/api/v1/projects', {
-        method: 'POST',
-        headers: requestHeaders,
-        body: JSON.stringify({ id, title: 'Real service acceptance' }),
-      });
-      return response.status;
-    },
-    { id: projectId, requestHeaders: headers },
-  );
-  if (created !== 201) throw new Error(`real-service project create returned ${created}`);
-  const registered = await page.evaluate(
-    async ({ projectId: id, assetId: mediaId, digest, bytes, requestHeaders }) => {
-      const response = await fetch(`/api/v1/projects/${id}/assets`, {
-        method: 'POST',
-        headers: requestHeaders,
-        body: JSON.stringify({
-          id: mediaId,
-          kind: 'video',
-          displayName: 'video.mp4',
-          sha256: digest,
-          bytes,
-          descriptor: { mimeType: 'video/mp4', durationUs: 3_000_000, width: 320, height: 180 },
-          locations: [{ kind: 'opfs-cache', ref: `real-opfs-${mediaId}` }],
-        }),
-      });
-      return response.status;
-    },
-    { projectId, assetId, digest, bytes: bytes.byteLength, requestHeaders: headers },
-  );
-  if (registered !== 201) throw new Error(`real-service asset registration returned ${registered}`);
-  const uploaded = await page.evaluate(
-    async ({ projectId: id, assetId: mediaId, digest, payload, sessionToken }) => {
-      const raw = atob(payload);
-      const body = Uint8Array.from(raw, (character) => character.charCodeAt(0));
-      const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${sessionToken}`,
-          'content-type': 'video/mp4',
-          'x-joy-sha256': digest,
-          'x-joy-bytes': String(body.byteLength),
-        },
-        body,
-      });
-      return response.status;
-    },
-    { projectId, assetId, digest, payload: bytes.toString('base64'), sessionToken },
-  );
-  if (uploaded !== 201) throw new Error(`real-service upload returned ${uploaded}`);
-  const downloaded = await page.evaluate(
-    async ({ projectId: id, assetId: mediaId, sessionToken }) => {
-      const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
-        headers: { authorization: `Bearer ${sessionToken}` },
-      });
-      const content = new Uint8Array(await response.arrayBuffer());
-      const digest = Array.from(
-        new Uint8Array(await crypto.subtle.digest('SHA-256', content)),
-        (byte) => byte.toString(16).padStart(2, '0'),
-      ).join('');
-      return { status: response.status, bytes: content.byteLength, digest };
-    },
-    { projectId, assetId, sessionToken },
-  );
-  if (
-    downloaded.status !== 200 ||
-    downloaded.bytes !== bytes.byteLength ||
-    downloaded.digest !== digest
-  )
-    throw new Error('real-service object delivery failed integrity verification');
+  const videoName = `real-video-${runId}-${pass}.mp4`;
+  const audioName = `real-audio-${runId}-${pass}.wav`;
+  await importFixture(page, 'video.mp4', videoName);
+  await importFixture(page, 'audio.wav', audioName);
+  await addAssetToTimeline(page, videoName);
+  await addAssetToTimeline(page, audioName);
 
-  // Produce a real mixed-source export, then exercise the same private
-  // object path for download, ffprobe inspection, and re-import.  Keeping
-  // this in the disposable project makes the acceptance proof meaningful
-  // without touching owner media or a production bucket.
-  const mixedPath = join(tempRoot, `mixed-${runId}-${pass}.mp4`);
-  await execFile(
-    'ffmpeg',
-    [
-      '-hide_banner',
-      '-loglevel',
-      'error',
-      '-y',
-      '-i',
-      join(root, 'packages/test-fixtures/media/video.mp4'),
-      '-i',
-      join(root, 'packages/test-fixtures/media/audio.mp3'),
-      '-map',
-      '0:v:0',
-      '-map',
-      '1:a:0',
-      '-c:v',
-      'copy',
-      '-c:a',
-      'aac',
-      '-shortest',
-      mixedPath,
-    ],
-    { cwd: root },
-  );
-  const mixedBytes = await readFile(mixedPath);
-  const mixedDigest = createHash('sha256').update(mixedBytes).digest('hex');
+  const firstDownload = await triggerExportDownload(page);
   const exportAssetId = `real-export-${runId}-${pass}`;
+  const mixedBytes = await readFile(firstDownload.path);
+  const mixedDigest = firstDownload.sha256;
   const reimportAssetId = `real-reimport-${runId}-${pass}`;
+  const exportedProbe = JSON.parse(
+    (
+      await execFile(
+        'ffprobe',
+        ['-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', firstDownload.path],
+        { cwd: root },
+      )
+    ).stdout.toString('utf8'),
+  );
   const exportRegistered = await page.evaluate(
     async ({ projectId: id, assetId: mediaId, digest: sha, byteLength, requestHeaders }) => {
       const response = await fetch(`/api/v1/projects/${id}/assets`, {
@@ -505,7 +460,7 @@ async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activ
     exportedDownload.digest !== mixedDigest
   )
     throw new Error('mixed export download failed integrity verification');
-  const exportedPath = join(tempRoot, `downloaded-${runId}-${pass}.mp4`);
+  const exportedPath = join(tempRoot, `verified-delivery-${runId}-${pass}.mp4`);
   await writeFile(exportedPath, Buffer.from(exportedDownload.payload, 'base64'));
   const ffprobeResult = await execFile(
     'ffprobe',
@@ -518,6 +473,12 @@ async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activ
   );
   if (!streamTypes.includes('video') || !streamTypes.includes('audio'))
     throw new Error('mixed export ffprobe did not find both video and audio streams');
+  await importFixture(page, firstDownload.path, firstDownload.filename);
+  const redownload = await redownloadMostRecentExport(page);
+  if (redownload.sha256 !== firstDownload.sha256 || redownload.bytes !== firstDownload.bytes) {
+    throw new Error('Recent processes redownload did not match the original JOY export bytes');
+  }
+  captureBrowserTelemetry = false;
   const reimported = await page.evaluate(
     async ({ projectId: id, assetId: mediaId, digest: sha, byteLength, requestHeaders }) => {
       const response = await fetch(`/api/v1/projects/${id}/assets`, {
@@ -648,14 +609,23 @@ async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activ
     deliveryRecovery.retriedState !== 'queued'
   )
     throw new Error(`delivery cancel/retry recovery failed: ${JSON.stringify(deliveryRecovery)}`);
+  const browserTelemetry = assertJourneyTelemetryClean(telemetry);
   var deliveryEvidence = {
     sourceAssets: { video: true, audio: true },
-    mixedSourceExport: { status: 'passed', bytes: mixedBytes.byteLength, sha256: mixedDigest },
+    mixedSourceExport: {
+      status: 'passed',
+      producer: 'joy-export-mp4',
+      filename: firstDownload.filename,
+      bytes: firstDownload.bytes,
+      sha256: firstDownload.sha256,
+      durableRedownloadMatched: true,
+    },
     downloaded: { status: 200, bytes: exportedDownload.bytes, sha256: exportedDownload.digest },
     ffprobe: {
       status: 'passed',
       streamTypes,
       formatName: ffprobe.format?.format_name ?? null,
+      exportFormatName: exportedProbe.format?.format_name ?? null,
     },
     reimport: {
       status: reimported,
@@ -704,7 +674,10 @@ async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activ
           url: baseUrl,
           title: await page.title(),
           authenticated: true,
-          console: { errors: 0, warnings: 0 },
+          console: browserTelemetry.console,
+          pageErrors: browserTelemetry.pageErrors,
+          network: browserTelemetry.network,
+          profiles: profileSummaries,
         },
         assertions: {
           effectsInspector: {
@@ -721,15 +694,16 @@ async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activ
           },
           worker: { status: 'disposable-real-service', connectedCount: 0 },
           verifiedDelivery: {
-            assetId,
+            assetId: exportAssetId,
             state: 'completed',
             progress: 100,
-            receipt: { bytes: bytes.byteLength, sha256Prefix: digest.slice(0, 12) },
+            receipt: { bytes: exportedDownload.bytes, sha256Prefix: exportedDownload.digest.slice(0, 12) },
             inspection: 'verified',
             browserPreview: 'Verified private derivative',
           },
           verifiedExport: {
             channel: 'verified-delivery',
+            producer: 'joy-export-mp4',
             inspection: {
               state: 'passed',
               artifact: 'owner-scoped object-store original',
@@ -779,6 +753,91 @@ async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activ
   await activePool.query('SELECT 1');
   await context.close();
   return deliveryEvidence;
+}
+
+async function downloadSha256(download) {
+  const stream = await download.createReadStream();
+  if (stream === null) throw new Error('The browser did not expose the export bytes');
+  const hash = createHash('sha256');
+  let bytes = 0;
+  for await (const chunk of stream) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytes += buffer.byteLength;
+    hash.update(buffer);
+  }
+  return { bytes, sha256: hash.digest('hex') };
+}
+
+async function importFixture(page, fileNameOrPath, displayName) {
+  await page.locator('.panel-tab[aria-label="Create"]').first().click();
+  await page.getByRole('article', { name: 'Assets', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Import media' }).first().click();
+  const drawer = page.getByRole('dialog', { name: 'Import media' });
+  const sourcePath =
+    fileNameOrPath.includes('/') || fileNameOrPath.includes('\\')
+      ? fileNameOrPath
+      : join(root, 'packages/test-fixtures/media', fileNameOrPath);
+  await drawer.locator('input[type="file"][aria-label="Media file"]').setInputFiles(sourcePath);
+  await drawer.getByRole('button', { name: 'Confirm import' }).click();
+  await page.locator('.asset-card', { hasText: displayName }).first().waitFor({ timeout: 15_000 });
+}
+
+async function addAssetToTimeline(page, displayName) {
+  const card = page.locator('.asset-card', { hasText: displayName }).first();
+  await card.getByRole('button', { name: `Add ${displayName} to timeline` }).click();
+  await page.locator(`.timeline-clip[aria-label^="${displayName},"]`).waitFor({ timeout: 15_000 });
+}
+
+async function triggerExportDownload(page) {
+  const downloadPromise = page.waitForEvent('download', { timeout: 240_000 });
+  await page.getByRole('button', { name: 'Export MP4' }).click();
+  const download = await downloadPromise;
+  const digest = await downloadSha256(download);
+  const path = await download.path();
+  if (!path) throw new Error('The browser did not materialize the JOY export file');
+  return {
+    filename: download.suggestedFilename(),
+    path,
+    bytes: digest.bytes,
+    sha256: digest.sha256,
+  };
+}
+
+async function redownloadMostRecentExport(page) {
+  const processes = page.getByRole('button', { name: 'Recent processes' });
+  if ((await processes.getAttribute('aria-expanded')) !== 'true') await processes.click();
+  await page.getByRole('region', { name: 'Recent processes' }).waitFor();
+  const redownload = page.getByRole('link', { name: /Download .* again/ }).first();
+  await redownload.waitFor();
+  const downloadPromise = page.waitForEvent('download', { timeout: 240_000 });
+  await redownload.click();
+  return await downloadSha256(await downloadPromise);
+}
+
+async function readControlPlaneProjectId(page) {
+  return page.evaluate(() => {
+    const activeRaw = localStorage.getItem('joy-media.active-project.v1');
+    if (activeRaw === null) return undefined;
+    let active;
+    try {
+      active = JSON.parse(activeRaw);
+    } catch {
+      return undefined;
+    }
+    if (typeof active?.projectId !== 'string') return undefined;
+    const bindingsRaw = localStorage.getItem('joy-media.control-plane-project-bindings.v1');
+    if (bindingsRaw === null) return undefined;
+    try {
+      const bindings = JSON.parse(bindingsRaw);
+      const ownerBindings = bindings?.bindingsByOwner?.['e2e-owner@example.test'];
+      const binding = ownerBindings?.[active.projectId];
+      return typeof binding?.controlPlaneProjectId === 'string'
+        ? binding.controlPlaneProjectId
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  });
 }
 
 async function runObserver(baseUrl, sessionToken) {

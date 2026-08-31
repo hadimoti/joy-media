@@ -593,8 +593,10 @@ function operationalEvidenceReady(
   const missingSource = record(delivery).missingSource;
   if (
     record(mixed).status !== 'passed' ||
+    record(mixed).producer !== 'joy-export-mp4' ||
     !positiveNumber(record(mixed).bytes) ||
     !sha256(record(mixed).sha256) ||
+    record(mixed).durableRedownloadMatched !== true ||
     record(downloaded).status !== 200 ||
     !positiveNumber(record(downloaded).bytes) ||
     !sha256(record(downloaded).sha256) ||

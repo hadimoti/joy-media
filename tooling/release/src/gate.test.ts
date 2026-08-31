@@ -131,7 +131,13 @@ const operationalEvidence = (): ReleaseOperationalEvidence => ({
     status: 'verified',
     execution: 'real-services',
     delivery: {
-      mixedSourceExport: { status: 'passed', bytes: 128, sha256: 'd'.repeat(64) },
+      mixedSourceExport: {
+        status: 'passed',
+        producer: 'joy-export-mp4',
+        bytes: 128,
+        sha256: 'd'.repeat(64),
+        durableRedownloadMatched: true,
+      },
       downloaded: { status: 200, bytes: 128, sha256: 'd'.repeat(64) },
       ffprobe: { status: 'passed', streamTypes: ['video', 'audio'] },
       reimport: {
@@ -979,6 +985,58 @@ describe('JOY Studio 1.0 release gate', () => {
           delivery: {
             ...(evidence.delivery.delivery as Record<string, unknown>),
             downloaded: { status: 200, bytes: 128, sha256: 'e'.repeat(64) },
+          },
+        },
+      },
+    });
+    expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
+      'failed',
+    );
+  });
+
+  it('rejects delivery evidence that is not bound to the JOY export path', () => {
+    const evidence = operationalEvidence();
+    const result = evaluateReleaseGate({
+      ...passingInput(),
+      operationalEvidence: {
+        ...evidence,
+        delivery: {
+          ...evidence.delivery,
+          delivery: {
+            ...(evidence.delivery.delivery as Record<string, unknown>),
+            mixedSourceExport: {
+              ...((evidence.delivery.delivery as Record<string, unknown>).mixedSourceExport as Record<
+                string,
+                unknown
+              >),
+              producer: 'standalone-ffmpeg',
+            },
+          },
+        },
+      },
+    });
+    expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
+      'failed',
+    );
+  });
+
+  it('rejects delivery evidence when the retained export cannot be redownloaded byte-for-byte', () => {
+    const evidence = operationalEvidence();
+    const result = evaluateReleaseGate({
+      ...passingInput(),
+      operationalEvidence: {
+        ...evidence,
+        delivery: {
+          ...evidence.delivery,
+          delivery: {
+            ...(evidence.delivery.delivery as Record<string, unknown>),
+            mixedSourceExport: {
+              ...((evidence.delivery.delivery as Record<string, unknown>).mixedSourceExport as Record<
+                string,
+                unknown
+              >),
+              durableRedownloadMatched: false,
+            },
           },
         },
       },
