@@ -1,6 +1,6 @@
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import type { JoyProjectV1, ProjectRevisionId } from '@joy-media/project-schema';
-import type { CreativeBriefV1 } from '@joy-media/agent-tools';
+import type { CreativeBriefV1, JoyCodePlanProposalV1 } from '@joy-media/agent-tools';
 import type { ControlPlaneProjectBinding } from './project-control-plane.js';
 import type { SyncProjectDocument } from './project-document-sync.js';
 import type { BrowserJoyCodePlanRequest } from './control-plane-client.js';
@@ -23,7 +23,7 @@ export interface JoyCodeServerSessionOptions {
   readonly localJoyCodePlanner?: (
     request: BrowserJoyCodePlanRequest,
     signal?: AbortSignal,
-  ) => Promise<import('@joy-media/agent-tools').JoyCodePlanProposalV1>;
+  ) => Promise<JoyCodePlanProposalV1>;
 }
 
 export class JoyCodeServerSession {
