@@ -1122,6 +1122,11 @@ async function importFixture(page, fileNameOrPath, displayName) {
 
 async function addAssetToTimeline(page, displayName) {
   const card = page.locator('.asset-card', { hasText: displayName }).first();
+  // The compact/list catalog keeps card actions hidden until the card is
+  // hovered or focused. Reveal the action row before asking Playwright to
+  // click the timeline affordance so the real-service journey matches a
+  // desktop user's interaction.
+  await card.hover();
   await card.getByRole('button', { name: `Add ${displayName} to timeline` }).click();
   await page.locator(`.timeline-clip[aria-label^="${displayName},"]`).waitFor({ timeout: 15_000 });
 }
