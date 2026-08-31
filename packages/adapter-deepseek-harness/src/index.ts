@@ -188,7 +188,10 @@ export class DeepSeekHarnessJoyCodeAdapter {
         }, timeoutMs);
       });
       const response = await Promise.race([responsePromise, timeoutPromise]);
-      if (!response.ok) return fail('provider-failed', 'DEEPSEEK_HARNESS_PROVIDER_FAILED', true);
+      if (!response.ok) {
+        await cancelResponseBody(response);
+        return fail('provider-failed', 'DEEPSEEK_HARNESS_PROVIDER_FAILED', true);
+      }
       const text = await readResponseBody(response, controller, timeoutMs);
       let body: unknown;
       try {
@@ -225,6 +228,10 @@ export class DeepSeekHarnessJoyCodeAdapter {
 
 class ResponseTooLargeError extends Error {}
 class ResponseBodyTimeoutError extends Error {}
+
+async function cancelResponseBody(response: Response): Promise<void> {
+  if (response.body !== null) await response.body.cancel('provider-failed').catch(() => undefined);
+}
 
 async function readResponseBody(
   response: Response,

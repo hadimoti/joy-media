@@ -101,6 +101,27 @@ describe('DeepSeek harness Joy Code adapter', () => {
     expect(loopback.category).toBe('ready');
   });
 
+  it('cancels non-OK response bodies before returning provider failure', async () => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('provider error'));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const result = await createDeepSeekHarnessJoyCodeAdapter({
+      ...options,
+      transport: { post: async () => new Response(stream, { status: 503 }) },
+    }).createPlan(input, { correlationId: 'test' });
+    expect(result).toMatchObject({
+      category: 'provider-failed',
+      errorCode: 'DEEPSEEK_HARNESS_PROVIDER_FAILED',
+    });
+    expect(cancelled).toBe(true);
+  });
+
   it('cancels an oversized streaming response before accumulating it', async () => {
     let cancelled = false;
     const stream = new ReadableStream<Uint8Array>({
