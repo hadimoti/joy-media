@@ -189,16 +189,12 @@ describe('agent settings', () => {
       }),
     ).toBe(false);
     expect(
-      canRunLocalDeepSeekHarness(
-        { ...settings, privacyMode: 'local-only' },
-        remoteSettings,
-        {
-          ...context,
-          endpointUrl: remoteSettings.endpointUrl,
-          authenticatedSessionReady: true,
-          disclosureAccepted: true,
-        },
-      ),
+      canRunLocalDeepSeekHarness({ ...settings, privacyMode: 'local-only' }, remoteSettings, {
+        ...context,
+        endpointUrl: remoteSettings.endpointUrl,
+        authenticatedSessionReady: true,
+        disclosureAccepted: true,
+      }),
     ).toBe(false);
     expect(
       canRunLocalDeepSeekHarness(
