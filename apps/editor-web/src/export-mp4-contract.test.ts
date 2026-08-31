@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { canonicalStagedExportMimeType } from './export-job-request.js';
 
 const appSource = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8');
 const exportCallback = appSource.slice(
@@ -32,9 +33,13 @@ describe('App MP4 export negotiation contract', () => {
   });
 
   it('queues Worker exports against the opaque control-plane project identity', () => {
-    expect(exportCallback).toContain('projectId: controlPlaneProject.controlPlaneProjectId');
-    expect(exportCallback).toContain('const stagedMimeType =');
-    expect(exportCallback).toContain("browserExportResult.mimeType.split(';', 1)");
+    expect(exportCallback).toContain('createRenderExportJobPayload({');
+    expect(exportCallback).toContain(
+      'controlPlaneProjectId: controlPlaneProject.controlPlaneProjectId',
+    );
+    expect(canonicalStagedExportMimeType('video/mp4;codecs=avc1.42E01E,mp4a.40.2')).toBe(
+      'video/mp4',
+    );
   });
 
   it('persists the export preset only after preload, Worker verification, and verified durable caching', () => {

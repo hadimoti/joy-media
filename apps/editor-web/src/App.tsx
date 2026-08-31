@@ -88,6 +88,10 @@ import {
   createAnimatedImageFrameSource,
   type AnimatedImageFrameSource,
 } from './animated-image-decoder.js';
+import {
+  canonicalStagedExportMimeType,
+  createRenderExportJobPayload,
+} from './export-job-request.js';
 import { inspectImageAnimation } from './animated-image-metadata.js';
 import {
   activePreparedExportClipAt,
@@ -4272,12 +4276,7 @@ function EditorWorkspace({
         abortController.signal.throwIfAborted();
         const stagedSha256 = await sha256Hex(stagedBytes);
         abortController.signal.throwIfAborted();
-        // MediaRecorder reports a codec-qualified MIME (for example,
-        // `video/mp4;codecs=avc1.42E01E,mp4a.40.2`), while the control-plane
-        // asset descriptor intentionally stores the canonical media type.
-        // Keep the codec detail in the Blob and normalize only the catalog
-        // descriptor so registration passes the API's strict MIME schema.
-        const stagedMimeType = browserExportResult.mimeType.split(';', 1)[0]?.trim() || 'video/mp4';
+        const stagedMimeType = canonicalStagedExportMimeType(browserExportResult.mimeType);
         stagedExportAssetId = `export-source-${attemptKey}`;
         const workerJobId = `render-${attemptKey}`;
         // Persist both server identities before the first network mutation.
@@ -4326,22 +4325,16 @@ function EditorWorkspace({
           controlPlaneProject.controlPlaneProjectId,
           workerJobId,
           stagedExportAssetId,
-          {
-            schemaVersion: 1,
-            producer: 'browser-staged-preview-export',
+          createRenderExportJobPayload({
+            controlPlaneProjectId: controlPlaneProject.controlPlaneProjectId,
             frameCount: totalFrames,
-            manifest: {
-              // The Worker job is owned by the opaque control-plane project,
-              // not the browser-local editor document identity.
-              projectId: controlPlaneProject.controlPlaneProjectId,
-              revision: sourceRevision,
-              width,
-              height,
-              frameRate,
-              durationUs,
-              preset: activeExportPreset,
-            },
-          },
+            revision: sourceRevision,
+            width,
+            height,
+            frameRate,
+            durationUs,
+            preset: activeExportPreset,
+          }),
         );
         setExportStatus('Waiting for Worker export verification…');
         let workerJob: BrowserJob | undefined;
