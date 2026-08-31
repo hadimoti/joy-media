@@ -6,7 +6,10 @@ import {
   createJourneyTelemetry,
   summarizeJourneyTelemetry,
 } from '../../../ops/self-hosted/linux-runner/real-service-evidence.mjs';
-import { createLeaseHeartbeatLoop } from '../../../ops/self-hosted/linux-runner/lease-heartbeat.mjs';
+import {
+  createLeaseHeartbeatLoop,
+  throwIfLeaseCanceled,
+} from '../../../ops/self-hosted/linux-runner/lease-heartbeat.mjs';
 
 describe('real-service evidence helpers', () => {
   it('keeps expected sandbox page errors out of the failing telemetry summary', () => {
@@ -98,22 +101,33 @@ describe('real-service evidence helpers', () => {
 
   it('serializes overlapping lease heartbeats and flushes the in-flight request on stop', async () => {
     let resolveHeartbeat: ((value: { cancelRequested: boolean }) => void) | undefined;
+    let cancelRequested = false;
     const heartbeat = vi.fn(
       () =>
         new Promise<{ cancelRequested: boolean }>((resolve) => {
           resolveHeartbeat = resolve;
         }),
     );
-    const loop = createLeaseHeartbeatLoop({ heartbeat, intervalMs: 1 });
+    const loop = createLeaseHeartbeatLoop({
+      heartbeat,
+      intervalMs: 1,
+      onHeartbeat: (result) => {
+        cancelRequested ||= result.cancelRequested;
+      },
+    });
 
     const first = loop.send();
     await vi.waitFor(() => expect(heartbeat).toHaveBeenCalledTimes(1));
     const second = loop.send();
     expect(heartbeat).toHaveBeenCalledTimes(1);
-    resolveHeartbeat?.({ cancelRequested: false });
+    const stop = loop.stop();
+    resolveHeartbeat?.({ cancelRequested: true });
     await Promise.all([first, second]);
-
-    await loop.stop();
+    await stop;
     expect(heartbeat).toHaveBeenCalledTimes(1);
+    expect(cancelRequested).toBe(true);
+    expect(() => throwIfLeaseCanceled(cancelRequested)).toThrow(
+      'render export was canceled by the control plane',
+    );
   });
 });

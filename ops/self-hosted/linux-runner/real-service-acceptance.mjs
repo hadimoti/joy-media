@@ -22,7 +22,7 @@ import {
   buildProfileSummary,
   createJourneyTelemetry,
 } from './real-service-evidence.mjs';
-import { createLeaseHeartbeatLoop } from './lease-heartbeat.mjs';
+import { createLeaseHeartbeatLoop, throwIfLeaseCanceled } from './lease-heartbeat.mjs';
 
 const requireFromApi = createRequire(new URL('../../../apps/api/package.json', import.meta.url));
 const { Pool } = requireFromApi('pg');
@@ -399,11 +399,12 @@ async function runLeasedExportWithHeartbeats(
     },
   });
   await heartbeatLoop.send();
+  throwIfLeaseCanceled(cancelRequested);
   heartbeatLoop.start();
   try {
     await executeExportInWorkerThread(input, outputPath);
     if (heartbeatLoop.lastError !== undefined) throw heartbeatLoop.lastError;
-    if (cancelRequested) throw new Error('render export was canceled by the control plane');
+    throwIfLeaseCanceled(cancelRequested);
   } finally {
     try {
       await heartbeatLoop.stop();
@@ -412,6 +413,7 @@ async function runLeasedExportWithHeartbeats(
     }
   }
   if (heartbeatError !== undefined) throw heartbeatError;
+  throwIfLeaseCanceled(cancelRequested);
 }
 
 async function executeExportInWorkerThread(input, outputPath) {

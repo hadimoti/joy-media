@@ -1,5 +1,9 @@
 /* global setInterval, clearInterval */
 
+export function throwIfLeaseCanceled(cancelRequested) {
+  if (cancelRequested) throw new Error('render export was canceled by the control plane');
+}
+
 /**
  * Keeps a leased-job heartbeat single-flight. The control plane extends a
  * lease from the timestamp of each request, so an older response must never
