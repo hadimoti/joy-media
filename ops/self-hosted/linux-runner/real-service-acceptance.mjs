@@ -709,6 +709,12 @@ async function recordJourney(
   const motionObjectId = (await motion.locator('.motion-object-id').textContent())?.trim();
   if (!motionObjectId || motionObjectId === 'Select a clip')
     throw new Error('real-service journey did not resolve the Motion target object');
+  // The Enhance panel replaces the Create/Assets surface. Return to the
+  // catalog before resolving the second imported asset, and clear any kind
+  // filter that the import flow or prior interactions may have selected.
+  await page.locator('.panel-tab[aria-label="Create"]').first().click();
+  await page.getByRole('article', { name: 'Assets', exact: true }).waitFor();
+  await resetAssetCatalogFilters(page);
   await addAssetToTimeline(page, audioName);
 
   const firstDownload = await triggerExportDownload(page);
