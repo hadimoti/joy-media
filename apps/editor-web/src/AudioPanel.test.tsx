@@ -1,10 +1,32 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { AudioPanel, prepareAudioCommandState } from './AudioPanel.js';
+import { AudioPanel, prepareAudioCommandState, selectConnectedAudioWorker } from './AudioPanel.js';
+import type { BrowserWorker } from './control-plane-client.js';
 import { EMPTY_AUDIO_STATE } from './audio-session.js';
 import { applyAudioCommand } from '@joy-media/commands';
 
 describe('AudioPanel Enhance workspace', () => {
+  it('selects a capable recent Worker instead of depending on API list order', () => {
+    const renderWorker: BrowserWorker = {
+      id: 'render-worker',
+      paired: true,
+      revoked: false,
+      capabilities: ['render.export'],
+      lastSeenAt: 1_000,
+    };
+    const audioWorker: BrowserWorker = {
+      id: 'audio-worker',
+      paired: true,
+      revoked: false,
+      capabilities: ['audio.ml-denoise'],
+      lastSeenAt: 1_000,
+    };
+
+    expect(selectConnectedAudioWorker([renderWorker, audioWorker], 1_001)?.id).toBe('audio-worker');
+    expect(selectConnectedAudioWorker([renderWorker], 1_001)).toBeUndefined();
+    expect(selectConnectedAudioWorker([audioWorker], 36_001)).toBeUndefined();
+  });
+
   it('hydrates a newly visible clip before applying a mix command', () => {
     const hydrated = prepareAudioCommandState(EMPTY_AUDIO_STATE, ['voice-1']);
     const { state } = applyAudioCommand(hydrated, {

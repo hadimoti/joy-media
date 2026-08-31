@@ -132,6 +132,27 @@ function ResourcePill({ value, label }: { readonly value: string; readonly label
   );
 }
 
+/**
+ * Select a recent paired Worker that actually advertises the audio denoise
+ * capability. The API may return several connected Workers (for example a
+ * render Worker alongside an audio Worker); choosing the first record makes
+ * readiness depend on list ordering and incorrectly reports a capable Worker
+ * as missing.
+ */
+export function selectConnectedAudioWorker(
+  workers: readonly BrowserWorker[],
+  now = Date.now(),
+): BrowserWorker | undefined {
+  return workers.find(
+    (worker) =>
+      worker.paired &&
+      !worker.revoked &&
+      worker.lastSeenAt !== undefined &&
+      now - worker.lastSeenAt < 35_000 &&
+      worker.capabilities.includes('audio.ml-denoise'),
+  );
+}
+
 function AudioWorkflowStepIcon({
   capabilityId,
 }: {
@@ -345,23 +366,20 @@ export function AudioPanel({
   const noClips = clipIds.length === 0;
   const clipsInactive = tab === 'mix' && noClips;
   const now = Date.now();
-  const pairedWorker = workers.find(
+  const connectedWorker = selectConnectedAudioWorker(workers, now);
+  const localWorkerReady = connectedWorker !== undefined;
+  const hasRecentPairedWorker = workers.some(
     (worker) =>
       worker.paired &&
       !worker.revoked &&
       worker.lastSeenAt !== undefined &&
       now - worker.lastSeenAt < 35_000,
   );
-  const connectedWorker = pairedWorker?.capabilities.includes('audio.ml-denoise')
-    ? pairedWorker
-    : undefined;
-  const localWorkerReady = connectedWorker !== undefined;
-  const localWorkerLabel =
-    pairedWorker === undefined
-      ? 'Disconnected'
-      : localWorkerReady
-        ? 'Connected'
-        : 'Missing audio.ml-denoise';
+  const localWorkerLabel = localWorkerReady
+    ? 'Connected'
+    : hasRecentPairedWorker
+      ? 'Missing audio.ml-denoise'
+      : 'Disconnected';
   const cloudProvider = providers.find(
     (provider) => provider.state === 'healthy' || provider.state === 'configured',
   );

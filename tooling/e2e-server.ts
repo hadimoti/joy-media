@@ -142,6 +142,7 @@ async function runE2eRenderWorker(): Promise<void> {
       await new Promise<void>((resolve) => setTimeout(resolve, 25));
       continue;
     }
+    process.stderr.write(`JOY_MEDIA_E2E_WORKER_LEASED ${job.id} ${job.type}\n`);
     if (job.type !== 'render.export' || job.assetId === undefined || job.payload === undefined) {
       controlPlane.fail(
         E2E_WORKER_ID,
@@ -221,7 +222,13 @@ async function runE2eRenderWorker(): Promise<void> {
         },
         job.leaseToken,
       );
+      process.stderr.write(`JOY_MEDIA_E2E_WORKER_COMPLETED ${job.id}\n`);
     } catch (error) {
+      process.stderr.write(
+        `JOY_MEDIA_E2E_WORKER_FAILED ${job.id} ${
+          error instanceof Error ? error.message.replace(/\s+/g, ' ').slice(0, 500) : String(error)
+        }\n`,
+      );
       controlPlane.fail(
         E2E_WORKER_ID,
         job.id,
