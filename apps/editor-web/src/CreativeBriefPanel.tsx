@@ -27,7 +27,21 @@ import {
   loadCreativeBrief,
   removeCreativeBrief,
   saveCreativeBrief,
+  type CreativeBriefStorage,
 } from './creative-brief-storage.js';
+
+/**
+ * Browser storage is an optional cache. Some privacy modes expose a
+ * localStorage property whose getter itself throws, so acquire it behind the
+ * same fail-closed boundary as the storage operations.
+ */
+function getCreativeBriefStorage(): CreativeBriefStorage | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Props for CreativeBriefPanel.
@@ -88,7 +102,8 @@ export function CreativeBriefPanel({
       setRequestText('');
     }
     previousStorageProjectIdRef.current = storageProjectId;
-    const saved = loadCreativeBrief(window.localStorage, storageProjectId);
+    const storage = getCreativeBriefStorage();
+    const saved = storage ? loadCreativeBrief(storage, storageProjectId) : undefined;
     if (saved !== undefined) {
       dispatch({ type: 'hydrate', brief: saved, revisionId });
       setRequestText(saved.request);
@@ -169,7 +184,8 @@ export function CreativeBriefPanel({
       const brief = await runBrief(request);
       // Verify the brief matches the requested revision
       if (brief.snapshotRevisionId === revisionId) {
-        saveCreativeBrief(window.localStorage, storageProjectId, brief);
+        const storage = getCreativeBriefStorage();
+        if (storage) saveCreativeBrief(storage, storageProjectId, brief);
         setRequestText(brief.request);
         dispatch({
           type: 'collect-success',
@@ -195,7 +211,8 @@ export function CreativeBriefPanel({
   const handleReset = useCallback(() => {
     dispatch({ type: 'reset' });
     setRequestText('');
-    removeCreativeBrief(window.localStorage, storageProjectId);
+    const storage = getCreativeBriefStorage();
+    if (storage) removeCreativeBrief(storage, storageProjectId);
   }, [storageProjectId]);
 
   // Handle retry
@@ -231,7 +248,8 @@ export function CreativeBriefPanel({
     try {
       const brief = await runBrief(request);
       if (brief.snapshotRevisionId === revisionId) {
-        saveCreativeBrief(window.localStorage, storageProjectId, brief);
+        const storage = getCreativeBriefStorage();
+        if (storage) saveCreativeBrief(storage, storageProjectId, brief);
         setRequestText(brief.request);
         dispatch({
           type: 'collect-success',
