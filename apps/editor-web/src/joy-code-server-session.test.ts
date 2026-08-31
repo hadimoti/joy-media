@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
+import type { CreativeBriefV1 } from '@joy-media/agent-tools';
 import type { ControlPlaneProjectBinding } from './project-control-plane.js';
 import { JoyCodeServerSession } from './joy-code-server-session.js';
 
@@ -80,5 +81,24 @@ describe('Joy Code server session', () => {
     controller.abort();
     const result = await session.plan('trim', { clipIds: [] }, 'p', controller.signal);
     expect(result.kind).toBe('cancelled');
+  });
+
+  it('forwards an explicitly handed-off Creative Brief to the planner transport', async () => {
+    const brief = { schemaVersion: 1, projectId: 'p', snapshotRevisionId: 'r' } as CreativeBriefV1;
+    let received: CreativeBriefV1 | undefined;
+    const session = new JoyCodeServerSession({
+      binding,
+      document: project,
+      revisionId: 'r',
+      storage,
+      syncProjectDocument: async () => ({ projectId: 'cp', revisionId: 'r' }),
+      joyCodeTransport: async (_id, request) => {
+        received = request.creativeBrief;
+        throw new Error('stop after capture');
+      },
+    });
+    const result = await session.plan('trim', { clipIds: [] }, undefined, undefined, brief);
+    expect(result.kind).toBe('plan-failure');
+    expect(received).toBe(brief);
   });
 });
