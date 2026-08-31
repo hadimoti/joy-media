@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { IncomingMessage } from 'node:http';
 import { executeLeasedExport, type ExportJobPayload } from '../apps/worker/src/export-job.js';
-import { verifyExport } from '@joy-media/export-core';
+// Use the checked-in implementation directly so acceptance cannot silently
+// exercise stale or missing generated package output on a clean runner.
+import { verifyExport } from '../packages/export-core/src/index.ts';
 import { createControlPlaneHttpServer, LocalControlPlane } from '../apps/api/src/index.js';
 import type { ApiAuthentication } from '../apps/api/src/http-server.js';
 import type { MediaAuthApi, MediaAuthMethod } from '../apps/api/src/media-auth.js';

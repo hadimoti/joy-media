@@ -4272,6 +4272,12 @@ function EditorWorkspace({
         abortController.signal.throwIfAborted();
         const stagedSha256 = await sha256Hex(stagedBytes);
         abortController.signal.throwIfAborted();
+        // MediaRecorder reports a codec-qualified MIME (for example,
+        // `video/mp4;codecs=avc1.42E01E,mp4a.40.2`), while the control-plane
+        // asset descriptor intentionally stores the canonical media type.
+        // Keep the codec detail in the Blob and normalize only the catalog
+        // descriptor so registration passes the API's strict MIME schema.
+        const stagedMimeType = browserExportResult.mimeType.split(';', 1)[0]?.trim() || 'video/mp4';
         stagedExportAssetId = `export-source-${attemptKey}`;
         const workerJobId = `render-${attemptKey}`;
         // Persist both server identities before the first network mutation.
@@ -4302,7 +4308,7 @@ function EditorWorkspace({
             sha256: stagedSha256,
             bytes: stagedBytes.byteLength,
             descriptor: {
-              mimeType: browserExportResult.mimeType || 'video/mp4',
+              mimeType: stagedMimeType,
               width,
               height,
               durationUs,
@@ -4325,7 +4331,9 @@ function EditorWorkspace({
             producer: 'browser-staged-preview-export',
             frameCount: totalFrames,
             manifest: {
-              projectId,
+              // The Worker job is owned by the opaque control-plane project,
+              // not the browser-local editor document identity.
+              projectId: controlPlaneProject.controlPlaneProjectId,
               revision: sourceRevision,
               width,
               height,

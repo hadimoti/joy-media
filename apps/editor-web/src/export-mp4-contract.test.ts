@@ -31,6 +31,12 @@ describe('App MP4 export negotiation contract', () => {
     expect(exportCallback).not.toMatch(/webm/i);
   });
 
+  it('queues Worker exports against the opaque control-plane project identity', () => {
+    expect(exportCallback).toContain('projectId: controlPlaneProject.controlPlaneProjectId');
+    expect(exportCallback).toContain('const stagedMimeType =');
+    expect(exportCallback).toContain("browserExportResult.mimeType.split(';', 1)");
+  });
+
   it('persists the export preset only after preload, Worker verification, and verified durable caching', () => {
     const preload = exportCallback.indexOf("'fetching authored audio bytes'");
     const download = exportCallback.indexOf(
