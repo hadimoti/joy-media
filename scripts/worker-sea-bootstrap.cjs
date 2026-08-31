@@ -33,8 +33,13 @@ const statePath =
     'worker-state.json',
   );
 const apiUrl = process.env.JOY_MEDIA_API_URL?.trim() || 'https://joyst.ir/api';
-
-if (!/^https:\/\//i.test(apiUrl)) throw new Error('JOY_MEDIA_API_URL must use HTTPS');
+const parsedApiUrl = new URL(apiUrl);
+const localTestApi =
+  process.env.JOY_MEDIA_WORKER_TEST_MODE === '1' &&
+  parsedApiUrl.protocol === 'http:' &&
+  ['127.0.0.1', 'localhost', '::1'].includes(parsedApiUrl.hostname);
+if (parsedApiUrl.protocol !== 'https:' && !localTestApi)
+  throw new Error('JOY_MEDIA_API_URL must use HTTPS');
 if (!existsSync(entryPoint)) throw new Error(`Worker entrypoint not found: ${entryPoint}`);
 
 const stateDirectory = dirname(statePath);

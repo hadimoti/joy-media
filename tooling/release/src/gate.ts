@@ -640,7 +640,9 @@ function operationalEvidenceReady(
   if (
     session.stateIsolated !== true ||
     session.ownerSessionUsed !== false ||
-    session.persistedSession !== false
+    session.fixtureSessionUsed !== true ||
+    session.persistedSession !== true ||
+    session.protectedState !== true
   )
     return false;
   const renewal = record(lifecycle.renewal);

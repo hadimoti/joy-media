@@ -2,7 +2,9 @@
 param(
     [string]$ApiUrl,
     [string]$StatePath,
-    [string]$WorkerExecutable
+    [string]$WorkerExecutable,
+    [string]$WorkerPipe,
+    [switch]$TestMode
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,7 +26,11 @@ if ([string]::IsNullOrWhiteSpace($StatePath)) {
 }
 
 $parsedApiUrl = [Uri]$ApiUrl
-if ($parsedApiUrl.Scheme -ne 'https' -or [string]::IsNullOrWhiteSpace($parsedApiUrl.Host)) {
+$localTestApi =
+    $parsedApiUrl.Scheme -eq 'http' -and
+    @('127.0.0.1', 'localhost', '::1') -contains $parsedApiUrl.DnsSafeHost -and
+    ($TestMode.IsPresent -or $env:JOY_MEDIA_WORKER_TEST_MODE -eq '1')
+if (($parsedApiUrl.Scheme -ne 'https' -and -not $localTestApi) -or [string]::IsNullOrWhiteSpace($parsedApiUrl.Host)) {
     throw 'ApiUrl must be an HTTPS URL.'
 }
 
@@ -45,6 +51,8 @@ New-Item -ItemType Directory -Force -Path $stateDirectory, (Split-Path -Parent $
 $env:JOY_MEDIA_API_URL = $ApiUrl
 $env:JOY_MEDIA_WORKER_STATE_PATH = $StatePath
 $env:JOY_MEDIA_WORKER_ROOT = $repoRoot
+if ($localTestApi) { $env:JOY_MEDIA_WORKER_TEST_MODE = '1' }
+if (-not [string]::IsNullOrWhiteSpace($WorkerPipe)) { $env:JOY_MEDIA_WORKER_PIPE = $WorkerPipe }
 Set-Location -LiteralPath $repoRoot
 
 try {

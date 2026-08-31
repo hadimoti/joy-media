@@ -162,7 +162,9 @@ const operationalEvidence = (): ReleaseOperationalEvidence => ({
         status: 'passed',
         stateIsolated: true,
         ownerSessionUsed: false,
-        persistedSession: false,
+        fixtureSessionUsed: true,
+        persistedSession: true,
+        protectedState: true,
       },
       renewal: { status: 'passed', restarted: true },
       recovery: { status: 'passed' },
@@ -1053,6 +1055,30 @@ describe('JOY Studio 1.0 release gate', () => {
           lifecycle: {
             ...evidence.windows.lifecycle,
             startup: { status: 'failed' },
+          },
+        },
+      },
+    });
+    expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
+      'failed',
+    );
+  });
+
+  it('rejects Windows evidence without a protected disposable fixture session', () => {
+    const evidence = operationalEvidence();
+    const result = evaluateReleaseGate({
+      ...passingInput(),
+      operationalEvidence: {
+        ...evidence,
+        windows: {
+          ...evidence.windows,
+          lifecycle: {
+            ...evidence.windows.lifecycle,
+            session: {
+              ...evidence.windows.lifecycle.session,
+              fixtureSessionUsed: false,
+              protectedState: false,
+            },
           },
         },
       },
