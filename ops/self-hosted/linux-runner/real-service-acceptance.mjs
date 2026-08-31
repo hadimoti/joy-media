@@ -679,6 +679,36 @@ async function recordJourney(
   await importFixture(page, 'audio.wav', audioName);
   await resetAssetCatalogFilters(page);
   await addAssetToTimeline(page, videoName);
+  // Motion/Spatial authoring requires an object-backed visual clip.  A newly
+  // created project starts with media-only clips, so place a first-party HTML
+  // scene on the imported video before applying a preset.  Keep this in the
+  // real-service journey (rather than seeding localStorage) so persistence is
+  // exercised through the same compound document transaction as production.
+  await page.locator(`.timeline-clip[aria-label^="${videoName},"]`).click();
+  await enhance.click();
+  await page
+    .getByRole('region', { name: 'Enhance tools', exact: true })
+    .getByRole('tab', { name: 'Animate', exact: true })
+    .click();
+  const motion = page.locator('.motion-panel');
+  await motion.waitFor();
+  await motion.getByRole('tab', { name: 'Scenes', exact: true }).click();
+  await motion
+    .getByRole('button', { name: /^Add .+ to selected clip$/ })
+    .first()
+    .click();
+  await motion.getByRole('tab', { name: 'Presets', exact: true }).click();
+  await motion
+    .locator('.motion-field', { hasText: 'Preset' })
+    .locator('select')
+    .selectOption('joy-pop-in');
+  await motion.getByRole('button', { name: 'Apply motion preset' }).click();
+  await motion.getByRole('img', { name: 'scaleX keyframes', exact: true }).waitFor();
+  await motion.getByRole('img', { name: 'scaleY keyframes', exact: true }).waitFor();
+  await motion.getByRole('img', { name: 'opacity keyframes', exact: true }).waitFor();
+  const motionObjectId = (await motion.locator('.motion-object-id').textContent())?.trim();
+  if (!motionObjectId || motionObjectId === 'Select a clip')
+    throw new Error('real-service journey did not resolve the Motion target object');
   await addAssetToTimeline(page, audioName);
 
   const firstDownload = await triggerExportDownload(page);
@@ -934,7 +964,6 @@ async function recordJourney(
     deliveryRecovery.retriedState !== 'queued'
   )
     throw new Error(`delivery cancel/retry recovery failed: ${JSON.stringify(deliveryRecovery)}`);
-  const browserTelemetry = assertJourneyTelemetryClean(telemetry);
   var deliveryEvidence = {
     sourceAssets: { video: true, audio: true },
     mixedSourceExport: {
@@ -964,24 +993,90 @@ async function recordJourney(
     missingSource: { status: missingSourceStatus },
   };
 
-  const visualStorage = await page.evaluate(() => {
-    const raw = localStorage.getItem('joy-media.visual-object-project-log.v1');
-    if (!raw) return { motionChannels: 0 };
-    const parsed = JSON.parse(raw);
-    const channels = [];
-    const visit = (value) => {
-      if (value === null || typeof value !== 'object') return;
-      if (value.animations && typeof value.animations === 'object') {
-        for (const channel of Object.keys(value.animations)) channels.push(channel);
-      }
-      if (Array.isArray(value)) value.forEach(visit);
-      else Object.values(value).forEach(visit);
-    };
-    visit(parsed);
-    return { motionChannels: channels.length, channels };
-  });
-  if (visualStorage.motionChannels < 2)
-    throw new Error('real-service journey did not observe persisted Motion data');
+  // Reopen the active project before asserting Motion persistence.  This
+  // proves the persisted document can be reconstructed by a fresh editor
+  // session instead of merely finding data in the current React/localStorage
+  // process.  The clip/object and expected channels are carried through the
+  // check so unrelated animation data cannot satisfy this release gate.
+  captureBrowserTelemetry = true;
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: 'File', exact: true }).waitFor();
+  const reloadedClip = page.locator('.timeline-clip').filter({ hasText: videoName }).first();
+  await reloadedClip.waitFor({ timeout: 15_000 });
+  await reloadedClip.click();
+  if ((await reloadedClip.getAttribute('aria-pressed')) !== 'true')
+    throw new Error('real-service journey did not reselect the imported video after reload');
+  const motionClipId = await reloadedClip.getAttribute('data-clip-id');
+  if (!motionClipId) throw new Error('real-service journey did not resolve the Motion clip id');
+  await enhance.click();
+  await page
+    .getByRole('region', { name: 'Enhance tools', exact: true })
+    .getByRole('tab', { name: 'Animate', exact: true })
+    .click();
+  const reloadedMotion = page.locator('.motion-panel');
+  await reloadedMotion.waitFor();
+  await reloadedMotion.getByRole('tab', { name: 'Presets', exact: true }).click();
+  const renderedMotionChannels = ['scaleX', 'scaleY', 'opacity'];
+  for (const channel of renderedMotionChannels)
+    await reloadedMotion.getByRole('img', { name: `${channel} keyframes`, exact: true }).waitFor();
+  const reloadedMotionObjectId = (
+    await reloadedMotion.locator('.motion-object-id').textContent()
+  )?.trim();
+  if (reloadedMotionObjectId !== motionObjectId)
+    throw new Error(
+      `real-service journey reopened a different Motion target: expected ${motionObjectId}, got ${reloadedMotionObjectId ?? '(none)'}`,
+    );
+
+  const visualStorage = await page.evaluate(
+    ({ objectId, renderedChannels }) => {
+      const raw = localStorage.getItem('joy-media.visual-object-project-log.v1');
+      if (!raw)
+        return {
+          objectId,
+          motionChannels: renderedChannels.length,
+          channels: renderedChannels,
+          storedChannels: [],
+          persistedAfterReload: false,
+        };
+      const parsed = JSON.parse(raw);
+      const storedChannels = new Set();
+      const visit = (value) => {
+        if (value === null || typeof value !== 'object') return;
+        if (value.id === objectId && value.animations && typeof value.animations === 'object')
+          Object.keys(value.animations).forEach((channel) => storedChannels.add(channel));
+        if (
+          value.type === 'object.replaceAnimation' &&
+          value.payload?.objectId === objectId &&
+          typeof value.payload.property === 'string'
+        )
+          storedChannels.add(value.payload.property);
+        if (Array.isArray(value)) value.forEach(visit);
+        else Object.values(value).forEach(visit);
+      };
+      visit(parsed);
+      const channels = [...renderedChannels];
+      const persistedAfterReload = channels.every((channel) => storedChannels.has(channel));
+      return {
+        objectId,
+        motionChannels: channels.length,
+        channels,
+        storedChannels: [...storedChannels],
+        persistedAfterReload,
+      };
+    },
+    { objectId: reloadedMotionObjectId, renderedChannels: renderedMotionChannels },
+  );
+  const expectedMotionChannels = ['scaleX', 'scaleY', 'opacity'];
+  if (
+    !visualStorage.persistedAfterReload ||
+    visualStorage.motionChannels !== expectedMotionChannels.length ||
+    !expectedMotionChannels.every((channel) => visualStorage.channels.includes(channel)) ||
+    !expectedMotionChannels.every((channel) => visualStorage.storedChannels.includes(channel))
+  )
+    throw new Error(
+      `real-service journey did not observe persisted Motion data for ${motionObjectId}: ${JSON.stringify(visualStorage)}`,
+    );
+  const browserTelemetry = assertJourneyTelemetryClean(telemetry);
   const source = await currentSourceProvenance(sourceSha);
   const evidenceDirectory = join(root, 'test-output/browser/authenticated-editor-1.0');
   await mkdir(evidenceDirectory, { recursive: true });
@@ -1045,13 +1140,15 @@ async function recordJourney(
           motionPlacement: [
             {
               preset: 'Persisted animation channels',
-              clipId: 'showcase-motion-object',
+              clipId: motionClipId,
+              objectId: reloadedMotionObjectId,
               channels: [visualStorage.channels?.[0] ?? 'x'],
               persistedAfterReload: true,
             },
             {
               preset: 'Persisted animation channels',
-              clipId: 'showcase-motion-object',
+              clipId: motionClipId,
+              objectId: reloadedMotionObjectId,
               channels: [visualStorage.channels?.[1] ?? 'opacity'],
               persistedAfterReload: true,
             },
