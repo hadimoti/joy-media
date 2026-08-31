@@ -301,7 +301,10 @@ async function recordJourney(baseUrl, apiBaseUrl, sessionToken, sourceSha, activ
   await joyCode.click();
   const joyCodeBrief = page
     .getByRole('tablist', { name: 'Joy Code sections', exact: true })
-    .getByRole('tab', { name: 'Brief', exact: true });
+    // PanelShell keeps the short visual label while exposing the migration
+    // alias as the accessible name. Target the contract users and assistive
+    // technology receive, not the painted text node.
+    .getByRole('tab', { name: 'Creative Brief', exact: true });
   await joyCodeBrief.click();
   await page.getByRole('article', { name: 'Creative Brief', exact: true }).waitFor();
   const joyCode3d = page
