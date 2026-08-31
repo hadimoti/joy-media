@@ -1129,7 +1129,10 @@ async function resetAssetCatalogFilters(page) {
   // clear any search before resolving either card. This also covers the
   // compact/1581 layouts where the category transition is committed before
   // the next interaction.
-  await assetsPanel.getByRole('tab', { name: /^All\b/ }).first().click();
+  await assetsPanel
+    .getByRole('tab', { name: /^All\b/ })
+    .first()
+    .click();
   const searchToggle = assetsPanel.getByRole('button', { name: 'Search Assets', exact: true });
   if ((await searchToggle.getAttribute('aria-expanded')) !== 'true') await searchToggle.click();
   await assetsPanel.getByRole('searchbox', { name: 'Search Assets', exact: true }).fill('');
