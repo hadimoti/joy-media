@@ -303,6 +303,70 @@ describe('PostgresControlPlane', () => {
     await pool.end();
   });
 
+  it('requires a render-export source and matching Worker capability', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const controlPlane = new PostgresControlPlane(pool, { skipLocked: false });
+    await controlPlane.initialize();
+    const owner = { id: 'render-export-contract-owner' };
+    const projectId = 'render-export-contract-project';
+    const payload = {
+      schemaVersion: 1,
+      producer: 'browser-staged-preview-export',
+      frameCount: 3,
+      manifest: {
+        projectId,
+        revision: 0,
+        width: 64,
+        height: 36,
+        frameRate: 30,
+        durationUs: 100_000,
+        preset: 'social-h264-aac',
+      },
+    } as const;
+    await controlPlane.createProject(owner, projectId, 'Render export contract');
+    await expect(
+      controlPlane.enqueue(
+        owner,
+        'render-export-missing-source',
+        projectId,
+        'render.export',
+        100,
+        undefined,
+        payload,
+      ),
+    ).rejects.toMatchObject({ code: 'ASSET_JOB_INVALID' });
+    const assetId = 'render-export-contract-source';
+    await controlPlane.registerAsset(owner, projectId, {
+      ...assetRegistration(),
+      id: assetId,
+      locations: [{ kind: 'private-object' as const, ref: 'render-contract-source-object' }],
+    });
+    await controlPlane.enqueue(
+      owner,
+      'render-export-capability-job',
+      projectId,
+      'render.export',
+      100,
+      assetId,
+      payload,
+    );
+    await controlPlane.pairWorker(owner, 'render-export-incapable-worker');
+    await controlPlane.helloWorker('render-export-incapable-worker', ['asset.thumbnail'], [], 100);
+    await expect(
+      controlPlane.lease('render-export-incapable-worker', 101),
+    ).resolves.toBeUndefined();
+    await controlPlane.pairWorker(owner, 'render-export-capable-worker');
+    await controlPlane.helloWorker('render-export-capable-worker', ['render.export'], [], 100);
+    await expect(controlPlane.lease('render-export-capable-worker', 101)).resolves.toMatchObject({
+      id: 'render-export-capability-job',
+      assetId,
+      state: 'leased',
+    });
+    await pool.end();
+  });
+
   it('does not complete a job after cancellation and closes the attempt on fail', async () => {
     const database = newDb();
     const adapter = database.adapters.createPg();

@@ -1629,6 +1629,7 @@ export class PostgresControlPlane implements ControlPlane {
             workerRecord.localAssetIds.includes(item.asset_id)
           );
         }
+        if (item.type === 'render.export') return caps.includes('render.export');
         if (item.type === 'image.comfy') return caps.includes('image.comfy');
         if (item.type === 'audio.ml-denoise') return caps.includes('audio.ml-denoise');
         if (item.type === 'mask.image' || item.type === 'mask.video') {
@@ -2428,6 +2429,7 @@ function derivativeKindForJob(type: string): DerivativeKind | undefined {
 
 function requiresSourceAsset(type: string): boolean {
   return (
+    type === 'render.export' ||
     type === 'image.comfy' ||
     type === 'audio.ml-denoise' ||
     type === 'mask.image' ||
