@@ -1608,8 +1608,9 @@ function EditorWorkspace({
       localCredentialStoreRef.current,
     );
     if (
+      localSettings !== undefined &&
       canRunLocalDeepSeekHarness(agentSettings, localSettings, {
-        endpointUrl: localSettings?.endpointUrl ?? agentSettings.deepSeekHarnessEndpoint,
+        endpointUrl: localSettings.endpointUrl,
         authenticatedSessionReady: joySession.kind === 'ready',
         // Remote provider disclosure/consent is a native-shell responsibility.
         disclosureAccepted: agentSettings.localProviderDisclosureAccepted,
