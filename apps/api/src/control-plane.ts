@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { freezeManifest, type RenderManifest } from '@joy-media/export-core';
 import { CREATIVE_BRIEF_CONSENT_VERSION } from './creative-brief-runtime-config.js';
 import { JOY_CODE_CONSENT_VERSION } from './joy-code-consent.js';
 
@@ -427,9 +428,23 @@ export interface UpscaleWorkerReceipt {
   readonly modelId?: string;
   readonly modelVersion?: string;
 }
+export interface RenderExportReceipt {
+  readonly kind: 'render.export';
+  readonly assetId: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly localRef: string;
+  readonly descriptor: {
+    readonly mimeType: 'video/mp4';
+    readonly width: number;
+    readonly height: number;
+    readonly durationUs: number;
+  };
+}
 export type WorkerResultReceipt =
   | FixtureThumbnailReceipt
   | AssetThumbnailReceipt
+  | RenderExportReceipt
   | LocalGpuWorkerReceipt
   | MaskWorkerReceipt
   | UpscaleWorkerReceipt;
@@ -438,6 +453,7 @@ export type WorkerResultReceipt =
  * it deliberately has no Worker path, bytes, pairing secret, or session token.
  */
 export type DerivativeRecord = WorkerResultReceipt & {
+  readonly id: string;
   readonly jobId: string;
   readonly workerRef: string;
   readonly resultRef: string;
@@ -568,6 +584,13 @@ export interface ControlPlane {
   ): readonly MediaAssetRecord[] | Promise<readonly MediaAssetRecord[]>;
   /** Resolve a cloud original only when it is curated or owned by the actor. */
   sharedCloudAsset(actor: Actor, assetId: string): MediaAssetRecord | Promise<MediaAssetRecord>;
+  /** Resolve the current cloud-backed source asset bound to an active Worker lease. */
+  workerJobAsset(
+    workerId: string,
+    jobId: string,
+    now?: number,
+    leaseToken?: string,
+  ): MediaAssetRecord | Promise<MediaAssetRecord>;
   registerLocalDerivative(
     actor: Actor,
     projectId: string,
@@ -1176,6 +1199,25 @@ export class LocalControlPlane implements ControlPlane {
     }
     return cloneAsset(asset);
   }
+  workerJobAsset(
+    workerId: string,
+    jobId: string,
+    now = Date.now(),
+    leaseToken?: string,
+  ): MediaAssetRecord {
+    const job = this.ownedLease(workerId, jobId, now, leaseToken);
+    if (job.assetId === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', jobId);
+    const asset = this.#assets.get(job.assetId);
+    if (
+      asset === undefined ||
+      (asset.projectId !== job.projectId &&
+        this.#assetAccess.get(`${job.projectId}\u0000${job.assetId}`) !== asset.projectId) ||
+      !asset.locations.some((location) => location.kind === 'private-object')
+    ) {
+      throw new ControlPlaneError('ASSET_NOT_FOUND', job.assetId);
+    }
+    return cloneAsset(asset);
+  }
   registerLocalDerivative(
     actor: Actor,
     projectId: string,
@@ -1416,12 +1458,14 @@ export class LocalControlPlane implements ControlPlane {
       )
         throw new ControlPlaneError('ASSET_JOB_INVALID', `${type} source kind is invalid`);
     }
+    const normalizedPayload = payload === undefined ? undefined : validatedJobPayload(payload);
+    if (type === 'render.export') validateRenderExportPayload(projectId, normalizedPayload);
     const job: Job = {
       id,
       projectId,
       type,
       ...(assetId !== undefined ? { assetId } : {}),
-      ...(payload === undefined ? {} : { payload: validatedJobPayload(payload) }),
+      ...(normalizedPayload === undefined ? {} : { payload: normalizedPayload }),
       ...(maxAttempts === undefined ? {} : { maxAttempts }),
       generation: 0,
       state: 'queued',
@@ -1535,6 +1579,11 @@ export class LocalControlPlane implements ControlPlane {
     if (
       job.type === 'asset.thumbnail' &&
       (!isAssetThumbnailReceipt(receipt) || receipt.assetId !== job.assetId)
+    )
+      throw new ControlPlaneError('RESULT_INVALID', jobId);
+    if (
+      job.type === 'render.export' &&
+      (!isRenderExportReceipt(receipt) || receipt.assetId !== job.assetId)
     )
       throw new ControlPlaneError('RESULT_INVALID', jobId);
     if (
@@ -1787,6 +1836,33 @@ function isLocalGpuReceipt(value: WorkerResultReceipt | undefined): value is Loc
   );
 }
 
+function isRenderExportReceipt(
+  value: WorkerResultReceipt | undefined,
+): value is RenderExportReceipt {
+  const descriptor =
+    value?.kind === 'render.export' &&
+    typeof value.descriptor === 'object' &&
+    value.descriptor !== null &&
+    !Array.isArray(value.descriptor)
+      ? value.descriptor
+      : undefined;
+  return (
+    value?.kind === 'render.export' &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.assetId) &&
+    /^[a-f0-9]{64}$/.test(value.sha256) &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes > 0 &&
+    /^export-[A-Za-z0-9._-]{1,120}$/.test(value.localRef) &&
+    descriptor?.mimeType === 'video/mp4' &&
+    Number.isSafeInteger(descriptor.width) &&
+    (descriptor.width ?? 0) > 0 &&
+    Number.isSafeInteger(descriptor.height) &&
+    (descriptor.height ?? 0) > 0 &&
+    Number.isSafeInteger(descriptor.durationUs) &&
+    (descriptor.durationUs ?? 0) > 0
+  );
+}
+
 function isMaskReceipt(value: WorkerResultReceipt | undefined): value is MaskWorkerReceipt {
   const image = value?.kind === 'mask.image';
   const video = value?.kind === 'mask.video';
@@ -1833,6 +1909,7 @@ function isUpscaleReceipt(value: WorkerResultReceipt | undefined): value is Upsc
 
 function derivativeKindForJob(type: string): DerivativeKind | undefined {
   if (type === 'asset.thumbnail') return 'thumbnail';
+  if (type === 'render.export') return 'proxy';
   if (type === 'audio.ml-denoise') return 'audio';
   if (type === 'mask.image' || type === 'mask.video') return 'mask';
   if (type === 'upscale.image' || type === 'upscale.video') return 'upscale';
@@ -1876,6 +1953,7 @@ export function matchesWorkerDerivativeCompletion(
 
 function requiresSourceAsset(type: string): boolean {
   return (
+    type === 'render.export' ||
     type === 'image.comfy' ||
     type === 'audio.ml-denoise' ||
     type === 'mask.image' ||
@@ -1909,6 +1987,9 @@ function isWorkerCompatible(worker: WorkerRecord, job: Job): boolean {
       worker.localAssetIds.includes(job.assetId)
     );
   }
+  if (job.type === 'render.export') {
+    return job.assetId !== undefined && worker.capabilities.includes('render.export');
+  }
   // Fixture / unknown types: any connected Worker may lease (existing behavior).
   return true;
 }
@@ -1940,6 +2021,53 @@ function validatedJobPayload(
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
     throw new ControlPlaneError('JOB_PAYLOAD_INVALID', 'job payload must be an object');
   return parsed as Readonly<Record<string, unknown>>;
+}
+
+/** Reject export jobs at enqueue time so malformed payloads cannot retry forever. */
+export function validateRenderExportPayload(
+  projectId: string,
+  payload: Readonly<Record<string, unknown>> | undefined,
+): void {
+  if (payload === undefined)
+    throw new ControlPlaneError('JOB_PAYLOAD_INVALID', 'render.export payload is required');
+  if (payload.schemaVersion !== 1 || payload.producer !== 'browser-staged-preview-export')
+    throw new ControlPlaneError('JOB_PAYLOAD_INVALID', 'render.export payload schema is invalid');
+  if (!Number.isSafeInteger(payload.frameCount) || (payload.frameCount as number) <= 0)
+    throw new ControlPlaneError('JOB_PAYLOAD_INVALID', 'render.export frameCount is invalid');
+  const manifest = payload.manifest;
+  if (manifest === null || typeof manifest !== 'object' || Array.isArray(manifest))
+    throw new ControlPlaneError('JOB_PAYLOAD_INVALID', 'render.export manifest is invalid');
+  const candidate = manifest as Record<string, unknown>;
+  if (candidate.projectId !== projectId)
+    throw new ControlPlaneError('JOB_PAYLOAD_INVALID', 'render.export project identity mismatch');
+  if (
+    candidate.preset !== 'social-h264-aac' &&
+    candidate.preset !== 'reels-1080' &&
+    candidate.preset !== 'shorts-1080' &&
+    candidate.preset !== 'youtube-1080' &&
+    candidate.preset !== 'high-bitrate'
+  )
+    throw new ControlPlaneError('JOB_PAYLOAD_INVALID', 'render.export preset is invalid');
+  let frozen: RenderManifest;
+  try {
+    frozen = freezeManifest(candidate as unknown as RenderManifest);
+  } catch (error) {
+    throw new ControlPlaneError(
+      'JOB_PAYLOAD_INVALID',
+      `render.export manifest is invalid: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (frozen.durationUs > 86_400_000_000)
+    throw new ControlPlaneError('JOB_PAYLOAD_INVALID', 'render.export duration exceeds 24 hours');
+  const expectedFrameCount = Math.max(
+    1,
+    Math.round((frozen.durationUs / 1_000_000) * frozen.frameRate),
+  );
+  if (payload.frameCount !== expectedFrameCount)
+    throw new ControlPlaneError(
+      'JOB_PAYLOAD_INVALID',
+      'render.export frameCount does not match the manifest',
+    );
 }
 
 export function validateWorkerMaxAttempts(value: number | undefined): void {
@@ -1979,6 +2107,7 @@ function derivativeOf(
   verifiedAt: number,
 ): DerivativeRecord {
   return {
+    id: workerDerivativeId(jobId, generation),
     jobId,
     workerRef,
     resultRef:

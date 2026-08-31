@@ -42,6 +42,7 @@ export interface BrowserJob {
   readonly cancelRequested: boolean;
   readonly error?: string;
   readonly derivative?: {
+    readonly id: string;
     readonly jobId: string;
     readonly kind: string;
     readonly sha256: string;
@@ -577,6 +578,19 @@ export class BrowserControlPlaneClient {
       type,
       assetId,
       ...(payload === undefined ? {} : { payload }),
+    });
+  }
+  async enqueueRenderExport(
+    projectId: string,
+    id: string,
+    assetId: string,
+    payload: Readonly<Record<string, unknown>>,
+  ): Promise<BrowserJob> {
+    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
+      id,
+      type: 'render.export',
+      assetId,
+      payload,
     });
   }
   async enqueueMask(

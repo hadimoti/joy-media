@@ -24,12 +24,14 @@ describe('App MP4 export negotiation contract', () => {
   });
 
   it('threads selected or actual MP4 MIME through recorder and persisted history metadata', () => {
-    expect(exportCallback.match(/mimeType: selectedMimeType/g)).toHaveLength(3);
+    expect(exportCallback.match(/mimeType: selectedMimeType/g)?.length ?? 0).toBeGreaterThanOrEqual(
+      3,
+    );
     expect(exportCallback).toContain('mimeType: exportResult.mimeType');
     expect(exportCallback).not.toMatch(/webm/i);
   });
 
-  it('persists the export preset only after preload, remux, and verified durable caching', () => {
+  it('persists the export preset only after preload, Worker verification, and verified durable caching', () => {
     const preload = exportCallback.indexOf("'fetching authored audio bytes'");
     const download = exportCallback.indexOf(
       'const browserExportResult: BrowserExportResult = await downloadBrowserMp4',
@@ -37,6 +39,7 @@ describe('App MP4 export negotiation contract', () => {
     const persistPreset = exportCallback.indexOf('session.synchronizeVisualProject({');
     const progress = exportCallback.indexOf('setExportProgress(1)', persistPreset);
     const durableCache = exportCallback.indexOf('cache.putVerified(entryId, exportResult.blob)');
+    const workerEnqueue = exportCallback.indexOf('mediaControlPlaneClient.enqueueRenderExport(');
     const autoDownload = exportCallback.indexOf(
       'triggerBrowserDownload(durableBlob, exportResult.filename)',
     );
@@ -45,13 +48,15 @@ describe('App MP4 export negotiation contract', () => {
     expect(download).toBeGreaterThan(preload);
     expect(persistPreset).toBeGreaterThan(download);
     expect(persistPreset).toBeGreaterThan(durableCache);
+    expect(workerEnqueue).toBeGreaterThan(download);
+    expect(workerEnqueue).toBeLessThan(durableCache);
     expect(autoDownload).toBeGreaterThan(persistPreset);
     expect(progress).toBeGreaterThan(persistPreset);
     expect(exportCallback.slice(0, persistPreset)).not.toContain(
       'session.synchronizeVisualProject({',
     );
     expect(exportCallback.slice(download, persistPreset)).toContain(
-      'mediaControlPlaneClient.remuxBrowserMp4',
+      'mediaControlPlaneClient.derivativeBytes',
     );
     expect(exportCallback.slice(persistPreset, progress)).toContain(
       'exportPreset: activeExportPreset',

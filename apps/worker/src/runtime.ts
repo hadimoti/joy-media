@@ -40,6 +40,8 @@ import {
   type UpscaleWorkerDerivative,
   type UpscalingAvailability,
 } from './local-upscaling.js';
+import { executeLeasedExport, exportJobPayload } from './export-job.js';
+import { verifyExport } from '@joy-media/export-core';
 
 export interface DeviceIdentity {
   readonly workerId: string;
@@ -416,12 +418,15 @@ export class WorkerRuntime {
       readonly sources?: LocalAssetSourceRegistry;
       readonly derivativeDirectory?: string;
       readonly gpuPreviewAvailable?: boolean;
+      readonly downloadJobAsset?: (jobId: string, leaseToken?: string) => Promise<Uint8Array>;
     } = {},
   ) {}
   hello(platform: string, architecture: string): WorkerHello {
     const capabilities: WorkerCapability[] = [];
     const inventory = modelInventory(this.tools.upscaling, this.tools.masking);
     if (this.tools.ffmpeg && this.tools.ffprobe) capabilities.push('asset.thumbnail');
+    if (this.tools.ffmpeg && this.tools.ffprobe && this.options.downloadJobAsset !== undefined)
+      capabilities.push('render.export');
     if (this.options.gpuPreviewAvailable === true) capabilities.push('render.preview.gpu');
     if (this.tools.comfy) capabilities.push('image.comfy');
     if (this.tools.ffprobe && this.tools.upscaling?.image?.modelReady === true)
@@ -454,6 +459,7 @@ export class WorkerRuntime {
       readonly id: string;
       readonly type: string;
       readonly assetId?: string;
+      readonly leaseToken?: string;
       readonly payload?: {
         readonly prompt?: string;
         readonly model?: string;
@@ -476,6 +482,72 @@ export class WorkerRuntime {
   > {
     if (UNSUPPORTED_PROVIDER_JOB_TYPES.has(job.type)) throw new UnsupportedWorkerJobError(job.type);
     if (job.type === 'fixture.thumbnail') return this.runFixtureThumbnail(job.id, options);
+    if (job.type === 'render.export') {
+      if (!this.tools.ffmpeg || !this.tools.ffprobe)
+        throw new Error('FFmpeg and FFprobe are required for render.export');
+      if (job.assetId === undefined) throw new Error('render.export requires a staged input asset');
+      if (this.options.downloadJobAsset === undefined)
+        throw new Error('render.export requires a staged source downloader');
+      if (options.cancelled()) return { state: 'canceled' };
+      const payload = exportJobPayload(job.payload);
+      const derivativeDirectory =
+        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+      const tempDir = mkdtempSync(join(tmpdir(), `joy-media-export-${job.id}-`));
+      const sourcePath = join(tempDir, 'source.mp4');
+      const outputPath = join(tempDir, 'export.mp4');
+      this.log.write(`job ${job.id} started (render.export)`);
+      try {
+        await options.progress(5);
+        const sourceBytes = await this.options.downloadJobAsset(job.id, job.leaseToken);
+        writeFileSync(sourcePath, Buffer.from(sourceBytes), { mode: 0o600 });
+        await options.progress(40);
+        executeLeasedExport(
+          { complete: () => undefined },
+          this.identity.workerId,
+          job.id,
+          { sourcePath, payload },
+          outputPath,
+          job.leaseToken,
+        );
+        await options.progress(80);
+        const bytes = readFileSync(outputPath);
+        if (bytes.length < 1) throw new Error('render.export output is empty');
+        const sha256 = createHash('sha256').update(bytes).digest('hex');
+        const localRef = `export-${job.id}-${sha256.slice(0, 16)}`;
+        mkdirSync(derivativeDirectory, { recursive: true });
+        const finalOutput = join(derivativeDirectory, `${localRef}.mp4`);
+        rmSync(finalOutput, { force: true });
+        renameSync(outputPath, finalOutput);
+        await options.progress(90);
+        const verified = verifyExport(finalOutput);
+        await options.progress(100);
+        this.log.write(`job ${job.id} completed`);
+        return {
+          state: 'completed',
+          result: {
+            kind: 'render.export',
+            assetId: job.assetId,
+            sha256,
+            bytes: bytes.length,
+            localRef,
+            descriptor: {
+              mimeType: 'video/mp4',
+              width: verified.width,
+              height: verified.height,
+              durationUs: verified.durationUs,
+            },
+          },
+        };
+      } catch (error) {
+        if (error instanceof Error && error.message === 'canceled') {
+          this.log.write(`job ${job.id} canceled`);
+          return { state: 'canceled' };
+        }
+        throw error;
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    }
     if (job.type === 'upscale.image' || job.type === 'upscale.video') {
       if (!this.tools.ffprobe) throw new Error('FFprobe is required for upscaling outputs');
       if (job.assetId === undefined) throw new Error(job.type + ' requires an input asset');
@@ -754,6 +826,17 @@ export class WorkerRuntime {
         this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
       return readGpuDerivative(directory, result);
     }
+    if (result.kind === 'render.export') {
+      const directory =
+        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+      const bytes = readFileSync(join(directory, `${result.localRef}.mp4`));
+      if (
+        bytes.length !== result.bytes ||
+        createHash('sha256').update(bytes).digest('hex') !== result.sha256
+      )
+        throw new Error('retained export derivative integrity check failed');
+      return bytes;
+    }
     if (result.kind === 'text' || result.kind === 'image' || result.kind === 'video') {
       if (result.localRef === undefined) throw new Error('AI derivative has no local reference');
       const ext = result.kind === 'video' ? 'mp4' : result.kind === 'text' ? 'txt' : 'png';
@@ -797,6 +880,7 @@ function mlDenoiseRunnable(): boolean {
 export type WorkerDerivativeReceipt =
   | RealThumbnailReceipt
   | FixtureThumbnailReceipt
+  | RenderExportReceipt
   | LocalGpuReceipt
   | LocalAiReceipt
   | MaskWorkerDerivative
@@ -875,6 +959,20 @@ export interface FixtureThumbnailReceipt {
   readonly kind: 'fixture.thumbnail';
   readonly sha256: string;
   readonly bytes: number;
+}
+
+export interface RenderExportReceipt {
+  readonly kind: 'render.export';
+  readonly assetId: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly localRef: string;
+  readonly descriptor: {
+    readonly mimeType: 'video/mp4';
+    readonly width: number;
+    readonly height: number;
+    readonly durationUs: number;
+  };
 }
 
 async function runBounded(

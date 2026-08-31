@@ -32,6 +32,10 @@ interface ProjectExportProcessEntryBase extends Omit<ExportProcessEntry, 'status
   readonly revision: number;
   readonly presetId: string;
   readonly manifest: ExportRetryManifest;
+  readonly producer?: 'browser-staged-preview-export';
+  readonly workerJobId?: string;
+  readonly derivativeId?: string;
+  readonly stagedAssetId?: string;
 }
 
 /** Immutable inputs required to retry the same logical browser encode. */
@@ -209,6 +213,10 @@ function isProjectEntry(value: unknown): value is ProjectExportProcessEntry {
     typeof entry.presetId === 'string' &&
     entry.presetId.length > 0 &&
     isRetryManifest(entry.manifest) &&
+    (entry.producer === undefined || entry.producer === 'browser-staged-preview-export') &&
+    (entry.workerJobId === undefined || typeof entry.workerJobId === 'string') &&
+    (entry.derivativeId === undefined || typeof entry.derivativeId === 'string') &&
+    (entry.stagedAssetId === undefined || typeof entry.stagedAssetId === 'string') &&
     ((entry.status === 'completed' &&
       entry.cacheState === 'ready' &&
       typeof entry.sha256 === 'string' &&

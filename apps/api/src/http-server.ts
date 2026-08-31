@@ -294,17 +294,28 @@ async function route(
   const workerDerivativeUploadMatch = /^\/v1\/workers\/([^/]+)\/jobs\/([^/]+)\/derivative$/.exec(
     url.pathname,
   );
+  const workerSourceMatch = /^\/v1\/workers\/([^/]+)\/jobs\/([^/]+)\/source$/.exec(url.pathname);
   const workerPreviewNextMatch = /^\/v1\/workers\/([^/]+)\/preview\/next$/.exec(url.pathname);
   const workerPreviewCompleteMatch =
     /^\/v1\/workers\/([^/]+)\/preview\/frames\/([^/]+)\/([0-9]+)$/.exec(url.pathname);
   if (
-    request.method === 'POST' &&
+    ((request.method === 'POST' &&
+      (workerLeaseMatch !== null ||
+        workerHelloMatch !== null ||
+        workerHeartbeatMatch !== null ||
+        workerCompleteMatch !== null ||
+        workerFailMatch !== null ||
+        workerDerivativeUploadMatch !== null ||
+        workerPreviewNextMatch !== null ||
+        workerPreviewCompleteMatch !== null)) ||
+      (request.method === 'GET' && workerSourceMatch !== null)) &&
     (workerLeaseMatch !== null ||
       workerHelloMatch !== null ||
       workerHeartbeatMatch !== null ||
       workerCompleteMatch !== null ||
       workerFailMatch !== null ||
       workerDerivativeUploadMatch !== null ||
+      workerSourceMatch !== null ||
       workerPreviewNextMatch !== null ||
       workerPreviewCompleteMatch !== null)
   ) {
@@ -315,6 +326,7 @@ async function route(
       workerCompleteMatch?.[1] ??
       workerFailMatch?.[1] ??
       workerDerivativeUploadMatch?.[1] ??
+      workerSourceMatch?.[1] ??
       workerPreviewNextMatch?.[1] ??
       workerPreviewCompleteMatch?.[1];
     const sessionWorkerId = await options.controlPlane.authenticateWorker(
@@ -435,13 +447,15 @@ async function route(
             profile:
               receipt.kind === 'thumbnail'
                 ? 'jpeg-640'
-                : receipt.kind === 'mask'
-                  ? receipt.descriptor.mimeType === 'video/webm'
-                    ? 'tracked-alpha-webm-v1'
-                    : 'alpha-matte-png-v1'
-                  : receipt.kind === 'upscale'
-                    ? 'ai-upscale-v1'
-                    : 'audio-processed',
+                : receipt.kind === 'proxy'
+                  ? 'joy-export-h264-aac'
+                  : receipt.kind === 'mask'
+                    ? receipt.descriptor.mimeType === 'video/webm'
+                      ? 'tracked-alpha-webm-v1'
+                      : 'alpha-matte-png-v1'
+                    : receipt.kind === 'upscale'
+                      ? 'ai-upscale-v1'
+                      : 'audio-processed',
             sha256: receipt.sha256,
             bytes: receipt.bytes,
             descriptor: receipt.descriptor,
@@ -466,6 +480,39 @@ async function route(
         }
         throw error;
       }
+    }
+    if (workerSourceMatch !== null) {
+      const store = options.privateObjectStore;
+      if (store === undefined)
+        throw new ControlPlaneError(
+          'PRIVATE_STORE_UNAVAILABLE',
+          'private media storage is unavailable',
+        );
+      const jobId = decodeURIComponent(workerSourceMatch[2]!);
+      const leaseToken = requiredHeader(request, 'x-joy-lease-token');
+      const asset = await options.controlPlane.workerJobAsset(
+        decodeURIComponent(workerId),
+        jobId,
+        Date.now(),
+        leaseToken,
+      );
+      const location = asset.locations.find((candidate) => candidate.kind === 'private-object');
+      if (location === undefined) throw new ControlPlaneError('ASSET_UNAVAILABLE', asset.id);
+      const bytes = await store.get({
+        ref: location.ref,
+        sha256: asset.sha256,
+        bytes: asset.bytes,
+        mimeType: asset.descriptor.mimeType,
+      });
+      response.writeHead(200, {
+        'content-type': asset.descriptor.mimeType,
+        'content-length': String(bytes.byteLength),
+        'cache-control': 'private, no-store',
+        'cross-origin-resource-policy': 'same-origin',
+        'x-content-type-options': 'nosniff',
+      });
+      response.end(Buffer.from(bytes));
+      return;
     }
     const body = await readJson(request, maxJsonBodyBytes);
     const result = optionalWorkerResult(body);
@@ -2010,6 +2057,19 @@ function optionalWorkerResult(body: Record<string, unknown>):
       };
     }
   | {
+      readonly kind: 'render.export';
+      readonly assetId: string;
+      readonly sha256: string;
+      readonly bytes: number;
+      readonly localRef: string;
+      readonly descriptor: {
+        readonly mimeType: 'video/mp4';
+        readonly width: number;
+        readonly height: number;
+        readonly durationUs: number;
+      };
+    }
+  | {
       readonly kind:
         | 'image.comfy'
         | 'audio.ml-denoise'
@@ -2038,6 +2098,33 @@ function optionalWorkerResult(body: Record<string, unknown>):
     return { kind: result.kind, sha256: result.sha256, bytes: result.bytes };
   }
   const descriptor = result.descriptor;
+  if (
+    result.kind === 'render.export' &&
+    typeof result.assetId === 'string' &&
+    typeof result.localRef === 'string' &&
+    isReceiptHashAndBytes(result) &&
+    descriptor !== null &&
+    typeof descriptor === 'object' &&
+    !Array.isArray(descriptor) &&
+    (descriptor as Record<string, unknown>).mimeType === 'video/mp4' &&
+    Number.isSafeInteger((descriptor as Record<string, unknown>).width) &&
+    Number.isSafeInteger((descriptor as Record<string, unknown>).height) &&
+    Number.isSafeInteger((descriptor as Record<string, unknown>).durationUs)
+  ) {
+    return {
+      kind: result.kind,
+      assetId: result.assetId,
+      sha256: result.sha256,
+      bytes: result.bytes,
+      localRef: result.localRef,
+      descriptor: {
+        mimeType: 'video/mp4',
+        width: (descriptor as Record<string, unknown>).width as number,
+        height: (descriptor as Record<string, unknown>).height as number,
+        durationUs: (descriptor as Record<string, unknown>).durationUs as number,
+      },
+    };
+  }
   if (
     (result.kind === 'image.comfy' ||
       result.kind === 'audio.ml-denoise' ||
@@ -2114,6 +2201,7 @@ function isCloudDerivativeResult(
   return (
     value !== undefined &&
     (value.kind === 'asset.thumbnail' ||
+      value.kind === 'render.export' ||
       value.kind === 'audio.ml-denoise' ||
       value.kind === 'mask.image' ||
       value.kind === 'mask.video' ||
@@ -2179,7 +2267,7 @@ function workerDerivativeHeaders(request: IncomingMessage): {
   readonly assetId: string;
   readonly sha256: string;
   readonly bytes: number;
-  readonly kind: 'thumbnail' | 'audio' | 'mask' | 'upscale';
+  readonly kind: 'thumbnail' | 'proxy' | 'audio' | 'mask' | 'upscale';
   readonly leaseToken: string;
   readonly descriptor: {
     readonly mimeType: string;
@@ -2203,10 +2291,12 @@ function workerDerivativeHeaders(request: IncomingMessage): {
   const isThumbnail =
     declaredKind === undefined ? mimeType === 'image/jpeg' : declaredKind === 'thumbnail';
   const isMask = declaredKind === 'mask';
+  const isProxy = declaredKind === 'proxy';
   const isUpscale = declaredKind === 'upscale';
   const declaredKindValid =
     declaredKind === undefined ||
     declaredKind === 'thumbnail' ||
+    declaredKind === 'proxy' ||
     declaredKind === 'audio' ||
     declaredKind === 'mask' ||
     declaredKind === 'upscale';
@@ -2233,8 +2323,23 @@ function workerDerivativeHeaders(request: IncomingMessage): {
         height <= 0 ||
         (mimeType === 'video/webm' &&
           (durationUs === undefined || !Number.isSafeInteger(durationUs) || durationUs <= 0)))) ||
+    (isProxy &&
+      (mimeType !== 'video/mp4' ||
+        width === undefined ||
+        !Number.isSafeInteger(width) ||
+        width <= 0 ||
+        height === undefined ||
+        !Number.isSafeInteger(height) ||
+        height <= 0 ||
+        durationUs === undefined ||
+        !Number.isSafeInteger(durationUs) ||
+        durationUs <= 0)) ||
     (isUpscale && !['image/png', 'image/jpeg', 'video/mp4', 'video/webm'].includes(mimeType)) ||
-    (!isThumbnail && !isMask && !isUpscale && !/^audio\/[a-z0-9.+-]+$/i.test(mimeType)) ||
+    (!isThumbnail &&
+      !isMask &&
+      !isProxy &&
+      !isUpscale &&
+      !/^audio\/[a-z0-9.+-]+$/i.test(mimeType)) ||
     (isMask && mimeType !== 'image/png' && mimeType !== 'video/webm') ||
     (isUpscale &&
       ((mimeType.startsWith('image/') &&
@@ -2261,7 +2366,15 @@ function workerDerivativeHeaders(request: IncomingMessage): {
     assetId,
     sha256,
     bytes,
-    kind: isThumbnail ? 'thumbnail' : isMask ? 'mask' : isUpscale ? 'upscale' : 'audio',
+    kind: isThumbnail
+      ? 'thumbnail'
+      : isMask
+        ? 'mask'
+        : isProxy
+          ? 'proxy'
+          : isUpscale
+            ? 'upscale'
+            : 'audio',
     leaseToken,
     descriptor: {
       mimeType,
@@ -2365,6 +2478,7 @@ function jobForBrowser(job: Job) {
       ? {}
       : {
           derivative: {
+            id: derivative.id,
             jobId: derivative.jobId,
             kind: derivative.kind,
             sha256: derivative.sha256,

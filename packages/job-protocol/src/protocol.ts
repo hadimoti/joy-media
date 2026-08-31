@@ -4,6 +4,7 @@ export const WORKER_PROTOCOL_VERSION = 1 as const;
 
 export type WorkerCapability =
   | 'asset.thumbnail'
+  | 'render.export'
   /** Ephemeral current-frame rendering; never a durable job type. */
   | 'render.preview.gpu'
   | 'image.comfy'

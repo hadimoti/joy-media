@@ -33,6 +33,7 @@ export function browserJob(value: unknown): BrowserJob {
 function jobDerivative(value: unknown): NonNullable<BrowserJob['derivative']> {
   if (!isRecord(value)) throw invalidJobResponse();
   return {
+    id: opaque(value.id),
     jobId: opaque(value.jobId),
     kind: opaque(value.kind),
     sha256: hash(value.sha256),

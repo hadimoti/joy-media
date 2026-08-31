@@ -289,6 +289,36 @@ describe('WorkerControlPlaneClient', () => {
       await close(server);
     }
   });
+
+  it('downloads the staged job source with the Worker lease token', async () => {
+    let seenAuthorization: string | undefined;
+    let seenLeaseToken: string | undefined;
+    const client = new WorkerControlPlaneClient({
+      apiUrl: 'https://media.joyteam.ir/',
+      identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
+      sessionStore: {
+        loadWorkerSession: () => 'worker-session',
+        saveWorkerSession: () => undefined,
+        clearWorkerSession: () => undefined,
+      },
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        seenAuthorization = new Headers(init?.headers).get('authorization') ?? undefined;
+        seenLeaseToken = new Headers(init?.headers).get('x-joy-lease-token') ?? undefined;
+        expect(url.pathname).toBe('/v1/workers/worker-1/jobs/job-1/source');
+        return new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { 'content-type': 'video/mp4' },
+        });
+      },
+    });
+
+    await expect(client.downloadJobAsset('job-1', 'lease-1')).resolves.toEqual(
+      new Uint8Array([1, 2, 3]),
+    );
+    expect(seenAuthorization).toBe('Bearer worker-session');
+    expect(seenLeaseToken).toBe('lease-1');
+  });
 });
 
 function response(status: number, value: unknown): Response {

@@ -32,6 +32,11 @@ const identity = getDeviceIdentity(store);
 const sources = localAssetSourcesFromEnvironment(process.env.JOY_MEDIA_LOCAL_ASSETS_JSON);
 if (store.loadWorkerSession() !== undefined) clearPairingNotification(pairingNotificationPath);
 let gpuPreviewHost: GpuPreviewHost | undefined;
+const apiUrl = process.env.JOY_MEDIA_API_URL;
+const client =
+  apiUrl === undefined
+    ? undefined
+    : new WorkerControlPlaneClient({ apiUrl, identity, sessionStore: store });
 try {
   gpuPreviewHost = await GpuPreviewHost.create();
   console.log(
@@ -49,12 +54,11 @@ try {
 const runtime = new WorkerRuntime(identity, detectMediaTools(), {
   ...(sources === undefined ? {} : { sources }),
   gpuPreviewAvailable: gpuPreviewHost !== undefined,
+  ...(client === undefined ? {} : { downloadJobAsset: client.downloadJobAsset.bind(client) }),
 });
 console.log(JSON.stringify(runtime.hello(process.platform, process.arch)));
 
-const apiUrl = process.env.JOY_MEDIA_API_URL;
-if (apiUrl !== undefined) {
-  const client = new WorkerControlPlaneClient({ apiUrl, identity, sessionStore: store });
+if (apiUrl !== undefined && client !== undefined) {
   if (store.loadWorkerSession() === undefined) {
     try {
       await waitForWorkerPairing(client, store, {

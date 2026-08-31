@@ -1,11 +1,12 @@
-import { mkdtempSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { LocalControlPlane } from '@joy-media/api';
 import { ProjectHistory } from '@joy-media/commands';
 import type { CommandTransaction } from '@joy-media/commands';
-import { freezeManifest, verifyExport } from '@joy-media/export-core';
+import { freezeManifest, renderFixture, verifyExport } from '@joy-media/export-core';
 import { PlaybackScheduler } from '@joy-media/playback-engine';
 import { InMemoryProjectStore, LocalProjectPersistence } from '@joy-media/project-persistence';
 import type { PersistenceAdapter } from '@joy-media/project-persistence';
@@ -74,12 +75,36 @@ describe('P02 reference social-edit end-to-end workflow', () => {
     const api = new LocalControlPlane();
     const owner = { id: 'reference-owner' };
     api.createProject(owner, REFERENCE_PROJECT.id, REFERENCE_PROJECT.title);
+    api.registerAsset(owner, REFERENCE_PROJECT.id, {
+      id: 'reference-source',
+      kind: 'video',
+      displayName: 'reference-source.mp4',
+      sha256: 'a'.repeat(64),
+      bytes: 1,
+      descriptor: { mimeType: 'video/mp4', durationUs: 100_000, width: 64, height: 36 },
+      locations: [{ kind: 'private-object', ref: 'reference-source-1' }],
+    });
     api.pairWorker(owner, 'interrupted-worker');
     api.pairWorker(owner, 'recovery-worker');
+    api.helloWorker('interrupted-worker', ['render.export']);
+    api.helloWorker('recovery-worker', ['render.export']);
     const outputDirectory = mkdtempSync(join(tmpdir(), 'joy-media-reference-e2e-'));
     const now = Date.now();
 
-    api.enqueue(owner, 'landscape', REFERENCE_PROJECT.id, 'render.export', now);
+    api.enqueue(
+      owner,
+      'landscape',
+      REFERENCE_PROJECT.id,
+      'render.export',
+      now,
+      'reference-source',
+      {
+        schemaVersion: 1,
+        producer: 'browser-staged-preview-export',
+        frameCount: 3,
+        manifest: landscapeManifestLike(),
+      },
+    );
     expect(api.lease('interrupted-worker', now + 1, 5)?.id).toBe('landscape');
     const landscapeLease = api.lease('recovery-worker', now + 6, 30_000);
     expect(landscapeLease?.id).toBe('landscape');
@@ -92,20 +117,61 @@ describe('P02 reference social-edit end-to-end workflow', () => {
       durationUs: 100_000,
       preset: 'social-h264-aac',
     });
+    const landscapeSource = join(outputDirectory, 'reference-source-landscape.mp4');
+    renderFixture(landscapeManifest, landscapeSource);
     const landscapePath = join(outputDirectory, 'reference-landscape.mp4');
-    expect(
-      executeLeasedExport(
-        api,
-        'recovery-worker',
-        'landscape',
-        landscapeManifest,
-        landscapePath,
-        landscapeLease?.leaseToken,
-      ),
-    ).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
-    expect(verifyExport(landscapePath)).toMatchObject({ width: 64, height: 36 });
+    const landscapeResult = executeLeasedExport(
+      { complete: () => undefined },
+      'recovery-worker',
+      'landscape',
+      {
+        sourcePath: landscapeSource,
+        payload: {
+          schemaVersion: 1,
+          producer: 'browser-staged-preview-export',
+          frameCount: 3,
+          manifest: landscapeManifest,
+        },
+      },
+      landscapePath,
+      landscapeLease?.leaseToken,
+    );
+    expect(landscapeResult).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
+    const landscapeProbe = verifyExport(landscapePath);
+    expect(landscapeProbe).toMatchObject({ width: 64, height: 36 });
+    completeExport(
+      api,
+      'recovery-worker',
+      'landscape',
+      'reference-source',
+      landscapePath,
+      landscapeProbe,
+      now + 7,
+      landscapeLease?.leaseToken,
+    );
 
-    api.enqueue(owner, 'vertical', REFERENCE_PROJECT.id, 'render.export', now + 10);
+    api.enqueue(
+      owner,
+      'vertical',
+      REFERENCE_PROJECT.id,
+      'render.export',
+      now + 10,
+      'reference-source',
+      {
+        schemaVersion: 1,
+        producer: 'browser-staged-preview-export',
+        frameCount: 3,
+        manifest: {
+          projectId: REFERENCE_PROJECT.id,
+          revision: REFERENCE_PROJECT.revision,
+          width: 36,
+          height: 64,
+          frameRate: 30,
+          durationUs: 100_000,
+          preset: 'social-h264-aac',
+        },
+      },
+    );
     const verticalLease = api.lease('recovery-worker', now + 11);
     expect(verticalLease?.id).toBe('vertical');
     const verticalManifest = freezeManifest({
@@ -113,18 +179,38 @@ describe('P02 reference social-edit end-to-end workflow', () => {
       width: 36,
       height: 64,
     });
+    const verticalSource = join(outputDirectory, 'reference-source-vertical.mp4');
+    renderFixture(verticalManifest, verticalSource);
     const verticalPath = join(outputDirectory, 'reference-vertical.mp4');
-    expect(
-      executeLeasedExport(
-        api,
-        'recovery-worker',
-        'vertical',
-        verticalManifest,
-        verticalPath,
-        verticalLease?.leaseToken,
-      ),
-    ).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
-    expect(verifyExport(verticalPath)).toMatchObject({ width: 36, height: 64 });
+    const verticalResult = executeLeasedExport(
+      { complete: () => undefined },
+      'recovery-worker',
+      'vertical',
+      {
+        sourcePath: verticalSource,
+        payload: {
+          schemaVersion: 1,
+          producer: 'browser-staged-preview-export',
+          frameCount: 3,
+          manifest: verticalManifest,
+        },
+      },
+      verticalPath,
+      verticalLease?.leaseToken,
+    );
+    expect(verticalResult).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
+    const verticalProbe = verifyExport(verticalPath);
+    expect(verticalProbe).toMatchObject({ width: 36, height: 64 });
+    completeExport(
+      api,
+      'recovery-worker',
+      'vertical',
+      'reference-source',
+      verticalPath,
+      verticalProbe,
+      now + 12,
+      verticalLease?.leaseToken,
+    );
     expect(api.eventsAfter(owner, REFERENCE_PROJECT.id, 0).map((event) => event.type)).toEqual([
       'queued',
       'leased',
@@ -136,3 +222,66 @@ describe('P02 reference social-edit end-to-end workflow', () => {
     ]);
   });
 });
+
+function landscapeManifestLike() {
+  return {
+    projectId: REFERENCE_PROJECT.id,
+    revision: REFERENCE_PROJECT.revision,
+    width: 64,
+    height: 36,
+    frameRate: 30,
+    durationUs: 100_000,
+    preset: 'social-h264-aac' as const,
+  };
+}
+
+function completeExport(
+  api: LocalControlPlane,
+  workerId: string,
+  jobId: string,
+  assetId: string,
+  outputPath: string,
+  probe: ReturnType<typeof verifyExport>,
+  at: number,
+  leaseToken: string | undefined,
+): void {
+  const bytes = readFileSync(outputPath);
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const descriptor = {
+    mimeType: 'video/mp4' as const,
+    width: probe.width,
+    height: probe.height,
+    durationUs: probe.durationUs,
+  };
+  api.registerWorkerCloudDerivative(
+    workerId,
+    jobId,
+    {
+      id: `derivative-${jobId}`,
+      assetId,
+      kind: 'proxy',
+      profile: 'joy-export-h264-aac',
+      sha256,
+      bytes: bytes.length,
+      descriptor,
+      availability: 'available-cloud',
+      locations: [{ kind: 'private-object', ref: `derivative-${jobId}` }],
+    },
+    at,
+    leaseToken,
+  );
+  api.complete(
+    workerId,
+    jobId,
+    at + 1,
+    {
+      kind: 'render.export',
+      assetId,
+      sha256,
+      bytes: bytes.length,
+      localRef: `export-${jobId}`,
+      descriptor,
+    },
+    leaseToken,
+  );
+}

@@ -463,6 +463,7 @@ describe('BrowserControlPlaneClient', () => {
             progress: 100,
             cancelRequested: false,
             derivative: {
+              id: 'derivative-job-1',
               jobId: 'job-1',
               kind: 'image.comfy',
               sha256: 'a'.repeat(64),

@@ -9,11 +9,23 @@ const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 function safeName(name: string): string {
   const base = name.replaceAll('\\', '/').split('/').at(-1)?.trim() ?? '';
-  return encodeURIComponent(base).slice(0, 180) || 'source.bin';
+  const encoded = encodeURIComponent(base);
+  // Keep the ref bounded without truncating a percent-encoded UTF-8 byte
+  // sequence. A truncated `%E2`-style suffix cannot be decoded on restore and
+  // makes an otherwise valid GLTF dependency permanently unavailable.
+  let bounded = '';
+  for (let index = 0; index < encoded.length;) {
+    const token = encoded[index] === '%' ? encoded.slice(index, index + 3) : encoded[index]!;
+    if (bounded.length + token.length > 180) break;
+    bounded += token;
+    index += token.length;
+  }
+  return bounded || 'source.bin';
 }
 
 export function createThreeDSourceRef(sceneId: string, index: number, name: string): string {
-  if (!SAFE_ID.test(sceneId) || !Number.isInteger(index) || index < 0) throw new Error('invalid 3D source reference');
+  if (!SAFE_ID.test(sceneId) || !Number.isInteger(index) || index < 0)
+    throw new Error('invalid 3D source reference');
   return `${sceneId}/${index}-${safeName(name)}`;
 }
 
@@ -42,10 +54,17 @@ export class OpfsThreeDSourceStore implements ThreeDSourceStore {
     const directory = await this.sceneDir(sceneId, true);
     const refs: string[] = [];
     for (const [index, file] of files.entries()) {
-      if (file.size <= 0 || file.size > 100 * 1024 * 1024) throw new Error(`3D source ${file.name} is empty or too large`);
+      if (file.size <= 0 || file.size > 100 * 1024 * 1024)
+        throw new Error(`3D source ${file.name} is empty or too large`);
       const ref = createThreeDSourceRef(sceneId, index, file.name);
-      const writable = await (await directory.getFileHandle(`${index}.bin`, { create: true })).createWritable();
-      try { await writable.write(file); } finally { await writable.close(); }
+      const writable = await (
+        await directory.getFileHandle(`${index}.bin`, { create: true })
+      ).createWritable();
+      try {
+        await writable.write(file);
+      } finally {
+        await writable.close();
+      }
       refs.push(ref);
     }
     return refs;
@@ -56,12 +75,21 @@ export class OpfsThreeDSourceStore implements ThreeDSourceStore {
     if (match === null) return undefined;
     try {
       const directory = await this.sceneDir(match[1]!, false);
-      return await (await directory.getFileHandle(`${Number(match[2])}.bin`, { create: false })).getFile();
-    } catch { return undefined; }
+      return await (
+        await directory.getFileHandle(`${Number(match[2])}.bin`, { create: false })
+      ).getFile();
+    } catch {
+      return undefined;
+    }
   }
 }
 
 export async function openThreeDSourceStore(): Promise<OpfsThreeDSourceStore> {
-  const getDirectory = (globalThis.navigator?.storage as (StorageManager & { readonly getDirectory?: () => Promise<OpfsDirectoryHandle> }) | undefined)?.getDirectory;
-  return new OpfsThreeDSourceStore(getDirectory === undefined ? undefined : await getDirectory.call(navigator.storage));
+  const getDirectory = (
+    globalThis.navigator?.storage as
+      (StorageManager & { readonly getDirectory?: () => Promise<OpfsDirectoryHandle> }) | undefined
+  )?.getDirectory;
+  return new OpfsThreeDSourceStore(
+    getDirectory === undefined ? undefined : await getDirectory.call(navigator.storage),
+  );
 }
