@@ -688,7 +688,7 @@ async function recordJourney(
   await enhance.click();
   await page
     .getByRole('region', { name: 'Enhance tools', exact: true })
-    .getByRole('tab', { name: 'Animate', exact: true })
+    .getByRole('tab', { name: /^Animate/ })
     .click();
   const motion = page.locator('.motion-panel');
   await motion.waitFor();
@@ -1011,7 +1011,7 @@ async function recordJourney(
   await enhance.click();
   await page
     .getByRole('region', { name: 'Enhance tools', exact: true })
-    .getByRole('tab', { name: 'Animate', exact: true })
+    .getByRole('tab', { name: /^Animate/ })
     .click();
   const reloadedMotion = page.locator('.motion-panel');
   await reloadedMotion.waitFor();
