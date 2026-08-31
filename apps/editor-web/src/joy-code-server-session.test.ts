@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
-import type { CreativeBriefV1 } from '@joy-media/agent-tools';
+import type { CreativeBriefV1, JoyCodePlanProposalV1 } from '@joy-media/agent-tools';
 import type { ControlPlaneProjectBinding } from './project-control-plane.js';
 import { JoyCodeServerSession } from './joy-code-server-session.js';
 
@@ -45,6 +45,47 @@ const storage: BrowserKeyValueStore = {
 };
 
 describe('Joy Code server session', () => {
+  it('invokes the local planner and skips cloud sync', async () => {
+    let syncCalls = 0;
+    const proposal = {
+      schemaVersion: 1,
+      goal: 'local plan',
+      summary: 'local',
+      operations: [],
+      assumptions: [],
+      blockedBy: [],
+      requiresHumanDecision: [],
+      planId: 'local-plan',
+      projectId: 'p',
+      snapshotRevisionId: 'r',
+      createdAt: '2026-09-01T00:00:00.000Z',
+      consentVersion: 'local-deepseek-harness-v1',
+      catalogVersion: 'joy-code-catalog-v1',
+      provenance: {
+        actor: 'joy-code-client',
+        adapterName: 'deepseek-harness-joy-code-v1',
+        modelId: 'deepseek-chat',
+      },
+    } satisfies JoyCodePlanProposalV1;
+    const session = new JoyCodeServerSession({
+      binding,
+      document: project,
+      revisionId: 'r',
+      storage,
+      syncProjectDocument: async () => {
+        syncCalls += 1;
+        return { projectId: 'cp', revisionId: 'r' };
+      },
+      joyCodeTransport: async () => {
+        throw new Error('cloud path must not run');
+      },
+      localJoyCodePlanner: async () => proposal,
+    });
+    const result = await session.plan('local', { clipIds: [] });
+    expect(result).toMatchObject({ kind: 'success', proposal });
+    expect(syncCalls).toBe(0);
+  });
+
   it('returns parity failure locally and does not call sync or provider', async () => {
     let calls = 0;
     const session = new JoyCodeServerSession({

@@ -87,4 +87,53 @@ describe('DeepSeek harness Joy Code adapter', () => {
       errorCode: 'DEEPSEEK_HARNESS_ENDPOINT_INVALID',
     });
   });
+
+  it('allows HTTP only for loopback and requires HTTPS for remote endpoints', async () => {
+    const remote = await createDeepSeekHarnessJoyCodeAdapter({
+      ...options,
+      endpointUrl: 'http://provider.example/v1/chat/completions',
+    }).createPlan(input, { correlationId: 'test' });
+    expect(remote.errorCode).toBe('DEEPSEEK_HARNESS_ENDPOINT_INVALID');
+    const loopback = await createDeepSeekHarnessJoyCodeAdapter({
+      ...options,
+      endpointUrl: 'http://127.0.0.1:8080/v1/chat/completions',
+    }).createPlan(input, { correlationId: 'test' });
+    expect(loopback.category).toBe('ready');
+  });
+
+  it('cancels an oversized streaming response before accumulating it', async () => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(262_144));
+        controller.enqueue(new Uint8Array(1));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const result = await createDeepSeekHarnessJoyCodeAdapter({
+      ...options,
+      transport: { post: async () => new Response(stream, { status: 200 }) },
+    }).createPlan(input, { correlationId: 'test' });
+    expect(result).toMatchObject({
+      category: 'provider-failed',
+      errorCode: 'DEEPSEEK_HARNESS_RESPONSE_TOO_LARGE',
+    });
+    expect(cancelled).toBe(true);
+  });
+
+  it('times out a body that stalls after headers', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"choices":['));
+      },
+    });
+    const result = await createDeepSeekHarnessJoyCodeAdapter({
+      ...options,
+      timeoutMs: 10,
+      transport: { post: async () => new Response(stream, { status: 200 }) },
+    }).createPlan(input, { correlationId: 'test' });
+    expect(result).toMatchObject({ category: 'timeout', errorCode: 'DEEPSEEK_HARNESS_TIMEOUT' });
+  });
 });

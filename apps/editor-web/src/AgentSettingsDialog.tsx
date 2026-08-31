@@ -188,6 +188,16 @@ export function AgentSettingsDialog({
                     onChange={(event) => update('deepSeekHarnessApiKey', event.target.value)}
                   />
                 </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={settings.localProviderDisclosureAccepted}
+                    onChange={(event) =>
+                      update('localProviderDisclosureAccepted', event.target.checked)
+                    }
+                  />{' '}
+                  I understand this provider may receive project context
+                </label>
                 <p>
                   Only the future Windows app reads this key. It is never sent to JOY cloud,
                   projects, logs, or reports.

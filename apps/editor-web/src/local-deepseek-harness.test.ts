@@ -21,7 +21,7 @@ describe('local DeepSeek harness planner', () => {
         apiKey: 'pc-only-key',
       },
       {
-        post: async (url, options) => {
+        post: async (url: string, options: RequestInit) => {
           requestUrl = url;
           requested = String(options.body);
           return new Response(

@@ -5,6 +5,9 @@ import {
   DEFAULT_AGENT_SETTINGS,
   loadAgentSettings,
   localDeepSeekHarnessSettings,
+  createInMemoryCredentialStore,
+  LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF,
+  canUseLocalDeepSeekHarness,
   saveAgentSettings,
 } from './agent-settings.js';
 
@@ -67,23 +70,64 @@ describe('agent settings', () => {
       deepSeekHarnessEndpoint: ' https://openrouter.example/v1/chat/completions ',
       deepSeekHarnessModel: 'deepseek-chat',
       deepSeekHarnessApiKey: 'credential-value',
+      localProviderDisclosureAccepted: true,
     };
     saveAgentSettings(storage, settings);
-    expect(localDeepSeekHarnessSettings(loadAgentSettings(storage))).toEqual({
+    expect(storage.value).not.toContain('credential-value');
+    const credentialStore = createInMemoryCredentialStore();
+    credentialStore.set(LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF, settings.deepSeekHarnessApiKey);
+    expect(localDeepSeekHarnessSettings(loadAgentSettings(storage), credentialStore)).toEqual({
       endpointUrl: 'https://openrouter.example/v1/chat/completions',
       modelId: 'deepseek-chat',
       apiKey: 'credential-value',
     });
-    expect(storage.value).toContain('credential-value');
+    expect(loadAgentSettings(storage).deepSeekHarnessApiKey).toBe('');
+    expect(loadAgentSettings(storage).localProviderDisclosureAccepted).toBe(true);
   });
 
   it('does not activate an incomplete local engine configuration', () => {
     expect(
-      localDeepSeekHarnessSettings({
-        ...DEFAULT_AGENT_SETTINGS,
-        joyCodeEngine: 'local-deepseek-harness',
-        deepSeekHarnessEndpoint: 'https://openrouter.example/v1/chat/completions',
-      }),
+      localDeepSeekHarnessSettings(
+        {
+          ...DEFAULT_AGENT_SETTINGS,
+          joyCodeEngine: 'local-deepseek-harness',
+          deepSeekHarnessEndpoint: 'https://openrouter.example/v1/chat/completions',
+        },
+        createInMemoryCredentialStore(),
+      ),
     ).toBeUndefined();
+  });
+
+  it('allows loopback endpoints but requires auth and disclosure for remote endpoints', () => {
+    const localOnly = { privacyMode: 'local-only' as const };
+    const asksBeforeRemote = { privacyMode: 'ask-before-remote' as const };
+    expect(
+      canUseLocalDeepSeekHarness(localOnly, {
+        endpointUrl: 'http://127.0.0.1:8080/v1/chat/completions',
+        authenticatedSessionReady: false,
+        disclosureAccepted: false,
+      }),
+    ).toBe(true);
+    expect(
+      canUseLocalDeepSeekHarness(localOnly, {
+        endpointUrl: 'https://provider.example/v1/chat/completions',
+        authenticatedSessionReady: true,
+        disclosureAccepted: true,
+      }),
+    ).toBe(false);
+    expect(
+      canUseLocalDeepSeekHarness(asksBeforeRemote, {
+        endpointUrl: 'https://provider.example/v1/chat/completions',
+        authenticatedSessionReady: true,
+        disclosureAccepted: true,
+      }),
+    ).toBe(true);
+    expect(
+      canUseLocalDeepSeekHarness(asksBeforeRemote, {
+        endpointUrl: 'https://provider.example/v1/chat/completions',
+        authenticatedSessionReady: true,
+        disclosureAccepted: false,
+      }),
+    ).toBe(false);
   });
 });

@@ -12,7 +12,6 @@ export const DEEPSEEK_HARNESS_ENGINE = 'deepseek-harness' as const;
 export const DEEPSEEK_HARNESS_DEFAULT_MODEL = 'deepseek-chat' as const;
 export const DEEPSEEK_HARNESS_DEFAULT_TIMEOUT_MS = 30_000;
 export const DEEPSEEK_HARNESS_MAX_RESPONSE_BYTES = 256 * 1024;
-const TOOL_NAME = 'submit_joy_code_plan' as const;
 
 export interface DeepSeekHarnessEndpoint {
   readonly endpointUrl: string;
@@ -166,6 +165,11 @@ export class DeepSeekHarnessJoyCodeAdapter {
     const onAbort = () => controller.abort();
     runtime.signal?.addEventListener('abort', onAbort, { once: true });
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
+    const timeoutMs = Math.max(
+      1,
+      runtime.timeoutMs ?? this.#options.timeoutMs ?? DEEPSEEK_HARNESS_DEFAULT_TIMEOUT_MS,
+    );
     try {
       const responsePromise = this.#options.transport.post(endpoint, {
         method: 'POST',
@@ -177,22 +181,15 @@ export class DeepSeekHarnessJoyCodeAdapter {
         signal: controller.signal,
       });
       const timeoutPromise = new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => {
-            controller.abort();
-            reject(new Error('timeout'));
-          },
-          Math.max(
-            1,
-            runtime.timeoutMs ?? this.#options.timeoutMs ?? DEEPSEEK_HARNESS_DEFAULT_TIMEOUT_MS,
-          ),
-        );
+        timer = setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+          reject(new Error('timeout'));
+        }, timeoutMs);
       });
       const response = await Promise.race([responsePromise, timeoutPromise]);
       if (!response.ok) return fail('provider-failed', 'DEEPSEEK_HARNESS_PROVIDER_FAILED', true);
-      const text = await response.text();
-      if (new TextEncoder().encode(text).byteLength > DEEPSEEK_HARNESS_MAX_RESPONSE_BYTES)
-        return fail('provider-failed', 'DEEPSEEK_HARNESS_RESPONSE_TOO_LARGE', false);
+      const text = await readResponseBody(response, controller, timeoutMs);
       let body: unknown;
       try {
         body = JSON.parse(text);
@@ -210,14 +207,78 @@ export class DeepSeekHarnessJoyCodeAdapter {
       };
     } catch (error) {
       if (runtime.signal?.aborted) return fail('cancelled', 'DEEPSEEK_HARNESS_CANCELLED', false);
-      if (error instanceof Error && error.message === 'timeout')
+      if (
+        timedOut ||
+        error instanceof ResponseBodyTimeoutError ||
+        (error instanceof Error && error.message === 'timeout')
+      )
         return fail('timeout', 'DEEPSEEK_HARNESS_TIMEOUT', true);
+      if (error instanceof ResponseTooLargeError)
+        return fail('provider-failed', 'DEEPSEEK_HARNESS_RESPONSE_TOO_LARGE', false);
       return fail('provider-failed', 'DEEPSEEK_HARNESS_PROVIDER_FAILED', true);
     } finally {
       if (timer !== undefined) clearTimeout(timer);
       runtime.signal?.removeEventListener('abort', onAbort);
     }
   }
+}
+
+class ResponseTooLargeError extends Error {}
+class ResponseBodyTimeoutError extends Error {}
+
+async function readResponseBody(
+  response: Response,
+  controller: AbortController,
+  timeoutMs: number,
+): Promise<string> {
+  if (response.body === null) {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > DEEPSEEK_HARNESS_MAX_RESPONSE_BYTES)
+      throw new ResponseTooLargeError();
+    return text;
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  const deadline = Date.now() + timeoutMs;
+  try {
+    while (true) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) throw new ResponseBodyTimeoutError();
+      let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+      const next = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => {
+          deadlineTimer = setTimeout(() => {
+            controller.abort();
+            reject(new ResponseBodyTimeoutError());
+          }, remainingMs);
+        }),
+      ]).finally(() => {
+        if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+      });
+      if (next.done) break;
+      totalBytes += next.value.byteLength;
+      if (totalBytes > DEEPSEEK_HARNESS_MAX_RESPONSE_BYTES) {
+        await reader.cancel('response-too-large');
+        controller.abort();
+        throw new ResponseTooLargeError();
+      }
+      chunks.push(next.value);
+    }
+  } catch (error) {
+    await reader.cancel('response-body-failed').catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+  const merged = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
 }
 
 export function createDeepSeekHarnessJoyCodeAdapter(
@@ -229,7 +290,12 @@ export function createDeepSeekHarnessJoyCodeAdapter(
 function parseEndpoint(value: string): string | undefined {
   try {
     const url = new URL(value);
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') return undefined;
+    const loopback =
+      url.hostname === 'localhost' ||
+      url.hostname === '127.0.0.1' ||
+      url.hostname === '::1' ||
+      url.hostname === '[::1]';
+    if (url.protocol !== 'https:' && !(loopback && url.protocol === 'http:')) return undefined;
     if (url.username || url.password || url.search || url.hash) return undefined;
     return url.toString().replace(/\/$/, '');
   } catch {

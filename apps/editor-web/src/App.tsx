@@ -228,9 +228,17 @@ import { JoyCodeServerSession } from './joy-code-server-session.js';
 import { AgentSettingsDialog } from './AgentSettingsDialog.js';
 import { coordinateCreativeBriefOptIn } from './creative-brief-opt-in-coordinator.js';
 import { createCreativeBriefPanelRunner } from './creative-brief-panel-runner.js';
-import { loadAgentSettings, saveAgentSettings, type AgentSettings } from './agent-settings.js';
-import { localDeepSeekHarnessSettings } from './agent-settings.js';
+import {
+  createInMemoryCredentialStore,
+  canUseLocalDeepSeekHarness,
+  loadAgentSettings,
+  LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF,
+  localDeepSeekHarnessSettings,
+  saveAgentSettings,
+  type AgentSettings,
+} from './agent-settings.js';
 import { createLocalDeepSeekHarnessPlanner } from './local-deepseek-harness.js';
+import type { DeepSeekHarnessTransport } from '@joy-media/adapter-deepseek-harness';
 import { HistoryPanel } from './HistoryPanel.js';
 import { WorkflowsPanel } from './WorkflowsPanel.js';
 import { PluginsPanel } from './PluginsPanel.js';
@@ -1041,6 +1049,17 @@ function EditorWorkspace({
   const [agentSettings, setAgentSettings] = useState<AgentSettings>(() =>
     loadAgentSettings(window.localStorage),
   );
+  const localCredentialStoreRef = useRef(createInMemoryCredentialStore());
+  const onAgentSettingsChange = useCallback((next: AgentSettings) => {
+    if (next.joyCodeEngine !== 'local-deepseek-harness' || next.deepSeekHarnessApiKey.trim() === '')
+      localCredentialStoreRef.current.clear(LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF);
+    else
+      localCredentialStoreRef.current.set(
+        LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF,
+        next.deepSeekHarnessApiKey,
+      );
+    setAgentSettings(next);
+  }, []);
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
   const [agentPanelCommand, setAgentPanelCommand] = useState<AgentPanelCommand>();
   const [creativeBriefOptedIn, setCreativeBriefOptedIn] = useState(false);
@@ -1587,8 +1606,19 @@ function EditorWorkspace({
     [controlPlaneOwnerKey, controlPlaneProject, session.projectRevisionId, session.visualProject],
   );
   const joyCodeServerSession = useMemo(() => {
-    const localSettings = localDeepSeekHarnessSettings(agentSettings);
-    if (localSettings !== undefined) {
+    const localSettings = localDeepSeekHarnessSettings(
+      agentSettings,
+      localCredentialStoreRef.current,
+    );
+    if (
+      localSettings !== undefined &&
+      canUseLocalDeepSeekHarness(agentSettings, {
+        endpointUrl: localSettings.endpointUrl,
+        authenticatedSessionReady: joySession.kind === 'ready',
+        // Remote provider disclosure/consent is a native-shell responsibility.
+        disclosureAccepted: agentSettings.localProviderDisclosureAccepted,
+      })
+    ) {
       return new JoyCodeServerSession({
         binding: controlPlaneProject,
         document: session.visualProject,
@@ -1598,7 +1628,9 @@ function EditorWorkspace({
           mediaControlPlaneClient.syncProjectDocument(controlPlaneProjectId, params),
         joyCodeTransport: (controlPlaneProjectId, request, signal) =>
           mediaControlPlaneClient.createJoyCodePlan(controlPlaneProjectId, request, signal),
-        localJoyCodePlanner: createLocalDeepSeekHarnessPlanner(localSettings),
+        localJoyCodePlanner: createLocalDeepSeekHarnessPlanner(localSettings, {
+          post: (url: string, options: RequestInit): Promise<Response> => fetch(url, options),
+        } satisfies DeepSeekHarnessTransport),
         ownerKey: controlPlaneOwnerKey,
       });
     }
@@ -7077,7 +7109,7 @@ function EditorWorkspace({
       {agentSettingsOpen && (
         <AgentSettingsDialog
           settings={agentSettings}
-          onChange={setAgentSettings}
+          onChange={onAgentSettingsChange}
           onClose={() => setAgentSettingsOpen(false)}
         />
       )}

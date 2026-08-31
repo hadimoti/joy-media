@@ -29,6 +29,8 @@ export interface AgentSettings {
   readonly deepSeekHarnessModel: string;
   /** Kept only in the local settings store; never included in a project/request envelope. */
   readonly deepSeekHarnessApiKey: string;
+  /** Explicit disclosure acknowledgement required before remote local-provider egress. */
+  readonly localProviderDisclosureAccepted: boolean;
 }
 
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
@@ -45,11 +47,53 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   deepSeekHarnessEndpoint: '',
   deepSeekHarnessModel: 'deepseek-chat',
   deepSeekHarnessApiKey: '',
+  localProviderDisclosureAccepted: false,
 };
 
 export interface AgentSettingsStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+}
+
+/**
+ * Local credential boundary. The browser implementation is intentionally
+ * memory-only; the Windows shell will replace it with an OS-native vault.
+ */
+export interface LocalCredentialStore {
+  get(reference: string): string | undefined;
+  set(reference: string, value: string): void;
+  clear(reference: string): void;
+}
+
+export function createInMemoryCredentialStore(): LocalCredentialStore {
+  const values = new Map<string, string>();
+  return {
+    get: (reference) => values.get(reference),
+    set: (reference, value) => values.set(reference, value),
+    clear: (reference) => values.delete(reference),
+  };
+}
+
+export const LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF = 'joy-media/local/deepseek-harness-api-key';
+
+export interface LocalProviderPolicyContext {
+  readonly endpointUrl: string;
+  readonly authenticatedSessionReady: boolean;
+  readonly disclosureAccepted: boolean;
+}
+
+/** Pure egress gate for the local-provider branch. */
+export function canUseLocalDeepSeekHarness(
+  settings: Pick<AgentSettings, 'privacyMode'>,
+  context: LocalProviderPolicyContext,
+): boolean {
+  const loopback = isLoopbackEndpoint(context.endpointUrl);
+  if (loopback) return true;
+  return (
+    settings.privacyMode === 'ask-before-remote' &&
+    context.authenticatedSessionReady &&
+    context.disclosureAccepted
+  );
 }
 
 export function loadAgentSettings(storage: AgentSettingsStorage): AgentSettings {
@@ -63,7 +107,11 @@ export function loadAgentSettings(storage: AgentSettingsStorage): AgentSettings 
 }
 
 export function saveAgentSettings(storage: AgentSettingsStorage, settings: AgentSettings): void {
-  storage.setItem(AGENT_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  // API keys are deliberately excluded. A native Windows vault will own the
+  // credential boundary; web localStorage is preferences-only.
+  const { deepSeekHarnessApiKey: _ignoredApiKey, ...preferences } = settings;
+  void _ignoredApiKey;
+  storage.setItem(AGENT_SETTINGS_STORAGE_KEY, JSON.stringify(preferences));
 }
 
 /**
@@ -79,11 +127,12 @@ export interface LocalDeepSeekHarnessSettings {
 
 export function localDeepSeekHarnessSettings(
   settings: AgentSettings,
+  credentialStore?: LocalCredentialStore,
 ): LocalDeepSeekHarnessSettings | undefined {
   if (settings.joyCodeEngine !== 'local-deepseek-harness') return undefined;
   const endpointUrl = settings.deepSeekHarnessEndpoint.trim();
   const modelId = settings.deepSeekHarnessModel.trim();
-  const apiKey = settings.deepSeekHarnessApiKey;
+  const apiKey = credentialStore?.get(LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF) ?? '';
   if (endpointUrl === '' || modelId === '' || apiKey.trim() === '') return undefined;
   return { endpointUrl, modelId, apiKey };
 }
@@ -176,9 +225,18 @@ function normalizeAgentSettings(value: unknown): AgentSettings {
       typeof candidate.deepSeekHarnessModel === 'string' && candidate.deepSeekHarnessModel.trim()
         ? candidate.deepSeekHarnessModel.trim().slice(0, 160)
         : DEFAULT_AGENT_SETTINGS.deepSeekHarnessModel,
-    deepSeekHarnessApiKey:
-      typeof candidate.deepSeekHarnessApiKey === 'string'
-        ? candidate.deepSeekHarnessApiKey
-        : DEFAULT_AGENT_SETTINGS.deepSeekHarnessApiKey,
+    deepSeekHarnessApiKey: '',
+    localProviderDisclosureAccepted: candidate.localProviderDisclosureAccepted === true,
   };
+}
+
+function isLoopbackEndpoint(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const host = url.hostname.toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1';
+  } catch {
+    return false;
+  }
 }
