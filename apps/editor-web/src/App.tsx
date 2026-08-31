@@ -230,7 +230,7 @@ import { coordinateCreativeBriefOptIn } from './creative-brief-opt-in-coordinato
 import { createCreativeBriefPanelRunner } from './creative-brief-panel-runner.js';
 import {
   createInMemoryCredentialStore,
-  canUseLocalDeepSeekHarness,
+  canRunLocalDeepSeekHarness,
   loadAgentSettings,
   LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF,
   localDeepSeekHarnessSettings,
@@ -1054,8 +1054,7 @@ function EditorWorkspace({
     const apiKey = next.deepSeekHarnessApiKey.trim();
     if (next.joyCodeEngine !== 'local-deepseek-harness' || apiKey === '')
       localCredentialStoreRef.current.clear(LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF);
-    else
-      localCredentialStoreRef.current.set(LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF, apiKey);
+    else localCredentialStoreRef.current.set(LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF, apiKey);
     setAgentSettings(next);
   }, []);
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
@@ -1609,9 +1608,8 @@ function EditorWorkspace({
       localCredentialStoreRef.current,
     );
     if (
-      localSettings !== undefined &&
-      canUseLocalDeepSeekHarness(agentSettings, {
-        endpointUrl: localSettings.endpointUrl,
+      canRunLocalDeepSeekHarness(agentSettings, localSettings, {
+        endpointUrl: localSettings?.endpointUrl ?? agentSettings.deepSeekHarnessEndpoint,
         authenticatedSessionReady: joySession.kind === 'ready',
         // Remote provider disclosure/consent is a native-shell responsibility.
         disclosureAccepted: agentSettings.localProviderDisclosureAccepted,
@@ -1632,6 +1630,9 @@ function EditorWorkspace({
         ownerKey: controlPlaneOwnerKey,
       });
     }
+    // A deliberate local selection must never silently fall back to cloud
+    // execution when its local configuration is incomplete or disallowed.
+    if (agentSettings.joyCodeEngine === 'local-deepseek-harness') return undefined;
     if (!joyCodeOptedIn || joySession.kind !== 'ready') return undefined;
     return new JoyCodeServerSession({
       binding: controlPlaneProject,

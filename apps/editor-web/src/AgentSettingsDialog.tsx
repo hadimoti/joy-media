@@ -180,7 +180,7 @@ export function AgentSettingsDialog({
                   />
                 </label>
                 <label>
-                  API key (stored on this PC)
+                  API key (kept locally)
                   <input
                     type="password"
                     value={settings.deepSeekHarnessApiKey}
@@ -199,8 +199,9 @@ export function AgentSettingsDialog({
                   I understand this provider may receive project context
                 </label>
                 <p>
-                  Only the future Windows app reads this key. It is never sent to JOY cloud,
-                  projects, logs, or reports.
+                  This app keeps the key in this browser session’s memory only. Packaged JoyStudio
+                  Windows/Linux desktop and CLI builds must inject a native OS vault. The key is
+                  never persisted here or sent to JOY cloud, projects, logs, or reports.
                 </p>
               </>
             )}

@@ -137,6 +137,22 @@ export function localDeepSeekHarnessSettings(
   return { endpointUrl, modelId, apiKey };
 }
 
+/**
+ * The local engine selection is fail-closed: an incomplete or disallowed local
+ * configuration must not silently fall back to the cloud planner.
+ */
+export function canRunLocalDeepSeekHarness(
+  settings: Pick<AgentSettings, 'joyCodeEngine' | 'privacyMode'>,
+  localSettings: LocalDeepSeekHarnessSettings | undefined,
+  context: LocalProviderPolicyContext,
+): boolean {
+  return (
+    settings.joyCodeEngine === 'local-deepseek-harness' &&
+    localSettings !== undefined &&
+    canUseLocalDeepSeekHarness(settings, context)
+  );
+}
+
 export function approvalPolicyForAgentSettings(settings: AgentSettings): ApprovalPolicy {
   const base = policyForMode(settings.executionMode);
   return {

@@ -23,8 +23,10 @@ document, cloud request, audit event, Gbrain record, or release artifact.
 The adapter accepts an OpenAI-compatible JSON-mode chat completion response,
 strictly validates the bounded Joy Code plan, caps prompt/response sizes, and
 fails closed for malformed endpoints, missing keys, provider errors, and
-invalid plans. The server OpenRouter planner remains the default when no
-complete local configuration is present.
+invalid plans. The server OpenRouter planner remains the default only when
+the user selects the cloud engine. Selecting the local engine with incomplete
+or disallowed configuration fails closed rather than silently routing the
+request to cloud.
 
 ## Consequences
 

@@ -8,6 +8,7 @@ import {
   createInMemoryCredentialStore,
   LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF,
   canUseLocalDeepSeekHarness,
+  canRunLocalDeepSeekHarness,
   saveAgentSettings,
 } from './agent-settings.js';
 
@@ -75,7 +76,10 @@ describe('agent settings', () => {
     saveAgentSettings(storage, settings);
     expect(storage.value).not.toContain('credential-value');
     const credentialStore = createInMemoryCredentialStore();
-    credentialStore.set(LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF, `  ${settings.deepSeekHarnessApiKey}  `);
+    credentialStore.set(
+      LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF,
+      `  ${settings.deepSeekHarnessApiKey}  `,
+    );
     expect(localDeepSeekHarnessSettings(loadAgentSettings(storage), credentialStore)).toEqual({
       endpointUrl: 'https://openrouter.example/v1/chat/completions',
       modelId: 'deepseek-chat',
@@ -128,6 +132,70 @@ describe('agent settings', () => {
         authenticatedSessionReady: true,
         disclosureAccepted: false,
       }),
+    ).toBe(false);
+  });
+
+  it('fails closed instead of falling back when local DSH selection is incomplete', () => {
+    const settings = {
+      joyCodeEngine: 'local-deepseek-harness' as const,
+      privacyMode: 'ask-before-remote' as const,
+    };
+    const context = {
+      endpointUrl: 'http://127.0.0.1:8080/v1/chat/completions',
+      authenticatedSessionReady: false,
+      disclosureAccepted: false,
+    };
+    expect(canRunLocalDeepSeekHarness(settings, undefined, context)).toBe(false);
+    const remoteSettings = {
+      endpointUrl: 'https://provider.example/v1/chat/completions',
+      modelId: 'deepseek-chat',
+      apiKey: 'local-key',
+    };
+    expect(
+      canRunLocalDeepSeekHarness(settings, remoteSettings, {
+        ...context,
+        endpointUrl: remoteSettings.endpointUrl,
+        authenticatedSessionReady: false,
+        disclosureAccepted: true,
+      }),
+    ).toBe(false);
+    expect(
+      canRunLocalDeepSeekHarness(settings, remoteSettings, {
+        ...context,
+        endpointUrl: remoteSettings.endpointUrl,
+        authenticatedSessionReady: true,
+        disclosureAccepted: false,
+      }),
+    ).toBe(false);
+    expect(
+      canRunLocalDeepSeekHarness(
+        { ...settings, privacyMode: 'local-only' },
+        remoteSettings,
+        {
+          ...context,
+          endpointUrl: remoteSettings.endpointUrl,
+          authenticatedSessionReady: true,
+          disclosureAccepted: true,
+        },
+      ),
+    ).toBe(false);
+    expect(
+      canRunLocalDeepSeekHarness(
+        settings,
+        { ...remoteSettings, endpointUrl: context.endpointUrl },
+        context,
+      ),
+    ).toBe(true);
+    expect(
+      canRunLocalDeepSeekHarness(
+        { ...settings, joyCodeEngine: 'cloud-openrouter' },
+        {
+          endpointUrl: context.endpointUrl,
+          modelId: 'deepseek-chat',
+          apiKey: 'local-key',
+        },
+        context,
+      ),
     ).toBe(false);
   });
 });
