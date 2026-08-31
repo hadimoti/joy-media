@@ -1051,13 +1051,11 @@ function EditorWorkspace({
   );
   const localCredentialStoreRef = useRef(createInMemoryCredentialStore());
   const onAgentSettingsChange = useCallback((next: AgentSettings) => {
-    if (next.joyCodeEngine !== 'local-deepseek-harness' || next.deepSeekHarnessApiKey.trim() === '')
+    const apiKey = next.deepSeekHarnessApiKey.trim();
+    if (next.joyCodeEngine !== 'local-deepseek-harness' || apiKey === '')
       localCredentialStoreRef.current.clear(LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF);
     else
-      localCredentialStoreRef.current.set(
-        LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF,
-        next.deepSeekHarnessApiKey,
-      );
+      localCredentialStoreRef.current.set(LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF, apiKey);
     setAgentSettings(next);
   }, []);
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);

@@ -132,8 +132,8 @@ export function localDeepSeekHarnessSettings(
   if (settings.joyCodeEngine !== 'local-deepseek-harness') return undefined;
   const endpointUrl = settings.deepSeekHarnessEndpoint.trim();
   const modelId = settings.deepSeekHarnessModel.trim();
-  const apiKey = credentialStore?.get(LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF) ?? '';
-  if (endpointUrl === '' || modelId === '' || apiKey.trim() === '') return undefined;
+  const apiKey = (credentialStore?.get(LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF) ?? '').trim();
+  if (endpointUrl === '' || modelId === '' || apiKey === '') return undefined;
   return { endpointUrl, modelId, apiKey };
 }
 

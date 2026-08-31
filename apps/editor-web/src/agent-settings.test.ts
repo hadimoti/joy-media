@@ -75,7 +75,7 @@ describe('agent settings', () => {
     saveAgentSettings(storage, settings);
     expect(storage.value).not.toContain('credential-value');
     const credentialStore = createInMemoryCredentialStore();
-    credentialStore.set(LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF, settings.deepSeekHarnessApiKey);
+    credentialStore.set(LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF, `  ${settings.deepSeekHarnessApiKey}  `);
     expect(localDeepSeekHarnessSettings(loadAgentSettings(storage), credentialStore)).toEqual({
       endpointUrl: 'https://openrouter.example/v1/chat/completions',
       modelId: 'deepseek-chat',
