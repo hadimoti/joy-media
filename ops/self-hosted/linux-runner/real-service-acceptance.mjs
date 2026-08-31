@@ -677,6 +677,7 @@ async function recordJourney(
   const audioName = `real-audio-${runId}-${pass}.wav`;
   await importFixture(page, 'video.mp4', videoName);
   await importFixture(page, 'audio.wav', audioName);
+  await resetAssetCatalogFilters(page);
   await addAssetToTimeline(page, videoName);
   await addAssetToTimeline(page, audioName);
 
@@ -1118,6 +1119,20 @@ async function importFixture(page, fileNameOrPath, displayName) {
     .setInputFiles({ name: displayName, mimeType, buffer: await readFile(sourcePath) });
   await drawer.getByRole('button', { name: 'Confirm import' }).click();
   await page.locator('.asset-card', { hasText: displayName }).first().waitFor({ timeout: 15_000 });
+}
+
+async function resetAssetCatalogFilters(page) {
+  const assetsPanel = page.getByRole('article', { name: 'Assets', exact: true });
+  // Import intentionally reveals the newly imported kind (for example,
+  // importing audio selects the Audio category). The journey adds both the
+  // video and audio fixtures next, so return to the user-visible All view and
+  // clear any search before resolving either card. This also covers the
+  // compact/1581 layouts where the category transition is committed before
+  // the next interaction.
+  await assetsPanel.getByRole('tab', { name: /^All\b/ }).first().click();
+  const searchToggle = assetsPanel.getByRole('button', { name: 'Search Assets', exact: true });
+  if ((await searchToggle.getAttribute('aria-expanded')) !== 'true') await searchToggle.click();
+  await assetsPanel.getByRole('searchbox', { name: 'Search Assets', exact: true }).fill('');
 }
 
 async function addAssetToTimeline(page, displayName) {
