@@ -1,8 +1,26 @@
-import type { JoyProjectV1, SpikeProject, VisualObjectV1 } from '@joy-media/project-schema';
+import type { JoyProjectV1, SpikeProject, VisualObjectV1, JsonValue } from '@joy-media/project-schema';
 import type { CommandTransaction } from '@joy-media/commands';
 import { bindClipToObject } from './sticker-bindings.js';
 import { withTimelineElementKinds } from './timeline-element-kind.js';
 import { upsertUniversalTimelineBinding } from './universal-placement.js';
+
+export const THREE_D_PLUGIN_KEY = 'joy.3d.v1';
+
+function pluginRecord(value: unknown): Record<string, JsonValue> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, JsonValue>)
+    : {};
+}
+
+export interface ThreeDSceneStateV1 {
+  readonly version: 1;
+  readonly sceneId: string;
+  readonly sourceRefs: readonly string[];
+  readonly camera: { readonly position: readonly [number, number, number]; readonly target: readonly [number, number, number] };
+  readonly model: { readonly position: readonly [number, number, number]; readonly rotation: readonly [number, number, number]; readonly scale: readonly [number, number, number] };
+  readonly light: { readonly intensity: number; readonly color: string };
+  readonly material: { readonly colors: readonly string[] };
+}
 
 export interface ThreeDRenderLayerInsertion {
   readonly label: string;
@@ -30,6 +48,7 @@ export function buildThreeDRenderLayerInsertion({
     readonly bytes: number;
     readonly mimeType: string;
     readonly sha256?: string;
+    readonly scene?: ThreeDSceneStateV1;
   };
 }): ThreeDRenderLayerInsertion {
   const composition = timeline.compositions[timeline.rootCompositionId];
@@ -60,6 +79,7 @@ export function buildThreeDRenderLayerInsertion({
       crop: { left: 0, top: 0, right: 0, bottom: 0 },
     },
   };
+  const sceneId = asset.scene?.sceneId ?? `scene-${token}`;
   const withAssetAndObject: JoyProjectV1 = {
     ...project,
     updatedAt: new Date().toISOString(),
@@ -75,6 +95,21 @@ export function buildThreeDRenderLayerInsertion({
       },
     },
     visualObjects: { ...project.visualObjects, [objectId]: nextObject },
+    pluginData: {
+      ...project.pluginData,
+      [THREE_D_PLUGIN_KEY]: {
+        ...pluginRecord(project.pluginData[THREE_D_PLUGIN_KEY]),
+        [sceneId]: asset.scene ?? {
+          version: 1,
+          sceneId,
+          sourceRefs: [asset.displayName],
+          camera: { position: [0, 0, 6], target: [0, 0, 0] },
+          model: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+          light: { intensity: 1, color: '#ffffff' },
+          material: { colors: [] },
+        },
+      } as JsonValue,
+    },
   };
   const nextProject = upsertUniversalTimelineBinding(
     withTimelineElementKinds(bindClipToObject(withAssetAndObject, clipId, objectId), {

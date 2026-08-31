@@ -3,12 +3,14 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createThreeDResourceResolver } from './three-d-resource-resolver.js';
+import type { ThreeDSceneStateV1 } from './three-d-render-layer.js';
 import { CubeIcon, UploadIcon } from './icons.js';
 
 export interface JoyCode3DRenderAsset {
   readonly assetId: string;
   readonly displayName: string;
   readonly blob: Blob;
+  readonly scene: ThreeDSceneStateV1;
 }
 
 /** Dispose a loaded model and every GPU-owned geometry/material/texture once. */
@@ -252,6 +254,7 @@ export function JoyCode3DViewer({
           const gltf = await loader.parseAsync(await file.arrayBuffer(), '');
           if (requestId !== loadSeqRef.current) return;
           const model = gltf.scene;
+          model.userData.joyThreeDModel = true;
           const box = new THREE.Box3().setFromObject(model);
           if (box.isEmpty()) throw new Error('the model contains no renderable geometry');
           model.traverse((child) => {
@@ -314,6 +317,7 @@ export function JoyCode3DViewer({
         assetId: renderAssetId(),
         displayName: `${baseName} · 3D Render`,
         blob,
+        scene: captureSceneState(scene, camera, controlsRef.current, fileList),
       });
       setStatus(`Added ${baseName} to the timeline`);
     } catch (reason) {
@@ -321,7 +325,7 @@ export function JoyCode3DViewer({
     } finally {
       setAdding(false);
     }
-  }, [currentModelName, onAddToTimeline]);
+  }, [currentModelName, fileList, onAddToTimeline]);
 
   return (
     <div className="joy-code-3d">
@@ -363,4 +367,41 @@ export function JoyCode3DViewer({
       )}
     </div>
   );
+}
+
+function captureSceneState(
+  scene: THREE.Scene,
+  camera: THREE.Camera,
+  controls: OrbitControls | null,
+  sourceRefs: readonly string[],
+): ThreeDSceneStateV1 {
+  const model = scene.children.find((child) => child.userData.joyThreeDModel === true) ?? scene;
+  const position = (value: THREE.Vector3) => [value.x, value.y, value.z] as const;
+  const rotation = [model.rotation.x, model.rotation.y, model.rotation.z] as const;
+  const materialColors: string[] = [];
+  let lightIntensity = 1;
+  let lightColor = '#ffffff';
+  scene.traverse((child) => {
+    if (child instanceof THREE.Light) {
+      lightIntensity = child.intensity;
+      lightColor = `#${child.color.getHexString()}`;
+    }
+  });
+  model.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    for (const material of materials) {
+      if ('color' in material && material.color instanceof THREE.Color)
+        materialColors.push(`#${material.color.getHexString()}`);
+    }
+  });
+  return {
+    version: 1,
+    sceneId: `scene-${Date.now().toString(36)}`,
+    sourceRefs: [...sourceRefs],
+    camera: { position: position(camera.position), target: position(controls?.target ?? new THREE.Vector3()) },
+    model: { position: position(model.position), rotation, scale: position(model.scale) },
+    light: { intensity: lightIntensity, color: lightColor },
+    material: { colors: materialColors },
+  };
 }

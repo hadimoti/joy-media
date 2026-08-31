@@ -2754,6 +2754,7 @@ function EditorWorkspace({
           bytes: asset.blob.size,
           mimeType,
           sha256: persistedAsset.sha256,
+          scene: asset.scene,
         },
       });
       session.dispatchCompound(insertion.label, {
