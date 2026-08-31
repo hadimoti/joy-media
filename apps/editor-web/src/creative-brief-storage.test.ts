@@ -43,4 +43,21 @@ describe('creative brief storage', () => {
     removeCreativeBrief(state, 'project-1');
     expect(loadCreativeBrief(state, 'project-1')).toBeUndefined();
   });
+
+  it('keeps the panel usable when browser storage is denied', () => {
+    const denied = {
+      getItem: () => {
+        throw new Error('storage denied');
+      },
+      setItem: () => {
+        throw new Error('storage denied');
+      },
+      removeItem: () => {
+        throw new Error('storage denied');
+      },
+    };
+    expect(loadCreativeBrief(denied, 'project-1')).toBeUndefined();
+    expect(() => saveCreativeBrief(denied, 'project-1', brief)).not.toThrow();
+    expect(() => removeCreativeBrief(denied, 'project-1')).not.toThrow();
+  });
 });

@@ -29,6 +29,14 @@ describe('desktop shell boundaries', () => {
     files.revoke(ref);
     expect(() => files.requestDerivative(ref, 'proxy')).toThrow();
   });
+  it('normalizes caller-provided local display names before exposing them', () => {
+    const files = createFileBoundary(() => 'local-2');
+    expect(files.registerSelection('C:\\Media\\clip.mp4', 'C:\\private\\secret.mp4')).toEqual({
+      kind: 'local-file',
+      id: 'local-2',
+      displayName: 'secret.mp4',
+    });
+  });
   it('accepts only project UUID deep links', () => {
     expect(
       parseProjectDeepLink('joy://open/project/123e4567-e89b-12d3-a456-426614174000')?.projectId,

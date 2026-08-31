@@ -104,6 +104,35 @@ describe('waitForWorkerPairing', () => {
     expect(logs).toContain('Worker pairing notification could not be displayed; retrying safely.');
   });
 
+  it('retries the same pairing offer when the notification channel recovers', async () => {
+    const store = pairingStore({ code: 'retry-notification-code', expiresAt: 200 });
+    const notifications: string[] = [];
+    let notifyAttempts = 0;
+    let claims = 0;
+    const client: WorkerPairingClient = {
+      publishPairingOffer: async () => 200,
+      claimPairing: async () => {
+        claims += 1;
+        if (claims === 2) store.establishSession();
+        return claims === 2;
+      },
+    };
+
+    await waitForWorkerPairing(client, store, {
+      createPairingCode: () => 'unused-code',
+      now: () => 100,
+      sleep: async () => undefined,
+      notify: (offer) => {
+        notifyAttempts += 1;
+        if (notifyAttempts === 1) throw new Error('desktop host unavailable');
+        notifications.push(offer.code);
+      },
+    });
+
+    expect(notifyAttempts).toBe(2);
+    expect(notifications).toEqual(['retry-notification-code']);
+  });
+
   it('claims the refreshed code after an active offer expires while polling', async () => {
     const store = pairingStore({ code: 'first-code', expiresAt: 100 });
     const claimed: string[] = [];

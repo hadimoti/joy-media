@@ -214,7 +214,13 @@ export function creativeBriefReducer(
   }
 
   if (event.type === 'hydrate') {
-    if (event.brief.snapshotRevisionId !== event.revisionId) return state;
+    if (event.brief.snapshotRevisionId !== event.revisionId)
+      return {
+        type: 'stale',
+        brief: event.brief,
+        revisionId: event.brief.snapshotRevisionId,
+        currentRevisionId: event.revisionId,
+      };
     return { type: 'brief-ready', brief: event.brief, revisionId: event.revisionId };
   }
 

@@ -1,5 +1,6 @@
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import type { JoyProjectV1, ProjectRevisionId } from '@joy-media/project-schema';
+import type { CreativeBriefV1 } from '@joy-media/agent-tools';
 import type { ControlPlaneProjectBinding } from './project-control-plane.js';
 import type { SyncProjectDocument } from './project-document-sync.js';
 import type { BrowserJoyCodePlanRequest } from './control-plane-client.js';
@@ -27,6 +28,7 @@ export class JoyCodeServerSession {
     selection: BrowserJoyCodePlanRequest['selection'],
     projectId = this.options.document.id,
     signal?: AbortSignal,
+    creativeBrief?: CreativeBriefV1,
   ): Promise<JoyCodeServerSessionResult> {
     if (signal?.aborted) return { kind: 'cancelled' };
     const request: BrowserJoyCodePlanRequest = {
@@ -34,6 +36,7 @@ export class JoyCodeServerSession {
       snapshotRevisionId: this.options.revisionId,
       prompt,
       selection,
+      ...(creativeBrief === undefined ? {} : { creativeBrief }),
     };
     try {
       const coordinationOptions =

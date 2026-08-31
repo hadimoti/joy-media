@@ -149,6 +149,22 @@ function dispatch(state: CreativeBriefState, event: CreativeBriefEvent): Creativ
   return creativeBriefReducer(state, event);
 }
 
+describe('hydrate transitions', () => {
+  it('marks a saved brief stale when it belongs to an older revision', () => {
+    const result = dispatch(INITIAL_BRIEF_STATE, {
+      type: 'hydrate',
+      brief: MOCK_BRIEF_WITH_REV_A,
+      revisionId: REVISION_ID_B,
+    });
+    expect(result).toMatchObject({
+      type: 'stale',
+      revisionId: REVISION_ID_A,
+      currentRevisionId: REVISION_ID_B,
+      brief: MOCK_BRIEF_WITH_REV_A,
+    });
+  });
+});
+
 // ==========================================================================
 // Initial State Tests
 // ==========================================================================

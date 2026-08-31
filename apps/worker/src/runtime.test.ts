@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -272,6 +272,31 @@ describe('Worker runtime', () => {
 
     expect(protectedStore.loadWorkerSession()).toBeUndefined();
     expect(protectedStore.loadPendingPairing()).toBeUndefined();
+  });
+
+  it('fails migration closed when a protected legacy read cannot be decoded', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'joy-media-worker-migrate-fail-')), 'state.json');
+    writeFileSync(
+      path,
+      JSON.stringify({
+        identity: { workerId: 'worker-legacy', createdAt: '2026-07-22T00:00:00.000Z' },
+        sessionToken: 'legacy-session-secret',
+        protectedSessionToken: 'unreadable-ciphertext',
+      }),
+    );
+    const protectedStore = new JsonFileWorkerStore(path, {
+      secretProtector: {
+        protect: () => 'ciphertext',
+        unprotect: () => {
+          throw new Error('cannot decrypt');
+        },
+      },
+    });
+
+    expect(() => protectedStore.migrateLegacySecrets()).toThrow(
+      'Unable to protect legacy Worker state',
+    );
+    expect(readFileSync(path, 'utf8')).toContain('legacy-session-secret');
   });
 
   it.runIf(process.platform === 'win32')(

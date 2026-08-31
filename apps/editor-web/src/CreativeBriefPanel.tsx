@@ -6,7 +6,7 @@
  * mutate state, persist data, create plans/commands/jobs, or execute recommendations.
  */
 
-import { useReducer, useEffect, useState, useCallback } from 'react';
+import { useReducer, useEffect, useState, useCallback, useRef } from 'react';
 import type { CreativeBriefV1, ProjectRevisionId } from '@joy-media/agent-tools';
 import {
   creativeBriefReducer,
@@ -79,8 +79,15 @@ export function CreativeBriefPanel({
   const [optInError, setOptInError] = useState<string | null>(null);
   const [isOptingIn, setIsOptingIn] = useState(false);
   const storageProjectId = projectId ?? `revision:${revisionId}`;
+  const previousStorageProjectIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    const previousStorageProjectId = previousStorageProjectIdRef.current;
+    if (previousStorageProjectId !== null && previousStorageProjectId !== storageProjectId) {
+      dispatch({ type: 'reset' });
+      setRequestText('');
+    }
+    previousStorageProjectIdRef.current = storageProjectId;
     const saved = loadCreativeBrief(window.localStorage, storageProjectId);
     if (saved !== undefined) {
       dispatch({ type: 'hydrate', brief: saved, revisionId });

@@ -38,9 +38,9 @@ export async function waitForWorkerPairing(
   let announcedCode: string | undefined;
   const announce = (offer: { readonly code: string; readonly expiresAt: number }): void => {
     if (announcedCode === offer.code) return;
-    announcedCode = offer.code;
     try {
       options.notify?.(offer);
+      announcedCode = offer.code;
       log('Worker pairing approval required; open the JOY Media notification to continue.');
     } catch {
       log('Worker pairing notification could not be displayed; retrying safely.');
@@ -62,6 +62,7 @@ export async function waitForWorkerPairing(
         continue;
       }
     }
+    if (pending.expiresAt > now()) announce(pending);
 
     try {
       if (await client.claimPairing(pending.code)) {

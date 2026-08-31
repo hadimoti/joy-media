@@ -164,6 +164,7 @@ export interface BrowserJoyCodePlanRequest {
   readonly projectId: string;
   readonly snapshotRevisionId: string;
   readonly prompt: string;
+  readonly creativeBrief?: CreativeBriefV1;
   readonly selection: {
     readonly clipIds: readonly string[];
     readonly objectIds?: readonly string[];

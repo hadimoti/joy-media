@@ -168,7 +168,15 @@ export class JsonFileWorkerStore implements PersistentWorkerStore {
     const hasLegacyPairing = isPendingPairing(record.pendingPairing);
     // Deliberately let protection errors surface: retaining plaintext would be
     // worse than refusing to start the packaged Worker.
-    if (hasLegacySession || hasLegacyPairing) this.write(this.read(true));
+    if (hasLegacySession || hasLegacyPairing) {
+      const legacyState = this.read(true);
+      if (
+        (hasLegacySession && typeof legacyState.sessionToken !== 'string') ||
+        (hasLegacyPairing && legacyState.pendingPairing === undefined)
+      )
+        throw new Error('Unable to protect legacy Worker state');
+      this.write(legacyState);
+    }
   }
 
   private read(allowLegacyPlaintext = false): {

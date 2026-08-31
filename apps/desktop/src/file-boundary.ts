@@ -22,7 +22,7 @@ export function createFileBoundary(
         throw new Error('Selection must be an absolute local path');
       const id = tokenFactory();
       approved.add(id);
-      return { kind: 'local-file', id, displayName: displayName.slice(0, 255) };
+      return { kind: 'local-file', id, displayName: basename(displayName).slice(0, 255) };
     },
     revoke(ref) {
       approved.delete(ref.id);
