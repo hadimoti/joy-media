@@ -1812,15 +1812,15 @@ export class PostgresControlPlane implements ControlPlane {
           storesAsset && receipt !== undefined ? receipt.descriptor.mimeType : null,
           isThumb && receipt?.kind === 'asset.thumbnail'
             ? receipt.descriptor.width
-            : (isGpu || isMask || isUpscale) && receipt !== undefined
+            : (isExport || isGpu || isMask || isUpscale) && receipt !== undefined
               ? (receipt.descriptor.width ?? null)
               : null,
           isThumb && receipt?.kind === 'asset.thumbnail'
             ? receipt.descriptor.height
-            : (isGpu || isMask || isUpscale) && receipt !== undefined
+            : (isExport || isGpu || isMask || isUpscale) && receipt !== undefined
               ? (receipt.descriptor.height ?? null)
               : null,
-          (isGpu || isMask || isUpscale) && receipt !== undefined
+          (isExport || isGpu || isMask || isUpscale) && receipt !== undefined
             ? (receipt.descriptor.durationUs ?? null)
             : null,
           leaseToken ?? '',
@@ -2174,6 +2174,28 @@ function derivativeOfRow(row: JobRow): NonNullable<Job['derivative']> {
     };
   }
   if (
+    row.result_kind === 'render.export' &&
+    row.result_asset_id !== null &&
+    row.result_local_ref !== null &&
+    row.result_mime_type === 'video/mp4' &&
+    row.result_width !== null &&
+    row.result_height !== null &&
+    row.result_duration_us !== null
+  ) {
+    return {
+      ...base,
+      kind: row.result_kind,
+      assetId: row.result_asset_id,
+      localRef: row.result_local_ref,
+      descriptor: {
+        mimeType: 'video/mp4',
+        width: safeNonNegativeInteger(row.result_width, 'result width'),
+        height: safeNonNegativeInteger(row.result_height, 'result height'),
+        durationUs: safeNonNegativeInteger(row.result_duration_us, 'result duration'),
+      },
+    };
+  }
+  if (
     (row.result_kind === 'image.comfy' ||
       row.result_kind === 'audio.ml-denoise' ||
       row.result_kind === 'mask.image' ||
@@ -2397,6 +2419,7 @@ function isUpscaleReceipt(value: WorkerResultReceipt): value is UpscaleWorkerRec
 
 function derivativeKindForJob(type: string): DerivativeKind | undefined {
   if (type === 'asset.thumbnail') return 'thumbnail';
+  if (type === 'render.export') return 'proxy';
   if (type === 'audio.ml-denoise') return 'audio';
   if (type === 'mask.image' || type === 'mask.video') return 'mask';
   if (type === 'upscale.image' || type === 'upscale.video') return 'upscale';

@@ -222,6 +222,87 @@ describe('PostgresControlPlane', () => {
     await pool.end();
   });
 
+  it('projects completed render exports with their verified cloud derivative', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const controlPlane = new PostgresControlPlane(pool, { skipLocked: false });
+    await controlPlane.initialize();
+    const owner = { id: 'render-export-owner' };
+    const projectId = 'render-export-project';
+    const assetId = 'render-export-source';
+    const jobId = 'render-export-job';
+    const payload = {
+      schemaVersion: 1,
+      producer: 'browser-staged-preview-export',
+      frameCount: 3,
+      manifest: {
+        projectId,
+        revision: 0,
+        width: 64,
+        height: 36,
+        frameRate: 30,
+        durationUs: 100_000,
+        preset: 'social-h264-aac',
+      },
+    } as const;
+    await controlPlane.createProject(owner, projectId, 'Render export');
+    await controlPlane.registerAsset(owner, projectId, {
+      ...assetRegistration(),
+      id: assetId,
+      locations: [{ kind: 'private-object' as const, ref: 'render-source-object' }],
+    });
+    await controlPlane.pairWorker(owner, 'render-export-worker');
+    await controlPlane.helloWorker('render-export-worker', ['render.export'], [], 100);
+    await controlPlane.enqueue(owner, jobId, projectId, 'render.export', 100, assetId, payload);
+    const lease = await controlPlane.lease('render-export-worker', 101, 30_000);
+    expect(lease).toMatchObject({ id: jobId, state: 'leased', assetId });
+    const receipt = {
+      kind: 'render.export' as const,
+      assetId,
+      sha256: 'b'.repeat(64),
+      bytes: 2048,
+      localRef: 'export-render-export-job',
+      descriptor: { mimeType: 'video/mp4' as const, width: 64, height: 36, durationUs: 100_000 },
+    };
+    await expect(
+      controlPlane.registerWorkerCloudDerivative(
+        'render-export-worker',
+        jobId,
+        {
+          id: 'upload-render-export-job',
+          assetId,
+          kind: 'proxy',
+          profile: 'joy-export-h264-aac',
+          sha256: receipt.sha256,
+          bytes: receipt.bytes,
+          descriptor: receipt.descriptor,
+          availability: 'available-cloud',
+          locations: [{ kind: 'private-object' as const, ref: 'render-export-object' }],
+        },
+        102,
+        lease?.leaseToken,
+      ),
+    ).resolves.toMatchObject({ id: `derivative-${jobId}`, kind: 'proxy' });
+    await expect(
+      controlPlane.complete('render-export-worker', jobId, 103, receipt, lease?.leaseToken),
+    ).resolves.toMatchObject({ state: 'completed' });
+    await expect(controlPlane.jobsForProject(owner, projectId)).resolves.toMatchObject([
+      {
+        id: jobId,
+        state: 'completed',
+        derivative: {
+          id: `derivative-${jobId}`,
+          kind: 'render.export',
+          assetId,
+          descriptor: receipt.descriptor,
+          resultRef: `derivative:${jobId}`,
+        },
+      },
+    ]);
+    await pool.end();
+  });
+
   it('does not complete a job after cancellation and closes the attempt on fail', async () => {
     const database = newDb();
     const adapter = database.adapters.createPg();
