@@ -46,6 +46,33 @@ function Get-JsonFile([string]$Path) {
     }
 }
 
+function ConvertTo-ScheduledTaskStateName([object]$State) {
+    if ($null -eq $State) { return 'Unknown' }
+
+    # ScheduledTask.State is a PowerShell enum.  Its string form is normally
+    # a name (for example, Running), but ConvertTo-Json serializes the same
+    # enum as its numeric value (for example, 4).  Normalize both forms before
+    # polling or writing evidence so comparisons and receipts are stable.
+    $stateText = ([string]$State).Trim()
+    switch -Regex ($stateText) {
+        '^(Unknown|Disabled|Queued|Ready|Running)$' { return $Matches[1] }
+    }
+
+    try {
+        $numericState = [int]$State
+    } catch {
+        return 'Unknown'
+    }
+    switch ($numericState) {
+        0 { return 'Unknown' }
+        1 { return 'Disabled' }
+        2 { return 'Queued' }
+        3 { return 'Ready' }
+        4 { return 'Running' }
+        default { return 'Unknown' }
+    }
+}
+
 function Get-DescendantProcessIds([int]$RootId) {
     $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
     $seen = New-Object 'System.Collections.Generic.HashSet[int]'
@@ -251,7 +278,7 @@ try {
     do {
         Start-Sleep -Milliseconds 250
         $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName
-        $taskState = (Get-ScheduledTask -TaskName $taskName).State
+        $taskState = ConvertTo-ScheduledTaskStateName ((Get-ScheduledTask -TaskName $taskName).State)
         $taskRan = $taskInfo.LastRunTime -ne $previousLastRunTime
         $scheduledProcesses = @(Get-WorkerRootProcesses -Path $installedPath)
         $scheduledSnapshot = Get-FixtureSnapshot
@@ -276,7 +303,7 @@ try {
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     for ($taskStopAttempt = 0; $taskStopAttempt -lt 80; $taskStopAttempt += 1) {
         Start-Sleep -Milliseconds 250
-        $taskState = (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue).State
+        $taskState = ConvertTo-ScheduledTaskStateName ((Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue).State)
         if ($taskState -ne 'Running') { break }
     }
     $scheduledTerminated = $true
