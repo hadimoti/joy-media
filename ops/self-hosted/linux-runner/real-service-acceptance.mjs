@@ -1226,7 +1226,12 @@ async function importFixture(page, fileNameOrPath, displayName) {
 }
 
 async function resetAssetCatalogFilters(page) {
-  const assetsPanel = page.getByRole('article', { name: 'Assets', exact: true });
+  // Dockview keeps inactive panels mounted while the feature hub changes. The
+  // accessible article locator can therefore resolve the outgoing copy while
+  // its header is being detached. Scope to the mounted, user-visible asset
+  // library so the following controls belong to the active Create surface.
+  const assetsPanel = page.locator('article.asset-library:visible').first();
+  await assetsPanel.waitFor({ state: 'visible' });
   // Import intentionally reveals the newly imported kind (for example,
   // importing audio selects the Audio category). The journey adds both the
   // video and audio fixtures next, so return to the user-visible All view and
@@ -1237,9 +1242,16 @@ async function resetAssetCatalogFilters(page) {
     .getByRole('tab', { name: /^All\b/ })
     .first()
     .click();
-  const searchToggle = assetsPanel.getByRole('button', { name: 'Search Assets', exact: true });
+  const searchToggle = assetsPanel
+    .getByRole('button', { name: 'Search Assets', exact: true })
+    .first();
+  await searchToggle.waitFor({ state: 'visible' });
   if ((await searchToggle.getAttribute('aria-expanded')) !== 'true') await searchToggle.click();
-  await assetsPanel.getByRole('searchbox', { name: 'Search Assets', exact: true }).fill('');
+  const searchField = assetsPanel
+    .getByRole('searchbox', { name: 'Search Assets', exact: true })
+    .first();
+  await searchField.waitFor({ state: 'visible' });
+  await searchField.fill('');
 }
 
 async function addAssetToTimeline(page, displayName) {
