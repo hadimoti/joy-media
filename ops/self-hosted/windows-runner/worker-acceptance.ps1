@@ -73,6 +73,22 @@ function ConvertTo-ScheduledTaskStateName([object]$State) {
     }
 }
 
+function Test-WorkerStartupPredicate(
+    [bool]$TriggerPassed,
+    [string]$TaskState,
+    [bool]$TaskRan,
+    [int]$ProcessCount,
+    [object]$Snapshot,
+    [bool]$NotificationCleared
+) {
+    $taskExecutionPassed = [bool](@('Running', 'Ready') -contains ([string]$TaskState))
+    $snapshotAvailable = [bool]($null -ne $Snapshot)
+    $fixturePaired = [bool]($snapshotAvailable -and $Snapshot.paired -eq $true)
+    $helloObserved = [bool]($snapshotAvailable -and [int]$Snapshot.counters.hello -ge 1)
+    $leaseObserved = [bool]($snapshotAvailable -and [int]$Snapshot.counters.leases -ge 1)
+    return [bool]($TriggerPassed -and $TaskRan -and $taskExecutionPassed -and $ProcessCount -gt 0 -and $snapshotAvailable -and $fixturePaired -and $helloObserved -and $leaseObserved -and $NotificationCleared)
+}
+
 function Get-DescendantProcessIds([int]$RootId) {
     $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
     $seen = New-Object 'System.Collections.Generic.HashSet[int]'
@@ -274,6 +290,8 @@ try {
     $taskRan = $false
     $scheduledProcesses = @()
     $scheduledSnapshot = $null
+    $startupFixtureHelloObserved = $false
+    $startupFixtureLeaseObserved = $false
     $startupDeadline = (Get-Date).AddSeconds(20)
     do {
         Start-Sleep -Milliseconds 250
@@ -282,22 +300,31 @@ try {
         $taskRan = $taskInfo.LastRunTime -ne $previousLastRunTime
         $scheduledProcesses = @(Get-WorkerRootProcesses -Path $installedPath)
         $scheduledSnapshot = Get-FixtureSnapshot
+        $startupFixtureHelloObserved = [bool]($null -ne $scheduledSnapshot -and [int]$scheduledSnapshot.counters.hello -ge 1)
+        $startupFixtureLeaseObserved = [bool]($null -ne $scheduledSnapshot -and [int]$scheduledSnapshot.counters.leases -ge 1)
     } while (
         (
             -not $taskRan -or
             $taskState -ne 'Running' -or
             $scheduledProcesses.Count -eq 0 -or
-            $null -eq $scheduledSnapshot -or
-            $scheduledSnapshot.counters.hello -lt 1
+            -not $startupFixtureHelloObserved -or
+            -not $startupFixtureLeaseObserved
         ) -and
         (Get-Date) -lt $startupDeadline
     )
     $scheduledRootIds = @($scheduledProcesses | ForEach-Object { [int]$_.ProcessId })
-    $startupTaskState = $taskState
+    $startupTaskState = [string]$taskState
     $scheduledNotificationPath = "$scheduledStatePath.notification.json"
-    $scheduledNotificationCleared = -not (Test-Path -LiteralPath $scheduledNotificationPath)
-    $startupTaskExecutionPassed = $startupTaskState -in @('Running', 'Ready')
-    $startupPassed = $startupTriggerPassed -and $taskRan -and $startupTaskExecutionPassed -and $scheduledProcesses.Count -gt 0 -and $null -ne $scheduledSnapshot -and $scheduledSnapshot.paired -eq $true -and $scheduledSnapshot.counters.hello -ge 1 -and $scheduledSnapshot.counters.leases -ge 1 -and $scheduledNotificationCleared
+    $scheduledNotificationCleared = [bool](-not (Test-Path -LiteralPath $scheduledNotificationPath))
+    $startupTriggerPassed = [bool]$startupTriggerPassed
+    $startupTaskRanPassed = [bool]$taskRan
+    $startupTaskExecutionPassed = [bool](@('Running', 'Ready') -contains ([string]$startupTaskState))
+    $startupDaemonProcessPassed = [bool]($scheduledProcesses.Count -gt 0)
+    $startupSnapshotAvailable = [bool]($null -ne $scheduledSnapshot)
+    $startupFixturePaired = [bool]($startupSnapshotAvailable -and $scheduledSnapshot.paired -eq $true)
+    $startupFixtureHelloPassed = [bool]($startupSnapshotAvailable -and [int]$scheduledSnapshot.counters.hello -ge 1)
+    $startupFixtureLeasePassed = [bool]($startupSnapshotAvailable -and [int]$scheduledSnapshot.counters.leases -ge 1)
+    $startupPassed = Test-WorkerStartupPredicate -TriggerPassed $startupTriggerPassed -TaskState $startupTaskState -TaskRan $startupTaskRanPassed -ProcessCount ([int]$scheduledProcesses.Count) -Snapshot $scheduledSnapshot -NotificationCleared $scheduledNotificationCleared
     $scheduledChildCount = 0
     if ($scheduledRootIds.Count -gt 0) { $scheduledChildCount = @(Get-DescendantProcessIds -RootId $scheduledRootIds[0]).Count }
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
@@ -384,7 +411,7 @@ try {
         package = [ordered]@{ path = 'joy-worker.exe'; sha256 = $installedHash; selfTest = ($selfTest | ConvertFrom-Json) }
         lifecycle = [ordered]@{
             install = [ordered]@{ status = 'passed'; isolated = $true }
-            startup = [ordered]@{ status = if ($startupPassed -and $scheduledDaemon.terminated) { 'passed' } else { 'failed' }; scheduledTask = $taskName; trigger = 'at-logon'; triggerVerified = $startupTriggerPassed; user = $userId; action = 'normal-daemon'; taskState = $startupTaskState; taskRan = $taskRan; lastRunTime = $taskInfo.LastRunTime; lastTaskResult = $taskInfo.LastTaskResult; daemon = $scheduledDaemon }
+            startup = [ordered]@{ status = if ($startupPassed -and $scheduledDaemon.terminated) { 'passed' } else { 'failed' }; scheduledTask = $taskName; trigger = 'at-logon'; triggerVerified = $startupTriggerPassed; user = $userId; action = 'normal-daemon'; taskState = $startupTaskState; taskRan = $startupTaskRanPassed; lastRunTime = $taskInfo.LastRunTime; lastTaskResult = $taskInfo.LastTaskResult; checks = [ordered]@{ triggerVerified = $startupTriggerPassed; taskRan = $startupTaskRanPassed; taskStateAccepted = $startupTaskExecutionPassed; daemonProcessObserved = $startupDaemonProcessPassed; fixtureSnapshotObserved = $startupSnapshotAvailable; fixturePaired = $startupFixturePaired; helloObserved = $startupFixtureHelloPassed; leaseObserved = $startupFixtureLeasePassed; notificationCleared = $scheduledNotificationCleared }; daemon = $scheduledDaemon }
             session = [ordered]@{ status = if ($sessionPassed) { 'passed' } else { 'failed' }; stateIsolated = $true; ownerSessionUsed = $false; fixtureSessionUsed = $true; persistedSession = $probeStateProtected; protectedState = $scheduledStateProtected -and $probeStateProtected; scheduledStateKeys = $scheduledStateProperties; probeStateKeys = $probeStateProperties; credentialMode = 'disposable-loopback-fixture'; offers = if ($null -eq $fixtureSnapshot) { 0 } else { [int]$fixtureSnapshot.counters.offers }; claims = if ($null -eq $fixtureSnapshot) { 0 } else { [int]$fixtureSnapshot.counters.claims }; note = 'The clean-host lane authenticates only against an isolated loopback control-plane fixture; it never contacts production or uses an owner session.' }
             renewal = [ordered]@{ status = if ($renewalProbe.started -and $renewalProbe.paired -and $renewalProbe.terminated) { 'passed' } else { 'failed' }; restarted = $renewalProbe.started -and $renewalProbe.terminated; statePath = 'probe-state.json'; previousPid = $daemonProbe.pid; daemon = $renewalProbe }
             recovery = [ordered]@{ status = 'passed'; repeatedSelfTests = 2; first = ($recoveryFirst | ConvertFrom-Json); second = ($recoverySecond | ConvertFrom-Json) }
