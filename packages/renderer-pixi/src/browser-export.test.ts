@@ -6,6 +6,7 @@ import {
   downloadBrowserMp4,
   packBrowserExport,
   selectBrowserMp4MimeType,
+  triggerBrowserDownload,
   type BrowserMp4MimeType,
 } from './browser-export.js';
 
@@ -197,6 +198,52 @@ describe('browser export contracts', () => {
       filename: 'fallback.rgba',
     });
     expect(result).toMatchObject({ encoded: false, filename: 'fallback.rgba', totalBytes: 20 });
+  });
+
+  it('keeps the blob URL alive for the browser download handoff', () => {
+    const body = {
+      appendChild: vi.fn((element: { isConnected: boolean }) => {
+        element.isConnected = true;
+      }),
+      removeChild: vi.fn((element: { isConnected: boolean }) => {
+        element.isConnected = false;
+      }),
+    };
+    const anchor = new EventTarget() as EventTarget & {
+      href: string;
+      download: string;
+      rel: string;
+      style: { display: string };
+      isConnected: boolean;
+      click: () => void;
+    };
+    Object.assign(anchor, {
+      href: '',
+      download: '',
+      rel: '',
+      style: { display: '' },
+      isConnected: false,
+      click: () => anchor.dispatchEvent(new Event('click')),
+    });
+    const revokeObjectURL = vi.fn();
+    let cleanup: (() => void) | undefined;
+    const setTimeout = vi.fn((callback: () => void) => {
+      cleanup = callback;
+      return 1;
+    });
+    vi.stubGlobal('document', { createElement: () => anchor, body });
+    vi.stubGlobal('URL', { createObjectURL: () => 'blob:test', revokeObjectURL });
+    vi.stubGlobal('setTimeout', setTimeout);
+
+    triggerBrowserDownload(new Blob(['encoded-mp4'], { type: 'video/mp4' }), 'export.mp4');
+
+    expect(body.appendChild).toHaveBeenCalledWith(anchor);
+    expect(setTimeout).toHaveBeenCalledOnce();
+    expect(setTimeout).toHaveBeenCalledWith(expect.any(Function), 10_000);
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    cleanup?.();
+    expect(body.removeChild).toHaveBeenCalledWith(anchor);
+    expect(revokeObjectURL).toHaveBeenCalledOnce();
   });
 
   it('requires exactly one browser paint source before touching DOM APIs', async () => {

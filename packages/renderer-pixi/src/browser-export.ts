@@ -47,6 +47,12 @@ export interface BrowserExportResult {
   readonly encoded: boolean;
 }
 
+// Chromium can report a blob download asynchronously, especially after a
+// long-running export or when the renderer is under headless CI load. Keep
+// the object URL alive long enough for the browser to claim it, while still
+// bounding its lifetime if the click is ignored.
+const BROWSER_DOWNLOAD_URL_CLEANUP_DELAY_MS = 10_000;
+
 /** Preferred native MP4 profile for Chromium's H.264/AAC MediaRecorder. */
 export const BROWSER_MP4_MIME_TYPE = 'video/mp4;codecs=avc1.42E01E,mp4a.40.2';
 
@@ -486,9 +492,9 @@ export function packBrowserExport(source: BrowserExportFrameSource): {
 
 /**
  * Triggers a browser download for the given Blob. Uses an off-DOM anchor and
- * `requestAnimationFrame` so the click is dispatched on a later tick — this
- * keeps the calling stack free to settle, and avoids the Safari quirk where
- * synchronous anchor clicks inside async handlers are dropped.
+ * keeps its object URL alive for a bounded handoff window: Chromium can report
+ * the download asynchronously after a long export, and revoking the URL on
+ * the next animation frame can race that handoff in headless CI.
  */
 export function triggerBrowserDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -498,17 +504,21 @@ export function triggerBrowserDownload(blob: Blob, filename: string): void {
   anchor.rel = 'noopener';
   anchor.style.display = 'none';
   document.body.appendChild(anchor);
+  let cleanupScheduled = false;
   const cleanup = (): void => {
     if (anchor.isConnected) document.body.removeChild(anchor);
     URL.revokeObjectURL(url);
   };
-  anchor.addEventListener('click', () => {
-    requestAnimationFrame(cleanup);
-  });
+  const scheduleCleanup = (): void => {
+    if (cleanupScheduled) return;
+    cleanupScheduled = true;
+    globalThis.setTimeout(cleanup, BROWSER_DOWNLOAD_URL_CLEANUP_DELAY_MS);
+  };
+  anchor.addEventListener('click', scheduleCleanup, { once: true });
   anchor.click();
   // Fallback cleanup in case the click handler never runs (e.g. headless
   // environments that synthesize the download without firing `click`).
-  requestAnimationFrame(cleanup);
+  scheduleCleanup();
 }
 
 /**
