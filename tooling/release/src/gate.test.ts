@@ -375,6 +375,25 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(harness).toContain("availability: 'available-cloud'");
   });
 
+  it('keeps delivery recovery non-leaseable and bounded while proving cancel/retry', () => {
+    const harness = readFileSync(
+      resolve(
+        import.meta.dirname,
+        '../../../ops/self-hosted/linux-runner/real-service-acceptance.mjs',
+      ),
+      'utf8',
+    );
+    expect(harness).toContain('assetId: reimportAssetId');
+    expect(harness).toContain("type: 'asset.thumbnail'");
+    expect(harness).toContain('const controller = new globalThis.AbortController()');
+    expect(harness).toContain('setTimeout(() => controller.abort(), pollRequestTimeoutMs)');
+    expect(harness).toContain("cancelPollError = 'job-missing'");
+    expect(harness).toContain("cancelPollError = 'malformed-jobs'");
+    expect(harness).toContain('cancelPollError = `terminal-${cancelSettledState}`');
+    expect(harness).toContain('pollRequestTimeoutMs: DELIVERY_CANCEL_POLL_REQUEST_TIMEOUT_MS');
+    expect(harness).toContain("deliveryRecovery.retriedState !== 'queued'");
+  });
+
   it('validates the checked-out candidate and always checks Worker teardown', () => {
     const workflow = readFileSync(
       resolve(import.meta.dirname, '../../../.github/workflows/release-candidate.yml'),

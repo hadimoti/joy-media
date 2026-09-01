@@ -65,6 +65,7 @@ const execFile = promisify((file, args, options, callback) => {
 const REAL_SERVICE_EXPORT_DOWNLOAD_TIMEOUT_MS = 35 * 60_000;
 const DELIVERY_CANCEL_SETTLE_TIMEOUT_MS = 60_000;
 const DELIVERY_CANCEL_POLL_INTERVAL_MS = 250;
+const DELIVERY_CANCEL_POLL_REQUEST_TIMEOUT_MS = 5_000;
 
 const root = resolve(fileURLToPath(new URL('../../../', import.meta.url)));
 const [candidateSha, runId, runAttempt, pass] = process.argv.slice(2);
@@ -947,7 +948,14 @@ async function recordJourney(
   if (missingSourceStatus !== 404 && missingSourceStatus !== 409)
     throw new Error(`missing-source recovery returned ${missingSourceStatus}, expected 404/409`);
   const deliveryRecovery = await page.evaluate(
-    async ({ projectId: id, sessionToken, settleTimeoutMs, pollIntervalMs }) => {
+    async ({
+      projectId: id,
+      sessionToken,
+      assetId,
+      settleTimeoutMs,
+      pollIntervalMs,
+      pollRequestTimeoutMs,
+    }) => {
       const requestHeaders = {
         authorization: `Bearer ${sessionToken}`,
         'content-type': 'application/json',
@@ -955,11 +963,29 @@ async function recordJourney(
       const createdResponse = await fetch(`/api/v1/projects/${id}/jobs`, {
         method: 'POST',
         headers: requestHeaders,
-        body: JSON.stringify({ id: `delivery-recovery-${Date.now()}`, type: 'render' }),
+        body: JSON.stringify({
+          id: `delivery-recovery-${Date.now()}`,
+          type: 'asset.thumbnail',
+          assetId,
+        }),
       });
       if (createdResponse.status !== 201) return { created: createdResponse.status };
       const created = await createdResponse.json();
       const jobId = created.data?.id;
+      if (typeof jobId !== 'string' || jobId.length === 0)
+        return {
+          created: createdResponse.status,
+          canceled: null,
+          cancelResponseState: null,
+          cancelResponseRequested: false,
+          cancelSettledState: null,
+          cancelPollAttempts: 0,
+          cancelPollStatus: null,
+          cancelPollError: 'malformed-create',
+          canceledState: null,
+          retried: null,
+          retriedState: null,
+        };
       const canceledResponse = await fetch(`/api/v1/projects/${id}/jobs/${jobId}/cancel`, {
         method: 'POST',
         headers: requestHeaders,
@@ -971,20 +997,57 @@ async function recordJourney(
       let cancelSettledState = cancelResponseState;
       let cancelPollAttempts = 0;
       let cancelPollStatus = null;
+      let cancelPollError = null;
+      const pollJobs = async () => {
+        const controller = new globalThis.AbortController();
+        const requestTimeout = setTimeout(() => controller.abort(), pollRequestTimeoutMs);
+        try {
+          const response = await fetch(`/api/v1/projects/${id}/jobs`, {
+            headers: { authorization: `Bearer ${sessionToken}` },
+            signal: controller.signal,
+          });
+          if (!response.ok) return { response, error: 'http-error' };
+          try {
+            return { response, payload: await response.json() };
+          } catch {
+            return { response, error: 'malformed-jobs' };
+          }
+        } catch (error) {
+          return {
+            response: null,
+            error:
+              error instanceof Error && error.name === 'AbortError'
+                ? 'request-timeout'
+                : 'request-failed',
+          };
+        } finally {
+          globalThis.clearTimeout(requestTimeout);
+        }
+      };
       const cancelSettleDeadline = Date.now() + settleTimeoutMs;
       while (Date.now() < cancelSettleDeadline) {
         cancelPollAttempts += 1;
-        const jobsResponse = await fetch(`/api/v1/projects/${id}/jobs`, {
-          headers: { authorization: `Bearer ${sessionToken}` },
-        });
-        cancelPollStatus = jobsResponse.status;
-        if (!jobsResponse.ok) break;
-        const jobsPayload = await jobsResponse.json();
-        const settledJob = Array.isArray(jobsPayload.data)
-          ? jobsPayload.data.find((job) => job.id === jobId)
-          : undefined;
-        if (settledJob?.state !== undefined) cancelSettledState = settledJob.state;
+        const { response: jobsResponse, payload: jobsPayload, error: pollError } = await pollJobs();
+        cancelPollStatus = jobsResponse?.status ?? null;
+        if (pollError !== undefined) {
+          cancelPollError = pollError;
+          break;
+        }
+        if (!jobsPayload || typeof jobsPayload !== 'object' || !Array.isArray(jobsPayload.data)) {
+          cancelPollError = 'malformed-jobs';
+          break;
+        }
+        const settledJob = jobsPayload.data.find((job) => job && job.id === jobId);
+        if (!settledJob || typeof settledJob.state !== 'string') {
+          cancelPollError = 'job-missing';
+          break;
+        }
+        cancelSettledState = settledJob.state;
         if (cancelSettledState === 'canceled') break;
+        if (cancelSettledState === 'failed' || cancelSettledState === 'succeeded') {
+          cancelPollError = `terminal-${cancelSettledState}`;
+          break;
+        }
         await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
       }
       if (cancelSettledState !== 'canceled') {
@@ -996,6 +1059,7 @@ async function recordJourney(
           cancelSettledState,
           cancelPollAttempts,
           cancelPollStatus,
+          cancelPollError,
           canceledState: cancelSettledState,
           retried: null,
           retriedState: null,
@@ -1015,6 +1079,7 @@ async function recordJourney(
         cancelSettledState,
         cancelPollAttempts,
         cancelPollStatus,
+        cancelPollError,
         canceledState: cancelSettledState,
         retried: retryResponse.status,
         retriedState: retried.data?.state,
@@ -1023,8 +1088,10 @@ async function recordJourney(
     {
       projectId,
       sessionToken,
+      assetId: reimportAssetId,
       settleTimeoutMs: DELIVERY_CANCEL_SETTLE_TIMEOUT_MS,
       pollIntervalMs: DELIVERY_CANCEL_POLL_INTERVAL_MS,
+      pollRequestTimeoutMs: DELIVERY_CANCEL_POLL_REQUEST_TIMEOUT_MS,
     },
   );
   if (
