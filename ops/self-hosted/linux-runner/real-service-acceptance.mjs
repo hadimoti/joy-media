@@ -63,6 +63,8 @@ const execFile = promisify((file, args, options, callback) => {
 // is 30 minutes, so the old four-minute Playwright event timeout could expire
 // before the app reached its final browser download handoff.
 const REAL_SERVICE_EXPORT_DOWNLOAD_TIMEOUT_MS = 35 * 60_000;
+const DELIVERY_CANCEL_SETTLE_TIMEOUT_MS = 60_000;
+const DELIVERY_CANCEL_POLL_INTERVAL_MS = 250;
 
 const root = resolve(fileURLToPath(new URL('../../../', import.meta.url)));
 const [candidateSha, runId, runAttempt, pass] = process.argv.slice(2);
@@ -945,7 +947,7 @@ async function recordJourney(
   if (missingSourceStatus !== 404 && missingSourceStatus !== 409)
     throw new Error(`missing-source recovery returned ${missingSourceStatus}, expected 404/409`);
   const deliveryRecovery = await page.evaluate(
-    async ({ projectId: id, sessionToken }) => {
+    async ({ projectId: id, sessionToken, settleTimeoutMs, pollIntervalMs }) => {
       const requestHeaders = {
         authorization: `Bearer ${sessionToken}`,
         'content-type': 'application/json',
@@ -964,6 +966,41 @@ async function recordJourney(
         body: '{}',
       });
       const canceled = await canceledResponse.json();
+      const cancelResponseState = canceled.data?.state;
+      const cancelResponseRequested = canceled.data?.cancelRequested === true;
+      let cancelSettledState = cancelResponseState;
+      let cancelPollAttempts = 0;
+      let cancelPollStatus = null;
+      const cancelSettleDeadline = Date.now() + settleTimeoutMs;
+      while (Date.now() < cancelSettleDeadline) {
+        cancelPollAttempts += 1;
+        const jobsResponse = await fetch(`/api/v1/projects/${id}/jobs`, {
+          headers: { authorization: `Bearer ${sessionToken}` },
+        });
+        cancelPollStatus = jobsResponse.status;
+        if (!jobsResponse.ok) break;
+        const jobsPayload = await jobsResponse.json();
+        const settledJob = Array.isArray(jobsPayload.data)
+          ? jobsPayload.data.find((job) => job.id === jobId)
+          : undefined;
+        if (settledJob?.state !== undefined) cancelSettledState = settledJob.state;
+        if (cancelSettledState === 'canceled') break;
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      }
+      if (cancelSettledState !== 'canceled') {
+        return {
+          created: createdResponse.status,
+          canceled: canceledResponse.status,
+          cancelResponseState,
+          cancelResponseRequested,
+          cancelSettledState,
+          cancelPollAttempts,
+          cancelPollStatus,
+          canceledState: cancelSettledState,
+          retried: null,
+          retriedState: null,
+        };
+      }
       const retryResponse = await fetch(`/api/v1/projects/${id}/jobs/${jobId}/retry`, {
         method: 'POST',
         headers: requestHeaders,
@@ -973,16 +1010,27 @@ async function recordJourney(
       return {
         created: createdResponse.status,
         canceled: canceledResponse.status,
-        canceledState: canceled.data?.state,
+        cancelResponseState,
+        cancelResponseRequested,
+        cancelSettledState,
+        cancelPollAttempts,
+        cancelPollStatus,
+        canceledState: cancelSettledState,
         retried: retryResponse.status,
         retriedState: retried.data?.state,
       };
     },
-    { projectId, sessionToken },
+    {
+      projectId,
+      sessionToken,
+      settleTimeoutMs: DELIVERY_CANCEL_SETTLE_TIMEOUT_MS,
+      pollIntervalMs: DELIVERY_CANCEL_POLL_INTERVAL_MS,
+    },
   );
   if (
     deliveryRecovery.created !== 201 ||
     ![200, 201].includes(deliveryRecovery.canceled) ||
+    deliveryRecovery.cancelSettledState !== 'canceled' ||
     deliveryRecovery.canceledState !== 'canceled' ||
     ![200, 201].includes(deliveryRecovery.retried) ||
     deliveryRecovery.retriedState !== 'queued'
