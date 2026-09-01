@@ -1243,7 +1243,7 @@ async function resetAssetCatalogFilters(page) {
     .first()
     .click();
   const searchToggle = assetsPanel
-    .getByRole('button', { name: 'Search Assets', exact: true })
+    .locator('button[aria-label="Search Assets"], button[aria-label="Close Assets search"]')
     .first();
   await searchToggle.waitFor({ state: 'visible' });
   if ((await searchToggle.getAttribute('aria-expanded')) !== 'true') await searchToggle.click();
