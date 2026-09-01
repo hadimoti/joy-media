@@ -64,6 +64,25 @@ describe('Timeline Elements Showcase', () => {
     ).toEqual(['gaussian-blur', 'noise']);
   });
 
+  it('recovers HTML-scene semantics from existing clip-object bindings', () => {
+    const { timeline, visual } = buildTimelineElementsShowcase();
+    const sceneClip = timeline.compositions
+      .root!.tracks.flatMap((track) => track.clips)
+      .find((clip) => clip.id === 'showcase-scene3d');
+    if (sceneClip === undefined) throw new Error('showcase scene clip is missing');
+    const explicitKinds = visual.pluginData['joy.timelineElementKinds'];
+    if (explicitKinds === null || typeof explicitKinds !== 'object')
+      throw new Error('showcase element kinds are missing');
+    const withoutSceneKind = Object.fromEntries(
+      Object.entries(explicitKinds).filter(([clipId]) => clipId !== sceneClip.id),
+    );
+    const recovered = readTimelineElementKindMap({
+      ...visual,
+      pluginData: { ...visual.pluginData, 'joy.timelineElementKinds': withoutSceneKind },
+    });
+    expect(recovered[sceneClip.id]).toBe('html-scene');
+  });
+
   it('stores Adjust as an independent controller targeted at the parent video', () => {
     const { timeline, visual } = buildTimelineElementsShowcase();
     const targets = readEffectLayerTargetMap(visual);

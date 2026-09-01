@@ -18,6 +18,7 @@ export function isExportVisualTimelineClip(
 ): boolean {
   return (
     !isControlTimelineElement(elementKind) &&
+    elementKind !== 'html-scene' &&
     elementKind !== 'audio' &&
     (assetKind === undefined || assetKind === 'video' || assetKind === 'image')
   );
@@ -35,6 +36,7 @@ export function isExportDurationTimelineClip(
 ): boolean {
   return (
     isExportVisualTimelineClip(elementKind, assetKind) ||
+    elementKind === 'html-scene' ||
     elementKind === 'audio' ||
     assetKind === 'audio'
   );

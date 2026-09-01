@@ -27,6 +27,7 @@ export const TIMELINE_ELEMENT_KINDS = [
   'adjust',
   'overlay',
   'scene3d',
+  'html-scene',
   'audio',
 ] as const;
 
@@ -45,13 +46,28 @@ export function isTimelineElementKind(value: unknown): value is TimelineElementK
 }
 
 export function readTimelineElementKindMap(
-  project: Pick<JoyProjectV1, 'pluginData'>,
+  project: Pick<JoyProjectV1, 'pluginData'> & Partial<Pick<JoyProjectV1, 'visualObjects'>>,
 ): TimelineElementKindMap {
   const raw = project.pluginData[TIMELINE_ELEMENT_KIND_PLUGIN_KEY];
-  if (!isRecord(raw)) return {};
   const result: Record<string, TimelineElementKind> = {};
-  for (const [clipId, kind] of Object.entries(raw)) {
-    if (isTimelineElementKind(kind)) result[clipId] = kind;
+  if (isRecord(raw)) {
+    for (const [clipId, kind] of Object.entries(raw)) {
+      if (isTimelineElementKind(kind)) result[clipId] = kind;
+    }
+  }
+  // HTML-scene placement predates the editor-only kind map and is persisted
+  // through the clip-object binding. Recover that semantic kind for existing
+  // projects while allowing an explicit map entry to remain authoritative.
+  const clipObjects = project.pluginData['joy.clipObjects'];
+  if (isRecord(clipObjects) && project.visualObjects !== undefined) {
+    for (const [clipId, objectId] of Object.entries(clipObjects)) {
+      if (
+        result[clipId] === undefined &&
+        typeof objectId === 'string' &&
+        project.visualObjects[objectId]?.kind === 'html-scene'
+      )
+        result[clipId] = 'html-scene';
+    }
   }
   return result;
 }

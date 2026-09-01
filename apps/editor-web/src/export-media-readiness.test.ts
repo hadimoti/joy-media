@@ -22,6 +22,7 @@ describe('isExportVisualTimelineClip', () => {
     ['audio element', 'audio' as const, 'audio' as const],
     ['caption controller', 'caption' as const, undefined],
     ['filter controller', 'filter' as const, undefined],
+    ['HTML scene render layer', 'html-scene' as const, undefined],
     ['LUT asset', 'video' as const, 'lut' as const],
     ['other asset', 'video' as const, 'other' as const],
   ])('rejects %s', (_label, elementKind, assetKind) => {
@@ -36,6 +37,7 @@ describe('isExportDurationTimelineClip', () => {
     ['semantic audio element', 'audio' as const, 'audio' as const],
     ['legacy audio asset', 'video' as const, 'audio' as const],
     ['3D render media', 'scene3d' as const, 'image' as const],
+    ['HTML scene render layer', 'html-scene' as const, undefined],
   ])('counts %s', (_label, elementKind, assetKind) => {
     expect(isExportDurationTimelineClip(elementKind, assetKind)).toBe(true);
   });

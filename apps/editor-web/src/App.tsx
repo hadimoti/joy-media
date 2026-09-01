@@ -448,6 +448,7 @@ function activeVideoClipAt(
       const assetKind = creative?.assets[clip.assetId]?.kind;
       return (
         !isControlTimelineElement(kind) &&
+        kind !== 'html-scene' &&
         kind !== 'audio' &&
         (assetKind === undefined || assetKind === 'video') &&
         playheadUs >= clip.startUs &&
