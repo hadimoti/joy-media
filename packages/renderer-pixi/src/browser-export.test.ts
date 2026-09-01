@@ -13,6 +13,7 @@ import {
 const manifest = { width: 1, height: 1, frameRate: 1_000, durationUs: 1_000 };
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -201,48 +202,36 @@ describe('browser export contracts', () => {
   });
 
   it('keeps the blob URL alive for the browser download handoff', () => {
-    const body = {
-      appendChild: vi.fn((element: { isConnected: boolean }) => {
-        element.isConnected = true;
-      }),
-      removeChild: vi.fn((element: { isConnected: boolean }) => {
-        element.isConnected = false;
-      }),
-    };
-    const anchor = new EventTarget() as EventTarget & {
-      href: string;
-      download: string;
-      rel: string;
-      style: { display: string };
-      isConnected: boolean;
-      click: () => void;
-    };
-    Object.assign(anchor, {
-      href: '',
-      download: '',
-      rel: '',
-      style: { display: '' },
-      isConnected: false,
-      click: () => anchor.dispatchEvent(new Event('click')),
-    });
-    const revokeObjectURL = vi.fn();
-    let cleanup: (() => void) | undefined;
-    const setTimeout = vi.fn((callback: () => void) => {
-      cleanup = callback;
-      return 1;
-    });
-    vi.stubGlobal('document', { createElement: () => anchor, body });
-    vi.stubGlobal('URL', { createObjectURL: () => 'blob:test', revokeObjectURL });
-    vi.stubGlobal('setTimeout', setTimeout);
+    vi.useFakeTimers();
+    const { anchor, body, revokeObjectURL } = installBrowserDownloadHarness(true);
 
     triggerBrowserDownload(new Blob(['encoded-mp4'], { type: 'video/mp4' }), 'export.mp4');
 
     expect(body.appendChild).toHaveBeenCalledWith(anchor);
-    expect(setTimeout).toHaveBeenCalledOnce();
-    expect(setTimeout).toHaveBeenCalledWith(expect.any(Function), 10_000);
+    expect(vi.getTimerCount()).toBe(1);
     expect(revokeObjectURL).not.toHaveBeenCalled();
-    cleanup?.();
+    vi.advanceTimersByTime(9_999);
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+
+    // The event listener is one-shot, and the explicit fallback call must not
+    // create a second timer when a browser dispatches duplicate clicks.
+    anchor.dispatchEvent(new Event('click'));
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(1);
     expect(body.removeChild).toHaveBeenCalledWith(anchor);
+    expect(revokeObjectURL).toHaveBeenCalledOnce();
+  });
+
+  it('uses the same bounded cleanup when the browser omits the click event', () => {
+    vi.useFakeTimers();
+    const { body, revokeObjectURL } = installBrowserDownloadHarness(false);
+
+    triggerBrowserDownload(new Blob(['encoded-mp4'], { type: 'video/mp4' }), 'export.mp4');
+
+    expect(vi.getTimerCount()).toBe(1);
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(10_000);
+    expect(body.removeChild).toHaveBeenCalledOnce();
     expect(revokeObjectURL).toHaveBeenCalledOnce();
   });
 
@@ -381,6 +370,37 @@ function installRecorderHarness(
       return recorderState.options;
     },
   };
+}
+
+function installBrowserDownloadHarness(dispatchClick: boolean) {
+  const body = {
+    appendChild: vi.fn((element: { isConnected: boolean }) => {
+      element.isConnected = true;
+    }),
+    removeChild: vi.fn((element: { isConnected: boolean }) => {
+      element.isConnected = false;
+    }),
+  };
+  const anchor = new EventTarget() as EventTarget & {
+    href: string;
+    download: string;
+    rel: string;
+    style: { display: string };
+    isConnected: boolean;
+    click: () => void;
+  };
+  Object.assign(anchor, {
+    href: '',
+    download: '',
+    rel: '',
+    style: { display: '' },
+    isConnected: false,
+    click: dispatchClick ? () => anchor.dispatchEvent(new Event('click')) : () => undefined,
+  });
+  const revokeObjectURL = vi.fn();
+  vi.stubGlobal('document', { createElement: () => anchor, body });
+  vi.stubGlobal('URL', { createObjectURL: () => 'blob:test', revokeObjectURL });
+  return { anchor, body, revokeObjectURL };
 }
 
 function installFallbackAudioHarness() {
