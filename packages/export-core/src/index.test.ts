@@ -59,6 +59,9 @@ describe('deterministic export contract', () => {
     renderRgbaFrames(manifest, [red, red], output);
     expect(verifyExport(output)).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
   });
+  // This intentionally runs two full-size 30-second FFmpeg encodes. Under
+  // the parallel repository suite, CPU contention can exceed Vitest's
+  // five-second default even though the export remains healthy.
   it('exports both golden social formats from a frozen revision', () => {
     for (const format of REFERENCE_PROJECT.formats) {
       const output = join(
@@ -77,7 +80,7 @@ describe('deterministic export contract', () => {
       );
       expect(verifyExport(output)).toMatchObject(format);
     }
-  });
+  }, 60_000);
   it('remuxes browser MP4 to h264/aac with exactly one video and audio stream at 30 fps', () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-remux-'));
     const fixturePath = join(directory, 'browser.mp4');
