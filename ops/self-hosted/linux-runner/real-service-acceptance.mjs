@@ -716,6 +716,17 @@ async function recordJourney(
   const motionObjectId = (await motion.locator('.motion-object-id').textContent())?.trim();
   if (!motionObjectId || motionObjectId === 'Select a clip')
     throw new Error('real-service journey did not resolve the Motion target object');
+  // Applying a preset targets the generated HTML-scene clip, not the
+  // imported media clip that the scene was placed above.  Keep that exact
+  // clip id for the reload check; selecting the imported video by display
+  // name would resolve its media controller (which intentionally has no
+  // animation channels) and make a valid persisted preset look missing.
+  const motionClipId = await page
+    .locator('.timeline-clip[data-element-kind="html-scene"][aria-pressed="true"]')
+    .first()
+    .getAttribute('data-clip-id');
+  if (!motionClipId)
+    throw new Error('real-service journey did not resolve the generated Motion clip id');
   // The Enhance panel replaces the Create/Assets surface. Return to the
   // catalog before resolving the second imported asset, and clear any kind
   // filter that the import flow or prior interactions may have selected.
@@ -1014,13 +1025,11 @@ async function recordJourney(
   captureBrowserTelemetry = true;
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.getByRole('button', { name: 'File', exact: true }).waitFor();
-  const reloadedClip = page.locator('.timeline-clip').filter({ hasText: videoName }).first();
+  const reloadedClip = page.locator(`.timeline-clip[data-clip-id="${motionClipId}"]`).first();
   await reloadedClip.waitFor({ timeout: 15_000 });
   await reloadedClip.click();
   if ((await reloadedClip.getAttribute('aria-pressed')) !== 'true')
-    throw new Error('real-service journey did not reselect the imported video after reload');
-  const motionClipId = await reloadedClip.getAttribute('data-clip-id');
-  if (!motionClipId) throw new Error('real-service journey did not resolve the Motion clip id');
+    throw new Error('real-service journey did not reselect the persisted Motion clip after reload');
   await enhance.click();
   await page
     .getByRole('region', { name: 'Enhance tools', exact: true })
