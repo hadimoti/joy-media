@@ -58,6 +58,12 @@ const execFile = promisify((file, args, options, callback) => {
   child.stdin.end(input);
 });
 
+// A real-service export includes browser encoding, upload, and disposable
+// Worker verification after the user's click. The app's Worker polling window
+// is 30 minutes, so the old four-minute Playwright event timeout could expire
+// before the app reached its final browser download handoff.
+const REAL_SERVICE_EXPORT_DOWNLOAD_TIMEOUT_MS = 35 * 60_000;
+
 const root = resolve(fileURLToPath(new URL('../../../', import.meta.url)));
 const [candidateSha, runId, runAttempt, pass] = process.argv.slice(2);
 if (!/^[0-9a-f]{40}$/.test(candidateSha ?? '')) throw new Error('candidate SHA is invalid');
@@ -1266,9 +1272,25 @@ async function addAssetToTimeline(page, displayName) {
 }
 
 async function triggerExportDownload(page) {
-  const downloadPromise = page.waitForEvent('download', { timeout: 240_000 });
+  const downloadPromise = page.waitForEvent('download', {
+    timeout: REAL_SERVICE_EXPORT_DOWNLOAD_TIMEOUT_MS,
+  });
+  const exportFailure = page
+    .locator('.export-toast')
+    .filter({ hasText: /^Export failed:/ })
+    .first();
+  const failurePromise = exportFailure
+    .waitFor({
+      state: 'visible',
+      timeout: REAL_SERVICE_EXPORT_DOWNLOAD_TIMEOUT_MS,
+    })
+    .then(async () => {
+      throw new Error(
+        `JOY export failed before browser download: ${(await exportFailure.textContent())?.trim() ?? 'unknown export failure'}`,
+      );
+    });
   await page.getByRole('button', { name: 'Export MP4' }).click();
-  const download = await downloadPromise;
+  const download = await Promise.race([downloadPromise, failurePromise]);
   const digest = await downloadSha256(download);
   const path = await download.path();
   if (!path) throw new Error('The browser did not materialize the JOY export file');
