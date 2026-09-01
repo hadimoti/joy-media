@@ -59,8 +59,8 @@ describe('deterministic export contract', () => {
     renderRgbaFrames(manifest, [red, red], output);
     expect(verifyExport(output)).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
   });
-  // This intentionally runs two full-size 30-second FFmpeg encodes. Under
-  // the parallel repository suite, CPU contention can exceed Vitest's
+  // This intentionally runs two full-size 100 ms FFmpeg encodes. Under the
+  // parallel repository suite, CPU contention can exceed Vitest's
   // five-second default even though the export remains healthy.
   it('exports both golden social formats from a frozen revision', () => {
     for (const format of REFERENCE_PROJECT.formats) {
