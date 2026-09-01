@@ -662,7 +662,8 @@ async function recordJourney(
     // technology receive, not the painted text node.
     .getByRole('tab', { name: 'Creative Brief', exact: true });
   await joyCodeBrief.click();
-  await page.getByRole('article', { name: 'Creative Brief', exact: true }).waitFor();
+  await page.getByRole('article', { name: 'Joy Code', exact: true }).waitFor();
+  await page.locator('.creative-brief-panel').waitFor();
   const joyCode3d = page
     .getByRole('tablist', { name: 'Joy Code sections', exact: true })
     .getByRole('tab', { name: '3d', exact: true });
