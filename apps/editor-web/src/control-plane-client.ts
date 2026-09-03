@@ -204,6 +204,19 @@ export interface BrowserAssetRegistration {
   readonly locations: readonly { readonly kind: 'opfs-cache'; readonly ref: string }[];
 }
 
+export const RESUMABLE_ORIGINAL_UPLOAD_THRESHOLD_BYTES = 8 * 1024 * 1024;
+const MAX_RESUMABLE_ORIGINAL_UPLOAD_PART_BYTES = 4 * 1024 * 1024;
+const RESUMABLE_ORIGINAL_UPLOAD_POLL_INTERVAL_MS = 750;
+const RESUMABLE_ORIGINAL_UPLOAD_POLL_LIMIT = 1_200;
+
+interface BrowserOriginalUploadStatus {
+  readonly sessionId: string;
+  readonly state: 'uploading' | 'committing' | 'failed' | 'complete';
+  readonly partSize: number;
+  readonly partCount: number;
+  readonly uploadedParts: readonly number[];
+}
+
 // Dockview keeps several panels mounted at once and each panel creates its own
 // client instance. Keep read coalescing at module scope so a status tick from
 // Jobs, Audio, Mask, and Enhance shares one request even when their polling
@@ -429,7 +442,13 @@ export class BrowserControlPlaneClient {
     file: Blob,
     onProgress?: (ratio: number) => void,
   ): Promise<BrowserAsset> {
-    const token = await this.assertion();
+    const token = this.assertion();
+    if (file.size !== asset.bytes) {
+      throw new Error('selected media bytes no longer match the registered asset');
+    }
+    if (file.size > RESUMABLE_ORIGINAL_UPLOAD_THRESHOLD_BYTES) {
+      return this.uploadAssetOriginalInParts(projectId, asset, file, token, onProgress);
+    }
     onProgress?.(0.05);
     const response = await fetch(
       `${this.apiUrl.replace(/\/$/, '')}/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(asset.id)}/original`,
@@ -451,6 +470,101 @@ export class BrowserControlPlaneClient {
       throw new Error('JOY Media API returned an invalid original-upload response');
     onProgress?.(1);
     return body.data.asset as unknown as BrowserAsset;
+  }
+  private async uploadAssetOriginalInParts(
+    projectId: string,
+    asset: Pick<BrowserAsset, 'id' | 'sha256' | 'bytes' | 'descriptor'>,
+    file: Blob,
+    token: string,
+    onProgress?: (ratio: number) => void,
+  ): Promise<BrowserAsset> {
+    const baseUrl = `${this.apiUrl.replace(/\/$/, '')}/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(asset.id)}/original/uploads`;
+    const identityHeaders = {
+      authorization: `Bearer ${token}`,
+      'x-joy-sha256': asset.sha256,
+      'x-joy-bytes': String(asset.bytes),
+      'x-joy-mime-type': asset.descriptor.mimeType,
+    };
+    onProgress?.(0.02);
+    let upload = await originalUploadStatus(
+      await fetch(baseUrl, { method: 'POST', headers: identityHeaders }),
+      'create',
+      asset.bytes,
+    );
+    const sessionId = upload.sessionId;
+    if (upload.state === 'uploading' || upload.state === 'failed') {
+      const uploadedParts = new Set(upload.uploadedParts);
+      for (let partIndex = 0; partIndex < upload.partCount; partIndex += 1) {
+        if (!uploadedParts.has(partIndex)) {
+          const part = file.slice(
+            partIndex * upload.partSize,
+            Math.min((partIndex + 1) * upload.partSize, file.size),
+            asset.descriptor.mimeType,
+          );
+          const partSha256 = await sha256Hex(part);
+          upload = await originalUploadStatus(
+            await fetch(`${baseUrl}/${encodeURIComponent(sessionId)}/parts/${partIndex}`, {
+              method: 'PUT',
+              headers: {
+                ...identityHeaders,
+                'content-type': asset.descriptor.mimeType,
+                'x-joy-part-sha256': partSha256,
+              },
+              body: part,
+            }),
+            'part',
+            asset.bytes,
+          );
+          assertOriginalUploadSession(upload, sessionId);
+        }
+        onProgress?.(0.05 + (0.8 * (partIndex + 1)) / upload.partCount);
+      }
+    }
+    upload = await originalUploadStatus(
+      await fetch(`${baseUrl}/${encodeURIComponent(sessionId)}/complete`, {
+        method: 'POST',
+        headers: identityHeaders,
+      }),
+      'finalize',
+      asset.bytes,
+      202,
+    );
+    assertOriginalUploadSession(upload, sessionId);
+    onProgress?.(0.9);
+    for (let poll = 0; poll < RESUMABLE_ORIGINAL_UPLOAD_POLL_LIMIT; poll += 1) {
+      const response = await fetch(`${baseUrl}/${encodeURIComponent(sessionId)}`, {
+        method: 'GET',
+        headers: identityHeaders,
+      });
+      const body = await responseBody(response);
+      if (!response.ok) throw new Error(errorMessage(body, response.status));
+      if (!isRecord(body) || !isRecord(body.data)) {
+        throw new Error('JOY Media API returned an invalid original-upload status');
+      }
+      upload = parseOriginalUploadStatus(body.data.upload, asset.bytes);
+      assertOriginalUploadSession(upload, sessionId);
+      if (upload.state === 'complete') {
+        if (
+          !isRecord(body.data.asset) ||
+          body.data.asset.cloudBacked !== true ||
+          body.data.asset.id !== asset.id ||
+          body.data.asset.sha256 !== asset.sha256 ||
+          body.data.asset.bytes !== asset.bytes ||
+          !isRecord(body.data.asset.descriptor) ||
+          body.data.asset.descriptor.mimeType !== asset.descriptor.mimeType
+        ) {
+          throw new Error('JOY Media API completed an upload without a cloud-backed asset');
+        }
+        onProgress?.(1);
+        return body.data.asset as unknown as BrowserAsset;
+      }
+      if (upload.state === 'failed') {
+        throw new Error('JOY Media could not finish the private cloud upload. Try again.');
+      }
+      onProgress?.(0.9 + Math.min(0.09, poll * 0.002));
+      await wait(RESUMABLE_ORIGINAL_UPLOAD_POLL_INTERVAL_MS);
+    }
+    throw new Error('JOY Media is still processing the private cloud upload. Try again.');
   }
   /** Fetches an owner-authorized original from private object storage. */
   async originalBytes(projectId: string, assetId: string): Promise<Blob> {
@@ -922,6 +1036,12 @@ function errorMessage(body: unknown, status: number): string {
     return `${code}${body.error.message}`;
   }
   if (isRecord(body) && typeof body.error === 'string') return body.error;
+  if (status === 408 || status === 504 || status === 524) {
+    return `JOY Media request timed out (${status}). Try again.`;
+  }
+  if (status === 502 || status === 503 || (status >= 520 && status <= 530)) {
+    return `JOY Media is temporarily unavailable (${status}). Try again shortly.`;
+  }
   return `JOY Media request failed (${status})`;
 }
 function requestError(body: unknown, status: number): BrowserControlPlaneRequestError {
@@ -937,9 +1057,82 @@ async function responseBody(response: Response): Promise<unknown> {
   try {
     return JSON.parse(text) as unknown;
   } catch {
-    return { error: text };
+    // Proxy/CDN failures can return entire HTML error pages. Non-JSON response
+    // bodies are never part of the browser-facing error contract.
+    return {};
   }
 }
+
+async function originalUploadStatus(
+  response: Response,
+  operation: 'create' | 'part' | 'finalize',
+  assetBytes: number,
+  expectedStatus = 200,
+): Promise<BrowserOriginalUploadStatus> {
+  const body = await responseBody(response);
+  if (!response.ok) throw new Error(errorMessage(body, response.status));
+  if (response.status !== expectedStatus || !isRecord(body) || !isRecord(body.data)) {
+    throw new Error(`JOY Media API returned an invalid original-upload ${operation} response`);
+  }
+  return parseOriginalUploadStatus(body.data.upload, assetBytes);
+}
+
+function parseOriginalUploadStatus(
+  value: unknown,
+  assetBytes: number,
+): BrowserOriginalUploadStatus {
+  if (!isRecord(value)) throw new Error('JOY Media API returned an invalid upload status');
+  const { sessionId, state, partSize, partCount, uploadedParts } = value;
+  if (
+    typeof sessionId !== 'string' ||
+    !/^upload-[a-f0-9]{48}$/.test(sessionId) ||
+    (state !== 'uploading' &&
+      state !== 'committing' &&
+      state !== 'failed' &&
+      state !== 'complete') ||
+    typeof partSize !== 'number' ||
+    !Number.isSafeInteger(partSize) ||
+    partSize < 1 ||
+    partSize > MAX_RESUMABLE_ORIGINAL_UPLOAD_PART_BYTES ||
+    typeof partCount !== 'number' ||
+    !Number.isSafeInteger(partCount) ||
+    partCount !== Math.ceil(assetBytes / partSize) ||
+    !Array.isArray(uploadedParts) ||
+    uploadedParts.some(
+      (part) =>
+        typeof part !== 'number' || !Number.isSafeInteger(part) || part < 0 || part >= partCount,
+    ) ||
+    new Set(uploadedParts).size !== uploadedParts.length
+  ) {
+    throw new Error('JOY Media API returned an invalid upload status');
+  }
+  return {
+    sessionId,
+    state,
+    partSize,
+    partCount,
+    uploadedParts: uploadedParts as number[],
+  };
+}
+
+function assertOriginalUploadSession(
+  upload: BrowserOriginalUploadStatus,
+  expectedSessionId: string,
+): void {
+  if (upload.sessionId !== expectedSessionId) {
+    throw new Error('JOY Media API changed the active upload session');
+  }
+}
+
+async function sha256Hex(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function wait(milliseconds: number): Promise<void> {
+  await new Promise<void>((resolve) => globalThis.setTimeout(resolve, milliseconds));
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }

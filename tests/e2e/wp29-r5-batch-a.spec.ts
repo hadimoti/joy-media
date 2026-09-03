@@ -166,7 +166,7 @@ test.describe('WP-29 R5 batch A — file bridge', () => {
         .setInputFiles(join(MEDIA_FIXTURE_DIR, fileName));
       await drawer.getByRole('button', { name: 'Confirm import' }).click();
       await expect(page.locator('.asset-library .joy-panel-note')).toContainText(
-        /Failed to register media:/,
+        /Media import failed:/,
         {
           timeout: 10_000,
         },

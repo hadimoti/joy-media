@@ -11975,12 +11975,6 @@ label {
   border-radius: var(--radius-md);
   background: var(--joy-bg-panel);
 }
-.asset-import-hint {
-  margin: 0;
-  color: var(--joy-text-faint);
-  font-size: 0.72rem;
-  line-height: 1.4;
-}
 .asset-import-row {
   display: flex;
   flex-wrap: wrap;

@@ -96,6 +96,43 @@ describe('importMediaFile', () => {
     expect(upload).toHaveBeenCalledOnce();
   });
 
+  it('reuses the generated asset ID when the same File is retried after upload failure', async () => {
+    const input = new File(['retry bytes'], 'retry.mp4', { type: 'video/mp4' });
+    const registrations: BrowserAssetRegistration[] = [];
+    const upload = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('temporary upload failure'))
+      .mockImplementationOnce(async (_projectId, asset) => asset);
+    const client = {
+      ensureProject: vi.fn(async () => undefined),
+      registerAsset: vi.fn(async (_projectId: string, registration: BrowserAssetRegistration) => {
+        registrations.push(registration);
+        if (registrations.length > 1) throw new Error('ASSET_EXISTS: retry');
+        return browserAsset(registration);
+      }),
+      assets: vi.fn(async () => [browserAsset(registrations[0]!)]),
+      uploadAssetOriginal: upload,
+    } satisfies NonNullable<MediaImportOptions['client']>;
+    const options = {
+      projectId: 'project-1',
+      projectTitle: 'Project',
+      file: input,
+      client,
+      originalAssetCache: { put: vi.fn(async () => undefined) },
+      describeMedia: async () => ({ mimeType: 'video/mp4' }),
+      createAssetId: vi
+        .fn()
+        .mockReturnValueOnce('media-stable-retry')
+        .mockReturnValueOnce('media-should-not-be-used'),
+    } satisfies MediaImportOptions;
+
+    await expect(importMediaFile(options)).rejects.toThrow('temporary upload failure');
+    await expect(importMediaFile(options)).resolves.toMatchObject({ id: 'media-stable-retry' });
+
+    expect(registrations.map(({ id }) => id)).toEqual(['media-stable-retry', 'media-stable-retry']);
+    expect(options.createAssetId).toHaveBeenCalledOnce();
+  });
+
   it('keeps a synthetic upload file while preserving its human-readable catalog name', async () => {
     const input = new File(['render bytes'], 'joycode-render-1.png', { type: 'image/png' });
     let registration: BrowserAssetRegistration | undefined;

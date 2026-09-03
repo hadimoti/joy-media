@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { BrowserControlPlaneClient, invalidateWorkerReadCache } from './control-plane-client.js';
+import {
+  BrowserControlPlaneClient,
+  RESUMABLE_ORIGINAL_UPLOAD_THRESHOLD_BYTES,
+  invalidateWorkerReadCache,
+} from './control-plane-client.js';
 
 describe('BrowserControlPlaneClient', () => {
   it('sends the local session token only to the Media API', async () => {
@@ -281,18 +285,190 @@ describe('BrowserControlPlaneClient', () => {
     }
   });
 
-  it('reports a plain-text API denial without a JSON parsing failure', async () => {
+  it('does not expose a non-JSON API denial body', async () => {
     const original = globalThis.fetch;
-    globalThis.fetch = async () => new Response('unauthorized', { status: 401 });
+    globalThis.fetch = async () =>
+      new Response('unauthorized: private upstream detail', { status: 401 });
     try {
       const client = new BrowserControlPlaneClient(
         'https://media.joyteam.ir/api',
         () => 'joy-session-token',
       );
-      await expect(client.workers()).rejects.toThrow('unauthorized');
+      await expect(client.workers()).rejects.toMatchObject({
+        message: 'JOY Media request failed (401)',
+      });
     } finally {
       globalThis.fetch = original;
     }
+  });
+
+  it('keeps structured JSON registration errors while sanitizing temporary HTML responses', async () => {
+    const original = globalThis.fetch;
+    let response = json(409, {
+      error: { code: 'ASSET_EXISTS', message: 'The asset is already registered.' },
+    });
+    globalThis.fetch = async () => response;
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => 'joy-session-token',
+      );
+      const registration = {
+        id: 'asset-1',
+        kind: 'video' as const,
+        displayName: 'clip.mp4',
+        sha256: 'a'.repeat(64),
+        bytes: 10,
+        descriptor: { mimeType: 'video/mp4' },
+        locations: [{ kind: 'opfs-cache' as const, ref: 'opfs-a1' }],
+      };
+
+      await expect(client.registerAsset('project-1', registration)).rejects.toMatchObject({
+        message: 'ASSET_EXISTS: The asset is already registered.',
+      });
+
+      response = new Response('<!DOCTYPE html><html>private gateway marker</html>', {
+        status: 503,
+        headers: { 'content-type': 'text/html' },
+      });
+      await expect(client.registerAsset('project-1', registration)).rejects.toMatchObject({
+        message: 'JOY Media is temporarily unavailable (503). Try again shortly.',
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('turns a Cloudflare 524 original-upload page into a concise retryable error', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        '<!DOCTYPE html><html><title>A timeout occurred</title>private gateway marker</html>',
+        {
+          status: 524,
+          headers: { 'content-type': 'text/html' },
+        },
+      );
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => 'joy-session-token',
+      );
+      await expect(
+        client.uploadAssetOriginal(
+          'project-1',
+          {
+            id: 'asset-1',
+            sha256: 'a'.repeat(64),
+            bytes: 10,
+            descriptor: { mimeType: 'video/mp4' },
+          },
+          new Blob(['0123456789'], { type: 'video/mp4' }),
+        ),
+      ).rejects.toMatchObject({ message: 'JOY Media request timed out (524). Try again.' });
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('resumes large originals in authenticated parts and polls for cloud backing', async () => {
+    const original = globalThis.fetch;
+    const sessionId = `upload-${'b'.repeat(48)}`;
+    const bytes = new Uint8Array(RESUMABLE_ORIGINAL_UPLOAD_THRESHOLD_BYTES + 123);
+    const file = new Blob([bytes], { type: 'video/mp4' });
+    const requests: Array<{
+      readonly url: string;
+      readonly method: string;
+      readonly headers: Headers;
+      readonly bodySize?: number;
+    }> = [];
+    const upload = (state: string, uploadedParts: number[]) => ({
+      sessionId,
+      state,
+      partSize: 4 * 1024 * 1024,
+      partCount: 3,
+      uploadedParts,
+    });
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      const body = init?.body;
+      requests.push({
+        url,
+        method,
+        headers: new Headers(init?.headers),
+        ...(body instanceof Blob ? { bodySize: body.size } : {}),
+      });
+      if (url.endsWith('/complete')) {
+        return json(202, { data: { upload: upload('committing', [0, 1, 2]) } });
+      }
+      if (url.endsWith(`/${sessionId}`)) {
+        return json(200, {
+          data: {
+            upload: upload('complete', []),
+            asset: {
+              id: 'asset-1',
+              projectId: 'project-1',
+              kind: 'video',
+              displayName: 'large.mp4',
+              sha256: 'a'.repeat(64),
+              bytes: file.size,
+              descriptor: { mimeType: 'video/mp4' },
+              createdAt: 1,
+              cloudBacked: true,
+            },
+          },
+        });
+      }
+      if (url.includes('/parts/')) {
+        const partIndex = Number(url.split('/').at(-1));
+        return json(200, {
+          data: { upload: upload('uploading', partIndex === 1 ? [0, 1] : [0, 1, 2]) },
+        });
+      }
+      return json(200, { data: { upload: upload('uploading', [0]) } });
+    };
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => 'joy-session-token',
+      );
+      await expect(
+        client.uploadAssetOriginal(
+          'project-1',
+          {
+            id: 'asset-1',
+            sha256: 'a'.repeat(64),
+            bytes: file.size,
+            descriptor: { mimeType: 'video/mp4' },
+          },
+          file,
+        ),
+      ).resolves.toMatchObject({ id: 'asset-1', cloudBacked: true });
+    } finally {
+      globalThis.fetch = original;
+    }
+
+    expect(requests.map(({ method, url }) => `${method} ${url.split('/').at(-1)}`)).toEqual([
+      'POST uploads',
+      'PUT 1',
+      'PUT 2',
+      'POST complete',
+      `GET ${sessionId}`,
+    ]);
+    for (const request of requests) {
+      expect(request.headers.get('authorization')).toBe('Bearer joy-session-token');
+      expect(request.headers.get('x-joy-sha256')).toBe('a'.repeat(64));
+      expect(request.headers.get('x-joy-bytes')).toBe(String(file.size));
+      expect(request.headers.get('x-joy-mime-type')).toBe('video/mp4');
+    }
+    const partRequests = requests.filter(({ method }) => method === 'PUT');
+    expect(partRequests.map(({ bodySize }) => bodySize)).toEqual([4 * 1024 * 1024, 123]);
+    expect(
+      partRequests.every(({ headers }) =>
+        /^[a-f0-9]{64}$/.test(headers.get('x-joy-part-sha256') ?? ''),
+      ),
+    ).toBe(true);
   });
 
   it('fetches derivative bytes only from the authenticated Media API, never the object store', async () => {

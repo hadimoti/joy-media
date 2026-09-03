@@ -420,7 +420,7 @@ export function AssetLibraryPanel({
       window.setTimeout(() => setImportProgress(undefined), 350);
     } catch (error) {
       setImportProgress(undefined);
-      setStatus(`Failed to register media: ${message(error)}`);
+      setStatus(`Media import failed: ${message(error)}`);
     }
   }, [client, originalAssetCache, projectId, projectTitle, refresh, selectedFile]);
   const fetchCloudOriginal = useCallback(
@@ -911,10 +911,6 @@ export function AssetLibraryPanel({
                   <CloseIcon />
                 </button>
               </div>
-              <p className="asset-import-hint">
-                The file is verified, stored in this browser, and backed up to private cloud
-                storage. JOY generates the opaque asset ID automatically.
-              </p>
               <div className="asset-import-row">
                 <input
                   ref={fileInputRef}

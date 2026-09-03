@@ -61,6 +61,8 @@ const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   webp: 'image/webp',
 };
 
+const generatedAssetIdsByFile = new WeakMap<File, Map<string, string>>();
+
 /**
  * Registers an original only after local integrity verification, then uploads
  * the exact bytes to private object storage. A retry resumes an interrupted
@@ -88,7 +90,17 @@ export async function importMediaFile(options: MediaImportOptions): Promise<Brow
   const sha256 = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', buffer)));
   const mimeType = sniffMediaMimeType(new Uint8Array(buffer), declaredMimeType);
   const kind = assetKind(mimeType);
-  const id = options.assetId?.trim() || (options.createAssetId ?? createImportedAssetId)();
+  const explicitAssetId = options.assetId?.trim() || undefined;
+  let idsByProject = generatedAssetIdsByFile.get(file);
+  let generatedAssetId =
+    explicitAssetId === undefined ? idsByProject?.get(options.projectId) : undefined;
+  if (explicitAssetId === undefined && generatedAssetId === undefined) {
+    generatedAssetId = (options.createAssetId ?? createImportedAssetId)();
+    idsByProject ??= new Map<string, string>();
+    idsByProject.set(options.projectId, generatedAssetId);
+    generatedAssetIdsByFile.set(file, idsByProject);
+  }
+  const id = explicitAssetId || generatedAssetId!;
   validateAssetId(id);
 
   const descriptor = await (options.describeMedia ?? describeMedia)(file, kind, mimeType);
@@ -127,6 +139,10 @@ export async function importMediaFile(options: MediaImportOptions): Promise<Brow
     },
   );
   report(options, 1, `${file.name} backed up to private cloud storage.`);
+  if (explicitAssetId === undefined) {
+    idsByProject?.delete(options.projectId);
+    if (idsByProject?.size === 0) generatedAssetIdsByFile.delete(file);
+  }
   return uploaded;
 }
 

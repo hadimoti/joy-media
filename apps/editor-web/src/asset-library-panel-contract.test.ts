@@ -4,6 +4,20 @@ import { describe, expect, it } from 'vitest';
 const panelSource = readFileSync(new URL('./AssetLibraryPanel.tsx', import.meta.url), 'utf8');
 
 describe('AssetLibraryPanel successful import contract', () => {
+  it('keeps the import controls without the retired explainer annotation', () => {
+    expect(panelSource).toContain('role="dialog" aria-label="Import media"');
+    expect(panelSource).toContain('aria-label="Media file"');
+    expect(panelSource).toContain('aria-label="Confirm import"');
+    expect(panelSource).not.toContain('asset-import-hint');
+    expect(panelSource).not.toContain('The file is verified, stored in this browser');
+    expect(panelSource).not.toContain('JOY generates the opaque asset ID automatically.');
+  });
+
+  it('uses phase-neutral failure copy for the full cache, registration, and upload transaction', () => {
+    expect(panelSource).toContain('setStatus(`Media import failed: ${message(error)}`);');
+    expect(panelSource).not.toContain('Failed to register media:');
+  });
+
   it('includes ownership, applies the reveal state, and retains refresh reconciliation', () => {
     const successPath = panelSource.slice(
       panelSource.indexOf('const imported = await importMediaFile'),

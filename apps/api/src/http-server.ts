@@ -76,6 +76,10 @@ import {
 import { JoyCodeAdmissionGate } from './joy-code-admission-gate.js';
 import { createClientAddressResolver, type ClientAddressResolver } from './client-address.js';
 import { attachDbQueryCountHeader, withDbQueryContext } from './db-query-observability.js';
+import {
+  ORIGINAL_UPLOAD_PART_BYTES,
+  type ResumableOriginalUploadCoordinator,
+} from './resumable-original-upload.js';
 
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
 const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 600;
@@ -110,6 +114,7 @@ export interface ControlPlaneHttpServerOptions {
   readonly authentication: ApiAuthentication;
   readonly mediaAuth?: MediaAuthApi;
   readonly privateObjectStore?: PrivateObjectStore;
+  readonly resumableOriginalUploads?: ResumableOriginalUploadCoordinator;
   /** Server-only provider registry; it never serializes a credential. */
   readonly mistral?: MistralProviderRegistry;
   /** Durable in production; injectable so transport tests never need ffmpeg. */
@@ -1521,6 +1526,80 @@ async function route(
   const assetOriginalMatch = /^\/v1\/projects\/([^/]+)\/assets\/([^/]+)\/original$/.exec(
     url.pathname,
   );
+  const resumableUploadCreateMatch =
+    /^\/v1\/projects\/([^/]+)\/assets\/([^/]+)\/original\/uploads$/.exec(url.pathname);
+  const resumableUploadPartMatch =
+    /^\/v1\/projects\/([^/]+)\/assets\/([^/]+)\/original\/uploads\/(upload-[a-f0-9]{48})\/parts\/(\d+)$/.exec(
+      url.pathname,
+    );
+  const resumableUploadCompleteMatch =
+    /^\/v1\/projects\/([^/]+)\/assets\/([^/]+)\/original\/uploads\/(upload-[a-f0-9]{48})\/complete$/.exec(
+      url.pathname,
+    );
+  const resumableUploadStatusMatch =
+    /^\/v1\/projects\/([^/]+)\/assets\/([^/]+)\/original\/uploads\/(upload-[a-f0-9]{48})$/.exec(
+      url.pathname,
+    );
+  if (request.method === 'POST' && resumableUploadCreateMatch !== null) {
+    const uploads = requiredResumableOriginalUploads(options);
+    const projectId = decodeURIComponent(resumableUploadCreateMatch[1]!);
+    const assetId = decodeURIComponent(resumableUploadCreateMatch[2]!);
+    const asset = await registeredUploadAsset(options, actor, request, projectId, assetId);
+    const upload = await uploads.createOrResume(actor, projectId, asset);
+    respondJson(response, 200, { data: { upload } });
+    return;
+  }
+  if (request.method === 'PUT' && resumableUploadPartMatch !== null) {
+    const uploads = requiredResumableOriginalUploads(options);
+    const projectId = decodeURIComponent(resumableUploadPartMatch[1]!);
+    const assetId = decodeURIComponent(resumableUploadPartMatch[2]!);
+    const asset = await registeredUploadAsset(options, actor, request, projectId, assetId);
+    const bytes = await readBytes(request, ORIGINAL_UPLOAD_PART_BYTES);
+    const upload = await uploads.putPart(
+      actor,
+      projectId,
+      asset,
+      resumableUploadPartMatch[3]!,
+      Number(resumableUploadPartMatch[4]),
+      requiredSha256Header(request, 'x-joy-part-sha256'),
+      bytes,
+    );
+    respondJson(response, 200, { data: { upload } });
+    return;
+  }
+  if (request.method === 'POST' && resumableUploadCompleteMatch !== null) {
+    const uploads = requiredResumableOriginalUploads(options);
+    const projectId = decodeURIComponent(resumableUploadCompleteMatch[1]!);
+    const assetId = decodeURIComponent(resumableUploadCompleteMatch[2]!);
+    const asset = await registeredUploadAsset(options, actor, request, projectId, assetId);
+    const upload = await uploads.finalize(
+      actor,
+      projectId,
+      asset,
+      resumableUploadCompleteMatch[3]!,
+    );
+    respondJson(response, 202, { data: { upload } });
+    return;
+  }
+  if (request.method === 'GET' && resumableUploadStatusMatch !== null) {
+    const uploads = requiredResumableOriginalUploads(options);
+    const projectId = decodeURIComponent(resumableUploadStatusMatch[1]!);
+    const assetId = decodeURIComponent(resumableUploadStatusMatch[2]!);
+    let asset = await registeredUploadAsset(options, actor, request, projectId, assetId);
+    const upload = await uploads.status(actor, projectId, asset, resumableUploadStatusMatch[3]!);
+    if (upload.state === 'complete') {
+      asset = await requiredProjectAsset(options.controlPlane, actor, projectId, assetId);
+    }
+    respondNoStoreJson(response, 200, {
+      data: {
+        upload,
+        ...(asset.locations.some((location) => location.kind === 'private-object')
+          ? { asset: assetForBrowser(asset) }
+          : {}),
+      },
+    });
+    return;
+  }
   if (request.method === 'GET' && assetOriginalMatch !== null) {
     const store = options.privateObjectStore;
     if (store === undefined)
@@ -2385,6 +2464,67 @@ function workerDerivativeHeaders(request: IncomingMessage): {
   };
 }
 
+function requiredResumableOriginalUploads(
+  options: ControlPlaneHttpServerOptions,
+): ResumableOriginalUploadCoordinator {
+  if (options.resumableOriginalUploads === undefined) {
+    throw new ControlPlaneError(
+      'UPLOAD_STAGING_UNAVAILABLE',
+      'resumable original upload is unavailable',
+    );
+  }
+  return options.resumableOriginalUploads;
+}
+
+async function registeredUploadAsset(
+  options: ControlPlaneHttpServerOptions,
+  actor: Actor,
+  request: IncomingMessage,
+  projectId: string,
+  assetId: string,
+): Promise<MediaAssetRecord> {
+  const asset = await requiredProjectAsset(options.controlPlane, actor, projectId, assetId);
+  const declaredSha256 = requiredSha256Header(request, 'x-joy-sha256');
+  const declaredBytes = Number(requiredHeader(request, 'x-joy-bytes'));
+  const declaredMimeType = requiredHeader(request, 'x-joy-mime-type').trim().toLowerCase();
+  if (
+    !Number.isSafeInteger(declaredBytes) ||
+    declaredBytes < 1 ||
+    declaredSha256 !== asset.sha256 ||
+    declaredBytes !== asset.bytes ||
+    declaredMimeType !== asset.descriptor.mimeType
+  ) {
+    throw new ControlPlaneError('REQUEST_INVALID', 'upload identity does not match asset');
+  }
+  if (request.method === 'PUT') {
+    const contentType = request.headers['content-type']?.split(';')[0]?.trim().toLowerCase();
+    if (contentType !== asset.descriptor.mimeType) {
+      throw new ControlPlaneError('REQUEST_INVALID', 'upload part MIME type does not match asset');
+    }
+  }
+  return asset;
+}
+
+async function requiredProjectAsset(
+  controlPlane: ControlPlane,
+  actor: Actor,
+  projectId: string,
+  assetId: string,
+): Promise<MediaAssetRecord> {
+  const assets = await controlPlane.assetsForProject(actor, projectId);
+  const asset = assets.find((candidate) => candidate.id === assetId);
+  if (asset === undefined) throw new ControlPlaneError('ASSET_NOT_FOUND', assetId);
+  return asset;
+}
+
+function requiredSha256Header(request: IncomingMessage, name: string): string {
+  const value = requiredHeader(request, name).toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(value)) {
+    throw new ControlPlaneError('REQUEST_INVALID', `${name} header is invalid`);
+  }
+  return value;
+}
+
 function requiredHeader(request: IncomingMessage, name: string): string {
   const value = request.headers[name];
   if (typeof value !== 'string' || value.length === 0)
@@ -2750,16 +2890,20 @@ function respondError(response: ServerResponse, error: unknown): void {
                 ? 400
                 : error.code === 'DERIVATIVE_NOT_READY'
                   ? 409
-                  : error.code === 'PROVIDER_UNAVAILABLE' ||
-                      error.code === 'DERIVATIVE_CLEANUP_FAILED' ||
-                      error.code === 'PROVIDER_FAILED' ||
-                      error.code === 'PROJECT_DOCUMENT_STORE_UNAVAILABLE'
-                    ? 503
-                    : error.code === 'DOCUMENT_REVISION_CONFLICT'
-                      ? 409
-                      : error.code.startsWith('PAIRING_')
-                        ? 403
-                        : 409;
+                  : error.code === 'UPLOAD_NOT_FOUND'
+                    ? 404
+                    : error.code === 'PROVIDER_UNAVAILABLE' ||
+                        error.code === 'PRIVATE_STORE_UNAVAILABLE' ||
+                        error.code === 'UPLOAD_STAGING_UNAVAILABLE' ||
+                        error.code === 'DERIVATIVE_CLEANUP_FAILED' ||
+                        error.code === 'PROVIDER_FAILED' ||
+                        error.code === 'PROJECT_DOCUMENT_STORE_UNAVAILABLE'
+                      ? 503
+                      : error.code === 'DOCUMENT_REVISION_CONFLICT'
+                        ? 409
+                        : error.code.startsWith('PAIRING_')
+                          ? 403
+                          : 409;
     respondJson(response, status, { error: { code: error.code, message: error.message } });
     return;
   }

@@ -39,6 +39,13 @@ export {
   type PrivateObjectStore,
 } from './private-object-store.js';
 export {
+  MAX_ORIGINAL_UPLOAD_BYTES,
+  ORIGINAL_UPLOAD_PART_BYTES,
+  ResumableOriginalUploadCoordinator,
+  type ResumableOriginalUploadState,
+  type ResumableOriginalUploadStatus,
+} from './resumable-original-upload.js';
+export {
   PostgresControlPlane,
   type PostgresControlPlaneOptions,
 } from './postgres-control-plane.js';

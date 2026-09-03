@@ -25,6 +25,7 @@ import { CanonicalJoyCodeInputResolver } from './joy-code-input-resolver.js';
 import { createClientAddressResolver, trustedProxyAddressesFromEnv } from './client-address.js';
 import { productionReadinessOptions, releaseIdentityFromEnvironment } from './server-readiness.js';
 import { instrumentPostgresPool } from './db-query-observability.js';
+import { ResumableOriginalUploadCoordinator } from './resumable-original-upload.js';
 
 await start();
 
@@ -115,6 +116,16 @@ async function start(): Promise<void> {
             ? {}
             : { command: process.env.JOY_MEDIA_RCLONE_COMMAND }),
         });
+  const resumableOriginalUploads =
+    privateObjectStore === undefined
+      ? undefined
+      : new ResumableOriginalUploadCoordinator({
+          rootDirectory:
+            process.env.JOY_MEDIA_UPLOAD_STAGING_DIR?.trim() ||
+            '/opt/joy-media/data/upload-staging',
+          controlPlane,
+          privateObjectStore,
+        });
   createControlPlaneHttpServer({
     controlPlane,
     // Public /v1 (project/job/asset routes) stays disabled unless durable state
@@ -144,6 +155,7 @@ async function start(): Promise<void> {
       ...(mistralLedger === undefined ? {} : { ledger: mistralLedger }),
     }),
     ...(privateObjectStore === undefined ? {} : { privateObjectStore }),
+    ...(resumableOriginalUploads === undefined ? {} : { resumableOriginalUploads }),
   }).listen(port, host);
   console.log(`JOY Media API listening on ${host}:${port}`);
 }
