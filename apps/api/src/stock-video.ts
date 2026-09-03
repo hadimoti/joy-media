@@ -689,7 +689,7 @@ function catalogOf(row: StockCatalogRow): StockVideoCatalogRecord {
     catalogId: row.id,
     provider: row.provider,
     providerAssetId: row.provider_asset_id,
-    ...(row.category === undefined ? {} : { category: row.category }),
+    category: row.category,
     title: row.title,
     creator: row.creator,
     sourcePageUrl: row.source_page_url,
