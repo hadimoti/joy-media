@@ -3,7 +3,22 @@ import type {
   BrowserAsset,
   BrowserJob,
   BrowserMediaDescriptor,
+  BrowserStockVideo,
+  BrowserStockVideoCategory,
+  BrowserStockVideoImport,
+  BrowserStockVideoPage,
 } from './control-plane-client.js';
+
+const STOCK_VIDEO_CATEGORY_IDS = [
+  'business-work',
+  'technology',
+  'people-lifestyle',
+  'nature',
+  'travel-places',
+  'city-transport',
+  'food-drink',
+  'abstract-backgrounds',
+] as const;
 
 export function browserJobList(value: unknown): readonly BrowserJob[] {
   if (!Array.isArray(value)) throw invalidJobResponse();
@@ -65,6 +80,119 @@ export function browserAsset(value: unknown): BrowserAsset {
     ...(value.sortName === undefined ? {} : { sortName: string(value.sortName) }),
     createdAt: nonNegative(value.createdAt),
     cloudBacked: value.cloudBacked,
+  };
+}
+
+export function browserStockVideoPage(
+  value: unknown,
+  requestedCategory?: BrowserStockVideoCategory,
+): BrowserStockVideoPage {
+  if (!isRecord(value) || !Array.isArray(value.items)) throw invalidStockVideoResponse();
+  const counts = {} as Record<BrowserStockVideoCategory, number>;
+  if (isRecord(value.counts)) {
+    for (const category of STOCK_VIDEO_CATEGORY_IDS) {
+      const count = value.counts[category];
+      if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0 || count > 6)
+        throw invalidStockVideoResponse();
+      counts[category] = count;
+    }
+  } else if (
+    requestedCategory !== undefined &&
+    typeof value.count === 'number' &&
+    Number.isSafeInteger(value.count) &&
+    value.count >= 0 &&
+    value.count <= 6
+  ) {
+    for (const category of STOCK_VIDEO_CATEGORY_IDS) counts[category] = 0;
+    counts[requestedCategory] = value.count;
+  } else {
+    throw invalidStockVideoResponse();
+  }
+  const nextCursor = value.nextCursor;
+  if (nextCursor !== undefined && (typeof nextCursor !== 'string' || nextCursor.length > 512))
+    throw invalidStockVideoResponse();
+  if (value.items.length > 6) throw invalidStockVideoResponse();
+  return {
+    items: value.items.map((item) => browserStockVideo(item, requestedCategory)),
+    counts,
+    ...(nextCursor === undefined ? {} : { nextCursor }),
+  };
+}
+
+export function browserStockVideo(
+  value: unknown,
+  fallbackCategory?: BrowserStockVideoCategory,
+): BrowserStockVideo {
+  if (!isRecord(value)) throw invalidStockVideoResponse();
+  const category = value.category ?? fallbackCategory;
+  const provider = value.provider;
+  const orientation = value.orientation;
+  if (
+    !STOCK_VIDEO_CATEGORY_IDS.includes(category as BrowserStockVideoCategory) ||
+    (provider !== 'pexels' && provider !== 'pixabay') ||
+    (orientation !== 'portrait' && orientation !== 'landscape')
+  )
+    throw invalidStockVideoResponse();
+  const sourcePageUrl = string(value.sourcePageUrl);
+  try {
+    const url = new URL(sourcePageUrl);
+    if (url.protocol !== 'https:') throw new Error('source page must be HTTPS');
+  } catch {
+    throw invalidStockVideoResponse();
+  }
+  const title = string(value.title);
+  const creator = string(value.creator);
+  const id = string(value.id);
+  const durationUs = durationInMicroseconds(value.durationUs ?? value.durationSeconds);
+  const width = positive(value.width);
+  const height = positive(value.height);
+  if (orientation === 'portrait' && width >= height) throw invalidStockVideoResponse();
+  if (orientation === 'landscape' && height >= width) throw invalidStockVideoResponse();
+  return {
+    id,
+    category: category as BrowserStockVideoCategory,
+    title,
+    provider,
+    creator,
+    sourcePageUrl,
+    durationUs,
+    width,
+    height,
+    orientation,
+  };
+}
+
+function durationInMicroseconds(value: unknown): number {
+  if (Number.isSafeInteger(value) && (value as number) > 0) return value as number;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0)
+    throw invalidStockVideoResponse();
+  const durationUs = Math.round(value * 1_000_000);
+  if (!Number.isSafeInteger(durationUs) || durationUs < 1) throw invalidStockVideoResponse();
+  return durationUs;
+}
+
+export function browserStockVideoImport(value: unknown): BrowserStockVideoImport {
+  if (!isRecord(value)) throw invalidStockVideoResponse();
+  const state = value.state;
+  if (
+    !['claimed', 'downloading', 'object-stored', 'registered', 'completed', 'failed'].includes(
+      String(state),
+    )
+  )
+    throw invalidStockVideoResponse();
+  if (value.errorCode !== undefined && typeof value.errorCode !== 'string')
+    throw invalidStockVideoResponse();
+  if (value.assetId !== undefined && typeof value.assetId !== 'string')
+    throw invalidStockVideoResponse();
+  const asset = value.asset === undefined ? undefined : browserAsset(value.asset);
+  if (state === 'completed' && asset === undefined && value.assetId === undefined)
+    throw invalidStockVideoResponse();
+  return {
+    importId: string(value.importId),
+    state: state as BrowserStockVideoImport['state'],
+    ...(value.assetId === undefined ? {} : { assetId: string(value.assetId) }),
+    ...(value.errorCode === undefined ? {} : { errorCode: string(value.errorCode) }),
+    ...(asset === undefined ? {} : { asset }),
   };
 }
 
@@ -146,6 +274,9 @@ function safeString(value: unknown): string {
 }
 function invalidAssetResponse(): Error {
   return new Error('JOY Media API returned an invalid asset response');
+}
+function invalidStockVideoResponse(): Error {
+  return new Error('JOY Media API returned an invalid stock video response');
 }
 function invalidJobResponse(): Error {
   return new Error('JOY Media API returned an invalid job response');

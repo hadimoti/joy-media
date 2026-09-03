@@ -26,6 +26,13 @@ import { createClientAddressResolver, trustedProxyAddressesFromEnv } from './cli
 import { productionReadinessOptions, releaseIdentityFromEnvironment } from './server-readiness.js';
 import { instrumentPostgresPool } from './db-query-observability.js';
 import { ResumableOriginalUploadCoordinator } from './resumable-original-upload.js';
+import {
+  createStockVideoCredentialSource,
+  STOCK_VIDEO_SECRET_REFS,
+} from './stock-video-credentials.js';
+import { PexelsStockVideoProvider } from './pexels-stock-video-provider.js';
+import { PixabayStockVideoProvider } from './pixabay-stock-video-provider.js';
+import { PostgresStockVideoRepository, StockVideoService } from './stock-video.js';
 
 await start();
 
@@ -126,6 +133,26 @@ async function start(): Promise<void> {
           controlPlane,
           privateObjectStore,
         });
+  const stockVideoSecrets = createStockVideoCredentialSource((path, encoding) =>
+    readFileSync(path, encoding),
+  );
+  const pexelsApiKey = stockVideoSecrets(STOCK_VIDEO_SECRET_REFS.pexels);
+  const pixabayApiKey = stockVideoSecrets(STOCK_VIDEO_SECRET_REFS.pixabay);
+  const stockVideoProviders = [
+    ...(pexelsApiKey === undefined ? [] : [new PexelsStockVideoProvider({ apiKey: pexelsApiKey })]),
+    ...(pixabayApiKey === undefined
+      ? []
+      : [new PixabayStockVideoProvider({ apiKey: pixabayApiKey })]),
+  ];
+  const stockVideo =
+    pool !== undefined && privateObjectStore !== undefined && stockVideoProviders.length > 0
+      ? new StockVideoService({
+          repository: new PostgresStockVideoRepository(pool),
+          providers: stockVideoProviders,
+          controlPlane,
+          privateObjectStore,
+        })
+      : undefined;
   createControlPlaneHttpServer({
     controlPlane,
     // Public /v1 (project/job/asset routes) stays disabled unless durable state
@@ -156,6 +183,7 @@ async function start(): Promise<void> {
     }),
     ...(privateObjectStore === undefined ? {} : { privateObjectStore }),
     ...(resumableOriginalUploads === undefined ? {} : { resumableOriginalUploads }),
+    ...(stockVideo === undefined ? {} : { stockVideo }),
   }).listen(port, host);
   console.log(`JOY Media API listening on ${host}:${port}`);
 }

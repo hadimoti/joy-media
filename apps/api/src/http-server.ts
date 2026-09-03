@@ -80,6 +80,9 @@ import {
   ORIGINAL_UPLOAD_PART_BYTES,
   type ResumableOriginalUploadCoordinator,
 } from './resumable-original-upload.js';
+import type { StockVideoService } from './stock-video.js';
+import { STOCK_VIDEO_CATEGORIES } from './stock-video-providers.js';
+import { stockVideoImportForBrowser } from './stock-video-import.js';
 
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
 const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 600;
@@ -115,6 +118,8 @@ export interface ControlPlaneHttpServerOptions {
   readonly mediaAuth?: MediaAuthApi;
   readonly privateObjectStore?: PrivateObjectStore;
   readonly resumableOriginalUploads?: ResumableOriginalUploadCoordinator;
+  /** Optional authenticated Pexels/Pixabay stock-video broker. */
+  readonly stockVideo?: StockVideoService;
   /** Server-only provider registry; it never serializes a credential. */
   readonly mistral?: MistralProviderRegistry;
   /** Durable in production; injectable so transport tests never need ffmpeg. */
@@ -956,6 +961,85 @@ async function route(
         ? await options.controlPlane.assetsForOwner(actor)
         : await options.controlPlane.assetsForProject(actor, projectId);
     respondJson(response, 200, { data: assets.map(assetForBrowser) });
+    return;
+  }
+
+  const stockVideo = options.stockVideo;
+  const stockVideoListMatch = /^\/v1\/library\/stock-videos$/.exec(url.pathname);
+  if (request.method === 'GET' && stockVideoListMatch !== null) {
+    if (stockVideo === undefined)
+      throw new ControlPlaneError('STOCK_PROVIDER_UNAVAILABLE', 'stock video is unavailable');
+    const rawCategory = url.searchParams.get('category') ?? undefined;
+    const category =
+      rawCategory === undefined
+        ? undefined
+        : (STOCK_VIDEO_CATEGORIES as readonly string[]).includes(rawCategory)
+          ? (rawCategory as (typeof STOCK_VIDEO_CATEGORIES)[number])
+          : undefined;
+    if (rawCategory !== undefined && category === undefined)
+      throw new ControlPlaneError('REQUEST_INVALID', 'stock video category is invalid');
+    const rawCursor = url.searchParams.get('cursor');
+    if (rawCursor !== null && rawCursor !== 'more')
+      throw new ControlPlaneError('REQUEST_INVALID', 'stock video cursor is invalid');
+    const query = url.searchParams.get('q');
+    const request: Parameters<StockVideoService['search']>[0] = {
+      ...(category === undefined ? {} : { category }),
+      ...(query === null ? {} : { query }),
+    };
+    respondJson(response, 200, { data: await stockVideo.search(request) });
+    return;
+  }
+  const stockVideoMediaMatch = /^\/v1\/library\/stock-videos\/([^/]+)\/(poster|preview)$/.exec(
+    url.pathname,
+  );
+  if (request.method === 'GET' && stockVideoMediaMatch !== null) {
+    if (stockVideo === undefined)
+      throw new ControlPlaneError('STOCK_PROVIDER_UNAVAILABLE', 'stock video is unavailable');
+    const range = stockVideoMediaMatch[2] === 'preview' ? request.headers.range : undefined;
+    const media = await stockVideo.proxy(
+      decodeURIComponent(stockVideoMediaMatch[1]!),
+      stockVideoMediaMatch[2] as 'poster' | 'preview',
+      range,
+    );
+    response.writeHead(media.status, {
+      'content-type': media.mimeType,
+      'content-length': String(media.bytes.byteLength),
+      'cache-control': 'private, max-age=300',
+      'cross-origin-resource-policy': 'same-origin',
+      'x-content-type-options': 'nosniff',
+      ...(media.contentRange ? { 'content-range': media.contentRange } : {}),
+    });
+    response.end(Buffer.from(media.bytes));
+    return;
+  }
+  const stockVideoImportMatch = /^\/v1\/projects\/([^/]+)\/stock-video-import$/.exec(url.pathname);
+  if (request.method === 'POST' && stockVideoImportMatch !== null) {
+    if (stockVideo === undefined)
+      throw new ControlPlaneError('STOCK_PROVIDER_UNAVAILABLE', 'stock video is unavailable');
+    const body = await readJson(request, maxJsonBodyBytes);
+    const catalogId = requiredString(body, 'catalogId');
+    respondJson(response, 202, {
+      data: stockVideoImportForBrowser(
+        await stockVideo.startImport(
+          actor,
+          decodeURIComponent(stockVideoImportMatch[1]!),
+          catalogId,
+        ),
+      ),
+    });
+    return;
+  }
+  const stockVideoImportStatusMatch =
+    /^\/v1\/projects\/([^/]+)\/stock-video-imports\/([^/]+)$/.exec(url.pathname);
+  if (request.method === 'GET' && stockVideoImportStatusMatch !== null) {
+    if (stockVideo === undefined)
+      throw new ControlPlaneError('STOCK_PROVIDER_UNAVAILABLE', 'stock video is unavailable');
+    const importStatus = await stockVideo.importStatus(
+      actor,
+      decodeURIComponent(stockVideoImportStatusMatch[1]!),
+      decodeURIComponent(stockVideoImportStatusMatch[2]!),
+    );
+    respondNoStoreJson(response, 200, { data: stockVideoImportForBrowser(importStatus) });
     return;
   }
 
@@ -2901,9 +2985,17 @@ function respondError(response: ServerResponse, error: unknown): void {
                       ? 503
                       : error.code === 'DOCUMENT_REVISION_CONFLICT'
                         ? 409
-                        : error.code.startsWith('PAIRING_')
-                          ? 403
-                          : 409;
+                        : error.code === 'STOCK_VIDEO_NOT_FOUND' ||
+                            error.code === 'STOCK_IMPORT_NOT_FOUND'
+                          ? 404
+                          : error.code === 'STOCK_MEDIA_TOO_LARGE' ||
+                              error.code === 'STOCK_REQUEST_INVALID'
+                            ? 400
+                            : error.code === 'STOCK_PROVIDER_UNAVAILABLE'
+                              ? 503
+                              : error.code.startsWith('PAIRING_')
+                                ? 403
+                                : 409;
     respondJson(response, status, { error: { code: error.code, message: error.message } });
     return;
   }

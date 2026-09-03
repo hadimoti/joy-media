@@ -4,6 +4,7 @@ import {
   BrowserControlPlaneClient,
   type BrowserAsset,
   type BrowserDerivative,
+  type BrowserStockVideo,
 } from './control-plane-client.js';
 import { describeMedia, importMediaFile } from './media-import.js';
 import { getStoredMediaToken, MEDIA_SESSION_CHANGED_EVENT } from './media-session.js';
@@ -49,6 +50,7 @@ import { panelTabIconUrl } from './panel-tab-icons.js';
 import { ASSET_CATEGORY_ICONS, assetCollectionIconUrl } from './asset-library-icons.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 import { loadEditorUiPreferences, saveEditorUiPreferences } from './ui-preferences.js';
+import { StockVideoDiscovery, waitForStockVideoImport } from './StockVideoDiscovery.js';
 
 type AssetSource = 'cloud' | 'user';
 
@@ -703,10 +705,41 @@ export function AssetLibraryPanel({
     );
   }, [client, projectId, refresh, selectedAssetIds, visible]);
 
+  const importStockVideo = useCallback(
+    async (video: BrowserStockVideo): Promise<void> => {
+      const started = await client.startStockVideoImport(projectId, video.id);
+      const completed =
+        started.state === 'completed' || started.state === 'failed'
+          ? started
+          : await waitForStockVideoImport(client, projectId, started.importId);
+      if (completed.state === 'failed') {
+        throw new Error(completed.errorCode ?? 'Native stock video import failed');
+      }
+      const importedAsset =
+        completed.asset ??
+        (completed.assetId === undefined
+          ? undefined
+          : (await client.myAssets(projectId)).find(({ id }) => id === completed.assetId));
+      if (importedAsset === undefined) throw new Error('Import completed without a My media asset');
+      setItems((current) => includeOwnedAsset(current, new Set(), importedAsset).items);
+      setOwnedAssetIds((current) => includeOwnedAsset([], current, importedAsset).ownedAssetIds);
+      setAssetSource('user');
+      setCategory('video');
+      setCollection('browse');
+      setQuery('');
+      setAvailability('all');
+      setSort('recent');
+      setStatus(`${importedAsset.displayName} imported to My media.`);
+      await refresh();
+    },
+    [client, projectId, refresh],
+  );
+
   const visibleIds = useMemo(() => rendered.map(({ asset }) => asset.id), [rendered]);
   const allVisibleSelected =
     visibleIds.length > 0 && visibleIds.every((id) => selectedAssetIds.has(id));
   const selectedCount = selectedAssetIds.size;
+  const showingStockVideos = assetSource === 'cloud' && category === 'video';
 
   // The top level is intentionally media-specific. Collections below it are
   // driven by category-* tags, so future videos and audio inherit the same UI.
@@ -1019,7 +1052,7 @@ export function AssetLibraryPanel({
               )}
             </div>
           )}
-          {filterActive && (
+          {!showingStockVideos && filterActive && (
             <div className="asset-filter-summary" aria-label="Active asset filters">
               <span>Active filters</span>
               {availability !== 'all' && <span className="asset-filter-chip">{availability}</span>}
@@ -1036,7 +1069,7 @@ export function AssetLibraryPanel({
               </button>
             </div>
           )}
-          {preview !== undefined && (
+          {!showingStockVideos && preview !== undefined && (
             <section className="asset-preview" aria-label={`Preview: ${preview.displayName}`}>
               <div>
                 <strong>{preview.displayName}</strong>
@@ -1063,7 +1096,7 @@ export function AssetLibraryPanel({
               )}
             </section>
           )}
-          {selectedCount > 0 && (
+          {!showingStockVideos && selectedCount > 0 && (
             <div className="asset-bulk-bar" role="toolbar" aria-label="Bulk asset actions">
               <span className="asset-bulk-count">{selectedCount}</span>
               <button
@@ -1108,7 +1141,15 @@ export function AssetLibraryPanel({
               </button>
             </div>
           )}
-          {visible.length === 0 ? (
+          {showingStockVideos ? (
+            <StockVideoDiscovery
+              client={client}
+              projectId={projectId}
+              query={deferredQuery}
+              onImport={importStockVideo}
+              onStatus={setStatus}
+            />
+          ) : visible.length === 0 ? (
             <div className="asset-library-empty">
               {status?.includes('Failed to load media catalog') ? (
                 // The status line is the shell's note now — do not print it twice.

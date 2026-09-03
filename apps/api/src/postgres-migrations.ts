@@ -3,7 +3,12 @@ import { POSTGRES_BASELINE_SCHEMA } from './postgres-baseline-schema.js';
 
 type MigrationDatabase = Pool | PoolClient;
 type MigrationSession = Pick<PoolClient, 'query'>;
-type MigrationQueryable = Pick<MigrationDatabase, 'query'>;
+type MigrationQueryable = {
+  readonly query: (
+    sql: string,
+    values?: readonly unknown[],
+  ) => Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
+};
 
 export interface PostgresMigration {
   readonly id: string;
@@ -43,10 +48,10 @@ async function repairAssetRevocationPrimaryKey(database: MigrationQueryable): Pr
   // otherwise a fresh install must not fail while altering a missing table.
   let tableExists = false;
   try {
-    const result = await database.query<{ readonly exists: boolean }>(
+    const result = await database.query(
       "SELECT to_regclass('public.asset_revocation_audits') IS NOT NULL AS exists",
     );
-    tableExists = result.rows[0]?.exists === true;
+    tableExists = result.rows[0]?.['exists'] === true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (/to_regclass|unsupported|pg_catalog/iu.test(message)) return;
@@ -80,13 +85,10 @@ async function repairAssetRevocationPrimaryKey(database: MigrationQueryable): Pr
 
   let result: { rows: readonly { indexname: string; indexdef: string }[] };
   try {
-    result = await database.query<{
-      readonly indexname: string;
-      readonly indexdef: string;
-    }>(
+    result = (await database.query(
       `SELECT indexname, indexdef FROM pg_indexes
        WHERE schemaname = current_schema() AND tablename = 'asset_revocation_audits'`,
-    );
+    )) as { rows: readonly { readonly indexname: string; readonly indexdef: string }[] };
   } catch (error) {
     // pg-mem does not expose PostgreSQL catalog views. Its fresh schema has
     // the correct primary key, so there is nothing to repair in that adapter.
@@ -155,11 +157,51 @@ const PROJECT_ASSET_ACCESS_MIGRATION: PostgresMigration = {
   },
 };
 
+const STOCK_VIDEO_MIGRATION: PostgresMigration = {
+  id: '005-stock-video',
+  checksum: 'sha256:stock-video-2026-09-04',
+  up: async (database) => {
+    await database.query(`
+      CREATE TABLE IF NOT EXISTS stock_video_catalog (
+        id text PRIMARY KEY, provider text NOT NULL, provider_asset_id text NOT NULL,
+        category text NOT NULL, title text NOT NULL, creator text NOT NULL,
+        source_page_url text NOT NULL, terms_url text NOT NULL, rendition_id text NOT NULL,
+        media_url text NOT NULL, poster_url text NOT NULL, mime_type text NOT NULL,
+        width integer NOT NULL, height integer NOT NULL, duration_seconds integer NOT NULL,
+        orientation text NOT NULL, retrieved_at timestamptz NOT NULL, expires_at timestamptz,
+        UNIQUE (provider, provider_asset_id, rendition_id)
+      );
+      CREATE INDEX IF NOT EXISTS stock_video_catalog_category_idx ON stock_video_catalog (category, retrieved_at DESC);
+      CREATE TABLE IF NOT EXISTS stock_video_search_cache (
+        cache_key text PRIMARY KEY, response_version integer NOT NULL, candidates jsonb NOT NULL,
+        fetched_at timestamptz NOT NULL, expires_at timestamptz NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS stock_video_imports (
+        id text PRIMARY KEY, owner_id text NOT NULL, project_id text NOT NULL, catalog_id text NOT NULL,
+        provider text NOT NULL, provider_asset_id text NOT NULL, rendition_id text NOT NULL,
+        state text NOT NULL, attempt integer NOT NULL DEFAULT 0, asset_id text,
+        object_sha256 text, object_bytes bigint, error_code text, updated_at timestamptz NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (owner_id, provider, provider_asset_id, rendition_id)
+      );
+      CREATE INDEX IF NOT EXISTS stock_video_imports_owner_project_idx ON stock_video_imports (owner_id, project_id, updated_at DESC);
+      CREATE TABLE IF NOT EXISTS media_asset_sources (
+        asset_id text PRIMARY KEY, provider text NOT NULL, provider_asset_id text NOT NULL,
+        creator text NOT NULL, source_page_url text NOT NULL, terms_url text NOT NULL,
+        retrieved_at timestamptz NOT NULL, rendition_id text NOT NULL, sha256 text NOT NULL,
+        bytes bigint NOT NULL, width integer NOT NULL, height integer NOT NULL, duration_seconds integer NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS media_asset_sources_provider_idx ON media_asset_sources (provider, provider_asset_id, rendition_id);
+    `);
+  },
+};
+
 export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
   BASELINE_MIGRATION,
   ASSET_REVOCATION_PRIMARY_KEY_MIGRATION,
   WORKER_LEASE_GENERATION_MIGRATION,
   PROJECT_ASSET_ACCESS_MIGRATION,
+  STOCK_VIDEO_MIGRATION,
 ];
 
 export async function runPostgresMigrations(database: MigrationDatabase): Promise<void> {

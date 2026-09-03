@@ -68,6 +68,52 @@ export interface BrowserAsset {
   readonly cloudBacked: boolean;
 }
 
+export const STOCK_VIDEO_CATEGORIES = [
+  { id: 'business-work', label: 'Business & Work' },
+  { id: 'technology', label: 'Technology' },
+  { id: 'people-lifestyle', label: 'People & Lifestyle' },
+  { id: 'nature', label: 'Nature' },
+  { id: 'travel-places', label: 'Travel & Places' },
+  { id: 'city-transport', label: 'City & Transport' },
+  { id: 'food-drink', label: 'Food & Drink' },
+  { id: 'abstract-backgrounds', label: 'Abstract Backgrounds' },
+] as const;
+
+export type BrowserStockVideoCategory = (typeof STOCK_VIDEO_CATEGORIES)[number]['id'];
+export type BrowserStockVideoOrientation = 'portrait' | 'landscape';
+
+/** Browser-safe stock catalog card. Rendition URLs and provider credentials stay server-side. */
+export interface BrowserStockVideo {
+  readonly id: string;
+  readonly category: BrowserStockVideoCategory;
+  readonly title: string;
+  readonly provider: 'pexels' | 'pixabay';
+  readonly creator: string;
+  readonly sourcePageUrl: string;
+  readonly durationUs: number;
+  readonly width: number;
+  readonly height: number;
+  readonly orientation: BrowserStockVideoOrientation;
+}
+
+export interface BrowserStockVideoPage {
+  readonly items: readonly BrowserStockVideo[];
+  readonly counts: Readonly<Record<BrowserStockVideoCategory, number>>;
+  readonly nextCursor?: string;
+}
+
+export type BrowserStockVideoImportState =
+  'claimed' | 'downloading' | 'object-stored' | 'registered' | 'completed' | 'failed';
+
+export interface BrowserStockVideoImport {
+  readonly importId: string;
+  readonly state: BrowserStockVideoImportState;
+  /** Transitional compatibility for services that return the completed asset by ID. */
+  readonly assetId?: string;
+  readonly errorCode?: string;
+  readonly asset?: BrowserAsset;
+}
+
 export interface BrowserMediaDescriptor {
   readonly mimeType: string;
   readonly durationUs?: number;
@@ -341,6 +387,48 @@ export class BrowserControlPlaneClient {
     const { browserAssetList } = await browserProjections;
     return browserAssetList(await this.get<unknown>('/v1/library/cloud-assets'));
   }
+  async stockVideos(
+    category: BrowserStockVideoCategory,
+    query = '',
+    cursor?: string,
+  ): Promise<BrowserStockVideoPage> {
+    const { browserStockVideoPage } = await browserProjections;
+    const params = new URLSearchParams({ category });
+    if (query.trim().length > 0) params.set('q', query.trim());
+    if (cursor !== undefined) params.set('cursor', cursor);
+    return browserStockVideoPage(
+      await this.get<unknown>(`/v1/library/stock-videos?${params}`),
+      category,
+    );
+  }
+  async stockVideoPoster(catalogId: string): Promise<Blob> {
+    return this.stockVideoBytes(catalogId, 'poster');
+  }
+  async stockVideoPreview(catalogId: string): Promise<Blob> {
+    return this.stockVideoBytes(catalogId, 'preview');
+  }
+  async startStockVideoImport(
+    projectId: string,
+    catalogId: string,
+  ): Promise<BrowserStockVideoImport> {
+    const { browserStockVideoImport } = await browserProjections;
+    return browserStockVideoImport(
+      await this.post<unknown>(`/v1/projects/${encodeURIComponent(projectId)}/stock-video-import`, {
+        catalogId,
+      }),
+    );
+  }
+  async stockVideoImportStatus(
+    projectId: string,
+    importId: string,
+  ): Promise<BrowserStockVideoImport> {
+    const { browserStockVideoImport } = await browserProjections;
+    return browserStockVideoImport(
+      await this.get<unknown>(
+        `/v1/projects/${encodeURIComponent(projectId)}/stock-video-imports/${encodeURIComponent(importId)}`,
+      ),
+    );
+  }
   /**
    * Assets owned by this Joy identity. Passing a project keeps the active
    * workspace focused on its own media while the unscoped catalog remains
@@ -368,6 +456,18 @@ export class BrowserControlPlaneClient {
     if (response.status === 401 || response.status === 403)
       throw new DerivativeAuthorityRevokedError();
     if (!response.ok) throw new Error(`cloud original request failed (${response.status})`);
+    return response.blob();
+  }
+  private async stockVideoBytes(catalogId: string, kind: 'poster' | 'preview'): Promise<Blob> {
+    const token = await this.assertion();
+    const response = await fetch(
+      `${this.apiUrl.replace(/\/$/, '')}/v1/library/stock-videos/${encodeURIComponent(catalogId)}/${kind}`,
+      { method: 'GET', headers: { authorization: `Bearer ${token}` } },
+    );
+    if (!response.ok) {
+      const body = await responseBody(response);
+      throw requestError(body, response.status);
+    }
     return response.blob();
   }
   async remuxBrowserMp4(

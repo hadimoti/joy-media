@@ -46,6 +46,38 @@ export {
   type ResumableOriginalUploadStatus,
 } from './resumable-original-upload.js';
 export {
+  MemoryStockVideoRepository,
+  PostgresStockVideoRepository,
+  StockVideoService,
+  STOCK_VIDEO_RENDITION_MAX_BYTES,
+  STOCK_VIDEO_POSTER_MAX_BYTES,
+  type BrowserStockVideo,
+  type MediaAssetSourceRecord,
+  type StockVideoCacheRecord,
+  type StockVideoCatalogRecord,
+  type StockVideoImportRecord,
+  type StockVideoImportState,
+  type StockVideoRepository,
+  type StockVideoSearchResult,
+} from './stock-video.js';
+export {
+  STOCK_VIDEO_CATEGORIES,
+  type StockVideoCandidate,
+  type StockVideoCategory,
+  type StockVideoOrientation,
+  type StockVideoProvider,
+  type StockVideoSearchRequest,
+} from './stock-video-providers.js';
+export { PexelsStockVideoProvider } from './pexels-stock-video-provider.js';
+export { PixabayStockVideoProvider } from './pixabay-stock-video-provider.js';
+export {
+  STOCK_VIDEO_IMPORT_STATES,
+  createStockVideoImportCoordinator,
+  stockVideoImportForBrowser,
+  type StockVideoImportClaimRepository,
+  type StockVideoImportCoordinatorOptions,
+} from './stock-video-import.js';
+export {
   PostgresControlPlane,
   type PostgresControlPlaneOptions,
 } from './postgres-control-plane.js';
