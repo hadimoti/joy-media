@@ -467,12 +467,31 @@ input[type='checkbox']:focus-visible {
   padding: 0;
   list-style: none;
 }
+.stock-video-grid--large {
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.6rem;
+}
+.stock-video-grid--medium {
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  gap: 0.4rem;
+}
+.stock-video-grid--list {
+  grid-template-columns: 1fr;
+  gap: 0.25rem;
+}
 .stock-video-card {
   min-width: 0;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--joy-border) 88%, transparent);
   border-radius: 0.55rem;
   background: var(--joy-bg-raised);
+}
+.stock-video-grid--list .stock-video-card {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem;
 }
 .stock-video-poster {
   position: relative;
@@ -494,6 +513,13 @@ input[type='checkbox']:focus-visible {
 .stock-video-card[data-orientation='portrait'] .stock-video-poster {
   aspect-ratio: 9 / 16;
 }
+.stock-video-grid--list .stock-video-poster,
+.stock-video-grid--list .stock-video-card[data-orientation='portrait'] .stock-video-poster {
+  width: 3.5rem;
+  height: 2.5rem;
+  aspect-ratio: auto;
+  grid-row: 1;
+}
 .stock-video-orientation {
   position: absolute;
   inset-block-end: 0.3rem;
@@ -509,6 +535,10 @@ input[type='checkbox']:focus-visible {
   display: grid;
   gap: 0.22rem;
   padding: 0.42rem;
+}
+.stock-video-grid--list .stock-video-card-copy {
+  min-width: 0;
+  padding: 0.1rem 0.2rem 0.1rem 0;
 }
 .stock-video-card-copy strong,
 .stock-video-provenance,
@@ -535,6 +565,9 @@ input[type='checkbox']:focus-visible {
   align-items: center;
   gap: 0.3rem;
   margin-top: 0.18rem;
+}
+.stock-video-grid--list .stock-video-card-actions {
+  justify-content: flex-end;
 }
 .stock-video-card-actions a,
 .stock-video-card-actions button,

@@ -5,6 +5,7 @@ import {
   type BrowserStockVideoCategory,
   type BrowserControlPlaneClient,
 } from './control-plane-client.js';
+import type { AssetViewMode } from './asset-library-state.js';
 
 const STOCK_VIDEO_PAGE_SIZE = 6;
 const IMPORT_POLL_INTERVAL_MS = 750;
@@ -14,12 +15,14 @@ export function StockVideoDiscovery({
   client,
   projectId: _projectId,
   query,
+  viewMode,
   onImport,
   onStatus,
 }: {
   readonly client: BrowserControlPlaneClient;
   readonly projectId: string;
   readonly query: string;
+  readonly viewMode: AssetViewMode;
   readonly onImport: (video: BrowserStockVideo) => Promise<void>;
   readonly onStatus: (status: string | undefined) => void;
 }) {
@@ -190,7 +193,7 @@ export function StockVideoDiscovery({
       )}
       {videos.length > 0 && (
         <ul
-          className="stock-video-grid"
+          className={`stock-video-grid stock-video-grid--${viewMode}`}
           aria-label={`${STOCK_VIDEO_CATEGORIES.find((item) => item.id === category)?.label} stock videos`}
         >
           {videos.map((video) => (

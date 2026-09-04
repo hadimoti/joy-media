@@ -1146,6 +1146,7 @@ export function AssetLibraryPanel({
               client={client}
               projectId={projectId}
               query={deferredQuery}
+              viewMode={viewMode}
               onImport={importStockVideo}
               onStatus={setStatus}
             />

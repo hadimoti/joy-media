@@ -38,4 +38,10 @@ describe('stock-video asset-library UI contract', () => {
     expect(panelSource).toMatch(/loading|importing|failed|retry/i);
     expect(panelSource).not.toMatch(/stock.*add.*timeline|add.*timeline.*stock/i);
   });
+
+  it('passes the shared asset view mode into the native stock grid', () => {
+    expect(panelSource).toContain('viewMode={viewMode}');
+    expect(discoverySource).toContain('stock-video-grid--${viewMode}');
+    expect(discoverySource).toContain('type { AssetViewMode }');
+  });
 });
