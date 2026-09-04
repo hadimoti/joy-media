@@ -1,7 +1,7 @@
 /**
  * Async Model Adapter Interface - WP-37 S4-F6
  *
- * Provides the asynchronous server-side boundary for real KiloCode/OpenRouter
+ * Provides the asynchronous compatibility boundary for approved model adapters
  * Creative Brief runtime. This is the production-facing async contract.
  *
  * The sync CreativeModelAdapter (in model-adapter.ts) remains test-only for S3.
@@ -112,7 +112,7 @@ export interface AsyncAdapterOptions {
  */
 export interface AsyncCreativeModelAdapter {
   /**
-   * Unique name for this adapter (e.g., 'kilocode-creative-v1', 'openrouter-creative-v1')
+   * Unique name for this adapter (for example, 'openrouter-creative-v1').
    */
   readonly adapterName: string;
 

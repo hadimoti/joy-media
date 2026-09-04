@@ -54,11 +54,13 @@ import { compileJoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
 import { JoyCodeCompoundRunner } from './joy-code-compound-runner.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
+import { createJoyAgentContextSnapshot } from './joy-agent/context-snapshot.js';
 import type { JoyAgentPhase } from './joy-agent/protocol.js';
 import type { AgentPresenceStore, JoyAgentPresenceEvent } from './agent-presence.js';
 import type { AgentPreviewStore } from './agent-preview-store.js';
 import { previewTimelineFromProject } from './agent-timeline-preview.js';
 import { applyTransaction } from '@joy-media/commands';
+import { inferJoyAgentTaskKind, targetForJoyAgentTask } from './agent-ui-targets.js';
 
 /** Every edit this panel commits is attributed to the built-in JOY engine. */
 const AGENT_ACTOR: AgentActor = { type: 'agent', id: 'joy-agent' };
@@ -181,8 +183,9 @@ function threadTimestamp(value: string): string {
 
 /**
  * Joy Code — a conversational shell over the guarded JOY Agent Engine.
- * Prompt routing currently exposes the same deterministic timeline intents as
- * the former dashboard; unsupported free-form prompts are reported honestly.
+ * Deterministic timeline intents remain available offline; other prompts use
+ * the configured built-in JOY Agent Worker and stay behind the same approval
+ * and revision boundary.
  */
 export function AgentPanel({
   project,
@@ -202,6 +205,7 @@ export function AgentPanel({
   onCreativeBriefOptIn,
   joyAgentEngineClient,
   agentPresenceStore,
+  agentPreviewStore,
 }: {
   readonly project: SpikeProject;
   readonly selectedClipIds: readonly string[];
@@ -246,6 +250,20 @@ export function AgentPanel({
     setCreativeBriefContext(undefined);
   }, [project.id]);
 
+  useEffect(() => {
+    const preview = agentPreviewStore?.getState();
+    if (
+      preview?.timeline?.baseRevision !== undefined &&
+      preview.timeline.baseRevision !== session.projectRevisionId
+    )
+      agentPreviewStore?.clear();
+    if (
+      preview?.document?.baseRevision !== undefined &&
+      preview.document.baseRevision !== session.projectRevisionId
+    )
+      agentPreviewStore?.clear();
+  }, [agentPreviewStore, session.projectRevisionId]);
+
   const approvalEngine = useMemo(
     () => new ApprovalEngine(approvalPolicyForAgentPolicy(settings)),
     [settings],
@@ -275,6 +293,26 @@ export function AgentPanel({
     [],
   );
 
+  const startNewTask = useCallback(() => {
+    if (thinkingTimerRef.current !== undefined) {
+      window.clearTimeout(thinkingTimerRef.current);
+      thinkingTimerRef.current = undefined;
+    }
+    const now = new Date().toISOString();
+    const thread = createJoyCodeThread(makeJoyCodeId('task'), now);
+    setJoyCode((current) => ({
+      threads: [thread, ...current.threads],
+      activeThreadId: thread.id,
+    }));
+    setPending(undefined);
+    setModelDraft(undefined);
+    agentPreviewStore?.clear();
+    setLastRun(undefined);
+    setThinkingThreadId(undefined);
+    setDraft('');
+    setTab('composer');
+  }, [agentPreviewStore]);
+
   useEffect(() => {
     if (command === undefined || handledCommandRef.current === command.serial) return;
     handledCommandRef.current = command.serial;
@@ -301,27 +339,15 @@ export function AgentPanel({
     }
     setPending(undefined);
     if (command.type === 'new-task') startNewTask();
-  }, [agentPresenceStore, agentRunId, command, joyAgentEngineClient, pending]);
-
-  function startNewTask() {
-    if (thinkingTimerRef.current !== undefined) {
-      window.clearTimeout(thinkingTimerRef.current);
-      thinkingTimerRef.current = undefined;
-    }
-    const now = new Date().toISOString();
-    const thread = createJoyCodeThread(makeJoyCodeId('task'), now);
-    setJoyCode((current) => ({
-      threads: [thread, ...current.threads],
-      activeThreadId: thread.id,
-    }));
-    setPending(undefined);
-    setModelDraft(undefined);
-    agentPreviewStore?.clear();
-    setLastRun(undefined);
-    setThinkingThreadId(undefined);
-    setDraft('');
-    setTab('composer');
-  }
+  }, [
+    agentPresenceStore,
+    agentPreviewStore,
+    agentRunId,
+    command,
+    joyAgentEngineClient,
+    pending,
+    startNewTask,
+  ]);
 
   function appendMessage(threadId: string, role: 'user' | 'assistant', body: string): void {
     const now = new Date().toISOString();
@@ -387,13 +413,13 @@ export function AgentPanel({
 
   function plan(intent: AgentIntent, threadId: string) {
     const runId = makeJoyCodeId('run');
-    agentPresenceStore?.beginRun(runId, session.projectRevisionId);
+    agentPresenceStore?.beginRun(runId, session.historyCursorSequence);
     agentPresenceStore?.dispatch({
       protocolVersion: 1,
       runId,
       seq: 0,
       at: new Date().toISOString(),
-      revision: session.projectRevisionId,
+      revision: session.historyCursorSequence,
       kind: 'activity',
       phase: 'planning',
       targets: [{ panelId: 'timeline', sectionId: 'timeline' }],
@@ -455,7 +481,7 @@ export function AgentPanel({
       runId,
       seq: 1,
       at: new Date().toISOString(),
-      revision: session.projectRevisionId,
+      revision: session.historyCursorSequence,
       kind: 'approval-required',
       phase: 'awaiting-approval',
       targets: [{ panelId: 'timeline', sectionId: 'timeline' }],
@@ -482,26 +508,54 @@ export function AgentPanel({
     const intentId = matchJoyCodeIntentId(body);
     const intent = AGENT_INTENTS.find((candidate) => candidate.id === intentId);
     if (intent === undefined && joyAgentEngineClient !== undefined) {
-      if (joyAgentEngineClient.getStatus()?.capability === 'incompatible') {
+      const connectionStatus = joyAgentEngineClient.getStatus();
+      if (connectionStatus === undefined || connectionStatus.capability === 'incompatible') {
         appendMessage(
           threadId,
           'assistant',
-          'The configured model is incompatible. Test another model in Agent Settings; no fallback provider was selected.',
+          connectionStatus?.capability === 'incompatible'
+            ? 'The configured model is incompatible. Test another model in Agent Settings; no fallback provider was selected.'
+            : 'Connect a model in Agent Settings to run natural-language JOY edits. No fallback provider was selected.',
         );
         return;
       }
       const runId = makeJoyCodeId('run');
+      const taskKind = inferJoyAgentTaskKind(body);
+      const taskTarget = targetForJoyAgentTask(taskKind);
       setAgentRunId(runId);
-      agentPresenceStore?.beginRun(runId, session.projectRevisionId);
+      agentPreviewStore?.clear();
+      agentPresenceStore?.beginRun(runId, session.historyCursorSequence);
       setThinkingThreadId(threadId);
       setAgentPhase('connecting');
       void (async () => {
         try {
+          const composition =
+            session.timelineProject.compositions[session.timelineProject.rootCompositionId];
+          const contextSnapshot = createJoyAgentContextSnapshot({
+            projectId: session.visualProject.id,
+            revision: session.historyCursorSequence,
+            selectedClipIds,
+            playheadUs,
+            clips: composition?.tracks.flatMap((track) =>
+              track.clips.map((clip) => ({
+                id: clip.id,
+                trackId: track.id,
+                startUs: clip.startUs,
+                durationUs: clip.durationUs,
+              })),
+            ),
+            assets: Object.values(session.visualProject.assets).map((asset) => ({
+              id: asset.id,
+              kind: asset.kind,
+              displayName: asset.displayName,
+            })),
+          });
           for await (const event of joyAgentEngineClient.startRun({
             runId,
+            taskKind,
             prompt: body,
             baseRevision: session.projectRevisionId,
-            context: { selectedClipIds, playheadUs },
+            context: contextSnapshot,
             mode:
               joyAgentEngineClient.getStatus()?.capability === 'plan-only'
                 ? 'plan-only'
@@ -517,7 +571,7 @@ export function AgentPanel({
               runId,
               seq: event.seq,
               at: event.at,
-              revision: session.projectRevisionId,
+              revision: session.historyCursorSequence,
               kind: terminal
                 ? event.phase
                 : event.phase === 'awaiting-approval'
@@ -526,18 +580,20 @@ export function AgentPanel({
                     ? 'preview'
                     : 'activity',
               phase: event.phase,
+              ...(event.errorCode === undefined ? {} : { errorCode: event.errorCode }),
               targets:
                 event.phase === 'previewing' || event.phase === 'awaiting-approval'
                   ? [
                       { panelId: 'agent', sectionId: 'composer' },
+                      taskTarget,
                       { panelId: 'timeline', sectionId: 'timeline' },
                     ]
-                  : [{ panelId: 'agent', sectionId: 'composer' }],
+                  : [{ panelId: 'agent', sectionId: 'composer' }, taskTarget],
               ...(event.proposal === undefined
                 ? {}
                 : {
                     preview: {
-                      revision: session.projectRevisionId,
+                      revision: session.historyCursorSequence,
                       summaryCode: 'joy-agent-proposal',
                       targetCount: event.proposal.operations.length,
                     },
@@ -561,6 +617,17 @@ export function AgentPanel({
               });
               if (compiled.ok) {
                 setModelDraft(compiled);
+                if (
+                  compiled.document !== session.visualProject &&
+                  compiled.baseRevision === session.projectRevisionId
+                ) {
+                  agentPreviewStore?.setDocument({
+                    runId,
+                    baseRevision: compiled.baseRevision,
+                    canonical: session.visualProject,
+                    preview: compiled.document,
+                  });
+                }
                 if (
                   compiled.timeline !== undefined &&
                   compiled.baseRevision === session.projectRevisionId
@@ -686,7 +753,7 @@ export function AgentPanel({
         runId: modelDraft.planId,
         seq: 99,
         at: new Date().toISOString(),
-        revision: session.projectRevisionId,
+        revision: session.historyCursorSequence,
         kind: 'completed',
         phase: 'completed',
         targets: [{ panelId: 'timeline', sectionId: 'timeline' }],
@@ -709,7 +776,7 @@ export function AgentPanel({
       runId: pending.runId,
       seq: 2,
       at: new Date().toISOString(),
-      revision: session.projectRevisionId,
+      revision: session.historyCursorSequence,
       kind: 'activity',
       phase: 'applying',
       targets: [{ panelId: 'timeline', sectionId: 'timeline' }],
@@ -810,7 +877,7 @@ export function AgentPanel({
       runId: pending.runId,
       seq: 3,
       at: new Date().toISOString(),
-      revision: session.projectRevisionId,
+      revision: session.historyCursorSequence,
       kind: executionResult.success ? 'completed' : 'failed',
       phase: executionResult.success ? 'completed' : 'failed',
       targets: [{ panelId: 'timeline', sectionId: 'timeline' }],

@@ -243,12 +243,6 @@ importers:
         specifier: workspace:*
         version: link:../provider-sdk
 
-  packages/adapter-deepseek-harness:
-    dependencies:
-      '@joy-media/agent-tools':
-        specifier: workspace:*
-        version: link:../agent-tools
-
   packages/adapter-mistral:
     dependencies:
       '@joy-media/provider-sdk':

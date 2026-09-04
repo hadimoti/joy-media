@@ -44,11 +44,7 @@ import type {
   ArtifactStore,
   ArtifactTransaction,
 } from '@joy-media/commands';
-import type {
-  CreativeBriefRequestV1,
-  CreativeBriefV1,
-  EditorContext,
-} from '@joy-media/agent-tools';
+import type { CreativeBriefV1, EditorContext } from '@joy-media/agent-tools';
 import { buildEditorContext } from '@joy-media/agent-tools';
 import type { HistoryEntry } from './editor-session.js';
 import type { PanelId } from './workspace.js';
@@ -57,7 +53,6 @@ import type {
   AssetRecordV1,
   AnimatablePropertyV1,
   JoyProjectV1,
-  ProjectRevisionId,
   SpikeProject,
   TransitionV1,
   VideoClip,
@@ -231,8 +226,9 @@ import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
 import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
 import { JoyAgentSettingsDialog } from './JoyAgentSettingsDialog.js';
 import { createJoyAgentEngineClient } from './joy-agent/engine-client.js';
-import { coordinateCreativeBriefOptIn } from './creative-brief-opt-in-coordinator.js';
-import { createCreativeBriefPanelRunner } from './creative-brief-panel-runner.js';
+import type { ByokSessionStatus } from './joy-agent/protocol.js';
+import { createJoyAgentContextSnapshot } from './joy-agent/context-snapshot.js';
+import { runCreativeBriefTask } from './joy-agent/entry-points.js';
 import {
   loadAgentPolicy,
   saveAgentPolicy,
@@ -1068,7 +1064,14 @@ function EditorWorkspace({
   }, [agentPolicy]);
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
   const [agentPanelCommand, setAgentPanelCommand] = useState<AgentPanelCommand>();
-  const [creativeBriefOptedIn, setCreativeBriefOptedIn] = useState(false);
+  const [agentConnectionStatus, setAgentConnectionStatus] = useState<ByokSessionStatus | undefined>(
+    () => joyAgentEngineClientRef.current?.getStatus(),
+  );
+  // Creative Brief is a read-only task on the same page-session Worker. There
+  // is no second server consent or cloud-planner opt-in state.
+  const creativeBriefOptedIn =
+    agentConnectionStatus?.capability === 'tool-loop' ||
+    agentConnectionStatus?.capability === 'plan-only';
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
   const joySessionRefreshSeqRef = useRef(0);
   const [toasts, setToasts] = useState<
@@ -1567,61 +1570,78 @@ function EditorWorkspace({
       autosync?.stop();
     };
   }, []);
-  useEffect(() => {
-    let cancelled = false;
-    setCreativeBriefOptedIn(false);
-    if (!controlPlaneProjectReady || joySession.kind !== 'ready') return () => undefined;
-    void mediaControlPlaneClient
-      .getCreativeBriefOptIn(controlPlaneProject.controlPlaneProjectId)
-      .then((result) => {
-        if (!cancelled) setCreativeBriefOptedIn(result.creativeBriefOptIn);
-      })
-      .catch(() => {
-        if (!cancelled) setCreativeBriefOptedIn(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [controlPlaneProject.controlPlaneProjectId, controlPlaneProjectReady, joySession.kind]);
-  const creativeBriefRunner = useMemo(
-    () =>
-      createCreativeBriefPanelRunner({
-        controlPlaneProjectBinding: controlPlaneProject,
-        joyProject: session.visualProject,
-        projectRevisionId: session.projectRevisionId,
-        browserKeyValueStore: window.localStorage,
-        syncProjectDocument: (controlPlaneProjectId, params) =>
-          mediaControlPlaneClient.syncProjectDocument(controlPlaneProjectId, params),
-        creativeBriefTransport: (controlPlaneProjectId, request) =>
-          mediaControlPlaneClient.createCreativeBrief(controlPlaneProjectId, request),
-        requestFactory: (
-          trimmedText: string,
-          projectId: string,
-          revisionId: ProjectRevisionId,
-        ): CreativeBriefRequestV1 => ({
-          projectId,
-          snapshotRevisionId: revisionId,
-          request: trimmedText,
-          scope: 'general',
-        }),
-        ownerKey: controlPlaneOwnerKey,
+  const creativeBriefContext = useMemo(() => {
+    const composition =
+      session.timelineProject.compositions[session.timelineProject.rootCompositionId];
+    return createJoyAgentContextSnapshot({
+      projectId: session.visualProject.id,
+      revision: session.projectRevisionId,
+      selectedClipIds: state.selectedIds,
+      playheadUs: state.playheadUs,
+      clips: composition?.tracks.flatMap((track) =>
+        track.clips.map((clip) => ({
+          id: clip.id,
+          trackId: track.id,
+          startUs: clip.startUs,
+          durationUs: clip.durationUs,
+        })),
+      ),
+      assets: Object.values(session.visualProject.assets).map((asset) => ({
+        id: asset.id,
+        kind: asset.kind,
+        displayName: asset.displayName,
+      })),
+    });
+  }, [
+    session.projectRevisionId,
+    session.timelineProject,
+    session.visualProject,
+    state.playheadUs,
+    state.selectedIds,
+  ]);
+  const creativeBriefRunner = useCallback(
+    (requestText: string) =>
+      runCreativeBriefTask({
+        client: joyAgentEngineClientRef.current!,
+        projectId: session.visualProject.id,
+        revisionId: session.projectRevisionId,
+        request: requestText,
+        context: creativeBriefContext,
+        onEvent: (event) => {
+          const terminal =
+            event.phase === 'completed' || event.phase === 'failed' || event.phase === 'cancelled';
+          appAgentPresenceStore.dispatch({
+            protocolVersion: 1,
+            runId: event.runId,
+            seq: event.seq,
+            at: event.at,
+            revision: session.historyCursorSequence,
+            kind: terminal ? event.phase : event.phase === 'planning' ? 'preview' : 'activity',
+            phase: event.phase,
+            ...(event.errorCode === undefined ? {} : { errorCode: event.errorCode }),
+            targets: [{ panelId: 'agent', sectionId: 'brief' }],
+            ...(event.phase === 'planning'
+              ? {
+                  preview: {
+                    revision: session.historyCursorSequence,
+                    summaryCode: 'joy-agent-brief',
+                    targetCount: 1,
+                  },
+                }
+              : {}),
+          });
+        },
       }),
-    [controlPlaneOwnerKey, controlPlaneProject, session.projectRevisionId, session.visualProject],
+    [
+      creativeBriefContext,
+      session.historyCursorSequence,
+      session.projectRevisionId,
+      session.visualProject.id,
+    ],
   );
-  const onCreativeBriefOptIn = useCallback(async () => {
-    const result = await coordinateCreativeBriefOptIn(
-      controlPlaneProject,
-      true,
-      window.localStorage,
-      (controlPlaneProjectId, enabled, baseRevision) =>
-        mediaControlPlaneClient.setCreativeBriefOptIn(controlPlaneProjectId, enabled, baseRevision),
-      { ownerKey: controlPlaneOwnerKey },
-    );
-    if (result.kind !== 'success') {
-      throw new Error(`Creative Brief opt-in failed (${result.kind})`);
-    }
-    setCreativeBriefOptedIn(true);
-  }, [controlPlaneOwnerKey, controlPlaneProject]);
+  const onCreativeBriefOptIn = useCallback(() => {
+    setAgentSettingsOpen(true);
+  }, []);
   const mediaResolver = useMemo(
     () =>
       new ProjectMediaResolver({
@@ -4717,6 +4737,10 @@ function EditorWorkspace({
       return content;
     };
     const { state, visualProject, controlPlaneProject, updateVisualProperty } = context;
+    const previewVisualProject =
+      agentPreviewState.document?.baseRevision === context.session.projectRevisionId
+        ? agentPreviewState.document.preview
+        : visualProject;
     const activeTimelineView =
       timelineCompositionView(context.timelineProject, context.activeTimelineCompositionId) ??
       timelineCompositionView(context.timelineProject, context.timelineProject.rootCompositionId);
@@ -5258,7 +5282,8 @@ function EditorWorkspace({
     };
     if (api.id === 'inspector') {
       const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
-      const object = objectId === undefined ? undefined : visualProject.visualObjects[objectId];
+      const object =
+        objectId === undefined ? undefined : previewVisualProject.visualObjects[objectId];
       const selectedMaskAsset =
         selectedTimelineEntry?.clip?.kind === 'video'
           ? visualProject.assets[selectedTimelineEntry.clip.assetId]
@@ -5403,9 +5428,9 @@ function EditorWorkspace({
                 },
                 onSpeedChange: changeSelectedClipSpeed,
               })}
-          allObjects={visualProject.visualObjects}
+          allObjects={previewVisualProject.visualObjects}
           playheadUs={state.playheadUs}
-          project={visualProject}
+          project={previewVisualProject}
           {...(maskTarget === undefined
             ? {}
             : {
@@ -5706,9 +5731,9 @@ function EditorWorkspace({
               throw error;
             }
           }}
-          onRunCloudBrain={async (workflowId) => {
+          onRunRemoteMediaJob={async (workflowId) => {
             if (selectedAudioClip === undefined)
-              throw new Error('Place a video or audio clip before running Cloud Brain.');
+              throw new Error('Place a video or audio clip before running a remote provider job.');
             const targetClipId = selectedAudioClip.id;
             const targetAssetId = selectedAudioClip.assetId;
             const sourceProjectRevisionId = context.session.projectRevisionId;
@@ -5716,7 +5741,8 @@ function EditorWorkspace({
             const sourceAsset = context.session.visualProject.assets[targetAssetId];
             const source = await mediaResolver.resolve(targetAssetId);
             const response = await fetch(source.url);
-            if (!response.ok) throw new Error('Cloud Brain could not read the selected media.');
+            if (!response.ok)
+              throw new Error('The remote provider could not read the selected media.');
             const sourceBlob = await response.blob();
             const sourceSha256 =
               sourceAsset?.sha256 ??
@@ -5725,7 +5751,7 @@ function EditorWorkspace({
             const fingerprint = `${sourceSha256}:${workflowId}:afftdn:0.8`;
             const existing = operationLedger.get(operationId);
             if (existing?.status === 'applied' || existing?.status === 'completed') {
-              context.showToast('This Cloud Brain result is already applied.', 'info');
+              context.showToast('This remote provider result is already applied.', 'info');
               return;
             }
             if (existing === undefined)
@@ -5765,7 +5791,7 @@ function EditorWorkspace({
                 recovered.leaseExpiresAt > Date.now()
               ) {
                 context.showToast(
-                  'This Cloud Brain operation is still running. Try recovery again shortly.',
+                  'This remote provider job is still running. Try recovery again shortly.',
                   'info',
                 );
                 return;
@@ -5799,7 +5825,7 @@ function EditorWorkspace({
                 bytes: generatedBlob.size,
                 descriptor: { mimeType: result.mimeType },
                 generationProvenance: {
-                  providerId: 'joy.cloud-brain',
+                  providerId: 'joy.remote-audio',
                   modelId: result.method,
                   modelVersion: 'v1',
                   prompt: workflowId,
@@ -5825,7 +5851,7 @@ function EditorWorkspace({
                 context.session.historyCursorSequence !== sourceRevision
               )
                 throw new Error(
-                  'The project changed while Cloud Brain was running. The result was not applied.',
+                  'The project changed while the remote provider job was running. The result was not applied.',
                 );
               const currentTimeline =
                 context.session.timelineProject.compositions[
@@ -5838,13 +5864,13 @@ function EditorWorkspace({
                 );
               if (currentTarget?.assetId !== targetAssetId)
                 throw new Error(
-                  'The target clip changed while Cloud Brain was running. The result was not applied.',
+                  'The target clip changed while the remote provider job was running. The result was not applied.',
                 );
               const currentProject = context.session.visualProject;
               const collision = currentProject.assets[generatedAsset.id];
               if (collision !== undefined && collision.sha256 !== generatedAsset.sha256)
                 throw new Error(
-                  'Cloud Brain returned an asset ID already used by different media.',
+                  'The remote provider returned an asset ID already used by different media.',
                 );
               const nextProject = projectWithImportedAsset(currentProject, {
                 ...generatedAsset,
@@ -5872,7 +5898,7 @@ function EditorWorkspace({
                 },
               });
               operationLedger.finish(operationId, 'applied', { resultRef: generatedAsset.id });
-              context.showToast('Cloud Brain audio applied to the selected clip.', 'success');
+              context.showToast('Remote provider audio applied to the selected clip.', 'success');
             } catch (error) {
               operationLedger.finish(operationId, 'failed', {
                 error: error instanceof Error ? error.message : String(error),
@@ -6479,7 +6505,13 @@ function EditorWorkspace({
         <main>
           <header className="app-header">
             <AgentActivityIndicator
-              onShowTarget={(target) => activatePanel(target.panelId)}
+              onShowTarget={(target) => {
+                const routed =
+                  target.sectionId === undefined
+                    ? undefined
+                    : featureActivationRoute(target.sectionId);
+                activatePanel(routed?.toolId ?? target.panelId);
+              }}
               onStop={() => issueAgentPanelCommand('stop')}
             />
             {exportProgress !== undefined && (
@@ -7061,7 +7093,14 @@ function EditorWorkspace({
               policy={agentPolicy}
               onPolicyChange={setAgentPolicy}
               engineClient={joyAgentEngineClientRef.current!}
-              status={joyAgentEngineClientRef.current!.getStatus()}
+              status={agentConnectionStatus}
+              onStatusChange={(next) => {
+                setAgentConnectionStatus(next);
+                if (next === undefined) {
+                  appAgentPresenceStore.clear();
+                  appAgentPreviewStore.clear();
+                }
+              }}
               onClose={() => setAgentSettingsOpen(false)}
             />
           )}
@@ -7155,6 +7194,7 @@ function MonitorPanelContent({ context }: { readonly context: EditorPanelContext
     bumpProjectRevision,
     showToast,
   } = context;
+  const agentPreviewState = useAgentPreviewSnapshot();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [monitorDragOver, setMonitorDragOver] = useState(false);
   const rendererRef = useRef<BrowserPixiRenderer | null>(null);
@@ -7172,6 +7212,12 @@ function MonitorPanelContent({ context }: { readonly context: EditorPanelContext
   const [monitorFitView, setMonitorFitView] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [agentPreviewBefore, setAgentPreviewBefore] = useState(false);
+  const previewVisualProject =
+    !agentPreviewBefore &&
+    agentPreviewState.document !== undefined &&
+    agentPreviewState.document.baseRevision === session.projectRevisionId
+      ? agentPreviewState.document.preview
+      : visualProject;
   const [zoomDrawerOpen, setZoomDrawerOpen] = useState(false);
   const panelRef = useRef<HTMLElement | null>(null);
   const transportRef = useRef<HTMLDivElement | null>(null);
@@ -7222,15 +7268,15 @@ function MonitorPanelContent({ context }: { readonly context: EditorPanelContext
 
   useEffect(() => {
     let cancelled = false;
-    const mattes = readImageMatteMap(visualProject);
+    const mattes = readImageMatteMap(previewVisualProject);
     const activeStickerIds = new Set(
-      Object.values(visualProject.visualObjects)
+      Object.values(previewVisualProject.visualObjects)
         .filter((object) => object.kind === 'image' && object.assetId !== undefined)
         .map((object) => object.id),
     );
     stickerImageCache.clearMissing(activeStickerIds);
     void Promise.all(
-      Object.values(visualProject.visualObjects).map(async (object) => {
+      Object.values(previewVisualProject.visualObjects).map(async (object) => {
         if (object.kind !== 'image' || object.assetId === undefined) return;
         await stickerImageCache.syncObject({
           objectId: object.id,
@@ -7252,25 +7298,29 @@ function MonitorPanelContent({ context }: { readonly context: EditorPanelContext
     return () => {
       cancelled = true;
     };
-  }, [loadProjectAssetBlob, visualProject, stickerTick]);
+  }, [loadProjectAssetBlob, previewVisualProject, stickerTick]);
 
   paintRef.current = (): void => {
     const renderer = rendererRef.current;
     if (renderer === null) return;
-    const composition = visualProject.compositions[visualProject.rootCompositionId];
+    const composition = previewVisualProject.compositions[previewVisualProject.rootCompositionId];
     if (composition === undefined) return;
     const cameraId = composition.activeCameraId;
-    const objectsById = visualProject.visualObjects as Readonly<Record<string, VisualObjectV1>>;
-    const resolved: ResolvedObject[] = Object.values(visualProject.visualObjects).map((object) => ({
-      object,
-      transform: evaluateCameraExpressionTransform(
-        object.id,
-        cameraId,
-        objectsById,
-        state.playheadUs,
-        composition.height,
-      ).transform,
-    }));
+    const objectsById = previewVisualProject.visualObjects as Readonly<
+      Record<string, VisualObjectV1>
+    >;
+    const resolved: ResolvedObject[] = Object.values(previewVisualProject.visualObjects).map(
+      (object) => ({
+        object,
+        transform: evaluateCameraExpressionTransform(
+          object.id,
+          cameraId,
+          objectsById,
+          state.playheadUs,
+          composition.height,
+        ).transform,
+      }),
+    );
     const visualFrame = withCaptionBurnInNodes(
       buildRenderFrameIR(
         composition.id,
@@ -7279,13 +7329,13 @@ function MonitorPanelContent({ context }: { readonly context: EditorPanelContext
         composition.height,
         resolved,
         renderFrameOptions(
-          visualProject,
+          previewVisualProject,
           timelineProject,
           state.playheadUs,
           imageSizesFromCache(state.playheadUs),
         ),
       ),
-      visualProject,
+      previewVisualProject,
     );
     const frame =
       previewVideoFrame === undefined
@@ -7303,8 +7353,8 @@ function MonitorPanelContent({ context }: { readonly context: EditorPanelContext
       videoBitmaps.set(id, bitmap);
     }
     applyClipGradesToTransitionBitmaps(
-      visualProject,
-      activeTransitionAt(visualProject, state.playheadUs),
+      previewVisualProject,
+      activeTransitionAt(previewVisualProject, state.playheadUs),
       state.playheadUs,
       videoBitmaps,
     );
@@ -7545,14 +7595,16 @@ function MonitorPanelContent({ context }: { readonly context: EditorPanelContext
 
   useEffect(() => {
     let cancelled = false;
-    void sceneCacheRef.current.sync(visualProject.visualObjects, state.playheadUs).then(() => {
-      if (cancelled) return;
-      setSceneTick((value) => value + 1);
-    });
+    void sceneCacheRef.current
+      .sync(previewVisualProject.visualObjects, state.playheadUs)
+      .then(() => {
+        if (cancelled) return;
+        setSceneTick((value) => value + 1);
+      });
     return () => {
       cancelled = true;
     };
-  }, [state.playheadUs, visualProject]);
+  }, [state.playheadUs, previewVisualProject]);
 
   useEffect(() => () => sceneCacheRef.current.destroy(), []);
 
@@ -7564,11 +7616,12 @@ function MonitorPanelContent({ context }: { readonly context: EditorPanelContext
     previewVideoFrame,
     state.playheadUs,
     visualProject,
+    previewVisualProject,
     sceneTick,
     viewerZoom,
   ]);
 
-  const composition = visualProject.compositions[visualProject.rootCompositionId];
+  const composition = previewVisualProject.compositions[previewVisualProject.rootCompositionId];
   const width = composition?.width ?? 1080;
   const height = composition?.height ?? 1920;
   const monitorAspectRatio: MonitorAspectRatio = monitorFitView

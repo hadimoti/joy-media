@@ -31,6 +31,25 @@ completed. The non-secret deployment record is stored in Gbrain page
 `ops/joy-media-c514e5e-release-2026-08-30`; no credentials or owner browser
 state were recorded.
 
+## Built-in JOY Agent Engine implementation (2026-09-04)
+
+The approved replacement for the former KiloCode/code-server, server-planner,
+and local-DSH product fork is implemented on branch `codex/joy-agent-engine`.
+New runs use one dedicated browser Worker with session-only OpenRouter or
+custom OpenAI-compatible BYOK, while the main thread retains validation,
+revision checks, live scratch previews, explicit approval, atomic apply, and
+Undo. Creative Brief, Joy Code, domain entry-point routing, media-job consent,
+and active-panel presence all use the same JOY boundary. Historical KiloCode
+and joy-code-server provenance remains readable but is not a new-run engine.
+
+Focused verification currently passes the JOY engine/editor slice (190 tests),
+the JOY package build, changed-file ESLint, Prettier, and `git diff --check`.
+The full workspace editor typecheck/build remains environment-blocked because
+the checkout lacks several generated workspace package declarations; the
+Worker release verifier also remains blocked until a production Worker bundle
+exists. Public redistribution remains gated by the license/font review in
+`docs/OPEN_SOURCE_RELEASE.md`. No deployment was performed in this session.
+
 ## VPS access
 
 JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box, two apps.

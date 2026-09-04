@@ -1,6 +1,7 @@
 import type { FeatureToolId } from './feature-architecture.js';
 import type { PanelId } from './workspace.js';
 import type { JoyAgentEntityKind, JoyAgentTarget } from './agent-presence.js';
+import type { JoyAgentTaskKind } from './joy-agent/protocol.js';
 
 export type JoyAgentToolName =
   | 'read_project'
@@ -107,6 +108,48 @@ const TOOL_TARGETS: Readonly<Record<string, AgentUiTargetMap>> = {
   preview_changes: { panelId: 'monitor', sectionId: 'preview' },
   submit_plan: { panelId: 'agent', sectionId: 'composer' },
 };
+
+const TASK_TARGETS: Readonly<Record<JoyAgentTaskKind, JoyAgentTarget>> = {
+  'joy-code': { panelId: 'agent', sectionId: 'composer' },
+  'creative-brief': { panelId: 'agent', sectionId: 'brief' },
+  'asset-edit': { panelId: 'media', sectionId: 'media' },
+  text: { panelId: 'media', sectionId: 'text' },
+  effects: { panelId: 'effects', sectionId: 'effects' },
+  filters: { panelId: 'effects', sectionId: 'filters' },
+  transitions: { panelId: 'effects', sectionId: 'transitions' },
+  color: { panelId: 'effects', sectionId: 'color' },
+  motion: { panelId: 'effects', sectionId: 'motion' },
+  camera: { panelId: 'monitor', sectionId: 'preview' },
+  captions: { panelId: 'media', sectionId: 'captions' },
+  audio: { panelId: 'media', sectionId: 'audio' },
+  '3d': { panelId: 'agent', sectionId: '3d' },
+  workflow: { panelId: 'workflows', sectionId: 'workflows' },
+  'media-job': { panelId: 'jobs', sectionId: 'jobs' },
+};
+
+/** Route model activity to a product-owned tab; the provider never supplies this. */
+export function targetForJoyAgentTask(taskKind: JoyAgentTaskKind): JoyAgentTarget {
+  return TASK_TARGETS[taskKind];
+}
+
+/** Best-effort semantic routing for free-form Joy Code prompts. */
+export function inferJoyAgentTaskKind(prompt: string): JoyAgentTaskKind {
+  const value = prompt.toLowerCase();
+  // Creative Brief is a read-only panel task and is launched from that panel;
+  // free-form Composer requests stay proposal-shaped even when they mention a brief.
+  if (/\b(caption|subtitle|transcri)/.test(value)) return 'captions';
+  if (/\b(audio|sound|music|voice|denoise|mix|volume)\b/.test(value)) return 'audio';
+  if (/\b(3d|three[- ]?d|model|camera orbit)\b/.test(value)) return '3d';
+  if (/\b(filter|lut)\b/.test(value)) return 'filters';
+  if (/\b(effect|glow|blur|shadow)\b/.test(value)) return 'effects';
+  if (/\b(transition|crossfade|wipe)\b/.test(value)) return 'transitions';
+  if (/\b(color|grade|grading|exposure|saturation)\b/.test(value)) return 'color';
+  if (/\b(motion|animate|keyframe|easing)\b/.test(value)) return 'motion';
+  if (/\b(text|title|typography|font)\b/.test(value)) return 'text';
+  if (/\b(asset|media|image|video|import)\b/.test(value)) return 'asset-edit';
+  if (/\b(workflow|automation|pipeline)\b/.test(value)) return 'workflow';
+  return 'joy-code';
+}
 
 function validIds(
   ids: readonly string[] | undefined,

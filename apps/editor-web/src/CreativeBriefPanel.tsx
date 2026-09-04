@@ -2,8 +2,9 @@
  * Creative Brief Panel - WP-37 S4-D
  *
  * Unmounted panel component that composes CreativeBriefDisplay and creative-brief-controller.
- * Does NOT: mount to App, accept raw project objects, call models, call adapters,
- * mutate state, persist data, create plans/commands/jobs, or execute recommendations.
+ * Does NOT: mount to App, accept raw project objects, call adapters, create
+ * plans/commands/jobs, or execute recommendations. Model calls stay behind the
+ * runner supplied by the built-in JOY Agent Engine.
  */
 
 import { useReducer, useEffect, useState, useCallback, useRef } from 'react';
@@ -68,7 +69,7 @@ export interface CreativeBriefPanelProps {
 
 /** Versioned disclosure shown immediately before project-level opt-in. */
 export const CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1 =
-  "A bounded semantic summary of this project (not media files, URLs, or secrets) will be sent to OpenRouter's free NVIDIA Nemotron model. OpenRouter may log prompts and outputs; do not include confidential data. Paid fallback is disabled." as const;
+  'A bounded semantic summary of this project (not media files, URLs, or secrets) will be sent directly from this page to the provider you configured in JOY Agent Settings. JOY does not save or proxy your key; the provider may log prompts or charge for usage.' as const;
 
 /**
  * Creative Brief Panel Component.
@@ -287,7 +288,7 @@ export function CreativeBriefPanel({
               <p>
                 <strong>Creative Brief is currently disabled.</strong>
               </p>
-              <p>Enable Creative Brief to request improvements to your project.</p>
+              <p>Connect a model in JOY Agent Settings to request improvements to your project.</p>
               <p className="creative-brief-panel-disclosure">
                 {CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1}
               </p>
@@ -300,9 +301,9 @@ export function CreativeBriefPanel({
                 className="creative-brief-panel-button"
                 onClick={handleOptIn}
                 disabled={isOptingIn}
-                aria-label="Enable Creative Brief"
+                aria-label="Open JOY Agent Settings"
               >
-                {isOptingIn ? 'Enabling...' : 'Enable Creative Brief'}
+                {isOptingIn ? 'Opening...' : 'Open Agent Settings'}
               </button>
             </>
           ) : (

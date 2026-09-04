@@ -70,7 +70,12 @@ export interface AgentActivityIndicatorProps {
 export function AgentActivityIndicator({ onShowTarget, onStop }: AgentActivityIndicatorProps) {
   const state = useAgentPresenceSnapshot();
   const [follow, setFollow] = useState(false);
-  const primaryTarget = state.targets[0] ?? state.terminalTarget;
+  // Prefer the edited surface over the Composer origin so the live rail tells
+  // the user which tab is actually being previewed.
+  const primaryTarget =
+    state.targets.find((target) => target.panelId !== 'agent') ??
+    state.targets[0] ??
+    state.terminalTarget;
   const label = useMemo(() => stateLabel(state), [state]);
   const showTargetRef = useRef(onShowTarget);
   showTargetRef.current = onShowTarget;

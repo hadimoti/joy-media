@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 const appSource = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8');
 const cloudBlock = appSource.slice(
-  appSource.indexOf('onRunCloudBrain={async'),
+  appSource.indexOf('onRunRemoteMediaJob={async'),
   appSource.indexOf("if (api.id === 'effects')"),
 );
 

@@ -18,12 +18,14 @@ export function JoyAgentSettingsDialog({
   onPolicyChange,
   engineClient,
   status,
+  onStatusChange,
   onClose,
 }: {
   readonly policy: AgentPolicyPreferences;
   readonly onPolicyChange: (next: AgentPolicyPreferences) => void;
   readonly engineClient: JoyAgentEngineClient;
   readonly status?: ByokSessionStatus;
+  readonly onStatusChange?: (status: ByokSessionStatus | undefined) => void;
   readonly onClose: () => void;
 }) {
   const keyRef = useRef<HTMLInputElement>(null);
@@ -46,6 +48,7 @@ export function JoyAgentSettingsDialog({
   const setProviderKind = (next: 'openrouter' | 'openai-compatible') => {
     engineClient.clear();
     setConnectionStatus(undefined);
+    onStatusChange?.(undefined);
     if (keyRef.current) keyRef.current.value = '';
     setCustomDisclosure(false);
     setProvider(next);
@@ -70,9 +73,16 @@ export function JoyAgentSettingsDialog({
       });
       const next = await engineClient.testConnection();
       setConnectionStatus(next);
+      onStatusChange?.(next);
       if (keyRef.current) keyRef.current.value = '';
     } catch (error) {
       setConnectionStatus({
+        provider,
+        modelId,
+        capability: 'incompatible',
+        message: error instanceof Error ? error.message : 'Unable to configure connection',
+      });
+      onStatusChange?.({
         provider,
         modelId,
         capability: 'incompatible',
@@ -85,6 +95,7 @@ export function JoyAgentSettingsDialog({
   const clear = () => {
     engineClient.clear();
     setConnectionStatus(undefined);
+    onStatusChange?.(undefined);
     if (keyRef.current) keyRef.current.value = '';
   };
   return (
@@ -256,21 +267,13 @@ export function JoyAgentSettingsDialog({
             <p className="agent-settings-hint">
               Follow agent is off by default and stays in memory for this session.
             </p>
-            <label>
-              Worker preference
-              <select
-                value={policy.workerPreference}
-                onChange={(event) =>
-                  update(
-                    'workerPreference',
-                    event.target.value as AgentPolicyPreferences['workerPreference'],
-                  )
-                }
-              >
-                <option value="prefer-local">Prefer browser worker</option>
-                <option value="any-approved">Any approved executor</option>
-              </select>
-            </label>
+            <div className="agent-settings-readonly" aria-label="Agent executor">
+              <span>Executor</span>
+              <strong>Built-in browser Worker</strong>
+              <small>
+                One page-session engine. No external editor agent or local model process is used.
+              </small>
+            </div>
           </section>
           <section className="agent-settings-permissions">
             <h3>Capabilities</h3>

@@ -55,6 +55,7 @@ import { ensureClipAudio } from './audio-session.js';
 import { audioKeyframeState, audioKeyframeTransaction } from './audio-keyframes.js';
 import { PropertyRow } from './components/PropertyRow.js';
 import { BoundedPollingLoop } from './bounded-polling.js';
+import { createJoyMediaJobBridge } from './joy-agent/media-job-bridge.js';
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'enhance', label: 'Enhance' },
@@ -71,7 +72,7 @@ const CAPABILITY_FILTERS: readonly {
   { id: 'all', label: 'All' },
   { id: 'local-worker', label: 'Local Worker' },
   { id: 'browser-dsp', label: 'Browser DSP' },
-  { id: 'vps-orchestrated', label: 'Cloud Brain' },
+  { id: 'vps-orchestrated', label: 'Remote Provider' },
 ];
 
 interface AudioPanelProps {
@@ -88,7 +89,7 @@ interface AudioPanelProps {
     clipIds: readonly string[],
   ) => void | Promise<void>;
   readonly onRunLocalWorker?: (workflowId: string) => void | Promise<void>;
-  readonly onRunCloudBrain?: (workflowId: string) => void | Promise<void>;
+  readonly onRunRemoteMediaJob?: (workflowId: string) => void | Promise<void>;
 }
 
 export interface AudioEnhanceScopeOption {
@@ -245,7 +246,7 @@ export function AudioPanel({
   onDispatch,
   onRunBrowserDsp,
   onRunLocalWorker,
-  onRunCloudBrain,
+  onRunRemoteMediaJob,
 }: AudioPanelProps) {
   const [tab, setTab] = useState('enhance');
   const [workflowId, setWorkflowId] = useState(AUDIO_WORKFLOW_PRESETS[0]!.id);
@@ -255,7 +256,7 @@ export function AudioPanel({
   const [capabilityFilter, setCapabilityFilter] = useState<CapabilityFilter>('all');
   const [workers, setWorkers] = useState<readonly BrowserWorker[]>([]);
   const [providers, setProviders] = useState<readonly BrowserReasoningProvider[]>([]);
-  const [cloudConfirmWorkflowId, setCloudConfirmWorkflowId] = useState<string | null>(null);
+  const [remoteConfirmWorkflowId, setRemoteConfirmWorkflowId] = useState<string | null>(null);
   const [runningTarget, setRunningTarget] = useState<AudioExecutionTarget | null>(null);
   const [reviewingWorkflow, setReviewingWorkflow] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
@@ -288,13 +289,13 @@ export function AudioPanel({
     };
   }, [client]);
   useEffect(() => {
-    if (cloudConfirmWorkflowId === null) return;
+    if (remoteConfirmWorkflowId === null) return;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setCloudConfirmWorkflowId(null);
+      if (event.key === 'Escape') setRemoteConfirmWorkflowId(null);
     };
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [cloudConfirmWorkflowId]);
+  }, [remoteConfirmWorkflowId]);
   const dispatch = (command: AudioCommand, label: string) => {
     try {
       const { state } = applyAudioCommand(prepareAudioCommandState(audioState, clipIds), command);
@@ -380,33 +381,33 @@ export function AudioPanel({
     : hasRecentPairedWorker
       ? 'Missing audio.ml-denoise'
       : 'Disconnected';
-  const cloudProvider = providers.find(
+  const remoteProvider = providers.find(
     (provider) => provider.state === 'healthy' || provider.state === 'configured',
   );
-  const cloudLabel = cloudProvider === undefined ? 'Unavailable' : 'Online';
+  const remoteProviderLabel = remoteProvider === undefined ? 'Unavailable' : 'Online';
   const browserDspReady = selectedScope.clipIds.length > 0 && onRunBrowserDsp !== undefined;
   const localRunReady =
     selectedScope.clipIds.length > 0 && localWorkerReady && onRunLocalWorker !== undefined;
-  const cloudRunReady =
+  const remoteRunReady =
     selectedScope.clipIds.length > 0 &&
-    cloudProvider !== undefined &&
-    onRunCloudBrain !== undefined;
+    remoteProvider !== undefined &&
+    onRunRemoteMediaJob !== undefined;
   const runReadinessId = `audio-${selectedWorkflow.id}-runtime-readiness`;
-  const cloudConfirmWorkflow = AUDIO_WORKFLOW_PRESETS.find(
-    (workflow) => workflow.id === cloudConfirmWorkflowId,
+  const remoteConfirmWorkflow = AUDIO_WORKFLOW_PRESETS.find(
+    (workflow) => workflow.id === remoteConfirmWorkflowId,
   );
   const executionPlan = useMemo(
     () =>
       buildAudioWorkflowExecutionPlan(selectedWorkflow.id, {
         browserDsp: browserDspReady,
         localWorker: localWorkerReady && onRunLocalWorker !== undefined,
-        cloudBrain: cloudProvider !== undefined && onRunCloudBrain !== undefined,
+        remoteProvider: remoteProvider !== undefined && onRunRemoteMediaJob !== undefined,
       }),
     [
       browserDspReady,
-      cloudProvider,
+      remoteProvider,
       localWorkerReady,
-      onRunCloudBrain,
+      onRunRemoteMediaJob,
       onRunLocalWorker,
       selectedWorkflow.id,
     ],
@@ -440,7 +441,23 @@ export function AudioPanel({
     setRunError(null);
     setRunningTarget(target);
     try {
-      await callback(workflow);
+      if (target === 'vps-orchestrated') {
+        const bridge = createJoyMediaJobBridge({
+          submit: async (request) => {
+            await callback(request.jobId);
+          },
+        });
+        await bridge.submit({
+          jobId: workflow,
+          kind: 'audio',
+          providerId: remoteProvider?.providerId ?? '',
+          remoteUpload: true,
+          // This path is reached only from the explicit confirmation dialog.
+          approved: true,
+        });
+      } else {
+        await callback(workflow);
+      }
     } catch (error) {
       console.warn(`audio ${target} workflow rejected`, error);
       setRunError(error instanceof Error ? error.message : `Could not run ${target} workflow`);
@@ -694,7 +711,7 @@ export function AudioPanel({
             <strong>Runtime readiness</strong>
             <span>Browser DSP: {clipIds.length > 0 ? 'Ready' : 'Needs clips'}</span>
             <span>Local Worker: {localWorkerLabel}</span>
-            <span>Cloud Brain: {cloudLabel}</span>
+            <span>Remote Provider: {remoteProviderLabel}</span>
           </section>
           <section className="audio-runtime-section" aria-label="Audio runtime controls">
             <div className="audio-runtime-grid">
@@ -710,13 +727,13 @@ export function AudioPanel({
               </div>
               <div
                 className="audio-runtime-cell"
-                data-state={cloudProvider === undefined ? 'offline' : 'online'}
+                data-state={remoteProvider === undefined ? 'offline' : 'online'}
               >
                 <span className="icon-tool" aria-hidden="true">
                   <CloudIcon />
                 </span>
-                <strong>Cloud Brain</strong>
-                <span>{cloudLabel}</span>
+                <strong>Remote Provider</strong>
+                <span>{remoteProviderLabel}</span>
               </div>
               <label className="audio-runtime-cell audio-runtime-control">
                 <span className="icon-tool audio-device-icon" aria-hidden="true">
@@ -795,18 +812,18 @@ export function AudioPanel({
                   type="button"
                   className="audio-run-button"
                   data-audio-route="vps-orchestrated"
-                  aria-label={`Run ${selectedWorkflow.label} with Cloud Brain`}
+                  aria-label={`Run ${selectedWorkflow.label} with Remote Provider`}
                   aria-describedby={runReadinessId}
                   title={
-                    cloudRunReady
-                      ? `Confirm Cloud Brain run with ${cloudProvider?.providerId ?? 'provider'}`
-                      : cloudProvider === undefined
-                        ? 'Configure a Cloud Brain provider to run'
-                        : 'Cloud Brain execution is not connected'
+                    remoteRunReady
+                      ? `Confirm remote provider run with ${remoteProvider?.providerId ?? 'provider'}`
+                      : remoteProvider === undefined
+                        ? 'Configure a remote provider to run'
+                        : 'Remote provider execution is not connected'
                   }
-                  disabled={!cloudRunReady || runningTarget !== null}
+                  disabled={!remoteRunReady || runningTarget !== null}
                   onClick={() => {
-                    if (cloudRunReady) setCloudConfirmWorkflowId(selectedWorkflow.id);
+                    if (remoteRunReady) setRemoteConfirmWorkflowId(selectedWorkflow.id);
                   }}
                 >
                   {runningTarget === 'vps-orchestrated' ? 'Running…' : 'Run Cloud'}
@@ -880,7 +897,7 @@ export function AudioPanel({
         </div>
       )}
 
-      {cloudConfirmWorkflowId !== null && cloudConfirmWorkflow !== undefined && (
+      {remoteConfirmWorkflowId !== null && remoteConfirmWorkflow !== undefined && (
         <div className="audio-cloud-confirm-backdrop">
           <section
             className="audio-cloud-confirm-dialog"
@@ -890,14 +907,14 @@ export function AudioPanel({
             aria-describedby="audio-cloud-confirm-description"
             data-audio-cloud-confirmation
           >
-            <h3 id="audio-cloud-confirm-title">Run with Cloud Brain?</h3>
+            <h3 id="audio-cloud-confirm-title">Run with a remote provider?</h3>
             <p id="audio-cloud-confirm-description">
-              {cloudConfirmWorkflow.label} sends selected audio to{' '}
-              {cloudProvider?.providerId ?? 'the configured cloud provider'} and may use paid
+              {remoteConfirmWorkflow.label} sends selected audio to{' '}
+              {remoteProvider?.providerId ?? 'the configured remote provider'} and may use paid
               credits.
             </p>
             <div className="audio-cloud-confirm-actions">
-              <button type="button" onClick={() => setCloudConfirmWorkflowId(null)}>
+              <button type="button" onClick={() => setRemoteConfirmWorkflowId(null)}>
                 Cancel
               </button>
               <button
@@ -905,12 +922,12 @@ export function AudioPanel({
                 className="is-primary"
                 autoFocus
                 onClick={() => {
-                  const workflow = cloudConfirmWorkflowId;
-                  setCloudConfirmWorkflowId(null);
-                  void runExternalWorkflow('vps-orchestrated', workflow, onRunCloudBrain);
+                  const workflow = remoteConfirmWorkflowId;
+                  setRemoteConfirmWorkflowId(null);
+                  void runExternalWorkflow('vps-orchestrated', workflow, onRunRemoteMediaJob);
                 }}
               >
-                Run Cloud Brain
+                Run remote job
               </button>
             </div>
           </section>

@@ -83,6 +83,10 @@ import {
 import type { StockVideoService } from './stock-video.js';
 import { STOCK_VIDEO_CATEGORIES } from './stock-video-providers.js';
 import { stockVideoImportForBrowser } from './stock-video-import.js';
+import {
+  isRetiredJoyAgentRoute,
+  JOY_AGENT_RETIRED_ROUTE_RESPONSE,
+} from './joy-agent-route-retirement.js';
 
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
 const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 600;
@@ -628,6 +632,17 @@ async function route(
 
   const actor = await options.authentication.authenticate(request);
   if (actor === undefined) throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+
+  // Reasoning is now a browser-owned, page-session JOY Agent Worker. Keep
+  // these routes as an explicit migration response for older clients rather
+  // than invoking a server model, resolving a credential, or syncing a
+  // project snapshot on their behalf.
+  if (isRetiredJoyAgentRoute(url.pathname)) {
+    respondJson(response, 410, {
+      error: JOY_AGENT_RETIRED_ROUTE_RESPONSE,
+    });
+    return;
+  }
 
   const creativeBriefMatch = /^\/v1\/projects\/([^/]+)\/creative-brief$/.exec(url.pathname);
   const joyCodePlanMatch = /^\/v1\/projects\/([^/]+)\/joy-code\/plans$/.exec(url.pathname);

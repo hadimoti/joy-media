@@ -28,7 +28,7 @@ export type AudioEnhanceScopeId = 'selection' | 'track' | 'timeline';
 export interface AudioExecutionReadiness {
   readonly browserDsp: boolean;
   readonly localWorker: boolean;
-  readonly cloudBrain: boolean;
+  readonly remoteProvider: boolean;
 }
 
 export interface AudioWorkflowExecutionStep {
@@ -398,7 +398,7 @@ function routeIsReady(target: AudioExecutionTarget, readiness: AudioExecutionRea
     case 'local-worker':
       return readiness.localWorker;
     case 'vps-orchestrated':
-      return readiness.cloudBrain;
+      return readiness.remoteProvider;
   }
 }
 
@@ -409,7 +409,7 @@ export function audioExecutionTargetLabel(target: AudioExecutionTarget): string 
     case 'local-worker':
       return 'Local Worker';
     case 'vps-orchestrated':
-      return 'Cloud Brain';
+      return 'Remote Provider';
   }
 }
 

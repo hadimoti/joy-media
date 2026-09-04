@@ -11,7 +11,7 @@ import { normalizeByokSessionConfig } from '@joy-media/joy-agent-engine';
 export interface JoyAgentEngineClient {
   configure(config: ByokSessionConfig): Promise<ByokSessionStatus>;
   testConnection(): Promise<ByokSessionStatus>;
-  startRun(request: JoyAgentRunRequest): AsyncIterable<JoyAgentSafeEvent>;
+  startRun(request: JoyAgentRunRequest): AsyncIterableIterator<JoyAgentSafeEvent>;
   cancel(runId: string): Promise<void>;
   clear(): void;
   dispose(): void;
@@ -101,7 +101,13 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
     worker = undefined;
     configured = false;
     latestStatus = undefined;
+    for (const request of pending.values())
+      request.reject(new Error('JOY Agent connection cleared'));
     pending.clear();
+    for (const queue of runQueues.values()) {
+      queue.done = true;
+      while (queue.waiters.length) queue.waiters.shift()!({ value: undefined, done: true });
+    }
     runQueues.clear();
   };
   return {
@@ -119,7 +125,11 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
     },
     startRun(request) {
       if (!configured) throw new Error('Configure a model connection first');
-      const queue = { events: [], waiters: [], done: false };
+      const queue: {
+        events: JoyAgentSafeEvent[];
+        waiters: ((result: IteratorResult<JoyAgentSafeEvent>) => void)[];
+        done: boolean;
+      } = { events: [], waiters: [], done: false };
       runQueues.set(request.runId, queue);
       ensureWorker().postMessage({
         protocolVersion: JOY_AGENT_PROTOCOL_VERSION,

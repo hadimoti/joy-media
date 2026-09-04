@@ -163,12 +163,12 @@ function makeBriefWithRevision(
 }
 
 describe('CreativeBriefPanel', () => {
-  it('uses the versioned free-only remote-processing disclosure', () => {
+  it('uses the versioned BYOK remote-processing disclosure', () => {
     expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('semantic summary');
     expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('not media files, URLs, or secrets');
-    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('OpenRouter');
-    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('NVIDIA Nemotron');
-    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('Paid fallback is disabled');
+    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('provider you configured');
+    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('does not save or proxy your key');
+    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('may log prompts or charge');
   });
   it('exports CreativeBriefPanel component', () => {
     expect(CreativeBriefPanel).toBeDefined();

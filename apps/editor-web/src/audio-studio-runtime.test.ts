@@ -40,7 +40,7 @@ describe('audio studio runtime contract', () => {
     }
   });
 
-  it('summarizes local worker resources without adding cloud-only compute', () => {
+  it('summarizes local worker resources without adding remote compute', () => {
     const summary = summarizeLocalAudioResources([
       'audio.denoise',
       'audio.enhance',
@@ -55,7 +55,7 @@ describe('audio studio runtime contract', () => {
   });
 
   it('marks Voice Polish as browser-runnable without overstating Podcast Quality coverage', () => {
-    const readiness = { browserDsp: true, localWorker: false, cloudBrain: true };
+    const readiness = { browserDsp: true, localWorker: false, remoteProvider: true };
     const voicePolish = buildAudioWorkflowExecutionPlan('voice-polish', readiness);
     const podcastQuality = buildAudioWorkflowExecutionPlan('podcast-quality', readiness);
 

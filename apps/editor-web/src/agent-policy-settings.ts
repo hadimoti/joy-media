@@ -22,7 +22,8 @@ export interface AgentPolicyPreferences {
   readonly allowedCapabilities: readonly ToolCapability[];
   readonly maxCostPerRunUsd: number;
   readonly privacyMode: 'ask-before-remote' | 'local-only';
-  readonly workerPreference: 'prefer-local' | 'any-approved';
+  /** The only supported reasoning executor for new runs. */
+  readonly workerPreference: 'browser-worker';
   readonly mediaProvider: string;
   readonly livePreview: boolean;
 }
@@ -33,7 +34,7 @@ export const DEFAULT_AGENT_POLICY: AgentPolicyPreferences = {
   allowedCapabilities: ALL_TOOL_CAPABILITIES,
   maxCostPerRunUsd: 10,
   privacyMode: 'ask-before-remote',
-  workerPreference: 'prefer-local',
+  workerPreference: 'browser-worker',
   mediaProvider: 'Approved provider',
   livePreview: true,
 };
@@ -133,8 +134,10 @@ function normalizeAgentPolicy(value: unknown): AgentPolicyPreferences {
         ? Math.min(10_000, candidate.maxCostPerRunUsd)
         : DEFAULT_AGENT_POLICY.maxCostPerRunUsd,
     privacyMode: candidate.privacyMode === 'local-only' ? 'local-only' : 'ask-before-remote',
-    workerPreference:
-      candidate.workerPreference === 'any-approved' ? 'any-approved' : 'prefer-local',
+    // Older policies carried local/approved-executor values. They are
+    // intentionally collapsed to the single built-in browser Worker so a
+    // stale preference can never re-enable a retired local engine.
+    workerPreference: 'browser-worker',
     mediaProvider:
       typeof candidate.mediaProvider === 'string' && candidate.mediaProvider.trim().length > 0
         ? candidate.mediaProvider.trim()

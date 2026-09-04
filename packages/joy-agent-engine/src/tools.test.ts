@@ -109,4 +109,21 @@ describe('JOY Agent tool catalog', () => {
     ).inputSchema;
     expect(() => inputSchema.parse({ operations: [{ ...insert('op-1'), headers: {} }] })).toThrow();
   });
+
+  it('exposes bounded domain tools without granting them a default executor', async () => {
+    const readBrief = vi.fn(async () => ({ request: 'brief' }));
+    const tools = createJoyAgentTools(bridge({ readBrief }));
+    expect(JOY_AGENT_TOOL_METADATA.read_brief?.surface).toBe('creative-brief');
+    expect(JOY_AGENT_TOOL_METADATA.propose_scene_3d?.access).toBe('preview');
+    const read = (tools.read_brief as { execute: () => Promise<unknown> }).execute;
+    await expect(read()).resolves.toEqual({ request: 'brief' });
+    const propose = (
+      tools.propose_asset as {
+        execute: (input: unknown) => Promise<unknown>;
+      }
+    ).execute;
+    await expect(propose({ assetId: 'asset-1', summary: 'retime' })).rejects.toThrow(
+      'JOY_AGENT_UNAVAILABLE',
+    );
+  });
 });

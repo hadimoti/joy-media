@@ -103,7 +103,7 @@ describe('Dual Lens Creative Document projections', () => {
     expect(projection.traceNodeIds.has('data:captions:captions-fa')).toBe(true);
   });
 
-  it('projects generation provenance and KiloCode change sets without a second engine', () => {
+  it('projects generation provenance and JOY Agent Engine change sets without a second engine', () => {
     const history: HistoryEntry[] = [
       {
         id: 'history-agent-1',
@@ -147,7 +147,7 @@ describe('Dual Lens Creative Document projections', () => {
     expect(projection.nodes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'provider:local-worker:flux-dev', kind: 'provider' }),
-        expect.objectContaining({ id: 'agent:kilocode', kind: 'agent' }),
+        expect.objectContaining({ id: 'agent:joy-agent', kind: 'agent' }),
       ]),
     );
     expect(projection.traceNodeIds.has('provider:local-worker:flux-dev')).toBe(true);

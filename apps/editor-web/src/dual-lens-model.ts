@@ -226,11 +226,11 @@ export function buildDualLensProjection(
 
   const agentEntries = history.filter((entry) => /agent/i.test(entry.label));
   if (agentEntries.length > 0) {
-    const agentId = 'agent:kilocode';
+    const agentId = 'agent:joy-agent';
     addNode({
       id: agentId,
       kind: 'agent',
-      label: 'KiloCode',
+      label: 'JOY Agent Engine',
       detail: `${agentEntries.length} committed change set(s)`,
       column: 0,
     });

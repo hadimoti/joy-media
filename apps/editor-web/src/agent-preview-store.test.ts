@@ -13,4 +13,14 @@ describe('agent preview store', () => {
     store.clear('run-1');
     expect(store.getState().timeline).toBeUndefined();
   });
+
+  it('keeps document previews alongside the timeline and clears both atomically', () => {
+    const store = createAgentPreviewStore();
+    const canonical = { id: 'project-1' } as never;
+    const preview = { id: 'project-1', title: 'staged' } as never;
+    store.setDocument({ runId: 'run-2', baseRevision: 'rev-2', canonical, preview });
+    expect(store.getState().document?.preview).toEqual(preview);
+    store.clear('run-2');
+    expect(store.getState()).toEqual({ timeline: undefined, document: undefined });
+  });
 });

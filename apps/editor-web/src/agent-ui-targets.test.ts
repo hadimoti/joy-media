@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  inferJoyAgentTaskKind,
   mapAgentToolToSurface,
   mapAgentToolToTargets,
+  targetForJoyAgentTask,
   trustedFeatureToolForRequest,
 } from './agent-ui-targets.js';
 
@@ -77,5 +79,14 @@ describe('JOY agent trusted UI target map', () => {
     expect(mapAgentToolToTargets({ tool: 'submit_plan' }, snapshot)).toEqual([
       { panelId: 'agent', sectionId: 'composer' },
     ]);
+  });
+
+  it('routes free-form task kinds to the active product section', () => {
+    expect(targetForJoyAgentTask('color')).toEqual({ panelId: 'effects', sectionId: 'color' });
+    expect(targetForJoyAgentTask('captions')).toEqual({ panelId: 'media', sectionId: 'captions' });
+    expect(inferJoyAgentTaskKind('add a warm cinematic grade')).toBe('color');
+    expect(inferJoyAgentTaskKind('make the lower third glow')).toBe('effects');
+    expect(inferJoyAgentTaskKind('write subtitles from the speech')).toBe('captions');
+    expect(inferJoyAgentTaskKind('trim the intro and tighten the cut')).toBe('joy-code');
   });
 });

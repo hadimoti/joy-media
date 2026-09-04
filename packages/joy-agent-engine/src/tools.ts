@@ -108,6 +108,18 @@ export interface JoyAgentToolBridge {
     readonly operations: readonly JoyDocumentOperation[];
   }) => Promise<unknown>;
   readonly submitPlan: () => Promise<unknown>;
+  /** Optional domain readers/proposers keep media surfaces on the same bridge. */
+  readonly readBrief?: () => Promise<unknown>;
+  readonly readScene3d?: () => Promise<unknown>;
+  readonly proposeAsset?: (input: {
+    readonly assetId: string;
+    readonly summary: string;
+  }) => Promise<unknown>;
+  readonly proposeBrief?: (input: { readonly summary: string }) => Promise<unknown>;
+  readonly proposeScene3d?: (input: {
+    readonly sceneId: string;
+    readonly summary: string;
+  }) => Promise<unknown>;
 }
 
 export interface JoyAgentToolMetadata {
@@ -174,6 +186,41 @@ export const JOY_AGENT_TOOL_METADATA: Readonly<Record<string, JoyAgentToolMetada
       capability: 'timeline.write',
       activityCode: 'approval.requested',
       surface: 'joy-code',
+      parallel: false,
+    },
+    read_brief: {
+      access: 'read',
+      capability: 'timeline.read',
+      activityCode: 'read.brief',
+      surface: 'creative-brief',
+      parallel: true,
+    },
+    read_scene_3d: {
+      access: 'read',
+      capability: 'render.preview',
+      activityCode: 'read.scene-3d',
+      surface: 'scene-3d',
+      parallel: true,
+    },
+    propose_asset: {
+      access: 'preview',
+      capability: 'assets.import',
+      activityCode: 'preview.asset',
+      surface: 'asset-library',
+      parallel: false,
+    },
+    propose_brief: {
+      access: 'preview',
+      capability: 'timeline.write',
+      activityCode: 'preview.brief',
+      surface: 'creative-brief',
+      parallel: false,
+    },
+    propose_scene_3d: {
+      access: 'preview',
+      capability: 'render.preview',
+      activityCode: 'preview.scene-3d',
+      surface: 'scene-3d',
       parallel: false,
     },
   });
@@ -313,6 +360,46 @@ export function createJoyAgentTools(
       execute: async (input) => {
         validateOperationDependencies(input.operations);
         return boundedResult(await bridge.proposeDocumentOperations(input), maxPayloadBytes);
+      },
+    }),
+    read_brief: tool({
+      description: 'Read the current bounded Creative Brief state.',
+      inputSchema: z.object({}).strict(),
+      execute: async () => {
+        if (bridge.readBrief === undefined) throw new Error('JOY_AGENT_UNAVAILABLE');
+        return boundedResult(await runRead(bridge.readBrief), maxPayloadBytes);
+      },
+    }),
+    read_scene_3d: tool({
+      description: 'Read the current bounded 3D scene state.',
+      inputSchema: z.object({}).strict(),
+      execute: async () => {
+        if (bridge.readScene3d === undefined) throw new Error('JOY_AGENT_UNAVAILABLE');
+        return boundedResult(await runRead(bridge.readScene3d), maxPayloadBytes);
+      },
+    }),
+    propose_asset: tool({
+      description: 'Stage a bounded asset edit for explicit approval.',
+      inputSchema: z.object({ assetId: id, summary: boundedText }).strict(),
+      execute: async (input) => {
+        if (bridge.proposeAsset === undefined) throw new Error('JOY_AGENT_UNAVAILABLE');
+        return boundedResult(await bridge.proposeAsset(input), maxPayloadBytes);
+      },
+    }),
+    propose_brief: tool({
+      description: 'Stage a bounded Creative Brief hand-off for review.',
+      inputSchema: z.object({ summary: boundedText }).strict(),
+      execute: async (input) => {
+        if (bridge.proposeBrief === undefined) throw new Error('JOY_AGENT_UNAVAILABLE');
+        return boundedResult(await bridge.proposeBrief(input), maxPayloadBytes);
+      },
+    }),
+    propose_scene_3d: tool({
+      description: 'Stage a bounded 3D scene operation for explicit approval.',
+      inputSchema: z.object({ sceneId: id, summary: boundedText }).strict(),
+      execute: async (input) => {
+        if (bridge.proposeScene3d === undefined) throw new Error('JOY_AGENT_UNAVAILABLE');
+        return boundedResult(await bridge.proposeScene3d(input), maxPayloadBytes);
       },
     }),
     submit_plan: tool({

@@ -1024,7 +1024,7 @@ export class BrowserControlPlaneClient {
     return this.post('/v1/providers/speech/synthesize', input);
   }
 
-  /** Authenticated VPS spectral denoise used only after explicit Cloud Brain consent. */
+  /** Authenticated remote spectral denoise used only after explicit user consent. */
   async denoiseAudio(input: {
     readonly projectId: string;
     readonly operationId: string;

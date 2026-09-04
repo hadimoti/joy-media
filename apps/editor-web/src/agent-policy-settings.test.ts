@@ -60,7 +60,7 @@ describe('AgentPolicyPreferences v2', () => {
       executionMode: 'suggest-only',
       maxCostPerRunUsd: 2.5,
       privacyMode: 'local-only',
-      workerPreference: 'any-approved',
+      workerPreference: 'browser-worker',
       mediaProvider: 'media-test',
       livePreview: true,
     });

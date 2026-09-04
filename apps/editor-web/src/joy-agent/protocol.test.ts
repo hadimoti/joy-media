@@ -41,12 +41,67 @@ describe('JOY Agent Worker protocol', () => {
     expect(
       isWorkerToMainMessage({
         protocolVersion: 1,
+        type: 'event',
+        event: {
+          protocolVersion: 1,
+          runId: 'run-1',
+          seq: 2,
+          phase: 'failed',
+          errorCode: 'JOY_AGENT_AUTH_FAILED',
+          message: 'Provider authentication failed',
+        },
+      }),
+    ).toBe(true);
+    expect(
+      isWorkerToMainMessage({
+        protocolVersion: 1,
+        type: 'event',
+        event: {
+          protocolVersion: 1,
+          runId: 'run-1',
+          seq: 3,
+          phase: 'failed',
+          errorCode: 'LEAKED_SECRET',
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isWorkerToMainMessage({
+        protocolVersion: 1,
         type: 'test-result',
         status: {
           provider: 'openrouter',
           modelId: 'openrouter/auto',
           capability: 'tool-loop',
           apiKey: 'never-forward',
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isWorkerToMainMessage({
+        protocolVersion: 1,
+        type: 'event',
+        event: {
+          protocolVersion: 1,
+          runId: 'brief-1',
+          seq: 2,
+          phase: 'completed',
+          taskKind: 'creative-brief',
+          result: { schemaVersion: 1, projectId: 'p', snapshotRevisionId: 'r' },
+        },
+      }),
+    ).toBe(true);
+    expect(
+      isWorkerToMainMessage({
+        protocolVersion: 1,
+        type: 'event',
+        event: {
+          protocolVersion: 1,
+          runId: 'brief-1',
+          seq: 2,
+          phase: 'completed',
+          taskKind: 'creative-brief',
+          result: { apiKey: 'secret' },
         },
       }),
     ).toBe(false);
