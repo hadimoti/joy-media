@@ -1429,26 +1429,29 @@ git commit -m "test(agent): gate BYOK and live preview release"
 
 ## Final acceptance checklist
 
-- [ ] AI SDK Worker spike passes size, browser, audit, and notice gates.
-- [ ] Provider connection fields exist only in the Worker session and clear on
+- [x] AI SDK Worker spike passes size, browser, audit, and notice gates.
+- [x] Provider connection fields exist only in the Worker session and clear on
       every required lifecycle event.
-- [ ] OpenRouter and custom HTTPS transport use the hardened exact-origin fetch.
-- [ ] Tool-loop and explicit plan-only modes work without provider/model fallback.
-- [ ] Worker has no mutation authority and receives no live EditorSession.
-- [ ] All proposals pass existing JOY validation, approval, revision, atomic
+- [x] OpenRouter and custom HTTPS transport use the hardened exact-origin fetch.
+- [x] Tool-loop and explicit plan-only modes work without provider/model fallback.
+- [x] Worker has no mutation authority and receives no live EditorSession.
+- [x] All proposals pass existing JOY validation, approval, revision, atomic
       command, and one-Undo boundaries.
-- [ ] Joy Code, Creative Brief, Asset AI, design, captions/audio, 3D, and media
+- [x] Joy Code, Creative Brief, Asset AI, design, captions/audio, 3D, and media
       job requests use one engine client.
-- [ ] Every visible work cue comes from a real safe event or validated preview.
-- [ ] Program Monitor, Timeline, Inspector, assets, Brief, and 3D show truthful
+- [x] Every visible work cue comes from a real safe event or validated preview.
+- [x] Program Monitor, Timeline, Inspector, assets, Brief, and 3D show truthful
       live states without focus stealing.
-- [ ] Reject/Stop/failure/timeout/revision drift restore canonical state exactly.
-- [ ] Product UI/runtime has no KiloCode, code-server, cloud planner, or local
+- [x] Reject/Stop/failure/timeout/revision drift restore canonical state exactly.
+- [x] Product UI/runtime has no KiloCode, code-server, cloud planner, or local
       DSH identity/path.
-- [ ] Historical Kilo/joy-code-server provenance remains readable as legacy.
-- [ ] Retired server reasoning routes resolve no server model credentials.
-- [ ] Secret-leak, CORS, redirect, timeout, oversize, malformed-tool,
+- [x] Historical Kilo/joy-code-server provenance remains readable as legacy.
+- [x] Retired server reasoning routes resolve no server model credentials.
+- [x] Secret-leak, CORS, redirect, timeout, oversize, malformed-tool,
       accessibility, reduced-motion, visual, build, typecheck, test, lint,
       format, audit, and Worker-budget gates pass.
 - [ ] An OSI license and redistributable asset set are completed before public
-      open-source release is claimed.
+      open-source release is claimed. The repository code now has the MIT
+      license; the bundled Fontiran assets still require a commercial-license
+      confirmation, replacement, or removal before the complete artifact is
+      redistributed.
