@@ -8084,7 +8084,11 @@ label {
   border: 1px solid color-mix(in srgb, var(--joy-gold, #f5b82e) 48%, var(--joy-border));
   border-radius: var(--radius-md);
   background:
-    linear-gradient(120deg, color-mix(in srgb, var(--joy-gold, #f5b82e) 10%, transparent), transparent 56%),
+    linear-gradient(
+      120deg,
+      color-mix(in srgb, var(--joy-gold, #f5b82e) 10%, transparent),
+      transparent 56%
+    ),
     var(--joy-bg-inset);
   box-shadow: inset 3px 0 0 var(--joy-gold, #f5b82e);
 }
@@ -8142,14 +8146,153 @@ label {
   color: var(--joy-text-faint);
 }
 .joy-code-creative-brief {
-  margin-block-end: 0.55rem;
-  padding: 0.65rem;
-  border: 1px solid color-mix(in srgb, var(--joy-gold, #f5b82e) 35%, var(--joy-border));
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--joy-gold, #f5b82e) 5%, var(--joy-bg-panel));
+  order: 2;
+  flex: none;
+  min-width: 0;
+  margin: 0;
+  padding: 0.45rem 0.35rem 0;
+  border: 0;
+  background: transparent;
 }
 .joy-code-creative-brief .creative-brief-panel {
-  gap: 0.55rem;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0;
+}
+.joy-code-creative-brief .creative-brief-panel-content {
+  order: 1;
+  min-width: 0;
+  max-height: min(16rem, 34vh);
+  overflow: auto;
+}
+.joy-code-composer.is-creative-brief .joy-code-messages {
+  order: 1;
+}
+.joy-code-composer.is-creative-brief .joy-code-creative-brief {
+  order: 2;
+}
+.joy-code-composer.is-creative-brief .creative-brief-panel-idle {
+  display: none;
+}
+.joy-code-creative-brief .creative-brief-panel-input {
+  order: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0.45rem;
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-inset);
+  box-shadow: 0 -8px 22px rgb(0 0 0 / 14%);
+}
+.joy-code-creative-brief .creative-brief-panel-textarea {
+  width: 100%;
+  min-height: 3.1rem;
+  max-height: 9rem;
+  resize: vertical;
+  box-sizing: border-box;
+  padding: 0.35rem 0.15rem;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--joy-text);
+  font: inherit;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+.joy-code-creative-brief .creative-brief-panel-textarea::placeholder {
+  color: var(--joy-text-disabled);
+}
+.joy-code-creative-brief .creative-brief-panel-input > .creative-brief-panel-button {
+  min-height: 1.8rem;
+  margin-bottom: 0.1rem;
+  padding: 0 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--joy-accent) 62%, var(--joy-border));
+  border-radius: 999px;
+  background: var(--joy-accent);
+  color: var(--joy-on-accent);
+  font: inherit;
+  font-size: 0.67rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.joy-code-creative-brief .creative-brief-panel-input > .creative-brief-panel-button:disabled {
+  border-color: var(--joy-border);
+  background: var(--joy-bg-control);
+  color: var(--joy-text-disabled);
+  cursor: default;
+}
+.joy-code-creative-brief .creative-brief-panel-status {
+  grid-column: 1 / -1;
+  color: var(--joy-text-faint);
+  font-size: 0.62rem;
+}
+.creative-brief-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+.creative-brief-panel-input {
+  display: grid;
+  gap: 0.45rem;
+}
+.creative-brief-panel-textarea {
+  width: 100%;
+  min-height: 5rem;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-md);
+  background: var(--joy-bg-input);
+  color: var(--joy-text);
+  font: inherit;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+.creative-brief-panel-textarea:focus-visible {
+  border-color: var(--joy-accent);
+  outline: 2px solid color-mix(in srgb, var(--joy-accent) 28%, transparent);
+  outline-offset: 1px;
+}
+.creative-brief-panel-button {
+  min-height: 1.9rem;
+  justify-self: start;
+  padding: 0 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--joy-accent) 62%, var(--joy-border));
+  border-radius: var(--radius-sm);
+  background: var(--joy-accent);
+  color: var(--joy-on-accent);
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.creative-brief-panel-button:disabled {
+  border-color: var(--joy-border);
+  background: var(--joy-bg-control);
+  color: var(--joy-text-disabled);
+  cursor: default;
+}
+.creative-brief-panel-status,
+.creative-brief-panel-error,
+.creative-brief-panel-unavailable,
+.creative-brief-panel-stale,
+.creative-brief-panel-consent {
+  color: var(--joy-text-muted);
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+.creative-brief-panel-content {
+  min-width: 0;
+}
+.creative-brief-panel-content > * + * {
+  margin-top: 0.6rem;
 }
 .joy-code-composer.is-agent-busy .joy-code-capability.is-active {
   border-color: var(--joy-gold, #f5b82e);
@@ -17296,6 +17439,51 @@ label {
   flex-wrap: wrap;
   gap: 0.55rem;
   margin-top: 0.75rem;
+}
+.agent-settings-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-sm);
+  color: var(--joy-text-secondary);
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+.agent-settings-notice-icon {
+  display: inline-grid;
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--joy-text-faint);
+  color: var(--joy-bg-elevated);
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+.agent-settings-notice.is-success {
+  border-color: color-mix(in srgb, var(--joy-ok) 48%, var(--joy-border));
+  background: color-mix(in srgb, var(--joy-ok) 8%, transparent);
+}
+.agent-settings-notice.is-success .agent-settings-notice-icon {
+  background: var(--joy-ok);
+}
+.agent-settings-notice.is-error {
+  border-color: color-mix(in srgb, var(--joy-danger) 52%, var(--joy-border));
+  background: color-mix(in srgb, var(--joy-danger) 8%, transparent);
+}
+.agent-settings-notice.is-error .agent-settings-notice-icon {
+  background: var(--joy-danger);
+}
+.agent-settings-notice.is-info {
+  border-color: color-mix(in srgb, var(--joy-accent) 42%, var(--joy-border));
+  background: color-mix(in srgb, var(--joy-accent) 7%, transparent);
+}
+.agent-settings-notice.is-info .agent-settings-notice-icon {
+  background: var(--joy-accent);
 }
 .agent-settings-readonly {
   display: grid;

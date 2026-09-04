@@ -6,6 +6,11 @@ import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus } from './joy-agent/protocol.js';
 import { CloseIcon } from './icons.js';
 
+type AgentSettingsNotice = {
+  readonly kind: 'info' | 'success' | 'error';
+  readonly message: string;
+};
+
 const MODES: Readonly<Record<AgentExecutionMode, string>> = {
   'suggest-only': 'Suggest only',
   'preview-and-approve': 'Preview and approve',
@@ -19,6 +24,7 @@ export function JoyAgentSettingsDialog({
   engineClient,
   status,
   onStatusChange,
+  onNotice,
   onClose,
 }: {
   readonly policy: AgentPolicyPreferences;
@@ -26,6 +32,7 @@ export function JoyAgentSettingsDialog({
   readonly engineClient: JoyAgentEngineClient;
   readonly status?: ByokSessionStatus;
   readonly onStatusChange?: (status: ByokSessionStatus | undefined) => void;
+  readonly onNotice?: (message: string, kind: AgentSettingsNotice['kind']) => void;
   readonly onClose: () => void;
 }) {
   const keyRef = useRef<HTMLInputElement>(null);
@@ -39,6 +46,7 @@ export function JoyAgentSettingsDialog({
   const [customDisclosure, setCustomDisclosure] = useState(false);
   const [working, setWorking] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState(status);
+  const [connectionNotice, setConnectionNotice] = useState<AgentSettingsNotice | undefined>();
   useEffect(() => {
     setConnectionStatus(status);
     if (status === undefined) return;
@@ -57,6 +65,7 @@ export function JoyAgentSettingsDialog({
   const setProviderKind = (next: 'openrouter' | 'openai-compatible') => {
     engineClient.clear();
     setConnectionStatus(undefined);
+    setConnectionNotice(undefined);
     onStatusChange?.(undefined);
     if (keyRef.current) keyRef.current.value = '';
     setCustomDisclosure(false);
@@ -65,37 +74,59 @@ export function JoyAgentSettingsDialog({
   };
   const connect = async () => {
     const key = keyRef.current?.value.trim() ?? '';
-    if (
-      !key ||
-      !modelId.trim() ||
-      !baseUrl.trim() ||
-      (provider === 'openai-compatible' && !customDisclosure)
-    )
+    const normalizedModelId = modelId.trim();
+    const normalizedBaseUrl = baseUrl.trim();
+    const missing: string[] = [];
+    if (!key) missing.push('an API key');
+    if (!normalizedModelId) missing.push('a model ID');
+    if (!normalizedBaseUrl) missing.push('a base URL');
+    if (provider === 'openai-compatible' && !customDisclosure)
+      missing.push('the custom-provider acknowledgement');
+    if (missing.length > 0) {
+      const message = `Enter ${missing.join(', ')} before connecting.`;
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
       return;
+    }
     setWorking(true);
     try {
       await engineClient.configure({
         provider,
-        baseUrl: baseUrl.trim().replace(/\/$/, ''),
-        modelId: modelId.trim(),
+        baseUrl: normalizedBaseUrl.replace(/\/$/, ''),
+        modelId: normalizedModelId,
         apiKey: key,
       });
       const next = await engineClient.testConnection();
       setConnectionStatus(next);
       onStatusChange?.(next);
+      const message =
+        next.capability === 'tool-loop'
+          ? 'Connected successfully. JOY is ready to edit in this session.'
+          : next.capability === 'plan-only'
+            ? 'Connected successfully in plan-only mode. Creative Brief is ready in this session.'
+            : 'The provider responded, but JOY could not use its tool loop.';
+      const kind = next.capability === 'incompatible' ? 'error' : 'success';
+      setConnectionNotice({ kind, message });
+      onNotice?.(message, kind);
+      if (kind === 'success') onClose();
     } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : 'Unable to configure connection';
+      const safeMessage = rawMessage.replaceAll(key, '[redacted]').slice(0, 180);
+      const message = `Connection failed: ${safeMessage}`;
       setConnectionStatus({
         provider,
-        modelId,
+        modelId: normalizedModelId,
         capability: 'incompatible',
-        message: error instanceof Error ? error.message : 'Unable to configure connection',
+        message: safeMessage,
       });
       onStatusChange?.({
         provider,
-        modelId,
+        modelId: normalizedModelId,
         capability: 'incompatible',
-        message: error instanceof Error ? error.message : 'Unable to configure connection',
+        message: safeMessage,
       });
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
     } finally {
       if (keyRef.current) keyRef.current.value = '';
       setWorking(false);
@@ -105,6 +136,9 @@ export function JoyAgentSettingsDialog({
     engineClient.clear();
     setConnectionStatus(undefined);
     onStatusChange?.(undefined);
+    const message = 'Connection cleared. Your API key was removed from this page session.';
+    setConnectionNotice({ kind: 'info', message });
+    onNotice?.(message, 'info');
     if (keyRef.current) keyRef.current.value = '';
   };
   return (
@@ -240,6 +274,22 @@ export function JoyAgentSettingsDialog({
                   Clear connection
                 </button>
               </div>
+              {connectionNotice !== undefined && (
+                <div
+                  className={`agent-settings-notice is-${connectionNotice.kind}`}
+                  role={connectionNotice.kind === 'error' ? 'alert' : 'status'}
+                  aria-live="polite"
+                >
+                  <span className="agent-settings-notice-icon" aria-hidden="true">
+                    {connectionNotice.kind === 'success'
+                      ? '✓'
+                      : connectionNotice.kind === 'error'
+                        ? '!'
+                        : 'i'}
+                  </span>
+                  <span>{connectionNotice.message}</span>
+                </div>
+              )}
             </div>
           </section>
           <section>

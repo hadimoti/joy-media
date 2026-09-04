@@ -1175,7 +1175,7 @@ export function AgentPanel({
 
         {tab === 'composer' && (
           <section
-            className={`joy-code-composer ${liveAgentBusy ? 'is-agent-busy' : ''}`}
+            className={`joy-code-composer is-${composerCapability} ${liveAgentBusy ? 'is-agent-busy' : ''}`}
             aria-label="Joy Code composer"
             aria-busy={liveAgentBusy}
             data-agent-phase={liveAgentPhase}

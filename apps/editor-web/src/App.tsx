@@ -1663,8 +1663,9 @@ function EditorWorkspace({
     ],
   );
   const onCreativeBriefOptIn = useCallback(async () => {
+    if (creativeBriefOptedIn) return;
     setAgentSettingsOpen(true);
-  }, []);
+  }, [creativeBriefOptedIn]);
   const mediaResolver = useMemo(
     () =>
       new ProjectMediaResolver({
@@ -7141,6 +7142,7 @@ function EditorWorkspace({
                   appAgentPreviewStore.clear();
                 }
               }}
+              onNotice={showToast}
               onClose={() => setAgentSettingsOpen(false)}
             />
           )}
