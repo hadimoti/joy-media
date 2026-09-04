@@ -110,7 +110,12 @@ export class PixabayStockVideoProvider implements StockVideoProvider {
     const mediaUrl = rendition ? stringValue(rendition.url ?? rendition.link) : '';
     const sourcePageUrl = stringValue(value.pageURL);
     const posterId = stringValue(value.picture_id);
-    const posterUrl = posterId ? `https://i.vimeocdn.com/video/${posterId}_640x360.jpg` : '';
+    // Pixabay currently returns the poster alongside each video rendition.
+    // Keep the legacy picture_id fallback for older responses, but prefer the
+    // rendition thumbnail so current API hits are not discarded as incomplete.
+    const posterUrl =
+      stringValue(rendition?.thumbnail) ||
+      (posterId ? `https://i.vimeocdn.com/video/${posterId}_640x360.jpg` : '');
     const creator = stringValue(value.user);
     const width = numberValue(rendition?.width);
     const height = numberValue(rendition?.height);

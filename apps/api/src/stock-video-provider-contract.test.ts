@@ -98,6 +98,54 @@ describe('stock-video provider safety contract', () => {
     expect(response.status).not.toBe(302);
   });
 
+  it('normalizes current Pixabay rendition thumbnails as posters', async () => {
+    let module: Record<string, unknown>;
+    try {
+      module = (await import('./pixabay-stock-video-provider.js')) as Record<string, unknown>;
+    } catch (error) {
+      throw new Error(
+        `pixabay-stock-video-provider contract is not implemented: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    const Provider = exported<
+      new (options: Record<string, unknown>) => {
+        search(request: Record<string, unknown>): Promise<readonly Record<string, unknown>[]>;
+      }
+    >(module, 'PixabayStockVideoProvider');
+    const fetchImpl = async () =>
+      new Response(
+        JSON.stringify({
+          hits: [
+            {
+              id: 42,
+              pageURL: 'https://pixabay.com/videos/fixture-42/',
+              user: 'Fixture creator',
+              duration: 8,
+              videos: {
+                medium: {
+                  width: 1280,
+                  height: 720,
+                  size: 1_000,
+                  url: 'https://cdn.pixabay.com/video/fixture-42.mp4',
+                  thumbnail: 'https://cdn.pixabay.com/video/fixture-42.jpg',
+                },
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    const provider = new Provider({
+      apiKey: 'fixture-only-secret',
+      fetchImplementation: fetchImpl,
+    });
+    const cards = await provider.search({ category: 'nature', perPage: 3 });
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.posterUrl).toBe('https://cdn.pixabay.com/video/fixture-42.jpg');
+  });
+
   it('enforces response byte and media metadata limits before acceptance', async () => {
     const module = await providerModule();
     const validate = exported<(candidate: Record<string, unknown>) => boolean>(
