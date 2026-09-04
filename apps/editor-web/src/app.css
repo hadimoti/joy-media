@@ -428,7 +428,10 @@ input[type='checkbox']:focus-visible {
 }
 .stock-video-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  /* Keep every implicit stock row the same height; this is scoped to this
+     catalog so owned-media grids and every other asset tab are untouched. */
+  grid-auto-rows: 1fr;
   gap: 0.6rem;
   min-width: 0;
   margin: 0;
@@ -436,10 +439,11 @@ input[type='checkbox']:focus-visible {
   list-style: none;
 }
 .stock-video-grid--large {
-  grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
 }
 .stock-video-grid--medium {
-  grid-template-columns: repeat(auto-fill, minmax(13.5rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  grid-auto-rows: 1fr;
   gap: 0.5rem;
 }
 .stock-video-grid--list {
@@ -456,6 +460,8 @@ input[type='checkbox']:focus-visible {
   border: 1px solid color-mix(in srgb, var(--joy-border) 88%, transparent);
   border-radius: 0.55rem;
   background: var(--joy-bg-raised);
+  box-sizing: border-box;
+  height: 100%;
 }
 .stock-video-grid--medium:not(.stock-video-grid--list) .stock-video-card {
   min-height: 12rem;
@@ -12898,8 +12904,9 @@ label {
   }
 }
 @container asset-library-content (max-width: 17rem) {
+  .stock-video-grid--large,
   .stock-video-grid--medium {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 @container (max-width: 18rem) {

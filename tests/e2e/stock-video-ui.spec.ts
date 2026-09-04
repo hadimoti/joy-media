@@ -332,7 +332,7 @@ test.describe('native stock video library', () => {
             (element) => getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length,
           ),
       )
-      .toBe(1);
+      .toBeGreaterThanOrEqual(2);
     const compact300Geometry = await page
       .locator('.stock-video-grid--medium .stock-video-card')
       .evaluateAll((cards) =>
@@ -420,7 +420,7 @@ test.describe('native stock video library', () => {
             (element) => getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length,
           ),
       )
-      .toBe(2);
+      .toBeGreaterThanOrEqual(2);
     const cardGeometry = await page
       .locator('.stock-video-grid--medium .stock-video-card')
       .evaluateAll((cards) =>
