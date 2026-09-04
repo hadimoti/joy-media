@@ -12,6 +12,9 @@
   "include": ["src"],
   "references": [
     {
+      "path": "../../packages/joy-agent-engine"
+    },
+    {
       "path": "../../packages/adapter-deepseek-harness"
     },
     {

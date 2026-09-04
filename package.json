@@ -22,6 +22,7 @@
     "audit:prod": "pnpm audit --prod --audit-level=moderate",
     "release:performance": "node tooling/release/release-performance-observer.mjs",
     "release:gate": "node --experimental-strip-types tooling/release/src/gate.ts",
+    "verify:joy-agent-worker": "node tooling/release/verify-joy-agent-worker.mjs",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test",
     "verify:ci": "pnpm check && pnpm build && pnpm audit:prod"
   },

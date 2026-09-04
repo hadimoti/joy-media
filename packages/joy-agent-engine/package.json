@@ -1,0 +1,29 @@
+{
+  "name": "@joy-media/joy-agent-engine",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Browser-resident JOY Agent Engine contracts and provider-neutral model loop",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@joy-media/agent-tools": "workspace:*",
+    "@ai-sdk/openai-compatible": "3.0.43",
+    "ai": "7.0.92",
+    "zod": "4.1.8"
+  }
+}

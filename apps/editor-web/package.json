@@ -11,6 +11,7 @@
   "dependencies": {
     "@joy-media/adapter-deepseek-harness": "workspace:*",
     "@joy-media/agent-tools": "workspace:*",
+    "@joy-media/joy-agent-engine": "workspace:*",
     "@joy-media/audio-core": "workspace:*",
     "@joy-media/captions-core": "workspace:*",
     "@joy-media/commands": "workspace:*",

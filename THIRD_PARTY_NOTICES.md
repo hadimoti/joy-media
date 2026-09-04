@@ -1,5 +1,13 @@
 # Third-party notices
 
+## JOY Agent Engine dependencies
+
+- `ai` 7.0.92 — Apache-2.0; provider-neutral AI SDK Core used behind the JOY
+  Agent Engine package boundary
+- `@ai-sdk/openai-compatible` 3.0.43 — Apache-2.0; OpenAI-compatible provider
+  adapter used for session-only BYOK transport
+- `zod` 4.1.8 — MIT; runtime schema validation for agent boundaries
+
 ## Fontiran Modam Pro
 
 - Product: [Modam Pro](https://modam.pro/) (Fontiran commercial webfont)
