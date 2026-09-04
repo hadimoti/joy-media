@@ -38,7 +38,9 @@ export function PanelTab({ api }: IDockviewPanelHeaderProps) {
       {presence.active && (
         <span
           className="panel-tab-agent-marker"
-          aria-label={presence.awaitingApproval ? 'Agent needs approval' : `Agent ${presence.phase}`}
+          aria-label={
+            presence.awaitingApproval ? 'Agent needs approval' : `Agent ${presence.phase}`
+          }
           title={presence.awaitingApproval ? 'Agent needs approval' : `Agent ${presence.phase}`}
         >
           <span aria-hidden="true" />

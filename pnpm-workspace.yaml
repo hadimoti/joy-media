@@ -4,3 +4,5 @@ packages:
   - 'tooling/*'
 allowBuilds:
   esbuild: true
+overrides:
+  '@xmldom/xmldom': 0.8.15

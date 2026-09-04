@@ -18,6 +18,14 @@ application must keep those values out of storage, project exports, server
 requests, logs, and release artifacts. Provider terms, model licenses, and
 user API charges remain the user's responsibility.
 
+The 2026-09-04 implementation evidence is local and reproducible: the
+browser Worker bundle is 8,869 raw bytes / 3,387 gzip bytes, the production
+dependency audit is clean, and 63 Playwright checks pass across the seven
+desktop viewport projects. The release verifier also confirms that the
+Worker imports only the JOY engine boundary. This is implementation evidence,
+not a public-release approval; deployment, repository licensing, and font or
+asset redistribution review remain owner/legal gates.
+
 Release evidence must include the Worker size/import gate, production
 dependency audit, third-party notices, repository license decision, and asset
 redistribution review.

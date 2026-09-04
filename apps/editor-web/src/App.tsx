@@ -103,6 +103,17 @@ registerBuiltins();
 export const appAgentPresenceStore = createAgentPresenceStore();
 export const appAgentPreviewStore = createAgentPreviewStore();
 
+/**
+ * A human document edit invalidates any staged agent preview. Keep the
+ * activity handoff alive so the user can still see which surface was active,
+ * but remove the preview marker until the agent produces a new revision-bound
+ * proposal.
+ */
+function invalidateAgentPreviewAfterEdit(session: EditorSession): void {
+  appAgentPreviewStore.clear();
+  appAgentPresenceStore.invalidatePreview(session.historyCursorSequence);
+}
+
 const CLIP_FRAME_CACHE_LIMIT = 120;
 const MotionStudioShell = lazy(() =>
   import('./motion-studio/index.js').then((module) => ({ default: module.MotionStudioShell })),
@@ -1578,14 +1589,18 @@ function EditorWorkspace({
       revision: session.projectRevisionId,
       selectedClipIds: state.selectedIds,
       playheadUs: state.playheadUs,
-      clips: composition?.tracks.flatMap((track) =>
-        track.clips.map((clip) => ({
-          id: clip.id,
-          trackId: track.id,
-          startUs: clip.startUs,
-          durationUs: clip.durationUs,
-        })),
-      ),
+      ...(composition === undefined
+        ? {}
+        : {
+            clips: composition.tracks.flatMap((track) =>
+              track.clips.map((clip) => ({
+                id: clip.id,
+                trackId: track.id,
+                startUs: clip.startUs,
+                durationUs: clip.durationUs,
+              })),
+            ),
+          }),
       assets: Object.values(session.visualProject.assets).map((asset) => ({
         id: asset.id,
         kind: asset.kind,
@@ -1639,7 +1654,7 @@ function EditorWorkspace({
       session.visualProject.id,
     ],
   );
-  const onCreativeBriefOptIn = useCallback(() => {
+  const onCreativeBriefOptIn = useCallback(async () => {
     setAgentSettingsOpen(true);
   }, []);
   const mediaResolver = useMemo(
@@ -2501,6 +2516,7 @@ function EditorWorkspace({
             document: universalProject,
           });
       }
+      invalidateAgentPreviewAfterEdit(session);
       resyncTimelineMedia();
       setRevision((revision) => revision + 1);
     },
@@ -2517,6 +2533,7 @@ function EditorWorkspace({
         timeline,
         document: withProjectAudio(nextVisualProject, nextAudioState),
       });
+      invalidateAgentPreviewAfterEdit(session);
       setAudioStateRaw(nextAudioState);
       resyncTimelineMedia();
       setRevision((revision) => revision + 1);
@@ -2526,6 +2543,7 @@ function EditorWorkspace({
   const dispatchGraph = useCallback(
     (transaction: GraphTransaction) => {
       session.dispatchGraph(transaction);
+      invalidateAgentPreviewAfterEdit(session);
       setRevision((revision) => revision + 1);
     },
     [session],
@@ -2533,6 +2551,7 @@ function EditorWorkspace({
   const dispatchArtifacts = useCallback(
     (transaction: ArtifactTransaction) => {
       session.dispatchArtifacts(transaction);
+      invalidateAgentPreviewAfterEdit(session);
       setRevision((revision) => revision + 1);
     },
     [session],
@@ -2558,6 +2577,7 @@ function EditorWorkspace({
         commands: [{ type: 'object.setTransformProperty', payload: { objectId, key, value } }],
       };
       session.dispatchVisualObjects(transaction);
+      invalidateAgentPreviewAfterEdit(session);
       setRevision((revision) => revision + 1);
     },
     [session],
@@ -2565,6 +2585,7 @@ function EditorWorkspace({
   const dispatchProject = useCallback(
     (transaction: VisualObjectTransaction) => {
       session.dispatchVisualObjects(transaction);
+      invalidateAgentPreviewAfterEdit(session);
       setRevision((revision) => revision + 1);
     },
     [session],
@@ -2573,6 +2594,7 @@ function EditorWorkspace({
   const replaceVisualProject = useCallback(
     (next: JoyProjectV1) => {
       session.replaceVisualProject(next);
+      invalidateAgentPreviewAfterEdit(session);
       setRevision((revision) => revision + 1);
     },
     [session],
@@ -2580,6 +2602,7 @@ function EditorWorkspace({
   const replaceVisualProjectAndAudio = useCallback(
     (next: JoyProjectV1, nextAudio: AudioState) => {
       session.replaceVisualProject(withProjectAudio(next, nextAudio));
+      invalidateAgentPreviewAfterEdit(session);
       setAudioStateRaw(nextAudio);
       setRevision((revision) => revision + 1);
     },
@@ -3205,8 +3228,9 @@ function EditorWorkspace({
     [joyAgentAttachedAssets],
   );
   const bumpProjectRevision = useCallback(() => {
+    invalidateAgentPreviewAfterEdit(session);
     setRevision((revision) => revision + 1);
-  }, []);
+  }, [session]);
   const bumpPluginRevision = useCallback(() => {
     setPluginRevision((revision) => revision + 1);
   }, []);
@@ -4693,7 +4717,7 @@ function EditorWorkspace({
     );
   }
 
-  function PanelContent({ api }: IDockviewPanelProps) {
+  function PanelContent({ api }: Pick<IDockviewPanelProps, 'api'>) {
     const agentPreviewState = useAgentPreviewSnapshot();
     const context = useContext(EditorPanelContext);
     // Dockview can mount a cached panel one frame before its provider is
@@ -6349,6 +6373,7 @@ function EditorWorkspace({
           playheadUs={state.playheadUs}
           agentContext={context.agentContext}
           onUndo={context.undo}
+          onProjectRevision={context.bumpProjectRevision}
           session={context.session}
           settings={context.agentPolicy}
           {...(context.agentPanelCommand === undefined
@@ -7093,7 +7118,7 @@ function EditorWorkspace({
               policy={agentPolicy}
               onPolicyChange={setAgentPolicy}
               engineClient={joyAgentEngineClientRef.current!}
-              status={agentConnectionStatus}
+              {...(agentConnectionStatus === undefined ? {} : { status: agentConnectionStatus })}
               onStatusChange={(next) => {
                 setAgentConnectionStatus(next);
                 if (next === undefined) {

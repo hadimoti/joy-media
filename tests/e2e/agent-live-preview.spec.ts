@@ -34,7 +34,7 @@ test.describe('built-in JOY Agent live visual preview', () => {
     await before.check();
     await expect(page.getByText('Before · canonical')).toBeVisible();
     await before.uncheck();
-    await expect(page.getByText('Staged · not applied')).toBeVisible();
+    await expect(page.getByText('Staged · not applied').first()).toBeVisible();
 
     await page.getByRole('button', { name: 'Reject' }).click();
     await expect(page.locator('[data-agent-preview="true"]')).toHaveCount(0);
@@ -53,10 +53,11 @@ test.describe('built-in JOY Agent live visual preview', () => {
 
   test('revision drift invalidates a staged preview before approval', async ({ page }) => {
     await requestPreview(page);
-    const clip = page.locator('.timeline-clip').first();
+    const clip = page.locator('.timeline-clip[data-clip-id]').first();
     await clip.click();
+    await expect(clip).toHaveAttribute('aria-pressed', 'true');
     await page.locator('.app-menu-trigger').filter({ hasText: 'Edit' }).click();
-    await page.getByRole('menuitem', { name: 'Duplicate Clip', exact: true }).click();
+    await page.getByRole('menuitem', { name: /Duplicate Clip/ }).click();
     await expect(page.locator('[data-agent-preview="true"]')).toHaveCount(0);
   });
 });

@@ -193,6 +193,7 @@ export function AgentPanel({
   playheadUs,
   agentContext,
   onUndo,
+  onProjectRevision,
   session,
   attachedAssets = [],
   onDetachAsset,
@@ -212,6 +213,8 @@ export function AgentPanel({
   readonly playheadUs: number;
   readonly agentContext: EditorContext;
   readonly onUndo: () => void;
+  /** Notify the app shell after a model draft mutates the shared session. */
+  readonly onProjectRevision?: () => void;
   readonly session: EditorSession;
   readonly attachedAssets?: readonly JoyAgentAttachedAsset[];
   readonly onDetachAsset?: (assetId: string) => void;
@@ -533,17 +536,21 @@ export function AgentPanel({
             session.timelineProject.compositions[session.timelineProject.rootCompositionId];
           const contextSnapshot = createJoyAgentContextSnapshot({
             projectId: session.visualProject.id,
-            revision: session.historyCursorSequence,
+            revision: session.projectRevisionId,
             selectedClipIds,
             playheadUs,
-            clips: composition?.tracks.flatMap((track) =>
-              track.clips.map((clip) => ({
-                id: clip.id,
-                trackId: track.id,
-                startUs: clip.startUs,
-                durationUs: clip.durationUs,
-              })),
-            ),
+            ...(composition === undefined
+              ? {}
+              : {
+                  clips: composition.tracks.flatMap((track) =>
+                    track.clips.map((clip) => ({
+                      id: clip.id,
+                      trackId: track.id,
+                      startUs: clip.startUs,
+                      durationUs: clip.durationUs,
+                    })),
+                  ),
+                }),
             assets: Object.values(session.visualProject.assets).map((asset) => ({
               id: asset.id,
               kind: asset.kind,
@@ -740,6 +747,7 @@ export function AgentPanel({
         baseRevision: modelDraft.baseRevision,
         approvedAt: new Date().toISOString(),
       });
+      onProjectRevision?.();
       appendMessage(
         activeThread.id,
         'assistant',

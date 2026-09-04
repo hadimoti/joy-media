@@ -38,42 +38,12 @@ import {
   validateProjectDocumentSyncRequest,
   isProjectDocumentSyncValidationSuccess,
 } from './project-document-sync-request-validation.js';
-import type { CreativeBriefRuntime } from './creative-brief-runtime.js';
-import type { CreativeBriefRuntimeContext } from './creative-brief-runtime.js';
-import { DEFAULT_CREATIVE_BRIEF_RUNTIME } from './creative-brief-runtime.js';
-import type {
-  CreativeBriefInputResolver,
-  CreativeBriefInputResolverRequest,
-  CreativeBriefInputResolverResult,
-  CreativeBriefInputResolverContext,
-} from './creative-brief-input-resolver.js';
-import { UnavailableCreativeBriefInputResolver } from './creative-brief-input-resolver.js';
-import { validateCreativeBriefClientRequest } from './creative-brief-client-request-validation.js';
-import type { CreativeBriefClientRequestEnvelope } from './creative-brief-client-request-validation.js';
-import type { CreativeBriefInputV1 } from '@joy-media/agent-tools';
 import {
   GpuPreviewTransport,
   deserializeGpuPreviewResponse,
   type SerializedGpuPreviewFrameResponse,
 } from './gpu-preview-transport.js';
 import type { GpuPreviewFrameRequest } from '@joy-media/job-protocol';
-import type { AsyncCreativeBriefOutcome } from '@joy-media/agent-tools';
-import { randomUUID } from 'node:crypto';
-import { CreativeBriefAdmissionGate } from './creative-brief-admission-gate.js';
-import type { JoyCodeRuntime, JoyCodeRuntimeInput } from './joy-code-runtime.js';
-import { DEFAULT_JOY_CODE_RUNTIME } from './joy-code-runtime.js';
-import type {
-  JoyCodeInputResolver,
-  JoyCodeInputResolverRequest,
-  JoyCodeInputResolverContext,
-} from './joy-code-input-resolver.js';
-import { UnavailableJoyCodeInputResolver } from './joy-code-input-resolver.js';
-import {
-  validateJoyCodeClientRequest,
-  isValidJoyCodeClientRequest,
-  type JoyCodeClientRequestEnvelope,
-} from './joy-code-client-request-validation.js';
-import { JoyCodeAdmissionGate } from './joy-code-admission-gate.js';
 import { createClientAddressResolver, type ClientAddressResolver } from './client-address.js';
 import { attachDbQueryCountHeader, withDbQueryContext } from './db-query-observability.js';
 import {
@@ -130,22 +100,6 @@ export interface ControlPlaneHttpServerOptions {
   readonly audioDenoise?: SpectralDenoiseService;
   /** In-memory only; injectable for deterministic transport tests. */
   readonly gpuPreview?: GpuPreviewTransport;
-  /**
-   * Creative brief runtime for async creative brief generation.
-   * Production default is unavailable. Inject for tests or real implementation.
-   */
-  readonly creativeBriefRuntime?: CreativeBriefRuntime;
-  /**
-   * Creative brief input resolver for server-side resolution.
-   * Production default is UnavailableCreativeBriefInputResolver.
-   * Inject for tests or real implementation.
-   */
-  readonly creativeBriefInputResolver?: CreativeBriefInputResolver;
-  /** Bounded owner/project admission gate; defaults to the in-memory policy gate. */
-  readonly creativeBriefAdmissionGate?: CreativeBriefAdmissionGate;
-  readonly joyCodeRuntime?: JoyCodeRuntime;
-  readonly joyCodeInputResolver?: JoyCodeInputResolver;
-  readonly joyCodeAdmissionGate?: JoyCodeAdmissionGate;
   /** Process-local abuse guard; production deployments should also enforce an edge limit. */
   readonly rateLimit?: {
     readonly windowMs?: number;
@@ -178,14 +132,6 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
       options.audioDenoise ??
       new SpectralDenoiseService(new MemorySpectralDenoiseInvocationLedger()),
     gpuPreview: options.gpuPreview ?? new GpuPreviewTransport(options.controlPlane),
-    creativeBriefRuntime: options.creativeBriefRuntime ?? DEFAULT_CREATIVE_BRIEF_RUNTIME,
-    creativeBriefInputResolver:
-      options.creativeBriefInputResolver ?? UnavailableCreativeBriefInputResolver,
-    creativeBriefAdmissionGate:
-      options.creativeBriefAdmissionGate ?? new CreativeBriefAdmissionGate(),
-    joyCodeRuntime: options.joyCodeRuntime ?? DEFAULT_JOY_CODE_RUNTIME,
-    joyCodeInputResolver: options.joyCodeInputResolver ?? UnavailableJoyCodeInputResolver,
-    joyCodeAdmissionGate: options.joyCodeAdmissionGate ?? new JoyCodeAdmissionGate(),
   };
   const rateLimitWindowMs = options.rateLimit?.windowMs ?? DEFAULT_RATE_LIMIT_WINDOW_MS;
   const rateLimitMaxRequests = options.rateLimit?.maxRequests ?? DEFAULT_RATE_LIMIT_MAX_REQUESTS;
@@ -227,12 +173,6 @@ async function route(
     readonly mediaAuth: MediaAuthApi;
     readonly audioDenoise: SpectralDenoiseService;
     readonly gpuPreview: GpuPreviewTransport;
-    readonly creativeBriefRuntime: CreativeBriefRuntime;
-    readonly creativeBriefInputResolver: CreativeBriefInputResolver;
-    readonly creativeBriefAdmissionGate: CreativeBriefAdmissionGate;
-    readonly joyCodeRuntime: JoyCodeRuntime;
-    readonly joyCodeInputResolver: JoyCodeInputResolver;
-    readonly joyCodeAdmissionGate: JoyCodeAdmissionGate;
   },
   request: IncomingMessage,
   response: ServerResponse,
@@ -642,220 +582,6 @@ async function route(
       error: JOY_AGENT_RETIRED_ROUTE_RESPONSE,
     });
     return;
-  }
-
-  const creativeBriefMatch = /^\/v1\/projects\/([^/]+)\/creative-brief$/.exec(url.pathname);
-  const joyCodePlanMatch = /^\/v1\/projects\/([^/]+)\/joy-code\/plans$/.exec(url.pathname);
-  if (request.method === 'POST' && joyCodePlanMatch !== null) {
-    const projectId = decodeURIComponent(joyCodePlanMatch[1]!);
-    const consent = await options.controlPlane.getJoyCodeOptIn(actor, projectId);
-    if (!consent.enabled)
-      throw new ControlPlaneError(
-        'POLICY_DENIED',
-        'Joy Code planning is not opted in for this project',
-      );
-    const body = await readJson(request, maxJsonBodyBytes);
-    const validation = validateJoyCodeClientRequest(body);
-    if (!validation.valid)
-      throw new ControlPlaneError(
-        'REQUEST_INVALID',
-        validation.errors[0] ?? 'invalid Joy Code request',
-      );
-    if (!isValidJoyCodeClientRequest(body))
-      throw new ControlPlaneError('REQUEST_INVALID', 'invalid Joy Code request');
-    const envelope: JoyCodeClientRequestEnvelope = body;
-    if (envelope.projectId !== projectId)
-      throw new ControlPlaneError('PROJECT_MISMATCH', 'projectId does not match route');
-    const admission = options.joyCodeAdmissionGate.admit(actor.id, projectId, Date.now());
-    if (!admission.allowed) {
-      const statusCode =
-        admission.code === 'JOY_CODE_IN_FLIGHT' || admission.code === 'JOY_CODE_CIRCUIT_OPEN'
-          ? 409
-          : 429;
-      respondJson(response, statusCode, { error: { code: admission.code } });
-      return;
-    }
-    try {
-      const resolverRequest: JoyCodeInputResolverRequest = envelope;
-      const resolverContext: JoyCodeInputResolverContext = {
-        actor,
-        controlPlaneProjectId: projectId,
-      };
-      const resolved = await options.joyCodeInputResolver.resolve(resolverRequest, resolverContext);
-      if (resolved.status === 'stale-revision') {
-        respondJson(response, 409, {
-          error: { code: 'REVISION_MISMATCH', message: resolved.message },
-        });
-        return;
-      }
-      if (resolved.status === 'unavailable') {
-        respondJson(response, 503, { error: { code: resolved.code, message: resolved.message } });
-        return;
-      }
-      const runtimeInput: JoyCodeRuntimeInput = {
-        ...resolved.input,
-        planId: randomUUID(),
-        createdAt: new Date().toISOString(),
-        catalogVersion: 'v1',
-      };
-      const outcome = await options.joyCodeRuntime.execute(runtimeInput, {
-        correlationId: randomUUID(),
-        timeoutMs: 30_000,
-        spendLimitUsdCents: 0,
-      });
-      options.joyCodeAdmissionGate.recordOutcome(outcome.category, Date.now());
-      if (outcome.category === 'ready' && outcome.result !== undefined) {
-        respondJson(response, 200, { data: outcome.result });
-        return;
-      }
-      const statusCode =
-        outcome.category === 'unavailable'
-          ? 503
-          : outcome.category === 'policy-denied'
-            ? 403
-            : outcome.category === 'timeout'
-              ? 504
-              : outcome.category === 'cancelled'
-                ? 499
-                : 502;
-      respondJson(response, statusCode, {
-        error: {
-          code: outcome.errorCode ?? 'JOY_CODE_RUNTIME_FAILED',
-          message: outcome.message ?? 'Joy Code runtime failed',
-        },
-      });
-      return;
-    } finally {
-      options.joyCodeAdmissionGate.release(actor.id, projectId);
-    }
-  }
-  if (request.method === 'POST' && creativeBriefMatch !== null) {
-    const projectId = decodeURIComponent(creativeBriefMatch[1]!);
-    const project = await options.controlPlane.getProject(actor, projectId);
-    if (!project.creativeBriefOptIn) {
-      throw new ControlPlaneError('POLICY_DENIED', 'creative brief not opted in for this project');
-    }
-
-    // Step 3: Strict client-envelope validation (browser-safe envelope only)
-    const body = await readJson(request, maxJsonBodyBytes);
-    const clientValidation = validateCreativeBriefClientRequest(body);
-    if (!clientValidation.valid) {
-      const firstError = clientValidation.errors[0];
-      if (firstError) {
-        throw new ControlPlaneError(
-          firstError.code === 'invalid-envelope'
-            ? 'REQUEST_INVALID'
-            : firstError.code === 'payload-too-large'
-              ? 'PAYLOAD_TOO_LARGE'
-              : firstError.code === 'unknown-field'
-                ? 'REQUEST_INVALID'
-                : firstError.code === 'forbidden-field'
-                  ? 'REQUEST_INVALID'
-                  : firstError.code === 'project-mismatch'
-                    ? 'PROJECT_MISMATCH'
-                    : firstError.code === 'revision-mismatch'
-                      ? 'REVISION_MISMATCH'
-                      : firstError.code === 'invalid-request'
-                        ? 'REQUEST_INVALID'
-                        : 'REQUEST_INVALID',
-          firstError.message,
-        );
-      }
-      throw new ControlPlaneError(
-        'REQUEST_INVALID',
-        'Creative brief client request validation failed',
-      );
-    }
-
-    // Type assertion is safe because we just validated it
-    const clientEnvelope = body as unknown as CreativeBriefClientRequestEnvelope;
-
-    const admission = options.creativeBriefAdmissionGate.admit(actor.id, projectId, Date.now());
-    if (!admission.allowed) {
-      const statusCode =
-        admission.code === 'CREATIVE_BRIEF_IN_FLIGHT'
-          ? 409
-          : admission.code === 'CREATIVE_BRIEF_CIRCUIT_OPEN'
-            ? 503
-            : 429;
-      respondJson(response, statusCode, { error: { code: admission.code } });
-      return;
-    }
-
-    try {
-      // Step 4: Input resolver - resolve server-side canonical input
-      const resolverRequest: CreativeBriefInputResolverRequest = {
-        projectId: clientEnvelope.projectId,
-        snapshotRevisionId: clientEnvelope.snapshotRevisionId,
-        request: clientEnvelope.request,
-      };
-      const resolverContext: CreativeBriefInputResolverContext = {
-        actor,
-        controlPlaneProjectId: projectId,
-      };
-      const resolverResult: CreativeBriefInputResolverResult =
-        await options.creativeBriefInputResolver.resolve(resolverRequest, resolverContext);
-
-      // Handle resolver failures
-      if (resolverResult.status === 'unavailable') {
-        respondJson(response, 503, {
-          data: {
-            kind: 'unavailable',
-            code: resolverResult.code,
-            message: resolverResult.message,
-          },
-        });
-        return;
-      }
-
-      if (resolverResult.status === 'stale-revision') {
-        respondJson(response, 409, {
-          error: {
-            code: 'REVISION_MISMATCH',
-            message: resolverResult.message,
-          },
-        });
-        return;
-      }
-
-      // Step 5: Runtime with resolved input
-      const runtimeAbort = createCreativeBriefRequestAbortController(request, response);
-      try {
-        const runtimeContext: CreativeBriefRuntimeContext = {
-          correlationId: randomUUID(),
-          signal: runtimeAbort.controller.signal,
-          timeoutMs: 60_000, // 60 second default timeout for free-model latency
-          spendLimitUsdCents: 0, // Free-only policy
-        };
-
-        const resolvedInput: CreativeBriefInputV1 = resolverResult.input;
-        const outcome: AsyncCreativeBriefOutcome = await options.creativeBriefRuntime.execute(
-          resolvedInput,
-          runtimeContext,
-        );
-        options.creativeBriefAdmissionGate.recordOutcome(outcome.category, Date.now());
-        // Keep the production diagnostic redacted: outcome category/code and
-        // duration are safe metadata; provider bodies and generated content
-        // must never enter API logs.
-        console.warn(
-          JSON.stringify({
-            event: 'creative-brief-outcome',
-            category: outcome.category,
-            ...(outcome.errorCode === undefined ? {} : { errorCode: outcome.errorCode }),
-            durationMs: outcome.durationMs,
-          }),
-        );
-
-        // Map outcome to HTTP response
-        const httpResponse = mapCreativeBriefOutcomeToHttpResponse(outcome);
-        respondJson(response, httpResponse.statusCode, httpResponse.body);
-        return;
-      } finally {
-        runtimeAbort.cleanup();
-      }
-    } finally {
-      options.creativeBriefAdmissionGate.release(actor.id, projectId);
-    }
   }
 
   const openPreviewSessionMatch = /^\/v1\/projects\/([^/]+)\/preview-sessions$/.exec(url.pathname);
@@ -1316,99 +1042,6 @@ async function route(
         ? await options.controlPlane.trashProject(actor, projectId, baseRevision)
         : await options.controlPlane.restoreProject(actor, projectId, baseRevision);
     respondJson(response, 200, { data });
-    return;
-  }
-
-  const creativeBriefOptInMatch = /^\/v1\/projects\/([^/]+)\/creative-brief-opt-in$/.exec(
-    url.pathname,
-  );
-  if (request.method === 'GET' && creativeBriefOptInMatch !== null) {
-    const projectId = decodeURIComponent(creativeBriefOptInMatch[1]!);
-    const project = await options.controlPlane.getProject(actor, projectId);
-    respondJson(response, 200, {
-      data: {
-        creativeBriefOptIn: project.creativeBriefOptIn,
-        revision: project.revision,
-      },
-    });
-    return;
-  }
-  if (request.method === 'PUT' && creativeBriefOptInMatch !== null) {
-    const body = await readJson(request, maxJsonBodyBytes);
-    // Validate exact JSON body: { enabled: boolean, baseRevision: non-negative safe integer }
-    const keys = Object.keys(body);
-    if (keys.length !== 2 || !keys.includes('enabled') || !keys.includes('baseRevision'))
-      throw new ControlPlaneError(
-        'REQUEST_INVALID',
-        'exact body { enabled: boolean, baseRevision: number } required',
-      );
-    const enabled = body.enabled;
-    const baseRevision = body.baseRevision;
-    if (typeof enabled !== 'boolean')
-      throw new ControlPlaneError('REQUEST_INVALID', 'enabled must be boolean');
-    if (typeof baseRevision !== 'number' || !Number.isSafeInteger(baseRevision) || baseRevision < 0)
-      throw new ControlPlaneError(
-        'REQUEST_INVALID',
-        'baseRevision must be a non-negative safe integer',
-      );
-    const projectId = decodeURIComponent(creativeBriefOptInMatch[1]!);
-    const result = await options.controlPlane.setCreativeBriefOptIn(
-      actor,
-      projectId,
-      enabled,
-      baseRevision,
-    );
-    respondJson(response, 200, {
-      data: { creativeBriefOptIn: result.creativeBriefOptIn, revision: result.revision },
-    });
-    return;
-  }
-
-  const joyCodeOptInMatch = /^\/v1\/projects\/([^/]+)\/joy-code-opt-in$/.exec(url.pathname);
-  if (request.method === 'GET' && joyCodeOptInMatch !== null) {
-    const status = await options.controlPlane.getJoyCodeOptIn(
-      actor,
-      decodeURIComponent(joyCodeOptInMatch[1]!),
-    );
-    respondJson(response, 200, { data: status });
-    return;
-  }
-  if (request.method === 'PUT' && joyCodeOptInMatch !== null) {
-    const body = await readJson(request, maxJsonBodyBytes);
-    const keys = Object.keys(body);
-    if (
-      keys.length !== 3 ||
-      !keys.includes('enabled') ||
-      !keys.includes('consentVersion') ||
-      !keys.includes('baseRevision')
-    )
-      throw new ControlPlaneError(
-        'REQUEST_INVALID',
-        'exact body { enabled, consentVersion, baseRevision } required',
-      );
-    if (typeof body.enabled !== 'boolean')
-      throw new ControlPlaneError('REQUEST_INVALID', 'enabled must be boolean');
-    if (body.consentVersion !== null && typeof body.consentVersion !== 'string')
-      throw new ControlPlaneError('REQUEST_INVALID', 'consentVersion must be string or null');
-    if (
-      typeof body.baseRevision !== 'number' ||
-      !Number.isSafeInteger(body.baseRevision) ||
-      body.baseRevision < 0
-    )
-      throw new ControlPlaneError(
-        'REQUEST_INVALID',
-        'baseRevision must be a non-negative safe integer',
-      );
-    const projectId = decodeURIComponent(joyCodeOptInMatch[1]!);
-    const result = await options.controlPlane.setJoyCodeOptIn(
-      actor,
-      projectId,
-      body.enabled,
-      body.consentVersion === null ? undefined : body.consentVersion,
-      body.baseRevision,
-    );
-    const status = await options.controlPlane.getJoyCodeOptIn(actor, projectId);
-    respondJson(response, 200, { data: { ...status, revision: result.revision } });
     return;
   }
 
@@ -3017,32 +2650,6 @@ function respondError(response: ServerResponse, error: unknown): void {
   respondJson(response, 500, { error: { code: 'INTERNAL_ERROR' } });
 }
 
-function createCreativeBriefRequestAbortController(
-  request: IncomingMessage,
-  response: ServerResponse,
-): { readonly controller: AbortController; readonly cleanup: () => void } {
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  const close = () => {
-    if (!response.writableEnded) controller.abort();
-  };
-  // `IncomingMessage.destroyed` is also true after a normal request body has
-  // been consumed, so it cannot distinguish a disconnect at this point.
-  if (request.aborted) controller.abort();
-  request.once('aborted', abort);
-  // IncomingMessage.close fires after a normal request body completes as well
-  // as on disconnect. Observe the response instead so a completed request body
-  // does not cancel the runtime before it can produce its response.
-  response.once('close', close);
-  return {
-    controller,
-    cleanup: () => {
-      request.removeListener('aborted', abort);
-      response.removeListener('close', close);
-    },
-  };
-}
-
 function bearerToken(request: IncomingMessage): string | undefined {
   const value = request.headers.authorization;
   return typeof value === 'string' && value.startsWith('Bearer ') ? value.slice(7) : undefined;
@@ -3055,113 +2662,4 @@ function workerSessionHash(request: IncomingMessage): string {
 
 function secretHash(value: string): string {
   return createHash('sha256').update(value).digest('base64url');
-}
-
-// ============================================================================
-// Creative Brief Outcome Mapping
-// ============================================================================
-
-/**
- * HTTP response for creative brief outcomes.
- */
-interface CreativeBriefHttpResponse {
-  readonly statusCode: number;
-  readonly body: { data: unknown } | { error: { code: string; message?: string } };
-}
-
-/**
- * Map async creative brief outcome to HTTP response.
- *
- * Mapping:
- * - ready -> 200 with validated CreativeBriefV1
- * - unavailable -> 503
- * - policy-denied -> 403 (existing policy-denied status)
- * - invalid-output / provider-failed -> 502
- * - timeout -> 504
- * - cancelled -> 499 (safe cancellation)
- */
-function mapCreativeBriefOutcomeToHttpResponse(
-  outcome: AsyncCreativeBriefOutcome,
-): CreativeBriefHttpResponse {
-  switch (outcome.category) {
-    case 'ready':
-      // Success - return validated CreativeBriefV1
-      return {
-        statusCode: 200,
-        body: { data: outcome.brief },
-      };
-
-    case 'unavailable':
-      // Provider/runtime not configured
-      return {
-        statusCode: 503,
-        body: {
-          error: {
-            code: outcome.errorCode ?? 'UNAVAILABLE',
-            ...(outcome.message !== undefined ? { message: outcome.message } : {}),
-          } as { code: string; message?: string },
-        },
-      };
-
-    case 'policy-denied':
-      // Policy denial (opt-in, ownership, etc.) - 403 Forbidden
-      return {
-        statusCode: 403,
-        body: {
-          error: {
-            code: outcome.errorCode ?? 'POLICY_DENIED',
-            ...(outcome.message !== undefined ? { message: outcome.message } : {}),
-          } as { code: string; message?: string },
-        },
-      };
-
-    case 'invalid-output':
-    case 'provider-failed':
-      // Model returned invalid output or provider failed - 502 Bad Gateway
-      return {
-        statusCode: 502,
-        body: {
-          error: {
-            code: outcome.errorCode ?? outcome.category.toUpperCase(),
-            ...(outcome.message !== undefined ? { message: outcome.message } : {}),
-          } as { code: string; message?: string },
-        },
-      };
-
-    case 'timeout':
-      // Request timed out - 504 Gateway Timeout
-      return {
-        statusCode: 504,
-        body: {
-          error: {
-            code: outcome.errorCode ?? 'TIMEOUT',
-            message: outcome.message ?? 'Creative brief generation timed out',
-          },
-        },
-      };
-
-    case 'cancelled':
-      // Request was cancelled - 499 Client Closed Request (safe cancellation)
-      return {
-        statusCode: 499,
-        body: {
-          error: {
-            code: outcome.errorCode ?? 'CANCELLED',
-            message: outcome.message ?? 'Creative brief generation was cancelled',
-          },
-        },
-      };
-
-    default:
-      // Unknown category - treat as unavailable
-      return {
-        statusCode: 503,
-        body: {
-          error: {
-            code: 'UNKNOWN_OUTCOME',
-            message: 'Unknown creative brief outcome category',
-          },
-        },
-      };
-  }
 }

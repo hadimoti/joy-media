@@ -42,13 +42,16 @@ Undo. Creative Brief, Joy Code, domain entry-point routing, media-job consent,
 and active-panel presence all use the same JOY boundary. Historical KiloCode
 and joy-code-server provenance remains readable but is not a new-run engine.
 
-Focused verification currently passes the JOY engine/editor slice (190 tests),
-the JOY package build, changed-file ESLint, Prettier, and `git diff --check`.
-The full workspace editor typecheck/build remains environment-blocked because
-the checkout lacks several generated workspace package declarations; the
-Worker release verifier also remains blocked until a production Worker bundle
-exists. Public redistribution remains gated by the license/font review in
-`docs/OPEN_SOURCE_RELEASE.md`. No deployment was performed in this session.
+Final local verification passes: `pnpm test` reports 446 files passed / 2
+skipped and 3,707 tests passed / 39 skipped; `pnpm typecheck`, `pnpm lint`
+(seven pre-existing warnings only), `pnpm format:check`, `git diff --check`,
+the editor production build, `pnpm verify:joy-agent-worker`, and
+`pnpm audit --prod --audit-level=moderate` are all green. The three new
+security/live-UI suites pass 63/63 times across desktop-primary, compact,
+minimum, 1280, 1440, 1581, and 1920 viewport projects. The verified Worker
+bundle is 8,869 raw bytes / 3,387 gzip bytes. Public redistribution remains
+gated by the license/font review in `docs/OPEN_SOURCE_RELEASE.md`; no
+deployment or service restart was performed in this session.
 
 ## VPS access
 

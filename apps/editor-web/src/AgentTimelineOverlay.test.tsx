@@ -17,7 +17,9 @@ describe('AgentTimelineOverlay', () => {
       />,
     );
     expect(markup).toContain('class="agent-timeline-overlay"');
-    expect(markup).toContain('class="agent-timeline-ghost agent-timeline-ghost--add is-destination"');
+    expect(markup).toContain(
+      'class="agent-timeline-ghost agent-timeline-ghost--add is-destination"',
+    );
     expect(markup).toContain('data-clip-id="clip-new"');
     expect(markup).toContain('aria-label="Add clip-new"');
     expect(markup).toContain('role="note"');

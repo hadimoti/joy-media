@@ -1775,7 +1775,10 @@ describe('control-plane HTTP transport', () => {
     expect(await controlPlane.jobsForProject({ id: 'owner' }, 'gpu-project')).toEqual([]);
   });
 
-  describe('Creative Brief route', () => {
+  // Retired in favor of the browser-resident JOY Agent Engine. The historical
+  // contract remains in the file for provenance, while the live route is
+  // covered by joy-agent-route-retirement.test.ts.
+  describe.skip('Creative Brief route (retired)', () => {
     // Helper to create a test resolver that returns resolved input
     const createTestResolver = (input: CreativeBriefInputV1): CreativeBriefInputResolver => ({
       resolve: (
@@ -3736,7 +3739,7 @@ async function request(
 // Creative Brief Opt-In Route Tests - WP-37 S4 Phase 6-D1
 // ============================================================================
 
-describe('GET /v1/projects/:projectId/creative-brief-opt-in', () => {
+describe.skip('GET /v1/projects/:projectId/creative-brief-opt-in (retired)', () => {
   it('requires authentication', async () => {
     const origin = await start({ authenticate: () => undefined });
     expect(
@@ -3800,7 +3803,7 @@ describe('GET /v1/projects/:projectId/creative-brief-opt-in', () => {
   });
 });
 
-describe('PUT /v1/projects/:projectId/creative-brief-opt-in', () => {
+describe.skip('PUT /v1/projects/:projectId/creative-brief-opt-in (retired)', () => {
   it('requires authentication', async () => {
     const origin = await start({ authenticate: () => undefined });
     expect(

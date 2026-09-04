@@ -61,6 +61,17 @@ test.describe('built-in JOY Agent BYOK security envelope', () => {
     }
   });
 
+  test('reports a bounded provider timeout without retaining the key', async ({ page }) => {
+    test.setTimeout(40_000);
+    await page.unroute('https://joy-agent-fixture.example/**');
+    const provider = await installFakeOpenAIProvider(page, { mode: 'slow', delayMs: 16_000 });
+    const dialog = await configureJoyAgent(page, `${SENTINEL}-timeout`, { allowFailure: true });
+    await expect(dialog.getByText('Connection timed out')).toBeVisible({ timeout: 20_000 });
+    expect(provider.authorizationSeen).toBe(true);
+    expect(await scanForSentinel(page, `${SENTINEL}-timeout`)).toEqual([]);
+    await dialog.getByRole('button', { name: 'Done' }).click();
+  });
+
   test('reports malformed provider output without creating a preview or edit', async ({ page }) => {
     const provider = await installFakeOpenAIProvider(page, { mode: 'malformed' });
     const dialog = await configureJoyAgent(page, `${SENTINEL}-malformed`);

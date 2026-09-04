@@ -78,6 +78,8 @@ export function AgentActivityIndicator({ onShowTarget, onStop }: AgentActivityIn
     state.terminalTarget;
   const label = useMemo(() => stateLabel(state), [state]);
   const showTargetRef = useRef(onShowTarget);
+  const followInputRef = useRef<HTMLInputElement>(null);
+  const focusReturnRef = useRef<HTMLElement | null>(null);
   showTargetRef.current = onShowTarget;
   const terminal =
     state.status === 'completed' || state.status === 'failed' || state.status === 'cancelled';
@@ -131,9 +133,27 @@ export function AgentActivityIndicator({ onShowTarget, onStop }: AgentActivityIn
       {state.runId !== undefined && !terminal && (
         <label className="agent-activity-follow">
           <input
+            ref={followInputRef}
             type="checkbox"
             checked={follow}
-            onChange={(event) => setFollow(event.currentTarget.checked)}
+            onPointerDown={() => {
+              const active = document.activeElement;
+              if (active instanceof HTMLElement && active !== followInputRef.current)
+                focusReturnRef.current = active;
+            }}
+            onKeyDown={() => {
+              const active = document.activeElement;
+              if (active instanceof HTMLElement && active !== followInputRef.current)
+                focusReturnRef.current = active;
+            }}
+            onChange={(event) => {
+              setFollow(event.currentTarget.checked);
+              const returnFocus = focusReturnRef.current;
+              if (returnFocus !== null)
+                window.requestAnimationFrame(() => {
+                  if (returnFocus.isConnected) returnFocus.focus();
+                });
+            }}
           />
           Follow
         </label>

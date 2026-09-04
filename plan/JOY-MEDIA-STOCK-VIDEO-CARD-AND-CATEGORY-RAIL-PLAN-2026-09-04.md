@@ -113,16 +113,16 @@ Desktop/normal rail keyboard behavior and tab panel relationship:
 
 Add the mapping alongside ASSET_CATEGORY_ICONS in asset-library-icons.ts. Every source is bundled through icon-assets.ts and Vite; no remote URL is permitted.
 
-| Stock category ID | Label | Local mask asset | Semantic rationale |
-| --- | --- | --- | --- |
-| business-work | Business & Work | ui/charts.png | Work/metrics signal for business use cases. |
-| technology | Technology | asset/24_UI.png | Existing UI/technical glyph used in JOY's asset language. |
-| people-lifestyle | People & Lifestyle | 24_socials.png | Existing people/community/social signal. |
-| nature | Nature | 24_scenes.png | Existing scene/environment signal. |
-| travel-places | Travel & Places | camera.png | Capture/travel signal already bundled in panel icons. |
-| city-transport | City & Transport | asset/24_arrows.png | Direction/movement/route signal. |
-| food-drink | Food & Drink | asset/24_creative.png | Creative elements signal where no food-specific glyph is bundled. |
-| abstract-backgrounds | Abstract Backgrounds | asset/24_patterns.png | Pattern/background signal already used in the cloud rail. |
+| Stock category ID    | Label                | Local mask asset      | Semantic rationale                                                |
+| -------------------- | -------------------- | --------------------- | ----------------------------------------------------------------- |
+| business-work        | Business & Work      | ui/charts.png         | Work/metrics signal for business use cases.                       |
+| technology           | Technology           | asset/24_UI.png       | Existing UI/technical glyph used in JOY's asset language.         |
+| people-lifestyle     | People & Lifestyle   | 24_socials.png        | Existing people/community/social signal.                          |
+| nature               | Nature               | 24_scenes.png         | Existing scene/environment signal.                                |
+| travel-places        | Travel & Places      | camera.png            | Capture/travel signal already bundled in panel icons.             |
+| city-transport       | City & Transport     | asset/24_arrows.png   | Direction/movement/route signal.                                  |
+| food-drink           | Food & Drink         | asset/24_creative.png | Creative elements signal where no food-specific glyph is bundled. |
+| abstract-backgrounds | Abstract Backgrounds | asset/24_patterns.png | Pattern/background signal already used in the cloud rail.         |
 
 These are the locked semantic matches to the existing JOY icon set, not new pictograms. Do not substitute a different asset or introduce an external icon package in this redesign.
 
@@ -190,7 +190,6 @@ Use the measured .asset-library-content box as the sole product reference.
 - Never create document-level horizontal overflow. Stock discovery scrolls vertically; the rail has its own thin scroll only when necessary.
 
 ## Data flow and component changes
-
 
 ### AssetLibraryPanel.tsx
 
@@ -267,20 +266,21 @@ This intentionally avoids a long broad regression run. Keep source invariants in
    - `page.route('**/api/v1/projects/*/stock-video-import', ...)` asserts POST JSON `{catalogId}` and returns `{data:{importId:'stock-import-1',state:'claimed'}}`.
    - `page.route('**/api/v1/projects/*/stock-video-imports/stock-import-1', ...)` returns exactly `{data:{importId:'stock-import-1',state:'completed',assetId:'imported-stock-1'}}`. The primary journey therefore exercises the production assetId fallback rather than a nested asset response. `completedAsset` is the complete valid BrowserAsset returned by the matching project-scoped my-assets route: `{id:'imported-stock-1',projectId:activeProjectId,kind:'video',displayName:'Imported stock fixture.mp4',sha256:'0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',bytes:1024,descriptor:{mimeType:'video/mp4',durationUs:3000000,width:640,height:360},createdAt:1700000000000,cloudBacked:true}`. The hash is exactly 64 hex characters; bytes, dimensions, and duration are positive; createdAt is a nonnegative integer; and the test asserts `completedAsset.projectId === activeProjectId`.
    - Any other stock request throws in the route handler. Record intercepted stock requests and assert none falls through to the e2e server's unconfigured `STOCK_PROVIDER_UNAVAILABLE` path. No provider endpoint, key, or production data is reachable.
- 3. Size the exact `.asset-library-content` reference box, not the outer Dockview/panel: fixture CSS accounts for the existing 0.65rem + 0.65rem outer padding (20.8px at the 16px root), so set padded outer border-box width to 320.8px for 300px content and 580.8px for 560px content. Set parent flex `min-width:0; overflow:hidden`; set `.asset-library` and `.asset-library-content` to `box-sizing:border-box; width:100%`. Before assertions read `getBoundingClientRect().width` for `.asset-library-content`, `.asset-library-sidebar`, and `.stock-video-discovery`; assert the content box is 300px/560px (±1px), never infer from viewport or outer width.
- 4. At 300px content width assert 53.6px rail, 10.4px discovery inline padding each side, approximately 225.6px list/grid area, one large/medium column, computed `.asset-library-content` display `grid` with exactly two computed tracks whose first track is approximately 53.6px, and separate overflow bounds: documentElement, `.asset-library`, and `.asset-library-content` each have `scrollWidth <= clientWidth`. In list mode assert the card border-box is 225.6px, inner width is at least 223.6px, thumbnail is 52px, action wrapper is 61px, each icon-only control is 28px × 28px, action gap is 4px, and copy clientWidth is at least 96px.
- 5. At 560px content width assert approximately 485.6px grid content, computed medium `grid-template-columns` has exactly two tracks, exactly two medium cards are rendered, and visible list labels remain above the <=20rem compact boundary.
- 6. Resize that same fixture element so the measured `.asset-library-content` becomes 280px (padded outer width 300.8px), await two animation frames plus ResizeObserver delivery, and assert measured width <=288px, `data-stock-rail-orientation=horizontal`, `aria-orientation=horizontal`, computed `.asset-library-content` display `flex` with `flex-direction:column`, horizontal rail layout, and Left/Right activation. Restore the padded outer width 320.8px, assert content returns to 300px, computed display `grid` with the vertical grid columns, and ArrowUp/Down activation. This proves resize crossing on the same box that drives CSS and runtime orientation.
+3. Size the exact `.asset-library-content` reference box, not the outer Dockview/panel: fixture CSS accounts for the existing 0.65rem + 0.65rem outer padding (20.8px at the 16px root), so set padded outer border-box width to 320.8px for 300px content and 580.8px for 560px content. Set parent flex `min-width:0; overflow:hidden`; set `.asset-library` and `.asset-library-content` to `box-sizing:border-box; width:100%`. Before assertions read `getBoundingClientRect().width` for `.asset-library-content`, `.asset-library-sidebar`, and `.stock-video-discovery`; assert the content box is 300px/560px (±1px), never infer from viewport or outer width.
+4. At 300px content width assert 53.6px rail, 10.4px discovery inline padding each side, approximately 225.6px list/grid area, one large/medium column, computed `.asset-library-content` display `grid` with exactly two computed tracks whose first track is approximately 53.6px, and separate overflow bounds: documentElement, `.asset-library`, and `.asset-library-content` each have `scrollWidth <= clientWidth`. In list mode assert the card border-box is 225.6px, inner width is at least 223.6px, thumbnail is 52px, action wrapper is 61px, each icon-only control is 28px × 28px, action gap is 4px, and copy clientWidth is at least 96px.
+5. At 560px content width assert approximately 485.6px grid content, computed medium `grid-template-columns` has exactly two tracks, exactly two medium cards are rendered, and visible list labels remain above the <=20rem compact boundary.
+6. Resize that same fixture element so the measured `.asset-library-content` becomes 280px (padded outer width 300.8px), await two animation frames plus ResizeObserver delivery, and assert measured width <=288px, `data-stock-rail-orientation=horizontal`, `aria-orientation=horizontal`, computed `.asset-library-content` display `flex` with `flex-direction:column`, horizontal rail layout, and Left/Right activation. Restore the padded outer width 320.8px, assert content returns to 300px, computed display `grid` with the vertical grid columns, and ArrowUp/Down activation. This proves resize crossing on the same box that drives CSS and runtime orientation.
 7. In both widths assert every poster has the same computed 16:9 frame regardless of orientation, common-row cards differ by at most 1px, actions occupy the bottom row, and text does not overflow.
 8. Exercise rail mouse and automatic-activation keyboard paths (ArrowUp/Down/Home/End, selected tab, aria-controls/tabpanel relationship), one RTL assertion for the scoped selected marker, and compact smoke states: loading, zero-result, catalog error + Retry, poster failure visual fallback, modal open/close/Escape/focus return/stale-result suppression, import busy, and import failure + Retry. Keep one mixed-orientation fixture and do not duplicate existing client behavior suite.
 9. Run the exact narrow commands from repository root:
-   
+
        pnpm exec tsc --noEmit -p apps/editor-web/tsconfig.json --pretty false
        pnpm exec eslint apps/editor-web/src/AssetLibraryPanel.tsx apps/editor-web/src/StockVideoDiscovery.tsx apps/editor-web/src/asset-library-icons.ts apps/editor-web/src/icon-assets.ts
        pnpm exec vitest run apps/editor-web/src/stock-video-ui-contract.test.ts apps/editor-web/src/stock-video-client-contract.test.ts apps/editor-web/src/stock-video-contract.test.ts
        pnpm exec playwright test tests/e2e/stock-video-ui.spec.ts --project=desktop-minimum --workers=1
 
    apps/editor-web/tsconfig.json contains project references, so tsc can type-check referenced workspace packages as required; that unavoidable breadth is documented here and is not a request to run root pnpm typecheck. ESLint and Vitest are path-bounded; Playwright runs one spec/project with configured disposable servers.
+
 10. Review source diff and changed-path manifest: no API/provider/backend/storage/deployment file changed. Do not run the repository's full test matrix, a long soak, production browser automation, or live deployment as part of this UI plan.
 
 ## Acceptance criteria
@@ -359,5 +359,5 @@ None remain that require an owner decision for implementation. The eight icon ma
    - Affected: none. This is a review/acceptance record, not a code or artifact PR.
    - Dependency: PR 3 focused checks.
    - Changes: owner reviews the diff, focused browser evidence, acceptance criteria, exact allowlist, and guardrail compliance; records accept/reject and any follow-up fixes. PR 4 validates that every changed path is in the allowlist above and that no helper or test outside it was added. It must not alter source, release metadata, web artifacts, deployment state, VPS state, or Gbrain.
-   
+
 Any later release is a separate owner-run task after PR 4, outside this PR plan. That task—not this plan—may perform the normal web release, VPS-origin check, rollback choice, export, and Gbrain completion record after separate authorization.

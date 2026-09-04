@@ -143,7 +143,11 @@ export async function configureJoyAgent(
   await page.getByRole('menuitem', { name: 'Joy Code Settings…', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'JOY Agent Engine' });
   await expect(dialog).toBeVisible();
-  await dialog.getByLabel('Provider').selectOption('openai-compatible');
+  // The settings dialog has several descendant labels containing the word
+  // "provider" (budget and capability controls). The first select is the
+  // model-connection provider selector; keep this locator tied to the UI
+  // structure rather than relying on ambiguous accessible-name matching.
+  await dialog.locator('select').first().selectOption('openai-compatible');
   await dialog.getByLabel('Base URL').fill(FAKE_PROVIDER_BASE_URL);
   await dialog.getByLabel('Model ID').fill(options.modelId ?? FAKE_PROVIDER_MODEL);
   await dialog.getByLabel(/I understand the custom provider receives/).check();

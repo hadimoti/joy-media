@@ -1,3 +1,4 @@
+// Retained as dated, skipped provenance after route retirement.
 import { once } from 'node:events';
 import type { Server } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -50,7 +51,10 @@ async function request(origin: string, method: string, path: string, body?: unkn
   return { status: response.status, body: (await response.json()) as unknown };
 }
 
-describe('Joy Code opt-in routes', () => {
+// Historical server opt-in behavior is intentionally retained as readable
+// provenance only; the production route now returns 410 and is covered by
+// joy-agent-route-retirement.test.ts.
+describe.skip('Joy Code opt-in routes (retired)', () => {
   it('returns disabled by default and requires the current disclosure version', async () => {
     const controlPlane = new LocalControlPlane();
     controlPlane.createProject({ id: 'owner' }, 'p', 'Project');
@@ -162,6 +166,7 @@ describe('Joy Code opt-in routes', () => {
       controlPlane,
       authentication: { authenticate: () => ({ id: 'owner' }) },
       mediaAuth: new DisabledMediaAuth(),
+      // @ts-expect-error -- historical skipped route no longer accepts resolver injection.
       joyCodeInputResolver: resolver,
       joyCodeRuntime: runtime,
     });

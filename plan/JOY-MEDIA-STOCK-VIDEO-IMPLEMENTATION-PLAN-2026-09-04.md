@@ -88,15 +88,15 @@ Do not:
 
 Use these eight stable category slugs and labels:
 
-| Slug | Label |
-| --- | --- |
-| `business-work` | Business & Work |
-| `technology` | Technology |
-| `people-lifestyle` | People & Lifestyle |
-| `nature` | Nature |
-| `travel-places` | Travel & Places |
-| `city-transport` | City & Transport |
-| `food-drink` | Food & Drink |
+| Slug                   | Label                |
+| ---------------------- | -------------------- |
+| `business-work`        | Business & Work      |
+| `technology`           | Technology           |
+| `people-lifestyle`     | People & Lifestyle   |
+| `nature`               | Nature               |
+| `travel-places`        | Travel & Places      |
+| `city-transport`       | City & Transport     |
+| `food-drink`           | Food & Drink         |
 | `abstract-backgrounds` | Abstract Backgrounds |
 
 The default catalog contains exactly six eligible cards per category (48 total

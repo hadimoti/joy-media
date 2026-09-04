@@ -21,10 +21,6 @@ export {
   instrumentPostgresPool,
   withDbQueryContext,
 } from './db-query-observability.js';
-export {
-  composeCreativeBriefRuntime,
-  type CreativeBriefRuntimeCompositionOptions,
-} from './creative-brief-runtime-composition.js';
 export { ControlPlaneError, LocalControlPlane } from './control-plane.js';
 export {
   GpuPreviewTransport,

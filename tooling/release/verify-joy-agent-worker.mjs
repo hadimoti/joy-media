@@ -1,3 +1,4 @@
+/* global console, process */
 import { gzipSync } from 'node:zlib';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

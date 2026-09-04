@@ -75,7 +75,7 @@ export interface PanelShellProps {
 
 function PanelSectionTab({
   tab,
-  index,
+  index: _index,
   selected,
   panelId,
   onSelect,
@@ -140,7 +140,9 @@ function PanelSectionTab({
       {panelId !== undefined && presence.active && (
         <span
           className="joy-panel-tab-agent-marker"
-          aria-label={presence.awaitingApproval ? 'Agent needs approval' : `Agent ${presence.phase}`}
+          aria-label={
+            presence.awaitingApproval ? 'Agent needs approval' : `Agent ${presence.phase}`
+          }
           title={presence.awaitingApproval ? 'Agent needs approval' : `Agent ${presence.phase}`}
         />
       )}
@@ -203,8 +205,12 @@ export function PanelShell({
     <article
       className={`${className === undefined ? 'joy-panel-root' : `joy-panel-root ${className}`}${effectivePanelId !== undefined && panelPresence.active ? ' is-agent-active' : ''}`}
       aria-label={title}
-      data-agent-active={effectivePanelId !== undefined && panelPresence.active ? 'true' : undefined}
-      data-agent-phase={effectivePanelId !== undefined && panelPresence.active ? panelPresence.phase : undefined}
+      data-agent-active={
+        effectivePanelId !== undefined && panelPresence.active ? 'true' : undefined
+      }
+      data-agent-phase={
+        effectivePanelId !== undefined && panelPresence.active ? panelPresence.phase : undefined
+      }
     >
       {!hideHeader && (tabsInHeader || hasHeaderActions) && (
         <div className="joy-panel-header">

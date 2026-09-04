@@ -62,7 +62,7 @@ function validRequest(request: JoyMediaJobRequest): void {
     (!Number.isFinite(request.estimatedCostUsd) || request.estimatedCostUsd < 0)
   )
     throw new JoyMediaJobBridgeError('approval-required', 'Media job cost is invalid');
-  if (request.providerId.length > 256 || request.assetId?.length > 256)
+  if (request.providerId.length > 256 || (request.assetId?.length ?? 0) > 256)
     throw new JoyMediaJobBridgeError('invalid-request', 'Media job identifiers are too long');
 }
 
