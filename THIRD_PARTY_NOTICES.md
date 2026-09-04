@@ -1,5 +1,10 @@
 # Third-party notices
 
+## Repository code
+
+Unless a file or directory is listed below with its own terms, JOY Media
+source code is released under the MIT License in [`LICENSE`](LICENSE).
+
 ## JOY Agent Engine dependencies
 
 - `ai` 7.0.92 — Apache-2.0; provider-neutral AI SDK Core used behind the JOY
