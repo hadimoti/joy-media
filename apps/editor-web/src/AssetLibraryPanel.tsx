@@ -5,6 +5,8 @@ import {
   type BrowserAsset,
   type BrowserDerivative,
   type BrowserStockVideo,
+  STOCK_VIDEO_CATEGORIES,
+  type BrowserStockVideoCategory,
 } from './control-plane-client.js';
 import { describeMedia, importMediaFile } from './media-import.js';
 import { getStoredMediaToken, MEDIA_SESSION_CHANGED_EVENT } from './media-session.js';
@@ -47,7 +49,11 @@ import {
 } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
-import { ASSET_CATEGORY_ICONS, assetCollectionIconUrl } from './asset-library-icons.js';
+import {
+  ASSET_CATEGORY_ICONS,
+  assetCollectionIconUrl,
+  stockVideoCategoryIconUrl,
+} from './asset-library-icons.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 import { loadEditorUiPreferences, saveEditorUiPreferences } from './ui-preferences.js';
 import { StockVideoDiscovery, waitForStockVideoImport } from './StockVideoDiscovery.js';
@@ -180,9 +186,49 @@ export function AssetLibraryPanel({
   const [importOpen, setImportOpen] = useState(false);
   const [importProgress, setImportProgress] = useState<number | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const assetLibraryContentRef = useRef<HTMLDivElement | null>(null);
+  const [isHorizontalStockRail, setIsHorizontalStockRail] = useState(false);
   const filterActive = availability !== 'all' || sort !== 'name';
   const canImport = selectedFile !== undefined && importProgress === undefined;
+  const [stockVideoCategory, setStockVideoCategory] = useState<BrowserStockVideoCategory>(
+    STOCK_VIDEO_CATEGORIES[0].id,
+  );
+  const [stockVideoCategoryCounts, setStockVideoCategoryCounts] = useState<
+    Readonly<Record<BrowserStockVideoCategory, number>>
+  >(
+    () =>
+      Object.fromEntries(STOCK_VIDEO_CATEGORIES.map(({ id }) => [id, 6])) as Record<
+        BrowserStockVideoCategory,
+        number
+      >,
+  );
+
+  useEffect(() => {
+    const content = assetLibraryContentRef.current;
+    if (content === null || typeof ResizeObserver === 'undefined') return;
+    const updateOrientation = (width: number): void => {
+      setIsHorizontalStockRail(width <= 288);
+    };
+    updateOrientation(content.getBoundingClientRect().width);
+    const observer = new ResizeObserver(() => {
+      updateOrientation(content.getBoundingClientRect().width);
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, []);
+
+  const mergeStockVideoCounts = useCallback(
+    (counts: Readonly<Partial<Record<BrowserStockVideoCategory, number>>>): void => {
+      setStockVideoCategoryCounts((current) => ({ ...current, ...counts }));
+    },
+    [],
+  );
+  const handleStockVideoCategoryChange = useCallback(
+    (nextCategory: BrowserStockVideoCategory): void => {
+      setStockVideoCategory(nextCategory);
+    },
+    [],
+  );
 
   useEffect(() => {
     const current = loadEditorUiPreferences(window.localStorage);
@@ -318,7 +364,7 @@ export function AssetLibraryPanel({
   useEffect(() => {
     if (!filterOpen && !importOpen) return;
     const onPointerDown = (event: PointerEvent) => {
-      const root = toolbarRef.current;
+      const root = assetLibraryContentRef.current;
       if (root === null || root.contains(event.target as Node)) return;
       setFilterOpen(false);
       if (selectedFile === undefined) setImportOpen(false);
@@ -881,41 +927,120 @@ export function AssetLibraryPanel({
         </>
       }
     >
-      <div className="asset-library-content" ref={toolbarRef}>
-        <aside className="asset-library-sidebar" aria-label={`${category} collections`}>
+      <div
+        className="asset-library-content"
+        ref={assetLibraryContentRef}
+        data-asset-library-source={showingStockVideos ? 'stock' : undefined}
+        data-stock-rail-orientation={isHorizontalStockRail ? 'horizontal' : 'vertical'}
+      >
+        <aside
+          className="asset-library-sidebar"
+          aria-label={
+            showingStockVideos ? 'Native JOY stock video categories' : `${category} collections`
+          }
+        >
           <span className="asset-library-sidebar-title">Collections</span>
-          <div
-            className="asset-library-collections"
-            role="tablist"
-            aria-label={`${category} collections`}
-          >
-            {collections.map((entry) => {
-              const collectionIcon = assetCollectionIconUrl(entry.id);
-              return (
-                <button
-                  key={entry.id}
-                  type="button"
-                  role="tab"
-                  className="asset-library-collection-tab"
-                  aria-label={`${entry.label} (${entry.count})`}
-                  title={`${entry.label} (${entry.count})`}
-                  aria-selected={collection === entry.id}
-                  onClick={() => setCollection(entry.id)}
-                >
-                  {collectionIcon !== undefined && (
-                    <span
-                      className="asset-library-collection-tab-icon"
-                      style={{
-                        maskImage: `url(${collectionIcon})`,
-                        WebkitMaskImage: `url(${collectionIcon})`,
-                      }}
-                      aria-hidden="true"
-                    />
-                  )}
-                </button>
-              );
-            })}
-          </div>
+          {showingStockVideos ? (
+            <div
+              className="stock-video-category-rail"
+              role="tablist"
+              aria-label="Native JOY stock video categories"
+              aria-orientation={isHorizontalStockRail ? 'horizontal' : 'vertical'}
+            >
+              {STOCK_VIDEO_CATEGORIES.map((entry, index) => {
+                const selected = stockVideoCategory === entry.id;
+                const categoryCount = stockVideoCategoryCounts[entry.id];
+                const activate = (): void => {
+                  handleStockVideoCategoryChange(entry.id);
+                };
+                return (
+                  <button
+                    key={entry.id}
+                    id={`stock-video-category-${entry.id}`}
+                    type="button"
+                    role="tab"
+                    className="stock-video-category-tab"
+                    aria-selected={selected}
+                    aria-controls="stock-video-panel"
+                    aria-label={`${entry.label} — ${categoryCount} clips`}
+                    title={`${entry.label} — ${categoryCount} clips`}
+                    tabIndex={selected ? 0 : -1}
+                    onClick={(event) => {
+                      activate();
+                      event.currentTarget.focus();
+                    }}
+                    onKeyDown={(event) => {
+                      const horizontal = isHorizontalStockRail;
+                      const nextKey = horizontal ? 'ArrowRight' : 'ArrowDown';
+                      const previousKey = horizontal ? 'ArrowLeft' : 'ArrowUp';
+                      let nextIndex = index;
+                      if (event.key === nextKey)
+                        nextIndex = (index + 1) % STOCK_VIDEO_CATEGORIES.length;
+                      else if (event.key === previousKey) {
+                        nextIndex =
+                          (index - 1 + STOCK_VIDEO_CATEGORIES.length) %
+                          STOCK_VIDEO_CATEGORIES.length;
+                      } else if (event.key === 'Home') nextIndex = 0;
+                      else if (event.key === 'End') nextIndex = STOCK_VIDEO_CATEGORIES.length - 1;
+                      else if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        activate();
+                        return;
+                      } else return;
+                      event.preventDefault();
+                      const next = STOCK_VIDEO_CATEGORIES[nextIndex]!;
+                      handleStockVideoCategoryChange(next.id);
+                      document.getElementById(`stock-video-category-${next.id}`)?.focus();
+                    }}
+                  >
+                    {stockVideoCategoryIconUrl(entry.id) !== undefined && (
+                      <span
+                        className="asset-library-collection-tab-icon"
+                        style={{
+                          maskImage: `url(${stockVideoCategoryIconUrl(entry.id)})`,
+                          WebkitMaskImage: `url(${stockVideoCategoryIconUrl(entry.id)})`,
+                        }}
+                        aria-hidden="true"
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div
+              className="asset-library-collections"
+              role="tablist"
+              aria-label={`${category} collections`}
+            >
+              {collections.map((entry) => {
+                const collectionIcon = assetCollectionIconUrl(entry.id);
+                return (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    role="tab"
+                    className="asset-library-collection-tab"
+                    aria-label={`${entry.label} (${entry.count})`}
+                    title={`${entry.label} (${entry.count})`}
+                    aria-selected={collection === entry.id}
+                    onClick={() => setCollection(entry.id)}
+                  >
+                    {collectionIcon !== undefined && (
+                      <span
+                        className="asset-library-collection-tab-icon"
+                        style={{
+                          maskImage: `url(${collectionIcon})`,
+                          WebkitMaskImage: `url(${collectionIcon})`,
+                        }}
+                        aria-hidden="true"
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </aside>
         <div className="asset-library-main">
           {importProgress !== undefined && (
@@ -1146,6 +1271,9 @@ export function AssetLibraryPanel({
               client={client}
               projectId={projectId}
               query={deferredQuery}
+              category={stockVideoCategory}
+              categoryCounts={stockVideoCategoryCounts}
+              onCategoryCountsChange={mergeStockVideoCounts}
               viewMode={viewMode}
               onImport={importStockVideo}
               onStatus={setStatus}

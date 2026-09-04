@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   STOCK_VIDEO_CATEGORIES,
   type BrowserStockVideo,
@@ -6,6 +6,7 @@ import {
   type BrowserControlPlaneClient,
 } from './control-plane-client.js';
 import type { AssetViewMode } from './asset-library-state.js';
+import { ExportIcon, UploadIcon } from './icons.js';
 
 const STOCK_VIDEO_PAGE_SIZE = 6;
 const IMPORT_POLL_INTERVAL_MS = 750;
@@ -15,6 +16,9 @@ export function StockVideoDiscovery({
   client,
   projectId: _projectId,
   query,
+  category,
+  categoryCounts,
+  onCategoryCountsChange,
   viewMode,
   onImport,
   onStatus,
@@ -22,18 +26,16 @@ export function StockVideoDiscovery({
   readonly client: BrowserControlPlaneClient;
   readonly projectId: string;
   readonly query: string;
+  readonly category: BrowserStockVideoCategory;
+  readonly categoryCounts: Readonly<Record<BrowserStockVideoCategory, number>>;
+  readonly onCategoryCountsChange: (
+    counts: Readonly<Partial<Record<BrowserStockVideoCategory, number>>>,
+  ) => void;
   readonly viewMode: AssetViewMode;
   readonly onImport: (video: BrowserStockVideo) => Promise<void>;
   readonly onStatus: (status: string | undefined) => void;
 }) {
-  const [category, setCategory] = useState<BrowserStockVideoCategory>(STOCK_VIDEO_CATEGORIES[0].id);
   const [videos, setVideos] = useState<readonly BrowserStockVideo[]>([]);
-  const [counts, setCounts] = useState<Readonly<Record<BrowserStockVideoCategory, number>>>(
-    () =>
-      Object.fromEntries(
-        STOCK_VIDEO_CATEGORIES.map(({ id }) => [id, STOCK_VIDEO_PAGE_SIZE]),
-      ) as Record<BrowserStockVideoCategory, number>,
-  );
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | undefined>(undefined);
   const [importing, setImporting] = useState<string | undefined>(undefined);
@@ -44,7 +46,29 @@ export function StockVideoDiscovery({
     readonly url: string;
     readonly posterUrl?: string;
   }>();
+  const previewStateRef = useRef<typeof preview>(undefined);
   const requestSequence = useRef(0);
+  const previewRequestSequence = useRef(0);
+  const previewOpenerRef = useRef<HTMLButtonElement | null>(null);
+  const previewCloseRef = useRef<HTMLButtonElement | null>(null);
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    previewStateRef.current = preview;
+  }, [preview]);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      previewRequestSequence.current += 1;
+      const current = previewStateRef.current;
+      if (current !== undefined) {
+        URL.revokeObjectURL(current.url);
+        if (current.posterUrl !== undefined) URL.revokeObjectURL(current.posterUrl);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const sequence = ++requestSequence.current;
@@ -57,9 +81,7 @@ export function StockVideoDiscovery({
       .then((page) => {
         if (cancelled || sequence !== requestSequence.current) return;
         setVideos(page.items.slice(0, STOCK_VIDEO_PAGE_SIZE));
-        // Keep the six-card target visible for categories that have not been
-        // queried yet; replace only the category backed by this response.
-        setCounts((current) => ({ ...current, [category]: page.counts[category] }));
+        onCategoryCountsChange(page.counts);
         setState('ready');
       })
       .catch((reason: unknown) => {
@@ -73,21 +95,56 @@ export function StockVideoDiscovery({
     return () => {
       cancelled = true;
     };
-  }, [category, client, onStatus, query, reloadToken]);
+  }, [category, client, onCategoryCountsChange, onStatus, query, reloadToken]);
+
+  const revokePreview = useCallback((value: typeof preview): void => {
+    if (value === undefined) return;
+    URL.revokeObjectURL(value.url);
+    if (value.posterUrl !== undefined) URL.revokeObjectURL(value.posterUrl);
+  }, []);
+
+  const closePreview = useCallback((): void => {
+    previewRequestSequence.current += 1;
+    const opener = previewOpenerRef.current;
+    revokePreview(preview);
+    setPreview(undefined);
+    window.setTimeout(() => opener?.focus(), 0);
+  }, [preview, revokePreview]);
 
   useEffect(() => {
-    return () => {
-      if (preview !== undefined) URL.revokeObjectURL(preview.url);
-      if (preview?.posterUrl !== undefined) URL.revokeObjectURL(preview.posterUrl);
+    if (preview === undefined) return;
+    previewCloseRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closePreview();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const first = previewCloseRef.current;
+      const last = previewVideoRef.current;
+      if (first === null || last === null) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
-  }, [preview]);
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [closePreview, preview]);
 
-  const openPreview = async (video: BrowserStockVideo): Promise<void> => {
-    if (preview !== undefined) {
-      URL.revokeObjectURL(preview.url);
-      if (preview.posterUrl !== undefined) URL.revokeObjectURL(preview.posterUrl);
-      setPreview(undefined);
-    }
+  const openPreview = async (
+    video: BrowserStockVideo,
+    opener: HTMLButtonElement,
+  ): Promise<void> => {
+    previewOpenerRef.current = opener;
+    const sequence = ++previewRequestSequence.current;
+    revokePreview(preview);
+    setPreview(undefined);
+    onStatus(`Loading preview for ${video.title}…`);
     try {
       const [previewBlob, posterBlob] = await Promise.all([
         client.stockVideoPreview(video.id),
@@ -98,9 +155,14 @@ export function StockVideoDiscovery({
         url: URL.createObjectURL(previewBlob),
         ...(posterBlob === undefined ? {} : { posterUrl: URL.createObjectURL(posterBlob) }),
       };
+      if (!mountedRef.current || sequence !== previewRequestSequence.current) {
+        revokePreview(next);
+        return;
+      }
       setPreview(next);
       onStatus(`Preview ready for ${video.title}.`);
     } catch (reason: unknown) {
+      if (!mountedRef.current || sequence !== previewRequestSequence.current) return;
       onStatus(
         `Preview unavailable for ${video.title}: ${reason instanceof Error ? reason.message : 'try again'}`,
       );
@@ -127,55 +189,54 @@ export function StockVideoDiscovery({
     }
   };
 
+  const categoryLabel =
+    STOCK_VIDEO_CATEGORIES.find((item) => item.id === category)?.label ?? category;
   return (
-    <section className="stock-video-discovery" aria-label="Native JOY stock videos">
+    <section
+      className="stock-video-discovery"
+      role="tabpanel"
+      id="stock-video-panel"
+      aria-labelledby={`stock-video-category-${category}`}
+      tabIndex={0}
+    >
       <div className="stock-video-heading">
         <div>
           <strong>JOY stock videos</strong>
-          <span>Curated clips for your next edit</span>
+          <span>Curated clips for your next edit · {categoryLabel}</span>
         </div>
         <span
           className="stock-video-count"
-          aria-label={`${counts[category]} clips in this category`}
+          aria-label={`${categoryCounts[category]} clips in this category`}
         >
-          {counts[category]} clips
+          {categoryCounts[category]} clips
         </span>
       </div>
-      <div className="stock-video-categories" role="tablist" aria-label="Stock video categories">
-        {STOCK_VIDEO_CATEGORIES.map((entry) => (
-          <button
-            key={entry.id}
-            type="button"
-            role="tab"
-            aria-selected={category === entry.id}
-            aria-label={`${entry.label}, ${counts[entry.id]} clips`}
-            tabIndex={category === entry.id ? 0 : -1}
-            onClick={() => setCategory(entry.id)}
-            onKeyDown={(event) => {
-              if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-              event.preventDefault();
-              const current = STOCK_VIDEO_CATEGORIES.findIndex((item) => item.id === category);
-              const offset = event.key === 'ArrowRight' ? 1 : -1;
-              const next =
-                STOCK_VIDEO_CATEGORIES[
-                  (current + offset + STOCK_VIDEO_CATEGORIES.length) % STOCK_VIDEO_CATEGORIES.length
-                ]!;
-              setCategory(next.id);
-              event.currentTarget.parentElement
-                ?.querySelector<HTMLButtonElement>(`[data-stock-category="${next.id}"]`)
-                ?.focus();
-            }}
-            data-stock-category={entry.id}
-          >
-            <span>{entry.label}</span>
-            <small>{counts[entry.id]}</small>
-          </button>
-        ))}
-      </div>
       {state === 'loading' && (
-        <div className="stock-video-state" role="status" aria-live="polite">
-          Loading native JOY videos…
-        </div>
+        <>
+          <ul
+            className={`stock-video-grid stock-video-grid--${viewMode}`}
+            aria-label="Loading stock videos"
+          >
+            {Array.from({ length: STOCK_VIDEO_PAGE_SIZE }, (_, index) => (
+              <li
+                className="stock-video-card stock-video-card--skeleton"
+                key={index}
+                aria-hidden="true"
+              >
+                <span className="stock-video-poster" />
+                <span className="stock-video-card-copy" />
+                <span className="stock-video-card-actions" />
+              </li>
+            ))}
+          </ul>
+          <div
+            className="stock-video-state stock-video-loading-label"
+            role="status"
+            aria-live="polite"
+          >
+            Loading native JOY videos…
+          </div>
+        </>
       )}
       {state === 'error' && (
         <div className="stock-video-state stock-video-state--error" role="alert">
@@ -187,14 +248,13 @@ export function StockVideoDiscovery({
       )}
       {state === 'ready' && videos.length === 0 && (
         <div className="stock-video-state" role="status">
-          No native videos match “{query.trim()}” in{' '}
-          {STOCK_VIDEO_CATEGORIES.find((item) => item.id === category)?.label}.
+          No native videos match “{query.trim()}” in {categoryLabel}.
         </div>
       )}
-      {videos.length > 0 && (
+      {state === 'ready' && videos.length > 0 && (
         <ul
           className={`stock-video-grid stock-video-grid--${viewMode}`}
-          aria-label={`${STOCK_VIDEO_CATEGORIES.find((item) => item.id === category)?.label} stock videos`}
+          aria-label={`${categoryLabel} stock videos`}
         >
           {videos.map((video) => (
             <StockVideoCard
@@ -203,7 +263,7 @@ export function StockVideoDiscovery({
               client={client}
               importing={importing === video.id}
               failed={failedImports.has(video.id)}
-              onPreview={() => void openPreview(video)}
+              onPreview={(opener) => void openPreview(video, opener)}
               onImport={() => void importVideo(video)}
             />
           ))}
@@ -213,23 +273,28 @@ export function StockVideoDiscovery({
         <div
           className="stock-video-preview"
           role="dialog"
-          aria-label={`Preview ${preview.video.title}`}
+          aria-modal="true"
+          aria-labelledby="stock-video-preview-title"
         >
           <div className="stock-video-preview-head">
-            <strong>{preview.video.title}</strong>
+            <strong id="stock-video-preview-title">{preview.video.title}</strong>
             <button
+              ref={previewCloseRef}
               type="button"
               aria-label="Close stock video preview"
-              onClick={() => {
-                URL.revokeObjectURL(preview.url);
-                if (preview.posterUrl !== undefined) URL.revokeObjectURL(preview.posterUrl);
-                setPreview(undefined);
-              }}
+              onClick={closePreview}
             >
               ×
             </button>
           </div>
-          <video src={preview.url} poster={preview.posterUrl} controls autoPlay playsInline />
+          <video
+            ref={previewVideoRef}
+            src={preview.url}
+            poster={preview.posterUrl}
+            controls
+            autoPlay
+            playsInline
+          />
         </div>
       )}
     </section>
@@ -248,7 +313,7 @@ function StockVideoCard({
   readonly client: BrowserControlPlaneClient;
   readonly importing: boolean;
   readonly failed: boolean;
-  readonly onPreview: () => void;
+  readonly onPreview: (opener: HTMLButtonElement) => void;
   readonly onImport: () => void;
 }) {
   const posterTargetRef = useRef<HTMLButtonElement>(null);
@@ -304,13 +369,13 @@ function StockVideoCard({
         ref={posterTargetRef}
         type="button"
         className="stock-video-poster"
-        onClick={onPreview}
+        onClick={(event) => onPreview(event.currentTarget)}
         aria-label={`Preview ${video.title}`}
       >
         {posterUrl !== undefined ? (
           <img src={posterUrl} alt="" loading="lazy" />
         ) : (
-          <span aria-hidden>{posterFailed ? 'Poster unavailable' : 'Loading poster…'}</span>
+          <span aria-hidden="true">{posterFailed ? 'Poster unavailable' : 'Loading poster…'}</span>
         )}
         <span className="stock-video-orientation">{video.orientation}</span>
       </button>
@@ -322,24 +387,36 @@ function StockVideoCard({
         <span className="stock-video-meta">
           {formatDuration(video.durationUs)} · {video.width}×{video.height}
         </span>
-        <div className="stock-video-card-actions">
-          <a
-            href={video.sourcePageUrl}
-            target="_blank"
-            rel="noreferrer"
-            aria-label={`Open ${video.provider} source for ${video.title}`}
-          >
-            Source
-          </a>
-          <button
-            type="button"
-            onClick={onImport}
-            disabled={importing}
-            aria-label={`Import ${video.title} to My media`}
-          >
-            {importing ? 'Importing…' : failed ? 'Retry import' : 'Import to My media'}
-          </button>
-        </div>
+      </div>
+      <div className="stock-video-card-actions">
+        <a
+          href={video.sourcePageUrl}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={`Open ${video.provider} source for ${video.title}`}
+          title={`Open ${video.provider} source for ${video.title}`}
+        >
+          <ExportIcon />
+          <span>Source</span>
+        </a>
+        <button
+          type="button"
+          onClick={onImport}
+          disabled={importing}
+          aria-label={
+            importing
+              ? `Importing ${video.title} to My media`
+              : `${failed ? 'Retry import' : 'Import'} ${video.title} to My media`
+          }
+          title={
+            importing
+              ? `Importing ${video.title} to My media`
+              : `${failed ? 'Retry import' : 'Import'} ${video.title} to My media`
+          }
+        >
+          <UploadIcon />
+          <span>{importing ? 'Importing…' : failed ? 'Retry import' : 'Import'}</span>
+        </button>
       </div>
     </li>
   );
