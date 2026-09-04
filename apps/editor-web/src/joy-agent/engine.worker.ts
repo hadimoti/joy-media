@@ -105,6 +105,19 @@ function isBlockedHost(host: string): boolean {
     return true;
   const mappedIpv4 = host.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
   if (mappedIpv4?.[1] !== undefined) return isBlockedHost(mappedIpv4[1]);
+  const compressedMapped = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+  if (compressedMapped?.[1] !== undefined && compressedMapped[2] !== undefined) {
+    const high = Number.parseInt(compressedMapped[1], 16);
+    const low = Number.parseInt(compressedMapped[2], 16);
+    return isBlockedHost(`${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`);
+  }
+  const mappedGroups = host.split(':');
+  if (mappedGroups.length === 8 && mappedGroups[5] === 'ffff') {
+    const high = Number.parseInt(mappedGroups[6] ?? '', 16);
+    const low = Number.parseInt(mappedGroups[7] ?? '', 16);
+    if (Number.isInteger(high) && Number.isInteger(low) && high <= 0xffff && low <= 0xffff)
+      return isBlockedHost(`${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`);
+  }
   const parts = host.split('.');
   if (parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part))) {
     const [firstRaw = '-1', secondRaw = '-1'] = parts;

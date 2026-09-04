@@ -94,7 +94,7 @@ function isPublicWebHost(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
   if (host === 'localhost' || host.endsWith('.localhost') || host === 'ip6-localhost') return false;
   if (host === 'metadata.google.internal' || host === 'metadata') return false;
-  if (isPrivateIpv4(host) || isPrivateIpv6(host)) return false;
+  if (isPrivateIpv4(host) || isPrivateIpv6(host) || isMappedPrivateIpv4(host)) return false;
   return true;
 }
 
@@ -124,6 +124,23 @@ function isPrivateIpv6(host: string): boolean {
     host.startsWith('fd') ||
     host.endsWith('.internal')
   );
+}
+
+/** IPv4-mapped IPv6 literals inherit the IPv4 private-range blocklist. */
+function isMappedPrivateIpv4(host: string): boolean {
+  const compressed = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+  if (compressed?.[1] !== undefined && compressed[2] !== undefined) {
+    const high = Number.parseInt(compressed[1], 16);
+    const low = Number.parseInt(compressed[2], 16);
+    return isPrivateIpv4(`${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`);
+  }
+  const groups = host.split(':');
+  if (groups.length !== 8 || groups[5]?.toLowerCase() !== 'ffff') return false;
+  const high = Number.parseInt(groups[6] ?? '', 16);
+  const low = Number.parseInt(groups[7] ?? '', 16);
+  if (!Number.isInteger(high) || !Number.isInteger(low) || high > 0xffff || low > 0xffff)
+    return false;
+  return isPrivateIpv4(`${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`);
 }
 
 export { OPENROUTER_BASE_URL };
