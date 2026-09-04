@@ -7838,8 +7838,9 @@ label {
   user-select: none;
 }
 .joy-code-logo.is-mark {
-  width: 100%;
-  height: 100%;
+  width: 1.2rem;
+  height: 1.2rem;
+  flex: none;
 }
 .joy-code-logo.is-horizontal {
   width: min(11rem, 78%);
@@ -7847,7 +7848,8 @@ label {
   filter: drop-shadow(0 0 18px color-mix(in srgb, var(--joy-accent) 10%, transparent));
 }
 .joy-code-welcome .joy-code-logo.is-horizontal {
-  margin-bottom: 25px;
+  width: min(8rem, 58%);
+  margin-bottom: 0.8rem;
 }
 @keyframes joy-code-thinking-wiggle {
   0%,
@@ -7904,6 +7906,14 @@ label {
   width: 1.65rem;
   height: 1.2rem;
   margin-top: 0.12rem;
+}
+.joy-code-capability .joy-code-logo.is-mark {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+.joy-code-avatar .joy-code-logo.is-mark {
+  width: 1.2rem;
+  height: 1.2rem;
 }
 .joy-code-message.is-thinking p {
   color: var(--joy-text-faint);
