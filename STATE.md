@@ -3,7 +3,7 @@
 Updated by **every** implementation session (protocol: [`ORCHESTRATION.md`](ORCHESTRATION.md) §2).
 One row per part. Keep entries terse; detail lives in the part files' WP checkboxes.
 
-## Current closure checkpoint (2026-08-29 UTC / 2026-08-30 local)
+## Current closure checkpoint (2026-09-04 UTC)
 
 Commits through `c514e5e` are pushed to both `github/main` and the VPS bare
 `main`. They fix the project-rename SQL revision placeholder, close the
@@ -23,13 +23,8 @@ selection, Timeline Time/Flow/Split, and Worker GPU status had no console errors
 resetting the stale saved workspace removed the obsolete Creative Brief tab.
 The same Effects/3D/Flow checks were repeated after the `c514e5e` deploy, with
 no console errors. A compact 1024×768 desktop pass also kept Effects categories,
-the 3D tab, Timeline controls, and Worker state reachable. This is still
-conditional evidence: final release remains NO-GO until the
-isolated Linux real-service lane, clean-profile Worker lane, acceptance lane,
-remaining lease/runtime hardening, and authenticated canary/rollback proof are
-completed. The non-secret deployment record is stored in Gbrain page
-`ops/joy-media-c514e5e-release-2026-08-30`; no credentials or owner browser
-state were recorded.
+the 3D tab, Timeline controls, and Worker state reachable. That historical
+checkpoint is superseded by the built-in-engine release below.
 
 ## Built-in JOY Agent Engine implementation (2026-09-04)
 
@@ -42,7 +37,7 @@ Undo. Creative Brief, Joy Code, domain entry-point routing, media-job consent,
 and active-panel presence all use the same JOY boundary. Historical KiloCode
 and joy-code-server provenance remains readable but is not a new-run engine.
 
-Final local verification passes: `pnpm test` reports 446 files passed / 2
+Final local verification passes: `pnpm verify:ci` reports 446 files passed / 2
 skipped and 3,707 tests passed / 39 skipped; `pnpm typecheck`, `pnpm lint`
 (seven pre-existing warnings only), `pnpm format:check`, `git diff --check`,
 the editor production build, `pnpm verify:joy-agent-worker`, and
@@ -50,8 +45,32 @@ the editor production build, `pnpm verify:joy-agent-worker`, and
 security/live-UI suites pass 63/63 times across desktop-primary, compact,
 minimum, 1280, 1440, 1581, and 1920 viewport projects. The verified Worker
 bundle is 8,869 raw bytes / 3,387 gzip bytes. Public redistribution remains
-gated by the license/font review in `docs/OPEN_SOURCE_RELEASE.md`; no
-deployment or service restart was performed in this session.
+gated only for the bundled Fontiran assets: the repository code now has an MIT
+`LICENSE`, but the Fontiran font/asset pack is still explicitly
+non-redistributable until its commercial terms are confirmed.
+
+## Built-in JOY Agent Engine deployment (2026-09-04 UTC)
+
+The final source commit `d149711e7b9aeb765fd58b6fd51ee7fc5950b09c` is pushed to
+both `github/main` and the VPS bare `main`. The VPS checkout, immutable API
+release, and static web release all match that commit. Active pointers are:
+
+- API: `/opt/joy-media/releases/joy-media-d149711e7b9aeb765fd58b6fd51ee7fc5950b09c-api`
+- Web: `/opt/joy-media/web-releases/joy-media-d149711e7b9aeb765fd58b6fd51ee7fc5950b09c-web`
+- Release identity: tree `c87ea525b170cd6659d1db434ef1caa45f2fca5b`, lockfile
+  SHA-256 `8a50a4283f62914b232dc1b81712c902967f41c29f4d9665a8469a2430d6cf91`,
+  schema `5`
+
+Before activation, PostgreSQL `joymedia` was dumped successfully to
+`/opt/joy-media/data/backups/joymedia-agent-engine-20260904T182513Z.sql.gz`
+(`382338085ea6879bc2427d0805e0b4ef2a1bb8221dce5de97a7420063f64a0e3`, gzip
+verified). The prior API environment was retained at
+`/etc/joy-media/api.env.before-agent-engine-20260904T183315Z.env` for rollback.
+`nginx -t`, `joy-media@api`, and `nginx` are green; local `/live`, `/ready`,
+and public `/api/health` pass. The signed-in browser was reloaded and the live
+settings dialog shows `Built in · Browser Worker`, session-only provider/model/
+API-key controls, and `No external editor agent or local model process is used`.
+The old untracked VPS directories `  --legacy/` and `\\/` were preserved.
 
 ## VPS access
 
