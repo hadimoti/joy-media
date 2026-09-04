@@ -179,6 +179,10 @@ export async function scanForSentinel(page: Page, sentinel: string): Promise<rea
     }
     inspect('cookie', document.cookie);
     inspect('dom', document.documentElement.outerHTML);
+    for (const input of document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+      'input, textarea',
+    ))
+      inspect('form-value', input.value);
     for (const entry of performance.getEntriesByType('resource')) inspect('resource', entry.name);
     if (typeof indexedDB.databases === 'function') {
       for (const database of await indexedDB.databases()) inspect('indexeddb', database.name);

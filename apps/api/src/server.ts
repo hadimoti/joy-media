@@ -16,12 +16,6 @@ import {
   PostgresSpectralDenoiseInvocationLedger,
   SpectralDenoiseService,
 } from './spectral-denoise-service.js';
-import { CanonicalCreativeBriefInputResolver } from './creative-brief-input-resolver.js';
-import { ProjectSnapshotService } from './project-snapshot-service.js';
-import { ProjectIntelligenceService } from './project-intelligence-service.js';
-import { createProductionCreativeBriefRuntime } from './creative-brief-production-runtime.js';
-import { createProductionJoyCodeRuntime } from './joy-code-production-runtime.js';
-import { CanonicalJoyCodeInputResolver } from './joy-code-input-resolver.js';
 import { createClientAddressResolver, trustedProxyAddressesFromEnv } from './client-address.js';
 import { productionReadinessOptions, releaseIdentityFromEnvironment } from './server-readiness.js';
 import { instrumentPostgresPool } from './db-query-observability.js';
@@ -54,52 +48,6 @@ async function start(): Promise<void> {
   if (audioDenoiseLedger instanceof PostgresSpectralDenoiseInvocationLedger)
     await audioDenoiseLedger.initialize();
   const controlPlane = durableControlPlane ?? new LocalControlPlane();
-  const creativeBriefInputResolver = new CanonicalCreativeBriefInputResolver({
-    controlPlane,
-    snapshotService: new ProjectSnapshotService(),
-    intelligenceService: new ProjectIntelligenceService(),
-  });
-  const joyCodeInputResolver = new CanonicalJoyCodeInputResolver({
-    controlPlane,
-    snapshotService: new ProjectSnapshotService(),
-    intelligenceService: new ProjectIntelligenceService(),
-    catalogs: {
-      textTemplateIds: ['clean-title', 'hero-title'],
-      captionTemplateIds: ['joy-clean', 'joy-karaoke-pop', 'joy-rtl-classic'],
-      transitionIds: ['dissolve', 'wipe', 'slide'],
-    },
-  });
-  const creativeBriefRuntime = createProductionCreativeBriefRuntime(
-    {
-      JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODE: process.env.JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODE,
-      JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODEL_ID:
-        process.env.JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_MODEL_ID,
-      JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_TIMEOUT_MS:
-        process.env.JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_TIMEOUT_MS,
-      JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_SPEND_LIMIT_USD_CENTS:
-        process.env.JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_SPEND_LIMIT_USD_CENTS,
-      JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_SECRET_REF:
-        process.env.JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_SECRET_REF,
-      JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_ALLOWED_FREE_MODEL_IDS:
-        process.env.JOY_MEDIA_CREATIVE_BRIEF_RUNTIME_ALLOWED_FREE_MODEL_IDS,
-    },
-    (path, encoding) => readFileSync(path, encoding),
-    globalThis.fetch.bind(globalThis),
-  );
-  const joyCodeRuntime = createProductionJoyCodeRuntime(
-    {
-      JOY_MEDIA_JOY_CODE_RUNTIME_MODE: process.env.JOY_MEDIA_JOY_CODE_RUNTIME_MODE,
-      JOY_MEDIA_JOY_CODE_RUNTIME_MODEL_ID: process.env.JOY_MEDIA_JOY_CODE_RUNTIME_MODEL_ID,
-      JOY_MEDIA_JOY_CODE_RUNTIME_TIMEOUT_MS: process.env.JOY_MEDIA_JOY_CODE_RUNTIME_TIMEOUT_MS,
-      JOY_MEDIA_JOY_CODE_RUNTIME_SPEND_LIMIT_USD_CENTS:
-        process.env.JOY_MEDIA_JOY_CODE_RUNTIME_SPEND_LIMIT_USD_CENTS,
-      JOY_MEDIA_JOY_CODE_RUNTIME_SECRET_REF: process.env.JOY_MEDIA_JOY_CODE_RUNTIME_SECRET_REF,
-      JOY_MEDIA_JOY_CODE_RUNTIME_ALLOWED_FREE_MODEL_IDS:
-        process.env.JOY_MEDIA_JOY_CODE_RUNTIME_ALLOWED_FREE_MODEL_IDS,
-    },
-    (path, encoding) => readFileSync(path, encoding),
-    globalThis.fetch.bind(globalThis),
-  );
   const mailer = createMailer();
   const telegram = createTelegramSender();
   const clientAddressResolver = createClientAddressResolver({
@@ -165,10 +113,6 @@ async function start(): Promise<void> {
     mediaAuth,
     clientAddressResolver,
     audioDenoise: new SpectralDenoiseService(audioDenoiseLedger),
-    creativeBriefInputResolver,
-    creativeBriefRuntime,
-    joyCodeInputResolver,
-    joyCodeRuntime,
     readiness: productionReadinessOptions({
       pool,
       durableControlPlane,

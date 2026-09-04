@@ -74,7 +74,6 @@ export function JoyAgentSettingsDialog({
       const next = await engineClient.testConnection();
       setConnectionStatus(next);
       onStatusChange?.(next);
-      if (keyRef.current) keyRef.current.value = '';
     } catch (error) {
       setConnectionStatus({
         provider,
@@ -89,6 +88,7 @@ export function JoyAgentSettingsDialog({
         message: error instanceof Error ? error.message : 'Unable to configure connection',
       });
     } finally {
+      if (keyRef.current) keyRef.current.value = '';
       setWorking(false);
     }
   };
