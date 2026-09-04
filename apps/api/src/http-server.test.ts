@@ -31,20 +31,8 @@ import {
   MemorySpectralDenoiseInvocationLedger,
   SpectralDenoiseService,
 } from './spectral-denoise-service.js';
-import {
-  UnavailableCreativeBriefInputResolver,
-  type CreativeBriefInputResolver,
-  type CreativeBriefInputResolverRequest,
-  type CreativeBriefInputResolverSuccess,
-  type CreativeBriefInputResolverContext,
-  type CreativeBriefInputResolverUnavailable,
-  type CreativeBriefInputResolverStaleRevision,
-} from './creative-brief-input-resolver.js';
-import type { CreativeBriefRuntime } from './creative-brief-runtime.js';
-import { DEFAULT_CREATIVE_BRIEF_RUNTIME } from './creative-brief-runtime.js';
 import type {
   CreativeBriefInputV1,
-  CreativeBriefRequestV1,
   AsyncCreativeBriefOutcome,
 } from '@joy-media/agent-tools';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
@@ -52,6 +40,17 @@ import {
   INITIAL_REVISION,
   MAX_PROJECT_DOCUMENT_SYNC_BYTES,
 } from './project-document-sync-request-validation.js';
+
+// The historical server-agent cases below remain skipped as provenance. Keep
+// their local fixture shapes type-checkable without importing retired runtime
+// or secret-bearing modules into the test graph.
+type CreativeBriefInputResolver = any;
+type CreativeBriefInputResolverRequest = any;
+type CreativeBriefInputResolverSuccess = any;
+type CreativeBriefInputResolverContext = any;
+type CreativeBriefInputResolverUnavailable = any;
+type CreativeBriefInputResolverStaleRevision = any;
+type CreativeBriefRuntime = any;
 
 const servers: Server[] = [];
 const SHA256 = 'a'.repeat(64);
@@ -3200,6 +3199,8 @@ async function start(
   clientAddressResolver?: ClientAddressResolver,
   readiness?: ApiReadinessOptions,
 ): Promise<string> {
+  void creativeBriefInputResolver;
+  void creativeBriefRuntime;
   const server = createControlPlaneHttpServer({
     controlPlane,
     authentication,
@@ -3207,8 +3208,6 @@ async function start(
     ...(privateObjectStore === undefined ? {} : { privateObjectStore }),
     ...(mistral === undefined ? {} : { mistral }),
     ...(audioDenoise === undefined ? {} : { audioDenoise }),
-    ...(creativeBriefInputResolver === undefined ? {} : { creativeBriefInputResolver }),
-    ...(creativeBriefRuntime === undefined ? {} : { creativeBriefRuntime }),
     ...(rateLimit === undefined ? {} : { rateLimit }),
     ...(clientAddressResolver === undefined ? {} : { clientAddressResolver }),
     ...(readiness === undefined ? {} : { readiness }),

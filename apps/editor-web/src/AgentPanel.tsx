@@ -1,4 +1,13 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import type { SpikeProject } from '@joy-media/project-schema';
 import type {
   AgentEditPlan,
@@ -56,7 +65,12 @@ import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import { createJoyAgentContextSnapshot } from './joy-agent/context-snapshot.js';
 import type { JoyAgentPhase } from './joy-agent/protocol.js';
-import type { AgentPresenceStore, JoyAgentPresenceEvent } from './agent-presence.js';
+import {
+  EMPTY_AGENT_PRESENCE,
+  type AgentPresenceState,
+  type AgentPresenceStore,
+  type JoyAgentPresenceEvent,
+} from './agent-presence.js';
 import type { AgentPreviewStore } from './agent-preview-store.js';
 import { previewTimelineFromProject } from './agent-timeline-preview.js';
 import { applyTransaction } from '@joy-media/commands';
@@ -65,6 +79,9 @@ import { inferJoyAgentTaskKind, targetForJoyAgentTask } from './agent-ui-targets
 /** Every edit this panel commits is attributed to the built-in JOY engine. */
 const AGENT_ACTOR: AgentActor = { type: 'agent', id: 'joy-agent' };
 const THINKING_REVEAL_MS = 320;
+const MAX_COMPOSER_PROMPT_CHARS = 8_000;
+const CREDENTIAL_LIKE_PROMPT =
+  /(?:bearer\s+[A-Za-z0-9._~-]{16,}|(?:api[_-]?key|secret|token)\s*[:=]\s*\S{12,}|sk-[A-Za-z0-9_-]{20,})/i;
 const JoyCode3DViewer = lazy(() =>
   import('./JoyCode3DViewer.js').then((module) => ({ default: module.JoyCode3DViewer })),
 );
@@ -72,9 +89,12 @@ const JoyCode3DViewer = lazy(() =>
 const TABS: readonly PanelTabSpec[] = [
   { id: 'history', label: 'History' },
   { id: 'composer', label: 'Composer' },
-  { id: 'brief', label: 'Brief', ariaLabel: 'Creative Brief' },
   { id: '3d', label: '', iconUrl: '/assets/24_3d.png' },
 ];
+
+type ComposerCapability = 'edit' | 'creative-brief';
+const NOOP_SUBSCRIBE = () => () => {};
+const NOOP_PRESENCE_SNAPSHOT = (): AgentPresenceState => EMPTY_AGENT_PRESENCE;
 
 interface PendingPlan {
   readonly runId: string;
@@ -109,10 +129,11 @@ export interface JoyAgentAttachedAsset {
   readonly source?: 'joycode-folder';
 }
 
-export type AgentPanelCommandType = 'new-task' | 'activity' | 'stop';
+export type AgentPanelCommandType = 'new-task' | 'activity' | 'stop' | 'select-capability';
 export interface AgentPanelCommand {
   readonly serial: number;
   readonly type: AgentPanelCommandType;
+  readonly capability?: ComposerCapability;
 }
 
 /**
@@ -241,16 +262,25 @@ export function AgentPanel({
   const [agentPhase, setAgentPhase] = useState<JoyAgentPhase | undefined>(undefined);
   const [agentRunId, setAgentRunId] = useState<string | undefined>(undefined);
   const [tab, setTab] = useState('composer');
+  const [composerCapability, setComposerCapability] = useState<ComposerCapability>('edit');
   const [draft, setDraft] = useState('');
   const [attachError, setAttachError] = useState<string | undefined>(undefined);
   const [attaching, setAttaching] = useState(false);
   const [joyCode, setJoyCode] = useState<JoyCodeState>(() => initialJoyCodeState(project.id));
-  const [, setCreativeBriefContext] = useState<CreativeBriefV1 | undefined>(undefined);
+  const [creativeBriefContext, setCreativeBriefContext] = useState<CreativeBriefV1 | undefined>(
+    undefined,
+  );
   const [modelDraft, setModelDraft] = useState<JoyCodeCompoundDraft | undefined>(undefined);
   const modelRunnerRef = useRef(new JoyCodeCompoundRunner());
+  const presenceState = useSyncExternalStore(
+    agentPresenceStore?.subscribe ?? NOOP_SUBSCRIBE,
+    agentPresenceStore?.getState ?? NOOP_PRESENCE_SNAPSHOT,
+    NOOP_PRESENCE_SNAPSHOT,
+  );
 
   useEffect(() => {
     setCreativeBriefContext(undefined);
+    setComposerCapability('edit');
   }, [project.id]);
 
   useEffect(() => {
@@ -266,6 +296,21 @@ export function AgentPanel({
     )
       agentPreviewStore?.clear();
   }, [agentPreviewStore, session.projectRevisionId]);
+
+  // A trusted Creative Brief target can arrive from an older deep link or a
+  // live run before this panel has rendered. Keep Composer selected and open
+  // the matching first-party capability without allowing provider routing to
+  // choose a UI surface.
+  useEffect(() => {
+    if (
+      presenceState.targets.some(
+        (target) => target.panelId === 'agent' && target.capability === 'creative-brief',
+      ) ||
+      (presenceState.terminalTarget?.panelId === 'agent' &&
+        presenceState.terminalTarget.capability === 'creative-brief')
+    )
+      setComposerCapability('creative-brief');
+  }, [presenceState.targets, presenceState.terminalTarget]);
 
   const approvalEngine = useMemo(
     () => new ApprovalEngine(approvalPolicyForAgentPolicy(settings)),
@@ -313,12 +358,19 @@ export function AgentPanel({
     setLastRun(undefined);
     setThinkingThreadId(undefined);
     setDraft('');
+    setCreativeBriefContext(undefined);
     setTab('composer');
+    setComposerCapability('edit');
   }, [agentPreviewStore]);
 
   useEffect(() => {
     if (command === undefined || handledCommandRef.current === command.serial) return;
     handledCommandRef.current = command.serial;
+    if (command.type === 'select-capability') {
+      setTab('composer');
+      if (command.capability !== undefined) setComposerCapability(command.capability);
+      return;
+    }
     if (command.type === 'activity') {
       setTab('history');
       return;
@@ -333,10 +385,11 @@ export function AgentPanel({
       appendMessage(pending.threadId, 'assistant', 'Stopped. The proposed edit was not applied.');
       updateThreadStatus(pending.threadId, 'draft');
     }
-    if (command.type === 'stop' && agentRunId !== undefined && joyAgentEngineClient !== undefined) {
-      void joyAgentEngineClient.cancel(agentRunId);
+    const commandRunId = agentRunId ?? presenceState.runId;
+    if (command.type === 'stop' && commandRunId !== undefined && joyAgentEngineClient !== undefined) {
+      void joyAgentEngineClient.cancel(commandRunId);
       agentPresenceStore?.clear();
-      agentPreviewStore?.clear(agentRunId);
+      agentPreviewStore?.clear(commandRunId);
       setAgentPhase('cancelled');
       setModelDraft(undefined);
     }
@@ -349,6 +402,7 @@ export function AgentPanel({
     command,
     joyAgentEngineClient,
     pending,
+    presenceState.runId,
     startNewTask,
   ]);
 
@@ -380,8 +434,9 @@ export function AgentPanel({
       appendMessage(
         threadId,
         'user',
-        `Creative Brief hand-off (review only): ${brief.request}\n\nValidated brief context queued for the next guarded Joy Code plan. No recommendation was executed.`,
+        `Creative Brief artifact attached (review only): ${brief.request}\n\nValidated brief context is available to the next guarded Joy Code edit. No recommendation was executed.`,
       );
+      setComposerCapability('creative-brief');
       setTab('composer');
     },
     [joyCode.activeThreadId],
@@ -494,9 +549,18 @@ export function AgentPanel({
   }
 
   function submitPrompt(prompt: string) {
-    const body = prompt.trim();
+    const body = prompt.trim().slice(0, MAX_COMPOSER_PROMPT_CHARS);
     if (body.length === 0 || activeThread === undefined || thinkingThreadId !== undefined) return;
     const threadId = activeThread.id;
+    if (CREDENTIAL_LIKE_PROMPT.test(body)) {
+      appendMessage(
+        threadId,
+        'assistant',
+        'This request looks like it contains a credential. JOY did not save or send it; remove the secret and try again.',
+      );
+      setDraft('');
+      return;
+    }
     setDraft('');
     setTab('composer');
     appendMessage(threadId, 'user', body);
@@ -510,6 +574,27 @@ export function AgentPanel({
     }
     const intentId = matchJoyCodeIntentId(body);
     const intent = AGENT_INTENTS.find((candidate) => candidate.id === intentId);
+    if (intent === undefined && settings.privacyMode === 'local-only') {
+      appendMessage(
+        threadId,
+        'assistant',
+        'Local-only privacy is enabled. Connect a remote model or switch the privacy policy before using natural-language JOY edits.',
+      );
+      return;
+    }
+    if (
+      creativeBriefContext !== undefined &&
+      creativeBriefContext.snapshotRevisionId !== session.projectRevisionId
+    ) {
+      appendMessage(
+        threadId,
+        'assistant',
+        'The attached Creative Brief is stale because the project changed. Regenerate it before starting this edit.',
+      );
+      setCreativeBriefContext(undefined);
+      setComposerCapability('creative-brief');
+      return;
+    }
     if (intent === undefined && joyAgentEngineClient !== undefined) {
       const connectionStatus = joyAgentEngineClient.getStatus();
       if (connectionStatus === undefined || connectionStatus.capability === 'incompatible') {
@@ -556,6 +641,7 @@ export function AgentPanel({
               kind: asset.kind,
               displayName: asset.displayName,
             })),
+            ...(creativeBriefContext === undefined ? {} : { creativeBrief: creativeBriefContext }),
           });
           for await (const event of joyAgentEngineClient.startRun({
             runId,
@@ -925,6 +1011,22 @@ export function AgentPanel({
     return extractPendingChanges(pending.plan, project);
   }, [pending, project]);
   const isThinking = thinkingThreadId === activeThread?.id;
+  const composerPresenceActive = presenceState.targets.some(
+    (target) => target.panelId === 'agent' && target.sectionId === 'composer',
+  );
+  const liveAgentPhase =
+    agentPhase ??
+    (composerPresenceActive || presenceState.terminalTarget?.panelId === 'agent'
+      ? presenceState.phase === 'idle'
+        ? undefined
+        : presenceState.phase
+      : undefined);
+  const liveAgentBusy =
+    liveAgentPhase !== undefined &&
+    liveAgentPhase !== 'completed' &&
+    liveAgentPhase !== 'failed' &&
+    liveAgentPhase !== 'cancelled';
+  const activeRunId = agentRunId ?? presenceState.runId;
 
   const uploadJoyCodeFiles = async (fileList: FileList | null) => {
     if (fileList === null || fileList.length === 0 || onAttachAsset === undefined) return;
@@ -998,32 +1100,32 @@ export function AgentPanel({
           }
         }}
       >
-        {agentPhase !== undefined && (
+        {liveAgentPhase !== undefined && (
           <div
-            className={`joy-agent-live-status is-${agentPhase}`}
+            className={`joy-agent-live-status is-${liveAgentPhase}`}
             role="status"
             aria-live="polite"
           >
             <span className="joy-agent-live-mark" aria-hidden="true" />
             <strong>
-              {agentPhase === 'awaiting-approval'
+              {liveAgentPhase === 'awaiting-approval'
                 ? 'Needs approval'
-                : `JOY ${agentPhase.replaceAll('-', ' ')}`}
+                : `JOY ${liveAgentPhase.replaceAll('-', ' ')}`}
             </strong>
             <span>
-              {agentPhase === 'previewing' || agentPhase === 'planning'
+              {liveAgentPhase === 'previewing' || liveAgentPhase === 'planning'
                 ? 'Previewing changes in the editor'
                 : 'Live engine activity'}
             </span>
-            {(agentPhase === 'thinking' ||
-              agentPhase === 'connecting' ||
-              agentPhase === 'planning' ||
-              agentPhase === 'previewing') &&
+            {(liveAgentPhase === 'thinking' ||
+              liveAgentPhase === 'connecting' ||
+              liveAgentPhase === 'planning' ||
+              liveAgentPhase === 'previewing') &&
               joyAgentEngineClient !== undefined && (
                 <button
                   type="button"
                   onClick={() => {
-                    if (agentRunId !== undefined) void joyAgentEngineClient.cancel(agentRunId);
+                    if (activeRunId !== undefined) void joyAgentEngineClient.cancel(activeRunId);
                   }}
                 >
                   Stop
@@ -1072,7 +1174,95 @@ export function AgentPanel({
         )}
 
         {tab === 'composer' && (
-          <section className="joy-code-composer" aria-label="Joy Code composer">
+          <section
+            className={`joy-code-composer ${liveAgentBusy ? 'is-agent-busy' : ''}`}
+            aria-label="Joy Code composer"
+            aria-busy={liveAgentBusy}
+            data-agent-phase={liveAgentPhase}
+          >
+            <div
+              className="joy-code-capabilities"
+              role="toolbar"
+              aria-label="Composer capabilities"
+            >
+              <span className="joy-code-capabilities-label">Create with JOY</span>
+              <button
+                type="button"
+                className={`joy-code-capability ${
+                  composerCapability === 'edit' ? 'is-active' : ''
+                }`}
+                aria-pressed={composerCapability === 'edit'}
+                onClick={() => setComposerCapability('edit')}
+              >
+                <JoyCodeLogo variant="mark" />
+                Edit
+              </button>
+              <button
+                type="button"
+                className={`joy-code-capability ${
+                  composerCapability === 'creative-brief' ? 'is-active' : ''
+                } ${creativeBriefContext !== undefined ? 'has-artifact' : ''}`}
+                aria-pressed={composerCapability === 'creative-brief'}
+                onClick={() => setComposerCapability('creative-brief')}
+              >
+                <span className="joy-code-capability-spark" aria-hidden="true">
+                  ✦
+                </span>
+                Creative Brief
+                {creativeBriefContext !== undefined && (
+                  <span className="joy-code-capability-dot" aria-label="Brief attached" />
+                )}
+              </button>
+            </div>
+            {creativeBriefContext !== undefined && (
+              <section className="joy-code-brief-artifact" aria-label="Attached Creative Brief">
+                <div className="joy-code-brief-artifact-copy">
+                  <span className="joy-code-brief-artifact-kicker">
+                    <span aria-hidden="true">✦</span> Creative Brief attached
+                  </span>
+                  <strong>{creativeBriefContext.request}</strong>
+                  <span>
+                    {creativeBriefContext.recommendations.length}{' '}
+                    {creativeBriefContext.recommendations.length === 1
+                      ? 'recommendation'
+                      : 'recommendations'}{' '}
+                    · revision {creativeBriefContext.snapshotRevisionId}
+                  </span>
+                </div>
+                <div className="joy-code-brief-artifact-actions">
+                  <button
+                    type="button"
+                    onClick={() => setComposerCapability('creative-brief')}
+                  >
+                    Open brief
+                  </button>
+                  <button
+                    type="button"
+                    className="is-subtle"
+                    onClick={() => setCreativeBriefContext(undefined)}
+                  >
+                    Detach
+                  </button>
+                </div>
+              </section>
+            )}
+            <div
+              className="joy-code-creative-brief"
+              aria-label="Creative Brief capability"
+              hidden={composerCapability !== 'creative-brief'}
+            >
+              <CreativeBriefPanel
+                revisionId={session.projectRevisionId}
+                projectId={project.id}
+                optedIn={creativeBriefOptedIn}
+                onBriefReady={handOffCreativeBrief}
+                onBriefHydrated={setCreativeBriefContext}
+                onBriefCleared={() => setCreativeBriefContext(undefined)}
+                {...(onCreativeBriefOptIn === undefined ? {} : { onOptIn: onCreativeBriefOptIn })}
+                {...(creativeBriefRunner === undefined ? {} : { runBrief: creativeBriefRunner })}
+                embedded
+              />
+            </div>
             <div className="joy-code-messages" aria-live="polite">
               {activeThread?.messages.length === 0 && (
                 <div className="joy-code-welcome">
@@ -1260,88 +1450,90 @@ export function AgentPanel({
               <div ref={messagesEndRef} />
             </div>
 
-            <div className="joy-code-compose-dock">
-              {attachedAssets.length > 0 && (
-                <ul className="joy-code-attachments" aria-label="Attached media">
-                  {attachedAssets.map((asset) => (
-                    <li key={asset.assetId}>
-                      <span>{asset.kind}</span>
-                      <strong title={asset.assetId}>{asset.displayName}</strong>
-                      {onDetachAsset !== undefined && (
-                        <button
-                          type="button"
-                          aria-label={`Detach ${asset.displayName}`}
-                          onClick={() => onDetachAsset(asset.assetId)}
-                        >
-                          <CloseIcon />
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {attachError !== undefined && (
-                <p className="joy-code-attach-error" role="alert">
-                  {attachError}
-                </p>
-              )}
-              <input
-                ref={attachInputRef}
-                type="file"
-                className="sr-only"
-                accept="image/*,.md,text/markdown,text/plain"
-                multiple
-                aria-hidden="true"
-                tabIndex={-1}
-                onChange={(event) => {
-                  void uploadJoyCodeFiles(event.currentTarget.files);
-                }}
-              />
-              <div className="joy-code-input">
-                <button
-                  type="button"
-                  className="icon-button joy-code-attach"
-                  aria-label="Attach image or Markdown"
-                  title="Attach image or Markdown"
-                  disabled={attaching || onAttachAsset === undefined}
-                  onClick={() => attachInputRef.current?.click()}
-                >
-                  <PlusIcon />
-                </button>
-                <textarea
-                  rows={3}
-                  value={draft}
-                  aria-label="Message Joy Code"
-                  placeholder="Describe the timeline edit you want…"
-                  onChange={(event) => setDraft(event.currentTarget.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                      event.preventDefault();
-                      submitPrompt(draft);
-                    }
+            {composerCapability === 'edit' && (
+              <div className="joy-code-compose-dock">
+                {attachedAssets.length > 0 && (
+                  <ul className="joy-code-attachments" aria-label="Attached media">
+                    {attachedAssets.map((asset) => (
+                      <li key={asset.assetId}>
+                        <span>{asset.kind}</span>
+                        <strong title={asset.assetId}>{asset.displayName}</strong>
+                        {onDetachAsset !== undefined && (
+                          <button
+                            type="button"
+                            aria-label={`Detach ${asset.displayName}`}
+                            onClick={() => onDetachAsset(asset.assetId)}
+                          >
+                            <CloseIcon />
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {attachError !== undefined && (
+                  <p className="joy-code-attach-error" role="alert">
+                    {attachError}
+                  </p>
+                )}
+                <input
+                  ref={attachInputRef}
+                  type="file"
+                  className="sr-only"
+                  accept="image/*,.md,text/markdown,text/plain"
+                  multiple
+                  aria-hidden="true"
+                  tabIndex={-1}
+                  onChange={(event) => {
+                    void uploadJoyCodeFiles(event.currentTarget.files);
                   }}
                 />
-                <button
-                  type="button"
-                  className="joy-code-send"
-                  aria-label={
-                    isThinking
-                      ? 'Joy Code is thinking'
-                      : pending === undefined
-                        ? 'Send message'
-                        : 'Stop current plan'
-                  }
-                  title={isThinking ? 'Thinking…' : pending === undefined ? 'Send' : 'Stop'}
-                  disabled={isThinking || (pending === undefined && draft.trim().length === 0)}
-                  onClick={() => {
-                    if (pending !== undefined) reject();
-                    else submitPrompt(draft);
-                  }}
-                >
-                  {pending === undefined ? <PlayIcon /> : <CloseIcon />}
-                </button>
+                <div className="joy-code-input">
+                  <button
+                    type="button"
+                    className="icon-button joy-code-attach"
+                    aria-label="Attach image or Markdown"
+                    title="Attach image or Markdown"
+                    disabled={attaching || onAttachAsset === undefined}
+                    onClick={() => attachInputRef.current?.click()}
+                  >
+                    <PlusIcon />
+                  </button>
+                  <textarea
+                    rows={3}
+                    value={draft}
+                    aria-label="Message Joy Code"
+                    placeholder="Describe the timeline edit you want…"
+                    onChange={(event) => setDraft(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        submitPrompt(draft);
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="joy-code-send"
+                    aria-label={
+                      isThinking
+                        ? 'Joy Code is thinking'
+                        : pending === undefined
+                          ? 'Send message'
+                          : 'Stop current plan'
+                    }
+                    title={isThinking ? 'Thinking…' : pending === undefined ? 'Send' : 'Stop'}
+                    disabled={isThinking || (pending === undefined && draft.trim().length === 0)}
+                    onClick={() => {
+                      if (pending !== undefined) reject();
+                      else submitPrompt(draft);
+                    }}
+                  >
+                    {pending === undefined ? <PlayIcon /> : <CloseIcon />}
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
           </section>
         )}
 
@@ -1355,17 +1547,6 @@ export function AgentPanel({
               {...(onAdd3DRender === undefined ? {} : { onAddToTimeline: onAdd3DRender })}
             />
           </Suspense>
-        )}
-        {tab === 'brief' && (
-          <CreativeBriefPanel
-            revisionId={session.projectRevisionId}
-            projectId={project.id}
-            optedIn={creativeBriefOptedIn}
-            onHandOff={handOffCreativeBrief}
-            {...(onCreativeBriefOptIn === undefined ? {} : { onOptIn: onCreativeBriefOptIn })}
-            {...(creativeBriefRunner === undefined ? {} : { runBrief: creativeBriefRunner })}
-            embedded
-          />
         )}
       </div>
     </PanelShell>

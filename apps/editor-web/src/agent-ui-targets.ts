@@ -1,6 +1,6 @@
 import type { FeatureToolId } from './feature-architecture.js';
 import type { PanelId } from './workspace.js';
-import type { JoyAgentEntityKind, JoyAgentTarget } from './agent-presence.js';
+import type { JoyAgentCapability, JoyAgentEntityKind, JoyAgentTarget } from './agent-presence.js';
 import type { JoyAgentTaskKind } from './joy-agent/protocol.js';
 
 export type JoyAgentToolName =
@@ -65,6 +65,7 @@ export interface AgentToolTargetRequest {
 export interface AgentUiTargetMap {
   readonly panelId: PanelId;
   readonly sectionId?: string;
+  readonly capability?: JoyAgentCapability;
   readonly kind?: JoyAgentEntityKind;
   readonly featureTool?: FeatureToolId;
 }
@@ -76,7 +77,7 @@ const TOOL_TARGETS: Readonly<Record<string, AgentUiTargetMap>> = {
   read_timeline_track: { panelId: 'timeline', sectionId: 'timeline', kind: 'track' },
   read_inspector: { panelId: 'inspector', sectionId: 'visual' },
   read_assets: { panelId: 'media', sectionId: 'media', kind: 'asset', featureTool: 'media' },
-  read_brief: { panelId: 'agent', sectionId: 'brief' },
+  read_brief: { panelId: 'agent', sectionId: 'composer', capability: 'creative-brief' },
   read_scene_3d: { panelId: 'agent', sectionId: '3d' },
   create_media: { panelId: 'media', sectionId: 'media', featureTool: 'media' },
   create_text: { panelId: 'media', sectionId: 'text', featureTool: 'text' },
@@ -97,13 +98,13 @@ const TOOL_TARGETS: Readonly<Record<string, AgentUiTargetMap>> = {
   inspect_audio: { panelId: 'inspector', sectionId: 'audio', kind: 'property' },
   inspect_speed: { panelId: 'inspector', sectionId: 'speed', kind: 'property' },
   joy_code_composer: { panelId: 'agent', sectionId: 'composer' },
-  creative_brief: { panelId: 'agent', sectionId: 'brief' },
+  creative_brief: { panelId: 'agent', sectionId: 'composer', capability: 'creative-brief' },
   scene_3d: { panelId: 'agent', sectionId: '3d' },
   propose_timeline: { panelId: 'timeline', sectionId: 'timeline', kind: 'clip' },
   propose_track: { panelId: 'timeline', sectionId: 'timeline', kind: 'track' },
   propose_document: { panelId: 'inspector', sectionId: 'visual', kind: 'property' },
   propose_asset: { panelId: 'media', sectionId: 'media', kind: 'asset', featureTool: 'media' },
-  propose_brief: { panelId: 'agent', sectionId: 'brief' },
+  propose_brief: { panelId: 'agent', sectionId: 'composer', capability: 'creative-brief' },
   propose_scene_3d: { panelId: 'agent', sectionId: '3d' },
   preview_changes: { panelId: 'monitor', sectionId: 'preview' },
   submit_plan: { panelId: 'agent', sectionId: 'composer' },
@@ -111,7 +112,7 @@ const TOOL_TARGETS: Readonly<Record<string, AgentUiTargetMap>> = {
 
 const TASK_TARGETS: Readonly<Record<JoyAgentTaskKind, JoyAgentTarget>> = {
   'joy-code': { panelId: 'agent', sectionId: 'composer' },
-  'creative-brief': { panelId: 'agent', sectionId: 'brief' },
+  'creative-brief': { panelId: 'agent', sectionId: 'composer', capability: 'creative-brief' },
   'asset-edit': { panelId: 'media', sectionId: 'media' },
   text: { panelId: 'media', sectionId: 'text' },
   effects: { panelId: 'effects', sectionId: 'effects' },
@@ -190,6 +191,7 @@ export function mapAgentToolToTargets(
       {
         panelId: target.panelId,
         ...(target.sectionId === undefined ? {} : { sectionId: target.sectionId }),
+        ...(target.capability === undefined ? {} : { capability: target.capability }),
       },
     ];
   }
@@ -197,6 +199,7 @@ export function mapAgentToolToTargets(
   return ids.map((id) => ({
     panelId: target.panelId,
     ...(target.sectionId === undefined ? {} : { sectionId: target.sectionId }),
+    ...(target.capability === undefined ? {} : { capability: target.capability }),
     entity: { kind, id },
   }));
 }

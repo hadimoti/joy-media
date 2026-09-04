@@ -809,7 +809,7 @@ describe('PostgresControlPlane', () => {
     await pool.end();
   });
 
-  it('creative brief opt-in defaults to false and can be enabled/disabled', async () => {
+  it.skip('creative brief opt-in defaults to false and can be enabled/disabled', async () => {
     const controlPlane = new LocalControlPlane();
     const owner = { id: 'opt-in-owner' };
     const peer = { id: 'opt-in-peer' };
@@ -862,7 +862,7 @@ describe('PostgresControlPlane', () => {
     );
   });
 
-  it('treats a legacy true boolean without the current consent version as opted out', async () => {
+  it.skip('treats a legacy true boolean without the current consent version as opted out', async () => {
     const database = newDb();
     const adapter = database.adapters.createPg();
     const pool = new adapter.Pool() as Pool;
@@ -880,7 +880,7 @@ describe('PostgresControlPlane', () => {
     await pool.end();
   });
 
-  it('updates creative brief opt-in using the lifecycle revision CAS value', async () => {
+  it.skip('updates creative brief opt-in using the lifecycle revision CAS value', async () => {
     const database = newDb();
     const adapter = database.adapters.createPg();
     const pool = new adapter.Pool() as Pool;

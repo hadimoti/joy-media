@@ -63,6 +63,12 @@ export interface CreativeBriefPanelProps {
   readonly projectId?: string;
   /** Hands a generated brief to the guarded Joy Code composer; never executes it. */
   readonly onHandOff?: (brief: CreativeBriefV1) => void;
+  /** Notifies an embedding Composer when a validated artifact is ready. */
+  readonly onBriefReady?: (brief: CreativeBriefV1) => void;
+  /** Notifies an embedding Composer when a stored brief is restored. */
+  readonly onBriefHydrated?: (brief: CreativeBriefV1) => void;
+  /** Clears an embedding Composer's attached artifact when the brief is cleared. */
+  readonly onBriefCleared?: () => void;
   /** Mount inside the Joy Code surface without a second visual panel header. */
   readonly embedded?: boolean;
 }
@@ -91,6 +97,9 @@ export function CreativeBriefPanel({
   onOptIn,
   projectId,
   onHandOff,
+  onBriefReady,
+  onBriefHydrated,
+  onBriefCleared,
   embedded = false,
 }: CreativeBriefPanelProps) {
   const [state, dispatch] = useReducer(creativeBriefReducer, INITIAL_BRIEF_STATE);
@@ -99,12 +108,14 @@ export function CreativeBriefPanel({
   const [isOptingIn, setIsOptingIn] = useState(false);
   const storageProjectId = projectId ?? `revision:${revisionId}`;
   const previousStorageProjectIdRef = useRef<string | null>(null);
+  const hydratedBriefKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     const previousStorageProjectId = previousStorageProjectIdRef.current;
     if (previousStorageProjectId !== null && previousStorageProjectId !== storageProjectId) {
       dispatch({ type: 'reset' });
       setRequestText('');
+      hydratedBriefKeyRef.current = null;
     }
     previousStorageProjectIdRef.current = storageProjectId;
     const storage = getCreativeBriefStorage();
@@ -112,8 +123,13 @@ export function CreativeBriefPanel({
     if (saved !== undefined) {
       dispatch({ type: 'hydrate', brief: saved, revisionId });
       setRequestText(saved.request);
+      const hydrationKey = `${storageProjectId}:${saved.snapshotRevisionId}`;
+      if (saved.snapshotRevisionId === revisionId && hydratedBriefKeyRef.current !== hydrationKey) {
+        hydratedBriefKeyRef.current = hydrationKey;
+        onBriefHydrated?.(saved);
+      }
     }
-  }, [revisionId, storageProjectId]);
+  }, [onBriefHydrated, revisionId, storageProjectId]);
 
   // Track previous revision to detect changes
   const [previousRevisionId, setPreviousRevisionId] = useState<ProjectRevisionId | null>(null);
@@ -197,6 +213,7 @@ export function CreativeBriefPanel({
           brief,
           revisionId,
         });
+        onBriefReady?.(brief);
       } else {
         dispatch({
           type: 'collect-error',
@@ -210,7 +227,7 @@ export function CreativeBriefPanel({
         error: errorMessage,
       });
     }
-  }, [requestText, revisionId, runBrief, optedIn, storageProjectId]);
+  }, [onBriefReady, requestText, revisionId, runBrief, optedIn, storageProjectId]);
 
   // Handle reset
   const handleReset = useCallback(() => {
@@ -218,7 +235,8 @@ export function CreativeBriefPanel({
     setRequestText('');
     const storage = getCreativeBriefStorage();
     if (storage) removeCreativeBrief(storage, storageProjectId);
-  }, [storageProjectId]);
+    onBriefCleared?.();
+  }, [onBriefCleared, storageProjectId]);
 
   // Handle retry
   const handleRetry = useCallback(async () => {
@@ -261,6 +279,7 @@ export function CreativeBriefPanel({
           brief,
           revisionId,
         });
+        onBriefReady?.(brief);
       } else {
         dispatch({
           type: 'collect-error',
@@ -274,7 +293,15 @@ export function CreativeBriefPanel({
         error: errorMessage,
       });
     }
-  }, [displayedRequest, requestText, revisionId, runBrief, optedIn, storageProjectId]);
+  }, [
+    displayedRequest,
+    onBriefReady,
+    requestText,
+    revisionId,
+    runBrief,
+    optedIn,
+    storageProjectId,
+  ]);
 
   // Render based on current state
   const panelContent = (
@@ -402,9 +429,9 @@ export function CreativeBriefPanel({
             className="creative-brief-panel-button"
             type="button"
             onClick={() => onHandOff(getBrief(state)!)}
-            aria-label="Send brief to Joy Code"
+            aria-label={embedded ? 'Attach brief to Joy Code edits' : 'Send brief to Joy Code'}
           >
-            Send to Joy Code
+            {embedded ? 'Attach to edits' : 'Send to Joy Code'}
           </button>
         )}
       </div>

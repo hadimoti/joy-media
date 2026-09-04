@@ -13,7 +13,6 @@ import {
   type AssetThumbnailReceipt,
   type CloudDerivativeRegistration,
   type ControlPlane,
-  type JoyCodeOptInStatus,
   type LocalDerivativeRegistration,
   type MediaAssetRecord,
   type MediaDerivativeRecord,
@@ -47,8 +46,6 @@ import {
 } from './control-plane.js';
 import { runPostgresMigrations } from './postgres-migrations.js';
 import { validateProjectDocumentRecord } from './project-document-store.js';
-import { CREATIVE_BRIEF_CONSENT_VERSION } from './creative-brief-runtime-config.js';
-import { JOY_CODE_CONSENT_VERSION } from './joy-code-consent.js';
 
 const FIXTURE_THUMBNAIL_SHA256 = '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735';
 const FIXTURE_THUMBNAIL_BYTES = 14;
@@ -344,11 +341,7 @@ interface ProjectRow {
   readonly revision: number;
   readonly asset_sync_enabled: boolean;
   readonly trashed_at: Date | null;
-  readonly creative_brief_opt_in: boolean;
-  readonly creative_brief_consent_version: string | null;
-  readonly creative_brief_consent_at: Date | null;
   readonly document_revision_id: string | null;
-  readonly joy_code_consent_version: string | null;
 }
 
 interface ProjectDocumentRow {
@@ -755,92 +748,35 @@ export class PostgresControlPlane implements ControlPlane {
     if (result.rows[0] === undefined) throw new ControlPlaneError('PROJECT_NOT_FOUND', projectId);
     return projectOf(result.rows[0]);
   }
-
-  async getCreativeBriefOptIn(actor: Actor, projectId: string): Promise<boolean> {
-    const project = await this.project(actor, projectId);
-    return project.creativeBriefOptIn;
+  /** @deprecated The browser-owned engine no longer has server consent state. */
+  async getCreativeBriefOptIn(_actor: Actor, _projectId: string): Promise<boolean> {
+    throw new ControlPlaneError('JOY_AGENT_ROUTE_RETIRED', 'Creative Brief is browser-owned');
   }
-
+  /** @deprecated The browser-owned engine no longer has server consent state. */
   async setCreativeBriefOptIn(
-    actor: Actor,
-    projectId: string,
-    enabled: boolean,
-    baseRevision: number,
+    _actor: Actor,
+    _projectId: string,
+    _enabled: boolean,
+    _baseRevision: number,
   ): Promise<ProjectMetadata> {
-    assertActor(actor);
-    const current = await this.project(actor, projectId);
-    if (current.revision !== baseRevision)
-      throw new ControlPlaneError(
-        'REVISION_CONFLICT',
-        `expected ${baseRevision}, found ${current.revision}`,
-      );
-    const result = await this.pool.query<ProjectRow>(
-      `UPDATE projects SET
-         creative_brief_opt_in = $3,
-         creative_brief_consent_version = $4,
-         creative_brief_consent_at = $5,
-         revision = revision + 1
-       WHERE id = $1 AND owner_id = $2 AND revision = $6 RETURNING *`,
-      [
-        projectId,
-        actor.id,
-        enabled,
-        enabled ? CREATIVE_BRIEF_CONSENT_VERSION : null,
-        enabled ? new Date() : null,
-        baseRevision,
-      ],
-    );
-    if (result.rows[0] === undefined) throw new ControlPlaneError('PROJECT_NOT_FOUND', projectId);
-    return projectOf(result.rows[0]);
+    throw new ControlPlaneError('JOY_AGENT_ROUTE_RETIRED', 'Creative Brief is browser-owned');
   }
-
-  async getJoyCodeOptIn(actor: Actor, projectId: string): Promise<JoyCodeOptInStatus> {
-    assertActor(actor);
-    const result = await this.pool.query<{
-      readonly revision: number;
-      readonly joy_code_consent_version: string | null;
-    }>('SELECT revision, joy_code_consent_version FROM projects WHERE id = $1 AND owner_id = $2', [
-      projectId,
-      actor.id,
-    ]);
-    const row = result.rows[0];
-    if (row === undefined) throw new ControlPlaneError('PROJECT_NOT_FOUND', projectId);
-    const consentVersion = row.joy_code_consent_version;
-    return {
-      enabled: consentVersion === JOY_CODE_CONSENT_VERSION,
-      ...(consentVersion === null ? {} : { consentVersion }),
-      revision: row.revision,
-    };
+  /** @deprecated The browser-owned engine no longer has server consent state. */
+  async getJoyCodeOptIn(
+    _actor: Actor,
+    _projectId: string,
+  ): Promise<{ enabled: boolean; revision: number }> {
+    throw new ControlPlaneError('JOY_AGENT_ROUTE_RETIRED', 'JOY Code is browser-owned');
   }
-
+  /** @deprecated The browser-owned engine no longer has server consent state. */
   async setJoyCodeOptIn(
-    actor: Actor,
-    projectId: string,
-    enabled: boolean,
-    consentVersion: string | undefined,
-    baseRevision: number,
+    _actor: Actor,
+    _projectId: string,
+    _enabled: boolean,
+    _consentVersion: string | undefined,
+    _baseRevision: number,
   ): Promise<ProjectMetadata> {
-    assertActor(actor);
-    if (enabled && consentVersion !== JOY_CODE_CONSENT_VERSION)
-      throw new ControlPlaneError(
-        'JOY_CODE_CONSENT_VERSION_REQUIRED',
-        'current disclosure version required',
-      );
-    const result = await this.pool.query<ProjectRow>(
-      `UPDATE projects SET joy_code_consent_version = $3, revision = revision + 1
-       WHERE id = $1 AND owner_id = $2 AND revision = $4 RETURNING *`,
-      [projectId, actor.id, enabled ? JOY_CODE_CONSENT_VERSION : null, baseRevision],
-    );
-    if (result.rows[0] === undefined) {
-      const current = await this.project(actor, projectId);
-      if (current.revision !== baseRevision)
-        throw new ControlPlaneError(
-          'REVISION_CONFLICT',
-          `expected ${baseRevision}, found ${current.revision}`,
-        );
-      throw new ControlPlaneError('PROJECT_NOT_FOUND', projectId);
-    }
-    return projectOf(result.rows[0]);
+    throw new ControlPlaneError('JOY_AGENT_ROUTE_RETIRED', 'JOY Code is browser-owned');
   }
 
   async registerAsset(
@@ -2080,9 +2016,7 @@ function projectOf(row: ProjectRow): ProjectMetadata {
     title: row.title,
     revision: row.revision,
     assetSyncEnabled: row.asset_sync_enabled,
-    creativeBriefOptIn:
-      row.creative_brief_opt_in &&
-      row.creative_brief_consent_version === CREATIVE_BRIEF_CONSENT_VERSION,
+    creativeBriefOptIn: false,
     ...(row.trashed_at === null ? {} : { trashedAt: row.trashed_at.getTime() }),
   };
 }

@@ -1,7 +1,5 @@
 import { createHash } from 'node:crypto';
 import { freezeManifest, type RenderManifest } from '@joy-media/export-core';
-import { CREATIVE_BRIEF_CONSENT_VERSION } from './creative-brief-runtime-config.js';
-import { JOY_CODE_CONSENT_VERSION } from './joy-code-consent.js';
 
 export interface Actor {
   readonly id: string;
@@ -196,14 +194,8 @@ export interface ProjectMetadata {
   /** Always true: originals and eligible derivatives use private durable storage. */
   readonly assetSyncEnabled: boolean;
   readonly trashedAt?: number;
-  /** Per-project Creative Brief opt-in flag. Defaults to false. */
+  /** @deprecated Server-agent consent is retired; retained only for old metadata readers. */
   readonly creativeBriefOptIn: boolean;
-}
-
-export interface JoyCodeOptInStatus {
-  readonly enabled: boolean;
-  readonly consentVersion?: string;
-  readonly revision: number;
 }
 
 export interface ProjectLifecycleMetadata extends ProjectMetadata {
@@ -214,6 +206,27 @@ export interface ProjectDuplicateResult {
   readonly project: ProjectMetadata;
   readonly assetIdMap: Readonly<Record<string, string>>;
   readonly derivativeIdMap: Readonly<Record<string, string>>;
+}
+/** @deprecated Server-agent consent is retired and never touches storage. */
+export interface RetiredAgentConsentApi {
+  getCreativeBriefOptIn(actor: Actor, projectId: string): boolean | Promise<boolean>;
+  setCreativeBriefOptIn(
+    actor: Actor,
+    projectId: string,
+    enabled: boolean,
+    baseRevision: number,
+  ): ProjectMetadata | Promise<ProjectMetadata>;
+  getJoyCodeOptIn(
+    actor: Actor,
+    projectId: string,
+  ): { readonly enabled: boolean; readonly revision: number } | Promise<{ readonly enabled: boolean; readonly revision: number }>;
+  setJoyCodeOptIn(
+    actor: Actor,
+    projectId: string,
+    enabled: boolean,
+    consentVersion: string | undefined,
+    baseRevision: number,
+  ): ProjectMetadata | Promise<ProjectMetadata>;
 }
 export type MediaAssetKind = 'video' | 'audio' | 'image';
 export type DerivativeKind = 'thumbnail' | 'proxy' | 'audio' | 'mask' | 'upscale';
@@ -469,7 +482,7 @@ export interface JobEvent {
 }
 
 /** The API transport can use the synchronous local spike or durable PostgreSQL. */
-export interface ControlPlane {
+export interface ControlPlane extends RetiredAgentConsentApi {
   createProject(
     actor: Actor,
     id: string,
@@ -508,24 +521,6 @@ export interface ControlPlane {
     actor: Actor,
     projectId: string,
     enabled: boolean,
-  ): ProjectMetadata | Promise<ProjectMetadata>;
-  getCreativeBriefOptIn(actor: Actor, projectId: string): boolean | Promise<boolean>;
-  setCreativeBriefOptIn(
-    actor: Actor,
-    projectId: string,
-    enabled: boolean,
-    baseRevision: number,
-  ): ProjectMetadata | Promise<ProjectMetadata>;
-  getJoyCodeOptIn(
-    actor: Actor,
-    projectId: string,
-  ): JoyCodeOptInStatus | Promise<JoyCodeOptInStatus>;
-  setJoyCodeOptIn(
-    actor: Actor,
-    projectId: string,
-    enabled: boolean,
-    consentVersion: string | undefined,
-    baseRevision: number,
   ): ProjectMetadata | Promise<ProjectMetadata>;
   registerAsset(
     actor: Actor,
@@ -740,8 +735,6 @@ export class ControlPlaneError extends Error {
 /** In-memory adapter with the same revision/lease semantics as the PostgreSQL implementation. */
 export class LocalControlPlane implements ControlPlane {
   readonly #projects = new Map<string, ProjectMetadata>();
-  readonly #creativeBriefConsentVersions = new Map<string, string>();
-  readonly #joyCodeConsentVersions = new Map<string, string>();
   readonly #workers = new Map<string, WorkerRecord>();
   readonly #jobs = new Map<string, Job>();
   readonly #jobAttempts = new Map<string, number>();
@@ -938,63 +931,32 @@ export class LocalControlPlane implements ControlPlane {
     this.#projects.set(projectId, next);
     return next;
   }
-  getCreativeBriefOptIn(actor: Actor, projectId: string): boolean {
-    const project = this.project(actor, projectId);
-    return (
-      project.creativeBriefOptIn &&
-      this.#creativeBriefConsentVersions.get(projectId) === CREATIVE_BRIEF_CONSENT_VERSION
-    );
+  /** @deprecated The browser-owned engine no longer has server consent state. */
+  getCreativeBriefOptIn(_actor: Actor, _projectId: string): boolean {
+    throw new ControlPlaneError('JOY_AGENT_ROUTE_RETIRED', 'Creative Brief is browser-owned');
   }
+  /** @deprecated The browser-owned engine no longer has server consent state. */
   setCreativeBriefOptIn(
-    actor: Actor,
-    projectId: string,
-    enabled: boolean,
-    baseRevision: number,
+    _actor: Actor,
+    _projectId: string,
+    _enabled: boolean,
+    _baseRevision: number,
   ): ProjectMetadata {
-    const current = this.project(actor, projectId);
-    if (current.revision !== baseRevision)
-      throw new ControlPlaneError(
-        'REVISION_CONFLICT',
-        `expected ${baseRevision}, found ${current.revision}`,
-      );
-    const next = { ...current, creativeBriefOptIn: enabled, revision: current.revision + 1 };
-    this.#projects.set(projectId, next);
-    if (enabled) this.#creativeBriefConsentVersions.set(projectId, CREATIVE_BRIEF_CONSENT_VERSION);
-    else this.#creativeBriefConsentVersions.delete(projectId);
-    return next;
+    throw new ControlPlaneError('JOY_AGENT_ROUTE_RETIRED', 'Creative Brief is browser-owned');
   }
-  getJoyCodeOptIn(actor: Actor, projectId: string): JoyCodeOptInStatus {
-    const project = this.project(actor, projectId);
-    const consentVersion = this.#joyCodeConsentVersions.get(projectId);
-    return {
-      enabled: consentVersion === JOY_CODE_CONSENT_VERSION,
-      ...(consentVersion === undefined ? {} : { consentVersion }),
-      revision: project.revision,
-    };
+  /** @deprecated The browser-owned engine no longer has server consent state. */
+  getJoyCodeOptIn(_actor: Actor, _projectId: string): { enabled: boolean; revision: number } {
+    throw new ControlPlaneError('JOY_AGENT_ROUTE_RETIRED', 'JOY Code is browser-owned');
   }
+  /** @deprecated The browser-owned engine no longer has server consent state. */
   setJoyCodeOptIn(
-    actor: Actor,
-    projectId: string,
-    enabled: boolean,
-    consentVersion: string | undefined,
-    baseRevision: number,
+    _actor: Actor,
+    _projectId: string,
+    _enabled: boolean,
+    _consentVersion: string | undefined,
+    _baseRevision: number,
   ): ProjectMetadata {
-    const current = this.project(actor, projectId);
-    if (current.revision !== baseRevision)
-      throw new ControlPlaneError(
-        'REVISION_CONFLICT',
-        `expected ${baseRevision}, found ${current.revision}`,
-      );
-    if (enabled && consentVersion !== JOY_CODE_CONSENT_VERSION)
-      throw new ControlPlaneError(
-        'JOY_CODE_CONSENT_VERSION_REQUIRED',
-        'current disclosure version required',
-      );
-    const next = { ...current, revision: current.revision + 1 };
-    this.#projects.set(projectId, next);
-    if (enabled) this.#joyCodeConsentVersions.set(projectId, JOY_CODE_CONSENT_VERSION);
-    else this.#joyCodeConsentVersions.delete(projectId);
-    return next;
+    throw new ControlPlaneError('JOY_AGENT_ROUTE_RETIRED', 'JOY Code is browser-owned');
   }
   registerAsset(
     actor: Actor,

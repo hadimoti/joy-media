@@ -24,11 +24,14 @@ export type JoyAgentPhase = (typeof JOY_AGENT_PHASES)[number];
 
 export type JoyAgentPresenceStatus = 'idle' | 'active' | 'completed' | 'failed' | 'cancelled';
 export type JoyAgentEntityKind = 'clip' | 'track' | 'asset' | 'property' | 'brief' | 'scene';
+export type JoyAgentCapability = 'edit' | 'creative-brief';
 
 /** A trusted UI target. These values are produced by the code-owned target map. */
 export interface JoyAgentTarget {
   readonly panelId: PanelId;
   readonly sectionId?: string;
+  /** Optional product capability to open when the target is Composer. */
+  readonly capability?: JoyAgentCapability;
   readonly entity?: { readonly kind: JoyAgentEntityKind; readonly id: string };
 }
 

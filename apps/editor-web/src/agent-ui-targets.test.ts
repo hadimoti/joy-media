@@ -68,7 +68,7 @@ describe('JOY agent trusted UI target map', () => {
       { panelId: 'inspector', sectionId: 'mask' },
     ]);
     expect(mapAgentToolToTargets({ tool: 'creative_brief' }, snapshot)).toEqual([
-      { panelId: 'agent', sectionId: 'brief' },
+      { panelId: 'agent', sectionId: 'composer', capability: 'creative-brief' },
     ]);
     expect(mapAgentToolToTargets({ tool: 'scene_3d' }, snapshot)).toEqual([
       { panelId: 'agent', sectionId: '3d' },
@@ -88,5 +88,10 @@ describe('JOY agent trusted UI target map', () => {
     expect(inferJoyAgentTaskKind('make the lower third glow')).toBe('effects');
     expect(inferJoyAgentTaskKind('write subtitles from the speech')).toBe('captions');
     expect(inferJoyAgentTaskKind('trim the intro and tighten the cut')).toBe('joy-code');
+    expect(targetForJoyAgentTask('creative-brief')).toEqual({
+      panelId: 'agent',
+      sectionId: 'composer',
+      capability: 'creative-brief',
+    });
   });
 });

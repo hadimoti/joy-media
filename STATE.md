@@ -51,13 +51,13 @@ non-redistributable until its commercial terms are confirmed.
 
 ## Built-in JOY Agent Engine deployment (2026-09-04 UTC)
 
-The final source commit `d149711e7b9aeb765fd58b6fd51ee7fc5950b09c` is pushed to
+The final source commit `b0402e21936095e46ef37f93a632a2c73886d626` is pushed to
 both `github/main` and the VPS bare `main`. The VPS checkout, immutable API
 release, and static web release all match that commit. Active pointers are:
 
-- API: `/opt/joy-media/releases/joy-media-d149711e7b9aeb765fd58b6fd51ee7fc5950b09c-api`
-- Web: `/opt/joy-media/web-releases/joy-media-d149711e7b9aeb765fd58b6fd51ee7fc5950b09c-web`
-- Release identity: tree `c87ea525b170cd6659d1db434ef1caa45f2fca5b`, lockfile
+- API: `/opt/joy-media/releases/joy-media-b0402e21936095e46ef37f93a632a2c73886d626-api`
+- Web: `/opt/joy-media/web-releases/joy-media-b0402e21936095e46ef37f93a632a2c73886d626-web`
+- Release identity: tree `e87d960e8c8fcbe974050b6ceb8cf6a866848d10`, lockfile
   SHA-256 `8a50a4283f62914b232dc1b81712c902967f41c29f4d9665a8469a2430d6cf91`,
   schema `5`
 

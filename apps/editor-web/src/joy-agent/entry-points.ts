@@ -16,7 +16,7 @@ export const JOY_AGENT_ENTRY_POINTS = [
     id: 'creative-brief',
     taskKind: 'creative-brief',
     panelId: 'agent',
-    sectionId: 'brief',
+    sectionId: 'composer',
     capability: 'timeline.read',
   },
   {
@@ -121,10 +121,15 @@ export interface RunJoyAgentTaskInput {
   readonly baseRevision: string;
   readonly context?: unknown;
   readonly onEvent?: (event: JoyAgentSafeEvent) => void;
+  /** Called after a run id is allocated and before the Worker iterator starts. */
+  readonly onRunStart?: (runId: string) => void;
+  /** Local-only policy must fail before any remote Worker/provider call. */
+  readonly allowRemote?: boolean;
 }
 
 export class JoyAgentTaskError extends Error {
-  readonly code: 'failed' | 'cancelled' | 'empty-result' | 'invalid-result' | 'stale-result';
+  readonly code:
+    'failed' | 'cancelled' | 'empty-result' | 'invalid-result' | 'stale-result' | 'remote-disabled';
 
   constructor(code: JoyAgentTaskError['code'], message: string) {
     super(message);
@@ -138,10 +143,25 @@ function newRunId(taskKind: JoyAgentTaskKind): string {
   return `${taskKind}-${cryptoApi.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 }
 
+const CREDENTIAL_LIKE_PROMPT =
+  /(?:bearer\s+[A-Za-z0-9._~-]{16,}|(?:api[_-]?key|secret|token)\s*[:=]\s*\S{12,}|sk-[A-Za-z0-9_-]{20,})/i;
+
 /** Run any registered entry point and return its terminal safe event. */
 export async function runJoyAgentTask(input: RunJoyAgentTaskInput): Promise<JoyAgentSafeEvent> {
+  if (input.allowRemote === false)
+    throw new JoyAgentTaskError(
+      'remote-disabled',
+      'Remote JOY Agent processing is disabled by the Local only privacy policy.',
+    );
+  if (CREDENTIAL_LIKE_PROMPT.test(input.prompt))
+    throw new JoyAgentTaskError(
+      'failed',
+      'JOY did not send this request because it looks like it contains a credential.',
+    );
+  const runId = newRunId(input.taskKind);
+  input.onRunStart?.(runId);
   const request: JoyAgentRunRequest = {
-    runId: newRunId(input.taskKind),
+    runId,
     taskKind: input.taskKind,
     prompt: input.prompt.trim().slice(0, 8_000),
     baseRevision: input.baseRevision,
@@ -168,6 +188,8 @@ export async function runCreativeBriefTask(input: {
   readonly request: string;
   readonly context: unknown;
   readonly onEvent?: (event: JoyAgentSafeEvent) => void;
+  readonly onRunStart?: (runId: string) => void;
+  readonly allowRemote?: boolean;
 }): Promise<CreativeBriefV1> {
   const event = await runJoyAgentTask({
     client: input.client,
@@ -176,6 +198,8 @@ export async function runCreativeBriefTask(input: {
     baseRevision: input.revisionId,
     context: input.context,
     ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
+    ...(input.onRunStart === undefined ? {} : { onRunStart: input.onRunStart }),
+    ...(input.allowRemote === undefined ? {} : { allowRemote: input.allowRemote }),
   });
   if (event.result === undefined)
     throw new JoyAgentTaskError('empty-result', 'JOY returned no Creative Brief');

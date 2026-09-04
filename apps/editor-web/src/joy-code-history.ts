@@ -24,6 +24,11 @@ export interface JoyCodeHistoryStorage {
 
 const MAX_THREADS = 30;
 const MAX_MESSAGES_PER_THREAD = 120;
+const MAX_THREAD_ID_CHARS = 128;
+const MAX_THREAD_TITLE_CHARS = 160;
+const MAX_MESSAGE_ID_CHARS = 128;
+const MAX_MESSAGE_BODY_CHARS = 8_000;
+const MAX_TIMESTAMP_CHARS = 64;
 export const JOY_CODE_HISTORY_PREFIX = 'joy-media.joy-code-history.v1';
 
 export function joyCodeHistoryKey(projectId: string): string {
@@ -156,6 +161,14 @@ function isJoyCodeThread(value: unknown): value is JoyCodeThread {
   ) {
     return false;
   }
+  if (
+    candidate.id.length > MAX_THREAD_ID_CHARS ||
+    candidate.title.length > MAX_THREAD_TITLE_CHARS ||
+    candidate.createdAt.length > MAX_TIMESTAMP_CHARS ||
+    candidate.updatedAt.length > MAX_TIMESTAMP_CHARS
+  ) {
+    return false;
+  }
   return candidate.messages.every(isJoyCodeMessage);
 }
 
@@ -166,6 +179,9 @@ function isJoyCodeMessage(value: unknown): value is JoyCodeMessage {
     typeof candidate.id === 'string' &&
     (candidate.role === 'user' || candidate.role === 'assistant') &&
     typeof candidate.body === 'string' &&
-    typeof candidate.createdAt === 'string'
+    typeof candidate.createdAt === 'string' &&
+    candidate.id.length <= MAX_MESSAGE_ID_CHARS &&
+    candidate.body.length <= MAX_MESSAGE_BODY_CHARS &&
+    candidate.createdAt.length <= MAX_TIMESTAMP_CHARS
   );
 }

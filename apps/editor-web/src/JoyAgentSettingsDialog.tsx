@@ -131,98 +131,124 @@ export function JoyAgentSettingsDialog({
           </button>
         </header>
         <div className="agent-settings-grid">
-          <section className="agent-engine-card">
-            <h3>Built in · Browser Worker</h3>
-            <p>
-              JOY owns the tool loop, previews, approvals, and edits. The worker is created only for
-              this page session.
-            </p>
-            <span
-              className={`agent-connection-badge is-${connectionStatus?.capability ?? 'untested'}`}
-            >
-              {connectionStatus?.capability === 'tool-loop'
-                ? 'Tool loop ready'
-                : connectionStatus?.capability === 'plan-only'
-                  ? 'Plan-only'
-                  : connectionStatus?.capability === 'incompatible'
-                    ? (connectionStatus.message ?? 'Connection unavailable')
-                    : 'Not connected'}
-            </span>
-          </section>
-          <section>
-            <h3>Model connection</h3>
-            <p className="agent-settings-hint">
-              This page session only. JOY does not save, proxy, or log your key. Provider charges
-              may apply.
-            </p>
-            <label>
-              Provider
-              <select
-                value={provider}
-                onChange={(event) => setProviderKind(event.target.value as typeof provider)}
+          <section className="agent-settings-connection agent-engine-card">
+            <div className="agent-engine-identity">
+              <div className="agent-engine-mark" aria-hidden="true">
+                JOY
+              </div>
+              <div className="agent-engine-copy">
+                <span className="agent-settings-kicker">Built in · Browser Worker</span>
+                <h3>JOY owns the creative loop</h3>
+                <p>
+                  Previews, approvals, and edits stay in this page session. Your provider key is
+                  held in memory only and is never saved or proxied by JOY.
+                </p>
+              </div>
+              <span
+                className={`agent-connection-badge is-${connectionStatus?.capability ?? 'untested'}`}
+                aria-live="polite"
               >
-                <option value="openrouter">OpenRouter</option>
-                <option value="openai-compatible">Custom OpenAI-compatible</option>
-              </select>
-            </label>
-            <label>
-              Base URL
-              <input
-                type="url"
-                value={baseUrl}
-                disabled={provider === 'openrouter'}
-                onChange={(event) => setBaseUrl(event.target.value)}
-                placeholder="https://provider.example/v1"
-              />
-            </label>
-            <label>
-              Model ID
-              <input
-                value={modelId}
-                onChange={(event) => setModelId(event.target.value)}
-                placeholder="provider/model"
-              />
-            </label>
-            {provider === 'openai-compatible' && (
-              <label className="agent-disclosure">
-                <input
-                  type="checkbox"
-                  checked={customDisclosure}
-                  onChange={(event) => setCustomDisclosure(event.target.checked)}
-                />{' '}
-                I understand the custom provider receives the context I send
-              </label>
-            )}
-            <label>
-              API key
-              <input
-                ref={keyRef}
-                type="password"
-                autoComplete="off"
-                placeholder="Entered once for this session"
-              />
-            </label>
-            <div className="agent-settings-actions">
-              <button
-                type="button"
-                className="agent-settings-done"
-                onClick={() => void connect()}
-                disabled={working}
-              >
-                {working ? 'Connecting…' : 'Test & use'}
-              </button>
-              <button
-                type="button"
-                className="button-secondary"
-                onClick={clear}
-                disabled={working || connectionStatus === undefined}
-              >
-                Clear connection
-              </button>
+                {connectionStatus?.capability === 'tool-loop'
+                  ? 'Tool loop ready'
+                  : connectionStatus?.capability === 'plan-only'
+                    ? 'Plan-only ready'
+                    : connectionStatus?.capability === 'incompatible'
+                      ? (connectionStatus.message ?? 'Connection unavailable')
+                      : 'Not connected'}
+              </span>
+            </div>
+            <div className="agent-settings-connection-form">
+              <div className="agent-settings-section-heading">
+                <div>
+                  <span className="agent-settings-kicker">Connection</span>
+                  <h3>Bring your own model</h3>
+                </div>
+                <span className="agent-settings-session-chip">Session-only BYOK</span>
+              </div>
+              <p className="agent-settings-hint">
+                Connect OpenRouter or any approved HTTPS OpenAI-compatible provider. Provider
+                charges and logging policies may apply.
+              </p>
+              <div className="agent-settings-form-grid">
+                <label>
+                  Provider
+                  <select
+                    value={provider}
+                    onChange={(event) => setProviderKind(event.target.value as typeof provider)}
+                  >
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="openai-compatible">Custom OpenAI-compatible</option>
+                  </select>
+                </label>
+                <label>
+                  Model ID
+                  <input
+                    value={modelId}
+                    onChange={(event) => setModelId(event.target.value)}
+                    placeholder="provider/model"
+                  />
+                </label>
+                <label className="agent-settings-field-wide">
+                  Base URL
+                  <input
+                    type="url"
+                    value={baseUrl}
+                    disabled={provider === 'openrouter'}
+                    onChange={(event) => setBaseUrl(event.target.value)}
+                    placeholder="https://provider.example/v1"
+                  />
+                </label>
+                {provider === 'openai-compatible' && (
+                  <label className="agent-disclosure agent-settings-field-wide">
+                    <input
+                      type="checkbox"
+                      checked={customDisclosure}
+                      onChange={(event) => setCustomDisclosure(event.target.checked)}
+                    />{' '}
+                    I understand the custom provider receives the context I send
+                  </label>
+                )}
+                <label className="agent-settings-field-wide">
+                  API key
+                  <input
+                    ref={keyRef}
+                    type="password"
+                    autoComplete="off"
+                    placeholder="Entered once for this session"
+                  />
+                </label>
+              </div>
+              <div className="agent-settings-actions">
+                <button
+                  type="button"
+                  className="agent-settings-done"
+                  onClick={() => void connect()}
+                  disabled={working}
+                >
+                  {working
+                    ? 'Connecting…'
+                    : connectionStatus === undefined
+                      ? 'Connect model'
+                      : 'Test & use'}
+                </button>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={clear}
+                  disabled={working || connectionStatus === undefined}
+                >
+                  Clear connection
+                </button>
+              </div>
             </div>
           </section>
           <section>
-            <h3>Editing policy & budgets</h3>
+            <div className="agent-settings-section-heading">
+              <div>
+                <span className="agent-settings-kicker">Behavior</span>
+                <h3>Editing policy &amp; budgets</h3>
+              </div>
+            </div>
             <label>
               Execution mode
               <select
@@ -264,7 +290,17 @@ export function JoyAgentSettingsDialog({
             </label>
           </section>
           <section>
-            <h3>Live work</h3>
+            <div className="agent-settings-section-heading">
+              <div>
+                <span className="agent-settings-kicker">Live experience</span>
+                <h3>Keep work visible</h3>
+              </div>
+              <span
+                className={`agent-settings-live-dot is-${connectionStatus?.capability ?? 'untested'}`}
+                aria-label={`Connection capability: ${connectionStatus?.capability ?? 'untested'}`}
+                role="img"
+              />
+            </div>
             <label className="agent-toggle">
               <input
                 type="checkbox"
@@ -276,39 +312,46 @@ export function JoyAgentSettingsDialog({
             <p className="agent-settings-hint">
               Follow agent is off by default and stays in memory for this session.
             </p>
-            <div className="agent-settings-readonly" aria-label="Agent executor">
-              <span>Executor</span>
-              <strong>Built-in browser Worker</strong>
-              <small>
-                One page-session engine. No external editor agent or local model process is used.
-              </small>
-            </div>
           </section>
-          <section className="agent-settings-permissions">
-            <h3>Capabilities</h3>
-            <div className="agent-capability-grid">
-              {ALL_TOOL_CAPABILITIES.map((capability) => (
-                <label key={capability}>
-                  <input
-                    type="checkbox"
-                    checked={policy.allowedCapabilities.includes(capability)}
-                    onChange={() =>
-                      update(
-                        'allowedCapabilities',
-                        policy.allowedCapabilities.includes(capability)
-                          ? policy.allowedCapabilities.filter((item) => item !== capability)
-                          : ([
-                              ...policy.allowedCapabilities,
-                              capability,
-                            ] as readonly ToolCapability[]),
-                      )
-                    }
-                  />
-                  {capability}
-                </label>
-              ))}
+          <details className="agent-settings-permissions" aria-label="Advanced permissions">
+            <summary>
+              <span>
+                <span className="agent-settings-kicker">Advanced</span>
+                <strong>Permissions</strong>
+              </span>
+              <span className="agent-settings-permissions-count">
+                {policy.allowedCapabilities.length} enabled
+              </span>
+            </summary>
+            <div className="agent-settings-permissions-body">
+              <p className="agent-settings-hint">
+                These capabilities control what JOY may inspect or stage. Changes apply to this
+                browser only.
+              </p>
+              <div className="agent-capability-grid">
+                {ALL_TOOL_CAPABILITIES.map((capability) => (
+                  <label key={capability}>
+                    <input
+                      type="checkbox"
+                      checked={policy.allowedCapabilities.includes(capability)}
+                      onChange={() =>
+                        update(
+                          'allowedCapabilities',
+                          policy.allowedCapabilities.includes(capability)
+                            ? policy.allowedCapabilities.filter((item) => item !== capability)
+                            : ([
+                                ...policy.allowedCapabilities,
+                                capability,
+                              ] as readonly ToolCapability[]),
+                        )
+                      }
+                    />
+                    {capability}
+                  </label>
+                ))}
+              </div>
             </div>
-          </section>
+          </details>
         </div>
         <footer>
           <span>Editing policy is saved in this browser. Connection details are session-only.</span>

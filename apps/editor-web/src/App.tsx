@@ -1615,13 +1615,19 @@ function EditorWorkspace({
     state.selectedIds,
   ]);
   const creativeBriefRunner = useCallback(
-    (requestText: string) =>
-      runCreativeBriefTask({
+    (requestText: string) => {
+      if (agentPolicy.privacyMode === 'local-only')
+        return Promise.reject(
+          new Error('Remote JOY Agent processing is disabled by the Local only privacy policy.'),
+        );
+      return runCreativeBriefTask({
         client: joyAgentEngineClientRef.current!,
         projectId: session.visualProject.id,
         revisionId: session.projectRevisionId,
         request: requestText,
         context: creativeBriefContext,
+        allowRemote: true,
+        onRunStart: (runId) => appAgentPresenceStore.beginRun(runId, session.historyCursorSequence),
         onEvent: (event) => {
           const terminal =
             event.phase === 'completed' || event.phase === 'failed' || event.phase === 'cancelled';
@@ -1634,7 +1640,7 @@ function EditorWorkspace({
             kind: terminal ? event.phase : event.phase === 'planning' ? 'preview' : 'activity',
             phase: event.phase,
             ...(event.errorCode === undefined ? {} : { errorCode: event.errorCode }),
-            targets: [{ panelId: 'agent', sectionId: 'brief' }],
+            targets: [{ panelId: 'agent', sectionId: 'composer', capability: 'creative-brief' }],
             ...(event.phase === 'planning'
               ? {
                   preview: {
@@ -1646,8 +1652,10 @@ function EditorWorkspace({
               : {}),
           });
         },
-      }),
+      });
+    },
     [
+      agentPolicy.privacyMode,
       creativeBriefContext,
       session.historyCursorSequence,
       session.projectRevisionId,
@@ -4603,12 +4611,16 @@ function EditorWorkspace({
   const cancelExport = useCallback(() => {
     exportAbortRef.current?.abort();
   }, []);
-  const issueAgentPanelCommand = useCallback((type: AgentPanelCommandType) => {
-    setAgentPanelCommand((current) => ({
-      serial: (current?.serial ?? 0) + 1,
-      type,
-    }));
-  }, []);
+  const issueAgentPanelCommand = useCallback(
+    (type: AgentPanelCommandType, capability?: 'edit' | 'creative-brief') => {
+      setAgentPanelCommand((current) => ({
+        serial: (current?.serial ?? 0) + 1,
+        type,
+        ...(capability === undefined ? {} : { capability }),
+      }));
+    },
+    [],
+  );
   const runMenuAction = useCallback(
     (id: AppMenuActionId) => {
       const panelId = panelIdFromMenuAction(id);
@@ -6536,6 +6548,9 @@ function EditorWorkspace({
                     ? undefined
                     : featureActivationRoute(target.sectionId);
                 activatePanel(routed?.toolId ?? target.panelId);
+                if (target.panelId === 'agent' && target.capability !== undefined) {
+                  issueAgentPanelCommand('select-capability', target.capability);
+                }
               }}
               onStop={() => issueAgentPanelCommand('stop')}
             />
