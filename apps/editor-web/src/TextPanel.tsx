@@ -7,8 +7,10 @@ import type {
   VisualObjectV1,
 } from '@joy-media/project-schema';
 import {
-  CONTENT_FONT_FAMILIES,
+  CONTENT_FONT_CATALOG,
   DEFAULT_TEXT_STYLE_V1,
+  canonicalizeContentFontFamily,
+  resolveContentFontFamily,
   textDocumentToString,
 } from '@joy-media/project-schema';
 import { PanelShell } from './PanelShell.js';
@@ -18,6 +20,7 @@ import { resolveObjectIdForSelection } from './sticker-bindings.js';
 import { TEXT_TEMPLATES, type TextTemplateV1 } from './text-template-catalog.js';
 import { insertTextTemplate } from './text-template-transaction.js';
 import type { EditorSession } from './editor-session.js';
+import { getPageFontCatalogSession, type FontCatalogEntry } from './font-catalog.js';
 
 type TextTab = 'templates' | 'edit';
 type TextCategory = 'All' | TextTemplateV1['category'];
@@ -157,7 +160,7 @@ function TemplatePreview({ template }: { readonly template: TextTemplateV1 }) {
       style={{
         color: fill.kind === 'solid' ? fill.color : fill.stops[0]?.color,
         backgroundImage: background,
-        fontFamily: template.style.fontFamily,
+        fontFamily: resolveContentFontFamily(template.style.fontFamily),
         fontSize: `${Math.max(0.68, Math.min(1.2, template.style.fontSizePx / 96))}rem`,
         fontStyle: template.style.italic ? 'italic' : 'normal',
         fontWeight: template.style.fontWeight,
@@ -190,7 +193,50 @@ function TextEditor({
   );
   const style = object.textStyle ?? DEFAULT_TEXT_STYLE_V1;
   const [draftText, setDraftText] = useState(textDocumentToString(document));
+  const fontCatalogSession = useMemo(() => getPageFontCatalogSession(), []);
+  const [fontCatalogKey, setFontCatalogKey] = useState('');
+  const [fontCatalogEntries, setFontCatalogEntries] = useState<readonly FontCatalogEntry[]>(
+    () => fontCatalogSession.localEntries,
+  );
+  const [fontCatalogBusy, setFontCatalogBusy] = useState(false);
+  const [fontCatalogStatus, setFontCatalogStatus] = useState('');
+  const bundledFontCount = fontCatalogEntries.filter((entry) => entry.bundled).length;
+  const discoveredFontEntries = fontCatalogEntries.slice(fontCatalogSession.localEntries.length);
   useEffect(() => setDraftText(textDocumentToString(document)), [document]);
+  useEffect(() => {
+    if (fontCatalogSession.hasGoogleApiKey()) {
+      setFontCatalogStatus('Google Fonts key is active for this page session.');
+    }
+  }, [fontCatalogSession]);
+
+  const discoverFontCatalog = async (): Promise<void> => {
+    // Keep a previously entered page-session key when a panel remounts. The
+    // only way to remove it is the explicit Clear action below.
+    if (fontCatalogKey.trim().length > 0) fontCatalogSession.setGoogleApiKey(fontCatalogKey);
+    setFontCatalogBusy(true);
+    setFontCatalogStatus('Discovering Google Fonts metadata…');
+    try {
+      const entries = await fontCatalogSession.discoverGoogleFonts();
+      setFontCatalogEntries(entries);
+      const remoteCount = entries.length - fontCatalogSession.localEntries.length;
+      setFontCatalogStatus(
+        remoteCount > 0
+          ? `${remoteCount} metadata families found. Only bundled families can be applied safely.`
+          : 'Local catalog ready. Add a Google Fonts key to discover metadata.',
+      );
+    } catch {
+      setFontCatalogStatus('Catalog discovery failed. Check the key or try again.');
+    } finally {
+      setFontCatalogBusy(false);
+    }
+  };
+
+  const clearFontCatalogKey = (): void => {
+    fontCatalogSession.clearGoogleApiKey();
+    setFontCatalogKey('');
+    setFontCatalogEntries(fontCatalogSession.localEntries);
+    setFontCatalogStatus('Google Fonts key cleared from this page session.');
+  };
 
   const update = (patch: Partial<TextStyleV1>) =>
     onChange({ ...object, textStyle: { ...style, ...patch } });
@@ -267,11 +313,13 @@ function TextEditor({
         <label className="text-editor-row">
           <span>Font</span>
           <select
-            value={style.fontFamily}
+            value={canonicalizeContentFontFamily(style.fontFamily)}
             onChange={(event) => update({ fontFamily: event.currentTarget.value })}
           >
-            {CONTENT_FONT_FAMILIES.map((font) => (
-              <option key={font}>{font}</option>
+            {CONTENT_FONT_CATALOG.map((font) => (
+              <option key={font.family} value={font.family}>
+                {font.label} · {font.scripts}
+              </option>
             ))}
           </select>
         </label>
@@ -320,6 +368,63 @@ function TextEditor({
             <option value="rtl">RTL</option>
           </select>
         </label>
+        <details className="font-catalog-discovery">
+          <summary>Optional font catalog discovery</summary>
+          <p>
+            JOY bundles the local catalog. A Google Fonts key can discover metadata only; it stays
+            in this page session and is never saved or sent to JOY.
+          </p>
+          <label className="font-catalog-key-row">
+            <span>Google Fonts key</span>
+            <input
+              type="password"
+              value={fontCatalogKey}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => setFontCatalogKey(event.currentTarget.value)}
+              placeholder="Optional"
+            />
+          </label>
+          <div className="font-catalog-actions">
+            <button
+              type="button"
+              onClick={() => void discoverFontCatalog()}
+              disabled={fontCatalogBusy}
+            >
+              {fontCatalogBusy ? 'Discovering…' : 'Discover'}
+            </button>
+            <button type="button" onClick={clearFontCatalogKey} disabled={fontCatalogBusy}>
+              Clear
+            </button>
+          </div>
+          <span className="font-catalog-count">
+            {bundledFontCount} bundled families
+            {fontCatalogEntries.length > fontCatalogSession.localEntries.length
+              ? ` · ${fontCatalogEntries.length - fontCatalogSession.localEntries.length} metadata results`
+              : ''}
+          </span>
+          <span className="font-catalog-status" aria-live="polite">
+            {fontCatalogStatus}
+          </span>
+          {discoveredFontEntries.length > 0 && (
+            <div className="font-catalog-results" aria-label="Discovered font metadata">
+              <span>Metadata preview (not installed)</span>
+              <ul>
+                {discoveredFontEntries.slice(0, 12).map((font) => (
+                  <li key={font.family}>
+                    <strong>{font.label}</strong>
+                    <span>
+                      {font.scripts} · {font.weights}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {discoveredFontEntries.length > 12 && (
+                <small>{discoveredFontEntries.length - 12} more metadata families available.</small>
+              )}
+            </div>
+          )}
+        </details>
       </section>
       <section className="text-editor-section">
         <h4>Fill</h4>

@@ -1,6 +1,6 @@
 # JOY Media — Editor Design System
 
-Owner direction (DECISIONS.md **D-UI-GRAY**, 2026-07-23; **D-UI-FONT**, 2026-07-25): a professional, Adobe-class editing surface — icon-driven, neutral-gray, dockable panels, with **Modam Pro** for English UI type. Every panel and every new control follows this file. Source of truth for values is [app.css](apps/editor-web/src/app.css); for UI fonts, [public/assets/fonts/modam-pro/](apps/editor-web/public/assets/fonts/modam-pro/) + §4f; for toolbar/action icons, [icons.tsx](apps/editor-web/src/icons.tsx); for dockview panel-tab glyphs, [panel-tab-icons.ts](apps/editor-web/src/panel-tab-icons.ts) + PNGs under `apps/editor-web/public/assets/icons/`. If a change is needed, change it here and in those files together.
+Owner direction (DECISIONS.md **D-UI-GRAY**, 2026-07-23; **D-UI-FONT**, 2026-09-05): a professional, Adobe-class editing surface — icon-driven, neutral-gray, dockable panels, with self-hosted OFL faces for English, Persian, and Arabic. Every panel and every new control follows this file. Source of truth for values is [app.css](apps/editor-web/src/app.css); for UI fonts, Fontsource imports in `apps/editor-web/src/main.tsx` + §4f; for toolbar/action icons, [icons.tsx](apps/editor-web/src/icons.tsx); for dockview panel-tab glyphs, [panel-tab-icons.ts](apps/editor-web/src/panel-tab-icons.ts) + PNGs under `apps/editor-web/public/assets/icons/`. If a change is needed, change it here and in those files together.
 
 ## Language (binding)
 
@@ -292,28 +292,35 @@ floating in a panel.
 
 ## 4f. Typography
 
-**UI chrome face is Fontiran Modam Pro** for the English-only interface. The
-same font may render imported or user-authored multilingual content; that data
-must be preserved without adding multilingual product copy to the shell.
+**UI chrome uses self-hosted Fontsource faces**. Inter Variable handles the
+Latin-heavy editor chrome while Vazirmatn Variable and Noto Sans Arabic provide
+Persian/Arabic coverage. Noto Naskh Arabic is available for editorial text;
+the same stack may render imported or user-authored multilingual content.
 
-| Token / face            | Value                                               | Use                                                                    |
-| ----------------------- | --------------------------------------------------- | ---------------------------------------------------------------------- |
-| `--joy-font-ui`         | `'Modam Pro', Tahoma, system-ui, sans-serif`        | Root, body, buttons, inputs, selects, textareas, panel chrome          |
-| `--joy-font-mono`       | `ui-monospace, SFMono-Regular, Consolas, monospace` | Timecode, expressions, diagnostic/code wells only                      |
-| `--joy-type-2xs`        | `0.6875rem` (11px)                                  | Dense metadata, badges, IDs; the minimum normal UI text size           |
-| `--joy-type-xs`         | `0.75rem` (12px)                                    | Tabs, inputs, secondary labels                                         |
-| `--joy-type-sm`         | `0.8125rem` (13px)                                  | Panel titles and primary compact labels                                |
-| `--joy-type-md`         | `0.875rem` (14px)                                   | Dialog headings and emphasized controls                                |
-| `'Modam Pro Condensed'` | Optional condensed weights in `modam-pro.css`       | Dense labels only when explicitly requested — not the default UI stack |
+| Token / face         | Value                                                                                                    | Use                                                           |
+| -------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `--joy-font-ui`      | `'Inter Variable', 'Vazirmatn Variable', 'Noto Sans Arabic', Tahoma, system-ui, sans-serif`              | Root, body, buttons, inputs, selects, textareas, panel chrome |
+| `--joy-font-content` | `'Vazirmatn Variable', 'Noto Sans Arabic', 'Noto Naskh Arabic', 'Inter Variable', system-ui, sans-serif` | Text objects, captions, and content previews                  |
+| `--joy-font-mono`    | `ui-monospace, SFMono-Regular, Consolas, monospace`                                                      | Timecode, expressions, diagnostic/code wells only             |
+| `--joy-type-2xs`     | `0.6875rem` (11px)                                                                                       | Dense metadata, badges, IDs; the minimum normal UI text size  |
+| `--joy-type-xs`      | `0.75rem` (12px)                                                                                         | Tabs, inputs, secondary labels                                |
+| `--joy-type-sm`      | `0.8125rem` (13px)                                                                                       | Panel titles and primary compact labels                       |
+| `--joy-type-md`      | `0.875rem` (14px)                                                                                        | Dialog headings and emphasized controls                       |
+| `Inter Variable`     | Fontsource variable weight 100–900                                                                       | Latin-heavy UI labels and title templates                     |
+| `Vazirmatn Variable` | Fontsource variable weight 100–900                                                                       | Persian / Arabic content and UI fallback                      |
+| `Noto Naskh Arabic`  | Fontsource weights 400–700                                                                               | Editorial Arabic/Persian content                              |
 
 Text below 11px is reserved for non-textual diagram annotations inside a fixed SVG. It is not permitted for buttons, metadata, empty states, timeline labels, or studio controls.
 
-- Source files: [`apps/editor-web/public/assets/fonts/modam-pro/`](apps/editor-web/public/assets/fonts/modam-pro/) (`modam-pro.css` + WOFF2/WOFF). Preload Regular in [`index.html`](apps/editor-web/index.html); stack is applied in [`app.css`](apps/editor-web/src/app.css) `:root`.
+- Font files are bundled from pinned Fontsource packages via imports in
+  [`main.tsx`](apps/editor-web/src/main.tsx); no CDN or font API key is needed.
 - Persian explainer copy follows §4d: centered, layout-neutral, and tagged
-  `lang="fa"` so Modam Pro is applied without changing panel direction.
-- **Do not** use Inter, Roboto, Arial, Segoe UI, or Helvetica as the editor UI family.
-- **HTML scene packages** (ADR-0006) keep package-local / system faces declared in each scene `source` for deterministic goldens — they are not the editor UI stack. Do not load Modam over the network inside a sandboxed scene.
-- License: Fontiran Modam Pro (commercial). See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+  `lang="fa"` so the Arabic-capable stack is selected without changing panel direction.
+- The content catalog in [`content-fonts.ts`](packages/project-schema/src/content-fonts.ts)
+  keeps retired project identifiers as aliases and resolves them to open faces.
+- **HTML scene packages** (ADR-0006) keep package-local / system faces declared in each scene `source` for deterministic goldens — they are not the editor UI stack. Do not load webfonts over the network inside a sandboxed scene.
+- Licenses: Fontsource font packages are OFL-1.1. See
+  [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ## 5. Accessibility non-negotiables
 

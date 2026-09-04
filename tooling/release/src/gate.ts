@@ -3,6 +3,10 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { extname, join, posix, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// This gate is executed directly by Node's TypeScript strip-types loader.
+// Keep the explicit .ts extension so the release command works from a clean
+// checkout where no compiled font-assets.js sibling exists yet.
+import { scanFontAssets } from './font-assets.ts';
 
 export const REQUIRED_BUILD_IDS = ['editor', 'api', 'worker'] as const;
 export const REQUIRED_JOURNEY_ID = 'authenticated-editor-1.0' as const;
@@ -63,6 +67,8 @@ export interface ReleaseGateInput {
   readonly builds: Readonly<Record<string, boolean>>;
   /** Source-to-dist static asset checks from the clean editor build. */
   readonly staticAssetPackaging: readonly string[];
+  /** Font redistribution scan errors. Omitted only for pure unit evaluation. */
+  readonly fontAssetErrors?: readonly string[];
   readonly staticAssetInventory?: ReleaseStaticAssetInventory;
   readonly manifestGenerated: boolean;
   readonly sbomGenerated: boolean;
@@ -258,6 +264,15 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
       'static-assets',
       staticAssetInventoryReady(input) && input.staticAssetPackaging.length === 0,
       staticAssetMessage(input),
+    ),
+    check(
+      'font-assets',
+      input.fontAssetErrors === undefined || input.fontAssetErrors.length === 0,
+      input.fontAssetErrors === undefined
+        ? 'font redistribution scan not supplied to pure evaluator'
+        : input.fontAssetErrors.length === 0
+          ? 'font redistribution scan passed; no retired ownership markers or missing licenses'
+          : `font redistribution errors: ${input.fontAssetErrors.join(', ')}`,
     ),
     check(
       'manifest',
@@ -1084,6 +1099,7 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
   const sourceProvenance = workspaceSourceProvenance(root);
   const performanceEvidence = readPerformanceEvidence(root);
   const staticAssets = buildStaticAssetInventory(root);
+  const fontAssets = scanFontAssets(root);
   const artifacts = [
     'apps/editor-web/dist',
     'apps/api/dist',
@@ -1139,6 +1155,7 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     deploymentManifests: verifyDeploymentManifests(root),
     builds: buildSuccess,
     staticAssetPackaging: staticAssets.errors,
+    fontAssetErrors: fontAssets.errors,
     staticAssetInventory: staticAssets.inventory,
     manifestGenerated: true,
     sbomGenerated: true,

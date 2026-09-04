@@ -1,3 +1,5 @@
+import { resolveContentFontFamily } from '@joy-media/project-schema';
+
 export interface FontReadinessPlatform {
   readonly check: (family: string) => boolean;
   readonly ready: Promise<unknown>;
@@ -17,7 +19,13 @@ export async function waitForContentFonts(
   families: readonly string[],
   options: { readonly timeoutMs?: number; readonly platform?: FontReadinessPlatform } = {},
 ): Promise<void> {
-  const unique = [...new Set(families.filter((family) => family.trim().length > 0))];
+  const unique = [
+    ...new Set(
+      families
+        .filter((family) => family.trim().length > 0)
+        .map((family) => resolveContentFontFamily(family)),
+    ),
+  ];
   if (unique.length === 0) return;
   const platform = options.platform ?? resolvePlatform();
   const timeoutMs = options.timeoutMs ?? 3_000;

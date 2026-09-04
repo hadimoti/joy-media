@@ -124,10 +124,12 @@ export {
 } from './text-style.js';
 export type { ContentFontFamily } from './content-fonts.js';
 export {
+  CONTENT_FONT_CATALOG,
   CONTENT_FONT_FAMILIES,
   CANONICAL_CONTENT_FONT_ALIASES,
   canonicalizeContentFontFamily,
   isContentFontFamily,
+  resolveContentFontFamily,
 } from './content-fonts.js';
 export type {
   ColorAdjustments,

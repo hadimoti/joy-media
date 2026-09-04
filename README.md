@@ -8,14 +8,14 @@ Toolchain: Node ≥22, pnpm (via corepack). Run `pnpm install` then `pnpm check`
 
 ## Start here
 
-| File                                                   | What it is                                                                                                        |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| [`JOY_MEDIA_MASTER_PLAN.md`](JOY_MEDIA_MASTER_PLAN.md) | The architecture contract (v1.1, 50 sections). Read sections on demand, not linearly.                             |
-| [`ORCHESTRATION.md`](ORCHESTRATION.md)                 | **The execution front door.** Part map, dependency graph, session protocol.                                       |
-| [`STATE.md`](STATE.md)                                 | Progress ledger — which part/WP is active, what's next.                                                           |
-| [`DESIGN.md`](DESIGN.md)                               | Editor UI contract (gray Adobe-class chrome, library gate, timeline NLE, **Modam Pro** Eng/Fa/Arabic typography). |
-| [`plan/`](plan/)                                       | One file per part (P00–P10 + X01), each with work packages and exit criteria.                                     |
-| [`plan/DECISIONS.md`](plan/DECISIONS.md)               | Open product questions (§48) with working defaults and status.                                                    |
+| File                                                   | What it is                                                                                                       |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| [`JOY_MEDIA_MASTER_PLAN.md`](JOY_MEDIA_MASTER_PLAN.md) | The architecture contract (v1.1, 50 sections). Read sections on demand, not linearly.                            |
+| [`ORCHESTRATION.md`](ORCHESTRATION.md)                 | **The execution front door.** Part map, dependency graph, session protocol.                                      |
+| [`STATE.md`](STATE.md)                                 | Progress ledger — which part/WP is active, what's next.                                                          |
+| [`DESIGN.md`](DESIGN.md)                               | Editor UI contract (gray Adobe-class chrome, library gate, timeline NLE, self-hosted Fontsource OFL typography). |
+| [`plan/`](plan/)                                       | One file per part (P00–P10 + X01), each with work packages and exit criteria.                                    |
+| [`plan/DECISIONS.md`](plan/DECISIONS.md)               | Open product questions (§48) with working defaults and status.                                                   |
 
 **Editor entry (2026-07-24):** `media.joyteam.ir` boots a **Projects library** (open/create), then the Dockview editor with CapCut-style timeline tools. Live tip/deploy state is always in `STATE.md` handoff — do not trust this README for SHA freshness.
 

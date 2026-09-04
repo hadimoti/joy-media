@@ -551,6 +551,19 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(result.checks.find((check) => check.id === 'static-assets')?.status).toBe('failed');
   });
 
+  it('fails the gate when the font redistribution scan reports an error', () => {
+    const result = evaluateReleaseGate({
+      ...passingInput(),
+      fontAssetErrors: ['retired font asset present: assets/fonts/modam-pro'],
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.checks.find((check) => check.id === 'font-assets')).toMatchObject({
+      status: 'failed',
+      critical: true,
+    });
+  });
+
   it('requires byte-for-byte SVG static assets in the editor build output', () => {
     const root = mkdtempSync(join(tmpdir(), 'joy-release-static-assets-'));
     const asset = 'assets/transition-preview-frame-a.svg';

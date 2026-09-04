@@ -25,11 +25,11 @@ import {
   type AnimatablePath,
 } from './state/motionCapabilities.js';
 import { KeyframeDiamondIcon, StrokeIcon, ShadowIcon, FilterIcon } from './MsIcons.js';
-import { CONTENT_FONT_FAMILIES } from '@joy-media/project-schema';
+import { CONTENT_FONT_CATALOG, canonicalizeContentFontFamily } from '@joy-media/project-schema';
 
 /**
- * Curated content-creation fonts (fontiran pack), registered as @font-face
- * in public/assets/fonts/content-fonts.css. 'system-ui' is the fallback.
+ * Curated, self-hosted OFL content fonts are registered by the editor entry
+ * point. Legacy project font IDs are normalized before they reach the picker.
  */
 const TEXT_TRANSFORMS: readonly string[] = ['none', 'uppercase', 'lowercase', 'capitalize'];
 const TEXT_ALIGNS: readonly string[] = ['left', 'center', 'right', 'justify'];
@@ -161,6 +161,8 @@ function NumberRow({
   );
 }
 
+type SelectOption = string | { readonly value: string; readonly label: string };
+
 function SelectRow({
   label,
   value,
@@ -172,7 +174,7 @@ function SelectRow({
 }: {
   readonly label: string;
   readonly value: string;
-  readonly options: readonly string[];
+  readonly options: readonly SelectOption[];
   readonly onChange: (v: string) => void;
   readonly diamond?: boolean;
   readonly keyframeActive?: boolean;
@@ -198,11 +200,14 @@ function SelectRow({
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >
-        {options.map((opt) => (
-          <option key={opt} value={opt}>
-            {opt}
-          </option>
-        ))}
+        {options.map((opt) => {
+          const option = typeof opt === 'string' ? { value: opt, label: opt } : opt;
+          return (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          );
+        })}
       </select>
     </div>
   );
@@ -495,7 +500,9 @@ function TextSection({
   readonly keyframes: KeyframeControls | undefined;
 }) {
   const texts = selected.map((l) => l.text ?? '');
-  const fontFamilies = selected.map((l) => l.typography?.fontFamily ?? 'system-ui');
+  const fontFamilies = selected.map((l) =>
+    canonicalizeContentFontFamily(l.typography?.fontFamily ?? 'system-ui'),
+  );
   const fontSizes = selected.map((l) => l.typography?.fontSize ?? 48);
   const lineHeights = selected.map((l) => l.typography?.lineHeight ?? 1.2);
   const letterSpacings = selected.map((l) => l.typography?.letterSpacing ?? 0);
@@ -540,7 +547,10 @@ function TextSection({
         <SelectRow
           label="Font Family"
           value={mixedString(fontFamilies)}
-          options={CONTENT_FONT_FAMILIES}
+          options={CONTENT_FONT_CATALOG.map((font) => ({
+            value: font.family,
+            label: `${font.label} · ${font.scripts}`,
+          }))}
           onChange={(v) => updateTypography({ fontFamily: v })}
         />
         <NumberRow

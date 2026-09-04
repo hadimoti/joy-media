@@ -14,11 +14,11 @@ export interface MediaMailerLike {
 
 const JOY_STUDIO_LOGO_URL = 'https://joyst.ir/assets/JoyCodeNew_256x256.png';
 
-function joyStudioOtpHtml(code: string): string {
+export function joyStudioOtpHtml(code: string): string {
   return `<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background:#000000;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
-         style="background:#000000;padding:40px 16px;font-family:'Modam Pro',Tahoma,system-ui,sans-serif;">
+         style="background:#000000;padding:40px 16px;font-family:Tahoma,Arial,system-ui,sans-serif;">
     <tr><td align="center">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
              style="max-width:420px;background:#252525;border:1px solid #3a3a3a;

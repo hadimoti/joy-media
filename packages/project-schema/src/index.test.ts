@@ -7,7 +7,7 @@ describe('@joy-media/project-schema scaffold', () => {
   });
 
   it('exports canonical content font helpers', () => {
-    expect(CONTENT_FONT_FAMILIES).toContain('YekanBakh');
-    expect(canonicalizeContentFontFamily('Yekan Bakh')).toBe('YekanBakh');
+    expect(CONTENT_FONT_FAMILIES).toContain('Vazirmatn Variable');
+    expect(canonicalizeContentFontFamily('Yekan Bakh')).toBe('Vazirmatn Variable');
   });
 });

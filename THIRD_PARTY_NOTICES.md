@@ -13,28 +13,34 @@ source code is released under the MIT License in [`LICENSE`](LICENSE).
   adapter used for session-only BYOK transport
 - `zod` 4.1.8 — MIT; runtime schema validation for agent boundaries
 
-## Fontiran Modam Pro
+## Self-hosted editor fonts
 
-- Product: [Modam Pro](https://modam.pro/) (Fontiran commercial webfont)
-- Use: JOY Media editor UI chrome for English / Persian / Arabic (`Modam Pro` + optional Condensed weights)
-- Files: `apps/editor-web/public/assets/fonts/modam-pro/`
-- Shared with JOY Agent on this VPS (`/opt/joy-wg-bot/webapp/assets/fonts/modam-pro/`)
-- License: Fontiran commercial license held by the JOY deployment — do not redistribute outside this product without confirming the license terms
+The editor ships the following Fontsource packages at pinned versions in
+`apps/editor-web/package.json`. Each package is licensed under the SIL Open
+Font License 1.1 (OFL-1.1), and the package's `LICENSE` file remains available
+in the installed dependency for audit and release attribution:
 
-## Fontiran content-creation font pack (18 families)
+- `@fontsource-variable/inter` 5.2.6 — Inter Variable, Latin / Greek / Cyrillic
+- `@fontsource-variable/vazirmatn` 5.2.6 — Vazirmatn Variable, Persian / Arabic / Latin
+- `@fontsource/noto-sans-arabic` 5.2.6 — Noto Sans Arabic, Arabic / Persian / Latin
+- `@fontsource/noto-naskh-arabic` 5.2.6 — Noto Naskh Arabic, Arabic / Persian / Latin
 
-- Source: Fontiran bulk font pack, same vendor/collection as Modam Pro above
-- Use: JOY Media text-object content fonts, selectable via the Motion Studio
-  "Font Family" picker (`apps/editor-web/src/motion-studio/MotionStudioInspector.tsx`)
-- Files: `apps/editor-web/public/assets/fonts/{yekanbakh,vazin,tajrid,pulad,damoon,
-bon,bonyadekoodak,shoor,aviny,katibeh,tahrir,stencil-898,radio,falsafeh,edameh,
-paradox,gramophone,emkan-inline}/`, aggregated by `content-fonts.css`
-- Families: YekanBakh, Vazin, Tajrid, Pulad, Damoon Pro, Bon, Bonyade Koodak,
-  Shoor Pro, Aviny, Katibeh, Tahrir, 898 Stencil, Radio, Falsafeh, Edameh Pro,
-  Paradox, Gramophone, Emkan Inline
-- License: same Fontiran commercial pack as Modam Pro — license terms have
-  **not** been individually confirmed per family; do not redistribute outside
-  this product without confirming terms for each
+The CSS is imported by `apps/editor-web/src/main.tsx`, so font files are
+bundled into the application build rather than fetched from a CDN. The
+complete license text and release attribution are shipped in
+`apps/editor-web/public/licenses/fonts/OFL-1.1.txt` and
+`apps/editor-web/public/licenses/fonts/FONT-ATTRIBUTIONS.md`. The catalog
+metadata and compatibility aliases are code-owned in
+`packages/project-schema/src/content-fonts.ts`.
+
+Projects written before the migration may still contain retired Fontiran
+family identifiers. They are treated as compatibility aliases and resolved to
+the open local faces at render/export time; no retired font binaries ship in
+the editor.
+
+The former `apps/editor-web/public/fonts/` login-gate files were removed. The
+login gate now uses the same bundled Fontsource Inter/Vazirmatn stack as the
+editor, so there are no separate unverified font binaries in the artifact.
 
 ## gl-transitions
 

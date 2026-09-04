@@ -11,7 +11,7 @@ technical identifiers in English. It presents supporting copy in Persian:
 - search, composer, and other instructional placeholders.
 
 Persian copy must carry `lang="fa"` when rendered as its own element. The
-shared editor style applies Modam Pro, centered alignment, and
+shared editor style applies the bundled Vazirmatn/Noto Arabic stack, centered alignment, and
 `unicode-bidi: plaintext`. Do not force `dir="rtl"` or `dir="ltr"` on these
 blocks; direction overrides can alter otherwise neutral flex/grid layouts.
 Use `<bdi>` or `<code>` for filenames, ids, API names, and other technical

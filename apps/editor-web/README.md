@@ -7,7 +7,7 @@
 
 **Visible copy.** Panel titles and controls remain English. Explanatory copy,
 guidance, empty states, live status, and placeholders are Persian and use
-`lang="fa"`. They are centered with Modam Pro and must not set an explicit RTL
+`lang="fa"`. They are centered with the bundled Vazirmatn/Noto Arabic stack and must not set an explicit RTL
 or LTR direction; isolate inline technical tokens with `<bdi>` or `<code>`.
 See [`DESIGN.md`](../../DESIGN.md) §4d–§4f. The visible shell lockup reads
 **JOY Studio**; repository, API, storage, package, and domain identifiers remain

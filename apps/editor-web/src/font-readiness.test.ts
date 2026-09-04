@@ -14,7 +14,7 @@ describe('content font readiness', () => {
         ready: Promise.resolve(),
       },
     });
-    expect(checked).toEqual(['YekanBakh', 'Vazin']);
+    expect(checked).toEqual(['Vazirmatn Variable']);
   });
 
   it('fails with a bounded typed error when a family is unavailable', async () => {

@@ -1,5 +1,12 @@
 # Next agent: creative HTML scene effects (image + multi-part text)
 
+> **Current runtime note (2026-09-05):** This dated scene-authoring brief is
+> still valid for HTML scene work, but its historical deployment URL is not
+> the product source of truth. The active editor is `https://joyst.ir/` and
+> uses the self-hosted Fontsource OFL stack; scenes must continue to use their
+> declared package-local/system faces for deterministic rendering and must not
+> load remote web fonts.
+
 **Date:** 2026-07-28  
 **Goal:** Author modern, creative first-party **HTML scene** overlays that place an **image beside 2–3 text parts** (headline / subhead / meta), animate on `ctx.progress`, and ship in the Motion panel **Scenes** catalog.
 
@@ -84,7 +91,7 @@ Design **new first-party HTML scenes** that feel modern and editorial — CapCut
    - Full-bleed image with text stack on a gradient veil (chapter / product reveal)
    - Split diagonal: image + three stacked lines with accent bar
 
-Avoid default AI-looking purple gradients and generic Inter/Roboto stacks inside scenes; use system stacks already used in the catalog (Helvetica / Georgia / Tahoma) or inline SVG geometry. Editor UI uses Modam Pro — **scenes must not** load Modam over the network (ADR-0006 / DESIGN.md § fonts).
+Avoid default AI-looking purple gradients and generic Inter/Roboto stacks inside scenes; use system stacks already used in the catalog (Helvetica / Georgia / Tahoma) or inline SVG geometry. The editor UI uses its bundled OFL Fontsource stack; **scenes must not** load editor fonts or any webfont over the network (ADR-0006 / DESIGN.md § fonts).
 
 ---
 

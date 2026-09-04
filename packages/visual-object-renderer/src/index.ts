@@ -22,6 +22,7 @@ import type {
   VisualObjectTransformV1,
   VisualObjectV1,
 } from '@joy-media/project-schema';
+import { resolveContentFontFamily } from '@joy-media/project-schema';
 import type {
   RenderNode,
   RenderFrameIR,
@@ -174,7 +175,9 @@ export function visualObjectToRenderNode(
       ...(style?.align === 'start' || style?.align === 'center' || style?.align === 'end'
         ? { align: style.align === 'start' ? 'left' : style.align === 'end' ? 'right' : 'center' }
         : {}),
-      ...(style?.fontFamily === undefined ? {} : { fontFamily: style.fontFamily }),
+      ...(style?.fontFamily === undefined
+        ? {}
+        : { fontFamily: resolveContentFontFamily(style.fontFamily) }),
       ...(style?.fontSizePx === undefined ? {} : { fontSizePx: style.fontSizePx }),
       ...(style?.fontWeight === undefined ? {} : { fontWeight: style.fontWeight }),
       ...(style?.italic === undefined ? {} : { italic: style.italic }),
@@ -594,7 +597,9 @@ function textDocumentSpans(document: TextDocumentV1, baseStyle?: TextStyleV1): r
         text: run.text,
         color: parseTextColor(runColor),
         ...(run.style?.highlightColor === undefined ? {} : { emphasis: true }),
-        ...(run.style?.fontFamily === undefined ? {} : { fontFamily: run.style.fontFamily }),
+        ...(run.style?.fontFamily === undefined
+          ? {}
+          : { fontFamily: resolveContentFontFamily(run.style.fontFamily) }),
         ...(run.style?.fontSizePx === undefined ? {} : { fontSizePx: run.style.fontSizePx }),
         ...(run.style?.fontWeight === undefined ? {} : { fontWeight: run.style.fontWeight }),
         ...(run.style?.italic === undefined ? {} : { italic: run.style.italic }),

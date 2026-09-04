@@ -7,7 +7,7 @@
 
 **First built in part:** P01+. Do not scaffold code here before that part is marked active in [`STATE.md`](../../STATE.md).
 
-**UI typography (2026-07-25):** editor Eng/Fa/Arabic chrome uses Fontiran **Modam Pro** — see [`DESIGN.md`](../../DESIGN.md) §4f and decision **D-UI-FONT** in [`plan/DECISIONS.md`](../../plan/DECISIONS.md). License note: [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md).
+**UI typography (2026-09-05):** editor Eng/Fa/Arabic chrome uses pinned, self-hosted Fontsource OFL faces — see [`DESIGN.md`](../../DESIGN.md) §4f and decision **D-UI-FONT** in [`plan/DECISIONS.md`](../../plan/DECISIONS.md). License note: [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md).
 
 **UI copy policy (2026-07-27):** visible titles and controls stay English;
 explainers, guidance, empty states, live status, and placeholders are Persian.

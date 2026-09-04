@@ -516,14 +516,14 @@ uses exactly one visible engine path.
 
 ## Open-source release boundary
 
-The repository currently has third-party notices but no top-level open-source
-license, and its Fontiran assets are documented as commercially licensed and
-not cleared for redistribution. The app must not be advertised as
+At the time this design was written, the repository's Fontiran assets were
+documented as commercially licensed and not cleared for redistribution. The
+2026-09-05 font migration removed those runtime assets and replaced them with
+the pinned OFL-1.1 Fontsource set. The app must not be advertised as
 redistributable open source until:
 
 - an owner/legal-approved OSI license is added;
-- proprietary font/assets are removed from the public distribution or replaced
-  with redistribution-safe alternatives;
+- all remaining third-party font/assets are independently reviewed;
 - AI SDK and all new dependencies appear in the SBOM/notices;
 - production dependency audit and license checks pass.
 

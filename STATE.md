@@ -45,9 +45,28 @@ the editor production build, `pnpm verify:joy-agent-worker`, and
 security/live-UI suites pass 63/63 times across desktop-primary, compact,
 minimum, 1280, 1440, 1581, and 1920 viewport projects. The verified Worker
 bundle is 8,869 raw bytes / 3,387 gzip bytes. Public redistribution remains
-gated only for the bundled Fontiran assets: the repository code now has an MIT
-`LICENSE`, but the Fontiran font/asset pack is still explicitly
-non-redistributable until its commercial terms are confirmed.
+gated pending owner/legal review of the complete asset set: the repository code now has an MIT
+`LICENSE`; the former Fontiran editor and login-gate assets have been removed.
+Pinned Fontsource OFL faces and license/attribution files now ship with the
+editor. The overall Fontiran gate remains open until release evidence and
+owner/legal review are accepted.
+
+## Open-font redistribution migration (2026-09-05)
+
+The editor no longer ships the former commercial login or content font
+binaries. UI and content typography use four pinned Fontsource packages under
+OFL-1.1, with `system-ui` explicitly treated as an operating-system fallback
+rather than a bundled face. Noto Arabic/Naskh Arabic imports are limited to
+the checked-in Arabic, Latin, and Latin Extended subsets. The Text panel's
+local catalog works without a key; optional Google Fonts Developer API
+discovery is metadata-only, bounded, and held in page memory for the current
+session only. The release gate scans source, generated runtime, and shipped
+font surfaces and requires the public OFL license/attribution manifest.
+
+This migration is conditional and not a legal clearance: the overall Fontiran
+redistribution gate remains open pending owner/legal review of the complete
+artifact. Historical aliases remain only to migrate existing projects and are
+resolved to the open local faces at render/export time.
 
 ## Built-in JOY Agent Engine deployment (2026-09-04 UTC)
 
@@ -601,7 +620,7 @@ none of this is visible to users yet; that switch is the owner's call.
 
 **Pro-tools:** Phases 0–6 + **P14.0–P14.7 complete**. **P15** stickers: [`plan/P15-sticker-overlays.md`](plan/P15-sticker-overlays.md). **P16** gl-transitions + HTML scene pack: [`plan/P16-oss-transitions-html-scenes.md`](plan/P16-oss-transitions-html-scenes.md).
 
-**Read this first.** UI: [`DESIGN.md`](DESIGN.md) (incl. **§4f Typography — Modam Pro**). Decisions: **D-UI-LIBRARY** / **D-UI-TIMELINE-NLE** / **D-UI-ICON-GUIDES** / **D-UI-FONT** / **D-P14-HERMES** in [`plan/DECISIONS.md`](plan/DECISIONS.md). Provider residuals: [`plan/WP-23-live-provider-residuals.md`](plan/WP-23-live-provider-residuals.md).
+**Read this first.** UI: [`DESIGN.md`](DESIGN.md) (incl. **§4f Typography — self-hosted Fontsource OFL faces**). Decisions: **D-UI-LIBRARY** / **D-UI-TIMELINE-NLE** / **D-UI-ICON-GUIDES** / **D-UI-FONT** / **D-P14-HERMES** in [`plan/DECISIONS.md`](plan/DECISIONS.md). Provider residuals: [`plan/WP-23-live-provider-residuals.md`](plan/WP-23-live-provider-residuals.md).
 
 ### Editor UX on tip
 
@@ -611,7 +630,7 @@ none of this is visible to users yet; that switch is the owner's call.
 4. **P14 closed** — mixer→preview/export; spatial paths; transitions (junction-timed); FX/grade in Pixi; honest workflow ports; caption burn-in.
 5. **P15 stickers** — Assets **Add as sticker** (OPFS image → visual object + clip bind); real alpha pixels in Monitor/export; crop in Inspector; RemBG button gated on `image.comfy` Worker.
 6. **P16** — real A↔B gl-transitions; 15 first-party HTML scenes with live 9:16 focused previews in Motion.
-7. **Typography** — editor UI Eng/Fa/Arabic uses **Fontiran Modam Pro** (`public/assets/fonts/modam-pro/`); see DESIGN.md §4f.
+7. **Typography** — editor UI Eng/Fa/Arabic uses bundled Fontsource OFL faces (Inter/Vazirmatn/Noto Arabic); see DESIGN.md §4f.
 
 ### Where things live
 

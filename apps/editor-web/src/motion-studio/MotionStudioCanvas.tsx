@@ -16,6 +16,7 @@ import {
 import { JOY_COLORS } from '../theme.js';
 import { TrashIcon, DuplicateIcon, LayersIcon, UnlockIcon, LockIcon } from '../icons.js';
 import type { SceneCommand } from './state/sceneCommands.js';
+import { resolveMotionStudioFontFamily } from './font-family.js';
 
 interface LayerElementProps {
   readonly layer: MotionLayer;
@@ -158,7 +159,7 @@ function LayerElement({
             alignItems: 'flex-start',
             justifyContent: 'flex-start',
             color: layer.fills[0] ? fillToCSS(layer.fills[0]) : '#ffffff',
-            fontFamily: layer.typography?.fontFamily ?? 'system-ui',
+            fontFamily: resolveMotionStudioFontFamily(layer.typography?.fontFamily),
             fontSize: layer.typography?.fontSize ?? 40,
             fontWeight: layer.typography?.fontWeight ?? 400,
             lineHeight: layer.typography?.lineHeight ?? 1.2,

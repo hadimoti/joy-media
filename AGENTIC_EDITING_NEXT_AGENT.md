@@ -1,5 +1,12 @@
 # JOY Media Agentic Editing — Next-Agent Handoff
 
+> **Superseded current-state note (2026-09-05):** This handoff preserves the
+> historical agentic milestones below for provenance. The active product uses
+> the built-in JOY Agent Engine on `https://joyst.ir/`, with session-only BYOK
+> and no KiloCode/code-server or local DSH editing host. Editor typography now
+> uses the pinned self-hosted Fontsource OFL stack; `system-ui` is a platform
+> fallback only. See the current checkpoint in [`STATE.md`](STATE.md).
+
 Date: 2026-07-27
 Local machine: Hadi's Windows PC
 Authoritative local checkout: `C:\Users\HadiMoti\joy-media`
@@ -51,7 +58,7 @@ RSA:     SHA256:w4W3qHqP6UXlfHPA4hotJWOrYT+dDv+07iDo5o/Mhmk
 If the host fingerprint changes, stop. Do not accept a replacement until Hadi
 has confirmed the rebuild or key rotation.
 
-## Current production state
+## Historical production state (superseded)
 
 - Public editor: `https://media.joyteam.ir`
 - Live application commit: `b3d7787`
@@ -130,14 +137,14 @@ Production was verified after deployment:
     left edge, keeps Cloud, View, and Search at the right edge, and preserves
     the Assets title at the exact panel center. Production browser measurement
     confirmed the header and title centers match within subpixel precision.
-20. User-facing explainers, guidance, empty states, live status, and
-    instructional placeholders are Persian in Modam Pro. They use centered,
-    layout-neutral `lang="fa"` styling without forced RTL/LTR direction;
-    titles and controls stay English. The two visible header lockups read
-    **JOY Studio** only—JOY Media infrastructure and identifiers are unchanged.
-    Production browser QA verified the new JS/CSS hashes, `JOY Studio`, centered
-    Modam Pro computed styles, `unicode-bidi: plaintext`, and zero Persian
-    explainer elements with a forced `dir`.
+20. Historical (pre-open-font migration): user-facing explainers, guidance,
+    empty states, live status, and instructional placeholders used the former
+    commercial UI face. The current editor uses the bundled OFL Fontsource
+    stack (`Vazirmatn Variable`, `Noto Sans Arabic`, `Noto Naskh Arabic`, and
+    `Inter Variable`) with `system-ui` as a platform fallback. Keep Persian
+    copy layout-neutral (`lang="fa"`) without forcing RTL/LTR direction; titles
+    and controls stay English. The two visible header lockups read **JOY
+    Studio** only—JOY Media infrastructure and identifiers are unchanged.
 21. The rebuilt identity boundary is active with a newly generated 3072-bit
     RSA signer at `/etc/joy-wg-bot/identity/joy-media-rs256.pem` (mode 0600);
     no key from the compromised host was reused. `/etc/joy-media/api.env` and
@@ -151,7 +158,7 @@ An already-open browser tab may retain the prior `index.html`. Reload normally,
 or use `https://media.joyteam.ir/?deploy=b3d7787` once to force a fresh HTML
 request. The asset name is content-hashed.
 
-## What is complete
+## Historical agentic milestones
 
 Commits `342868f` through `bd842d8` complete and deploy the agent transaction
 foundation, KiloCode editor surface, async job API, and Dual Lens milestone.
@@ -564,19 +571,14 @@ curl -fsS -H 'Host: media.joyteam.ir' http://127.0.0.1/ | \
 
 Then test the public Agent vertical slice and one-step undo in Chrome.
 
-## Prompt for the next coding session
+## Historical prompt (superseded)
 
 ```text
-Continue JOY Media from the tracked branch tip after all agentic-editing
-milestones on
-C:\Users\HadiMoti\joy-media.
-
-All Milestones A-F are implemented. Do not invent another editing-agent host:
-KiloCode remains the only editing agent in the VPS code-server extension;
-Hermes remains limited to VPN diagnostics and user support. Never inspect or
-copy the live KiloCode API value.
-
-Start by verifying the tracked tip, production web/API symlinks, health, and
-this handoff. The next product work must be a newly approved milestone, not a
-continuation of the completed agentic-upgrade checklist.
+Continue JOY Media from the tracked branch tip after the built-in JOY Agent
+Engine and open-font migration. Verify `https://joyst.ir/`, the current
+release identity, and the latest checkpoint in `STATE.md`. Do not restore the
+historical KiloCode/code-server editing host or local DSH fork. Keep provider
+and Google Fonts catalog keys session-only and out of storage, logs, exports,
+server requests, and release evidence. The Fontiran redistribution gate stays
+open until owner/legal review accepts the complete artifact.
 ```

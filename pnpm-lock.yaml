@@ -105,6 +105,18 @@ importers:
 
   apps/editor-web:
     dependencies:
+      '@fontsource-variable/inter':
+        specifier: 5.2.6
+        version: 5.2.6
+      '@fontsource-variable/vazirmatn':
+        specifier: 5.2.6
+        version: 5.2.6
+      '@fontsource/noto-naskh-arabic':
+        specifier: 5.2.6
+        version: 5.2.6
+      '@fontsource/noto-sans-arabic':
+        specifier: 5.2.6
+        version: 5.2.6
       '@joy-media/agent-tools':
         specifier: workspace:*
         version: link:../../packages/agent-tools
@@ -902,6 +914,18 @@ packages:
   '@eslint/plugin-kit@0.4.1':
     resolution: {integrity: sha512-43/qtrDUokr7LJqoF2c3+RInu/t4zfrpYdoSDfYyhg52rwLV6TnOvdG4fXm7IkSB3wErkcmJS9iEhjVtOSEjjA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+
+  '@fontsource-variable/inter@5.2.6':
+    resolution: {integrity: sha512-jks/bficUPQ9nn7GvXvHtlQIPudW7Wx8CrlZoY8bhxgeobNxlQan8DclUJuYF2loYRrGpfrhCIZZspXYysiVGg==}
+
+  '@fontsource-variable/vazirmatn@5.2.6':
+    resolution: {integrity: sha512-jFH7+BjyFWbHl1VqhZ7mrWiKnPl8SH301DkaV147E3RW/gO7mJ2xvbrrNeor99XaJR2jsLHi+CUeooihY4I6oA==}
+
+  '@fontsource/noto-naskh-arabic@5.2.6':
+    resolution: {integrity: sha512-bNaSGnougmVDEi0ssMLKMQEAlvdxjP6Y5PLeP3rypGIuPgpHjPOyhiVrkDZrmXkTEcSTf7Ht3ihqeZ7hInwZAw==}
+
+  '@fontsource/noto-sans-arabic@5.2.6':
+    resolution: {integrity: sha512-cAlMirNKXN9JGnNyUNPKJz8XTjcZhNEzUk12U3yb9OiSLKebKPZ87LhgHoTt11y66lvKeJPGRyal+cV82PK5RA==}
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -2639,6 +2663,14 @@ snapshots:
     dependencies:
       '@eslint/core': 0.17.0
       levn: 0.4.1
+
+  '@fontsource-variable/inter@5.2.6': {}
+
+  '@fontsource-variable/vazirmatn@5.2.6': {}
+
+  '@fontsource/noto-naskh-arabic@5.2.6': {}
+
+  '@fontsource/noto-sans-arabic@5.2.6': {}
 
   '@humanfs/core@0.19.2':
     dependencies:

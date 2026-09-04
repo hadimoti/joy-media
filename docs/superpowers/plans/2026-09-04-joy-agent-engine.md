@@ -143,9 +143,10 @@ ADR-0020, ADR-0036, and ADR-0041, and states that AI SDK is replaceable. It
 does not delete historical ADRs.
 
 docs/OPEN_SOURCE_RELEASE.md must state that public redistribution remains
-blocked until an owner/legal-approved OSI license exists and Fontiran assets
-are removed or replaced with redistribution-safe assets. Update third-party
-notices with the pinned Apache-2.0 AI SDK packages and Zod’s license.
+subject to the remaining asset review. The later 2026-09-05 migration removed
+Fontiran assets and replaced them with pinned OFL-1.1 Fontsource packages.
+Update third-party notices with the pinned Apache-2.0 AI SDK packages and
+Zod’s license.
 
 **Step 4: verify workspace wiring**
 
@@ -1450,8 +1451,6 @@ git commit -m "test(agent): gate BYOK and live preview release"
 - [x] Secret-leak, CORS, redirect, timeout, oversize, malformed-tool,
       accessibility, reduced-motion, visual, build, typecheck, test, lint,
       format, audit, and Worker-budget gates pass.
-- [ ] An OSI license and redistributable asset set are completed before public
-      open-source release is claimed. The repository code now has the MIT
-      license; the bundled Fontiran assets still require a commercial-license
-      confirmation, replacement, or removal before the complete artifact is
-      redistributed.
+- [x] The 2026-09-05 migration replaced the bundled Fontiran assets with
+      pinned OFL-1.1 Fontsource packages. Remaining third-party and login-gate
+      asset licensing is tracked separately in THIRD_PARTY_NOTICES.md.

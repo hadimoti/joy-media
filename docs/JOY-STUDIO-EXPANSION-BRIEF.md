@@ -65,15 +65,15 @@ flowchart LR
 
 ### 2.1 Positioning & surfaces
 
-| Layer                | Reality                                                                           |
-| -------------------- | --------------------------------------------------------------------------------- |
-| Brand in UI          | **Joy Studio** / **JOY Studio** (login lockup, menubar, Joy Code logos)           |
-| Repo / API / systemd | Still **joy-media** (`/opt/joy-media/repo`, `/etc/joy-media/api.env`)             |
-| Domain               | Canonical **`joyst.ir`** / `www.joyst.ir`; `media.joyteam.ir` → 301 to joyst.ir   |
-| First paint          | Project library gate (`ProjectLibrary.tsx`) then CapCut-tile Dockview workspace   |
-| Auth                 | Independent allow-list OTP (Gmail / Telegram / Token) — ADR-0017 login            |
-| Composition default  | `DEFAULT_COMPOSITION_SIZE = { width: 1080, height: 1920 }` in `editor-project.ts` |
-| Design system        | `DESIGN.md` — neutral gray CapCut shell, Modam Pro, amber accent scarcity         |
+| Layer                | Reality                                                                                               |
+| -------------------- | ----------------------------------------------------------------------------------------------------- |
+| Brand in UI          | **Joy Studio** / **JOY Studio** (login lockup, menubar, Joy Code logos)                               |
+| Repo / API / systemd | Still **joy-media** (`/opt/joy-media/repo`, `/etc/joy-media/api.env`)                                 |
+| Domain               | Canonical **`joyst.ir`** / `www.joyst.ir`; `media.joyteam.ir` → 301 to joyst.ir                       |
+| First paint          | Project library gate (`ProjectLibrary.tsx`) then CapCut-tile Dockview workspace                       |
+| Auth                 | Independent allow-list OTP (Gmail / Telegram / Token) — ADR-0017 login                                |
+| Composition default  | `DEFAULT_COMPOSITION_SIZE = { width: 1080, height: 1920 }` in `editor-project.ts`                     |
+| Design system        | `DESIGN.md` — neutral gray CapCut shell, self-hosted Fontsource OFL typography, amber accent scarcity |
 
 Product docs that matter: `DESIGN.md`, `STATE.md`, `ARCHITECTURE_SUMMARY.md`, `docs/adr/*`, `AGENTIC_EDITING_NEXT_AGENT.md`, `JOY_MEDIA_UNIFIED_DATA_TIMELINE_AND_AGENT_FLOW_PLAN.md`.
 
@@ -472,7 +472,7 @@ flowchart TB
 
 - **One shell language:** dock panels keep `.joy-panel-root` contract; overlays keep top bar + body regions like Motion Studio.
 - **Neutral gray + amber scarcity:** no purple AI chrome; status uses `--joy-ok` / `--joy-danger`; generation progress as status dots, not accent floods.
-- **Icon-first actions:** Import PSD, Open 3D Studio = `icon-button` + tooltip; Modam Pro for FA/EN.
+- **Icon-first actions:** Import PSD, Open 3D Studio = `icon-button` + tooltip; bundled Vazirmatn/Noto Arabic faces cover FA/EN.
 - **Honest empty states:** if MCP/LLM offline, say so (Joy Code already declines free-form honestly).
 - **Approve before mutate:** MCP write tools should produce plans / change sets compatible with ADR-0019 / ADR-0026 spirit (propose → approve → apply), especially for timeline placement.
 - **Portrait-first:** template thumbs and 3D studio default framing assume 1080×1920 unless user picks landscape.

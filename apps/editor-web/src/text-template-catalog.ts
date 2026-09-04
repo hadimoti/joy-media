@@ -102,7 +102,7 @@ export const TEXT_TEMPLATES: readonly TextTemplateV1[] = [
     'Titles',
     'The story starts here',
     {
-      fontFamily: 'Modam Pro',
+      fontFamily: 'Inter Variable',
       fontSizePx: 92,
       direction: 'ltr',
       align: 'center',
