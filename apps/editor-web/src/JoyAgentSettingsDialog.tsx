@@ -29,13 +29,22 @@ export function JoyAgentSettingsDialog({
   readonly onClose: () => void;
 }) {
   const keyRef = useRef<HTMLInputElement>(null);
-  const [provider, setProvider] = useState<'openrouter' | 'openai-compatible'>('openrouter');
-  const [baseUrl, setBaseUrl] = useState('https://openrouter.ai/api/v1');
-  const [modelId, setModelId] = useState('openrouter/auto');
+  const [provider, setProvider] = useState<'openrouter' | 'openai-compatible'>(
+    status?.provider ?? 'openrouter',
+  );
+  const [baseUrl, setBaseUrl] = useState(
+    status?.provider === 'openai-compatible' ? '' : 'https://openrouter.ai/api/v1',
+  );
+  const [modelId, setModelId] = useState(status?.modelId || 'openrouter/auto');
   const [customDisclosure, setCustomDisclosure] = useState(false);
   const [working, setWorking] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState(status);
-  useEffect(() => setConnectionStatus(status), [status]);
+  useEffect(() => {
+    setConnectionStatus(status);
+    if (status === undefined) return;
+    setProvider(status.provider);
+    setModelId(status.modelId || 'openrouter/auto');
+  }, [status]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => event.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
