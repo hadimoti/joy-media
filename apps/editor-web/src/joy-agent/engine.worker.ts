@@ -388,10 +388,20 @@ function parseModelOutput(
       typeof content === 'string'
         ? content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '')
         : '';
+    if (candidate.length === 0)
+      throw new JoyAgentWorkerError(
+        'JOY_AGENT_INVALID_PROPOSAL',
+        'Provider returned an empty proposal',
+      );
     const parsed = JSON.parse(candidate) as { summary?: unknown; operations?: unknown };
     if (taskKind === 'creative-brief') return { result: parsed };
     const plan = parsed;
-    const operations = Array.isArray(plan.operations) ? plan.operations.slice(0, 32) : [];
+    if (!Array.isArray(plan.operations) || plan.operations.length === 0)
+      throw new JoyAgentWorkerError(
+        'JOY_AGENT_INVALID_PROPOSAL',
+        'Provider returned no bounded operations',
+      );
+    const operations = plan.operations.slice(0, 32);
     return {
       proposal: {
         summary:
@@ -400,16 +410,14 @@ function parseModelOutput(
         baseRevision: request.baseRevision ?? request.runId,
       },
     };
-  } catch {
-    return taskKind === 'creative-brief'
-      ? {}
-      : {
-          proposal: {
-            summary: 'JOY staged proposal',
-            operations: [],
-            baseRevision: request.baseRevision ?? request.runId,
-          },
-        };
+  } catch (error) {
+    if (error instanceof JoyAgentWorkerError) throw error;
+    throw new JoyAgentWorkerError(
+      'JOY_AGENT_INVALID_PROPOSAL',
+      taskKind === 'creative-brief'
+        ? 'Provider returned invalid Creative Brief JSON'
+        : 'Provider returned invalid proposal JSON',
+    );
   }
 }
 globalThis.addEventListener('message', (event: MessageEvent<MainToWorkerMessage>) => {
