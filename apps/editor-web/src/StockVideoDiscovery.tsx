@@ -59,6 +59,7 @@ export function StockVideoDiscovery({
   }, [preview]);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       previewRequestSequence.current += 1;

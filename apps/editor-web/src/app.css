@@ -12883,6 +12883,7 @@ label {
   .stock-video-grid--list .stock-video-card-actions a,
   .stock-video-grid--list .stock-video-card-actions button {
     box-sizing: border-box;
+    flex: 0 0 1.75rem;
     width: 1.75rem;
     height: 1.75rem;
     min-width: 1.75rem;

@@ -68,14 +68,44 @@ test.describe('native stock video library', () => {
         throw new Error('malformed active project binding');
       return (value as { projectId: string }).projectId;
     });
+    const controlPlaneProjectIds = await page.evaluate((editorProjectId) => {
+      const raw = window.localStorage.getItem('joy-media.control-plane-project-bindings.v1');
+      if (raw === null) throw new Error('missing control-plane project bindings');
+      const value: unknown = JSON.parse(raw);
+      if (typeof value !== 'object' || value === null || Array.isArray(value))
+        throw new Error('malformed control-plane project bindings');
+      const bindingsByOwner = (value as { bindingsByOwner?: unknown }).bindingsByOwner;
+      if (
+        typeof bindingsByOwner !== 'object' ||
+        bindingsByOwner === null ||
+        Array.isArray(bindingsByOwner)
+      )
+        throw new Error('malformed control-plane owner bindings');
+      const projectIds: string[] = [];
+      for (const ownerBindings of Object.values(bindingsByOwner)) {
+        if (
+          typeof ownerBindings !== 'object' ||
+          ownerBindings === null ||
+          Array.isArray(ownerBindings)
+        )
+          continue;
+        const binding = (ownerBindings as Record<string, unknown>)[editorProjectId];
+        if (typeof binding !== 'object' || binding === null || Array.isArray(binding)) continue;
+        const projectId = (binding as { controlPlaneProjectId?: unknown }).controlPlaneProjectId;
+        if (typeof projectId === 'string' && projectId.length > 0) projectIds.push(projectId);
+      }
+      if (projectIds.length === 0)
+        throw new Error(`missing control-plane binding for ${editorProjectId}`);
+      return [...new Set(projectIds)];
+    }, activeProject);
     const projectRequestErrors: string[] = [];
     const stockRequestErrors: string[] = [];
     page.on('request', (request) => {
       const pathname = new URL(request.url()).pathname;
       const match = pathname.match(/^\/api\/v1\/projects\/([^/]+)\//);
       if (match === null) return;
-      if (decodeURIComponent(match[1]!) !== activeProject)
-        projectRequestErrors.push(`unexpected project ${decodeURIComponent(match[1]!)}`);
+      const projectId = decodeURIComponent(match[1]!);
+      if (!controlPlaneProjectIds.includes(projectId)) projectRequestErrors.push(projectId);
     });
     page.on('request', (request) => {
       const pathname = new URL(request.url()).pathname;
@@ -94,9 +124,9 @@ test.describe('native stock video library', () => {
     let stalePreviewId: string | undefined;
     let releaseCatalog: (() => void) | undefined;
     let releasePreview: (() => void) | undefined;
+    let stalePreviewFulfilled: Promise<void> | undefined;
     const completedAsset = {
       id: 'imported-stock-1',
-      projectId: activeProject,
       kind: 'video',
       displayName: 'Imported stock fixture.mp4',
       sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
@@ -110,11 +140,16 @@ test.describe('native stock video library', () => {
       const url = new URL(route.request().url());
       expect(url.pathname).toBe('/api/v1/library/my-assets');
       const projectId = url.searchParams.get('projectId');
-      if (projectId !== null && projectId !== activeProject)
+      if (projectId !== null && !controlPlaneProjectIds.includes(projectId))
         throw new Error(`unexpected my-assets project ${projectId}`);
       await route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify({ data: projectId === activeProject ? [completedAsset] : [] }),
+        body: JSON.stringify({
+          data:
+            projectId === null || !controlPlaneProjectIds.includes(projectId)
+              ? []
+              : [{ ...completedAsset, projectId }],
+        }),
       });
     });
     await page.route('**/api/v1/library/cloud-assets', async (route) => {
@@ -131,9 +166,15 @@ test.describe('native stock video library', () => {
     await page.route('**/api/v1/library/stock-videos/*/preview', async (route) => {
       const id = route.request().url().split('/').at(-2);
       if (id === stalePreviewId) {
-        await new Promise<void>((resolve) => {
+        const released = new Promise<void>((resolve) => {
           releasePreview = resolve;
         });
+        const fulfillment = released.then(async () => {
+          await route.fulfill({ status: 200, contentType: 'video/mp4', body: PREVIEW_BYTES });
+        });
+        stalePreviewFulfilled = fulfillment;
+        await fulfillment;
+        return;
       }
       await route.fulfill({ status: 200, contentType: 'video/mp4', body: PREVIEW_BYTES });
     });
@@ -174,6 +215,8 @@ test.describe('native stock video library', () => {
     });
     await page.route('**/api/v1/projects/*/stock-video-import', async (route) => {
       expect(route.request().method()).toBe('POST');
+      const projectId = decodeURIComponent(new URL(route.request().url()).pathname.split('/')[4]!);
+      expect(controlPlaneProjectIds).toContain(projectId);
       expect(route.request().postDataJSON()).toEqual({
         catalogId: IMPORT_FIXTURE_ID,
       });
@@ -216,34 +259,58 @@ test.describe('native stock video library', () => {
       'stock-video-category-business-work',
     );
     await expect(page.locator('.stock-video-poster')).toHaveCount(6);
+    await page.getByRole('button', { name: 'Search Assets' }).click();
     await page.getByPlaceholder('Search media…').fill('fixture');
     await expect(page.locator('.stock-video-card[data-orientation="portrait"]')).toHaveCount(2);
 
     const setContentWidth = async (contentWidth: number): Promise<void> => {
       await page.locator('.asset-library').evaluate((element, width) => {
         const panel = element as HTMLElement;
+        const outerWidth = `${width + 20.8}px`;
         panel.style.boxSizing = 'border-box';
-        panel.style.width = `${width + 20.8}px`;
+        panel.style.width = outerWidth;
         panel.style.minWidth = '0';
+        panel.style.maxWidth = outerWidth;
         panel.style.overflow = 'hidden';
-        const parent = panel.parentElement;
-        if (parent instanceof HTMLElement) {
-          parent.style.minWidth = '0';
-          parent.style.overflow = 'hidden';
+        const body = panel.querySelector<HTMLElement>('.joy-panel-body');
+        if (body !== null) {
+          body.style.boxSizing = 'border-box';
+          body.style.width = '100%';
+          body.style.minWidth = '0';
+          body.style.maxWidth = 'none';
+          body.style.overflow = 'hidden';
+          body.style.scrollbarGutter = 'auto';
+        }
+        let ancestor: HTMLElement | null = panel.parentElement;
+        for (let depth = 0; ancestor !== null && depth < 8; depth += 1) {
+          ancestor.style.boxSizing = 'border-box';
+          ancestor.style.minWidth = '0';
+          ancestor.style.maxWidth = 'none';
+          ancestor.style.overflow = 'hidden';
+          ancestor = ancestor.parentElement;
         }
       }, contentWidth);
       await expect
         .poll(() => content.evaluate((element) => element.getBoundingClientRect().width))
-        .toBeCloseTo(contentWidth, 0);
+        .toBeCloseTo(contentWidth, 1);
+      await expect
+        .poll(() => content.evaluate((element) => element.getBoundingClientRect().width))
+        .toBeGreaterThan(contentWidth - 1);
+      await expect
+        .poll(() => content.evaluate((element) => element.getBoundingClientRect().width))
+        .toBeLessThan(contentWidth + 1);
     };
     await setContentWidth(300);
     await expect
       .poll(() => content.evaluate((element) => element.getBoundingClientRect().width))
       .toBeGreaterThan(299);
-    await expect(content.locator(':scope > .asset-library-sidebar')).toHaveJSProperty(
-      'clientWidth',
-      54,
-    );
+    await expect
+      .poll(() =>
+        content
+          .locator(':scope > .asset-library-sidebar')
+          .evaluate((element) => element.getBoundingClientRect().width),
+      )
+      .toBeCloseTo(53.6, 0);
     await page.getByRole('button', { name: 'Large previews' }).click();
     await expect(page.locator('.stock-video-grid--large')).toHaveCount(1);
     await expect
@@ -400,7 +467,9 @@ test.describe('native stock video library', () => {
 
     catalogMode = 'zero';
     await page.getByRole('tab', { name: /Food & Drink/ }).click();
-    await expect(page.getByRole('status')).toContainText('No native videos match');
+    await expect(page.locator('.stock-video-state[role="status"]')).toContainText(
+      'No native videos match',
+    );
     catalogMode = 'normal';
     await page.getByRole('tab', { name: /Business & Work/ }).click();
     await expect(page.locator('.stock-video-card[data-orientation="portrait"]')).toHaveCount(2);
@@ -439,11 +508,11 @@ test.describe('native stock video library', () => {
 
     stockMode = 'poster-failure';
     await page.getByRole('tab', { name: /Nature/ }).click();
-    await expect(
-      page.locator(
-        `.stock-video-card[data-stock-video-id="${stockFixtureId('nature', 'stock-portrait-2')}"] .stock-video-poster`,
-      ),
-    ).toContainText('Poster unavailable');
+    const failedPoster = page.locator(
+      `.stock-video-card[data-stock-video-id="${stockFixtureId('nature', 'stock-portrait-2')}"] .stock-video-poster`,
+    );
+    await failedPoster.scrollIntoViewIfNeeded();
+    await expect(failedPoster).toContainText('Poster unavailable');
 
     const opener = page.locator(
       `.stock-video-card[data-stock-video-id="${stockFixtureId('nature', 'stock-landscape-1')}"] .stock-video-poster`,
@@ -453,11 +522,28 @@ test.describe('native stock video library', () => {
       .locator(`.stock-video-card[data-stock-video-id="${stalePreviewId}"] .stock-video-poster`)
       .click();
     await expect.poll(() => releasePreview !== undefined).toBe(true);
-    await opener.click();
-    await expect(page.getByRole('dialog')).toContainText('Landscape fixture');
+    await page.getByRole('tab', { name: /^Images/ }).click();
+    await expect(page.locator('#stock-video-panel')).toHaveCount(0);
     releasePreview?.();
+    releasePreview = undefined;
+    if (stalePreviewFulfilled === undefined) throw new Error('stale preview did not start');
+    await stalePreviewFulfilled;
     stalePreviewId = undefined;
-    await page.waitForTimeout(50);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.locator('.joy-panel-note')).not.toContainText(
+      'Preview ready for Second landscape fixture.',
+    );
+
+    stockMode = 'normal';
+    await page.evaluate(() => {
+      document.documentElement.dir = 'ltr';
+    });
+    await page.getByRole('button', { name: /Cloud library/ }).click();
+    await page.getByRole('tab', { name: /^Video/ }).click();
+    await page.getByRole('tab', { name: /Nature/ }).click();
+    await expect(page.locator('.stock-video-card')).toHaveCount(6);
+    await opener.scrollIntoViewIfNeeded();
+    await opener.click();
     await expect(page.getByRole('dialog')).toContainText('Landscape fixture');
     const dialog = page.getByRole('dialog');
     await expect(dialog).toHaveAttribute('aria-modal', 'true');
