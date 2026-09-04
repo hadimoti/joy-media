@@ -19,7 +19,7 @@ import {
   validateCreativeBrief,
 } from '@joy-media/agent-tools';
 import type { AgentActor, AtomicRunResult, ProjectRevisionId } from '@joy-media/agent-tools';
-import type { CreativeBriefV1, JoyCodePlanProposalV1 } from '@joy-media/agent-tools';
+import type { CreativeBriefV1 } from '@joy-media/agent-tools';
 import {
   AGENT_INTENTS,
   buildShortenIntroRecipe,
@@ -32,8 +32,8 @@ import { saveWorkflow } from './workflow-recorder.js';
 import type { EditorSession } from './editor-session.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
-import type { AgentSettings } from './agent-settings.js';
-import { approvalPolicyForAgentSettings } from './agent-settings.js';
+import type { AgentPolicyPreferences } from './agent-policy-settings.js';
+import { approvalPolicyForAgentPolicy } from './agent-policy-settings.js';
 import { JoyCodeLogo } from './JoyCodeLogo.js';
 import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
 import {
@@ -48,13 +48,20 @@ import {
 import { CheckIcon, CloseIcon, PlayIcon, PlusIcon, SaveIcon, UndoIcon } from './icons.js';
 import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
 import { readThreeDSceneStates } from './three-d-render-layer.js';
-import type { JoyCodeServerSession } from './joy-code-server-session.js';
-import type { JoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
-import { JoyCodeCompoundRunner } from './joy-code-compound-runner.js';
 import { CreativeBriefPanel } from './CreativeBriefPanel.js';
+import type { JoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
+import { compileJoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
+import { JoyCodeCompoundRunner } from './joy-code-compound-runner.js';
+import { AgentPreviewBadge } from './AgentPreviewBadge.js';
+import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
+import type { JoyAgentPhase } from './joy-agent/protocol.js';
+import type { AgentPresenceStore, JoyAgentPresenceEvent } from './agent-presence.js';
+import type { AgentPreviewStore } from './agent-preview-store.js';
+import { previewTimelineFromProject } from './agent-timeline-preview.js';
+import { applyTransaction } from '@joy-media/commands';
 
-/** Every edit this panel commits is attributed to the KiloCode adapter. */
-const AGENT_ACTOR: AgentActor = { type: 'agent', id: 'kilocode' };
+/** Every edit this panel commits is attributed to the built-in JOY engine. */
+const AGENT_ACTOR: AgentActor = { type: 'agent', id: 'joy-agent' };
 const THINKING_REVEAL_MS = 320;
 const JoyCode3DViewer = lazy(() =>
   import('./JoyCode3DViewer.js').then((module) => ({ default: module.JoyCode3DViewer })),
@@ -68,6 +75,7 @@ const TABS: readonly PanelTabSpec[] = [
 ];
 
 interface PendingPlan {
+  readonly runId: string;
   readonly threadId: string;
   readonly intent: AgentIntent;
   readonly plan: AgentEditPlan;
@@ -91,7 +99,7 @@ interface JoyCodeState {
   readonly activeThreadId: string;
 }
 
-export interface KiloCodeAttachedAsset {
+export interface JoyAgentAttachedAsset {
   readonly assetId: string;
   readonly kind: 'image' | 'video' | 'markdown';
   readonly displayName: string;
@@ -172,7 +180,7 @@ function threadTimestamp(value: string): string {
 }
 
 /**
- * Joy Code — a conversational shell over the guarded KiloCode editing adapter.
+ * Joy Code — a conversational shell over the guarded JOY Agent Engine.
  * Prompt routing currently exposes the same deterministic timeline intents as
  * the former dashboard; unsupported free-form prompts are reported honestly.
  */
@@ -189,12 +197,11 @@ export function AgentPanel({
   onAdd3DRender,
   settings,
   command,
-  joyCodeServerSession,
-  joyCodeOptedIn = false,
-  onJoyCodeOptIn,
   creativeBriefOptedIn = false,
   creativeBriefRunner,
   onCreativeBriefOptIn,
+  joyAgentEngineClient,
+  agentPresenceStore,
 }: {
   readonly project: SpikeProject;
   readonly selectedClipIds: readonly string[];
@@ -202,19 +209,18 @@ export function AgentPanel({
   readonly agentContext: EditorContext;
   readonly onUndo: () => void;
   readonly session: EditorSession;
-  readonly attachedAssets?: readonly KiloCodeAttachedAsset[];
+  readonly attachedAssets?: readonly JoyAgentAttachedAsset[];
   readonly onDetachAsset?: (assetId: string) => void;
-  readonly onAttachAsset?: (asset: KiloCodeAttachedAsset) => void;
+  readonly onAttachAsset?: (asset: JoyAgentAttachedAsset) => void;
   readonly onAdd3DRender?: (asset: JoyCode3DRenderAsset) => Promise<void>;
-  readonly settings: AgentSettings;
+  readonly settings: AgentPolicyPreferences;
   readonly command?: AgentPanelCommand;
-  /** Optional guarded server planner for unmatched free-form prompts. */
-  readonly joyCodeServerSession?: JoyCodeServerSession;
-  readonly joyCodeOptedIn?: boolean;
-  readonly onJoyCodeOptIn?: () => Promise<void>;
   readonly creativeBriefOptedIn?: boolean;
   readonly creativeBriefRunner?: (requestText: string) => Promise<CreativeBriefV1>;
   readonly onCreativeBriefOptIn?: () => Promise<void>;
+  readonly joyAgentEngineClient?: JoyAgentEngineClient;
+  readonly agentPresenceStore?: AgentPresenceStore;
+  readonly agentPreviewStore?: AgentPreviewStore;
 }) {
   const registry = useMemo(() => createToolRegistry(), []);
   const auditRef = useRef(createAuditTrail());
@@ -225,26 +231,23 @@ export function AgentPanel({
   const [pending, setPending] = useState<PendingPlan | undefined>(undefined);
   const [lastRun, setLastRun] = useState<LastRun | undefined>(undefined);
   const [thinkingThreadId, setThinkingThreadId] = useState<string | undefined>(undefined);
+  const [agentPhase, setAgentPhase] = useState<JoyAgentPhase | undefined>(undefined);
+  const [agentRunId, setAgentRunId] = useState<string | undefined>(undefined);
   const [tab, setTab] = useState('composer');
   const [draft, setDraft] = useState('');
   const [attachError, setAttachError] = useState<string | undefined>(undefined);
   const [attaching, setAttaching] = useState(false);
   const [joyCode, setJoyCode] = useState<JoyCodeState>(() => initialJoyCodeState(project.id));
-  const [serverProposal, setServerProposal] = useState<JoyCodePlanProposalV1 | undefined>(
-    undefined,
-  );
-  const [creativeBriefContext, setCreativeBriefContext] = useState<CreativeBriefV1 | undefined>(
-    undefined,
-  );
-  const [serverDraft, setServerDraft] = useState<JoyCodeCompoundDraft | undefined>(undefined);
-  const serverRunnerRef = useRef(new JoyCodeCompoundRunner());
+  const [, setCreativeBriefContext] = useState<CreativeBriefV1 | undefined>(undefined);
+  const [modelDraft, setModelDraft] = useState<JoyCodeCompoundDraft | undefined>(undefined);
+  const modelRunnerRef = useRef(new JoyCodeCompoundRunner());
 
   useEffect(() => {
     setCreativeBriefContext(undefined);
   }, [project.id]);
 
   const approvalEngine = useMemo(
-    () => new ApprovalEngine(approvalPolicyForAgentSettings(settings)),
+    () => new ApprovalEngine(approvalPolicyForAgentPolicy(settings)),
     [settings],
   );
 
@@ -289,9 +292,16 @@ export function AgentPanel({
       appendMessage(pending.threadId, 'assistant', 'Stopped. The proposed edit was not applied.');
       updateThreadStatus(pending.threadId, 'draft');
     }
+    if (command.type === 'stop' && agentRunId !== undefined && joyAgentEngineClient !== undefined) {
+      void joyAgentEngineClient.cancel(agentRunId);
+      agentPresenceStore?.clear();
+      agentPreviewStore?.clear(agentRunId);
+      setAgentPhase('cancelled');
+      setModelDraft(undefined);
+    }
     setPending(undefined);
     if (command.type === 'new-task') startNewTask();
-  }, [command, pending]);
+  }, [agentPresenceStore, agentRunId, command, joyAgentEngineClient, pending]);
 
   function startNewTask() {
     if (thinkingTimerRef.current !== undefined) {
@@ -305,6 +315,8 @@ export function AgentPanel({
       activeThreadId: thread.id,
     }));
     setPending(undefined);
+    setModelDraft(undefined);
+    agentPreviewStore?.clear();
     setLastRun(undefined);
     setThinkingThreadId(undefined);
     setDraft('');
@@ -374,6 +386,18 @@ export function AgentPanel({
   }
 
   function plan(intent: AgentIntent, threadId: string) {
+    const runId = makeJoyCodeId('run');
+    agentPresenceStore?.beginRun(runId, session.projectRevisionId);
+    agentPresenceStore?.dispatch({
+      protocolVersion: 1,
+      runId,
+      seq: 0,
+      at: new Date().toISOString(),
+      revision: session.projectRevisionId,
+      kind: 'activity',
+      phase: 'planning',
+      targets: [{ panelId: 'timeline', sectionId: 'timeline' }],
+    });
     const baseRevision = session.projectRevisionId;
     const baseProject = project;
     const built = buildIntent(intent);
@@ -416,7 +440,26 @@ export function AgentPanel({
         ? `The plan is ready, but execution policy blocked it: ${approval.reason}`
         : `The “${intent.label}” plan is ready. Preview: ${dryRun.aggregateDiff.summary}. Review the proposed change below.`,
     );
-    setPending({ threadId, intent, plan: agentPlan, baseRevision, baseProject, dryRun, approval });
+    setPending({
+      runId,
+      threadId,
+      intent,
+      plan: agentPlan,
+      baseRevision,
+      baseProject,
+      dryRun,
+      approval,
+    });
+    agentPresenceStore?.dispatch({
+      protocolVersion: 1,
+      runId,
+      seq: 1,
+      at: new Date().toISOString(),
+      revision: session.projectRevisionId,
+      kind: 'approval-required',
+      phase: 'awaiting-approval',
+      targets: [{ panelId: 'timeline', sectionId: 'timeline' }],
+    });
     setLastRun(undefined);
     updateThreadStatus(threadId, 'planning');
   }
@@ -438,74 +481,153 @@ export function AgentPanel({
     }
     const intentId = matchJoyCodeIntentId(body);
     const intent = AGENT_INTENTS.find((candidate) => candidate.id === intentId);
-    if (intent === undefined && joyCodeServerSession !== undefined) {
-      const briefContext = creativeBriefContext;
+    if (intent === undefined && joyAgentEngineClient !== undefined) {
+      if (joyAgentEngineClient.getStatus()?.capability === 'incompatible') {
+        appendMessage(
+          threadId,
+          'assistant',
+          'The configured model is incompatible. Test another model in Agent Settings; no fallback provider was selected.',
+        );
+        return;
+      }
+      const runId = makeJoyCodeId('run');
+      setAgentRunId(runId);
+      agentPresenceStore?.beginRun(runId, session.projectRevisionId);
       setThinkingThreadId(threadId);
-      void joyCodeServerSession
-        .plan(body, { clipIds: selectedClipIds }, undefined, undefined, briefContext)
-        .then((result) => {
-          if (result.kind === 'success') {
-            setCreativeBriefContext(undefined);
-            setServerProposal(result.proposal);
-            return import('./joy-code-compound-compiler.js').then(
-              ({ compileJoyCodeCompoundDraft }) => {
-                const compiled = compileJoyCodeCompoundDraft({
-                  planId: result.proposal.planId,
-                  baseRevision: result.proposal.snapshotRevisionId,
-                  timeline: session.timelineProject,
-                  visualProject: session.visualProject,
-                  registeredAssetIds: Object.keys(session.visualProject.assets),
-                  operations: result.proposal.operations,
-                });
-                if (!compiled.ok) {
-                  appendMessage(
-                    threadId,
-                    'assistant',
-                    `The proposal could not be compiled safely (${compiled.error.code}). No edits were applied.`,
-                  );
+      setAgentPhase('connecting');
+      void (async () => {
+        try {
+          for await (const event of joyAgentEngineClient.startRun({
+            runId,
+            prompt: body,
+            baseRevision: session.projectRevisionId,
+            context: { selectedClipIds, playheadUs },
+            mode:
+              joyAgentEngineClient.getStatus()?.capability === 'plan-only'
+                ? 'plan-only'
+                : 'tool-loop',
+          })) {
+            setAgentPhase(event.phase);
+            const terminal =
+              event.phase === 'completed' ||
+              event.phase === 'failed' ||
+              event.phase === 'cancelled';
+            const presenceEvent: JoyAgentPresenceEvent = {
+              protocolVersion: 1,
+              runId,
+              seq: event.seq,
+              at: event.at,
+              revision: session.projectRevisionId,
+              kind: terminal
+                ? event.phase
+                : event.phase === 'awaiting-approval'
+                  ? 'approval-required'
+                  : event.phase === 'previewing'
+                    ? 'preview'
+                    : 'activity',
+              phase: event.phase,
+              targets:
+                event.phase === 'previewing' || event.phase === 'awaiting-approval'
+                  ? [
+                      { panelId: 'agent', sectionId: 'composer' },
+                      { panelId: 'timeline', sectionId: 'timeline' },
+                    ]
+                  : [{ panelId: 'agent', sectionId: 'composer' }],
+              ...(event.proposal === undefined
+                ? {}
+                : {
+                    preview: {
+                      revision: session.projectRevisionId,
+                      summaryCode: 'joy-agent-proposal',
+                      targetCount: event.proposal.operations.length,
+                    },
+                  }),
+            };
+            agentPresenceStore?.dispatch(presenceEvent);
+            if (event.phase === 'awaiting-approval')
+              appendMessage(
+                threadId,
+                'assistant',
+                'JOY prepared a bounded proposal. Review the live preview before applying.',
+              );
+            if (event.proposal !== undefined && event.proposal.operations.length > 0) {
+              const compiled = compileJoyCodeCompoundDraft({
+                planId: runId,
+                baseRevision: event.proposal.baseRevision,
+                timeline: session.timelineProject,
+                visualProject: session.visualProject,
+                registeredAssetIds: Object.keys(session.visualProject.assets),
+                operations: event.proposal.operations as never,
+              });
+              if (compiled.ok) {
+                setModelDraft(compiled);
+                if (
+                  compiled.timeline !== undefined &&
+                  compiled.baseRevision === session.projectRevisionId
+                ) {
+                  try {
+                    const stagedProject = applyTransaction(
+                      session.timelineProject,
+                      compiled.timeline,
+                    ).project;
+                    agentPreviewStore?.setTimeline({
+                      runId,
+                      baseRevision: compiled.baseRevision,
+                      canonical: previewTimelineFromProject(session.timelineProject),
+                      preview: previewTimelineFromProject(stagedProject),
+                    });
+                  } catch {
+                    agentPreviewStore?.clear(runId);
+                  }
                 } else {
-                  setServerDraft(compiled);
-                  appendMessage(
-                    threadId,
-                    'assistant',
-                    `A guarded Joy Code proposal is ready: ${result.proposal.summary}. ${briefContext === undefined ? '' : 'The validated Creative Brief context was included. '}Review and explicitly approve the bounded changes.`,
-                  );
+                  agentPreviewStore?.clear(runId);
                 }
-              },
-            );
-          } else if (result.kind === 'stale') {
-            appendMessage(
-              threadId,
-              'assistant',
-              'The project changed while planning. Refresh the project and try again.',
-            );
-          } else if (result.kind === 'cancelled') {
-            appendMessage(threadId, 'assistant', 'Joy Code planning was cancelled.');
-          } else {
-            appendMessage(
-              threadId,
-              'assistant',
-              `Joy Code planning did not complete (${result.kind}). No edits were applied.`,
-            );
+              }
+              appendMessage(
+                threadId,
+                'assistant',
+                `${event.proposal.summary} (${event.proposal.operations.length} bounded operation${event.proposal.operations.length === 1 ? '' : 's'}) is ready for JOY validation.`,
+              );
+            }
+            if (event.phase === 'completed')
+              appendMessage(
+                threadId,
+                'assistant',
+                'The model response was received. JOY keeps edits in preview until you approve them.',
+              );
+            if (event.phase === 'failed')
+              appendMessage(
+                threadId,
+                'assistant',
+                event.message ?? 'JOY could not complete this run. No edits were applied.',
+              );
+            if (event.phase === 'cancelled')
+              appendMessage(threadId, 'assistant', 'JOY run cancelled. No edits were applied.');
+            if (event.phase === 'failed' || event.phase === 'cancelled')
+              agentPreviewStore?.clear(runId);
           }
-        })
-        .catch(() =>
+        } catch (error) {
           appendMessage(
             threadId,
             'assistant',
-            'Joy Code planning failed safely. No edits were applied.',
-          ),
-        )
-        .finally(() =>
-          setThinkingThreadId((current) => (current === threadId ? undefined : current)),
-        );
+            error instanceof Error ? error.message : 'JOY run failed safely.',
+          );
+          setAgentPhase('failed');
+        } finally {
+          setThinkingThreadId((current) => (current === threadId ? undefined : current));
+          window.setTimeout(() => {
+            setAgentPhase(undefined);
+            setAgentRunId(undefined);
+          }, 1200);
+        }
+      })();
       return;
     }
     if (intent === undefined) {
       appendMessage(
         threadId,
         'assistant',
-        'Joy Code accepts direct timeline requests such as shortening an intro, trimming, moving, joining, adding, or removing clips. Server planning is not configured for this session.',
+        'Connect a model in Agent Settings to run natural-language JOY edits. Direct timeline recipes remain available without a connection.',
       );
       return;
     }
@@ -520,44 +642,6 @@ export function AgentPanel({
     }, THINKING_REVEAL_MS);
   }
 
-  function rejectServerProposal() {
-    setServerProposal(undefined);
-    setServerDraft(undefined);
-    if (activeThread !== undefined)
-      appendMessage(
-        activeThread.id,
-        'assistant',
-        'Joy Code proposal rejected. No edits were applied.',
-      );
-  }
-
-  function applyServerProposal() {
-    if (serverDraft === undefined || activeThread === undefined) return;
-    try {
-      serverRunnerRef.current.apply(session, serverDraft, {
-        planId: serverDraft.planId,
-        proposalHash: serverDraft.proposalHash,
-        baseRevision: serverDraft.baseRevision,
-        approvedAt: new Date().toISOString(),
-      });
-      appendMessage(
-        activeThread.id,
-        'assistant',
-        'Approved and applied as one compound edit. One Undo restores the prior timeline and visual document.',
-      );
-      setServerProposal(undefined);
-      setServerDraft(undefined);
-    } catch (error) {
-      appendMessage(
-        activeThread.id,
-        'assistant',
-        error instanceof Error
-          ? `Joy Code apply failed: ${error.message}`
-          : 'Joy Code apply failed safely.',
-      );
-    }
-  }
-
   function reject() {
     if (pending === undefined) return;
     auditRef.current.record({
@@ -568,11 +652,68 @@ export function AgentPanel({
     appendMessage(pending.threadId, 'assistant', 'Rejected. No timeline changes were applied.');
     updateThreadStatus(pending.threadId, 'draft');
     setPending(undefined);
+    agentPreviewStore?.clear(pending.runId);
+  }
+
+  function rejectModelDraft() {
+    void joyAgentEngineClient?.cancel(modelDraft?.planId ?? '');
+    setModelDraft(undefined);
+    agentPreviewStore?.clear(modelDraft?.planId);
+    if (activeThread !== undefined)
+      appendMessage(activeThread.id, 'assistant', 'JOY preview rejected. No edits were applied.');
+    agentPresenceStore?.clear();
+  }
+
+  function applyModelDraft() {
+    if (modelDraft === undefined || activeThread === undefined) return;
+    try {
+      modelRunnerRef.current.apply(session, modelDraft, {
+        planId: modelDraft.planId,
+        proposalHash: modelDraft.proposalHash,
+        baseRevision: modelDraft.baseRevision,
+        approvedAt: new Date().toISOString(),
+      });
+      appendMessage(
+        activeThread.id,
+        'assistant',
+        'Approved and applied as one atomic JOY edit. One Undo restores the prior state.',
+      );
+      setModelDraft(undefined);
+      agentPreviewStore?.clear(modelDraft.planId);
+      void joyAgentEngineClient?.cancel(modelDraft.planId);
+      agentPresenceStore?.dispatch({
+        protocolVersion: 1,
+        runId: modelDraft.planId,
+        seq: 99,
+        at: new Date().toISOString(),
+        revision: session.projectRevisionId,
+        kind: 'completed',
+        phase: 'completed',
+        targets: [{ panelId: 'timeline', sectionId: 'timeline' }],
+      });
+      window.setTimeout(() => agentPresenceStore?.completeHandoff(), 1200);
+    } catch (error) {
+      appendMessage(
+        activeThread.id,
+        'assistant',
+        error instanceof Error ? `JOY apply failed: ${error.message}` : 'JOY apply failed safely.',
+      );
+    }
   }
 
   async function executePending(manualApprovalGranted: boolean) {
     if (pending === undefined) return;
     const { threadId, intent, plan: agentPlan, baseRevision, baseProject } = pending;
+    agentPresenceStore?.dispatch({
+      protocolVersion: 1,
+      runId: pending.runId,
+      seq: 2,
+      at: new Date().toISOString(),
+      revision: session.projectRevisionId,
+      kind: 'activity',
+      phase: 'applying',
+      targets: [{ panelId: 'timeline', sectionId: 'timeline' }],
+    });
     auditRef.current.record({
       planId: agentPlan.planId,
       action: 'execution-started',
@@ -663,6 +804,18 @@ export function AgentPanel({
     updateThreadStatus(threadId, executionResult.success ? 'completed' : 'failed');
     setPending(undefined);
     setLastRun({ threadId, intent, plan: agentPlan, executionResult, reverted: false });
+    agentPreviewStore?.clear(pending.runId);
+    agentPresenceStore?.dispatch({
+      protocolVersion: 1,
+      runId: pending.runId,
+      seq: 3,
+      at: new Date().toISOString(),
+      revision: session.projectRevisionId,
+      kind: executionResult.success ? 'completed' : 'failed',
+      phase: executionResult.success ? 'completed' : 'failed',
+      targets: [{ panelId: 'timeline', sectionId: 'timeline' }],
+      ...(executionResult.success ? {} : { errorCode: 'JOY_AGENT_INVALID_PROPOSAL' as const }),
+    });
   }
 
   function saveLastRunAsWorkflow() {
@@ -770,6 +923,39 @@ export function AgentPanel({
           }
         }}
       >
+        {agentPhase !== undefined && (
+          <div
+            className={`joy-agent-live-status is-${agentPhase}`}
+            role="status"
+            aria-live="polite"
+          >
+            <span className="joy-agent-live-mark" aria-hidden="true" />
+            <strong>
+              {agentPhase === 'awaiting-approval'
+                ? 'Needs approval'
+                : `JOY ${agentPhase.replaceAll('-', ' ')}`}
+            </strong>
+            <span>
+              {agentPhase === 'previewing' || agentPhase === 'planning'
+                ? 'Previewing changes in the editor'
+                : 'Live engine activity'}
+            </span>
+            {(agentPhase === 'thinking' ||
+              agentPhase === 'connecting' ||
+              agentPhase === 'planning' ||
+              agentPhase === 'previewing') &&
+              joyAgentEngineClient !== undefined && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (agentRunId !== undefined) void joyAgentEngineClient.cancel(agentRunId);
+                  }}
+                >
+                  Stop
+                </button>
+              )}
+          </div>
+        )}
         {tab === 'history' && (
           <section className="joy-code-history" aria-label="Joy Code task history">
             <div className="joy-code-history-intro">
@@ -821,23 +1007,6 @@ export function AgentPanel({
                     <strong>Joy Code</strong> prepares controlled timeline plans. Nothing changes
                     until the plan passes policy and the execution mode permits it.
                   </p>
-                  {joyCodeServerSession !== undefined && (
-                    <p className="joy-code-disclosure">
-                      Server planning sends your prompt and bounded semantic project summary
-                      (including caption text and registered asset names) to OpenRouter/NVIDIA. It
-                      never sends media bytes, URLs, filesystem paths, or secrets. Provider output
-                      is untrusted and requires explicit preview approval.
-                    </p>
-                  )}
-                  {!joyCodeOptedIn && onJoyCodeOptIn !== undefined && (
-                    <button
-                      type="button"
-                      className="is-primary"
-                      onClick={() => void onJoyCodeOptIn()}
-                    >
-                      Enable server planning
-                    </button>
-                  )}
                 </div>
               )}
 
@@ -945,38 +1114,35 @@ export function AgentPanel({
                 </section>
               )}
 
-              {serverDraft !== undefined &&
-                serverProposal !== undefined &&
-                activeThread !== undefined && (
-                  <section
-                    className="joy-code-plan-card"
-                    aria-label="Proposed server Joy Code plan"
-                  >
-                    <div className="joy-code-plan-head">
-                      <div>
-                        <span>Server proposal</span>
-                        <strong>{serverProposal.summary}</strong>
-                      </div>
-                      <span className="agent-decision agent-decision-requires-manual">
-                        manual approval
-                      </span>
+              {modelDraft !== undefined && activeThread !== undefined && (
+                <section
+                  className="joy-code-plan-card joy-code-model-plan"
+                  aria-label="JOY Agent live proposal"
+                >
+                  <AgentPreviewBadge surface="JOY Code" />
+                  <div className="joy-code-plan-head">
+                    <div>
+                      <span>JOY Agent preview</span>
+                      <strong>Not applied</strong>
                     </div>
-                    <p>{serverDraft.groups.map((group) => group.summary).join(' · ')}</p>
-                    {serverDraft.warnings.length > 0 && (
-                      <p className="agent-error">{serverDraft.warnings.join(', ')}</p>
-                    )}
-                    <div className="joy-code-plan-actions">
-                      <button type="button" className="is-primary" onClick={applyServerProposal}>
-                        <CheckIcon />
-                        Approve &amp; apply
-                      </button>
-                      <button type="button" onClick={rejectServerProposal}>
-                        <CloseIcon />
-                        Reject
-                      </button>
-                    </div>
-                  </section>
-                )}
+                    <span className="agent-decision agent-decision-requires-manual">
+                      needs approval
+                    </span>
+                  </div>
+                  <p>{modelDraft.groups.map((group) => group.summary).join(' · ')}</p>
+                  {modelDraft.warnings.length > 0 && (
+                    <p className="agent-error">{modelDraft.warnings.join(', ')}</p>
+                  )}
+                  <div className="joy-code-plan-actions">
+                    <button type="button" className="is-primary" onClick={applyModelDraft}>
+                      <CheckIcon /> Approve &amp; apply
+                    </button>
+                    <button type="button" onClick={rejectModelDraft}>
+                      <CloseIcon /> Reject
+                    </button>
+                  </div>
+                </section>
+              )}
 
               {lastRun !== undefined && lastRun.threadId === activeThread?.id && (
                 <section

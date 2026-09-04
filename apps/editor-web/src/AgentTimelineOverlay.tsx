@@ -30,25 +30,49 @@ export function AgentTimelineOverlay({
         const rects =
           diff.kind === 'move'
             ? [
-                { rect: clipRect(diff.from.trackId, diff.from.startUs, diff.from.durationUs), ghost: false },
-                { rect: clipRect(diff.to.trackId, diff.to.startUs, diff.to.durationUs), ghost: true },
+                {
+                  rect: clipRect(diff.from.trackId, diff.from.startUs, diff.from.durationUs),
+                  ghost: false,
+                },
+                {
+                  rect: clipRect(diff.to.trackId, diff.to.startUs, diff.to.durationUs),
+                  ghost: true,
+                },
               ]
             : diff.kind === 'trim'
               ? [
-                  { rect: clipRect(diff.from.trackId, diff.from.startUs, diff.from.durationUs), ghost: false },
-                  { rect: clipRect(diff.to.trackId, diff.to.startUs, diff.to.durationUs), ghost: true },
+                  {
+                    rect: clipRect(diff.from.trackId, diff.from.startUs, diff.from.durationUs),
+                    ghost: false,
+                  },
+                  {
+                    rect: clipRect(diff.to.trackId, diff.to.startUs, diff.to.durationUs),
+                    ghost: true,
+                  },
                 ]
               : diff.kind === 'add'
-                ? [{ rect: clipRect(diff.clip.trackId, diff.clip.startUs, diff.clip.durationUs), ghost: true }]
+                ? [
+                    {
+                      rect: clipRect(diff.clip.trackId, diff.clip.startUs, diff.clip.durationUs),
+                      ghost: true,
+                    },
+                  ]
                 : diff.kind === 'remove'
-                  ? [{ rect: clipRect(diff.clip.trackId, diff.clip.startUs, diff.clip.durationUs), ghost: false }]
+                  ? [
+                      {
+                        rect: clipRect(diff.clip.trackId, diff.clip.startUs, diff.clip.durationUs),
+                        ghost: false,
+                      },
+                    ]
                   : [];
         if (rects.length === 0) {
           return [
             <span
               className={`agent-timeline-diff agent-timeline-diff--${diff.kind}`}
-              key={`${diff.kind}-${diff.clipId}-${index}`}
-              data-clip-id={diff.kind === 'add' || diff.kind === 'remove' ? diff.clip.id : diff.clipId}
+              key={`${diff.kind}-${diff.kind === 'add' || diff.kind === 'remove' ? diff.clip.id : diff.clipId}-${index}`}
+              data-clip-id={
+                diff.kind === 'add' || diff.kind === 'remove' ? diff.clip.id : diff.clipId
+              }
               role="note"
             >
               {diffSummary(diff)}
@@ -62,7 +86,9 @@ export function AgentTimelineOverlay({
                 <span
                   className={`agent-timeline-ghost agent-timeline-ghost--${diff.kind}${ghost ? ' is-destination' : ' is-origin'}`}
                   key={`${diff.kind}-${index}-${rectIndex}`}
-                  data-clip-id={diff.kind === 'add' || diff.kind === 'remove' ? diff.clip.id : diff.clipId}
+                  data-clip-id={
+                    diff.kind === 'add' || diff.kind === 'remove' ? diff.clip.id : diff.clipId
+                  }
                   aria-label={diffSummary(diff)}
                   role="note"
                   style={{

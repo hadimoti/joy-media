@@ -12,7 +12,8 @@ export function AgentPreviewBadge({
 }) {
   const state = useAgentPresenceSnapshot();
   const visible =
-    state.preview !== undefined && (state.phase === 'previewing' || state.phase === 'awaiting-approval');
+    state.preview !== undefined &&
+    (state.phase === 'previewing' || state.phase === 'awaiting-approval');
   if (!visible) return null;
   return (
     <div
@@ -21,7 +22,9 @@ export function AgentPreviewBadge({
       role="region"
       aria-label={`${surface} agent preview`}
     >
-      <span className="agent-preview-badge-mark" aria-hidden="true">◇</span>
+      <span className="agent-preview-badge-mark" aria-hidden="true">
+        ◇
+      </span>
       <span className="agent-preview-badge-copy">
         <strong>AGENT PREVIEW</strong>
         <span>{before ? 'Before · canonical' : 'Staged · not applied'}</span>

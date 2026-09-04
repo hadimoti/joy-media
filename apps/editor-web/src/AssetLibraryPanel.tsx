@@ -135,7 +135,7 @@ export function AssetLibraryPanel({
     readonly displayName: string;
     readonly descriptor: BrowserAsset['descriptor'];
   }) => void;
-  /** Attach image/video to KiloCode for further editing automations. */
+  /** Attach image/video to the built-in JOY Agent Engine for editing. */
   readonly onEditWithAi?: (asset: {
     readonly assetId: string;
     readonly kind: 'image' | 'video';
@@ -390,7 +390,7 @@ export function AssetLibraryPanel({
         return;
       }
       if (onEditWithAi === undefined) {
-        setStatus('Attaching media to KiloCode is not available in this session.');
+        setStatus('Attaching media to the JOY Agent Engine is not available in this session.');
         return;
       }
       onEditWithAi({
@@ -399,7 +399,7 @@ export function AssetLibraryPanel({
         displayName: asset.displayName,
       });
       setStatus(
-        `${asset.displayName} attached to KiloCode. Drag it onto the timeline or automate it from Agent.`,
+        `${asset.displayName} attached to JOY Agent. Drag it onto the timeline or ask JOY to edit it.`,
       );
     },
     [onEditWithAi],
@@ -706,7 +706,7 @@ export function AssetLibraryPanel({
 
   const bulkEditWithAi = useCallback(() => {
     if (onEditWithAi === undefined) {
-      setStatus('Attaching media to KiloCode is not available in this session.');
+      setStatus('Attaching media to the JOY Agent Engine is not available in this session.');
       return;
     }
     let attached = 0;
@@ -723,7 +723,7 @@ export function AssetLibraryPanel({
     setStatus(
       attached === 0
         ? 'No selected images or videos to attach.'
-        : `${attached} media item(s) attached to KiloCode.`,
+        : `${attached} media item(s) attached to JOY Agent.`,
     );
   }, [onEditWithAi, selectedAssetIds, visible]);
 

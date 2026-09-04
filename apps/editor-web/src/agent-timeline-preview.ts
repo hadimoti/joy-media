@@ -10,6 +10,39 @@ export interface AgentPreviewTimeline {
   readonly clips: readonly AgentPreviewClip[];
 }
 
+/** Convert the canonical JOY timeline into the small, render-safe preview shape. */
+export function previewTimelineFromProject(project: {
+  readonly rootCompositionId: string;
+  readonly compositions: Readonly<
+    Record<
+      string,
+      {
+        readonly tracks: readonly {
+          readonly id: string;
+          readonly clips: readonly {
+            readonly id: string;
+            readonly startUs: number;
+            readonly durationUs: number;
+          }[];
+        }[];
+      }
+    >
+  >;
+}): AgentPreviewTimeline {
+  const composition = project.compositions[project.rootCompositionId];
+  return {
+    clips:
+      composition?.tracks.flatMap((track) =>
+        track.clips.map((clip) => ({
+          id: clip.id,
+          trackId: track.id,
+          startUs: clip.startUs,
+          durationUs: clip.durationUs,
+        })),
+      ) ?? [],
+  };
+}
+
 export type AgentTimelineDiff =
   | { readonly kind: 'add'; readonly clip: AgentPreviewClip }
   | { readonly kind: 'remove'; readonly clip: AgentPreviewClip }

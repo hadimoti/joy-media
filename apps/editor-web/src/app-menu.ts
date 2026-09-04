@@ -101,7 +101,7 @@ export const APP_MENU_GROUPS: readonly AppMenuGroup[] = [
     items: [
       { id: 'agent.open', label: 'Open Joy Code' },
       { id: 'agent.newTask', label: 'New Task', separatorAfter: true },
-      { id: 'agent.active', label: 'Editing Host: KiloCode', disabled: true },
+      { id: 'agent.active', label: 'Built-in JOY Agent Engine', disabled: true },
       { id: 'agent.executionMode', label: 'Execution Mode…', separatorAfter: true },
       { id: 'agent.stop', label: 'Pause / Stop Task' },
       { id: 'agent.activity', label: 'Joy Code History', separatorAfter: true },

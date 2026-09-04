@@ -102,9 +102,6 @@ importers:
 
   apps/editor-web:
     dependencies:
-      '@joy-media/adapter-deepseek-harness':
-        specifier: workspace:*
-        version: link:../../packages/adapter-deepseek-harness
       '@joy-media/agent-tools':
         specifier: workspace:*
         version: link:../../packages/agent-tools

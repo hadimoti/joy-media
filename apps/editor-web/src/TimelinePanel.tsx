@@ -117,10 +117,8 @@ import {
 import { timelineGapsForClips, type TimelineGap } from './timeline-gaps.js';
 import { nextTimelineMarkerLabel } from './timeline-marker-id.js';
 import { AgentTimelineOverlay } from './AgentTimelineOverlay.js';
-import {
-  diffAgentTimeline,
-  type AgentPreviewTimeline,
-} from './agent-timeline-preview.js';
+import { AgentPreviewBadge } from './AgentPreviewBadge.js';
+import { diffAgentTimeline, type AgentPreviewTimeline } from './agent-timeline-preview.js';
 /** Drags snap to a 100 ms grid, matching the playhead slider's step. */
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
@@ -2319,6 +2317,8 @@ export function TimelinePanel({
         }}
         onToast={(message) => showToast?.(message, 'info')}
       />
+
+      <AgentPreviewBadge surface="Timeline" />
 
       <div
         className="timeline-tracks"

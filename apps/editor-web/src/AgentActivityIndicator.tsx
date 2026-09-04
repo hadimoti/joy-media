@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { panelLabel } from './panel-tab-icons.js';
 import {
   useAgentPresenceSnapshot,
@@ -47,7 +47,9 @@ const SECTION_LABELS: Readonly<Record<string, string>> = {
 function targetLabel(target: JoyAgentTarget | undefined): string {
   if (target === undefined) return 'JOY workspace';
   const section = target.sectionId === undefined ? undefined : SECTION_LABELS[target.sectionId];
-  return section === undefined ? panelLabel(target.panelId) : `${panelLabel(target.panelId)} · ${section}`;
+  return section === undefined
+    ? panelLabel(target.panelId)
+    : `${panelLabel(target.panelId)} · ${section}`;
 }
 
 function stateLabel(state: AgentPresenceState): string {
@@ -65,17 +67,24 @@ export interface AgentActivityIndicatorProps {
 }
 
 /** A compact, provider-neutral live status rail for the app header. */
-export function AgentActivityIndicator({
-  onShowTarget,
-  onStop,
-}: AgentActivityIndicatorProps) {
+export function AgentActivityIndicator({ onShowTarget, onStop }: AgentActivityIndicatorProps) {
   const state = useAgentPresenceSnapshot();
   const [follow, setFollow] = useState(false);
   const primaryTarget = state.targets[0] ?? state.terminalTarget;
   const label = useMemo(() => stateLabel(state), [state]);
+  const showTargetRef = useRef(onShowTarget);
+  showTargetRef.current = onShowTarget;
+  const terminal =
+    state.status === 'completed' || state.status === 'failed' || state.status === 'cancelled';
+  const primaryTargetKey =
+    primaryTarget === undefined
+      ? ''
+      : `${primaryTarget.panelId}:${primaryTarget.sectionId ?? ''}:${primaryTarget.entity?.kind ?? ''}:${primaryTarget.entity?.id ?? ''}`;
+  useEffect(() => {
+    if (!follow || terminal || primaryTarget === undefined) return;
+    showTargetRef.current?.(primaryTarget);
+  }, [follow, primaryTarget, primaryTargetKey, terminal]);
   if (state.status === 'idle') return null;
-
-  const terminal = state.status === 'completed' || state.status === 'failed' || state.status === 'cancelled';
   const canStop = !terminal && state.runId !== undefined;
   return (
     <div

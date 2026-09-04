@@ -37,7 +37,6 @@ export {
   isJoyAgentErrorCode,
   toSafeJoyAgentError,
 } from './redaction.js';
-export { createJoyAgentSpike, type JoyAgentSpikeConfig } from './spike.js';
 export type { ByokSessionConfig, ByokSessionStatus } from './provider-config.js';
 export {
   OPENROUTER_BASE_URL,

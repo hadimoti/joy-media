@@ -120,7 +120,9 @@ function targetKey(target: JoyAgentTarget): string {
   return `${target.panelId}:${target.sectionId ?? ''}:${target.entity?.kind ?? ''}:${target.entity?.id ?? ''}`;
 }
 
-function distinctTargets(targets: readonly JoyAgentTarget[] | undefined): readonly JoyAgentTarget[] {
+function distinctTargets(
+  targets: readonly JoyAgentTarget[] | undefined,
+): readonly JoyAgentTarget[] {
   if (targets === undefined || targets.length === 0) return [];
   const seen = new Set<string>();
   return targets.filter((target) => {
@@ -186,7 +188,11 @@ export function reduceAgentPresence(
     revision: event.revision,
     phase,
     targets,
-    progress: validProgress(event.progress) ? event.progress : event.kind === 'progress' ? undefined : state.progress,
+    progress: validProgress(event.progress)
+      ? event.progress
+      : event.kind === 'progress'
+        ? undefined
+        : state.progress,
     preview:
       event.kind === 'preview' && event.preview?.revision === event.revision
         ? event.preview
@@ -262,7 +268,7 @@ export function createAgentPresenceStore(): AgentPresenceStore {
     listeners.add(listener);
     return () => listeners.delete(listener);
   };
-  const subscribeSelector = <T,>(selector: () => T, listener: () => void) => {
+  const subscribeSelector = <T>(selector: () => T, listener: () => void) => {
     let selected = selector();
     return subscribe(() => {
       const next = selector();
@@ -310,7 +316,11 @@ export function createAgentPresenceStore(): AgentPresenceStore {
       notify(previous);
     },
     getPanelPresence: (panelId) => {
-      const key = `${state.runId ?? ''}|${state.seq}|${state.status}|${state.phase}|${state.revision}|${state.targets.map(targetKey).join(',')}|${state.terminalTarget === undefined ? '' : targetKey(state.terminalTarget)}`;
+      const relevant = state.targets.filter((target) => target.panelId === panelId);
+      const terminalRelevant =
+        state.terminalTarget?.panelId === panelId ? state.terminalTarget : undefined;
+      const active = relevant.length > 0 || terminalRelevant !== undefined;
+      const key = `${panelId}|${active ? state.status : 'idle'}|${active ? state.phase : 'idle'}|${active ? (state.progress?.current ?? '') : ''}|${active ? (state.progress?.total ?? '') : ''}|${relevant.map(targetKey).join(',')}|${terminalRelevant === undefined ? '' : targetKey(terminalRelevant)}`;
       const cached = panelCache.get(panelId);
       if (cached?.key === key) return cached.value;
       const value = panelPresence(state, panelId);
@@ -378,10 +388,7 @@ export function useAgentPanelPresence(panelId: PanelId): AgentPanelPresence {
   );
 }
 
-export function useAgentSectionPresence(
-  panelId: PanelId,
-  sectionId: string,
-): AgentSectionPresence {
+export function useAgentSectionPresence(panelId: PanelId, sectionId: string): AgentSectionPresence {
   const store = useAgentPresenceStore();
   return useSyncExternalStore(
     (listener) =>
@@ -391,10 +398,7 @@ export function useAgentSectionPresence(
   );
 }
 
-export function useAgentEntityPresence(
-  kind: JoyAgentEntityKind,
-  id: string,
-): AgentEntityPresence {
+export function useAgentEntityPresence(kind: JoyAgentEntityKind, id: string): AgentEntityPresence {
   const store = useAgentPresenceStore();
   return useSyncExternalStore(
     (listener) => store.subscribeSelector(() => store.getEntityPresence(kind, id), listener),

@@ -51,6 +51,7 @@ import type {
 } from '@joy-media/agent-tools';
 import { buildEditorContext } from '@joy-media/agent-tools';
 import type { HistoryEntry } from './editor-session.js';
+import type { PanelId } from './workspace.js';
 import type {
   AnimationDescriptorV1,
   AssetRecordV1,
@@ -102,6 +103,10 @@ import {
 } from './export-media-readiness.js';
 
 registerBuiltins();
+
+/** One in-memory activity store for this editor instance; never persisted. */
+export const appAgentPresenceStore = createAgentPresenceStore();
+export const appAgentPreviewStore = createAgentPreviewStore();
 
 const CLIP_FRAME_CACHE_LIMIT = 120;
 const MotionStudioShell = lazy(() =>
@@ -220,25 +225,19 @@ import {
   AgentPanel,
   type AgentPanelCommand,
   type AgentPanelCommandType,
-  type KiloCodeAttachedAsset,
+  type JoyAgentAttachedAsset,
 } from './AgentPanel.js';
 import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
 import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
-import { JoyCodeServerSession } from './joy-code-server-session.js';
-import { AgentSettingsDialog } from './AgentSettingsDialog.js';
+import { JoyAgentSettingsDialog } from './JoyAgentSettingsDialog.js';
+import { createJoyAgentEngineClient } from './joy-agent/engine-client.js';
 import { coordinateCreativeBriefOptIn } from './creative-brief-opt-in-coordinator.js';
 import { createCreativeBriefPanelRunner } from './creative-brief-panel-runner.js';
 import {
-  createInMemoryCredentialStore,
-  canRunLocalDeepSeekHarness,
-  loadAgentSettings,
-  LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF,
-  localDeepSeekHarnessSettings,
-  saveAgentSettings,
-  type AgentSettings,
-} from './agent-settings.js';
-import { createLocalDeepSeekHarnessPlanner } from './local-deepseek-harness.js';
-import type { DeepSeekHarnessTransport } from '@joy-media/adapter-deepseek-harness';
+  loadAgentPolicy,
+  saveAgentPolicy,
+  type AgentPolicyPreferences,
+} from './agent-policy-settings.js';
 import { HistoryPanel } from './HistoryPanel.js';
 import { WorkflowsPanel } from './WorkflowsPanel.js';
 import { PluginsPanel } from './PluginsPanel.js';
@@ -360,6 +359,18 @@ import {
 import { buildCaptionLayerInsertion } from './caption-layer.js';
 import { buildThreeDRenderLayerInsertion } from './three-d-render-layer.js';
 import { FeatureHub } from './FeatureHub.js';
+import { AgentActivityIndicator } from './AgentActivityIndicator.js';
+import { AgentPreviewBadge } from './AgentPreviewBadge.js';
+import {
+  AgentPresenceProvider,
+  PanelIdentityContext,
+  createAgentPresenceStore,
+} from './agent-presence.js';
+import {
+  AgentPreviewProvider,
+  createAgentPreviewStore,
+  useAgentPreviewSnapshot,
+} from './agent-preview-store.js';
 import { featureActivationRoute, type FeatureToolId } from './feature-architecture.js';
 import { AdjustmentLayersPanel } from './AdjustmentLayersPanel.js';
 import {
@@ -852,17 +863,14 @@ interface EditorPanelContextValue {
   readonly animationGraphFocus: AnimationGraphFocusRequest | undefined;
   readonly openAnimationGraph: (objectId: string, channel: AnimatablePropertyV1) => void;
   readonly agentContext: EditorContext;
-  readonly agentSettings: AgentSettings;
+  readonly agentPolicy: AgentPolicyPreferences;
   readonly agentPanelCommand: AgentPanelCommand | undefined;
   readonly creativeBriefOptedIn: boolean;
   readonly creativeBriefRunner: (requestText: string) => Promise<CreativeBriefV1>;
   readonly onCreativeBriefOptIn: () => Promise<void>;
-  readonly joyCodeOptedIn: boolean;
-  readonly onJoyCodeOptIn: () => Promise<void>;
-  readonly joyCodeServerSession: JoyCodeServerSession | undefined;
-  readonly kiloCodeAttachedAssets: readonly KiloCodeAttachedAsset[];
-  readonly attachKiloCodeAsset: (asset: KiloCodeAttachedAsset) => void;
-  readonly detachKiloCodeAsset: (assetId: string) => void;
+  readonly joyAgentAttachedAssets: readonly JoyAgentAttachedAsset[];
+  readonly attachJoyAgentAsset: (asset: JoyAgentAttachedAsset) => void;
+  readonly detachJoyAgentAsset: (assetId: string) => void;
   readonly pluginHost: ReturnType<typeof createEditorPluginHost>;
   readonly bumpProjectRevision: () => void;
   readonly bumpPluginRevision: () => void;
@@ -1044,24 +1052,23 @@ function EditorWorkspace({
   const [accountOpen, setAccountOpen] = useState(false);
   const [exportPresetOpen, setExportPresetOpen] = useState(false);
   const [stickerTick, setStickerTick] = useState(0);
-  const [kiloCodeAttachedAssets, setKiloCodeAttachedAssets] = useState<
-    readonly KiloCodeAttachedAsset[]
+  const [joyAgentAttachedAssets, setJoyAgentAttachedAssets] = useState<
+    readonly JoyAgentAttachedAsset[]
   >([]);
-  const [agentSettings, setAgentSettings] = useState<AgentSettings>(() =>
-    loadAgentSettings(window.localStorage),
+  const [agentPolicy, setAgentPolicy] = useState<AgentPolicyPreferences>(() =>
+    loadAgentPolicy(window.localStorage),
   );
-  const localCredentialStoreRef = useRef(createInMemoryCredentialStore());
-  const onAgentSettingsChange = useCallback((next: AgentSettings) => {
-    const apiKey = next.deepSeekHarnessApiKey.trim();
-    if (next.joyCodeEngine !== 'local-deepseek-harness' || apiKey === '')
-      localCredentialStoreRef.current.clear(LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF);
-    else localCredentialStoreRef.current.set(LOCAL_DEEPSEEK_HARNESS_CREDENTIAL_REF, apiKey);
-    setAgentSettings(next);
-  }, []);
+  const joyAgentEngineClientRef = useRef<ReturnType<typeof createJoyAgentEngineClient> | null>(
+    null,
+  );
+  if (joyAgentEngineClientRef.current === null)
+    joyAgentEngineClientRef.current = createJoyAgentEngineClient();
+  useEffect(() => {
+    saveAgentPolicy(window.localStorage, agentPolicy);
+  }, [agentPolicy]);
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
   const [agentPanelCommand, setAgentPanelCommand] = useState<AgentPanelCommand>();
   const [creativeBriefOptedIn, setCreativeBriefOptedIn] = useState(false);
-  const [joyCodeOptedIn, setJoyCodeOptedIn] = useState(false);
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
   const joySessionRefreshSeqRef = useRef(0);
   const [toasts, setToasts] = useState<
@@ -1157,9 +1164,7 @@ function EditorWorkspace({
       cancelled = true;
     };
   }, [exportHistory, projectId]);
-  useEffect(() => {
-    saveAgentSettings(window.localStorage, agentSettings);
-  }, [agentSettings]);
+  useEffect(() => () => joyAgentEngineClientRef.current?.dispose(), []);
   useEffect(() => {
     updateEditorUiPreferences(window.localStorage, (current) => ({
       ...current,
@@ -1603,59 +1608,6 @@ function EditorWorkspace({
       }),
     [controlPlaneOwnerKey, controlPlaneProject, session.projectRevisionId, session.visualProject],
   );
-  const joyCodeServerSession = useMemo(() => {
-    const localSettings = localDeepSeekHarnessSettings(
-      agentSettings,
-      localCredentialStoreRef.current,
-    );
-    if (
-      localSettings !== undefined &&
-      canRunLocalDeepSeekHarness(agentSettings, localSettings, {
-        endpointUrl: localSettings.endpointUrl,
-        authenticatedSessionReady: joySession.kind === 'ready',
-        // Remote provider disclosure/consent is a native-shell responsibility.
-        disclosureAccepted: agentSettings.localProviderDisclosureAccepted,
-      })
-    ) {
-      return new JoyCodeServerSession({
-        binding: controlPlaneProject,
-        document: session.visualProject,
-        revisionId: session.projectRevisionId,
-        storage: window.localStorage,
-        syncProjectDocument: (controlPlaneProjectId, params) =>
-          mediaControlPlaneClient.syncProjectDocument(controlPlaneProjectId, params),
-        joyCodeTransport: (controlPlaneProjectId, request, signal) =>
-          mediaControlPlaneClient.createJoyCodePlan(controlPlaneProjectId, request, signal),
-        localJoyCodePlanner: createLocalDeepSeekHarnessPlanner(localSettings, {
-          post: (url: string, options: RequestInit): Promise<Response> => fetch(url, options),
-        } satisfies DeepSeekHarnessTransport),
-        ownerKey: controlPlaneOwnerKey,
-      });
-    }
-    // A deliberate local selection must never silently fall back to cloud
-    // execution when its local configuration is incomplete or disallowed.
-    if (agentSettings.joyCodeEngine === 'local-deepseek-harness') return undefined;
-    if (!joyCodeOptedIn || joySession.kind !== 'ready') return undefined;
-    return new JoyCodeServerSession({
-      binding: controlPlaneProject,
-      document: session.visualProject,
-      revisionId: session.projectRevisionId,
-      storage: window.localStorage,
-      syncProjectDocument: (controlPlaneProjectId, params) =>
-        mediaControlPlaneClient.syncProjectDocument(controlPlaneProjectId, params),
-      joyCodeTransport: (controlPlaneProjectId, request, signal) =>
-        mediaControlPlaneClient.createJoyCodePlan(controlPlaneProjectId, request, signal),
-      ownerKey: controlPlaneOwnerKey,
-    });
-  }, [
-    controlPlaneOwnerKey,
-    controlPlaneProject,
-    agentSettings,
-    joyCodeOptedIn,
-    joySession.kind,
-    session.projectRevisionId,
-    session.visualProject,
-  ]);
   const onCreativeBriefOptIn = useCallback(async () => {
     const result = await coordinateCreativeBriefOptIn(
       controlPlaneProject,
@@ -1670,34 +1622,6 @@ function EditorWorkspace({
     }
     setCreativeBriefOptedIn(true);
   }, [controlPlaneOwnerKey, controlPlaneProject]);
-  useEffect(() => {
-    let cancelled = false;
-    setJoyCodeOptedIn(false);
-    if (!controlPlaneProjectReady || joySession.kind !== 'ready') return () => undefined;
-    void mediaControlPlaneClient
-      .getJoyCodeOptIn(controlPlaneProject.controlPlaneProjectId)
-      .then((result) => {
-        if (!cancelled) setJoyCodeOptedIn(result.enabled);
-      })
-      .catch(() => {
-        if (!cancelled) setJoyCodeOptedIn(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [controlPlaneProject.controlPlaneProjectId, controlPlaneProjectReady, joySession.kind]);
-  const onJoyCodeOptIn = useCallback(async () => {
-    const current = await mediaControlPlaneClient.getJoyCodeOptIn(
-      controlPlaneProject.controlPlaneProjectId,
-    );
-    const result = await mediaControlPlaneClient.setJoyCodeOptIn(
-      controlPlaneProject.controlPlaneProjectId,
-      true,
-      'openrouter-nvidia-free-edit-planning-v1',
-      current.revision,
-    );
-    setJoyCodeOptedIn(result.enabled);
-  }, [controlPlaneProject.controlPlaneProjectId]);
   const mediaResolver = useMemo(
     () =>
       new ProjectMediaResolver({
@@ -3240,16 +3164,16 @@ function EditorWorkspace({
       'error',
     );
   }, [session, showToast]);
-  const attachKiloCodeAsset = useCallback((asset: KiloCodeAttachedAsset) => {
-    setKiloCodeAttachedAssets((current) => {
+  const attachJoyAgentAsset = useCallback((asset: JoyAgentAttachedAsset) => {
+    setJoyAgentAttachedAssets((current) => {
       if (current.some((entry) => entry.assetId === asset.assetId)) return current;
       return [...current, asset];
     });
   }, []);
-  const detachKiloCodeAsset = useCallback(
+  const detachJoyAgentAsset = useCallback(
     (assetId: string) => {
-      const entry = kiloCodeAttachedAssets.find((item) => item.assetId === assetId);
-      setKiloCodeAttachedAssets((current) => current.filter((item) => item.assetId !== assetId));
+      const entry = joyAgentAttachedAssets.find((item) => item.assetId === assetId);
+      setJoyAgentAttachedAssets((current) => current.filter((item) => item.assetId !== assetId));
       if (entry?.source === 'joycode-folder') {
         void openJoyCodeOpfsAssetCache()
           .then((cache) => cache.remove(assetId))
@@ -3258,7 +3182,7 @@ function EditorWorkspace({
           });
       }
     },
-    [kiloCodeAttachedAssets],
+    [joyAgentAttachedAssets],
   );
   const bumpProjectRevision = useCallback(() => {
     setRevision((revision) => revision + 1);
@@ -3426,6 +3350,8 @@ function EditorWorkspace({
     if (!window.confirm('Sign out of JOY Studio? Your local project will remain on this device.'))
       return;
     setAccountOpen(false);
+    joyAgentEngineClientRef.current?.clear();
+    appAgentPresenceStore.clear();
     await logoutJoySession(window.localStorage);
     refreshJoySession();
   }, [refreshJoySession]);
@@ -4740,6 +4666,15 @@ function EditorWorkspace({
   );
 
   function Panel({ api }: IDockviewPanelProps) {
+    return (
+      <PanelIdentityContext.Provider value={api.id as PanelId}>
+        <PanelContent api={api} />
+      </PanelIdentityContext.Provider>
+    );
+  }
+
+  function PanelContent({ api }: IDockviewPanelProps) {
+    const agentPreviewState = useAgentPreviewSnapshot();
     const context = useContext(EditorPanelContext);
     // Dockview can mount a cached panel one frame before its provider is
     // attached (notably during StrictMode/HMR and layout restoration). Keep
@@ -6112,6 +6047,11 @@ function EditorWorkspace({
           playheadUs={activeTimelinePlayheadUs}
           playing={state.playing}
           selectedIds={state.selectedIds}
+          agentPreview={
+            agentPreviewState.timeline?.baseRevision === context.session.projectRevisionId
+              ? agentPreviewState.timeline
+              : undefined
+          }
           viewport={context.timelineViewport}
           onViewportChange={context.onTimelineViewportChange}
           trackFlags={context.timelineTrackFlags}
@@ -6370,7 +6310,7 @@ function EditorWorkspace({
           onAddSticker={(asset) => void context.addStickerFromAsset(asset)}
           onAddToTimeline={addAssetToTimeline}
           onEditWithAi={(asset) => {
-            context.attachKiloCodeAsset(asset);
+            context.attachJoyAgentAsset(asset);
             context.activatePanel('agent');
           }}
         />,
@@ -6384,22 +6324,20 @@ function EditorWorkspace({
           agentContext={context.agentContext}
           onUndo={context.undo}
           session={context.session}
-          settings={context.agentSettings}
+          settings={context.agentPolicy}
           {...(context.agentPanelCommand === undefined
             ? {}
             : { command: context.agentPanelCommand })}
-          attachedAssets={context.kiloCodeAttachedAssets}
-          onDetachAsset={context.detachKiloCodeAsset}
-          onAttachAsset={context.attachKiloCodeAsset}
+          attachedAssets={context.joyAgentAttachedAssets}
+          onDetachAsset={context.detachJoyAgentAsset}
+          onAttachAsset={context.attachJoyAgentAsset}
           onAdd3DRender={context.addJoyCode3DRender}
-          joyCodeOptedIn={context.joyCodeOptedIn}
-          onJoyCodeOptIn={context.onJoyCodeOptIn}
           creativeBriefOptedIn={context.creativeBriefOptedIn}
           creativeBriefRunner={context.creativeBriefRunner}
           onCreativeBriefOptIn={context.onCreativeBriefOptIn}
-          {...(context.joyCodeServerSession === undefined
-            ? {}
-            : { joyCodeServerSession: context.joyCodeServerSession })}
+          joyAgentEngineClient={joyAgentEngineClientRef.current!}
+          agentPresenceStore={appAgentPresenceStore}
+          agentPreviewStore={appAgentPreviewStore}
         />
       );
     }
@@ -6536,639 +6474,654 @@ function EditorWorkspace({
   ] as const;
 
   return (
-    <main>
-      <header className="app-header">
-        {exportProgress !== undefined && (
-          <div
-            className="export-progress"
-            role="progressbar"
-            aria-label="Export encoding progress"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(exportProgress * 100)}
-          >
-            <span style={{ width: `${Math.min(100, exportProgress * 100).toFixed(1)}%` }} />
-          </div>
-        )}
-        {exportStatus !== undefined && (
-          <div className="export-toast" role="status" aria-live="polite" dir="ltr">
-            {exportStatus}
-          </div>
-        )}
-        <div className="header-group" role="group" aria-label="Brand">
-          <span className="app-brand">
-            <img
-              className="app-brand-logo"
-              src="/assets/JoyCodeNew_32x32.png"
-              alt=""
-              width={24}
-              height={24}
-              decoding="async"
+    <AgentPreviewProvider store={appAgentPreviewStore}>
+      <AgentPresenceProvider store={appAgentPresenceStore}>
+        <main>
+          <header className="app-header">
+            <AgentActivityIndicator
+              onShowTarget={(target) => activatePanel(target.panelId)}
+              onStop={() => issueAgentPanelCommand('stop')}
             />
-            <strong>{JOY_STUDIO_NAME}</strong>
-          </span>
-          <AppMenuBar
-            canUndo={session.canUndo}
-            canRedo={session.canRedo}
-            hasSelection={state.selectedIds.length > 0}
-            exporting={exporting}
-            signedIn={joySession.kind === 'ready'}
-            onAction={runMenuAction}
-          />
-        </div>
-        <div className="header-spacer" aria-hidden="true" />
-        <div className="header-group" role="group" aria-label="Edit">
-          <button
-            className="icon-button"
-            disabled={!session.canUndo}
-            onClick={undo}
-            aria-label="Undo"
-            title="Undo (Ctrl+Z)"
-          >
-            <UndoIcon />
-          </button>
-          <button
-            className="icon-button"
-            disabled={!session.canRedo}
-            onClick={redo}
-            aria-label="Redo"
-            title="Redo (Ctrl+Y)"
-          >
-            <RedoIcon />
-          </button>
-          <button
-            className="icon-button"
-            onClick={() => setPaletteOpen(true)}
-            aria-label="Command palette"
-            title="Command palette (Ctrl+K)"
-          >
-            <CommandIcon />
-          </button>
-          <button
-            className="icon-button"
-            onClick={switchEditorView}
-            aria-label={
-              viewMode === 'vertical' ? 'Switch to Widescreen layout' : 'Switch to Vertical layout'
-            }
-            title={
-              viewMode === 'vertical' ? 'Switch to Widescreen layout' : 'Switch to Vertical layout'
-            }
-            aria-pressed={viewMode === 'widescreen'}
-          >
-            {viewMode === 'vertical' ? <VerticalViewIcon /> : <WideViewIcon />}
-          </button>
-          <WorkspaceSwitcher
-            value={workspacePreset}
-            onChange={switchWorkspacePreset}
-            onReset={resetWorkspace}
-          />
-          <button
-            className="icon-button"
-            onClick={toggleKeyboardShortcuts}
-            aria-label="Keyboard shortcuts"
-            title="Keyboard shortcuts (?)"
-          >
-            <PngMaskIcon src="/assets/24_keyboard.png" size={14} />
-          </button>
-        </div>
-        <div className="header-group" role="group" aria-label="Deliver">
-          <div className="header-menu">
-            <button
-              type="button"
-              className="icon-button header-export-preset-trigger"
-              disabled={exporting}
-              aria-label="Export preset"
-              aria-expanded={exportPresetOpen}
-              data-guide="Export preset"
-              onClick={() => {
-                setExportPresetOpen((open) => !open);
-                setProcessesOpen(false);
-                setAccountOpen(false);
-              }}
-            >
-              <span className="header-disclosure-chevron" aria-hidden="true">
-                <ChevronDownIcon />
-              </span>
-              <span className="header-export-preset-label">
-                {exportPreset === 'reels-1080'
-                  ? 'Reels 1080×1920'
-                  : exportPreset === 'shorts-1080'
-                    ? 'Shorts 1080×1920'
-                    : exportPreset === 'youtube-1080'
-                      ? 'YouTube 1920×1080'
-                      : exportPreset === 'high-bitrate'
-                        ? 'High bitrate'
-                        : 'Social H.264'}
-              </span>
-            </button>
-            {exportPresetOpen && (
-              <section
-                className="header-dropdown header-export-preset-dropdown"
-                aria-label="Export preset"
+            {exportProgress !== undefined && (
+              <div
+                className="export-progress"
+                role="progressbar"
+                aria-label="Export encoding progress"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(exportProgress * 100)}
               >
-                <h3>Export preset</h3>
-                <ul className="export-preset-list">
-                  {(
-                    [
-                      ['social-h264-aac', ExportIcon, 'Social H.264'],
-                      ['reels-1080', ReelsIcon, 'Reels 1080×1920'],
-                      ['shorts-1080', ReelsIcon, 'Shorts 1080×1920'],
-                      ['youtube-1080', YoutubeIcon, 'YouTube 1920×1080'],
-                      ['high-bitrate', HighBitrateIcon, 'High bitrate'],
-                    ] as const
-                  ).map(([id, Icon, label]) => (
-                    <li key={id}>
-                      <button
-                        type="button"
-                        className="icon-button icon-button-labeled"
-                        disabled={exporting}
-                        aria-pressed={exportPreset === id}
-                        aria-label={label}
-                        data-guide={label}
-                        onClick={() => {
-                          setExportPreset(id);
-                          setExportPresetOpen(false);
-                        }}
-                      >
-                        <Icon />
-                        <span className="export-preset-option-label">{label}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </section>
+                <span style={{ width: `${Math.min(100, exportProgress * 100).toFixed(1)}%` }} />
+              </div>
             )}
-          </div>
-          <button
-            type="button"
-            className="header-export-btn"
-            onClick={() => void handleExport()}
-            disabled={exporting}
-            aria-label={exporting ? 'Exporting…' : 'Export MP4'}
-            data-guide={exporting ? 'Exporting…' : 'Export MP4'}
-            aria-busy={exporting}
-          >
-            <ExportIcon />
-          </button>
-          {exporting && (
-            <button
-              type="button"
-              className="icon-button"
-              onClick={cancelExport}
-              aria-label="Cancel export"
-              title="Cancel export"
-            >
-              <CloseIcon />
-            </button>
-          )}
-          <div className="header-menu">
-            <button
-              className="icon-button header-processes-trigger"
-              aria-label="Recent processes"
-              aria-expanded={processesOpen}
-              title="Recent processes"
-              onClick={() => {
-                setProcessesOpen((open) => !open);
-                setAccountOpen(false);
-                setExportPresetOpen(false);
-              }}
-            >
-              <PngMaskIcon src="/assets/24_recent-exports.png" size={14} />
-              {processCounts.active + processCounts.attention > 0 && (
-                <span
-                  className="process-center-count"
-                  aria-label={`${processCounts.active + processCounts.attention} active or attention processes`}
-                >
-                  {processCounts.active + processCounts.attention}
-                </span>
-              )}
-            </button>
-            {processesOpen && (
-              <section className="header-dropdown" aria-label="Recent processes">
-                <h3>Process Center</h3>
-                <div className="process-filter-row" role="group" aria-label="Process filter">
-                  {(
-                    [
-                      ['active', 'Active', processCounts.active],
-                      ['attention', 'Needs attention', processCounts.attention],
-                      ['completed', 'Completed', processCounts.completed],
-                      ['all', 'All', exportHistory.length],
-                    ] as const
-                  ).map(([id, label, count]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      className="process-filter-button"
-                      aria-pressed={processFilter === id}
-                      onClick={() => setProcessFilter(id)}
-                    >
-                      {label} <span>{count}</span>
-                    </button>
-                  ))}
-                </div>
-                {visibleProcesses.length === 0 ? (
-                  <p className="empty-hint">No exports yet. Use Export to create an MP4.</p>
-                ) : (
-                  <div className="process-groups">
-                    {processGroups.map(
-                      (group) =>
-                        group.entries.length > 0 && (
-                          <section
-                            key={group.id}
-                            className="process-group"
-                            aria-label={group.label}
-                          >
-                            <h4>{group.label}</h4>
-                            <ul className="process-list">
-                              {group.entries.map((entry) => (
-                                <li
-                                  key={entry.id}
-                                  className={`process-row process-${entry.status}`}
-                                >
-                                  <span className="process-dot" aria-hidden="true" />
-                                  <span className="process-name" dir="ltr">
-                                    {entry.filename}
-                                  </span>
-                                  <span className="process-meta">
-                                    <strong>
-                                      {entry.status === 'running'
-                                        ? 'Running'
-                                        : entry.status === 'completed'
-                                          ? 'Completed'
-                                          : entry.status === 'interrupted-retryable'
-                                            ? 'Interrupted — retry available'
-                                            : 'Failed — retry'}
-                                    </strong>{' '}
-                                    {entry.status === 'completed' && entry.totalBytes !== undefined
-                                      ? `${(entry.totalBytes / 1_048_576).toFixed(1)} MB`
-                                      : entry.status !== 'completed'
-                                        ? (entry.error ?? '')
-                                        : 'Ready to download'}
-                                  </span>
-                                  {lastExportRef.current?.entryId === entry.id && (
-                                    <a
-                                      className="icon-button"
-                                      href={lastExportRef.current.url}
-                                      download={entry.filename}
-                                      aria-label={`Download ${entry.filename} again`}
-                                      title="Download again"
-                                    >
-                                      <DownloadIcon />
-                                    </a>
-                                  )}
-                                  {(entry.status === 'failed' ||
-                                    entry.status === 'interrupted-retryable') && (
-                                    <button
-                                      type="button"
-                                      className="process-retry"
-                                      onClick={() => void handleExport(entry)}
-                                      disabled={exporting}
-                                      aria-label={`Retry ${entry.filename}`}
-                                    >
-                                      Retry
-                                    </button>
-                                  )}
-                                </li>
-                              ))}
-                            </ul>
-                          </section>
-                        ),
-                    )}
-                  </div>
-                )}
-              </section>
+            {exportStatus !== undefined && (
+              <div className="export-toast" role="status" aria-live="polite" dir="ltr">
+                {exportStatus}
+              </div>
             )}
-          </div>
-          <div className="header-menu">
-            <button
-              className="icon-button"
-              aria-label={`${JOY_STUDIO_NAME} account`}
-              aria-expanded={accountOpen}
-              title={
-                joySession.kind === 'ready'
-                  ? `Signed in · ${joySession.displayName ?? joySession.subject ?? JOY_STUDIO_NAME}`
-                  : joySession.kind === 'no-access'
-                    ? `Signed in, ${JOY_STUDIO_NAME} access not enabled`
-                    : joySession.kind === 'signed-out'
-                      ? 'Signed out'
-                      : joySession.kind === 'unavailable'
-                        ? 'Sign-in status unavailable'
-                        : `${JOY_STUDIO_NAME} account`
-              }
-              onClick={() => {
-                setAccountOpen((open) => !open);
-                setProcessesOpen(false);
-                setExportPresetOpen(false);
-                refreshJoySession();
-              }}
-            >
-              <span className="session-icon-wrap">
-                <UserIcon />
-                <span className={`session-dot session-${joySession.kind}`} aria-hidden="true" />
+            <div className="header-group" role="group" aria-label="Brand">
+              <span className="app-brand">
+                <img
+                  className="app-brand-logo"
+                  src="/assets/JoyCodeNew_32x32.png"
+                  alt=""
+                  width={24}
+                  height={24}
+                  decoding="async"
+                />
+                <strong>{JOY_STUDIO_NAME}</strong>
               </span>
-            </button>
-            {accountOpen && (
-              <section
-                ref={accountDropdownRef}
-                className="header-dropdown account-dropdown"
-                aria-label={`${JOY_STUDIO_NAME} account`}
-              >
-                {joySession.kind === 'ready' && (
-                  <>
-                    <div className="account-card">
-                      <div className="account-card-avatar" aria-hidden="true">
-                        {joySession.avatarObjectUrl !== undefined ? (
-                          <img
-                            className="account-card-avatar-img"
-                            src={joySession.avatarObjectUrl}
-                            alt=""
-                          />
-                        ) : (
-                          (
-                            (joySession.displayName ?? joySession.subject ?? 'J')
-                              .replace(/^@/, '')
-                              .trim()
-                              .charAt(0) || 'J'
-                          ).toUpperCase()
-                        )}
-                      </div>
-                      <div className="account-card-meta">
-                        <p className="account-card-status">Signed in</p>
-                        {(joySession.displayName ?? joySession.subject) !== undefined && (
-                          <p className="account-card-subject">
-                            <bdi>{joySession.displayName ?? joySession.subject}</bdi>
-                          </p>
-                        )}
-                      </div>
-                      <span className="account-card-dot session-ready" aria-hidden="true" />
-                    </div>
-                    <button
-                      type="button"
-                      className="account-sign-out"
-                      title={`Sign out of ${JOY_STUDIO_NAME}`}
-                      onClick={() => void signOut()}
-                    >
-                      <LogoutIcon />
-                      Sign out
-                    </button>
-                  </>
-                )}
-                {joySession.kind === 'no-access' && (
-                  <p className="empty-hint">
-                    {JOY_STUDIO_NAME} access is not enabled for this account.
-                  </p>
-                )}
-                {joySession.kind === 'signed-out' && (
-                  <p className="empty-hint">Returning to login…</p>
-                )}
-                {joySession.kind === 'unknown' && <p className="empty-hint">Checking session…</p>}
-                {joySession.kind === 'unavailable' && (
-                  <p className="empty-hint">
-                    Sign-in status could not be verified. Try again shortly.
-                  </p>
-                )}
-              </section>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {paletteOpen && (
-        <section ref={paletteRef} className="palette" aria-label="Command palette">
-          <input
-            autoFocus
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search commands"
-          />
-          {searchActions(query).map((action) => (
-            <button key={action.id} onClick={() => executeAction(action.id)}>
-              {action.title}
-              <kbd>{action.shortcut}</kbd>
-            </button>
-          ))}
-        </section>
-      )}
-      <video ref={videoRef} className="playback-media" playsInline muted={false} />
-      <audio
-        ref={replacementAudioRef}
-        className="playback-media"
-        aria-hidden="true"
-        preload="auto"
-      />
-      <EditorPanelContext.Provider
-        value={{
-          state,
-          previewVideoFrame,
-          clipFrameCache: clipFrameCacheRef.current,
-          clipFrameTick,
-          timelineProject: session.timelineProject,
-          visualProject: session.visualProject,
-          controlPlaneProject,
-          controlPlaneReady: controlPlaneProjectReady,
-          loadProjectAssetBlob,
-          playback: playbackDiagnostics.current.snapshot(),
-          canUndo: session.canUndo,
-          canRedo: session.canRedo,
-          historyEntries: session.historyEntries,
-          dualLensProjection,
-          lensReveal,
-          revealInFlow,
-          revealOnTimeline,
-          workflowGraph: session.graphEnabled ? session.workflowGraph : undefined,
-          dispatchGraph,
-          dataLanes,
-          artifacts: session.graphEnabled ? session.artifacts : undefined,
-          dispatchArtifacts,
-          togglePlayback,
-          seek,
-          toggleSelection: (id) =>
-            setState((current) => ({
-              ...current,
-              selectedIds: toggleSelection({ clipIds: current.selectedIds }, id).clipIds,
-            })),
-          selectClips,
-          clearSelection: () => setState((current) => ({ ...current, selectedIds: [] })),
-          dispatchTimeline,
-          dispatchTimelineAndProjectAudio,
-          updateVisualProperty,
-          dispatchProject,
-          replaceVisualProject,
-          replaceVisualProjectAndAudio,
-          addStickerFromAsset,
-          addAdjustmentLayer,
-          addTreatmentLayer,
-          addCaptionLayer,
-          addHtmlSceneToSelectedClip,
-          addJoyCode3DRender,
-          stickerTick,
-          audioState,
-          setAudioState,
-          transcribe,
-          transcriptionError,
-          undo,
-          redo,
-          jumpToHistory,
-          session,
-          createTool,
-          enhanceTool,
-          onCreateToolChange: setCreateTool,
-          onEnhanceToolChange: setEnhanceTool,
-          activatePanel,
-          animationGraphFocus,
-          openAnimationGraph,
-          agentContext,
-          agentSettings,
-          agentPanelCommand,
-          creativeBriefOptedIn,
-          creativeBriefRunner,
-          onCreativeBriefOptIn,
-          joyCodeOptedIn,
-          onJoyCodeOptIn,
-          joyCodeServerSession,
-          kiloCodeAttachedAssets,
-          attachKiloCodeAsset,
-          detachKiloCodeAsset,
-          pluginHost,
-          bumpProjectRevision,
-          bumpPluginRevision,
-          showToast,
-          motionStudioOpen: motionStudioSceneId !== undefined,
-          openMotionStudio: (sceneId: string) => setMotionStudioSceneId(sceneId),
-          closeMotionStudio: () => setMotionStudioSceneId(undefined),
-          effectStudioOpen: effectStudioSession !== undefined,
-          openEffectStudio: (recipeId: string, objectId?: string) =>
-            setEffectStudioSession({
-              recipeId,
-              ...(objectId !== undefined ? { objectId } : {}),
-            }),
-          closeEffectStudio: () => setEffectStudioSession(undefined),
-          timelineViewport,
-          onTimelineViewportChange: setTimelineViewport,
-          timelineTrackFlags,
-          onTimelineTrackFlagsChange: setTimelineTrackFlags,
-          timelineAutoFit,
-          onTimelineAutoFitChange: setTimelineAutoFit,
-          activeTimelineCompositionId,
-          onActiveTimelineCompositionChange: setActiveTimelineCompositionId,
-        }}
-      >
-        <DockviewReact
-          className="workspace"
-          components={dockviewComponents}
-          defaultTabComponent={PanelTab}
-          onReady={onReady}
-        />
-      </EditorPanelContext.Provider>
-      {motionStudioSceneId !== undefined && (
-        <Suspense fallback={null}>
-          <MotionStudioShell
-            key={motionStudioSceneId}
-            sceneId={motionStudioSceneId}
-            onClose={() => setMotionStudioSceneId(undefined)}
-          />
-        </Suspense>
-      )}
-      {effectStudioSession !== undefined && (
-        <Suspense fallback={null}>
-          <EffectStudioShell
-            key={effectStudioSession.recipeId}
-            recipeId={effectStudioSession.recipeId}
-            canApply={
-              effectStudioSession.objectId !== undefined ||
-              resolveObjectIdForSelection(session.visualProject, state.selectedIds) !== undefined
-            }
-            onApply={(effects) => {
-              const objectId =
-                effectStudioSession.objectId ??
-                resolveObjectIdForSelection(session.visualProject, state.selectedIds);
-              if (objectId === undefined) {
-                showToast('Select a clip to apply the recipe.', 'info');
-                return;
-              }
-              const activeEffects = effects.filter((effect) => effect.enabled);
-              if (activeEffects.length === 0) {
-                showToast('This recipe has no active effects to apply.', 'info');
-                return;
-              }
-              dispatchProject({
-                label: 'Apply Effect Recipe',
-                commands: [
-                  {
-                    type: 'effect.replaceAll',
-                    payload: { objectId, effects: activeEffects },
-                  },
-                ],
-              } as unknown as VisualObjectTransaction);
-              showToast('Effect recipe applied to the clip.', 'success');
-              setEffectStudioSession(undefined);
-            }}
-            onClose={() => setEffectStudioSession(undefined)}
-          />
-        </Suspense>
-      )}
-      {agentSettingsOpen && (
-        <AgentSettingsDialog
-          settings={agentSettings}
-          onChange={onAgentSettingsChange}
-          onClose={() => setAgentSettingsOpen(false)}
-        />
-      )}
-      {toasts.length > 0 && (
-        <div className="toast-container" aria-live="polite">
-          {toasts.map((toast) => (
-            <div key={toast.id} className={`toast toast-${toast.kind ?? 'info'}`} role="alert">
-              <span className="toast-message">{toast.message}</span>
+              <AppMenuBar
+                canUndo={session.canUndo}
+                canRedo={session.canRedo}
+                hasSelection={state.selectedIds.length > 0}
+                exporting={exporting}
+                signedIn={joySession.kind === 'ready'}
+                onAction={runMenuAction}
+              />
+            </div>
+            <div className="header-spacer" aria-hidden="true" />
+            <div className="header-group" role="group" aria-label="Edit">
               <button
-                type="button"
-                className="toast-close"
-                aria-label="Dismiss"
-                onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+                className="icon-button"
+                disabled={!session.canUndo}
+                onClick={undo}
+                aria-label="Undo"
+                title="Undo (Ctrl+Z)"
               >
-                <CloseIcon />
+                <UndoIcon />
+              </button>
+              <button
+                className="icon-button"
+                disabled={!session.canRedo}
+                onClick={redo}
+                aria-label="Redo"
+                title="Redo (Ctrl+Y)"
+              >
+                <RedoIcon />
+              </button>
+              <button
+                className="icon-button"
+                onClick={() => setPaletteOpen(true)}
+                aria-label="Command palette"
+                title="Command palette (Ctrl+K)"
+              >
+                <CommandIcon />
+              </button>
+              <button
+                className="icon-button"
+                onClick={switchEditorView}
+                aria-label={
+                  viewMode === 'vertical'
+                    ? 'Switch to Widescreen layout'
+                    : 'Switch to Vertical layout'
+                }
+                title={
+                  viewMode === 'vertical'
+                    ? 'Switch to Widescreen layout'
+                    : 'Switch to Vertical layout'
+                }
+                aria-pressed={viewMode === 'widescreen'}
+              >
+                {viewMode === 'vertical' ? <VerticalViewIcon /> : <WideViewIcon />}
+              </button>
+              <WorkspaceSwitcher
+                value={workspacePreset}
+                onChange={switchWorkspacePreset}
+                onReset={resetWorkspace}
+              />
+              <button
+                className="icon-button"
+                onClick={toggleKeyboardShortcuts}
+                aria-label="Keyboard shortcuts"
+                title="Keyboard shortcuts (?)"
+              >
+                <PngMaskIcon src="/assets/24_keyboard.png" size={14} />
               </button>
             </div>
-          ))}
-        </div>
-      )}
-      {keyboardShortcutsOpen && (
-        <div className="shortcuts-overlay" role="dialog" aria-label="Keyboard shortcuts">
-          <div className="shortcuts-panel">
-            <header className="shortcuts-header">
-              <h2>Keyboard Shortcuts</h2>
+            <div className="header-group" role="group" aria-label="Deliver">
+              <div className="header-menu">
+                <button
+                  type="button"
+                  className="icon-button header-export-preset-trigger"
+                  disabled={exporting}
+                  aria-label="Export preset"
+                  aria-expanded={exportPresetOpen}
+                  data-guide="Export preset"
+                  onClick={() => {
+                    setExportPresetOpen((open) => !open);
+                    setProcessesOpen(false);
+                    setAccountOpen(false);
+                  }}
+                >
+                  <span className="header-disclosure-chevron" aria-hidden="true">
+                    <ChevronDownIcon />
+                  </span>
+                  <span className="header-export-preset-label">
+                    {exportPreset === 'reels-1080'
+                      ? 'Reels 1080×1920'
+                      : exportPreset === 'shorts-1080'
+                        ? 'Shorts 1080×1920'
+                        : exportPreset === 'youtube-1080'
+                          ? 'YouTube 1920×1080'
+                          : exportPreset === 'high-bitrate'
+                            ? 'High bitrate'
+                            : 'Social H.264'}
+                  </span>
+                </button>
+                {exportPresetOpen && (
+                  <section
+                    className="header-dropdown header-export-preset-dropdown"
+                    aria-label="Export preset"
+                  >
+                    <h3>Export preset</h3>
+                    <ul className="export-preset-list">
+                      {(
+                        [
+                          ['social-h264-aac', ExportIcon, 'Social H.264'],
+                          ['reels-1080', ReelsIcon, 'Reels 1080×1920'],
+                          ['shorts-1080', ReelsIcon, 'Shorts 1080×1920'],
+                          ['youtube-1080', YoutubeIcon, 'YouTube 1920×1080'],
+                          ['high-bitrate', HighBitrateIcon, 'High bitrate'],
+                        ] as const
+                      ).map(([id, Icon, label]) => (
+                        <li key={id}>
+                          <button
+                            type="button"
+                            className="icon-button icon-button-labeled"
+                            disabled={exporting}
+                            aria-pressed={exportPreset === id}
+                            aria-label={label}
+                            data-guide={label}
+                            onClick={() => {
+                              setExportPreset(id);
+                              setExportPresetOpen(false);
+                            }}
+                          >
+                            <Icon />
+                            <span className="export-preset-option-label">{label}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+              </div>
               <button
                 type="button"
-                className="icon-button"
-                aria-label="Close shortcuts"
-                onClick={() => setKeyboardShortcutsOpen(false)}
+                className="header-export-btn"
+                onClick={() => void handleExport()}
+                disabled={exporting}
+                aria-label={exporting ? 'Exporting…' : 'Export MP4'}
+                data-guide={exporting ? 'Exporting…' : 'Export MP4'}
+                aria-busy={exporting}
               >
-                <CloseIcon />
+                <ExportIcon />
               </button>
-            </header>
-            <div className="shortcuts-list">
-              {[
-                { keys: 'Ctrl+Z', action: 'Undo' },
-                { keys: 'Ctrl+Y', action: 'Redo' },
-                { keys: 'Ctrl+K', action: 'Command palette' },
-                { keys: 'Ctrl+D', action: 'Duplicate clip' },
-                { keys: 'Space', action: 'Toggle playback' },
-                { keys: '← / →', action: 'Step back / forward 1s' },
-                { keys: 'Shift+← / Shift+→', action: 'Fine step 100ms' },
-                { keys: 'Home / End', action: 'Go to start / end' },
-                { keys: 'Delete / Backspace', action: 'Delete selected clip or marker' },
-                { keys: 'S', action: 'Split clip at playhead' },
-                { keys: '?', action: 'Toggle this panel' },
-              ].map(({ keys, action }) => (
-                <div key={keys} className="shortcut-row">
-                  <span className="shortcut-action">{action}</span>
-                  <kbd className="shortcut-keys">{keys}</kbd>
+              {exporting && (
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={cancelExport}
+                  aria-label="Cancel export"
+                  title="Cancel export"
+                >
+                  <CloseIcon />
+                </button>
+              )}
+              <div className="header-menu">
+                <button
+                  className="icon-button header-processes-trigger"
+                  aria-label="Recent processes"
+                  aria-expanded={processesOpen}
+                  title="Recent processes"
+                  onClick={() => {
+                    setProcessesOpen((open) => !open);
+                    setAccountOpen(false);
+                    setExportPresetOpen(false);
+                  }}
+                >
+                  <PngMaskIcon src="/assets/24_recent-exports.png" size={14} />
+                  {processCounts.active + processCounts.attention > 0 && (
+                    <span
+                      className="process-center-count"
+                      aria-label={`${processCounts.active + processCounts.attention} active or attention processes`}
+                    >
+                      {processCounts.active + processCounts.attention}
+                    </span>
+                  )}
+                </button>
+                {processesOpen && (
+                  <section className="header-dropdown" aria-label="Recent processes">
+                    <h3>Process Center</h3>
+                    <div className="process-filter-row" role="group" aria-label="Process filter">
+                      {(
+                        [
+                          ['active', 'Active', processCounts.active],
+                          ['attention', 'Needs attention', processCounts.attention],
+                          ['completed', 'Completed', processCounts.completed],
+                          ['all', 'All', exportHistory.length],
+                        ] as const
+                      ).map(([id, label, count]) => (
+                        <button
+                          key={id}
+                          type="button"
+                          className="process-filter-button"
+                          aria-pressed={processFilter === id}
+                          onClick={() => setProcessFilter(id)}
+                        >
+                          {label} <span>{count}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {visibleProcesses.length === 0 ? (
+                      <p className="empty-hint">No exports yet. Use Export to create an MP4.</p>
+                    ) : (
+                      <div className="process-groups">
+                        {processGroups.map(
+                          (group) =>
+                            group.entries.length > 0 && (
+                              <section
+                                key={group.id}
+                                className="process-group"
+                                aria-label={group.label}
+                              >
+                                <h4>{group.label}</h4>
+                                <ul className="process-list">
+                                  {group.entries.map((entry) => (
+                                    <li
+                                      key={entry.id}
+                                      className={`process-row process-${entry.status}`}
+                                    >
+                                      <span className="process-dot" aria-hidden="true" />
+                                      <span className="process-name" dir="ltr">
+                                        {entry.filename}
+                                      </span>
+                                      <span className="process-meta">
+                                        <strong>
+                                          {entry.status === 'running'
+                                            ? 'Running'
+                                            : entry.status === 'completed'
+                                              ? 'Completed'
+                                              : entry.status === 'interrupted-retryable'
+                                                ? 'Interrupted — retry available'
+                                                : 'Failed — retry'}
+                                        </strong>{' '}
+                                        {entry.status === 'completed' &&
+                                        entry.totalBytes !== undefined
+                                          ? `${(entry.totalBytes / 1_048_576).toFixed(1)} MB`
+                                          : entry.status !== 'completed'
+                                            ? (entry.error ?? '')
+                                            : 'Ready to download'}
+                                      </span>
+                                      {lastExportRef.current?.entryId === entry.id && (
+                                        <a
+                                          className="icon-button"
+                                          href={lastExportRef.current.url}
+                                          download={entry.filename}
+                                          aria-label={`Download ${entry.filename} again`}
+                                          title="Download again"
+                                        >
+                                          <DownloadIcon />
+                                        </a>
+                                      )}
+                                      {(entry.status === 'failed' ||
+                                        entry.status === 'interrupted-retryable') && (
+                                        <button
+                                          type="button"
+                                          className="process-retry"
+                                          onClick={() => void handleExport(entry)}
+                                          disabled={exporting}
+                                          aria-label={`Retry ${entry.filename}`}
+                                        >
+                                          Retry
+                                        </button>
+                                      )}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </section>
+                            ),
+                        )}
+                      </div>
+                    )}
+                  </section>
+                )}
+              </div>
+              <div className="header-menu">
+                <button
+                  className="icon-button"
+                  aria-label={`${JOY_STUDIO_NAME} account`}
+                  aria-expanded={accountOpen}
+                  title={
+                    joySession.kind === 'ready'
+                      ? `Signed in · ${joySession.displayName ?? joySession.subject ?? JOY_STUDIO_NAME}`
+                      : joySession.kind === 'no-access'
+                        ? `Signed in, ${JOY_STUDIO_NAME} access not enabled`
+                        : joySession.kind === 'signed-out'
+                          ? 'Signed out'
+                          : joySession.kind === 'unavailable'
+                            ? 'Sign-in status unavailable'
+                            : `${JOY_STUDIO_NAME} account`
+                  }
+                  onClick={() => {
+                    setAccountOpen((open) => !open);
+                    setProcessesOpen(false);
+                    setExportPresetOpen(false);
+                    refreshJoySession();
+                  }}
+                >
+                  <span className="session-icon-wrap">
+                    <UserIcon />
+                    <span className={`session-dot session-${joySession.kind}`} aria-hidden="true" />
+                  </span>
+                </button>
+                {accountOpen && (
+                  <section
+                    ref={accountDropdownRef}
+                    className="header-dropdown account-dropdown"
+                    aria-label={`${JOY_STUDIO_NAME} account`}
+                  >
+                    {joySession.kind === 'ready' && (
+                      <>
+                        <div className="account-card">
+                          <div className="account-card-avatar" aria-hidden="true">
+                            {joySession.avatarObjectUrl !== undefined ? (
+                              <img
+                                className="account-card-avatar-img"
+                                src={joySession.avatarObjectUrl}
+                                alt=""
+                              />
+                            ) : (
+                              (
+                                (joySession.displayName ?? joySession.subject ?? 'J')
+                                  .replace(/^@/, '')
+                                  .trim()
+                                  .charAt(0) || 'J'
+                              ).toUpperCase()
+                            )}
+                          </div>
+                          <div className="account-card-meta">
+                            <p className="account-card-status">Signed in</p>
+                            {(joySession.displayName ?? joySession.subject) !== undefined && (
+                              <p className="account-card-subject">
+                                <bdi>{joySession.displayName ?? joySession.subject}</bdi>
+                              </p>
+                            )}
+                          </div>
+                          <span className="account-card-dot session-ready" aria-hidden="true" />
+                        </div>
+                        <button
+                          type="button"
+                          className="account-sign-out"
+                          title={`Sign out of ${JOY_STUDIO_NAME}`}
+                          onClick={() => void signOut()}
+                        >
+                          <LogoutIcon />
+                          Sign out
+                        </button>
+                      </>
+                    )}
+                    {joySession.kind === 'no-access' && (
+                      <p className="empty-hint">
+                        {JOY_STUDIO_NAME} access is not enabled for this account.
+                      </p>
+                    )}
+                    {joySession.kind === 'signed-out' && (
+                      <p className="empty-hint">Returning to login…</p>
+                    )}
+                    {joySession.kind === 'unknown' && (
+                      <p className="empty-hint">Checking session…</p>
+                    )}
+                    {joySession.kind === 'unavailable' && (
+                      <p className="empty-hint">
+                        Sign-in status could not be verified. Try again shortly.
+                      </p>
+                    )}
+                  </section>
+                )}
+              </div>
+            </div>
+          </header>
+
+          {paletteOpen && (
+            <section ref={paletteRef} className="palette" aria-label="Command palette">
+              <input
+                autoFocus
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search commands"
+              />
+              {searchActions(query).map((action) => (
+                <button key={action.id} onClick={() => executeAction(action.id)}>
+                  {action.title}
+                  <kbd>{action.shortcut}</kbd>
+                </button>
+              ))}
+            </section>
+          )}
+          <video ref={videoRef} className="playback-media" playsInline muted={false} />
+          <audio
+            ref={replacementAudioRef}
+            className="playback-media"
+            aria-hidden="true"
+            preload="auto"
+          />
+          <EditorPanelContext.Provider
+            value={{
+              state,
+              previewVideoFrame,
+              clipFrameCache: clipFrameCacheRef.current,
+              clipFrameTick,
+              timelineProject: session.timelineProject,
+              visualProject: session.visualProject,
+              controlPlaneProject,
+              controlPlaneReady: controlPlaneProjectReady,
+              loadProjectAssetBlob,
+              playback: playbackDiagnostics.current.snapshot(),
+              canUndo: session.canUndo,
+              canRedo: session.canRedo,
+              historyEntries: session.historyEntries,
+              dualLensProjection,
+              lensReveal,
+              revealInFlow,
+              revealOnTimeline,
+              workflowGraph: session.graphEnabled ? session.workflowGraph : undefined,
+              dispatchGraph,
+              dataLanes,
+              artifacts: session.graphEnabled ? session.artifacts : undefined,
+              dispatchArtifacts,
+              togglePlayback,
+              seek,
+              toggleSelection: (id) =>
+                setState((current) => ({
+                  ...current,
+                  selectedIds: toggleSelection({ clipIds: current.selectedIds }, id).clipIds,
+                })),
+              selectClips,
+              clearSelection: () => setState((current) => ({ ...current, selectedIds: [] })),
+              dispatchTimeline,
+              dispatchTimelineAndProjectAudio,
+              updateVisualProperty,
+              dispatchProject,
+              replaceVisualProject,
+              replaceVisualProjectAndAudio,
+              addStickerFromAsset,
+              addAdjustmentLayer,
+              addTreatmentLayer,
+              addCaptionLayer,
+              addHtmlSceneToSelectedClip,
+              addJoyCode3DRender,
+              stickerTick,
+              audioState,
+              setAudioState,
+              transcribe,
+              transcriptionError,
+              undo,
+              redo,
+              jumpToHistory,
+              session,
+              createTool,
+              enhanceTool,
+              onCreateToolChange: setCreateTool,
+              onEnhanceToolChange: setEnhanceTool,
+              activatePanel,
+              animationGraphFocus,
+              openAnimationGraph,
+              agentContext,
+              agentPolicy,
+              agentPanelCommand,
+              creativeBriefOptedIn,
+              creativeBriefRunner,
+              onCreativeBriefOptIn,
+              joyAgentAttachedAssets,
+              attachJoyAgentAsset,
+              detachJoyAgentAsset,
+              pluginHost,
+              bumpProjectRevision,
+              bumpPluginRevision,
+              showToast,
+              motionStudioOpen: motionStudioSceneId !== undefined,
+              openMotionStudio: (sceneId: string) => setMotionStudioSceneId(sceneId),
+              closeMotionStudio: () => setMotionStudioSceneId(undefined),
+              effectStudioOpen: effectStudioSession !== undefined,
+              openEffectStudio: (recipeId: string, objectId?: string) =>
+                setEffectStudioSession({
+                  recipeId,
+                  ...(objectId !== undefined ? { objectId } : {}),
+                }),
+              closeEffectStudio: () => setEffectStudioSession(undefined),
+              timelineViewport,
+              onTimelineViewportChange: setTimelineViewport,
+              timelineTrackFlags,
+              onTimelineTrackFlagsChange: setTimelineTrackFlags,
+              timelineAutoFit,
+              onTimelineAutoFitChange: setTimelineAutoFit,
+              activeTimelineCompositionId,
+              onActiveTimelineCompositionChange: setActiveTimelineCompositionId,
+            }}
+          >
+            <DockviewReact
+              className="workspace"
+              components={dockviewComponents}
+              defaultTabComponent={PanelTab}
+              onReady={onReady}
+            />
+          </EditorPanelContext.Provider>
+          {motionStudioSceneId !== undefined && (
+            <Suspense fallback={null}>
+              <MotionStudioShell
+                key={motionStudioSceneId}
+                sceneId={motionStudioSceneId}
+                onClose={() => setMotionStudioSceneId(undefined)}
+              />
+            </Suspense>
+          )}
+          {effectStudioSession !== undefined && (
+            <Suspense fallback={null}>
+              <EffectStudioShell
+                key={effectStudioSession.recipeId}
+                recipeId={effectStudioSession.recipeId}
+                canApply={
+                  effectStudioSession.objectId !== undefined ||
+                  resolveObjectIdForSelection(session.visualProject, state.selectedIds) !==
+                    undefined
+                }
+                onApply={(effects) => {
+                  const objectId =
+                    effectStudioSession.objectId ??
+                    resolveObjectIdForSelection(session.visualProject, state.selectedIds);
+                  if (objectId === undefined) {
+                    showToast('Select a clip to apply the recipe.', 'info');
+                    return;
+                  }
+                  const activeEffects = effects.filter((effect) => effect.enabled);
+                  if (activeEffects.length === 0) {
+                    showToast('This recipe has no active effects to apply.', 'info');
+                    return;
+                  }
+                  dispatchProject({
+                    label: 'Apply Effect Recipe',
+                    commands: [
+                      {
+                        type: 'effect.replaceAll',
+                        payload: { objectId, effects: activeEffects },
+                      },
+                    ],
+                  } as unknown as VisualObjectTransaction);
+                  showToast('Effect recipe applied to the clip.', 'success');
+                  setEffectStudioSession(undefined);
+                }}
+                onClose={() => setEffectStudioSession(undefined)}
+              />
+            </Suspense>
+          )}
+          {agentSettingsOpen && (
+            <JoyAgentSettingsDialog
+              policy={agentPolicy}
+              onPolicyChange={setAgentPolicy}
+              engineClient={joyAgentEngineClientRef.current!}
+              status={joyAgentEngineClientRef.current!.getStatus()}
+              onClose={() => setAgentSettingsOpen(false)}
+            />
+          )}
+          {toasts.length > 0 && (
+            <div className="toast-container" aria-live="polite">
+              {toasts.map((toast) => (
+                <div key={toast.id} className={`toast toast-${toast.kind ?? 'info'}`} role="alert">
+                  <span className="toast-message">{toast.message}</span>
+                  <button
+                    type="button"
+                    className="toast-close"
+                    aria-label="Dismiss"
+                    onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+                  >
+                    <CloseIcon />
+                  </button>
                 </div>
               ))}
             </div>
-          </div>
-        </div>
-      )}
-    </main>
+          )}
+          {keyboardShortcutsOpen && (
+            <div className="shortcuts-overlay" role="dialog" aria-label="Keyboard shortcuts">
+              <div className="shortcuts-panel">
+                <header className="shortcuts-header">
+                  <h2>Keyboard Shortcuts</h2>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label="Close shortcuts"
+                    onClick={() => setKeyboardShortcutsOpen(false)}
+                  >
+                    <CloseIcon />
+                  </button>
+                </header>
+                <div className="shortcuts-list">
+                  {[
+                    { keys: 'Ctrl+Z', action: 'Undo' },
+                    { keys: 'Ctrl+Y', action: 'Redo' },
+                    { keys: 'Ctrl+K', action: 'Command palette' },
+                    { keys: 'Ctrl+D', action: 'Duplicate clip' },
+                    { keys: 'Space', action: 'Toggle playback' },
+                    { keys: '← / →', action: 'Step back / forward 1s' },
+                    { keys: 'Shift+← / Shift+→', action: 'Fine step 100ms' },
+                    { keys: 'Home / End', action: 'Go to start / end' },
+                    { keys: 'Delete / Backspace', action: 'Delete selected clip or marker' },
+                    { keys: 'S', action: 'Split clip at playhead' },
+                    { keys: '?', action: 'Toggle this panel' },
+                  ].map(({ keys, action }) => (
+                    <div key={keys} className="shortcut-row">
+                      <span className="shortcut-action">{action}</span>
+                      <kbd className="shortcut-keys">{keys}</kbd>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </main>
+      </AgentPresenceProvider>
+    </AgentPreviewProvider>
   );
 }
 
@@ -7218,6 +7171,7 @@ function MonitorPanelContent({ context }: { readonly context: EditorPanelContext
   // footer claiming a canvas ratio that no longer exists.
   const [monitorFitView, setMonitorFitView] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [agentPreviewBefore, setAgentPreviewBefore] = useState(false);
   const [zoomDrawerOpen, setZoomDrawerOpen] = useState(false);
   const panelRef = useRef<HTMLElement | null>(null);
   const transportRef = useRef<HTMLDivElement | null>(null);
@@ -7788,6 +7742,11 @@ function MonitorPanelContent({ context }: { readonly context: EditorPanelContext
             data-preview-renderer="hardware-gpu"
           />
         )}
+        <AgentPreviewBadge
+          surface="Program Monitor"
+          before={agentPreviewBefore}
+          onBeforeChange={setAgentPreviewBefore}
+        />
       </div>
       <div className="monitor-transport" ref={transportRef}>
         {zoomDrawerOpen && (

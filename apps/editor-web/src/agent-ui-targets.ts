@@ -165,7 +165,9 @@ export function mapAgentToolToSurface(
   return mapAgentToolToTargets(request, snapshot);
 }
 
-export function trustedFeatureToolForRequest(request: AgentToolTargetRequest): FeatureToolId | undefined {
+export function trustedFeatureToolForRequest(
+  request: AgentToolTargetRequest,
+): FeatureToolId | undefined {
   return TOOL_TARGETS[request.tool]?.featureTool;
 }
 
