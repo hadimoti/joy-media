@@ -40,6 +40,7 @@ import {
 import { effectRegistry, type EffectDescriptor } from '@joy-media/visual-effects';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
+import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 import { effectReorderTransaction } from './effect-reorder.js';
 import { PropertyRow } from './components/PropertyRow.js';
 import {
@@ -528,6 +529,7 @@ export function InspectorPanel({
       note={inspectorInactive ? 'Select a clip to edit its properties.' : undefined}
       noteMode={inspectorInactive ? 'hint' : undefined}
     >
+      <AgentPreviewBadge surface="Inspector" />
       <div className="inspector-selection-row">
         <h2 className="inspector-selected-name" dir="ltr">
           {title}

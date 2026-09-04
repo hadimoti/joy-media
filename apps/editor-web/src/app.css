@@ -8155,6 +8155,274 @@ label {
   box-sizing: border-box;
   color: var(--joy-text-muted);
 }
+
+/* JOY Agent presence: a restrained gold cue that never replaces Dockview's
+   solid user-selection state. Every cue is backed by a safe engine event. */
+.panel-tab.is-agent-active,
+.joy-panel-root.is-agent-active {
+  position: relative;
+}
+.panel-tab-agent-marker,
+.joy-panel-tab-agent-marker,
+.feature-hub-agent-marker {
+  display: inline-flex;
+  flex: none;
+  width: 0.32rem;
+  height: 0.32rem;
+  border-radius: 50%;
+  background: var(--joy-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--joy-accent) 20%, transparent);
+}
+.panel-tab-agent-marker {
+  position: absolute;
+  inset-block-start: 0.28rem;
+  inset-inline-end: 0.28rem;
+}
+.panel-tab.is-agent-active::after,
+.joy-panel-root.is-agent-active::before {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--joy-accent) 52%, transparent);
+}
+.panel-tab.is-agent-active::after {
+  inset: 2px;
+  border-radius: var(--radius-sm);
+  animation: joy-agent-tab-pulse 1.8s ease-in-out infinite;
+}
+.joy-panel-root.is-agent-active::before {
+  inset: 0;
+  border-radius: var(--radius-inner, var(--radius-sm));
+  opacity: 0.5;
+}
+.joy-panel-tab.is-agent-active {
+  position: relative;
+}
+.joy-panel-tab-agent-marker {
+  position: relative;
+  margin-inline-start: 0.2rem;
+  width: 0.28rem;
+  height: 0.28rem;
+  border-radius: 0;
+  box-shadow: none;
+}
+.joy-panel-tab.is-agent-active::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0.35rem;
+  inset-block-end: -1px;
+  height: 2px;
+  border: 0;
+  background: var(--joy-accent);
+  animation: joy-agent-tab-underline 1.8s ease-in-out infinite;
+}
+.joy-panel-tab[data-agent-phase='awaiting-approval']::after,
+.panel-tab[data-agent-phase='awaiting-approval']::after {
+  animation: none;
+  opacity: 1;
+}
+.feature-hub.is-agent-active .feature-hub-nav {
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--joy-accent) 38%, transparent);
+}
+.feature-hub-agent-marker {
+  width: 0.28rem;
+  height: 0.28rem;
+  margin-inline-start: 0.15rem;
+}
+
+.agent-activity-rail {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  max-width: min(36rem, 42vw);
+  min-height: 1.85rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--joy-accent) 42%, var(--joy-border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--joy-bg-elevated) 94%, var(--joy-accent));
+  box-shadow: 0 0.25rem 1rem rgb(0 0 0 / 22%);
+  transform: translate(-50%, -50%);
+  color: var(--joy-text);
+  font-size: var(--joy-type-2xs);
+  pointer-events: auto;
+}
+.agent-activity-rail--awaiting-approval,
+.agent-activity-rail--active.agent-activity-rail--awaiting-approval {
+  border-color: var(--joy-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--joy-accent) 15%, transparent);
+}
+.agent-activity-mark {
+  display: grid;
+  place-items: center;
+  width: 0.78rem;
+  height: 0.78rem;
+  border: 1px solid var(--joy-accent);
+  border-radius: 50%;
+  flex: none;
+}
+.agent-activity-mark-core {
+  width: 0.28rem;
+  height: 0.28rem;
+  border-radius: 50%;
+  background: var(--joy-accent);
+  animation: joy-agent-core-pulse 1.8s ease-in-out infinite;
+}
+.agent-activity-copy {
+  display: inline-flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.1;
+}
+.agent-activity-phase {
+  color: var(--joy-text);
+  font-weight: 650;
+}
+.agent-activity-target,
+.agent-activity-progress {
+  color: var(--joy-text-muted);
+  white-space: nowrap;
+}
+.agent-activity-progress {
+  font-variant-numeric: tabular-nums;
+}
+.agent-activity-action,
+.agent-activity-follow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  min-height: 1.35rem;
+  padding: 0.1rem 0.3rem;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--joy-text-muted);
+  font: inherit;
+  font-size: var(--joy-type-2xs);
+  white-space: nowrap;
+}
+.agent-activity-action:hover,
+.agent-activity-action:focus-visible,
+.agent-activity-follow:hover {
+  background: var(--joy-bg-hover);
+  color: var(--joy-text);
+}
+.agent-activity-stop {
+  color: var(--joy-danger);
+}
+.agent-activity-follow input {
+  width: 0.72rem;
+  height: 0.72rem;
+}
+
+.agent-preview-badge {
+  position: absolute;
+  inset-block-start: 0.6rem;
+  inset-inline-start: 0.6rem;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 1.75rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--joy-accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--joy-bg-elevated) 94%, var(--joy-accent));
+  box-shadow: 0 0.3rem 1.1rem rgb(0 0 0 / 28%);
+  color: var(--joy-text);
+  font-size: var(--joy-type-2xs);
+  pointer-events: auto;
+}
+.agent-preview-badge-mark {
+  color: var(--joy-accent);
+  font-size: 1rem;
+}
+.agent-preview-badge-copy {
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+.agent-preview-badge-copy span,
+.agent-preview-toggle {
+  color: var(--joy-text-muted);
+}
+.agent-preview-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+.agent-preview-toggle input {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+.agent-timeline-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+.agent-timeline-ghost {
+  position: absolute;
+  display: block;
+  overflow: visible;
+  border: 1px dashed var(--joy-accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--joy-accent) 12%, transparent);
+  color: var(--joy-text);
+  pointer-events: none;
+}
+.agent-timeline-ghost--remove {
+  border-color: var(--joy-danger);
+  background: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--joy-danger) 13%, transparent) 0 4px, transparent 4px 8px);
+}
+.agent-timeline-ghost--move.is-origin,
+.agent-timeline-ghost--trim.is-origin {
+  opacity: 0.35;
+  border-color: var(--joy-text-muted);
+  background: transparent;
+}
+.agent-timeline-ghost-label {
+  position: absolute;
+  inset-block-start: 0.1rem;
+  inset-inline-start: 0.25rem;
+  max-width: 12rem;
+  overflow: hidden;
+  color: var(--joy-text);
+  font-size: var(--joy-type-2xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.agent-timeline-diff {
+  display: inline-flex;
+  margin: 0.3rem;
+  padding: 0.2rem 0.35rem;
+  border: 1px dashed var(--joy-accent);
+  color: var(--joy-text);
+  font-size: var(--joy-type-2xs);
+}
+
+@keyframes joy-agent-tab-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.9; }
+}
+@keyframes joy-agent-tab-underline {
+  0%, 100% { transform: scaleX(0.55); opacity: 0.45; }
+  50% { transform: scaleX(1); opacity: 1; }
+}
+@keyframes joy-agent-core-pulse {
+  0%, 100% { transform: scale(0.7); opacity: 0.55; }
+  50% { transform: scale(1); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel-tab.is-agent-active::after,
+  .joy-panel-tab.is-agent-active::after,
+  .agent-activity-mark-core {
+    animation: none;
+  }
+}
 #root .workspace .dv-tab {
   margin: 0;
   padding: 0;
@@ -16625,3 +16893,22 @@ label {
 .creative-brief-meta p {
   margin: 0;
 }
+/* Built-in JOY Agent Engine session connection and truthful live activity. */
+.joy-agent-settings-dialog .agent-engine-card { border-color: color-mix(in srgb, var(--joy-gold, #f5b82e) 52%, transparent); background: linear-gradient(135deg, color-mix(in srgb, var(--joy-gold, #f5b82e) 12%, var(--panel-bg, #1f2328)), var(--panel-bg, #1f2328)); }
+.agent-connection-badge { display: inline-flex; align-items: center; gap: 0.45rem; border-radius: 999px; padding: 0.3rem 0.65rem; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.agent-connection-badge::before, .joy-agent-live-mark { content: ''; width: 0.48rem; height: 0.48rem; border-radius: 50%; background: currentColor; }
+.agent-connection-badge.is-untested { color: var(--text-muted, #9aa0a6); background: color-mix(in srgb, currentColor 12%, transparent); }
+.agent-connection-badge.is-tool-loop { color: var(--joy-ok, #69c779); background: color-mix(in srgb, currentColor 15%, transparent); }
+.agent-connection-badge.is-plan-only { color: var(--joy-gold, #f5b82e); background: color-mix(in srgb, currentColor 15%, transparent); }
+.agent-connection-badge.is-incompatible { color: var(--joy-danger, #e56b6f); background: color-mix(in srgb, currentColor 15%, transparent); }
+.agent-settings-actions { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.75rem; }
+.button-secondary { border: 1px solid var(--border-subtle, #3a3f46); background: transparent; color: inherit; border-radius: 0.4rem; padding: 0.55rem 0.75rem; cursor: pointer; }
+.joy-agent-live-status { display: flex; align-items: center; gap: 0.55rem; margin: 0.7rem 0; padding: 0.55rem 0.7rem; border: 1px solid color-mix(in srgb, var(--joy-gold, #f5b82e) 65%, transparent); border-radius: 0.5rem; color: var(--text-primary, #f5f5f5); background: color-mix(in srgb, var(--joy-gold, #f5b82e) 8%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--joy-gold, #f5b82e) 18%, transparent) inset; }
+.joy-agent-live-status > span:not(.joy-agent-live-mark) { color: var(--text-muted, #a4a9af); font-size: 0.78rem; }
+.joy-agent-live-status .joy-agent-live-mark { color: var(--joy-gold, #f5b82e); animation: joy-agent-pulse 1.8s ease-in-out infinite; }
+.joy-agent-live-status.is-awaiting-approval { border-color: var(--joy-gold, #f5b82e); box-shadow: 0 0 0 2px color-mix(in srgb, var(--joy-gold, #f5b82e) 22%, transparent) inset; }
+.joy-agent-live-status.is-completed { border-color: var(--joy-ok, #69c779); }
+.joy-agent-live-status.is-failed { border-color: var(--joy-danger, #e56b6f); }
+.joy-agent-live-status button { margin-inline-start: auto; border: 1px solid currentColor; background: transparent; color: inherit; border-radius: 0.35rem; padding: 0.25rem 0.55rem; cursor: pointer; }
+@keyframes joy-agent-pulse { 0%, 100% { opacity: 0.35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1.15); } }
+@media (prefers-reduced-motion: reduce) { .joy-agent-live-status .joy-agent-live-mark { animation: none; } }

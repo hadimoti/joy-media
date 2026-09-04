@@ -10,6 +10,7 @@ import {
 } from './three-d-source-cache.js';
 import type { ThreeDSceneStateV1 } from './three-d-render-layer.js';
 import { CubeIcon, UploadIcon } from './icons.js';
+import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 
 export interface JoyCode3DRenderAsset {
   readonly assetId: string;
@@ -432,6 +433,7 @@ export function JoyCode3DViewer({
 
   return (
     <div className="joy-code-3d">
+      <AgentPreviewBadge surface="3D" />
       <div className="joy-code-3d-toolbar">
         <button
           type="button"

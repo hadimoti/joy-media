@@ -116,6 +116,11 @@ import {
 } from './timeline-marquee-selection.js';
 import { timelineGapsForClips, type TimelineGap } from './timeline-gaps.js';
 import { nextTimelineMarkerLabel } from './timeline-marker-id.js';
+import { AgentTimelineOverlay } from './AgentTimelineOverlay.js';
+import {
+  diffAgentTimeline,
+  type AgentPreviewTimeline,
+} from './agent-timeline-preview.js';
 /** Drags snap to a 100 ms grid, matching the playhead slider's step. */
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
@@ -663,6 +668,7 @@ export function TimelinePanel({
   selectedObject,
   onPropertyDispatch,
   trackLabelColors,
+  agentPreview,
 }: {
   readonly project: SpikeProject;
   /** Durable clip presentation kinds from the paired creative project. */
@@ -724,6 +730,10 @@ export function TimelinePanel({
   readonly onPropertyDispatch?: (transaction: VisualObjectTransaction) => void;
   /** Durable per-composition track label colors mirrored from the universal deck. */
   readonly trackLabelColors?: Readonly<Record<string, TimelineTrackLabelColor | undefined>>;
+  /** Revision-bound, non-canonical timeline projection from the JOY Agent. */
+  readonly agentPreview?:
+    | { readonly canonical: AgentPreviewTimeline; readonly preview: AgentPreviewTimeline }
+    | undefined;
 }) {
   const [localTrackFlags, setLocalTrackFlags] = useState<readonly TimelineTrackView[]>([]);
   const [localActiveCompositionId, setLocalActiveCompositionId] = useState(
@@ -1508,6 +1518,21 @@ export function TimelinePanel({
   const audioRunwayNeeded = !tracks.some(
     (track) => track.family === 'audio' && track.visible && !track.locked,
   );
+  const agentPreviewDiffs = useMemo(
+    () =>
+      agentPreview === undefined
+        ? []
+        : diffAgentTimeline(agentPreview.canonical, agentPreview.preview),
+    [agentPreview],
+  );
+  const agentTrackLayouts = useMemo(() => {
+    let topPx = visualRunwayNeeded ? 48 : 0;
+    return visible.map((track) => {
+      const layout = { trackId: track.id, topPx, heightPx: track.heightPx };
+      topPx += track.heightPx + 4;
+      return layout;
+    });
+  }, [visible, visualRunwayNeeded]);
   const handleRunwayDrop = useCallback(
     (
       asset: {
@@ -2339,6 +2364,13 @@ export function TimelinePanel({
         </div>
         <div className="timeline-tracks-inner" ref={laneMeasureRef}>
           <TimelineTracksGrid ticks={rulerTicks} widthPx={laneWidthPx} />
+          {agentPreviewDiffs.length > 0 && (
+            <AgentTimelineOverlay
+              diffs={agentPreviewDiffs}
+              viewport={{ ...viewport, originUs: 0 }}
+              tracks={agentTrackLayouts}
+            />
+          )}
           {marqueeRect !== undefined &&
             laneMeasureRef.current !== null &&
             (() => {

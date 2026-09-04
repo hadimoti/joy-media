@@ -14,6 +14,7 @@ import {
   WorkflowPathIcon,
 } from './icons.js';
 import { FEATURE_HUBS, type FeatureHubId, type FeatureToolId } from './feature-architecture.js';
+import { useAgentPanelPresence, useAgentSectionPresence } from './agent-presence.js';
 
 function FeatureGlyph({ id }: { readonly id: FeatureToolId }) {
   switch (id) {
@@ -44,6 +45,27 @@ function FeatureGlyph({ id }: { readonly id: FeatureToolId }) {
   }
 }
 
+function FeatureToolPresence({
+  hub,
+  toolId,
+}: {
+  readonly hub: FeatureHubId;
+  readonly toolId: FeatureToolId;
+}) {
+  const panelId = hub === 'create' ? 'media' : 'effects';
+  const presence = useAgentSectionPresence(panelId, toolId);
+  if (!presence.active) return null;
+  return (
+    <span
+      className="feature-hub-agent-marker"
+      aria-label={presence.awaitingApproval ? 'Agent needs approval' : `Agent ${presence.phase}`}
+      title={presence.awaitingApproval ? 'Agent needs approval' : `Agent ${presence.phase}`}
+    >
+      <span aria-hidden="true" />
+    </span>
+  );
+}
+
 /** Compact primary navigation above the mature feature panels. */
 export function FeatureHub({
   hub,
@@ -59,8 +81,14 @@ export function FeatureHub({
   const definition = FEATURE_HUBS[hub];
   const contentId = `feature-hub-${hub}-content`;
   const hasActiveTool = definition.tools.some((tool) => tool.id === activeTool);
+  const panelPresence = useAgentPanelPresence(hub === 'create' ? 'media' : 'effects');
   return (
-    <section className={`feature-hub feature-hub--${hub}`} aria-label={`${definition.label} tools`}>
+    <section
+      className={`feature-hub feature-hub--${hub}${panelPresence.active ? ' is-agent-active' : ''}`}
+      aria-label={`${definition.label} tools`}
+      data-agent-active={panelPresence.active ? 'true' : undefined}
+      data-agent-phase={panelPresence.active ? panelPresence.phase : undefined}
+    >
       <nav className="feature-hub-nav" role="tablist" aria-label={`${definition.label} tools`}>
         {definition.tools.map((tool, index) => (
           <button
@@ -100,6 +128,7 @@ export function FeatureHub({
               <FeatureGlyph id={tool.id} />
             </span>
             <span>{tool.shortLabel}</span>
+            <FeatureToolPresence hub={hub} toolId={tool.id} />
           </button>
         ))}
       </nav>

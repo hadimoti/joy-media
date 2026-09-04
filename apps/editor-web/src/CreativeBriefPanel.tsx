@@ -23,6 +23,7 @@ import {
 import { CreativeBriefDisplay } from './CreativeBriefDisplay.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
+import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 import {
   loadCreativeBrief,
   removeCreativeBrief,
@@ -277,6 +278,7 @@ export function CreativeBriefPanel({
   // Render based on current state
   const panelContent = (
     <div className="creative-brief-panel" aria-label="Creative brief panel">
+      <AgentPreviewBadge surface="Creative Brief" />
       {/* Consent gate - shown when optedIn is false */}
       {!optedIn && (
         <div className="creative-brief-panel-consent" aria-label="Creative Brief consent gate">

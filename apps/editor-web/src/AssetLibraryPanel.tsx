@@ -49,6 +49,7 @@ import {
 } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
+import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 import {
   ASSET_CATEGORY_ICONS,
   assetCollectionIconUrl,
@@ -927,6 +928,7 @@ export function AssetLibraryPanel({
         </>
       }
     >
+      <AgentPreviewBadge surface="Assets" />
       <div
         className="asset-library-content"
         ref={assetLibraryContentRef}

@@ -11,8 +11,14 @@
  * only the body goes quiet. It never swaps itself for a sentence.
  */
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { SearchIcon } from './icons.js';
+import {
+  PanelIdentityContext,
+  useAgentPanelPresence,
+  useAgentSectionPresence,
+} from './agent-presence.js';
+import type { PanelId } from './workspace.js';
 
 export interface PanelTabSpec {
   readonly id: string;
@@ -28,6 +34,8 @@ export interface PanelTabSpec {
 export interface PanelShellProps {
   /** Accessible panel name. Visible dock labels already identify the panel. */
   readonly title: string;
+  /** Durable Dockview ID; normally supplied by PanelIdentityContext. */
+  readonly panelId?: PanelId | undefined;
   /** Same glyph as the panel's dockview tab — pass `panelTabIconUrl(id)`. */
   readonly iconUrl?: string | undefined;
   /** For the panels whose tab glyph is an inline SVG rather than a PNG mask. */
@@ -65,6 +73,81 @@ export interface PanelShellProps {
   readonly children: ReactNode;
 }
 
+function PanelSectionTab({
+  tab,
+  index,
+  selected,
+  panelId,
+  onSelect,
+  onTabChange,
+  fallbackFirst,
+}: {
+  readonly tab: PanelTabSpec;
+  readonly index: number;
+  readonly selected: boolean;
+  readonly fallbackFirst: boolean;
+  readonly panelId: PanelId | undefined;
+  readonly onSelect: () => void;
+  readonly onTabChange: ((id: string) => void) | undefined;
+}) {
+  const presence = useAgentSectionPresence(panelId ?? 'agent', tab.id);
+  return (
+    <button
+      type="button"
+      role="tab"
+      className={`joy-panel-tab${panelId !== undefined && presence.active ? ' is-agent-active' : ''}`}
+      data-panel-tab-id={tab.id}
+      data-agent-active={panelId !== undefined && presence.active ? 'true' : undefined}
+      data-agent-phase={panelId !== undefined && presence.active ? presence.phase : undefined}
+      aria-selected={selected}
+      aria-label={(tab.ariaLabel ?? tab.label) || tab.id}
+      disabled={tab.disabled === true}
+      tabIndex={selected || fallbackFirst ? 0 : -1}
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        const siblings = Array.from(
+          event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+            '[role="tab"]:not(:disabled)',
+          ) ?? [],
+        );
+        if (siblings.length === 0) return;
+        event.preventDefault();
+        const currentIndex = siblings.indexOf(event.currentTarget);
+        const nextIndex =
+          event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? siblings.length - 1
+              : (currentIndex + (event.key === 'ArrowLeft' ? -1 : 1) + siblings.length) %
+                siblings.length;
+        siblings[nextIndex]?.focus();
+        const nextId = siblings[nextIndex]?.dataset.panelTabId;
+        if (nextId !== undefined) onTabChange?.(nextId);
+      }}
+    >
+      {tab.iconUrl !== undefined && (
+        <span
+          className="joy-panel-tab-icon"
+          style={{
+            maskImage: `url(${tab.iconUrl})`,
+            WebkitMaskImage: `url(${tab.iconUrl})`,
+          }}
+          aria-hidden="true"
+        />
+      )}
+      {tab.label}
+      {panelId !== undefined && presence.active && (
+        <span
+          className="joy-panel-tab-agent-marker"
+          aria-label={presence.awaitingApproval ? 'Agent needs approval' : `Agent ${presence.phase}`}
+          title={presence.awaitingApproval ? 'Agent needs approval' : `Agent ${presence.phase}`}
+        />
+      )}
+    </button>
+  );
+}
+
 export function PanelShell({
   title,
   className,
@@ -79,8 +162,12 @@ export function PanelShell({
   note,
   noteMode = 'status',
   hideHeader = false,
+  panelId,
   children,
 }: PanelShellProps) {
+  const identityPanelId = useContext(PanelIdentityContext);
+  const effectivePanelId = panelId ?? identityPanelId;
+  const panelPresence = useAgentPanelPresence(effectivePanelId ?? 'agent');
   const [searchOpen, setSearchOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -96,51 +183,16 @@ export function PanelShell({
   const tabButtons =
     tabs !== undefined && tabs.length > 0
       ? tabs.map((tab, index) => (
-          <button
+          <PanelSectionTab
             key={tab.id}
-            type="button"
-            role="tab"
-            className="joy-panel-tab"
-            data-panel-tab-id={tab.id}
-            aria-selected={activeTab === tab.id}
-            aria-label={(tab.ariaLabel ?? tab.label) || tab.id}
-            disabled={tab.disabled === true}
-            tabIndex={activeTab === tab.id || (activeTab === undefined && index === 0) ? 0 : -1}
-            onClick={() => onTabChange?.(tab.id)}
-            onKeyDown={(event) => {
-              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-              const siblings = Array.from(
-                event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
-                  '[role="tab"]:not(:disabled)',
-                ) ?? [],
-              );
-              if (siblings.length === 0) return;
-              event.preventDefault();
-              const currentIndex = siblings.indexOf(event.currentTarget);
-              const nextIndex =
-                event.key === 'Home'
-                  ? 0
-                  : event.key === 'End'
-                    ? siblings.length - 1
-                    : (currentIndex + (event.key === 'ArrowLeft' ? -1 : 1) + siblings.length) %
-                      siblings.length;
-              siblings[nextIndex]?.focus();
-              const nextId = siblings[nextIndex]?.dataset.panelTabId;
-              if (nextId !== undefined) onTabChange?.(nextId);
-            }}
-          >
-            {tab.iconUrl !== undefined && (
-              <span
-                className="joy-panel-tab-icon"
-                style={{
-                  maskImage: `url(${tab.iconUrl})`,
-                  WebkitMaskImage: `url(${tab.iconUrl})`,
-                }}
-                aria-hidden="true"
-              />
-            )}
-            {tab.label}
-          </button>
+            tab={tab}
+            index={index}
+            selected={activeTab === tab.id}
+            fallbackFirst={activeTab === undefined && index === 0}
+            panelId={effectivePanelId}
+            onSelect={() => onTabChange?.(tab.id)}
+            onTabChange={onTabChange}
+          />
         ))
       : null;
 
@@ -149,8 +201,10 @@ export function PanelShell({
 
   return (
     <article
-      className={className === undefined ? 'joy-panel-root' : `joy-panel-root ${className}`}
+      className={`${className === undefined ? 'joy-panel-root' : `joy-panel-root ${className}`}${effectivePanelId !== undefined && panelPresence.active ? ' is-agent-active' : ''}`}
       aria-label={title}
+      data-agent-active={effectivePanelId !== undefined && panelPresence.active ? 'true' : undefined}
+      data-agent-phase={effectivePanelId !== undefined && panelPresence.active ? panelPresence.phase : undefined}
     >
       {!hideHeader && (tabsInHeader || hasHeaderActions) && (
         <div className="joy-panel-header">
