@@ -1,6 +1,4 @@
 import {
-  lazy,
-  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -40,23 +38,21 @@ import { extractPendingChanges } from './agent-plan-visualizer.js';
 import { saveWorkflow } from './workflow-recorder.js';
 import type { EditorSession } from './editor-session.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
-import { PanelShell, type PanelTabSpec } from './PanelShell.js';
+import { PanelShell } from './PanelShell.js';
 import type { AgentPolicyPreferences } from './agent-policy-settings.js';
 import { approvalPolicyForAgentPolicy } from './agent-policy-settings.js';
 import { JoyCodeLogo } from './JoyCodeLogo.js';
 import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
+import { matchJoyCodeIntentId, type JoyCodeThreadStatus } from './joy-code-history.js';
 import {
-  addJoyCodeMessage,
-  createJoyCodeThread,
-  loadJoyCodeThreads,
-  matchJoyCodeIntentId,
-  saveJoyCodeThreads,
-  setJoyCodeThreadStatus,
-  type JoyCodeThread,
-} from './joy-code-history.js';
+  addJoyCodeConversationMessage,
+  createJoyCodeConversation,
+  loadJoyCodeConversation,
+  saveJoyCodeConversation,
+  setJoyCodeConversationStatus,
+  type JoyCodeConversation,
+} from './joy-code-conversation.js';
 import { CheckIcon, CloseIcon, PlayIcon, PlusIcon, SaveIcon, UndoIcon } from './icons.js';
-import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
-import { readThreeDSceneStates } from './three-d-render-layer.js';
 import { CreativeBriefPanel } from './CreativeBriefPanel.js';
 import type { JoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
 import { compileJoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
@@ -81,16 +77,6 @@ const THINKING_REVEAL_MS = 320;
 const MAX_COMPOSER_PROMPT_CHARS = 8_000;
 const CREDENTIAL_LIKE_PROMPT =
   /(?:bearer\s+[A-Za-z0-9._~-]{16,}|(?:api[_-]?key|secret|token)\s*[:=]\s*\S{12,}|sk-[A-Za-z0-9_-]{20,})/i;
-const JoyCode3DViewer = lazy(() =>
-  import('./JoyCode3DViewer.js').then((module) => ({ default: module.JoyCode3DViewer })),
-);
-
-const TABS: readonly PanelTabSpec[] = [
-  { id: 'history', label: 'History' },
-  { id: 'composer', label: 'Composer' },
-  { id: '3d', label: '', iconUrl: '/assets/24_3d.png' },
-];
-
 type ComposerCapability = 'edit' | 'creative-brief';
 const NOOP_SUBSCRIBE = () => () => {};
 const NOOP_PRESENCE_SNAPSHOT = (): AgentPresenceState => EMPTY_AGENT_PRESENCE;
@@ -115,11 +101,6 @@ interface LastRun {
   readonly savedWorkflowId?: string;
 }
 
-interface JoyCodeState {
-  readonly threads: readonly JoyCodeThread[];
-  readonly activeThreadId: string;
-}
-
 export interface JoyAgentAttachedAsset {
   readonly assetId: string;
   readonly kind: 'image' | 'video' | 'markdown';
@@ -128,7 +109,7 @@ export interface JoyAgentAttachedAsset {
   readonly source?: 'joycode-folder';
 }
 
-export type AgentPanelCommandType = 'new-task' | 'activity' | 'stop' | 'select-capability';
+export type AgentPanelCommandType = 'stop' | 'select-capability';
 export interface AgentPanelCommand {
   readonly serial: number;
   readonly type: AgentPanelCommandType;
@@ -177,28 +158,14 @@ function makeJoyCodeId(prefix: string): string {
   return `${prefix}-${randomPart}`;
 }
 
-function initialJoyCodeState(projectId: string): JoyCodeState {
-  let threads: readonly JoyCodeThread[] = [];
+function initialJoyCodeConversation(projectId: string): JoyCodeConversation {
   try {
-    threads = loadJoyCodeThreads(window.localStorage, projectId);
+    const existing = loadJoyCodeConversation(window.localStorage, projectId);
+    if (existing !== undefined) return existing;
   } catch {
     // Storage can be disabled by browser policy. The composer still works in memory.
   }
-  const existing = threads[0];
-  if (existing !== undefined) return { threads, activeThreadId: existing.id };
-  const thread = createJoyCodeThread(makeJoyCodeId('task'), new Date().toISOString());
-  return { threads: [thread], activeThreadId: thread.id };
-}
-
-function threadTimestamp(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
+  return createJoyCodeConversation(makeJoyCodeId('conversation'), new Date().toISOString());
 }
 
 /**
@@ -218,7 +185,6 @@ export function AgentPanel({
   attachedAssets = [],
   onDetachAsset,
   onAttachAsset,
-  onAdd3DRender,
   settings,
   command,
   creativeBriefOptedIn = false,
@@ -239,7 +205,6 @@ export function AgentPanel({
   readonly attachedAssets?: readonly JoyAgentAttachedAsset[];
   readonly onDetachAsset?: (assetId: string) => void;
   readonly onAttachAsset?: (asset: JoyAgentAttachedAsset) => void;
-  readonly onAdd3DRender?: (asset: JoyCode3DRenderAsset) => Promise<void>;
   readonly settings: AgentPolicyPreferences;
   readonly command?: AgentPanelCommand;
   readonly creativeBriefOptedIn?: boolean;
@@ -260,12 +225,13 @@ export function AgentPanel({
   const [thinkingThreadId, setThinkingThreadId] = useState<string | undefined>(undefined);
   const [agentPhase, setAgentPhase] = useState<JoyAgentPhase | undefined>(undefined);
   const [agentRunId, setAgentRunId] = useState<string | undefined>(undefined);
-  const [tab, setTab] = useState('composer');
   const [composerCapability, setComposerCapability] = useState<ComposerCapability>('edit');
   const [draft, setDraft] = useState('');
   const [attachError, setAttachError] = useState<string | undefined>(undefined);
   const [attaching, setAttaching] = useState(false);
-  const [joyCode, setJoyCode] = useState<JoyCodeState>(() => initialJoyCodeState(project.id));
+  const [conversation, setConversation] = useState<JoyCodeConversation>(() =>
+    initialJoyCodeConversation(project.id),
+  );
   const [creativeBriefContext, setCreativeBriefContext] = useState<CreativeBriefV1 | undefined>(
     undefined,
   );
@@ -280,6 +246,7 @@ export function AgentPanel({
   useEffect(() => {
     setCreativeBriefContext(undefined);
     setComposerCapability('edit');
+    setConversation(initialJoyCodeConversation(project.id));
   }, [project.id]);
 
   useEffect(() => {
@@ -315,21 +282,21 @@ export function AgentPanel({
     () => new ApprovalEngine(approvalPolicyForAgentPolicy(settings)),
     [settings],
   );
-
-  const activeThread =
-    joyCode.threads.find((thread) => thread.id === joyCode.activeThreadId) ?? joyCode.threads[0];
+  // Internal runner records retain a threadId field for compatibility with
+  // plans and audit entries. It is now the stable project conversation ID.
+  const activeThread = conversation;
 
   useEffect(() => {
     try {
-      saveJoyCodeThreads(window.localStorage, project.id, joyCode.threads);
+      saveJoyCodeConversation(window.localStorage, project.id, conversation);
     } catch {
-      // History persistence is optional; never block editing when storage is unavailable.
+      // Conversation persistence is optional; never block editing when storage is unavailable.
     }
-  }, [joyCode.threads, project.id]);
+  }, [conversation, project.id]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: 'nearest' });
-  }, [activeThread?.messages.length, pending, lastRun, tab, thinkingThreadId]);
+  }, [conversation.messages.length, pending, lastRun, thinkingThreadId]);
 
   useEffect(
     () => () => {
@@ -340,38 +307,11 @@ export function AgentPanel({
     [],
   );
 
-  const startNewTask = useCallback(() => {
-    if (thinkingTimerRef.current !== undefined) {
-      window.clearTimeout(thinkingTimerRef.current);
-      thinkingTimerRef.current = undefined;
-    }
-    const now = new Date().toISOString();
-    const thread = createJoyCodeThread(makeJoyCodeId('task'), now);
-    setJoyCode((current) => ({
-      threads: [thread, ...current.threads],
-      activeThreadId: thread.id,
-    }));
-    setPending(undefined);
-    setModelDraft(undefined);
-    agentPreviewStore?.clear();
-    setLastRun(undefined);
-    setThinkingThreadId(undefined);
-    setDraft('');
-    setCreativeBriefContext(undefined);
-    setTab('composer');
-    setComposerCapability('edit');
-  }, [agentPreviewStore]);
-
   useEffect(() => {
     if (command === undefined || handledCommandRef.current === command.serial) return;
     handledCommandRef.current = command.serial;
     if (command.type === 'select-capability') {
-      setTab('composer');
       if (command.capability !== undefined) setComposerCapability(command.capability);
-      return;
-    }
-    if (command.type === 'activity') {
-      setTab('history');
       return;
     }
     if (command.type === 'stop' && pending !== undefined) {
@@ -397,7 +337,6 @@ export function AgentPanel({
       setModelDraft(undefined);
     }
     setPending(undefined);
-    if (command.type === 'new-task') startNewTask();
   }, [
     agentPresenceStore,
     agentPreviewStore,
@@ -406,25 +345,23 @@ export function AgentPanel({
     joyAgentEngineClient,
     pending,
     presenceState.runId,
-    startNewTask,
   ]);
 
-  function appendMessage(threadId: string, role: 'user' | 'assistant', body: string): void {
+  function appendMessage(_threadId: string, role: 'user' | 'assistant', body: string): void {
     const now = new Date().toISOString();
-    setJoyCode((current) => ({
-      ...current,
-      threads: addJoyCodeMessage(current.threads, threadId, {
+    setConversation((current) =>
+      addJoyCodeConversationMessage(current, {
         id: makeJoyCodeId('message'),
         role,
         body,
         createdAt: now,
       }),
-    }));
+    );
   }
 
   const handOffCreativeBrief = useCallback(
     (brief: CreativeBriefV1): void => {
-      const threadId = joyCode.activeThreadId;
+      const threadId = conversation.id;
       if (!validateCreativeBrief(brief).valid) {
         appendMessage(
           threadId,
@@ -440,16 +377,14 @@ export function AgentPanel({
         `Creative Brief artifact attached (review only): ${brief.request}\n\nValidated brief context is available to the next guarded Joy Code edit. No recommendation was executed.`,
       );
       setComposerCapability('creative-brief');
-      setTab('composer');
     },
-    [joyCode.activeThreadId],
+    [conversation.id],
   );
 
-  function updateThreadStatus(threadId: string, status: JoyCodeThread['status']): void {
-    setJoyCode((current) => ({
-      ...current,
-      threads: setJoyCodeThreadStatus(current.threads, threadId, status, new Date().toISOString()),
-    }));
+  function updateThreadStatus(_threadId: string, status: JoyCodeThreadStatus): void {
+    setConversation((current) =>
+      setJoyCodeConversationStatus(current, status, new Date().toISOString()),
+    );
   }
 
   function buildIntent(intent: AgentIntent) {
@@ -553,7 +488,7 @@ export function AgentPanel({
 
   function submitPrompt(prompt: string) {
     const body = prompt.trim().slice(0, MAX_COMPOSER_PROMPT_CHARS);
-    if (body.length === 0 || activeThread === undefined || thinkingThreadId !== undefined) return;
+    if (body.length === 0 || thinkingThreadId !== undefined) return;
     const threadId = activeThread.id;
     if (CREDENTIAL_LIKE_PROMPT.test(body)) {
       appendMessage(
@@ -565,7 +500,6 @@ export function AgentPanel({
       return;
     }
     setDraft('');
-    setTab('composer');
     appendMessage(threadId, 'user', body);
     if (pending !== undefined) {
       appendMessage(
@@ -1043,21 +977,6 @@ export function AgentPanel({
     <PanelShell
       title="Joy Code"
       className="joy-code-panel"
-      actions={
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="New Joy Code task"
-          title="New task"
-          onClick={startNewTask}
-        >
-          <PlusIcon />
-        </button>
-      }
-      tabs={TABS}
-      activeTab={tab}
-      onTabChange={setTab}
-      tabsInHeader
     >
       <div
         className="joy-code-drop-target"
@@ -1125,48 +1044,7 @@ export function AgentPanel({
               )}
           </div>
         )}
-        {tab === 'history' && (
-          <section className="joy-code-history" aria-label="Joy Code task history">
-            <div className="joy-code-history-intro">
-              <div>
-                <strong>Recent tasks</strong>
-                <span>Saved for this project</span>
-              </div>
-              <button type="button" onClick={startNewTask}>
-                <PlusIcon />
-                New task
-              </button>
-            </div>
-            <ul className="joy-code-thread-list">
-              {joyCode.threads.map((thread) => {
-                const preview = thread.messages.at(-1)?.body ?? 'Ready for a request';
-                return (
-                  <li key={thread.id}>
-                    <button
-                      type="button"
-                      className="joy-code-thread"
-                      aria-current={thread.id === joyCode.activeThreadId ? 'true' : undefined}
-                      onClick={() => {
-                        setJoyCode((current) => ({ ...current, activeThreadId: thread.id }));
-                        setTab('composer');
-                      }}
-                    >
-                      <span className={`joy-code-thread-status is-${thread.status}`} />
-                      <span className="joy-code-thread-copy">
-                        <strong>{thread.title}</strong>
-                        <span>{preview}</span>
-                      </span>
-                      <time dateTime={thread.updatedAt}>{threadTimestamp(thread.updatedAt)}</time>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        )}
-
-        {tab === 'composer' && (
-          <section
+        <section
             className={`joy-code-composer is-${composerCapability} ${liveAgentBusy ? 'is-agent-busy' : ''}`}
             aria-label="Joy Code composer"
             aria-busy={liveAgentBusy}
@@ -1528,20 +1406,7 @@ export function AgentPanel({
                 </div>
               </div>
             )}
-          </section>
-        )}
-
-        {tab === '3d' && (
-          <Suspense fallback={null}>
-            <JoyCode3DViewer
-              {...(() => {
-                const savedScene = readThreeDSceneStates(session.visualProject)[0];
-                return savedScene === undefined ? {} : { savedScene };
-              })()}
-              {...(onAdd3DRender === undefined ? {} : { onAddToTimeline: onAdd3DRender })}
-            />
-          </Suspense>
-        )}
+        </section>
       </div>
     </PanelShell>
   );

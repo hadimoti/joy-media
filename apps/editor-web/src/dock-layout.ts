@@ -35,7 +35,7 @@ export type EditorViewMode = 'vertical' | 'widescreen';
 export const VIEW_MODE_KEY = 'joy-media.view-mode.v1';
 
 /** Per-mode Dockview JSON keys (bump when a seed changes). */
-export const DOCK_LAYOUT_VERSION = 11;
+export const DOCK_LAYOUT_VERSION = 12;
 export const DOCK_LAYOUT_SCHEMA_VERSION = 2;
 
 /** @deprecated Prefer `dockLayoutKey(mode)` — kept for migration of v8 saves. */
@@ -52,6 +52,7 @@ export const SUPERSEDED_DOCK_LAYOUT_KEYS: readonly string[] = [
   'joy-media.dockview.v8',
   'joy-media.dockview.v9',
   'joy-media.dockview.v10',
+  'joy-media.dockview.v11',
 ];
 
 /**
@@ -67,7 +68,7 @@ const BROWSER_GROUP = ['media', 'effects'] as const;
 // presets select these views (Enhance → Motion, Audio & Captions → Audio,
 // Automate → Jobs); omitting a view here makes that preset silently fall back
 // to Inspector even though the panel is registered.
-const CONTEXT_GROUP = ['inspector', 'motion', 'audio', 'jobs'] as const;
+const CONTEXT_GROUP = ['inspector', 'scene3d', 'motion', 'audio', 'jobs'] as const;
 
 export interface ViewModeStorage {
   getItem(key: string): string | null;
@@ -193,7 +194,7 @@ export function migrateDockLayoutAliases(layout: unknown): unknown {
 
 /** Applies aliases, compact constraints, and the explicit saved-layout marker. */
 export function migrateDockLayout(layout: unknown): unknown {
-  return normalizeDockLayoutConstraints(migrateDockLayoutAliases(layout));
+  return ensureScene3DInContextGroup(normalizeDockLayoutConstraints(migrateDockLayoutAliases(layout)));
 }
 
 export function serializeDockLayout(layout: unknown): string {
@@ -329,4 +330,37 @@ function dedupeViewIds(values: readonly unknown[]): readonly unknown[] {
     next.push(value);
   }
   return next;
+}
+
+/**
+ * Existing Dockview saves are user-owned. Add the new 3D workspace tab to its
+ * familiar Inspector group without replacing a custom grid or moving any tab.
+ */
+function ensureScene3DInContextGroup(layout: unknown): unknown {
+  if (!isRecord(layout)) return layout;
+  const migrate = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(migrate);
+    if (!isRecord(value)) return value;
+    const next: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value)) next[key] = migrate(child);
+    if (next.id === 'context' && Array.isArray(next.views) && !next.views.includes('scene3d')) {
+      const inspectorIndex = next.views.indexOf('inspector');
+      const insertionIndex = inspectorIndex < 0 ? next.views.length : inspectorIndex + 1;
+      next.views = [
+        ...next.views.slice(0, insertionIndex),
+        'scene3d',
+        ...next.views.slice(insertionIndex),
+      ];
+    }
+    return next;
+  };
+  const migrated = migrate(layout) as Record<string, unknown>;
+  if (!isRecord(migrated.panels) || migrated.panels.scene3d !== undefined) return migrated;
+  return {
+    ...migrated,
+    panels: {
+      ...migrated.panels,
+      scene3d: panelEntries().scene3d,
+    },
+  };
 }

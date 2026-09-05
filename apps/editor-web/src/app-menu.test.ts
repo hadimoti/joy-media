@@ -18,15 +18,13 @@ describe('app-menu catalog', () => {
     expect(file?.items.some((item) => item.id === 'file.projects')).toBe(true);
   });
 
-  it('keeps the Joy Code menu focused on the built-in engine and settings', () => {
+  it('keeps the Joy Code menu focused on the project conversation and settings', () => {
     const agent = APP_MENU_GROUPS.find((group) => group.id === 'agent');
     expect(agent?.items.map((item) => item.label)).toEqual([
       'Open Joy Code',
-      'New Task',
       'Built-in JOY Agent Engine',
       'Execution Mode…',
-      'Pause / Stop Task',
-      'Joy Code History',
+      'Pause / Stop',
       'Joy Code Settings…',
     ]);
   });

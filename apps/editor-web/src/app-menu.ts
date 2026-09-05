@@ -19,11 +19,9 @@ export type AppMenuActionId =
   | 'edit.commandPalette'
   | 'clip.split'
   | 'agent.open'
-  | 'agent.newTask'
   | 'agent.active'
   | 'agent.executionMode'
   | 'agent.stop'
-  | 'agent.activity'
   | 'agent.settings'
   | 'view.commandPalette'
   | `view.panel.${PanelId}`
@@ -103,12 +101,10 @@ export const APP_MENU_GROUPS: readonly AppMenuGroup[] = [
     id: 'agent',
     label: 'Joy Code',
     items: [
-      { id: 'agent.open', label: 'Open Joy Code' },
-      { id: 'agent.newTask', label: 'New Task', separatorAfter: true },
+      { id: 'agent.open', label: 'Open Joy Code', separatorAfter: true },
       { id: 'agent.active', label: 'Built-in JOY Agent Engine', disabled: true },
       { id: 'agent.executionMode', label: 'Execution Mode…', separatorAfter: true },
-      { id: 'agent.stop', label: 'Pause / Stop Task' },
-      { id: 'agent.activity', label: 'Joy Code History', separatorAfter: true },
+      { id: 'agent.stop', label: 'Pause / Stop' },
       { id: 'agent.settings', label: 'Joy Code Settings…' },
     ],
   },

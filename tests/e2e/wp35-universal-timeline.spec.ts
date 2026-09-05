@@ -14,11 +14,7 @@ test.describe('WP-35 universal timeline closeout', () => {
     page,
   }, testInfo) => {
     await openReferenceWorkspace(page);
-    await openPanel(page, 'Joy Code');
-    await page
-      .getByRole('tablist', { name: 'Joy Code sections' })
-      .getByRole('tab', { name: '3d', exact: true })
-      .click();
+    await openPanel(page, '3D Scene');
     const triangle = JSON.stringify({
       asset: { version: '2.0', generator: 'JOY Media e2e' },
       scene: 0,

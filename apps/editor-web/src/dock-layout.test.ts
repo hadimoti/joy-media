@@ -181,6 +181,20 @@ describe('dock layout constraints', () => {
       },
     });
   });
+
+  it('adds 3D Scene after Inspector without disturbing a saved context group', () => {
+    const migrated = migrateDockLayout({
+      panels: { inspector: { id: 'inspector' } },
+      grid: {
+        root: {
+          type: 'leaf',
+          data: { id: 'context', views: ['inspector', 'motion'], activeView: 'motion' },
+        },
+      },
+    }) as LayoutWithPanels;
+    expect(leafViews(migrated, 'context')).toEqual(['inspector', 'scene3d', 'motion']);
+    expect(migrated.panels.scene3d).toMatchObject({ id: 'scene3d' });
+  });
 });
 
 describe('view modes', () => {

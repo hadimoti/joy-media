@@ -46,6 +46,7 @@ export const PANEL_METADATA: readonly PanelMetadata[] = [
   ]),
   panel('timeline', 'edit', 'Open Timeline', ['edit', 'enhance', 'audio-captions', 'automate']),
   panel('inspector', 'edit', 'Open Inspector', ['edit', 'enhance']),
+  panel('scene3d', 'edit', 'Open 3D Scene', ['edit', 'enhance']),
   panel('history', 'edit', 'Open History', ['edit']),
   panel('flow', 'edit', 'Open Flow', ['edit', 'automate']),
   panel('effects', 'enhance', 'Open Enhance', ['enhance', 'edit']),

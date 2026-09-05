@@ -71,7 +71,7 @@ describe('JOY agent trusted UI target map', () => {
       { panelId: 'agent', sectionId: 'composer', capability: 'creative-brief' },
     ]);
     expect(mapAgentToolToTargets({ tool: 'scene_3d' }, snapshot)).toEqual([
-      { panelId: 'agent', sectionId: '3d' },
+      { panelId: 'scene3d', sectionId: 'scene' },
     ]);
     expect(mapAgentToolToTargets({ tool: 'preview_changes' }, snapshot)).toEqual([
       { panelId: 'monitor', sectionId: 'preview' },

@@ -89,7 +89,13 @@ export const JOY_AGENT_ENTRY_POINTS = [
     sectionId: 'audio',
     capability: 'timeline.write',
   },
-  { id: '3d', taskKind: '3d', panelId: 'agent', sectionId: '3d', capability: 'render.preview' },
+  {
+    id: '3d',
+    taskKind: '3d',
+    panelId: 'scene3d',
+    sectionId: 'scene',
+    capability: 'render.preview',
+  },
   {
     id: 'workflow',
     taskKind: 'workflow',

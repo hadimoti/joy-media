@@ -6,6 +6,7 @@ export const PANEL_IDS = [
   'captions',
   'text',
   'inspector',
+  'scene3d',
   'motion',
   'camera',
   'audio',
@@ -27,6 +28,7 @@ export const CORE_WORKSPACE_PANELS = [
   'media',
   'effects',
   'inspector',
+  'scene3d',
   'agent',
   'timeline',
   'flow',
@@ -34,12 +36,12 @@ export const CORE_WORKSPACE_PANELS = [
 ] as const satisfies readonly PanelId[];
 
 export interface WorkspaceLayout {
-  readonly version: 1;
+  readonly version: 2;
   readonly panels: readonly PanelId[];
 }
 
 export const DEFAULT_WORKSPACE: WorkspaceLayout = {
-  version: 1,
+  version: 2,
   panels: [
     'media',
     'monitor',
@@ -48,6 +50,7 @@ export const DEFAULT_WORKSPACE: WorkspaceLayout = {
     'captions',
     'text',
     'inspector',
+    'scene3d',
     'motion',
     'camera',
     'audio',
@@ -72,8 +75,13 @@ export interface WorkspaceStorage {
 
 /** Layout is a user preference, isolated from the creative project document. */
 export function recoverWorkspaceLayout(value: unknown): WorkspaceLayout {
-  if (!isLayout(value)) return DEFAULT_WORKSPACE;
-  return value;
+  if (isLayout(value)) return value;
+  if (isLegacyLayout(value)) {
+    const panels = [...value.panels];
+    panels.splice(panels.indexOf('inspector') + 1, 0, 'scene3d');
+    return { version: 2, panels };
+  }
+  return DEFAULT_WORKSPACE;
 }
 
 export function loadWorkspacePreference(storage: WorkspaceStorage): WorkspaceLayout {
@@ -93,12 +101,29 @@ function isLayout(value: unknown): value is WorkspaceLayout {
   if (value === null || typeof value !== 'object') return false;
   const candidate = value as { version?: unknown; panels?: unknown };
   return (
-    candidate.version === 1 &&
+    candidate.version === 2 &&
     Array.isArray(candidate.panels) &&
     candidate.panels.length === PANEL_IDS.length &&
     new Set(candidate.panels).size === PANEL_IDS.length &&
     candidate.panels.every(
       (panel) => typeof panel === 'string' && PANEL_IDS.includes(panel as PanelId),
+    )
+  );
+}
+
+function isLegacyLayout(
+  value: unknown,
+): value is { readonly version: 1; readonly panels: readonly Exclude<PanelId, 'scene3d'>[] } {
+  if (value === null || typeof value !== 'object') return false;
+  const candidate = value as { version?: unknown; panels?: unknown };
+  const legacyPanelIds = PANEL_IDS.filter((panelId) => panelId !== 'scene3d');
+  return (
+    candidate.version === 1 &&
+    Array.isArray(candidate.panels) &&
+    candidate.panels.length === legacyPanelIds.length &&
+    new Set(candidate.panels).size === legacyPanelIds.length &&
+    candidate.panels.every(
+      (panel) => typeof panel === 'string' && legacyPanelIds.includes(panel as PanelId),
     )
   );
 }

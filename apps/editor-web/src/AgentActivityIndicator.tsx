@@ -23,7 +23,7 @@ const PHASE_LABELS: Readonly<Record<AgentPresenceState['phase'], string>> = {
 const SECTION_LABELS: Readonly<Record<string, string>> = {
   composer: 'Composer',
   brief: 'Creative Brief',
-  '3d': '3D',
+  scene: '3D Scene',
   preview: 'Preview',
   timeline: 'Timeline',
   media: 'Media',
@@ -46,6 +46,7 @@ const SECTION_LABELS: Readonly<Record<string, string>> = {
 
 function targetLabel(target: JoyAgentTarget | undefined): string {
   if (target === undefined) return 'JOY workspace';
+  if (target.panelId === 'scene3d' && target.sectionId === 'scene') return '3D Scene';
   const section = target.sectionId === undefined ? undefined : SECTION_LABELS[target.sectionId];
   return section === undefined
     ? panelLabel(target.panelId)

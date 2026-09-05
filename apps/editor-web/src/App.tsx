@@ -241,6 +241,7 @@ import {
 } from './AgentPanel.js';
 import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
 import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
+import { Scene3DPanel } from './Scene3DPanel.js';
 import { JoyAgentSettingsDialog } from './JoyAgentSettingsDialog.js';
 import { createJoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus } from './joy-agent/protocol.js';
@@ -4741,10 +4742,6 @@ function EditorWorkspace({
         case 'agent.open':
           activatePanel('agent');
           break;
-        case 'agent.newTask':
-          activatePanel('agent');
-          issueAgentPanelCommand('new-task');
-          break;
         case 'agent.executionMode':
         case 'agent.settings':
           setAgentSettingsOpen(true);
@@ -4752,10 +4749,6 @@ function EditorWorkspace({
         case 'agent.stop':
           activatePanel('agent');
           issueAgentPanelCommand('stop');
-          break;
-        case 'agent.activity':
-          activatePanel('agent');
-          issueAgentPanelCommand('activity');
           break;
         case 'agent.active':
           break;
@@ -6476,7 +6469,6 @@ function EditorWorkspace({
           attachedAssets={context.joyAgentAttachedAssets}
           onDetachAsset={context.detachJoyAgentAsset}
           onAttachAsset={context.attachJoyAgentAsset}
-          onAdd3DRender={context.addJoyCode3DRender}
           creativeBriefOptedIn={context.creativeBriefOptedIn}
           creativeBriefRunner={context.creativeBriefRunner}
           onCreativeBriefOptIn={context.onCreativeBriefOptIn}
@@ -6485,6 +6477,9 @@ function EditorWorkspace({
           agentPreviewStore={appAgentPreviewStore}
         />
       );
+    }
+    if (api.id === 'scene3d') {
+      return <Scene3DPanel session={context.session} onAdd3DRender={context.addJoyCode3DRender} />;
     }
     if (api.id === 'history') {
       return <HistoryPanel entries={context.historyEntries} onJumpTo={context.jumpToHistory} />;

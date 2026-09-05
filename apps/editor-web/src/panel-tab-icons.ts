@@ -13,6 +13,7 @@ export const PANEL_LABELS: Readonly<Record<PanelId, string>> = {
   captions: 'Captions',
   text: 'Text',
   inspector: 'Inspector',
+  scene3d: '3D Scene',
   motion: 'Animate',
   camera: 'Camera',
   audio: 'Audio',
@@ -41,6 +42,9 @@ export const PANEL_TAB_ICONS: Readonly<Partial<Record<PanelId, string>>> = {
   flow: iconUrl('timeline.png'),
   captions: iconUrl('captions.png'),
   inspector: iconUrl('ui/inspect_24x24.png'),
+  // This legacy 3D glyph is still served from public assets until its source
+  // artwork is moved into panel-icons alongside the other fingerprinted tabs.
+  scene3d: '/assets/24_3d.png',
   motion: iconUrl('ui/motion_24x24.png'),
   camera: iconUrl('camera.png'),
   effects: iconUrl('ui/effects-org_24x24.png'),
