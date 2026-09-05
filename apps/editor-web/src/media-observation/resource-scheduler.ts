@@ -72,7 +72,7 @@ export class ObservationResourceScheduler {
       id: active.id,
       bytes: active.bytes,
       epoch: active.epoch,
-      release: () => this.#release(active.id),
+      release: () => this.#release(active),
     };
   }
 
@@ -81,7 +81,7 @@ export class ObservationResourceScheduler {
       throw new RangeError('epoch must be a non-negative safe integer');
     const cancelled: string[] = [];
     for (const active of [...this.#active.values()]) {
-      if (active.epoch === epoch && this.#release(active.id)) cancelled.push(active.id);
+      if (active.epoch === epoch && this.#release(active)) cancelled.push(active.id);
     }
     return cancelled;
   }
@@ -100,11 +100,10 @@ export class ObservationResourceScheduler {
     return [...this.#active.values()].some((active) => active.priority === 'playback');
   }
 
-  #release(id: string): boolean {
-    const active = this.#active.get(id);
-    if (active === undefined || active.released) return false;
+  #release(active: ActiveLease): boolean {
+    if (active.released || this.#active.get(active.id) !== active) return false;
     active.released = true;
-    this.#active.delete(id);
+    this.#active.delete(active.id);
     this.#workingSetBytes -= active.bytes;
     return true;
   }

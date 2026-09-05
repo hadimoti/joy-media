@@ -59,6 +59,7 @@ export function selectOverviewFrames(
         return leftScore - rightScore || right - left;
       })[0];
     if (replaceable === undefined) break;
+    if (event.score <= (sorted[replaceable]!.eventScore ?? 0)) continue;
     selectedIndexes.delete(replaceable);
     selectedIndexes.add(event.index);
   }

@@ -38,9 +38,24 @@ export type ObservationAuthorization =
 
 const ISSUED = Symbol('joy-observation-consent-issued');
 type IssuedObservationConsent = ObservationConsent & { readonly [ISSUED]: true };
+const ISSUED_CONSENTS = new WeakSet<IssuedObservationConsent>();
+const CLAIMED_CONSENTS = new WeakSet<IssuedObservationConsent>();
+
+interface StoredObservationConsent {
+  readonly projectId: string;
+  readonly runId: string;
+  readonly endpointOrigin: string;
+  readonly modelId: string;
+  readonly evidenceIds: readonly string[];
+  readonly modalities: readonly ('image' | 'audio' | 'video' | 'transcript')[];
+  readonly maxRequests: number;
+  readonly maxBytes: number;
+  readonly expiresAtMs: number;
+}
 
 interface ActiveConsent {
-  readonly consent: IssuedObservationConsent;
+  readonly issued: IssuedObservationConsent;
+  readonly consent: StoredObservationConsent;
   usedRequests: number;
   usedBytes: number;
 }
@@ -55,21 +70,52 @@ export function issueObservationConsent(
   nowMs = Date.now(),
 ): IssuedObservationConsent {
   assertConsent(consent, nowMs);
-  return {
-    ...consent,
-    evidenceIds: [...new Set(consent.evidenceIds)].sort(),
-    modalities: [...new Set(consent.modalities)].sort(),
-    [ISSUED]: true,
+  const issued = {
+    projectId: consent.projectId,
+    runId: consent.runId,
+    endpointOrigin: consent.endpointOrigin,
+    modelId: consent.modelId,
+    evidenceIds: Object.freeze([...new Set(consent.evidenceIds)].sort()),
+    modalities: Object.freeze([...new Set(consent.modalities)].sort()) as readonly (
+      'image' | 'audio' | 'video' | 'transcript'
+    )[],
+    maxRequests: consent.maxRequests,
+    maxBytes: consent.maxBytes,
+    expiresAtMs: consent.expiresAtMs,
   };
+  Object.defineProperty(issued, ISSUED, {
+    value: true,
+    enumerable: false,
+    writable: false,
+    configurable: false,
+  });
+  const frozen = Object.freeze(issued) as IssuedObservationConsent;
+  ISSUED_CONSENTS.add(frozen);
+  return frozen;
 }
 
 export class ObservationConsentRegistry {
   readonly #active = new Map<string, ActiveConsent>();
 
   grant(consent: IssuedObservationConsent): void {
-    if (consent[ISSUED] !== true)
+    if (consent[ISSUED] !== true || !ISSUED_CONSENTS.has(consent))
       throw new Error('observation consent must be issued by the local host');
-    this.#active.set(consent.runId, { consent, usedRequests: 0, usedBytes: 0 });
+    const active = this.#active.get(consent.runId);
+    if (active !== undefined) {
+      if (active.issued !== consent)
+        throw new Error('active observation consent cannot be replaced without cancellation');
+      return;
+    }
+    if (CLAIMED_CONSENTS.has(consent))
+      throw new Error('observation consent cannot be reused after cancellation or completion');
+    const snapshot = snapshotConsent(consent);
+    CLAIMED_CONSENTS.add(consent);
+    this.#active.set(snapshot.runId, {
+      issued: consent,
+      consent: snapshot,
+      usedRequests: 0,
+      usedBytes: 0,
+    });
   }
 
   cancel(runId: string): void {
@@ -124,6 +170,20 @@ function assertConsent(consent: ObservationConsent, nowMs: number): void {
   if (consent.modalities.length === 0) throw new RangeError('modalities must not be empty');
 }
 
+function snapshotConsent(consent: ObservationConsent): StoredObservationConsent {
+  return Object.freeze({
+    projectId: consent.projectId,
+    runId: consent.runId,
+    endpointOrigin: consent.endpointOrigin,
+    modelId: consent.modelId,
+    evidenceIds: Object.freeze([...consent.evidenceIds]),
+    modalities: Object.freeze([...consent.modalities]),
+    maxRequests: consent.maxRequests,
+    maxBytes: consent.maxBytes,
+    expiresAtMs: consent.expiresAtMs,
+  });
+}
+
 function isExactHttpsOrigin(endpointUrl: string, expectedOrigin: string): boolean {
   try {
     const endpoint = new URL(endpointUrl);
@@ -131,6 +191,10 @@ function isExactHttpsOrigin(endpointUrl: string, expectedOrigin: string): boolea
     return (
       endpoint.protocol === 'https:' &&
       expected.protocol === 'https:' &&
+      !endpoint.username &&
+      !endpoint.password &&
+      !expected.username &&
+      !expected.password &&
       expected.pathname === '/' &&
       !expected.search &&
       !expected.hash &&

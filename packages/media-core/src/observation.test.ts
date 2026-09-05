@@ -26,6 +26,9 @@ describe('observation identity', () => {
     const second = { ...first, presentationIndex: 13 };
     assertFrameIdentity(first);
     expect(frameIdentityKey(first)).not.toBe(frameIdentityKey(second));
+    expect(frameIdentityKey(first)).toBe(
+      `source-frame:v1:${'a'.repeat(64)}:video-0:12:9000:timebase-1-90000`,
+    );
   });
 
   it('rejects negative, non-integer, and overflow timing instead of rounding it into evidence', () => {

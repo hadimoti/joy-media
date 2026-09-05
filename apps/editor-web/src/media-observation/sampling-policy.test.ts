@@ -27,4 +27,17 @@ describe('overview sampling policy', () => {
       omittedFrameCount: 0,
     });
   });
+
+  it('does not replace a selected stronger event with a weaker event', () => {
+    const selected = selectOverviewFrames(
+      Array.from({ length: 7 }, (_, index) => ({
+        id: `frame-${index}`,
+        sourceTimeUs: index * 1_000_000,
+        eventScore: index === 2 ? 10 : index === 4 ? 1 : 0,
+      })),
+      { maxFrames: 3 },
+    );
+
+    expect(selected.selectedFrameIds).toEqual(['frame-0', 'frame-2', 'frame-6']);
+  });
 });

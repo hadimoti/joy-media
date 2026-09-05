@@ -36,4 +36,11 @@ describe('evidence batches', () => {
       }),
     ).toEqual([{ id: 'evidence-batch-0', frameIds: ['still-a@1', 'flash'] }]);
   });
+
+  it('accepts the canonical source-frame identity format for exhaustive batches', () => {
+    const sourceFrameId = `source-frame:v1:${'a'.repeat(64)}:video-0:0:0:timebase-1-30`;
+    expect(
+      createEvidenceBatches([sourceFrameId], { maxFramesPerBatch: 1, reviewedFrameIds: [] }),
+    ).toEqual([{ id: 'evidence-batch-0', frameIds: [sourceFrameId] }]);
+  });
 });

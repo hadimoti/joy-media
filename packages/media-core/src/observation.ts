@@ -92,7 +92,7 @@ export function frameIdentityKey(frame: FrameIdentity): string {
     frame.streamId,
     frame.presentationIndex,
     frame.ptsTicks,
-    `${frame.timebaseNumerator}/${frame.timebaseDenominator}`,
+    `timebase-${frame.timebaseNumerator}-${frame.timebaseDenominator}`,
   ].join(':');
 }
 

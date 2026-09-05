@@ -36,6 +36,32 @@ describe('ObservationResourceScheduler', () => {
     expect(scheduler.snapshot()).toMatchObject({ activeCount: 1, workingSetBytes: 40 });
   });
 
+  it('does not let a stale lease release a later lease with the same resource ID', () => {
+    const scheduler = new ObservationResourceScheduler({ maxWorkingSetBytes: 100, maxInFlight: 2 });
+    const stale = scheduler.tryAcquire({
+      id: 'frame-a',
+      bytes: 80,
+      epoch: 1,
+      priority: 'background',
+    });
+    expect(stale.state).toBe('acquired');
+    if (stale.state !== 'acquired') return;
+
+    expect(scheduler.cancelEpoch(1)).toEqual(['frame-a']);
+    const current = scheduler.tryAcquire({
+      id: 'frame-a',
+      bytes: 80,
+      epoch: 2,
+      priority: 'background',
+    });
+    expect(current.state).toBe('acquired');
+    expect(stale.release()).toBe(false);
+    expect(scheduler.snapshot()).toMatchObject({ activeCount: 1, workingSetBytes: 80 });
+    expect(
+      scheduler.tryAcquire({ id: 'frame-b', bytes: 80, epoch: 2, priority: 'background' }),
+    ).toEqual({ state: 'backpressure', reason: 'working-set-budget' });
+  });
+
   it('pauses background observation while playback owns a lease without preempting user playback', () => {
     const scheduler = new ObservationResourceScheduler({ maxWorkingSetBytes: 100, maxInFlight: 3 });
     const playback = scheduler.tryAcquire({
