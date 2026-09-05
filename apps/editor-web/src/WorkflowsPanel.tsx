@@ -573,6 +573,10 @@ export function WorkflowsPanel({
               v{systemWorkflowVersion}
             </span>
           </div>
+          <p className="workflow-experimental-note" role="note">
+            <strong>Experimental</strong> — bundled recipes may return deferred or fixture-backed
+            outputs. Inspect the result before treating a run as a finished media export.
+          </p>
           <ul className="workflow-list">{systemWorkflows.map((wf) => renderSystemRow(wf))}</ul>
         </>
       )}
