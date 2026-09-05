@@ -164,11 +164,11 @@ function makeBriefWithRevision(
 
 describe('CreativeBriefPanel', () => {
   it('uses the versioned BYOK remote-processing disclosure', () => {
-    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('semantic summary');
-    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('not media files, URLs, or secrets');
-    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('provider you configured');
-    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('does not save or proxy your key');
-    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('may log prompts or charge');
+    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('project summary');
+    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('never media files, URLs, or secrets');
+    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('provider you choose');
+    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('key stays in this browser');
+    expect(CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1).toContain('may cost money');
   });
   it('exports CreativeBriefPanel component', () => {
     expect(CreativeBriefPanel).toBeDefined();

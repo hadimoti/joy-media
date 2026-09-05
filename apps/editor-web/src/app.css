@@ -8484,6 +8484,52 @@ label {
   font-size: 0.68rem;
   line-height: 1.45;
 }
+.joy-code-creative-brief .creative-brief-panel-consent {
+  display: flex;
+  min-height: 11rem;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 1rem 1.15rem;
+  text-align: center;
+}
+.joy-code-creative-brief .creative-brief-panel-consent-kicker {
+  color: var(--joy-accent);
+  font-size: 0.61rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.joy-code-creative-brief .creative-brief-panel-consent h3,
+.joy-code-creative-brief .creative-brief-panel-consent p {
+  max-width: 29rem;
+  margin: 0;
+}
+.joy-code-creative-brief .creative-brief-panel-consent h3 {
+  color: var(--joy-text);
+  font-size: 0.88rem;
+  line-height: 1.25;
+}
+.joy-code-creative-brief .creative-brief-panel-consent-summary {
+  color: var(--joy-text-muted);
+}
+.joy-code-creative-brief .creative-brief-panel-consent .creative-brief-panel-disclosure {
+  max-width: 31rem;
+  color: var(--joy-text-faint);
+  font-size: 0.62rem;
+  line-height: 1.45;
+}
+.joy-code-creative-brief .creative-brief-panel-consent > .creative-brief-panel-button {
+  align-self: center;
+  margin-top: 0.15rem;
+  border-radius: 999px;
+}
+.joy-code-creative-brief .creative-brief-panel-consent > .creative-brief-panel-error {
+  max-width: 29rem;
+  margin: 0;
+}
 .creative-brief-panel-content {
   min-width: 0;
 }

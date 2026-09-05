@@ -75,7 +75,7 @@ export interface CreativeBriefPanelProps {
 
 /** Versioned disclosure shown immediately before project-level opt-in. */
 export const CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1 =
-  'A bounded semantic summary of this project (not media files, URLs, or secrets) will be sent directly from this page to the provider you configured in JOY Agent Settings. JOY does not save or proxy your key; the provider may log prompts or charge for usage.' as const;
+  'JOY sends only a bounded project summary — never media files, URLs, or secrets — directly to the provider you choose. Your key stays in this browser; provider use may cost money.' as const;
 
 /**
  * Creative Brief Panel Component.
@@ -312,10 +312,12 @@ export function CreativeBriefPanel({
         <div className="creative-brief-panel-consent" aria-label="Creative Brief consent gate">
           {onOptIn ? (
             <>
-              <p>
-                <strong>Creative Brief is currently disabled.</strong>
+              <span className="creative-brief-panel-consent-kicker">Creative Brief</span>
+              <h3>Connect a model to start</h3>
+              <p className="creative-brief-panel-consent-summary">
+                Add your private BYOK model in JOY Agent Settings, then turn this project into
+                focused improvement ideas.
               </p>
-              <p>Connect a model in JOY Agent Settings to request improvements to your project.</p>
               <p className="creative-brief-panel-disclosure">
                 {CREATIVE_BRIEF_CONSENT_DISCLOSURE_V1}
               </p>
@@ -325,12 +327,13 @@ export function CreativeBriefPanel({
                 </p>
               )}
               <button
+                type="button"
                 className="creative-brief-panel-button"
                 onClick={handleOptIn}
                 disabled={isOptingIn}
                 aria-label="Open JOY Agent Settings"
               >
-                {isOptingIn ? 'Opening...' : 'Open Agent Settings'}
+                {isOptingIn ? 'Opening settings…' : 'Connect a model'}
               </button>
             </>
           ) : (
