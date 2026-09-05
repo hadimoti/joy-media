@@ -17,11 +17,7 @@ import {
   upsertCatalogProject,
   type ProjectCatalogEntry,
 } from './project-catalog.js';
-import {
-  purgeLocalProject,
-  readProjectBundle,
-  type ProjectDocumentBundle,
-} from './project-lifecycle.js';
+import { readProjectBundle, type ProjectDocumentBundle } from './project-lifecycle.js';
 
 /** Versioned, self-describing editable project interchange format. */
 export const PROJECT_PACKAGE_FORMAT = 'joy-media-project' as const;
@@ -177,16 +173,19 @@ export async function importProjectPackage(
   const oldId = pkg.source.id;
   const requestedId = oldId.trim() || createProjectId('project');
   const existing = getCatalogProject(storage, requestedId);
-  let replacedProjectId: string | undefined;
   let id = requestedId;
   if (existing !== undefined) {
     const collision = options.collision ?? 'rename';
     if (collision === 'reject') throw new Error(`A project named “${requestedId}” already exists.`);
     if (collision === 'replace') {
-      // Keep replacement explicit; callers choose this only from the import UI.
-      replacedProjectId = existing.id;
-      id = requestedId;
-    } else id = options.createId?.() ?? createProjectId('import');
+      // Replacement would need a storage journal spanning project logs,
+      // catalog, audio state and agent records. Refuse it until that rollback
+      // contract exists; rename is the safe portable-import default.
+      throw new Error(
+        `Replacing an existing project is not supported yet; choose “rename” or “reject”.`,
+      );
+    }
+    id = options.createId?.() ?? createProjectId('import');
   } else if (options.collision === 'replace') {
     // Replace has no effect when the source id is not present.
     id = requestedId;
@@ -264,8 +263,6 @@ export async function importProjectPackage(
   // private-cache write fails, the catalog and project logs remain untouched
   // rather than exposing a half-imported project to the user.
   for (const asset of verifiedAssets) await options.assetWriter!(asset);
-  if (replacedProjectId !== undefined && existing !== undefined)
-    purgeLocalProject(storage, existing);
   new EditorSession(
     storage,
     timeline,
@@ -282,7 +279,6 @@ export async function importProjectPackage(
     entry,
     missingAssetIds,
     assetIdMap,
-    ...(replacedProjectId === undefined ? {} : { replacedProjectId }),
   };
 }
 

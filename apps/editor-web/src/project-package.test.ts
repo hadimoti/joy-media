@@ -147,8 +147,21 @@ describe('portable project packages', () => {
     });
 
     await expect(
-      importProjectPackage(storage, malformed, { collision: 'replace' }),
+      importProjectPackage(storage, malformed, {
+        createId: () => 'malformed-import',
+      }),
     ).rejects.toThrow('visual.schemaVersion: schemaVersion must be 1');
+    expect(getCatalogProject(storage, entry.id)).toMatchObject({ title: 'Source project' });
+  });
+
+  it('rejects destructive replacement until storage rollback is transactional', async () => {
+    const storage = memoryStorage();
+    const entry = createEntry(storage);
+    const pkg = await createProjectPackage(entry, storage);
+
+    await expect(importProjectPackage(storage, pkg, { collision: 'replace' })).rejects.toThrow(
+      'Replacing an existing project is not supported yet',
+    );
     expect(getCatalogProject(storage, entry.id)).toMatchObject({ title: 'Source project' });
   });
 });
