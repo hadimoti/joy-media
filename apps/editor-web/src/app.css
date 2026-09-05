@@ -7882,6 +7882,9 @@ label {
 }
 .joy-code-panel .joy-panel-body {
   overflow: hidden;
+  /* This body never scrolls; reserving a scrollbar gutter here shifts the
+     entire Composer left instead of keeping its panel geometry symmetrical. */
+  scrollbar-gutter: auto;
 }
 .joy-code-drop-target,
 .joy-code-composer {
