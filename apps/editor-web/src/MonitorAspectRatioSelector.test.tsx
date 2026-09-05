@@ -55,6 +55,8 @@ describe('MonitorAspectRatioSelector', () => {
     );
 
     expect(markup).toContain('aria-label="Canvas aspect ratio (9:16)"');
+    expect(markup).toContain('title="Canvas format: 9:16"');
+    expect(markup).toContain('monitor-aspect-ratio-trigger-details');
     expect(markup).toContain('role="menu"');
     expect(markup).toContain('aria-label="Landscape"');
     expect(markup).toContain('aria-label="Square"');

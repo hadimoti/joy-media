@@ -208,6 +208,7 @@ export function MonitorAspectRatioSelector({
         aria-controls={menuId}
         aria-pressed={open}
         data-guide="Ratio"
+        title={`Canvas format: ${currentLabel}${authoredWidth !== undefined && authoredHeight !== undefined ? ` · ${authoredWidth}×${authoredHeight}` : ''}`}
         onClick={() => (open ? setOpen(false) : openMenu())}
         onKeyDown={(event) => {
           if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;

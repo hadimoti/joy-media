@@ -174,53 +174,63 @@ function TrackHeaderChrome({
       <strong title={fallbackLabel}>{fallbackLabel}</strong>
     ) : (
       <>
-        <span
-          className="timeline-track-kind-icon"
-          title={`${header.kind === 'scene3d' ? '3D Scene' : `${header.kind[0]?.toUpperCase() ?? ''}${header.kind.slice(1)}`} track`}
-        >
-          <ItemGlyph icon={header.kind} />
+        <span className="track-code" dir="ltr">
+          {header.code}
         </span>
-        <div className="timeline-track-label">
-          <span className="track-code" dir="ltr">
-            {header.code}
-          </span>
-          <span className="track-name" dir="ltr" title={header.name}>
-            {header.name}
-          </span>
-        </div>
+        <span className="track-name" dir="ltr" title={header.name}>
+          {header.name}
+        </span>
       </>
     );
 
-  if (controls === undefined) return label;
+  if (header === undefined && controls === undefined) {
+    return <div className="timeline-track-label">{label}</div>;
+  }
+
+  const trackId = controls?.trackId ?? header?.name ?? fallbackLabel;
 
   return (
     <>
-      {label}
-      <button
-        type="button"
-        className="icon-button"
-        aria-pressed={controls.locked}
-        aria-label={`Lock ${controls.trackId}`}
-        title={controls.locked ? 'Unlock track' : 'Lock track'}
-        onClick={() => controls.onToggle('locked')}
-      >
-        <LockIcon />
-      </button>
-      <TimelineTrackVisibilityButton
-        trackId={controls.trackId}
-        visible={controls.visible}
-        onToggle={() => controls.onToggle('visible')}
-      />
-      <button
-        type="button"
-        className="icon-button"
-        aria-pressed={controls.solo}
-        aria-label={`Solo ${controls.trackId}`}
-        title={controls.solo ? 'Unsolo track' : 'Solo track'}
-        onClick={() => controls.onToggle('solo')}
-      >
-        <SoloIcon />
-      </button>
+      <div className="timeline-track-label">{label}</div>
+      <div className="timeline-track-controls" aria-label={`${trackId} track controls`}>
+        {header !== undefined && (
+          <span
+            className="timeline-track-kind-icon"
+            title={`${header.kind === 'scene3d' ? '3D Scene' : `${header.kind[0]?.toUpperCase() ?? ''}${header.kind.slice(1)}`} track`}
+          >
+            <ItemGlyph icon={header.kind} />
+          </span>
+        )}
+        {controls !== undefined && (
+          <>
+            <button
+              type="button"
+              className="icon-button"
+              aria-pressed={controls.locked}
+              aria-label={`Lock ${controls.trackId}`}
+              title={controls.locked ? 'Unlock track' : 'Lock track'}
+              onClick={() => controls.onToggle('locked')}
+            >
+              <LockIcon />
+            </button>
+            <TimelineTrackVisibilityButton
+              trackId={controls.trackId}
+              visible={controls.visible}
+              onToggle={() => controls.onToggle('visible')}
+            />
+            <button
+              type="button"
+              className="icon-button"
+              aria-pressed={controls.solo}
+              aria-label={`Solo ${controls.trackId}`}
+              title={controls.solo ? 'Unsolo track' : 'Solo track'}
+              onClick={() => controls.onToggle('solo')}
+            >
+              <SoloIcon />
+            </button>
+          </>
+        )}
+      </div>
     </>
   );
 }

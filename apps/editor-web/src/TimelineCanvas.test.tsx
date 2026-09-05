@@ -47,6 +47,8 @@ describe('TimelineCanvas track visibility controls', () => {
     expect(markup).toContain('title="Hide track"');
     expect(markup).toContain('aria-label="Show hidden-track"');
     expect(markup).toContain('title="Show track"');
+    expect(markup).toContain('timeline-track-controls');
+    expect(markup).toContain('timeline-track-label');
     expect(markup).toContain('d="M1.5 8s2.5-4.5');
     expect(markup).toContain('d="M2.5 2.5 13.5 13.5');
     expect(markup).not.toContain('Mute');

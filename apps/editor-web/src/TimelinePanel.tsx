@@ -2443,7 +2443,7 @@ export function TimelinePanel({
                 style={{ height: track.heightPx }}
               >
                 <div
-                  className="timeline-track-header"
+                  className={`timeline-track-header${colorMenuTrackId === track.id ? ' is-controls-visible' : ''}`}
                   data-track-id={track.id}
                   draggable={colorMenuTrackId !== track.id}
                   aria-roledescription="draggable timeline track"
@@ -2513,47 +2513,6 @@ export function TimelinePanel({
                     setMenu({ x: event.clientX, y: event.clientY, items });
                   }}
                 >
-                  <button
-                    type="button"
-                    className="timeline-track-kind-icon timeline-track-kind-button"
-                    title="Change track color"
-                    aria-label={`Change label color for ${source.name ?? source.id}`}
-                    aria-haspopup="menu"
-                    aria-expanded={colorMenuTrackId === track.id}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setColorMenuTrackId((current) =>
-                        current === track.id ? undefined : track.id,
-                      );
-                    }}
-                  >
-                    <TimelineTrackKindIcon kind={kind} />
-                  </button>
-                  {colorMenuTrackId === track.id && (
-                    <TimelineTrackColorMenu
-                      current={trackLabelColor}
-                      onSelect={(labelColor?: TimelineTrackLabelColor) => {
-                        setLocalTrackLabelColors((current) => ({
-                          ...current,
-                          [track.id]: labelColor,
-                        }));
-                        onDispatch({
-                          label: `Color ${source.name ?? source.id}`,
-                          commands: [
-                            {
-                              type: 'timeline.setTrackLabelColor',
-                              payload: {
-                                compositionId: composition.id,
-                                trackId: track.id,
-                                ...(labelColor === undefined ? {} : { labelColor }),
-                              },
-                            },
-                          ],
-                        });
-                      }}
-                      onClose={() => setColorMenuTrackId(undefined)}
-                    />
-                  )}
                   <div className="timeline-track-label">
                     <span className="track-code" dir="ltr">
                       {professionalTrackCode(track.family, track.familyIndex)}
@@ -2562,41 +2521,87 @@ export function TimelinePanel({
                       {trackName}
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-pressed={track.locked}
-                    aria-label={`Lock ${track.id}`}
-                    title={track.locked ? 'Unlock track' : 'Lock track'}
-                    onClick={() => toggle(track.id, 'locked')}
+                  <div
+                    className="timeline-track-controls"
+                    aria-label={`${track.id} track controls`}
                   >
-                    <LockIcon />
-                  </button>
-                  <TimelineTrackVisibilityButton
-                    trackId={track.id}
-                    visible={track.visible}
-                    onToggle={(visible) => setVisibility(track.id, visible)}
-                  />
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-pressed={track.muted === true}
-                    aria-label={`${track.muted ? 'Unmute' : 'Mute'} ${track.id}`}
-                    title={track.muted ? 'Unmute track' : 'Mute track'}
-                    onClick={() => toggle(track.id, 'muted')}
-                  >
-                    <MuteIcon />
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-pressed={track.solo}
-                    aria-label={`Solo ${track.id}`}
-                    title={track.solo ? 'Unsolo track' : 'Solo track'}
-                    onClick={() => toggle(track.id, 'solo')}
-                  >
-                    <SoloIcon />
-                  </button>
+                    <button
+                      type="button"
+                      className="timeline-track-kind-icon timeline-track-kind-button"
+                      title="Change track color"
+                      aria-label={`Change label color for ${source.name ?? source.id}`}
+                      aria-haspopup="menu"
+                      aria-expanded={colorMenuTrackId === track.id}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setColorMenuTrackId((current) =>
+                          current === track.id ? undefined : track.id,
+                        );
+                      }}
+                    >
+                      <TimelineTrackKindIcon kind={kind} />
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-pressed={track.locked}
+                      aria-label={`Lock ${track.id}`}
+                      title={track.locked ? 'Unlock track' : 'Lock track'}
+                      onClick={() => toggle(track.id, 'locked')}
+                    >
+                      <LockIcon />
+                    </button>
+                    <TimelineTrackVisibilityButton
+                      trackId={track.id}
+                      visible={track.visible}
+                      onToggle={(visible) => setVisibility(track.id, visible)}
+                    />
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-pressed={track.muted === true}
+                      aria-label={`${track.muted ? 'Unmute' : 'Mute'} ${track.id}`}
+                      title={track.muted ? 'Unmute track' : 'Mute track'}
+                      onClick={() => toggle(track.id, 'muted')}
+                    >
+                      <MuteIcon />
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-pressed={track.solo}
+                      aria-label={`Solo ${track.id}`}
+                      title={track.solo ? 'Unsolo track' : 'Solo track'}
+                      onClick={() => toggle(track.id, 'solo')}
+                    >
+                      <SoloIcon />
+                    </button>
+                    {colorMenuTrackId === track.id && (
+                      <TimelineTrackColorMenu
+                        current={trackLabelColor}
+                        onSelect={(labelColor?: TimelineTrackLabelColor) => {
+                          setLocalTrackLabelColors((current) => ({
+                            ...current,
+                            [track.id]: labelColor,
+                          }));
+                          onDispatch({
+                            label: `Color ${source.name ?? source.id}`,
+                            commands: [
+                              {
+                                type: 'timeline.setTrackLabelColor',
+                                payload: {
+                                  compositionId: composition.id,
+                                  trackId: track.id,
+                                  ...(labelColor === undefined ? {} : { labelColor }),
+                                },
+                              },
+                            ],
+                          });
+                        }}
+                        onClose={() => setColorMenuTrackId(undefined)}
+                      />
+                    )}
+                  </div>
                 </div>
                 <span
                   className="timeline-lane"
