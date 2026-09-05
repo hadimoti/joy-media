@@ -69,6 +69,13 @@ describe('Joy Code compound runner', () => {
     });
     expect(applied).toMatchObject({ applied: true, replayed: false });
     const appliedRevision = applied.revisionId;
+    expect(applied.receipt).toMatchObject({
+      executionId: draft.planId,
+      operationDigest: draft.operationDigest,
+      baseRevision: draft.baseRevision,
+      resultRevision: appliedRevision,
+      undoEntryId: `history-${session.historyCursorSequence}`,
+    });
     expect(() =>
       runner.apply(session, draft, {
         planId: draft.planId,
@@ -148,12 +155,15 @@ describe('Joy Code compound runner', () => {
     );
     expect(new JoyCodeCompoundRunner().apply(reopenedSession, draft, approval)).toMatchObject({
       replayed: true,
-      receiptPersisted: true,
+      receipt: {
+        executionId: draft.planId,
+        operationDigest: draft.operationDigest,
+      },
     });
     expect(session.historyEntries).toHaveLength(historyBefore + 1);
   });
 
-  it('does not report a false apply failure when receipt storage fails after commit', () => {
+  it('does not commit a change when its durable receipt cannot be written', () => {
     const baseStorage = storage();
     let failReceiptWrite = false;
     const session = new EditorSession(
@@ -188,24 +198,98 @@ describe('Joy Code compound runner', () => {
     });
     expect(draft.ok).toBe(true);
     if (!draft.ok) return;
+    const historyBefore = session.historyEntries.length;
+    const revisionBefore = session.projectRevisionId;
     failReceiptWrite = true;
-    const result = new JoyCodeCompoundRunner().apply(session, draft, {
-      planId: draft.planId,
-      proposalHash: draft.proposalHash,
-      baseRevision: draft.baseRevision,
-      approvedAt: '2026-09-05T00:00:00.000Z',
-    });
-    expect(result).toMatchObject({ applied: true, receiptPersisted: false });
-    expect(
-      session.visualProject.visualObjects['text-clean-title-runner-receipt-failure-0'],
-    ).toBeDefined();
-    expect(
+    expect(() =>
       new JoyCodeCompoundRunner().apply(session, draft, {
         planId: draft.planId,
         proposalHash: draft.proposalHash,
         baseRevision: draft.baseRevision,
         approvedAt: '2026-09-05T00:00:00.000Z',
       }),
-    ).toMatchObject({ replayed: true, receiptPersisted: false });
+    ).toThrow('quota');
+    expect(
+      session.visualProject.visualObjects['text-clean-title-runner-receipt-failure-0'],
+    ).toBeUndefined();
+    expect(session.historyEntries).toHaveLength(historyBefore);
+    expect(session.projectRevisionId).toBe(revisionBefore);
+    expect(session.agentIdempotency.getExecutionReceipt(draft.planId)).toBeUndefined();
+    failReceiptWrite = false;
+    const reopened = new EditorSession(
+      baseStorage,
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    expect(
+      reopened.visualProject.visualObjects['text-clean-title-runner-receipt-failure-0'],
+    ).toBeUndefined();
+    expect(reopened.agentIdempotency.getExecutionReceipt(draft.planId)).toBeUndefined();
+  });
+
+  it('rejects the same execution ID when a different operation digest is proposed', () => {
+    const session = new EditorSession(
+      storage(),
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const first = compileJoyCodeCompoundDraft({
+      planId: 'runner-conflict',
+      baseRevision: session.projectRevisionId,
+      timeline: session.timelineProject,
+      visualProject: session.visualProject,
+      registeredAssetIds: [],
+      operations: [
+        {
+          id: 'title',
+          dependsOn: [],
+          kind: 'text.insertTemplate',
+          templateId: 'clean-title',
+          content: 'First authority',
+          startUs: 0,
+          durationUs: 1_000_000,
+          placementPreset: 'center',
+        },
+      ],
+    });
+    const conflicting = compileJoyCodeCompoundDraft({
+      planId: 'runner-conflict',
+      baseRevision: session.projectRevisionId,
+      timeline: session.timelineProject,
+      visualProject: session.visualProject,
+      registeredAssetIds: [],
+      operations: [
+        {
+          id: 'title',
+          dependsOn: [],
+          kind: 'text.insertTemplate',
+          templateId: 'clean-title',
+          content: 'Different authority',
+          startUs: 0,
+          durationUs: 1_000_000,
+          placementPreset: 'center',
+        },
+      ],
+    });
+    expect(first.ok).toBe(true);
+    expect(conflicting.ok).toBe(true);
+    if (!first.ok || !conflicting.ok) return;
+    const runner = new JoyCodeCompoundRunner();
+    const approval = (draft: typeof first) => ({
+      planId: draft.planId,
+      proposalHash: draft.proposalHash,
+      baseRevision: draft.baseRevision,
+      approvedAt: '2026-09-05T00:00:00.000Z',
+    });
+    runner.apply(session, first, approval(first));
+    const committedRevision = session.projectRevisionId;
+
+    expect(() => runner.apply(session, conflicting, approval(conflicting))).toThrow(
+      'JOY_CODE_EXECUTION_CONFLICT',
+    );
+    expect(session.projectRevisionId).toBe(committedRevision);
+    expect(session.agentIdempotency.getExecutionReceipt(first.planId)?.operationDigest).toBe(
+      first.operationDigest,
+    );
   });
 });

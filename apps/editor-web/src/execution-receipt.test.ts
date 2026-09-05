@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createExecutionReceipt, receiptReplayKey } from './execution-receipt.js';
+import {
+  createExecutionReceipt,
+  isExecutionReceipt,
+  receiptReplayKey,
+} from './execution-receipt.js';
 
 const input = {
   executionId: 'run-1',
@@ -32,5 +36,15 @@ describe('agent execution receipt', () => {
     );
     expect(() => createExecutionReceipt({ ...input, writerFence: 0 })).toThrow('writerFence');
     expect(() => createExecutionReceipt({ ...input, executionId: '' })).toThrow('executionId');
+  });
+
+  it('recognizes only canonical persisted receipt values', () => {
+    const receipt = createExecutionReceipt(input);
+    expect(isExecutionReceipt(receipt)).toBe(true);
+    expect(
+      isExecutionReceipt({ ...receipt, operationDigest: receipt.operationDigest.toUpperCase() }),
+    ).toBe(false);
+    expect(isExecutionReceipt({ ...receipt, changedEntityIds: ['clip-2', 'clip-1'] })).toBe(false);
+    expect(isExecutionReceipt({ ...receipt, writerFence: 0 })).toBe(false);
   });
 });

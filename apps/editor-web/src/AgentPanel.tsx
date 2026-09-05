@@ -808,8 +808,8 @@ export function AgentPanel({
       // Prepare the expected timeline state before committing. Replaying the
       // transaction after commit would double-apply non-idempotent edits such
       // as split/remove/insert and turn a valid commit into a false failure.
-      const replayKey = `${modelDraft.planId}:${modelDraft.proposalHash}`;
-      const isDurableReplay = session.agentIdempotency.hasExecuted(replayKey);
+      const durableReceipt = session.agentIdempotency.getExecutionReceipt(modelDraft.planId);
+      const isDurableReplay = durableReceipt?.operationDigest === modelDraft.operationDigest;
       const expectedTimeline =
         modelDraft.timeline === undefined || isDurableReplay
           ? undefined
@@ -827,6 +827,13 @@ export function AgentPanel({
       );
       if (!applied.replayed && session.projectRevisionId !== applied.revisionId)
         throw new Error('JOY_CODE_VERIFICATION_FAILED: committed revision could not be read back');
+      if (
+        session.agentIdempotency.getExecutionReceipt(modelDraft.planId)?.operationDigest !==
+        applied.receipt.operationDigest
+      )
+        throw new Error(
+          'JOY_CODE_VERIFICATION_FAILED: durable execution receipt could not be read back',
+        );
       if (
         !applied.replayed &&
         modelDraft.document !== session.visualProject &&
@@ -851,7 +858,7 @@ export function AgentPanel({
       appendMessage(
         activeThread.id,
         'assistant',
-        `${applied.replayed ? 'This JOY edit was already committed.' : 'Approved and applied'} Revision ${applied.revisionId} was ${applied.replayed ? 'confirmed from its saved receipt; no new edit or Undo entry was created.' : 'read back successfully; one Undo restores the prior state.'}${applied.receiptPersisted ? '' : ' The local replay receipt could not be persisted, so do not retry this run after a reload.'}`,
+        `${applied.replayed ? 'This JOY edit was already committed.' : 'Approved and applied'} Revision ${applied.revisionId} was ${applied.replayed ? 'confirmed from its saved receipt; no new edit or Undo entry was created.' : 'read back successfully; one Undo restores the prior state.'}`,
       );
       setModelDraft(undefined);
       setAgentPhase('completed');

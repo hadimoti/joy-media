@@ -487,4 +487,69 @@ describe('EditorSession', () => {
       [...values.keys()].some((key) => key.startsWith('joy-media.editor-compound-write.v1:')),
     ).toBe(false);
   });
+
+  it('recovers a raw agent receipt written before a failed compound commit marker', () => {
+    const values = new Map<string, string>();
+    let writes = 0;
+    let rejectFromWrite = Number.POSITIVE_INFINITY;
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        writes += 1;
+        if (writes >= rejectFromWrite)
+          throw new DOMException('Storage unavailable', 'QuotaExceededError');
+        values.set(key, value);
+      },
+      removeItem: (key: string) => values.delete(key),
+    };
+    const initialTimeline = buildReferenceSpikeProject();
+    const session = new EditorSession(storage, initialTimeline, INITIAL_EDITOR_PROJECT);
+    const initialRevision = session.projectRevisionId;
+
+    // The journal, document snapshot, and raw receipt write all succeed. The
+    // durable commit marker then fails along with immediate rollback, so only
+    // reopening may decide whether the pair survives.
+    rejectFromWrite = writes + 4;
+    expect(() =>
+      session.commitAgentCompound(
+        'Receipt must recover with document',
+        { document: { ...session.visualProject, title: 'Must not survive' } },
+        {
+          executionId: 'journal-raw-receipt',
+          operationDigest: 'a'.repeat(64),
+          baseRevision: initialRevision,
+          changedEntityIds: ['root'],
+        },
+      ),
+    ).toThrow('requires reload recovery');
+    expect(session.visualProject.title).toBe(INITIAL_EDITOR_PROJECT.title);
+    expect(session.agentIdempotency.getExecutionReceipt('journal-raw-receipt')).toBeUndefined();
+
+    rejectFromWrite = Number.POSITIVE_INFINITY;
+    // The same live session must not overwrite the prepared journal after its
+    // rollback failed. Recovery/reopen owns the only valid next transition.
+    expect(() =>
+      session.commitAgentCompound(
+        'Must wait for recovery',
+        { document: { ...session.visualProject, title: 'Second write' } },
+        {
+          executionId: 'journal-raw-receipt-second',
+          operationDigest: 'b'.repeat(64),
+          baseRevision: initialRevision,
+          changedEntityIds: ['root'],
+        },
+      ),
+    ).toThrow(expect.objectContaining({ code: 'PERSISTENCE_RECOVERY_REQUIRED' }));
+    expect(
+      session.agentIdempotency.getExecutionReceipt('journal-raw-receipt-second'),
+    ).toBeUndefined();
+
+    const reopened = new EditorSession(storage, initialTimeline, INITIAL_EDITOR_PROJECT);
+    expect(reopened.visualProject.title).toBe(INITIAL_EDITOR_PROJECT.title);
+    expect(reopened.projectRevisionId).toBe(initialRevision);
+    expect(reopened.agentIdempotency.getExecutionReceipt('journal-raw-receipt')).toBeUndefined();
+    expect(
+      [...values.keys()].some((key) => key.startsWith('joy-media.editor-compound-write.v1:')),
+    ).toBe(false);
+  });
 });

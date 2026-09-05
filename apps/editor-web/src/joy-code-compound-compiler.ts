@@ -39,6 +39,8 @@ export interface JoyCodeCompoundGroup {
 export interface JoyCodeCompoundDraft {
   readonly planId: string;
   readonly baseRevision: string;
+  /** Canonical SHA-256 over the bounded model operations and revision. */
+  readonly operationDigest: string;
   readonly proposalHash: string;
   readonly timeline: CommandTransaction | undefined;
   readonly document: JoyProjectV1;
@@ -321,16 +323,18 @@ export function compileJoyCodeCompoundDraft(
       affectedIds: result.affectedIds,
     });
   }
+  const operationDigest = sha256Hex(
+    canonicalJson({
+      version: 1,
+      baseRevision: input.baseRevision,
+      operations: input.operations,
+    }),
+  );
   const draft: JoyCodeCompoundDraft = {
     planId: input.planId,
     baseRevision: input.baseRevision,
-    proposalHash: `joy-code-proposal-${sha256Hex(
-      canonicalJson({
-        version: 1,
-        baseRevision: input.baseRevision,
-        operations: input.operations,
-      }),
-    )}`,
+    operationDigest,
+    proposalHash: `joy-code-proposal-${operationDigest}`,
     timeline:
       commands.length === 0 ? undefined : { label: `Joy Code plan ${input.planId}`, commands },
     document,
