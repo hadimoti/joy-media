@@ -23,6 +23,15 @@ export interface PreparedTextTemplateInsertion {
   readonly label: string;
 }
 
+/** Canonical ID derivation shared by preview compilation and output references. */
+export function joyCodeInsertedTextObjectId(
+  templateId: string,
+  planId: string,
+  operationIndex: number,
+): string {
+  return `text-${templateId}-${planId}-${operationIndex}`;
+}
+
 /** Pure, deterministic preparation seam used by Joy Code and the manual wrapper. */
 export function prepareTextTemplateInsertion(
   timeline: SpikeProject,

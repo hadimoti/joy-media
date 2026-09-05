@@ -1,4 +1,5 @@
 import { containsForbiddenPattern, deepCheckForbiddenPatterns } from './creative-brief.js';
+import { PROPERTY_OWNER_KINDS, PROPERTY_TIME_DOMAINS } from '@joy-media/project-schema';
 
 export const JOY_CODE_PLAN_SCHEMA_VERSION = 1 as const;
 
@@ -11,6 +12,8 @@ export const JOY_CODE_OPERATION_KINDS = [
   'text.insertTemplate',
   'text.setContent',
   'text.setTemplate',
+  'motion.setKeyframe',
+  'motion.removeKeyframe',
   'caption.setSegmentText',
   'caption.setSegmentTiming',
   'caption.setTemplate',
@@ -76,6 +79,17 @@ interface JoyCodeOperationBase {
   readonly kind: JoyCodeOperationKind;
 }
 
+export interface JoyCodeVisualObjectOutputRefV1 {
+  readonly kind: 'visual-object';
+  /** Model-local name for the output; the runtime resolves it to a durable ID. */
+  readonly ref: string;
+}
+
+export interface JoyCodeVisualObjectBindingRefV1 {
+  readonly kind: 'visual-object';
+  readonly ref: string;
+}
+
 export interface JoyCodeTrimClipOperationV1 extends JoyCodeOperationBase {
   readonly kind: 'timeline.trimClip';
   readonly compositionId: string;
@@ -125,6 +139,7 @@ export interface JoyCodeInsertTemplateOperationV1 extends JoyCodeOperationBase {
   readonly startUs: number;
   readonly durationUs: number;
   readonly placementPreset: JoyCodePlacementPreset;
+  readonly outputRef?: JoyCodeVisualObjectOutputRefV1;
 }
 
 export interface JoyCodeSetTextContentOperationV1 extends JoyCodeOperationBase {
@@ -137,6 +152,41 @@ export interface JoyCodeSetTextTemplateOperationV1 extends JoyCodeOperationBase 
   readonly kind: 'text.setTemplate';
   readonly objectId: string;
   readonly templateId: string;
+}
+
+export interface JoyCodeSetKeyframeOperationV1 extends JoyCodeOperationBase {
+  readonly kind: 'motion.setKeyframe';
+  readonly binding: {
+    readonly ownerKind: string;
+    readonly ownerId?: string;
+    readonly ownerRef?: JoyCodeVisualObjectBindingRefV1;
+    readonly propertyId: string;
+    readonly timeDomain: string;
+  };
+  readonly key: {
+    readonly kind: 'scalar' | 'angle' | 'hue';
+    readonly timeUs: number;
+    readonly value: number;
+    readonly interpolation: 'hold' | 'linear' | 'eased' | 'bezier';
+    readonly bezier?: {
+      readonly x1: number;
+      readonly y1: number;
+      readonly x2: number;
+      readonly y2: number;
+    };
+  };
+}
+
+export interface JoyCodeRemoveKeyframeOperationV1 extends JoyCodeOperationBase {
+  readonly kind: 'motion.removeKeyframe';
+  readonly binding: {
+    readonly ownerKind: string;
+    readonly ownerId?: string;
+    readonly ownerRef?: JoyCodeVisualObjectBindingRefV1;
+    readonly propertyId: string;
+    readonly timeDomain: string;
+  };
+  readonly timeUs: number;
 }
 
 export interface JoyCodeSetCaptionTextOperationV1 extends JoyCodeOperationBase {
@@ -187,6 +237,8 @@ export type JoyCodePlanOperationV1 =
   | JoyCodeInsertTemplateOperationV1
   | JoyCodeSetTextContentOperationV1
   | JoyCodeSetTextTemplateOperationV1
+  | JoyCodeSetKeyframeOperationV1
+  | JoyCodeRemoveKeyframeOperationV1
   | JoyCodeSetCaptionTextOperationV1
   | JoyCodeSetCaptionTimingOperationV1
   | JoyCodeSetCaptionTemplateOperationV1
@@ -383,6 +435,57 @@ function readCatalogId(
   return candidate;
 }
 
+function readVisualObjectRef(
+  value: unknown,
+  path: string,
+  errors: JoyCodePlanValidationError[],
+): JoyCodeVisualObjectOutputRefV1 | undefined {
+  if (!isRecord(value)) {
+    error(errors, 'invalid-output-ref', 'outputRef must be an object', path);
+    return undefined;
+  }
+  checkKnownKeys(value, ['kind', 'ref'], errors, path);
+  if (value.kind !== 'visual-object')
+    error(errors, 'invalid-output-ref', 'outputRef.kind must be visual-object', path + '.kind');
+  const ref = readNonEmptyString(value, 'ref', errors, path, JOY_CODE_PLAN_LIMITS.operationId);
+  return value.kind === 'visual-object' && ref !== undefined
+    ? { kind: value.kind, ref }
+    : undefined;
+}
+
+function readVisualObjectBinding(
+  value: unknown,
+  path: string,
+  errors: JoyCodePlanValidationError[],
+): { readonly ownerId?: string; readonly ownerRef?: JoyCodeVisualObjectBindingRefV1 } | undefined {
+  if (!isRecord(value)) {
+    error(errors, 'invalid-binding', 'binding must be an object', path);
+    return undefined;
+  }
+  checkKnownKeys(
+    value,
+    ['ownerKind', 'ownerId', 'ownerRef', 'propertyId', 'timeDomain'],
+    errors,
+    path,
+  );
+  const ownerId = value.ownerId;
+  const ownerRef = value.ownerRef;
+  if (typeof ownerId === 'string' && ownerRef !== undefined) {
+    error(errors, 'invalid-binding', 'binding must use ownerId or ownerRef, not both', path);
+    return undefined;
+  }
+  if (typeof ownerId !== 'string' && ownerRef === undefined) {
+    error(errors, 'invalid-binding', 'binding requires ownerId or ownerRef', path);
+    return undefined;
+  }
+  if (ownerId !== undefined) {
+    const parsedOwnerId = readNonEmptyString(value, 'ownerId', errors, path, 160);
+    return parsedOwnerId === undefined ? undefined : { ownerId: parsedOwnerId };
+  }
+  const parsedRef = readVisualObjectRef(ownerRef, path + '.ownerRef', errors);
+  return parsedRef === undefined ? undefined : { ownerRef: parsedRef };
+}
+
 function parseOperation(
   value: unknown,
   index: number,
@@ -547,6 +650,7 @@ function parseOperation(
         'startUs',
         'durationUs',
         'placementPreset',
+        'outputRef',
       ],
       errors,
       path,
@@ -570,6 +674,10 @@ function parseOperation(
     const startUs = readNonNegativeInteger(value, 'startUs', errors, path);
     const durationUs = readPositiveInteger(value, 'durationUs', errors, path);
     const placementPreset = value.placementPreset;
+    const outputRef =
+      value.outputRef === undefined
+        ? undefined
+        : readVisualObjectRef(value.outputRef, path + '.outputRef', errors);
     if (!JOY_CODE_PLACEMENT_PRESETS.includes(placementPreset as JoyCodePlacementPreset)) {
       error(errors, 'invalid-placement', 'Placement is not allowlisted', path + '.placementPreset');
     }
@@ -602,6 +710,7 @@ function parseOperation(
       startUs,
       durationUs,
       placementPreset: placementPreset as JoyCodePlacementPreset,
+      ...(outputRef === undefined ? {} : { outputRef }),
     };
   }
 
@@ -633,6 +742,175 @@ function parseOperation(
     );
     if (objectId === undefined || templateId === undefined) return undefined;
     return { ...base, kind, objectId, templateId };
+  }
+
+  if (kind === 'motion.setKeyframe') {
+    checkKnownKeys(value, ['id', 'dependsOn', 'kind', 'binding', 'key'], errors, path);
+    const bindingValue = value.binding;
+    const keyValue = value.key;
+    if (!isRecord(bindingValue)) {
+      error(errors, 'invalid-binding', 'binding must be an object', path + '.binding');
+      return undefined;
+    }
+    const ownerKind = bindingValue.ownerKind;
+    const ownerBinding = readVisualObjectBinding(bindingValue, path + '.binding', errors);
+    const propertyId = readNonEmptyString(
+      bindingValue,
+      'propertyId',
+      errors,
+      path + '.binding',
+      160,
+    );
+    const timeDomain = bindingValue.timeDomain;
+    if (!PROPERTY_OWNER_KINDS.includes(ownerKind as (typeof PROPERTY_OWNER_KINDS)[number]))
+      error(
+        errors,
+        'invalid-binding-owner',
+        'ownerKind is not supported',
+        path + '.binding.ownerKind',
+      );
+    if (!PROPERTY_TIME_DOMAINS.includes(timeDomain as (typeof PROPERTY_TIME_DOMAINS)[number]))
+      error(
+        errors,
+        'invalid-binding-domain',
+        'timeDomain is not supported',
+        path + '.binding.timeDomain',
+      );
+    if (!isRecord(keyValue)) {
+      error(errors, 'invalid-keyframe', 'key must be an object', path + '.key');
+      return undefined;
+    }
+    const keyKind = keyValue.kind;
+    if (keyKind !== 'scalar' && keyKind !== 'angle' && keyKind !== 'hue')
+      error(
+        errors,
+        'invalid-keyframe-kind',
+        'key.kind must be scalar, angle, or hue',
+        path + '.key.kind',
+      );
+    const timeUs = readNonNegativeInteger(keyValue, 'timeUs', errors, path + '.key');
+    const keyValueNumber = keyValue.value;
+    if (typeof keyValueNumber !== 'number' || !Number.isFinite(keyValueNumber))
+      error(errors, 'invalid-keyframe-value', 'key.value must be finite', path + '.key.value');
+    const interpolation = keyValue.interpolation;
+    if (
+      interpolation !== 'hold' &&
+      interpolation !== 'linear' &&
+      interpolation !== 'eased' &&
+      interpolation !== 'bezier'
+    )
+      error(
+        errors,
+        'invalid-interpolation',
+        'interpolation is not supported',
+        path + '.key.interpolation',
+      );
+    let bezier:
+      | { readonly x1: number; readonly y1: number; readonly x2: number; readonly y2: number }
+      | undefined;
+    if (keyValue.bezier !== undefined) {
+      if (!isRecord(keyValue.bezier)) {
+        error(errors, 'invalid-bezier', 'bezier must be an object', path + '.key.bezier');
+      } else {
+        const values = [
+          keyValue.bezier.x1,
+          keyValue.bezier.y1,
+          keyValue.bezier.x2,
+          keyValue.bezier.y2,
+        ];
+        if (
+          !values.every((candidate) => typeof candidate === 'number' && Number.isFinite(candidate))
+        )
+          error(
+            errors,
+            'invalid-bezier',
+            'bezier handles must be finite numbers',
+            path + '.key.bezier',
+          );
+        else
+          bezier = {
+            x1: values[0] as number,
+            y1: values[1] as number,
+            x2: values[2] as number,
+            y2: values[3] as number,
+          };
+      }
+    }
+    if (
+      ownerBinding === undefined ||
+      propertyId === undefined ||
+      typeof ownerKind !== 'string' ||
+      typeof timeDomain !== 'string' ||
+      timeUs === undefined ||
+      typeof keyValueNumber !== 'number' ||
+      !Number.isFinite(keyValueNumber) ||
+      (keyKind !== 'scalar' && keyKind !== 'angle' && keyKind !== 'hue') ||
+      (interpolation !== 'hold' &&
+        interpolation !== 'linear' &&
+        interpolation !== 'eased' &&
+        interpolation !== 'bezier')
+    )
+      return undefined;
+    return {
+      ...base,
+      kind,
+      binding: { ownerKind, ...ownerBinding, propertyId, timeDomain },
+      key: {
+        kind: keyKind,
+        timeUs,
+        value: keyValueNumber,
+        interpolation,
+        ...(bezier === undefined ? {} : { bezier }),
+      },
+    };
+  }
+
+  if (kind === 'motion.removeKeyframe') {
+    checkKnownKeys(value, ['id', 'dependsOn', 'kind', 'binding', 'timeUs'], errors, path);
+    const bindingValue = value.binding;
+    if (!isRecord(bindingValue)) {
+      error(errors, 'invalid-binding', 'binding must be an object', path + '.binding');
+      return undefined;
+    }
+    const ownerKind = bindingValue.ownerKind;
+    const ownerBinding = readVisualObjectBinding(bindingValue, path + '.binding', errors);
+    const propertyId = readNonEmptyString(
+      bindingValue,
+      'propertyId',
+      errors,
+      path + '.binding',
+      160,
+    );
+    const timeDomain = bindingValue.timeDomain;
+    if (!PROPERTY_OWNER_KINDS.includes(ownerKind as (typeof PROPERTY_OWNER_KINDS)[number]))
+      error(
+        errors,
+        'invalid-binding-owner',
+        'ownerKind is not supported',
+        path + '.binding.ownerKind',
+      );
+    if (!PROPERTY_TIME_DOMAINS.includes(timeDomain as (typeof PROPERTY_TIME_DOMAINS)[number]))
+      error(
+        errors,
+        'invalid-binding-domain',
+        'timeDomain is not supported',
+        path + '.binding.timeDomain',
+      );
+    const timeUs = readNonNegativeInteger(value, 'timeUs', errors, path);
+    if (
+      ownerBinding === undefined ||
+      propertyId === undefined ||
+      typeof ownerKind !== 'string' ||
+      typeof timeDomain !== 'string' ||
+      timeUs === undefined
+    )
+      return undefined;
+    return {
+      ...base,
+      kind,
+      binding: { ownerKind, ...ownerBinding, propertyId, timeDomain },
+      timeUs,
+    };
   }
 
   if (kind === 'caption.setSegmentText') {

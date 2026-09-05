@@ -77,7 +77,7 @@ export interface WorkspaceStorage {
 export function recoverWorkspaceLayout(value: unknown): WorkspaceLayout {
   if (isLayout(value)) return value;
   if (isLegacyLayout(value)) {
-    const panels = [...value.panels];
+    const panels: PanelId[] = [...value.panels];
     panels.splice(panels.indexOf('inspector') + 1, 0, 'scene3d');
     return { version: 2, panels };
   }
@@ -123,7 +123,8 @@ function isLegacyLayout(
     candidate.panels.length === legacyPanelIds.length &&
     new Set(candidate.panels).size === legacyPanelIds.length &&
     candidate.panels.every(
-      (panel) => typeof panel === 'string' && legacyPanelIds.includes(panel as PanelId),
+      (panel) =>
+        typeof panel === 'string' && legacyPanelIds.includes(panel as Exclude<PanelId, 'scene3d'>),
     )
   );
 }

@@ -4,6 +4,7 @@ import {
   mapAgentToolToSurface,
   mapAgentToolToTargets,
   targetForJoyAgentTask,
+  targetsForJoyCodeOperations,
   trustedFeatureToolForRequest,
 } from './agent-ui-targets.js';
 
@@ -93,5 +94,26 @@ describe('JOY agent trusted UI target map', () => {
       sectionId: 'composer',
       capability: 'creative-brief',
     });
+  });
+
+  it('derives presence targets from validated operation kinds, not model routing text', () => {
+    expect(
+      targetsForJoyCodeOperations([
+        { kind: 'timeline.trimClip', clipId: 'clip-a' },
+        { kind: 'motion.setKeyframe', binding: { ownerId: 'object-1', propertyId: 'opacity' } },
+        { kind: 'caption.setTemplate', captionClipId: 'caption-a' },
+        { kind: 'transition.addAtJunction', transitionId: 'dissolve' },
+      ]),
+    ).toEqual([
+      { panelId: 'agent', sectionId: 'composer' },
+      { panelId: 'timeline', sectionId: 'timeline', entity: { kind: 'clip', id: 'clip-a' } },
+      {
+        panelId: 'inspector',
+        sectionId: 'visual',
+        entity: { kind: 'property', id: 'object-1:opacity' },
+      },
+      { panelId: 'media', sectionId: 'captions', entity: { kind: 'clip', id: 'caption-a' } },
+      { panelId: 'effects', sectionId: 'transitions' },
+    ]);
   });
 });

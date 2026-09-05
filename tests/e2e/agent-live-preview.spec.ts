@@ -60,4 +60,58 @@ test.describe('built-in JOY Agent live visual preview', () => {
     await page.getByRole('menuitem', { name: /Duplicate Clip/ }).click();
     await expect(page.locator('[data-agent-preview="true"]')).toHaveCount(0);
   });
+
+  test('creates a title and applies its dependent motion keyframe from an empty Worker object context', async ({
+    page,
+  }) => {
+    await installFakeOpenAIProvider(page, {
+      proposal: {
+        summary: 'Create and animate a title',
+        operations: [
+          {
+            id: 'title',
+            dependsOn: [],
+            kind: 'text.insertTemplate',
+            templateId: 'clean-title',
+            content: 'Worker title',
+            startUs: 0,
+            durationUs: 1_000_000,
+            placementPreset: 'center',
+            outputRef: { kind: 'visual-object', ref: 'title-output' },
+          },
+          {
+            id: 'animate',
+            dependsOn: ['title'],
+            kind: 'motion.setKeyframe',
+            binding: {
+              ownerKind: 'visual-object',
+              ownerRef: { kind: 'visual-object', ref: 'title-output' },
+              propertyId: 'opacity',
+              timeDomain: 'composition',
+            },
+            key: { kind: 'scalar', timeUs: 500_000, value: 0.5, interpolation: 'linear' },
+          },
+        ],
+      },
+    });
+    const before = await page.locator('.timeline-clip').count();
+    const composer = page.getByLabel('Message Joy Code');
+    await composer.fill('Create a title and animate its opacity');
+    await composer.press('Enter');
+    await expect(page.getByRole('region', { name: 'JOY Code agent preview' })).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(page.getByRole('button', { name: /Approve & apply/ })).toBeVisible();
+    expect(await page.locator('.timeline-clip').count()).toBe(before);
+
+    await page.getByRole('button', { name: /Approve & apply/ }).click();
+    await expect(page.locator('[data-agent-preview="true"]')).toHaveCount(0);
+    await expect(page.locator('[data-clip-id^="clip-text-clean-title-"]')).toHaveCount(1);
+    await expect(page.getByText(/JOY apply failed/i)).toHaveCount(0);
+
+    const undo = page.getByRole('button', { name: 'Undo', exact: true });
+    await expect(undo).toBeEnabled();
+    await undo.click();
+    await expect(page.locator('[data-clip-id^="clip-text-clean-title-"]')).toHaveCount(0);
+  });
 });

@@ -41,6 +41,7 @@ import { effectRegistry, type EffectDescriptor } from '@joy-media/visual-effects
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
+import { useAgentEntityPresence } from './agent-presence.js';
 import { effectReorderTransaction } from './effect-reorder.js';
 import { PropertyRow } from './components/PropertyRow.js';
 import {
@@ -265,6 +266,7 @@ function TransformPropertyRow({
   onOpenAnimationGraph,
   children,
 }: TransformPropertyRowProps) {
+  const agentPresence = useAgentEntityPresence('property', `${target.id}:${property.key}`);
   const curve = target.animations?.[property.key];
   const animated = curve !== undefined;
   const keyed = animated && hasKeyframeAtCurve(curve, timeUs);
@@ -309,6 +311,7 @@ function TransformPropertyRow({
         {...(animated && onOpenAnimationGraph !== undefined
           ? { onOpenGraph: () => onOpenAnimationGraph(target.id, property.key) }
           : {})}
+        agentActive={agentPresence.active}
       >
         <div className="inspector-prop-row">
           <NumericPropertyControl

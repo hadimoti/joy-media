@@ -1,19 +1,51 @@
-import { validateJoyCodeModelPlan } from '@joy-media/agent-tools';
+import { validateJoyCodeModelPlan, type JoyCodePlanOperationV1 } from '@joy-media/agent-tools';
 import { JOY_CAPTION_TEMPLATES } from '@joy-media/captions-core';
 import { TEXT_TEMPLATES } from '../text-template-catalog.js';
+import { resolveJoyCodeOperationReferences } from '../joy-code-operation-references.js';
+import type { ResolvedJoyCodeOperations } from '../joy-code-operation-references.js';
 import type { JoyAgentContextSnapshot } from './context-snapshot.js';
 
 export type BrowserProposal = ReturnType<typeof validateBrowserProposal>;
+
+const ANIMATABLE_VISUAL_PROPERTIES = new Set([
+  'x',
+  'y',
+  'scaleX',
+  'scaleY',
+  'rotationDeg',
+  'opacity',
+]);
 
 /** Snapshot checks are conservative; the canonical compiler remains the apply gate. */
 function validateProjectReferences(
   proposal: BrowserProposal,
   context: JoyAgentContextSnapshot,
+  trustedGeneratedBindings: ResolvedJoyCodeOperations['trustedGeneratedBindings'] = [],
 ): void {
   const clips = new Map(context.clips.map((clip) => [clip.id, { ...clip }]));
   const tracks = new Set(context.trackIds ?? context.clips.map((clip) => clip.trackId));
   const assets = new Set(context.assets.map((asset) => asset.id));
-  for (const operation of proposal.operations) {
+  const byId = new Map(proposal.operations.map((operation) => [operation.id, operation]));
+  const ordered: JoyCodePlanOperationV1[] = [];
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (id: string): void => {
+    if (visited.has(id)) return;
+    if (visiting.has(id)) throw new Error('JOY_AGENT_INVALID_PROPOSAL');
+    const operation = byId.get(id);
+    if (operation === undefined) throw new Error('JOY_AGENT_INVALID_PROPOSAL');
+    visiting.add(id);
+    for (const dependency of operation.dependsOn) visit(dependency);
+    visiting.delete(id);
+    visited.add(id);
+    ordered.push(operation);
+  };
+  for (const operation of proposal.operations) visit(operation.id);
+  // Existing objects come only from the frozen snapshot. New bindings are
+  // accepted only when the typed reference resolver produced them for this
+  // exact operation; arbitrary model-supplied IDs never enter this set.
+  const visualObjects = new Set((context.visualObjects ?? []).map((object) => object.id));
+  for (const operation of ordered) {
     if ('compositionId' in operation && operation.compositionId !== context.compositionId)
       throw new Error('JOY_AGENT_UNKNOWN_COMPOSITION');
     if ('clipId' in operation) {
@@ -45,6 +77,33 @@ function validateProjectReferences(
       throw new Error('JOY_AGENT_UNKNOWN_TRACK');
     if ('assetId' in operation && !assets.has(operation.assetId))
       throw new Error('JOY_AGENT_UNKNOWN_ASSET');
+    if ('objectId' in operation && !visualObjects.has(operation.objectId))
+      throw new Error('JOY_AGENT_UNKNOWN_OBJECT');
+    if ('binding' in operation) {
+      const ownerKind = operation.binding.ownerKind;
+      if (ownerKind !== 'visual-object' || operation.binding.timeDomain !== 'composition')
+        throw new Error('JOY_AGENT_UNSUPPORTED_BINDING');
+      if (!ANIMATABLE_VISUAL_PROPERTIES.has(operation.binding.propertyId))
+        throw new Error('JOY_AGENT_UNSUPPORTED_PROPERTY');
+      if (operation.kind === 'motion.setKeyframe') {
+        if (
+          (operation.binding.propertyId === 'rotationDeg' && operation.key.kind !== 'angle') ||
+          (operation.binding.propertyId !== 'rotationDeg' && operation.key.kind !== 'scalar')
+        )
+          throw new Error('JOY_AGENT_KEY_KIND_MISMATCH');
+      }
+      if (
+        ownerKind === 'visual-object' &&
+        (operation.binding.ownerId === undefined ||
+          (!visualObjects.has(operation.binding.ownerId) &&
+            !trustedGeneratedBindings.some(
+              (binding) =>
+                binding.operationId === operation.id &&
+                binding.ownerId === operation.binding.ownerId,
+            )))
+      )
+        throw new Error('JOY_AGENT_UNKNOWN_OBJECT');
+    }
     if (
       'outgoingClipId' in operation &&
       (!clips.has(operation.outgoingClipId) || !clips.has(operation.incomingClipId))
@@ -76,6 +135,324 @@ export function validateBrowserProposal(value: unknown) {
   return { summary: result.value.summary.slice(0, 512), operations: result.value.operations };
 }
 
+const operationSchemas = [
+  {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      dependsOn: { type: 'array', items: { type: 'string' } },
+      kind: { const: 'timeline.trimClip' },
+      compositionId: { type: 'string' },
+      trackId: { type: 'string' },
+      clipId: { type: 'string' },
+      newStartUs: { type: 'integer', minimum: 0 },
+      newEndUs: { type: 'integer', minimum: 1 },
+    },
+    required: [
+      'id',
+      'dependsOn',
+      'kind',
+      'compositionId',
+      'trackId',
+      'clipId',
+      'newStartUs',
+      'newEndUs',
+    ],
+    additionalProperties: false,
+  },
+  {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      dependsOn: { type: 'array', items: { type: 'string' } },
+      kind: { const: 'timeline.splitClip' },
+      compositionId: { type: 'string' },
+      trackId: { type: 'string' },
+      clipId: { type: 'string' },
+      atUs: { type: 'integer', minimum: 1 },
+    },
+    required: ['id', 'dependsOn', 'kind', 'compositionId', 'trackId', 'clipId', 'atUs'],
+    additionalProperties: false,
+  },
+  {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      dependsOn: { type: 'array', items: { type: 'string' } },
+      kind: { const: 'timeline.moveClip' },
+      compositionId: { type: 'string' },
+      sourceTrackId: { type: 'string' },
+      targetTrackId: { type: 'string' },
+      clipId: { type: 'string' },
+      newStartUs: { type: 'integer', minimum: 0 },
+    },
+    required: [
+      'id',
+      'dependsOn',
+      'kind',
+      'compositionId',
+      'sourceTrackId',
+      'targetTrackId',
+      'clipId',
+      'newStartUs',
+    ],
+    additionalProperties: false,
+  },
+  {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      dependsOn: { type: 'array', items: { type: 'string' } },
+      kind: { const: 'timeline.removeClip' },
+      compositionId: { type: 'string' },
+      trackId: { type: 'string' },
+      clipId: { type: 'string' },
+    },
+    required: ['id', 'dependsOn', 'kind', 'compositionId', 'trackId', 'clipId'],
+    additionalProperties: false,
+  },
+  {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      dependsOn: { type: 'array', items: { type: 'string' } },
+      kind: { const: 'timeline.insertExistingAsset' },
+      compositionId: { type: 'string' },
+      targetTrackId: { type: 'string' },
+      assetId: { type: 'string' },
+      startUs: { type: 'integer', minimum: 0 },
+      durationUs: { type: 'integer', minimum: 1 },
+    },
+    required: [
+      'id',
+      'dependsOn',
+      'kind',
+      'compositionId',
+      'targetTrackId',
+      'assetId',
+      'startUs',
+      'durationUs',
+    ],
+    additionalProperties: false,
+  },
+  {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      dependsOn: { type: 'array', items: { type: 'string' } },
+      kind: { const: 'text.setContent' },
+      objectId: { type: 'string' },
+      content: { type: 'string', minLength: 1, maxLength: 500 },
+    },
+    required: ['id', 'dependsOn', 'kind', 'objectId', 'content'],
+    additionalProperties: false,
+  },
+  {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      dependsOn: { type: 'array', items: { type: 'string' } },
+      kind: { const: 'motion.setKeyframe' },
+      binding: {
+        type: 'object',
+        properties: {
+          ownerKind: { type: 'string' },
+          ownerId: { type: 'string' },
+          ownerRef: {
+            type: 'object',
+            properties: { kind: { const: 'visual-object' }, ref: { type: 'string' } },
+            required: ['kind', 'ref'],
+            additionalProperties: false,
+          },
+          propertyId: { type: 'string' },
+          timeDomain: { type: 'string' },
+        },
+        required: ['ownerKind', 'propertyId', 'timeDomain'],
+        oneOf: [{ required: ['ownerId'] }, { required: ['ownerRef'] }],
+        additionalProperties: false,
+      },
+      key: {
+        type: 'object',
+        properties: {
+          kind: { enum: ['scalar', 'angle', 'hue'] },
+          timeUs: { type: 'integer', minimum: 0 },
+          value: { type: 'number' },
+          interpolation: { enum: ['hold', 'linear', 'eased', 'bezier'] },
+          bezier: {
+            type: 'object',
+            properties: {
+              x1: { type: 'number' },
+              y1: { type: 'number' },
+              x2: { type: 'number' },
+              y2: { type: 'number' },
+            },
+            required: ['x1', 'y1', 'x2', 'y2'],
+            additionalProperties: false,
+          },
+        },
+        required: ['kind', 'timeUs', 'value', 'interpolation'],
+        additionalProperties: false,
+      },
+    },
+    required: ['id', 'dependsOn', 'kind', 'binding', 'key'],
+    additionalProperties: false,
+  },
+  {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      dependsOn: { type: 'array', items: { type: 'string' } },
+      kind: { const: 'motion.removeKeyframe' },
+      binding: {
+        type: 'object',
+        properties: {
+          ownerKind: { type: 'string' },
+          ownerId: { type: 'string' },
+          ownerRef: {
+            type: 'object',
+            properties: { kind: { const: 'visual-object' }, ref: { type: 'string' } },
+            required: ['kind', 'ref'],
+            additionalProperties: false,
+          },
+          propertyId: { type: 'string' },
+          timeDomain: { type: 'string' },
+        },
+        required: ['ownerKind', 'propertyId', 'timeDomain'],
+        oneOf: [{ required: ['ownerId'] }, { required: ['ownerRef'] }],
+        additionalProperties: false,
+      },
+      timeUs: { type: 'integer', minimum: 0 },
+    },
+    required: ['id', 'dependsOn', 'kind', 'binding', 'timeUs'],
+    additionalProperties: false,
+  },
+  {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      dependsOn: { type: 'array', items: { type: 'string' } },
+      kind: { const: 'text.insertTemplate' },
+      templateId: { type: 'string' },
+      content: { type: 'string', minLength: 1, maxLength: 500 },
+      startUs: { type: 'integer', minimum: 0 },
+      durationUs: { type: 'integer', minimum: 1 },
+      placementPreset: { enum: ['center', 'top', 'bottom', 'lower-third'] },
+      outputRef: {
+        type: 'object',
+        properties: { kind: { const: 'visual-object' }, ref: { type: 'string' } },
+        required: ['kind', 'ref'],
+        additionalProperties: false,
+      },
+    },
+    required: [
+      'id',
+      'dependsOn',
+      'kind',
+      'templateId',
+      'content',
+      'startUs',
+      'durationUs',
+      'placementPreset',
+    ],
+    additionalProperties: false,
+  },
+  {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      dependsOn: { type: 'array', items: { type: 'string' } },
+      kind: { const: 'text.setTemplate' },
+      objectId: { type: 'string' },
+      templateId: { type: 'string' },
+    },
+    required: ['id', 'dependsOn', 'kind', 'objectId', 'templateId'],
+    additionalProperties: false,
+  },
+  {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      dependsOn: { type: 'array', items: { type: 'string' } },
+      kind: { const: 'caption.setSegmentText' },
+      captionClipId: { type: 'string' },
+      segmentId: { type: 'string' },
+      text: { type: 'string', minLength: 1, maxLength: 500 },
+    },
+    required: ['id', 'dependsOn', 'kind', 'captionClipId', 'segmentId', 'text'],
+    additionalProperties: false,
+  },
+  {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      dependsOn: { type: 'array', items: { type: 'string' } },
+      kind: { const: 'caption.setSegmentTiming' },
+      captionClipId: { type: 'string' },
+      segmentId: { type: 'string' },
+      startUs: { type: 'integer', minimum: 0 },
+      endUs: { type: 'integer', minimum: 1 },
+    },
+    required: ['id', 'dependsOn', 'kind', 'captionClipId', 'segmentId', 'startUs', 'endUs'],
+    additionalProperties: false,
+  },
+  {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      dependsOn: { type: 'array', items: { type: 'string' } },
+      kind: { const: 'caption.setTemplate' },
+      captionClipId: { type: 'string' },
+      templateId: { type: 'string' },
+    },
+    required: ['id', 'dependsOn', 'kind', 'captionClipId', 'templateId'],
+    additionalProperties: false,
+  },
+  {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      dependsOn: { type: 'array', items: { type: 'string' } },
+      kind: { const: 'caption.setBurnIn' },
+      enabled: { type: 'boolean' },
+    },
+    required: ['id', 'dependsOn', 'kind', 'enabled'],
+    additionalProperties: false,
+  },
+  {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      dependsOn: { type: 'array', items: { type: 'string' } },
+      kind: { const: 'transition.addAtJunction' },
+      outgoingClipId: { type: 'string' },
+      incomingClipId: { type: 'string' },
+      transitionId: { type: 'string' },
+      durationUs: { type: 'integer', minimum: 1 },
+    },
+    required: [
+      'id',
+      'dependsOn',
+      'kind',
+      'outgoingClipId',
+      'incomingClipId',
+      'transitionId',
+      'durationUs',
+    ],
+    additionalProperties: false,
+  },
+  {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      dependsOn: { type: 'array', items: { type: 'string' } },
+      kind: { const: 'transition.remove' },
+      transitionId: { type: 'string' },
+    },
+    required: ['id', 'dependsOn', 'kind', 'transitionId'],
+    additionalProperties: false,
+  },
+] as const;
+
 export const BROWSER_AGENT_TOOLS = [
   {
     type: 'function',
@@ -95,7 +472,7 @@ export const BROWSER_AGENT_TOOLS = [
         type: 'object',
         properties: {
           summary: { type: 'string' },
-          operations: { type: 'array', items: { type: 'object' }, maxItems: 24 },
+          operations: { type: 'array', items: { oneOf: operationSchemas }, maxItems: 24 },
         },
         required: ['summary', 'operations'],
         additionalProperties: false,
@@ -113,6 +490,8 @@ export async function runBoundedToolExchange(
   options: {
     readonly signal?: AbortSignal;
     readonly onStaged?: (proposal: BrowserProposal) => void;
+    /** Stable run identity used only to resolve created outputs internally. */
+    readonly planId?: string;
   } = {},
 ): Promise<string> {
   const messages = [...initialMessages];
@@ -140,9 +519,29 @@ export async function runBoundedToolExchange(
       if (!contextRead || staged === undefined || typeof message.content !== 'string')
         throw new Error('Provider returned a proposal before context inspection and staging');
       const final = validateBrowserProposal(JSON.parse(message.content));
-      if (JSON.stringify(final) !== JSON.stringify(staged))
+      const resolvedFinal = resolveJoyCodeOperationReferences(
+        options.planId ?? 'joy-agent-run',
+        final.operations,
+      );
+      if (!resolvedFinal.ok) throw new Error(resolvedFinal.error.code);
+      const normalizedFinal = { ...final, operations: resolvedFinal.operations };
+      if (JSON.stringify(normalizedFinal) !== JSON.stringify(staged))
         throw new Error('Provider final proposal differs from the staged operations');
-      return raw;
+      const hasCreatedOutputRefs = final.operations.some(
+        (operation) =>
+          (operation.kind === 'text.insertTemplate' && operation.outputRef !== undefined) ||
+          ((operation.kind === 'motion.setKeyframe' ||
+            operation.kind === 'motion.removeKeyframe') &&
+            operation.binding.ownerRef !== undefined),
+      );
+      if (!hasCreatedOutputRefs) return raw;
+      const normalizedEnvelope = JSON.parse(raw) as {
+        choices: { message?: { content?: unknown } }[];
+      };
+      const firstChoice = normalizedEnvelope.choices?.[0];
+      if (firstChoice?.message !== undefined)
+        firstChoice.message = { ...firstChoice.message, content: JSON.stringify(normalizedFinal) };
+      return JSON.stringify(normalizedEnvelope);
     }
     if (step === 3 || toolCount + message.tool_calls.length > 8)
       throw new Error('Provider tool limit reached before a valid proposal');
@@ -190,15 +589,25 @@ export async function runBoundedToolExchange(
           if (!contextRead || contextReadStep === step)
             throw new Error('JOY_AGENT_CONTEXT_REQUIRED');
           const proposal = validateBrowserProposal(args);
-          validateProjectReferences(proposal, snapshot);
-          staged = proposal;
-          options.onStaged?.(proposal);
+          const resolved = resolveJoyCodeOperationReferences(
+            options.planId ?? 'joy-agent-run',
+            proposal.operations,
+          );
+          if (!resolved.ok) throw new Error(resolved.error.code);
+          const normalizedProposal = { ...proposal, operations: resolved.operations };
+          validateProjectReferences(
+            normalizedProposal,
+            snapshot,
+            resolved.trustedGeneratedBindings,
+          );
+          staged = normalizedProposal;
+          options.onStaged?.(normalizedProposal);
           result = {
             ok: true,
             staged: true,
             applied: false,
             baseRevision: snapshot.revision,
-            proposal,
+            proposal: normalizedProposal,
           };
         }
       } catch (error) {

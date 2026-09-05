@@ -97,6 +97,73 @@ describe('Joy Code plan contract', () => {
     if (result.valid) expect(result.value.operations).toHaveLength(4);
   });
 
+  it('accepts typed motion keyframe operations and rejects unsupported bindings', () => {
+    const result = validateJoyCodeModelPlan(
+      validPlan({
+        operations: [
+          {
+            id: 'opacity-key',
+            dependsOn: [],
+            kind: 'motion.setKeyframe',
+            binding: {
+              ownerKind: 'visual-object',
+              ownerId: 'object-1',
+              propertyId: 'opacity',
+              timeDomain: 'composition',
+            },
+            key: {
+              kind: 'scalar',
+              timeUs: 500_000,
+              value: 0.75,
+              interpolation: 'linear',
+            },
+          },
+          {
+            id: 'opacity-remove',
+            dependsOn: ['opacity-key'],
+            kind: 'motion.removeKeyframe',
+            binding: {
+              ownerKind: 'visual-object',
+              ownerId: 'object-1',
+              propertyId: 'opacity',
+              timeDomain: 'composition',
+            },
+            timeUs: 500_000,
+          },
+        ],
+      }),
+      CATALOGS,
+    );
+    expect(result.valid).toBe(true);
+
+    const rejected = validateJoyCodeModelPlan(
+      validPlan({
+        operations: [
+          {
+            id: 'bad-key',
+            dependsOn: [],
+            kind: 'motion.setKeyframe',
+            binding: {
+              ownerKind: 'not-a-real-owner',
+              ownerId: 'object-1',
+              propertyId: 'opacity',
+              timeDomain: 'composition',
+            },
+            key: {
+              kind: 'scalar',
+              timeUs: 0,
+              value: 1,
+              interpolation: 'linear',
+            },
+          },
+        ],
+      }),
+      CATALOGS,
+    );
+    expect(rejected.valid).toBe(false);
+    expect(rejected.errors.some((error) => error.code === 'invalid-binding-owner')).toBe(true);
+  });
+
   it('preserves Persian and RTL text byte-for-byte', () => {
     const input = validPlan({
       goal: 'ریتم و زیرنویس فارسی را بهتر کن',

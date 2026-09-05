@@ -1,10 +1,23 @@
 import { applyTransaction, type CommandTransaction, type SpikeCommand } from '@joy-media/commands';
-import type { JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
+import {
+  canonicalBindingKey,
+  type JoyProjectV1,
+  type PropertyBindingV2,
+  type SpikeProject,
+} from '@joy-media/project-schema';
 import type { JoyCodePlanOperationV1 } from '@joy-media/agent-tools';
+import {
+  VISUAL_INSPECTOR,
+  applyPropertyAnimationCommand,
+  readLegacyPropertyAnimation,
+} from '@joy-media/property-system';
 import { compileJoyCodeTimelineOperations } from './joy-code-timeline-compiler.js';
 import { compileJoyCodeTextOperation } from './joy-code-text-operations.js';
 import { compileJoyCodeCaptionOperation } from './joy-code-caption-operations.js';
 import { compileJoyCodeTransitionOperation } from './joy-code-transition-operations.js';
+import { resolveJoyCodeOperationReferences } from './joy-code-operation-references.js';
+import { audioStateFromProject } from './timeline-presentation.js';
+import { prepareTimelinePresentation } from './timeline-presentation.js';
 
 export interface JoyCodeCompoundCompilerInput {
   readonly planId: string;
@@ -16,7 +29,7 @@ export interface JoyCodeCompoundCompilerInput {
 }
 
 export interface JoyCodeCompoundGroup {
-  readonly kind: 'timeline' | 'text' | 'caption' | 'transition';
+  readonly kind: 'timeline' | 'text' | 'caption' | 'transition' | 'motion';
   readonly operationId: string;
   readonly summary: string;
   readonly affectedIds: readonly string[];
@@ -44,6 +57,29 @@ export type JoyCodeCompoundCompileResult =
       };
     };
 
+const ANIMATABLE_VISUAL_PROPERTIES = new Set([
+  'x',
+  'y',
+  'scaleX',
+  'scaleY',
+  'rotationDeg',
+  'opacity',
+]);
+
+function assertSupportedMotionBinding(document: JoyProjectV1, binding: PropertyBindingV2): void {
+  if (binding.ownerKind !== 'visual-object')
+    throw new RangeError(`motion owner kind "${binding.ownerKind}" is not implemented`);
+  if (binding.timeDomain !== 'composition')
+    throw new RangeError(`motion time domain "${binding.timeDomain}" is not implemented`);
+  if (document.visualObjects[binding.ownerId] === undefined)
+    throw new RangeError(`visual object "${binding.ownerId}" does not exist`);
+  if (!ANIMATABLE_VISUAL_PROPERTIES.has(binding.propertyId))
+    throw new RangeError(`visual property "${binding.propertyId}" is not animatable`);
+  const descriptor = VISUAL_INSPECTOR.find((candidate) => candidate.key === binding.propertyId);
+  if (descriptor?.kind !== 'number')
+    throw new RangeError(`visual property "${binding.propertyId}" is not animatable`);
+}
+
 export function compileJoyCodeCompoundDraft(
   input: JoyCodeCompoundCompilerInput,
 ): JoyCodeCompoundCompileResult {
@@ -52,7 +88,10 @@ export function compileJoyCodeCompoundDraft(
       ok: false,
       error: { code: 'JOY_CODE_COMPOUND_EMPTY', message: 'Joy Code plan contains no operations' },
     };
-  const byId = new Map(input.operations.map((operation) => [operation.id, operation]));
+  const resolvedReferences = resolveJoyCodeOperationReferences(input.planId, input.operations);
+  if (!resolvedReferences.ok) return { ok: false, error: resolvedReferences.error };
+  const operations = resolvedReferences.operations;
+  const byId = new Map(operations.map((operation) => [operation.id, operation]));
   const visiting = new Set<string>();
   const visited = new Set<string>();
   const ordered: JoyCodePlanOperationV1[] = [];
@@ -71,7 +110,7 @@ export function compileJoyCodeCompoundDraft(
     ordered.push(operation);
     return undefined;
   };
-  for (const operation of input.operations) {
+  for (const operation of operations) {
     const error = visit(operation.id);
     if (error !== undefined)
       return {
@@ -88,23 +127,30 @@ export function compileJoyCodeCompoundDraft(
 
   let timeline = input.timeline;
   let document = input.visualProject;
+  let audio = audioStateFromProject(document);
   const commands: SpikeCommand[] = [];
   const groups: JoyCodeCompoundGroup[] = [];
   for (const operation of ordered) {
-    const operationIndex = input.operations.findIndex((candidate) => candidate.id === operation.id);
+    const operationIndex = operations.findIndex((candidate) => candidate.id === operation.id);
     if (operation.kind.startsWith('timeline.')) {
       const result = compileJoyCodeTimelineOperations({
         planId: input.planId,
         project: timeline,
         operations: [operation],
         registeredAssetIds: input.registeredAssetIds,
+        operationIndex,
       });
       if (!result.ok) return { ok: false, error: result.error };
       try {
-        timeline = applyTransaction(timeline, {
+        const transaction = {
           label: `Joy Code ${operation.kind}`,
           commands: result.commands,
-        }).project;
+        };
+        const beforeTimeline = timeline;
+        timeline = applyTransaction(timeline, transaction).project;
+        const prepared = prepareTimelinePresentation(document, audio, beforeTimeline, transaction);
+        document = prepared.project;
+        audio = prepared.audio;
       } catch (error) {
         return {
           ok: false,
@@ -158,6 +204,87 @@ export function compileJoyCodeCompoundDraft(
         summary: result.label,
         affectedIds: result.affectedIds,
       });
+      continue;
+    }
+    if (operation.kind === 'motion.setKeyframe') {
+      try {
+        const binding = operation.binding as PropertyBindingV2;
+        assertSupportedMotionBinding(document, binding);
+        if (
+          (binding.propertyId === 'rotationDeg' && operation.key.kind !== 'angle') ||
+          (binding.propertyId !== 'rotationDeg' && operation.key.kind !== 'scalar')
+        )
+          throw new RangeError(
+            `key kind "${operation.key.kind}" does not match ${binding.propertyId}`,
+          );
+        const keyframe = {
+          timeUs: operation.key.timeUs,
+          value: operation.key.value,
+          interpolation: operation.key.interpolation,
+          ...(operation.key.bezier === undefined ? {} : { bezier: operation.key.bezier }),
+        } as const;
+        const hasExistingAnimation =
+          document.propertyAnimations?.[canonicalBindingKey(binding)] !== undefined ||
+          readLegacyPropertyAnimation(document, binding) !== undefined;
+        const result = !hasExistingAnimation
+          ? applyPropertyAnimationCommand(document, {
+              type: 'propertyAnimation.replace',
+              payload: {
+                binding,
+                value: { kind: operation.key.kind, curve: { keyframes: [keyframe] } },
+              },
+            })
+          : applyPropertyAnimationCommand(document, {
+              type: 'propertyAnimation.setKey',
+              payload: {
+                binding,
+                key: { kind: operation.key.kind, keyframe },
+              },
+            });
+        document = result.project;
+        groups.push({
+          kind: 'motion',
+          operationId: operation.id,
+          summary: `Set ${operation.binding.propertyId} keyframe at ${operation.key.timeUs}µs`,
+          affectedIds: [binding.ownerId, binding.propertyId],
+        });
+      } catch (error) {
+        return {
+          ok: false,
+          error: {
+            code: 'JOY_CODE_MOTION_KEYFRAME_REJECTED',
+            message: error instanceof Error ? error.message : 'keyframe rejected',
+            operationId: operation.id,
+          },
+        };
+      }
+      continue;
+    }
+    if (operation.kind === 'motion.removeKeyframe') {
+      try {
+        const binding = operation.binding as PropertyBindingV2;
+        assertSupportedMotionBinding(document, binding);
+        const result = applyPropertyAnimationCommand(document, {
+          type: 'propertyAnimation.removeKey',
+          payload: { binding, timeUs: operation.timeUs },
+        });
+        document = result.project;
+        groups.push({
+          kind: 'motion',
+          operationId: operation.id,
+          summary: `Remove ${operation.binding.propertyId} keyframe at ${operation.timeUs}µs`,
+          affectedIds: [binding.ownerId, binding.propertyId],
+        });
+      } catch (error) {
+        return {
+          ok: false,
+          error: {
+            code: 'JOY_CODE_MOTION_KEYFRAME_REJECTED',
+            message: error instanceof Error ? error.message : 'keyframe removal rejected',
+            operationId: operation.id,
+          },
+        };
+      }
       continue;
     }
     if (operation.kind.startsWith('caption.')) {

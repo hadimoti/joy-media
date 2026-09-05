@@ -8,6 +8,8 @@ export interface JoyCodeTimelineCompilerInput {
   readonly project: SpikeProject;
   readonly operations: readonly JoyCodePlanOperationV1[];
   readonly registeredAssetIds: readonly string[];
+  /** Original plan index used for deterministic IDs when compiling incrementally. */
+  readonly operationIndex?: number;
 }
 
 export interface JoyCodeTimelineDiffEntry {
@@ -83,7 +85,9 @@ export function compileJoyCodeTimelineOperations(
   const affectedIds = new Set<string>();
 
   for (const operation of ordered) {
-    const operationIndex = input.operations.findIndex((candidate) => candidate.id === operation.id);
+    const operationIndex =
+      input.operationIndex ??
+      input.operations.findIndex((candidate) => candidate.id === operation.id);
     const result = commandsForOperation(operation, input, operationIndex);
     if (!result.ok) return result;
     try {

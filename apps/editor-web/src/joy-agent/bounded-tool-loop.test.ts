@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
+import { INITIAL_EDITOR_PROJECT } from '../editor-project.js';
+import { compileJoyCodeCompoundDraft } from '../joy-code-compound-compiler.js';
 import { runBoundedToolExchange, validateBrowserProposal } from './bounded-tool-loop.js';
 
 const proposal = {
@@ -180,5 +183,116 @@ describe('mounted Worker bounded semantic tool exchange', () => {
       'invalid',
     );
     expect(validateBrowserProposal(proposal)).toEqual(proposal);
+  });
+
+  it('resolves a created title output before a dependent motion operation, even when array order is reversed', async () => {
+    const createdContext = {
+      ...context,
+      visualObjects: [],
+    };
+    const symbolicProposal = {
+      summary: 'Create and animate a title',
+      operations: [
+        {
+          id: 'animate',
+          dependsOn: ['title'],
+          kind: 'motion.setKeyframe',
+          binding: {
+            ownerKind: 'visual-object',
+            ownerRef: { kind: 'visual-object', ref: 'title-output' },
+            propertyId: 'opacity',
+            timeDomain: 'composition',
+          },
+          key: { kind: 'scalar', timeUs: 500_000, value: 0.5, interpolation: 'linear' },
+        },
+        {
+          id: 'title',
+          dependsOn: [],
+          kind: 'text.insertTemplate',
+          templateId: 'clean-title',
+          content: 'Title',
+          startUs: 0,
+          durationUs: 1_000_000,
+          placementPreset: 'center',
+          outputRef: { kind: 'visual-object', ref: 'title-output' },
+        },
+      ],
+    };
+    let step = 0;
+    const staged: unknown[] = [];
+    const result = await runBoundedToolExchange(
+      [],
+      createdContext,
+      async (messages) => {
+        if (step++ === 0) return response({ tool_calls: [call('read', 'read_project_context')] });
+        if (step === 2)
+          return response({ tool_calls: [call('stage', 'validate_proposal', symbolicProposal)] });
+        expect(lastResult(messages)).toMatchObject({ ok: true, staged: true });
+        return response({ content: JSON.stringify(symbolicProposal) });
+      },
+      { planId: 'review', onStaged: (proposal) => staged.push(proposal) },
+    );
+    expect(staged[0]).toMatchObject({
+      operations: [
+        { id: 'animate', binding: { ownerId: 'text-clean-title-review-1' } },
+        { id: 'title', outputRef: { ref: 'title-output' } },
+      ],
+    });
+    expect(JSON.parse(result).choices[0].message.content).toContain('text-clean-title-review-1');
+    const canonical = compileJoyCodeCompoundDraft({
+      planId: 'review',
+      baseRevision: 'revision',
+      timeline: buildReferenceSpikeProject(),
+      visualProject: INITIAL_EDITOR_PROJECT,
+      registeredAssetIds: [],
+      operations:
+        staged[0] && typeof staged[0] === 'object'
+          ? (staged[0] as { operations: never[] }).operations
+          : [],
+    });
+    expect(canonical.ok).toBe(true);
+  });
+
+  it('rejects an output reference that is not declared by a dependency', async () => {
+    const invalid = {
+      summary: 'Animate unknown output',
+      operations: [
+        {
+          id: 'animate',
+          dependsOn: [],
+          kind: 'motion.setKeyframe',
+          binding: {
+            ownerKind: 'visual-object',
+            ownerRef: { kind: 'visual-object', ref: 'missing-output' },
+            propertyId: 'opacity',
+            timeDomain: 'composition',
+          },
+          key: { kind: 'scalar', timeUs: 0, value: 0.5, interpolation: 'linear' },
+        },
+      ],
+    };
+    let count = 0;
+    await expect(
+      runBoundedToolExchange(
+        [],
+        { ...context, visualObjects: [] },
+        async (messages) => {
+          const step = count++;
+          if (step === 0) return response({ tool_calls: [call('read', 'read_project_context')] });
+          if (step === 1)
+            return response({ tool_calls: [call('stage', 'validate_proposal', invalid)] });
+          if (step === 2) {
+            expect(lastResult(messages)).toMatchObject({
+              code: 'JOY_AGENT_UNKNOWN_OUTPUT_REF',
+              repairable: true,
+            });
+            return response({ tool_calls: [call('repair', 'validate_proposal', proposal)] });
+          }
+          expect(lastResult(messages)).toMatchObject({ ok: true, staged: true });
+          return response({ content: JSON.stringify(proposal) });
+        },
+        { planId: 'review' },
+      ),
+    ).resolves.toBeDefined();
   });
 });

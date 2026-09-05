@@ -1,12 +1,6 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { SpikeProject } from '@joy-media/project-schema';
+import { applyTransaction } from '@joy-media/commands';
 import type {
   AgentEditPlan,
   ApprovalDecision,
@@ -57,6 +51,7 @@ import { CreativeBriefPanel } from './CreativeBriefPanel.js';
 import type { JoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
 import { compileJoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
 import { JoyCodeCompoundRunner } from './joy-code-compound-runner.js';
+import { resolveObjectIdForSelection } from './sticker-bindings.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import { createJoyAgentContextSnapshot } from './joy-agent/context-snapshot.js';
@@ -65,11 +60,16 @@ import {
   EMPTY_AGENT_PRESENCE,
   type AgentPresenceState,
   type AgentPresenceStore,
+  type JoyAgentTarget,
   type JoyAgentPresenceEvent,
 } from './agent-presence.js';
 import type { AgentPreviewStore } from './agent-preview-store.js';
 import { stageJoyAgentPreview } from './joy-agent/stage-preview.js';
-import { inferJoyAgentTaskKind, targetForJoyAgentTask } from './agent-ui-targets.js';
+import {
+  inferJoyAgentTaskKind,
+  targetForJoyAgentTask,
+  targetsForJoyCodeOperations,
+} from './agent-ui-targets.js';
 
 /** Every edit this panel commits is attributed to the built-in JOY engine. */
 const AGENT_ACTOR: AgentActor = { type: 'agent', id: 'joy-agent' };
@@ -235,6 +235,7 @@ export function AgentPanel({
   const [creativeBriefContext, setCreativeBriefContext] = useState<CreativeBriefV1 | undefined>(
     undefined,
   );
+  const proposalTargetsRef = useRef(new Map<string, readonly JoyAgentTarget[]>());
   const [modelDraft, setModelDraft] = useState<JoyCodeCompoundDraft | undefined>(undefined);
   const modelRunnerRef = useRef(new JoyCodeCompoundRunner());
   const presenceState = useSyncExternalStore(
@@ -548,6 +549,7 @@ export function AgentPanel({
       const taskKind = inferJoyAgentTaskKind(body);
       const taskTarget = targetForJoyAgentTask(taskKind);
       setAgentRunId(runId);
+      proposalTargetsRef.current.delete(runId);
       setModelDraft(undefined);
       agentPreviewStore?.clear();
       agentPresenceStore?.beginRun(runId, session.historyCursorSequence);
@@ -563,6 +565,9 @@ export function AgentPanel({
             compositionId: session.timelineProject.rootCompositionId,
             trackIds: composition?.tracks.map((track) => track.id) ?? [],
             selectedClipIds,
+            selectedVisualObjectIds: selectedClipIds
+              .map((clipId) => resolveObjectIdForSelection(session.visualProject, [clipId]))
+              .filter((id): id is string => id !== undefined),
             playheadUs,
             ...(composition === undefined
               ? {}
@@ -580,6 +585,29 @@ export function AgentPanel({
               id: asset.id,
               kind: asset.kind,
               displayName: asset.displayName,
+            })),
+            visualObjects: Object.values(session.visualProject.visualObjects).map((object) => ({
+              id: object.id,
+              kind: object.kind,
+              ...(typeof object.text === 'string' ? { text: object.text } : {}),
+              transform: {
+                x: object.transform.x,
+                y: object.transform.y,
+                scaleX: object.transform.scaleX,
+                scaleY: object.transform.scaleY,
+                rotationDeg: object.transform.rotationDeg,
+                opacity: object.transform.opacity,
+              },
+              animatedProperties: [
+                ...Object.keys(object.animations ?? {}),
+                ...Object.values(session.visualProject.propertyAnimations ?? {})
+                  .filter((animation) => animation.binding.ownerId === object.id)
+                  .map((animation) => animation.binding.propertyId),
+              ],
+            })),
+            conversation: conversation.messages.slice(-8).map((message) => ({
+              role: message.role,
+              body: message.body,
             })),
             ...(creativeBriefContext === undefined ? {} : { creativeBrief: creativeBriefContext }),
           });
@@ -599,6 +627,19 @@ export function AgentPanel({
               event.phase === 'completed' ||
               event.phase === 'failed' ||
               event.phase === 'cancelled';
+            const computedProposalTargets =
+              event.proposal === undefined
+                ? undefined
+                : targetsForJoyCodeOperations(
+                    event.proposal.operations as readonly {
+                      readonly kind: string;
+                      readonly [key: string]: unknown;
+                    }[],
+                  );
+            if (computedProposalTargets !== undefined)
+              proposalTargetsRef.current.set(runId, computedProposalTargets);
+            const proposalTargets =
+              computedProposalTargets ?? proposalTargetsRef.current.get(runId);
             const presenceEvent: JoyAgentPresenceEvent = {
               protocolVersion: 1,
               runId,
@@ -615,13 +656,14 @@ export function AgentPanel({
               phase: event.phase,
               ...(event.errorCode === undefined ? {} : { errorCode: event.errorCode }),
               targets:
-                event.phase === 'previewing' || event.phase === 'awaiting-approval'
+                proposalTargets ??
+                (event.phase === 'previewing' || event.phase === 'awaiting-approval'
                   ? [
                       { panelId: 'agent', sectionId: 'composer' },
                       taskTarget,
                       { panelId: 'timeline', sectionId: 'timeline' },
                     ]
-                  : [{ panelId: 'agent', sectionId: 'composer' }, taskTarget],
+                  : [{ panelId: 'agent', sectionId: 'composer' }, taskTarget]),
               ...(event.proposal === undefined
                 ? {}
                 : {
@@ -632,7 +674,6 @@ export function AgentPanel({
                     },
                   }),
             };
-            agentPresenceStore?.dispatch(presenceEvent);
             if (event.phase === 'awaiting-approval')
               appendMessage(
                 threadId,
@@ -667,6 +708,11 @@ export function AgentPanel({
                 `${event.proposal.summary} (${event.proposal.operations.length} bounded operation${event.proposal.operations.length === 1 ? '' : 's'}) is ready for JOY validation.`,
               );
             }
+            // A preview presence event is emitted only after the canonical
+            // compiler has accepted the proposal. This keeps the activity
+            // rail truthful when provider validation succeeds but a local
+            // adapter rejects the draft.
+            agentPresenceStore?.dispatch(presenceEvent);
             if (event.phase === 'completed')
               appendMessage(
                 threadId,
@@ -683,8 +729,22 @@ export function AgentPanel({
               appendMessage(threadId, 'assistant', 'JOY run cancelled. No edits were applied.');
             if (event.phase === 'failed' || event.phase === 'cancelled')
               agentPreviewStore?.clear(runId);
+            if (event.phase === 'failed' || event.phase === 'cancelled')
+              proposalTargetsRef.current.delete(runId);
           }
         } catch (error) {
+          agentPresenceStore?.dispatch({
+            protocolVersion: 1,
+            runId,
+            seq: Math.max(0, (agentPresenceStore?.getState().seq ?? -1) + 1),
+            at: new Date().toISOString(),
+            revision: session.historyCursorSequence,
+            kind: 'failed',
+            phase: 'failed',
+            targets: proposalTargetsRef.current.get(runId) ?? [
+              { panelId: 'agent', sectionId: 'composer' },
+            ],
+          });
           appendMessage(
             threadId,
             'assistant',
@@ -731,10 +791,12 @@ export function AgentPanel({
   }
 
   function rejectModelDraft() {
-    void joyAgentEngineClient?.cancel(modelDraft?.planId ?? '');
+    const planId = modelDraft?.planId;
+    void joyAgentEngineClient?.cancel(planId ?? '');
     setModelDraft(undefined);
     setAgentPhase('cancelled');
-    agentPreviewStore?.clear(modelDraft?.planId);
+    agentPreviewStore?.clear(planId);
+    if (planId !== undefined) proposalTargetsRef.current.delete(planId);
     if (activeThread !== undefined)
       appendMessage(activeThread.id, 'assistant', 'JOY preview rejected. No edits were applied.');
     agentPresenceStore?.clear();
@@ -743,7 +805,16 @@ export function AgentPanel({
   function applyModelDraft() {
     if (modelDraft === undefined || activeThread === undefined) return;
     try {
-      modelRunnerRef.current.apply(
+      // Prepare the expected timeline state before committing. Replaying the
+      // transaction after commit would double-apply non-idempotent edits such
+      // as split/remove/insert and turn a valid commit into a false failure.
+      const replayKey = `${modelDraft.planId}:${modelDraft.proposalHash}`;
+      const isDurableReplay = session.agentIdempotency.hasExecuted(replayKey);
+      const expectedTimeline =
+        modelDraft.timeline === undefined || isDurableReplay
+          ? undefined
+          : applyTransaction(session.timelineProject, modelDraft.timeline).project;
+      const applied = modelRunnerRef.current.apply(
         session,
         modelDraft,
         {
@@ -754,11 +825,33 @@ export function AgentPanel({
         },
         settings,
       );
-      onProjectRevision?.();
+      if (!applied.replayed && session.projectRevisionId !== applied.revisionId)
+        throw new Error('JOY_CODE_VERIFICATION_FAILED: committed revision could not be read back');
+      if (
+        !applied.replayed &&
+        modelDraft.document !== session.visualProject &&
+        JSON.stringify(modelDraft.document) !== JSON.stringify(session.visualProject)
+      )
+        throw new Error(
+          'JOY_CODE_VERIFICATION_FAILED: document state differs from the approved draft',
+        );
+      if (
+        !applied.replayed &&
+        modelDraft.timeline !== undefined &&
+        !isDurableReplay &&
+        JSON.stringify(expectedTimeline) !== JSON.stringify(session.timelineProject)
+      )
+        throw new Error(
+          'JOY_CODE_VERIFICATION_FAILED: timeline state differs from the approved draft',
+        );
+      if (!applied.replayed) onProjectRevision?.();
+      const completionTargets = proposalTargetsRef.current.get(modelDraft.planId) ?? [
+        { panelId: 'agent', sectionId: 'composer' },
+      ];
       appendMessage(
         activeThread.id,
         'assistant',
-        'Approved and applied as one atomic JOY edit. One Undo restores the prior state.',
+        `${applied.replayed ? 'This JOY edit was already committed.' : 'Approved and applied'} Revision ${applied.revisionId} was ${applied.replayed ? 'confirmed from its saved receipt; no new edit or Undo entry was created.' : 'read back successfully; one Undo restores the prior state.'}${applied.receiptPersisted ? '' : ' The local replay receipt could not be persisted, so do not retry this run after a reload.'}`,
       );
       setModelDraft(undefined);
       setAgentPhase('completed');
@@ -767,13 +860,14 @@ export function AgentPanel({
       agentPresenceStore?.dispatch({
         protocolVersion: 1,
         runId: modelDraft.planId,
-        seq: 99,
+        seq: Math.max(0, (agentPresenceStore?.getState().seq ?? -1) + 1),
         at: new Date().toISOString(),
         revision: session.historyCursorSequence,
         kind: 'completed',
         phase: 'completed',
-        targets: [{ panelId: 'timeline', sectionId: 'timeline' }],
+        targets: completionTargets,
       });
+      proposalTargetsRef.current.delete(modelDraft.planId);
       window.setTimeout(() => agentPresenceStore?.completeHandoff(), 1200);
     } catch (error) {
       appendMessage(
@@ -974,10 +1068,7 @@ export function AgentPanel({
   };
 
   return (
-    <PanelShell
-      title="Joy Code"
-      className="joy-code-panel"
-    >
+    <PanelShell title="Joy Code" className="joy-code-panel">
       <div
         className="joy-code-drop-target"
         onDragOver={(event) => {
@@ -1045,370 +1136,362 @@ export function AgentPanel({
           </div>
         )}
         <section
-            className={`joy-code-composer is-${composerCapability} ${liveAgentBusy ? 'is-agent-busy' : ''}`}
-            aria-label="Joy Code composer"
-            aria-busy={liveAgentBusy}
-            data-agent-phase={liveAgentPhase}
-          >
-            <div
-              className="joy-code-capabilities"
-              role="toolbar"
-              aria-label="Composer capabilities"
+          className={`joy-code-composer is-${composerCapability} ${liveAgentBusy ? 'is-agent-busy' : ''}`}
+          aria-label="Joy Code composer"
+          aria-busy={liveAgentBusy}
+          data-agent-phase={liveAgentPhase}
+        >
+          <div className="joy-code-capabilities" role="toolbar" aria-label="Composer capabilities">
+            <span className="joy-code-capabilities-label">Create with JOY</span>
+            <button
+              type="button"
+              className={`joy-code-capability ${composerCapability === 'edit' ? 'is-active' : ''}`}
+              aria-pressed={composerCapability === 'edit'}
+              onClick={() => setComposerCapability('edit')}
             >
-              <span className="joy-code-capabilities-label">Create with JOY</span>
-              <button
-                type="button"
-                className={`joy-code-capability ${
-                  composerCapability === 'edit' ? 'is-active' : ''
-                }`}
-                aria-pressed={composerCapability === 'edit'}
-                onClick={() => setComposerCapability('edit')}
-              >
-                <JoyCodeLogo variant="mark" />
-                Edit
-              </button>
-              <button
-                type="button"
-                className={`joy-code-capability ${
-                  composerCapability === 'creative-brief' ? 'is-active' : ''
-                } ${creativeBriefContext !== undefined ? 'has-artifact' : ''}`}
-                aria-pressed={composerCapability === 'creative-brief'}
-                onClick={() => setComposerCapability('creative-brief')}
-              >
-                <span className="joy-code-capability-spark" aria-hidden="true">
-                  ✦
+              <JoyCodeLogo variant="mark" />
+              Edit
+            </button>
+            <button
+              type="button"
+              className={`joy-code-capability ${
+                composerCapability === 'creative-brief' ? 'is-active' : ''
+              } ${creativeBriefContext !== undefined ? 'has-artifact' : ''}`}
+              aria-pressed={composerCapability === 'creative-brief'}
+              onClick={() => setComposerCapability('creative-brief')}
+            >
+              <span className="joy-code-capability-spark" aria-hidden="true">
+                ✦
+              </span>
+              Creative Brief
+              {creativeBriefContext !== undefined && (
+                <span className="joy-code-capability-dot" aria-label="Brief attached" />
+              )}
+            </button>
+          </div>
+          {creativeBriefContext !== undefined && (
+            <section className="joy-code-brief-artifact" aria-label="Attached Creative Brief">
+              <div className="joy-code-brief-artifact-copy">
+                <span className="joy-code-brief-artifact-kicker">
+                  <span aria-hidden="true">✦</span> Creative Brief attached
                 </span>
-                Creative Brief
-                {creativeBriefContext !== undefined && (
-                  <span className="joy-code-capability-dot" aria-label="Brief attached" />
-                )}
-              </button>
-            </div>
-            {creativeBriefContext !== undefined && (
-              <section className="joy-code-brief-artifact" aria-label="Attached Creative Brief">
-                <div className="joy-code-brief-artifact-copy">
-                  <span className="joy-code-brief-artifact-kicker">
-                    <span aria-hidden="true">✦</span> Creative Brief attached
+                <strong>{creativeBriefContext.request}</strong>
+                <span>
+                  {creativeBriefContext.recommendations.length}{' '}
+                  {creativeBriefContext.recommendations.length === 1
+                    ? 'recommendation'
+                    : 'recommendations'}{' '}
+                  · revision {creativeBriefContext.snapshotRevisionId}
+                </span>
+              </div>
+              <div className="joy-code-brief-artifact-actions">
+                <button type="button" onClick={() => setComposerCapability('creative-brief')}>
+                  Open brief
+                </button>
+                <button
+                  type="button"
+                  className="is-subtle"
+                  onClick={() => setCreativeBriefContext(undefined)}
+                >
+                  Detach
+                </button>
+              </div>
+            </section>
+          )}
+          <div
+            className="joy-code-creative-brief"
+            aria-label="Creative Brief capability"
+            hidden={composerCapability !== 'creative-brief'}
+          >
+            <CreativeBriefPanel
+              revisionId={session.projectRevisionId}
+              projectId={project.id}
+              optedIn={creativeBriefOptedIn}
+              onBriefReady={handOffCreativeBrief}
+              onBriefHydrated={setCreativeBriefContext}
+              onBriefCleared={() => setCreativeBriefContext(undefined)}
+              {...(onCreativeBriefOptIn === undefined ? {} : { onOptIn: onCreativeBriefOptIn })}
+              {...(creativeBriefRunner === undefined ? {} : { runBrief: creativeBriefRunner })}
+              embedded
+            />
+          </div>
+          <div
+            className={`joy-code-messages${activeThread?.messages.length === 0 ? ' is-empty' : ''}`}
+            aria-live="polite"
+          >
+            {activeThread?.messages.length === 0 && (
+              <div className="joy-code-welcome">
+                <JoyCodeLogo variant="horizontal" label="Joy Code" />
+                <h3 className="joy-code-welcome-title">What should we edit?</h3>
+                <p className="joy-code-welcome-copy">
+                  <strong>Joy Code</strong> prepares controlled timeline plans. Nothing changes
+                  until the plan passes policy and the execution mode permits it.
+                </p>
+              </div>
+            )}
+
+            {activeThread?.messages.map((message) => (
+              <article
+                key={message.id}
+                className={`joy-code-message is-${message.role}`}
+                aria-label={message.role === 'user' ? 'You' : 'Joy Code'}
+              >
+                {message.role === 'assistant' && (
+                  <span className="joy-code-avatar" aria-hidden="true">
+                    <JoyCodeLogo variant="mark" />
                   </span>
-                  <strong>{creativeBriefContext.request}</strong>
-                  <span>
-                    {creativeBriefContext.recommendations.length}{' '}
-                    {creativeBriefContext.recommendations.length === 1
-                      ? 'recommendation'
-                      : 'recommendations'}{' '}
-                    · revision {creativeBriefContext.snapshotRevisionId}
+                )}
+                <div>
+                  <strong>{message.role === 'user' ? 'You' : 'Joy Code'}</strong>
+                  <p
+                    lang={
+                      message.role === 'assistant' && /[\u0600-\u06ff]/u.test(message.body)
+                        ? 'fa'
+                        : undefined
+                    }
+                  >
+                    {message.body}
+                  </p>
+                </div>
+              </article>
+            ))}
+
+            {isThinking && (
+              <article
+                className="joy-code-message is-assistant is-thinking"
+                aria-label="Joy Code is thinking"
+                role="status"
+              >
+                <span className="joy-code-avatar" aria-hidden="true">
+                  <JoyCodeLogo variant="mark" thinking />
+                </span>
+                <div>
+                  <strong>Joy Code</strong>
+                  <p>Thinking…</p>
+                </div>
+              </article>
+            )}
+
+            {pending !== undefined && pending.threadId === activeThread?.id && (
+              <section className="joy-code-plan-card" aria-label="Proposed timeline plan">
+                <div className="joy-code-plan-head">
+                  <div>
+                    <span>Proposed edit</span>
+                    <strong>{pending.intent.label}</strong>
+                  </div>
+                  <span className={`agent-decision agent-decision-${pending.approval.decision}`}>
+                    {pending.approval.decision.replaceAll('-', ' ')}
                   </span>
                 </div>
-                <div className="joy-code-brief-artifact-actions">
-                  <button type="button" onClick={() => setComposerCapability('creative-brief')}>
-                    Open brief
+                <p>{pending.dryRun.aggregateDiff.summary}</p>
+                <AgentTimelineCanvas
+                  project={project}
+                  playheadUs={playheadUs}
+                  highlightedClipIds={selectedClipIds}
+                  pendingChanges={pendingChanges}
+                  width={400}
+                  height={120}
+                />
+                {pending.dryRun.errors.length > 0 && (
+                  <p className="agent-error">Dry-run errors: {pending.dryRun.errors.join(', ')}</p>
+                )}
+                <span className="joy-code-plan-reason">{pending.approval.reason}</span>
+                <div className="joy-code-plan-actions">
+                  {pending.approval.decision === 'blocked' && (
+                    <button type="button" onClick={reject}>
+                      Dismiss
+                    </button>
+                  )}
+                  {pending.approval.decision === 'requires-manual' && (
+                    <>
+                      <button
+                        type="button"
+                        className="is-primary"
+                        onClick={() => void executePending(true)}
+                      >
+                        <CheckIcon />
+                        Approve &amp; apply
+                      </button>
+                      <button type="button" onClick={reject}>
+                        <CloseIcon />
+                        Reject
+                      </button>
+                    </>
+                  )}
+                  {pending.approval.decision === 'auto-approved' && (
+                    <button
+                      type="button"
+                      className="is-primary"
+                      onClick={() => void executePending(false)}
+                    >
+                      <PlayIcon />
+                      Apply edit
+                    </button>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {modelDraft !== undefined && activeThread !== undefined && (
+              <section
+                className="joy-code-plan-card joy-code-model-plan"
+                aria-label="JOY Agent live proposal"
+              >
+                <AgentPreviewBadge surface="JOY Code" />
+                <div className="joy-code-plan-head">
+                  <div>
+                    <span>JOY Agent preview</span>
+                    <strong>Not applied</strong>
+                  </div>
+                  <span className="agent-decision agent-decision-requires-manual">
+                    needs approval
+                  </span>
+                </div>
+                <p>{modelDraft.groups.map((group) => group.summary).join(' · ')}</p>
+                <p>
+                  Applying this local edit adds no provider cost. BYOK model spend is unknown; the
+                  dollar limit cannot cap provider billing. Requests are limited to four steps of
+                  2,048 output tokens.
+                </p>
+                {modelDraft.warnings.length > 0 && (
+                  <p className="agent-error">{modelDraft.warnings.join(', ')}</p>
+                )}
+                <div className="joy-code-plan-actions">
+                  <button type="button" className="is-primary" onClick={applyModelDraft}>
+                    <CheckIcon /> Approve &amp; apply
                   </button>
-                  <button
-                    type="button"
-                    className="is-subtle"
-                    onClick={() => setCreativeBriefContext(undefined)}
-                  >
-                    Detach
+                  <button type="button" onClick={rejectModelDraft}>
+                    <CloseIcon /> Reject
                   </button>
                 </div>
               </section>
             )}
-            <div
-              className="joy-code-creative-brief"
-              aria-label="Creative Brief capability"
-              hidden={composerCapability !== 'creative-brief'}
-            >
-              <CreativeBriefPanel
-                revisionId={session.projectRevisionId}
-                projectId={project.id}
-                optedIn={creativeBriefOptedIn}
-                onBriefReady={handOffCreativeBrief}
-                onBriefHydrated={setCreativeBriefContext}
-                onBriefCleared={() => setCreativeBriefContext(undefined)}
-                {...(onCreativeBriefOptIn === undefined ? {} : { onOptIn: onCreativeBriefOptIn })}
-                {...(creativeBriefRunner === undefined ? {} : { runBrief: creativeBriefRunner })}
-                embedded
-              />
-            </div>
-            <div
-              className={`joy-code-messages${activeThread?.messages.length === 0 ? ' is-empty' : ''}`}
-              aria-live="polite"
-            >
-              {activeThread?.messages.length === 0 && (
-                <div className="joy-code-welcome">
-                  <JoyCodeLogo variant="horizontal" label="Joy Code" />
-                  <h3 className="joy-code-welcome-title">What should we edit?</h3>
-                  <p className="joy-code-welcome-copy">
-                    <strong>Joy Code</strong> prepares controlled timeline plans. Nothing changes
-                    until the plan passes policy and the execution mode permits it.
-                  </p>
+
+            {lastRun !== undefined && lastRun.threadId === activeThread?.id && (
+              <section
+                className={`joy-code-run-card ${
+                  lastRun.executionResult.success ? 'is-success' : 'is-failed'
+                }`}
+                aria-label="Last Joy Code run"
+              >
+                <div>
+                  <strong>
+                    {lastRun.executionResult.success ? 'Edit applied' : 'Edit failed'}
+                  </strong>
+                  <span>{lastRun.intent.label}</span>
                 </div>
-              )}
-
-              {activeThread?.messages.map((message) => (
-                <article
-                  key={message.id}
-                  className={`joy-code-message is-${message.role}`}
-                  aria-label={message.role === 'user' ? 'You' : 'Joy Code'}
-                >
-                  {message.role === 'assistant' && (
-                    <span className="joy-code-avatar" aria-hidden="true">
-                      <JoyCodeLogo variant="mark" />
-                    </span>
+                <div className="joy-code-run-actions">
+                  {lastRun.executionResult.rollbackAvailable && !lastRun.reverted && (
+                    <button type="button" onClick={undoLastRun}>
+                      <UndoIcon />
+                      Undo run
+                    </button>
                   )}
-                  <div>
-                    <strong>{message.role === 'user' ? 'You' : 'Joy Code'}</strong>
-                    <p
-                      lang={
-                        message.role === 'assistant' && /[\u0600-\u06ff]/u.test(message.body)
-                          ? 'fa'
-                          : undefined
-                      }
-                    >
-                      {message.body}
-                    </p>
-                  </div>
-                </article>
-              ))}
-
-              {isThinking && (
-                <article
-                  className="joy-code-message is-assistant is-thinking"
-                  aria-label="Joy Code is thinking"
-                  role="status"
-                >
-                  <span className="joy-code-avatar" aria-hidden="true">
-                    <JoyCodeLogo variant="mark" thinking />
-                  </span>
-                  <div>
-                    <strong>Joy Code</strong>
-                    <p>Thinking…</p>
-                  </div>
-                </article>
-              )}
-
-              {pending !== undefined && pending.threadId === activeThread?.id && (
-                <section className="joy-code-plan-card" aria-label="Proposed timeline plan">
-                  <div className="joy-code-plan-head">
-                    <div>
-                      <span>Proposed edit</span>
-                      <strong>{pending.intent.label}</strong>
-                    </div>
-                    <span className={`agent-decision agent-decision-${pending.approval.decision}`}>
-                      {pending.approval.decision.replaceAll('-', ' ')}
-                    </span>
-                  </div>
-                  <p>{pending.dryRun.aggregateDiff.summary}</p>
-                  <AgentTimelineCanvas
-                    project={project}
-                    playheadUs={playheadUs}
-                    highlightedClipIds={selectedClipIds}
-                    pendingChanges={pendingChanges}
-                    width={400}
-                    height={120}
-                  />
-                  {pending.dryRun.errors.length > 0 && (
-                    <p className="agent-error">
-                      Dry-run errors: {pending.dryRun.errors.join(', ')}
-                    </p>
+                  {lastRun.executionResult.success && lastRun.savedWorkflowId === undefined && (
+                    <button type="button" onClick={saveLastRunAsWorkflow}>
+                      <SaveIcon />
+                      Save workflow
+                    </button>
                   )}
-                  <span className="joy-code-plan-reason">{pending.approval.reason}</span>
-                  <div className="joy-code-plan-actions">
-                    {pending.approval.decision === 'blocked' && (
-                      <button type="button" onClick={reject}>
-                        Dismiss
-                      </button>
-                    )}
-                    {pending.approval.decision === 'requires-manual' && (
-                      <>
+                </div>
+                {!lastRun.executionResult.success && (
+                  <p className="agent-error">{lastRun.executionResult.errors.join(', ')}</p>
+                )}
+                {lastRun.reverted && <p>Reverted.</p>}
+                {lastRun.savedWorkflowId !== undefined && (
+                  <p>
+                    Saved with ID <bdi>{lastRun.savedWorkflowId}</bdi>.
+                  </p>
+                )}
+              </section>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {composerCapability === 'edit' && (
+            <div className="joy-code-compose-dock">
+              {attachedAssets.length > 0 && (
+                <ul className="joy-code-attachments" aria-label="Attached media">
+                  {attachedAssets.map((asset) => (
+                    <li key={asset.assetId}>
+                      <span>{asset.kind}</span>
+                      <strong title={asset.assetId}>{asset.displayName}</strong>
+                      {onDetachAsset !== undefined && (
                         <button
                           type="button"
-                          className="is-primary"
-                          onClick={() => void executePending(true)}
+                          aria-label={`Detach ${asset.displayName}`}
+                          onClick={() => onDetachAsset(asset.assetId)}
                         >
-                          <CheckIcon />
-                          Approve &amp; apply
-                        </button>
-                        <button type="button" onClick={reject}>
                           <CloseIcon />
-                          Reject
                         </button>
-                      </>
-                    )}
-                    {pending.approval.decision === 'auto-approved' && (
-                      <button
-                        type="button"
-                        className="is-primary"
-                        onClick={() => void executePending(false)}
-                      >
-                        <PlayIcon />
-                        Apply edit
-                      </button>
-                    )}
-                  </div>
-                </section>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               )}
-
-              {modelDraft !== undefined && activeThread !== undefined && (
-                <section
-                  className="joy-code-plan-card joy-code-model-plan"
-                  aria-label="JOY Agent live proposal"
+              {attachError !== undefined && (
+                <p className="joy-code-attach-error" role="alert">
+                  {attachError}
+                </p>
+              )}
+              <input
+                ref={attachInputRef}
+                type="file"
+                className="sr-only"
+                accept="image/*,.md,text/markdown,text/plain"
+                multiple
+                aria-hidden="true"
+                tabIndex={-1}
+                onChange={(event) => {
+                  void uploadJoyCodeFiles(event.currentTarget.files);
+                }}
+              />
+              <div className="joy-code-input">
+                <button
+                  type="button"
+                  className="icon-button joy-code-attach"
+                  aria-label="Attach image or Markdown"
+                  title="Attach image or Markdown"
+                  disabled={attaching || onAttachAsset === undefined}
+                  onClick={() => attachInputRef.current?.click()}
                 >
-                  <AgentPreviewBadge surface="JOY Code" />
-                  <div className="joy-code-plan-head">
-                    <div>
-                      <span>JOY Agent preview</span>
-                      <strong>Not applied</strong>
-                    </div>
-                    <span className="agent-decision agent-decision-requires-manual">
-                      needs approval
-                    </span>
-                  </div>
-                  <p>{modelDraft.groups.map((group) => group.summary).join(' · ')}</p>
-                  <p>
-                    Applying this local edit adds no provider cost. BYOK model spend is unknown; the
-                    dollar limit cannot cap provider billing. Requests are limited to four steps of
-                    2,048 output tokens.
-                  </p>
-                  {modelDraft.warnings.length > 0 && (
-                    <p className="agent-error">{modelDraft.warnings.join(', ')}</p>
-                  )}
-                  <div className="joy-code-plan-actions">
-                    <button type="button" className="is-primary" onClick={applyModelDraft}>
-                      <CheckIcon /> Approve &amp; apply
-                    </button>
-                    <button type="button" onClick={rejectModelDraft}>
-                      <CloseIcon /> Reject
-                    </button>
-                  </div>
-                </section>
-              )}
-
-              {lastRun !== undefined && lastRun.threadId === activeThread?.id && (
-                <section
-                  className={`joy-code-run-card ${
-                    lastRun.executionResult.success ? 'is-success' : 'is-failed'
-                  }`}
-                  aria-label="Last Joy Code run"
-                >
-                  <div>
-                    <strong>
-                      {lastRun.executionResult.success ? 'Edit applied' : 'Edit failed'}
-                    </strong>
-                    <span>{lastRun.intent.label}</span>
-                  </div>
-                  <div className="joy-code-run-actions">
-                    {lastRun.executionResult.rollbackAvailable && !lastRun.reverted && (
-                      <button type="button" onClick={undoLastRun}>
-                        <UndoIcon />
-                        Undo run
-                      </button>
-                    )}
-                    {lastRun.executionResult.success && lastRun.savedWorkflowId === undefined && (
-                      <button type="button" onClick={saveLastRunAsWorkflow}>
-                        <SaveIcon />
-                        Save workflow
-                      </button>
-                    )}
-                  </div>
-                  {!lastRun.executionResult.success && (
-                    <p className="agent-error">{lastRun.executionResult.errors.join(', ')}</p>
-                  )}
-                  {lastRun.reverted && <p>Reverted.</p>}
-                  {lastRun.savedWorkflowId !== undefined && (
-                    <p>
-                      Saved with ID <bdi>{lastRun.savedWorkflowId}</bdi>.
-                    </p>
-                  )}
-                </section>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {composerCapability === 'edit' && (
-              <div className="joy-code-compose-dock">
-                {attachedAssets.length > 0 && (
-                  <ul className="joy-code-attachments" aria-label="Attached media">
-                    {attachedAssets.map((asset) => (
-                      <li key={asset.assetId}>
-                        <span>{asset.kind}</span>
-                        <strong title={asset.assetId}>{asset.displayName}</strong>
-                        {onDetachAsset !== undefined && (
-                          <button
-                            type="button"
-                            aria-label={`Detach ${asset.displayName}`}
-                            onClick={() => onDetachAsset(asset.assetId)}
-                          >
-                            <CloseIcon />
-                          </button>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {attachError !== undefined && (
-                  <p className="joy-code-attach-error" role="alert">
-                    {attachError}
-                  </p>
-                )}
-                <input
-                  ref={attachInputRef}
-                  type="file"
-                  className="sr-only"
-                  accept="image/*,.md,text/markdown,text/plain"
-                  multiple
-                  aria-hidden="true"
-                  tabIndex={-1}
-                  onChange={(event) => {
-                    void uploadJoyCodeFiles(event.currentTarget.files);
+                  <PlusIcon />
+                </button>
+                <textarea
+                  rows={3}
+                  value={draft}
+                  aria-label="Message Joy Code"
+                  placeholder="Describe the timeline edit you want…"
+                  onChange={(event) => setDraft(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault();
+                      submitPrompt(draft);
+                    }
                   }}
                 />
-                <div className="joy-code-input">
-                  <button
-                    type="button"
-                    className="icon-button joy-code-attach"
-                    aria-label="Attach image or Markdown"
-                    title="Attach image or Markdown"
-                    disabled={attaching || onAttachAsset === undefined}
-                    onClick={() => attachInputRef.current?.click()}
-                  >
-                    <PlusIcon />
-                  </button>
-                  <textarea
-                    rows={3}
-                    value={draft}
-                    aria-label="Message Joy Code"
-                    placeholder="Describe the timeline edit you want…"
-                    onChange={(event) => setDraft(event.currentTarget.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !event.shiftKey) {
-                        event.preventDefault();
-                        submitPrompt(draft);
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="joy-code-send"
-                    aria-label={
-                      isThinking
-                        ? 'Joy Code is thinking'
-                        : pending === undefined
-                          ? 'Send message'
-                          : 'Stop current plan'
-                    }
-                    title={isThinking ? 'Thinking…' : pending === undefined ? 'Send' : 'Stop'}
-                    disabled={isThinking || (pending === undefined && draft.trim().length === 0)}
-                    onClick={() => {
-                      if (pending !== undefined) reject();
-                      else submitPrompt(draft);
-                    }}
-                  >
-                    {pending === undefined ? <PlayIcon /> : <CloseIcon />}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  className="joy-code-send"
+                  aria-label={
+                    isThinking
+                      ? 'Joy Code is thinking'
+                      : pending === undefined
+                        ? 'Send message'
+                        : 'Stop current plan'
+                  }
+                  title={isThinking ? 'Thinking…' : pending === undefined ? 'Send' : 'Stop'}
+                  disabled={isThinking || (pending === undefined && draft.trim().length === 0)}
+                  onClick={() => {
+                    if (pending !== undefined) reject();
+                    else submitPrompt(draft);
+                  }}
+                >
+                  {pending === undefined ? <PlayIcon /> : <CloseIcon />}
+                </button>
               </div>
-            )}
+            </div>
+          )}
         </section>
       </div>
     </PanelShell>

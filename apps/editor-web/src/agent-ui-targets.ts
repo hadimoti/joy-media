@@ -133,6 +133,75 @@ export function targetForJoyAgentTask(taskKind: JoyAgentTaskKind): JoyAgentTarge
   return TASK_TARGETS[taskKind];
 }
 
+/**
+ * Resolve targets from validated JOY operations, never from prompt keywords.
+ * The operation compiler remains the authority for whether the IDs exist;
+ * this helper only translates already-validated semantic references into UI
+ * activity locations.
+ */
+export function targetsForJoyCodeOperations(
+  operations: readonly { readonly kind: string; readonly [key: string]: unknown }[],
+): readonly JoyAgentTarget[] {
+  const targets: JoyAgentTarget[] = [{ panelId: 'agent', sectionId: 'composer' }];
+  const seen = new Set<string>();
+  const add = (target: JoyAgentTarget): void => {
+    const key = `${target.panelId}:${target.sectionId ?? ''}:${target.entity?.kind ?? ''}:${target.entity?.id ?? ''}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    targets.push(target);
+  };
+  for (const operation of operations) {
+    const kind = operation.kind;
+    if (kind.startsWith('timeline.')) {
+      const clipId = typeof operation.clipId === 'string' ? operation.clipId : undefined;
+      add({
+        panelId: 'timeline',
+        sectionId: 'timeline',
+        ...(clipId ? { entity: { kind: 'clip', id: clipId } } : {}),
+      });
+    } else if (kind.startsWith('text.')) {
+      const objectId = typeof operation.objectId === 'string' ? operation.objectId : undefined;
+      add({
+        panelId: 'inspector',
+        sectionId: 'visual',
+        ...(objectId ? { entity: { kind: 'property', id: objectId } } : {}),
+      });
+    } else if (kind.startsWith('motion.')) {
+      const binding = operation.binding;
+      const ownerId =
+        binding !== null &&
+        typeof binding === 'object' &&
+        typeof (binding as { ownerId?: unknown }).ownerId === 'string'
+          ? (binding as { ownerId: string }).ownerId
+          : undefined;
+      const propertyId =
+        binding !== null &&
+        typeof binding === 'object' &&
+        typeof (binding as { propertyId?: unknown }).propertyId === 'string'
+          ? (binding as { propertyId: string }).propertyId
+          : undefined;
+      add({
+        panelId: 'inspector',
+        sectionId: 'visual',
+        ...(ownerId
+          ? { entity: { kind: 'property', id: `${ownerId}:${propertyId ?? 'unknown'}` } }
+          : {}),
+      });
+    } else if (kind.startsWith('caption.')) {
+      const captionClipId =
+        typeof operation.captionClipId === 'string' ? operation.captionClipId : undefined;
+      add({
+        panelId: 'media',
+        sectionId: 'captions',
+        ...(captionClipId ? { entity: { kind: 'clip', id: captionClipId } } : {}),
+      });
+    } else if (kind.startsWith('transition.')) {
+      add({ panelId: 'effects', sectionId: 'transitions' });
+    }
+  }
+  return targets;
+}
+
 /** Best-effort semantic routing for free-form Joy Code prompts. */
 export function inferJoyAgentTaskKind(prompt: string): JoyAgentTaskKind {
   const value = prompt.toLowerCase();

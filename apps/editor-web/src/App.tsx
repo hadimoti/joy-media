@@ -60,10 +60,7 @@ import type {
   VisualObjectV1,
 } from '@joy-media/project-schema';
 import { normalizePlaybackRate, sourceTimeAtVideoClipTime } from '@joy-media/project-schema';
-import {
-  removeClipPropertyAnimations,
-  type VisualObjectTransaction,
-} from '@joy-media/property-system';
+import { type VisualObjectTransaction } from '@joy-media/property-system';
 import {
   evaluateCameraExpressionTransform,
   evaluateColorGradeAtTime,
@@ -140,7 +137,7 @@ import { waitForContentFonts } from './font-readiness.js';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
 import { runReleaseObserverTimelineProbe } from './release-observer-timeline.js';
-import { updateUniversalTimelineForTransaction } from './universal-placement.js';
+import { prepareTimelinePresentation } from './timeline-presentation.js';
 import { TimelinePanel } from './TimelinePanel.js';
 import { buildTimelineMediaImportTransaction } from './timeline-media-import.js';
 import { buildTimelineElementDocument } from './place-timeline-element.js';
@@ -349,11 +346,7 @@ import {
 import { PlaybackOperationGate, playMediaWhenCurrent } from './playback-operation.js';
 import { playbackStartAtOrAfter, playbackTargetAfterClip } from './timeline-playback.js';
 import { timelineEffectiveDurationUs } from './timeline-layout.js';
-import {
-  buildDerivedClipPresentation,
-  buildSpeedRampPresentation,
-  buildSpeedRampTransaction,
-} from './speed-ramp.js';
+import { buildSpeedRampPresentation, buildSpeedRampTransaction } from './speed-ramp.js';
 import {
   flattenRootTimelineVideoClips,
   rootTimelineVideoClipById,
@@ -628,45 +621,6 @@ function findVideoClipById(
   clipId: string,
 ): VideoClip | undefined {
   return rootTimelineVideoClipById(project as SpikeProject, clipId);
-}
-
-/** Timeline edits that create additional clips must retain their presentation state. */
-function derivedClipPresentationTarget(transaction: CommandTransaction):
-  | {
-      readonly originalClipId: string;
-      readonly derivedClipIds: readonly string[];
-      readonly splitAtUs?: number;
-    }
-  | undefined {
-  if (transaction.commands.length !== 1) return undefined;
-  const [command] = transaction.commands;
-  if (command === undefined) return undefined;
-  switch (command.type) {
-    case 'timeline.freezeFrame':
-      return {
-        originalClipId: command.payload.clipId,
-        derivedClipIds: [command.payload.freezeClipId, command.payload.rightClipId],
-      };
-    case 'timeline.splitClip':
-      return {
-        originalClipId: command.payload.clipId,
-        derivedClipIds: [command.payload.newClipId],
-        splitAtUs: command.payload.atUs,
-      };
-    case 'timeline.duplicateClip':
-      return {
-        originalClipId: command.payload.clipId,
-        derivedClipIds: [command.payload.newClipId],
-      };
-    default:
-      return undefined;
-  }
-}
-
-/** Any remove transaction orphaning a clip-owned property map gets a matching document update. */
-function removedClipPresentationTarget(transaction: CommandTransaction): string | undefined {
-  return transaction.commands.find((command) => command.type === 'timeline.removeClip')?.payload
-    .clipId;
 }
 
 /** Composition playhead → source media time, honoring clip.playbackRate (0 = freeze). */
@@ -2559,52 +2513,20 @@ function EditorWorkspace({
   }, [ensurePreviewAudioGraph, session, syncMediaToPlayhead]);
   const dispatchTimeline = useCallback(
     (transaction: CommandTransaction) => {
-      const presentationTarget = derivedClipPresentationTarget(transaction);
-      const removedClipId = removedClipPresentationTarget(transaction);
-      if (presentationTarget !== undefined) {
-        const sourceClip = Object.values(session.timelineProject.compositions)
-          .flatMap((composition) => composition.tracks)
-          .flatMap((track) => track.clips)
-          .find((clip) => clip.id === presentationTarget.originalClipId);
-        const splitLocalUs =
-          presentationTarget.splitAtUs === undefined || sourceClip === undefined
-            ? undefined
-            : presentationTarget.splitAtUs - sourceClip.startUs;
-        const presentation = buildDerivedClipPresentation(
-          session.visualProject,
-          audioState,
-          presentationTarget.originalClipId,
-          presentationTarget.derivedClipIds,
-          splitLocalUs === undefined ? {} : { splitLocalUs },
-        );
-        const syncedPresentation = updateUniversalTimelineForTransaction(
-          presentation.project,
-          transaction,
-        );
+      const prepared = prepareTimelinePresentation(
+        session.visualProject,
+        audioState,
+        session.timelineProject,
+        transaction,
+      );
+      if (prepared.project !== session.visualProject) {
         session.dispatchCompound(transaction.label, {
           timeline: transaction,
-          document: syncedPresentation,
+          document: prepared.project,
         });
-        setAudioStateRaw(presentation.audio);
-      } else if (removedClipId !== undefined) {
-        session.dispatchCompound(transaction.label, {
-          timeline: transaction,
-          document: updateUniversalTimelineForTransaction(
-            removeClipPropertyAnimations(session.visualProject, removedClipId),
-            transaction,
-          ),
-        });
+        setAudioStateRaw(prepared.audio);
       } else {
-        const universalProject = updateUniversalTimelineForTransaction(
-          session.visualProject,
-          transaction,
-        );
-        if (universalProject === session.visualProject) session.dispatchTimeline(transaction);
-        else
-          session.dispatchCompound(transaction.label, {
-            timeline: transaction,
-            document: universalProject,
-          });
+        session.dispatchTimeline(transaction);
       }
       invalidateAgentPreviewAfterEdit(session);
       resyncTimelineMedia();

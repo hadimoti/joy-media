@@ -61,6 +61,14 @@ describe('Joy Code compound runner', () => {
       ),
     ).toThrow('denies');
     expect(session.historyEntries).toHaveLength(historyBefore);
+    const applied = runner.apply(session, draft, {
+      planId: draft.planId,
+      proposalHash: draft.proposalHash,
+      baseRevision: draft.baseRevision,
+      approvedAt: '2026-08-20T00:00:00.000Z',
+    });
+    expect(applied).toMatchObject({ applied: true, replayed: false });
+    const appliedRevision = applied.revisionId;
     expect(() =>
       runner.apply(session, draft, {
         planId: draft.planId,
@@ -78,9 +86,126 @@ describe('Joy Code compound runner', () => {
         baseRevision: draft.baseRevision,
         approvedAt: '2026-08-20T00:00:00.000Z',
       }),
-    ).toMatchObject({ replayed: true });
+    ).toMatchObject({ replayed: true, revisionId: appliedRevision });
     session.undo();
+    const revisionAfterUndo = session.projectRevisionId;
+    expect(
+      runner.apply(session, draft, {
+        planId: draft.planId,
+        proposalHash: draft.proposalHash,
+        baseRevision: draft.baseRevision,
+        approvedAt: '2026-08-20T00:00:00.000Z',
+      }),
+    ).toMatchObject({ replayed: true, revisionId: appliedRevision });
+    expect(session.projectRevisionId).toBe(revisionAfterUndo);
     expect(JSON.stringify(session.timelineProject)).toBe(beforeTimeline);
     expect(JSON.stringify(session.visualProject)).toBe(beforeDocument);
+  });
+
+  it('persists the replay receipt so a fresh runner cannot commit the same plan twice', () => {
+    const durableStorage = storage();
+    const session = new EditorSession(
+      durableStorage,
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const historyBefore = session.historyEntries.length;
+    const draft = compileJoyCodeCompoundDraft({
+      planId: 'runner-reload',
+      baseRevision: session.projectRevisionId,
+      timeline: session.timelineProject,
+      visualProject: session.visualProject,
+      registeredAssetIds: [],
+      operations: [
+        {
+          id: 'title',
+          dependsOn: [],
+          kind: 'text.insertTemplate',
+          templateId: 'clean-title',
+          content: 'Reload-safe title',
+          startUs: 0,
+          durationUs: 1_000_000,
+          placementPreset: 'center',
+        },
+      ],
+    });
+    expect(draft.ok).toBe(true);
+    if (!draft.ok) return;
+    const approval = {
+      planId: draft.planId,
+      proposalHash: draft.proposalHash,
+      baseRevision: draft.baseRevision,
+      approvedAt: '2026-09-05T00:00:00.000Z',
+    };
+    expect(new JoyCodeCompoundRunner().apply(session, draft, approval).applied).toBe(true);
+    expect(new JoyCodeCompoundRunner().apply(session, draft, approval)).toMatchObject({
+      replayed: true,
+    });
+    const reopenedSession = new EditorSession(
+      durableStorage,
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    expect(new JoyCodeCompoundRunner().apply(reopenedSession, draft, approval)).toMatchObject({
+      replayed: true,
+      receiptPersisted: true,
+    });
+    expect(session.historyEntries).toHaveLength(historyBefore + 1);
+  });
+
+  it('does not report a false apply failure when receipt storage fails after commit', () => {
+    const baseStorage = storage();
+    let failReceiptWrite = false;
+    const session = new EditorSession(
+      {
+        getItem: baseStorage.getItem,
+        setItem: (key, value) => {
+          if (failReceiptWrite && key.includes('agent-idempotency')) throw new Error('quota');
+          baseStorage.setItem(key, value);
+        },
+      },
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const draft = compileJoyCodeCompoundDraft({
+      planId: 'runner-receipt-failure',
+      baseRevision: session.projectRevisionId,
+      timeline: session.timelineProject,
+      visualProject: session.visualProject,
+      registeredAssetIds: [],
+      operations: [
+        {
+          id: 'title',
+          dependsOn: [],
+          kind: 'text.insertTemplate',
+          templateId: 'clean-title',
+          content: 'Receipt warning',
+          startUs: 0,
+          durationUs: 1_000_000,
+          placementPreset: 'center',
+        },
+      ],
+    });
+    expect(draft.ok).toBe(true);
+    if (!draft.ok) return;
+    failReceiptWrite = true;
+    const result = new JoyCodeCompoundRunner().apply(session, draft, {
+      planId: draft.planId,
+      proposalHash: draft.proposalHash,
+      baseRevision: draft.baseRevision,
+      approvedAt: '2026-09-05T00:00:00.000Z',
+    });
+    expect(result).toMatchObject({ applied: true, receiptPersisted: false });
+    expect(
+      session.visualProject.visualObjects['text-clean-title-runner-receipt-failure-0'],
+    ).toBeDefined();
+    expect(
+      new JoyCodeCompoundRunner().apply(session, draft, {
+        planId: draft.planId,
+        proposalHash: draft.proposalHash,
+        baseRevision: draft.baseRevision,
+        approvedAt: '2026-09-05T00:00:00.000Z',
+      }),
+    ).toMatchObject({ replayed: true, receiptPersisted: false });
   });
 });

@@ -2,6 +2,7 @@ import type { CommandTransaction } from '@joy-media/commands';
 import type {
   Clip,
   JoyProjectV1,
+  SpikeProject,
   TrackV1,
   TimelineElementKind,
   UniversalTimelineItem,
@@ -79,6 +80,7 @@ export function removeUniversalTimelineBinding(
 export function updateUniversalTimelineForTransaction(
   project: JoyProjectV1,
   transaction: CommandTransaction,
+  timeline?: SpikeProject,
 ): JoyProjectV1 {
   const normalized = normalizeUniversalTimeline(project);
   let items = [...normalized.document.items];
@@ -208,6 +210,89 @@ export function updateUniversalTimelineForTransaction(
           withinTrackOrder:
             trackItems.reduce((highest, item) => Math.max(highest, item.withinTrackOrder), -1) + 1,
         });
+        changed = true;
+        break;
+      }
+      case 'timeline.splitClip': {
+        const source = items.find((item) => item.id === command.payload.clipId);
+        if (source === undefined) break;
+        const sourceClip = findTimelineClip(timeline, command.payload, command.payload.clipId);
+        const derivedClip = findTimelineClip(timeline, command.payload, command.payload.newClipId);
+        if (sourceClip !== undefined && derivedClip !== undefined) {
+          items = cloneDerivedUniversalItems(
+            items,
+            command.payload.clipId,
+            [sourceClip, derivedClip],
+            [command.payload.clipId, command.payload.newClipId],
+          );
+        } else {
+          const leftDuration = command.payload.atUs - source.startUs;
+          const rightDuration = source.durationUs - leftDuration;
+          if (leftDuration <= 0 || rightDuration <= 0) break;
+          items = items.map((item) =>
+            item.id === source.id ? { ...item, durationUs: leftDuration } : item,
+          );
+          items.push({
+            ...source,
+            id: command.payload.newClipId,
+            startUs: command.payload.atUs,
+            durationUs: rightDuration,
+          });
+        }
+        changed = true;
+        break;
+      }
+      case 'timeline.duplicateClip': {
+        const source = items.find((item) => item.id === command.payload.clipId);
+        if (source === undefined || items.some((item) => item.id === command.payload.newClipId))
+          break;
+        const sourceClip = findTimelineClip(timeline, command.payload, command.payload.clipId);
+        const derivedClip = findTimelineClip(timeline, command.payload, command.payload.newClipId);
+        if (sourceClip !== undefined && derivedClip !== undefined)
+          items = cloneDerivedUniversalItems(
+            items,
+            command.payload.clipId,
+            [sourceClip, derivedClip],
+            [command.payload.clipId, command.payload.newClipId],
+          );
+        else
+          items.push({
+            ...source,
+            id: command.payload.newClipId,
+            startUs: command.payload.newStartUs ?? source.startUs + source.durationUs,
+          });
+        changed = true;
+        break;
+      }
+      case 'timeline.freezeFrame': {
+        const source = items.find((item) => item.id === command.payload.clipId);
+        if (source === undefined) break;
+        const sourceClip = findTimelineClip(timeline, command.payload, command.payload.clipId);
+        const freezeClip = findTimelineClip(
+          timeline,
+          command.payload,
+          command.payload.freezeClipId,
+        );
+        const rightClip = findTimelineClip(timeline, command.payload, command.payload.rightClipId);
+        if (sourceClip !== undefined && freezeClip !== undefined && rightClip !== undefined)
+          items = cloneDerivedUniversalItems(
+            items,
+            command.payload.clipId,
+            [sourceClip, freezeClip, rightClip],
+            [command.payload.clipId, command.payload.freezeClipId, command.payload.rightClipId],
+          );
+        else {
+          const leftDuration = command.payload.atUs - source.startUs;
+          const rightDuration = source.durationUs - leftDuration;
+          if (leftDuration <= 0 || rightDuration <= 0 || command.payload.holdUs <= 0) break;
+          items = items.map((item) =>
+            item.id === source.id ? { ...item, durationUs: leftDuration } : item,
+          );
+          items.push(
+            { ...source, id: command.payload.freezeClipId, durationUs: command.payload.holdUs },
+            { ...source, id: command.payload.rightClipId, durationUs: rightDuration },
+          );
+        }
         changed = true;
         break;
       }
@@ -392,12 +477,75 @@ export function updateUniversalTimelineForTransaction(
     }
   }
   if (!changed) return project;
+  items = reindexUniversalItems(items);
   const deckProject = syncTrackDeckMetadata(project, transaction);
   return {
     ...deckProject,
     universalTimeline: { schemaVersion: UNIVERSAL_TIMELINE_SCHEMA_VERSION, items },
     updatedAt: new Date().toISOString(),
   };
+}
+
+function findTimelineClip(
+  timeline: SpikeProject | undefined,
+  target: { readonly compositionId: string; readonly trackId: string },
+  clipId: string,
+): Clip | undefined {
+  return timeline?.compositions[target.compositionId]?.tracks
+    .find((track) => track.id === target.trackId)
+    ?.clips.find((clip) => clip.id === clipId);
+}
+
+function cloneDerivedUniversalItems(
+  items: UniversalTimelineItem[],
+  originalClipId: string,
+  clips: readonly Clip[],
+  clipIds: readonly string[],
+): UniversalTimelineItem[] {
+  const sourceItems = items.filter(
+    (item) => item.id === originalClipId || item.id.startsWith(`${originalClipId}:object:`),
+  );
+  if (sourceItems.length === 0) return items;
+  const withoutDerived = items.filter(
+    (item) =>
+      !clipIds
+        .slice(1)
+        .some((clipId) => item.id === clipId || item.id.startsWith(`${clipId}:object:`)),
+  );
+  const next = withoutDerived.map((item) => {
+    const isSource = item.id === originalClipId || item.id.startsWith(`${originalClipId}:object:`);
+    return isSource ? updateUniversalItemForClip(item, clips[0]!) : item;
+  });
+  for (let index = 1; index < clips.length; index += 1) {
+    const clip = clips[index]!;
+    for (const sourceItem of sourceItems) {
+      const suffix = sourceItem.id.slice(originalClipId.length);
+      next.push(updateUniversalItemForClip({ ...sourceItem, id: clipIds[index]! + suffix }, clip));
+    }
+  }
+  return next;
+}
+
+function updateUniversalItemForClip(
+  item: UniversalTimelineItem,
+  clip: Clip,
+): UniversalTimelineItem {
+  return {
+    ...item,
+    startUs: clip.startUs,
+    durationUs: clip.durationUs,
+    ...(item.id === clip.id && clip.kind === 'video' ? { sourceInUs: clip.sourceInUs } : {}),
+  };
+}
+
+function reindexUniversalItems(items: readonly UniversalTimelineItem[]): UniversalTimelineItem[] {
+  const orders = new Map<string, number>();
+  return items.map((item) => {
+    const key = `${item.compositionId}:${item.trackId}`;
+    const withinTrackOrder = orders.get(key) ?? 0;
+    orders.set(key, withinTrackOrder + 1);
+    return { ...item, withinTrackOrder };
+  });
 }
 
 function adaptSpikeTrack(track: {

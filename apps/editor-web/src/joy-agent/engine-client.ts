@@ -32,6 +32,7 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
       events: JoyAgentSafeEvent[];
       waiters: ((result: IteratorResult<JoyAgentSafeEvent>) => void)[];
       done: boolean;
+      lastSeq: number;
     }
   >();
 
@@ -58,6 +59,8 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
       } else if (message.type === 'event') {
         const queue = runQueues.get(message.event.runId);
         if (!queue || queue.done) return;
+        if (message.event.seq <= queue.lastSeq) return;
+        queue.lastSeq = message.event.seq;
         if (
           message.event.phase === 'completed' ||
           message.event.phase === 'failed' ||
@@ -145,7 +148,8 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
         events: JoyAgentSafeEvent[];
         waiters: ((result: IteratorResult<JoyAgentSafeEvent>) => void)[];
         done: boolean;
-      } = { events: [], waiters: [], done: false };
+        lastSeq: number;
+      } = { events: [], waiters: [], done: false, lastSeq: -1 };
       runQueues.set(request.runId, queue);
       ensureWorker().postMessage({
         protocolVersion: JOY_AGENT_PROTOCOL_VERSION,

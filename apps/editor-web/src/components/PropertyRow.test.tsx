@@ -95,4 +95,15 @@ describe('PropertyRow', () => {
     expect(markup).toContain('M8 3 13 8 8 13 3 8Z');
     expect(markup).not.toContain('fill="currentColor"');
   });
+
+  it('exposes precise agent presence on the property row without changing controls', () => {
+    const markup = renderToStaticMarkup(
+      <PropertyRow label="Opacity" agentActive onToggleAnimation={() => undefined}>
+        <input aria-label="Opacity value" type="number" value="50" readOnly />
+      </PropertyRow>,
+    );
+
+    expect(markup).toContain('is-agent-active');
+    expect(markup).toContain('data-agent-active="true"');
+  });
 });

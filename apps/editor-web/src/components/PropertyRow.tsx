@@ -31,6 +31,8 @@ export interface PropertyRowProps {
   readonly onOpenGraph?: (() => void) | undefined;
   /** `inline` keeps a small, high-frequency control on one line at every panel width. */
   readonly layout?: 'compact' | 'inline' | 'two-line' | undefined;
+  /** True when a validated JOY operation targets this exact property row. */
+  readonly agentActive?: boolean | undefined;
 }
 
 function ResetIcon() {
@@ -82,6 +84,7 @@ export function PropertyRow({
   onNextKeyframe,
   onOpenGraph,
   layout = 'compact',
+  agentActive = false,
 }: PropertyRowProps) {
   const descriptionId = controlId === undefined ? undefined : `${controlId}-description`;
   const animationLabel =
@@ -91,8 +94,9 @@ export function PropertyRow({
 
   return (
     <div
-      className={`property-row property-row-${layout}${mixed ? ' is-mixed' : ''}${disabled ? ' is-disabled' : ''}${error !== undefined ? ' has-error' : ''}`}
+      className={`property-row property-row-${layout}${mixed ? ' is-mixed' : ''}${disabled ? ' is-disabled' : ''}${error !== undefined ? ' has-error' : ''}${agentActive ? ' is-agent-active' : ''}`}
       data-property-row={label}
+      data-agent-active={agentActive ? 'true' : undefined}
     >
       <div className="property-row-heading">
         <label className="property-row-label" htmlFor={controlId}>

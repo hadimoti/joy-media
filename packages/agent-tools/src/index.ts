@@ -1,5 +1,16 @@
 export const PACKAGE_NAME = '@joy-media/agent-tools' as const;
 
+export {
+  JOY_EDITOR_OPERATION_DEFINITIONS,
+  getJoyEditorOperationDefinition,
+  listJoyEditorOperations,
+} from './editor-operation-registry.js';
+export type {
+  JoyEditorOperationAccess,
+  JoyEditorOperationDefinition,
+  JoyEditorOperationStatus,
+} from './editor-operation-registry.js';
+
 export type {
   ToolDefinition,
   ToolScope,
@@ -226,6 +237,10 @@ export type {
   JoyCodeRemoveClipOperationV1,
   JoyCodeInsertExistingAssetOperationV1,
   JoyCodeInsertTemplateOperationV1,
+  JoyCodeVisualObjectOutputRefV1,
+  JoyCodeVisualObjectBindingRefV1,
+  JoyCodeSetKeyframeOperationV1,
+  JoyCodeRemoveKeyframeOperationV1,
   JoyCodeSetTextContentOperationV1,
   JoyCodeSetTextTemplateOperationV1,
   JoyCodeSetCaptionTextOperationV1,

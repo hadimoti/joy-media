@@ -8099,7 +8099,11 @@ label {
 .joy-code-welcome-title,
 .joy-code-welcome-copy {
   --joy-code-pixel-dim: color-mix(in srgb, var(--joy-text-muted) 84%, var(--joy-bg-panel));
-  --joy-code-pixel-glow: color-mix(in srgb, var(--joy-gold, var(--joy-accent)) 82%, var(--joy-text));
+  --joy-code-pixel-glow: color-mix(
+    in srgb,
+    var(--joy-gold, var(--joy-accent)) 82%,
+    var(--joy-text)
+  );
   color: transparent;
   background-image: linear-gradient(
     104deg,
@@ -12801,6 +12805,11 @@ label {
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
+}
+.property-row.is-agent-active {
+  outline: 1px solid color-mix(in srgb, var(--joy-accent) 65%, transparent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm, 4px);
 }
 .property-row-heading,
 .property-row-control,
