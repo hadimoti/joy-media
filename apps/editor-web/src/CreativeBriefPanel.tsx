@@ -33,22 +33,10 @@ import {
 } from './creative-brief-storage.js';
 
 /**
- * Browser storage is an optional cache. Some privacy modes expose a
- * localStorage property whose getter itself throws, so acquire it behind the
- * same fail-closed boundary as the storage operations.
- */
-function getCreativeBriefStorage(): CreativeBriefStorage | undefined {
-  try {
-    return window.localStorage;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
  * Props for CreativeBriefPanel.
  * Accepts only revision ID and an optional async brief runner.
- * No raw project object, model adapter, provider, command bus, or persistence dependency.
+ * No raw project object, model adapter, provider, or command bus. Persistence,
+ * when wanted, is injected by the writer-owning editor root.
  */
 export interface CreativeBriefPanelProps {
   /** Current project revision ID. */
@@ -61,6 +49,11 @@ export interface CreativeBriefPanelProps {
   readonly onOptIn?: () => Promise<void> | void;
   /** Stable project key used for local durable reopen state. */
   readonly projectId?: string;
+  /**
+   * Writer-fenced browser storage. Omit only for an intentionally in-memory
+   * standalone panel; this component never reaches for global localStorage.
+   */
+  readonly storage?: CreativeBriefStorage;
   /** Hands a generated brief to the guarded Joy Code composer; never executes it. */
   readonly onHandOff?: (brief: CreativeBriefV1) => void;
   /** Notifies an embedding Composer when a validated artifact is ready. */
@@ -101,6 +94,7 @@ export function CreativeBriefPanel({
   onBriefHydrated,
   onBriefCleared,
   embedded = false,
+  storage,
 }: CreativeBriefPanelProps) {
   const [state, dispatch] = useReducer(creativeBriefReducer, INITIAL_BRIEF_STATE);
   const [requestText, setRequestText] = useState('');
@@ -118,7 +112,6 @@ export function CreativeBriefPanel({
       hydratedBriefKeyRef.current = null;
     }
     previousStorageProjectIdRef.current = storageProjectId;
-    const storage = getCreativeBriefStorage();
     const saved = storage ? loadCreativeBrief(storage, storageProjectId) : undefined;
     if (saved !== undefined) {
       dispatch({ type: 'hydrate', brief: saved, revisionId });
@@ -129,7 +122,7 @@ export function CreativeBriefPanel({
         onBriefHydrated?.(saved);
       }
     }
-  }, [onBriefHydrated, revisionId, storageProjectId]);
+  }, [onBriefHydrated, revisionId, storage, storageProjectId]);
 
   // Track previous revision to detect changes
   const [previousRevisionId, setPreviousRevisionId] = useState<ProjectRevisionId | null>(null);
@@ -205,7 +198,6 @@ export function CreativeBriefPanel({
       const brief = await runBrief(request);
       // Verify the brief matches the requested revision
       if (brief.snapshotRevisionId === revisionId) {
-        const storage = getCreativeBriefStorage();
         if (storage) saveCreativeBrief(storage, storageProjectId, brief);
         setRequestText(brief.request);
         dispatch({
@@ -227,16 +219,15 @@ export function CreativeBriefPanel({
         error: errorMessage,
       });
     }
-  }, [onBriefReady, requestText, revisionId, runBrief, optedIn, storageProjectId]);
+  }, [onBriefReady, optedIn, requestText, revisionId, runBrief, storage, storageProjectId]);
 
   // Handle reset
   const handleReset = useCallback(() => {
     dispatch({ type: 'reset' });
     setRequestText('');
-    const storage = getCreativeBriefStorage();
     if (storage) removeCreativeBrief(storage, storageProjectId);
     onBriefCleared?.();
-  }, [onBriefCleared, storageProjectId]);
+  }, [onBriefCleared, storage, storageProjectId]);
 
   // Handle retry
   const handleRetry = useCallback(async () => {
@@ -271,7 +262,6 @@ export function CreativeBriefPanel({
     try {
       const brief = await runBrief(request);
       if (brief.snapshotRevisionId === revisionId) {
-        const storage = getCreativeBriefStorage();
         if (storage) saveCreativeBrief(storage, storageProjectId, brief);
         setRequestText(brief.request);
         dispatch({
@@ -300,6 +290,7 @@ export function CreativeBriefPanel({
     revisionId,
     runBrief,
     optedIn,
+    storage,
     storageProjectId,
   ]);
 

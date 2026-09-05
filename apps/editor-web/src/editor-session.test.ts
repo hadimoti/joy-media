@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
-import { EditorSession } from './editor-session.js';
+import { EditorSession, type EditorSessionWriter } from './editor-session.js';
 
 function memoryStorage() {
   const values = new Map<string, string>();
@@ -11,7 +11,117 @@ function memoryStorage() {
   };
 }
 
+function controlledWriter(fence = 1): {
+  readonly writer: EditorSessionWriter;
+  release(): void;
+} {
+  let active = true;
+  return {
+    writer: {
+      fence,
+      assertActive: vi.fn(() => {
+        if (!active) throw new Error('writer is no longer active');
+      }),
+    },
+    release: () => {
+      active = false;
+    },
+  };
+}
+
 describe('EditorSession', () => {
+  it('does not start recovery when its supplied writer capability is already released', () => {
+    const storage = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(),
+    };
+    const writer = controlledWriter(41);
+    writer.release();
+
+    expect(
+      () =>
+        new EditorSession(
+          storage,
+          buildReferenceSpikeProject(),
+          INITIAL_EDITOR_PROJECT,
+          {},
+          writer.writer,
+        ),
+    ).toThrow('writer is no longer active');
+    expect(storage.getItem).not.toHaveBeenCalled();
+    expect(storage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('refuses mutations, Undo, and Redo after its supplied writer capability is released', () => {
+    const writer = controlledWriter(42);
+    const session = new EditorSession(
+      memoryStorage(),
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+      {},
+      writer.writer,
+    );
+    session.dispatchVisualObjects({
+      label: 'First move',
+      commands: [
+        {
+          type: 'object.setTransformProperty',
+          payload: { objectId: 'intro-title', key: 'x', value: 20 },
+        },
+      ],
+    });
+    session.dispatchVisualObjects({
+      label: 'Second move',
+      commands: [
+        {
+          type: 'object.setTransformProperty',
+          payload: { objectId: 'intro-title', key: 'x', value: 40 },
+        },
+      ],
+    });
+    session.undo();
+    const beforeRelease = session.visualProject;
+    const beforeReleaseRevision = session.projectRevisionId;
+    expect(session.canUndo).toBe(true);
+    expect(session.canRedo).toBe(true);
+
+    writer.release();
+
+    expect(() =>
+      session.replaceVisualProject({ ...beforeRelease, title: 'must not persist' }),
+    ).toThrow('writer is no longer active');
+    expect(() => session.undo()).toThrow('writer is no longer active');
+    expect(() => session.redo()).toThrow('writer is no longer active');
+    expect(session.visualProject).toBe(beforeRelease);
+    expect(session.projectRevisionId).toBe(beforeReleaseRevision);
+  });
+
+  it('uses an active writer fence for an agent receipt instead of the local history sequence', () => {
+    const writer = controlledWriter(73);
+    const session = new EditorSession(
+      memoryStorage(),
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+      {},
+      writer.writer,
+    );
+    const baseRevision = session.projectRevisionId;
+
+    const receipt = session.commitAgentCompound(
+      'Fence an approved title update',
+      { document: { ...session.visualProject, title: 'Fenced title' } },
+      {
+        executionId: 'writer-fence-test',
+        operationDigest: 'c'.repeat(64),
+        baseRevision,
+        changedEntityIds: ['root'],
+      },
+    );
+
+    expect(receipt.writerFence).toBe(73);
+    expect(receipt.undoEntryId).toBe('history-1');
+  });
+
   it('recovers the same durable project revision and advances it for either document slice', () => {
     const storage = memoryStorage();
     const session = new EditorSession(
@@ -486,6 +596,107 @@ describe('EditorSession', () => {
     expect(
       [...values.keys()].some((key) => key.startsWith('joy-media.editor-compound-write.v1:')),
     ).toBe(false);
+  });
+
+  it('keeps a prepared journal when the second rollback restoration write fails, then converges on a later reopen', () => {
+    const values = new Map<string, string>();
+    const initialTimeline = buildReferenceSpikeProject();
+    const journalKey = `joy-media.editor-compound-write.v1:${encodeURIComponent(initialTimeline.id)}`;
+    const timelineKey = 'joy-media.timeline-project-log.v1';
+    const visualKey = 'joy-media.visual-object-project-log.v1';
+    let mode: 'idle' | 'fail-commit-and-immediate-rollback' | 'fail-recovery-second-restore' =
+      'idle';
+    let journalWrites = 0;
+    let recoveryRollbackWrites = 0;
+    let recoveryFailureInjected = false;
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        if (mode === 'fail-commit-and-immediate-rollback' && key === journalKey) {
+          journalWrites += 1;
+          // Both domain writes have succeeded when the commit marker is
+          // written. Failing it forces the prepared journal rollback path.
+          if (journalWrites === 2) throw new Error('injected commit-marker failure');
+        }
+        if (
+          mode === 'fail-commit-and-immediate-rollback' &&
+          journalWrites >= 2 &&
+          (key === timelineKey || key === visualKey)
+        ) {
+          // Leave a true prepared journal for a later open. Recovery must be
+          // the only component allowed to resolve this interrupted compound.
+          throw new Error('injected immediate rollback failure');
+        }
+        if (mode === 'fail-recovery-second-restore' && (key === timelineKey || key === visualKey)) {
+          recoveryRollbackWrites += 1;
+          if (recoveryRollbackWrites === 2) {
+            recoveryFailureInjected = true;
+            throw new Error('injected recovery second restoration failure');
+          }
+        }
+        values.set(key, value);
+      },
+      removeItem: (key: string) => values.delete(key),
+    };
+    const session = new EditorSession(storage, initialTimeline, INITIAL_EDITOR_PROJECT);
+    const initialClipCount =
+      session.timelineProject.compositions[session.timelineProject.rootCompositionId]!.tracks[0]!
+        .clips.length;
+
+    mode = 'fail-commit-and-immediate-rollback';
+    expect(() =>
+      session.dispatchCompound('Interrupted rollback restoration', {
+        timeline: {
+          label: 'Split product',
+          commands: [
+            {
+              type: 'timeline.splitClip',
+              payload: {
+                compositionId: session.timelineProject.rootCompositionId,
+                trackId: 'track-0',
+                clipId: 'product',
+                atUs: 15_000_000,
+                newClipId: 'product-rollback-recovery-b',
+              },
+            },
+          ],
+        },
+        document: { ...session.visualProject, title: 'Must recover together' },
+      }),
+    ).toThrow(expect.objectContaining({ code: 'PERSISTENCE_ATOMIC_ROLLBACK_PENDING' }));
+
+    // Immediate rollback intentionally failed, leaving recovery authority for
+    // a new EditorSession rather than silently accepting the half-write.
+    expect(values.get(journalKey)).toContain('"state":"prepared"');
+
+    mode = 'fail-recovery-second-restore';
+    expect(() => new EditorSession(storage, initialTimeline, INITIAL_EDITOR_PROJECT)).toThrow(
+      'injected recovery second restoration failure',
+    );
+
+    // Recovery restored the first target, then failed restoring the second.
+    // It must retain the prepared journal so the next open can retry every
+    // rollback byte instead of accepting a mixed durable project.
+    expect(recoveryFailureInjected).toBe(true);
+    expect(recoveryRollbackWrites).toBe(2);
+    expect(values.get(journalKey)).toContain('"state":"prepared"');
+
+    mode = 'idle';
+    const reopened = new EditorSession(storage, initialTimeline, INITIAL_EDITOR_PROJECT);
+    expect(reopened.visualProject.title).toBe(INITIAL_EDITOR_PROJECT.title);
+    expect(
+      reopened.timelineProject.compositions[reopened.timelineProject.rootCompositionId]!.tracks[0]!
+        .clips,
+    ).toHaveLength(initialClipCount);
+    expect(values.get(journalKey)).toBeUndefined();
+
+    // A second open proves recovery did not merely mask a mixed on-disk state.
+    const reopenedAgain = new EditorSession(storage, initialTimeline, INITIAL_EDITOR_PROJECT);
+    expect(reopenedAgain.visualProject.title).toBe(INITIAL_EDITOR_PROJECT.title);
+    expect(
+      reopenedAgain.timelineProject.compositions[reopenedAgain.timelineProject.rootCompositionId]!
+        .tracks[0]!.clips,
+    ).toHaveLength(initialClipCount);
   });
 
   it('recovers a raw agent receipt written before a failed compound commit marker', () => {

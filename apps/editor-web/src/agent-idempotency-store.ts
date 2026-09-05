@@ -242,6 +242,38 @@ function readState(serialized: string | null, projectId: string): StoredAgentIde
   }
 }
 
+/**
+ * Recovery journals restore this value byte-for-byte. The normal reader is
+ * deliberately tolerant so a bad optional cache cannot prevent an editor from
+ * opening, but recovery must never copy bytes that the normal reader would
+ * silently discard. Doing so would turn a corrupt rollback record into data
+ * loss. Keep that stricter contract explicit and separate from `readState`.
+ */
+export function isStrictAgentIdempotencyStorageState(
+  serialized: string,
+  projectId: string,
+): boolean {
+  try {
+    const parsed: unknown = JSON.parse(serialized);
+    if (Array.isArray(parsed)) return parsed.every(isIdempotencyRecord);
+    if (!isRecord(parsed) || parsed.version !== 2 || !Array.isArray(parsed.records)) return false;
+    if (!parsed.records.every(isIdempotencyRecord)) return false;
+
+    // Early v2 payloads did not have receipts. Treat that as the exact empty
+    // receipt set, matching the tolerant reader without silently accepting a
+    // malformed present value.
+    if (parsed.executionReceipts === undefined) return true;
+    return (
+      Array.isArray(parsed.executionReceipts) &&
+      parsed.executionReceipts.every(
+        (receipt) => isExecutionReceipt(receipt) && receipt.projectId === projectId,
+      )
+    );
+  } catch {
+    return false;
+  }
+}
+
 function emptyStoredState(): StoredAgentIdempotencyState {
   return { records: [], executionReceipts: [], executionReceiptConflicts: [] };
 }

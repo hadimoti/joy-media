@@ -4,6 +4,12 @@ import { describe, expect, it } from 'vitest';
 const panelSource = readFileSync(new URL('./AssetLibraryPanel.tsx', import.meta.url), 'utf8');
 
 describe('AssetLibraryPanel successful import contract', () => {
+  it('uses the writer-gated panel storage rather than raw browser localStorage', () => {
+    expect(panelSource).toContain('readonly storage: AssetLibraryStorage;');
+    expect(panelSource).not.toContain('window.localStorage');
+    expect(panelSource).not.toContain('localStorage.setItem');
+  });
+
   it('keeps the import controls without the retired explainer annotation', () => {
     expect(panelSource).toContain('role="dialog" aria-label="Import media"');
     expect(panelSource).toContain('aria-label="Media file"');

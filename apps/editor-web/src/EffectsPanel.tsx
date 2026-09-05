@@ -90,14 +90,15 @@ export function EffectsPanel({
   showToast,
   onCreateEffectLayer,
 }: EffectsPanelProps) {
+  const editorContext = useContext(EditorPanelContext);
+  const storage = editorContext?.storage;
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('pixel-bw');
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [builtinsReady, setBuiltinsReady] = useState(false);
   const [recipes, setRecipes] = useState<readonly EffectRecipeCatalogEntry[]>(() =>
-    listEffectRecipes(window.localStorage),
+    storage === undefined ? [] : listEffectRecipes(storage),
   );
-  const editorContext = useContext(EditorPanelContext);
   const effectStudioOpen = editorContext?.effectStudioOpen ?? false;
   const wasStudioOpen = useRef(effectStudioOpen);
 
@@ -107,11 +108,17 @@ export function EffectsPanel({
   }, []);
 
   useEffect(() => {
-    if (wasStudioOpen.current && !effectStudioOpen) {
-      setRecipes(listEffectRecipes(window.localStorage));
-    }
+    if (storage !== undefined && wasStudioOpen.current && !effectStudioOpen)
+      setRecipes(listEffectRecipes(storage));
     wasStudioOpen.current = effectStudioOpen;
-  }, [effectStudioOpen]);
+  }, [effectStudioOpen, storage]);
+
+  // Dockview may render a cached panel before its provider attaches. Hydrate
+  // only from the root writer-gated adapter once it is available; never fall
+  // back to a raw browser store during that transient frame.
+  useEffect(() => {
+    if (storage !== undefined) setRecipes(listEffectRecipes(storage));
+  }, [storage]);
 
   const descriptors = useMemo(
     () => (builtinsReady ? effectsInCategory(category, favorites) : []),
@@ -180,17 +187,21 @@ export function EffectsPanel({
   }, []);
 
   const handleCreateRecipe = useCallback(() => {
+    if (storage === undefined) {
+      showToast('Effect recipes require an active editor session.', 'error');
+      return;
+    }
     const selectedEffects =
       objectId === undefined ? [] : (project.visualObjects[objectId]?.effects ?? []);
     const recipe = createEffectRecipe(
-      window.localStorage,
+      storage,
       selectedEffects.length > 0 ? 'Recipe from Selection' : 'Untitled Effect Recipe',
       selectedEffects,
       objectId,
     );
-    setRecipes(listEffectRecipes(window.localStorage));
+    setRecipes(listEffectRecipes(storage));
     editorContext?.openEffectStudio(recipe.id, objectId);
-  }, [editorContext, objectId, project.visualObjects]);
+  }, [editorContext, objectId, project.visualObjects, showToast, storage]);
 
   const emptyHint =
     category === 'favorites' && favorites.size === 0

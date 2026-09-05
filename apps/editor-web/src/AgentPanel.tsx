@@ -30,6 +30,7 @@ import { AgentTimelineCanvas } from './AgentTimelineCanvas.js';
 import { extractPendingChanges } from './agent-plan-visualizer.js';
 import { saveWorkflow } from './workflow-recorder.js';
 import type { EditorSession } from './editor-session.js';
+import type { ProjectWriterStorage } from './project-writer.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 import { PanelShell } from './PanelShell.js';
 import type { AgentPolicyPreferences } from './agent-policy-settings.js';
@@ -68,6 +69,10 @@ import {
   type PreparedChangeAuthority,
 } from './joy-agent/prepared-change-store.js';
 import {
+  applyPreparedJoyCodeChange,
+  type PreparedJoyCodeApplyOutcome,
+} from './joy-agent/prepared-apply-outcome.js';
+import {
   inferJoyAgentTaskKind,
   targetForJoyAgentTask,
   targetsForJoyCodeOperations,
@@ -87,7 +92,7 @@ const NOOP_PRESENCE_SNAPSHOT = (): AgentPresenceState => EMPTY_AGENT_PRESENCE;
  * The older local recipe executor predates durable prepared changes. Keep its
  * UI route hard-disabled until it is migrated through JoyCodeCompoundRunner.
  */
-function legacyRecipeExecutionEnabled(): boolean {
+export function legacyRecipeExecutionEnabled(): false {
   return false;
 }
 
@@ -168,9 +173,12 @@ function makeJoyCodeId(prefix: string): string {
   return `${prefix}-${randomPart}`;
 }
 
-function initialJoyCodeConversation(projectId: string): JoyCodeConversation {
+function initialJoyCodeConversation(
+  storage: ProjectWriterStorage,
+  projectId: string,
+): JoyCodeConversation {
   try {
-    const existing = loadJoyCodeConversation(window.localStorage, projectId);
+    const existing = loadJoyCodeConversation(storage, projectId);
     if (existing !== undefined) return existing;
   } catch {
     // Storage can be disabled by browser policy. The composer still works in memory.
@@ -212,6 +220,7 @@ export function AgentPanel({
   joyAgentEngineClient,
   agentPresenceStore,
   agentPreviewStore,
+  storage,
 }: {
   readonly project: SpikeProject;
   readonly selectedClipIds: readonly string[];
@@ -232,6 +241,8 @@ export function AgentPanel({
   readonly joyAgentEngineClient?: JoyAgentEngineClient;
   readonly agentPresenceStore?: AgentPresenceStore;
   readonly agentPreviewStore?: AgentPreviewStore;
+  /** Writer-fenced browser persistence owned by the writable editor root. */
+  readonly storage: ProjectWriterStorage;
 }) {
   const registry = useMemo(() => createToolRegistry(), []);
   const auditRef = useRef(createAuditTrail());
@@ -249,8 +260,9 @@ export function AgentPanel({
   const [attachError, setAttachError] = useState<string | undefined>(undefined);
   const [attaching, setAttaching] = useState(false);
   const [conversation, setConversation] = useState<JoyCodeConversation>(() =>
-    initialJoyCodeConversation(project.id),
+    initialJoyCodeConversation(storage, project.id),
   );
+  const conversationProjectIdRef = useRef(project.id);
   const [creativeBriefContext, setCreativeBriefContext] = useState<CreativeBriefV1 | undefined>(
     undefined,
   );
@@ -288,7 +300,6 @@ export function AgentPanel({
   useEffect(() => {
     setCreativeBriefContext(undefined);
     setComposerCapability('edit');
-    setConversation(initialJoyCodeConversation(project.id));
   }, [project.id]);
 
   useEffect(() => {
@@ -409,12 +420,20 @@ export function AgentPanel({
   );
 
   useEffect(() => {
+    // Do not save the prior project's conversation under a newly selected
+    // project key during React's state-transition render. The next render
+    // persists only the replacement conversation owned by this project.
+    if (conversationProjectIdRef.current !== project.id) {
+      conversationProjectIdRef.current = project.id;
+      setConversation(initialJoyCodeConversation(storage, project.id));
+      return;
+    }
     try {
-      saveJoyCodeConversation(window.localStorage, project.id, conversation);
+      saveJoyCodeConversation(storage, project.id, conversation);
     } catch {
       // Conversation persistence is optional; never block editing when storage is unavailable.
     }
-  }, [conversation, project.id]);
+  }, [conversation, project.id, storage]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: 'nearest' });
@@ -968,43 +987,16 @@ export function AgentPanel({
     const changeSetId = modelChangeSetIdRef.current;
     const prepared = changeSetId === undefined ? undefined : preparedChanges.getView(changeSetId);
     if (changeSetId === undefined || prepared === undefined) return;
+    let outcome: PreparedJoyCodeApplyOutcome;
     try {
       const authority = currentPreparedAuthority(prepared.hostRunId);
-      const approval = preparedChanges.approve(changeSetId, authority);
-      const applied = modelRunnerRef.current.apply(session, preparedChanges, approval, authority);
-      if (!applied.replayed && session.projectRevisionId !== applied.revisionId)
-        throw new Error('JOY_CODE_VERIFICATION_FAILED: committed revision could not be read back');
-      if (
-        session.agentIdempotency.getExecutionReceipt(prepared.executionId)?.operationDigest !==
-        applied.receipt.operationDigest
-      )
-        throw new Error(
-          'JOY_CODE_VERIFICATION_FAILED: durable execution receipt could not be read back',
-        );
-      if (!applied.replayed) onProjectRevision?.();
-      const completionTargets = proposalTargetsRef.current.get(prepared.planId) ?? [
-        { panelId: 'agent', sectionId: 'composer' },
-      ];
-      appendMessage(
-        activeThread.id,
-        'assistant',
-        `${applied.replayed ? 'This JOY edit was already committed.' : 'Approved and applied'} Revision ${applied.revisionId} was ${applied.replayed ? 'confirmed from its saved receipt; no new edit or Undo entry was created.' : 'read back successfully; one Undo restores the prior state.'}`,
-      );
-      activeModelRunIdRef.current = undefined;
-      discardPreparedModelChange(prepared.planId);
-      setAgentPhase('completed');
-      void joyAgentEngineClient?.cancel(prepared.planId);
-      agentPresenceStore?.dispatch({
-        protocolVersion: 1,
-        runId: prepared.planId,
-        seq: Math.max(0, (agentPresenceStore?.getState().seq ?? -1) + 1),
-        at: new Date().toISOString(),
-        revision: session.historyCursorSequence,
-        kind: 'completed',
-        phase: 'completed',
-        targets: completionTargets,
+      outcome = applyPreparedJoyCodeChange({
+        session,
+        preparedChanges,
+        prepared,
+        authority,
+        runner: modelRunnerRef.current,
       });
-      window.setTimeout(() => agentPresenceStore?.completeHandoff(), 1200);
     } catch (error) {
       if (isTerminalPreparedChangeError(error)) discardPreparedModelChange(prepared.planId);
       appendMessage(
@@ -1012,7 +1004,35 @@ export function AgentPanel({
         'assistant',
         error instanceof Error ? `JOY apply failed: ${error.message}` : 'JOY apply failed safely.',
       );
+      return;
     }
+    const applied = outcome.result;
+    if (!applied.replayed || outcome.recoveredFromReceipt) onProjectRevision?.();
+    const completionTargets = proposalTargetsRef.current.get(prepared.planId) ?? [
+      { panelId: 'agent', sectionId: 'composer' },
+    ];
+    appendMessage(
+      activeThread.id,
+      'assistant',
+      outcome.recoveredFromReceipt
+        ? `JOY edit was committed. Its completion response was interrupted, but revision ${applied.revisionId} was confirmed from its saved receipt; no new edit or Undo entry was created.`
+        : `${applied.replayed ? 'This JOY edit was already committed.' : 'Approved and applied'} Revision ${applied.revisionId} was ${applied.replayed ? 'confirmed from its saved receipt; no new edit or Undo entry was created.' : 'read back successfully; one Undo restores the prior state.'}`,
+    );
+    activeModelRunIdRef.current = undefined;
+    discardPreparedModelChange(prepared.planId);
+    setAgentPhase('completed');
+    void joyAgentEngineClient?.cancel(prepared.planId);
+    agentPresenceStore?.dispatch({
+      protocolVersion: 1,
+      runId: prepared.planId,
+      seq: Math.max(0, (agentPresenceStore?.getState().seq ?? -1) + 1),
+      at: new Date().toISOString(),
+      revision: session.historyCursorSequence,
+      kind: 'completed',
+      phase: 'completed',
+      targets: completionTargets,
+    });
+    window.setTimeout(() => agentPresenceStore?.completeHandoff(), 1200);
   }
 
   function isTerminalPreparedChangeError(error: unknown): boolean {
@@ -1141,7 +1161,7 @@ export function AgentPanel({
 
   function saveLastRunAsWorkflow() {
     if (lastRun === undefined || !lastRun.executionResult.success) return;
-    const recorded = saveWorkflow(session, lastRun.plan);
+    const recorded = saveWorkflow(session, lastRun.plan, storage);
     auditRef.current.record({
       planId: lastRun.plan.planId,
       action: 'workflow-saved',
@@ -1351,6 +1371,7 @@ export function AgentPanel({
             <CreativeBriefPanel
               revisionId={session.projectRevisionId}
               projectId={project.id}
+              storage={storage}
               optedIn={creativeBriefOptedIn}
               onBriefReady={handOffCreativeBrief}
               onBriefHydrated={setCreativeBriefContext}

@@ -8,7 +8,17 @@ import {
   listWorkflows,
   resolveParameterizedValue,
   saveWorkflow,
+  type WorkflowStorage,
 } from './workflow-recorder.js';
+
+function createWorkflowStorage(): WorkflowStorage {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  };
+}
 
 describe('workflow-recorder', () => {
   it('converts a single-step plan to a JoyWorkflow', () => {
@@ -39,6 +49,7 @@ describe('workflow-recorder', () => {
   });
 
   it('saves, loads, lists, and deletes a recorded workflow', () => {
+    const storage = createWorkflowStorage();
     const step: AgentPlanStep = {
       id: 'step-1',
       description: 'Insert a clip',
@@ -55,19 +66,39 @@ describe('workflow-recorder', () => {
       requiresConfirmation: false,
     };
     const plan = createPlan('Save workflow test', [step]);
-    const recorded = saveWorkflow(null, plan);
+    const recorded = saveWorkflow(null, plan, storage);
     expect(recorded.workflow.id).toBe('user.workflows.save-workflow-test');
 
-    const loaded = loadWorkflow(null, recorded.workflow.id);
+    const loaded = loadWorkflow(null, recorded.workflow.id, storage);
     expect(loaded).toBeDefined();
     expect(loaded!.workflow.id).toBe(recorded.workflow.id);
     expect(loaded!.originalPlan.planId).toBe(plan.planId);
 
-    const all = listWorkflows(null);
+    const all = listWorkflows(null, storage);
     expect(all.some((wf) => wf.workflow.id === recorded.workflow.id)).toBe(true);
 
-    deleteWorkflow(null, recorded.workflow.id);
-    expect(loadWorkflow(null, recorded.workflow.id)).toBeUndefined();
+    deleteWorkflow(null, recorded.workflow.id, storage);
+    expect(loadWorkflow(null, recorded.workflow.id, storage)).toBeUndefined();
+  });
+
+  it('keeps an index-only failed write invisible to readers', () => {
+    const values = new Map<string, string>();
+    const storage: WorkflowStorage = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        if (key.startsWith('joy-media.workflow.v1:user.workflows.')) {
+          throw new Error('simulated final workflow write failure');
+        }
+        values.set(key, value);
+      },
+      removeItem: (key) => values.delete(key),
+    };
+    const plan = createPlan('Fail safely', []);
+
+    expect(() => saveWorkflow(null, plan, storage)).toThrow(
+      'simulated final workflow write failure',
+    );
+    expect(listWorkflows(null, storage)).toEqual([]);
   });
 
   it('parameterizes timing and structural identifiers while baking assetId and compositionId', () => {

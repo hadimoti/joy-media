@@ -28,6 +28,7 @@ import { isTraversalKey, traverseGraph, type TraversalKey } from './graph-traver
 import { TimelineCanvas, type TimelineCanvasTrack } from './TimelineCanvas.js';
 import { timelineContentWidthPx } from './timeline-layout.js';
 import { nextTimelineMarkerLabel } from './timeline-marker-id.js';
+import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import {
   FitWidthIcon,
   MarkerIcon,
@@ -75,6 +76,8 @@ export interface DualLensPanelProps {
   /** Rendered by the editor so this panel stays free of agent wiring. */
   readonly specialistReview?: ReactNode;
   readonly transitions?: readonly TransitionV1[];
+  /** Root writer-gated adapter for child UI preferences. */
+  readonly storage?: BrowserKeyValueStore;
 }
 
 export function DualLensPanel({
@@ -100,6 +103,7 @@ export function DualLensPanel({
   markers = [],
   specialistReview,
   transitions = [],
+  storage,
 }: DualLensPanelProps) {
   const [mode, setMode] = useState<LensMode>('time');
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -227,6 +231,7 @@ export function DualLensPanel({
               graph={workflowGraph}
               onDispatch={onDispatchGraph}
               selectedClipIds={selectedClipIds}
+              {...(storage === undefined ? {} : { storage })}
               {...(selectionRange === undefined ? {} : { selectionRange })}
             />
           </div>

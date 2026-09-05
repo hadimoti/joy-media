@@ -8,6 +8,9 @@ import {
 } from './joy-code-compound-compiler.js';
 import { JoyCodeCompoundRunner } from './joy-code-compound-runner.js';
 import { DEFAULT_AGENT_POLICY } from './agent-policy-settings.js';
+import { createAgentPreviewStore } from './agent-preview-store.js';
+import { hydrateProjectDocument } from './project-document-hydration.js';
+import { stageJoyAgentPreview } from './joy-agent/stage-preview.js';
 import {
   PreparedChangeStore,
   type PreparedChangeApprovalHandle,
@@ -229,6 +232,82 @@ describe('Joy Code compound runner', () => {
       },
     });
     expect(session.historyEntries).toHaveLength(historyBefore + 1);
+  });
+
+  it('invalidates a prepared preview and approval after remote document hydration advances revision', async () => {
+    const durableStorage = storage();
+    const session = new EditorSession(
+      durableStorage,
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const draft = compileDraft(session, 'runner-hydration-stale', 'Must not survive hydration');
+    const authority = authorityFor(session);
+    const prepared = prepareApproved(draft, authority);
+    const preview = prepared.store.getPreviewDraft(prepared.view.changeSetId);
+    expect(preview).toBeDefined();
+    if (preview === undefined) return;
+
+    const previewStore = createAgentPreviewStore();
+    stageJoyAgentPreview(previewStore, session, preview);
+    expect(previewStore.getState().document).toBeDefined();
+
+    const timelineBefore = JSON.stringify(session.timelineProject);
+    const revisionBeforeHydration = session.projectRevisionId;
+    const hydratedDocument = {
+      ...session.visualProject,
+      title: 'Document from another device',
+    };
+    const binding = {
+      editorProjectId: session.visualProject.id,
+      controlPlaneProjectId: 'remote-project-hydration',
+    } as const;
+    await expect(
+      hydrateProjectDocument(session, binding, async () => ({
+        projectId: binding.controlPlaneProjectId,
+        revisionId: 'remote-document-revision-2',
+        document: hydratedDocument,
+      })),
+    ).resolves.toEqual({ kind: 'hydrated', revisionId: 'remote-document-revision-2' });
+    expect(session.projectRevisionId).not.toBe(revisionBeforeHydration);
+
+    // Staging an old draft clears the old visual overlay and refuses to restage it.
+    expect(() => stageJoyAgentPreview(previewStore, session, preview)).toThrow('proposal is stale');
+    expect(previewStore.getState()).toEqual({ timeline: undefined, document: undefined });
+    expect(() => prepared.store.approve(prepared.view.changeSetId, authorityFor(session))).toThrow(
+      'JOY_CODE_STALE_REVISION',
+    );
+
+    const revisionAfterHydration = session.projectRevisionId;
+    expect(() =>
+      new JoyCodeCompoundRunner().apply(
+        session,
+        prepared.store,
+        prepared.approval,
+        authorityFor(session),
+      ),
+    ).toThrow('JOY_CODE_STALE_REVISION');
+    expect(session.projectRevisionId).toBe(revisionAfterHydration);
+    expect(JSON.stringify(session.timelineProject)).toBe(timelineBefore);
+    expect(session.visualProject).toEqual(hydratedDocument);
+    expect(
+      session.visualProject.visualObjects['text-clean-title-runner-hydration-stale-0'],
+    ).toBeUndefined();
+    expect(session.agentIdempotency.getExecutionReceipt(prepared.view.executionId)).toBeUndefined();
+
+    const reopened = new EditorSession(
+      durableStorage,
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    expect(JSON.stringify(reopened.timelineProject)).toBe(timelineBefore);
+    expect(reopened.visualProject).toEqual(hydratedDocument);
+    expect(
+      reopened.visualProject.visualObjects['text-clean-title-runner-hydration-stale-0'],
+    ).toBeUndefined();
+    expect(
+      reopened.agentIdempotency.getExecutionReceipt(prepared.view.executionId),
+    ).toBeUndefined();
   });
 
   it('leaves its opaque approval retryable when durable receipt persistence fails', () => {

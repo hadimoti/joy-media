@@ -26,7 +26,8 @@ import {
 interface TemplatesPanelProps {
   readonly onApplyTemplate: (seeded: SeededContentTemplate) => void;
   readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
-  readonly storage?: BrowserKeyValueStore;
+  /** Supplied by LibraryPanel from the root project-writer gate. */
+  readonly storage: BrowserKeyValueStore;
   readonly promptForTemplateName?: (message: string, defaultValue: string) => string | null;
   readonly confirmTemplateDelete?: (message: string) => boolean;
 }
@@ -44,11 +45,6 @@ const SIDEBAR_VIEWS: readonly { readonly id: TemplateView; readonly iconUrl: str
   { id: 'Effects', iconUrl: iconUrl('ui/motion_24x24.png') },
 ];
 
-const SERVER_RENDER_STORAGE: BrowserKeyValueStore = {
-  getItem: () => null,
-  setItem: () => undefined,
-};
-
 export function TemplatesPanel({
   onApplyTemplate,
   showToast,
@@ -58,8 +54,7 @@ export function TemplatesPanel({
 }: TemplatesPanelProps) {
   const [view, setView] = useState<TemplateView>('library');
   const [catalogRevision, setCatalogRevision] = useState(0);
-  const catalogStorage =
-    storage ?? (typeof window === 'undefined' ? SERVER_RENDER_STORAGE : window.localStorage);
+  const catalogStorage = storage;
 
   const handleApplyLibraryTemplate = useCallback(
     (templateId: string) => {

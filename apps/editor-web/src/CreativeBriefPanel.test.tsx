@@ -14,6 +14,7 @@ import {
   type CreativeBriefPanelProps,
 } from './CreativeBriefPanel.js';
 import { creativeBriefReducer, INITIAL_BRIEF_STATE } from './creative-brief-controller.js';
+import type { ProjectWriterStorage } from './project-writer.js';
 
 // Static fixture
 const STATIC_BRIEF: CreativeBriefV1 = {
@@ -187,6 +188,20 @@ describe('CreativeBriefPanel', () => {
     const props: CreativeBriefPanelProps = { revisionId: REVISION_ID_A };
     expect(props).toBeDefined();
     expect(props.runBrief).toBeUndefined();
+  });
+
+  it('accepts writer-fenced storage without reaching for browser globals', () => {
+    const writerStorage: ProjectWriterStorage = {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+    };
+    const props: CreativeBriefPanelProps = {
+      revisionId: REVISION_ID_A,
+      projectId: 'test-project-001',
+      storage: writerStorage,
+    };
+    expect(props.storage).toBe(writerStorage);
   });
 
   it('static brief has facts and inferences clearly separated', () => {

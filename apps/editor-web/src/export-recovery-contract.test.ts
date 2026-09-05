@@ -25,10 +25,10 @@ describe('App export recovery contract', () => {
     expect(historySource).toContain(
       "export const PROJECT_EXPORT_HISTORY_KEY = 'joy-media.export-history.v2'",
     );
-    expect(appSource).toContain('recoverInterruptedProjectExports(window.localStorage, projectId)');
+    expect(appSource).toContain('recoverInterruptedProjectExports(storage, projectId)');
     expect(appSource).toContain("operationLedger.recoverInterrupted('export')");
     expect(appSource).toContain('const next = upsertProjectEntry(exportHistoryRef.current, entry)');
-    expect(appSource).toContain('saveProjectExportHistory(window.localStorage, projectId, next)');
+    expect(appSource).toContain('saveProjectExportHistory(storage, projectId, next)');
 
     const runningEntry = exportCallback.indexOf("status: 'running'");
     const runningEntryStart = exportCallback.lastIndexOf('recordExportEntry({', runningEntry);
@@ -189,7 +189,7 @@ describe('App export recovery contract', () => {
     );
 
     const historyPersistence = appSource.indexOf(
-      'saveProjectExportHistory(window.localStorage, projectId, next)',
+      'saveProjectExportHistory(storage, projectId, next)',
     );
     const historyStatePublication = appSource.indexOf('setExportHistory(next)', historyPersistence);
     expect(historyPersistence).toBeGreaterThanOrEqual(0);

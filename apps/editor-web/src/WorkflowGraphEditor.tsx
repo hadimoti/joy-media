@@ -1,24 +1,27 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { WorkflowGraphV2 } from '@joy-media/project-schema';
 import type { GraphTransaction } from '@joy-media/commands';
 import { computeNodeCacheKey, dryRunGraphTransaction } from '@joy-media/commands';
 import { WORKFLOW_NODE_TEMPLATES, templateFor } from './workflow-node-catalog.js';
 import { WORKFLOW_TEMPLATES, buildTemplateTransaction } from './workflow-templates.js';
+import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 
 /** Cleared the first time a workflow is created, so the hint stops appearing. */
 const HINT_KEY = 'joy-media.workflow-hint-seen';
 
-function hintSeen(): boolean {
+function hintSeen(storage: BrowserKeyValueStore | undefined): boolean {
+  if (storage === undefined) return true;
   try {
-    return window.localStorage.getItem(HINT_KEY) === 'yes';
+    return storage.getItem(HINT_KEY) === 'yes';
   } catch {
     return true;
   }
 }
 
-function markHintSeen(): void {
+function markHintSeen(storage: BrowserKeyValueStore | undefined): void {
+  if (storage === undefined) return;
   try {
-    window.localStorage.setItem(HINT_KEY, 'yes');
+    storage.setItem(HINT_KEY, 'yes');
   } catch {
     // A hint is not worth failing over when storage is unavailable.
   }
@@ -32,6 +35,8 @@ export interface WorkflowGraphEditorProps {
   readonly selectedClipIds?: readonly string[];
   /** Range covered by the selection, used to bind the template's source node. */
   readonly selectionRange?: { readonly startUs: number; readonly durationUs: number };
+  /** Root writer-gated adapter; omitted only for non-persistent isolated renders. */
+  readonly storage?: BrowserKeyValueStore;
 }
 
 /**
@@ -50,15 +55,22 @@ export function WorkflowGraphEditor({
   onDispatch,
   selectedClipIds,
   selectionRange,
+  storage,
 }: WorkflowGraphEditorProps) {
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const [connectFromId, setConnectFromId] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
-  const [showHint, setShowHint] = useState(() => !hintSeen());
+  const [showHint, setShowHint] = useState(() => !hintSeen(storage));
   const [checkedIds, setCheckedIds] = useState<readonly string[]>([]);
   const [openGroupId, setOpenGroupId] = useState<string | undefined>(undefined);
   /** Which group's name is being edited, kept apart from which group is open. */
   const [rename, setRename] = useState<{ groupId: string; value: string } | undefined>(undefined);
+
+  // A cached docked panel can mount before its writer context. Once attached,
+  // resolve the preference through the fenced adapter rather than raw storage.
+  useEffect(() => {
+    if (storage !== undefined) setShowHint(!hintSeen(storage));
+  }, [storage]);
 
   const selected = graph.nodes.find((node) => node.id === selectedId);
   const connectFrom = graph.nodes.find((node) => node.id === connectFromId);
@@ -119,7 +131,7 @@ export function WorkflowGraphEditor({
       }),
     );
     // The hint has done its job the moment a workflow exists.
-    markHintSeen();
+    markHintSeen(storage);
     setShowHint(false);
   };
 

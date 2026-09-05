@@ -29,6 +29,9 @@ import {
   validateJoyProjectV1,
   validateSpikeProject,
   validateWorkflowGraph,
+  validateCreativeArtifact,
+  validateArtifactContentRef,
+  validateArtifactProvenance,
   readDualLensFlags,
   EMPTY_WORKFLOW_GRAPH,
 } from '@joy-media/project-schema';
@@ -38,6 +41,7 @@ import { EditorCommandController } from './command-controller.js';
 import {
   agentIdempotencyStorageKey,
   BrowserAgentIdempotencyStore,
+  isStrictAgentIdempotencyStorageState,
   type StagedExecutionReceiptWrite,
 } from './agent-idempotency-store.js';
 import { createExecutionReceipt, type ExecutionReceipt } from './execution-receipt.js';
@@ -108,6 +112,24 @@ interface CompoundWriteJournal {
   readonly previous: readonly CompoundWriteJournalEntry[];
 }
 
+/**
+ * The editor currently persists its timeline and visual document under
+ * different durable document ids. This scope binds each journal participant to
+ * the one id it is allowed to restore; a journal for one open editor session
+ * can never redirect a project-log write to another project's record.
+ */
+interface CompoundJournalScope {
+  readonly timelineProjectId: string;
+  readonly visualProjectId: string;
+}
+
+/** One prevalidated durable replacement used while restoring a prepared journal. */
+interface CompoundRollbackWrite {
+  readonly storageKey: string;
+  readonly serialized: string | null;
+  readonly raw: boolean;
+}
+
 interface PreparedCompoundDispatch {
   readonly operations: readonly EditorOperation[];
   readonly persistencePlans: readonly CompoundPersistencePlan[];
@@ -126,6 +148,21 @@ export interface AgentCompoundExecution {
 export interface EditorSessionSeed {
   readonly graph?: WorkflowGraphV2;
   readonly artifacts?: ArtifactStore;
+}
+
+/**
+ * Optional capability supplied by the origin-wide writer gate.
+ *
+ * EditorSession deliberately depends on this narrow structural contract rather
+ * than the browser lock implementation. That keeps the durable session
+ * boundary testable while allowing the production ProjectWriterHandle to pass
+ * through unchanged.
+ */
+export interface EditorSessionWriter {
+  /** Strictly increasing durable fence allocated by the origin writer. */
+  readonly fence: number;
+  /** Throws once the originating writer lock has been released. */
+  assertActive(): void;
 }
 
 /**
@@ -160,9 +197,7 @@ const visualObjectAdapter: PersistenceAdapter<JoyProjectV1, VisualObjectTransact
 const artifactAdapter: PersistenceAdapter<PersistedArtifactDocument, ArtifactTransaction> = {
   projectId: (document) => document.id,
   schemaVersion: (document) => document.schemaVersion,
-  // Commands already validate each artifact as they apply; the store as a whole
-  // has no extra invariant, so re-walking it here would only duplicate work.
-  validate: () => [],
+  validate: (document) => validateArtifactStore(document.store),
   apply: (document, transaction) => ({
     ...document,
     store: applyArtifactTransaction(document.store, transaction).store,
@@ -186,7 +221,9 @@ const graphAdapter: PersistenceAdapter<PersistedGraphDocument, GraphTransaction>
  */
 export class EditorSession {
   readonly #storage: BrowserKeyValueStore;
+  readonly #writer: EditorSessionWriter | undefined;
   readonly #compoundJournalKey: string;
+  readonly #compoundJournalScope: CompoundJournalScope;
   readonly #timelinePersistence: LocalProjectPersistence<SpikeProject, CommandTransaction>;
   readonly #visualObjectPersistence: LocalProjectPersistence<JoyProjectV1, VisualObjectTransaction>;
   readonly #timeline: EditorCommandController;
@@ -229,10 +266,20 @@ export class EditorSession {
     initialTimeline: SpikeProject,
     initialVisualProject: JoyProjectV1,
     initialSeed: EditorSessionSeed = {},
+    writer?: EditorSessionWriter,
   ) {
+    this.#writer = writer;
+    // Recovery can initialize a missing log or resolve a prepared compound
+    // journal. It is therefore a write boundary, not an innocuous read-only
+    // constructor step.
+    this.#assertWriterActive();
     this.#storage = storage;
     this.#compoundJournalKey = compoundWriteJournalKey(initialTimeline.id);
-    recoverPreparedCompoundWrite(storage, initialTimeline.id);
+    this.#compoundJournalScope = {
+      timelineProjectId: initialTimeline.id,
+      visualProjectId: initialVisualProject.id,
+    };
+    recoverPreparedCompoundWrite(storage, this.#compoundJournalScope);
     this.#timelinePersistence = new LocalProjectPersistence(
       new BrowserProjectStore(storage, TIMELINE_PROJECT_LOG_KEY),
       timelineAdapter,
@@ -370,6 +417,7 @@ export class EditorSession {
    * `historyCursorSequence === sequence`.
    */
   jumpToHistory(sequence: number): void {
+    this.#assertPersistenceReady();
     if (!Number.isFinite(sequence) || sequence < 0) return;
     const known =
       sequence === 0 ||
@@ -438,7 +486,7 @@ export class EditorSession {
     }
     const before = this.#graphDocument;
     const result = applyGraphTransaction(before.graph, transaction);
-    this.#graphPersistence?.saveTransaction(before, transaction, false);
+    this.#requireGraphPersistence().saveTransaction(before, transaction, false);
     this.#graphDocument = { ...before, graph: result.graph };
     this.#graphRevision += 1;
     this.#graphUndo.push(result.record);
@@ -455,7 +503,7 @@ export class EditorSession {
     }
     const before = this.#artifactDocument;
     const result = applyArtifactTransaction(before.store, transaction);
-    this.#artifactPersistence?.saveTransaction(before, transaction, false);
+    this.#requireArtifactPersistence().saveTransaction(before, transaction, false);
     this.#artifactDocument = { ...before, store: result.store };
     this.#artifactRevision += 1;
     this.#artifactUndo.push(result.record);
@@ -481,6 +529,7 @@ export class EditorSession {
     label: string,
     parts: {
       readonly document?: JoyProjectV1;
+      readonly graph?: GraphTransaction;
       readonly artifacts?: ArtifactTransaction;
       readonly timeline?: CommandTransaction;
     },
@@ -503,6 +552,7 @@ export class EditorSession {
     label: string,
     parts: {
       readonly document?: JoyProjectV1;
+      readonly graph?: GraphTransaction;
       readonly artifacts?: ArtifactTransaction;
       readonly timeline?: CommandTransaction;
     },
@@ -522,10 +572,10 @@ export class EditorSession {
         'JOY_CODE_EMPTY_COMMIT: an execution receipt requires a durable editor change',
       );
 
-    // A history sequence is the only single-session writer ordering available
-    // at this seam. It binds the receipt to the exact local undo entry, but it
-    // is not presented as cross-tab authority; Web Locks and a durable writer
-    // fence remain a later F2 slice.
+    // The origin writer fence survives this EditorSession's lifetime and is
+    // the cross-tab ordering authority when the browser writer gate supplied
+    // one. Keep the local history sequence for the undo entry identifier and
+    // as the legacy no-writer fallback used by existing session-only callers.
     const sequence = this.#sequence + 1;
     const receipt = createExecutionReceipt({
       executionId: execution.executionId,
@@ -533,7 +583,7 @@ export class EditorSession {
       operationDigest: execution.operationDigest,
       baseRevision: execution.baseRevision,
       resultRevision: this.#projectRevisionAfter(prepared.operations),
-      writerFence: sequence,
+      writerFence: this.#writer?.fence ?? sequence,
       changedEntityIds: execution.changedEntityIds,
       undoEntryId: `history-${sequence}`,
     });
@@ -548,6 +598,7 @@ export class EditorSession {
 
   #prepareCompound(parts: {
     readonly document?: JoyProjectV1;
+    readonly graph?: GraphTransaction;
     readonly artifacts?: ArtifactTransaction;
     readonly timeline?: CommandTransaction;
   }): PreparedCompoundDispatch {
@@ -556,12 +607,29 @@ export class EditorSession {
     let commandCount = 0;
 
     // Everything that can fail is checked before anything is written. Applying
-    // the document and then throwing on the artifacts would leave a change that
-    // is persisted, unrecorded, and therefore impossible to undo — the exact
+    // one domain and then throwing on another would leave a change that is
+    // persisted, unrecorded, and therefore impossible to undo — the exact
     // split this method exists to prevent.
+    if (parts.graph !== undefined && !this.graphEnabled) {
+      throw new Error('workflow graph editing is disabled; enable the Dual Lens graph flag');
+    }
     if (parts.artifacts !== undefined && !this.graphEnabled) {
       throw new Error('creative artifacts are disabled; enable the Dual Lens graph flag');
     }
+    if (parts.document !== undefined) {
+      const diagnostics = validateJoyProjectV1(parts.document);
+      if (diagnostics.length > 0) {
+        const first = diagnostics[0]!;
+        throw new PersistenceError(
+          'PERSISTENCE_COMPOUND_DOCUMENT_INVALID',
+          `compound document is invalid: [${first.code}] ${first.message}`,
+        );
+      }
+    }
+    const graphResult =
+      parts.graph === undefined
+        ? undefined
+        : applyGraphTransaction(this.#graphDocument.graph, parts.graph);
     const artifactResult =
       parts.artifacts === undefined
         ? undefined
@@ -607,15 +675,38 @@ export class EditorSession {
       operations.push('document-snapshot');
     }
 
+    if (parts.graph !== undefined && graphResult !== undefined) {
+      const before = this.#graphDocument;
+      const transaction = parts.graph;
+      const next = { ...before, graph: graphResult.graph };
+      const persistence = this.#requireGraphPersistence();
+      persistencePlans.push({
+        storageKey: WORKFLOW_GRAPH_LOG_KEY,
+        projectId: before.id,
+        persist: () => {
+          persistence.saveTransaction(before, transaction, false);
+        },
+        commit: () => {
+          this.#graphDocument = next;
+          this.#graphRevision += 1;
+          this.#graphUndo.push(graphResult.record);
+          this.#graphRedo.length = 0;
+        },
+      });
+      operations.push('graph');
+      commandCount += parts.graph.commands.length;
+    }
+
     if (parts.artifacts !== undefined && artifactResult !== undefined) {
       const before = this.#artifactDocument;
       const transaction = parts.artifacts;
       const next = { ...before, store: artifactResult.store };
+      const persistence = this.#requireArtifactPersistence();
       persistencePlans.push({
         storageKey: CREATIVE_ARTIFACT_LOG_KEY,
         projectId: before.id,
         persist: () => {
-          this.#artifactPersistence?.saveTransaction(before, transaction, false);
+          persistence.saveTransaction(before, transaction, false);
         },
         commit: () => {
           this.#artifactDocument = next;
@@ -675,6 +766,7 @@ export class EditorSession {
   }
 
   undo(): void {
+    this.#assertPersistenceReady();
     const entry = this.#undo.at(-1);
     if (entry === undefined) return;
     // Reverse order: a compound applied document-then-artifact must undo
@@ -730,7 +822,7 @@ export class EditorSession {
         storageKey: WORKFLOW_GRAPH_LOG_KEY,
         projectId: before.id,
         persist: () => {
-          this.#graphPersistence?.saveTransaction(before, transaction, false);
+          this.#requireGraphPersistence().saveTransaction(before, transaction, false);
         },
         commit: () => {
           this.#graphDocument = next;
@@ -753,7 +845,7 @@ export class EditorSession {
         storageKey: CREATIVE_ARTIFACT_LOG_KEY,
         projectId: before.id,
         persist: () => {
-          this.#artifactPersistence?.saveTransaction(before, transaction, false);
+          this.#requireArtifactPersistence().saveTransaction(before, transaction, false);
         },
         commit: () => {
           this.#artifactDocument = next;
@@ -780,6 +872,7 @@ export class EditorSession {
   }
 
   redo(): void {
+    this.#assertPersistenceReady();
     const entry = this.#redo.at(-1);
     if (entry === undefined) return;
     const plans = entry.operations.map((operation) => this.#redoPlan(operation));
@@ -839,7 +932,7 @@ export class EditorSession {
         storageKey: WORKFLOW_GRAPH_LOG_KEY,
         projectId: before.id,
         persist: () => {
-          this.#graphPersistence?.saveTransaction(before, transaction, false);
+          this.#requireGraphPersistence().saveTransaction(before, transaction, false);
         },
         commit: () => {
           this.#graphDocument = next;
@@ -865,7 +958,7 @@ export class EditorSession {
         storageKey: CREATIVE_ARTIFACT_LOG_KEY,
         projectId: before.id,
         persist: () => {
-          this.#artifactPersistence?.saveTransaction(before, transaction, false);
+          this.#requireArtifactPersistence().saveTransaction(before, transaction, false);
         },
         commit: () => {
           this.#artifactDocument = next;
@@ -902,11 +995,37 @@ export class EditorSession {
   }
 
   #assertPersistenceReady(): void {
+    this.#assertWriterActive();
     if (!this.#persistenceRecoveryRequired) return;
     throw new PersistenceError(
       'PERSISTENCE_RECOVERY_REQUIRED',
       'a previous compound write requires recovery; reopen the project before making another change',
     );
+  }
+
+  #assertWriterActive(): void {
+    this.#writer?.assertActive();
+  }
+
+  #requireGraphPersistence(): LocalProjectPersistence<PersistedGraphDocument, GraphTransaction> {
+    if (this.#graphPersistence === undefined)
+      throw new PersistenceError(
+        'PERSISTENCE_GRAPH_UNAVAILABLE',
+        'workflow graph persistence is unavailable while graph editing is enabled',
+      );
+    return this.#graphPersistence;
+  }
+
+  #requireArtifactPersistence(): LocalProjectPersistence<
+    PersistedArtifactDocument,
+    ArtifactTransaction
+  > {
+    if (this.#artifactPersistence === undefined)
+      throw new PersistenceError(
+        'PERSISTENCE_ARTIFACT_UNAVAILABLE',
+        'creative artifact persistence is unavailable while artifact editing is enabled',
+      );
+    return this.#artifactPersistence;
   }
 
   /**
@@ -960,7 +1079,7 @@ export class EditorSession {
       );
     } catch (error) {
       try {
-        restoreCompoundWrite(this.#storage, prepared);
+        restoreCompoundWrite(this.#storage, prepared, this.#compoundJournalScope);
         resolveCompoundWriteJournal(this.#storage, this.#compoundJournalKey, prepared);
       } catch (rollbackError) {
         this.#persistenceRecoveryRequired = true;
@@ -1017,35 +1136,243 @@ function compoundWriteJournalKey(projectId: string): string {
   return `${COMPOUND_WRITE_JOURNAL_PREFIX}:${encodeURIComponent(projectId)}`;
 }
 
-function recoverPreparedCompoundWrite(storage: BrowserKeyValueStore, projectId: string): void {
-  const journalKey = compoundWriteJournalKey(projectId);
+function recoverPreparedCompoundWrite(
+  storage: BrowserKeyValueStore,
+  scope: CompoundJournalScope,
+): void {
+  const journalKey = compoundWriteJournalKey(scope.timelineProjectId);
   const serialized = storage.getItem(journalKey);
   if (serialized === null) return;
-  const journal = parseCompoundWriteJournal(serialized, projectId);
+  const journal = parseCompoundWriteJournal(serialized, scope);
   if (journal === undefined) {
-    bestEffortRemove(storage, journalKey);
-    return;
+    // A journal exists precisely when one multi-store edit may be between its
+    // old and new states. Deleting an unknown journal would turn that ambiguity
+    // into a silent mixed-state acceptance. Preserve it for support/recovery
+    // and refuse to open a writable session until the bytes are understood.
+    throw new PersistenceError(
+      'PERSISTENCE_ATOMIC_JOURNAL_CORRUPT',
+      'cannot safely recover an unparseable compound write journal',
+    );
   }
   if (journal.state === 'prepared') {
-    restoreCompoundWrite(storage, journal);
+    restoreCompoundWrite(storage, journal, scope);
     resolveCompoundWriteJournal(storage, journalKey, journal);
     return;
   }
   bestEffortRemove(storage, journalKey);
 }
 
-function restoreCompoundWrite(storage: BrowserKeyValueStore, journal: CompoundWriteJournal): void {
+function restoreCompoundWrite(
+  storage: BrowserKeyValueStore,
+  journal: CompoundWriteJournal,
+  scope: CompoundJournalScope,
+): void {
+  // Do not start restoring before every rollback byte and every current target
+  // has been checked. A prepared journal is our only recovery authority; a
+  // lazy parse halfway through it could otherwise leave a permanently mixed
+  // project even though we correctly preserved the journal.
+  const writes = prepareCompoundRollbackWrites(storage, journal, scope);
+  for (const write of writes) {
+    if (write.raw) restoreRawPersistenceBytes(storage, write.storageKey, write.serialized);
+    else storage.setItem(write.storageKey, write.serialized!);
+  }
+}
+
+function prepareCompoundRollbackWrites(
+  storage: BrowserKeyValueStore,
+  journal: CompoundWriteJournal,
+  scope: CompoundJournalScope,
+): readonly CompoundRollbackWrite[] {
+  const targets = new Set<string>();
+  const writes: CompoundRollbackWrite[] = [];
+
   for (const previous of journal.previous) {
+    if (!isJournalEntryInScope(previous, scope))
+      throw compoundJournalCorrupt('rollback entry is not bound to this editor project');
+
+    const target = `${previous.storageKind}\u0000${previous.storageKey}\u0000${previous.projectId}`;
+    if (targets.has(target))
+      throw compoundJournalCorrupt('journal contains a duplicate rollback target');
+    targets.add(target);
+
     if (previous.storageKind === 'agent-idempotency') {
-      restoreRawPersistenceBytes(storage, previous.storageKey, previous.serialized);
+      if (
+        previous.serialized !== null &&
+        !isStrictAgentIdempotencyStorageState(previous.serialized, journal.projectId)
+      )
+        throw compoundJournalCorrupt('journal contains malformed agent idempotency bytes');
+      writes.push({
+        storageKey: previous.storageKey,
+        serialized: previous.serialized,
+        raw: true,
+      });
       continue;
     }
-    const database = projectDatabase(storage.getItem(previous.storageKey));
+
+    // Parse both the old project record and the current database before any
+    // storage mutation. BrowserProjectStore relies on this record shape when
+    // it appends later snapshots or transactions.
+    const restoredProject =
+      previous.serialized === null
+        ? undefined
+        : parseProjectRollbackRecord(previous.serialized, previous.storageKey, previous.projectId);
+    let database: { projects: Record<string, unknown> };
+    try {
+      database = projectDatabase(storage.getItem(previous.storageKey));
+    } catch (error) {
+      throw compoundJournalCorrupt(`cannot read rollback target: ${errorMessage(error)}`);
+    }
     const projects = { ...database.projects };
-    if (previous.serialized === null) delete projects[previous.projectId];
-    else projects[previous.projectId] = JSON.parse(previous.serialized) as unknown;
-    storage.setItem(previous.storageKey, JSON.stringify({ projects }));
+    if (restoredProject === undefined) delete projects[previous.projectId];
+    else projects[previous.projectId] = restoredProject;
+    writes.push({
+      storageKey: previous.storageKey,
+      serialized: JSON.stringify({ projects }),
+      raw: false,
+    });
   }
+
+  return writes;
+}
+
+function parseProjectRollbackRecord(
+  serialized: string,
+  storageKey: string,
+  projectId: string,
+): Record<string, unknown> {
+  try {
+    const value = JSON.parse(serialized) as unknown;
+    if (!isRecord(value) || !Array.isArray(value.snapshots) || !Array.isArray(value.transactions))
+      throw new Error('project record must contain snapshots and transactions arrays');
+    assertRecoverableRollbackProjectRecord(value, storageKey, projectId);
+    return value;
+  } catch (error) {
+    throw compoundJournalCorrupt(
+      `journal contains malformed rollback bytes for ${storageKey}: ${errorMessage(error)}`,
+    );
+  }
+}
+
+/**
+ * A project-log journal does not store arbitrary JSON: its preimage must be a
+ * fully recoverable BrowserProjectStore record for the matching domain. This
+ * dry run shares the exact persistence adapters used at open, including
+ * snapshot checksums and schema validation, but uses an isolated in-memory
+ * reader so it cannot mutate the real storage while preflighting recovery.
+ */
+function assertRecoverableRollbackProjectRecord(
+  record: Record<string, unknown>,
+  storageKey: string,
+  projectId: string,
+): void {
+  switch (storageKey) {
+    case TIMELINE_PROJECT_LOG_KEY:
+      assertRecordRecoversWithAdapter(record, storageKey, projectId, timelineAdapter);
+      return;
+    case VISUAL_OBJECT_PROJECT_LOG_KEY:
+      assertRecordRecoversWithAdapter(record, storageKey, projectId, visualObjectAdapter);
+      return;
+    case WORKFLOW_GRAPH_LOG_KEY:
+      assertRecordRecoversWithAdapter(record, storageKey, projectId, graphAdapter);
+      return;
+    case CREATIVE_ARTIFACT_LOG_KEY:
+      assertRecordRecoversWithAdapter(record, storageKey, projectId, artifactAdapter);
+      return;
+    default:
+      throw new Error(`unsupported project-log storage key ${storageKey}`);
+  }
+}
+
+function assertRecordRecoversWithAdapter<P, T>(
+  record: Record<string, unknown>,
+  storageKey: string,
+  projectId: string,
+  adapter: PersistenceAdapter<P, T>,
+): void {
+  const candidate = JSON.stringify({ projects: { [projectId]: record } });
+  const isolatedStorage: BrowserKeyValueStore = {
+    getItem: (key) => (key === storageKey ? candidate : null),
+    setItem: () => {
+      throw new Error('rollback preflight must not write');
+    },
+  };
+  const recovered = new LocalProjectPersistence(
+    new BrowserProjectStore<P, T>(isolatedStorage, storageKey),
+    adapter,
+  ).recover(projectId);
+  if (recovered.recoveredWithWarnings)
+    throw new Error(`rollback record has recovery warnings: ${recovered.warnings.join('; ')}`);
+  if (adapter.projectId(recovered.project) !== projectId)
+    throw new Error('rollback record recovered a different project id');
+}
+
+function validateArtifactStore(store: ArtifactStore): readonly { code: string; message: string }[] {
+  const value = store as unknown;
+  if (!isRecord(value) || !isRecord(value.artifacts) || !isRecord(value.versions))
+    return [{ code: 'ARTIFACT_STORE_INVALID', message: 'artifact store has invalid maps' }];
+  const diagnostics: { code: string; message: string }[] = [];
+  for (const [id, artifact] of Object.entries(value.artifacts)) {
+    if (!isRecord(artifact) || artifact.id !== id) {
+      diagnostics.push({
+        code: 'ARTIFACT_STORE_ID',
+        message: `artifact map key ${id} does not match its durable artifact id`,
+      });
+      continue;
+    }
+    for (const diagnostic of validateCreativeArtifact(artifact, `artifacts.${id}`)) {
+      diagnostics.push({ code: diagnostic.code, message: diagnostic.message });
+    }
+  }
+  for (const [artifactId, versions] of Object.entries(value.versions)) {
+    if (value.artifacts[artifactId] === undefined) {
+      diagnostics.push({
+        code: 'ARTIFACT_VERSIONS_ORPHANED',
+        message: `versions exist for missing artifact ${artifactId}`,
+      });
+      continue;
+    }
+    if (!Array.isArray(versions)) {
+      diagnostics.push({
+        code: 'ARTIFACT_VERSIONS_INVALID',
+        message: `versions for artifact ${artifactId} are not an array`,
+      });
+      continue;
+    }
+    for (const [index, version] of versions.entries()) {
+      if (!isValidArtifactVersion(version, artifactId)) {
+        diagnostics.push({
+          code: 'ARTIFACT_VERSION_INVALID',
+          message: `version ${index} for artifact ${artifactId} is invalid`,
+        });
+      }
+    }
+  }
+  return diagnostics;
+}
+
+function isValidArtifactVersion(value: unknown, artifactId: string): boolean {
+  if (!isRecord(value)) return false;
+  const revision = value.revision;
+  if (
+    typeof value.id !== 'string' ||
+    value.id.length === 0 ||
+    value.artifactId !== artifactId ||
+    typeof revision !== 'number' ||
+    !Number.isSafeInteger(revision) ||
+    revision < 0 ||
+    typeof value.createdAt !== 'string' ||
+    value.createdAt.length === 0 ||
+    (value.pinned !== undefined && typeof value.pinned !== 'boolean')
+  )
+    return false;
+  return (
+    validateArtifactContentRef(value.contentRef, 'version.contentRef').length === 0 &&
+    validateArtifactProvenance(value.provenance, 'version.provenance').length === 0
+  );
+}
+
+function compoundJournalCorrupt(message: string): PersistenceError {
+  return new PersistenceError('PERSISTENCE_ATOMIC_JOURNAL_CORRUPT', message);
 }
 
 /** Mark rollback resolved before removal, so a failed remove can never replay it. */
@@ -1123,27 +1450,27 @@ function projectDatabase(serialized: string | null): { projects: Record<string, 
 
 function parseCompoundWriteJournal(
   serialized: string,
-  projectId: string,
+  scope: CompoundJournalScope,
 ): CompoundWriteJournal | undefined {
   try {
     const value = JSON.parse(serialized) as unknown;
     if (
       !isRecord(value) ||
       (value.version !== 1 && value.version !== 2) ||
-      value.projectId !== projectId ||
+      value.projectId !== scope.timelineProjectId ||
       (value.state !== 'prepared' && value.state !== 'committed') ||
       !Array.isArray(value.previous)
     )
       return undefined;
     const version: 1 | 2 = value.version === 1 ? 1 : 2;
     const previous = value.previous.map((entry) =>
-      parseCompoundWriteJournalEntry(entry, projectId, version),
+      parseCompoundWriteJournalEntry(entry, scope, version),
     );
     if (previous.some((entry) => entry === undefined)) return undefined;
     return {
       version,
       state: value.state,
-      projectId,
+      projectId: scope.timelineProjectId,
       previous: previous as readonly CompoundWriteJournalEntry[],
     };
   } catch {
@@ -1153,14 +1480,14 @@ function parseCompoundWriteJournal(
 
 function parseCompoundWriteJournalEntry(
   value: unknown,
-  journalProjectId: string,
+  scope: CompoundJournalScope,
   journalVersion: 1 | 2,
 ): CompoundWriteJournalEntry | undefined {
   if (!isRecord(value)) return undefined;
-  const storageKind =
+  const rawStorageKind =
     value.storageKind === undefined && journalVersion === 1 ? 'project-log' : value.storageKind;
   if (
-    (storageKind !== 'project-log' && storageKind !== 'agent-idempotency') ||
+    (rawStorageKind !== 'project-log' && rawStorageKind !== 'agent-idempotency') ||
     typeof value.storageKey !== 'string' ||
     typeof value.projectId !== 'string' ||
     value.projectId.length === 0 ||
@@ -1168,20 +1495,38 @@ function parseCompoundWriteJournalEntry(
     (typeof value.serialized !== 'string' && value.serialized !== null)
   )
     return undefined;
+  const storageKind: CompoundPersistenceStorageKind = rawStorageKind;
   if (storageKind === 'project-log') {
     if (!PROJECT_LOG_STORAGE_KEYS.has(value.storageKey)) return undefined;
   } else if (
-    value.projectId !== journalProjectId ||
-    value.storageKey !== agentIdempotencyStorageKey(journalProjectId)
+    value.projectId !== scope.timelineProjectId ||
+    value.storageKey !== agentIdempotencyStorageKey(scope.timelineProjectId)
   ) {
     return undefined;
   }
-  return {
+  const entry = {
     storageKey: value.storageKey,
     projectId: value.projectId,
     storageKind,
     serialized: value.serialized,
   };
+  return isJournalEntryInScope(entry, scope) ? entry : undefined;
+}
+
+function isJournalEntryInScope(
+  entry: Pick<CompoundWriteJournalEntry, 'storageKey' | 'storageKind' | 'projectId'>,
+  scope: CompoundJournalScope,
+): boolean {
+  if (entry.storageKind === 'agent-idempotency')
+    return (
+      entry.projectId === scope.timelineProjectId &&
+      entry.storageKey === agentIdempotencyStorageKey(scope.timelineProjectId)
+    );
+  const expectedProjectId =
+    entry.storageKey === VISUAL_OBJECT_PROJECT_LOG_KEY
+      ? scope.visualProjectId
+      : scope.timelineProjectId;
+  return PROJECT_LOG_STORAGE_KEYS.has(entry.storageKey) && entry.projectId === expectedProjectId;
 }
 
 const PROJECT_LOG_STORAGE_KEYS = new Set([

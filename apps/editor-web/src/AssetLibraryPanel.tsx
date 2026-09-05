@@ -9,7 +9,11 @@ import {
   type BrowserStockVideoCategory,
 } from './control-plane-client.js';
 import { describeMedia, importMediaFile } from './media-import.js';
-import { getStoredMediaToken, MEDIA_SESSION_CHANGED_EVENT } from './media-session.js';
+import {
+  getStoredMediaToken,
+  MEDIA_SESSION_CHANGED_EVENT,
+  type MediaSessionStorage,
+} from './media-session.js';
 import {
   assetCollectionId,
   assetCollectionLabel,
@@ -56,10 +60,15 @@ import {
   stockVideoCategoryIconUrl,
 } from './asset-library-icons.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
-import { loadEditorUiPreferences, saveEditorUiPreferences } from './ui-preferences.js';
+import {
+  loadEditorUiPreferences,
+  saveEditorUiPreferences,
+  type UiPreferenceStorage,
+} from './ui-preferences.js';
 import { StockVideoDiscovery, waitForStockVideoImport } from './StockVideoDiscovery.js';
 
 type AssetSource = 'cloud' | 'user';
+type AssetLibraryStorage = UiPreferenceStorage & MediaSessionStorage;
 
 const categories: readonly {
   readonly id: AssetCategory;
@@ -118,12 +127,15 @@ export function withAssetTimelineTimeout<T>(
 export function AssetLibraryPanel({
   projectId,
   projectTitle = 'Editor project',
+  storage,
   onAddSticker: _onAddSticker,
   onAddToTimeline,
   onEditWithAi,
 }: {
   readonly projectId: string;
   readonly projectTitle?: string;
+  /** Root writer-gated browser persistence for UI preferences and session state. */
+  readonly storage: AssetLibraryStorage;
   readonly onAddSticker?: (asset: {
     readonly assetId: string;
     readonly displayName?: string;
@@ -160,7 +172,7 @@ export function AssetLibraryPanel({
   const timelineAddRef = useRef<Set<string>>(new Set());
   const refreshSeqRef = useRef(0);
   const previewSeqRef = useRef(0);
-  const initialUiPreferences = useRef(loadEditorUiPreferences(window.localStorage));
+  const initialUiPreferences = useRef(loadEditorUiPreferences(storage));
   const [items, setItems] = useState<readonly AssetLibraryItem[]>([]);
   const [cloudAssetIds, setCloudAssetIds] = useState<ReadonlySet<string>>(() => new Set());
   const [ownedAssetIds, setOwnedAssetIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -232,8 +244,8 @@ export function AssetLibraryPanel({
   );
 
   useEffect(() => {
-    const current = loadEditorUiPreferences(window.localStorage);
-    saveEditorUiPreferences(window.localStorage, {
+    const current = loadEditorUiPreferences(storage);
+    saveEditorUiPreferences(storage, {
       ...current,
       assetLibrary: {
         ...current.assetLibrary,
@@ -247,7 +259,7 @@ export function AssetLibraryPanel({
         },
       },
     });
-  }, [assetSource, category, collection, sort, viewMode]);
+  }, [assetSource, category, collection, sort, storage, viewMode]);
 
   const clearPreview = useCallback(() => {
     previewRef.current?.revoke();
@@ -258,7 +270,7 @@ export function AssetLibraryPanel({
 
   const refresh = useCallback(async () => {
     const requestId = ++refreshSeqRef.current;
-    if (getStoredMediaToken(window.localStorage) === undefined) {
+    if (getStoredMediaToken(storage) === undefined) {
       // LoginGate keeps the editor mounted under the blur; don't wipe a prior
       // catalog or treat "not signed in yet" as a hard failure.
       return;
@@ -342,7 +354,7 @@ export function AssetLibraryPanel({
       setOwnedAssetIds(new Set());
       setStatus(`Failed to load media catalog: ${detail}`);
     }
-  }, [client, projectId]);
+  }, [client, projectId, storage]);
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -889,7 +901,7 @@ export function AssetLibraryPanel({
               data-active={viewMode === 'large' ? 'true' : undefined}
               onClick={() => {
                 setViewMode('large');
-                writeAssetViewMode('large');
+                writeAssetViewMode(storage, 'large');
               }}
             >
               <span className="asset-view-glyph asset-view-glyph--large" aria-hidden>
@@ -905,7 +917,7 @@ export function AssetLibraryPanel({
               data-active={viewMode === 'medium' ? 'true' : undefined}
               onClick={() => {
                 setViewMode('medium');
-                writeAssetViewMode('medium');
+                writeAssetViewMode(storage, 'medium');
               }}
             >
               <GridUiIcon />
@@ -919,7 +931,7 @@ export function AssetLibraryPanel({
               data-active={viewMode === 'list' ? 'true' : undefined}
               onClick={() => {
                 setViewMode('list');
-                writeAssetViewMode('list');
+                writeAssetViewMode(storage, 'list');
               }}
             >
               <ListIcon />
@@ -1734,9 +1746,9 @@ function message(error: unknown): string {
 
 const ASSET_VIEW_KEY = 'joy-media.asset-view.v1';
 
-function writeAssetViewMode(mode: AssetViewMode): void {
+function writeAssetViewMode(storage: UiPreferenceStorage, mode: AssetViewMode): void {
   try {
-    localStorage.setItem(ASSET_VIEW_KEY, mode);
+    storage.setItem(ASSET_VIEW_KEY, mode);
   } catch {
     /* ignore */
   }

@@ -11,26 +11,38 @@ import {
 } from './motion-scene-catalog.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
+import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 
 export interface LibraryPanelProps {
   readonly onApplyTemplate: (seeded: SeededContentTemplate) => void;
   readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
   readonly openMotionStudio: (sceneId: string) => void;
+  /**
+   * The root writer gate supplies this guarded adapter. Motion scenes and
+   * authored templates are project data, so this panel must never reach for
+   * raw browser storage after a tab has lost writer authority.
+   */
+  readonly storage: BrowserKeyValueStore;
 }
 
 type LibraryView = 'templates' | 'motions';
 
 /** Shared home for reusable templates and user-authored Motion scenes. */
-export function LibraryPanel({ onApplyTemplate, showToast, openMotionStudio }: LibraryPanelProps) {
+export function LibraryPanel({
+  onApplyTemplate,
+  showToast,
+  openMotionStudio,
+  storage,
+}: LibraryPanelProps) {
   const [view, setView] = useState<LibraryView>('templates');
   const [, setRevision] = useState(0);
-  const entries = listCatalogScenes(window.localStorage);
+  const entries = listCatalogScenes(storage);
   const refresh = useCallback(() => setRevision((value) => value + 1), []);
   const createMotion = useCallback(() => {
-    const scene = createMotionScene(window.localStorage, `Untitled Motion ${entries.length + 1}`);
+    const scene = createMotionScene(storage, `Untitled Motion ${entries.length + 1}`);
     refresh();
     openMotionStudio(scene.id);
-  }, [entries.length, openMotionStudio, refresh]);
+  }, [entries.length, openMotionStudio, refresh, storage]);
 
   return (
     <PanelShell title="Library" iconUrl={panelTabIconUrl('templates')} className="library-panel">
@@ -53,7 +65,7 @@ export function LibraryPanel({ onApplyTemplate, showToast, openMotionStudio }: L
         </button>
       </div>
       {view === 'templates' ? (
-        <TemplatesPanel onApplyTemplate={onApplyTemplate} showToast={showToast} />
+        <TemplatesPanel onApplyTemplate={onApplyTemplate} showToast={showToast} storage={storage} />
       ) : (
         <div className="library-motions-view">
           <div className="library-motions-toolbar">
@@ -66,16 +78,16 @@ export function LibraryPanel({ onApplyTemplate, showToast, openMotionStudio }: L
             entries={entries}
             onOpen={openMotionStudio}
             onRename={(id, title) => {
-              renameMotionScene(window.localStorage, id, title);
+              renameMotionScene(storage, id, title);
               refresh();
             }}
             onDuplicate={(id) => {
               const source = entries.find((entry) => entry.id === id);
-              duplicateMotionScene(window.localStorage, id, `${source?.title ?? 'Motion'} (Copy)`);
+              duplicateMotionScene(storage, id, `${source?.title ?? 'Motion'} (Copy)`);
               refresh();
             }}
             onDelete={(id) => {
-              removeCatalogScene(window.localStorage, id);
+              removeCatalogScene(storage, id);
               refresh();
             }}
           />

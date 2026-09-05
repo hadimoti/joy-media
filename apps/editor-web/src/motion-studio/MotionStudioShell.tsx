@@ -30,9 +30,12 @@ import {
   saveMotionSceneDocument,
   publishMotionScene,
 } from '../motion-scene-catalog.js';
+import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 
 export interface MotionStudioShellProps {
   readonly sceneId: string;
+  /** Guarded by the root project-writer capability for this browser tab. */
+  readonly storage: BrowserKeyValueStore;
   readonly onClose: () => void;
 }
 
@@ -54,8 +57,7 @@ function clamp(value: number, min: number, max: number): number {
 
 type MsResizeEdge = 'left' | 'right' | 'bottom';
 
-export function MotionStudioShell({ sceneId, onClose }: MotionStudioShellProps) {
-  const storage = window.localStorage;
+export function MotionStudioShell({ sceneId, storage, onClose }: MotionStudioShellProps) {
   const [initialDocument] = useState(
     () => loadMotionSceneDocument(storage, sceneId) ?? createBlankScene('Untitled Motion'),
   );

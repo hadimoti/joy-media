@@ -136,6 +136,7 @@ import { HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
 import { waitForContentFonts } from './font-readiness.js';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
+import type { ProjectWriterHandle, ProjectWriterStorage } from './project-writer.js';
 import { runReleaseObserverTimelineProbe } from './release-observer-timeline.js';
 import { prepareTimelinePresentation } from './timeline-presentation.js';
 import { TimelinePanel } from './TimelinePanel.js';
@@ -726,6 +727,8 @@ export interface AnimationGraphFocusRequest {
 }
 
 interface EditorPanelContextValue {
+  /** All editor persistence is guarded by the origin writer capability. */
+  readonly storage: GuardedBrowserStorage;
   readonly state: EditorRuntimeState;
   readonly previewVideoFrame: DecodedPreviewFrame | undefined;
   /** Last decoded RGBA per timeline clip id (dual-texture transitions). */
@@ -847,8 +850,27 @@ interface EditorPanelContextValue {
 }
 export const EditorPanelContext = createContext<EditorPanelContextValue | undefined>(undefined);
 
-export function App() {
-  const storage = window.localStorage;
+/**
+ * Browser localStorage always supports removal. Preserve that stronger surface
+ * after wrapping it so existing project services cannot be tempted to fall
+ * back to raw localStorage for migrations or cleanup.
+ */
+interface GuardedBrowserStorage extends ProjectWriterStorage {
+  removeItem(key: string): void;
+}
+
+function guardBrowserStorage(writer: ProjectWriterHandle): GuardedBrowserStorage {
+  const storage = writer.guardStorage(window.localStorage);
+  if (storage.removeItem === undefined)
+    throw new Error('The browser writer storage boundary does not support removal.');
+  return storage as GuardedBrowserStorage;
+}
+
+export function App({ writer }: { readonly writer: ProjectWriterHandle }) {
+  // The root gate grants this capability before App mounts. Never hand raw
+  // localStorage to a project service: after the origin lock is released the
+  // wrapper rejects any attempted durable write.
+  const storage = useMemo(() => guardBrowserStorage(writer), [writer]);
   const [projectPackageNotice, setProjectPackageNotice] = useState<string | undefined>(undefined);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(() => {
     const id = loadActiveProjectId(storage);
@@ -924,7 +946,7 @@ export function App() {
       const now = new Date().toISOString();
       const seeds = createBlankProjectDocuments(id, title, now);
       // Materialize durable empty docs via recover-or-initialize.
-      new EditorSession(storage, seeds.timeline, seeds.visual);
+      new EditorSession(storage, seeds.timeline, seeds.visual, {}, writer);
       const entry: ProjectCatalogEntry = {
         id,
         title,
@@ -937,7 +959,7 @@ export function App() {
       saveActiveProjectId(storage, id);
       setActiveProjectId(id);
     },
-    [storage],
+    [storage, writer],
   );
 
   const renameProject = useCallback(
@@ -985,6 +1007,8 @@ export function App() {
     <EditorWorkspace
       key={activeProjectId}
       projectId={activeProjectId}
+      storage={storage}
+      writer={writer}
       onBackToLibrary={backToLibrary}
       onImportProjectFile={importProjectFromFile}
       projectPackageNotice={projectPackageNotice}
@@ -998,11 +1022,15 @@ const CONTROL_PLANE_PROJECT_ENSURE_RETRY_MAX_MS = 60_000;
 
 function EditorWorkspace({
   projectId,
+  storage,
+  writer,
   onBackToLibrary,
   onImportProjectFile,
   projectPackageNotice,
 }: {
   readonly projectId: string;
+  readonly storage: GuardedBrowserStorage;
+  readonly writer: ProjectWriterHandle;
   readonly onBackToLibrary: () => void;
   readonly onImportProjectFile: (file: File) => void | Promise<void>;
   readonly projectPackageNotice?: string | undefined;
@@ -1022,13 +1050,13 @@ function EditorWorkspace({
   const [exportStatus, setExportStatus] = useState<string | undefined>(undefined);
   const [exportProgress, setExportProgress] = useState<number | undefined>(undefined);
   const [exportHistory, setExportHistory] = useState<readonly ProjectExportProcessEntry[]>(() =>
-    recoverInterruptedProjectExports(window.localStorage, projectId),
+    recoverInterruptedProjectExports(storage, projectId),
   );
   const exportHistoryRef = useRef(exportHistory);
   exportHistoryRef.current = exportHistory;
   const operationLedger = useMemo(
-    () => new ProjectOperationLedger(window.localStorage, projectId),
-    [projectId],
+    () => new ProjectOperationLedger(storage, projectId),
+    [projectId, storage],
   );
   useEffect(() => {
     operationLedger.recoverInterrupted('export');
@@ -1044,11 +1072,13 @@ function EditorWorkspace({
       .catch(() => undefined);
   }, [exportHistory]);
   const [exportPreset, setExportPreset] = useState<ExportPresetId>('reels-1080');
-  const [audioState, setAudioStateRaw] = useState<AudioState>(() => loadAudioState(projectId));
+  const [audioState, setAudioStateRaw] = useState<AudioState>(() =>
+    loadAudioState(storage, projectId),
+  );
   const [audioHydrated, setAudioHydrated] = useState(false);
   const [processesOpen, setProcessesOpen] = useState(false);
   const [processFilter, setProcessFilter] = useState<EditorUiPreferencesV2['processFilter']>(
-    () => loadEditorUiPreferences(window.localStorage).processFilter,
+    () => loadEditorUiPreferences(storage).processFilter,
   );
   const [accountOpen, setAccountOpen] = useState(false);
   const projectPackageInputRef = useRef<HTMLInputElement | null>(null);
@@ -1058,7 +1088,7 @@ function EditorWorkspace({
     readonly JoyAgentAttachedAsset[]
   >([]);
   const [agentPolicy, setAgentPolicy] = useState<AgentPolicyPreferences>(() =>
-    loadAgentPolicy(window.localStorage),
+    loadAgentPolicy(storage),
   );
   const joyAgentEngineClientRef = useRef<ReturnType<typeof createJoyAgentEngineClient> | null>(
     null,
@@ -1066,8 +1096,8 @@ function EditorWorkspace({
   if (joyAgentEngineClientRef.current === null)
     joyAgentEngineClientRef.current = createJoyAgentEngineClient();
   useEffect(() => {
-    saveAgentPolicy(window.localStorage, agentPolicy);
-  }, [agentPolicy]);
+    saveAgentPolicy(storage, agentPolicy);
+  }, [agentPolicy, storage]);
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
   const [agentPanelCommand, setAgentPanelCommand] = useState<AgentPanelCommand>();
   const [agentConnectionStatus, setAgentConnectionStatus] = useState<ByokSessionStatus | undefined>(
@@ -1085,12 +1115,12 @@ function EditorWorkspace({
   >([]);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
   const [viewMode, setViewMode] = useState<EditorViewMode>(
-    () => loadEditorUiPreferences(window.localStorage).viewMode,
+    () => loadEditorUiPreferences(storage).viewMode,
   );
   const viewModeRef = useRef(viewMode);
   viewModeRef.current = viewMode;
   const [workspacePreset, setWorkspacePreset] = useState<WorkspacePresetId>(
-    () => loadEditorUiPreferences(window.localStorage).workspacePreset,
+    () => loadEditorUiPreferences(storage).workspacePreset,
   );
   const workspacePresetRef = useRef(workspacePreset);
   workspacePresetRef.current = workspacePreset;
@@ -1167,7 +1197,7 @@ function EditorWorkspace({
                   }
                 : candidate,
             );
-            saveProjectExportHistory(window.localStorage, projectId, next);
+            saveProjectExportHistory(storage, projectId, next);
             return next;
           });
           return;
@@ -1179,19 +1209,19 @@ function EditorWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [exportHistory, projectId]);
+  }, [exportHistory, projectId, storage]);
   useEffect(() => () => joyAgentEngineClientRef.current?.dispose(), []);
   useEffect(() => {
-    updateEditorUiPreferences(window.localStorage, (current) => ({
+    updateEditorUiPreferences(storage, (current) => ({
       ...current,
       processFilter,
     }));
-  }, [processFilter]);
+  }, [processFilter, storage]);
   const [previewVideoFrame, setPreviewVideoFrame] = useState<DecodedPreviewFrame | undefined>(
     undefined,
   );
   const [, setRevision] = useState(0);
-  const [pluginHost] = useState(() => createEditorPluginHost());
+  const [pluginHost] = useState(() => createEditorPluginHost(storage));
   const [, setPluginRevision] = useState(0);
   const sessionRef = useRef<EditorSession | null>(null);
   const remoteDocumentHydrationRef = useRef<Set<string>>(new Set());
@@ -1205,7 +1235,7 @@ function EditorWorkspace({
   const remoteDocumentAutosyncRef = useRef<ProjectDocumentAutosync | null>(null);
   if (remoteDocumentAutosyncRef.current === null) {
     remoteDocumentAutosyncRef.current = new ProjectDocumentAutosync({
-      storage: window.localStorage,
+      storage,
       syncProjectDocument: (controlPlaneProjectId, params) =>
         mediaControlPlaneClient.syncProjectDocument(controlPlaneProjectId, params),
       isDocumentMissing: (error) =>
@@ -1337,10 +1367,10 @@ function EditorWorkspace({
   }, [audioState, ensurePreviewAudioGraph]);
 
   if (sessionRef.current === null) {
-    const entry = getCatalogProject(window.localStorage, projectId);
+    const entry = getCatalogProject(storage, projectId);
     if (entry === undefined) throw new Error(`unknown project "${projectId}"`);
     const seeds = seedsForCatalogEntry(entry);
-    sessionRef.current = new EditorSession(window.localStorage, seeds.timeline, seeds.visual);
+    sessionRef.current = new EditorSession(storage, seeds.timeline, seeds.visual, {}, writer);
   }
   const session = sessionRef.current;
   useEffect(() => {
@@ -1423,30 +1453,26 @@ function EditorWorkspace({
   useEffect(() => {
     if (audioMigrationRef.current) return;
     audioMigrationRef.current = true;
-    const canonical = loadAudioStateFromProject(
-      window.localStorage,
-      projectId,
-      session.visualProject,
-    );
+    const canonical = loadAudioStateFromProject(storage, projectId, session.visualProject);
     if (session.visualProject.audio === undefined) {
       session.synchronizeVisualProject(withProjectAudio(session.visualProject, canonical));
       setAudioStateRaw(canonical);
       setRevision((revision) => revision + 1);
     } else setAudioStateRaw(canonical);
     setAudioHydrated(true);
-  }, [projectId, session]);
+  }, [projectId, session, storage]);
   const controlPlaneOwnerKey =
     joySession.kind === 'ready'
       ? (joySession.subject ?? 'signed-in')
-      : getStoredMediaToken(window.localStorage) !== undefined
+      : getStoredMediaToken(storage) !== undefined
         ? 'signed-in'
         : 'signed-out';
   const controlPlaneProject = useMemo(
     () =>
-      getOrCreateControlPlaneProjectBinding(window.localStorage, session.visualProject, {
+      getOrCreateControlPlaneProjectBinding(storage, session.visualProject, {
         ownerKey: controlPlaneOwnerKey,
       }),
-    [controlPlaneOwnerKey, session.visualProject],
+    [controlPlaneOwnerKey, session.visualProject, storage],
   );
   const [controlPlaneProjectReady, setControlPlaneProjectReady] = useState(false);
   useEffect(() => {
@@ -1679,7 +1705,7 @@ function EditorWorkspace({
         // not ready" error immediately after opening a project.
         controlPlaneReady:
           controlPlaneProjectReady ||
-          (joySession.kind === 'unknown' && getStoredMediaToken(window.localStorage) !== undefined),
+          (joySession.kind === 'unknown' && getStoredMediaToken(storage) !== undefined),
         project: session.visualProject,
         client: mediaControlPlaneClient,
         originalCache: {
@@ -1691,6 +1717,7 @@ function EditorWorkspace({
       controlPlaneProjectReady,
       joySession.kind,
       session.visualProject,
+      storage,
     ],
   );
   useEffect(() => () => mediaResolver.clear(), [mediaResolver]);
@@ -1717,13 +1744,13 @@ function EditorWorkspace({
     [mediaResolver],
   );
   const exportEditableProject = useCallback(async () => {
-    const entry = getCatalogProject(window.localStorage, projectId);
+    const entry = getCatalogProject(storage, projectId);
     if (entry === undefined) {
       showToast('The current project is no longer in the library.', 'error');
       return;
     }
     try {
-      const pkg = await createProjectPackage(entry, window.localStorage, {
+      const pkg = await createProjectPackage(entry, storage, {
         assetBlobLoader: loadProjectAssetBlob,
       });
       const filename = `${entry.title.replace(/[^a-z0-9._-]+/gi, '-').replace(/^-|-$/g, '') || 'joy-project'}.joyproject.json`;
@@ -1748,7 +1775,7 @@ function EditorWorkspace({
         'error',
       );
     }
-  }, [loadProjectAssetBlob, projectId, showToast]);
+  }, [loadProjectAssetBlob, projectId, showToast, storage]);
   const agentCommandBusRef = useRef<ReturnType<typeof createAgentCommandBus> | null>(null);
   if (agentCommandBusRef.current === null)
     agentCommandBusRef.current = createAgentCommandBus(session, () =>
@@ -3086,32 +3113,26 @@ function EditorWorkspace({
   const undo = useCallback(() => {
     session.undo();
     reconcileSelection();
-    setAudioStateRaw(
-      loadAudioStateFromProject(window.localStorage, projectId, session.visualProject),
-    );
+    setAudioStateRaw(loadAudioStateFromProject(storage, projectId, session.visualProject));
     reconcileWorkerResultOperations();
     setRevision((revision) => revision + 1);
-  }, [projectId, reconcileSelection, reconcileWorkerResultOperations, session]);
+  }, [projectId, reconcileSelection, reconcileWorkerResultOperations, session, storage]);
   const redo = useCallback(() => {
     session.redo();
     reconcileSelection();
-    setAudioStateRaw(
-      loadAudioStateFromProject(window.localStorage, projectId, session.visualProject),
-    );
+    setAudioStateRaw(loadAudioStateFromProject(storage, projectId, session.visualProject));
     reconcileWorkerResultOperations();
     setRevision((revision) => revision + 1);
-  }, [projectId, reconcileSelection, reconcileWorkerResultOperations, session]);
+  }, [projectId, reconcileSelection, reconcileWorkerResultOperations, session, storage]);
   const jumpToHistory = useCallback(
     (sequence: number) => {
       session.jumpToHistory(sequence);
       reconcileSelection();
-      setAudioStateRaw(
-        loadAudioStateFromProject(window.localStorage, projectId, session.visualProject),
-      );
+      setAudioStateRaw(loadAudioStateFromProject(storage, projectId, session.visualProject));
       reconcileWorkerResultOperations();
       setRevision((revision) => revision + 1);
     },
-    [projectId, reconcileSelection, reconcileWorkerResultOperations, session],
+    [projectId, reconcileSelection, reconcileWorkerResultOperations, session, storage],
   );
   const executeAction = useCallback(
     (id: string) => {
@@ -3195,7 +3216,7 @@ function EditorWorkspace({
   );
   const refreshJoySession = useCallback(() => {
     const requestId = ++joySessionRefreshSeqRef.current;
-    void probeJoySession(window.localStorage)
+    void probeJoySession(storage)
       .then((next) => {
         if (requestId !== joySessionRefreshSeqRef.current) {
           if (next.kind === 'ready' && next.avatarObjectUrl !== undefined) {
@@ -3211,7 +3232,7 @@ function EditorWorkspace({
         });
       })
       .catch(() => undefined);
-  }, []);
+  }, [storage]);
   useEffect(() => {
     if (session.recoveryWarnings.length === 0) return;
     showToast(
@@ -3287,7 +3308,7 @@ function EditorWorkspace({
     (api: DockviewApi, mode: EditorViewMode, preset = workspacePresetRef.current) => {
       const layoutKey =
         preset === 'edit' ? dockLayoutKey(mode) : workspacePresetLayoutKey(mode, preset);
-      const saved = window.localStorage.getItem(layoutKey);
+      const saved = storage.getItem(layoutKey);
       let restored = false;
       if (saved !== null) {
         try {
@@ -3296,7 +3317,7 @@ function EditorWorkspace({
           });
           restored = true;
         } catch {
-          window.localStorage.removeItem(layoutKey);
+          storage.removeItem(layoutKey);
         }
       }
       if (!restored) {
@@ -3313,20 +3334,20 @@ function EditorWorkspace({
       }
       ensureDockPanels(api);
       api.getPanel('monitor')?.api.setActive();
-      window.localStorage.setItem(layoutKey, serializeDockLayout(api.toJSON()));
+      storage.setItem(layoutKey, serializeDockLayout(api.toJSON()));
     },
-    [ensureDockPanels],
+    [ensureDockPanels, storage],
   );
 
   const persistUiPreferences = useCallback(
     (next: Partial<{ workspacePreset: WorkspacePresetId; viewMode: EditorViewMode }>) => {
-      const current = loadEditorUiPreferences(window.localStorage);
-      saveEditorUiPreferences(window.localStorage, {
+      const current = loadEditorUiPreferences(storage);
+      saveEditorUiPreferences(storage, {
         ...current,
         ...next,
       });
     },
-    [],
+    [storage],
   );
 
   const switchWorkspacePreset = useCallback(
@@ -3336,7 +3357,7 @@ function EditorWorkspace({
       const current = workspacePresetRef.current;
       const mode = viewModeRef.current;
       if (api !== null && current !== 'custom') {
-        window.localStorage.setItem(
+        storage.setItem(
           workspacePresetLayoutKey(mode, 'custom'),
           serializeDockLayout(api.toJSON()),
         );
@@ -3346,36 +3367,36 @@ function EditorWorkspace({
       persistUiPreferences({ workspacePreset: next });
       if (api !== null) applyDockLayout(api, mode, next);
     },
-    [applyDockLayout, persistUiPreferences],
+    [applyDockLayout, persistUiPreferences, storage],
   );
 
   const resetWorkspace = useCallback(() => {
     for (const mode of ['vertical', 'widescreen'] as const) {
-      window.localStorage.removeItem(dockLayoutKey(mode));
+      storage.removeItem(dockLayoutKey(mode));
       for (const preset of ['enhance', 'audio-captions', 'automate', 'custom'] as const) {
-        window.localStorage.removeItem(workspacePresetLayoutKey(mode, preset));
+        storage.removeItem(workspacePresetLayoutKey(mode, preset));
       }
     }
-    window.localStorage.removeItem(EDITOR_UI_PREFERENCES_KEY);
+    storage.removeItem(EDITOR_UI_PREFERENCES_KEY);
     workspacePresetRef.current = DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset;
     setWorkspacePreset(DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset);
     setViewMode(DEFAULT_EDITOR_UI_PREFERENCES.viewMode);
     viewModeRef.current = DEFAULT_EDITOR_UI_PREFERENCES.viewMode;
     const api = dockviewApiRef.current;
     if (api !== null) applyDockLayout(api, 'vertical', 'edit');
-  }, [applyDockLayout]);
+  }, [applyDockLayout, storage]);
 
   const switchEditorView = useCallback(() => {
     const api = dockviewApiRef.current;
     if (api === null) return;
     const current = viewModeRef.current;
-    window.localStorage.setItem(dockLayoutKey(current), serializeDockLayout(api.toJSON()));
+    storage.setItem(dockLayoutKey(current), serializeDockLayout(api.toJSON()));
     const next: EditorViewMode = current === 'vertical' ? 'widescreen' : 'vertical';
-    saveViewMode(window.localStorage, next);
+    saveViewMode(storage, next);
     persistUiPreferences({ viewMode: next });
     setViewMode(next);
     applyDockLayout(api, next, workspacePresetRef.current);
-  }, [applyDockLayout, persistUiPreferences]);
+  }, [applyDockLayout, persistUiPreferences, storage]);
 
   useEffect(() => {
     if (!paletteOpen) return;
@@ -3408,17 +3429,17 @@ function EditorWorkspace({
     setAccountOpen(false);
     joyAgentEngineClientRef.current?.clear();
     appAgentPresenceStore.clear();
-    await logoutJoySession(window.localStorage);
+    await logoutJoySession(storage);
     refreshJoySession();
-  }, [refreshJoySession]);
+  }, [refreshJoySession, storage]);
   const recordExportEntry = useCallback(
     (entry: ProjectExportProcessEntry) => {
       const next = upsertProjectEntry(exportHistoryRef.current, entry);
-      saveProjectExportHistory(window.localStorage, projectId, next);
+      saveProjectExportHistory(storage, projectId, next);
       exportHistoryRef.current = next;
       setExportHistory(next);
     },
-    [projectId],
+    [projectId, storage],
   );
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -4693,29 +4714,29 @@ function EditorWorkspace({
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
       dockviewApiRef.current = event.api;
-      migrateLegacyDockLayout(window.localStorage);
+      migrateLegacyDockLayout(storage);
       for (const stale of SUPERSEDED_DOCK_LAYOUT_KEYS) {
-        window.localStorage.removeItem(stale);
+        storage.removeItem(stale);
       }
       // Drop the legacy single-key after migration copy.
-      window.localStorage.removeItem(DOCK_LAYOUT_KEY);
+      storage.removeItem(DOCK_LAYOUT_KEY);
 
-      const mode = loadEditorUiPreferences(window.localStorage).viewMode;
-      const preset = loadEditorUiPreferences(window.localStorage).workspacePreset;
+      const mode = loadEditorUiPreferences(storage).viewMode;
+      const preset = loadEditorUiPreferences(storage).workspacePreset;
       setViewMode(mode);
       setWorkspacePreset(preset);
       workspacePresetRef.current = preset;
       applyDockLayout(event.api, mode, preset);
 
       const persistDockLayout = () => {
-        window.localStorage.setItem(
+        storage.setItem(
           dockLayoutKey(viewModeRef.current),
           serializeDockLayout(event.api.toJSON()),
         );
       };
       event.api.onDidLayoutChange(persistDockLayout);
     },
-    [applyDockLayout],
+    [applyDockLayout, storage],
   );
 
   function Panel({ api }: IDockviewPanelProps) {
@@ -5140,11 +5161,7 @@ function EditorWorkspace({
       if (context.session.historyCursorSequence !== expectedRevision)
         throw new Error('The project changed while the Worker result was being prepared');
       const currentProject = context.session.visualProject;
-      const currentAudio = loadAudioStateFromProject(
-        window.localStorage,
-        projectId,
-        currentProject,
-      );
+      const currentAudio = loadAudioStateFromProject(storage, projectId, currentProject);
       if (
         mode === 'replace' &&
         !Object.values(context.session.timelineProject.compositions)
@@ -5910,7 +5927,7 @@ function EditorWorkspace({
                 kind: 'audio',
               });
               const currentAudioState = loadAudioStateFromProject(
-                window.localStorage,
+                storage,
                 projectId,
                 currentProject,
               );
@@ -5974,6 +5991,7 @@ function EditorWorkspace({
           project={visualProject}
           timelineProject={context.timelineProject}
           selectedClipIds={state.selectedIds}
+          storage={context.storage}
           onAddTransition={(t) =>
             context.replaceVisualProject({
               ...visualProject,
@@ -6257,6 +6275,7 @@ function EditorWorkspace({
         <DualLensPanel
           projection={context.dualLensProjection}
           transitions={visualProject.transitions ?? []}
+          storage={context.storage}
           playheadUs={state.playheadUs}
           playing={state.playing}
           selectedClipIds={state.selectedIds}
@@ -6366,6 +6385,7 @@ function EditorWorkspace({
         <AssetLibraryPanel
           projectId={controlPlaneProject.controlPlaneProjectId}
           projectTitle={controlPlaneProject.title}
+          storage={context.storage}
           onAddSticker={(asset) => void context.addStickerFromAsset(asset)}
           onAddToTimeline={addAssetToTimeline}
           onEditWithAi={(asset) => {
@@ -6377,6 +6397,7 @@ function EditorWorkspace({
     if (api.id === 'agent') {
       return (
         <AgentPanel
+          storage={context.storage}
           project={context.timelineProject}
           selectedClipIds={state.selectedIds}
           playheadUs={state.playheadUs}
@@ -6433,11 +6454,17 @@ function EditorWorkspace({
       return (
         <WorkflowsPanel
           session={context.session}
+          storage={context.storage}
           selectedClipIds={state.selectedIds}
           playheadUs={state.playheadUs}
           onRun={async (workflowId, inputs) => {
             try {
-              const outcome = await runWorkflow(context.session, workflowId, inputs);
+              const outcome = await runWorkflow(
+                context.session,
+                workflowId,
+                inputs,
+                context.storage,
+              );
               context.bumpProjectRevision();
               return outcome;
             } catch (error) {
@@ -6452,7 +6479,12 @@ function EditorWorkspace({
           }}
           onResume={async (runId, humanInputs) => {
             try {
-              const outcome = await resumeWorkflow(context.session, runId, humanInputs);
+              const outcome = await resumeWorkflow(
+                context.session,
+                runId,
+                humanInputs,
+                context.storage,
+              );
               context.bumpProjectRevision();
               return outcome;
             } catch (error) {
@@ -6474,6 +6506,7 @@ function EditorWorkspace({
     if (effectivePanelId === 'templates') {
       return withFeatureHub(
         <LibraryPanel
+          storage={context.storage}
           onApplyTemplate={(seeded) => {
             buildContentTemplateTransaction(seeded, {
               session: context.session,
@@ -6991,6 +7024,7 @@ function EditorWorkspace({
           />
           <EditorPanelContext.Provider
             value={{
+              storage,
               state,
               previewVideoFrame,
               clipFrameCache: clipFrameCacheRef.current,
@@ -7095,6 +7129,7 @@ function EditorWorkspace({
               <MotionStudioShell
                 key={motionStudioSceneId}
                 sceneId={motionStudioSceneId}
+                storage={storage}
                 onClose={() => setMotionStudioSceneId(undefined)}
               />
             </Suspense>
@@ -7104,6 +7139,7 @@ function EditorWorkspace({
               <EffectStudioShell
                 key={effectStudioSession.recipeId}
                 recipeId={effectStudioSession.recipeId}
+                storage={storage}
                 canApply={
                   effectStudioSession.objectId !== undefined ||
                   resolveObjectIdForSelection(session.visualProject, state.selectedIds) !==
@@ -7242,6 +7278,7 @@ function MonitorPanelContent({ context }: { readonly context: EditorPanelContext
     seek,
     dispatchProject,
     session,
+    storage,
     bumpProjectRevision,
     showToast,
   } = context;
@@ -7273,7 +7310,7 @@ function MonitorPanelContent({ context }: { readonly context: EditorPanelContext
   const panelRef = useRef<HTMLElement | null>(null);
   const transportRef = useRef<HTMLDivElement | null>(null);
   const initialPreviewPreference = useRef(
-    loadEditorUiPreferences(window.localStorage).monitorPreview ??
+    loadEditorUiPreferences(storage).monitorPreview ??
       DEFAULT_EDITOR_UI_PREFERENCES.monitorPreview!,
   );
   const [previewQuality, setPreviewQuality] = useState<PreviewQuality>(
@@ -7468,12 +7505,12 @@ function MonitorPanelContent({ context }: { readonly context: EditorPanelContext
   }, [previewQuality]);
 
   useEffect(() => {
-    const current = loadEditorUiPreferences(window.localStorage);
-    saveEditorUiPreferences(window.localStorage, {
+    const current = loadEditorUiPreferences(storage);
+    saveEditorUiPreferences(storage, {
       ...current,
       monitorPreview: { quality: previewQuality, renderer: previewRenderer },
     });
-  }, [previewQuality, previewRenderer]);
+  }, [previewQuality, previewRenderer, storage]);
 
   useEffect(() => {
     let cancelled = false;

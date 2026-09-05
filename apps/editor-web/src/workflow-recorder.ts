@@ -18,49 +18,131 @@ export interface WorkflowInputParameter {
 }
 
 const WORKFLOW_STORAGE_PREFIX = 'joy-media.workflow.v1:';
+const WORKFLOW_INDEX_KEY = 'joy-media.workflow.v1:index';
+
+/**
+ * A deliberately narrow durable-store contract. The app root passes its
+ * project-writer guarded adapter; no workflow path is allowed to silently
+ * select raw browser localStorage on its own.
+ */
+export interface WorkflowStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem?(key: string): void;
+  /** Optional for legacy-record discovery; new records use the durable index. */
+  readonly length?: number;
+  key?(index: number): string | null;
+}
+
+export class WorkflowStorageRequiredError extends Error {
+  constructor() {
+    super('A guarded workflow storage adapter is required in the browser.');
+    this.name = 'WorkflowStorageRequiredError';
+  }
+}
 
 const memoryStore = new Map<string, string>();
 
-function storageGetItem(key: string): string | null {
-  if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
-    return window.localStorage.getItem(key);
-  }
-  return memoryStore.get(key) ?? null;
+const serverMemoryStorage: Required<Pick<WorkflowStorage, 'getItem' | 'setItem' | 'removeItem'>> = {
+  getItem: (key) => memoryStore.get(key) ?? null,
+  setItem: (key, value) => memoryStore.set(key, value),
+  removeItem: (key) => memoryStore.delete(key),
+};
+
+/**
+ * Test/SSR has no writable browser origin. Production callers must inject the
+ * root-gated adapter explicitly, so a released tab cannot retain an unguarded
+ * storage reference through a module-level fallback.
+ */
+function requireWorkflowStorage(storage: WorkflowStorage | undefined): WorkflowStorage {
+  if (storage !== undefined) return storage;
+  if (typeof window === 'undefined') return serverMemoryStorage;
+  throw new WorkflowStorageRequiredError();
 }
 
-function storageSetItem(key: string, value: string): void {
-  if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
-    window.localStorage.setItem(key, value);
-  } else {
-    memoryStore.set(key, value);
-  }
+function storageGetItem(storage: WorkflowStorage, key: string): string | null {
+  return storage.getItem(key);
 }
 
-function storageRemoveItem(key: string): void {
-  if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
-    window.localStorage.removeItem(key);
-  } else {
-    memoryStore.delete(key);
-  }
+function storageSetItem(storage: WorkflowStorage, key: string, value: string): void {
+  storage.setItem(key, value);
 }
 
-function storageLength(): number {
-  if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
-    return window.localStorage.length;
+function storageRemoveItem(storage: WorkflowStorage, key: string): void {
+  if (storage.removeItem === undefined) {
+    throw new WorkflowStorageRequiredError();
   }
-  return memoryStore.size;
-}
-
-function storageKey(index: number): string | null {
-  if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
-    return window.localStorage.key(index);
-  }
-  const keys = Array.from(memoryStore.keys());
-  return keys[index] ?? null;
+  storage.removeItem(key);
 }
 
 function workflowKey(workflowId: string): string {
   return `${WORKFLOW_STORAGE_PREFIX}${workflowId}`;
+}
+
+interface WorkflowIndex {
+  readonly version: 1;
+  readonly workflowIds: readonly string[];
+}
+
+function readWorkflowIndex(storage: WorkflowStorage): readonly string[] {
+  const serialized = storageGetItem(storage, WORKFLOW_INDEX_KEY);
+  if (serialized === null) return [];
+  try {
+    const parsed: unknown = JSON.parse(serialized);
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      (parsed as { readonly version?: unknown }).version !== 1 ||
+      !Array.isArray((parsed as { readonly workflowIds?: unknown }).workflowIds)
+    ) {
+      return [];
+    }
+    return (parsed as { readonly workflowIds: readonly unknown[] }).workflowIds.filter(
+      (workflowId): workflowId is string =>
+        typeof workflowId === 'string' && workflowId.startsWith('user.workflows.'),
+    );
+  } catch {
+    return [];
+  }
+}
+
+function writeWorkflowIndex(storage: WorkflowStorage, workflowIds: readonly string[]): void {
+  const index: WorkflowIndex = { version: 1, workflowIds: [...new Set(workflowIds)] };
+  storageSetItem(storage, WORKFLOW_INDEX_KEY, JSON.stringify(index));
+}
+
+function addWorkflowToIndex(storage: WorkflowStorage, workflowId: string): void {
+  const previous = readWorkflowIndex(storage).filter((id) => id !== workflowId);
+  writeWorkflowIndex(storage, [...previous, workflowId]);
+}
+
+function removeWorkflowFromIndex(storage: WorkflowStorage, workflowId: string): void {
+  writeWorkflowIndex(
+    storage,
+    readWorkflowIndex(storage).filter((id) => id !== workflowId),
+  );
+}
+
+/**
+ * Older builds did not keep a workflow index. An injected adapter may expose
+ * read-only enumeration so we can preserve those records without coupling this
+ * module to raw browser storage. The guarded production adapter need not
+ * implement it for all newly-written records to remain discoverable.
+ */
+function discoverLegacyWorkflowIds(storage: WorkflowStorage): readonly string[] {
+  if (storage.length === undefined || storage.key === undefined) return [];
+  const workflowIds: string[] = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (key === undefined || key === null || !key.startsWith(WORKFLOW_STORAGE_PREFIX)) continue;
+    const workflowId = key.slice(WORKFLOW_STORAGE_PREFIX.length);
+    if (workflowId.startsWith('user.workflows.')) workflowIds.push(workflowId);
+  }
+  return workflowIds;
+}
+
+function listedWorkflowIds(storage: WorkflowStorage): readonly string[] {
+  return [...new Set([...readWorkflowIndex(storage), ...discoverLegacyWorkflowIds(storage)])];
 }
 
 /** Derive a kebab-case slug from the plan goal. */
@@ -338,8 +420,13 @@ export function convertPlanToWorkflow(plan: AgentEditPlan): JoyWorkflow {
   };
 }
 
-/** Save a recorded workflow to workspace storage. */
-export function saveWorkflow(_session: unknown, plan: AgentEditPlan): RecordedWorkflow {
+/** Save a recorded workflow to the injected, writer-gated workspace store. */
+export function saveWorkflow(
+  _session: unknown,
+  plan: AgentEditPlan,
+  storage?: WorkflowStorage,
+): RecordedWorkflow {
+  const workflowStorage = requireWorkflowStorage(storage);
   const workflow = convertPlanToWorkflow(plan);
   const recorded: RecordedWorkflow = {
     workflow,
@@ -347,16 +434,25 @@ export function saveWorkflow(_session: unknown, plan: AgentEditPlan): RecordedWo
     savedAt: new Date().toISOString(),
   };
 
+  // Write discovery metadata first. If the guarded writer loses authority
+  // between the two operations, a harmless dangling index entry is skipped by
+  // readers; the inverse order could leave a durable workflow invisible.
+  addWorkflowToIndex(workflowStorage, workflow.id);
   const key = workflowKey(workflow.id);
-  storageSetItem(key, JSON.stringify(recorded));
+  storageSetItem(workflowStorage, key, JSON.stringify(recorded));
 
   return recorded;
 }
 
-/** Load a recorded workflow from workspace storage. */
-export function loadWorkflow(_session: unknown, workflowId: string): RecordedWorkflow | undefined {
+/** Load a recorded workflow from the injected, writer-gated workspace store. */
+export function loadWorkflow(
+  _session: unknown,
+  workflowId: string,
+  storage?: WorkflowStorage,
+): RecordedWorkflow | undefined {
+  const workflowStorage = requireWorkflowStorage(storage);
   const key = workflowKey(workflowId);
-  const raw = storageGetItem(key);
+  const raw = storageGetItem(workflowStorage, key);
   if (raw === null) return undefined;
   try {
     return JSON.parse(raw) as RecordedWorkflow;
@@ -365,28 +461,31 @@ export function loadWorkflow(_session: unknown, workflowId: string): RecordedWor
   }
 }
 
-/** List all recorded workflows from workspace storage. */
-export function listWorkflows(_session: unknown): readonly RecordedWorkflow[] {
+/** List all recorded workflows from the injected, writer-gated workspace store. */
+export function listWorkflows(
+  _session: unknown,
+  storage?: WorkflowStorage,
+): readonly RecordedWorkflow[] {
+  const workflowStorage = requireWorkflowStorage(storage);
   const workflows: RecordedWorkflow[] = [];
-  for (let i = 0; i < storageLength(); i++) {
-    const key = storageKey(i);
-    if (key?.startsWith(WORKFLOW_STORAGE_PREFIX)) {
-      const raw = storageGetItem(key);
-      if (raw !== null) {
-        try {
-          workflows.push(JSON.parse(raw) as RecordedWorkflow);
-        } catch {
-          // Skip invalid entries
-        }
-      }
+  for (const workflowId of listedWorkflowIds(workflowStorage)) {
+    const recorded = loadWorkflow(_session, workflowId, workflowStorage);
+    if (recorded !== undefined) {
+      workflows.push(recorded);
     }
   }
   return workflows;
 }
 
-/** Delete a recorded workflow from workspace storage. */
-export function deleteWorkflow(_session: unknown, workflowId: string): boolean {
+/** Delete a recorded workflow from the injected, writer-gated workspace store. */
+export function deleteWorkflow(
+  _session: unknown,
+  workflowId: string,
+  storage?: WorkflowStorage,
+): boolean {
+  const workflowStorage = requireWorkflowStorage(storage);
   const key = workflowKey(workflowId);
-  storageRemoveItem(key);
+  storageRemoveItem(workflowStorage, key);
+  removeWorkflowFromIndex(workflowStorage, workflowId);
   return true;
 }

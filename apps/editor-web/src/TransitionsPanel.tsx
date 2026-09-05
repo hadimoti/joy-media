@@ -28,6 +28,7 @@ import {
   useTransientPropertyControl,
 } from './components/PropertyControlAdapters.js';
 import { PropertyRow, type PropertyAnimationState } from './components/PropertyRow.js';
+import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 
 const SHADER_CATALOG = listTransitionShaders();
 
@@ -41,6 +42,8 @@ interface TransitionsPanelProps {
   readonly playheadUs?: number;
   readonly onDispatch?: (transaction: VisualObjectTransaction) => void;
   readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
+  /** Root writer-gated adapter; omitted only for non-persistent isolated renders. */
+  readonly storage?: BrowserKeyValueStore;
 }
 
 function transitionBinding(transitionId: string, propertyId: string): PropertyBindingV2 {
@@ -325,25 +328,33 @@ export function TransitionsPanel({
   playheadUs = 0,
   onDispatch,
   showToast,
+  storage,
 }: TransitionsPanelProps) {
   const rootComp = timelineProject.compositions[timelineProject.rootCompositionId];
   const [pendingType, setPendingType] = useState('dissolve');
   const [favorites, setFavorites] = useState<Set<string>>(() =>
-    typeof window === 'undefined' ? new Set() : readTransitionFavorites(window.localStorage),
+    storage === undefined ? new Set() : readTransitionFavorites(storage),
   );
   const [query, setQuery] = useState('');
   const [favoritesOnly, setFavoritesOnly] = useState(false);
 
+  // Dockview may render a cached panel before its writer-gated provider is
+  // attached. Hydrate only when that adapter exists; do not use raw storage
+  // during the transition.
+  useEffect(() => {
+    if (storage !== undefined) setFavorites(readTransitionFavorites(storage));
+  }, [storage]);
+
   const toggleFavorite = useCallback(
     (id: string) => {
-      if (typeof window === 'undefined') return;
+      if (storage === undefined) return;
       try {
-        setFavorites(toggleTransitionFavorite(window.localStorage, favorites, id));
+        setFavorites(toggleTransitionFavorite(storage, favorites, id));
       } catch {
         showToast('Could not save transition favorites in this browser.', 'error');
       }
     },
-    [favorites, showToast],
+    [favorites, showToast, storage],
   );
 
   const availableJunctions = useMemo(() => {

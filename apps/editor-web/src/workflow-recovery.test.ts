@@ -40,15 +40,20 @@ afterEach(() => {
 
 describe('project-bound workflow recovery', () => {
   it('reloads both approvals without rerunning completed nodes and removes the completed run', async () => {
-    const { values } = browserStorage();
+    const { values, storage } = browserStorage();
     const session = makeSession();
     let runner = await import('./workflow-runner.js');
-    const first = await runner.runWorkflow(session, workflowId, { assetId: 'opaque-video' });
+    const first = await runner.runWorkflow(
+      session,
+      workflowId,
+      { assetId: 'opaque-video' },
+      storage,
+    );
     expect(first).toMatchObject({ status: 'waiting_for_input', recovery: 'saved' });
     vi.resetModules();
     runner = await import('./workflow-runner.js');
     const reopened = makeSession();
-    const parked = runner.listParkedWorkflowRuns(reopened)[0]!;
+    const parked = runner.listParkedWorkflowRuns(reopened, storage)[0]!;
     expect(parked.runId).toBe(first.runId);
     const library = createStubFirstPartyLibrary();
     const handlers = Object.fromEntries(
@@ -56,65 +61,76 @@ describe('project-bound workflow recovery', () => {
     );
     runner.setFirstPartyLibraryForTests({ ...library, handlers });
     const payload = parked.request.payload as { candidates: unknown[] };
-    const second = await runner.resumeWorkflow(reopened, parked.runId, {
-      [parked.nodeId]: { candidates: payload.candidates.slice(0, 1) },
-    });
+    const second = await runner.resumeWorkflow(
+      reopened,
+      parked.runId,
+      { [parked.nodeId]: { candidates: payload.candidates.slice(0, 1) } },
+      storage,
+    );
     expect(second).toMatchObject({ status: 'waiting_for_input', nodeId: 'approve-drafts' });
     expect(handlers['analysis.transcribe']).not.toHaveBeenCalled();
     expect(handlers['analysis.hooks']).not.toHaveBeenCalled();
     vi.resetModules();
     runner = await import('./workflow-runner.js');
-    const renderApproval = runner.listParkedWorkflowRuns(reopened)[0]!;
+    const renderApproval = runner.listParkedWorkflowRuns(reopened, storage)[0]!;
     const renderPayload = renderApproval.request.payload as { items: unknown[] };
-    const completed = await runner.resumeWorkflow(reopened, renderApproval.runId, {
-      [renderApproval.nodeId]: { approved: renderPayload.items },
-    });
+    const completed = await runner.resumeWorkflow(
+      reopened,
+      renderApproval.runId,
+      { [renderApproval.nodeId]: { approved: renderPayload.items } },
+      storage,
+    );
     expect(completed).toMatchObject({ status: 'succeeded', outputs: { deferred: true } });
     expect(values.has(runner.PARKED_RUNS_STORAGE_KEY)).toBe(false);
     vi.resetModules();
     runner = await import('./workflow-runner.js');
-    expect(runner.listParkedWorkflowRuns(reopened)).toEqual([]);
-    expect(await runner.resumeWorkflow(reopened, first.runId, {})).toMatchObject({
+    expect(runner.listParkedWorkflowRuns(reopened, storage)).toEqual([]);
+    expect(await runner.resumeWorkflow(reopened, first.runId, {}, storage)).toMatchObject({
       status: 'failed',
     });
   });
 
   it('does not expose or resume another project approval', async () => {
-    browserStorage();
+    const { storage } = browserStorage();
     const runner = await import('./workflow-runner.js');
-    const first = await runner.runWorkflow(makeSession('project-a'), workflowId, {
-      assetId: 'opaque-a',
-    });
+    const first = await runner.runWorkflow(
+      makeSession('project-a'),
+      workflowId,
+      { assetId: 'opaque-a' },
+      storage,
+    );
     const other = makeSession('project-b');
-    expect(runner.listParkedWorkflowRuns(other)).toEqual([]);
-    expect(await runner.resumeWorkflow(other, first.runId, {})).toMatchObject({ status: 'failed' });
-    runner.discardParkedWorkflowRun(other, first.runId);
-    expect(runner.listParkedWorkflowRuns(makeSession('project-a'))).toHaveLength(1);
+    expect(runner.listParkedWorkflowRuns(other, storage)).toEqual([]);
+    expect(await runner.resumeWorkflow(other, first.runId, {}, storage)).toMatchObject({
+      status: 'failed',
+    });
+    runner.discardParkedWorkflowRun(other, first.runId, storage);
+    expect(runner.listParkedWorkflowRuns(makeSession('project-a'), storage)).toHaveLength(1);
   });
 
   it('rejects an approval after the canonical project revision changes', async () => {
-    browserStorage();
+    const { storage } = browserStorage();
     const runner = await import('./workflow-runner.js');
     const session = makeSession();
-    const first = await runner.runWorkflow(session, workflowId, { assetId: 'opaque-a' });
+    const first = await runner.runWorkflow(session, workflowId, { assetId: 'opaque-a' }, storage);
     session.dispatchCompound('Change project', {
       document: { ...session.visualProject, title: 'Changed' },
     });
-    expect(await runner.resumeWorkflow(session, first.runId, {})).toMatchObject({
+    expect(await runner.resumeWorkflow(session, first.runId, {}, storage)).toMatchObject({
       status: 'failed',
       error: expect.stringContaining('Project changed'),
     });
-    runner.discardParkedWorkflowRun(session, first.runId);
-    expect(runner.listParkedWorkflowRuns(session)).toEqual([]);
+    runner.discardParkedWorkflowRun(session, first.runId, storage);
+    expect(runner.listParkedWorkflowRuns(session, storage)).toEqual([]);
   });
 
   it.each(['nodes', 'identity', 'workflow', 'request', 'legacy'])(
     'ignores a malformed or incompatible %s recovery record',
     async (corruption) => {
-      const { values } = browserStorage();
+      const { values, storage } = browserStorage();
       let runner = await import('./workflow-runner.js');
       const session = makeSession();
-      await runner.runWorkflow(session, workflowId, { assetId: 'opaque-a' });
+      await runner.runWorkflow(session, workflowId, { assetId: 'opaque-a' }, storage);
       const key = runner.PARKED_RUNS_STORAGE_KEY;
       const records = JSON.parse(values.get(key)!);
       if (corruption === 'nodes') records[0].checkpoint.nodes = null;
@@ -125,22 +141,22 @@ describe('project-bound workflow recovery', () => {
       values.set(key, JSON.stringify(records));
       vi.resetModules();
       runner = await import('./workflow-runner.js');
-      expect(runner.listParkedWorkflowRuns(session)).toEqual([]);
+      expect(runner.listParkedWorkflowRuns(session, storage)).toEqual([]);
     },
   );
 
   it('restores earlier runs before a new run writes storage and assigns unique identities', async () => {
-    browserStorage();
+    const { storage } = browserStorage();
     const session = makeSession();
     let runner = await import('./workflow-runner.js');
-    const first = await runner.runWorkflow(session, workflowId, { assetId: 'one' });
+    const first = await runner.runWorkflow(session, workflowId, { assetId: 'one' }, storage);
     vi.resetModules();
     runner = await import('./workflow-runner.js');
-    const second = await runner.runWorkflow(session, workflowId, { assetId: 'two' });
+    const second = await runner.runWorkflow(session, workflowId, { assetId: 'two' }, storage);
     expect(first.runId).not.toBe(second.runId);
     vi.resetModules();
     runner = await import('./workflow-runner.js');
-    expect(runner.listParkedWorkflowRuns(session).map((run) => run.runId)).toEqual([
+    expect(runner.listParkedWorkflowRuns(session, storage).map((run) => run.runId)).toEqual([
       first.runId,
       second.runId,
     ]);
@@ -153,17 +169,19 @@ describe('project-bound workflow recovery', () => {
     };
     const runner = await import('./workflow-runner.js');
     const session = makeSession();
-    expect(await runner.runWorkflow(session, workflowId, { assetId: 'one' })).toMatchObject({
+    expect(
+      await runner.runWorkflow(session, workflowId, { assetId: 'one' }, storage),
+    ).toMatchObject({
       status: 'waiting_for_input',
       recovery: 'session-only',
     });
-    expect(runner.listParkedWorkflowRuns(session)).toHaveLength(1);
+    expect(runner.listParkedWorkflowRuns(session, storage)).toHaveLength(1);
   });
 
   it('ignores oversized storage without blocking the editor', async () => {
-    const { values } = browserStorage();
+    const { values, storage } = browserStorage();
     const runner = await import('./workflow-runner.js');
     values.set(runner.PARKED_RUNS_STORAGE_KEY, ' '.repeat(2 * 1024 * 1024 + 1));
-    expect(runner.listParkedWorkflowRuns(makeSession())).toEqual([]);
+    expect(runner.listParkedWorkflowRuns(makeSession(), storage)).toEqual([]);
   });
 });

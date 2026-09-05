@@ -7,6 +7,7 @@ import {
   listWorkflows,
   deleteWorkflow,
   type RecordedWorkflow,
+  type WorkflowStorage,
 } from './workflow-recorder.js';
 import {
   loadFirstPartyWorkflows,
@@ -206,12 +207,14 @@ export function humanInputsForApproval(
 
 export function WorkflowsPanel({
   session,
+  storage,
   selectedClipIds,
   playheadUs,
   onRun,
   onResume,
 }: {
   readonly session: EditorSession;
+  readonly storage: WorkflowStorage;
   readonly selectedClipIds: readonly string[];
   readonly playheadUs: number;
   readonly onRun: (
@@ -223,7 +226,7 @@ export function WorkflowsPanel({
     humanInputs: Record<string, unknown>,
   ) => Promise<WorkflowRunOutcome>;
 }) {
-  const [workflows, setWorkflows] = useState(() => listWorkflows(session));
+  const [workflows, setWorkflows] = useState(() => listWorkflows(session, storage));
   const [tab, setTab] = useState('saved');
   const [runModal, setRunModal] = useState<
     { workflowId: string; parameters: WorkflowInputParameter[] } | undefined
@@ -235,8 +238,8 @@ export function WorkflowsPanel({
   void playheadUs;
 
   const handleDelete = (workflowId: string) => {
-    deleteWorkflow(session, workflowId);
-    setWorkflows(listWorkflows(session));
+    deleteWorkflow(session, workflowId, storage);
+    setWorkflows(listWorkflows(session, storage));
   };
 
   const selectedClip = (() => {
@@ -275,7 +278,7 @@ export function WorkflowsPanel({
 
   useEffect(() => {
     setApproval(undefined);
-    const parked = listParkedWorkflowRuns(session)[0];
+    const parked = listParkedWorkflowRuns(session, storage)[0];
     if (parked === undefined) return;
     const payload = parked.request.payload as { candidates?: readonly unknown[] } | undefined;
     const candidates = payload?.candidates ?? [];
@@ -298,10 +301,10 @@ export function WorkflowsPanel({
         checkpoint: parked.checkpoint,
       }),
     );
-  }, [session]);
+  }, [session, storage]);
 
   function openRunModal(workflowId: string) {
-    const recorded = loadWorkflow(session, workflowId);
+    const recorded = loadWorkflow(session, workflowId, storage);
     let schema: Record<string, unknown>;
     if (recorded !== undefined) {
       schema = extractWorkflowInputs(recorded.workflow.nodes);
@@ -448,7 +451,7 @@ export function WorkflowsPanel({
       : [];
 
   const isEmpty = workflows.length === 0 && systemWorkflows.length === 0;
-  const parkedRuns = listParkedWorkflowRuns(session);
+  const parkedRuns = listParkedWorkflowRuns(session, storage);
   const approvalIsStale =
     approval !== undefined &&
     parkedRuns.find((run) => run.runId === approval.runId)?.baseRevision !==
@@ -473,7 +476,7 @@ export function WorkflowsPanel({
           className="icon-button"
           aria-label="Refresh workflow list"
           title="Refresh workflow list"
-          onClick={() => setWorkflows(listWorkflows(session))}
+          onClick={() => setWorkflows(listWorkflows(session, storage))}
         >
           <RefreshIcon />
         </button>
@@ -503,7 +506,7 @@ export function WorkflowsPanel({
                 <button
                   type="button"
                   onClick={() => {
-                    discardParkedWorkflowRun(session, run.runId);
+                    discardParkedWorkflowRun(session, run.runId, storage);
                     if (approval?.runId === run.runId) setApproval(undefined);
                     setStatusMessage('Saved workflow run discarded. No further steps were run.');
                   }}
