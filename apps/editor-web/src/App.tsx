@@ -169,6 +169,11 @@ import {
   restoreProject as restoreProjectLifecycle,
   trashProject as trashProjectLifecycle,
 } from './project-lifecycle.js';
+import {
+  createProjectPackage,
+  importProjectPackage,
+  parseProjectPackage,
+} from './project-package.js';
 import { withCaptionBurnInNodes } from './caption-burn-in.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
 import { TextPanel } from './TextPanel.js';
@@ -889,6 +894,7 @@ export const EditorPanelContext = createContext<EditorPanelContextValue | undefi
 
 export function App() {
   const storage = window.localStorage;
+  const [projectPackageNotice, setProjectPackageNotice] = useState<string | undefined>(undefined);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(() => {
     const id = loadActiveProjectId(storage);
     if (id === null) return null;
@@ -911,6 +917,47 @@ export function App() {
       setActiveProjectId(entry.id);
     },
     [storage],
+  );
+
+  const importProjectFromFile = useCallback(
+    async (file: File) => {
+      try {
+        const pkg = parseProjectPackage(JSON.parse(await file.text()));
+        const imported = await importProjectPackage(storage, pkg, {
+          assetWriter: async ({ assetId, blob, record }) => {
+            if (record.sha256 === undefined || record.bytes === undefined)
+              throw new Error(
+                `Imported asset “${record.displayName}” is missing integrity metadata.`,
+              );
+            const cache = await originalAssetCachePromise;
+            await cache.put(
+              {
+                assetId,
+                sha256: record.sha256,
+                bytes: record.bytes,
+                mimeType: record.descriptor?.mimeType ?? blob.type,
+              },
+              blob,
+            );
+          },
+        });
+        const missing = imported.missingAssetIds.length;
+        setProjectPackageNotice(
+          missing === 0
+            ? `Imported “${imported.entry.title}” with all media available.`
+            : `Imported “${imported.entry.title}”; ${missing} media ${missing === 1 ? 'file needs' : 'files need'} relinking.`,
+        );
+        openProject(imported.entry);
+        window.setTimeout(() => setProjectPackageNotice(undefined), 0);
+      } catch (error) {
+        setProjectPackageNotice(
+          error instanceof Error
+            ? `Project import failed: ${error.message}`
+            : 'Project import failed.',
+        );
+      }
+    },
+    [openProject, storage],
   );
 
   const createProject = useCallback(
@@ -984,6 +1031,8 @@ export function App() {
       key={activeProjectId}
       projectId={activeProjectId}
       onBackToLibrary={backToLibrary}
+      onImportProjectFile={importProjectFromFile}
+      projectPackageNotice={projectPackageNotice}
     />
   );
 }
@@ -995,9 +1044,13 @@ const CONTROL_PLANE_PROJECT_ENSURE_RETRY_MAX_MS = 60_000;
 function EditorWorkspace({
   projectId,
   onBackToLibrary,
+  onImportProjectFile,
+  projectPackageNotice,
 }: {
   readonly projectId: string;
   readonly onBackToLibrary: () => void;
+  readonly onImportProjectFile: (file: File) => void | Promise<void>;
+  readonly projectPackageNotice?: string | undefined;
 }) {
   const [state, setState] = useState<EditorRuntimeState>({ ...EMPTY_EDITOR_STATE, playing: false });
   /** Shared by Timeline + Dual Lens Time View so clip widths stay one layout. */
@@ -1043,6 +1096,7 @@ function EditorWorkspace({
     () => loadEditorUiPreferences(window.localStorage).processFilter,
   );
   const [accountOpen, setAccountOpen] = useState(false);
+  const projectPackageInputRef = useRef<HTMLInputElement | null>(null);
   const [exportPresetOpen, setExportPresetOpen] = useState(false);
   const [stickerTick, setStickerTick] = useState(0);
   const [joyAgentAttachedAssets, setJoyAgentAttachedAssets] = useState<
@@ -1123,6 +1177,13 @@ function EditorWorkspace({
     }, 4000);
     toastTimersRef.current.set(id, timer);
   }, []);
+  useEffect(() => {
+    if (projectPackageNotice === undefined) return;
+    showToast(
+      projectPackageNotice,
+      projectPackageNotice.startsWith('Project import failed:') ? 'error' : 'success',
+    );
+  }, [projectPackageNotice, showToast]);
   useEffect(() => {
     if (lastExportRef.current !== null) return;
     const entry = exportHistory.find((candidate) => candidate.status === 'completed');
@@ -1700,6 +1761,39 @@ function EditorWorkspace({
     },
     [mediaResolver],
   );
+  const exportEditableProject = useCallback(async () => {
+    const entry = getCatalogProject(window.localStorage, projectId);
+    if (entry === undefined) {
+      showToast('The current project is no longer in the library.', 'error');
+      return;
+    }
+    try {
+      const pkg = await createProjectPackage(entry, window.localStorage, {
+        assetBlobLoader: loadProjectAssetBlob,
+      });
+      const filename = `${entry.title.replace(/[^a-z0-9._-]+/gi, '-').replace(/^-|-$/g, '') || 'joy-project'}.joyproject.json`;
+      triggerBrowserDownload(
+        new Blob([JSON.stringify(pkg, null, 2)], {
+          type: 'application/vnd.joy-media.project+json',
+        }),
+        filename,
+      );
+      const missing = pkg.media.filter((asset) => asset.status === 'missing').length;
+      showToast(
+        missing === 0
+          ? `Editable project package downloaded with all media.`
+          : `Editable project package downloaded; ${missing} media ${missing === 1 ? 'file is' : 'files are'} marked missing.`,
+        missing === 0 ? 'success' : 'info',
+      );
+    } catch (error) {
+      showToast(
+        error instanceof Error
+          ? `Project package export failed: ${error.message}`
+          : 'Project package export failed.',
+        'error',
+      );
+    }
+  }, [loadProjectAssetBlob, projectId, showToast]);
   const agentCommandBusRef = useRef<ReturnType<typeof createAgentCommandBus> | null>(null);
   if (agentCommandBusRef.current === null)
     agentCommandBusRef.current = createAgentCommandBus(session, () =>
@@ -4613,6 +4707,12 @@ function EditorWorkspace({
         case 'file.projects':
           onBackToLibrary();
           break;
+        case 'file.projectImport':
+          projectPackageInputRef.current?.click();
+          break;
+        case 'file.projectExport':
+          void exportEditableProject();
+          break;
         case 'file.export':
           void handleExport();
           break;
@@ -4665,6 +4765,7 @@ function EditorWorkspace({
     },
     [
       activatePanel,
+      exportEditableProject,
       handleExport,
       issueAgentPanelCommand,
       onBackToLibrary,
@@ -6954,6 +7055,17 @@ function EditorWorkspace({
             </section>
           )}
           <video ref={videoRef} className="playback-media" playsInline muted={false} />
+          <input
+            ref={projectPackageInputRef}
+            type="file"
+            accept=".joyproject.json,.json,application/vnd.joy-media.project+json"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.currentTarget.value = '';
+              if (file !== undefined) void onImportProjectFile(file);
+            }}
+          />
           <audio
             ref={replacementAudioRef}
             className="playback-media"
