@@ -1,0 +1,262 @@
+{
+  "schemaVersion": 1,
+  "scope": "Built-in JOY Agent Engine operation boundary",
+  "complete": false,
+  "advertisingRule": "Only status=verified entries with existing source and focused test paths may be model-visible.",
+  "operations": [
+    {
+      "kind": "timeline.trimClip",
+      "status": "verified",
+      "source": "apps/editor-web/src/joy-code-timeline-compiler.ts",
+      "tests": ["apps/editor-web/src/joy-code-timeline-compiler.test.ts"],
+      "surface": "timeline",
+      "preview": "compound-draft",
+      "postconditions": [
+        "canonical compiler accepts the operation",
+        "approved draft remains undoable"
+      ]
+    },
+    {
+      "kind": "timeline.splitClip",
+      "status": "verified",
+      "source": "apps/editor-web/src/joy-code-timeline-compiler.ts",
+      "tests": ["apps/editor-web/src/joy-code-timeline-compiler.test.ts"],
+      "surface": "timeline",
+      "preview": "compound-draft",
+      "postconditions": [
+        "canonical compiler accepts the operation",
+        "approved draft remains undoable"
+      ]
+    },
+    {
+      "kind": "timeline.moveClip",
+      "status": "verified",
+      "source": "apps/editor-web/src/joy-code-timeline-compiler.ts",
+      "tests": ["apps/editor-web/src/joy-code-timeline-compiler.test.ts"],
+      "surface": "timeline",
+      "preview": "compound-draft",
+      "postconditions": [
+        "canonical compiler accepts the operation",
+        "approved draft remains undoable"
+      ]
+    },
+    {
+      "kind": "timeline.removeClip",
+      "status": "verified",
+      "source": "apps/editor-web/src/joy-code-timeline-compiler.ts",
+      "tests": ["apps/editor-web/src/joy-code-timeline-compiler.test.ts"],
+      "surface": "timeline",
+      "preview": "compound-draft",
+      "postconditions": [
+        "canonical compiler accepts the operation",
+        "approved draft remains undoable"
+      ]
+    },
+    {
+      "kind": "timeline.insertExistingAsset",
+      "status": "verified",
+      "source": "apps/editor-web/src/joy-code-timeline-compiler.ts",
+      "tests": ["apps/editor-web/src/joy-code-timeline-compiler.test.ts"],
+      "surface": "timeline",
+      "preview": "compound-draft",
+      "postconditions": [
+        "canonical compiler accepts the operation",
+        "approved draft remains undoable"
+      ]
+    },
+    {
+      "kind": "text.insertTemplate",
+      "status": "verified",
+      "source": "apps/editor-web/src/joy-code-text-operations.ts",
+      "tests": ["apps/editor-web/src/joy-code-text-operations.test.ts"],
+      "surface": "inspector",
+      "preview": "compound-draft",
+      "postconditions": [
+        "canonical compiler accepts the operation",
+        "approved draft remains undoable"
+      ]
+    },
+    {
+      "kind": "text.setContent",
+      "status": "verified",
+      "source": "apps/editor-web/src/joy-code-text-operations.ts",
+      "tests": ["apps/editor-web/src/joy-code-text-operations.test.ts"],
+      "surface": "inspector",
+      "preview": "compound-draft",
+      "postconditions": [
+        "canonical compiler accepts the operation",
+        "approved draft remains undoable"
+      ]
+    },
+    {
+      "kind": "text.setTemplate",
+      "status": "verified",
+      "source": "apps/editor-web/src/joy-code-text-operations.ts",
+      "tests": ["apps/editor-web/src/joy-code-text-operations.test.ts"],
+      "surface": "inspector",
+      "preview": "compound-draft",
+      "postconditions": [
+        "canonical compiler accepts the operation",
+        "approved draft remains undoable"
+      ]
+    },
+    {
+      "kind": "motion.setKeyframe",
+      "status": "verified",
+      "source": "apps/editor-web/src/joy-code-compound-compiler.ts",
+      "tests": ["apps/editor-web/src/joy-code-compound-compiler.test.ts"],
+      "surface": "motion",
+      "preview": "compound-draft",
+      "postconditions": [
+        "canonical compiler accepts the operation",
+        "approved draft remains undoable"
+      ]
+    },
+    {
+      "kind": "motion.removeKeyframe",
+      "status": "verified",
+      "source": "apps/editor-web/src/joy-code-compound-compiler.ts",
+      "tests": ["apps/editor-web/src/joy-code-compound-compiler.test.ts"],
+      "surface": "motion",
+      "preview": "compound-draft",
+      "postconditions": [
+        "canonical compiler accepts the operation",
+        "approved draft remains undoable"
+      ]
+    },
+    {
+      "kind": "caption.setSegmentText",
+      "status": "verified",
+      "source": "apps/editor-web/src/joy-code-caption-operations.ts",
+      "tests": ["apps/editor-web/src/joy-code-caption-operations.test.ts"],
+      "surface": "captions",
+      "preview": "compound-draft",
+      "postconditions": [
+        "canonical compiler accepts the operation",
+        "approved draft remains undoable"
+      ]
+    },
+    {
+      "kind": "caption.setSegmentTiming",
+      "status": "verified",
+      "source": "apps/editor-web/src/joy-code-caption-operations.ts",
+      "tests": ["apps/editor-web/src/joy-code-caption-operations.test.ts"],
+      "surface": "captions",
+      "preview": "compound-draft",
+      "postconditions": [
+        "canonical compiler accepts the operation",
+        "approved draft remains undoable"
+      ]
+    },
+    {
+      "kind": "caption.setTemplate",
+      "status": "verified",
+      "source": "apps/editor-web/src/joy-code-caption-operations.ts",
+      "tests": ["apps/editor-web/src/joy-code-caption-operations.test.ts"],
+      "surface": "captions",
+      "preview": "compound-draft",
+      "postconditions": [
+        "canonical compiler accepts the operation",
+        "approved draft remains undoable"
+      ]
+    },
+    {
+      "kind": "caption.setBurnIn",
+      "status": "verified",
+      "source": "apps/editor-web/src/joy-code-caption-operations.ts",
+      "tests": ["apps/editor-web/src/joy-code-caption-operations.test.ts"],
+      "surface": "captions",
+      "preview": "compound-draft",
+      "postconditions": [
+        "canonical compiler accepts the operation",
+        "approved draft remains undoable"
+      ]
+    },
+    {
+      "kind": "transition.addAtJunction",
+      "status": "verified",
+      "source": "apps/editor-web/src/joy-code-transition-operations.ts",
+      "tests": ["apps/editor-web/src/joy-code-transition-operations.test.ts"],
+      "surface": "transitions",
+      "preview": "compound-draft",
+      "postconditions": [
+        "canonical compiler accepts the operation",
+        "approved draft remains undoable"
+      ]
+    },
+    {
+      "kind": "transition.remove",
+      "status": "verified",
+      "source": "apps/editor-web/src/joy-code-transition-operations.ts",
+      "tests": ["apps/editor-web/src/joy-code-transition-operations.test.ts"],
+      "surface": "transitions",
+      "preview": "compound-draft",
+      "postconditions": [
+        "canonical compiler accepts the operation",
+        "approved draft remains undoable"
+      ]
+    }
+  ],
+  "domainInventory": [
+    {
+      "id": "timeline",
+      "status": "verified",
+      "reason": "Bounded typed proposal operations compile into the canonical compound draft."
+    },
+    {
+      "id": "text",
+      "status": "verified",
+      "reason": "Bounded template/content operations compile into the canonical compound draft."
+    },
+    {
+      "id": "captions",
+      "status": "verified",
+      "reason": "Bounded segment/template/burn-in operations compile into the canonical compound draft."
+    },
+    {
+      "id": "motion-keyframes",
+      "status": "verified",
+      "reason": "Typed keyframe add/remove operations compile through the property boundary."
+    },
+    {
+      "id": "transitions",
+      "status": "verified",
+      "reason": "Allowlisted junction transitions compile through the canonical compound draft."
+    },
+    {
+      "id": "effects",
+      "status": "unsupported",
+      "reason": "No model-visible typed effect operation, target resolver, or end-to-end host acceptance exists yet."
+    },
+    {
+      "id": "audio",
+      "status": "unsupported",
+      "reason": "No model-visible typed audio operation, target resolver, or end-to-end host acceptance exists yet."
+    },
+    {
+      "id": "color",
+      "status": "unsupported",
+      "reason": "No model-visible typed color operation, target resolver, or end-to-end host acceptance exists yet."
+    },
+    {
+      "id": "camera",
+      "status": "unsupported",
+      "reason": "No model-visible typed camera operation, target resolver, or end-to-end host acceptance exists yet."
+    },
+    {
+      "id": "scene-3d",
+      "status": "unsupported",
+      "reason": "No model-visible typed 3D operation, target resolver, or end-to-end host acceptance exists yet."
+    },
+    {
+      "id": "export",
+      "status": "unsupported",
+      "reason": "Export remains a user-controlled delivery action; no agent export authority is advertised."
+    }
+  ],
+  "limitations": [
+    "Verified means the bounded proposal compiler path has source and focused test evidence; it does not claim full-editor parity.",
+    "The current Worker still exposes only context read and proposal validation tools. Applying an edit remains separately approval-gated.",
+    "Rendered-frame, encoded-output, audio, observation, and project-scoped lifecycle verification remain open milestones."
+  ]
+}

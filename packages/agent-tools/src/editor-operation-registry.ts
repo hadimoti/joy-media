@@ -1,47 +1,146 @@
+import {
+  assertJoyEditorOperationDefinitions,
+  type CoverageStatus,
+  type JoyEditorOperationDefinition,
+  type JoyEditorOperationDomain,
+  type JoyEditorOperationSurface,
+  type OperationAccess,
+} from './editor-operation-definition.js';
+import type { JoyCodeOperationKind } from './joy-code-plan.js';
+
 /**
  * Shared semantic inventory for model tools, skills and UI capability checks.
  * Domain compilers remain in their owning packages; this file deliberately
- * contains metadata only and never grants mutation authority.
+ * describes the authority boundary but never grants mutation authority.
  */
-export type JoyEditorOperationAccess =
-  'read' | 'preview' | 'reversible-local' | 'external-job' | 'delivery';
+export { canAdvertiseOperation } from './editor-operation-definition.js';
+export type {
+  CoverageStatus,
+  JoyEditorOperationDefinition,
+  JoyEditorOperationDomain,
+  JoyEditorOperationPolicy,
+  JoyEditorOperationPreview,
+  JoyEditorOperationSurface,
+  OperationAccess,
+  OperationEvidence,
+} from './editor-operation-definition.js';
 
-export type JoyEditorOperationStatus = 'implemented' | 'planned' | 'unavailable';
+/** @deprecated Use OperationAccess. */
+export type JoyEditorOperationAccess = OperationAccess;
+/** @deprecated Use CoverageStatus. */
+export type JoyEditorOperationStatus = CoverageStatus;
 
-export interface JoyEditorOperationDefinition {
-  readonly kind: string;
-  readonly domain:
-    | 'timeline'
-    | 'text'
-    | 'captions'
-    | 'motion'
-    | 'effects'
-    | 'transitions'
-    | 'audio'
-    | 'assets'
-    | 'color'
-    | 'camera'
-    | 'scene-3d'
-    | 'export';
-  readonly surface:
-    | 'timeline'
-    | 'inspector'
-    | 'captions'
-    | 'motion'
-    | 'effects'
-    | 'audio'
-    | 'asset-library'
-    | 'color'
-    | 'scene-3d'
-    | 'program-monitor';
-  readonly access: JoyEditorOperationAccess;
-  readonly status: JoyEditorOperationStatus;
-  readonly description: string;
-  readonly requiredFields: readonly string[];
-  readonly outputRefs: readonly string[];
-}
+type DefinitionSeed = readonly [
+  JoyCodeOperationKind,
+  JoyEditorOperationDomain,
+  JoyEditorOperationSurface,
+  string,
+  readonly string[],
+  readonly string[],
+];
 
-const definitions: readonly JoyEditorOperationDefinition[] = [
+const OPERATION_EVIDENCE: Readonly<
+  Record<JoyCodeOperationKind, JoyEditorOperationDefinition['evidence']>
+> = {
+  'timeline.trimClip': {
+    id: 'joy-code.timeline-compiler',
+    status: 'verified',
+    source: 'apps/editor-web/src/joy-code-timeline-compiler.ts',
+    tests: ['apps/editor-web/src/joy-code-timeline-compiler.test.ts'],
+  },
+  'timeline.splitClip': {
+    id: 'joy-code.timeline-compiler',
+    status: 'verified',
+    source: 'apps/editor-web/src/joy-code-timeline-compiler.ts',
+    tests: ['apps/editor-web/src/joy-code-timeline-compiler.test.ts'],
+  },
+  'timeline.moveClip': {
+    id: 'joy-code.timeline-compiler',
+    status: 'verified',
+    source: 'apps/editor-web/src/joy-code-timeline-compiler.ts',
+    tests: ['apps/editor-web/src/joy-code-timeline-compiler.test.ts'],
+  },
+  'timeline.removeClip': {
+    id: 'joy-code.timeline-compiler',
+    status: 'verified',
+    source: 'apps/editor-web/src/joy-code-timeline-compiler.ts',
+    tests: ['apps/editor-web/src/joy-code-timeline-compiler.test.ts'],
+  },
+  'timeline.insertExistingAsset': {
+    id: 'joy-code.timeline-compiler',
+    status: 'verified',
+    source: 'apps/editor-web/src/joy-code-timeline-compiler.ts',
+    tests: ['apps/editor-web/src/joy-code-timeline-compiler.test.ts'],
+  },
+  'text.insertTemplate': {
+    id: 'joy-code.text-compiler',
+    status: 'verified',
+    source: 'apps/editor-web/src/joy-code-text-operations.ts',
+    tests: ['apps/editor-web/src/joy-code-text-operations.test.ts'],
+  },
+  'text.setContent': {
+    id: 'joy-code.text-compiler',
+    status: 'verified',
+    source: 'apps/editor-web/src/joy-code-text-operations.ts',
+    tests: ['apps/editor-web/src/joy-code-text-operations.test.ts'],
+  },
+  'text.setTemplate': {
+    id: 'joy-code.text-compiler',
+    status: 'verified',
+    source: 'apps/editor-web/src/joy-code-text-operations.ts',
+    tests: ['apps/editor-web/src/joy-code-text-operations.test.ts'],
+  },
+  'motion.setKeyframe': {
+    id: 'joy-code.motion-compound-compiler',
+    status: 'verified',
+    source: 'apps/editor-web/src/joy-code-compound-compiler.ts',
+    tests: ['apps/editor-web/src/joy-code-compound-compiler.test.ts'],
+  },
+  'motion.removeKeyframe': {
+    id: 'joy-code.motion-compound-compiler',
+    status: 'verified',
+    source: 'apps/editor-web/src/joy-code-compound-compiler.ts',
+    tests: ['apps/editor-web/src/joy-code-compound-compiler.test.ts'],
+  },
+  'caption.setSegmentText': {
+    id: 'joy-code.caption-compiler',
+    status: 'verified',
+    source: 'apps/editor-web/src/joy-code-caption-operations.ts',
+    tests: ['apps/editor-web/src/joy-code-caption-operations.test.ts'],
+  },
+  'caption.setSegmentTiming': {
+    id: 'joy-code.caption-compiler',
+    status: 'verified',
+    source: 'apps/editor-web/src/joy-code-caption-operations.ts',
+    tests: ['apps/editor-web/src/joy-code-caption-operations.test.ts'],
+  },
+  'caption.setTemplate': {
+    id: 'joy-code.caption-compiler',
+    status: 'verified',
+    source: 'apps/editor-web/src/joy-code-caption-operations.ts',
+    tests: ['apps/editor-web/src/joy-code-caption-operations.test.ts'],
+  },
+  'caption.setBurnIn': {
+    id: 'joy-code.caption-compiler',
+    status: 'verified',
+    source: 'apps/editor-web/src/joy-code-caption-operations.ts',
+    tests: ['apps/editor-web/src/joy-code-caption-operations.test.ts'],
+  },
+  'transition.addAtJunction': {
+    id: 'joy-code.transition-compiler',
+    status: 'verified',
+    source: 'apps/editor-web/src/joy-code-transition-operations.ts',
+    tests: ['apps/editor-web/src/joy-code-transition-operations.test.ts'],
+  },
+  'transition.remove': {
+    id: 'joy-code.transition-compiler',
+    status: 'verified',
+    source: 'apps/editor-web/src/joy-code-transition-operations.ts',
+    tests: ['apps/editor-web/src/joy-code-transition-operations.test.ts'],
+  },
+};
+
+const seeds = [
   [
     'timeline.trimClip',
     'timeline',
@@ -163,16 +262,28 @@ const definitions: readonly JoyEditorOperationDefinition[] = [
     ['transitionId'],
     [],
   ],
-].map(([kind, domain, surface, description, requiredFields, outputRefs]) => ({
-  kind,
-  domain,
-  surface,
-  access: 'reversible-local' as const,
-  status: 'implemented' as const,
-  description,
-  requiredFields,
-  outputRefs,
-})) as readonly JoyEditorOperationDefinition[];
+] satisfies readonly DefinitionSeed[];
+
+const definitions: readonly JoyEditorOperationDefinition[] = seeds.map(
+  ([kind, domain, surface, description, requiredFields, outputRefs]) => ({
+    kind,
+    domain,
+    surface,
+    access: 'reversible-edit' as const,
+    description,
+    requiredFields,
+    outputRefs,
+    evidence: OPERATION_EVIDENCE[kind],
+    contextSelectors: ['project.timeline', 'project.assets', 'project.visual-document'],
+    targetResolver: 'joy-code-operation-references',
+    prepareAdapter: 'joy-code-compound-compiler',
+    preview: 'compound-draft' as const,
+    policy: 'approval-required' as const,
+    postconditions: ['canonical compiler accepts the operation', 'approved draft remains undoable'],
+  }),
+);
+
+assertJoyEditorOperationDefinitions(definitions);
 
 export const JOY_EDITOR_OPERATION_DEFINITIONS = definitions;
 
@@ -188,7 +299,7 @@ export function listJoyEditorOperations(options?: {
 }): readonly JoyEditorOperationDefinition[] {
   return definitions.filter(
     (definition) =>
-      (options?.status === undefined || definition.status === options.status) &&
+      (options?.status === undefined || definition.evidence.status === options.status) &&
       (options?.domain === undefined || definition.domain === options.domain),
   );
 }

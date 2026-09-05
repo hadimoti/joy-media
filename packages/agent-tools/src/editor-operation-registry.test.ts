@@ -12,15 +12,21 @@ describe('JOY editor operation registry', () => {
     );
   });
 
-  it('describes keyframe operations as reversible local editor work', () => {
+  it('describes keyframe operations as source-backed reversible editor work', () => {
     expect(getJoyEditorOperationDefinition('motion.setKeyframe')).toMatchObject({
-      access: 'reversible-local',
-      status: 'implemented',
+      access: 'reversible-edit',
+      evidence: {
+        status: 'verified',
+        source: 'apps/editor-web/src/joy-code-compound-compiler.ts',
+      },
       requiredFields: expect.arrayContaining(['binding', 'key']),
     });
     expect(getJoyEditorOperationDefinition('motion.removeKeyframe')).toMatchObject({
-      access: 'reversible-local',
-      status: 'implemented',
+      access: 'reversible-edit',
+      evidence: {
+        status: 'verified',
+        source: 'apps/editor-web/src/joy-code-compound-compiler.ts',
+      },
       requiredFields: expect.arrayContaining(['binding', 'timeUs']),
     });
   });

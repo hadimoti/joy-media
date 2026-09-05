@@ -2,14 +2,23 @@ export const PACKAGE_NAME = '@joy-media/agent-tools' as const;
 
 export {
   JOY_EDITOR_OPERATION_DEFINITIONS,
+  canAdvertiseOperation,
   getJoyEditorOperationDefinition,
   listJoyEditorOperations,
 } from './editor-operation-registry.js';
 export type {
+  CoverageStatus,
   JoyEditorOperationAccess,
   JoyEditorOperationDefinition,
+  JoyEditorOperationDomain,
+  JoyEditorOperationPolicy,
+  JoyEditorOperationPreview,
   JoyEditorOperationStatus,
+  JoyEditorOperationSurface,
+  OperationAccess,
+  OperationEvidence,
 } from './editor-operation-registry.js';
+export { assertJoyEditorOperationDefinitions } from './editor-operation-definition.js';
 
 export type {
   ToolDefinition,
