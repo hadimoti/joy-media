@@ -530,6 +530,11 @@ function TimelineClip({
           {rateBadge !== undefined && <span className="timeline-clip-badge">{rateBadge}</span>}
         </span>
       )}
+      {!showChrome && (
+        <span className="timeline-clip-icon timeline-clip-icon--compact" aria-hidden="true">
+          <TimelineElementGlyph kind={elementKind} />
+        </span>
+      )}
     </div>
   );
 }
@@ -2513,6 +2518,13 @@ export function TimelinePanel({
                     setMenu({ x: event.clientX, y: event.clientY, items });
                   }}
                 >
+                  <span
+                    className="timeline-track-kind-icon timeline-track-identity-icon"
+                    title={`${trackName} track`}
+                    aria-hidden="true"
+                  >
+                    <TimelineTrackKindIcon kind={kind} />
+                  </span>
                   <div className="timeline-track-label">
                     <span className="track-code" dir="ltr">
                       {professionalTrackCode(track.family, track.familyIndex)}

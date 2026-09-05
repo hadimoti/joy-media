@@ -3375,6 +3375,22 @@ label {
   width: 0.85rem;
   height: 0.85rem;
 }
+.timeline-clip-icon--compact {
+  position: absolute;
+  inset-inline-start: 0.32rem;
+  top: 50%;
+  z-index: 2;
+  width: 0.8rem;
+  height: 0.8rem;
+  transform: translateY(-50%);
+  color: var(--joy-text);
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 58%));
+}
+.timeline-clip-icon--compact .png-mask-icon,
+.timeline-clip-icon--compact svg {
+  width: 0.76rem;
+  height: 0.76rem;
+}
 .timeline-clip--audio .timeline-clip-chrome,
 .timeline-clip--voice .timeline-clip-chrome {
   align-items: flex-start;
@@ -3518,9 +3534,25 @@ label {
   overflow: visible;
 }
 .timeline-track-header .timeline-track-label {
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   padding-inline: 0.35rem;
   box-sizing: border-box;
+}
+.timeline-track-identity-icon {
+  position: relative;
+  z-index: 1;
+  width: 1.2rem;
+  min-width: 1.2rem;
+  height: 1.2rem;
+  color: var(--joy-text);
+  opacity: 0.92;
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 42%));
+}
+.timeline-track-identity-icon svg,
+.timeline-track-identity-icon .png-mask-icon {
+  width: 1rem;
+  height: 1rem;
 }
 .timeline-track-controls {
   position: absolute;

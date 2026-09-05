@@ -191,17 +191,18 @@ function TrackHeaderChrome({
 
   return (
     <>
+      {header !== undefined && (
+        <span
+          className="timeline-track-kind-icon timeline-track-identity-icon"
+          title={`${header.kind === 'scene3d' ? '3D Scene' : `${header.kind[0]?.toUpperCase() ?? ''}${header.kind.slice(1)}`} track`}
+          aria-hidden="true"
+        >
+          <ItemGlyph icon={header.kind} />
+        </span>
+      )}
       <div className="timeline-track-label">{label}</div>
-      <div className="timeline-track-controls" aria-label={`${trackId} track controls`}>
-        {header !== undefined && (
-          <span
-            className="timeline-track-kind-icon"
-            title={`${header.kind === 'scene3d' ? '3D Scene' : `${header.kind[0]?.toUpperCase() ?? ''}${header.kind.slice(1)}`} track`}
-          >
-            <ItemGlyph icon={header.kind} />
-          </span>
-        )}
-        {controls !== undefined && (
+      {controls !== undefined && (
+        <div className="timeline-track-controls" aria-label={`${trackId} track controls`}>
           <>
             <button
               type="button"
@@ -229,8 +230,8 @@ function TrackHeaderChrome({
               <SoloIcon />
             </button>
           </>
-        )}
-      </div>
+        </div>
+      )}
     </>
   );
 }
@@ -292,6 +293,11 @@ function InspectClip({
           </span>
           <span className="timeline-clip-label">{item.label}</span>
           {showDuration && <span className="timeline-clip-duration">{durationLabel}</span>}
+        </span>
+      )}
+      {!showChrome && (
+        <span className="timeline-clip-icon timeline-clip-icon--compact" aria-hidden="true">
+          <TimelineElementGlyph kind={elementKind} />
         </span>
       )}
     </button>
