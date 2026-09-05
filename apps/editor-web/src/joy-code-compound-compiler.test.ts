@@ -36,7 +36,7 @@ describe('Joy Code compound compiler', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.baseRevision).toBe('rev-1');
-    expect(result.proposalHash).toMatch(/^joy-code-proposal-[0-9a-f]+$/);
+    expect(result.proposalHash).toMatch(/^joy-code-proposal-[0-9a-f]{64}$/);
     expect(result.document.visualObjects['text-clean-title-compound-1-0']).toBeDefined();
     expect(result.document.captionDocuments['captions-fa']?.styleRef).toBe('joy-rtl-classic');
     expect(result.document.pluginData['joy.captions.burnIn']).toBe(true);

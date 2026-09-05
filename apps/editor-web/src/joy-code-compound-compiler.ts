@@ -11,6 +11,7 @@ import {
   applyPropertyAnimationCommand,
   readLegacyPropertyAnimation,
 } from '@joy-media/property-system';
+import { canonicalJson, sha256Hex } from '@joy-media/workflow-engine';
 import { compileJoyCodeTimelineOperations } from './joy-code-timeline-compiler.js';
 import { compileJoyCodeTextOperation } from './joy-code-text-operations.js';
 import { compileJoyCodeCaptionOperation } from './joy-code-caption-operations.js';
@@ -323,7 +324,13 @@ export function compileJoyCodeCompoundDraft(
   const draft: JoyCodeCompoundDraft = {
     planId: input.planId,
     baseRevision: input.baseRevision,
-    proposalHash: `joy-code-proposal-${stableHash(JSON.stringify(input.operations))}`,
+    proposalHash: `joy-code-proposal-${sha256Hex(
+      canonicalJson({
+        version: 1,
+        baseRevision: input.baseRevision,
+        operations: input.operations,
+      }),
+    )}`,
     timeline:
       commands.length === 0 ? undefined : { label: `Joy Code plan ${input.planId}`, commands },
     document,
@@ -332,13 +339,4 @@ export function compileJoyCodeCompoundDraft(
     requiresManualApproval: true,
   };
   return { ok: true, ...draft };
-}
-
-function stableHash(value: string): string {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0');
 }
