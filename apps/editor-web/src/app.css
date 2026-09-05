@@ -7891,6 +7891,9 @@ label {
   min-height: 0;
   flex-direction: column;
 }
+.joy-code-composer {
+  position: relative;
+}
 .joy-code-history {
   min-height: 0;
   overflow: auto;
@@ -8027,6 +8030,13 @@ label {
 }
 .joy-code-messages.is-empty .joy-code-welcome {
   margin: 0;
+}
+.joy-code-composer.is-edit .joy-code-messages.is-empty .joy-code-welcome {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(calc(100% - 1.3rem), 23rem);
+  transform: translate(-50%, -50%);
 }
 .joy-code-avatar {
   display: inline-grid;
