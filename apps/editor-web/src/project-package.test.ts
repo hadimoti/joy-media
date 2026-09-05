@@ -133,4 +133,22 @@ describe('portable project packages', () => {
     ).rejects.toThrow('Project name cannot be empty');
     expect(getCatalogProject(storage, entry.id)).toMatchObject({ title: 'Source project' });
   });
+
+  it('validates replacement documents before removing the existing project', async () => {
+    const storage = memoryStorage();
+    const entry = createEntry(storage);
+    const pkg = await createProjectPackage(entry, storage);
+    const malformed = parseProjectPackage({
+      ...pkg,
+      documents: {
+        ...pkg.documents,
+        visual: { ...pkg.documents.visual, schemaVersion: 99 },
+      },
+    });
+
+    await expect(
+      importProjectPackage(storage, malformed, { collision: 'replace' }),
+    ).rejects.toThrow('visual.schemaVersion: schemaVersion must be 1');
+    expect(getCatalogProject(storage, entry.id)).toMatchObject({ title: 'Source project' });
+  });
 });

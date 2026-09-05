@@ -6,6 +6,11 @@ import type {
   SpikeProject,
   WorkflowGraphV2,
 } from '@joy-media/project-schema';
+import {
+  validateJoyProjectV1,
+  validateSpikeProject,
+  validateWorkflowGraph,
+} from '@joy-media/project-schema';
 import { EditorSession } from './editor-session.js';
 import {
   getCatalogProject,
@@ -242,6 +247,11 @@ export async function importProjectPackage(
     pkg.documents.artifacts === undefined
       ? undefined
       : (remapJson(pkg.documents.artifacts, replacements) as ArtifactStore);
+  // Validate every document before any replacement purge or private-cache write.
+  // EditorSession performs the same checks while persisting, but doing them at
+  // this boundary keeps collision:'replace' non-destructive for malformed
+  // packages (including documents that parse as JSON but violate their schema).
+  assertImportedDocumentsValid(timeline, visual, graph);
   const entry: ProjectCatalogEntry = {
     id,
     title: visual.title,
@@ -274,6 +284,28 @@ export async function importProjectPackage(
     assetIdMap,
     ...(replacedProjectId === undefined ? {} : { replacedProjectId }),
   };
+}
+
+function assertImportedDocumentsValid(
+  timeline: SpikeProject,
+  visual: JoyProjectV1,
+  graph: WorkflowGraphV2 | undefined,
+): void {
+  const diagnostics = [
+    ...validateSpikeProject(timeline).map((diagnostic) => ({
+      ...diagnostic,
+      document: 'timeline',
+    })),
+    ...validateJoyProjectV1(visual).map((diagnostic) => ({ ...diagnostic, document: 'visual' })),
+    ...(graph === undefined
+      ? []
+      : validateWorkflowGraph(graph, 'graph').map((diagnostic) => ({
+          ...diagnostic,
+          document: 'graph',
+        }))),
+  ];
+  const first = diagnostics[0];
+  if (first !== undefined) throw new Error(`${first.document}.${first.path}: ${first.message}`);
 }
 
 function requireTitle(title: string): string {
