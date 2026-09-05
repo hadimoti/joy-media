@@ -1,4 +1,5 @@
 import type { JoyCodeOperationKind } from './joy-code-plan.js';
+import type { JsonSchema } from './types.js';
 
 /**
  * An operation definition describes the narrow, canonical action boundary that
@@ -53,6 +54,18 @@ export type JoyEditorOperationSurface =
 export type JoyEditorOperationPreview = 'none' | 'compound-draft';
 export type JoyEditorOperationPolicy = 'read-only' | 'approval-required' | 'consent-required';
 
+/**
+ * The strict JSON Schema object supplied to a model for one canonical editor
+ * operation. Runtime validation remains the authority; this schema prevents
+ * the model-facing catalog from silently widening or renaming an operation.
+ */
+export type JoyEditorOperationModelInputSchema = JsonSchema & {
+  readonly type: 'object';
+  readonly properties: Readonly<Record<string, JsonSchema>>;
+  readonly required: readonly string[];
+  readonly additionalProperties: false;
+};
+
 export interface JoyEditorOperationDefinition {
   readonly kind: JoyCodeOperationKind;
   readonly domain: JoyEditorOperationDomain;
@@ -60,6 +73,8 @@ export interface JoyEditorOperationDefinition {
   readonly access: OperationAccess;
   readonly description: string;
   readonly requiredFields: readonly string[];
+  /** Strict, model-visible JSON Schema for this exact operation kind. */
+  readonly modelInputSchema: JoyEditorOperationModelInputSchema;
   readonly outputRefs: readonly string[];
   readonly evidence: OperationEvidence;
   /** Bounded project data needed before the target can be resolved. */
@@ -93,9 +108,39 @@ export function assertJoyEditorOperationDefinitions(
       throw new Error(`verified operation requires source and test evidence: ${definition.kind}`);
     if (definition.requiredFields.length === 0)
       throw new Error(`operation requires an explicit input shape: ${definition.kind}`);
+    assertModelInputSchema(definition);
     if (definition.contextSelectors.length === 0 || definition.targetResolver.length === 0)
       throw new Error(`operation requires a bounded target resolver: ${definition.kind}`);
     if (definition.prepareAdapter.length === 0 || definition.postconditions.length === 0)
       throw new Error(`operation requires preparation and postconditions: ${definition.kind}`);
   }
+}
+
+function assertModelInputSchema(definition: JoyEditorOperationDefinition): void {
+  const schema = definition.modelInputSchema;
+  if (
+    !isRecord(schema) ||
+    schema.type !== 'object' ||
+    schema.additionalProperties !== false ||
+    !isRecord(schema.properties) ||
+    !isStringArray(schema.required)
+  )
+    throw new Error(`operation requires a strict model input schema: ${definition.kind}`);
+
+  const kindSchema = schema.properties.kind;
+  if (!isRecord(kindSchema) || kindSchema.const !== definition.kind)
+    throw new Error(`model input schema kind must match operation: ${definition.kind}`);
+
+  for (const field of ['id', 'dependsOn', 'kind', ...definition.requiredFields]) {
+    if (!schema.required.includes(field) || !(field in schema.properties))
+      throw new Error(`model input schema missing required field: ${definition.kind}.${field}`);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }

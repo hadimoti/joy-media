@@ -1,6 +1,6 @@
 import {
-  canAdvertiseOperation,
   JOY_EDITOR_OPERATION_DEFINITIONS,
+  listModelVisibleJoyEditorOperationDefinitions,
   type JoyEditorOperationDefinition,
 } from '@joy-media/agent-tools';
 
@@ -20,13 +20,13 @@ export interface ModelVisibleJoyEditorOperation {
 export function listModelVisibleJoyEditorOperations(
   definitions: readonly JoyEditorOperationDefinition[] = JOY_EDITOR_OPERATION_DEFINITIONS,
 ): readonly ModelVisibleJoyEditorOperation[] {
-  return definitions
-    .filter((definition) => canAdvertiseOperation(definition.evidence))
-    .map(({ kind, surface, description, requiredFields, outputRefs }) => ({
+  return listModelVisibleJoyEditorOperationDefinitions(definitions).map(
+    ({ kind, surface, description, requiredFields, outputRefs }) => ({
       kind,
       surface,
       description,
       requiredFields,
       outputRefs,
-    }));
+    }),
+  );
 }

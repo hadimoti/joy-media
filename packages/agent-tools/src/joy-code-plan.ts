@@ -69,6 +69,12 @@ export interface JoyCodeValidationOptions {
   readonly textTemplateIds: readonly string[];
   readonly captionTemplateIds: readonly string[];
   readonly transitionIds: readonly string[];
+  /**
+   * Optional model-facing capability subset. The canonical operation allowlist
+   * remains the default so server-owned proposal validation stays backwards
+   * compatible while runtimes can reject operations they did not advertise.
+   */
+  readonly allowedOperationKinds?: readonly JoyCodeOperationKind[];
   readonly allowedModelIds?: readonly string[];
   readonly consentVersion?: string;
 }
@@ -506,6 +512,16 @@ function parseOperation(
     !JOY_CODE_OPERATION_KINDS.includes(kind as JoyCodeOperationKind)
   ) {
     error(errors, 'invalid-operation-kind', 'Operation kind is not allowlisted', path + '.kind');
+    return undefined;
+  }
+  const allowedOperationKinds = options.allowedOperationKinds ?? JOY_CODE_OPERATION_KINDS;
+  if (!allowedOperationKinds.includes(kind as JoyCodeOperationKind)) {
+    error(
+      errors,
+      'operation-not-model-visible',
+      'Operation kind was not advertised to the model for this request',
+      path + '.kind',
+    );
     return undefined;
   }
   if (id === undefined || dependsOn === undefined) return undefined;

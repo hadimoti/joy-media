@@ -1,8 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as agentTools from '@joy-media/agent-tools';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import { INITIAL_EDITOR_PROJECT } from '../editor-project.js';
 import { compileJoyCodeCompoundDraft } from '../joy-code-compound-compiler.js';
-import { runBoundedToolExchange, validateBrowserProposal } from './bounded-tool-loop.js';
+import {
+  BROWSER_AGENT_TOOLS,
+  createBrowserAgentTools,
+  runBoundedToolExchange,
+  validateBrowserProposal,
+} from './bounded-tool-loop.js';
+import { listModelVisibleJoyEditorOperations } from './editor-operation-registry.js';
 
 const proposal = {
   summary: 'Move clip',
@@ -40,6 +47,51 @@ const lastResult = (messages: readonly unknown[]) =>
   JSON.parse((messages.at(-1) as { content: string }).content);
 
 describe('mounted Worker bounded semantic tool exchange', () => {
+  it('advertises the package-generated schema for exactly the displayed operation kinds', () => {
+    const proposalTool = BROWSER_AGENT_TOOLS.find(
+      (tool) => tool.function.name === 'validate_proposal',
+    );
+    expect(proposalTool).toBeDefined();
+    const parameters = proposalTool?.function.parameters;
+    if (parameters === undefined) throw new Error('validate_proposal tool is missing parameters');
+    expect(parameters).toEqual(agentTools.createModelVisibleJoyCodeProposalParameters());
+    expect(parameters).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        operations: {
+          type: 'array',
+          items: {
+            oneOf: listModelVisibleJoyEditorOperations().map(({ kind }) =>
+              expect.objectContaining({
+                properties: expect.objectContaining({ kind: { const: kind } }),
+              }),
+            ),
+          },
+        },
+      },
+    });
+  });
+
+  it('withholds validation when no verified operation schema is available', () => {
+    expect(createBrowserAgentTools(undefined).map((tool) => tool.function.name)).toEqual([
+      'read_project_context',
+    ]);
+  });
+
+  it('rejects a canonical operation when the model-visible registry no longer allows it', () => {
+    expect(validateBrowserProposal(proposal)).toEqual(proposal);
+    const visibleKinds = vi
+      .spyOn(agentTools, 'listModelVisibleJoyCodeOperationKinds')
+      .mockReturnValue(['timeline.trimClip']);
+    try {
+      expect(() => validateBrowserProposal(proposal)).toThrow('invalid proposal operations');
+      expect(visibleKinds).toHaveBeenCalled();
+    } finally {
+      visibleKinds.mockRestore();
+    }
+  });
+
   it('feeds context to the model, repairs an unknown clip, stages and binds its final decision', async () => {
     let count = 0;
     const staged: unknown[] = [];

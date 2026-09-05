@@ -3,6 +3,7 @@ import {
   assertJoyEditorOperationDefinitions,
   canAdvertiseOperation,
   type JoyEditorOperationDefinition,
+  type JoyEditorOperationModelInputSchema,
 } from './editor-operation-definition.js';
 
 const verifiedEvidence = {
@@ -10,6 +11,31 @@ const verifiedEvidence = {
   status: 'verified' as const,
   source: 'packages/example/src/operation.ts',
   tests: ['packages/example/src/operation.test.ts'],
+};
+
+const modelInputSchema: JoyEditorOperationModelInputSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    dependsOn: { type: 'array', items: { type: 'string' } },
+    kind: { const: 'timeline.trimClip' },
+    compositionId: { type: 'string' },
+    trackId: { type: 'string' },
+    clipId: { type: 'string' },
+    newStartUs: { type: 'integer', minimum: 0 },
+    newEndUs: { type: 'integer', minimum: 1 },
+  },
+  required: [
+    'id',
+    'dependsOn',
+    'kind',
+    'compositionId',
+    'trackId',
+    'clipId',
+    'newStartUs',
+    'newEndUs',
+  ],
+  additionalProperties: false,
 };
 
 const definition: JoyEditorOperationDefinition = {
@@ -27,6 +53,7 @@ const definition: JoyEditorOperationDefinition = {
   preview: 'compound-draft',
   policy: 'approval-required',
   postconditions: ['clip range remains valid'],
+  modelInputSchema,
 };
 
 describe('JOY editor operation definitions', () => {
@@ -50,5 +77,36 @@ describe('JOY editor operation definitions', () => {
         },
       ]),
     ).toThrow('verified operation requires source and test evidence');
+  });
+
+  it('rejects a model input schema whose kind can drift from its definition', () => {
+    expect(() =>
+      assertJoyEditorOperationDefinitions([
+        {
+          ...definition,
+          modelInputSchema: {
+            ...modelInputSchema,
+            properties: {
+              ...modelInputSchema.properties,
+              kind: { const: 'timeline.moveClip' },
+            },
+          },
+        } as unknown as JoyEditorOperationDefinition,
+      ]),
+    ).toThrow('model input schema kind must match operation');
+  });
+
+  it('rejects a model input schema that omits a declared operation input', () => {
+    expect(() =>
+      assertJoyEditorOperationDefinitions([
+        {
+          ...definition,
+          modelInputSchema: {
+            ...modelInputSchema,
+            required: ['id', 'dependsOn', 'kind', 'compositionId'],
+          },
+        } as unknown as JoyEditorOperationDefinition,
+      ]),
+    ).toThrow('model input schema missing required field: timeline.trimClip.trackId');
   });
 });

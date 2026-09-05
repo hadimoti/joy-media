@@ -1,4 +1,9 @@
-import { validateJoyCodeModelPlan, type JoyCodePlanOperationV1 } from '@joy-media/agent-tools';
+import {
+  createModelVisibleJoyCodeProposalParameters,
+  listModelVisibleJoyCodeOperationKinds,
+  validateJoyCodeModelPlan,
+  type JoyCodePlanOperationV1,
+} from '@joy-media/agent-tools';
 import { JOY_CAPTION_TEMPLATES } from '@joy-media/captions-core';
 import { TEXT_TEMPLATES } from '../text-template-catalog.js';
 import { resolveJoyCodeOperationReferences } from '../joy-code-operation-references.js';
@@ -125,6 +130,7 @@ export function validateBrowserProposal(value: unknown) {
       requiresHumanDecision: [],
     },
     {
+      allowedOperationKinds: listModelVisibleJoyCodeOperationKinds(),
       textTemplateIds: TEXT_TEMPLATES.map((template) => template.id),
       captionTemplateIds: JOY_CAPTION_TEMPLATES.map((template) => template.id),
       transitionIds: ['dissolve', 'wipe', 'slide'],
@@ -135,351 +141,44 @@ export function validateBrowserProposal(value: unknown) {
   return { summary: result.value.summary.slice(0, 512), operations: result.value.operations };
 }
 
-const operationSchemas = [
-  {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-      dependsOn: { type: 'array', items: { type: 'string' } },
-      kind: { const: 'timeline.trimClip' },
-      compositionId: { type: 'string' },
-      trackId: { type: 'string' },
-      clipId: { type: 'string' },
-      newStartUs: { type: 'integer', minimum: 0 },
-      newEndUs: { type: 'integer', minimum: 1 },
-    },
-    required: [
-      'id',
-      'dependsOn',
-      'kind',
-      'compositionId',
-      'trackId',
-      'clipId',
-      'newStartUs',
-      'newEndUs',
-    ],
-    additionalProperties: false,
+const READ_PROJECT_CONTEXT_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'read_project_context',
+    description: 'Read the bounded project snapshot and supported catalogs.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
   },
-  {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-      dependsOn: { type: 'array', items: { type: 'string' } },
-      kind: { const: 'timeline.splitClip' },
-      compositionId: { type: 'string' },
-      trackId: { type: 'string' },
-      clipId: { type: 'string' },
-      atUs: { type: 'integer', minimum: 1 },
-    },
-    required: ['id', 'dependsOn', 'kind', 'compositionId', 'trackId', 'clipId', 'atUs'],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-      dependsOn: { type: 'array', items: { type: 'string' } },
-      kind: { const: 'timeline.moveClip' },
-      compositionId: { type: 'string' },
-      sourceTrackId: { type: 'string' },
-      targetTrackId: { type: 'string' },
-      clipId: { type: 'string' },
-      newStartUs: { type: 'integer', minimum: 0 },
-    },
-    required: [
-      'id',
-      'dependsOn',
-      'kind',
-      'compositionId',
-      'sourceTrackId',
-      'targetTrackId',
-      'clipId',
-      'newStartUs',
-    ],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-      dependsOn: { type: 'array', items: { type: 'string' } },
-      kind: { const: 'timeline.removeClip' },
-      compositionId: { type: 'string' },
-      trackId: { type: 'string' },
-      clipId: { type: 'string' },
-    },
-    required: ['id', 'dependsOn', 'kind', 'compositionId', 'trackId', 'clipId'],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-      dependsOn: { type: 'array', items: { type: 'string' } },
-      kind: { const: 'timeline.insertExistingAsset' },
-      compositionId: { type: 'string' },
-      targetTrackId: { type: 'string' },
-      assetId: { type: 'string' },
-      startUs: { type: 'integer', minimum: 0 },
-      durationUs: { type: 'integer', minimum: 1 },
-    },
-    required: [
-      'id',
-      'dependsOn',
-      'kind',
-      'compositionId',
-      'targetTrackId',
-      'assetId',
-      'startUs',
-      'durationUs',
-    ],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-      dependsOn: { type: 'array', items: { type: 'string' } },
-      kind: { const: 'text.setContent' },
-      objectId: { type: 'string' },
-      content: { type: 'string', minLength: 1, maxLength: 500 },
-    },
-    required: ['id', 'dependsOn', 'kind', 'objectId', 'content'],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-      dependsOn: { type: 'array', items: { type: 'string' } },
-      kind: { const: 'motion.setKeyframe' },
-      binding: {
-        type: 'object',
-        properties: {
-          ownerKind: { type: 'string' },
-          ownerId: { type: 'string' },
-          ownerRef: {
-            type: 'object',
-            properties: { kind: { const: 'visual-object' }, ref: { type: 'string' } },
-            required: ['kind', 'ref'],
-            additionalProperties: false,
-          },
-          propertyId: { type: 'string' },
-          timeDomain: { type: 'string' },
-        },
-        required: ['ownerKind', 'propertyId', 'timeDomain'],
-        oneOf: [{ required: ['ownerId'] }, { required: ['ownerRef'] }],
-        additionalProperties: false,
-      },
-      key: {
-        type: 'object',
-        properties: {
-          kind: { enum: ['scalar', 'angle', 'hue'] },
-          timeUs: { type: 'integer', minimum: 0 },
-          value: { type: 'number' },
-          interpolation: { enum: ['hold', 'linear', 'eased', 'bezier'] },
-          bezier: {
-            type: 'object',
-            properties: {
-              x1: { type: 'number' },
-              y1: { type: 'number' },
-              x2: { type: 'number' },
-              y2: { type: 'number' },
-            },
-            required: ['x1', 'y1', 'x2', 'y2'],
-            additionalProperties: false,
-          },
-        },
-        required: ['kind', 'timeUs', 'value', 'interpolation'],
-        additionalProperties: false,
-      },
-    },
-    required: ['id', 'dependsOn', 'kind', 'binding', 'key'],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-      dependsOn: { type: 'array', items: { type: 'string' } },
-      kind: { const: 'motion.removeKeyframe' },
-      binding: {
-        type: 'object',
-        properties: {
-          ownerKind: { type: 'string' },
-          ownerId: { type: 'string' },
-          ownerRef: {
-            type: 'object',
-            properties: { kind: { const: 'visual-object' }, ref: { type: 'string' } },
-            required: ['kind', 'ref'],
-            additionalProperties: false,
-          },
-          propertyId: { type: 'string' },
-          timeDomain: { type: 'string' },
-        },
-        required: ['ownerKind', 'propertyId', 'timeDomain'],
-        oneOf: [{ required: ['ownerId'] }, { required: ['ownerRef'] }],
-        additionalProperties: false,
-      },
-      timeUs: { type: 'integer', minimum: 0 },
-    },
-    required: ['id', 'dependsOn', 'kind', 'binding', 'timeUs'],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-      dependsOn: { type: 'array', items: { type: 'string' } },
-      kind: { const: 'text.insertTemplate' },
-      templateId: { type: 'string' },
-      content: { type: 'string', minLength: 1, maxLength: 500 },
-      startUs: { type: 'integer', minimum: 0 },
-      durationUs: { type: 'integer', minimum: 1 },
-      placementPreset: { enum: ['center', 'top', 'bottom', 'lower-third'] },
-      outputRef: {
-        type: 'object',
-        properties: { kind: { const: 'visual-object' }, ref: { type: 'string' } },
-        required: ['kind', 'ref'],
-        additionalProperties: false,
-      },
-    },
-    required: [
-      'id',
-      'dependsOn',
-      'kind',
-      'templateId',
-      'content',
-      'startUs',
-      'durationUs',
-      'placementPreset',
-    ],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-      dependsOn: { type: 'array', items: { type: 'string' } },
-      kind: { const: 'text.setTemplate' },
-      objectId: { type: 'string' },
-      templateId: { type: 'string' },
-    },
-    required: ['id', 'dependsOn', 'kind', 'objectId', 'templateId'],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-      dependsOn: { type: 'array', items: { type: 'string' } },
-      kind: { const: 'caption.setSegmentText' },
-      captionClipId: { type: 'string' },
-      segmentId: { type: 'string' },
-      text: { type: 'string', minLength: 1, maxLength: 500 },
-    },
-    required: ['id', 'dependsOn', 'kind', 'captionClipId', 'segmentId', 'text'],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-      dependsOn: { type: 'array', items: { type: 'string' } },
-      kind: { const: 'caption.setSegmentTiming' },
-      captionClipId: { type: 'string' },
-      segmentId: { type: 'string' },
-      startUs: { type: 'integer', minimum: 0 },
-      endUs: { type: 'integer', minimum: 1 },
-    },
-    required: ['id', 'dependsOn', 'kind', 'captionClipId', 'segmentId', 'startUs', 'endUs'],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-      dependsOn: { type: 'array', items: { type: 'string' } },
-      kind: { const: 'caption.setTemplate' },
-      captionClipId: { type: 'string' },
-      templateId: { type: 'string' },
-    },
-    required: ['id', 'dependsOn', 'kind', 'captionClipId', 'templateId'],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-      dependsOn: { type: 'array', items: { type: 'string' } },
-      kind: { const: 'caption.setBurnIn' },
-      enabled: { type: 'boolean' },
-    },
-    required: ['id', 'dependsOn', 'kind', 'enabled'],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-      dependsOn: { type: 'array', items: { type: 'string' } },
-      kind: { const: 'transition.addAtJunction' },
-      outgoingClipId: { type: 'string' },
-      incomingClipId: { type: 'string' },
-      transitionId: { type: 'string' },
-      durationUs: { type: 'integer', minimum: 1 },
-    },
-    required: [
-      'id',
-      'dependsOn',
-      'kind',
-      'outgoingClipId',
-      'incomingClipId',
-      'transitionId',
-      'durationUs',
-    ],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      id: { type: 'string' },
-      dependsOn: { type: 'array', items: { type: 'string' } },
-      kind: { const: 'transition.remove' },
-      transitionId: { type: 'string' },
-    },
-    required: ['id', 'dependsOn', 'kind', 'transitionId'],
-    additionalProperties: false,
-  },
-] as const;
+};
 
-export const BROWSER_AGENT_TOOLS = [
-  {
-    type: 'function',
-    function: {
-      name: 'read_project_context',
-      description: 'Read the bounded project snapshot and supported catalogs.',
-      parameters: { type: 'object', properties: {}, additionalProperties: false },
-    },
-  },
-  {
-    type: 'function',
+function createValidateProposalTool(
+  parameters: NonNullable<ReturnType<typeof createModelVisibleJoyCodeProposalParameters>>,
+) {
+  return {
+    type: 'function' as const,
     function: {
       name: 'validate_proposal',
       description:
         'Validate typed JOY operations against the snapshot and stage a candidate in this run. Nothing is applied. Read context first; repair any returned error; after success return exactly the staged proposal JSON as final content.',
-      parameters: {
-        type: 'object',
-        properties: {
-          summary: { type: 'string' },
-          operations: { type: 'array', items: { oneOf: operationSchemas }, maxItems: 24 },
-        },
-        required: ['summary', 'operations'],
-        additionalProperties: false,
-      },
+      parameters,
     },
-  },
-] as const;
+  };
+}
+
+/**
+ * With no verified operation definitions, the model can still inspect the
+ * project but cannot receive a malformed or authority-bearing proposal tool.
+ */
+export function createBrowserAgentTools(
+  proposalParameters: ReturnType<typeof createModelVisibleJoyCodeProposalParameters>,
+) {
+  return proposalParameters === undefined
+    ? [READ_PROJECT_CONTEXT_TOOL]
+    : [READ_PROJECT_CONTEXT_TOOL, createValidateProposalTool(proposalParameters)];
+}
+
+export const BROWSER_AGENT_TOOLS = createBrowserAgentTools(
+  createModelVisibleJoyCodeProposalParameters(),
+);
 
 /** Explicit OpenAI-compatible exchange; four requests and eight tool calls maximum.
  * Only frozen context reads and typed validation are available, never mutations. */
