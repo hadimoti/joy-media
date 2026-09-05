@@ -1,8 +1,10 @@
-import type { CreativeBriefV1 } from '@joy-media/agent-tools';
+import { validateCreativeBrief, type CreativeBriefV1 } from '@joy-media/agent-tools';
 
 export interface JoyAgentContextSnapshot {
   readonly projectId: string;
   readonly revision: string;
+  readonly compositionId?: string;
+  readonly trackIds?: readonly string[];
   readonly selectedClipIds: readonly string[];
   readonly playheadUs: number;
   readonly clips: readonly {
@@ -45,6 +47,8 @@ function byteLength(value: unknown): number {
 export function createJoyAgentContextSnapshot(input: {
   readonly projectId: string;
   readonly revision: string;
+  readonly compositionId?: string;
+  readonly trackIds?: readonly string[];
   readonly selectedClipIds?: readonly string[];
   readonly playheadUs?: number;
   readonly clips?: readonly {
@@ -64,6 +68,7 @@ export function createJoyAgentContextSnapshot(input: {
   const omitted: string[] = [];
   const projectId = safeText(input.projectId, 128) ?? 'unknown-project';
   const revision = safeText(input.revision, 256) ?? 'unknown-revision';
+  const compositionId = safeText(input.compositionId, 128);
   if (projectId === 'unknown-project' || revision === 'unknown-revision') omitted.push('identity');
   const selectedClipIds = (input.selectedClipIds ?? [])
     .slice(0, 64)
@@ -99,15 +104,35 @@ export function createJoyAgentContextSnapshot(input: {
     omitted.push('clips');
   if (assets.length !== (input.assets?.length ?? 0) || (input.assets?.length ?? 0) > MAX_ASSETS)
     omitted.push('assets');
-  const creativeBrief = input.creativeBrief;
+  const creativeBrief =
+    input.creativeBrief === undefined
+      ? undefined
+      : (JSON.parse(JSON.stringify(input.creativeBrief)) as CreativeBriefV1);
   if (creativeBrief !== undefined) {
     const bytes = byteLength(creativeBrief);
     if (bytes > 32_768 || UNSAFE_CONTEXT_TEXT.test(JSON.stringify(creativeBrief)))
       throw new RangeError('creative brief context is invalid or too large');
+    if (
+      !validateCreativeBrief(creativeBrief).valid ||
+      creativeBrief.projectId !== projectId ||
+      creativeBrief.snapshotRevisionId !== revision
+    )
+      throw new RangeError('creative brief context is invalid or stale');
   }
   const snapshot = {
     projectId,
     revision,
+    ...(compositionId === undefined ? {} : { compositionId }),
+    ...(input.trackIds === undefined
+      ? {}
+      : {
+          trackIds: Object.freeze(
+            input.trackIds
+              .slice(0, 128)
+              .map((id) => safeText(id, 128))
+              .filter((id): id is string => id !== undefined),
+          ),
+        }),
     selectedClipIds: Object.freeze(selectedClipIds),
     playheadUs: Number.isFinite(input.playheadUs) ? Math.max(0, input.playheadUs ?? 0) : 0,
     clips: Object.freeze(clips),

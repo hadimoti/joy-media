@@ -626,6 +626,8 @@ export function AgentPanel({
           const contextSnapshot = createJoyAgentContextSnapshot({
             projectId: session.visualProject.id,
             revision: session.projectRevisionId,
+            compositionId: session.timelineProject.rootCompositionId,
+            trackIds: composition?.tracks.map((track) => track.id) ?? [],
             selectedClipIds,
             playheadUs,
             ...(composition === undefined

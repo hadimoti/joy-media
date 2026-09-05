@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CreativeBriefV1 } from '@joy-media/agent-tools';
 import { createJoyAgentContextSnapshot } from './context-snapshot.js';
+import { briefFixture } from './creative-brief.test-fixture.js';
 
 describe('JOY Agent context snapshot', () => {
   it('projects bounded facts and omits private payloads', () => {
@@ -22,18 +23,21 @@ describe('JOY Agent context snapshot', () => {
   });
 
   it('keeps an attached Creative Brief as bounded, read-only Composer context', () => {
-    const brief = {
-      schemaVersion: 1,
-      projectId: 'p1',
-      snapshotRevisionId: 'r1',
-      request: 'Make the opening more cinematic',
-    } as CreativeBriefV1;
+    const brief = briefFixture('p1', 'r1', 'Make the opening more cinematic');
     const snapshot = createJoyAgentContextSnapshot({
       projectId: 'p1',
       revision: 'r1',
       creativeBrief: brief,
     });
-    expect(snapshot.creativeBrief).toBe(brief);
+    expect(snapshot.creativeBrief).toEqual(brief);
+    expect(snapshot.creativeBrief).not.toBe(brief);
+    expect(() =>
+      createJoyAgentContextSnapshot({
+        projectId: 'p1',
+        revision: 'new-revision',
+        creativeBrief: brief,
+      }),
+    ).toThrow('invalid or stale');
     expect(JSON.stringify(snapshot)).toContain('Make the opening more cinematic');
     expect(() =>
       createJoyAgentContextSnapshot({

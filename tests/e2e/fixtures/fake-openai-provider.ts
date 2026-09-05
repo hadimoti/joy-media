@@ -65,22 +65,24 @@ function responseBody(
   if (mode === 'plan-only' && isProbe)
     return JSON.stringify({ choices: [{ message: { content: '' } }] });
   const toolMessages = Array.isArray(requestBody.messages)
-    ? (requestBody.messages as readonly { role?: unknown }[]).some(
+    ? (requestBody.messages as readonly { role?: unknown }[]).filter(
         (message) => message.role === 'tool',
-      )
-    : false;
-  if (Array.isArray(requestBody.tools) && mode === 'tool-loop' && !toolMessages)
+      ).length
+    : 0;
+  if (Array.isArray(requestBody.tools) && mode === 'tool-loop' && toolMessages < 2)
     return JSON.stringify({
       choices: [
         {
           message: {
             tool_calls: [
               {
-                id: 'validate-1',
+                id: toolMessages === 0 ? 'read-1' : 'validate-1',
                 type: 'function',
                 function: {
-                  name: 'validate_proposal',
-                  arguments: JSON.stringify(options.proposal ?? DEFAULT_PROPOSAL),
+                  name: toolMessages === 0 ? 'read_project_context' : 'validate_proposal',
+                  arguments: JSON.stringify(
+                    toolMessages === 0 ? {} : (options.proposal ?? DEFAULT_PROPOSAL),
+                  ),
                 },
               },
             ],
