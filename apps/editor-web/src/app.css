@@ -8088,19 +8088,54 @@ label {
 }
 .joy-code-welcome h3 {
   margin: 0;
-  color: var(--joy-text);
   font-size: 0.9rem;
 }
 .joy-code-welcome p {
   margin: 0;
-  color: var(--joy-text-muted);
   font-size: 0.7rem;
   font-weight: 700;
   line-height: 1.5;
 }
-.joy-code-welcome strong {
-  color: var(--joy-text);
+.joy-code-welcome-title,
+.joy-code-welcome-copy {
+  --joy-code-pixel-dim: color-mix(in srgb, var(--joy-text-muted) 84%, var(--joy-bg-panel));
+  --joy-code-pixel-glow: color-mix(in srgb, var(--joy-gold, var(--joy-accent)) 82%, var(--joy-text));
+  color: transparent;
+  background-image: linear-gradient(
+    104deg,
+    var(--joy-code-pixel-dim) 0%,
+    var(--joy-code-pixel-dim) 42%,
+    color-mix(in srgb, var(--joy-code-pixel-glow) 58%, var(--joy-code-pixel-dim)) 46%,
+    var(--joy-code-pixel-glow) 49%,
+    var(--joy-text) 53%,
+    color-mix(in srgb, var(--joy-text) 64%, var(--joy-code-pixel-dim)) 57%,
+    var(--joy-code-pixel-dim) 62%,
+    var(--joy-code-pixel-dim) 100%
+  );
+  background-size: 260% 100%;
+  background-position: 108% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: joy-code-pixel-text-loop 7.2s steps(44, end) infinite;
+}
+.joy-code-welcome-copy {
+  animation-delay: -2.4s;
+}
+.joy-code-welcome-copy strong {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
   font-weight: 700;
+}
+@keyframes joy-code-pixel-text-loop {
+  0%,
+  16% {
+    background-position: 108% 0;
+  }
+  62%,
+  100% {
+    background-position: -8% 0;
+  }
 }
 .joy-code-message {
   display: flex;
@@ -8564,8 +8599,15 @@ label {
   border-color: color-mix(in srgb, var(--joy-gold, #f5b82e) 68%, var(--joy-border));
 }
 @media (prefers-reduced-motion: reduce) {
-  .joy-code-capability {
+  .joy-code-capability,
+  .joy-code-welcome-title,
+  .joy-code-welcome-copy {
     transition: none;
+  }
+  .joy-code-welcome-title,
+  .joy-code-welcome-copy {
+    animation: none;
+    background-position: 50% 0;
   }
 }
 @media (max-width: 560px) {

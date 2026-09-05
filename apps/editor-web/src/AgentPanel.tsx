@@ -1137,8 +1137,8 @@ export function AgentPanel({
               {activeThread?.messages.length === 0 && (
                 <div className="joy-code-welcome">
                   <JoyCodeLogo variant="horizontal" label="Joy Code" />
-                  <h3>What should we edit?</h3>
-                  <p>
+                  <h3 className="joy-code-welcome-title">What should we edit?</h3>
+                  <p className="joy-code-welcome-copy">
                     <strong>Joy Code</strong> prepares controlled timeline plans. Nothing changes
                     until the plan passes policy and the execution mode permits it.
                   </p>
