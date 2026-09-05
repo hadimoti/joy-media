@@ -8012,6 +8012,10 @@ label {
   padding: 0.55rem 0.35rem 0.8rem;
   scrollbar-gutter: stable;
 }
+.joy-code-messages.is-empty {
+  align-items: center;
+  justify-content: center;
+}
 .joy-code-welcome {
   display: grid;
   justify-items: center;
@@ -8020,6 +8024,9 @@ label {
   margin: auto;
   padding: 1.1rem 0.65rem;
   text-align: center;
+}
+.joy-code-messages.is-empty .joy-code-welcome {
+  margin: 0;
 }
 .joy-code-avatar {
   display: inline-grid;

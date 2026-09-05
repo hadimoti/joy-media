@@ -1130,7 +1130,10 @@ export function AgentPanel({
                 embedded
               />
             </div>
-            <div className="joy-code-messages" aria-live="polite">
+            <div
+              className={`joy-code-messages${activeThread?.messages.length === 0 ? ' is-empty' : ''}`}
+              aria-live="polite"
+            >
               {activeThread?.messages.length === 0 && (
                 <div className="joy-code-welcome">
                   <JoyCodeLogo variant="horizontal" label="Joy Code" />
