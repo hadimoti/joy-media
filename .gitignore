@@ -14,6 +14,9 @@ coverage/
 .env.*
 .vscode/
 
+# Codex/browser evidence attachments are workspace inputs, not release source.
+.codex-remote-attachments/
+
 # Captured worker stdout from local debugging runs, not source.
 worker_output.txt
 # Generated native Worker launcher; rebuild with `pnpm worker:exe`.
