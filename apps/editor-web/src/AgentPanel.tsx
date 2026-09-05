@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { SpikeProject } from '@joy-media/project-schema';
-import { applyTransaction } from '@joy-media/commands';
 import type {
   AgentEditPlan,
   ApprovalDecision,
@@ -48,7 +47,6 @@ import {
 } from './joy-code-conversation.js';
 import { CheckIcon, CloseIcon, PlayIcon, PlusIcon, SaveIcon, UndoIcon } from './icons.js';
 import { CreativeBriefPanel } from './CreativeBriefPanel.js';
-import type { JoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
 import { compileJoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
 import { JoyCodeCompoundRunner } from './joy-code-compound-runner.js';
 import { resolveObjectIdForSelection } from './sticker-bindings.js';
@@ -66,6 +64,10 @@ import {
 import type { AgentPreviewStore } from './agent-preview-store.js';
 import { stageJoyAgentPreview } from './joy-agent/stage-preview.js';
 import {
+  PreparedChangeStore,
+  type PreparedChangeAuthority,
+} from './joy-agent/prepared-change-store.js';
+import {
   inferJoyAgentTaskKind,
   targetForJoyAgentTask,
   targetsForJoyCodeOperations,
@@ -80,6 +82,14 @@ const CREDENTIAL_LIKE_PROMPT =
 type ComposerCapability = 'edit' | 'creative-brief';
 const NOOP_SUBSCRIBE = () => () => {};
 const NOOP_PRESENCE_SNAPSHOT = (): AgentPresenceState => EMPTY_AGENT_PRESENCE;
+
+/**
+ * The older local recipe executor predates durable prepared changes. Keep its
+ * UI route hard-disabled until it is migrated through JoyCodeCompoundRunner.
+ */
+function legacyRecipeExecutionEnabled(): boolean {
+  return false;
+}
 
 interface PendingPlan {
   readonly runId: string;
@@ -168,6 +178,15 @@ function initialJoyCodeConversation(projectId: string): JoyCodeConversation {
   return createJoyCodeConversation(makeJoyCodeId('conversation'), new Date().toISOString());
 }
 
+function createPreparedChangesForScope(
+  _projectId: string,
+  _session: EditorSession,
+): PreparedChangeStore {
+  // The arguments make the scope change explicit at the call site. The store
+  // itself intentionally retains no live editor or project objects.
+  return new PreparedChangeStore();
+}
+
 /**
  * Joy Code — a conversational shell over the guarded JOY Agent Engine.
  * Deterministic timeline intents remain available offline; other prompts use
@@ -236,7 +255,29 @@ export function AgentPanel({
     undefined,
   );
   const proposalTargetsRef = useRef(new Map<string, readonly JoyAgentTarget[]>());
-  const [modelDraft, setModelDraft] = useState<JoyCodeCompoundDraft | undefined>(undefined);
+  // A store is deliberately scoped to one mounted project/session. Async work
+  // from an old session only retains its now-detached store, not authority over
+  // the current panel.
+  const preparedChanges = useMemo(
+    () => createPreparedChangesForScope(project.id, session),
+    [project.id, session],
+  );
+  const preparedScopeRef = useRef({ projectId: project.id, session, epoch: 1 });
+  if (
+    preparedScopeRef.current.projectId !== project.id ||
+    preparedScopeRef.current.session !== session
+  )
+    preparedScopeRef.current = {
+      projectId: project.id,
+      session,
+      epoch: preparedScopeRef.current.epoch + 1,
+    };
+  const preparedSessionEpoch = preparedScopeRef.current.epoch;
+  const latestSettingsRef = useRef(settings);
+  latestSettingsRef.current = settings;
+  const activeModelRunIdRef = useRef<string | undefined>(undefined);
+  const modelChangeSetIdRef = useRef<string | undefined>(undefined);
+  const [modelChangeSetId, setModelChangeSetId] = useState<string | undefined>(undefined);
   const modelRunnerRef = useRef(new JoyCodeCompoundRunner());
   const presenceState = useSyncExternalStore(
     agentPresenceStore?.subscribe ?? NOOP_SUBSCRIBE,
@@ -251,6 +292,31 @@ export function AgentPanel({
   }, [project.id]);
 
   useEffect(() => {
+    // A current UI may keep a stale ID momentarily during a project/session
+    // transition, but the new store has no matching payload. Clear both the
+    // visible state and the old run token before it can receive another event.
+    preparedChanges.clear();
+    modelChangeSetIdRef.current = undefined;
+    activeModelRunIdRef.current = undefined;
+    setModelChangeSetId(undefined);
+    agentPreviewStore?.clear();
+    return () => {
+      // This cleanup runs for an unmount and before a new project/session
+      // scope. It makes late Worker iterator events fail the run-ID gate before
+      // they can stage into the shared preview store.
+      const runId = activeModelRunIdRef.current;
+      activeModelRunIdRef.current = undefined;
+      modelChangeSetIdRef.current = undefined;
+      preparedChanges.clear();
+      if (runId !== undefined) {
+        void joyAgentEngineClient?.cancel(runId);
+        agentPresenceStore?.clear();
+        agentPreviewStore?.clear(runId);
+      }
+    };
+  }, [agentPresenceStore, agentPreviewStore, joyAgentEngineClient, preparedChanges]);
+
+  useEffect(() => {
     const preview = agentPreviewStore?.getState();
     if (
       preview?.timeline?.baseRevision !== undefined &&
@@ -262,7 +328,28 @@ export function AgentPanel({
       preview.document.baseRevision !== session.projectRevisionId
     )
       agentPreviewStore?.clear();
-  }, [agentPreviewStore, session.projectRevisionId]);
+    const changeSetId = modelChangeSetIdRef.current;
+    const prepared = changeSetId === undefined ? undefined : preparedChanges.getView(changeSetId);
+    if (
+      changeSetId !== undefined &&
+      prepared !== undefined &&
+      (prepared.projectId !== session.timelineProject.id ||
+        prepared.sessionEpoch !== preparedSessionEpoch ||
+        prepared.baseRevision !== session.projectRevisionId)
+    ) {
+      preparedChanges.revoke(changeSetId);
+      modelChangeSetIdRef.current = undefined;
+      setModelChangeSetId(undefined);
+      agentPreviewStore?.clear(prepared.planId);
+      proposalTargetsRef.current.delete(prepared.planId);
+    }
+  }, [
+    agentPreviewStore,
+    preparedChanges,
+    preparedSessionEpoch,
+    session.projectRevisionId,
+    session.timelineProject.id,
+  ]);
 
   // A trusted Creative Brief target can arrive from an older deep link or a
   // live run before this panel has rendered. Keep Composer selected and open
@@ -286,6 +373,40 @@ export function AgentPanel({
   // Internal runner records retain a threadId field for compatibility with
   // plans and audit entries. It is now the stable project conversation ID.
   const activeThread = conversation;
+  const modelView =
+    modelChangeSetId === undefined ? undefined : preparedChanges.getView(modelChangeSetId);
+
+  function currentPreparedAuthority(hostRunId: string): PreparedChangeAuthority {
+    return {
+      projectId: session.timelineProject.id,
+      hostRunId,
+      sessionIdentity: session,
+      sessionEpoch: preparedSessionEpoch,
+      revision: session.projectRevisionId,
+      policy: latestSettingsRef.current,
+    };
+  }
+
+  function setPreparedModelChange(changeSetId: string | undefined): void {
+    modelChangeSetIdRef.current = changeSetId;
+    setModelChangeSetId(changeSetId);
+  }
+
+  const discardPreparedModelChange = useCallback(
+    (runId?: string): void => {
+      const changeSetId = modelChangeSetIdRef.current;
+      if (changeSetId === undefined) return;
+      const prepared = preparedChanges.getView(changeSetId);
+      // An old async closure must never erase a newer session's change card.
+      if (prepared === undefined || (runId !== undefined && prepared.planId !== runId)) return;
+      preparedChanges.revoke(changeSetId);
+      modelChangeSetIdRef.current = undefined;
+      setModelChangeSetId(undefined);
+      agentPreviewStore?.clear(prepared.planId);
+      proposalTargetsRef.current.delete(prepared.planId);
+    },
+    [agentPreviewStore, preparedChanges],
+  );
 
   useEffect(() => {
     try {
@@ -326,16 +447,14 @@ export function AgentPanel({
       updateThreadStatus(pending.threadId, 'draft');
     }
     const commandRunId = agentRunId ?? presenceState.runId;
-    if (
-      command.type === 'stop' &&
-      commandRunId !== undefined &&
-      joyAgentEngineClient !== undefined
-    ) {
-      void joyAgentEngineClient.cancel(commandRunId);
+    if (command.type === 'stop') {
+      if (commandRunId !== undefined && joyAgentEngineClient !== undefined)
+        void joyAgentEngineClient.cancel(commandRunId);
+      activeModelRunIdRef.current = undefined;
+      discardPreparedModelChange(commandRunId);
       agentPresenceStore?.clear();
-      agentPreviewStore?.clear(commandRunId);
+      if (commandRunId !== undefined) agentPreviewStore?.clear(commandRunId);
       setAgentPhase('cancelled');
-      setModelDraft(undefined);
     }
     setPending(undefined);
   }, [
@@ -343,6 +462,7 @@ export function AgentPanel({
     agentPreviewStore,
     agentRunId,
     command,
+    discardPreparedModelChange,
     joyAgentEngineClient,
     pending,
     presenceState.runId,
@@ -510,6 +630,14 @@ export function AgentPanel({
       );
       return;
     }
+    if (modelView !== undefined) {
+      appendMessage(
+        threadId,
+        'assistant',
+        'Review, apply, or reject the current JOY preview before starting a new edit.',
+      );
+      return;
+    }
     const intentId = matchJoyCodeIntentId(body);
     const intent = AGENT_INTENTS.find((candidate) => candidate.id === intentId);
     if (intent === undefined && settings.privacyMode === 'local-only') {
@@ -548,9 +676,10 @@ export function AgentPanel({
       const runId = makeJoyCodeId('run');
       const taskKind = inferJoyAgentTaskKind(body);
       const taskTarget = targetForJoyAgentTask(taskKind);
+      discardPreparedModelChange();
+      activeModelRunIdRef.current = runId;
       setAgentRunId(runId);
       proposalTargetsRef.current.delete(runId);
-      setModelDraft(undefined);
       agentPreviewStore?.clear();
       agentPresenceStore?.beginRun(runId, session.historyCursorSequence);
       setThinkingThreadId(threadId);
@@ -622,6 +751,11 @@ export function AgentPanel({
                 ? 'plan-only'
                 : 'tool-loop',
           })) {
+            // Cancellation, a project switch, or a subsequent prompt revokes
+            // this run synchronously. Late worker events are display-only at
+            // best and must not create a new prepared change or clear a newer
+            // preview.
+            if (activeModelRunIdRef.current !== runId) continue;
             setAgentPhase(event.phase);
             const terminal =
               event.phase === 'completed' ||
@@ -690,10 +824,22 @@ export function AgentPanel({
                 operations: event.proposal.operations as never,
               });
               if (compiled.ok) {
-                stageJoyAgentPreview(agentPreviewStore, session, compiled);
-                setModelDraft(compiled);
+                discardPreparedModelChange(runId);
+                const prepared = preparedChanges.prepare(compiled, currentPreparedAuthority(runId));
+                const preview = preparedChanges.getPreviewDraft(prepared.changeSetId);
+                if (preview === undefined)
+                  throw new Error(
+                    'JOY_CODE_PREPARED_CHANGE_MISSING: proposal could not be previewed',
+                  );
+                try {
+                  stageJoyAgentPreview(agentPreviewStore, session, preview);
+                } catch (error) {
+                  preparedChanges.revoke(prepared.changeSetId);
+                  throw error;
+                }
+                setPreparedModelChange(prepared.changeSetId);
               } else {
-                setModelDraft(undefined);
+                discardPreparedModelChange(runId);
                 agentPreviewStore?.clear(runId);
                 appendMessage(
                   threadId,
@@ -727,12 +873,17 @@ export function AgentPanel({
               );
             if (event.phase === 'cancelled')
               appendMessage(threadId, 'assistant', 'JOY run cancelled. No edits were applied.');
-            if (event.phase === 'failed' || event.phase === 'cancelled')
+            if (event.phase === 'failed' || event.phase === 'cancelled') {
+              discardPreparedModelChange(runId);
               agentPreviewStore?.clear(runId);
-            if (event.phase === 'failed' || event.phase === 'cancelled')
               proposalTargetsRef.current.delete(runId);
+              activeModelRunIdRef.current = undefined;
+            }
           }
         } catch (error) {
+          if (activeModelRunIdRef.current !== runId) return;
+          discardPreparedModelChange(runId);
+          activeModelRunIdRef.current = undefined;
           agentPresenceStore?.dispatch({
             protocolVersion: 1,
             runId,
@@ -762,7 +913,19 @@ export function AgentPanel({
       appendMessage(
         threadId,
         'assistant',
-        'Connect a model in Agent Settings to run natural-language JOY edits. Direct timeline recipes remain available without a connection.',
+        'Connect a model in Agent Settings to run natural-language JOY edits. No unfenced fallback recipe route is available.',
+      );
+      return;
+    }
+    if (!legacyRecipeExecutionEnabled()) {
+      // This legacy deterministic recipe runner commits through an older
+      // timeline-only idempotency route. It remains deliberately unavailable
+      // until it is migrated to the same prepared-change + receipt authority
+      // as the production Worker path above.
+      appendMessage(
+        threadId,
+        'assistant',
+        'This local recipe is temporarily unavailable while JOY finishes its durable approval and receipt boundary. Connect a model to use the guarded JOY edit path.',
       );
       return;
     }
@@ -791,68 +954,35 @@ export function AgentPanel({
   }
 
   function rejectModelDraft() {
-    const planId = modelDraft?.planId;
-    void joyAgentEngineClient?.cancel(planId ?? '');
-    setModelDraft(undefined);
+    const prepared = modelView;
+    if (prepared === undefined) return;
+    activeModelRunIdRef.current = undefined;
+    void joyAgentEngineClient?.cancel(prepared.planId);
+    discardPreparedModelChange(prepared.planId);
     setAgentPhase('cancelled');
-    agentPreviewStore?.clear(planId);
-    if (planId !== undefined) proposalTargetsRef.current.delete(planId);
-    if (activeThread !== undefined)
-      appendMessage(activeThread.id, 'assistant', 'JOY preview rejected. No edits were applied.');
+    appendMessage(activeThread.id, 'assistant', 'JOY preview rejected. No edits were applied.');
     agentPresenceStore?.clear();
   }
 
   function applyModelDraft() {
-    if (modelDraft === undefined || activeThread === undefined) return;
+    const changeSetId = modelChangeSetIdRef.current;
+    const prepared = changeSetId === undefined ? undefined : preparedChanges.getView(changeSetId);
+    if (changeSetId === undefined || prepared === undefined) return;
     try {
-      // Prepare the expected timeline state before committing. Replaying the
-      // transaction after commit would double-apply non-idempotent edits such
-      // as split/remove/insert and turn a valid commit into a false failure.
-      const durableReceipt = session.agentIdempotency.getExecutionReceipt(modelDraft.planId);
-      const isDurableReplay = durableReceipt?.operationDigest === modelDraft.operationDigest;
-      const expectedTimeline =
-        modelDraft.timeline === undefined || isDurableReplay
-          ? undefined
-          : applyTransaction(session.timelineProject, modelDraft.timeline).project;
-      const applied = modelRunnerRef.current.apply(
-        session,
-        modelDraft,
-        {
-          planId: modelDraft.planId,
-          proposalHash: modelDraft.proposalHash,
-          baseRevision: modelDraft.baseRevision,
-          approvedAt: new Date().toISOString(),
-        },
-        settings,
-      );
+      const authority = currentPreparedAuthority(prepared.hostRunId);
+      const approval = preparedChanges.approve(changeSetId, authority);
+      const applied = modelRunnerRef.current.apply(session, preparedChanges, approval, authority);
       if (!applied.replayed && session.projectRevisionId !== applied.revisionId)
         throw new Error('JOY_CODE_VERIFICATION_FAILED: committed revision could not be read back');
       if (
-        session.agentIdempotency.getExecutionReceipt(modelDraft.planId)?.operationDigest !==
+        session.agentIdempotency.getExecutionReceipt(prepared.executionId)?.operationDigest !==
         applied.receipt.operationDigest
       )
         throw new Error(
           'JOY_CODE_VERIFICATION_FAILED: durable execution receipt could not be read back',
         );
-      if (
-        !applied.replayed &&
-        modelDraft.document !== session.visualProject &&
-        JSON.stringify(modelDraft.document) !== JSON.stringify(session.visualProject)
-      )
-        throw new Error(
-          'JOY_CODE_VERIFICATION_FAILED: document state differs from the approved draft',
-        );
-      if (
-        !applied.replayed &&
-        modelDraft.timeline !== undefined &&
-        !isDurableReplay &&
-        JSON.stringify(expectedTimeline) !== JSON.stringify(session.timelineProject)
-      )
-        throw new Error(
-          'JOY_CODE_VERIFICATION_FAILED: timeline state differs from the approved draft',
-        );
       if (!applied.replayed) onProjectRevision?.();
-      const completionTargets = proposalTargetsRef.current.get(modelDraft.planId) ?? [
+      const completionTargets = proposalTargetsRef.current.get(prepared.planId) ?? [
         { panelId: 'agent', sectionId: 'composer' },
       ];
       appendMessage(
@@ -860,13 +990,13 @@ export function AgentPanel({
         'assistant',
         `${applied.replayed ? 'This JOY edit was already committed.' : 'Approved and applied'} Revision ${applied.revisionId} was ${applied.replayed ? 'confirmed from its saved receipt; no new edit or Undo entry was created.' : 'read back successfully; one Undo restores the prior state.'}`,
       );
-      setModelDraft(undefined);
+      activeModelRunIdRef.current = undefined;
+      discardPreparedModelChange(prepared.planId);
       setAgentPhase('completed');
-      agentPreviewStore?.clear(modelDraft.planId);
-      void joyAgentEngineClient?.cancel(modelDraft.planId);
+      void joyAgentEngineClient?.cancel(prepared.planId);
       agentPresenceStore?.dispatch({
         protocolVersion: 1,
-        runId: modelDraft.planId,
+        runId: prepared.planId,
         seq: Math.max(0, (agentPresenceStore?.getState().seq ?? -1) + 1),
         at: new Date().toISOString(),
         revision: session.historyCursorSequence,
@@ -874,15 +1004,22 @@ export function AgentPanel({
         phase: 'completed',
         targets: completionTargets,
       });
-      proposalTargetsRef.current.delete(modelDraft.planId);
       window.setTimeout(() => agentPresenceStore?.completeHandoff(), 1200);
     } catch (error) {
+      if (isTerminalPreparedChangeError(error)) discardPreparedModelChange(prepared.planId);
       appendMessage(
         activeThread.id,
         'assistant',
         error instanceof Error ? `JOY apply failed: ${error.message}` : 'JOY apply failed safely.',
       );
     }
+  }
+
+  function isTerminalPreparedChangeError(error: unknown): boolean {
+    if (!(error instanceof Error)) return false;
+    return /(?:JOY_CODE_(?:APPROVAL|PREPARED_CHANGE|POLICY_CHANGED|STALE_REVISION|EXECUTION_CONFLICT|VERIFICATION_FAILED)|PERSISTENCE_(?:RECOVERY_REQUIRED|ATOMIC_ROLLBACK_PENDING))/.test(
+      error.message,
+    );
   }
 
   async function executePending(manualApprovalGranted: boolean) {
@@ -1131,9 +1268,10 @@ export function AgentPanel({
                   type="button"
                   onClick={() => {
                     if (activeRunId !== undefined) void joyAgentEngineClient.cancel(activeRunId);
+                    activeModelRunIdRef.current = undefined;
+                    discardPreparedModelChange(activeRunId);
                     setAgentPhase('cancelled');
-                    setModelDraft(undefined);
-                    agentPreviewStore?.clear(activeRunId);
+                    if (activeRunId !== undefined) agentPreviewStore?.clear(activeRunId);
                     agentPresenceStore?.clear();
                   }}
                 >
@@ -1339,7 +1477,7 @@ export function AgentPanel({
               </section>
             )}
 
-            {modelDraft !== undefined && activeThread !== undefined && (
+            {modelView !== undefined && activeThread !== undefined && (
               <section
                 className="joy-code-plan-card joy-code-model-plan"
                 aria-label="JOY Agent live proposal"
@@ -1354,14 +1492,14 @@ export function AgentPanel({
                     needs approval
                   </span>
                 </div>
-                <p>{modelDraft.groups.map((group) => group.summary).join(' · ')}</p>
+                <p>{modelView.groups.map((group) => group.summary).join(' · ')}</p>
                 <p>
                   Applying this local edit adds no provider cost. BYOK model spend is unknown; the
                   dollar limit cannot cap provider billing. Requests are limited to four steps of
                   2,048 output tokens.
                 </p>
-                {modelDraft.warnings.length > 0 && (
-                  <p className="agent-error">{modelDraft.warnings.join(', ')}</p>
+                {modelView.warnings.length > 0 && (
+                  <p className="agent-error">{modelView.warnings.join(', ')}</p>
                 )}
                 <div className="joy-code-plan-actions">
                   <button type="button" className="is-primary" onClick={applyModelDraft}>

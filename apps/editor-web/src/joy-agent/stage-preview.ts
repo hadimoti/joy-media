@@ -17,7 +17,9 @@ export function stageJoyAgentPreview(
     draft.timeline === undefined
       ? undefined
       : applyTransaction(session.timelineProject, draft.timeline).project;
-  if (draft.document !== session.visualProject)
+  // Prepared changes are intentionally cloned before they reach this surface,
+  // so reference identity no longer says whether the visual document changed.
+  if (draft.documentChanged)
     store?.setDocument({
       runId: draft.planId,
       baseRevision: draft.baseRevision,

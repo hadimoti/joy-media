@@ -35,4 +35,34 @@ describe('mounted model preview staging', () => {
     );
     expect(store.getState().document).toBeUndefined();
   });
+
+  it('does not infer a document preview from a cloned unchanged document', () => {
+    const session = new EditorSession(
+      { getItem: () => null, setItem: () => {} },
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const store = createAgentPreviewStore();
+    const draft = compileJoyCodeCompoundDraft({
+      planId: 'preview-clone',
+      baseRevision: session.projectRevisionId,
+      timeline: session.timelineProject,
+      visualProject: session.visualProject,
+      registeredAssetIds: [],
+      operations: [{ id: 'caption', dependsOn: [], kind: 'caption.setBurnIn', enabled: true }],
+    });
+    expect(draft.ok).toBe(true);
+    if (!draft.ok) return;
+
+    stageJoyAgentPreview(store, session, {
+      ...draft,
+      // PreparedChangeStore intentionally clones the private canonical payload.
+      // `documentChanged`, not reference identity, determines preview scope.
+      document: JSON.parse(JSON.stringify(session.visualProject)),
+      documentChanged: false,
+    });
+
+    expect(store.getState().document).toBeUndefined();
+    expect(store.getState().timeline).toBeUndefined();
+  });
 });

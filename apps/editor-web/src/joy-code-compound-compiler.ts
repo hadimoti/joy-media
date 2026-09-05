@@ -44,6 +44,8 @@ export interface JoyCodeCompoundDraft {
   readonly proposalHash: string;
   readonly timeline: CommandTransaction | undefined;
   readonly document: JoyProjectV1;
+  /** Explicit because immutable prepared snapshots no longer share live object identity. */
+  readonly documentChanged: boolean;
   readonly groups: readonly JoyCodeCompoundGroup[];
   readonly warnings: readonly string[];
   readonly requiresManualApproval: true;
@@ -338,6 +340,7 @@ export function compileJoyCodeCompoundDraft(
     timeline:
       commands.length === 0 ? undefined : { label: `Joy Code plan ${input.planId}`, commands },
     document,
+    documentChanged: document !== input.visualProject,
     groups,
     warnings: [],
     requiresManualApproval: true,
