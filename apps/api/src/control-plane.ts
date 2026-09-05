@@ -219,7 +219,9 @@ export interface RetiredAgentConsentApi {
   getJoyCodeOptIn(
     actor: Actor,
     projectId: string,
-  ): { readonly enabled: boolean; readonly revision: number } | Promise<{ readonly enabled: boolean; readonly revision: number }>;
+  ):
+    | { readonly enabled: boolean; readonly revision: number }
+    | Promise<{ readonly enabled: boolean; readonly revision: number }>;
   setJoyCodeOptIn(
     actor: Actor,
     projectId: string,

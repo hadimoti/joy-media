@@ -31,10 +31,7 @@ import {
   MemorySpectralDenoiseInvocationLedger,
   SpectralDenoiseService,
 } from './spectral-denoise-service.js';
-import type {
-  CreativeBriefInputV1,
-  AsyncCreativeBriefOutcome,
-} from '@joy-media/agent-tools';
+import type { CreativeBriefInputV1, AsyncCreativeBriefOutcome } from '@joy-media/agent-tools';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import {
   INITIAL_REVISION,

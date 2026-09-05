@@ -1005,7 +1005,6 @@ describe('BrowserControlPlaneClient', () => {
       ]);
     });
   });
-
 });
 
 function json(status: number, value: unknown): Response {
