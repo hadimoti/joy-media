@@ -68,6 +68,27 @@ describe('parametersFromSchema', () => {
 });
 
 describe('summarizeWorkflowOutcome', () => {
+  it('does not promise reload recovery when browser storage rejected the checkpoint', () => {
+    expect(
+      summarizeWorkflowOutcome({
+        status: 'waiting_for_input',
+        workflowId: 'workflow',
+        runId: 'run',
+        nodeId: 'approval',
+        request: { kind: 'approve-render', prompt: 'Review' },
+        checkpoint: {
+          checkpointVersion: 1,
+          runId: 'run',
+          workflowId: 'workflow',
+          workflowVersion: '1',
+          projectRevision: 'revision',
+          state: 'waiting_for_input',
+          nodes: {},
+        },
+        recovery: 'session-only',
+      }),
+    ).toContain('this approval may be lost on reload');
+  });
   it('marks deferred workflow outputs as not yet finished', () => {
     expect(
       summarizeWorkflowOutcome({

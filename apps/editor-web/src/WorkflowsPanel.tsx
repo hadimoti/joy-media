@@ -13,7 +13,11 @@ import {
   getFirstPartyWorkflowVersion,
   detectDerivedFrom,
 } from './first-party-workflows.js';
-import { listParkedWorkflowRuns, type WorkflowRunOutcome } from './workflow-runner.js';
+import {
+  discardParkedWorkflowRun,
+  listParkedWorkflowRuns,
+  type WorkflowRunOutcome,
+} from './workflow-runner.js';
 import { CloseIcon, PlayIcon, RefreshIcon, TrashIcon, BadgeIcon } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
@@ -144,7 +148,7 @@ function collectOutcomeSignals(value: unknown, seen = new Set<object>()): Workfl
 
 export function summarizeWorkflowOutcome(outcome: WorkflowRunOutcome): string {
   if (outcome.status === 'waiting_for_input') {
-    return `Awaiting approval: ${outcome.request.kind}`;
+    return `Awaiting approval: ${outcome.request.kind}${outcome.recovery === 'session-only' ? '. Browser storage is unavailable or full; this approval may be lost on reload.' : ''}`;
   }
   if (outcome.status === 'failed') {
     return `Workflow run failed: ${outcome.error}`;
@@ -270,7 +274,8 @@ export function WorkflowsPanel({
   }
 
   useEffect(() => {
-    const parked = listParkedWorkflowRuns()[0];
+    setApproval(undefined);
+    const parked = listParkedWorkflowRuns(session)[0];
     if (parked === undefined) return;
     const payload = parked.request.payload as { candidates?: readonly unknown[] } | undefined;
     const candidates = payload?.candidates ?? [];
@@ -293,7 +298,7 @@ export function WorkflowsPanel({
         checkpoint: parked.checkpoint,
       }),
     );
-  }, []);
+  }, [session]);
 
   function openRunModal(workflowId: string) {
     const recorded = loadWorkflow(session, workflowId);
@@ -443,6 +448,11 @@ export function WorkflowsPanel({
       : [];
 
   const isEmpty = workflows.length === 0 && systemWorkflows.length === 0;
+  const parkedRuns = listParkedWorkflowRuns(session);
+  const approvalIsStale =
+    approval !== undefined &&
+    parkedRuns.find((run) => run.runId === approval.runId)?.baseRevision !==
+      session.projectRevisionId;
 
   return (
     <PanelShell
@@ -469,6 +479,42 @@ export function WorkflowsPanel({
         </button>
       }
     >
+      {parkedRuns.length > 0 && (
+        <section aria-label="Saved workflow approvals">
+          <h4>Pending approvals in this project</h4>
+          <p>Saved in this browser. Review each request before continuing.</p>
+          <ul className="workflow-list">
+            {parkedRuns.map((run) => (
+              <li className="workflow-row" key={run.runId}>
+                <span>
+                  {run.workflow.name} — {run.request.kind}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    applyOutcome({
+                      status: 'waiting_for_input',
+                      ...run,
+                    })
+                  }
+                >
+                  Review approval
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    discardParkedWorkflowRun(session, run.runId);
+                    if (approval?.runId === run.runId) setApproval(undefined);
+                    setStatusMessage('Saved workflow run discarded. No further steps were run.');
+                  }}
+                >
+                  Discard saved run
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {runModal !== undefined && (
         <div className="workflow-run-modal" role="dialog" aria-label="Run workflow inputs">
           <h4>Run: {runModal.workflowId}</h4>
@@ -509,6 +555,12 @@ export function WorkflowsPanel({
       {approval !== undefined && (
         <div className="workflow-run-modal" role="dialog" aria-label="Workflow approval">
           <h4>{approval.request.prompt}</h4>
+          {approvalIsStale && (
+            <p role="alert">
+              Project changed since this approval was prepared. Discard the saved run and start it
+              again.
+            </p>
+          )}
           {approval.request.kind === 'choose-candidates' ? (
             <ul className="workflow-candidate-list">
               {approvalCandidates.map((candidate, index) => {
@@ -539,6 +591,7 @@ export function WorkflowsPanel({
               className="icon-button icon-button-labeled"
               onClick={() => void submitApproval()}
               title="Continue workflow"
+              disabled={approvalIsStale}
             >
               <PlayIcon />
               Continue

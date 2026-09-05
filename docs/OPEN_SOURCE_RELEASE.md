@@ -19,17 +19,15 @@ application must keep those values out of storage, project exports, server
 requests, logs, and release artifacts. Provider terms, model licenses, and
 user API charges remain the user's responsibility.
 
-The 2026-09-04 implementation and deployment evidence is reproducible: the
-browser Worker bundle is 8,869 raw bytes / 3,387 gzip bytes, the production
-dependency audit is clean, and 63 Playwright checks pass across the seven
-desktop viewport projects. The release verifier also confirms that the Worker
-imports only the JOY engine boundary. The built-in engine is deployed on
-`joyst.ir` at the commit recorded in `STATE.md`; the live browser settings
-dialog is the acceptance surface. This is implementation and deployment
-evidence, not a public-release approval: remaining third-party asset review is
-still an owner/legal gate. The overall Fontiran redistribution gate remains
-open until the clean release checks and owner/legal review are accepted; the
-editor font asset scan itself now passes with no Fontiran runtime assets.
+The 2026-09-04 record reported an 8,869-byte raw / 3,387-byte gzip Worker and
+63 Playwright checks across seven desktop viewport projects. Those are
+historical measurements, not acceptance evidence for a later source revision.
+Regenerate bundle, audit, and browser evidence against the exact release
+candidate, including the current model-connection dialog and workflow recovery
+journey. Source changes and unit tests do not establish what is currently
+deployed at `joyst.ir`. Remaining third-party asset review is still an
+owner/legal gate; removing Fontiran runtime fonts does not itself approve
+redistribution of the complete artifact.
 
 Release evidence must include the Worker size/import gate, production
 dependency audit, third-party notices, repository license decision, and asset

@@ -3,6 +3,7 @@
 import type { EditorSession } from './editor-session.js';
 import {
   executeWorkflow,
+  HUMAN_INPUT_REQUEST_KINDS,
   type HumanInputRequest,
   type JoyWorkflow,
   type RunCheckpoint,
@@ -24,6 +25,8 @@ interface NodeRunResult {
 type CommandLike = { readonly tool: string; readonly arguments: unknown };
 
 export interface ParkedWorkflowRun {
+  readonly projectId: string;
+  readonly baseRevision: string;
   readonly runId: string;
   readonly workflowId: string;
   readonly workflow: JoyWorkflow;
@@ -47,6 +50,7 @@ export type WorkflowRunOutcome =
       readonly nodeId: string;
       readonly request: HumanInputRequest;
       readonly checkpoint: RunCheckpoint;
+      readonly recovery?: 'saved' | 'session-only';
     }
   | {
       readonly status: 'failed';
@@ -56,29 +60,96 @@ export type WorkflowRunOutcome =
     };
 
 const parkedRuns = new Map<string, ParkedWorkflowRun>();
-const PARKED_RUNS_STORAGE_KEY = 'joy-media.workflow-runs.v1';
+export const PARKED_RUNS_STORAGE_KEY = 'joy-media.workflow-runs.v2';
+const MAX_PARKED_BYTES = 2 * 1024 * 1024;
+const MAX_PARKED_RUNS = 64;
+let restored = false;
 let stubLibrary = createStubFirstPartyLibrary();
 
+/** Recovery data is untrusted and never establishes a new workflow definition. */
+function parseParkedRun(candidate: unknown): ParkedWorkflowRun | undefined {
+  if (typeof candidate !== 'object' || candidate === null) return undefined;
+  const record = candidate as Partial<ParkedWorkflowRun>;
+  if (
+    typeof record.projectId !== 'string' ||
+    record.projectId.length === 0 ||
+    typeof record.baseRevision !== 'string' ||
+    record.baseRevision.length === 0 ||
+    typeof record.runId !== 'string' ||
+    record.runId.length === 0 ||
+    typeof record.workflowId !== 'string' ||
+    typeof record.nodeId !== 'string'
+  )
+    return undefined;
+  const workflow = getFirstPartyWorkflow(record.workflowId)?.workflow;
+  if (workflow === undefined || JSON.stringify(workflow) !== JSON.stringify(record.workflow))
+    return undefined;
+  const checkpoint = record.checkpoint;
+  if (
+    checkpoint === undefined ||
+    checkpoint === null ||
+    checkpoint.checkpointVersion !== 1 ||
+    checkpoint.runId !== record.runId ||
+    checkpoint.workflowId !== workflow.id ||
+    checkpoint.workflowVersion !== workflow.version ||
+    checkpoint.projectRevision !== record.baseRevision ||
+    checkpoint.state !== 'waiting_for_input' ||
+    typeof checkpoint.nodes !== 'object' ||
+    checkpoint.nodes === null ||
+    Array.isArray(checkpoint.nodes)
+  )
+    return undefined;
+  const states = ['pending', 'succeeded', 'failed', 'skipped', 'canceled', 'waiting_for_input'];
+  if (Object.keys(checkpoint.nodes).length !== workflow.nodes.length) return undefined;
+  for (const node of workflow.nodes) {
+    const saved = checkpoint.nodes[node.id];
+    if (
+      saved === undefined ||
+      saved === null ||
+      typeof saved.runKey !== 'string' ||
+      !states.includes(saved.state) ||
+      !Number.isSafeInteger(saved.attempts) ||
+      saved.attempts < 0 ||
+      typeof saved.deterministic !== 'boolean'
+    )
+      return undefined;
+    if (saved.state === 'waiting_for_input') {
+      const request = saved.pendingRequest;
+      if (
+        request === undefined ||
+        request === null ||
+        !HUMAN_INPUT_REQUEST_KINDS.includes(request.kind) ||
+        typeof request.prompt !== 'string'
+      )
+        return undefined;
+    }
+  }
+  const pending = findPendingApproval(checkpoint);
+  if (
+    pending === undefined ||
+    pending.nodeId !== record.nodeId ||
+    JSON.stringify(pending.request) !== JSON.stringify(record.request)
+  )
+    return undefined;
+  return { ...record, workflow } as ParkedWorkflowRun;
+}
+
 function restoreParkedRuns(): void {
-  if (parkedRuns.size > 0) return;
+  if (restored) return;
+  restored = true;
   try {
     const raw = globalThis.localStorage?.getItem(PARKED_RUNS_STORAGE_KEY);
-    if (raw === null || raw === undefined) return;
+    if (
+      raw === null ||
+      raw === undefined ||
+      new TextEncoder().encode(raw).byteLength > MAX_PARKED_BYTES
+    )
+      return;
     const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return;
+    if (!Array.isArray(parsed) || parsed.length > MAX_PARKED_RUNS) return;
     for (const candidate of parsed) {
-      if (typeof candidate !== 'object' || candidate === null) continue;
-      const record = candidate as Partial<ParkedWorkflowRun>;
-      if (
-        typeof record.runId !== 'string' ||
-        typeof record.workflowId !== 'string' ||
-        typeof record.nodeId !== 'string' ||
-        record.workflow === undefined ||
-        record.checkpoint === undefined ||
-        record.request === undefined
-      )
-        continue;
-      parkedRuns.set(record.runId, record as ParkedWorkflowRun);
+      const record = parseParkedRun(candidate);
+      if (record !== undefined) parkedRuns.set(record.runId, record);
     }
   } catch {
     // Browser storage is an optional recovery aid. A malformed or unavailable
@@ -86,18 +157,25 @@ function restoreParkedRuns(): void {
   }
 }
 
-function persistParkedRuns(): void {
+function persistParkedRuns(): 'saved' | 'session-only' {
   try {
+    const storage = globalThis.localStorage;
+    if (storage === undefined) return 'session-only';
     if (parkedRuns.size === 0) {
-      globalThis.localStorage?.removeItem(PARKED_RUNS_STORAGE_KEY);
-      return;
+      storage.removeItem(PARKED_RUNS_STORAGE_KEY);
+      return 'saved';
     }
-    globalThis.localStorage?.setItem(
-      PARKED_RUNS_STORAGE_KEY,
-      JSON.stringify([...parkedRuns.values()]),
-    );
+    const serialized = JSON.stringify([...parkedRuns.values()]);
+    if (
+      parkedRuns.size > MAX_PARKED_RUNS ||
+      new TextEncoder().encode(serialized).byteLength > MAX_PARKED_BYTES
+    )
+      return 'session-only';
+    storage.setItem(PARKED_RUNS_STORAGE_KEY, serialized);
+    return 'saved';
   } catch {
     // Storage quota/private browsing failures leave the in-memory run usable.
+    return 'session-only';
   }
 }
 
@@ -111,6 +189,7 @@ export function setFirstPartyLibraryForTests(
 export function resetFirstPartyLibraryForTests(): void {
   stubLibrary = createStubFirstPartyLibrary();
   parkedRuns.clear();
+  restored = false;
   try {
     globalThis.localStorage?.removeItem(PARKED_RUNS_STORAGE_KEY);
   } catch {
@@ -123,9 +202,16 @@ export function getParkedWorkflowRun(runId: string): ParkedWorkflowRun | undefin
   return parkedRuns.get(runId);
 }
 
-export function listParkedWorkflowRuns(): readonly ParkedWorkflowRun[] {
+export function listParkedWorkflowRuns(session: EditorSession): readonly ParkedWorkflowRun[] {
   restoreParkedRuns();
-  return [...parkedRuns.values()];
+  return [...parkedRuns.values()].filter((run) => run.projectId === session.visualProject.id);
+}
+
+export function discardParkedWorkflowRun(session: EditorSession, runId: string): void {
+  restoreParkedRuns();
+  if (parkedRuns.get(runId)?.projectId !== session.visualProject.id) return;
+  parkedRuns.delete(runId);
+  persistParkedRuns();
 }
 
 function spikeCommandsFor(commands: readonly CommandLike[]): SpikeCommand[] {
@@ -246,7 +332,7 @@ function findPendingApproval(checkpoint: RunCheckpoint):
 }
 
 function newRunId(workflowId: string): string {
-  return `editor-${workflowId.replaceAll('.', '-')}-${String(Date.now())}`;
+  return `editor-${workflowId.replaceAll('.', '-')}-${globalThis.crypto.randomUUID()}`;
 }
 
 async function runRecordedWorkflow(
@@ -326,6 +412,7 @@ async function runRecordedWorkflow(
 }
 
 function runFirstPartyWorkflow(
+  session: EditorSession,
   workflow: JoyWorkflow,
   inputs: Readonly<Record<string, unknown>>,
   options: {
@@ -339,7 +426,7 @@ function runFirstPartyWorkflow(
   const result = executeWorkflow({
     workflow,
     runId,
-    projectRevision: 'editor-local',
+    projectRevision: session.projectRevisionId,
     workflowInputs,
     handlers: stubLibrary.handlers,
     ...(options.resumeFrom !== undefined ? { resumeFrom: options.resumeFrom } : {}),
@@ -358,6 +445,8 @@ function runFirstPartyWorkflow(
       };
     }
     parkedRuns.set(runId, {
+      projectId: session.visualProject.id,
+      baseRevision: session.projectRevisionId,
       runId,
       workflowId: workflow.id,
       workflow,
@@ -366,7 +455,7 @@ function runFirstPartyWorkflow(
       nodeId: pending.nodeId,
       request: pending.request,
     });
-    persistParkedRuns();
+    const recovery = persistParkedRuns();
     return {
       status: 'waiting_for_input',
       workflowId: workflow.id,
@@ -374,6 +463,7 @@ function runFirstPartyWorkflow(
       nodeId: pending.nodeId,
       request: pending.request,
       checkpoint,
+      recovery,
     };
   }
 
@@ -404,6 +494,7 @@ export async function runWorkflow(
   workflowId: string,
   inputs: Readonly<Record<string, unknown>> = {},
 ): Promise<WorkflowRunOutcome> {
+  restoreParkedRuns();
   const recorded = loadWorkflow(session, workflowId);
   if (recorded !== undefined) {
     return runRecordedWorkflow(session, recorded.workflow, inputs);
@@ -413,22 +504,39 @@ export async function runWorkflow(
   if (system === undefined) {
     throw new Error(`Workflow not found: ${workflowId}`);
   }
-  return runFirstPartyWorkflow(system.workflow, inputs);
+  return runFirstPartyWorkflow(session, system.workflow, inputs);
 }
 
 export async function resumeWorkflow(
-  _session: EditorSession,
+  session: EditorSession,
   runId: string,
   humanInputs: Readonly<Record<string, unknown>>,
 ): Promise<WorkflowRunOutcome> {
   restoreParkedRuns();
   const parked = parkedRuns.get(runId);
-  if (parked === undefined) {
+  if (parked === undefined || parked.projectId !== session.visualProject.id) {
     return {
       status: 'failed',
       workflowId: 'unknown',
       runId,
       error: `No parked workflow run: ${runId}`,
+    };
+  }
+  if (parked.baseRevision !== session.projectRevisionId) {
+    return {
+      status: 'failed',
+      workflowId: parked.workflowId,
+      runId,
+      error:
+        'Project changed since this approval was prepared. Discard the saved run and start it again.',
+    };
+  }
+  if (parseParkedRun(parked) === undefined) {
+    return {
+      status: 'failed',
+      workflowId: parked.workflowId,
+      runId,
+      error: 'The saved workflow is no longer compatible. Discard it and start a new run.',
     };
   }
 
@@ -437,7 +545,7 @@ export async function resumeWorkflow(
       ? (parked.workflowInputs as Record<string, unknown>)
       : {};
 
-  return runFirstPartyWorkflow(parked.workflow, inputs, {
+  return runFirstPartyWorkflow(session, parked.workflow, inputs, {
     runId: parked.runId,
     resumeFrom: parked.checkpoint,
     humanInputs,
