@@ -40,7 +40,9 @@ the editor.
 
 The former `apps/editor-web/public/fonts/` login-gate files were removed. The
 login gate now uses the same bundled Fontsource Inter/Vazirmatn stack as the
-editor, so there are no separate unverified font binaries in the artifact.
+editor, so there are no separate unverified font binaries in the artifact and
+the Fontiran-specific asset redistribution gate is closed. Whole-artifact
+owner/legal review remains a separate release decision.
 
 ## gl-transitions
 

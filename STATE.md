@@ -48,8 +48,10 @@ bundle is 8,869 raw bytes / 3,387 gzip bytes. Public redistribution remains
 gated pending owner/legal review of the complete asset set: the repository code now has an MIT
 `LICENSE`; the former Fontiran editor and login-gate assets have been removed.
 Pinned Fontsource OFL faces and license/attribution files now ship with the
-editor. The overall Fontiran gate remains open until release evidence and
-owner/legal review are accepted.
+editor. The Fontiran-specific asset gate is closed: no retired Fontiran
+runtime assets ship, the Fontsource OFL-1.1 manifest is present, and the
+release scan passes. The separate whole-artifact owner/legal review remains
+open.
 
 ## Open-font redistribution migration (2026-09-05)
 
@@ -63,10 +65,13 @@ discovery is metadata-only, bounded, and held in page memory for the current
 session only. The release gate scans source, generated runtime, and shipped
 font surfaces and requires the public OFL license/attribution manifest.
 
-This migration is conditional and not a legal clearance: the overall Fontiran
-redistribution gate remains open pending owner/legal review of the complete
-artifact. Historical aliases remain only to migrate existing projects and are
-resolved to the open local faces at render/export time.
+This migration closes the Fontiran-specific asset redistribution gate: the
+former commercial binaries are removed, four pinned Fontsource packages are
+bundled under OFL-1.1, and the release scan plus attribution manifest pass.
+It is not a legal clearance for the complete artifact; the separate
+whole-artifact owner/legal review remains open. Historical aliases remain only
+to migrate existing projects and are resolved to the open local faces at
+render/export time.
 
 ## Built-in JOY Agent Engine deployment (2026-09-04 UTC)
 

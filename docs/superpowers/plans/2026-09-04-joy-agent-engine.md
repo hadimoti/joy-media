@@ -1418,8 +1418,10 @@ create a key-bearing trace, video, HAR, screenshot, log, or CI artifact.
 **Step 6: update open-source readiness**
 
 Record the measured Worker size, audit result, dependency notices, and the
-remaining top-level license/font redistribution blocker. Do not claim the app
-is publicly redistributable until that separate gate is resolved.
+remaining top-level third-party/license redistribution review. The
+Fontiran-specific asset gate is closed by the 2026-09-05 Fontsource migration;
+do not claim the complete app is publicly redistributable until the separate
+whole-artifact owner/legal review is resolved.
 
 **Step 7: commit**
 

@@ -579,6 +579,8 @@ Engine and open-font migration. Verify `https://joyst.ir/`, the current
 release identity, and the latest checkpoint in `STATE.md`. Do not restore the
 historical KiloCode/code-server editing host or local DSH fork. Keep provider
 and Google Fonts catalog keys session-only and out of storage, logs, exports,
-server requests, and release evidence. The Fontiran redistribution gate stays
-open until owner/legal review accepts the complete artifact.
+server requests, and release evidence. The Fontiran-specific asset
+redistribution gate is closed: retired Fontiran assets are removed and the
+bundled Fontsource families carry OFL-1.1 attribution. The separate
+whole-artifact owner/legal review remains open.
 ```
