@@ -165,6 +165,10 @@ export async function importProjectPackage(
   options: ImportProjectPackageOptions = {},
 ): Promise<ImportProjectPackageResult> {
   const now = (options.now ?? (() => new Date().toISOString()))();
+  // Validate the replacement title before any destructive collision handling.
+  // A malformed package must never remove the existing project it is meant to
+  // replace.
+  const title = requireTitle(options.title ?? pkg.source.title);
   const oldId = pkg.source.id;
   const requestedId = oldId.trim() || createProjectId('project');
   const existing = getCatalogProject(storage, requestedId);
@@ -213,8 +217,6 @@ export async function importProjectPackage(
       record: { ...media.asset, id: mappedId },
     });
   }
-  if (replacedProjectId !== undefined && existing !== undefined)
-    purgeLocalProject(storage, existing);
   const replacements = {
     [oldId]: id,
     ...(pkg.documents.timeline.id === oldId ? {} : { [pkg.documents.timeline.id]: id }),
@@ -228,7 +230,7 @@ export async function importProjectPackage(
   const visual = {
     ...remapJson(pkg.documents.visual, replacements),
     id,
-    title: requireTitle(options.title ?? pkg.source.title),
+    title,
     createdAt: now,
     updatedAt: now,
   } as JoyProjectV1;
@@ -240,6 +242,20 @@ export async function importProjectPackage(
     pkg.documents.artifacts === undefined
       ? undefined
       : (remapJson(pkg.documents.artifacts, replacements) as ArtifactStore);
+  const entry: ProjectCatalogEntry = {
+    id,
+    title: visual.title,
+    createdAt: now,
+    updatedAt: now,
+    timelineProjectId: id,
+    visualProjectId: id,
+  };
+  // Persist verified originals before committing the imported documents. If a
+  // private-cache write fails, the catalog and project logs remain untouched
+  // rather than exposing a half-imported project to the user.
+  for (const asset of verifiedAssets) await options.assetWriter!(asset);
+  if (replacedProjectId !== undefined && existing !== undefined)
+    purgeLocalProject(storage, existing);
   new EditorSession(
     storage,
     timeline,
@@ -251,17 +267,7 @@ export async function importProjectPackage(
           ...(artifacts === undefined ? {} : { artifacts }),
         },
   );
-  const entry: ProjectCatalogEntry = {
-    id,
-    title: visual.title,
-    createdAt: now,
-    updatedAt: now,
-    timelineProjectId: id,
-    visualProjectId: id,
-  };
   upsertCatalogProject(storage, entry);
-
-  for (const asset of verifiedAssets) await options.assetWriter!(asset);
   return {
     entry,
     missingAssetIds,

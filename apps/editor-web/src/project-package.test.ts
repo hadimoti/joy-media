@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { EditorSession } from './editor-session.js';
 import { createBlankProjectDocuments } from './project-factory.js';
-import { upsertCatalogProject, type ProjectCatalogEntry } from './project-catalog.js';
+import {
+  getCatalogProject,
+  upsertCatalogProject,
+  type ProjectCatalogEntry,
+} from './project-catalog.js';
 import {
   createProjectPackage,
   importProjectPackage,
@@ -95,5 +99,38 @@ describe('portable project packages', () => {
     expect(() => parseProjectPackage({ format: 'joy-media-project', schemaVersion: 99 })).toThrow(
       'Unsupported',
     );
+  });
+
+  it('does not leave a project behind when an embedded-media write fails', async () => {
+    const storage = memoryStorage();
+    const entry = createEntry(storage);
+    const pkg = await createProjectPackage(entry, storage, {
+      assetBlobLoader: async () => new Blob(['a'], { type: 'image/png' }),
+    });
+
+    await expect(
+      importProjectPackage(storage, pkg, {
+        createId: () => 'failed-import',
+        assetWriter: async () => {
+          throw new Error('private cache quota exceeded');
+        },
+      }),
+    ).rejects.toThrow('private cache quota exceeded');
+    expect(getCatalogProject(storage, 'failed-import')).toBeUndefined();
+  });
+
+  it('validates replacement metadata before removing the existing project', async () => {
+    const storage = memoryStorage();
+    const entry = createEntry(storage);
+    const pkg = await createProjectPackage(entry, storage);
+    const malformed = {
+      ...pkg,
+      source: { ...pkg.source, title: '' },
+    };
+
+    await expect(
+      importProjectPackage(storage, malformed, { collision: 'replace' }),
+    ).rejects.toThrow('Project name cannot be empty');
+    expect(getCatalogProject(storage, entry.id)).toMatchObject({ title: 'Source project' });
   });
 });
