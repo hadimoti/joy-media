@@ -56,7 +56,50 @@ export type WorkflowRunOutcome =
     };
 
 const parkedRuns = new Map<string, ParkedWorkflowRun>();
+const PARKED_RUNS_STORAGE_KEY = 'joy-media.workflow-runs.v1';
 let stubLibrary = createStubFirstPartyLibrary();
+
+function restoreParkedRuns(): void {
+  if (parkedRuns.size > 0) return;
+  try {
+    const raw = globalThis.localStorage?.getItem(PARKED_RUNS_STORAGE_KEY);
+    if (raw === null || raw === undefined) return;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return;
+    for (const candidate of parsed) {
+      if (typeof candidate !== 'object' || candidate === null) continue;
+      const record = candidate as Partial<ParkedWorkflowRun>;
+      if (
+        typeof record.runId !== 'string' ||
+        typeof record.workflowId !== 'string' ||
+        typeof record.nodeId !== 'string' ||
+        record.workflow === undefined ||
+        record.checkpoint === undefined ||
+        record.request === undefined
+      )
+        continue;
+      parkedRuns.set(record.runId, record as ParkedWorkflowRun);
+    }
+  } catch {
+    // Browser storage is an optional recovery aid. A malformed or unavailable
+    // record must never prevent the editor from opening.
+  }
+}
+
+function persistParkedRuns(): void {
+  try {
+    if (parkedRuns.size === 0) {
+      globalThis.localStorage?.removeItem(PARKED_RUNS_STORAGE_KEY);
+      return;
+    }
+    globalThis.localStorage?.setItem(
+      PARKED_RUNS_STORAGE_KEY,
+      JSON.stringify([...parkedRuns.values()]),
+    );
+  } catch {
+    // Storage quota/private browsing failures leave the in-memory run usable.
+  }
+}
 
 /** Test seam: replace the stub library (e.g. to assert call counts). */
 export function setFirstPartyLibraryForTests(
@@ -68,10 +111,21 @@ export function setFirstPartyLibraryForTests(
 export function resetFirstPartyLibraryForTests(): void {
   stubLibrary = createStubFirstPartyLibrary();
   parkedRuns.clear();
+  try {
+    globalThis.localStorage?.removeItem(PARKED_RUNS_STORAGE_KEY);
+  } catch {
+    // Test/runtime storage may be unavailable.
+  }
 }
 
 export function getParkedWorkflowRun(runId: string): ParkedWorkflowRun | undefined {
+  restoreParkedRuns();
   return parkedRuns.get(runId);
+}
+
+export function listParkedWorkflowRuns(): readonly ParkedWorkflowRun[] {
+  restoreParkedRuns();
+  return [...parkedRuns.values()];
 }
 
 function spikeCommandsFor(commands: readonly CommandLike[]): SpikeCommand[] {
@@ -312,6 +366,7 @@ function runFirstPartyWorkflow(
       nodeId: pending.nodeId,
       request: pending.request,
     });
+    persistParkedRuns();
     return {
       status: 'waiting_for_input',
       workflowId: workflow.id,
@@ -323,6 +378,7 @@ function runFirstPartyWorkflow(
   }
 
   parkedRuns.delete(runId);
+  persistParkedRuns();
 
   if (checkpoint.state === 'failed' || checkpoint.state === 'waiting_for_manual_intervention') {
     const failedNode = Object.entries(checkpoint.nodes).find(([, node]) => node.state === 'failed');
@@ -365,6 +421,7 @@ export async function resumeWorkflow(
   runId: string,
   humanInputs: Readonly<Record<string, unknown>>,
 ): Promise<WorkflowRunOutcome> {
+  restoreParkedRuns();
   const parked = parkedRuns.get(runId);
   if (parked === undefined) {
     return {

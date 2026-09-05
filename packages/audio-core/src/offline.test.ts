@@ -24,6 +24,103 @@ describe('offline audio renderer', () => {
     solo: false,
   };
 
+  describe('stereo export', () => {
+    const config: OfflineRenderConfig = {
+      sampleRate: 1_000_000,
+      channels: 2,
+      startUs: 0,
+      endUs: 4,
+    };
+    const clip: AudioClipRenderSpec = {
+      clipId: 'voice',
+      samples: new Float32Array([1, 0, 0, 0]),
+      startUs: 0,
+      config: defaultClipConfig,
+      effects: [],
+    };
+    it('keeps left/right source content separate at center', () => {
+      const result = renderOfflineAudio(
+        [
+          {
+            ...clip,
+            channelData: [new Float32Array([1, 0, 0, 0]), new Float32Array([0, 1, 0, 0])],
+          },
+        ],
+        [],
+        config,
+      );
+      expect(result.channelData[0]![0]).toBeCloseTo(1);
+      expect(result.channelData[0]![1]).toBeCloseTo(0);
+      expect(result.channelData[1]![0]).toBeCloseTo(0);
+      expect(result.channelData[1]![1]).toBeCloseTo(1);
+    });
+    it('pans mono with equal power and stereo with crossfeed, like Web Audio', () => {
+      const center = renderOfflineAudio([clip], [], config);
+      expect(center.channelData[0]![0]).toBeCloseTo(Math.SQRT1_2);
+      expect(center.channelData[1]![0]).toBeCloseTo(Math.SQRT1_2);
+      const result = renderOfflineAudio(
+        [
+          {
+            ...clip,
+            config: { ...clip.config, pan: 1 },
+            channelData: [clip.samples, new Float32Array(4)],
+          },
+        ],
+        [],
+        config,
+      );
+      expect(result.channelData[0]![0]).toBeCloseTo(0);
+      expect(result.channelData[1]![0]).toBeCloseTo(1);
+    });
+    it('combines bus and clip pan and respects explicit routing, solo and mute', () => {
+      const buses: AudioBus[] = [
+        { id: 'master', name: 'Master', gain: 1, pan: 0, mute: false, solo: false, inputs: [] },
+        {
+          id: 'voice-bus',
+          name: 'Voice',
+          gain: 0.5,
+          pan: -0.5,
+          mute: false,
+          solo: true,
+          inputs: ['voice'],
+        },
+      ];
+      const voice = { ...clip, config: { ...clip.config, pan: -0.5, solo: true } };
+      const result = renderOfflineAudio([voice, { ...clip, clipId: 'music' }], buses, config);
+      expect(result.channelData[0]![0]).toBeCloseTo(0.5);
+      expect(result.channelData[1]![0]).toBeCloseTo(0);
+      const muted = renderOfflineAudio(
+        [voice],
+        buses.map((bus) => ({ ...bus, mute: true })),
+        config,
+      );
+      expect(muted.channelData.every((channel) => channel.every((sample) => sample === 0))).toBe(
+        true,
+      );
+    });
+    it('renders clip overlap when the export range starts inside the clip', () => {
+      const result = renderOfflineAudio(
+        [{ ...clip, samples: new Float32Array([1, 2, 3, 4]), config: { ...clip.config, pan: -1 } }],
+        [],
+        { ...config, startUs: 2 },
+      );
+      expect([...result.channelData[0]!]).toEqual([3, 4]);
+    });
+    it('ramps pan independently in left and right outputs', () => {
+      const result = renderOfflineAudio([{ ...clip, samples: new Float32Array(4).fill(1) }], [], {
+        ...config,
+        automation: {
+          blockSize: 4,
+          clipAt: (_id, timeUs, fallback) => ({ ...fallback, pan: -1 + timeUs / 2 }),
+        },
+      });
+      expect(result.channelData[0]![0]).toBeCloseTo(1);
+      expect(result.channelData[1]![0]).toBeCloseTo(0);
+      expect(result.channelData[0]![2]).toBeCloseTo(Math.SQRT1_2);
+      expect(result.channelData[1]![2]).toBeCloseTo(Math.SQRT1_2);
+    });
+  });
+
   describe('clip placement', () => {
     it('places clip at correct timeline position', () => {
       const sampleRate = 48000;

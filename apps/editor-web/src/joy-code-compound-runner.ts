@@ -1,5 +1,10 @@
 import type { EditorSession } from './editor-session.js';
 import type { JoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
+import {
+  assertModelApplyPolicy,
+  DEFAULT_AGENT_POLICY,
+  type AgentPolicyPreferences,
+} from './agent-policy-settings.js';
 
 export interface JoyCodeCompoundApproval {
   readonly planId: string;
@@ -19,7 +24,9 @@ export class JoyCodeCompoundRunner {
     session: EditorSession,
     draft: JoyCodeCompoundDraft,
     approval: JoyCodeCompoundApproval,
+    policy: AgentPolicyPreferences = DEFAULT_AGENT_POLICY,
   ): JoyCodeCompoundApplyResult {
+    assertModelApplyPolicy(policy);
     const replayKey = `${draft.planId}:${draft.proposalHash}`;
     if (this.#applied.has(replayKey))
       return { applied: false, replayed: true, revisionId: session.projectRevisionId };

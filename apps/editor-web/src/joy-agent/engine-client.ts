@@ -57,7 +57,7 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
         }
       } else if (message.type === 'event') {
         const queue = runQueues.get(message.event.runId);
-        if (!queue) return;
+        if (!queue || queue.done) return;
         if (
           message.event.phase === 'completed' ||
           message.event.phase === 'failed' ||
@@ -69,14 +69,29 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
         else queue.events.push(message.event);
         if (queue.done && queue.waiters.length > 0)
           while (queue.waiters.length) queue.waiters.shift()!({ value: undefined, done: true });
+        if (queue.done) runQueues.delete(message.event.runId);
+      } else if (message.type === 'run-finished') {
+        const queue = runQueues.get(message.runId);
+        if (queue) {
+          queue.done = true;
+          while (queue.waiters.length) queue.waiters.shift()!({ value: undefined, done: true });
+          runQueues.delete(message.runId);
+        }
       } else if (message.type === 'error') {
-        const request = pending.get(message.requestId ?? 'configure') ?? pending.get('test');
+        const key = pending.has(message.requestId ?? 'configure')
+          ? (message.requestId ?? 'configure')
+          : 'test';
+        const request = pending.get(key);
         if (request) {
-          pending.delete(message.requestId ?? 'configure');
+          pending.delete(key);
           request.reject(new Error(message.message));
         }
         const run = message.requestId ? runQueues.get(message.requestId) : undefined;
-        if (run) run.done = true;
+        if (run) {
+          run.done = true;
+          while (run.waiters.length) run.waiters.shift()!({ value: undefined, done: true });
+          runQueues.delete(message.requestId!);
+        }
       }
     };
     worker.onerror = () => {
@@ -125,6 +140,7 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
     },
     startRun(request) {
       if (!configured) throw new Error('Configure a model connection first');
+      if (runQueues.has(request.runId)) throw new Error('JOY run is already active');
       const queue: {
         events: JoyAgentSafeEvent[];
         waiters: ((result: IteratorResult<JoyAgentSafeEvent>) => void)[];
@@ -147,10 +163,25 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
             queue.waiters.push(resolve),
           );
         },
+        return: async () => {
+          queue.done = true;
+          queue.events.length = 0;
+          while (queue.waiters.length) queue.waiters.shift()!({ value: undefined, done: true });
+          runQueues.delete(request.runId);
+          worker?.postMessage({ protocolVersion: 1, type: 'cancel', runId: request.runId });
+          return { value: undefined, done: true };
+        },
       };
     },
     async cancel(runId) {
       worker?.postMessage({ protocolVersion: JOY_AGENT_PROTOCOL_VERSION, type: 'cancel', runId });
+      const queue = runQueues.get(runId);
+      if (queue) {
+        queue.done = true;
+        queue.events.length = 0;
+        while (queue.waiters.length) queue.waiters.shift()!({ value: undefined, done: true });
+        runQueues.delete(runId);
+      }
     },
     clear,
     dispose: clear,

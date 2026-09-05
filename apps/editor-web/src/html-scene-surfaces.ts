@@ -78,22 +78,41 @@ export class HtmlSceneSurfaceCache {
     objects: Readonly<Record<string, VisualObjectV1>>,
     timeUs: number,
   ): Promise<HtmlSceneBitmapMap> {
+    const generation = ++this.#generation;
     const result = new Map<string, SceneSurfaceBitmap>();
     const htmlScenes = Object.values(objects).filter((object) => object.kind === 'html-scene');
+    const liveIds = new Set(htmlScenes.map((object) => object.id));
+    for (const [id, host] of this.#hosts) {
+      if (!liveIds.has(id)) {
+        host.destroy();
+        this.#hosts.delete(id);
+        this.#bitmaps.delete(id);
+      }
+    }
     await Promise.all(
       htmlScenes.map(async (object) => {
         const packageId = object.scenePackageId;
         if (packageId === undefined) return;
         const scene = findFirstPartyScene(packageId);
         if (scene === undefined) return;
-        const host = createScenePreviewHost({ instanceId: `export-${object.id}`, scene });
+        let host = this.#hosts.get(object.id);
+        if (host === undefined) {
+          host = createScenePreviewHost({ instanceId: `export-${object.id}`, scene });
+          this.#hosts.set(object.id, host);
+        }
         try {
           await host.ready;
+          if (generation !== this.#generation) return;
           host.update(timeUs, defaultVariablesForScene(packageId));
           const viewport = viewportForScene(packageId);
-          result.set(object.id, await host.capture(viewport.width, viewport.height, 8_000));
-        } finally {
-          host.destroy();
+          const bitmap = await host.capture(viewport.width, viewport.height, 8_000);
+          if (generation !== this.#generation) {
+            return;
+          }
+          result.set(object.id, bitmap);
+          this.#bitmaps.set(object.id, bitmap);
+        } catch {
+          // A failed scene should not abort an otherwise valid export frame.
         }
       }),
     );

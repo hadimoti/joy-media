@@ -4,6 +4,7 @@ import { EditorSession } from './editor-session.js';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
 import { compileJoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
 import { JoyCodeCompoundRunner } from './joy-code-compound-runner.js';
+import { DEFAULT_AGENT_POLICY } from './agent-policy-settings.js';
 
 function storage() {
   const values = new Map<string, string>();
@@ -46,6 +47,20 @@ describe('Joy Code compound runner', () => {
     expect(draft.ok).toBe(true);
     if (!draft.ok) return;
     const runner = new JoyCodeCompoundRunner();
+    expect(() =>
+      runner.apply(
+        session,
+        draft,
+        {
+          planId: draft.planId,
+          proposalHash: draft.proposalHash,
+          baseRevision: draft.baseRevision,
+          approvedAt: '2026-08-20T00:00:00.000Z',
+        },
+        { ...DEFAULT_AGENT_POLICY, allowedCapabilities: [] },
+      ),
+    ).toThrow('denies');
+    expect(session.historyEntries).toHaveLength(historyBefore);
     expect(() =>
       runner.apply(session, draft, {
         planId: draft.planId,

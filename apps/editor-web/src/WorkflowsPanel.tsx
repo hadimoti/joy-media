@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { HumanInputRequest } from '@joy-media/workflow-engine';
 import type { EditorSession } from './editor-session.js';
 import {
@@ -13,7 +13,7 @@ import {
   getFirstPartyWorkflowVersion,
   detectDerivedFrom,
 } from './first-party-workflows.js';
-import type { WorkflowRunOutcome } from './workflow-runner.js';
+import { listParkedWorkflowRuns, type WorkflowRunOutcome } from './workflow-runner.js';
 import { CloseIcon, PlayIcon, RefreshIcon, TrashIcon, BadgeIcon } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
@@ -268,6 +268,32 @@ export function WorkflowsPanel({
     setApproval(undefined);
     setStatusMessage(summarizeWorkflowOutcome(outcome));
   }
+
+  useEffect(() => {
+    const parked = listParkedWorkflowRuns()[0];
+    if (parked === undefined) return;
+    const payload = parked.request.payload as { candidates?: readonly unknown[] } | undefined;
+    const candidates = payload?.candidates ?? [];
+    setApproval({
+      runId: parked.runId,
+      workflowId: parked.workflowId,
+      nodeId: parked.nodeId,
+      request: parked.request,
+      selected: new Set(
+        candidates.map((candidate, index) => candidateKey(candidate, index)).slice(0, 2),
+      ),
+    });
+    setStatusMessage(
+      summarizeWorkflowOutcome({
+        status: 'waiting_for_input',
+        workflowId: parked.workflowId,
+        runId: parked.runId,
+        nodeId: parked.nodeId,
+        request: parked.request,
+        checkpoint: parked.checkpoint,
+      }),
+    );
+  }, []);
 
   function openRunModal(workflowId: string) {
     const recorded = loadWorkflow(session, workflowId);

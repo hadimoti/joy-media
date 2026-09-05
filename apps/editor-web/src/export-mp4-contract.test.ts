@@ -9,6 +9,16 @@ const exportCallback = appSource.slice(
 );
 
 describe('App MP4 export negotiation contract', () => {
+  it('builds the audio mix from all timeline lanes while preparing only visual export clips for frames', () => {
+    expect(exportCallback).toMatch(/selectExportAudioClips\(\s*allTimelineClips,/);
+    expect(exportCallback).toContain('audioClipIds.has(media.clip.id)');
+    expect(exportCallback).toContain('visualClipIds.has(clip.id) && assetKind');
+    expect(exportCallback).toContain('visualClipIds.has(media.clip.id)');
+    expect(exportCallback).toContain('channels: 2');
+    expect(exportCallback).toContain('offlineAudio.channelData');
+    expect(exportCallback).toContain('mutedAudioClipIds.has(clipId)');
+  });
+
   it('preflights with the shared selector before export mutation or capture', () => {
     const selector = exportCallback.indexOf('selectBrowserMp4MimeType()');
     const sourcePreflight = exportCallback.indexOf('preflightExportClipSources(');

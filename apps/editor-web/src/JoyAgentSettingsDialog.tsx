@@ -108,7 +108,9 @@ export function JoyAgentSettingsDialog({
       const kind = next.capability === 'incompatible' ? 'error' : 'success';
       setConnectionNotice({ kind, message });
       onNotice?.(message, kind);
-      if (kind === 'success') onClose();
+      // Keep the dialog open after a successful test so the user can see the
+      // durable session status and explicitly finish.  Auto-closing hid the
+      // success confirmation and made BYOK setup feel like it had failed.
     } catch (error) {
       const rawMessage = error instanceof Error ? error.message : 'Unable to configure connection';
       const safeMessage = rawMessage.replaceAll(key, '[redacted]').slice(0, 180);

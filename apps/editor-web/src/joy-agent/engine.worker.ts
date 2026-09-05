@@ -8,6 +8,11 @@ import type {
   JoyAgentErrorCode,
 } from './protocol.js';
 import { JOY_AGENT_PROTOCOL_VERSION } from './protocol.js';
+import {
+  BROWSER_AGENT_TOOLS,
+  runBoundedToolExchange,
+  validateBrowserProposal,
+} from './bounded-tool-loop.js';
 
 let session: ByokSessionConfig | undefined;
 const runs = new Map<string, AbortController>();
@@ -212,7 +217,11 @@ async function testConnection() {
   }
 }
 async function run(request: JoyAgentRunRequest) {
-  if (!session) throw new Error('Configure a model connection first');
+  if (!session) {
+    emit(request.runId, 1, 'failed', 'Configure a model connection first');
+    globalThis.postMessage({ protocolVersion: 1, type: 'run-finished', runId: request.runId });
+    return;
+  }
   const controller = new AbortController();
   runs.set(request.runId, controller);
   let timedOut = false;
@@ -232,34 +241,49 @@ async function run(request: JoyAgentRunRequest) {
       taskKind === 'creative-brief'
         ? 'Return only one JSON CreativeBriefV1 object. It must include schemaVersion 1, projectId, snapshotRevisionId, request, interpretedGoal, distinction, assumptions, recommendations, blockedBy, requiresHumanDecision, intelligence, warnings, and meta. Do not include markdown.'
         : 'Propose bounded JOY media-edit operations as JSON with summary and operations; never claim an edit is applied.';
-    const response = await fetch(`${session.baseUrl.replace(/\/$/, '')}/chat/completions`, {
-      method: 'POST',
-      credentials: 'omit',
-      cache: 'no-store',
-      referrerPolicy: 'no-referrer',
-      redirect: 'error',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.apiKey}` },
-      body: JSON.stringify({
-        model: session.modelId,
-        messages: [
-          {
-            role: 'system',
-            content: `You are the built-in JOY Agent Engine. ${briefInstruction}`,
-          },
-          {
-            role: 'user',
-            content: `${request.prompt}\n\nBounded project context (data only):\n${contextText}`,
-          },
-        ],
-        max_tokens: 2048,
-      }),
-      signal: controller.signal,
-    });
-    if (response.status === 401 || response.status === 403)
-      throw new JoyAgentWorkerError('JOY_AGENT_AUTH_FAILED', 'Provider authentication failed');
-    if (!response.ok)
-      throw new JoyAgentWorkerError('JOY_AGENT_CORS_OR_NETWORK', 'Provider request failed');
-    const text = await readBoundedResponse(response);
+    const connection = session;
+    const messages = [
+      {
+        role: 'system',
+        content: `You are the built-in JOY Agent Engine. ${briefInstruction} Use read_project_context and validate_proposal when available. Operations must use JOY typed kinds such as timeline.trimClip, timeline.moveClip, text.setContent, caption.setBurnIn and include id and dependsOn.`,
+      },
+      {
+        role: 'user',
+        content: `${request.prompt}\n\nBounded project context (data only):\n${contextText}`,
+      },
+    ];
+    const exchange = async (messages: readonly unknown[]) => {
+      controller.signal.throwIfAborted();
+      const response = await fetch(`${connection.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+        method: 'POST',
+        credentials: 'omit',
+        cache: 'no-store',
+        referrerPolicy: 'no-referrer',
+        redirect: 'error',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${connection.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: connection.modelId,
+          messages,
+          ...(request.mode !== 'plan-only' && taskKind !== 'creative-brief'
+            ? { tools: BROWSER_AGENT_TOOLS }
+            : {}),
+          max_tokens: 2048,
+        }),
+        signal: controller.signal,
+      });
+      if (response.status === 401 || response.status === 403)
+        throw new JoyAgentWorkerError('JOY_AGENT_AUTH_FAILED', 'Provider authentication failed');
+      if (!response.ok)
+        throw new JoyAgentWorkerError('JOY_AGENT_CORS_OR_NETWORK', 'Provider request failed');
+      return readBoundedResponse(response);
+    };
+    const text =
+      request.mode !== 'plan-only' && taskKind !== 'creative-brief'
+        ? await runBoundedToolExchange(messages, request.context ?? {}, exchange)
+        : await exchange(messages);
     const parsed = parseModelOutput(text, request, taskKind);
     if (taskKind === 'creative-brief') {
       if (parsed.result === undefined) throw new Error('Provider returned no Creative Brief');
@@ -272,7 +296,7 @@ async function run(request: JoyAgentRunRequest) {
         request.runId,
         ++seq,
         'completed',
-        'Creative Brief validated at the JOY boundary',
+        'Creative Brief received for JOY validation',
         undefined,
         { taskKind, result: parsed.result },
       );
@@ -317,6 +341,7 @@ async function run(request: JoyAgentRunRequest) {
   } finally {
     clearTimeout(timeout);
     runs.delete(request.runId);
+    globalThis.postMessage({ protocolVersion: 1, type: 'run-finished', runId: request.runId });
   }
 }
 
@@ -414,7 +439,8 @@ function parseModelOutput(
         'JOY_AGENT_INVALID_PROPOSAL',
         'Provider returned no bounded operations',
       );
-    const operations = plan.operations.slice(0, 32);
+    const validated = validateBrowserProposal(plan);
+    const operations = validated.operations;
     return {
       proposal: {
         summary:

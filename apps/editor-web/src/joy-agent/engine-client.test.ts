@@ -42,6 +42,42 @@ class FakeWorker {
 }
 
 describe('JOY Agent Engine client lifecycle', () => {
+  it('finishes approval transport and accepts a second prompt; cancel settles a pending read', async () => {
+    const worker = new FakeWorker();
+    const client = createJoyAgentEngineClient(() => worker as unknown as Worker);
+    await client.configure({
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      modelId: 'model',
+      apiKey: 'session-key',
+    });
+    const first = client.startRun({ runId: 'first', prompt: 'edit' });
+    const next = first.next();
+    worker.onmessage?.({
+      data: {
+        protocolVersion: 1,
+        type: 'event',
+        event: {
+          protocolVersion: 1,
+          runId: 'first',
+          seq: 1,
+          at: new Date().toISOString(),
+          phase: 'awaiting-approval',
+        },
+      },
+    } as MessageEvent);
+    expect((await next).value.phase).toBe('awaiting-approval');
+    const finished = first.next();
+    worker.onmessage?.({
+      data: { protocolVersion: 1, type: 'run-finished', runId: 'first' },
+    } as MessageEvent);
+    await expect(finished).resolves.toMatchObject({ done: true });
+    const second = client.startRun({ runId: 'second', prompt: 'another edit' });
+    const pending = second.next();
+    await client.cancel('second');
+    await expect(pending).resolves.toMatchObject({ done: true });
+    await expect(second.next()).resolves.toMatchObject({ done: true });
+  });
   it('configures and tests one Worker-backed session', async () => {
     const worker = new FakeWorker();
     const client = createJoyAgentEngineClient(() => worker as unknown as Worker);

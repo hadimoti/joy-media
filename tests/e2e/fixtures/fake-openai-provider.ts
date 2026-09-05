@@ -43,14 +43,51 @@ function responseBody(
   requestBody: Readonly<Record<string, unknown>>,
   options: FakeOpenAIProviderOptions,
 ): string {
-  const isProbe = Array.isArray(requestBody.tools);
-  if (options.mode === 'malformed' && !isProbe) return '{not-json';
-  if (isProbe && options.mode !== 'plan-only')
+  const mode = options.mode ?? 'tool-loop';
+  const isProbe = Array.isArray(requestBody.tools) && requestBody.tool_choice !== undefined;
+  if (mode === 'malformed' && !isProbe) return '{not-json';
+  if (isProbe && mode !== 'plan-only')
     return JSON.stringify({
-      choices: [{ message: { tool_calls: [{ id: 'probe', type: 'function' }] } }],
+      choices: [
+        {
+          message: {
+            tool_calls: [
+              {
+                id: 'probe',
+                type: 'function',
+                function: { name: 'joy_probe', arguments: '{}' },
+              },
+            ],
+          },
+        },
+      ],
     });
-  if (options.mode === 'plan-only' && isProbe)
+  if (mode === 'plan-only' && isProbe)
     return JSON.stringify({ choices: [{ message: { content: '' } }] });
+  const toolMessages = Array.isArray(requestBody.messages)
+    ? (requestBody.messages as readonly { role?: unknown }[]).some(
+        (message) => message.role === 'tool',
+      )
+    : false;
+  if (Array.isArray(requestBody.tools) && mode === 'tool-loop' && !toolMessages)
+    return JSON.stringify({
+      choices: [
+        {
+          message: {
+            tool_calls: [
+              {
+                id: 'validate-1',
+                type: 'function',
+                function: {
+                  name: 'validate_proposal',
+                  arguments: JSON.stringify(options.proposal ?? DEFAULT_PROPOSAL),
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
   return JSON.stringify({
     choices: [
       {
@@ -152,7 +189,7 @@ export async function configureJoyAgent(
   await dialog.getByLabel('Model ID').fill(options.modelId ?? FAKE_PROVIDER_MODEL);
   await dialog.getByLabel(/I understand the custom provider receives/).check();
   await dialog.getByLabel('API key').fill(apiKey);
-  await dialog.getByRole('button', { name: 'Test & use' }).click();
+  await dialog.getByRole('button', { name: /Connect model|Test & use/ }).click();
   await expect(
     dialog.getByText(
       options.allowFailure
@@ -160,6 +197,7 @@ export async function configureJoyAgent(
         : /Tool loop ready|Plan-only/,
     ),
   ).toBeVisible({ timeout: 20_000 });
+  if (!options.allowFailure) await expect(dialog.getByText(/Connected successfully/)).toBeVisible();
   await expect(dialog.getByLabel('API key')).toHaveValue('');
   return dialog;
 }

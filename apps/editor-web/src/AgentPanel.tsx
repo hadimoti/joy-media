@@ -72,8 +72,7 @@ import {
   type JoyAgentPresenceEvent,
 } from './agent-presence.js';
 import type { AgentPreviewStore } from './agent-preview-store.js';
-import { previewTimelineFromProject } from './agent-timeline-preview.js';
-import { applyTransaction } from '@joy-media/commands';
+import { stageJoyAgentPreview } from './joy-agent/stage-preview.js';
 import { inferJoyAgentTaskKind, targetForJoyAgentTask } from './agent-ui-targets.js';
 
 /** Every edit this panel commits is attributed to the built-in JOY engine. */
@@ -386,7 +385,11 @@ export function AgentPanel({
       updateThreadStatus(pending.threadId, 'draft');
     }
     const commandRunId = agentRunId ?? presenceState.runId;
-    if (command.type === 'stop' && commandRunId !== undefined && joyAgentEngineClient !== undefined) {
+    if (
+      command.type === 'stop' &&
+      commandRunId !== undefined &&
+      joyAgentEngineClient !== undefined
+    ) {
       void joyAgentEngineClient.cancel(commandRunId);
       agentPresenceStore?.clear();
       agentPreviewStore?.clear(commandRunId);
@@ -611,6 +614,7 @@ export function AgentPanel({
       const taskKind = inferJoyAgentTaskKind(body);
       const taskTarget = targetForJoyAgentTask(taskKind);
       setAgentRunId(runId);
+      setModelDraft(undefined);
       agentPreviewStore?.clear();
       agentPresenceStore?.beginRun(runId, session.historyCursorSequence);
       setThinkingThreadId(threadId);
@@ -709,39 +713,17 @@ export function AgentPanel({
                 operations: event.proposal.operations as never,
               });
               if (compiled.ok) {
+                stageJoyAgentPreview(agentPreviewStore, session, compiled);
                 setModelDraft(compiled);
-                if (
-                  compiled.document !== session.visualProject &&
-                  compiled.baseRevision === session.projectRevisionId
-                ) {
-                  agentPreviewStore?.setDocument({
-                    runId,
-                    baseRevision: compiled.baseRevision,
-                    canonical: session.visualProject,
-                    preview: compiled.document,
-                  });
-                }
-                if (
-                  compiled.timeline !== undefined &&
-                  compiled.baseRevision === session.projectRevisionId
-                ) {
-                  try {
-                    const stagedProject = applyTransaction(
-                      session.timelineProject,
-                      compiled.timeline,
-                    ).project;
-                    agentPreviewStore?.setTimeline({
-                      runId,
-                      baseRevision: compiled.baseRevision,
-                      canonical: previewTimelineFromProject(session.timelineProject),
-                      preview: previewTimelineFromProject(stagedProject),
-                    });
-                  } catch {
-                    agentPreviewStore?.clear(runId);
-                  }
-                } else {
-                  agentPreviewStore?.clear(runId);
-                }
+              } else {
+                setModelDraft(undefined);
+                agentPreviewStore?.clear(runId);
+                appendMessage(
+                  threadId,
+                  'assistant',
+                  `JOY rejected the proposal: ${compiled.error.message}`,
+                );
+                throw new Error('Proposal validation failed. No edits were staged.');
               }
               appendMessage(
                 threadId,
@@ -775,10 +757,7 @@ export function AgentPanel({
           setAgentPhase('failed');
         } finally {
           setThinkingThreadId((current) => (current === threadId ? undefined : current));
-          window.setTimeout(() => {
-            setAgentPhase(undefined);
-            setAgentRunId(undefined);
-          }, 1200);
+          setAgentRunId((current) => (current === runId ? undefined : current));
         }
       })();
       return;
@@ -818,6 +797,7 @@ export function AgentPanel({
   function rejectModelDraft() {
     void joyAgentEngineClient?.cancel(modelDraft?.planId ?? '');
     setModelDraft(undefined);
+    setAgentPhase('cancelled');
     agentPreviewStore?.clear(modelDraft?.planId);
     if (activeThread !== undefined)
       appendMessage(activeThread.id, 'assistant', 'JOY preview rejected. No edits were applied.');
@@ -827,12 +807,17 @@ export function AgentPanel({
   function applyModelDraft() {
     if (modelDraft === undefined || activeThread === undefined) return;
     try {
-      modelRunnerRef.current.apply(session, modelDraft, {
-        planId: modelDraft.planId,
-        proposalHash: modelDraft.proposalHash,
-        baseRevision: modelDraft.baseRevision,
-        approvedAt: new Date().toISOString(),
-      });
+      modelRunnerRef.current.apply(
+        session,
+        modelDraft,
+        {
+          planId: modelDraft.planId,
+          proposalHash: modelDraft.proposalHash,
+          baseRevision: modelDraft.baseRevision,
+          approvedAt: new Date().toISOString(),
+        },
+        settings,
+      );
       onProjectRevision?.();
       appendMessage(
         activeThread.id,
@@ -840,6 +825,7 @@ export function AgentPanel({
         'Approved and applied as one atomic JOY edit. One Undo restores the prior state.',
       );
       setModelDraft(undefined);
+      setAgentPhase('completed');
       agentPreviewStore?.clear(modelDraft.planId);
       void joyAgentEngineClient?.cancel(modelDraft.planId);
       agentPresenceStore?.dispatch({
@@ -1126,6 +1112,10 @@ export function AgentPanel({
                   type="button"
                   onClick={() => {
                     if (activeRunId !== undefined) void joyAgentEngineClient.cancel(activeRunId);
+                    setAgentPhase('cancelled');
+                    setModelDraft(undefined);
+                    agentPreviewStore?.clear(activeRunId);
+                    agentPresenceStore?.clear();
                   }}
                 >
                   Stop
@@ -1230,10 +1220,7 @@ export function AgentPanel({
                   </span>
                 </div>
                 <div className="joy-code-brief-artifact-actions">
-                  <button
-                    type="button"
-                    onClick={() => setComposerCapability('creative-brief')}
-                  >
+                  <button type="button" onClick={() => setComposerCapability('creative-brief')}>
                     Open brief
                   </button>
                   <button
@@ -1395,6 +1382,11 @@ export function AgentPanel({
                     </span>
                   </div>
                   <p>{modelDraft.groups.map((group) => group.summary).join(' · ')}</p>
+                  <p>
+                    Applying this local edit adds no provider cost. BYOK model spend is unknown; the
+                    dollar limit cannot cap provider billing. Requests are limited to four steps of
+                    2,048 output tokens.
+                  </p>
                   {modelDraft.warnings.length > 0 && (
                     <p className="agent-error">{modelDraft.warnings.join(', ')}</p>
                   )}

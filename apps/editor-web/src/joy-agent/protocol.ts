@@ -92,6 +92,7 @@ export type MainToWorkerMessage =
   | { readonly protocolVersion: 1; readonly type: 'dispose' };
 
 export type WorkerToMainMessage =
+  | { readonly protocolVersion: 1; readonly type: 'run-finished'; readonly runId: string }
   | { readonly protocolVersion: 1; readonly type: 'configured'; readonly status: ByokSessionStatus }
   | { readonly protocolVersion: 1; readonly type: 'event'; readonly event: JoyAgentSafeEvent }
   | {
@@ -232,6 +233,8 @@ export function isWorkerToMainMessage(value: unknown): value is WorkerToMainMess
     if (event.taskKind !== undefined && !TASK_KINDS.has(event.taskKind as string)) return false;
     return true;
   }
+  if (candidate.type === 'run-finished')
+    return typeof candidate.runId === 'string' && candidate.runId.length <= 256;
   if (candidate.type === 'error')
     return (
       typeof candidate.code === 'string' &&

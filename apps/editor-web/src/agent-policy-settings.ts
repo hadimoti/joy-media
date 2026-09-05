@@ -39,6 +39,24 @@ export const DEFAULT_AGENT_POLICY: AgentPolicyPreferences = {
   livePreview: true,
 };
 
+/** Local compound edits have no additional provider/job cost. Model token spend is
+ * unknown for arbitrary BYOK providers and is never represented as a dollar cap. */
+export const MODEL_APPLY_COST_GUARD = Object.freeze({
+  additionalApplyCostUsd: 0,
+  providerSpend: 'unknown' as const,
+  maxProviderSteps: 4,
+  maxOutputTokensPerStep: 2048,
+});
+
+export function assertModelApplyPolicy(preferences: AgentPolicyPreferences): void {
+  if (preferences.executionMode === 'suggest-only')
+    throw new Error('Suggest-only mode does not permit applying model edits.');
+  if (!preferences.allowedCapabilities.includes('timeline.write'))
+    throw new Error('The current policy denies timeline and document edits.');
+  if (!Number.isFinite(preferences.maxCostPerRunUsd) || preferences.maxCostPerRunUsd < 0)
+    throw new Error('The current cost limit is invalid.');
+}
+
 export function loadAgentPolicy(storage: AgentPolicyStorage): AgentPolicyPreferences {
   const current = storage.getItem(AGENT_POLICY_STORAGE_KEY);
   if (current !== null) {
@@ -123,10 +141,7 @@ function normalizeAgentPolicy(value: unknown): AgentPolicyPreferences {
     executionMode: modes.includes(candidate.executionMode as AgentExecutionMode)
       ? (candidate.executionMode as AgentExecutionMode)
       : DEFAULT_AGENT_POLICY.executionMode,
-    allowedCapabilities:
-      capabilities.length > 0
-        ? [...new Set(capabilities)]
-        : DEFAULT_AGENT_POLICY.allowedCapabilities,
+    allowedCapabilities: [...new Set(capabilities)],
     maxCostPerRunUsd:
       typeof candidate.maxCostPerRunUsd === 'number' &&
       Number.isFinite(candidate.maxCostPerRunUsd) &&
