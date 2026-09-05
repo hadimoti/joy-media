@@ -20,3 +20,34 @@ export type { ImportRequest } from './import.js';
 export { importLocalAsset } from './import.js';
 export type { ProxyJobRequest } from './proxy-cache.js';
 export { ProxyCache } from './proxy-cache.js';
+
+export type {
+  CompositionEvidenceIdentity,
+  FrameIdentity,
+  ObservationFinding,
+  ObservationPrivacyOrigin,
+  SourceEvidenceIdentity,
+} from './observation.js';
+export {
+  assertFrameIdentity,
+  createCompositionEvidenceIdentity,
+  createSourceEvidenceIdentity,
+  frameIdentityKey,
+  ptsTicksToSourceTimeUs,
+} from './observation.js';
+
+export type {
+  EvidenceCoverage,
+  EvidenceCoverageStatus,
+  EvidenceCoverageSummary,
+  HalfOpenTimeRange,
+  ObservationMode,
+} from './observation-coverage.js';
+export {
+  hasExhaustiveInputCoverage,
+  isFrameWithinHalfOpenRange,
+  summarizeEvidenceCoverage,
+} from './observation-coverage.js';
+
+export type { ObservationCacheCrop, ObservationCacheKeyInput } from './observation-cache-key.js';
+export { createObservationCacheKey } from './observation-cache-key.js';
