@@ -162,6 +162,9 @@ export function createScenePreviewHost(options: {
     readyResolve = resolve;
     readyReject = reject;
   });
+  // A host may be removed before callers await readiness (preview teardown).
+  void ready.catch(() => undefined);
+  let destroyed = false;
   const pending = new Map<
     string,
     {
@@ -208,10 +211,13 @@ export function createScenePreviewHost(options: {
     session,
     ready,
     update(timeUs, variables) {
+      if (destroyed) return false;
       return session.update(timeUs, variables);
     },
     async capture(width, height, timeoutMs = 2_500) {
+      if (destroyed) throw new Error('scene preview host destroyed');
       await ready;
+      if (destroyed) throw new Error('scene preview host destroyed');
       const requestId = `cap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       return new Promise<SceneSurfaceBitmap>((resolve, reject) => {
         const timer = setTimeout(() => {
@@ -227,6 +233,9 @@ export function createScenePreviewHost(options: {
       });
     },
     destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      readyReject(new Error('scene preview host destroyed'));
       window.removeEventListener('message', onMessage);
       for (const waiter of pending.values()) {
         clearTimeout(waiter.timer);

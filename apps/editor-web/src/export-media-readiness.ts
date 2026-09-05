@@ -82,18 +82,24 @@ export function activePreparedExportClipAt<T extends ExportVisualClipLike>(
   mediaByClipId: ReadonlyMap<string, PreparedExportMediaLike>,
   priorityForClip: (clip: T) => number = () => 0,
 ): T | undefined {
-  let selected: T | undefined;
-  let selectedPriority = Number.POSITIVE_INFINITY;
-  for (const clip of clips) {
-    if (timeUs < clip.startUs || timeUs >= clip.startUs + clip.durationUs) continue;
-    if (!hasRenderableExportMedia(mediaByClipId.get(clip.id) ?? {})) continue;
-    const priority = priorityForClip(clip);
-    if (selected === undefined || priority < selectedPriority) {
-      selected = clip;
-      selectedPriority = priority;
-    }
-  }
-  return selected;
+  return activePreparedExportClipsAt(clips, timeUs, mediaByClipId, priorityForClip)[0];
+}
+
+/** Every simultaneous visual is needed for transforms, opacity and transitions. */
+export function activePreparedExportClipsAt<T extends ExportVisualClipLike>(
+  clips: readonly T[],
+  timeUs: number,
+  mediaByClipId: ReadonlyMap<string, PreparedExportMediaLike>,
+  priorityForClip: (clip: T) => number = () => 0,
+): readonly T[] {
+  return clips
+    .filter(
+      (clip) =>
+        timeUs >= clip.startUs &&
+        timeUs < clip.startUs + clip.durationUs &&
+        hasRenderableExportMedia(mediaByClipId.get(clip.id) ?? {}),
+    )
+    .sort((left, right) => priorityForClip(left) - priorityForClip(right));
 }
 
 /**

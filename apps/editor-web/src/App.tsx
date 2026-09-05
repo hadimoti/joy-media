@@ -22,6 +22,7 @@ import {
   PlaybackScheduler,
   videoFrameNodeFromDecoded,
   withVideoFrameNode,
+  withVideoFrameNodes,
   type HtmlMediaDecoder,
   type ImageDataLike,
   type MediaClock,
@@ -90,7 +91,7 @@ import {
 } from './export-job-request.js';
 import { inspectImageAnimation } from './animated-image-metadata.js';
 import {
-  activePreparedExportClipAt,
+  activePreparedExportClipsAt,
   hasRenderableExportMedia,
   isExportDurationTimelineClip,
   isExportVisualTimelineClip,
@@ -3810,7 +3811,10 @@ function EditorWorkspace({
           (clip, index, clips) =>
             clips.findIndex((candidate) => candidate.id === clip.id) === index,
         );
-        if (exportClips.length === 0)
+        const hasHtmlScenes = Object.values(exportVisualProject.visualObjects).some(
+          (object) => object.kind === 'html-scene',
+        );
+        if (exportClips.length === 0 && !hasHtmlScenes)
           throw new Error('No playable visual clips are available for export');
         // Audio lanes use video leaves in the timeline model, but have no visual
         // boundary. Keep their mix inputs independent of visual preparation.
@@ -4104,9 +4108,6 @@ function EditorWorkspace({
         if (recorderContext === null)
           throw new Error('Unable to create the deterministic export capture canvas');
         activeRecorderCanvas = recorderCanvas;
-        const hasHtmlScenes = Object.values(exportVisualProject.visualObjects).some(
-          (object) => object.kind === 'html-scene',
-        );
         // Scene frames are captured on demand while encoding. Keeping the
         // entire movie of RGBA bitmaps in a Map made long exports consume
         // unbounded browser memory. `captureFull` returns only the current
@@ -4150,24 +4151,13 @@ function EditorWorkspace({
           paintFrame: async (index) => {
             const timeUs = Math.min(durationUs - 1, Math.floor((index * 1_000_000) / frameRate));
             const transition = activeTransitionAt(exportVisualProject, timeUs);
-            const activeClip = activePreparedExportClipAt(
+            const activeClips = activePreparedExportClipsAt(
               playableTimelineClips,
               timeUs,
               mediaForClip,
               (candidate) =>
                 timelineElementKindForClip(candidate, exportElementKinds) === 'video' ? 0 : 1,
             );
-            const clip =
-              activeClip ??
-              (transition !== undefined
-                ? (() => {
-                    const partner = findVideoClipById(exportTimelineProject, transition.leftClipId);
-                    return partner !== undefined &&
-                      hasRenderableExportMedia(mediaForClip.get(partner.id) ?? {})
-                      ? partner
-                      : undefined;
-                  })()
-                : undefined);
             const bitmaps = new Map<string, ImageDataLike>();
             const captureExportClip = async (target: VideoClip): Promise<VideoFrameNode> => {
               const media = mediaForClip.get(target.id);
@@ -4237,11 +4227,12 @@ function EditorWorkspace({
                 },
               );
             };
-            let node: VideoFrameNode | undefined;
-            if (clip !== undefined && clip.kind === 'video') {
-              node = await captureExportClip(clip);
+            const nodes: VideoFrameNode[] = [];
+            for (const clip of activeClips) {
+              abortController.signal.throwIfAborted();
+              nodes.push(await captureExportClip(clip));
             }
-            if (transition !== undefined && node !== undefined) {
+            if (transition !== undefined) {
               for (const clipId of [transition.leftClipId, transition.rightClipId]) {
                 if (bitmaps.has(clipId)) continue;
                 const partner = findVideoClipById(exportTimelineProject, clipId);
@@ -4249,20 +4240,24 @@ function EditorWorkspace({
                   partner !== undefined &&
                   hasRenderableExportMedia(mediaForClip.get(partner.id) ?? {})
                 )
-                  await captureExportClip(partner);
+                  nodes.push(await captureExportClip(partner));
               }
             }
             const scenes =
               exportSceneCache === undefined
                 ? undefined
-                : await exportSceneCache.captureFull(exportVisualProject.visualObjects, timeUs);
+                : await exportSceneCache.captureFull(exportVisualProject.visualObjects, timeUs, {
+                    width,
+                    height,
+                    signal: abortController.signal,
+                  });
             if (scenes !== undefined) {
               for (const [id, bitmap] of scenes) bitmaps.set(id, bitmap);
             }
             for (const [id, bitmap] of stickerImageCache.bitmaps(timeUs)) bitmaps.set(id, bitmap);
             applyClipGradesToTransitionBitmaps(exportVisualProject, transition, timeUs, bitmaps);
             const frame = buildFrame(timeUs);
-            renderer.render(node === undefined ? frame : withVideoFrameNode(frame, node), bitmaps);
+            renderer.render(withVideoFrameNodes(frame, nodes), bitmaps);
             // CanvasCaptureMediaStreamTrack can sample a WebGL surface before
             // its GPU work is committed on cold/software renderers. Copying
             // into a 2D staging canvas synchronizes the exact painted frame.

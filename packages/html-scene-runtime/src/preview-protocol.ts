@@ -171,10 +171,7 @@ const PREVIEW_BOOTSTRAP = `(function () {
     try {
       paintTree(ctx, root, width, height);
       var imageData = ctx.getImageData(0, 0, width, height);
-      var buffer = imageData.data.buffer.slice(
-        imageData.data.byteOffset,
-        imageData.data.byteOffset + imageData.data.byteLength
-      );
+      var buffer = imageData.data.buffer;
       window.parent.postMessage(
         {
           type: 'joy.scene.surface.v1',
@@ -197,6 +194,9 @@ const PREVIEW_BOOTSTRAP = `(function () {
           path: 'surface'
         }
       }, '*');
+    } finally {
+      canvas.width = 0;
+      canvas.height = 0;
     }
   }
   function receive(event) {

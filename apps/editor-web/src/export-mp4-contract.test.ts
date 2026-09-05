@@ -9,6 +9,16 @@ const exportCallback = appSource.slice(
 );
 
 describe('App MP4 export negotiation contract', () => {
+  it('captures every simultaneous video and target-sized scenes with cancellation', () => {
+    expect(exportCallback).toContain('activePreparedExportClipsAt(');
+    expect(exportCallback).toContain('for (const clip of activeClips)');
+    expect(exportCallback).toContain('withVideoFrameNodes(frame, nodes)');
+    expect(exportCallback).toMatch(
+      /captureFull\(exportVisualProject.visualObjects, timeUs,\s*\{\s*width,\s*height,\s*signal: abortController.signal/,
+    );
+    expect(exportCallback).toContain('exportSceneCache?.destroy()');
+  });
+
   it('builds the audio mix from all timeline lanes while preparing only visual export clips for frames', () => {
     expect(exportCallback).toMatch(/selectExportAudioClips\(\s*allTimelineClips,/);
     expect(exportCallback).toContain('audioClipIds.has(media.clip.id)');

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { canonicalBindingKey, type JoyProjectV1 } from '@joy-media/project-schema';
 import {
   activePreparedExportClipAt,
+  activePreparedExportClipsAt,
   hasRenderableExportMedia,
   isExportDurationTimelineClip,
   isExportVisualTimelineClip,
@@ -78,6 +79,29 @@ describe('activePreparedExportClipAt', () => {
     { id: 'base-video', startUs: 0, durationUs: 1_000_000, layer: 0 },
     { id: 'later-image', startUs: 1_000_000, durationUs: 1_000_000, layer: 0 },
   ] as const;
+
+  it('preserves all simultaneous videos, exact end boundaries and stable layer order', () => {
+    const videos = [
+      { id: 'base', startUs: 0, durationUs: 600_000_000, layer: 0 },
+      { id: 'overlay', startUs: 1_000_000, durationUs: 2_000_000, layer: 1 },
+      { id: 'future', startUs: 600_000_000, durationUs: 1_000_000, layer: 0 },
+    ];
+    const media = new Map(videos.map((clip) => [clip.id, { video: {} }]));
+    expect(
+      activePreparedExportClipsAt(videos, 1_000_000, media, (clip) => clip.layer).map(
+        (clip) => clip.id,
+      ),
+    ).toEqual(['base', 'overlay']);
+    expect(activePreparedExportClipsAt(videos, 3_000_000, media).map((clip) => clip.id)).toEqual([
+      'base',
+    ]);
+    expect(activePreparedExportClipsAt(videos, 599_999_999, media).map((clip) => clip.id)).toEqual([
+      'base',
+    ]);
+    expect(activePreparedExportClipsAt(videos, 600_000_000, media).map((clip) => clip.id)).toEqual([
+      'future',
+    ]);
+  });
 
   it('selects prepared animated-image media instead of requiring an HTML video', () => {
     const media = new Map([['animated-image', { animatedFrameSource: {} }]]);
