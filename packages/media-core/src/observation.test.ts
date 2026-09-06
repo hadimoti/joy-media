@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertFrameIdentity,
+  assertObservationFinding,
   createCompositionEvidenceIdentity,
+  createSourceEvidenceIdentity,
   frameIdentityKey,
   ptsTicksToSourceTimeUs,
 } from './observation.js';
@@ -34,7 +36,67 @@ describe('observation identity', () => {
   it('rejects negative, non-integer, and overflow timing instead of rounding it into evidence', () => {
     expect(() => ptsTicksToSourceTimeUs('-1', 1, 90_000)).toThrow('ptsTicks');
     expect(() => ptsTicksToSourceTimeUs('1.5', 1, 90_000)).toThrow('ptsTicks');
+    expect(() => ptsTicksToSourceTimeUs('1'.repeat(65), 1, 90_000)).toThrow('ptsTicks');
     expect(() => ptsTicksToSourceTimeUs('9007199254740992', 1, 1)).toThrow('safe integer');
+  });
+
+  it('rejects invalid privacy origins, frame-end overflow, and unbounded composition dependencies', () => {
+    const frame = {
+      assetDigest: 'a'.repeat(64),
+      streamId: 'video-0',
+      presentationIndex: 0,
+      ptsTicks: '0',
+      timebaseNumerator: 1,
+      timebaseDenominator: 1,
+      sourceTimeUs: 0,
+      durationUs: 1,
+    };
+    expect(() => createSourceEvidenceIdentity('remote-upload' as never, frame)).toThrow('origin');
+    expect(() =>
+      assertFrameIdentity({
+        ...frame,
+        sourceTimeUs: Number.MAX_SAFE_INTEGER,
+        durationUs: 1,
+        ptsTicks: String(Number.MAX_SAFE_INTEGER),
+        timebaseDenominator: 1_000_000,
+      }),
+    ).toThrow('frame end');
+    expect(() =>
+      createCompositionEvidenceIdentity({
+        compositionId: 'composition-1',
+        projectRevision: 'revision-1',
+        outputTimeUs: 0,
+        rendererVersion: 'renderer-v1',
+        evaluatorVersion: 'evaluator-v1',
+        dependencyDigests: Array.from({ length: 257 }, () => 'a'.repeat(64)),
+      }),
+    ).toThrow('dependencyDigests');
+  });
+
+  it('accepts only bounded, evidence-linked findings without raw locations', () => {
+    const finding = {
+      id: 'finding-1',
+      kind: 'text' as const,
+      evidenceFrameIds: ['frame-1'],
+      confidence: 'medium' as const,
+      uncertainty: 'OCR could be incomplete.',
+    };
+    expect(() => assertObservationFinding(finding)).not.toThrow();
+    expect(() =>
+      assertObservationFinding({ ...finding, uncertainty: 'file:///private/project.mov' }),
+    ).toThrow('uncertainty');
+    expect(() =>
+      assertObservationFinding({ ...finding, uncertainty: 'See https://example.test/frame.' }),
+    ).toThrow('uncertainty');
+    expect(() =>
+      assertObservationFinding({
+        ...finding,
+        evidenceFrameIds: Array.from({ length: 257 }, (_, index) => `frame-${index}`),
+      }),
+    ).toThrow('evidenceFrameIds');
+    expect(() => assertObservationFinding({ ...finding, id: 'C:private-file' })).toThrow(
+      'finding.id',
+    );
   });
 
   it('keeps composed output evidence distinct from a source frame identity', () => {
@@ -48,5 +110,18 @@ describe('observation identity', () => {
         dependencyDigests: ['a'.repeat(64)],
       }),
     ).toMatchObject({ kind: 'composition', outputTimeUs: 1_000_000 });
+  });
+
+  it('rejects raw paths from composition evidence identities', () => {
+    expect(() =>
+      createCompositionEvidenceIdentity({
+        compositionId: 'relative/path',
+        projectRevision: 'revision-1',
+        outputTimeUs: 0,
+        rendererVersion: 'renderer-v1',
+        evaluatorVersion: 'evaluator-v1',
+        dependencyDigests: [],
+      }),
+    ).toThrow('compositionId');
   });
 });

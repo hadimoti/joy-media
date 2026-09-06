@@ -8,6 +8,17 @@ export interface ProjectMediaSource {
   readonly source: 'opfs' | 'cloud' | 'reference';
 }
 
+/**
+ * A host-only original/proxy byte handle for local observation. It deliberately
+ * exposes neither an object URL nor a storage location, so it cannot be handed
+ * to a model as a fetch target.
+ */
+export interface ProjectMediaObservationSource {
+  readonly blob: Blob;
+  readonly mimeType: string;
+  readonly source: 'opfs' | 'cloud';
+}
+
 export interface ProjectMediaResolverOptions {
   readonly projectId: string;
   /** Project-scoped API calls wait until the authenticated owner is known. */
@@ -37,6 +48,7 @@ function mediaMimeType(asset: BrowserAsset | undefined, blob: Blob): string {
 export class ProjectMediaResolver {
   readonly #options: ProjectMediaResolverOptions;
   readonly #sources = new Map<string, ProjectMediaSource>();
+  readonly #observationSources = new Map<string, ProjectMediaObservationSource>();
   readonly #pending = new Map<string, Promise<ProjectMediaSource>>();
   #epoch = 0;
 
@@ -59,12 +71,28 @@ export class ProjectMediaResolver {
     return request;
   }
 
+  /**
+   * Resolves owner-authorized bytes for the local observation Worker. This is
+   * intentionally unavailable for reference URL fallbacks: a reference clip
+   * must be represented as reference-origin evidence by an explicit adapter,
+   * never silently relabelled as a user's original.
+   */
+  async resolveObservationSource(assetId: string): Promise<ProjectMediaObservationSource> {
+    const existing = this.#observationSources.get(assetId);
+    if (existing !== undefined) return existing;
+    await this.resolve(assetId);
+    const resolved = this.#observationSources.get(assetId);
+    if (resolved !== undefined) return resolved;
+    throw new Error('This media is not available as trusted local observation bytes.');
+  }
+
   clear(): void {
     this.#epoch += 1;
     for (const source of this.#sources.values()) {
       if (source.source !== 'reference') URL.revokeObjectURL(source.url);
     }
     this.#sources.clear();
+    this.#observationSources.clear();
     this.#pending.clear();
   }
 
@@ -83,6 +111,7 @@ export class ProjectMediaResolver {
         },
         epoch,
       );
+      this.#rememberObservationSource(assetId, local, source, epoch);
       return source;
     }
     this.#assertEpoch(epoch);
@@ -118,7 +147,7 @@ export class ProjectMediaResolver {
       this.#assertEpoch(epoch);
       if (!(await matchesDescriptor(cloud, descriptor)))
         throw new Error(`owner media integrity check failed for ${assetId}`);
-      return this.#remember(
+      const source = this.#remember(
         assetId,
         {
           url: URL.createObjectURL(cloud),
@@ -127,6 +156,8 @@ export class ProjectMediaResolver {
         },
         epoch,
       );
+      this.#rememberObservationSource(assetId, cloud, source, epoch);
+      return source;
     } catch (error) {
       this.#assertEpoch(epoch);
       if (
@@ -181,6 +212,26 @@ export class ProjectMediaResolver {
     }
     this.#sources.set(assetId, source);
     return source;
+  }
+
+  #rememberObservationSource(
+    assetId: string,
+    blob: Blob,
+    source: ProjectMediaSource,
+    epoch: number,
+  ): void {
+    if (epoch !== this.#epoch) {
+      // `#remember` has already revoked its owned URL before throwing. Do not
+      // retain late bytes across a clear/relink/project switch.
+      this.#assertEpoch(epoch);
+    }
+    if (source.source === 'reference') return;
+    const existing = this.#observationSources.get(assetId);
+    if (existing !== undefined) return;
+    this.#observationSources.set(
+      assetId,
+      Object.freeze({ blob, mimeType: source.mimeType, source: source.source }),
+    );
   }
 }
 

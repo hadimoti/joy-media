@@ -30,9 +30,11 @@ export type {
 } from './observation.js';
 export {
   assertFrameIdentity,
+  assertObservationFinding,
   createCompositionEvidenceIdentity,
   createSourceEvidenceIdentity,
   frameIdentityKey,
+  isObservationPrivacyOrigin,
   ptsTicksToSourceTimeUs,
 } from './observation.js';
 
@@ -44,8 +46,11 @@ export type {
   ObservationMode,
 } from './observation-coverage.js';
 export {
+  assertEvidenceCoverage,
   hasExhaustiveInputCoverage,
   isFrameWithinHalfOpenRange,
+  isEvidenceCoverage,
+  MAX_EVIDENCE_COVERAGE_FRAME_IDS_PER_PAGE,
   summarizeEvidenceCoverage,
 } from './observation-coverage.js';
 

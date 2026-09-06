@@ -304,4 +304,45 @@ describe('ProjectMediaResolver', () => {
     });
     create.mockRestore();
   });
+
+  it('provides only owner-authorized local bytes to the observation host', async () => {
+    const blob = new Blob(['local-observation'], { type: 'video/mp4' });
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      client: {
+        assets: vi.fn(async () => []),
+        originalBytes: vi.fn(async () => {
+          throw new Error('cloud should not be requested');
+        }),
+        sharedCloudOriginalBytes: vi.fn(async () => {
+          throw new Error('shared cloud should not be requested');
+        }),
+      },
+      originalCache: { get: vi.fn(async () => blob) },
+    });
+
+    await expect(resolver.resolveObservationSource('media-1')).resolves.toEqual({
+      blob,
+      mimeType: 'video/mp4',
+      source: 'opfs',
+    });
+    resolver.clear();
+  });
+
+  it('does not reinterpret an allowlisted reference URL as local user observation bytes', async () => {
+    const resolver = new ProjectMediaResolver({
+      projectId: 'signed-out-project',
+      controlPlaneReady: false,
+      client: {
+        assets: vi.fn(async () => []),
+        originalBytes: vi.fn(),
+        sharedCloudOriginalBytes: vi.fn(),
+      },
+      originalCache: { get: vi.fn(async () => undefined) },
+    });
+
+    await expect(resolver.resolveObservationSource('asset-intro')).rejects.toThrow(
+      'trusted local observation bytes',
+    );
+  });
 });

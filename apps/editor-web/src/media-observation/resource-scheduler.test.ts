@@ -78,4 +78,17 @@ describe('ObservationResourceScheduler', () => {
       reason: 'playback-priority',
     });
   });
+
+  it('honors an explicit foreground playback signal before opening a background decode', () => {
+    const scheduler = new ObservationResourceScheduler({ maxWorkingSetBytes: 100, maxInFlight: 1 });
+    scheduler.setPlaybackPriorityActive(true);
+    expect(scheduler.snapshot()).toMatchObject({ playbackPriorityActive: true });
+    expect(
+      scheduler.tryAcquire({ id: 'background', bytes: 20, epoch: 1, priority: 'background' }),
+    ).toEqual({ state: 'backpressure', reason: 'playback-priority' });
+    scheduler.setPlaybackPriorityActive(false);
+    expect(
+      scheduler.tryAcquire({ id: 'background', bytes: 20, epoch: 1, priority: 'background' }),
+    ).toMatchObject({ state: 'acquired' });
+  });
 });

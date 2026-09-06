@@ -36,6 +36,8 @@ export interface ObservationResourceSnapshot {
   readonly activeCount: number;
   readonly workingSetBytes: number;
   readonly activePlaybackCount: number;
+  /** True while foreground playback has asked background observation to pause. */
+  readonly playbackPriorityActive: boolean;
 }
 
 interface ActiveLease extends ObservationResourceRequest {
@@ -45,6 +47,7 @@ interface ActiveLease extends ObservationResourceRequest {
 export class ObservationResourceScheduler {
   readonly #active = new Map<string, ActiveLease>();
   #workingSetBytes = 0;
+  #playbackPriorityActive = false;
 
   constructor(private readonly options: ObservationResourceSchedulerOptions) {
     if (!Number.isSafeInteger(options.maxWorkingSetBytes) || options.maxWorkingSetBytes < 1)
@@ -55,7 +58,10 @@ export class ObservationResourceScheduler {
 
   tryAcquire(request: ObservationResourceRequest): ObservationResourceDecision {
     assertRequest(request);
-    if (request.priority === 'background' && this.#hasPlaybackLease())
+    if (
+      request.priority === 'background' &&
+      (this.#playbackPriorityActive || this.#hasPlaybackLease())
+    )
       return { state: 'backpressure', reason: 'playback-priority' };
     if (this.#active.size >= this.options.maxInFlight)
       return { state: 'backpressure', reason: 'in-flight-budget' };
@@ -86,6 +92,16 @@ export class ObservationResourceScheduler {
     return cancelled;
   }
 
+  /**
+   * The real Monitor reports foreground playback separately from decoded
+   * observation leases. This is deliberately a pause signal, not permission
+   * to preempt or dispose a frame currently owned by an observation consumer.
+   */
+  setPlaybackPriorityActive(active: boolean): void {
+    if (typeof active !== 'boolean') throw new TypeError('playback priority must be a boolean');
+    this.#playbackPriorityActive = active;
+  }
+
   snapshot(): ObservationResourceSnapshot {
     return {
       activeCount: this.#active.size,
@@ -93,6 +109,7 @@ export class ObservationResourceScheduler {
       activePlaybackCount: [...this.#active.values()].filter(
         (active) => active.priority === 'playback',
       ).length,
+      playbackPriorityActive: this.#playbackPriorityActive,
     };
   }
 

@@ -33,5 +33,18 @@ describe('observation cache keys', () => {
     expect(() =>
       createObservationCacheKey({ ...input, streamId: 'https://example.test/media' }),
     ).toThrow('streamId');
+    expect(() => createObservationCacheKey({ ...input, modelId: '../model' })).toThrow('modelId');
+    expect(() => createObservationCacheKey({ ...input, rotationDeg: 45 as never })).toThrow(
+      'rotationDeg',
+    );
+    expect(() =>
+      createObservationCacheKey({ ...input, representation: 'provider-url' as never }),
+    ).toThrow('representation');
+    expect(() =>
+      createObservationCacheKey({
+        ...input,
+        crop: { ...input.crop, x: Number.MAX_SAFE_INTEGER, width: 1 },
+      }),
+    ).toThrow('crop.x + crop.width');
   });
 });

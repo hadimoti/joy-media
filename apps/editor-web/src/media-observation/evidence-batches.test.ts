@@ -43,4 +43,22 @@ describe('evidence batches', () => {
       createEvidenceBatches([sourceFrameId], { maxFramesPerBatch: 1, reviewedFrameIds: [] }),
     ).toEqual([{ id: 'evidence-batch-0', frameIds: [sourceFrameId] }]);
   });
+
+  it('accepts the O1 512-character opaque identity bound and rejects a longer frame id', () => {
+    const maxLengthFrameId = `f${'a'.repeat(511)}`;
+    const tooLongFrameId = `f${'a'.repeat(512)}`;
+    expect(
+      createEvidenceBatches([maxLengthFrameId], { maxFramesPerBatch: 1, reviewedFrameIds: [] }),
+    ).toEqual([{ id: 'evidence-batch-0', frameIds: [maxLengthFrameId] }]);
+    expect(() =>
+      createEvidenceBatches([tooLongFrameId], { maxFramesPerBatch: 1, reviewedFrameIds: [] }),
+    ).toThrow('bounded opaque identifier');
+  });
+
+  it('keeps O1 raw-location rejection when expanding the source-frame identifier bound', () => {
+    for (const unsafeFrameId of ['https:provider-frame', 'data:private-frame', 'C:frame'])
+      expect(() =>
+        createEvidenceBatches([unsafeFrameId], { maxFramesPerBatch: 1, reviewedFrameIds: [] }),
+      ).toThrow('bounded opaque identifier');
+  });
 });

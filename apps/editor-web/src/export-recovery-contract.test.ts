@@ -221,15 +221,24 @@ describe('App export recovery contract', () => {
     const inputAccepted = exportCallback.indexOf('retryInputsAccepted = true', inputGuard);
     const catchBlock = exportCallback.indexOf('} catch (error) {', inputAccepted);
     const guardedFailure = exportCallback.indexOf('retryInputsAccepted &&', catchBlock);
-    const failedEntry = exportCallback.indexOf(
-      "status: cancelled ? 'interrupted-retryable' : 'failed'",
-      guardedFailure,
+    // The guarded failure entry records a cancelled retry as interrupted-retryable,
+    // an unavailable final-export verification receipt as verification-required, and
+    // any other error as failed.
+    const failedEntry = exportCallback.indexOf('status: cancelled', guardedFailure);
+    const interruptedBranch = exportCallback.indexOf("'interrupted-retryable'", failedEntry);
+    const verificationRequiredBranch = exportCallback.indexOf(
+      "verificationGate?.receipt.status === 'unavailable'",
+      failedEntry,
     );
+    const failedBranch = exportCallback.indexOf("'failed'", verificationRequiredBranch);
 
     expect(inputGuard).toBeGreaterThanOrEqual(0);
     expect(inputAccepted).toBeGreaterThan(inputGuard);
     expect(catchBlock).toBeGreaterThan(inputAccepted);
     expect(guardedFailure).toBeGreaterThan(catchBlock);
     expect(failedEntry).toBeGreaterThan(guardedFailure);
+    expect(interruptedBranch).toBeGreaterThan(failedEntry);
+    expect(verificationRequiredBranch).toBeGreaterThan(interruptedBranch);
+    expect(failedBranch).toBeGreaterThan(verificationRequiredBranch);
   });
 });

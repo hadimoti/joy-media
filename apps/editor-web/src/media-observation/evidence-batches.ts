@@ -14,6 +14,9 @@ export interface EvidenceBatchOptions {
   readonly reviewedFrameIds: readonly string[];
 }
 
+const UNSAFE_LOCATION =
+  /(?:\b(?:https?|file|data|blob):|\b[A-Za-z]:|(?:^|\s|=|:|\(|\[)(?:~?\/|\\\\)|(?:^|\/)\.{1,2}(?:\/|$)|\\)/i;
+
 /**
  * Return each not-yet-reviewed temporal identity once. Content-addressed image
  * bytes may deduplicate in storage, but identical stills at different times
@@ -47,7 +50,10 @@ export function createEvidenceBatches(
 function assertIntendedFrameIds(frameIds: readonly string[]): void {
   const ids = new Set<string>();
   for (const id of frameIds) {
-    if (!/^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/.test(id))
+    // O1 source-frame keys can exceed 256 characters when they carry an exact
+    // stream/PTS identity. Keep the same 512-character opaque identifier
+    // boundary as observation coverage instead of truncating semantic input.
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:@=-]{0,511}$/.test(id) || UNSAFE_LOCATION.test(id))
       throw new RangeError('frame id must be a bounded opaque identifier');
     if (ids.has(id)) throw new RangeError(`duplicate intended frame id: ${id}`);
     ids.add(id);

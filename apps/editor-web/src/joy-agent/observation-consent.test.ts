@@ -2,24 +2,37 @@ import { describe, expect, it } from 'vitest';
 import {
   ObservationConsentRegistry,
   issueObservationConsent,
+  type ObservationConsent,
+  type ObservationMediaCapability,
   type ObservationTransferRequest,
 } from './observation-consent.js';
 
-function createConsent() {
-  return issueObservationConsent(
-    {
-      projectId: 'project-1',
-      runId: 'run-1',
-      endpointOrigin: 'https://openrouter.ai',
-      modelId: 'openrouter/model-a',
-      evidenceIds: ['frame-1', 'frame-2'],
-      modalities: ['image'],
-      maxRequests: 2,
-      maxBytes: 1_000,
-      expiresAtMs: 2_000,
-    },
-    1_000,
-  );
+const imageCapability: ObservationMediaCapability = {
+  modelId: 'openrouter/model-a',
+  modalities: ['image'],
+};
+
+function consentInput(overrides: Partial<ObservationConsent> = {}): ObservationConsent {
+  return {
+    projectId: 'project-1',
+    runId: 'run-1',
+    endpointOrigin: 'https://openrouter.ai',
+    modelId: 'openrouter/model-a',
+    range: { domain: 'source', startUs: 100_000, endUs: 900_000 },
+    evidenceIds: ['frame-1', 'frame-2'],
+    modalities: ['image'],
+    maxRequests: 2,
+    maxBytes: 1_000,
+    expiresAtMs: 2_000,
+    ...overrides,
+  };
+}
+
+function createConsent(
+  overrides: Partial<ObservationConsent> = {},
+  capability: ObservationMediaCapability = imageCapability,
+) {
+  return issueObservationConsent(consentInput(overrides), capability, 1_000);
 }
 
 const request: ObservationTransferRequest = {
@@ -27,6 +40,7 @@ const request: ObservationTransferRequest = {
   runId: 'run-1',
   endpointUrl: 'https://openrouter.ai/api/v1/chat/completions',
   modelId: 'openrouter/model-a',
+  range: { domain: 'source', startUs: 200_000, endUs: 500_000 },
   evidenceIds: ['frame-1'],
   modalities: ['image'],
   bytes: 500,
@@ -44,20 +58,28 @@ describe('observation consent', () => {
     expect(registry.authorize(request, 1_100)).toEqual({ allowed: true, remainingRequests: 1 });
   });
 
-  it('invalidates endpoint, model, evidence, modality, and byte expansion', () => {
+  it('invalidates origin, model, range, evidence, modality, and budget expansion', () => {
     const registry = new ObservationConsentRegistry();
-    const consent = createConsent();
-    registry.grant(consent);
+    registry.grant(createConsent());
+    expect(
+      registry.authorize({ ...request, endpointUrl: 'https://openrouter.ai.evil/chat' }, 1_100),
+    ).toEqual({ allowed: false, reason: 'endpoint-mismatch' });
     expect(registry.authorize({ ...request, modelId: 'openrouter/other' }, 1_100)).toEqual({
       allowed: false,
       reason: 'model-mismatch',
     });
     expect(
-      registry.authorize({ ...request, endpointUrl: 'https://example.test/chat' }, 1_100),
-    ).toEqual({
-      allowed: false,
-      reason: 'endpoint-mismatch',
-    });
+      registry.authorize(
+        { ...request, range: { domain: 'source', startUs: 99_999, endUs: 500_000 } },
+        1_100,
+      ),
+    ).toEqual({ allowed: false, reason: 'range-mismatch' });
+    expect(
+      registry.authorize(
+        { ...request, range: { domain: 'composition', startUs: 200_000, endUs: 500_000 } },
+        1_100,
+      ),
+    ).toEqual({ allowed: false, reason: 'range-mismatch' });
     expect(registry.authorize({ ...request, evidenceIds: ['frame-3'] }, 1_100)).toEqual({
       allowed: false,
       reason: 'evidence-mismatch',
@@ -72,56 +94,44 @@ describe('observation consent', () => {
     });
   });
 
-  it('expires and cancels approvals so later batches cannot resume after reload-like interruption', () => {
+  it('expires, revokes, and does not restore approval in a fresh in-memory registry', () => {
     const registry = new ObservationConsentRegistry();
     const consent = createConsent();
     registry.grant(consent);
     expect(registry.authorize(request, 2_000)).toEqual({ allowed: false, reason: 'expired' });
-    registry.grant(createConsent());
-    registry.cancel('run-1');
+
+    const renewed = createConsent({ expiresAtMs: 3_000 });
+    registry.grant(renewed);
+    expect(registry.revoke('run-1')).toBe(true);
+    expect(registry.cancel('run-1')).toBe(false);
     expect(registry.authorize(request, 1_100)).toEqual({
+      allowed: false,
+      reason: 'consent-missing',
+    });
+    expect(new ObservationConsentRegistry().authorize(request, 1_100)).toEqual({
       allowed: false,
       reason: 'consent-missing',
     });
   });
 
-  it('freezes an issued scope and its collection fields', () => {
-    const issued = issueObservationConsent(
-      {
-        projectId: 'project-immutable',
-        runId: 'run-immutable',
-        endpointOrigin: 'https://openrouter.ai',
-        modelId: 'openrouter/model-a',
-        evidenceIds: ['frame-1'],
-        modalities: ['image'],
-        maxRequests: 1,
-        maxBytes: 500,
-        expiresAtMs: 2_000,
-      },
-      1_000,
-    );
+  it('freezes and canonicalizes the issued scope', () => {
+    const issued = createConsent({
+      runId: 'run-immutable',
+      evidenceIds: ['frame-2', 'frame-1', 'frame-2'],
+      range: { domain: 'composition', startUs: 1, endUs: 2 },
+    });
 
     expect(Object.isFrozen(issued)).toBe(true);
+    expect(Object.isFrozen(issued.range)).toBe(true);
+    expect(issued.evidenceIds).toEqual(['frame-1', 'frame-2']);
     expect(Object.isFrozen(issued.evidenceIds)).toBe(true);
     expect(Object.isFrozen(issued.modalities)).toBe(true);
     expect(() => (issued.evidenceIds as string[]).push('frame-forged')).toThrow(TypeError);
+    expect(() => ((issued.range as { startUs: number }).startUs = 0)).toThrow(TypeError);
   });
 
-  it('rejects a reflected copy of an issued consent', () => {
-    const issued = issueObservationConsent(
-      {
-        projectId: 'project-forged',
-        runId: 'run-forged',
-        endpointOrigin: 'https://openrouter.ai',
-        modelId: 'openrouter/model-a',
-        evidenceIds: ['frame-1'],
-        modalities: ['image'],
-        maxRequests: 1,
-        maxBytes: 500,
-        expiresAtMs: 2_000,
-      },
-      1_000,
-    );
+  it('rejects reflected model JSON rather than letting it grant consent', () => {
+    const issued = createConsent({ runId: 'run-forged' });
     const forged = Object.create(
       Object.getPrototypeOf(issued),
       Object.getOwnPropertyDescriptors(issued),
@@ -132,78 +142,65 @@ describe('observation consent', () => {
     );
   });
 
-  it('does not reset spent budgets when the same issued consent is re-granted', () => {
+  it('does not reset spent budgets or let a revoked issued scope resume', () => {
     const registry = new ObservationConsentRegistry();
-    const consent = createConsent();
-    const smallRequest = { ...request, bytes: 1 };
+    const consent = createConsent({ runId: 'run-budget' });
+    const budgetRequest = { ...request, runId: 'run-budget', bytes: 1 };
     registry.grant(consent);
-    expect(registry.authorize(smallRequest, 1_100)).toEqual({
+    expect(registry.authorize(budgetRequest, 1_100)).toEqual({
       allowed: true,
       remainingRequests: 1,
     });
-
     registry.grant(consent);
-    expect(registry.authorize(smallRequest, 1_100)).toEqual({
+    expect(registry.authorize(budgetRequest, 1_100)).toEqual({
       allowed: true,
       remainingRequests: 0,
     });
-    expect(registry.authorize(smallRequest, 1_100)).toEqual({
+    expect(registry.authorize(budgetRequest, 1_100)).toEqual({
       allowed: false,
       reason: 'request-budget',
     });
+    registry.revoke('run-budget');
+    expect(() => registry.grant(consent)).toThrow('observation consent cannot be reused');
   });
 
-  it('does not let a cancelled issued scope resume later batches', () => {
-    const registry = new ObservationConsentRegistry();
-    const issued = issueObservationConsent(
-      {
-        projectId: 'project-cancelled',
-        runId: 'run-cancelled',
-        endpointOrigin: 'https://openrouter.ai',
-        modelId: 'openrouter/model-a',
-        evidenceIds: ['frame-1'],
-        modalities: ['image'],
-        maxRequests: 1,
-        maxBytes: 500,
-        expiresAtMs: 2_000,
-      },
-      1_000,
+  it('accepts only HTTPS or localhost origins and rejects malformed endpoint URLs', () => {
+    expect(() => createConsent({ endpointOrigin: 'http://example.test' })).toThrow(
+      'HTTPS or localhost origin',
+    );
+    expect(() => createConsent({ endpointOrigin: 'https://user:secret@openrouter.ai' })).toThrow(
+      'HTTPS or localhost origin',
+    );
+    expect(() => createConsent({ endpointOrigin: 'https://openrouter.ai/api/v1' })).toThrow(
+      'HTTPS or localhost origin',
     );
 
-    registry.grant(issued);
-    registry.cancel('run-cancelled');
-    expect(() => registry.grant(issued)).toThrow('observation consent cannot be reused');
-  });
-
-  it('rejects credentials in both consent and transfer endpoints', () => {
-    expect(() =>
-      issueObservationConsent(
-        {
-          projectId: 'project-userinfo',
-          runId: 'run-userinfo',
-          endpointOrigin: 'https://user:secret@openrouter.ai',
-          modelId: 'openrouter/model-a',
-          evidenceIds: ['frame-1'],
-          modalities: ['image'],
-          maxRequests: 1,
-          maxBytes: 500,
-          expiresAtMs: 2_000,
-        },
-        1_000,
-      ),
-    ).toThrow('endpointOrigin must be an HTTPS origin without a path');
-
     const registry = new ObservationConsentRegistry();
-    const consent = createConsent();
-    registry.grant(consent);
+    registry.grant(createConsent({ endpointOrigin: 'http://localhost:4010' }));
     expect(
       registry.authorize(
-        {
-          ...request,
-          endpointUrl: 'https://user:secret@openrouter.ai/api/v1/chat/completions',
-        },
+        { ...request, endpointUrl: 'http://localhost:4010/v1/chat/completions' },
         1_100,
       ),
-    ).toEqual({ allowed: false, reason: 'endpoint-mismatch' });
+    ).toEqual({ allowed: true, remainingRequests: 1 });
+    expect(registry.authorize({ ...request, endpointUrl: 'not a url' }, 1_100)).toEqual({
+      allowed: false,
+      reason: 'invalid-request',
+    });
+    expect(
+      registry.authorize(
+        { ...request, endpointUrl: 'https://openrouter.ai/api/v1?token=not-allowed' },
+        1_100,
+      ),
+    ).toEqual({ allowed: false, reason: 'invalid-request' });
+  });
+
+  it('does not issue image consent for a text-only or mismatched model capability', () => {
+    expect(() => createConsent({}, { modelId: 'openrouter/model-a', modalities: [] })).toThrow(
+      'does not have the requested media capability',
+    );
+    expect(() =>
+      createConsent({}, { modelId: 'openrouter/model-b', modalities: ['image'] }),
+    ).toThrow('must exactly match consent modelId');
   });
 });
