@@ -203,3 +203,66 @@ user approves exactly as they do for a direct tool-loop edit today.
 - Recipe prompt templates are product-owned constants, never model- or
   user-authored, and cannot raise `allowedToolNames` beyond the manifest.
 - One tool-loop per recipe run; no second executor, no parallel model loop.
+
+## Appendix: `AgentPanel.tsx` seam map (Option A)
+
+Concrete line references as of `b634d3cd`. The extraction target is the
+`void (async () => { … })()` IIFE inside `submitPrompt`.
+
+| Region                                                             | Lines         | Moves to                                                                                                                                                                                             |
+| ------------------------------------------------------------------ | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `submitPrompt` fn                                                  | 1313–2048     | stays; becomes thin caller                                                                                                                                                                           |
+| tool-loop guard + run-id allocation + `discard*` + `beginRun`      | 1367–1439     | stays in `submitPrompt` (UI/refs setup)                                                                                                                                                              |
+| **the async IIFE**                                                 | **1440–2016** | **`createJoyAgentEditRunController(deps).start(runInput)`**                                                                                                                                          |
+| `contextInput: JoyAgentContextSnapshotInput` build                 | 1446–1513     | stays; passed in as `runInput.contextInput`                                                                                                                                                          |
+| `mode` / `structured` / `capturedModelId` / `capturedPolicyDigest` | 1514–1521     | into controller (`runInput` carries `mode`, `taskKind`)                                                                                                                                              |
+| `observationBridge` construction                                   | 1522–1584     | stays in `submitPrompt`; passed as `runInput.observationBridge` (recipe path injects its own)                                                                                                        |
+| `revokeStagedChange` (mutates `stagedChangeSetId`)                 | 1585–1597     | controller-owned                                                                                                                                                                                     |
+| `terminalizeConnectionReset`                                       | 1598–1632     | controller-owned                                                                                                                                                                                     |
+| `host` literal (`createJoyAgentHostRpcMethodsForSnapshot(…)`)      | 1633–1764     | `deps.buildHost({ prepareProposal, allowedToolNames, observationTools, onObservationCompleted, onCancelled })` — direct path passes the snapshot builder, recipe path passes the manifest-scoped one |
+| `prepareProposal` = the `async (proposal, rpcContext) => {…}` body | 1638–1748     | controller-owned; the one piece both hosts share                                                                                                                                                     |
+| `contextSnapshot` (non-structured only)                            | 1765–1767     | stays with `buildHost` caller                                                                                                                                                                        |
+| `client.startRun(...)` + `runIterator`                             | 1768–1779     | controller-owned (`deps.client`)                                                                                                                                                                     |
+| `beginRunLifecycle` + `createJoyAgentComposerHostLease`            | 1782–1792     | controller-owned                                                                                                                                                                                     |
+| **`for await (const event of runIterator)` loop**                  | **1793–1974** | controller-owned                                                                                                                                                                                     |
+| `catch` (failed-run cleanup + presence dispatch)                   | 1975–2005     | controller-owned                                                                                                                                                                                     |
+| `finally` (lease revoke, `setThinkingThreadId`, `setAgentRunId`)   | 2006–2015     | controller-owned                                                                                                                                                                                     |
+
+`deps` (all from the `AgentPanel` body, stable identities already `useCallback`/`useRef`):
+
+- stores/clients: `client` (`joyAgentEngineClient`), `buildHost`, `preparedChanges`,
+  `agentPreviewStore`, `agentPresenceStore`, `runController`
+- refs: `activeModelRunIdRef`, `activeComposerHostLeaseRef`, `proposalTargetsRef`,
+  `modelChangeSetIdRef`, `deferredPreviewApprovalRef`, `latestSessionRef`,
+  `latestSettingsRef`
+- session snapshot accessor: `getSession()` → live `session` (loop reads
+  `session.projectRevisionId` / `session.historyCursorSequence` fresh each event)
+- lifecycle helpers: `beginRunLifecycle` (789), `acceptRunLifecycle` (739),
+  `cancelRunLifecycle` (802), `revokeActiveComposerHostLease` (782)
+- prepared-change helpers: `currentPreparedAuthority` (1066),
+  `setPreparedModelChange` (1077), `discardPreparedModelChange` (1082),
+  `clearAgentPreviewForSourceRun` (822), `stageJoyAgentPreview` (import)
+- observation: `registerObservationReviewCandidate` (594)
+- UI: `setAgentPhase`, `setThinkingThreadId`, `setAgentRunId`, `appendMessage` (1174),
+  `threadId`
+- constants: `LEGACY_JOY_AGENT_TOOL_NAMES` / `JOY_AGENT_HOST_TOOL_NAMES`,
+  `targetsForJoyCodeOperations`, `targetForJoyAgentTask`
+
+`runInput` (per call): `{ runId, threadId, taskKind, taskTarget, prompt: body,
+baseRevision, mode, structured, contextInput, selectedEntityReference?,
+observationBridge?, allowedToolNames }`.
+
+Recipe reuse: the recipe path builds `runInput` with `taskKind: 'creative-skill'`,
+`allowedToolNames` from `buildCreativeSkillToolAllowList(manifest)`, and an
+`observationBridge` whose `observe` tool records the manifest id via
+`onObservationCompleted`; then reads back the controller's terminal
+`{ kind: 'prepared' | 'answer' | 'failed', changeSetId?, … }` — the same shape
+`runScopedCreativeSkillToolLoop` returns today.
+
+Parity gate (must stay green unchanged): `tests/e2e/agent-live-preview.spec.ts`,
+`agent-live-presence.spec.ts`, `agent-director-lifecycle.spec.ts`,
+`agent-director-runtime.spec.ts`, plus the full editor-web vitest suite. Add a
+focused `edit-run-controller.test.ts` with a fake `client` + in-memory
+`preparedChanges` / `agentPreviewStore` asserting: staged change on
+`awaiting-approval`, renderer-ack gate defers approval, `terminalizeConnectionReset`
+revokes without touching a newer run, hostile proposal digest mismatch throws.
