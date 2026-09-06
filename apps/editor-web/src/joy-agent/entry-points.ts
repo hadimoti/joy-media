@@ -1,6 +1,7 @@
 import type { CreativeBriefV1, CreativeSkillAvailability } from '@joy-media/agent-tools';
 import { resolveCreativeSkillAvailability, validateCreativeBrief } from '@joy-media/agent-tools';
 import type { JoyAgentEngineClient, JoyAgentRunHost } from './engine-client.js';
+import type { CreativeSkillScopedToolLoopResult } from './creative-skill-editor-primitives.js';
 import type {
   JoyAgentPreparedProposal,
   JoyAgentRunRequest,
@@ -340,4 +341,56 @@ export function runCreativeSkill(input: RunCreativeSkillInput): Promise<Creative
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
   });
+}
+
+/**
+ * Run one scoped recipe tool-loop through the same `runJoyAgentTask` path the
+ * direct editor uses, and map its terminal event to the recipe result shape.
+ * The recipe's tool allow-list is applied by the host the caller supplies;
+ * this wrapper never widens it.
+ */
+export async function runScopedCreativeSkillToolLoop(input: {
+  readonly client: JoyAgentEngineClient;
+  readonly host: JoyAgentRunHost;
+  readonly prompt: string;
+  readonly baseRevision: string;
+  readonly onEvent?: (event: JoyAgentSafeEvent) => void;
+  readonly signal?: AbortSignal;
+}): Promise<CreativeSkillScopedToolLoopResult> {
+  try {
+    const event = await runJoyAgentTask({
+      client: input.client,
+      host: input.host,
+      taskKind: 'joy-code',
+      prompt: input.prompt,
+      baseRevision: input.baseRevision,
+      ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
+    });
+    if (event.phase === 'awaiting-approval' && event.proposal !== undefined) {
+      return {
+        kind: 'prepared',
+        changeSetId: event.proposal.changeSetId,
+        operationDigest: event.proposal.operationDigest,
+        operationCount: event.proposal.operationCount,
+        // The bounded tool-loop caps repair proposals internally; the terminal
+        // event does not surface the count, so this is a conservative 0.
+        repairAttempts: 0,
+      };
+    }
+    if (event.phase === 'completed') {
+      const result = event.result as
+        { readonly kind?: string; readonly text?: unknown } | undefined;
+      if (result?.kind === 'answer' && typeof result.text === 'string')
+        return { kind: 'answer', text: result.text };
+      return { kind: 'answer', text: 'The recipe run completed without a proposed edit.' };
+    }
+    return { kind: 'failed', message: 'The recipe run produced no prepared change or answer.' };
+  } catch (error) {
+    if (error instanceof JoyAgentTaskError && error.code === 'cancelled')
+      return { kind: 'failed', message: 'The recipe run was cancelled.' };
+    return {
+      kind: 'failed',
+      message: error instanceof Error ? error.message.slice(0, 480) : 'The recipe run failed.',
+    };
+  }
 }

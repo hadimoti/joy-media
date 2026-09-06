@@ -7,6 +7,7 @@ import {
   runCreativeBriefTask,
   runCreativeSkill,
   runJoyAgentTask,
+  runScopedCreativeSkillToolLoop,
 } from './entry-points.js';
 import type { JoyAgentEngineClient, JoyAgentRunIterator } from './engine-client.js';
 import type { HostRpcMethods } from './host-rpc.js';
@@ -276,5 +277,53 @@ describe('JOY Agent entry points', () => {
     ]);
     expect(events).toContain('completed:preview');
     expect(primitives.verifyDeliverable).not.toHaveBeenCalled();
+  });
+
+  it('maps a scoped recipe tool-loop terminal event to the recipe result shape', async () => {
+    const proposal: JoyAgentPreparedProposal = {
+      summary: 'Trim the intro',
+      baseRevision: 'rev-1',
+      changeSetId: 'change-set-9',
+      operationDigest: 'c'.repeat(64),
+      bindingDigest: 'd'.repeat(64),
+      operationCount: 3,
+    };
+    await expect(
+      runScopedCreativeSkillToolLoop({
+        client: fakeClient([
+          event('previewing', { proposal }),
+          event('awaiting-approval', { message: 'review' }),
+        ]),
+        host,
+        prompt: 'prepare a rough cut',
+        baseRevision: 'rev-1',
+      }),
+    ).resolves.toEqual({
+      kind: 'prepared',
+      changeSetId: 'change-set-9',
+      operationDigest: 'c'.repeat(64),
+      operationCount: 3,
+      repairAttempts: 0,
+    });
+
+    await expect(
+      runScopedCreativeSkillToolLoop({
+        client: fakeClient([
+          event('completed', { result: { kind: 'answer', text: 'Flash at 1.5s' } }),
+        ]),
+        host,
+        prompt: 'find the flash',
+        baseRevision: 'rev-1',
+      }),
+    ).resolves.toEqual({ kind: 'answer', text: 'Flash at 1.5s' });
+
+    await expect(
+      runScopedCreativeSkillToolLoop({
+        client: fakeClient([event('failed', { message: 'provider unavailable' })]),
+        host,
+        prompt: 'prepare a rough cut',
+        baseRevision: 'rev-1',
+      }),
+    ).resolves.toMatchObject({ kind: 'failed' });
   });
 });
