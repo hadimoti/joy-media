@@ -1,6 +1,6 @@
 # JOY Living Looks and Linked Versions Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` / installed `executing-plans` task-by-task. GPT-5.6 Terra executes; GPT-6 Astra reviews the exact release candidate before deployment. Read the master plan and R1 contracts first.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` / installed `executing-plans` task-by-task. A Claude implementer agent executes; an independent Claude Opus agent reviews the exact release candidate before deployment. Read the master plan and R1 contracts first.
 
 **Goal:** Turn JOY's verified editing/observation foundation into distinctive editable art direction and coherent campaign deliverables that preserve human choices.
 
@@ -118,7 +118,7 @@ Each pack defines portrait and landscape constraint values explicitly. Energy ch
 - [ ] Run `pnpm exec vitest run packages/motion-core/src/looks/packs.test.ts`.
 - [ ] Author each pack as typed declarative data and compile it on portrait, landscape, short/long title, missing optional media and RTL fixtures. Use installed/free fonts only; include license notices and fallback diagnostics without resurrecting Fontiran.
 - [ ] Render before/after/keyframe boundary frames and full short motion previews using actual JOY rendering. Establish golden expectations for stable geometry/timing/pixels with pinned fixture fonts; account explicitly for platform rasterization tolerance, not broad screenshot masks.
-- [ ] Run `pnpm exec playwright test tests/e2e/living-looks-render.spec.ts --project=desktop-primary`. Review actual motion and legibility visually; save sanitized samples for Astra/creator evaluation. A passing schema test is not art-direction approval.
+- [ ] Run `pnpm exec playwright test tests/e2e/living-looks-render.spec.ts --project=desktop-primary`. Review actual motion and legibility visually; save sanitized samples for independent-reviewer/creator evaluation. A passing schema test is not art-direction approval.
 - [ ] Commit each independently finished pack, then pack integration. Run the master's creator scorecard and record weaknesses; improve the pack data/constraints rather than multiplying presets to hide low quality.
 
 ## L4 — Audio-reactive motion that remains editable and deterministic
@@ -135,7 +135,7 @@ Inputs are an explicit audio evidence version, source/composition time mapping, 
 - [ ] Run `pnpm exec vitest run packages/motion-core/src/looks/audio-reactive.test.ts`.
 - [ ] Implement envelope-to-keyframe sampling with bounded simplification error and explicit maximum key count; expose approximation error if decimating. Human editing of a generated key marks the corresponding curve override. Reanalysis produces a proposed diff, not an automatic overwrite.
 - [ ] Compare preview/export evaluation at exact impulse/key times, then decode the export to verify A/V alignment. Run `pnpm exec playwright test tests/e2e/living-looks-audio-motion.spec.ts --project=desktop-primary`.
-- [ ] Commit `feat(looks): bake audio-reactive motion into editable keyframes`. R2 review bundle includes six packs, source audio evidence, editable project packages, actual rendered samples and pilot feedback. Apply the master Astra gate before release.
+- [ ] Commit `feat(looks): bake audio-reactive motion into editable keyframes`. R2 review bundle includes six packs, source audio evidence, editable project packages, actual rendered samples and pilot feedback. Apply the master independent-Opus review gate before release.
 
 ## R3 scope and model decision
 
@@ -233,7 +233,7 @@ Deliver portrait, landscape, still poster and localized title/caption variants. 
 - [ ] Implement preflight per derivative revision/dependency set, a bounded local/export-job queue and artifact receipts. Each receipt identifies input composition revision, dimensions, format, actual encoded output digest and verification result. A queued or uploaded file is not automatically “delivered”; external destinations require explicit configured authority and a verified response.
 - [ ] Invalidate verified-export badges when dependent fields/assets change. Re-export uses explicit user action or an approved delivery envelope; no surprise background jobs. Unknown or ambiguous external status remains visible until reconciled.
 - [ ] Run `pnpm exec playwright test tests/e2e/linked-version-delivery.spec.ts --project=desktop-primary`. End-to-end campaign scenario: generate four variants, manually lock crop and localized title, change master logo/title/music, preview selective updates, preserve overrides, apply once, reload, export and decode all artifacts. One Undo restores the local update but does not claim refunded external costs.
-- [ ] Commit `feat(versions): verify and recover campaign delivery`. Run the master checks, creator study and exact-candidate Astra review gate. Complete Gbrain/Desktop-brief closeout only for the validated release scope.
+- [ ] Commit `feat(versions): verify and recover campaign delivery`. Run the master checks, creator study and exact-candidate independent Opus review gate. Complete Gbrain/Desktop-brief closeout only for the validated release scope.
 
 ## Combined completion checklist
 
@@ -244,4 +244,4 @@ Deliver portrait, landscape, still poster and localized title/caption variants. 
 - [ ] Master propagation preserves human changes and rejects unresolved structural conflicts.
 - [ ] Media/provider generation reuse prevents unnecessary paid regeneration.
 - [ ] Project package migration, Undo/reload, privacy, resource limits and UI accessibility pass across milestones.
-- [ ] Actual output/creative evaluation accompanies the complete diff. Astra approves the unchanged candidate before any deploy; unknown/blocked checks remain explicit.
+- [ ] Actual output/creative evaluation accompanies the complete diff. The independent Opus reviewer approves the unchanged candidate before any deploy; unknown/blocked checks remain explicit.

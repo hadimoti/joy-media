@@ -1,10 +1,10 @@
 # JOY Live Director Upgrade Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` (or the installed `executing-plans` equivalent) to implement this plan task-by-task. GPT-5.6 Terra is the requested executor. Steps use checkbox syntax for tracking. Do not start another implementation agent unless the owner requests delegation.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` (or the installed `executing-plans` equivalent) to implement this plan task-by-task. A Claude implementer agent is the requested executor; an independent Claude Opus agent reviews the release candidate. Steps use checkbox syntax for tracking. Do not start another implementation agent unless the owner requests delegation.
 
 **Goal:** Deliver a trustworthy video-observing editor agent, editable art direction and linked deliverables while preserving JOY's browser BYOK architecture and existing projects.
 
-**Architecture:** Keep one built-in Worker runtime and one trusted project controller over JOY's canonical operation/transaction boundary. Add isolated observation services and typed evidence, then compile Looks and version propagation through the same operation API. All releases require independent Astra review of the exact candidate before deployment.
+**Architecture:** Keep one built-in Worker runtime and one trusted project controller over JOY's canonical operation/transaction boundary. Add isolated observation services and typed evidence, then compile Looks and version propagation through the same operation API. All releases require independent Claude Opus review of the exact candidate before deployment.
 
 **Tech Stack:** Existing TypeScript/pnpm monorepo, React, browser Workers, OPFS/IndexedDB, JOY project schema/commands/property system/RenderFrameIR, Vitest and Playwright; candidate browser demux/decode adapter behind a narrow interface. No new mandatory backend or local model.
 
@@ -20,26 +20,26 @@
 6. [Existing full-editor operation plan](2026-09-05-joy-agent-full-editor-operation-plan.md), especially sections 5–8. Its incomplete domain requirements are prerequisites, not erased by this document.
 7. `docs/reviews/2026-09-05-joy-agent-implementation-review.md` and ADR-0004.
 
-Scope is this three-release JOY Media upgrade. The planning turn writes documentation only. Execution is for the next Terra agent, not automatically launched by these files.
+Scope is this three-release JOY Media upgrade. The planning turn writes documentation only. Execution is for the next Claude implementer agent, not automatically launched by these files.
 
 The source baseline inspected for this plan is `6a6a336cdd4fb0126c002dda86167f5c92ebfe32`. A later checkout requires a delta audit, not checkout/reset to the old baseline. The prior foundation release is not proof that the entire prior full-editor plan was implemented.
 
 ## Execution state (initial, unimplemented)
 
-| Milestone                | Dependencies                                     | Required acceptance                                                                             | State                                    |
-| ------------------------ | ------------------------------------------------ | ----------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| F: functional foundation | Baseline/ownership audit                         | One runtime, durable controller, actual operation parity ledger and preview/commit verification | Open                                     |
-| O: observation           | F contracts; O1/O2 can precede remaining domains | Real video/audio fixtures; exact timing/coverage; consent; no focus theft                       | Open                                     |
-| R1 integration           | F + O + skills/presence                          | All R1 scenarios, real Worker, rendered and exported evidence                                   | Open                                     |
-| R2 Living Looks          | R1 accepted interfaces and operation support     | Six editable packs, manual/agent parity, audio-reactive timing, creator evaluation              | Open                                     |
-| R3 Linked Versions       | R1 + R2                                          | Human overrides, dependency propagation, four deliverable types, recovery                       | Open                                     |
-| Release                  | Candidate for the selected milestone             | Astra explicit exact-candidate approval, then scoped deploy/rollback/smoke                      | Not authorized by a checklist tick alone |
+| Milestone                | Dependencies                                     | Required acceptance                                                                                  | State                                    |
+| ------------------------ | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| F: functional foundation | Baseline/ownership audit                         | One runtime, durable controller, actual operation parity ledger and preview/commit verification      | Open                                     |
+| O: observation           | F contracts; O1/O2 can precede remaining domains | Real video/audio fixtures; exact timing/coverage; consent; no focus theft                            | Open                                     |
+| R1 integration           | F + O + skills/presence                          | All R1 scenarios, real Worker, rendered and exported evidence                                        | Open                                     |
+| R2 Living Looks          | R1 accepted interfaces and operation support     | Six editable packs, manual/agent parity, audio-reactive timing, creator evaluation                   | Open                                     |
+| R3 Linked Versions       | R1 + R2                                          | Human overrides, dependency propagation, four deliverable types, recovery                            | Open                                     |
+| Release                  | Candidate for the selected milestone             | the independent Opus reviewer's explicit exact-candidate approval, then scoped deploy/rollback/smoke | Not authorized by a checklist tick alone |
 
 Do not conflate milestones: an R1 candidate may be reviewed independently with R2/R3 explicitly open. The whole requested upgrade is complete only when every required milestone passes. A partial release requires the owner to agree to that delivery scope; approval of this plan is not permission to describe a partial slice as complete.
 
 ## Task protocol and test harness
 
-Each task contains exact source seams, a concrete behavior contract and named test cases. Small contract snippets are intended to remove ambiguity; they do not license replacing existing reducers/renderers with a toy implementation. Terra must read each touched implementation and its tests before editing it.
+Each task contains exact source seams, a concrete behavior contract and named test cases. Small contract snippets are intended to remove ambiguity; they do not license replacing existing reducers/renderers with a toy implementation. The implementer must read each touched implementation and its tests before editing it.
 
 For each named scenario, add one focused regression, run it red, implement the smallest complete path, run it green, then commit only that task's files. Do not manufacture test success by mocking away the compiler, persistence or renderer under test. Provider responses may be scripted; the Worker, RPC, host, commit and output paths must remain real in integration tests.
 
@@ -100,16 +100,16 @@ Use one common task set: 20-second launch edit; Persian editorial/caption clip; 
 
 Record creator preference, editability, typography/readability, timing, time-to-approved-export, number of repairs/manual corrections, and actual authorized provider cost. The goal is clearly better controllable results, not just a faster first draft. A failed taste study changes packs/procedures; it does not justify relaxing safety gates. No claim of market uniqueness or five-year success from a passing test suite.
 
-## Exact-candidate Astra review gate — mandatory before any deployment
+## Exact-candidate independent Opus review gate — mandatory before any deployment
 
-### Terra prepares the handoff
+### The implementer prepares the handoff
 
 - [ ] Stop all deployment actions. Finish local tests and scoped commits; preserve unrelated dirty work.
 - [ ] Create `docs/reviews/joy-live-director-release-review.md` naming requested milestone, implementation base SHA, candidate commit/tree, lock digest, schema/protocol versions, supported browsers/codecs, dependency/license changes and migration/rollback risks.
 - [ ] Collect **all scoped changes from the implementation base**, not only the last commit: full binary-capable Git diff, changed-file summary, ordered commits, status and any scoped untracked files not yet in the candidate. Untracked runtime changes must be committed or excluded from the release; no invisible additions.
 - [ ] Provide sanitized commands/exit codes/test outputs, screenshots at narrow/wide/RTL/reduced-motion sizes, original/preview/export frame comparisons, audio measurements, privacy/network tests, performance logs, real-model compatibility results and explicit skips/limitations. Exclude owner media, keys, raw prompts/transcripts and private provider responses.
 - [ ] Use `git diff --binary BASE_SHA CANDIDATE_SHA` through a safe artifact collector, with SHA-256 hashes for artifacts. `BASE_SHA` and `CANDIDATE_SHA` mean the verified exact values in the review manifest. Include staged and unstaged scope checks separately so nothing is omitted. Do not use `git add .` in a shared dirty worktree.
-- [ ] Send the bundle to GPT-6 Astra for **independent source and result review**, using an existing identified review task if available. If no reviewer is available, stop and ask the owner to route the bundle. Do not fabricate an approval or treat a timeout/silence as approval.
+- [ ] Send the bundle to an independent Claude Opus reviewer for **independent source and result review**, using an existing identified review task if available. If no reviewer is available, stop and ask the owner to route the bundle. Do not fabricate an approval or treat a timeout/silence as approval.
 
 Reviewer request to send (substitute the actual manifest and candidate, not invented IDs):
 
@@ -117,10 +117,10 @@ Reviewer request to send (substitute the actual manifest and candidate, not inve
 
 ### Approval semantics
 
-- Only an explicit Astra `APPROVE_FOR_DEPLOY` for that candidate satisfies the review gate.
-- Astra findings return to Terra for fixes and rerun evidence; resubmit the complete updated diff.
+- Only an explicit `APPROVE_FOR_DEPLOY` from the independent Opus reviewer for that candidate satisfies the review gate.
+- Reviewer findings return to the implementer for fixes and rerun evidence; resubmit the complete updated diff.
 - Any changed runtime file, build input, lockfile, migration or deployment configuration invalidates prior approval. Rebuilt artifacts must match approved source/build inputs; record artifact digest.
-- If Astra approves only a subset, only that scoped candidate may proceed after the owner accepts partial release scope. Unfinished milestones remain open.
+- If the reviewer approves only a subset, only that scoped candidate may proceed after the owner accepts partial release scope. Unfinished milestones remain open.
 
 ### After approval, same scoped release procedure
 
@@ -132,9 +132,9 @@ Reviewer request to send (substitute the actual manifest and candidate, not inve
 - [ ] Only the orchestrator writes a redacted result to live VPS Gbrain, reads it back, runs `Invoke-VpsGbrainExport.ps1` with **no arguments**, records the verified export SHA in a private PC receipt, then runs `Publish-PcReceipt.ps1`. Never edit/push the pull-only Desktop `gbrain` mirror or bulk-replicate PC notes.
 - [ ] Fresh-read and append the validated JOY release/limitations to Desktop `VPS-AGENT-BRIEF.md`, preserving concurrent edits and unrelated facts. Include candidate/artifact identity, scope, tests, rollback and next open milestone; no secrets.
 
-## Ready-to-use Terra handoff
+## Ready-to-use implementer handoff
 
-> Implement the approved JOY Live Director plan in `docs/superpowers/plans/2026-09-05-joy-live-director-master.md`, reading its linked design and both subplans first. Work through F/O/V, then L and C tasks with TDD, source-derived capability coverage and scoped commits. Preserve existing human controls/projects, session-only BYOK and the closed Fontiran gate. Do not require DSH/Kilo/local services. Do not touch the independent agent's joy-vps work. Never claim sampled frames are exhaustive understanding. Stop before deployment; collect all implementation-base-to-candidate diffs and real evidence for GPT-6 Astra. Deployment can proceed only after Astra explicitly approves the unchanged exact candidate, followed by the guarded live verification and Gbrain/Desktop-brief closeout. Report partial milestones honestly.
+> Implement the approved JOY Live Director plan in `docs/superpowers/plans/2026-09-05-joy-live-director-master.md`, reading its linked design and both subplans first. Work through F/O/V, then L and C tasks with TDD, source-derived capability coverage and scoped commits. Preserve existing human controls/projects, session-only BYOK and the closed Fontiran gate. Do not require DSH/Kilo/local services. Do not touch the independent agent's joy-vps work. Never claim sampled frames are exhaustive understanding. Stop before deployment; collect all implementation-base-to-candidate diffs and real evidence for an independent Claude Opus reviewer. Deployment can proceed only after the independent Opus reviewer explicitly approves the unchanged exact candidate, followed by the guarded live verification and Gbrain/Desktop-brief closeout. Report partial milestones honestly.
 
 ## Planning self-review
 
@@ -143,4 +143,4 @@ Reviewer request to send (substitute the actual manifest and candidate, not inve
 - Observing source media, observing composed output and verifying encoded output are distinct gates.
 - Privacy is not inferred from connection success; no external skill/plugin installed by the plan.
 - Full parity, six Looks and linked versions remain explicit open deliverables, not silently deferred behind a foundation badge.
-- Terra implementation and Astra release approval are separate responsibilities.
+- Implementation and independent release approval are separate responsibilities.

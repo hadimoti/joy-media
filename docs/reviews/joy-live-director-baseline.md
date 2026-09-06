@@ -62,6 +62,6 @@ again against the final candidate; it is not evidence of a new regression.
 
 ## Release boundary
 
-The Live Director master plan requires an explicit GPT-6 Astra approval tied to
-the final commit, tree, and lock digest before deployment. No implementation
+The Live Director master plan requires an explicit `APPROVE_FOR_DEPLOY` from an independent Claude Opus
+reviewer tied to the final commit, tree, and lock digest before deployment. No implementation
 checkpoint is deployable on its own.

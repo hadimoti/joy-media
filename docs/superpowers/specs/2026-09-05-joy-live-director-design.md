@@ -2,7 +2,7 @@
 
 Date: 2026-09-05
 Status: owner-approved direction; implementation and acceptance remain open.
-Executor: GPT-5.6 Terra. Release reviewer: GPT-6 Astra.
+Executor: Claude implementer. Release reviewer: independent Claude Opus agent (fresh context, release bundle only).
 
 ## 1. Product decision
 
@@ -151,18 +151,18 @@ No mandatory local agent/service, autonomous deployment, remote skill marketplac
 
 Fontiran redistribution gate stays **closed** after the free-font migration; do not reintroduce its files. Whole-artifact dependency/media/font licensing remains a separate release review; adding an open-source library does not automatically close it.
 
-Every release follows the master plan's exact-candidate Astra gate. Terra must stop before deploying, collect the entire scoped diff and evidence, and receive explicit Astra approval for the same candidate. New code or lockfile changes invalidate that approval. Another agent's `joy-vps` work and unrelated services must remain untouched.
+Every release follows the master plan's exact-candidate independent Opus review gate. The implementer must stop before deploying, collect the entire scoped diff and evidence, and receive the independent Opus reviewer's explicit approval for the same candidate. New code or lockfile changes invalidate that approval. Another agent's `joy-vps` work and unrelated services must remain untouched.
 
 ## 12. Requirement trace
 
-| Requirement                                       | Implementation location                                            |
-| ------------------------------------------------- | ------------------------------------------------------------------ |
-| Functional atomic agent / all domain parity       | R1 tasks F1–F5 plus domain ledger in the existing full-editor plan |
-| Exact source-frame and rendered-video observation | R1 tasks O1–O6                                                     |
-| BYOK privacy/cost/capability truth                | R1 tasks F3, O5, V2                                                |
-| Actual visually active UI and bounded repair      | R1 tasks F4, V1–V3                                                 |
-| Working skills / one Brief conversation           | R1 task V1                                                         |
-| Editable art direction / audio-reactive looks     | R2 tasks L1–L4                                                     |
-| Linked campaign deliverables / human overrides    | R3 tasks C1–C4                                                     |
-| Five-year differentiation tests                   | Master evaluation scorecard and R2/R3 pilot gates                  |
-| Terra handoff / Astra before deploy / memory      | Master release checklist                                           |
+| Requirement                                                          | Implementation location                                            |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Functional atomic agent / all domain parity                          | R1 tasks F1–F5 plus domain ledger in the existing full-editor plan |
+| Exact source-frame and rendered-video observation                    | R1 tasks O1–O6                                                     |
+| BYOK privacy/cost/capability truth                                   | R1 tasks F3, O5, V2                                                |
+| Actual visually active UI and bounded repair                         | R1 tasks F4, V1–V3                                                 |
+| Working skills / one Brief conversation                              | R1 task V1                                                         |
+| Editable art direction / audio-reactive looks                        | R2 tasks L1–L4                                                     |
+| Linked campaign deliverables / human overrides                       | R3 tasks C1–C4                                                     |
+| Five-year differentiation tests                                      | Master evaluation scorecard and R2/R3 pilot gates                  |
+| Implementer handoff / independent Opus review before deploy / memory | Master release checklist                                           |

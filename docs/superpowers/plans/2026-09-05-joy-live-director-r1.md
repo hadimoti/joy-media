@@ -1,6 +1,6 @@
 # JOY Live Director R1 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` / installed `executing-plans`. GPT-5.6 Terra executes the checkboxes; GPT-6 Astra reviews the complete candidate before deployment. Read the master plan first.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` / installed `executing-plans`. A Claude implementer agent executes the checkboxes; an independent Claude Opus agent reviews the complete candidate before deployment. Read the master plan first.
 
 **Goal:** Make JOY's built-in agent genuinely observe, control, preview and verify the editor, with exact evidence and no hidden authority.
 
@@ -369,4 +369,4 @@ Skill manifest: ID/version/title, typed inputs, context selectors, required oper
 - [ ] Prove overview says sampled, native video says unknown/provider coverage, exhausted budget says partial, and missing modalities never say watched/heard. Prove the same trusted operation path is used by a manual control and a skill.
 - [ ] Record real BYOK model/endpoint/date/capability tests only with separately authorized test credentials, footage and spend cap. If no authorized model is available, label live compatibility/creative evaluation blocked; deterministic tests cannot substitute for it or claim full live acceptance.
 - [ ] Update the earlier foundation plan with a dated evidence addendum rather than rewriting historical results. Update coverage ledger and limitations from actual results.
-- [ ] Follow the master **stop-before-deploy** bundle and Astra gate. R2/R3 remain open until their tasks and evidence pass.
+- [ ] Follow the master **stop-before-deploy** bundle and independent Opus review gate. R2/R3 remain open until their tasks and evidence pass.
