@@ -95,14 +95,21 @@ cancellation, and no preview revival after reload.
 
 ## Open items before the R1 candidate can be bundled for review
 
-1. **`skill-runner` / `creative-skills` recipe layer (V1) has no production
-   caller.** The named procedures (Watch and Map, Find Moment, Build Rough
-   Cut, Title/Caption Polish, Motion/Transition Polish, Audio Balance, Verify
-   Deliverable) exist as validated manifests and the runner is unit-tested,
-   but nothing in `entry-points.ts` constructs a `CreativeSkillRunAdapter`
-   wired to the observation service / compound compiler / preview /
-   director-verifier. r1.md V1 wants each procedure invocable end to end with
-   its own Playwright spec.
+1. **V1 recipe layer — core landed, integration + e2e open.** The full
+   testable stack now exists (24 unit tests, see
+   `joy-live-director-v1-wiring-design-2026-09-06.md`):
+   `creative-skill-runtime` (verified-seam capability map),
+   `creative-skill-host-adapter` (checkpoint → primitive adapter, no
+   apply/commit), `creative-skill-editor-primitives` (one memoized scoped
+   tool-loop shared by observe/propose; manifest-derived tool allow-list;
+   product-owned prompt templates), and `entry-points.ts`
+   `listCreativeSkills()` / `runCreativeSkill()`. **Still open**: the concrete
+   `CreativeSkillEditorPrimitiveDeps` assembled from `App.tsx`'s object graph
+   (thin wrappers over `runJoyAgentTask` / the observation host bridge / the
+   renderer-ack signal / the O6 decoders), the `AgentPanel.tsx` recipe picker,
+   and `tests/e2e/agent-director-skills.spec.ts`. Audio Balance and
+   Title/Caption Polish stay visible-but-unavailable for R1 (no verified
+   audio-mix op / RTL-text readback).
 2. **Coverage ledger reconciliation.** All 16 advertised ops are
    `verificationScope: bounded-proposal-path` / `readback: not-verified`.
    The F5 `*-readback` assertions (trim, move, split, created-title opacity
