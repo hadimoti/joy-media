@@ -21,6 +21,7 @@
     "@joy-media/html-scene-runtime": "workspace:*",
     "@joy-media/job-protocol": "workspace:*",
     "@joy-media/joy-agent-engine": "workspace:*",
+    "@joy-media/media-core": "workspace:*",
     "@joy-media/motion-core": "workspace:*",
     "@joy-media/playback-engine": "workspace:*",
     "@joy-media/plugin-sdk": "workspace:*",
@@ -40,6 +41,7 @@
     "ag-psd": "^31.0.2",
     "dockview": "^4.13.1",
     "gifuct-js": "2.1.2",
+    "mediabunny": "1.55.7",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "three": "^0.185.1"

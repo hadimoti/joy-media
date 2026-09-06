@@ -41,7 +41,10 @@ export default tseslint.config(
   {
     rules: {
       '@typescript-eslint/consistent-type-imports': 'error',
-      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
     },
   },
   {
@@ -55,7 +58,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/bin/**/*.{mjs,cjs,js}', 'tooling/*.mjs', 'scripts/*.cjs'],
+    files: ['**/bin/**/*.{mjs,cjs,js}', 'tooling/**/*.mjs', 'scripts/*.cjs'],
     languageOptions: {
       globals: {
         require: 'readonly',
@@ -65,6 +68,7 @@ export default tseslint.config(
         __dirname: 'readonly',
         __filename: 'readonly',
         URL: 'readonly',
+        structuredClone: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
         performance: 'readonly',
