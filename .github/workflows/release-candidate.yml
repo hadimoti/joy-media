@@ -71,6 +71,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Remove any stale build output left in a persistent runner workspace
+          # so the release checks only ever see this candidate's fresh artifacts.
+          git clean -xdf -e node_modules -e '.pnpm-store'
           pnpm run verify:ci
           # The runner's isolated integration harness must exercise its
           # namespaced PostgreSQL/S3 services and teardown contract.
@@ -149,10 +152,18 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $statePath = Join-Path $env:RUNNER_TEMP 'joy-media-release-state'
           if (Test-Path -LiteralPath $statePath) { throw 'clean Worker state leaked into the runner temp directory' }
-          $leakedWorkers = @(Get-Process -Name 'joy-worker' -ErrorAction SilentlyContinue)
+          # A self-test worker process may still be exiting when this step runs.
+          # Give it a bounded window to disappear on its own before declaring a
+          # leak; only a process that outlives that window is a real defect.
+          $leakedWorkers = @()
+          for ($attempt = 0; $attempt -lt 15; $attempt++) {
+            $leakedWorkers = @(Get-Process -Name 'joy-worker' -ErrorAction SilentlyContinue)
+            if ($leakedWorkers.Count -eq 0) { break }
+            Start-Sleep -Seconds 1
+          }
           if ($leakedWorkers.Count -gt 0) {
-            $leakedWorkers | Stop-Process -Force
-            throw 'clean Worker teardown found a leaked joy-worker process'
+            $leakedWorkers | Stop-Process -Force -ErrorAction SilentlyContinue
+            throw 'clean Worker teardown found a leaked joy-worker process after a bounded wait'
           }
 
   acceptance:
