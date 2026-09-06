@@ -19,14 +19,14 @@ try {
   await migrationModule.runPostgresMigrations(pool);
   const ledger = await pool.query('SELECT id FROM joy_media_schema_migrations ORDER BY id');
   const ids = ledger.rows.map((row) => row.id);
-  const expected = [
-    '001-baseline',
-    '002-asset-revocation-revoke-id-primary-key',
-    '003-worker-lease-generation',
-    '004-project-asset-access',
-  ];
+  // Derive the expected ledger from the shipped migration list so this check
+  // stays correct as migrations are added, rather than drifting behind a
+  // hardcoded array.
+  const expected = [...migrationModule.POSTGRES_MIGRATIONS].map((migration) => migration.id).sort();
   if (ids.join('\0') !== expected.join('\0')) {
-    throw new Error(`migration ledger mismatch: ${ids.join(',')}`);
+    throw new Error(
+      `migration ledger mismatch: ledger=[${ids.join(',')}] expected=[${expected.join(',')}]`,
+    );
   }
   const tables = await pool.query(
     `SELECT table_name
