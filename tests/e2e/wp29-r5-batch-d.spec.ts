@@ -240,14 +240,14 @@ test.describe('WP-29 R5 batch D — Worker and audio execution routes', () => {
     await expect(cloudRun).toBeEnabled();
     await expect(cloudRun).toHaveAttribute(
       'title',
-      'Confirm Cloud Brain run with joy.playwright-cloud',
+      'Confirm remote provider run with joy.playwright-cloud',
     );
 
     await cloudRun.click();
-    const consent = page.getByRole('dialog', { name: 'Run with Cloud Brain?' });
+    const consent = page.getByRole('dialog', { name: 'Run with a remote provider?' });
     await expect(consent).toContainText('joy.playwright-cloud');
     await expect(consent).toContainText('may use paid credits');
-    await expect(consent.getByRole('button', { name: 'Run Cloud Brain' })).toBeFocused();
+    await expect(consent.getByRole('button', { name: 'Run remote job' })).toBeFocused();
     await consent.getByRole('button', { name: 'Cancel' }).click();
     await expect(consent).toBeHidden();
     expect(probe.requests).toBe(0);
@@ -259,12 +259,14 @@ test.describe('WP-29 R5 batch D — Worker and audio execution routes', () => {
       });
 
     await cloudRun.click();
-    await consent.getByRole('button', { name: 'Run Cloud Brain' }).click();
+    await consent.getByRole('button', { name: 'Run remote job' }).click();
     await expect(cloudRun).toBeDisabled();
     await expect(cloudRun).toHaveText('Running…');
-    await expect(page.getByText('Cloud Brain audio applied to the selected clip.')).toBeVisible({
-      timeout: 15_000,
-    });
+    await expect(page.getByText('Remote provider audio applied to the selected clip.')).toBeVisible(
+      {
+        timeout: 15_000,
+      },
+    );
     expect(probe).toMatchObject({
       requests: 1,
       authorization: `Bearer ${E2E_TOKEN}`,
@@ -298,9 +300,9 @@ test.describe('WP-29 R5 batch D — Worker and audio execution routes', () => {
     const reloadedCloudRun = page.locator('[data-audio-route="vps-orchestrated"]');
     await expect(reloadedCloudRun).toBeEnabled();
     await reloadedCloudRun.click();
-    const reloadedConsent = page.getByRole('dialog', { name: 'Run with Cloud Brain?' });
-    await reloadedConsent.getByRole('button', { name: 'Run Cloud Brain' }).click();
-    await expect(page.getByText('This Cloud Brain result is already applied.')).toBeVisible();
+    const reloadedConsent = page.getByRole('dialog', { name: 'Run with a remote provider?' });
+    await reloadedConsent.getByRole('button', { name: 'Run remote job' }).click();
+    await expect(page.getByText('This remote provider result is already applied.')).toBeVisible();
     expect(probe.requests).toBe(1);
     const reopened = await readCloudApplicationState(page, outputAssetId);
     expect(reopened).toEqual(applied);

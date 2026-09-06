@@ -52,8 +52,16 @@ test.describe('WP-32 responsive workflow checkpoints', () => {
     await expect(menu).toBeVisible();
     await expect(menu.getByRole('menuitem', { name: 'Projects Library…' })).toBeVisible();
     await expect(page.getByRole('menuitem', { name: 'Projects Library…' })).toBeFocused();
+    // Walk the File menu with the keyboard to the plain "Export" action. The
+    // menu order is Projects Library… / Import Editable Project… / Export
+    // Editable Project… / Export, so "Export" needs an exact-name match.
     await page.keyboard.press('ArrowDown');
-    await expect(page.getByRole('menuitem', { name: 'Export' })).toBeFocused();
+    await expect(
+      page.getByRole('menuitem', { name: 'Import Editable Project…', exact: true }),
+    ).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+    await expect(page.getByRole('menuitem', { name: 'Export', exact: true })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(menu).toBeHidden();
 
