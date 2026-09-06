@@ -4,6 +4,16 @@ import { canonicalJson } from '@joy-media/workflow-engine';
 import { assertModelApplyPolicy } from './agent-policy-settings.js';
 import { ExecutionReceiptConflictError } from './agent-idempotency-store.js';
 import type { ExecutionReceipt } from './execution-receipt.js';
+import {
+  assertTimelineMoveProjectReadback,
+  assertTimelineTrimProjectReadback,
+} from './joy-agent/timeline-edit-readback.js';
+import { assertTimelineSplitProjectReadback } from './joy-agent/timeline-split-readback.js';
+import { assertCreatedTitleOpacityKeyframeProjectReadback } from './joy-agent/title-keyframe-readback.js';
+import {
+  assertAddedTransitionProjectReadback,
+  assertRemovedTransitionProjectReadback,
+} from './joy-agent/transition-add-readback.js';
 import type {
   PreparedChangeStore,
   ApprovedPreparedChange,
@@ -88,10 +98,12 @@ export class JoyCodeCompoundRunner {
     const document = draft.documentChanged ? draft.document : undefined;
     // Calculate expected state before the one-way commit. Re-applying a
     // transaction after commit could double-apply split/remove/insert actions.
+    const timelineBefore = session.timelineProject;
+    const documentBefore = session.visualProject;
     const expectedTimeline =
       draft.timeline === undefined
         ? undefined
-        : applyTransaction(session.timelineProject, draft.timeline).project;
+        : applyTransaction(timelineBefore, draft.timeline).project;
     let receipt: ExecutionReceipt;
     try {
       receipt = session.commitAgentCompound(
@@ -115,6 +127,41 @@ export class JoyCodeCompoundRunner {
       throw error;
     }
     assertCommittedPreparedPayload(session, receipt, view.executionId, document, expectedTimeline);
+    // First operation-specific F5 readback slice. This remains intentionally
+    // narrow: a mixed transaction can alter a split half later in the same
+    // compound edit, so it needs ordered per-operation observation rather than
+    // a misleading final-state comparison.
+    if (
+      draft.timeline?.commands.length === 1 &&
+      draft.timeline.commands[0]?.type === 'timeline.splitClip'
+    )
+      assertTimelineSplitProjectReadback(
+        timelineBefore,
+        session.timelineProject,
+        draft.timeline.commands[0],
+      );
+    if (
+      draft.timeline?.commands.length === 2 &&
+      draft.timeline.commands[0]?.type === 'timeline.trimClipStart' &&
+      draft.timeline.commands[1]?.type === 'timeline.trimClipEnd'
+    )
+      assertTimelineTrimProjectReadback(
+        timelineBefore,
+        session.timelineProject,
+        draft.timeline.commands,
+      );
+    if (
+      draft.timeline?.commands.length === 1 &&
+      draft.timeline.commands[0]?.type === 'timeline.moveClip'
+    )
+      assertTimelineMoveProjectReadback(
+        timelineBefore,
+        session.timelineProject,
+        draft.timeline.commands[0],
+      );
+    assertCreatedTitleOpacityKeyframeProjectReadback(documentBefore, session.visualProject, draft);
+    assertAddedTransitionProjectReadback(documentBefore, session.visualProject, draft);
+    assertRemovedTransitionProjectReadback(documentBefore, session.visualProject, draft);
     return {
       applied: true,
       replayed: false,

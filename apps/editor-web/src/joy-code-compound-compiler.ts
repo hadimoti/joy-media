@@ -17,6 +17,7 @@ import { compileJoyCodeTextOperation } from './joy-code-text-operations.js';
 import { compileJoyCodeCaptionOperation } from './joy-code-caption-operations.js';
 import { compileJoyCodeTransitionOperation } from './joy-code-transition-operations.js';
 import { resolveJoyCodeOperationReferences } from './joy-code-operation-references.js';
+import { joyCodeAssetDescriptorsFromProject } from './joy-code-asset-descriptors.js';
 import { audioStateFromProject } from './timeline-presentation.js';
 import { prepareTimelinePresentation } from './timeline-presentation.js';
 
@@ -25,7 +26,12 @@ export interface JoyCodeCompoundCompilerInput {
   readonly baseRevision: string;
   readonly timeline: SpikeProject;
   readonly visualProject: JoyProjectV1;
-  readonly registeredAssetIds: readonly string[];
+  /**
+   * Retained temporarily so existing host call sites stay source-compatible.
+   * Timeline asset authority ignores this bare-ID list and derives trusted
+   * descriptors from visualProject.assets for every compile.
+   */
+  readonly registeredAssetIds?: readonly string[];
   readonly operations: readonly JoyCodePlanOperationV1[];
 }
 
@@ -93,6 +99,7 @@ export function compileJoyCodeCompoundDraft(
       ok: false,
       error: { code: 'JOY_CODE_COMPOUND_EMPTY', message: 'Joy Code plan contains no operations' },
     };
+  const registeredAssets = joyCodeAssetDescriptorsFromProject(input.visualProject);
   const resolvedReferences = resolveJoyCodeOperationReferences(input.planId, input.operations);
   if (!resolvedReferences.ok) return { ok: false, error: resolvedReferences.error };
   const operations = resolvedReferences.operations;
@@ -142,7 +149,7 @@ export function compileJoyCodeCompoundDraft(
         planId: input.planId,
         project: timeline,
         operations: [operation],
-        registeredAssetIds: input.registeredAssetIds,
+        registeredAssets,
         operationIndex,
       });
       if (!result.ok) return { ok: false, error: result.error };

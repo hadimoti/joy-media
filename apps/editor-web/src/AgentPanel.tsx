@@ -43,6 +43,7 @@ import {
   createJoyCodeConversation,
   loadJoyCodeConversation,
   saveJoyCodeConversation,
+  setJoyCodeConversationEntityReferences,
   setJoyCodeConversationStatus,
   type JoyCodeConversation,
 } from './joy-code-conversation.js';
@@ -52,9 +53,57 @@ import { compileJoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
 import { JoyCodeCompoundRunner } from './joy-code-compound-runner.js';
 import { resolveObjectIdForSelection } from './sticker-bindings.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
-import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
-import { createJoyAgentContextSnapshot } from './joy-agent/context-snapshot.js';
+import {
+  AgentObservationConsent,
+  type AgentObservationConsentScope,
+} from './AgentObservationConsent.js';
+import type { JoyAgentEngineClient, JoyAgentRunIterator } from './joy-agent/engine-client.js';
+import {
+  createJoyAgentContextSnapshot,
+  type JoyAgentContextSnapshotInput,
+} from './joy-agent/context-snapshot.js';
+import { HostRpcDiagnosticError } from './joy-agent/host-rpc.js';
+import { createJoyAgentHostRpcMethodsForSnapshot } from './joy-agent/tool-bridge.js';
+import type { JoyAgentObservationAdapterFactory } from './joy-agent/observation-host-factory.js';
+import type {
+  JoyAgentObservationHostBridge,
+  JoyAgentObservationReviewCandidate,
+} from './joy-agent/observation-tool-adapter.js';
+import { resolveJoyAgentObservationAuthority } from './joy-agent/observation-run-authority.js';
+import {
+  createObservationReviewController,
+  type ObservationReviewController,
+  type ObservationReviewState,
+} from './joy-agent/observation-review-controller.js';
+import { createWorkerObservationReviewTransfer } from './joy-agent/worker-observation-transfer.js';
+import { MAX_PRIVATE_OBSERVATION_FIRST_RELEASE_BYTES } from './joy-agent/observation-transfer-port-protocol.js';
+import type { ObservationTransferAuthority } from './joy-agent/observation-transfer-service.js';
+import { digestJoyAgentPolicy } from './joy-agent/prepared-change-store.js';
+import {
+  JOY_AGENT_HOST_TOOL_NAMES,
+  type JoyAgentHostToolName,
+} from './joy-agent/host-tool-contract.js';
+import {
+  createJoyAgentComposerHostLease,
+  interruptJoyAgentComposerHostLease,
+  isJoyAgentComposerHostLeaseCurrent,
+  revokeJoyAgentComposerHostLease,
+  type JoyAgentComposerHostLease,
+} from './joy-agent/composer-host-lease.js';
 import type { JoyAgentPhase } from './joy-agent/protocol.js';
+import {
+  createJoyAgentRunController,
+  type JoyAgentRunController,
+  type JoyAgentRunEventAcceptance,
+} from './joy-agent/run-controller.js';
+import {
+  JOY_AGENT_RUN_EVENT_VERSION,
+  JOY_AGENT_RUN_ERROR_CODES,
+  isTerminalJoyAgentRunState,
+  type JoyAgentActiveRunState,
+  type JoyAgentRunArtifactReference,
+  type JoyAgentRunErrorCode,
+} from './joy-agent/run-events.js';
 import {
   EMPTY_AGENT_PRESENCE,
   type AgentPresenceState,
@@ -62,8 +111,21 @@ import {
   type JoyAgentTarget,
   type JoyAgentPresenceEvent,
 } from './agent-presence.js';
-import type { AgentPreviewStore } from './agent-preview-store.js';
+import {
+  isAgentPreviewBundleReady,
+  type AgentPreviewBundle,
+  type AgentPreviewStore,
+} from './agent-preview-store.js';
 import { stageJoyAgentPreview } from './joy-agent/stage-preview.js';
+import {
+  deriveJoyAgentConversationEntityReferences,
+  resolveJoyAgentConversationEntityReference,
+  type JoyAgentConversationEntityReference,
+} from './joy-agent/conversation-entity-references.js';
+import {
+  constrainJoyAgentConversationTarget,
+  JOY_AGENT_CONVERSATION_TARGET_MISMATCH,
+} from './joy-agent/conversation-target-constraint.js';
 import {
   PreparedChangeStore,
   type PreparedChangeAuthority,
@@ -84,9 +146,89 @@ const THINKING_REVEAL_MS = 320;
 const MAX_COMPOSER_PROMPT_CHARS = 8_000;
 const CREDENTIAL_LIKE_PROMPT =
   /(?:bearer\s+[A-Za-z0-9._~-]{16,}|(?:api[_-]?key|secret|token)\s*[:=]\s*\S{12,}|sk-[A-Za-z0-9_-]{20,})/i;
+const CONVERSATION_REFERENCE_WORD =
+  /\b(?:that|this|same|previous|it)\b|(?:همان|همین|این|آن|قبلی|اون|همونو|همینو)/iu;
+const CONVERSATION_TITLE_WORD = /\b(?:title|heading|text)\b|(?:عنوان|تیتر|متن)/iu;
+const CONVERSATION_REFERENCE_AMBIGUOUS_MESSAGE =
+  'JOY cannot safely determine which previous item to use. Select one item before continuing.';
 type ComposerCapability = 'edit' | 'creative-brief';
+
+const LEGACY_JOY_AGENT_TOOL_NAMES = Object.freeze([
+  'read_project_context',
+  'validate_proposal',
+] as const satisfies readonly JoyAgentHostToolName[]);
+
+/** A Worker approval event held until the staged preview has actually rendered. */
+interface DeferredPreviewApproval {
+  readonly run: JoyAgentRunIterator['run'];
+  readonly threadId: string;
+  readonly presence: JoyAgentPresenceEvent;
+  readonly display: string;
+}
+
+interface PrivateObservationReviewLease {
+  readonly bridge: JoyAgentObservationHostBridge;
+  readonly candidate: JoyAgentObservationReviewCandidate;
+  readonly leaseId: string;
+  readonly expiresAtMs: number;
+}
+
+interface ObservationReviewDisplay {
+  readonly evidenceCount: number;
+  readonly range: { readonly domain: 'source'; readonly startUs: number; readonly endUs: number };
+  readonly modelId: string;
+}
+
+interface ObservationReviewUiState {
+  readonly status: ObservationReviewState['status'];
+  readonly analysis?: string;
+  readonly message?: string;
+}
+
+const OBSERVATION_REVIEW_PROMPT =
+  'Review only the explicitly approved image evidence. Describe observable visual facts and possible edit opportunities without making edits.';
+const OBSERVATION_REVIEW_TTL_MS = 2 * 60 * 1_000;
+const OBSERVATION_REVIEW_MAX_BYTES = MAX_PRIVATE_OBSERVATION_FIRST_RELEASE_BYTES;
+const OPENROUTER_PRIVACY_POLICY_HREF = 'https://openrouter.ai/privacy';
+
 const NOOP_SUBSCRIBE = () => () => {};
 const NOOP_PRESENCE_SNAPSHOT = (): AgentPresenceState => EMPTY_AGENT_PRESENCE;
+const NOOP_PREVIEW_BUNDLE = (): AgentPreviewBundle | undefined => undefined;
+
+function sameObservationTransferAuthority(
+  left: ObservationTransferAuthority | undefined,
+  right: ObservationTransferAuthority | undefined,
+): boolean {
+  return (
+    left !== undefined &&
+    right !== undefined &&
+    left.projectId === right.projectId &&
+    left.revision === right.revision &&
+    left.run.runId === right.run.runId &&
+    left.run.epoch === right.run.epoch &&
+    left.modelId === right.modelId &&
+    left.promptPolicyDigest === right.promptPolicyDigest
+  );
+}
+
+function reviewUiState(state: ObservationReviewState): ObservationReviewUiState {
+  if (state.status === 'reviewed') return { status: state.status, analysis: state.analysis.text };
+  if (state.status === 'failed')
+    return { status: state.status, message: 'Image review could not be completed.' };
+  if (state.status === 'cancelled')
+    return { status: state.status, message: 'Image review was cancelled.' };
+  return { status: state.status };
+}
+
+function boundedAgentResultText(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const result = value as Record<string, unknown>;
+  if (result.kind === 'answer' && typeof result.text === 'string')
+    return result.text.slice(0, 8_192);
+  if (result.kind === 'clarification' && typeof result.question === 'string')
+    return result.question.slice(0, 8_192);
+  return undefined;
+}
 
 /**
  * The older local recipe executor predates durable prepared changes. Keep its
@@ -173,6 +315,12 @@ function makeJoyCodeId(prefix: string): string {
   return `${prefix}-${randomPart}`;
 }
 
+/** Prepared preview IDs add an epoch, while Worker cancellation uses the source run ID. */
+function sourceRunIdForPreparedPlan(planId: string): string {
+  const epochMarker = planId.lastIndexOf('.epoch-');
+  return epochMarker > 0 ? planId.slice(0, epochMarker) : planId;
+}
+
 function initialJoyCodeConversation(
   storage: ProjectWriterStorage,
   projectId: string,
@@ -193,6 +341,66 @@ function createPreparedChangesForScope(
   // The arguments make the scope change explicit at the call site. The store
   // itself intentionally retains no live editor or project objects.
   return new PreparedChangeStore();
+}
+
+function lifecycleStateForAgentPhase(phase: JoyAgentPhase): JoyAgentActiveRunState {
+  switch (phase) {
+    case 'connecting':
+    case 'thinking':
+    case 'inspecting':
+      return 'inspecting';
+    case 'planning':
+      return 'preparing';
+    case 'previewing':
+      // A canonical proposal is only staged here. The lifecycle enters
+      // preview-ready after every mapped surface acknowledges an actual render.
+      return 'preparing';
+    case 'awaiting-approval':
+      return 'awaiting-approval';
+    case 'applying':
+      return 'committing';
+    case 'completed':
+      return 'completed';
+    case 'failed':
+      return 'failed';
+    case 'cancelled':
+      return 'cancelled';
+  }
+}
+
+function agentPhaseForLifecycleState(
+  state: ReturnType<JoyAgentRunController['getSnapshot']>['state'],
+): JoyAgentPhase | undefined {
+  switch (state) {
+    case 'inspecting':
+      return 'inspecting';
+    case 'preparing':
+      return 'planning';
+    case 'preview-ready':
+      return 'previewing';
+    case 'awaiting-approval':
+      return 'awaiting-approval';
+    case 'committing':
+    case 'verifying':
+      return 'applying';
+    case 'completed':
+      return 'completed';
+    case 'failed':
+    case 'interrupted':
+      return 'failed';
+    case 'cancel-requested':
+    case 'cancelled':
+      return 'cancelled';
+    case 'idle':
+      return undefined;
+  }
+}
+
+function runErrorCodeForAgentError(value: unknown): JoyAgentRunErrorCode | undefined {
+  return typeof value === 'string' &&
+    JOY_AGENT_RUN_ERROR_CODES.includes(value as JoyAgentRunErrorCode)
+    ? (value as JoyAgentRunErrorCode)
+    : undefined;
 }
 
 /**
@@ -218,8 +426,10 @@ export function AgentPanel({
   creativeBriefRunner,
   onCreativeBriefOptIn,
   joyAgentEngineClient,
+  joyAgentRunController,
   agentPresenceStore,
   agentPreviewStore,
+  observationAdapterFactory,
   storage,
 }: {
   readonly project: SpikeProject;
@@ -239,8 +449,16 @@ export function AgentPanel({
   readonly creativeBriefRunner?: (requestText: string) => Promise<CreativeBriefV1>;
   readonly onCreativeBriefOptIn?: () => Promise<void>;
   readonly joyAgentEngineClient?: JoyAgentEngineClient;
+  /** App-owned lifecycle evidence; a test-only fallback is used when omitted. */
+  readonly joyAgentRunController?: JoyAgentRunController;
   readonly agentPresenceStore?: AgentPresenceStore;
   readonly agentPreviewStore?: AgentPreviewStore;
+  /**
+   * Main-thread-only factory for bounded local evidence. Its output is paired
+   * with the exact Worker tool catalog below; the model never receives the
+   * resolver, decoder, cache, or evidence store.
+   */
+  readonly observationAdapterFactory?: JoyAgentObservationAdapterFactory;
   /** Writer-fenced browser persistence owned by the writable editor root. */
   readonly storage: ProjectWriterStorage;
 }) {
@@ -262,6 +480,18 @@ export function AgentPanel({
   const [conversation, setConversation] = useState<JoyCodeConversation>(() =>
     initialJoyCodeConversation(storage, project.id),
   );
+  // Production passes an App-owned controller so panel remounts cannot revive
+  // authority or lose lifecycle evidence. Keep an isolated fallback for
+  // focused component tests and older embedders that have not adopted F4 yet.
+  const fallbackRunController = useMemo(
+    () =>
+      createJoyAgentRunController({
+        projectId: project.id,
+        conversationId: `conversation-${project.id}`,
+      }),
+    [project.id],
+  );
+  const runController = joyAgentRunController ?? fallbackRunController;
   const conversationProjectIdRef = useRef(project.id);
   const [creativeBriefContext, setCreativeBriefContext] = useState<CreativeBriefV1 | undefined>(
     undefined,
@@ -274,6 +504,8 @@ export function AgentPanel({
     () => createPreparedChangesForScope(project.id, session),
     [project.id, session],
   );
+  const preparedChangesRef = useRef(preparedChanges);
+  preparedChangesRef.current = preparedChanges;
   const preparedScopeRef = useRef({ projectId: project.id, session, epoch: 1 });
   if (
     preparedScopeRef.current.projectId !== project.id ||
@@ -287,15 +519,371 @@ export function AgentPanel({
   const preparedSessionEpoch = preparedScopeRef.current.epoch;
   const latestSettingsRef = useRef(settings);
   latestSettingsRef.current = settings;
+  const latestSessionRef = useRef(session);
+  latestSessionRef.current = session;
   const activeModelRunIdRef = useRef<string | undefined>(undefined);
+  const activeComposerHostLeaseRef = useRef<JoyAgentComposerHostLease | undefined>(undefined);
+  const sessionScopeRef = useRef({
+    projectId: project.id,
+    session,
+    revision: session.projectRevisionId,
+  });
   const modelChangeSetIdRef = useRef<string | undefined>(undefined);
+  const deferredPreviewApprovalRef = useRef<DeferredPreviewApproval | undefined>(undefined);
   const [modelChangeSetId, setModelChangeSetId] = useState<string | undefined>(undefined);
   const modelRunnerRef = useRef(new JoyCodeCompoundRunner());
+  // The lease and candidate remain in private refs. React receives only a
+  // redacted count/range/status, never frame IDs, a prompt, bytes, endpoint,
+  // or BYOK material.
+  const observationReviewLeaseRef = useRef<PrivateObservationReviewLease | undefined>(undefined);
+  const observationReviewControllerRef = useRef<ObservationReviewController | undefined>(undefined);
+  const observationReviewRegistrationRef = useRef(0);
+  const [observationReviewDisplay, setObservationReviewDisplay] = useState<
+    ObservationReviewDisplay | undefined
+  >(undefined);
+  const [observationReviewUi, setObservationReviewUi] = useState<ObservationReviewUiState>({
+    status: 'idle',
+  });
   const presenceState = useSyncExternalStore(
     agentPresenceStore?.subscribe ?? NOOP_SUBSCRIBE,
     agentPresenceStore?.getState ?? NOOP_PRESENCE_SNAPSHOT,
     NOOP_PRESENCE_SNAPSHOT,
   );
+  const previewBundle = useSyncExternalStore(
+    agentPreviewStore?.subscribe ?? NOOP_SUBSCRIBE,
+    agentPreviewStore?.getBundle ?? NOOP_PREVIEW_BUNDLE,
+    NOOP_PREVIEW_BUNDLE,
+  );
+  const runLifecycle = useSyncExternalStore(
+    runController.subscribe,
+    runController.getSnapshot,
+    runController.getSnapshot,
+  );
+
+  const discardObservationReview = useCallback((): void => {
+    observationReviewRegistrationRef.current += 1;
+    observationReviewControllerRef.current?.dispose();
+    observationReviewControllerRef.current = undefined;
+    observationReviewLeaseRef.current = undefined;
+    setObservationReviewDisplay(undefined);
+    setObservationReviewUi({ status: 'idle' });
+  }, []);
+
+  const currentObservationReviewAuthority = useCallback(():
+    ObservationTransferAuthority | undefined => {
+    const review = observationReviewLeaseRef.current;
+    const status = joyAgentEngineClient?.getStatus();
+    const liveSession = latestSessionRef.current;
+    if (
+      review === undefined ||
+      review.expiresAtMs <= Date.now() ||
+      status === undefined ||
+      status.modelId !== review.candidate.authority.modelId ||
+      liveSession.visualProject.id !== review.candidate.authority.projectId ||
+      liveSession.projectRevisionId !== review.candidate.authority.revision ||
+      digestJoyAgentPolicy(latestSettingsRef.current) !==
+        review.candidate.authority.promptPolicyDigest
+    )
+      return undefined;
+    return review.candidate.authority;
+  }, [joyAgentEngineClient]);
+
+  const registerObservationReviewCandidate = useCallback(
+    async (bridge: JoyAgentObservationHostBridge, observationId: string): Promise<void> => {
+      const client = joyAgentEngineClient;
+      if (client === undefined) return;
+      const candidate = bridge.createReviewCandidate(observationId);
+      const status = client.getStatus();
+      if (
+        candidate === undefined ||
+        status === undefined ||
+        status.modelId !== candidate.authority.modelId ||
+        latestSessionRef.current.visualProject.id !== candidate.authority.projectId ||
+        latestSessionRef.current.projectRevisionId !== candidate.authority.revision ||
+        digestJoyAgentPolicy(latestSettingsRef.current) !== candidate.authority.promptPolicyDigest
+      )
+        return;
+      const registration = ++observationReviewRegistrationRef.current;
+      const expiresAtMs = Date.now() + OBSERVATION_REVIEW_TTL_MS;
+      const lease = await client.registerObservationReviewLease({
+        authority: candidate.authority,
+        manifestId: candidate.manifest.manifestId,
+        range: candidate.range,
+        evidenceIds: candidate.evidenceIds,
+        expiresAtMs,
+      });
+      if (
+        lease === undefined ||
+        registration !== observationReviewRegistrationRef.current ||
+        lease.expiresAtMs < expiresAtMs ||
+        latestSessionRef.current.visualProject.id !== candidate.authority.projectId ||
+        latestSessionRef.current.projectRevisionId !== candidate.authority.revision ||
+        client.getStatus()?.modelId !== candidate.authority.modelId ||
+        digestJoyAgentPolicy(latestSettingsRef.current) !== candidate.authority.promptPolicyDigest
+      )
+        return;
+      observationReviewControllerRef.current?.dispose();
+      observationReviewControllerRef.current = undefined;
+      observationReviewLeaseRef.current = Object.freeze({
+        bridge,
+        candidate,
+        leaseId: lease.leaseId,
+        expiresAtMs: lease.expiresAtMs,
+      });
+      setObservationReviewDisplay(
+        Object.freeze({
+          evidenceCount: candidate.evidenceIds.length,
+          range: candidate.range,
+          modelId: candidate.authority.modelId,
+        }),
+      );
+      setObservationReviewUi({ status: 'idle' });
+    },
+    [joyAgentEngineClient],
+  );
+
+  const prepareObservationReview = useCallback((): void => {
+    const client = joyAgentEngineClient;
+    const review = observationReviewLeaseRef.current;
+    const media = client?.getMediaCapabilities();
+    const status = client?.getStatus();
+    if (
+      client === undefined ||
+      review === undefined ||
+      media?.modelId !== review.candidate.authority.modelId ||
+      media.image !== 'supported' ||
+      !media.modalities.includes('image') ||
+      status === undefined
+    ) {
+      setObservationReviewUi({
+        status: 'failed',
+        message: 'Test image capability in JOY Agent Settings before reviewing local images.',
+      });
+      return;
+    }
+    observationReviewControllerRef.current?.dispose();
+    const candidate = review.candidate;
+    const controller = createObservationReviewController({
+      bridge: review.bridge,
+      currentAuthority: currentObservationReviewAuthority,
+      createHostTransfer: ({ evidenceResolver, currentAuthority }) =>
+        createWorkerObservationReviewTransfer({
+          engineClient: client,
+          evidenceResolver,
+          currentAuthority,
+          lease: () => {
+            const current = observationReviewLeaseRef.current;
+            return current !== undefined && current.candidate === candidate
+              ? Object.freeze({ leaseId: current.leaseId, expiresAtMs: current.expiresAtMs })
+              : undefined;
+          },
+          markReviewed: (authority, manifest, evidenceIds) => {
+            const current = observationReviewLeaseRef.current;
+            if (
+              current === undefined ||
+              current.candidate !== candidate ||
+              !sameObservationTransferAuthority(current.candidate.authority, authority) ||
+              current.candidate.manifest.manifestId !== manifest.manifestId ||
+              current.candidate.evidenceIds.length !== evidenceIds.length ||
+              !current.candidate.evidenceIds.every((id, index) => id === evidenceIds[index])
+            )
+              return false;
+            return current.bridge.markReviewedEvidence({
+              authority,
+              manifest,
+              range: current.candidate.range,
+              evidenceIds,
+            });
+          },
+        }),
+    });
+    observationReviewControllerRef.current = controller;
+    controller.subscribe((next) => setObservationReviewUi(reviewUiState(next)));
+    const providerCapability =
+      status.capability === 'tool-loop'
+        ? ({ state: 'structured-tools', diagnostic: 'structured-tool-proven' } as const)
+        : status.capability === 'plan-only'
+          ? ({ state: 'plan-only', diagnostic: 'plan-only-proven' } as const)
+          : ({ state: 'unavailable', diagnostic: 'provider-probe-missing' } as const);
+    setObservationReviewUi(
+      reviewUiState(
+        controller.prepareReview({
+          authority: candidate.authority,
+          manifest: candidate.manifest,
+          range: candidate.range,
+          evidenceIds: candidate.evidenceIds,
+          modalities: ['image'],
+          prompt: OBSERVATION_REVIEW_PROMPT,
+          providerCapability,
+          mediaCapability: { modelId: candidate.authority.modelId, modalities: ['image'] },
+        }),
+      ),
+    );
+  }, [currentObservationReviewAuthority, joyAgentEngineClient]);
+
+  const approveObservationReview = useCallback((): void => {
+    const controller = observationReviewControllerRef.current;
+    const review = observationReviewLeaseRef.current;
+    if (controller === undefined || review === undefined) return;
+    const expiresAtMs = Math.min(review.expiresAtMs, Date.now() + OBSERVATION_REVIEW_TTL_MS);
+    void controller.grantUserApprovedReview({
+      maxRequests: 1,
+      maxBytes: OBSERVATION_REVIEW_MAX_BYTES,
+      expiresAtMs,
+    });
+  }, []);
+
+  const acceptRunLifecycle = useCallback(
+    (
+      run: JoyAgentRunIterator['run'],
+      state: JoyAgentActiveRunState,
+      options: {
+        readonly at?: string;
+        readonly seq?: number;
+        readonly display?: string;
+        readonly errorCode?: JoyAgentRunErrorCode;
+        readonly changeSetVersion?: number;
+        readonly artifacts?: readonly JoyAgentRunArtifactReference[];
+      } = {},
+    ): JoyAgentRunEventAcceptance | undefined => {
+      const current = runController.getSnapshot().run;
+      if (
+        current === undefined ||
+        current.scope.runId !== run.runId ||
+        current.scope.epoch !== run.epoch
+      )
+        return undefined;
+      return runController.accept({
+        version: JOY_AGENT_RUN_EVENT_VERSION,
+        scope: {
+          // The editor's durable project key can differ from the timeline
+          // document's ID. The App-owned controller is the scope authority.
+          projectId: current.scope.projectId,
+          runId: run.runId,
+          epoch: run.epoch,
+          seq: options.seq ?? current.scope.seq + 1,
+        },
+        state,
+        at: options.at ?? new Date().toISOString(),
+        ...(options.display === undefined ? {} : { display: options.display }),
+        ...(options.errorCode === undefined ? {} : { errorCode: options.errorCode }),
+        ...(options.changeSetVersion === undefined
+          ? {}
+          : { changeSetVersion: options.changeSetVersion }),
+        ...(options.artifacts === undefined ? {} : { artifacts: options.artifacts }),
+      });
+    },
+    [runController],
+  );
+
+  const revokeActiveComposerHostLease = useCallback((runId?: string): void => {
+    const lease = activeComposerHostLeaseRef.current;
+    if (lease === undefined || (runId !== undefined && lease.run.runId !== runId)) return;
+    revokeJoyAgentComposerHostLease(lease);
+    activeComposerHostLeaseRef.current = undefined;
+  }, []);
+
+  const beginRunLifecycle = useCallback(
+    (run: JoyAgentRunIterator['run']): void => {
+      runController.start({
+        runId: run.runId,
+        epoch: run.epoch,
+        at: new Date().toISOString(),
+        state: 'inspecting',
+        display: 'JOY is inspecting the project.',
+      });
+    },
+    [runController],
+  );
+
+  const cancelRunLifecycle = useCallback(
+    (runId: string, display = 'JOY run cancelled.'): void => {
+      const current = runController.getSnapshot().run;
+      if (current === undefined || current.scope.runId !== runId) return;
+      revokeActiveComposerHostLease(runId);
+      runController.requestCancel(new Date().toISOString(), display);
+      const pending = runController.getSnapshot().run;
+      if (pending === undefined || pending.scope.runId !== runId) return;
+      acceptRunLifecycle({ runId: pending.scope.runId, epoch: pending.scope.epoch }, 'cancelled', {
+        display,
+      });
+    },
+    [acceptRunLifecycle, revokeActiveComposerHostLease, runController],
+  );
+
+  /**
+   * Preview bundles are keyed by the prepared, epoch-qualified plan ID. Never
+   * pass a bare Worker run ID to the store: it would leave the matching staged
+   * overlay behind after cancellation while still protecting a newer run.
+   */
+  const clearAgentPreviewForSourceRun = useCallback(
+    (sourceRunId?: string): void => {
+      const bundle = agentPreviewStore?.getBundle();
+      if (bundle === undefined) return;
+      if (sourceRunId === undefined || sourceRunIdForPreparedPlan(bundle.runId) === sourceRunId)
+        agentPreviewStore?.clear(bundle.runId);
+    },
+    [agentPreviewStore],
+  );
+
+  useEffect(() => {
+    const deferred = deferredPreviewApprovalRef.current;
+    if (deferred === undefined) return;
+    const expectedBundleRunId = `${deferred.run.runId}.epoch-${deferred.run.epoch}`;
+    const current = runController.getSnapshot().run;
+    if (
+      current === undefined ||
+      current.scope.runId !== deferred.run.runId ||
+      current.scope.epoch !== deferred.run.epoch ||
+      activeModelRunIdRef.current !== deferred.run.runId
+    ) {
+      deferredPreviewApprovalRef.current = undefined;
+      return;
+    }
+    if (previewBundle?.runId !== expectedBundleRunId || !isAgentPreviewBundleReady(previewBundle))
+      return;
+
+    // The Worker already created the prepared change, but its review state is
+    // not truthfully ready until every mapped editor surface has acknowledged
+    // the one immutable preview bundle it actually rendered.
+    if (current.state === 'preparing') {
+      runController.accept({
+        version: JOY_AGENT_RUN_EVENT_VERSION,
+        scope: {
+          projectId: current.scope.projectId,
+          runId: current.scope.runId,
+          epoch: current.scope.epoch,
+          seq: current.scope.seq + 1,
+        },
+        state: 'preview-ready',
+        at: new Date().toISOString(),
+        display: 'JOY preview rendered and ready for review.',
+      });
+    }
+    const ready = runController.getSnapshot().run;
+    if (
+      ready !== undefined &&
+      ready.scope.runId === deferred.run.runId &&
+      ready.scope.epoch === deferred.run.epoch &&
+      ready.state === 'preview-ready'
+    ) {
+      runController.accept({
+        version: JOY_AGENT_RUN_EVENT_VERSION,
+        scope: {
+          projectId: ready.scope.projectId,
+          runId: ready.scope.runId,
+          epoch: ready.scope.epoch,
+          seq: ready.scope.seq + 1,
+        },
+        state: 'awaiting-approval',
+        at: new Date().toISOString(),
+        display: deferred.display,
+      });
+      agentPresenceStore?.dispatch(deferred.presence);
+      setAgentPhase('awaiting-approval');
+    }
+    deferredPreviewApprovalRef.current = undefined;
+  }, [agentPresenceStore, previewBundle, runController]);
 
   useEffect(() => {
     setCreativeBriefContext(undefined);
@@ -303,29 +891,96 @@ export function AgentPanel({
   }, [project.id]);
 
   useEffect(() => {
-    // A current UI may keep a stale ID momentarily during a project/session
-    // transition, but the new store has no matching payload. Clear both the
-    // visible state and the old run token before it can receive another event.
-    preparedChanges.clear();
-    modelChangeSetIdRef.current = undefined;
-    activeModelRunIdRef.current = undefined;
-    setModelChangeSetId(undefined);
-    agentPreviewStore?.clear();
+    // A Dockview relocation may unmount this view while the App-owned Worker
+    // and run controller remain alive. Revoke only this React closure's host
+    // lease: the old host cannot inspect media or prepare a write after the
+    // panel leaves, while the controller remains the durable lifecycle record.
     return () => {
-      // This cleanup runs for an unmount and before a new project/session
-      // scope. It makes late Worker iterator events fail the run-ID gate before
-      // they can stage into the shared preview store.
-      const runId = activeModelRunIdRef.current;
-      activeModelRunIdRef.current = undefined;
-      modelChangeSetIdRef.current = undefined;
-      preparedChanges.clear();
-      if (runId !== undefined) {
-        void joyAgentEngineClient?.cancel(runId);
-        agentPresenceStore?.clear();
-        agentPreviewStore?.clear(runId);
-      }
+      revokeActiveComposerHostLease();
+      deferredPreviewApprovalRef.current = undefined;
+      observationReviewRegistrationRef.current += 1;
+      observationReviewControllerRef.current?.dispose();
+      observationReviewControllerRef.current = undefined;
+      observationReviewLeaseRef.current = undefined;
+      preparedChangesRef.current.clear();
     };
-  }, [agentPresenceStore, agentPreviewStore, joyAgentEngineClient, preparedChanges]);
+  }, [revokeActiveComposerHostLease]);
+
+  useEffect(() => {
+    const previous = sessionScopeRef.current;
+    const scopeChanged =
+      previous.projectId !== project.id ||
+      previous.session !== session ||
+      previous.revision !== session.projectRevisionId;
+    if (!scopeChanged) return;
+
+    // A genuine editor project/session transition is not a panel relocation.
+    // Terminate only the exact lease this panel minted; a stale cleanup can
+    // never interrupt a later App-owned run.
+    const runId = activeModelRunIdRef.current;
+    const lease = activeComposerHostLeaseRef.current;
+    const ownsCurrentRun =
+      lease !== undefined &&
+      isJoyAgentComposerHostLeaseCurrent(lease) &&
+      (runId === undefined || lease.run.runId === runId);
+    const current = runController.getSnapshot().run;
+    // If Dockview remounted before a genuine project transition, this panel
+    // may no longer own the old closure's lease. The controller is still the
+    // project authority, so cancel its one nonterminal run rather than leave a
+    // detached Worker alive against a changed revision.
+    const runIdToCancel =
+      ownsCurrentRun && lease !== undefined
+        ? lease.run.runId
+        : current !== undefined && !isTerminalJoyAgentRunState(current.state)
+          ? current.scope.runId
+          : undefined;
+    const interruptedByExactLease =
+      ownsCurrentRun && lease !== undefined
+        ? interruptJoyAgentComposerHostLease(
+            lease,
+            new Date().toISOString(),
+            'JOY run interrupted because the editor project changed. Reconnect before continuing.',
+          )
+        : false;
+    if (lease !== undefined) revokeActiveComposerHostLease(lease.run.runId);
+    if (runIdToCancel !== undefined) {
+      if (
+        !interruptedByExactLease &&
+        current !== undefined &&
+        current.scope.runId === runIdToCancel &&
+        !isTerminalJoyAgentRunState(current.state)
+      )
+        runController.interrupt(
+          new Date().toISOString(),
+          'JOY run interrupted because the editor project changed. Reconnect before continuing.',
+        );
+      void joyAgentEngineClient?.cancel(runIdToCancel);
+    }
+    activeModelRunIdRef.current = undefined;
+    discardObservationReview();
+    deferredPreviewApprovalRef.current = undefined;
+    modelChangeSetIdRef.current = undefined;
+    preparedChanges.clear();
+    agentPreviewStore?.clear();
+    setModelChangeSetId(undefined);
+    agentPresenceStore?.clear();
+    sessionScopeRef.current = {
+      projectId: project.id,
+      session,
+      revision: session.projectRevisionId,
+    };
+  }, [
+    agentPresenceStore,
+    agentPreviewStore,
+    discardObservationReview,
+    joyAgentEngineClient,
+    preparedChanges,
+    project.id,
+    revokeActiveComposerHostLease,
+    runController,
+    session,
+    session.projectRevisionId,
+  ]);
 
   useEffect(() => {
     const preview = agentPreviewStore?.getState();
@@ -348,6 +1003,13 @@ export function AgentPanel({
         prepared.sessionEpoch !== preparedSessionEpoch ||
         prepared.baseRevision !== session.projectRevisionId)
     ) {
+      // `run-finished` intentionally retains this host endpoint while the
+      // owner can approve its preview. A human revision invalidates that
+      // authority, so close the retained endpoint before revoking the card.
+      const invalidatedRunId = sourceRunIdForPreparedPlan(prepared.planId);
+      cancelRunLifecycle(invalidatedRunId, 'JOY preview expired because the project changed.');
+      void joyAgentEngineClient?.cancel(invalidatedRunId);
+      if (activeModelRunIdRef.current === invalidatedRunId) activeModelRunIdRef.current = undefined;
       preparedChanges.revoke(changeSetId);
       modelChangeSetIdRef.current = undefined;
       setModelChangeSetId(undefined);
@@ -356,6 +1018,8 @@ export function AgentPanel({
     }
   }, [
     agentPreviewStore,
+    cancelRunLifecycle,
+    joyAgentEngineClient,
     preparedChanges,
     preparedSessionEpoch,
     session.projectRevisionId,
@@ -386,6 +1050,15 @@ export function AgentPanel({
   const activeThread = conversation;
   const modelView =
     modelChangeSetId === undefined ? undefined : preparedChanges.getView(modelChangeSetId);
+  const modelPreviewReady =
+    modelView !== undefined &&
+    (agentPreviewStore === undefined ||
+      (previewBundle?.runId === modelView.planId && isAgentPreviewBundleReady(previewBundle)));
+  const modelAwaitingApproval =
+    modelPreviewReady &&
+    modelView !== undefined &&
+    runLifecycle.run?.scope.runId === sourceRunIdForPreparedPlan(modelView.planId) &&
+    runLifecycle.run.state === 'awaiting-approval';
 
   function currentPreparedAuthority(hostRunId: string): PreparedChangeAuthority {
     return {
@@ -409,7 +1082,11 @@ export function AgentPanel({
       if (changeSetId === undefined) return;
       const prepared = preparedChanges.getView(changeSetId);
       // An old async closure must never erase a newer session's change card.
-      if (prepared === undefined || (runId !== undefined && prepared.planId !== runId)) return;
+      if (
+        prepared === undefined ||
+        (runId !== undefined && sourceRunIdForPreparedPlan(prepared.planId) !== runId)
+      )
+        return;
       preparedChanges.revoke(changeSetId);
       modelChangeSetIdRef.current = undefined;
       setModelChangeSetId(undefined);
@@ -467,12 +1144,14 @@ export function AgentPanel({
     }
     const commandRunId = agentRunId ?? presenceState.runId;
     if (command.type === 'stop') {
-      if (commandRunId !== undefined && joyAgentEngineClient !== undefined)
-        void joyAgentEngineClient.cancel(commandRunId);
+      if (commandRunId !== undefined) {
+        cancelRunLifecycle(commandRunId);
+        if (joyAgentEngineClient !== undefined) void joyAgentEngineClient.cancel(commandRunId);
+      }
       activeModelRunIdRef.current = undefined;
       discardPreparedModelChange(commandRunId);
       agentPresenceStore?.clear();
-      if (commandRunId !== undefined) agentPreviewStore?.clear(commandRunId);
+      clearAgentPreviewForSourceRun(commandRunId);
       setAgentPhase('cancelled');
     }
     setPending(undefined);
@@ -480,6 +1159,8 @@ export function AgentPanel({
     agentPresenceStore,
     agentPreviewStore,
     agentRunId,
+    cancelRunLifecycle,
+    clearAgentPreviewForSourceRun,
     command,
     discardPreparedModelChange,
     joyAgentEngineClient,
@@ -692,9 +1373,59 @@ export function AgentPanel({
         );
         return;
       }
+      const entityReferenceSource = {
+        timeline: session.timelineProject,
+        visual: session.visualProject,
+      };
+      const storedEntityReferences = conversation.recentEntityReferences ?? [];
+      // A generic request can naturally contain “it” (for example, “start an
+      // edit, then stop it”). Treat pronouns as a constrained follow-up only
+      // when this project has an actual durable entity reference to resolve.
+      const isReferenceFollowUp =
+        storedEntityReferences.length > 0 && CONVERSATION_REFERENCE_WORD.test(body);
+      const referenceCandidates = CONVERSATION_TITLE_WORD.test(body)
+        ? storedEntityReferences.filter((reference) => reference.entityKind === 'visual-text')
+        : storedEntityReferences;
+      let selectedEntityReference: JoyAgentConversationEntityReference | undefined;
+      if (isReferenceFollowUp) {
+        if (referenceCandidates.length !== 1) {
+          appendMessage(threadId, 'assistant', CONVERSATION_REFERENCE_AMBIGUOUS_MESSAGE);
+          return;
+        }
+        const resolved = resolveJoyAgentConversationEntityReference(
+          referenceCandidates[0],
+          entityReferenceSource,
+        );
+        if (resolved.kind === 'clarification') {
+          appendMessage(threadId, 'assistant', resolved.clarification.message);
+          return;
+        }
+        selectedEntityReference = resolved.reference;
+      }
+      // The reference is re-resolved at the last possible host boundary. A
+      // deleted or cross-project record is never passed to the model, and a
+      // pronoun-style follow-up above must name exactly one surviving target.
+      const currentEntityReferences = storedEntityReferences.flatMap((reference) => {
+        const resolved = resolveJoyAgentConversationEntityReference(
+          reference,
+          entityReferenceSource,
+        );
+        return resolved.kind === 'resolved' ? [resolved.reference] : [];
+      });
+      const contextualEntityReferences =
+        selectedEntityReference === undefined ? currentEntityReferences : [selectedEntityReference];
       const runId = makeJoyCodeId('run');
       const taskKind = inferJoyAgentTaskKind(body);
       const taskTarget = targetForJoyAgentTask(taskKind);
+      // A prepared preview intentionally keeps its host RPC queue alive until
+      // the owner approves or rejects it. A new prompt supersedes that
+      // authority, so close the prior queue before changing the active token.
+      const supersededRunId = activeModelRunIdRef.current;
+      if (supersededRunId !== undefined) {
+        cancelRunLifecycle(supersededRunId, 'Superseded by a new JOY request.');
+        void joyAgentEngineClient.cancel(supersededRunId);
+      }
+      discardObservationReview();
       discardPreparedModelChange();
       activeModelRunIdRef.current = runId;
       setAgentRunId(runId);
@@ -704,18 +1435,33 @@ export function AgentPanel({
       setThinkingThreadId(threadId);
       setAgentPhase('connecting');
       void (async () => {
+        let revokeStagedChange = (): void => {};
+        let lifecycleRun: JoyAgentRunIterator['run'] | undefined;
+        let activeObservationRun: JoyAgentRunIterator['run'] | undefined;
+        let activeComposerHostLease: JoyAgentComposerHostLease | undefined;
         try {
           const composition =
             session.timelineProject.compositions[session.timelineProject.rootCompositionId];
-          const contextSnapshot = createJoyAgentContextSnapshot({
+          const baseRevision = session.projectRevisionId;
+          const selectedReferenceVisualObjectIds =
+            selectedEntityReference?.entityKind.startsWith('visual-') === true
+              ? [selectedEntityReference.entityId]
+              : [];
+          const contextInput: JoyAgentContextSnapshotInput = {
             projectId: session.visualProject.id,
+            entityReferenceProjectId: session.timelineProject.id,
             revision: session.projectRevisionId,
             compositionId: session.timelineProject.rootCompositionId,
             trackIds: composition?.tracks.map((track) => track.id) ?? [],
             selectedClipIds,
-            selectedVisualObjectIds: selectedClipIds
-              .map((clipId) => resolveObjectIdForSelection(session.visualProject, [clipId]))
-              .filter((id): id is string => id !== undefined),
+            selectedVisualObjectIds: [
+              ...new Set([
+                ...selectedClipIds
+                  .map((clipId) => resolveObjectIdForSelection(session.visualProject, [clipId]))
+                  .filter((id): id is string => id !== undefined),
+                ...selectedReferenceVisualObjectIds,
+              ]),
+            ],
             playheadUs,
             ...(composition === undefined
               ? {}
@@ -757,42 +1503,383 @@ export function AgentPanel({
               role: message.role,
               body: message.body,
             })),
+            ...(contextualEntityReferences.length === 0
+              ? {}
+              : { recentEntityReferences: contextualEntityReferences }),
             ...(creativeBriefContext === undefined ? {} : { creativeBrief: creativeBriefContext }),
-          });
-          for await (const event of joyAgentEngineClient.startRun({
-            runId,
-            taskKind,
-            prompt: body,
-            baseRevision: session.projectRevisionId,
-            context: contextSnapshot,
-            mode:
-              joyAgentEngineClient.getStatus()?.capability === 'plan-only'
-                ? 'plan-only'
-                : 'tool-loop',
-          })) {
+          };
+          const mode =
+            taskKind === 'creative-brief' ||
+            joyAgentEngineClient.getStatus()?.capability === 'plan-only'
+              ? ('plan-only' as const)
+              : ('tool-loop' as const);
+          const structured = mode === 'tool-loop' && taskKind !== 'creative-brief';
+          const capturedModelId = joyAgentEngineClient.getStatus()?.modelId;
+          const capturedPolicyDigest = digestJoyAgentPolicy(latestSettingsRef.current);
+          let observationBridge: JoyAgentObservationHostBridge | undefined;
+          if (
+            structured &&
+            capturedModelId !== undefined &&
+            capturedModelId.trim().length > 0 &&
+            observationAdapterFactory !== undefined
+          ) {
+            try {
+              observationBridge = observationAdapterFactory.create({
+                projectId: contextInput.projectId,
+                revision: baseRevision,
+                currentAuthority: () => {
+                  const liveSession = latestSessionRef.current;
+                  const liveRun = runController.getSnapshot().run;
+                  const lifecycleMatches =
+                    activeObservationRun !== undefined &&
+                    activeComposerHostLease !== undefined &&
+                    isJoyAgentComposerHostLeaseCurrent(activeComposerHostLease) &&
+                    liveRun !== undefined &&
+                    liveRun.scope.projectId === contextInput.projectId &&
+                    liveRun.scope.runId === activeObservationRun.runId &&
+                    liveRun.scope.epoch === activeObservationRun.epoch &&
+                    !isTerminalJoyAgentRunState(liveRun.state);
+                  const retainedReview = observationReviewLeaseRef.current;
+                  const retainedReviewMatches =
+                    retainedReview !== undefined &&
+                    retainedReview.expiresAtMs > Date.now() &&
+                    retainedReview.candidate.authority.projectId === contextInput.projectId &&
+                    retainedReview.candidate.authority.revision === baseRevision &&
+                    retainedReview.candidate.authority.modelId === capturedModelId &&
+                    retainedReview.candidate.authority.promptPolicyDigest ===
+                      capturedPolicyDigest &&
+                    liveSession.visualProject.id === contextInput.projectId &&
+                    liveSession.projectRevisionId === baseRevision &&
+                    (joyAgentEngineClient.getStatus()?.modelId ?? '') === capturedModelId &&
+                    digestJoyAgentPolicy(latestSettingsRef.current) === capturedPolicyDigest;
+                  if (retainedReviewMatches) return retainedReview.candidate.authority;
+                  const observedRun = lifecycleMatches ? activeObservationRun : undefined;
+                  return resolveJoyAgentObservationAuthority(
+                    {
+                      projectId: contextInput.projectId,
+                      revision: baseRevision,
+                      modelId: capturedModelId,
+                      promptPolicyDigest: capturedPolicyDigest,
+                    },
+                    {
+                      projectId: liveSession.visualProject.id,
+                      revision: liveSession.projectRevisionId,
+                      modelId: joyAgentEngineClient.getStatus()?.modelId ?? '',
+                      promptPolicyDigest: digestJoyAgentPolicy(latestSettingsRef.current),
+                      run: observedRun,
+                      terminal: observedRun === undefined || activeModelRunIdRef.current !== runId,
+                    },
+                  );
+                },
+              });
+            } catch {
+              // Observation is an optional, locally bounded enhancement. A
+              // browser that cannot construct its isolated decoder keeps the
+              // safe legacy catalog instead of falling back to a URL/path.
+              observationBridge = undefined;
+            }
+          }
+          let stagedChangeSetId: string | undefined;
+          revokeStagedChange = (): void => {
+            if (stagedChangeSetId === undefined) return;
+            const staged = preparedChanges.getView(stagedChangeSetId);
+            preparedChanges.revoke(stagedChangeSetId);
+            if (staged !== undefined) {
+              agentPreviewStore?.clear(staged.planId);
+              proposalTargetsRef.current.delete(staged.planId);
+            }
+            if (modelChangeSetIdRef.current === stagedChangeSetId)
+              setPreparedModelChange(undefined);
+            stagedChangeSetId = undefined;
+          };
+          const terminalizeConnectionReset = (): void => {
+            // This callback is fired by the main-thread client when it tears
+            // down a run before the Worker can deliver a terminal event (for
+            // example after Clear connection or provider reconfiguration).
+            // Keep it scoped to this exact run so an old Worker cannot erase
+            // a newer preview or lifecycle record.
+            revokeStagedChange();
+            revokeActiveComposerHostLease(runId);
+            if (activeModelRunIdRef.current !== runId) return;
+
+            const current = runController.getSnapshot().run;
+            const receiptExists = current?.artifacts.some(
+              (artifact) => artifact.kind === 'execution-receipt',
+            );
+            const display = receiptExists
+              ? 'JOY’s connection changed while verification was pending. Reconnect before continuing.'
+              : 'JOY run was cancelled because its model connection changed. No staged edit was applied.';
+            if (
+              current !== undefined &&
+              current.scope.runId === runId &&
+              !isTerminalJoyAgentRunState(current.state)
+            ) {
+              if (receiptExists) runController.interrupt(new Date().toISOString(), display);
+              else cancelRunLifecycle(runId, display);
+            }
+
+            deferredPreviewApprovalRef.current = undefined;
+            discardPreparedModelChange(runId);
+            clearAgentPreviewForSourceRun(runId);
+            proposalTargetsRef.current.delete(runId);
+            activeModelRunIdRef.current = undefined;
+            agentPresenceStore?.clear();
+            setAgentPhase(receiptExists ? 'failed' : 'cancelled');
+            appendMessage(threadId, 'assistant', display);
+          };
+          const host = !structured
+            ? undefined
+            : {
+                methods: createJoyAgentHostRpcMethodsForSnapshot(
+                  contextInput,
+                  async (proposal, rpcContext) => {
+                    const hostPlanId = `${runId}.epoch-${rpcContext.run.epoch}`;
+                    const reject = (
+                      field: string,
+                      compilerCode: string,
+                      retryable = true,
+                    ): HostRpcDiagnosticError =>
+                      new HostRpcDiagnosticError({
+                        code: 'JOY_AGENT_RPC_CANONICAL_REJECTED',
+                        retryable,
+                        operation: 'validate_proposal',
+                        field,
+                        facts: { compilerCode },
+                      });
+                    const hasCurrentHostLease = (): boolean =>
+                      activeComposerHostLease !== undefined &&
+                      activeComposerHostLease.run.runId === rpcContext.run.runId &&
+                      activeComposerHostLease.run.epoch === rpcContext.run.epoch &&
+                      isJoyAgentComposerHostLeaseCurrent(activeComposerHostLease);
+                    rpcContext.signal.throwIfAborted();
+                    if (
+                      !hasCurrentHostLease() ||
+                      activeModelRunIdRef.current !== runId ||
+                      session.projectRevisionId !== baseRevision ||
+                      latestSessionRef.current.visualProject.id !== contextInput.projectId ||
+                      latestSessionRef.current.projectRevisionId !== baseRevision
+                    )
+                      throw reject('run', 'JOY_AGENT_HOST_REVOKED', false);
+                    if (selectedEntityReference !== undefined) {
+                      const targetConstraint = constrainJoyAgentConversationTarget(
+                        selectedEntityReference,
+                        proposal.operations,
+                      );
+                      if (!targetConstraint.ok)
+                        throw reject(
+                          `operations.${targetConstraint.operationId}`,
+                          JOY_AGENT_CONVERSATION_TARGET_MISMATCH,
+                          false,
+                        );
+                    }
+                    const compiled = compileJoyCodeCompoundDraft({
+                      planId: hostPlanId,
+                      baseRevision,
+                      timeline: session.timelineProject,
+                      visualProject: session.visualProject,
+                      registeredAssetIds: Object.keys(session.visualProject.assets),
+                      operations: proposal.operations,
+                    });
+                    if (!compiled.ok)
+                      throw reject(
+                        'operations',
+                        compiled.error.code.slice(0, 64),
+                        compiled.error.code !== 'JOY_CODE_STALE_REVISION',
+                      );
+                    rpcContext.signal.throwIfAborted();
+                    if (
+                      !hasCurrentHostLease() ||
+                      session.projectRevisionId !== baseRevision ||
+                      latestSessionRef.current.projectRevisionId !== baseRevision
+                    )
+                      throw reject('run', 'JOY_AGENT_HOST_REVOKED', false);
+                    let preparedChangeSetId: string | undefined;
+                    try {
+                      const prepared = preparedChanges.prepare(
+                        compiled,
+                        currentPreparedAuthority(hostPlanId),
+                      );
+                      preparedChangeSetId = prepared.changeSetId;
+                      const preview = preparedChanges.getPreviewDraft(prepared.changeSetId);
+                      if (preview === undefined)
+                        throw new Error('JOY_CODE_PREPARED_CHANGE_MISSING');
+                      rpcContext.signal.throwIfAborted();
+                      stageJoyAgentPreview(agentPreviewStore, session, preview);
+                      rpcContext.signal.throwIfAborted();
+                      if (
+                        !hasCurrentHostLease() ||
+                        activeModelRunIdRef.current !== runId ||
+                        session.projectRevisionId !== baseRevision ||
+                        latestSessionRef.current.projectRevisionId !== baseRevision
+                      )
+                        throw reject('run', 'JOY_AGENT_HOST_REVOKED', false);
+                      stagedChangeSetId = prepared.changeSetId;
+                      proposalTargetsRef.current.set(
+                        prepared.planId,
+                        targetsForJoyCodeOperations(
+                          proposal.operations as unknown as readonly {
+                            readonly kind: string;
+                            readonly [key: string]: unknown;
+                          }[],
+                        ),
+                      );
+                      return {
+                        summary: proposal.summary,
+                        baseRevision,
+                        changeSetId: prepared.changeSetId,
+                        operationDigest: prepared.operationDigest,
+                        bindingDigest: prepared.bindingDigest,
+                        operationCount: proposal.operations.length,
+                      };
+                    } catch (error) {
+                      if (preparedChangeSetId !== undefined) {
+                        const prepared = preparedChanges.getView(preparedChangeSetId);
+                        preparedChanges.revoke(preparedChangeSetId);
+                        if (prepared !== undefined) {
+                          agentPreviewStore?.clear(prepared.planId);
+                          proposalTargetsRef.current.delete(prepared.planId);
+                        }
+                      }
+                      throw error;
+                    }
+                  },
+                  observationBridge?.tools,
+                  observationBridge === undefined
+                    ? undefined
+                    : async (result) => {
+                        await registerObservationReviewCandidate(
+                          observationBridge!,
+                          result.observationId,
+                        );
+                      },
+                ),
+                allowedToolNames:
+                  observationBridge === undefined
+                    ? LEGACY_JOY_AGENT_TOOL_NAMES
+                    : JOY_AGENT_HOST_TOOL_NAMES,
+                onCancelled: revokeStagedChange,
+              };
+          const contextSnapshot = structured
+            ? undefined
+            : createJoyAgentContextSnapshot(contextInput);
+          const runIterator = joyAgentEngineClient.startRun(
+            {
+              runId,
+              taskKind,
+              prompt: body,
+              baseRevision,
+              mode,
+              ...(contextSnapshot === undefined ? {} : { context: contextSnapshot }),
+            },
+            host,
+            { onConnectionCleared: terminalizeConnectionReset },
+          );
+          lifecycleRun = runIterator.run;
+          activeObservationRun = runIterator.run;
+          try {
+            beginRunLifecycle(runIterator.run);
+            activeComposerHostLease = createJoyAgentComposerHostLease(
+              runController,
+              runIterator.run,
+            );
+            activeComposerHostLeaseRef.current = activeComposerHostLease;
+          } catch (error) {
+            void joyAgentEngineClient.cancel(runId);
+            throw error;
+          }
+          for await (const event of runIterator) {
             // Cancellation, a project switch, or a subsequent prompt revokes
             // this run synchronously. Late worker events are display-only at
             // best and must not create a new prepared change or clear a newer
             // preview.
             if (activeModelRunIdRef.current !== runId) continue;
-            setAgentPhase(event.phase);
             const terminal =
               event.phase === 'completed' ||
               event.phase === 'failed' ||
               event.phase === 'cancelled';
-            const computedProposalTargets =
-              event.proposal === undefined
-                ? undefined
-                : targetsForJoyCodeOperations(
-                    event.proposal.operations as readonly {
-                      readonly kind: string;
-                      readonly [key: string]: unknown;
-                    }[],
-                  );
-            if (computedProposalTargets !== undefined)
-              proposalTargetsRef.current.set(runId, computedProposalTargets);
-            const proposalTargets =
-              computedProposalTargets ?? proposalTargetsRef.current.get(runId);
+            let preparedProposalTargets: readonly JoyAgentTarget[] | undefined;
+            let preparedChangeArtifact: JoyAgentRunArtifactReference | undefined;
+            if (event.proposal !== undefined) {
+              const prepared = preparedChanges.getView(event.proposal.changeSetId);
+              const expectedHostRunId = `${runId}.epoch-${event.runEpoch}`;
+              if (
+                prepared === undefined ||
+                prepared.hostRunId !== expectedHostRunId ||
+                prepared.baseRevision !== event.proposal.baseRevision ||
+                prepared.operationDigest !== event.proposal.operationDigest ||
+                prepared.bindingDigest !== event.proposal.bindingDigest ||
+                prepared.baseRevision !== session.projectRevisionId ||
+                preparedChanges.getPreviewDraft(event.proposal.changeSetId) === undefined
+              ) {
+                revokeStagedChange();
+                throw new Error('JOY preview authority was invalidated. Request a new edit.');
+              }
+              stagedChangeSetId = prepared.changeSetId;
+              preparedChangeArtifact = {
+                kind: 'prepared-change',
+                id: prepared.changeSetId,
+                version: event.seq,
+              };
+              preparedProposalTargets = proposalTargetsRef.current.get(prepared.planId);
+              setPreparedModelChange(prepared.changeSetId);
+              appendMessage(
+                threadId,
+                'assistant',
+                `${event.proposal.summary} (${event.proposal.operationCount} bounded operation${event.proposal.operationCount === 1 ? '' : 's'}) is ready for JOY validation.`,
+              );
+            }
+            const proposalTargets = preparedProposalTargets;
+            const lifecycleErrorCode = runErrorCodeForAgentError(event.errorCode);
+            const expectedPreviewBundleRunId = `${runId}.epoch-${event.runEpoch}`;
+            const stagedPreviewBundle = agentPreviewStore?.getBundle();
+            const previewRenderRequired = agentPreviewStore !== undefined;
+            if (
+              event.phase === 'awaiting-approval' &&
+              previewRenderRequired &&
+              stagedPreviewBundle?.runId !== expectedPreviewBundleRunId
+            ) {
+              revokeStagedChange();
+              throw new Error('JOY preview was not rendered. Request a new edit.');
+            }
+            const awaitingPreviewRender =
+              event.phase === 'awaiting-approval' &&
+              previewRenderRequired &&
+              !isAgentPreviewBundleReady(stagedPreviewBundle);
+            setAgentPhase(awaitingPreviewRender ? 'planning' : event.phase);
+            if (event.phase === 'awaiting-approval') {
+              if (awaitingPreviewRender) {
+                // Preserve the Worker event sequence as lifecycle evidence but
+                // do not falsely surface approval before a real renderer ack.
+                acceptRunLifecycle(runIterator.run, 'preparing', {
+                  at: event.at,
+                  seq: event.seq,
+                  display: 'JOY is rendering the staged preview.',
+                });
+              } else {
+                acceptRunLifecycle(runIterator.run, 'preview-ready', {
+                  at: event.at,
+                  seq: event.seq,
+                  display: 'JOY preview rendered and ready for review.',
+                });
+                acceptRunLifecycle(runIterator.run, 'awaiting-approval', {
+                  at: event.at,
+                  seq: event.seq + 1,
+                  display: 'Review the live preview before applying.',
+                });
+              }
+            } else {
+              acceptRunLifecycle(runIterator.run, lifecycleStateForAgentPhase(event.phase), {
+                at: event.at,
+                seq: event.seq,
+                ...(event.phase === 'previewing' && preparedChangeArtifact !== undefined
+                  ? {
+                      changeSetVersion: preparedChangeArtifact.version,
+                      artifacts: [preparedChangeArtifact],
+                    }
+                  : {}),
+                ...(lifecycleErrorCode === undefined ? {} : { errorCode: lifecycleErrorCode }),
+              });
+            }
             const presenceEvent: JoyAgentPresenceEvent = {
               protocolVersion: 1,
               runId,
@@ -823,67 +1910,47 @@ export function AgentPanel({
                     preview: {
                       revision: session.historyCursorSequence,
                       summaryCode: 'joy-agent-proposal',
-                      targetCount: event.proposal.operations.length,
+                      targetCount: event.proposal.operationCount,
                     },
                   }),
             };
-            if (event.phase === 'awaiting-approval')
-              appendMessage(
-                threadId,
-                'assistant',
-                'JOY prepared a bounded proposal. Review the live preview before applying.',
-              );
-            if (event.proposal !== undefined && event.proposal.operations.length > 0) {
-              const compiled = compileJoyCodeCompoundDraft({
-                planId: runId,
-                baseRevision: event.proposal.baseRevision,
-                timeline: session.timelineProject,
-                visualProject: session.visualProject,
-                registeredAssetIds: Object.keys(session.visualProject.assets),
-                operations: event.proposal.operations as never,
-              });
-              if (compiled.ok) {
-                discardPreparedModelChange(runId);
-                const prepared = preparedChanges.prepare(compiled, currentPreparedAuthority(runId));
-                const preview = preparedChanges.getPreviewDraft(prepared.changeSetId);
-                if (preview === undefined)
-                  throw new Error(
-                    'JOY_CODE_PREPARED_CHANGE_MISSING: proposal could not be previewed',
-                  );
-                try {
-                  stageJoyAgentPreview(agentPreviewStore, session, preview);
-                } catch (error) {
-                  preparedChanges.revoke(prepared.changeSetId);
-                  throw error;
-                }
-                setPreparedModelChange(prepared.changeSetId);
-              } else {
-                discardPreparedModelChange(runId);
-                agentPreviewStore?.clear(runId);
+            if (event.phase === 'awaiting-approval') {
+              if (awaitingPreviewRender) {
+                deferredPreviewApprovalRef.current = {
+                  run: runIterator.run,
+                  threadId,
+                  presence: presenceEvent,
+                  display: 'Review the live preview before applying.',
+                };
                 appendMessage(
                   threadId,
                   'assistant',
-                  `JOY rejected the proposal: ${compiled.error.message}`,
+                  'JOY staged the proposal and is rendering the live preview.',
                 );
-                throw new Error('Proposal validation failed. No edits were staged.');
+              } else {
+                appendMessage(
+                  threadId,
+                  'assistant',
+                  'JOY prepared a bounded proposal. Review the live preview before applying.',
+                );
               }
-              appendMessage(
-                threadId,
-                'assistant',
-                `${event.proposal.summary} (${event.proposal.operations.length} bounded operation${event.proposal.operations.length === 1 ? '' : 's'}) is ready for JOY validation.`,
-              );
             }
             // A preview presence event is emitted only after the canonical
             // compiler has accepted the proposal. This keeps the activity
             // rail truthful when provider validation succeeds but a local
             // adapter rejects the draft.
-            agentPresenceStore?.dispatch(presenceEvent);
-            if (event.phase === 'completed')
+            if (!awaitingPreviewRender) agentPresenceStore?.dispatch(presenceEvent);
+            if (event.phase === 'completed') {
+              const resultText = boundedAgentResultText(event.result);
               appendMessage(
                 threadId,
                 'assistant',
-                'The model response was received. JOY keeps edits in preview until you approve them.',
+                resultText ??
+                  (event.proposal === undefined
+                    ? 'The model response was received safely.'
+                    : 'The model response was received. JOY keeps edits in preview until you approve them.'),
               );
+            }
             if (event.phase === 'failed')
               appendMessage(
                 threadId,
@@ -893,15 +1960,27 @@ export function AgentPanel({
             if (event.phase === 'cancelled')
               appendMessage(threadId, 'assistant', 'JOY run cancelled. No edits were applied.');
             if (event.phase === 'failed' || event.phase === 'cancelled') {
+              revokeActiveComposerHostLease(runId);
+              deferredPreviewApprovalRef.current = undefined;
+              revokeStagedChange();
               discardPreparedModelChange(runId);
-              agentPreviewStore?.clear(runId);
+              clearAgentPreviewForSourceRun(runId);
               proposalTargetsRef.current.delete(runId);
               activeModelRunIdRef.current = undefined;
             }
           }
         } catch (error) {
           if (activeModelRunIdRef.current !== runId) return;
+          revokeActiveComposerHostLease(runId);
+          revokeStagedChange();
           discardPreparedModelChange(runId);
+          // A local consistency failure can happen after a prepared preview.
+          // Do not retain its host RPC endpoint after its UI authority is gone.
+          void joyAgentEngineClient.cancel(runId);
+          if (lifecycleRun !== undefined)
+            acceptRunLifecycle(lifecycleRun, 'failed', {
+              display: 'JOY run failed safely.',
+            });
           activeModelRunIdRef.current = undefined;
           agentPresenceStore?.dispatch({
             protocolVersion: 1,
@@ -922,6 +2001,12 @@ export function AgentPanel({
           );
           setAgentPhase('failed');
         } finally {
+          if (activeComposerHostLease !== undefined) {
+            revokeJoyAgentComposerHostLease(activeComposerHostLease);
+            if (activeComposerHostLeaseRef.current === activeComposerHostLease)
+              activeComposerHostLeaseRef.current = undefined;
+          }
+          activeObservationRun = undefined;
           setThinkingThreadId((current) => (current === threadId ? undefined : current));
           setAgentRunId((current) => (current === runId ? undefined : current));
         }
@@ -969,15 +2054,17 @@ export function AgentPanel({
     appendMessage(pending.threadId, 'assistant', 'Rejected. No timeline changes were applied.');
     updateThreadStatus(pending.threadId, 'draft');
     setPending(undefined);
-    agentPreviewStore?.clear(pending.runId);
+    clearAgentPreviewForSourceRun(pending.runId);
   }
 
   function rejectModelDraft() {
     const prepared = modelView;
     if (prepared === undefined) return;
+    const sourceRunId = sourceRunIdForPreparedPlan(prepared.planId);
     activeModelRunIdRef.current = undefined;
-    void joyAgentEngineClient?.cancel(prepared.planId);
-    discardPreparedModelChange(prepared.planId);
+    cancelRunLifecycle(sourceRunId, 'JOY preview rejected. No edits were applied.');
+    void joyAgentEngineClient?.cancel(sourceRunId);
+    discardPreparedModelChange(sourceRunId);
     setAgentPhase('cancelled');
     appendMessage(activeThread.id, 'assistant', 'JOY preview rejected. No edits were applied.');
     agentPresenceStore?.clear();
@@ -986,7 +2073,19 @@ export function AgentPanel({
   function applyModelDraft() {
     const changeSetId = modelChangeSetIdRef.current;
     const prepared = changeSetId === undefined ? undefined : preparedChanges.getView(changeSetId);
-    if (changeSetId === undefined || prepared === undefined) return;
+    if (changeSetId === undefined || prepared === undefined || !modelAwaitingApproval) return;
+    const sourceRunId = sourceRunIdForPreparedPlan(prepared.planId);
+    const lifecycleRecord = runController.getSnapshot().run;
+    const lifecycleRun =
+      lifecycleRecord?.scope.runId === sourceRunId && lifecycleRecord.state === 'awaiting-approval'
+        ? { runId: lifecycleRecord.scope.runId, epoch: lifecycleRecord.scope.epoch }
+        : undefined;
+    if (lifecycleRun === undefined) return;
+    const commitAccepted = acceptRunLifecycle(lifecycleRun, 'committing', {
+      display: 'JOY is applying the approved edit.',
+    });
+    if (commitAccepted?.accepted !== true) return;
+    setAgentPhase('applying');
     let outcome: PreparedJoyCodeApplyOutcome;
     try {
       const authority = currentPreparedAuthority(prepared.hostRunId);
@@ -998,7 +2097,13 @@ export function AgentPanel({
         runner: modelRunnerRef.current,
       });
     } catch (error) {
-      if (isTerminalPreparedChangeError(error)) discardPreparedModelChange(prepared.planId);
+      if (isTerminalPreparedChangeError(error)) {
+        discardPreparedModelChange(sourceRunIdForPreparedPlan(prepared.planId));
+        void joyAgentEngineClient?.cancel(sourceRunIdForPreparedPlan(prepared.planId));
+      }
+      if (lifecycleRun !== undefined)
+        acceptRunLifecycle(lifecycleRun, 'failed', { display: 'JOY apply failed safely.' });
+      setAgentPhase('failed');
       appendMessage(
         activeThread.id,
         'assistant',
@@ -1007,6 +2112,33 @@ export function AgentPanel({
       return;
     }
     const applied = outcome.result;
+    // Derive the next-turn targets from the host's verified receipt and the
+    // just-read-back canonical documents. This never preserves prompt/model
+    // text or guessed identifiers in the durable project conversation.
+    const entityReferenceDerivation = deriveJoyAgentConversationEntityReferences(applied.receipt, {
+      timeline: session.timelineProject,
+      visual: session.visualProject,
+    });
+    setConversation((current) =>
+      setJoyCodeConversationEntityReferences(
+        current,
+        entityReferenceDerivation.references,
+        new Date().toISOString(),
+      ),
+    );
+    const lifecycleVersion = runController.getSnapshot().run?.changeSetVersion ?? 1;
+    if (lifecycleRun !== undefined)
+      acceptRunLifecycle(lifecycleRun, 'verifying', {
+        display: 'JOY is verifying the durable edit receipt.',
+        changeSetVersion: lifecycleVersion,
+        artifacts: [
+          {
+            kind: 'execution-receipt',
+            id: applied.receipt.executionId,
+            version: lifecycleVersion,
+          },
+        ],
+      });
     if (!applied.replayed || outcome.recoveredFromReceipt) onProjectRevision?.();
     const completionTargets = proposalTargetsRef.current.get(prepared.planId) ?? [
       { panelId: 'agent', sectionId: 'composer' },
@@ -1019,12 +2151,24 @@ export function AgentPanel({
         : `${applied.replayed ? 'This JOY edit was already committed.' : 'Approved and applied'} Revision ${applied.revisionId} was ${applied.replayed ? 'confirmed from its saved receipt; no new edit or Undo entry was created.' : 'read back successfully; one Undo restores the prior state.'}`,
     );
     activeModelRunIdRef.current = undefined;
-    discardPreparedModelChange(prepared.planId);
+    discardPreparedModelChange(sourceRunIdForPreparedPlan(prepared.planId));
     setAgentPhase('completed');
-    void joyAgentEngineClient?.cancel(prepared.planId);
+    if (lifecycleRun !== undefined)
+      acceptRunLifecycle(lifecycleRun, 'completed', {
+        display: 'JOY edit committed and verified.',
+        changeSetVersion: lifecycleVersion,
+        artifacts: [
+          {
+            kind: 'verification',
+            id: applied.receipt.resultRevision,
+            version: lifecycleVersion,
+          },
+        ],
+      });
+    void joyAgentEngineClient?.cancel(sourceRunIdForPreparedPlan(prepared.planId));
     agentPresenceStore?.dispatch({
       protocolVersion: 1,
-      runId: prepared.planId,
+      runId: sourceRunIdForPreparedPlan(prepared.planId),
       seq: Math.max(0, (agentPresenceStore?.getState().seq ?? -1) + 1),
       at: new Date().toISOString(),
       revision: session.historyCursorSequence,
@@ -1145,7 +2289,7 @@ export function AgentPanel({
     updateThreadStatus(threadId, executionResult.success ? 'completed' : 'failed');
     setPending(undefined);
     setLastRun({ threadId, intent, plan: agentPlan, executionResult, reverted: false });
-    agentPreviewStore?.clear(pending.runId);
+    clearAgentPreviewForSourceRun(pending.runId);
     agentPresenceStore?.dispatch({
       protocolVersion: 1,
       runId: pending.runId,
@@ -1195,18 +2339,19 @@ export function AgentPanel({
     (target) => target.panelId === 'agent' && target.sectionId === 'composer',
   );
   const liveAgentPhase =
+    agentPhaseForLifecycleState(runLifecycle.state) ??
     agentPhase ??
     (composerPresenceActive || presenceState.terminalTarget?.panelId === 'agent'
       ? presenceState.phase === 'idle'
         ? undefined
         : presenceState.phase
-      : undefined);
+      : agentPhaseForLifecycleState(runLifecycle.state));
   const liveAgentBusy =
     liveAgentPhase !== undefined &&
     liveAgentPhase !== 'completed' &&
     liveAgentPhase !== 'failed' &&
     liveAgentPhase !== 'cancelled';
-  const activeRunId = agentRunId ?? presenceState.runId;
+  const activeRunId = agentRunId ?? presenceState.runId ?? runLifecycle.run?.scope.runId;
 
   const uploadJoyCodeFiles = async (fileList: FileList | null) => {
     if (fileList === null || fileList.length === 0 || onAttachAsset === undefined) return;
@@ -1287,11 +2432,14 @@ export function AgentPanel({
                 <button
                   type="button"
                   onClick={() => {
-                    if (activeRunId !== undefined) void joyAgentEngineClient.cancel(activeRunId);
+                    if (activeRunId !== undefined) {
+                      cancelRunLifecycle(activeRunId);
+                      void joyAgentEngineClient.cancel(activeRunId);
+                    }
                     activeModelRunIdRef.current = undefined;
                     discardPreparedModelChange(activeRunId);
                     setAgentPhase('cancelled');
-                    if (activeRunId !== undefined) agentPreviewStore?.clear(activeRunId);
+                    clearAgentPreviewForSourceRun(activeRunId);
                     agentPresenceStore?.clear();
                   }}
                 >
@@ -1502,6 +2650,8 @@ export function AgentPanel({
               <section
                 className="joy-code-plan-card joy-code-model-plan"
                 aria-label="JOY Agent live proposal"
+                data-agent-preview-ready={modelAwaitingApproval ? 'true' : 'false'}
+                data-agent-lifecycle-state={runLifecycle.state}
               >
                 <AgentPreviewBadge surface="JOY Code" />
                 <div className="joy-code-plan-head">
@@ -1510,7 +2660,11 @@ export function AgentPanel({
                     <strong>Not applied</strong>
                   </div>
                   <span className="agent-decision agent-decision-requires-manual">
-                    needs approval
+                    {modelAwaitingApproval
+                      ? 'needs approval'
+                      : modelPreviewReady
+                        ? 'awaiting review state'
+                        : 'rendering preview'}
                   </span>
                 </div>
                 <p>{modelView.groups.map((group) => group.summary).join(' · ')}</p>
@@ -1523,7 +2677,17 @@ export function AgentPanel({
                   <p className="agent-error">{modelView.warnings.join(', ')}</p>
                 )}
                 <div className="joy-code-plan-actions">
-                  <button type="button" className="is-primary" onClick={applyModelDraft}>
+                  <button
+                    type="button"
+                    className="is-primary"
+                    onClick={applyModelDraft}
+                    disabled={!modelAwaitingApproval}
+                    title={
+                      modelAwaitingApproval
+                        ? undefined
+                        : 'Waiting for the live preview and approval state'
+                    }
+                  >
                     <CheckIcon /> Approve &amp; apply
                   </button>
                   <button type="button" onClick={rejectModelDraft}>
@@ -1567,6 +2731,88 @@ export function AgentPanel({
                 {lastRun.savedWorkflowId !== undefined && (
                   <p>
                     Saved with ID <bdi>{lastRun.savedWorkflowId}</bdi>.
+                  </p>
+                )}
+              </section>
+            )}
+            {observationReviewDisplay !== undefined && (
+              <section
+                className="joy-code-plan-card joy-code-observation-review"
+                aria-label="Optional image evidence review"
+                data-observation-review-status={observationReviewUi.status}
+              >
+                <div className="joy-code-plan-head">
+                  <div>
+                    <span>Optional image review</span>
+                    <strong>Sampled local evidence is ready</strong>
+                  </div>
+                  <span className="agent-decision agent-decision-requires-manual">your choice</span>
+                </div>
+                <p>
+                  JOY can send {observationReviewDisplay.evidenceCount} small local image sample
+                  {observationReviewDisplay.evidenceCount === 1 ? '' : 's'} to your configured model
+                  only after you review and allow the exact scope. No video or audio is sent.
+                </p>
+                {observationReviewUi.status === 'idle' && (
+                  <div className="joy-code-plan-actions">
+                    <button type="button" className="is-primary" onClick={prepareObservationReview}>
+                      Review image scope
+                    </button>
+                    <button type="button" onClick={discardObservationReview}>
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+                {observationReviewUi.status === 'consent-required' && (
+                  <AgentObservationConsent
+                    scope={
+                      {
+                        providerName:
+                          joyAgentEngineClient?.getStatus()?.provider === 'openrouter'
+                            ? 'OpenRouter'
+                            : 'OpenAI-compatible provider',
+                        modelName: observationReviewDisplay.modelId,
+                        availability: 'ready',
+                        selectedEvidenceCount: observationReviewDisplay.evidenceCount,
+                        modalities: ['image'],
+                        range: observationReviewDisplay.range,
+                        maxRequests: 1,
+                        maxBytes: OBSERVATION_REVIEW_MAX_BYTES,
+                        estimatedCost: 'unknown',
+                        ...(joyAgentEngineClient?.getStatus()?.provider === 'openrouter'
+                          ? { policyHref: OPENROUTER_PRIVACY_POLICY_HREF }
+                          : {}),
+                      } satisfies AgentObservationConsentScope
+                    }
+                    onApprove={approveObservationReview}
+                    onNarrow={discardObservationReview}
+                    onCancel={() => {
+                      observationReviewControllerRef.current?.cancel();
+                      discardObservationReview();
+                    }}
+                    narrow
+                  />
+                )}
+                {observationReviewUi.status === 'transferring' && (
+                  <p role="status">
+                    JOY is sending the approved image scope through its private session.
+                  </p>
+                )}
+                {observationReviewUi.status === 'reviewed' &&
+                  observationReviewUi.analysis !== undefined && (
+                    <p className="joy-code-observation-review__analysis">
+                      {observationReviewUi.analysis}
+                    </p>
+                  )}
+                {observationReviewUi.status === 'failed' && (
+                  <p className="agent-error" role="status">
+                    {observationReviewUi.message ??
+                      'Image review could not be completed. Nothing else was shared.'}
+                  </p>
+                )}
+                {observationReviewUi.status === 'cancelled' && (
+                  <p role="status">
+                    {observationReviewUi.message ?? 'Image review was cancelled.'}
                   </p>
                 )}
               </section>

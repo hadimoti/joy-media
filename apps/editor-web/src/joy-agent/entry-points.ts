@@ -1,7 +1,12 @@
 import type { CreativeBriefV1 } from '@joy-media/agent-tools';
 import { validateCreativeBrief } from '@joy-media/agent-tools';
-import type { JoyAgentEngineClient } from './engine-client.js';
-import type { JoyAgentRunRequest, JoyAgentSafeEvent, JoyAgentTaskKind } from './protocol.js';
+import type { JoyAgentEngineClient, JoyAgentRunHost } from './engine-client.js';
+import type {
+  JoyAgentPreparedProposal,
+  JoyAgentRunRequest,
+  JoyAgentSafeEvent,
+  JoyAgentTaskKind,
+} from './protocol.js';
 
 /** Product-owned map: every model-assisted surface uses the same Worker client. */
 export const JOY_AGENT_ENTRY_POINTS = [
@@ -125,6 +130,9 @@ export interface RunJoyAgentTaskInput {
   readonly taskKind: JoyAgentTaskKind;
   readonly prompt: string;
   readonly baseRevision: string;
+  /** Required for every structured edit; never crosses into the Worker. */
+  readonly host?: JoyAgentRunHost;
+  /** Allowed only for the explicitly plan-only Creative Brief path. */
   readonly context?: unknown;
   readonly onEvent?: (event: JoyAgentSafeEvent) => void;
   /** Called after a run id is allocated and before the Worker iterator starts. */
@@ -135,7 +143,13 @@ export interface RunJoyAgentTaskInput {
 
 export class JoyAgentTaskError extends Error {
   readonly code:
-    'failed' | 'cancelled' | 'empty-result' | 'invalid-result' | 'stale-result' | 'remote-disabled';
+    | 'failed'
+    | 'cancelled'
+    | 'empty-result'
+    | 'invalid-result'
+    | 'stale-result'
+    | 'remote-disabled'
+    | 'host-required';
 
   constructor(code: JoyAgentTaskError['code'], message: string) {
     super(message);
@@ -152,7 +166,13 @@ function newRunId(taskKind: JoyAgentTaskKind): string {
 const CREDENTIAL_LIKE_PROMPT =
   /(?:bearer\s+[A-Za-z0-9._~-]{16,}|(?:api[_-]?key|secret|token)\s*[:=]\s*\S{12,}|sk-[A-Za-z0-9_-]{20,})/i;
 
-/** Run any registered entry point and return its terminal safe event. */
+/**
+ * Run any registered entry point and return its terminal safe event.
+ *
+ * Structured edits stop at an approval boundary rather than completing. Their
+ * terminal handoff carries only the opaque prepared-change identity from the
+ * preceding preview event; operations and host context never cross this API.
+ */
 export async function runJoyAgentTask(input: RunJoyAgentTaskInput): Promise<JoyAgentSafeEvent> {
   if (input.allowRemote === false)
     throw new JoyAgentTaskError(
@@ -164,6 +184,12 @@ export async function runJoyAgentTask(input: RunJoyAgentTaskInput): Promise<JoyA
       'failed',
       'JOY did not send this request because it looks like it contains a credential.',
     );
+  const planOnly = input.taskKind === 'creative-brief';
+  if (!planOnly && input.host === undefined)
+    throw new JoyAgentTaskError(
+      'host-required',
+      'This JOY edit needs a trusted main-thread host before it can contact a model.',
+    );
   const runId = newRunId(input.taskKind);
   input.onRunStart?.(runId);
   const request: JoyAgentRunRequest = {
@@ -171,20 +197,48 @@ export async function runJoyAgentTask(input: RunJoyAgentTaskInput): Promise<JoyA
     taskKind: input.taskKind,
     prompt: input.prompt.trim().slice(0, 8_000),
     baseRevision: input.baseRevision,
-    context: input.context,
-    mode: input.taskKind === 'creative-brief' ? 'plan-only' : 'tool-loop',
+    mode: planOnly ? 'plan-only' : 'tool-loop',
+    ...(planOnly && input.context !== undefined ? { context: input.context } : {}),
   };
-  let terminal: JoyAgentSafeEvent | undefined;
-  for await (const event of input.client.startRun(request)) {
+  let completed: JoyAgentSafeEvent | undefined;
+  let awaitingApproval: JoyAgentSafeEvent | undefined;
+  let preparedProposal: JoyAgentPreparedProposal | undefined;
+  for await (const event of input.client.startRun(request, input.host)) {
     input.onEvent?.(event);
     if (event.phase === 'failed')
       throw new JoyAgentTaskError('failed', event.message ?? 'JOY Agent Engine failed');
     if (event.phase === 'cancelled')
       throw new JoyAgentTaskError('cancelled', 'JOY Agent Engine run cancelled');
-    if (event.phase === 'completed') terminal = event;
+    if (event.phase === 'previewing' && event.proposal !== undefined)
+      preparedProposal = event.proposal;
+    if (event.phase === 'awaiting-approval') awaitingApproval = event;
+    if (event.phase === 'completed') completed = event;
   }
-  if (terminal === undefined) throw new JoyAgentTaskError('empty-result', 'JOY returned no result');
-  return terminal;
+  if (completed !== undefined) return completed;
+  if (awaitingApproval !== undefined) {
+    if (planOnly)
+      throw new JoyAgentTaskError(
+        'invalid-result',
+        'The plan-only JOY task unexpectedly requested edit approval.',
+      );
+    if (preparedProposal === undefined)
+      throw new JoyAgentTaskError(
+        'invalid-result',
+        'JOY requested approval without an opaque prepared preview.',
+      );
+    return {
+      ...awaitingApproval,
+      proposal: {
+        summary: preparedProposal.summary,
+        baseRevision: preparedProposal.baseRevision,
+        changeSetId: preparedProposal.changeSetId,
+        operationDigest: preparedProposal.operationDigest,
+        bindingDigest: preparedProposal.bindingDigest,
+        operationCount: preparedProposal.operationCount,
+      },
+    };
+  }
+  throw new JoyAgentTaskError('empty-result', 'JOY returned no result');
 }
 
 export async function runCreativeBriefTask(input: {

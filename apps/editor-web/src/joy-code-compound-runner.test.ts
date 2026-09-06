@@ -234,6 +234,104 @@ describe('Joy Code compound runner', () => {
     expect(session.historyEntries).toHaveLength(historyBefore + 1);
   });
 
+  it('applies a trusted audio asset on its audio lane, preserves replay safety after reload, and undoes atomically', () => {
+    const durableStorage = storage();
+    const timeline = timelineWithAudioTrack();
+    const visualProject = visualProjectWithVoiceOver();
+    const session = new EditorSession(durableStorage, timeline, visualProject);
+    const beforeTimeline = JSON.stringify(session.timelineProject);
+    const draft = compileJoyCodeCompoundDraft({
+      planId: 'runner-audio-family',
+      baseRevision: session.projectRevisionId,
+      timeline: session.timelineProject,
+      visualProject: session.visualProject,
+      // Retained compatibility input; the compiler must derive the actual
+      // family from visualProject.assets instead.
+      registeredAssetIds: ['voice-over'],
+      operations: [
+        {
+          id: 'voice',
+          dependsOn: [],
+          kind: 'timeline.insertExistingAsset',
+          compositionId: 'root',
+          targetTrackId: 'audio-track',
+          assetId: 'voice-over',
+          startUs: 0,
+          durationUs: 1_000_000,
+        },
+      ],
+    });
+    expect(draft.ok).toBe(true);
+    if (!draft.ok) return;
+    const authority = authorityFor(session);
+    const prepared = prepareApproved(draft, authority);
+    const runner = new JoyCodeCompoundRunner();
+
+    expect(runner.apply(session, prepared.store, prepared.approval, authority)).toMatchObject({
+      applied: true,
+      replayed: false,
+    });
+    expect(
+      session.timelineProject.compositions.root!.tracks.find((track) => track.id === 'audio-track')
+        ?.clips,
+    ).toMatchObject([{ assetId: 'voice-over' }]);
+
+    const reopenedSession = new EditorSession(durableStorage, timeline, visualProject);
+    const reopenedAuthority = authorityFor(reopenedSession, { revision: draft.baseRevision });
+    const reopened = prepareApproved(draft, reopenedAuthority);
+    expect(
+      new JoyCodeCompoundRunner().apply(
+        reopenedSession,
+        reopened.store,
+        reopened.approval,
+        authorityFor(reopenedSession),
+      ),
+    ).toMatchObject({ replayed: true, receipt: { operationDigest: draft.operationDigest } });
+
+    session.undo();
+    expect(JSON.stringify(session.timelineProject)).toBe(beforeTimeline);
+  });
+
+  it('rejects a prepared audio insertion after a revision change without writing a clip', () => {
+    const session = new EditorSession(
+      storage(),
+      timelineWithAudioTrack(),
+      visualProjectWithVoiceOver(),
+    );
+    const draft = compileJoyCodeCompoundDraft({
+      planId: 'runner-audio-stale',
+      baseRevision: session.projectRevisionId,
+      timeline: session.timelineProject,
+      visualProject: session.visualProject,
+      registeredAssetIds: ['voice-over'],
+      operations: [
+        {
+          id: 'voice',
+          dependsOn: [],
+          kind: 'timeline.insertExistingAsset',
+          compositionId: 'root',
+          targetTrackId: 'audio-track',
+          assetId: 'voice-over',
+          startUs: 0,
+          durationUs: 1_000_000,
+        },
+      ],
+    });
+    expect(draft.ok).toBe(true);
+    if (!draft.ok) return;
+    const authority = authorityFor(session);
+    const prepared = prepareApproved(draft, authority);
+    session.renameProjectTitle('A concurrent project revision');
+
+    expect(() =>
+      new JoyCodeCompoundRunner().apply(session, prepared.store, prepared.approval, authority),
+    ).toThrow('JOY_CODE_STALE_REVISION');
+    expect(
+      session.timelineProject.compositions.root!.tracks.find((track) => track.id === 'audio-track')
+        ?.clips,
+    ).toEqual([]);
+  });
+
   it('invalidates a prepared preview and approval after remote document hydration advances revision', async () => {
     const durableStorage = storage();
     const session = new EditorSession(
@@ -465,3 +563,44 @@ describe('Joy Code compound runner', () => {
     ).toBe(firstDraft.operationDigest);
   });
 });
+
+function timelineWithAudioTrack() {
+  const base = buildReferenceSpikeProject();
+  const root = base.compositions.root!;
+  return {
+    ...base,
+    compositions: {
+      ...base.compositions,
+      root: {
+        ...root,
+        tracks: [
+          ...root.tracks.map((track) => ({ ...track, family: 'visual' as const })),
+          {
+            id: 'audio-track',
+            kind: 'video' as const,
+            family: 'audio' as const,
+            order: root.tracks.length,
+            enabled: true,
+            locked: false,
+            clips: [],
+          },
+        ],
+      },
+    },
+  };
+}
+
+function visualProjectWithVoiceOver() {
+  return {
+    ...INITIAL_EDITOR_PROJECT,
+    assets: {
+      ...INITIAL_EDITOR_PROJECT.assets,
+      'voice-over': {
+        id: 'voice-over',
+        kind: 'audio' as const,
+        displayName: 'Voice over',
+        descriptor: { mimeType: 'audio/wav', durationUs: 1_000_000 },
+      },
+    },
+  };
+}

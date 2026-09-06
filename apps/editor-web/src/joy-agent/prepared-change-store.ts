@@ -84,7 +84,7 @@ export class PreparedChangeStore {
     assertDraftIdentity(draft, authority);
     const draftSerialized = canonicalDraft(draft);
     const compiledDigest = sha256Hex(draftSerialized);
-    const policyDigest = digestPolicy(authority.policy);
+    const policyDigest = digestJoyAgentPolicy(authority.policy);
     // Execution identity intentionally excludes the proposed payload and model
     // plan ID. A second payload under the same host-minted run ID must conflict
     // with the first durable receipt, never turn into a second executable edit.
@@ -260,7 +260,7 @@ export class PreparedChangeStore {
       throw new Error(
         `JOY_CODE_STALE_REVISION: expected ${record.view.baseRevision}, got ${authority.revision}`,
       );
-    if (record.policyDigest !== digestPolicy(authority.policy))
+    if (record.policyDigest !== digestJoyAgentPolicy(authority.policy))
       throw new Error('JOY_CODE_POLICY_CHANGED: prepare a new proposal under the current policy');
     return record;
   }
@@ -324,7 +324,12 @@ function deserializeDraft(serialized: string): JoyCodeCompoundDraft {
   return deepFreeze(JSON.parse(serialized) as JoyCodeCompoundDraft);
 }
 
-function digestPolicy(policy: AgentPolicyPreferences): string {
+/**
+ * Canonical non-secret policy fingerprint shared by prepared changes and
+ * observation evidence identity. It intentionally excludes credentials,
+ * prompts, media bytes and provider response data.
+ */
+export function digestJoyAgentPolicy(policy: AgentPolicyPreferences): string {
   return sha256Hex(
     canonicalJson({
       version: policy.version,

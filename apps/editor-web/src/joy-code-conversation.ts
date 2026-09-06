@@ -4,6 +4,11 @@ import {
   type JoyCodeMessage,
   type JoyCodeThreadStatus,
 } from './joy-code-history.js';
+import {
+  isJoyAgentConversationEntityReference,
+  JOY_AGENT_CONVERSATION_ENTITY_REFERENCE_MAX_COUNT,
+  type JoyAgentConversationEntityReference,
+} from './joy-agent/conversation-entity-references.js';
 
 const MAX_MESSAGES = 120;
 const MAX_ID_CHARS = 128;
@@ -20,6 +25,8 @@ export interface JoyCodeConversation {
   readonly id: string;
   readonly status: JoyCodeThreadStatus;
   readonly messages: readonly JoyCodeMessage[];
+  /** Safe host-derived targets from the last committed JOY edit, never prompt/model text. */
+  readonly recentEntityReferences?: readonly JoyAgentConversationEntityReference[];
   readonly updatedAt: string;
 }
 
@@ -44,7 +51,7 @@ export function loadJoyCodeConversation(
   if (raw !== null) {
     try {
       const parsed: unknown = JSON.parse(raw);
-      if (isJoyCodeConversation(parsed)) return parsed;
+      if (isJoyCodeConversation(parsed)) return normalizeConversation(parsed);
     } catch {
       // A malformed current record falls back to the recoverable legacy data.
     }
@@ -52,13 +59,13 @@ export function loadJoyCodeConversation(
 
   const latestLegacyThread = loadJoyCodeThreads(storage, projectId)[0];
   if (latestLegacyThread === undefined) return undefined;
-  return {
+  return normalizeConversation({
     version: 1,
     id: latestLegacyThread.id,
     status: latestLegacyThread.status,
     messages: latestLegacyThread.messages,
     updatedAt: latestLegacyThread.updatedAt,
-  };
+  });
 }
 
 export function saveJoyCodeConversation(
@@ -66,7 +73,10 @@ export function saveJoyCodeConversation(
   projectId: string,
   conversation: JoyCodeConversation,
 ): void {
-  storage.setItem(joyCodeConversationKey(projectId), JSON.stringify(normalizeConversation(conversation)));
+  storage.setItem(
+    joyCodeConversationKey(projectId),
+    JSON.stringify(normalizeConversation(conversation)),
+  );
 }
 
 export function addJoyCodeConversationMessage(
@@ -85,11 +95,40 @@ export function setJoyCodeConversationStatus(
   status: JoyCodeThreadStatus,
   now: string,
 ): JoyCodeConversation {
-  return { ...conversation, status, updatedAt: now };
+  return normalizeConversation({ ...conversation, status, updatedAt: now });
+}
+
+/**
+ * Persist only validated fixed-label host references. Clearing the list is
+ * intentional after an edit without a safe entity target.
+ */
+export function setJoyCodeConversationEntityReferences(
+  conversation: JoyCodeConversation,
+  references: readonly JoyAgentConversationEntityReference[],
+  now: string,
+): JoyCodeConversation {
+  const safeReferences = references
+    .filter(isJoyAgentConversationEntityReference)
+    .slice(0, JOY_AGENT_CONVERSATION_ENTITY_REFERENCE_MAX_COUNT);
+  return normalizeConversation({
+    ...conversation,
+    updatedAt: now,
+    recentEntityReferences: safeReferences,
+  });
 }
 
 function normalizeConversation(conversation: JoyCodeConversation): JoyCodeConversation {
-  return { ...conversation, messages: conversation.messages.slice(-MAX_MESSAGES) };
+  const recentEntityReferences = (conversation.recentEntityReferences ?? [])
+    .filter(isJoyAgentConversationEntityReference)
+    .slice(0, JOY_AGENT_CONVERSATION_ENTITY_REFERENCE_MAX_COUNT);
+  return {
+    version: 1,
+    id: conversation.id,
+    status: conversation.status,
+    messages: conversation.messages.slice(-MAX_MESSAGES),
+    updatedAt: conversation.updatedAt,
+    ...(recentEntityReferences.length === 0 ? {} : { recentEntityReferences }),
+  };
 }
 
 function isJoyCodeConversation(value: unknown): value is JoyCodeConversation {
@@ -104,7 +143,12 @@ function isJoyCodeConversation(value: unknown): value is JoyCodeConversation {
     candidate.updatedAt.length <= MAX_TIMESTAMP_CHARS &&
     Array.isArray(candidate.messages) &&
     candidate.messages.length <= MAX_MESSAGES &&
-    candidate.messages.every(isJoyCodeMessage)
+    candidate.messages.every(isJoyCodeMessage) &&
+    (candidate.recentEntityReferences === undefined ||
+      (Array.isArray(candidate.recentEntityReferences) &&
+        candidate.recentEntityReferences.length <=
+          JOY_AGENT_CONVERSATION_ENTITY_REFERENCE_MAX_COUNT &&
+        candidate.recentEntityReferences.every(isJoyAgentConversationEntityReference)))
   );
 }
 

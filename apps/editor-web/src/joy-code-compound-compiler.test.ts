@@ -217,6 +217,62 @@ describe('Joy Code compound compiler', () => {
     });
   });
 
+  it('derives an inserted asset family from the canonical document, never the legacy bare-id input', () => {
+    const timeline = timelineWithAudioTrack();
+    const visualProject = {
+      ...INITIAL_EDITOR_PROJECT,
+      assets: {
+        ...INITIAL_EDITOR_PROJECT.assets,
+        'voice-over': {
+          id: 'voice-over',
+          kind: 'audio' as const,
+          displayName: 'Voice over',
+          descriptor: { mimeType: 'audio/wav', durationUs: 1_000_000 },
+        },
+      },
+    };
+    const operation = {
+      id: 'insert-voice',
+      dependsOn: [],
+      kind: 'timeline.insertExistingAsset' as const,
+      compositionId: 'root',
+      targetTrackId: 'audio-track',
+      assetId: 'voice-over',
+      startUs: 0,
+      durationUs: 1_000_000,
+    };
+    const accepted = compileJoyCodeCompoundDraft({
+      planId: 'compound-audio',
+      baseRevision: 'rev-audio',
+      timeline,
+      visualProject,
+      registeredAssetIds: ['voice-over'],
+      operations: [operation],
+    });
+    expect(accepted.ok).toBe(true);
+    if (!accepted.ok) return;
+    expect(accepted.timeline?.commands).toContainEqual(
+      expect.objectContaining({
+        type: 'timeline.insertClip',
+        payload: expect.objectContaining({ expectedFamily: 'audio' }),
+      }),
+    );
+
+    const rejectedBareId = compileJoyCodeCompoundDraft({
+      planId: 'compound-audio-missing',
+      baseRevision: 'rev-audio',
+      timeline,
+      visualProject: INITIAL_EDITOR_PROJECT,
+      // This deprecated input intentionally contains the ID. It is ignored.
+      registeredAssetIds: ['voice-over'],
+      operations: [operation],
+    });
+    expect(rejectedBareId).toMatchObject({
+      ok: false,
+      error: { code: 'JOY_CODE_TIMELINE_ASSET_UNAVAILABLE', operationId: 'insert-voice' },
+    });
+  });
+
   it('removes deleted clip presentation bindings and clip-owned animations', () => {
     const binding = {
       ownerKind: 'color-clip' as const,
@@ -274,3 +330,29 @@ describe('Joy Code compound compiler', () => {
     expect(result.document.universalTimeline?.items).toEqual([]);
   });
 });
+
+function timelineWithAudioTrack() {
+  const base = buildReferenceSpikeProject();
+  const root = base.compositions.root!;
+  return {
+    ...base,
+    compositions: {
+      ...base.compositions,
+      root: {
+        ...root,
+        tracks: [
+          ...root.tracks.map((track) => ({ ...track, family: 'visual' as const })),
+          {
+            id: 'audio-track',
+            kind: 'video' as const,
+            family: 'audio' as const,
+            order: root.tracks.length,
+            enabled: true,
+            locked: false,
+            clips: [],
+          },
+        ],
+      },
+    },
+  };
+}

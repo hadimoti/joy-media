@@ -1,7 +1,19 @@
 import { validateCreativeBrief, type CreativeBriefV1 } from '@joy-media/agent-tools';
+import {
+  isJoyAgentConversationEntityReference,
+  JOY_AGENT_CONVERSATION_ENTITY_REFERENCE_MAX_COUNT,
+  type JoyAgentConversationEntityReference,
+} from './conversation-entity-references.js';
 
 export interface JoyAgentContextSnapshot {
   readonly projectId: string;
+  /**
+   * The canonical timeline project that owns any optional conversational
+   * entity references. The visual document ID remains `projectId`; keeping
+   * the two scopes explicit prevents a valid receipt from being silently
+   * dropped when the editor uses distinct document IDs.
+   */
+  readonly entityReferenceProjectId?: string;
   readonly revision: string;
   readonly compositionId?: string;
   readonly trackIds?: readonly string[];
@@ -18,6 +30,12 @@ export interface JoyAgentContextSnapshot {
     readonly kind: string;
     readonly displayName: string;
   }[];
+  /**
+   * Fixed, host-derived identities from the last committed JOY edit. These
+   * are deliberately not labels/names copied from project data: the exact
+   * reference validator admits only a closed vocabulary and opaque IDs.
+   */
+  readonly recentEntityReferences?: readonly JoyAgentConversationEntityReference[];
   /** Recent project-scoped conversation turns, stripped to safe bounded text. */
   readonly conversation?: readonly {
     readonly role: 'user' | 'assistant';
@@ -46,6 +64,7 @@ const RESERVED_OMISSION_LABELS = [
   'clips',
   'assets',
   'visualObjects',
+  'recentEntityReferences',
   'conversation',
   'trackIds',
 ] as const;
@@ -66,9 +85,14 @@ function byteLength(value: unknown): number {
   }
 }
 
-/** Build one immutable, byte-bounded model context; never forwards project objects. */
-export function createJoyAgentContextSnapshot(input: {
+/** Source facts from which JOY derives either a compact model snapshot or host pages. */
+export interface JoyAgentContextSnapshotInput {
   readonly projectId: string;
+  /**
+   * Optional canonical timeline project ID for recent entity references.
+   * Omit it when the visual and timeline documents share the same ID.
+   */
+  readonly entityReferenceProjectId?: string;
   readonly revision: string;
   readonly compositionId?: string;
   readonly trackIds?: readonly string[];
@@ -87,6 +111,11 @@ export function createJoyAgentContextSnapshot(input: {
     readonly kind: string;
     readonly displayName: string;
   }[];
+  /**
+   * Optional persisted conversation hints. They are treated as untrusted at
+   * this boundary and must pass the exact host-reference validator again.
+   */
+  readonly recentEntityReferences?: readonly JoyAgentConversationEntityReference[];
   readonly visualObjects?: readonly {
     readonly id: string;
     readonly kind: string;
@@ -100,12 +129,21 @@ export function createJoyAgentContextSnapshot(input: {
   }[];
   /** Optional validated brief context; bounded before crossing into the Worker. */
   readonly creativeBrief?: CreativeBriefV1;
-}): JoyAgentContextSnapshot {
+}
+
+/** Build one immutable, byte-bounded model context; never forwards project objects. */
+export function createJoyAgentContextSnapshot(
+  input: JoyAgentContextSnapshotInput,
+): JoyAgentContextSnapshot {
   const omitted = new Set<string>();
   const projectId = safeText(input.projectId, 128);
   const revision = safeText(input.revision, 256);
   if (projectId === undefined || revision === undefined)
     throw new RangeError('JOY context identity is invalid or missing');
+  const entityReferenceProjectId =
+    input.entityReferenceProjectId === undefined
+      ? projectId
+      : safeText(input.entityReferenceProjectId, 128);
   const compositionId = safeText(input.compositionId, 128);
   const selectedClipIds = (input.selectedClipIds ?? [])
     .slice(0, 64)
@@ -143,6 +181,33 @@ export function createJoyAgentContextSnapshot(input: {
       return { id, kind, displayName };
     })
     .filter((asset): asset is NonNullable<typeof asset> => asset !== undefined);
+  const recentEntityReferenceInput = Array.isArray(input.recentEntityReferences)
+    ? input.recentEntityReferences
+    : [];
+  const recentEntityReferenceInputCount = Array.isArray(input.recentEntityReferences)
+    ? input.recentEntityReferences.length
+    : input.recentEntityReferences === undefined
+      ? 0
+      : 1;
+  const recentEntityReferences = recentEntityReferenceInput
+    .slice(0, JOY_AGENT_CONVERSATION_ENTITY_REFERENCE_MAX_COUNT)
+    .filter(
+      (reference): reference is JoyAgentConversationEntityReference =>
+        isJoyAgentConversationEntityReference(reference) &&
+        entityReferenceProjectId !== undefined &&
+        reference.projectId === entityReferenceProjectId,
+    )
+    .map((reference) =>
+      Object.freeze({
+        version: reference.version,
+        projectId: reference.projectId,
+        executionId: reference.executionId,
+        resultRevision: reference.resultRevision,
+        entityId: reference.entityId,
+        entityKind: reference.entityKind,
+        label: reference.label,
+      }),
+    );
   const visualObjects = (input.visualObjects ?? [])
     .map((object) => {
       const id = safeText(object.id, 128);
@@ -180,6 +245,16 @@ export function createJoyAgentContextSnapshot(input: {
     omitted.add('clips');
   if (assets.length !== (input.assets?.length ?? 0) || (input.assets?.length ?? 0) > MAX_ASSETS)
     omitted.add('assets');
+  if (
+    recentEntityReferences.length !==
+      Math.min(
+        recentEntityReferenceInputCount,
+        JOY_AGENT_CONVERSATION_ENTITY_REFERENCE_MAX_COUNT,
+      ) ||
+    recentEntityReferenceInputCount > JOY_AGENT_CONVERSATION_ENTITY_REFERENCE_MAX_COUNT ||
+    (input.entityReferenceProjectId !== undefined && entityReferenceProjectId === undefined)
+  )
+    omitted.add('recentEntityReferences');
   if (
     visualObjects.length !== (input.visualObjects?.length ?? 0) ||
     (input.visualObjects?.length ?? 0) > MAX_VISUAL_OBJECTS
@@ -225,6 +300,9 @@ export function createJoyAgentContextSnapshot(input: {
   const boundedVisualObjects = orderedVisualObjects.slice(0, MAX_VISUAL_OBJECTS);
   const base = {
     projectId,
+    ...(recentEntityReferences.length > 0 && entityReferenceProjectId !== projectId
+      ? { entityReferenceProjectId }
+      : {}),
     revision,
     ...(compositionId === undefined ? {} : { compositionId }),
     ...(input.trackIds === undefined ? {} : { trackIds: [] as string[] }),
@@ -232,6 +310,7 @@ export function createJoyAgentContextSnapshot(input: {
     playheadUs: Number.isFinite(input.playheadUs) ? Math.max(0, input.playheadUs ?? 0) : 0,
     clips: [] as typeof clips,
     assets: [] as typeof assets,
+    recentEntityReferences: [] as typeof recentEntityReferences,
     visualObjects: [] as typeof visualObjects,
     conversation: [] as typeof conversation,
     ...(creativeBrief === undefined ? {} : { creativeBrief }),
@@ -239,7 +318,10 @@ export function createJoyAgentContextSnapshot(input: {
   if (byteLength(base) > MAX_CONTEXT_BYTES)
     throw new RangeError('JOY context snapshot is too large');
   let snapshot = base;
-  const append = <K extends 'trackIds' | 'clips' | 'assets' | 'visualObjects' | 'conversation'>(
+  const append = <
+    K extends
+      'trackIds' | 'clips' | 'assets' | 'recentEntityReferences' | 'visualObjects' | 'conversation',
+  >(
     key: K,
     records: readonly (K extends 'trackIds'
       ? string
@@ -247,9 +329,11 @@ export function createJoyAgentContextSnapshot(input: {
         ? (typeof clips)[number]
         : K extends 'assets'
           ? (typeof assets)[number]
-          : K extends 'visualObjects'
-            ? (typeof visualObjects)[number]
-            : (typeof conversation)[number])[],
+          : K extends 'recentEntityReferences'
+            ? (typeof recentEntityReferences)[number]
+            : K extends 'visualObjects'
+              ? (typeof visualObjects)[number]
+              : (typeof conversation)[number])[],
     label: string,
   ): void => {
     const kept: unknown[] = [];
@@ -274,11 +358,19 @@ export function createJoyAgentContextSnapshot(input: {
   append('clips', boundedClips, 'clips');
   append('visualObjects', boundedVisualObjects, 'visualObjects');
   append('assets', assets, 'assets');
+  append('recentEntityReferences', recentEntityReferences, 'recentEntityReferences');
   append('conversation', conversation, 'conversation');
-  const { conversation: packedConversation, ...snapshotWithoutConversation } = snapshot;
+  const {
+    conversation: packedConversation,
+    recentEntityReferences: packedRecentEntityReferences,
+    ...snapshotWithoutOptionalCollections
+  } = snapshot;
   const finalSnapshot = {
-    ...snapshotWithoutConversation,
+    ...snapshotWithoutOptionalCollections,
     ...(packedConversation.length > 0 ? { conversation: Object.freeze(packedConversation) } : {}),
+    ...(packedRecentEntityReferences.length > 0
+      ? { recentEntityReferences: Object.freeze(packedRecentEntityReferences) }
+      : {}),
     trackIds: Object.freeze(snapshot.trackIds ?? []),
     clips: Object.freeze(snapshot.clips),
     assets: Object.freeze(snapshot.assets),
@@ -288,4 +380,101 @@ export function createJoyAgentContextSnapshot(input: {
   if (byteLength(finalSnapshot) > MAX_CONTEXT_BYTES)
     throw new RangeError('JOY context snapshot is too large');
   return Object.freeze(finalSnapshot);
+}
+
+/**
+ * Trusted-host paging source for a single frozen editor revision.
+ *
+ * The compact `snapshot` remains the only thing eligible to cross into a
+ * plan-only provider prompt. The paged collections stay on the main thread
+ * and are returned only in individually bounded host-RPC responses. This
+ * lets a model discover a matching asset/title beyond the first 128 records
+ * without giving a Worker a project object, writer, or storage location.
+ */
+export interface JoyAgentPagedContext {
+  readonly snapshot: JoyAgentContextSnapshot;
+  readonly clips: JoyAgentContextSnapshot['clips'];
+  readonly assets: JoyAgentContextSnapshot['assets'];
+  readonly visualObjects: NonNullable<JoyAgentContextSnapshot['visualObjects']>;
+  readonly trackIds: readonly string[];
+  readonly omitted: readonly string[];
+}
+
+export const JOY_AGENT_HOST_CONTEXT_MAX_RECORDS = 4_096;
+
+function pageChunks<T>(records: readonly T[], size: number): readonly (readonly T[])[] {
+  const pages: T[][] = [];
+  for (let cursor = 0; cursor < records.length; cursor += size)
+    pages.push(records.slice(cursor, cursor + size));
+  return pages;
+}
+
+function uniqueOmitted(values: readonly string[]): readonly string[] {
+  return Object.freeze([...new Set(values)]);
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value === null || typeof value !== 'object') return value;
+  for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
+function freezeRecords<T extends object>(records: readonly T[]): readonly T[] {
+  return Object.freeze(
+    records.map((record) => deepFreeze(JSON.parse(JSON.stringify(record)) as T)),
+  );
+}
+
+/**
+ * Normalize every retained page through the same source sanitizer as the
+ * model snapshot. The host has a record-count cap in addition to the
+ * response byte cap enforced by host RPC; an oversized project reports an
+ * omission rather than silently reading an unbounded collection.
+ */
+export function createJoyAgentPagedContext(
+  input: JoyAgentContextSnapshotInput,
+): JoyAgentPagedContext {
+  const snapshot = createJoyAgentContextSnapshot(input);
+  const common = { projectId: input.projectId, revision: input.revision } as const;
+  const omitted: string[] = [];
+  const normalizeClips = (input.clips ?? []).flatMap((records) => records);
+  const clips = pageChunks(normalizeClips, MAX_CLIPS)
+    .flatMap((page) => createJoyAgentContextSnapshot({ ...common, clips: page }).clips)
+    .slice(0, JOY_AGENT_HOST_CONTEXT_MAX_RECORDS);
+  const normalizeAssets = input.assets ?? [];
+  const assets = pageChunks(normalizeAssets, MAX_ASSETS)
+    .flatMap((page) => createJoyAgentContextSnapshot({ ...common, assets: page }).assets)
+    .slice(0, JOY_AGENT_HOST_CONTEXT_MAX_RECORDS);
+  const normalizeVisualObjects = input.visualObjects ?? [];
+  const visualObjects = pageChunks(normalizeVisualObjects, MAX_VISUAL_OBJECTS)
+    .flatMap(
+      (page) =>
+        createJoyAgentContextSnapshot({ ...common, visualObjects: page }).visualObjects ?? [],
+    )
+    .slice(0, JOY_AGENT_HOST_CONTEXT_MAX_RECORDS);
+  const normalizeTrackIds = input.trackIds ?? [];
+  const trackIds = pageChunks(normalizeTrackIds, 128)
+    .flatMap((page) => createJoyAgentContextSnapshot({ ...common, trackIds: page }).trackIds ?? [])
+    .slice(0, JOY_AGENT_HOST_CONTEXT_MAX_RECORDS);
+
+  if (clips.length < normalizeClips.length) omitted.push('clips');
+  if (assets.length < normalizeAssets.length) omitted.push('assets');
+  if (visualObjects.length < normalizeVisualObjects.length) omitted.push('visualObjects');
+  if (trackIds.length < normalizeTrackIds.length) omitted.push('trackIds');
+  if (normalizeClips.length > JOY_AGENT_HOST_CONTEXT_MAX_RECORDS) omitted.push('host-clips-cap');
+  if (normalizeAssets.length > JOY_AGENT_HOST_CONTEXT_MAX_RECORDS) omitted.push('host-assets-cap');
+  if (normalizeVisualObjects.length > JOY_AGENT_HOST_CONTEXT_MAX_RECORDS)
+    omitted.push('host-visual-objects-cap');
+  if (normalizeTrackIds.length > JOY_AGENT_HOST_CONTEXT_MAX_RECORDS)
+    omitted.push('host-track-ids-cap');
+
+  return Object.freeze({
+    snapshot,
+    clips: freezeRecords(clips),
+    assets: freezeRecords(assets),
+    visualObjects:
+      freezeRecords<NonNullable<JoyAgentContextSnapshot['visualObjects']>[number]>(visualObjects),
+    trackIds: Object.freeze([...trackIds]),
+    omitted: uniqueOmitted([...snapshot.omitted, ...omitted]),
+  });
 }
