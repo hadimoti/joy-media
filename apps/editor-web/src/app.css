@@ -446,7 +446,10 @@ input[type='checkbox']:focus-visible {
   grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
 }
 .stock-video-grid--medium {
-  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  /* Compact previews must keep at least two columns even inside the narrow
+     asset rail, so the track has to be small enough that two fit next to the
+     sidebar before auto-fill drops to a single column. */
+  grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
   grid-auto-rows: 1fr;
   gap: 0.5rem;
 }
@@ -8104,6 +8107,10 @@ label {
   left: 50%;
   width: min(calc(100% - 1.3rem), 23rem);
   transform: translate(-50%, -50%);
+  /* The empty-state welcome is decorative. When it is floated over the
+     composer it can overlap the attachment chips and their Detach buttons on
+     short viewports, so it must never intercept pointer events. */
+  pointer-events: none;
 }
 .joy-code-avatar {
   display: inline-grid;
@@ -10680,6 +10687,12 @@ label {
   white-space: nowrap;
 }
 
+/* The 3D Scene panel supplies its own toolbar and viewport chrome, so the
+   shared panel-root only contributes the accessible name — not padding. */
+.scene3d-panel.joy-panel-root {
+  gap: 0;
+  padding: 0;
+}
 .joy-code-3d {
   display: flex;
   min-height: 0;
