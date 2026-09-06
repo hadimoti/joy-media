@@ -1,7 +1,9 @@
 # V1 recipe-layer production wiring — design decision
 
-Recorded: 2026-09-06 (Claude implementer). Status: **design agreed, implementation open.**
-This resolves the "`skill-runner` / `creative-skills` has no production caller"
+Recorded: 2026-09-06 (Claude implementer). Status: **design agreed; runtime +
+adapter + `entry-points` API landed (`686369be`); real host primitives + UI +
+e2e still open.**
+This addresses the "`skill-runner` / `creative-skills` has no production caller"
 open item in `joy-live-director-r1-landing-2026-09-06.md`.
 
 ## The question
@@ -17,9 +19,7 @@ authority → commit → verify" with "at most two repair proposals by default" 
 The open architectural point: **where does the model reasoning sit** inside a
 checkpoint adapter?
 
-## Decision: the recipe is a scaffold around the existing tool-loop, not a
-
-## parallel executor
+## Decision: the recipe is a scaffold around the existing tool-loop, not a parallel executor
 
 The production `CreativeSkillRunAdapter` **delegates to the same infrastructure
 `runJoyAgentTask` already uses** — one built-in Worker, the observation host
@@ -93,7 +93,7 @@ until their capabilities are verified. Record this in the coverage ledger's
       rejection through the runner's artifact gate.
 - [x] `entry-points.ts` — `listCreativeSkills(seams?)` and
       `runCreativeSkill({ skillId, scope, primitives, isAuthorityCurrent,
-    signal?, onEvent? })` (3 new tests in `entry-points.test.ts`). The
+  signal?, onEvent? })` (3 new tests in `entry-points.test.ts`). The
       **`CreativeSkillHostPrimitives` are injected** by the caller so the real
       host-wired implementation lives with the `App.tsx` object graph.
 - [ ] **Create the real `CreativeSkillHostPrimitives` from `App.tsx`'s graph** —
