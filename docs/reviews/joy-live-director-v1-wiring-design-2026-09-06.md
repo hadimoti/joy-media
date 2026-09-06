@@ -96,13 +96,21 @@ until their capabilities are verified. Record this in the coverage ledger's
 signal?, onEvent? })` (3 new tests in `entry-points.test.ts`). The
       **`CreativeSkillHostPrimitives` are injected** by the caller so the real
       host-wired implementation lives with the `App.tsx` object graph.
-- [ ] **Create the real `CreativeSkillHostPrimitives` from `App.tsx`'s graph** —
-      `readProjectContext` / `prepareChange` / `stagePreview` via a scoped
-      `runJoyAgentTask` tool-loop (`allowedToolNames` from the manifest,
-      recipe-owned prompt template, `maxRepairProposals` from the budget);
-      `observeSources` via `JoyAgentObservationHostBridge.tools`
-      (`describe` / `observe` / `coverage`); `verifyDeliverable` from the O6
-      `composition-observer` + `final-encoded-export-decoder` results.
+- [x] `apps/editor-web/src/joy-agent/creative-skill-editor-primitives.ts` +
+      `.test.ts` (6 tests) — `createCreativeSkillEditorPrimitives(deps, scope)`
+      builds `CreativeSkillHostPrimitives` from narrow function `deps`, runs
+      one memoized scoped tool-loop shared by `observe`/`propose`, maps
+      `answer` on an edit recipe to `no-actionable-edit`, and rethrows a
+      `failed` loop. `buildCreativeSkillToolAllowList` (manifest-derived) and
+      the product-owned `RECIPE_PROMPTS` live here.
+- [ ] **Provide the concrete `CreativeSkillEditorPrimitiveDeps` from `App.tsx`** —
+      thin wrappers: `runScopedToolLoop` over `runJoyAgentTask` (map
+      `awaiting-approval`+proposal → `prepared`, `completed`+answer → `answer`,
+      `failed` → `failed`); `readProjectContext` over the host RPC;
+      `readObservationCoverage` over `JoyAgentObservationHostBridge.tools`
+      `evidence_coverage` for the run's last manifest; `confirmPreviewRendered`
+      over the existing renderer-ack signal; `verifyComposedAndEncoded` over
+      `composition-observer` + `final-encoded-export-decoder`.
 - [ ] Modify `AgentPanel.tsx` — a recipe picker in the existing single project
       conversation (not a new tab); disabled entries show `missingCapabilities`
       / `missingOperations`; run events feed the V2 activity strings.
