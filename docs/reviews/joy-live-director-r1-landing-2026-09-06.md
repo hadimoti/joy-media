@@ -11,21 +11,34 @@ Landed range: `131e409c..` (this session's commits on top of Codex's `92018ca9`)
   / coverage-verifier) — ✅ green.
 - **push branch to `github`** — ✅ done.
 - **CodeRabbit** — ✅ 2 rounds, clean (15 → 3 → resolved/documented).
-- **self-hosted CI lanes** — partial. Started `joy-media-ci-worker` (it was
-  offline). `validate-candidate` ✅, `linux-real-services` ×2 ✅,
-  `windows-worker-clean` ✅ after fixing 3 runner-environment flakes: stale
-  `dist/` on the persistent linux container (font-assets false failure); a
-  teardown race on the still-exiting self-test worker; a hardcoded 4-entry
-  migration ledger in `real-service-smoke.mjs` missing `005-stock-video`. The
-  `acceptance` lane's `desktop-minimum` (1024×768) profile has **5 pre-existing
-  spec failures** — `wp32-responsive-checkpoints:7`, `wp35-universal-timeline:13`,
-  `stock-video-ui:51`, `wp29-r5-batch-a:210`, `wp29-r5-batch-d:219` — **all
-  confirmed failing identically on `6a6a336c`**, so not Live Director
-  regressions. The 7-profile acceptance matrix was added in `62dd5176` before
-  the foundation deploy but the workflow was never re-run with it. Spawned as a
-  separate fix track. Example: `wp32:56` uses
-  `getByRole('menuitem', { name: 'Export' })` which matches both "Export" and
-  "Export Editable Project…".
+- **self-hosted CI lanes** — re-running on candidate `f1daf140` (dispatch
+  `34042653454`). Started `joy-media-ci-worker` (it was offline).
+  `validate-candidate` ✅; `linux-real-services` ×2 and `windows-worker-clean`
+  ✅ on the prior run after fixing 3 runner-environment flakes: stale `dist/` on
+  the persistent linux container (font-assets false failure); a teardown race on
+  the still-exiting self-test worker; a hardcoded 4-entry migration ledger in
+  `real-service-smoke.mjs` missing `005-stock-video`.
+- **acceptance lane — 5 pre-existing failures fixed.** The 7-profile matrix
+  (added in `62dd5176` before the foundation deploy, never re-run) had 5 specs
+  failing **identically on production `6a6a336c`**, so not Live Director
+  regressions. All now green on every one of the 7 desktop profiles:
+  - `wp32-responsive-checkpoints:7` — File menu gained "Import/Export Editable
+    Project…"; keyboard walk to plain "Export" was 2 steps short and matched
+    non-exactly. _(test, `080bb9b5`)_
+  - `wp29-r5-batch-d:219` — product renamed "Cloud Brain" → "Remote provider"
+    in the AudioPanel run flow. _(test, `080bb9b5`)_
+  - `wp29-r5-batch-a:210` — Joy Code empty-state welcome floats over the
+    attachment chips on short viewports and swallowed the Detach click.
+    _(app: `pointer-events: none` on the decorative overlay, `f1daf140`)_
+  - `wp35-universal-timeline:13` — the 3D Scene panel rendered a bare `<div>`
+    (and `null` while its lazy chunk loaded), never exposing the named
+    `article` panel shell the panel-open contract expects. _(app: wrap in a
+    `joy-panel-root` article "3D Scene", `f1daf140`)_
+  - `stock-video-ui:51` — compact grid `minmax(8rem,…)` auto-fill collapsed to
+    one column in the narrow rail before the 17rem container query engaged.
+    _(app: tighten to `6.5rem`, `f1daf140`)_
+  - After the fixes, local `pnpm test` = 4020 pass, 1 pre-existing flake
+    (`resumable-original-upload` async-finalize race; passes in isolation).
 - **independent Opus "Astra" review** — not started; deferred until R1 is
   candidate-complete (V1 finish + V3 + ledger) so the review is not spent on an
   incomplete milestone.
