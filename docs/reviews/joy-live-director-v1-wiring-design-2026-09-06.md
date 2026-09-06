@@ -119,9 +119,57 @@ signal?, onEvent? })` (3 new tests in `entry-points.test.ts`). The
 - [ ] Update `docs/reviews/joy-live-director-coverage.json` `limitations` with
       the recipe availability matrix.
 
+## The observe/propose split — resolution for the real primitives
+
+`skill-runner` calls `observe` and `propose` as separate checkpoint handlers,
+but the model reasoning that decides _which_ asset/range to observe and _what_
+edit to prepare is one continuous thing. The real adapter therefore runs **one
+scoped `runJoyAgentTask` tool-loop per recipe run**, started lazily on the
+first checkpoint that needs the model, with later checkpoints reading the
+cached run:
+
+- `readProjectContext` (inspect) — a direct `read_project_context` host RPC.
+  No model. Feeds its summary into the tool-loop prompt.
+- The first of `observe` / `propose` to run starts the scoped tool-loop:
+  - `allowedToolNames` = `['read_project_context']`
+    - `+ ['media_describe','media_observe','media_coverage', ...]` iff the
+      manifest's `evidenceRequirements` is not `['none']`
+    - `+ ['media_transcript']` iff it requires `transcript`
+    - `+ ['validate_proposal']` iff the manifest has `requiredOperationKinds`
+      (i.e. an edit recipe, not an advisory one)
+  - prompt = a **product-owned template** keyed by `skillId` (constant, never
+    model/user text) + the recipe title + the required operation kinds + the
+    inspect/observe artifact summaries. `maxRepairProposals` from the budget.
+  - The run is `mode: 'tool-loop'`; `taskKind` = a new `'creative-skill'` kind
+    so policy/telemetry can distinguish it.
+- `observe` reads the tool-loop's observation evidence + coverage
+  (`media_coverage` result) → `evidence` / `moment` artifact + coverage status.
+- `propose` reads the tool-loop's terminal state:
+  - `awaiting-approval` with an opaque `proposal` → `prepared` result
+    (`changeSetId` = `proposal.changeSetId`, digest, count).
+  - `completed` with an `answer` and no proposal → for an **advisory** recipe
+    this is success (the cited interval / evidence map is the answer); for an
+    **edit** recipe it is `{ kind: 'unavailable', reason: 'no-actionable-edit' }`.
+  - `failed` → the adapter throws → run `blocked`.
+- `stagePreview` — the tool-loop already stages the preview (it emitted
+  `previewing` before `awaiting-approval`). This primitive confirms the
+  renderer acknowledged that staged preview (the same renderer-ack signal
+  `agent-live-preview.spec.ts` asserts) and returns `previewId`.
+- `verifyDeliverable` (verify-deliverable only) — runs
+  `composition-observer` at the composed output times and
+  `final-encoded-export-decoder` on the last export artifact, mapping their
+  results to `DirectorVerificationCheck`s (`rendered`, `encoded-output`);
+  `audio-measured` from `audio-observer` when the project has audio; each
+  absent method is an `unavailable` check with stated uncertainty.
+
+Commit is still only the existing approval envelope: `propose` returning a
+`prepared` result makes the skill-runner report `ready-for-approval`, and the
+user approves exactly as they do for a direct tool-loop edit today.
+
 ## Non-goals for R1
 
 - No `audio-mix` or RTL-text readback capability (kept visible-unavailable).
 - No new state system, history tab, or Brief tab.
 - Recipe prompt templates are product-owned constants, never model- or
   user-authored, and cannot raise `allowedToolNames` beyond the manifest.
+- One tool-loop per recipe run; no second executor, no parallel model loop.
