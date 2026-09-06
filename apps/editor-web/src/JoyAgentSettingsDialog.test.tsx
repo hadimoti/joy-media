@@ -169,7 +169,9 @@ describe('JOY Agent Settings media capability probe', () => {
 
     expect(engineClient.probeMediaCapabilities).not.toHaveBeenCalled();
     expect(rendered.textContent).not.toContain(privateValue);
-    expect(rendered.textContent).not.toContain('Image Supported');
+    // The unvalidated report must not render at all, not merely omit a string
+    // that never appears (the component renders "ImageSupported", no space).
+    expect(rendered.querySelector('.agent-media-capability-result')).toBeNull();
   });
 
   it('renders a matching cached session report without a provider request', async () => {

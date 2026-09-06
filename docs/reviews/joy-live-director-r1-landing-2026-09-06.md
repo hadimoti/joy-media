@@ -34,9 +34,33 @@ reviewable, green units:
 | `pnpm exec playwright test … --project=desktop-primary`    | **34 passed** — `agent-director-lifecycle` (8), `agent-director-runtime` (4), `agent-observation-decode` (7), `agent-timeline-split-parity` (1), `final-encoded-export-decoder` (4), `agent-live-preview` (4), `agent-live-presence` (2), `agent-byok-security` (4) |
 | `node tooling/release/verify-agent-operation-coverage.mjs` | PASS (16 bounded operations; 8 domains explicitly unsupported)                                                                                                                                                                                                      |
 
-CodeRabbit: attempted repeatedly this session; the CodeRabbit review service
-kept dropping the WebSocket mid-review (recoverable connection error; local
-`coderabbit doctor` is all-pass). Re-run before the R1 candidate bundle.
+## CodeRabbit review (base `6a6a336c` → the landed R1 commits)
+
+`coderabbit review --committed` completed after several dropped connections
+(the review service kept closing the WebSocket mid-stream this session; local
+`coderabbit doctor` is all-pass). It returned **15 findings — 1 critical, 7
+major, 7 minor — across 172 reviewed files.** All 15 were legitimate; none
+were dismissed. Fixed in `fix(agent): resolve CodeRabbit R1 review findings`:
+
+| Sev | Location | Fix |
+|---|---|---|
+| critical | `run-budget.ts` | a single over-budget output-byte chunk latched a cancellation state that failed re-parse (`=== maxOutputBytes` → `<= maxOutputBytes`); regression added |
+| major | `protocol.ts` | `FORBIDDEN_RESULT_KEYS` was run over the serialized JSON string, rejecting innocent prose ("Follow the path of the hero"); removed the serialized check (per-key denylist + per-value unsafe-pattern check remain); regression added |
+| major | `bounded-tool-loop.ts` | an `AbortError` became a repairable diagnostic and the call batch kept issuing host RPC after cancel; now checked before each call and rethrown from the catch |
+| major | `worker-observation-transfer.ts` | per-run cleanup deleted a replaced controller Set; now guarded with an identity check |
+| major | `sampling-policy.ts` | `createCanonicalFrameSampler` claimed `completeSourceCoverage` from `sourceFrameCount <= maxFrames` instead of "every selected identity accounts for a source frame"; fixed + first tests for that function |
+| major | `engine.worker.ts` | replacing the BYOK session did not abort in-flight runs, so the old key/baseUrl kept serving; now aborts every run in `configure` |
+| major | `protocol.ts` | `runEpoch` was optional in the type but required by the validator; made required, callers pass `Omit<JoyAgentRunRequest, 'runEpoch'>` |
+| major | `conversation-entity-references.ts` | `record?.[entityId] !== undefined` read the prototype chain (`constructor`, `toString`); switched to `Object.hasOwn`; regression added |
+| minor | `AgentPanel.tsx` | no Dismiss control once an image review reached `failed`; now rendered for the terminal state |
+| minor | `export-final-verification-contract.test.ts`, `export-recovery-contract.test.ts` | slice markers not asserted before slicing App.tsx; added an explicit guard |
+| minor | `JoyAgentSettingsDialog.test.tsx` | vacuous `not.toContain('Image Supported')` (never rendered with a space) → assert the result element is absent |
+| minor | `AgentPanel.tsx` | Persian pronoun alternatives matched bare substrings (این inside اینکه); anchored on `\p{L}\p{M}` boundaries |
+| minor | `export-history.ts` | a `verified` receipt failing only the strict manifest cross-check dropped the whole history row; now downgraded to `verification-required` (retry metadata kept, cached bytes and completion claim dropped); two "drops…" tests updated to "downgrades…" |
+| minor | `provider-capabilities.ts` | a present-but-invalid plan-only probe reported `provider-probe-missing`; now reports `plan-only-response-invalid` |
+| minor | `verify-agent-operation-coverage.mjs` | failure text said "advertised operation kinds" for a rule that rejects any kind |
+
+Re-run CodeRabbit on the exact R1 candidate before the bundle.
 
 ## Real journey — status
 

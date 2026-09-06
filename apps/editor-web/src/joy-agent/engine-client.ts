@@ -113,7 +113,7 @@ export interface JoyAgentEngineClient {
    */
   probeMediaCapabilities(): Promise<JoyAgentMediaCapabilityReport>;
   startRun(
-    request: JoyAgentRunRequest,
+    request: Omit<JoyAgentRunRequest, 'runEpoch'>,
     host?: JoyAgentRunHost,
     lifecycleHooks?: JoyAgentRunLifecycleHooks,
   ): JoyAgentRunIterator;
@@ -194,7 +194,7 @@ function runQueueKey(run: HostRpcRun): string {
   return `${run.runId}:${run.epoch}`;
 }
 
-function isStructuredRun(request: JoyAgentRunRequest): boolean {
+function isStructuredRun(request: Omit<JoyAgentRunRequest, 'runEpoch'>): boolean {
   return request.mode !== 'plan-only' && request.taskKind !== 'creative-brief';
 }
 

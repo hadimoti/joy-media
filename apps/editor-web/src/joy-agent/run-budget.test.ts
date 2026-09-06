@@ -232,6 +232,32 @@ describe('JOY Agent run budget', () => {
     });
   });
 
+  it('re-parses a latched output-byte cancellation from a single over-budget chunk', () => {
+    const state = createJoyAgentRunBudgetState(
+      parseJoyAgentRunBudget({
+        version: 1,
+        maxToolSteps: 1,
+        maxOutputBytes: 4,
+        maxWallTimeMs: 10_000,
+        maxRepairAttempts: 1,
+      }),
+      500,
+    );
+    const cancelled = consumeJoyAgentRunBudget(state, {
+      kind: 'output-bytes',
+      bytes: 5,
+      atMs: 501,
+    });
+    expect(cancelled).toMatchObject({ kind: 'cancel', reason: 'output-bytes-exhausted' });
+    if (cancelled.kind !== 'cancel') throw new Error('expected a cancel decision');
+    // usage.outputBytes is still 0 here (the rejected chunk was never charged);
+    // the latched state must remain valid input to another consume call.
+    expect(cancelled.state.usage.outputBytes).toBe(0);
+    expect(
+      consumeJoyAgentRunBudget(cancelled.state, { kind: 'output-bytes', bytes: 1, atMs: 502 }),
+    ).toEqual({ kind: 'cancel', reason: 'output-bytes-exhausted', state: cancelled.state });
+  });
+
   it('latches repair-attempt exhaustion without treating it as another tool step', () => {
     const state = createJoyAgentRunBudgetState(
       parseJoyAgentRunBudget({

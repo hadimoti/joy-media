@@ -192,7 +192,7 @@ export async function runJoyAgentTask(input: RunJoyAgentTaskInput): Promise<JoyA
     );
   const runId = newRunId(input.taskKind);
   input.onRunStart?.(runId);
-  const request: JoyAgentRunRequest = {
+  const request: Omit<JoyAgentRunRequest, 'runEpoch'> = {
     runId,
     taskKind: input.taskKind,
     prompt: input.prompt.trim().slice(0, 8_000),

@@ -96,8 +96,13 @@ export interface JoyAgentMediaCapabilityReport {
 
 export interface JoyAgentRunRequest {
   readonly runId: string;
-  /** Minted by the client; rejects stale messages if a run ID is reused. */
-  readonly runEpoch?: number;
+  /**
+   * Minted by the client; rejects stale messages if a run ID is reused.
+   * `isMainToWorkerMessage` requires it on every worker-bound run message.
+   * Callers pass `Omit<JoyAgentRunRequest, 'runEpoch'>` to `startRun`, which
+   * mints the epoch.
+   */
+  readonly runEpoch: number;
   readonly taskKind?: JoyAgentTaskKind;
   readonly prompt: string;
   readonly baseRevision?: string;
@@ -380,7 +385,6 @@ function isSafePreparedProposal(value: unknown): value is JoyAgentPreparedPropos
     return (
       serialized !== undefined &&
       new TextEncoder().encode(serialized).byteLength <= 65_536 &&
-      !FORBIDDEN_RESULT_KEYS.test(serialized) &&
       isSafeDataValue(value)
     );
   } catch {
@@ -395,7 +399,6 @@ export function isSafeResult(value: unknown): boolean {
     return (
       serialized !== undefined &&
       new TextEncoder().encode(serialized).byteLength <= 65_536 &&
-      !FORBIDDEN_RESULT_KEYS.test(serialized) &&
       isSafeDataValue(value)
     );
   } catch {

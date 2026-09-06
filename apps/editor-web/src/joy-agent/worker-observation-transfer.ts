@@ -143,7 +143,12 @@ export function createWorkerObservationReviewTransfer(
       } finally {
         linked();
         controllers.delete(controller);
-        if (controllers.size === 0) controllersByRun.delete(request.authority.run.runId);
+        // Only drop the map entry if it still points at this Set. cancel()
+        // removes the whole Set, and a later send for the same runId installs
+        // a fresh one that must not be deleted by this stale finally block.
+        const runId = request.authority.run.runId;
+        if (controllers.size === 0 && controllersByRun.get(runId) === controllers)
+          controllersByRun.delete(runId);
       }
     },
 

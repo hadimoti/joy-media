@@ -152,6 +152,32 @@ describe('JOY Agent Worker protocol V2', () => {
         event: { ...safeEvent, result: { text: 'https://secret.invalid/value' } },
       }),
     ).toBe(false);
+    // Ordinary prose that merely contains denylisted key words as substrings
+    // (path, secret, url, authorization) must not be rejected: the denylist
+    // guards object keys, and unsafe value patterns are matched separately.
+    expect(
+      isWorkerToMainMessage({
+        protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
+        type: 'event',
+        event: {
+          ...safeEvent,
+          proposal: {
+            ...proposal,
+            summary: 'Follow the path of the hero through the authorization arc',
+          },
+        },
+      }),
+    ).toBe(true);
+    expect(
+      isWorkerToMainMessage({
+        protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
+        type: 'event',
+        event: {
+          ...safeEvent,
+          result: { headline: 'The secret path to a better url', note: 'no credential needed' },
+        },
+      }),
+    ).toBe(true);
   });
 
   it('separates directional host RPC envelopes', () => {

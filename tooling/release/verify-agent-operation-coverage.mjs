@@ -209,7 +209,7 @@ export function validateJoyAgentOperationCoverage({ coverage, expectedKinds, fil
         fail(`domain ${domain.id} references unknown or mismatched operation ${kind}`);
     }
     if (domain.status === 'unsupported' && domain.operationKinds.length > 0)
-      fail(`unsupported domain ${domain.id} cannot contain advertised operation kinds`);
+      fail(`unsupported domain ${domain.id} cannot contain any operation kinds`);
   }
 
   return {

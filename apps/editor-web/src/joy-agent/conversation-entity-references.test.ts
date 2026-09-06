@@ -150,4 +150,18 @@ describe('JOY conversation entity references', () => {
       }),
     });
   });
+
+  it('does not resolve a prototype-chain identifier to a phantom entity', () => {
+    for (const phantom of ['constructor', 'toString', 'valueOf', 'hasOwnProperty']) {
+      const result = deriveJoyAgentConversationEntityReferences(receipt([phantom]), source());
+      expect(result).toEqual({
+        kind: 'clarification',
+        references: [],
+        clarification: expect.objectContaining({
+          code: 'JOY_AGENT_CONVERSATION_REFERENCE_MISSING_OR_DELETED',
+          entityIds: [phantom],
+        }),
+      });
+    }
+  });
 });

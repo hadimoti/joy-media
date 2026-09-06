@@ -318,12 +318,60 @@ function isLegacyUnverifiedCompletedProjectEntry(
   );
 }
 
+/**
+ * A completed row whose receipt is a genuine `verified` receipt that merely
+ * fails the strict manifest cross-check (for example an encoder that emits one
+ * extra or missing presentation frame). It was accepted at export time, so the
+ * row's retry metadata must survive a reload; only its completion claim and
+ * cached bytes are dropped.
+ */
+function isInconsistentVerifiedCompletedProjectEntry(value: unknown): boolean {
+  if (value === null || typeof value !== 'object') return false;
+  const entry = value as Partial<ProjectExportProcessEntry>;
+  return (
+    hasProjectEntryBaseFields(entry) &&
+    entry.status === 'completed' &&
+    entry.cacheState === 'ready' &&
+    typeof entry.sha256 === 'string' &&
+    /^[a-f0-9]{64}$/.test(entry.sha256) &&
+    Number.isSafeInteger(entry.totalBytes) &&
+    entry.totalBytes! >= 0 &&
+    isFinalExportVerificationReceipt(entry.verification) &&
+    entry.verification.status === 'verified' &&
+    !isVerifiedReceiptConsistent(entry.verification, entry.manifest!)
+  );
+}
+
+function downgradeInconsistentVerifiedCompletedEntry(
+  value: ProjectExportProcessEntry,
+): ProjectExportProcessEntry {
+  const {
+    cacheState: _cacheState,
+    sha256: _sha256,
+    totalBytes: _totalBytes,
+    verification: _verification,
+    ...metadata
+  } = value as ProjectExportProcessEntry & {
+    sha256?: unknown;
+    totalBytes?: unknown;
+    verification?: unknown;
+  };
+  return {
+    ...metadata,
+    status: 'verification-required',
+    cacheState: 'none',
+    error: LEGACY_FINAL_VERIFICATION_REQUIRED_ERROR,
+  };
+}
+
 function normalizeProjectEntryForPersistence(
   entry: ProjectExportProcessEntry,
 ): readonly ProjectExportProcessEntry[] {
   if (isProjectEntry(entry)) return [entry];
   if (isLegacyUnverifiedCompletedProjectEntry(entry))
     return [downgradeLegacyUnverifiedCompletedEntry(entry)];
+  if (isInconsistentVerifiedCompletedProjectEntry(entry))
+    return [downgradeInconsistentVerifiedCompletedEntry(entry)];
   return [];
 }
 
@@ -479,6 +527,8 @@ function readProjectHistory(storage: ExportHistoryStorage): ProjectExportHistory
       if (isProjectEntry(entry)) return [entry];
       if (isLegacyUnverifiedCompletedProjectEntry(entry))
         return [downgradeLegacyUnverifiedCompletedEntry(entry)];
+      if (isInconsistentVerifiedCompletedProjectEntry(entry))
+        return [downgradeInconsistentVerifiedCompletedEntry(entry as ProjectExportProcessEntry)];
       return [];
     });
     return {

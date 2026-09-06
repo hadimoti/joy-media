@@ -476,9 +476,14 @@ function entityCandidates(
     else add(marker.id, 'marker');
   }
   for (const transition of source.visual.transitions ?? []) add(transition.id, 'transition');
-  if (source.visual.propertyAnimations?.[entityId] !== undefined)
+  // Own-property checks only: a bare `!== undefined` on a record index reads
+  // the prototype chain, so ids like `constructor` or `toString` would report
+  // a phantom match and break this module's fail-closed contract.
+  const propertyAnimations = source.visual.propertyAnimations;
+  if (propertyAnimations !== undefined && Object.hasOwn(propertyAnimations, entityId))
     add(entityId, 'property-animation');
-  if (source.visual.audio?.clips[entityId] !== undefined) add(entityId, 'audio-clip');
+  const audioClips = source.visual.audio?.clips;
+  if (audioClips !== undefined && Object.hasOwn(audioClips, entityId)) add(entityId, 'audio-clip');
   for (const bus of source.visual.audio?.buses ?? []) add(bus.id, 'audio-bus');
   for (const effect of source.visual.audio?.effects ?? []) add(effect.id, 'audio-effect');
 

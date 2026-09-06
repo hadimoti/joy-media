@@ -348,7 +348,7 @@ describe('export history', () => {
     expect(loadProjectExportHistory(storage, 'project-a')).toEqual([]);
   });
 
-  it('drops a completed receipt whose safe facts no longer match its immutable manifest', () => {
+  it('downgrades a completed receipt whose safe facts no longer match its immutable manifest to a retryable row', () => {
     const storage = memoryStorage();
     storage.setItem(
       PROJECT_EXPORT_HISTORY_KEY,
@@ -380,10 +380,27 @@ describe('export history', () => {
       }),
     );
 
-    expect(loadProjectExportHistory(storage, 'project-a')).toEqual([]);
+    // A genuine verified receipt that only fails the strict manifest cross-check
+    // (for example one extra/missing presentation frame) keeps its retry
+    // metadata; only the completion claim and cached bytes are dropped.
+    expect(loadProjectExportHistory(storage, 'project-a')).toEqual([
+      expect.objectContaining({
+        id: 'mismatched-verified-receipt',
+        status: 'verification-required',
+        cacheState: 'none',
+        error: LEGACY_FINAL_VERIFICATION_REQUIRED_ERROR,
+        fingerprint: expect.any(String),
+        presetId: expect.any(String),
+        manifest: expect.any(Object),
+      }),
+    ]);
+    const [downgraded] = loadProjectExportHistory(storage, 'project-a');
+    expect(downgraded).not.toHaveProperty('sha256');
+    expect(downgraded).not.toHaveProperty('totalBytes');
+    expect(downgraded).not.toHaveProperty('verification');
   });
 
-  it('drops a completed receipt that omits required structural final-Blob checks', () => {
+  it('downgrades a completed receipt that omits required structural final-Blob checks to a retryable row', () => {
     const storage = memoryStorage();
     storage.setItem(
       PROJECT_EXPORT_HISTORY_KEY,
@@ -415,7 +432,14 @@ describe('export history', () => {
       }),
     );
 
-    expect(loadProjectExportHistory(storage, 'project-a')).toEqual([]);
+    expect(loadProjectExportHistory(storage, 'project-a')).toEqual([
+      expect.objectContaining({
+        id: 'incomplete-verified-receipt',
+        status: 'verification-required',
+        cacheState: 'none',
+        error: LEGACY_FINAL_VERIFICATION_REQUIRED_ERROR,
+      }),
+    ]);
   });
 
   it('rejects an empty project id instead of creating an unscoped v2 bucket', () => {

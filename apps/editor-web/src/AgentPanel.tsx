@@ -146,9 +146,12 @@ const THINKING_REVEAL_MS = 320;
 const MAX_COMPOSER_PROMPT_CHARS = 8_000;
 const CREDENTIAL_LIKE_PROMPT =
   /(?:bearer\s+[A-Za-z0-9._~-]{16,}|(?:api[_-]?key|secret|token)\s*[:=]\s*\S{12,}|sk-[A-Za-z0-9_-]{20,})/i;
+// The Persian alternatives are anchored on non-letter boundaries so a short
+// pronoun such as این is not matched inside an ordinary word like اینکه.
 const CONVERSATION_REFERENCE_WORD =
-  /\b(?:that|this|same|previous|it)\b|(?:همان|همین|این|آن|قبلی|اون|همونو|همینو)/iu;
-const CONVERSATION_TITLE_WORD = /\b(?:title|heading|text)\b|(?:عنوان|تیتر|متن)/iu;
+  /\b(?:that|this|same|previous|it)\b|(?<![\p{L}\p{M}])(?:همان|همین|این|آن|قبلی|اون|همونو|همینو)(?![\p{L}\p{M}])/iu;
+const CONVERSATION_TITLE_WORD =
+  /\b(?:title|heading|text)\b|(?<![\p{L}\p{M}])(?:عنوان|تیتر|متن)(?![\p{L}\p{M}])/iu;
 const CONVERSATION_REFERENCE_AMBIGUOUS_MESSAGE =
   'JOY cannot safely determine which previous item to use. Select one item before continuing.';
 type ComposerCapability = 'edit' | 'creative-brief';
@@ -2753,11 +2756,18 @@ export function AgentPanel({
                   {observationReviewDisplay.evidenceCount === 1 ? '' : 's'} to your configured model
                   only after you review and allow the exact scope. No video or audio is sent.
                 </p>
-                {observationReviewUi.status === 'idle' && (
+                {(observationReviewUi.status === 'idle' ||
+                  observationReviewUi.status === 'failed') && (
                   <div className="joy-code-plan-actions">
-                    <button type="button" className="is-primary" onClick={prepareObservationReview}>
-                      Review image scope
-                    </button>
+                    {observationReviewUi.status === 'idle' && (
+                      <button
+                        type="button"
+                        className="is-primary"
+                        onClick={prepareObservationReview}
+                      >
+                        Review image scope
+                      </button>
+                    )}
                     <button type="button" onClick={discardObservationReview}>
                       Dismiss
                     </button>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { selectOverviewFrames } from './sampling-policy.js';
+import { createCanonicalFrameSampler, selectOverviewFrames } from './sampling-policy.js';
 
 const frames = Array.from({ length: 10 }, (_, index) => ({
   id: `frame-${index}`,
@@ -39,5 +39,42 @@ describe('overview sampling policy', () => {
     );
 
     expect(selected.selectedFrameIds).toEqual(['frame-0', 'frame-2', 'frame-6']);
+  });
+});
+
+describe('canonical frame sampler', () => {
+  const add = (
+    sampler: ReturnType<typeof createCanonicalFrameSampler>,
+    frames: readonly { id: string; sourceTimeUs: number; durationUs: number }[],
+  ) => {
+    frames.forEach((frame, index) => sampler.add({ ...frame, presentationIndex: index }));
+  };
+
+  it('claims complete coverage only when every source identity is selected', () => {
+    const sampler = createCanonicalFrameSampler({ startUs: 0, endUs: 300_000 }, { maxFrames: 3 });
+    add(sampler, [
+      { id: 'f0', sourceTimeUs: 0, durationUs: 100_000 },
+      { id: 'f1', sourceTimeUs: 100_000, durationUs: 100_000 },
+      { id: 'f2', sourceTimeUs: 200_000, durationUs: 100_000 },
+    ]);
+    const result = sampler.finish();
+    expect(result.selectedFrameIds).toEqual(['f0', 'f1', 'f2']);
+    expect(result.sourceFrameCount).toBe(3);
+    expect(result.completeSourceCoverage).toBe(true);
+  });
+
+  it('does not claim complete coverage when a small source count leaves a frame unvisited', () => {
+    // Three source frames but the last one starts at the exclusive range end,
+    // so no time target ever lands inside it.
+    const sampler = createCanonicalFrameSampler({ startUs: 0, endUs: 200_000 }, { maxFrames: 3 });
+    add(sampler, [
+      { id: 'f0', sourceTimeUs: 0, durationUs: 100_000 },
+      { id: 'f1', sourceTimeUs: 100_000, durationUs: 100_000 },
+      { id: 'f2', sourceTimeUs: 200_000, durationUs: 100_000 },
+    ]);
+    const result = sampler.finish();
+    expect(result.sourceFrameCount).toBe(3);
+    expect(result.selectedFrameIds).not.toContain('f2');
+    expect(result.completeSourceCoverage).toBe(false);
   });
 });

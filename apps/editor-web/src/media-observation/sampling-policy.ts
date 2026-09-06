@@ -175,13 +175,18 @@ export function createCanonicalFrameSampler(
         selectedByTarget[nextTargetIndex] = previous;
         nextTargetIndex += 1;
       }
-      const selectedFrameIds = selectedByTarget.flatMap((candidate) =>
-        candidate === undefined ? [] : [candidate.id],
-      );
+      const selectedFrameIds = Object.freeze([
+        ...new Set(
+          selectedByTarget.flatMap((candidate) => (candidate === undefined ? [] : [candidate.id])),
+        ),
+      ]);
       return Object.freeze({
-        selectedFrameIds: Object.freeze([...new Set(selectedFrameIds)]),
+        selectedFrameIds,
         sourceFrameCount,
-        completeSourceCoverage: sourceFrameCount <= options.maxFrames,
+        // Honest only when the distinct selected identities actually account
+        // for every source frame; a small source count does not guarantee the
+        // time-target sampler visited each frame.
+        completeSourceCoverage: selectedFrameIds.length === sourceFrameCount,
       });
     },
   });

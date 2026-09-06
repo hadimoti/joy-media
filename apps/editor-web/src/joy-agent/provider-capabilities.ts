@@ -176,8 +176,12 @@ export function assessProviderCapabilities(probe: unknown): ProviderCapabilityAs
     });
   }
 
-  if (candidate?.planOnly !== undefined && isPlanOnlyProbeValid(candidate.planOnly)) {
-    return Object.freeze({ state: 'plan-only', diagnostic: 'plan-only-proven' });
+  if (candidate?.planOnly !== undefined) {
+    // A present-but-invalid plan-only probe means the provider replied badly,
+    // which is distinct from "no probe was collected".
+    if (isPlanOnlyProbeValid(candidate.planOnly))
+      return Object.freeze({ state: 'plan-only', diagnostic: 'plan-only-proven' });
+    return Object.freeze({ state: 'unavailable', diagnostic: 'plan-only-response-invalid' });
   }
 
   return Object.freeze({ state: 'unavailable', diagnostic: structured.diagnostic });

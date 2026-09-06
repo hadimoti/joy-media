@@ -173,8 +173,11 @@ export function parseJoyAgentRunBudgetState(value: unknown): JoyAgentRunBudgetSt
     const reasonMatchesUsage =
       (cancellation.reason === 'tool-steps-exhausted' &&
         value.usage.toolSteps === budget.maxToolSteps) ||
+      // An output-bytes cancellation is latched when the *next* chunk would
+      // exceed the allowance; the rejected bytes are never charged, so usage
+      // can hold any value at or below the cap (the > cap case already threw).
       (cancellation.reason === 'output-bytes-exhausted' &&
-        value.usage.outputBytes === budget.maxOutputBytes) ||
+        value.usage.outputBytes <= budget.maxOutputBytes) ||
       (cancellation.reason === 'repair-attempts-exhausted' &&
         value.usage.repairAttempts === budget.maxRepairAttempts) ||
       (cancellation.reason === 'wall-time-exhausted' && cancellation.atMs === deadlineAtMs) ||

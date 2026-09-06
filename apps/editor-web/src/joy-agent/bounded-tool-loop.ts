@@ -580,6 +580,9 @@ export async function runBoundedToolExchange(
       options.onToolCall?.(name);
       let result: HostRpcJson;
       try {
+        // Stop the batch immediately on cancellation rather than issuing more
+        // host RPC calls the caller no longer wants.
+        options.signal?.throwIfAborted();
         const args = JSON.parse(call.function!.arguments as string) as HostRpcJson;
         if (name !== 'read_project_context' && (!contextRead || contextReadStep === step))
           throw new Error('JOY_AGENT_CONTEXT_REQUIRED');
@@ -595,6 +598,9 @@ export async function runBoundedToolExchange(
           result = { ok: true, evidence: hostResult, applied: false };
         }
       } catch (error) {
+        // A cancellation is terminal: never convert it into a repairable
+        // diagnostic that would charge a repair attempt and keep the loop going.
+        if (options.signal?.aborted === true) throw error;
         const repair = repairResult(error);
         result = repair as unknown as HostRpcJson;
         if (repair.repairable) options.onRepairAttempt?.();

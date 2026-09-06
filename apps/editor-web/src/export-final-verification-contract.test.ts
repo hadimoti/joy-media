@@ -2,10 +2,13 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const appSource = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8');
-const exportCallback = appSource.slice(
-  appSource.indexOf('const handleExport = useCallback'),
-  appSource.indexOf('const cancelExport = useCallback'),
-);
+const exportStart = appSource.indexOf('const handleExport = useCallback');
+const exportEnd = appSource.indexOf('const cancelExport = useCallback');
+if (exportStart < 0 || exportEnd <= exportStart)
+  throw new Error(
+    'App.tsx no longer contains the handleExport/cancelExport markers this test slices between.',
+  );
+const exportCallback = appSource.slice(exportStart, exportEnd);
 
 describe('App final encoded export verification contract', () => {
   it('injects only the actual final-encoded browser decoder', () => {

@@ -114,7 +114,7 @@ class JoyAgentWorkerError extends Error {
 }
 
 interface ActiveRun {
-  readonly request: JoyAgentRunRequest & { readonly runEpoch: number };
+  readonly request: JoyAgentRunRequest;
   readonly controller: AbortController;
   readonly rpcRun: HostRpcRun;
   seq: number;
@@ -728,6 +728,10 @@ async function configure(config: ByokSessionConfig): Promise<void> {
     throw new Error('Invalid model connection');
   for (const controller of mediaCapabilityProbeControllers) controller.abort();
   mediaCapabilityProbeControllers.clear();
+  // A replaced BYOK session revokes every in-flight run. Otherwise a run that
+  // captured the previous connection keeps calling the old baseUrl with the
+  // old apiKey and can still stage a preview after the owner switched models.
+  for (const active of runs.values()) abortForCancellation(active, false);
   clearObservationReviewState();
   observationSessionEpoch += 1;
   session = { ...config };
