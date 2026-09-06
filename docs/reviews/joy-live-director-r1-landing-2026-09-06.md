@@ -42,25 +42,41 @@ reviewable, green units:
 major, 7 minor — across 172 reviewed files.** All 15 were legitimate; none
 were dismissed. Fixed in `fix(agent): resolve CodeRabbit R1 review findings`:
 
-| Sev | Location | Fix |
-|---|---|---|
-| critical | `run-budget.ts` | a single over-budget output-byte chunk latched a cancellation state that failed re-parse (`=== maxOutputBytes` → `<= maxOutputBytes`); regression added |
-| major | `protocol.ts` | `FORBIDDEN_RESULT_KEYS` was run over the serialized JSON string, rejecting innocent prose ("Follow the path of the hero"); removed the serialized check (per-key denylist + per-value unsafe-pattern check remain); regression added |
-| major | `bounded-tool-loop.ts` | an `AbortError` became a repairable diagnostic and the call batch kept issuing host RPC after cancel; now checked before each call and rethrown from the catch |
-| major | `worker-observation-transfer.ts` | per-run cleanup deleted a replaced controller Set; now guarded with an identity check |
-| major | `sampling-policy.ts` | `createCanonicalFrameSampler` claimed `completeSourceCoverage` from `sourceFrameCount <= maxFrames` instead of "every selected identity accounts for a source frame"; fixed + first tests for that function |
-| major | `engine.worker.ts` | replacing the BYOK session did not abort in-flight runs, so the old key/baseUrl kept serving; now aborts every run in `configure` |
-| major | `protocol.ts` | `runEpoch` was optional in the type but required by the validator; made required, callers pass `Omit<JoyAgentRunRequest, 'runEpoch'>` |
-| major | `conversation-entity-references.ts` | `record?.[entityId] !== undefined` read the prototype chain (`constructor`, `toString`); switched to `Object.hasOwn`; regression added |
-| minor | `AgentPanel.tsx` | no Dismiss control once an image review reached `failed`; now rendered for the terminal state |
-| minor | `export-final-verification-contract.test.ts`, `export-recovery-contract.test.ts` | slice markers not asserted before slicing App.tsx; added an explicit guard |
-| minor | `JoyAgentSettingsDialog.test.tsx` | vacuous `not.toContain('Image Supported')` (never rendered with a space) → assert the result element is absent |
-| minor | `AgentPanel.tsx` | Persian pronoun alternatives matched bare substrings (این inside اینکه); anchored on `\p{L}\p{M}` boundaries |
-| minor | `export-history.ts` | a `verified` receipt failing only the strict manifest cross-check dropped the whole history row; now downgraded to `verification-required` (retry metadata kept, cached bytes and completion claim dropped); two "drops…" tests updated to "downgrades…" |
-| minor | `provider-capabilities.ts` | a present-but-invalid plan-only probe reported `provider-probe-missing`; now reports `plan-only-response-invalid` |
-| minor | `verify-agent-operation-coverage.mjs` | failure text said "advertised operation kinds" for a rule that rejects any kind |
+| Sev      | Location                                                                         | Fix                                                                                                                                                                                                                                                      |
+| -------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| critical | `run-budget.ts`                                                                  | a single over-budget output-byte chunk latched a cancellation state that failed re-parse (`=== maxOutputBytes` → `<= maxOutputBytes`); regression added                                                                                                  |
+| major    | `protocol.ts`                                                                    | `FORBIDDEN_RESULT_KEYS` was run over the serialized JSON string, rejecting innocent prose ("Follow the path of the hero"); removed the serialized check (per-key denylist + per-value unsafe-pattern check remain); regression added                     |
+| major    | `bounded-tool-loop.ts`                                                           | an `AbortError` became a repairable diagnostic and the call batch kept issuing host RPC after cancel; now checked before each call and rethrown from the catch                                                                                           |
+| major    | `worker-observation-transfer.ts`                                                 | per-run cleanup deleted a replaced controller Set; now guarded with an identity check                                                                                                                                                                    |
+| major    | `sampling-policy.ts`                                                             | `createCanonicalFrameSampler` claimed `completeSourceCoverage` from `sourceFrameCount <= maxFrames` instead of "every selected identity accounts for a source frame"; fixed + first tests for that function                                              |
+| major    | `engine.worker.ts`                                                               | replacing the BYOK session did not abort in-flight runs, so the old key/baseUrl kept serving; now aborts every run in `configure`                                                                                                                        |
+| major    | `protocol.ts`                                                                    | `runEpoch` was optional in the type but required by the validator; made required, callers pass `Omit<JoyAgentRunRequest, 'runEpoch'>`                                                                                                                    |
+| major    | `conversation-entity-references.ts`                                              | `record?.[entityId] !== undefined` read the prototype chain (`constructor`, `toString`); switched to `Object.hasOwn`; regression added                                                                                                                   |
+| minor    | `AgentPanel.tsx`                                                                 | no Dismiss control once an image review reached `failed`; now rendered for the terminal state                                                                                                                                                            |
+| minor    | `export-final-verification-contract.test.ts`, `export-recovery-contract.test.ts` | slice markers not asserted before slicing App.tsx; added an explicit guard                                                                                                                                                                               |
+| minor    | `JoyAgentSettingsDialog.test.tsx`                                                | vacuous `not.toContain('Image Supported')` (never rendered with a space) → assert the result element is absent                                                                                                                                           |
+| minor    | `AgentPanel.tsx`                                                                 | Persian pronoun alternatives matched bare substrings (این inside اینکه); anchored on `\p{L}\p{M}` boundaries                                                                                                                                             |
+| minor    | `export-history.ts`                                                              | a `verified` receipt failing only the strict manifest cross-check dropped the whole history row; now downgraded to `verification-required` (retry metadata kept, cached bytes and completion claim dropped); two "drops…" tests updated to "downgrades…" |
+| minor    | `provider-capabilities.ts`                                                       | a present-but-invalid plan-only probe reported `provider-probe-missing`; now reports `plan-only-response-invalid`                                                                                                                                        |
+| minor    | `verify-agent-operation-coverage.mjs`                                            | failure text said "advertised operation kinds" for a rule that rejects any kind                                                                                                                                                                          |
 
-Re-run CodeRabbit on the exact R1 candidate before the bundle.
+**CodeRabbit run 2** (after the fix commit) returned **3 findings — 1 major,
+2 minor** (the 15 from run 1 are resolved). Fixed in the follow-up commit:
+
+| Sev   | Location                 | Fix                                                                                                                                                                                                       |
+| ----- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| major | `protocol.ts`            | the same key-denylist-over-prose bug on the error `message` field (`Provider token limit exceeded` was dropped); switched to `UNSAFE_CONTEXT_VALUE`                                                       |
+| minor | `render-verification.ts` | a fully silent export always failed `audio-streams-mismatch`; documented as a deliberate O6 scope limit (supporting `audioStreamCount: 0` is tracked follow-up) rather than half-implementing it untested |
+| minor | this doc                 | markdown list-continuation indentation                                                                                                                                                                    |
+
+Re-run CodeRabbit on the exact R1 candidate before the bundle; expect it to
+be clean or to surface only the tracked open items above.
+
+After the CodeRabbit fixes: `pnpm typecheck` / `lint` / `format:check` green;
+**3999 unit tests pass**; the affected Live Director Playwright specs
+(`agent-director-lifecycle`/`runtime`, `agent-byok-security`,
+`agent-live-preview`, `agent-observation-decode` — 27 specs) pass on
+desktop-primary.
 
 ## Real journey — status
 
@@ -92,19 +108,21 @@ cancellation, and no preview revival after reload.
    The F5 `*-readback` assertions (trim, move, split, created-title opacity
    keyframe, transition add/remove) are now wired into the commit path and
    unit/`domain-parity` tested. The release verifier only lets a row leave
-   `bounded-proposal-path` when it also has `e2eEvidence.classification =
-operation-specific`; today only `timeline.splitClip` does
-   (`agent-timeline-split-parity.spec.ts`). Decide per operation: add an
-   operation-specific Playwright spec and upgrade to `readback:
-project-state-only`, or leave it honest. **Whether the desktop plan's
-   stricter bar — a rendered/audio consumer for every advertised kind —
-   is required for R1 is an explicit question for the independent Opus
-   review.**
+   `bounded-proposal-path` when it also has
+   `e2eEvidence.classification = operation-specific`; today only
+   `timeline.splitClip` does (`agent-timeline-split-parity.spec.ts`). Decide
+   per operation: add an operation-specific Playwright spec and upgrade to
+   `readback: project-state-only`, or leave it honest. **Whether the desktop
+   plan's stricter bar — a rendered/audio consumer for every advertised
+   kind — is required for R1 is an explicit question for the independent
+   Opus review.**
 3. **O6 decoders not wired as per-operation ledger consumers.**
    `composition-observer`, `render-verification` and
    `final-encoded-export-decoder` are built, unit- and E2E-tested, and the
    encoded-export decoder gates export completion, but no ledger row claims
-   `readback: rendered-output`.
+   `readback: rendered-output`. `render-verification` also does not yet accept
+   `audioStreamCount: 0` — a fully silent export fails closed with
+   `audio-streams-mismatch` (documented as a scope limit in the module).
 4. **V3 acceptance demonstration** (r1.md V3): the scripted end-to-end
    showcase — find the single-frame flash in exact mode, build a rough cut
    from observed source ranges, refine a Persian title over two turns,

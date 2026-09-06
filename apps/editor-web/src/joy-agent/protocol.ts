@@ -654,7 +654,9 @@ export function isWorkerToMainMessage(value: unknown): value is WorkerToMainMess
         (typeof value.requestId === 'string' && OPAQUE_ID.test(value.requestId))) &&
       typeof value.message === 'string' &&
       value.message.length <= 512 &&
-      !FORBIDDEN_RESULT_KEYS.test(value.message)
+      // Value-oriented check only: the key denylist would drop ordinary
+      // provider errors like "Provider token limit exceeded".
+      !UNSAFE_CONTEXT_VALUE.test(value.message)
     );
   if (value.type === 'configured' || value.type === 'test-result')
     return exactKeys(value, ['protocolVersion', 'type', 'status']) && isSafeStatus(value.status);

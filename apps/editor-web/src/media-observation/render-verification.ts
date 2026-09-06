@@ -6,6 +6,14 @@
  * decoder explicitly labelled as an actual encoded-export decoder, asks it for
  * bounded final-artifact facts/pixels/audio samples, and exposes only safe
  * aggregate verification facts to callers.
+ *
+ * Scope: this verifier currently expects every JOY encoded export to carry at
+ * least one video and one audio stream (`audioStreamCount` defaults to 1 and
+ * cannot be 0). A fully silent / audio-free export therefore fails closed with
+ * `audio-streams-mismatch`; that is a deliberate scope limit, not a decoder
+ * defect. Supporting `audioStreamCount: 0` (skipping the audio window / decode
+ * / codec / sync checks in that case) is tracked O6 follow-up in
+ * docs/reviews/joy-live-director-r1-landing-2026-09-06.md.
  */
 
 export const FINAL_ENCODED_EXPORT_VERIFIER_VERSION =
