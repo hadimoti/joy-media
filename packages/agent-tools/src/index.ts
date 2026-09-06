@@ -25,6 +25,27 @@ export type {
 export { assertJoyEditorOperationDefinitions } from './editor-operation-definition.js';
 
 export type {
+  CreativeSkillId,
+  CreativeSkillCapability,
+  CreativeEvidenceRequirement,
+  CreativeSkillPrivacyRequirement,
+  CreativeSkillProcedureCheckpoint,
+  CreativeSkillBudget,
+  CreativeSkillManifest,
+  CreativeSkillValidationResult,
+  CreativeSkillRuntime,
+  CreativeSkillAvailability,
+} from './creative-skill.js';
+export {
+  CREATIVE_SKILL_IDS,
+  CREATIVE_SKILL_CAPABILITIES,
+  CREATIVE_EVIDENCE_REQUIREMENTS,
+  validateCreativeSkillManifest,
+  resolveCreativeSkillAvailability,
+} from './creative-skill.js';
+export { CREATIVE_SKILLS, getCreativeSkill } from './creative-skills.js';
+
+export type {
   ToolDefinition,
   ToolScope,
   ToolCapability,
