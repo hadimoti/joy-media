@@ -1,199 +1,540 @@
 {
-  "schemaVersion": 1,
-  "scope": "Built-in JOY Agent Engine operation boundary",
+  "schemaVersion": 2,
+  "scope": "Built-in JOY Agent Engine model-visible operation boundary",
   "complete": false,
-  "advertisingRule": "Only status=verified entries with existing source and focused test paths may be model-visible.",
+  "advertisingRule": "Only status=verified, modelVisibility=advertised entries with source, focused unit evidence, and declared browser evidence may be model-visible.",
+  "parityRule": "A bounded-proposal-path verification proves only canonical proposal preparation and the shared approval envelope. It never proves domain-complete UI parity, rendered output, decoded audio, or external job effects.",
   "operations": [
     {
       "kind": "timeline.trimClip",
+      "domain": "timeline",
       "status": "verified",
+      "statusReason": "The canonical timeline compiler accepts this bounded proposal and the shared agent path can stage it; no operation-specific semantic readback exists yet.",
+      "modelVisibility": "advertised",
+      "verificationScope": "bounded-proposal-path",
       "source": "apps/editor-web/src/joy-code-timeline-compiler.ts",
-      "tests": ["apps/editor-web/src/joy-code-timeline-compiler.test.ts"],
-      "surface": "timeline",
-      "preview": "compound-draft",
+      "unitEvidence": [
+        {
+          "path": "apps/editor-web/src/joy-code-timeline-compiler.test.ts",
+          "scope": "Typed trim proposal compilation and target validation."
+        }
+      ],
+      "e2eEvidence": {
+        "classification": "shared-host-lifecycle",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared browser fixture proves proposal staging, approval, and undo envelope behavior; it does not assert this exact trim result."
+      },
+      "preview": {
+        "classification": "staged-draft-with-shared-renderer-ack",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared preview harness acknowledges a staged draft, not an operation-specific rendered trim frame."
+      },
+      "readback": {
+        "classification": "not-verified",
+        "reason": "No operation-specific project-state or rendered-frame readback fixture exists yet."
+      },
       "postconditions": [
-        "canonical compiler accepts the operation",
-        "approved draft remains undoable"
+        "Canonical compiler accepts a bounded trim proposal.",
+        "An approved draft remains undoable through the compound runner."
       ]
     },
     {
       "kind": "timeline.splitClip",
+      "domain": "timeline",
       "status": "verified",
+      "statusReason": "The canonical timeline compiler accepts this bounded proposal and the shared agent path can stage it; no operation-specific semantic readback exists yet.",
+      "modelVisibility": "advertised",
+      "verificationScope": "bounded-proposal-path",
       "source": "apps/editor-web/src/joy-code-timeline-compiler.ts",
-      "tests": ["apps/editor-web/src/joy-code-timeline-compiler.test.ts"],
-      "surface": "timeline",
-      "preview": "compound-draft",
+      "unitEvidence": [
+        {
+          "path": "apps/editor-web/src/joy-code-timeline-compiler.test.ts",
+          "scope": "Typed split proposal compilation and target validation."
+        }
+      ],
+      "e2eEvidence": {
+        "classification": "shared-host-lifecycle",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared browser fixture proves proposal staging, approval, and undo envelope behavior; it does not assert this exact split result."
+      },
+      "preview": {
+        "classification": "staged-draft-with-shared-renderer-ack",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared preview harness acknowledges a staged draft, not an operation-specific rendered split frame."
+      },
+      "readback": {
+        "classification": "not-verified",
+        "reason": "No operation-specific project-state or rendered-frame readback fixture exists yet."
+      },
       "postconditions": [
-        "canonical compiler accepts the operation",
-        "approved draft remains undoable"
+        "Canonical compiler accepts a bounded split proposal.",
+        "An approved draft remains undoable through the compound runner."
       ]
     },
     {
       "kind": "timeline.moveClip",
+      "domain": "timeline",
       "status": "verified",
+      "statusReason": "The canonical timeline compiler accepts this bounded proposal and the shared agent path can stage it; no operation-specific semantic readback exists yet.",
+      "modelVisibility": "advertised",
+      "verificationScope": "bounded-proposal-path",
       "source": "apps/editor-web/src/joy-code-timeline-compiler.ts",
-      "tests": ["apps/editor-web/src/joy-code-timeline-compiler.test.ts"],
-      "surface": "timeline",
-      "preview": "compound-draft",
+      "unitEvidence": [
+        {
+          "path": "apps/editor-web/src/joy-code-timeline-compiler.test.ts",
+          "scope": "Typed move proposal compilation and cross-track target validation."
+        }
+      ],
+      "e2eEvidence": {
+        "classification": "shared-host-lifecycle",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared browser fixture proves proposal staging, approval, and undo envelope behavior; it does not assert this exact move result."
+      },
+      "preview": {
+        "classification": "staged-draft-with-shared-renderer-ack",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared preview harness acknowledges a staged draft, not an operation-specific rendered move frame."
+      },
+      "readback": {
+        "classification": "not-verified",
+        "reason": "No operation-specific project-state or rendered-frame readback fixture exists yet."
+      },
       "postconditions": [
-        "canonical compiler accepts the operation",
-        "approved draft remains undoable"
+        "Canonical compiler accepts a bounded move proposal.",
+        "An approved draft remains undoable through the compound runner."
       ]
     },
     {
       "kind": "timeline.removeClip",
+      "domain": "timeline",
       "status": "verified",
+      "statusReason": "The canonical timeline compiler accepts this bounded proposal and the shared agent path can stage it; no operation-specific semantic readback exists yet.",
+      "modelVisibility": "advertised",
+      "verificationScope": "bounded-proposal-path",
       "source": "apps/editor-web/src/joy-code-timeline-compiler.ts",
-      "tests": ["apps/editor-web/src/joy-code-timeline-compiler.test.ts"],
-      "surface": "timeline",
-      "preview": "compound-draft",
+      "unitEvidence": [
+        {
+          "path": "apps/editor-web/src/joy-code-timeline-compiler.test.ts",
+          "scope": "Typed remove proposal compilation and target validation."
+        }
+      ],
+      "e2eEvidence": {
+        "classification": "shared-host-lifecycle",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared browser fixture proves proposal staging, approval, and undo envelope behavior; it does not assert this exact removal result."
+      },
+      "preview": {
+        "classification": "staged-draft-with-shared-renderer-ack",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared preview harness acknowledges a staged draft, not an operation-specific rendered removal frame."
+      },
+      "readback": {
+        "classification": "not-verified",
+        "reason": "No operation-specific project-state or rendered-frame readback fixture exists yet."
+      },
       "postconditions": [
-        "canonical compiler accepts the operation",
-        "approved draft remains undoable"
+        "Canonical compiler accepts a bounded remove proposal.",
+        "An approved draft remains undoable through the compound runner."
       ]
     },
     {
       "kind": "timeline.insertExistingAsset",
+      "domain": "assets",
       "status": "verified",
+      "statusReason": "The canonical compiler derives image/video/audio family from a trusted project descriptor and rejects unsupported kinds or incompatible lanes; import/relink and semantic output readback remain incomplete parity work.",
+      "modelVisibility": "advertised",
+      "verificationScope": "bounded-proposal-path",
       "source": "apps/editor-web/src/joy-code-timeline-compiler.ts",
-      "tests": ["apps/editor-web/src/joy-code-timeline-compiler.test.ts"],
-      "surface": "timeline",
-      "preview": "compound-draft",
+      "unitEvidence": [
+        {
+          "path": "apps/editor-web/src/joy-code-timeline-compiler.test.ts",
+          "scope": "Trusted descriptor resolution, audio/visual lane compatibility, and unsupported-kind rejection."
+        },
+        {
+          "path": "apps/editor-web/src/joy-code-compound-runner.test.ts",
+          "scope": "Approved audio insertion, stale revision rejection, reload-safe receipt, and atomic undo."
+        }
+      ],
+      "e2eEvidence": {
+        "classification": "shared-host-lifecycle",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared browser fixture proves the proposal envelope; unit evidence covers family compatibility, but browser media placement and imported-output readback are still not operation-specific."
+      },
+      "preview": {
+        "classification": "staged-draft-with-shared-renderer-ack",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared preview harness acknowledges a staged draft, not an operation-specific media placement result."
+      },
+      "readback": {
+        "classification": "not-verified",
+        "reason": "No operation-specific browser media placement, project-state, or rendered-output readback fixture exists yet."
+      },
       "postconditions": [
-        "canonical compiler accepts the operation",
-        "approved draft remains undoable"
+        "Canonical compiler accepts only a registered asset identifier.",
+        "An approved draft remains undoable through the compound runner."
       ]
     },
     {
       "kind": "text.insertTemplate",
+      "domain": "text",
       "status": "verified",
+      "statusReason": "The canonical text operation compiler accepts this allowlisted template proposal and shared browser evidence covers title creation; typography and rendered-frame parity remain incomplete.",
+      "modelVisibility": "advertised",
+      "verificationScope": "bounded-proposal-path",
       "source": "apps/editor-web/src/joy-code-text-operations.ts",
-      "tests": ["apps/editor-web/src/joy-code-text-operations.test.ts"],
-      "surface": "inspector",
-      "preview": "compound-draft",
+      "unitEvidence": [
+        {
+          "path": "apps/editor-web/src/joy-code-text-operations.test.ts",
+          "scope": "Allowlisted template proposal compilation and malformed input rejection."
+        }
+      ],
+      "e2eEvidence": {
+        "classification": "shared-host-lifecycle",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The browser fixture creates and applies a title through the shared host path, but does not verify rich-text or pixel output semantics."
+      },
+      "preview": {
+        "classification": "staged-draft-with-shared-renderer-ack",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The browser fixture observes a staged title draft and shared renderer acknowledgement, not a pixel-comparison assertion."
+      },
+      "readback": {
+        "classification": "not-verified",
+        "reason": "No operation-specific rendered-frame typography readback fixture exists yet."
+      },
       "postconditions": [
-        "canonical compiler accepts the operation",
-        "approved draft remains undoable"
+        "Canonical compiler accepts an allowlisted text template proposal.",
+        "An approved draft remains undoable through the compound runner."
       ]
     },
     {
       "kind": "text.setContent",
+      "domain": "text",
       "status": "verified",
+      "statusReason": "The canonical text operation compiler accepts this bounded existing-object proposal; rich-text and rendered-frame readback remain incomplete parity work.",
+      "modelVisibility": "advertised",
+      "verificationScope": "bounded-proposal-path",
       "source": "apps/editor-web/src/joy-code-text-operations.ts",
-      "tests": ["apps/editor-web/src/joy-code-text-operations.test.ts"],
-      "surface": "inspector",
-      "preview": "compound-draft",
+      "unitEvidence": [
+        {
+          "path": "apps/editor-web/src/joy-code-text-operations.test.ts",
+          "scope": "Existing text object content proposal compilation and target validation."
+        }
+      ],
+      "e2eEvidence": {
+        "classification": "shared-host-lifecycle",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared browser fixture proves the proposal envelope, not this exact existing-text mutation."
+      },
+      "preview": {
+        "classification": "staged-draft-with-shared-renderer-ack",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared preview harness acknowledges a staged draft, not an operation-specific text-content render."
+      },
+      "readback": {
+        "classification": "not-verified",
+        "reason": "No operation-specific rich-text, project-state, or rendered-frame readback fixture exists yet."
+      },
       "postconditions": [
-        "canonical compiler accepts the operation",
-        "approved draft remains undoable"
+        "Canonical compiler accepts bounded existing-object content changes.",
+        "An approved draft remains undoable through the compound runner."
       ]
     },
     {
       "kind": "text.setTemplate",
+      "domain": "text",
       "status": "verified",
+      "statusReason": "The canonical text operation compiler accepts this allowlisted existing-object template proposal; template appearance readback remains incomplete parity work.",
+      "modelVisibility": "advertised",
+      "verificationScope": "bounded-proposal-path",
       "source": "apps/editor-web/src/joy-code-text-operations.ts",
-      "tests": ["apps/editor-web/src/joy-code-text-operations.test.ts"],
-      "surface": "inspector",
-      "preview": "compound-draft",
+      "unitEvidence": [
+        {
+          "path": "apps/editor-web/src/joy-code-text-operations.test.ts",
+          "scope": "Existing text template proposal compilation and allowlist validation."
+        }
+      ],
+      "e2eEvidence": {
+        "classification": "shared-host-lifecycle",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared browser fixture proves the proposal envelope, not this exact existing-text template change."
+      },
+      "preview": {
+        "classification": "staged-draft-with-shared-renderer-ack",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared preview harness acknowledges a staged draft, not an operation-specific template render."
+      },
+      "readback": {
+        "classification": "not-verified",
+        "reason": "No operation-specific template appearance or rendered-frame readback fixture exists yet."
+      },
       "postconditions": [
-        "canonical compiler accepts the operation",
-        "approved draft remains undoable"
+        "Canonical compiler accepts an allowlisted template change.",
+        "An approved draft remains undoable through the compound runner."
       ]
     },
     {
       "kind": "motion.setKeyframe",
+      "domain": "motion",
       "status": "verified",
+      "statusReason": "The compound compiler accepts typed keyframe proposals and the shared browser fixture applies one dependent keyframe; curve/evaluator readback remains incomplete parity work.",
+      "modelVisibility": "advertised",
+      "verificationScope": "bounded-proposal-path",
       "source": "apps/editor-web/src/joy-code-compound-compiler.ts",
-      "tests": ["apps/editor-web/src/joy-code-compound-compiler.test.ts"],
-      "surface": "motion",
-      "preview": "compound-draft",
+      "unitEvidence": [
+        {
+          "path": "apps/editor-web/src/joy-code-compound-compiler.test.ts",
+          "scope": "Typed property binding and keyframe proposal compilation."
+        }
+      ],
+      "e2eEvidence": {
+        "classification": "shared-host-lifecycle",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The browser fixture applies a dependent opacity keyframe through the shared host, but does not inspect the curve editor or evaluated frame."
+      },
+      "preview": {
+        "classification": "staged-draft-with-shared-renderer-ack",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The browser fixture observes a staged draft and shared renderer acknowledgement, not a keyframe-specific evaluated frame."
+      },
+      "readback": {
+        "classification": "not-verified",
+        "reason": "No operation-specific curve/property or rendered-frame readback fixture exists yet."
+      },
       "postconditions": [
-        "canonical compiler accepts the operation",
-        "approved draft remains undoable"
+        "Canonical compiler accepts a typed property keyframe proposal.",
+        "An approved draft remains undoable through the compound runner."
       ]
     },
     {
       "kind": "motion.removeKeyframe",
+      "domain": "motion",
       "status": "verified",
+      "statusReason": "The compound compiler accepts typed keyframe removal proposals; evaluated property and rendered-frame readback remain incomplete parity work.",
+      "modelVisibility": "advertised",
+      "verificationScope": "bounded-proposal-path",
       "source": "apps/editor-web/src/joy-code-compound-compiler.ts",
-      "tests": ["apps/editor-web/src/joy-code-compound-compiler.test.ts"],
-      "surface": "motion",
-      "preview": "compound-draft",
+      "unitEvidence": [
+        {
+          "path": "apps/editor-web/src/joy-code-compound-compiler.test.ts",
+          "scope": "Typed property binding and keyframe removal proposal compilation."
+        }
+      ],
+      "e2eEvidence": {
+        "classification": "shared-host-lifecycle",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared browser fixture proves the proposal envelope, not this exact keyframe removal."
+      },
+      "preview": {
+        "classification": "staged-draft-with-shared-renderer-ack",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared preview harness acknowledges a staged draft, not an operation-specific evaluated keyframe removal."
+      },
+      "readback": {
+        "classification": "not-verified",
+        "reason": "No operation-specific curve/property or rendered-frame readback fixture exists yet."
+      },
       "postconditions": [
-        "canonical compiler accepts the operation",
-        "approved draft remains undoable"
+        "Canonical compiler accepts a typed property keyframe removal proposal.",
+        "An approved draft remains undoable through the compound runner."
       ]
     },
     {
       "kind": "caption.setSegmentText",
+      "domain": "captions",
       "status": "verified",
+      "statusReason": "The caption compiler accepts this bounded segment proposal; caption layout and rendered-frame readback remain incomplete parity work.",
+      "modelVisibility": "advertised",
+      "verificationScope": "bounded-proposal-path",
       "source": "apps/editor-web/src/joy-code-caption-operations.ts",
-      "tests": ["apps/editor-web/src/joy-code-caption-operations.test.ts"],
-      "surface": "captions",
-      "preview": "compound-draft",
+      "unitEvidence": [
+        {
+          "path": "apps/editor-web/src/joy-code-caption-operations.test.ts",
+          "scope": "Caption segment text proposal compilation and target validation."
+        }
+      ],
+      "e2eEvidence": {
+        "classification": "shared-host-lifecycle",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared browser fixture proves the proposal envelope, not this exact caption segment mutation."
+      },
+      "preview": {
+        "classification": "staged-draft-with-shared-renderer-ack",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared preview harness acknowledges a staged draft, not an operation-specific caption render."
+      },
+      "readback": {
+        "classification": "not-verified",
+        "reason": "No operation-specific caption project-state or rendered-frame readback fixture exists yet."
+      },
       "postconditions": [
-        "canonical compiler accepts the operation",
-        "approved draft remains undoable"
+        "Canonical compiler accepts a bounded caption segment text proposal.",
+        "An approved draft remains undoable through the compound runner."
       ]
     },
     {
       "kind": "caption.setSegmentTiming",
+      "domain": "captions",
       "status": "verified",
+      "statusReason": "The caption compiler accepts this bounded segment timing proposal; timing layout and rendered-frame readback remain incomplete parity work.",
+      "modelVisibility": "advertised",
+      "verificationScope": "bounded-proposal-path",
       "source": "apps/editor-web/src/joy-code-caption-operations.ts",
-      "tests": ["apps/editor-web/src/joy-code-caption-operations.test.ts"],
-      "surface": "captions",
-      "preview": "compound-draft",
+      "unitEvidence": [
+        {
+          "path": "apps/editor-web/src/joy-code-caption-operations.test.ts",
+          "scope": "Caption segment timing proposal compilation and range validation."
+        }
+      ],
+      "e2eEvidence": {
+        "classification": "shared-host-lifecycle",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared browser fixture proves the proposal envelope, not this exact caption timing mutation."
+      },
+      "preview": {
+        "classification": "staged-draft-with-shared-renderer-ack",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared preview harness acknowledges a staged draft, not an operation-specific caption timing render."
+      },
+      "readback": {
+        "classification": "not-verified",
+        "reason": "No operation-specific caption project-state or rendered-frame readback fixture exists yet."
+      },
       "postconditions": [
-        "canonical compiler accepts the operation",
-        "approved draft remains undoable"
+        "Canonical compiler accepts a bounded caption timing proposal.",
+        "An approved draft remains undoable through the compound runner."
       ]
     },
     {
       "kind": "caption.setTemplate",
+      "domain": "captions",
       "status": "verified",
+      "statusReason": "The caption compiler accepts this allowlisted template proposal; caption template appearance readback remains incomplete parity work.",
+      "modelVisibility": "advertised",
+      "verificationScope": "bounded-proposal-path",
       "source": "apps/editor-web/src/joy-code-caption-operations.ts",
-      "tests": ["apps/editor-web/src/joy-code-caption-operations.test.ts"],
-      "surface": "captions",
-      "preview": "compound-draft",
+      "unitEvidence": [
+        {
+          "path": "apps/editor-web/src/joy-code-caption-operations.test.ts",
+          "scope": "Caption template proposal compilation and allowlist validation."
+        }
+      ],
+      "e2eEvidence": {
+        "classification": "shared-host-lifecycle",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared browser fixture proves the proposal envelope, not this exact caption template mutation."
+      },
+      "preview": {
+        "classification": "staged-draft-with-shared-renderer-ack",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared preview harness acknowledges a staged draft, not an operation-specific caption template render."
+      },
+      "readback": {
+        "classification": "not-verified",
+        "reason": "No operation-specific caption appearance or rendered-frame readback fixture exists yet."
+      },
       "postconditions": [
-        "canonical compiler accepts the operation",
-        "approved draft remains undoable"
+        "Canonical compiler accepts an allowlisted caption template proposal.",
+        "An approved draft remains undoable through the compound runner."
       ]
     },
     {
       "kind": "caption.setBurnIn",
+      "domain": "captions",
       "status": "verified",
+      "statusReason": "The caption compiler accepts this bounded burn-in proposal; encoded or rendered output readback remains incomplete parity work.",
+      "modelVisibility": "advertised",
+      "verificationScope": "bounded-proposal-path",
       "source": "apps/editor-web/src/joy-code-caption-operations.ts",
-      "tests": ["apps/editor-web/src/joy-code-caption-operations.test.ts"],
-      "surface": "captions",
-      "preview": "compound-draft",
+      "unitEvidence": [
+        {
+          "path": "apps/editor-web/src/joy-code-caption-operations.test.ts",
+          "scope": "Caption burn-in proposal compilation and boolean validation."
+        }
+      ],
+      "e2eEvidence": {
+        "classification": "shared-host-lifecycle",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared browser fixture proves the proposal envelope, not encoded burn-in output."
+      },
+      "preview": {
+        "classification": "staged-draft-with-shared-renderer-ack",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared preview harness acknowledges a staged draft, not an operation-specific burn-in render."
+      },
+      "readback": {
+        "classification": "not-verified",
+        "reason": "No operation-specific rendered or encoded burn-in readback fixture exists yet."
+      },
       "postconditions": [
-        "canonical compiler accepts the operation",
-        "approved draft remains undoable"
+        "Canonical compiler accepts a bounded caption burn-in proposal.",
+        "An approved draft remains undoable through the compound runner."
       ]
     },
     {
       "kind": "transition.addAtJunction",
+      "domain": "transitions",
       "status": "verified",
+      "statusReason": "The transition compiler accepts an allowlisted junction proposal; junction render and temporal readback remain incomplete parity work.",
+      "modelVisibility": "advertised",
+      "verificationScope": "bounded-proposal-path",
       "source": "apps/editor-web/src/joy-code-transition-operations.ts",
-      "tests": ["apps/editor-web/src/joy-code-transition-operations.test.ts"],
-      "surface": "transitions",
-      "preview": "compound-draft",
+      "unitEvidence": [
+        {
+          "path": "apps/editor-web/src/joy-code-transition-operations.test.ts",
+          "scope": "Allowlisted junction transition proposal compilation and constraint validation."
+        }
+      ],
+      "e2eEvidence": {
+        "classification": "shared-host-lifecycle",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared browser fixture proves the proposal envelope, not a transition-specific junction result."
+      },
+      "preview": {
+        "classification": "staged-draft-with-shared-renderer-ack",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared preview harness acknowledges a staged draft, not an operation-specific junction render."
+      },
+      "readback": {
+        "classification": "not-verified",
+        "reason": "No operation-specific temporal or rendered-frame transition readback fixture exists yet."
+      },
       "postconditions": [
-        "canonical compiler accepts the operation",
-        "approved draft remains undoable"
+        "Canonical compiler accepts an allowlisted junction transition proposal.",
+        "An approved draft remains undoable through the compound runner."
       ]
     },
     {
       "kind": "transition.remove",
+      "domain": "transitions",
       "status": "verified",
+      "statusReason": "The transition compiler accepts this bounded removal proposal; junction render and temporal readback remain incomplete parity work.",
+      "modelVisibility": "advertised",
+      "verificationScope": "bounded-proposal-path",
       "source": "apps/editor-web/src/joy-code-transition-operations.ts",
-      "tests": ["apps/editor-web/src/joy-code-transition-operations.test.ts"],
-      "surface": "transitions",
-      "preview": "compound-draft",
+      "unitEvidence": [
+        {
+          "path": "apps/editor-web/src/joy-code-transition-operations.test.ts",
+          "scope": "Transition removal proposal compilation and target validation."
+        }
+      ],
+      "e2eEvidence": {
+        "classification": "shared-host-lifecycle",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared browser fixture proves the proposal envelope, not a transition-specific removal result."
+      },
+      "preview": {
+        "classification": "staged-draft-with-shared-renderer-ack",
+        "evidence": ["tests/e2e/agent-live-preview.spec.ts"],
+        "reason": "The shared preview harness acknowledges a staged draft, not an operation-specific junction render."
+      },
+      "readback": {
+        "classification": "not-verified",
+        "reason": "No operation-specific temporal or rendered-frame transition readback fixture exists yet."
+      },
       "postconditions": [
-        "canonical compiler accepts the operation",
-        "approved draft remains undoable"
+        "Canonical compiler accepts a bounded transition removal proposal.",
+        "An approved draft remains undoable through the compound runner."
       ]
     }
   ],
@@ -201,62 +542,116 @@
     {
       "id": "timeline",
       "status": "verified",
-      "reason": "Bounded typed proposal operations compile into the canonical compound draft."
+      "verificationScope": "bounded-proposal-path",
+      "operationKinds": [
+        "timeline.trimClip",
+        "timeline.splitClip",
+        "timeline.moveClip",
+        "timeline.removeClip"
+      ],
+      "reason": "Only the listed typed timeline proposal operations are model-visible. Tracks, nested media, speed/reverse, linked state, audio preservation, and operation-specific readback are not verified parity."
+    },
+    {
+      "id": "assets",
+      "status": "verified",
+      "verificationScope": "bounded-proposal-path",
+      "operationKinds": ["timeline.insertExistingAsset"],
+      "reason": "Only trusted-descriptor asset placement is model-visible. Unit evidence covers audio/visual lane compatibility; import/relink and browser/renderer output readback remain unfinished."
     },
     {
       "id": "text",
       "status": "verified",
-      "reason": "Bounded template/content operations compile into the canonical compound draft."
+      "verificationScope": "bounded-proposal-path",
+      "operationKinds": ["text.insertTemplate", "text.setContent", "text.setTemplate"],
+      "reason": "Only typed text template/content proposals are model-visible. Rich text, RTL/font styling, and pixel readback remain unfinished."
+    },
+    {
+      "id": "motion",
+      "status": "verified",
+      "verificationScope": "bounded-proposal-path",
+      "operationKinds": ["motion.setKeyframe", "motion.removeKeyframe"],
+      "reason": "Only typed keyframe add/remove proposals are model-visible. Curve editing, evaluator output, and rendered-frame readback remain unfinished."
     },
     {
       "id": "captions",
       "status": "verified",
-      "reason": "Bounded segment/template/burn-in operations compile into the canonical compound draft."
-    },
-    {
-      "id": "motion-keyframes",
-      "status": "verified",
-      "reason": "Typed keyframe add/remove operations compile through the property boundary."
+      "verificationScope": "bounded-proposal-path",
+      "operationKinds": [
+        "caption.setSegmentText",
+        "caption.setSegmentTiming",
+        "caption.setTemplate",
+        "caption.setBurnIn"
+      ],
+      "reason": "Only typed caption proposals are model-visible. Caption layout and rendered/encoded output readback remain unfinished."
     },
     {
       "id": "transitions",
       "status": "verified",
-      "reason": "Allowlisted junction transitions compile through the canonical compound draft."
+      "verificationScope": "bounded-proposal-path",
+      "operationKinds": ["transition.addAtJunction", "transition.remove"],
+      "reason": "Only allowlisted transition proposals are model-visible. Junction rendering and temporal output readback remain unfinished."
     },
     {
       "id": "effects",
       "status": "unsupported",
-      "reason": "No model-visible typed effect operation, target resolver, or end-to-end host acceptance exists yet."
+      "verificationScope": "not-implemented",
+      "operationKinds": [],
+      "reason": "No model-visible typed effect catalog, target resolver, canonical adapter, and readback evidence exists."
     },
     {
       "id": "audio",
       "status": "unsupported",
-      "reason": "No model-visible typed audio operation, target resolver, or end-to-end host acceptance exists yet."
+      "verificationScope": "not-implemented",
+      "operationKinds": [],
+      "reason": "No model-visible typed audio lane, bus, automation, processing, decoded-mix, or commit evidence exists."
     },
     {
       "id": "color",
       "status": "unsupported",
-      "reason": "No model-visible typed color operation, target resolver, or end-to-end host acceptance exists yet."
+      "verificationScope": "not-implemented",
+      "operationKinds": [],
+      "reason": "No model-visible typed color operation, evaluator/renderer adapter, and frame readback evidence exists."
     },
     {
       "id": "camera",
       "status": "unsupported",
-      "reason": "No model-visible typed camera operation, target resolver, or end-to-end host acceptance exists yet."
+      "verificationScope": "not-implemented",
+      "operationKinds": [],
+      "reason": "No model-visible typed camera operation, persisted scene adapter, and staged render evidence exists."
     },
     {
       "id": "scene-3d",
       "status": "unsupported",
-      "reason": "No model-visible typed 3D operation, target resolver, or end-to-end host acceptance exists yet."
+      "verificationScope": "not-implemented",
+      "operationKinds": [],
+      "reason": "No model-visible typed 3D scene/node/material operation, persisted adapter, and staged render evidence exists."
+    },
+    {
+      "id": "html-scene",
+      "status": "unsupported",
+      "verificationScope": "not-implemented",
+      "operationKinds": [],
+      "reason": "No safe model-visible typed HTML-scene manifest operation and staged render evidence exists."
+    },
+    {
+      "id": "workflows-jobs",
+      "status": "unsupported",
+      "verificationScope": "not-implemented",
+      "operationKinds": [],
+      "reason": "No model-visible job prepare/submit/status/cancel/reconcile operation with provenance and external-output evidence exists."
     },
     {
       "id": "export",
       "status": "unsupported",
-      "reason": "Export remains a user-controlled delivery action; no agent export authority is advertised."
+      "verificationScope": "not-implemented",
+      "operationKinds": [],
+      "reason": "Export remains user-controlled; no agent export authority is advertised."
     }
   ],
   "limitations": [
-    "Verified means the bounded proposal compiler path has source and focused test evidence; it does not claim full-editor parity.",
-    "The current Worker still exposes only context read and proposal validation tools. Applying an edit remains separately approval-gated.",
-    "Rendered-frame, encoded-output, audio, observation, and project-scoped lifecycle verification remain open milestones."
+    "Verified rows are bounded proposal-path capabilities, not a claim of complete editor-domain parity.",
+    "The shared browser lifecycle evidence is intentionally classified as shared-host-lifecycle; it must be replaced by operation-specific E2E evidence before a row can advance beyond bounded-proposal-path.",
+    "Every currently advertised operation declares readback=not-verified. No row claims rendered-frame, encoded-output, decoded-audio, or external-job result verification.",
+    "The Worker exposes bounded context-read and proposal-validation tools. Applying a prepared edit remains separate, explicit, approval-gated host authority."
   ]
 }

@@ -77,6 +77,8 @@ test.describe('WP-30 animated timeline export', () => {
       const download: Download = await downloadPromise;
       const path = await download.path();
       expect(path).not.toBeNull();
+      await page.getByRole('button', { name: 'Recent processes' }).click();
+      await expect(page.getByText('Completed — final MP4 verified', { exact: true })).toBeVisible();
       const bytes = readFileSync(path!).byteLength;
       expect(bytes).toBeGreaterThan(0);
       const probe = JSON.parse(
