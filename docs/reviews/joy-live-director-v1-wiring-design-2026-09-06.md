@@ -78,17 +78,31 @@ runnable; `title-and-caption-polish` and `audio-balance` visible-unavailable
 until their capabilities are verified. Record this in the coverage ledger's
 `limitations`.
 
-## Files (implementation checklist for the next session)
+## Files (implementation checklist)
 
-- [ ] Create `apps/editor-web/src/joy-agent/creative-skill-host-adapter.ts` +
-      `.test.ts` — the adapter factory; unit-test each phase handler with a
-      scripted Worker/observation double and assert **no `apply`**, authority
-      re-checks, budget enforcement, and hostile-artifact rejection.
-- [ ] Create `apps/editor-web/src/joy-agent/creative-skill-runtime.ts` +
-      `.test.ts` — the verified-seam capability computation.
-- [ ] Modify `entry-points.ts` — add `listCreativeSkills(runtime)` and
-      `runCreativeSkill({ skillId, scope, host, adapter, signal })` that build
-      the runtime, construct the runner, and stream checkpoint events.
+- [x] `apps/editor-web/src/joy-agent/creative-skill-runtime.ts` + `.test.ts`
+      (5 tests) — the verified-seam → `CreativeSkillCapability[]` mapping and
+      `R1_EDITOR_CREATIVE_SKILL_SEAMS` (audio-mix / rtl-text = false).
+- [x] `apps/editor-web/src/joy-agent/creative-skill-host-adapter.ts` +
+      `.test.ts` (8 tests) — the single-use adapter that turns
+      `CreativeSkillHostPrimitives` into recipe checkpoints; asserts **no
+      `apply`/`commit`**, authority re-checks, per-recipe phase routing
+      (find-moment → moment+coverage; build-rough-cut → prepared-change +
+      preview; verify-deliverable → `DirectorVerificationReport`), block on
+      no-prepared-change / renderer-not-acknowledged, and hostile-text
+      rejection through the runner's artifact gate.
+- [x] `entry-points.ts` — `listCreativeSkills(seams?)` and
+      `runCreativeSkill({ skillId, scope, primitives, isAuthorityCurrent,
+    signal?, onEvent? })` (3 new tests in `entry-points.test.ts`). The
+      **`CreativeSkillHostPrimitives` are injected** by the caller so the real
+      host-wired implementation lives with the `App.tsx` object graph.
+- [ ] **Create the real `CreativeSkillHostPrimitives` from `App.tsx`'s graph** —
+      `readProjectContext` / `prepareChange` / `stagePreview` via a scoped
+      `runJoyAgentTask` tool-loop (`allowedToolNames` from the manifest,
+      recipe-owned prompt template, `maxRepairProposals` from the budget);
+      `observeSources` via `JoyAgentObservationHostBridge.tools`
+      (`describe` / `observe` / `coverage`); `verifyDeliverable` from the O6
+      `composition-observer` + `final-encoded-export-decoder` results.
 - [ ] Modify `AgentPanel.tsx` — a recipe picker in the existing single project
       conversation (not a new tab); disabled entries show `missingCapabilities`
       / `missingOperations`; run events feed the V2 activity strings.

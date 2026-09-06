@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import { JOY_AGENT_ENTRY_POINTS, runCreativeBriefTask, runJoyAgentTask } from './entry-points.js';
+import { createDirectorVerificationReport } from './director-verifier.js';
+import type { CreativeSkillHostPrimitives } from './creative-skill-host-adapter.js';
+import {
+  JOY_AGENT_ENTRY_POINTS,
+  listCreativeSkills,
+  runCreativeBriefTask,
+  runCreativeSkill,
+  runJoyAgentTask,
+} from './entry-points.js';
 import type { JoyAgentEngineClient, JoyAgentRunIterator } from './engine-client.js';
 import type { HostRpcMethods } from './host-rpc.js';
 import {
@@ -185,5 +193,88 @@ describe('JOY Agent entry points', () => {
         context: { projectId: 'project-1', revision: 'rev-1' },
       }),
     ).rejects.toMatchObject({ code: 'invalid-result' });
+  });
+
+  it('lists R1 recipes with honest availability from verified seams only', () => {
+    const byId = new Map(listCreativeSkills().map((entry) => [entry.skill.id, entry]));
+    expect(byId.get('build-rough-cut')?.available).toBe(true);
+    expect(byId.get('find-moment')?.available).toBe(true);
+    expect(byId.get('audio-balance')?.available).toBe(false);
+    expect(byId.get('title-and-caption-polish')?.available).toBe(false);
+    // With the observation bridge absent, source-observation recipes withhold.
+    const noBridge = new Map(
+      listCreativeSkills({
+        projectContext: true,
+        canonicalPrepare: true,
+        preview: true,
+        approval: true,
+        observationBridge: false,
+        transcriptEvidence: false,
+        audioAnalysis: false,
+        compositionCapture: true,
+        encodedOutputVerification: true,
+        audioMix: false,
+        rtlTextReadback: false,
+      }).map((entry) => [entry.skill.id, entry]),
+    );
+    expect(noBridge.get('build-rough-cut')?.available).toBe(false);
+    expect(noBridge.get('creative-brief')?.available).toBe(true);
+  });
+
+  it('runs a recipe through the shared runner with no apply and stops at ready-for-approval', async () => {
+    const events: string[] = [];
+    const primitives: CreativeSkillHostPrimitives = {
+      readProjectContext: vi.fn(async () => ({ summary: 'Read overview, tracks and clips.' })),
+      observeSources: vi.fn(async () => ({
+        evidenceIds: ['evidence-a'],
+        coverageSummary: 'Sampled 8 of 240 source frames.',
+        coverageComplete: false,
+      })),
+      prepareChange: vi.fn(async () => ({
+        kind: 'prepared' as const,
+        changeSetId: 'change-set-1',
+        operationDigest: 'a'.repeat(64),
+        operationCount: 2,
+        repairAttempts: 1,
+        summary: 'Prepared two timeline operations.',
+      })),
+      stagePreview: vi.fn(async () => ({
+        previewId: 'preview-1',
+        rendererAcknowledged: true,
+        summary: 'Before/after preview acknowledged.',
+      })),
+      verifyDeliverable: vi.fn(async () => ({
+        report: createDirectorVerificationReport({
+          projectId: 'project-1',
+          revision: 'revision-1',
+          checks: [
+            {
+              id: 'structural-1',
+              method: 'structural',
+              status: 'passed',
+              evidenceIds: ['evidence-a'],
+              summary: 'Project state matches.',
+            },
+          ],
+        }),
+        summary: 'Structural only.',
+      })),
+    };
+    const result = await runCreativeSkill({
+      skillId: 'build-rough-cut',
+      scope: { projectId: 'project-1', runId: 'run-1', epoch: 1, revision: 'revision-1' },
+      primitives,
+      isAuthorityCurrent: () => true,
+      onEvent: (e) => events.push(`${e.state}:${e.phase}`),
+    });
+    expect(result.kind).toBe('ready-for-approval');
+    expect(result.artifacts.map((a) => a.kind)).toEqual([
+      'context',
+      'evidence',
+      'prepared-change',
+      'preview',
+    ]);
+    expect(events).toContain('completed:preview');
+    expect(primitives.verifyDeliverable).not.toHaveBeenCalled();
   });
 });

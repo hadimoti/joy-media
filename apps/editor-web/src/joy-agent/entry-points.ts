@@ -1,5 +1,5 @@
-import type { CreativeBriefV1 } from '@joy-media/agent-tools';
-import { validateCreativeBrief } from '@joy-media/agent-tools';
+import type { CreativeBriefV1, CreativeSkillAvailability } from '@joy-media/agent-tools';
+import { resolveCreativeSkillAvailability, validateCreativeBrief } from '@joy-media/agent-tools';
 import type { JoyAgentEngineClient, JoyAgentRunHost } from './engine-client.js';
 import type {
   JoyAgentPreparedProposal,
@@ -7,6 +7,21 @@ import type {
   JoyAgentSafeEvent,
   JoyAgentTaskKind,
 } from './protocol.js';
+import {
+  createEditorCreativeSkillRuntime,
+  R1_EDITOR_CREATIVE_SKILL_SEAMS,
+  type CreativeSkillSeamAvailability,
+} from './creative-skill-runtime.js';
+import {
+  createCreativeSkillHostAdapter,
+  type CreativeSkillHostPrimitives,
+} from './creative-skill-host-adapter.js';
+import {
+  createCreativeSkillRunner,
+  type CreativeSkillCheckpointEvent,
+  type CreativeSkillRunResult,
+  type CreativeSkillRunScope,
+} from './skill-runner.js';
 
 /** Product-owned map: every model-assisted surface uses the same Worker client. */
 export const JOY_AGENT_ENTRY_POINTS = [
@@ -279,4 +294,50 @@ export async function runCreativeBriefTask(input: {
       'JOY Creative Brief no longer matches this project',
     );
   return brief;
+}
+
+/**
+ * List the R1 creative recipes with their availability. Availability is
+ * computed from verified editor seams only, so an unwired adapter keeps its
+ * recipe visible-but-unavailable rather than being a false promise.
+ */
+export function listCreativeSkills(
+  seams: CreativeSkillSeamAvailability = R1_EDITOR_CREATIVE_SKILL_SEAMS,
+): readonly CreativeSkillAvailability[] {
+  return resolveCreativeSkillAvailability(createEditorCreativeSkillRuntime(seams));
+}
+
+export interface RunCreativeSkillInput {
+  readonly skillId: string;
+  readonly scope: CreativeSkillRunScope;
+  /**
+   * Trusted host primitives. Each delegates to the same one-Worker /
+   * observation-bridge / canonical-compiler / staged-preview / verifier
+   * infrastructure the direct tool-loop uses; there is no commit primitive.
+   */
+  readonly primitives: CreativeSkillHostPrimitives;
+  /** Re-checked around every async checkpoint effect. */
+  readonly isAuthorityCurrent: (scope: CreativeSkillRunScope) => boolean;
+  readonly seams?: CreativeSkillSeamAvailability;
+  readonly signal?: AbortSignal;
+  readonly onEvent?: (event: CreativeSkillCheckpointEvent) => void;
+}
+
+/**
+ * Run one creative recipe through the shared skill runner. The runner has no
+ * `apply`: an edit recipe finishes `ready-for-approval` and the existing
+ * approval envelope remains the only write path.
+ */
+export function runCreativeSkill(input: RunCreativeSkillInput): Promise<CreativeSkillRunResult> {
+  const runner = createCreativeSkillRunner({
+    runtime: createEditorCreativeSkillRuntime(input.seams ?? R1_EDITOR_CREATIVE_SKILL_SEAMS),
+    adapter: createCreativeSkillHostAdapter(input.primitives),
+    isAuthorityCurrent: input.isAuthorityCurrent,
+  });
+  return runner.run({
+    skillId: input.skillId,
+    scope: input.scope,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
+  });
 }
