@@ -1,9 +1,23 @@
 # JOY Live Director — R1 landing status
 
 Recorded: 2026-09-06 (Claude implementer, continuation session)
-Branch: `codex/joy-live-director`
+Branch: `codex/joy-live-director` — **pushed to `github`** (`git push github codex/joy-live-director`, 2026-09-06)
 Implementation base: `6a6a336c` (live foundation release)
 Landed range: `131e409c..` (this session's commits on top of Codex's `92018ca9`)
+
+## Milestone-gate status (F/O/V groups landed + green)
+
+| Gate                                                                              | Status                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| local `pnpm` (typecheck/lint/format/test/build/worker-verifier/coverage-verifier) | ✅ green                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| push branch to `github`                                                           | ✅ done                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| CodeRabbit                                                                        | ✅ 2 rounds, clean (15 → 3 → resolved/documented)                                                                                                                                                                                                                                                                                                                                                                                   |
+| self-hosted CI lanes                                                              | **blocked** — `joy-media-ci-linux` + `joy-media-ci-acceptance` are online, but `joy-media-ci-worker` (Windows Worker + EXE lane) is **offline** and `joy-media-ci-windows` (legacy, `ci.yml` target) is offline. `release-candidate.yml` (`workflow_dispatch` on a 40-char `candidate_sha`) is the exact-candidate gate and needs the worker runner + a _final_ R1 candidate. Owner action: bring the Windows worker runner online. |
+| independent Opus "Astra" review                                                   | not started — deferred until R1 is candidate-complete (V1 finish + V3 + ledger) so the review isn't spent on an incomplete milestone                                                                                                                                                                                                                                                                                                |
+
+Owner instruction 2026-09-06: "use opus review and confirmations not me" — the
+Opus `APPROVE_FOR_DEPLOY` is the approval authority for push / CodeRabbit / CI /
+candidate bundling; a live production deploy stays a guarded, surfaced step.
 
 ## What landed this session
 
