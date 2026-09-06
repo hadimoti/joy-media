@@ -93,7 +93,7 @@ until their capabilities are verified. Record this in the coverage ledger's
       rejection through the runner's artifact gate.
 - [x] `entry-points.ts` — `listCreativeSkills(seams?)` and
       `runCreativeSkill({ skillId, scope, primitives, isAuthorityCurrent,
-  signal?, onEvent? })` (3 new tests in `entry-points.test.ts`). The
+signal?, onEvent? })` (3 new tests in `entry-points.test.ts`). The
       **`CreativeSkillHostPrimitives` are injected** by the caller so the real
       host-wired implementation lives with the `App.tsx` object graph.
 - [ ] **Create the real `CreativeSkillHostPrimitives` from `App.tsx`'s graph** —
