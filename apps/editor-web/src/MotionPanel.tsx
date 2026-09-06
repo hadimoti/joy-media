@@ -606,12 +606,19 @@ function HtmlSceneLiveThumb({
       root.dataset.liveProgress = progress.toFixed(3);
     };
 
-    void host.ready.then(() => {
-      if (cancelled) return;
-      listeners.add(onProgress);
-      onProgress(0.12);
-      setReady(true);
-    });
+    void host.ready.then(
+      () => {
+        if (cancelled) return;
+        listeners.add(onProgress);
+        onProgress(0.12);
+        setReady(true);
+      },
+      () => {
+        // The effect cleanup destroys the host, which rejects `ready`. That is
+        // an expected teardown, so swallow it here rather than let the derived
+        // promise surface as an unhandled rejection.
+      },
+    );
 
     return () => {
       cancelled = true;

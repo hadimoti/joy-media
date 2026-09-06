@@ -277,15 +277,22 @@ function TemplatePreviewThumb({
       rafRef.current = requestAnimationFrame(loop);
     };
 
-    void host.ready.then(() => {
-      if (cancelled) {
-        host.destroy();
-        return;
-      }
-      hostRef.current = host;
-      start = performance.now();
-      rafRef.current = requestAnimationFrame(loop);
-    });
+    void host.ready.then(
+      () => {
+        if (cancelled) {
+          host.destroy();
+          return;
+        }
+        hostRef.current = host;
+        start = performance.now();
+        rafRef.current = requestAnimationFrame(loop);
+      },
+      () => {
+        // The effect cleanup destroys the host, which rejects `ready`. That is
+        // an expected teardown, so swallow it here rather than let the derived
+        // promise surface as an unhandled rejection.
+      },
+    );
 
     return () => {
       cancelled = true;
