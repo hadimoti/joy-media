@@ -664,19 +664,22 @@ async function recordJourney(
   await page.getByRole('article', { name: 'Inspector', exact: true }).waitFor();
   const joyCode = page.locator('.panel-tab[aria-label="Joy Code"]').first();
   await joyCode.click();
-  const joyCodeBrief = page
-    .getByRole('tablist', { name: 'Joy Code sections', exact: true })
-    // PanelShell keeps the short visual label while exposing the migration
-    // alias as the accessible name. Target the contract users and assistive
-    // technology receive, not the painted text node.
-    .getByRole('tab', { name: 'Creative Brief', exact: true });
-  await joyCodeBrief.click();
   await page.getByRole('article', { name: 'Joy Code', exact: true }).waitFor();
+  // Creative Brief is a composer capability inside the Joy Code panel, not a
+  // section tab. Toggling it reveals the embedded brief surface (its consent
+  // gate, until a BYOK model is connected).
+  await page.getByRole('button', { name: 'Creative Brief', exact: true }).click();
   await page.locator('.creative-brief-panel').waitFor();
-  const joyCode3d = page
-    .getByRole('tablist', { name: 'Joy Code sections', exact: true })
-    .getByRole('tab', { name: '3d', exact: true });
-  await joyCode3d.click();
+  // The 3D scene workspace is its own on-demand Dockview panel. Reveal it from
+  // the View menu when its dock tab is not already mounted.
+  let scene3dTab = page.locator('.panel-tab[aria-label="3D Scene"]').first();
+  if (!(await scene3dTab.isVisible())) {
+    await page.getByRole('button', { name: 'View', exact: true }).click();
+    await page.getByRole('menuitem', { name: '3D Scene', exact: true }).click();
+    scene3dTab = page.locator('.panel-tab[aria-label="3D Scene"]').first();
+  }
+  await scene3dTab.click();
+  await page.getByRole('article', { name: '3D Scene', exact: true }).waitFor();
   await page.locator('.joy-code-3d').waitFor();
 
   const projectId = await readControlPlaneProjectId(page);
