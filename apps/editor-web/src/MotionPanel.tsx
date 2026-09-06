@@ -55,7 +55,7 @@ import {
 } from './icons.js';
 import { GraphEditor } from './GraphEditor.js';
 import { focusCoverTransform, getFirstPartySceneThumbUrl } from './html-scene-thumbs.js';
-import { EditorPanelContext } from './App.js';
+import { EditorPanelContext } from './editor-panel-context.js';
 import { JOY_COLORS } from './theme.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';

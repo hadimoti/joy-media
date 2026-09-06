@@ -17,7 +17,7 @@ import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { LayersIcon, PlusIcon, StarFilledIcon, StarIcon } from './icons.js';
 import { effectCategoryIconUrl } from './effect-category-icons.js';
-import { EditorPanelContext } from './App.js';
+import { EditorPanelContext } from './editor-panel-context.js';
 import { EffectPreviewMedia } from './EffectPreviewMedia.js';
 import {
   createEffectRecipe,

@@ -6,6 +6,20 @@ export interface AgentTimelineTrackLayout {
   readonly topPx: number;
   readonly heightPx: number;
 }
+
+/**
+ * Whether this mounted overlay can put at least one staged change on screen.
+ * Each diff either has visible ghost geometry or a visible bounded summary
+ * fallback (for example, a proposed new track that does not exist in the
+ * canonical layout yet). The caller still guards the root composition.
+ */
+export function hasRenderableAgentTimelineOverlay(
+  diffs: readonly AgentTimelineDiff[],
+  _tracks: readonly AgentTimelineTrackLayout[],
+): boolean {
+  return diffs.length > 0;
+}
+
 export function AgentTimelineOverlay({
   diffs,
   viewport,
@@ -27,6 +41,18 @@ export function AgentTimelineOverlay({
   return (
     <div className="agent-timeline-overlay" aria-label="Agent staged timeline changes">
       {diffs.flatMap((diff, index) => {
+        const summary = () => (
+          <span
+            className={`agent-timeline-diff agent-timeline-diff--${diff.kind}`}
+            key={`${diff.kind}-${diff.kind === 'add' || diff.kind === 'remove' ? diff.clip.id : diff.clipId}-${index}`}
+            data-clip-id={
+              diff.kind === 'add' || diff.kind === 'remove' ? diff.clip.id : diff.clipId
+            }
+            role="note"
+          >
+            {diffSummary(diff)}
+          </span>
+        );
         const rects =
           diff.kind === 'move'
             ? [
@@ -65,21 +91,8 @@ export function AgentTimelineOverlay({
                       },
                     ]
                   : [];
-        if (rects.length === 0) {
-          return [
-            <span
-              className={`agent-timeline-diff agent-timeline-diff--${diff.kind}`}
-              key={`${diff.kind}-${diff.kind === 'add' || diff.kind === 'remove' ? diff.clip.id : diff.clipId}-${index}`}
-              data-clip-id={
-                diff.kind === 'add' || diff.kind === 'remove' ? diff.clip.id : diff.clipId
-              }
-              role="note"
-            >
-              {diffSummary(diff)}
-            </span>,
-          ];
-        }
-        return rects.flatMap(({ rect, ghost }, rectIndex) =>
+        if (rects.length === 0) return [summary()];
+        const ghosts = rects.flatMap(({ rect, ghost }, rectIndex) =>
           rect === undefined
             ? []
             : [
@@ -102,6 +115,7 @@ export function AgentTimelineOverlay({
                 </span>,
               ],
         );
+        return ghosts.length > 0 ? ghosts : [summary()];
       })}
     </div>
   );

@@ -3,7 +3,11 @@ import type { AgentExecutionMode, ToolCapability } from '@joy-media/agent-tools'
 import { ALL_TOOL_CAPABILITIES } from '@joy-media/agent-tools';
 import type { AgentPolicyPreferences } from './agent-policy-settings.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
-import type { ByokSessionStatus } from './joy-agent/protocol.js';
+import type {
+  ByokSessionStatus,
+  JoyAgentMediaCapabilityReport,
+  JoyAgentMediaCapabilityState,
+} from './joy-agent/protocol.js';
 import { CloseIcon } from './icons.js';
 
 type AgentSettingsNotice = {
@@ -36,6 +40,8 @@ export function JoyAgentSettingsDialog({
   readonly onClose: () => void;
 }) {
   const keyRef = useRef<HTMLInputElement>(null);
+  const mountedRef = useRef(true);
+  const mediaProbeEpochRef = useRef(0);
   const [provider, setProvider] = useState<'openrouter' | 'openai-compatible'>(
     status?.provider ?? 'openrouter',
   );
@@ -47,6 +53,18 @@ export function JoyAgentSettingsDialog({
   const [working, setWorking] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState(status);
   const [connectionNotice, setConnectionNotice] = useState<AgentSettingsNotice | undefined>();
+  const [mediaCapabilities, setMediaCapabilities] = useState<
+    JoyAgentMediaCapabilityReport | undefined
+  >(() => matchingMediaCapabilityReport(engineClient.getMediaCapabilities(), status?.modelId));
+  const [mediaProbeWorking, setMediaProbeWorking] = useState(false);
+  const [mediaProbeNotice, setMediaProbeNotice] = useState<AgentSettingsNotice | undefined>();
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      mediaProbeEpochRef.current += 1;
+    };
+  }, []);
   useEffect(() => {
     setConnectionStatus(status);
     if (status === undefined) return;
@@ -54,7 +72,22 @@ export function JoyAgentSettingsDialog({
     setModelId(status.modelId || 'openrouter/auto');
   }, [status]);
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && onClose();
+    // Reading a previous redacted session result is intentionally passive. It
+    // never contacts a provider; only the explicit button below may probe.
+    setMediaCapabilities(
+      matchingMediaCapabilityReport(engineClient.getMediaCapabilities(), connectionStatus?.modelId),
+    );
+    setMediaProbeNotice(undefined);
+  }, [connectionStatus?.modelId, engineClient]);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      mediaProbeEpochRef.current += 1;
+      setMediaProbeWorking(false);
+      setMediaCapabilities(undefined);
+      setMediaProbeNotice(undefined);
+      onClose();
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
@@ -62,7 +95,18 @@ export function JoyAgentSettingsDialog({
     key: K,
     value: AgentPolicyPreferences[K],
   ) => onPolicyChange({ ...policy, [key]: value });
+  const invalidateMediaProbe = () => {
+    mediaProbeEpochRef.current += 1;
+    setMediaProbeWorking(false);
+    setMediaCapabilities(undefined);
+    setMediaProbeNotice(undefined);
+  };
+  const close = () => {
+    invalidateMediaProbe();
+    onClose();
+  };
   const setProviderKind = (next: 'openrouter' | 'openai-compatible') => {
+    invalidateMediaProbe();
     engineClient.clear();
     setConnectionStatus(undefined);
     setConnectionNotice(undefined);
@@ -73,6 +117,7 @@ export function JoyAgentSettingsDialog({
     setBaseUrl(next === 'openrouter' ? 'https://openrouter.ai/api/v1' : '');
   };
   const connect = async () => {
+    if (mediaProbeWorking) return;
     const key = keyRef.current?.value.trim() ?? '';
     const normalizedModelId = modelId.trim();
     const normalizedBaseUrl = baseUrl.trim();
@@ -88,6 +133,7 @@ export function JoyAgentSettingsDialog({
       onNotice?.(message, 'error');
       return;
     }
+    invalidateMediaProbe();
     setWorking(true);
     try {
       await engineClient.configure({
@@ -134,7 +180,47 @@ export function JoyAgentSettingsDialog({
       setWorking(false);
     }
   };
+  const canProbeMediaCapabilities =
+    connectionStatus?.capability === 'tool-loop' || connectionStatus?.capability === 'plan-only';
+  const probeMediaCapabilities = async () => {
+    if (!canProbeMediaCapabilities || working || mediaProbeWorking) return;
+    const configuredModelId = connectionStatus?.modelId;
+    if (configuredModelId === undefined) return;
+    const probeEpoch = mediaProbeEpochRef.current + 1;
+    mediaProbeEpochRef.current = probeEpoch;
+    setMediaProbeWorking(true);
+    setMediaProbeNotice(undefined);
+    try {
+      const report = safeMediaCapabilityReport(await engineClient.probeMediaCapabilities());
+      if (!mountedRef.current || probeEpoch !== mediaProbeEpochRef.current) return;
+      if (report === undefined || report.modelId !== configuredModelId) {
+        const message =
+          'Media capability check returned an invalid result. Reconnect the model and try again.';
+        setMediaCapabilities(undefined);
+        setMediaProbeNotice({ kind: 'error', message });
+        onNotice?.(message, 'error');
+        return;
+      }
+      setMediaCapabilities(report);
+      const message = `Media capability check complete for ${displayModelId(report.modelId)}.`;
+      setMediaProbeNotice({ kind: 'success', message });
+      onNotice?.(message, 'success');
+    } catch {
+      if (!mountedRef.current || probeEpoch !== mediaProbeEpochRef.current) return;
+      // Provider text is deliberately never shown here: it can contain an
+      // endpoint, credential echo, synthetic payload, or raw response body.
+      const message =
+        'Media capability check could not be completed. Reconnect the model and try again.';
+      setMediaProbeNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
+    } finally {
+      if (mountedRef.current && probeEpoch === mediaProbeEpochRef.current) {
+        setMediaProbeWorking(false);
+      }
+    }
+  };
   const clear = () => {
+    invalidateMediaProbe();
     engineClient.clear();
     setConnectionStatus(undefined);
     onStatusChange?.(undefined);
@@ -144,7 +230,7 @@ export function JoyAgentSettingsDialog({
     if (keyRef.current) keyRef.current.value = '';
   };
   return (
-    <div className="agent-settings-backdrop" role="presentation" onMouseDown={onClose}>
+    <div className="agent-settings-backdrop" role="presentation" onMouseDown={close}>
       <section
         className="agent-settings-dialog joy-agent-settings-dialog"
         role="dialog"
@@ -157,12 +243,7 @@ export function JoyAgentSettingsDialog({
             <p className="agent-settings-eyebrow">Editing intelligence</p>
             <h2 id="joy-agent-settings-title">JOY Agent Engine</h2>
           </div>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="Close settings"
-            onClick={onClose}
-          >
+          <button className="icon-button" type="button" aria-label="Close settings" onClick={close}>
             <CloseIcon />
           </button>
         </header>
@@ -211,6 +292,7 @@ export function JoyAgentSettingsDialog({
                   <select
                     value={provider}
                     onChange={(event) => setProviderKind(event.target.value as typeof provider)}
+                    disabled={working || mediaProbeWorking}
                   >
                     <option value="openrouter">OpenRouter</option>
                     <option value="openai-compatible">Custom OpenAI-compatible</option>
@@ -222,6 +304,7 @@ export function JoyAgentSettingsDialog({
                     value={modelId}
                     onChange={(event) => setModelId(event.target.value)}
                     placeholder="provider/model"
+                    disabled={working || mediaProbeWorking}
                   />
                 </label>
                 <label className="agent-settings-field-wide">
@@ -229,7 +312,7 @@ export function JoyAgentSettingsDialog({
                   <input
                     type="url"
                     value={baseUrl}
-                    disabled={provider === 'openrouter'}
+                    disabled={provider === 'openrouter' || working || mediaProbeWorking}
                     onChange={(event) => setBaseUrl(event.target.value)}
                     placeholder="https://provider.example/v1"
                   />
@@ -240,6 +323,7 @@ export function JoyAgentSettingsDialog({
                       type="checkbox"
                       checked={customDisclosure}
                       onChange={(event) => setCustomDisclosure(event.target.checked)}
+                      disabled={working || mediaProbeWorking}
                     />{' '}
                     I understand the custom provider receives the context I send
                   </label>
@@ -251,6 +335,7 @@ export function JoyAgentSettingsDialog({
                     type="password"
                     autoComplete="off"
                     placeholder="Entered once for this session"
+                    disabled={working || mediaProbeWorking}
                   />
                 </label>
               </div>
@@ -259,7 +344,7 @@ export function JoyAgentSettingsDialog({
                   type="button"
                   className="agent-settings-done"
                   onClick={() => void connect()}
-                  disabled={working}
+                  disabled={working || mediaProbeWorking}
                 >
                   {working
                     ? 'Connecting…'
@@ -292,6 +377,56 @@ export function JoyAgentSettingsDialog({
                   <span>{connectionNotice.message}</span>
                 </div>
               )}
+              <section className="agent-media-capability-probe" aria-label="Media capability check">
+                <div className="agent-settings-section-heading">
+                  <div>
+                    <span className="agent-settings-kicker">Optional capability check</span>
+                    <h3>Check media support</h3>
+                  </div>
+                  <span className="agent-settings-session-chip">Explicit only</span>
+                </div>
+                <p className="agent-settings-hint">
+                  This sends three tiny product-owned synthetic samples (image, audio, and video) to
+                  your configured provider. It never sends your project, owner, or uploaded media.
+                  Your provider may charge or log these requests.
+                </p>
+                <div className="agent-settings-actions">
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={() => void probeMediaCapabilities()}
+                    disabled={!canProbeMediaCapabilities || working || mediaProbeWorking}
+                  >
+                    {mediaProbeWorking ? 'Checking media support…' : 'Check media support'}
+                  </button>
+                </div>
+                {mediaCapabilities !== undefined && (
+                  <div className="agent-media-capability-result" role="status" aria-live="polite">
+                    <strong>Configured model: {displayModelId(mediaCapabilities.modelId)}</strong>
+                    <dl>
+                      <MediaCapabilityRow label="Image" state={mediaCapabilities.image} />
+                      <MediaCapabilityRow label="Audio" state={mediaCapabilities.audio} />
+                      <MediaCapabilityRow label="Video" state={mediaCapabilities.video} />
+                    </dl>
+                  </div>
+                )}
+                {mediaProbeNotice !== undefined && (
+                  <div
+                    className={`agent-settings-notice is-${mediaProbeNotice.kind}`}
+                    role={mediaProbeNotice.kind === 'error' ? 'alert' : 'status'}
+                    aria-live="polite"
+                  >
+                    <span className="agent-settings-notice-icon" aria-hidden="true">
+                      {mediaProbeNotice.kind === 'success'
+                        ? '✓'
+                        : mediaProbeNotice.kind === 'error'
+                          ? '!'
+                          : 'i'}
+                    </span>
+                    <span>{mediaProbeNotice.message}</span>
+                  </div>
+                )}
+              </section>
             </div>
           </section>
           <section>
@@ -407,11 +542,93 @@ export function JoyAgentSettingsDialog({
         </div>
         <footer>
           <span>Editing policy is saved in this browser. Connection details are session-only.</span>
-          <button type="button" className="agent-settings-done" onClick={onClose}>
+          <button type="button" className="agent-settings-done" onClick={close}>
             Done
           </button>
         </footer>
       </section>
     </div>
   );
+}
+
+function MediaCapabilityRow({
+  label,
+  state,
+}: {
+  readonly label: string;
+  readonly state: JoyAgentMediaCapabilityState;
+}) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd className={`is-${state}`}>{state === 'supported' ? 'Supported' : 'Unavailable'}</dd>
+    </div>
+  );
+}
+
+function safeMediaCapabilityReport(value: unknown): JoyAgentMediaCapabilityReport | undefined {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['modelId', 'image', 'audio', 'video', 'modalities'])
+  )
+    return undefined;
+  if (!isSafeModelId(value.modelId)) return undefined;
+  if (
+    !isCapabilityState(value.image) ||
+    !isCapabilityState(value.audio) ||
+    !isCapabilityState(value.video) ||
+    !Array.isArray(value.modalities)
+  )
+    return undefined;
+  const expected = ['image', 'audio', 'video'].filter(
+    (modality) => value[modality] === 'supported',
+  );
+  if (
+    value.modalities.length !== expected.length ||
+    value.modalities.some((modality, index) => modality !== expected[index])
+  )
+    return undefined;
+  return {
+    modelId: value.modelId,
+    image: value.image,
+    audio: value.audio,
+    video: value.video,
+    modalities: expected as JoyAgentMediaCapabilityReport['modalities'],
+  };
+}
+
+function matchingMediaCapabilityReport(
+  value: unknown,
+  configuredModelId: string | undefined,
+): JoyAgentMediaCapabilityReport | undefined {
+  const report = safeMediaCapabilityReport(value);
+  return report !== undefined && report.modelId === configuredModelId ? report : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && keys.every((key) => expected.includes(key));
+}
+
+function isSafeModelId(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 256 &&
+    !/(?:bearer\s+|sk-[A-Za-z0-9_-]{16,}|AIza[A-Za-z0-9_-]{20,}|https?:\/\/|blob:|data:|file:|opfs:|(?:[A-Za-z]:[\\/]|\\\\)[^\s]+)/i.test(
+      value,
+    )
+  );
+}
+
+function isCapabilityState(value: unknown): value is JoyAgentMediaCapabilityState {
+  return value === 'supported' || value === 'unavailable';
+}
+
+function displayModelId(modelId: string): string {
+  return modelId.length <= 96 ? modelId : `${modelId.slice(0, 93)}…`;
 }

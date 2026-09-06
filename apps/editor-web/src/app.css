@@ -1430,6 +1430,10 @@ main {
 .process-interrupted-retryable .process-dot {
   background: #d8a85c;
 }
+.process-verification-required .process-dot {
+  background: #c78cff;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #c78cff 18%, transparent);
+}
 .process-running .process-dot {
   background: var(--joy-accent);
   animation: process-pulse 1.2s ease-in-out infinite;
@@ -7473,6 +7477,63 @@ label {
   padding-inline-start: 16px;
   border-inline-start: 1px solid var(--joy-border-subtle);
 }
+.agent-media-capability-probe {
+  display: grid;
+  gap: 8px;
+  margin-top: 3px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--joy-accent) 24%, var(--joy-border-subtle));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--joy-accent) 4%, var(--joy-bg-inset));
+}
+.agent-media-capability-probe .agent-settings-actions {
+  margin-top: 0;
+}
+.agent-media-capability-result {
+  display: grid;
+  gap: 7px;
+  padding: 8px 9px;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-inset);
+}
+.agent-media-capability-result > strong {
+  overflow: hidden;
+  color: var(--joy-text-secondary);
+  font-size: 0.67rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-media-capability-result dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+.agent-media-capability-result dl > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 5px;
+  min-width: 0;
+}
+.agent-media-capability-result dt,
+.agent-media-capability-result dd {
+  margin: 0;
+  font-size: 0.62rem;
+}
+.agent-media-capability-result dt {
+  color: var(--joy-text-faint);
+}
+.agent-media-capability-result dd {
+  font-weight: 750;
+}
+.agent-media-capability-result dd.is-supported {
+  color: var(--joy-ok);
+}
+.agent-media-capability-result dd.is-unavailable {
+  color: var(--joy-text-muted);
+}
 .agent-settings-section-heading {
   display: flex;
   align-items: start;
@@ -7656,6 +7717,9 @@ label {
     padding-block-start: 14px;
     border-inline-start: 0;
     border-block-start: 1px solid var(--joy-border-subtle);
+  }
+  .agent-media-capability-result dl {
+    grid-template-columns: 1fr;
   }
   .agent-settings-permissions {
     grid-column: auto;

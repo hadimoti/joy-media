@@ -116,7 +116,7 @@ import {
 } from './timeline-marquee-selection.js';
 import { timelineGapsForClips, type TimelineGap } from './timeline-gaps.js';
 import { nextTimelineMarkerLabel } from './timeline-marker-id.js';
-import { AgentTimelineOverlay } from './AgentTimelineOverlay.js';
+import { AgentTimelineOverlay, hasRenderableAgentTimelineOverlay } from './AgentTimelineOverlay.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 import { diffAgentTimeline, type AgentPreviewTimeline } from './agent-timeline-preview.js';
 /** Drags snap to a 100 ms grid, matching the playhead slider's step. */
@@ -672,6 +672,8 @@ export function TimelinePanel({
   onPropertyDispatch,
   trackLabelColors,
   agentPreview,
+  agentPreviewSurfaceVisible = true,
+  onAgentPreviewRendered,
 }: {
   readonly project: SpikeProject;
   /** Durable clip presentation kinds from the paired creative project. */
@@ -735,8 +737,17 @@ export function TimelinePanel({
   readonly trackLabelColors?: Readonly<Record<string, TimelineTrackLabelColor | undefined>>;
   /** Revision-bound, non-canonical timeline projection from the JOY Agent. */
   readonly agentPreview?:
-    | { readonly canonical: AgentPreviewTimeline; readonly preview: AgentPreviewTimeline }
+    | {
+        readonly runId: string;
+        readonly bundleVersion: number;
+        readonly canonical: AgentPreviewTimeline;
+        readonly preview: AgentPreviewTimeline;
+      }
     | undefined;
+  /** Dockview confirms this mounted panel is actually visible to the owner. */
+  readonly agentPreviewSurfaceVisible?: boolean;
+  /** Called after this mounted timeline surface has committed an immutable preview bundle. */
+  readonly onAgentPreviewRendered?: (runId: string, bundleVersion: number) => void;
 }) {
   const [localTrackFlags, setLocalTrackFlags] = useState<readonly TimelineTrackView[]>([]);
   const [localActiveCompositionId, setLocalActiveCompositionId] = useState(
@@ -814,6 +825,22 @@ export function TimelinePanel({
     },
     [activeCompositionIdProp, onActiveCompositionChange, project.compositions],
   );
+
+  useEffect(() => {
+    if (agentPreview === undefined || activeCompositionId === project.rootCompositionId) return;
+    // Timeline preview data is root-composition scoped. Bring its concrete
+    // overlay into the user's current view instead of claiming readiness from
+    // a nested composition that cannot draw the staged geometry.
+    setCompositionPath([project.rootCompositionId]);
+    onClearSelection();
+    setActiveComposition(project.rootCompositionId);
+  }, [
+    activeCompositionId,
+    agentPreview,
+    onClearSelection,
+    project.rootCompositionId,
+    setActiveComposition,
+  ]);
 
   const openCompoundComposition = useCallback(
     (compositionId: string) => {
@@ -1536,6 +1563,28 @@ export function TimelinePanel({
       return layout;
     });
   }, [visible, visualRunwayNeeded]);
+  const agentPreviewActuallyRenderable = useMemo(
+    () =>
+      agentPreview !== undefined &&
+      agentPreviewSurfaceVisible &&
+      activeCompositionId === project.rootCompositionId &&
+      hasRenderableAgentTimelineOverlay(agentPreviewDiffs, agentTrackLayouts),
+    [
+      activeCompositionId,
+      agentPreview,
+      agentPreviewSurfaceVisible,
+      agentPreviewDiffs,
+      agentTrackLayouts,
+      project.rootCompositionId,
+    ],
+  );
+  useEffect(() => {
+    // This fires only after React committed an overlay with at least one
+    // concrete staged visual. It is observational: the callback cannot
+    // mutate the timeline or authorize the staged change.
+    if (agentPreview !== undefined && agentPreviewActuallyRenderable)
+      onAgentPreviewRendered?.(agentPreview.runId, agentPreview.bundleVersion);
+  }, [agentPreview, agentPreviewActuallyRenderable, onAgentPreviewRendered]);
   const handleRunwayDrop = useCallback(
     (
       asset: {

@@ -25,7 +25,7 @@ vi.mock('@joy-media/visual-effects', () => {
   };
 });
 
-vi.mock('./App.js', async () => {
+vi.mock('./editor-panel-context.js', async () => {
   const { createContext } = await import('react');
   return { EditorPanelContext: createContext(undefined) };
 });
