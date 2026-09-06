@@ -103,14 +103,38 @@ signal?, onEvent? })` (3 new tests in `entry-points.test.ts`). The
       `answer` on an edit recipe to `no-actionable-edit`, and rethrows a
       `failed` loop. `buildCreativeSkillToolAllowList` (manifest-derived) and
       the product-owned `RECIPE_PROMPTS` live here.
-- [ ] **Provide the concrete `CreativeSkillEditorPrimitiveDeps` from `App.tsx`** —
-      thin wrappers: `runScopedToolLoop` over `runJoyAgentTask` (map
-      `awaiting-approval`+proposal → `prepared`, `completed`+answer → `answer`,
-      `failed` → `failed`); `readProjectContext` over the host RPC;
-      `readObservationCoverage` over `JoyAgentObservationHostBridge.tools`
-      `evidence_coverage` for the run's last manifest; `confirmPreviewRendered`
-      over the existing renderer-ack signal; `verifyComposedAndEncoded` over
-      `composition-observer` + `final-encoded-export-decoder`.
+- [x] `entry-points.ts` `runScopedCreativeSkillToolLoop({ client, host, prompt,
+  baseRevision })` — wraps `runJoyAgentTask` and maps its terminal event to
+      `CreativeSkillScopedToolLoopResult` (3 tests). This is the
+      `runScopedToolLoop` dep.
+- [ ] **Provide the remaining concrete `CreativeSkillEditorPrimitiveDeps` from
+      `App.tsx`.** The blocker is that a recipe's `propose` must produce a
+      _staged, previewable_ change, and that machinery — the `validate_proposal`
+      RPC handler and the run-consumption loop — currently lives inside the
+      ~600-line `handleSubmit` closure in `AgentPanel.tsx`. The careful seam
+      extraction (with parity tests + a browser check that the direct
+      tool-loop path is unchanged):
+  - Extract `createJoyAgentEditRunController(deps)` from `handleSubmit`,
+    carrying: the `prepareProposal` closure (host-lease + revision + session
+    identity checks → `preparedChanges.stage` → `agentPreviewStore` populate),
+    the run iterator consumption (the `for await (const event of runIterator)`
+    body: proposal validation, `awaitingPreviewRender` renderer-ack gate,
+    lifecycle `acceptRunLifecycle` calls), and `revokeStagedChange` /
+    `terminalizeConnectionReset`. `deps` = `{ client, buildHost, preparedChanges,
+agentPreviewStore, runController, session/refs accessors, proposalTargetsRef,
+threadId, appendMessage }`.
+  - `handleSubmit` becomes a thin caller of that controller (parity: the
+    existing `agent-live-preview` / `agent-director-*` specs must stay green
+    unchanged).
+  - The recipe path then calls the same controller with a recipe-scoped host
+    (wrapped `observe` tool recording the manifest id via
+    `onObservationCompleted`) and the manifest-derived `allowedToolNames`.
+  - `readObservationCoverage` = `observationBridge.tools.coverage({ manifestId })`
+    for the recorded id; `confirmPreviewRendered` = read
+    `agentPreviewStore.getBundle()` + `isAgentPreviewBundleReady`;
+    `verifyComposedAndEncoded` = the O6 `composition-observer` +
+    `final-encoded-export-decoder` for `verify-deliverable` only, each absent
+    method an `unavailable` check.
 - [ ] Modify `AgentPanel.tsx` — a recipe picker in the existing single project
       conversation (not a new tab); disabled entries show `missingCapabilities`
       / `missingOperations`; run events feed the V2 activity strings.
