@@ -114,9 +114,11 @@ in the apply path, no renderer in `motion-core`.
    the normal approve path (Undo works) but is not yet re-openable — the v1→v3
    editor-document bridge (`project-package.ts` / `project-document-hydration.ts`
    still read `JoyProjectV1`) and `looks.prepareUpdate` are R2 follow-ups.
-4. **L3b rendered-frame capture.** `tests/e2e/living-looks-render.spec.ts`
-   (numeric-tolerance frame checks from a harness) + sanitized samples for the
-   scorecard.
+4. **L3b sample renders.** The numeric-tolerance harness landed as
+   `packs-render-fidelity.test.ts` (12 tests — compiled keyframes sampled back
+   through the renderer evaluator). What remains is presentational only: a few
+   sanitized sample renders attached to the scorecard for the owner's visual
+   read. Not a pipeline gate.
 
 ## Owner-gated (NOT self-certifiable)
 

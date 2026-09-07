@@ -177,9 +177,16 @@ a date, and notes. R2 does not ship a pack whose line still reads `PENDING`.
 | music-pulse       | PENDING |      |       |
 | persian-editorial | PENDING |      |       |
 
-## Rendered-sample capture
+## Render fidelity
 
-`tests/e2e/living-looks-render.spec.ts` (rendered-frame numeric-tolerance checks,
-3 frames × portrait + landscape per pack, driven from a test harness rather than
-the finished panel) is the remaining L3b task and will attach sanitized sample
-renders here when it lands.
+`packages/motion-core/src/looks/packs/packs-render-fidelity.test.ts` (12 tests,
+6 packs × portrait + landscape) is the numeric-tolerance harness the L3b plan
+called for, done deterministically without a browser: it compiles each pack,
+turns the `motion.setKeyframe` operations into curve keyframes, and asserts the
+renderer's own evaluator (`sampleCurve`) reproduces them — keyframe times inside
+the composition, exact sample-at-keyframe, no interpolation overshoot at the
+[0, 0.5, 1] fractions, and every pack driving ≥1 binding with real motion.
+
+The remaining L3b item is purely presentational: a handful of **sanitized sample
+renders** attached here for the owner's visual read during the taste review.
+That artifact does not gate the automated pipeline.
