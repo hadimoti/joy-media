@@ -34,6 +34,16 @@ export {
 export { validateLookDefinition, type LookDefinitionDiagnostic } from './validate.js';
 export { compileLook, mapLookControl } from './compile.js';
 export {
+  LOOK_AUDIO_REACTIVE_VERSION,
+  LOOK_AUDIO_MIN_CONFIDENCE,
+  bakeAudioReactive,
+  type LookAudioEnvelopeSample,
+  type LookAudioEnvelope,
+  type BakeAudioReactiveInput,
+  type BakedKey,
+  type BakeAudioReactiveResult,
+} from './audio-reactive.js';
+export {
   BUILT_IN_LOOK_PACKS,
   editorialClean,
   productPrecision,
