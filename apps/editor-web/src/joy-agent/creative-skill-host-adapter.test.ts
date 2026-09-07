@@ -164,8 +164,7 @@ describe('creative skill host adapter', () => {
       expect.objectContaining({
         skillId: 'watch-and-map',
         privacyRequirement: 'local-only',
-        maxObservationRequests: 2,
-        maxEvidenceItems: 128,
+        budget: { maxObservationRequests: 2, maxEvidenceItems: 128 },
       }),
     );
   });

@@ -25,14 +25,15 @@ async function openRecipes(page: Page): Promise<void> {
 }
 
 /**
- * R1 V1 recipe-layer browser coverage. This exercises the real ESM modules
- * (`entry-points`, `creative-skill-runtime`, `creative-skill-host-adapter`,
- * `creative-skill-editor-primitives`) in a real browser with scripted host
- * primitives -- proving the stack loads and runs outside Node, keeps its
- * no-apply contract, computes honest availability, and rejects hostile
- * artifact text -- plus the AgentPanel recipe picker rendering the same honest
- * availability. A model-driven recipe run-through is covered once the fake
- * provider fixture supports the advisory tool-loop shape.
+ * R1 V1 recipe-layer browser coverage:
+ *  - the real ESM modules (`entry-points`, `creative-skill-runtime`,
+ *    `creative-skill-host-adapter`, `creative-skill-editor-primitives`) with
+ *    scripted host primitives -- the stack loads outside Node, keeps its
+ *    no-apply contract, computes honest availability, rejects hostile text;
+ *  - the AgentPanel Recipes picker rendering the same honest availability;
+ *  - two model-driven run-throughs on the real Worker: `build-rough-cut`
+ *    (staged change -> Approve trims the clip -> one Undo) and
+ *    `verify-deliverable` (advisory -> honest R1 report, no approval card).
  */
 async function openHarness(page: Page): Promise<void> {
   await page.route('**/__joy-director-skills-harness', async (route) => {

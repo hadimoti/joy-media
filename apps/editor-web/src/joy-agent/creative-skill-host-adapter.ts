@@ -32,8 +32,18 @@ export interface CreativeSkillHostPrimitives {
     readonly signal: AbortSignal;
     readonly privacyRequirement: CreativeSkillManifest['privacyRequirement'];
     readonly evidenceRequirements: readonly string[];
-    readonly maxObservationRequests: number;
-    readonly maxEvidenceItems: number;
+    /**
+     * The manifest observation budget, forwarded for the implementation's
+     * information. R1's editor implementation does not re-enforce a
+     * per-checkpoint request/evidence cap here: recipe observation is already
+     * bounded by the single scoped tool-loop's overall call budget, the O5
+     * consent envelope, and the run-budget. A per-checkpoint cap is an R2
+     * refinement.
+     */
+    readonly budget: {
+      readonly maxObservationRequests: number;
+      readonly maxEvidenceItems: number;
+    };
   }): Promise<{
     readonly evidenceIds: readonly string[];
     readonly coverageSummary: string;
@@ -144,8 +154,10 @@ export function createCreativeSkillHostAdapter(
         signal: input.signal,
         privacyRequirement: input.skill.privacyRequirement,
         evidenceRequirements: input.skill.evidenceRequirements,
-        maxObservationRequests: input.skill.budget.maxObservationRequests,
-        maxEvidenceItems: input.skill.budget.maxEvidenceItems,
+        budget: {
+          maxObservationRequests: input.skill.budget.maxObservationRequests,
+          maxEvidenceItems: input.skill.budget.maxEvidenceItems,
+        },
       });
       lastCoverageSummary = result.coverageSummary;
       lastCoverageComplete = result.coverageComplete;

@@ -65,9 +65,17 @@ two-writer & project switch (`prepared-change-store` authority tests,
 - **native video says unknown / provider coverage**: the source decoder never
   claims model comprehension — `JoyAgentEvidenceCoverageSummary.modelComprehensionGuaranteed`
   is the literal type `false` (`tool-bridge.ts`).
-- **exhausted budget says partial**: `evidence status` is `'partial'` when
-  `budget.maxObservationRequests` / `maxEvidenceItems` is hit
-  (`observation-service.test.ts`).
+- **exhausted budget says partial**: when a bounded observation request hits
+  its per-request frame / metadata-byte cap the adapter returns
+  `status: 'partial'` (`apps/editor-web/src/joy-agent/observation-tool-adapter.test.ts`
+  ~lines 221 and 276), and `hasExhaustiveInputCoverage` refuses to label
+  `partial` (or provider / cancelled / zero-frame) work exhaustive
+  (`packages/media-core/src/observation-coverage.test.ts:47`). Separately, when
+  the observation _service_ exhausts its own working-set budget it fails closed
+  with `ObservationServiceError('budget-exceeded')` rather than silently
+  degrading. (The recipe manifest's `budget.maxObservationRequests` /
+  `maxEvidenceItems` are not re-enforced by the R1 editor `observeSources`
+  implementation — see the coverage-ledger `limitations`.)
 - **missing modalities never say watched / heard**:
   `render-verification` returns `'unavailable'` checks with stated uncertainty
   rather than a passed audio/rendered check when the evidence is absent

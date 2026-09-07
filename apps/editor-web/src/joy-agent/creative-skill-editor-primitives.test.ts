@@ -91,8 +91,10 @@ describe('createCreativeSkillEditorPrimitives', () => {
       signal: new AbortController().signal,
       privacyRequirement: skill.privacyRequirement,
       evidenceRequirements: skill.evidenceRequirements,
-      maxObservationRequests: skill.budget.maxObservationRequests,
-      maxEvidenceItems: skill.budget.maxEvidenceItems,
+      budget: {
+        maxObservationRequests: skill.budget.maxObservationRequests,
+        maxEvidenceItems: skill.budget.maxEvidenceItems,
+      },
     });
     await primitives.prepareChange({
       skillId: skill.id,
