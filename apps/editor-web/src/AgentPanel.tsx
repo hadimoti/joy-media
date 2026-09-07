@@ -2033,8 +2033,8 @@ export function AgentPanel({
         )
         .join('\n');
       const staged = recipeStagedChangeSetRef.current;
-      if (result.kind === 'ready-for-approval' && staged !== undefined) {
-        const prepared = preparedChanges.getView(staged);
+      if (result.kind === 'ready-for-approval') {
+        const prepared = staged === undefined ? undefined : preparedChanges.getView(staged);
         if (prepared === undefined) {
           appendMessage(
             threadId,
@@ -2043,6 +2043,7 @@ export function AgentPanel({
           );
           cancelRunLifecycle(scope.runId, 'Recipe preview authority lost.');
           setAgentPhase('failed');
+          if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
           return;
         }
         acceptRunLifecycle(lifecycleRun, 'preview-ready', {
