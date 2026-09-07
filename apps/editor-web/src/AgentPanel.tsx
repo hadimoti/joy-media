@@ -2048,6 +2048,9 @@ export function AgentPanel({
           if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
           return;
         }
+        // Walk the lifecycle through its legal states so the approval UI sees
+        // `awaiting-approval` from a `preparing`/`preview-ready` origin.
+        acceptRunLifecycle(lifecycleRun, 'preparing', { display: 'Recipe prepared a change.' });
         acceptRunLifecycle(lifecycleRun, 'preview-ready', {
           display: 'Recipe preview rendered and ready for review.',
         });

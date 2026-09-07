@@ -163,15 +163,15 @@ isAuthorityCurrent })` composes primitives + `runCreativeSkill`.
       `runEditorCreativeSkill` → concrete primitives → advisory tool-loop
       (new `advisoryAnswer` fake-provider mode) → `verifyComposedAndEncoded` →
       the honest R1 report in the conversation, with no approval card.
-- [ ] **Edit-recipe run-through e2e (`build-rough-cut` approve + Undo)** — still
-      open: the Timeline Elements Showcase's human-readable track ids (`"Video 1"`)
-      are not valid model-plan identifiers, so a model `timeline.trimClip`
-      proposal against it is rejected before the staging handler. Needs a
-      video-bearing fixture project with token-safe clip/track ids (import a
-      generated fixture, or a dedicated showcase). The staged-change → approval
-      routing itself is unit-proven (`recipe-scoped-host.test.ts` drives a real
-      `validate_proposal`) and the direct-edit approve/Undo is covered by
-      `agent-live-preview` / `agent-director-lifecycle`.
+- [x] **Edit-recipe run-through e2e (`build-rough-cut` approve + Undo)** —
+      `agent-director-skills.spec.ts` "runs Build Rough Cut through the real
+      Worker": on `openReferenceWorkspace` (timeline = `buildReferenceSpikeProject`,
+      token-safe `track-0` / `intro` ids), a fake-provider `timeline.trimClip`
+      proposal stages a change, the recipe routes it into the existing approval
+      card, Approve trims the clip 10s→6s, and one Undo restores it. This also
+      caught a `runRecipe` lifecycle bug: `inspecting → preview-ready` is not a
+      legal transition, so the approval card stayed `data-agent-preview-ready="false"`
+      — fixed by walking `preparing → preview-ready → awaiting-approval`.
 - [ ] Update `docs/reviews/joy-live-director-coverage.json` `limitations` with
       the recipe availability matrix (already carries the V1 recipe note; refine
       once the run-through e2e lands).

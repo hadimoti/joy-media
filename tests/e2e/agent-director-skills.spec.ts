@@ -2,6 +2,22 @@ import { expect, test, type Page } from '@playwright/test';
 import { authenticate, openPanel, openReferenceWorkspace } from './wp29-r5-harness.js';
 import { configureJoyAgent, installFakeOpenAIProvider } from './fixtures/fake-openai-provider.js';
 
+const ROUGH_CUT_PROPOSAL = {
+  summary: 'Trim the intro clip for a tighter rough cut',
+  operations: [
+    {
+      id: 'trim-intro',
+      dependsOn: [],
+      kind: 'timeline.trimClip',
+      compositionId: 'root',
+      trackId: 'track-0',
+      clipId: 'intro',
+      newStartUs: 0,
+      newEndUs: 6_000_000,
+    },
+  ],
+} as const;
+
 async function openRecipes(page: Page): Promise<void> {
   await openPanel(page, 'Joy Code');
   await page.getByRole('button', { name: 'Recipes', exact: true }).click();
@@ -213,6 +229,38 @@ test.describe('JOY Live Director creative recipes', () => {
       await expect(row).toHaveClass(/is-unavailable/);
       await expect(row.getByRole('button', { name: new RegExp(`Run ${title}`) })).toBeDisabled();
     }
+  });
+
+  test('runs Build Rough Cut through the real Worker: staged change, approve, one Undo', async ({
+    page,
+  }) => {
+    await authenticate(page);
+    await openReferenceWorkspace(page);
+    await openPanel(page, 'Joy Code');
+    await installFakeOpenAIProvider(page, { proposal: ROUGH_CUT_PROPOSAL });
+    const dialog = await configureJoyAgent(page, 'JOY_E2E_RECIPE_KEY');
+    await dialog.getByRole('button', { name: 'Done' }).click();
+
+    const introClip = page.locator('.timeline-clip[data-clip-id="intro"]');
+    await expect(introClip).toBeVisible();
+    await expect(introClip).toHaveAttribute('title', /0\.0s–10\.0s/);
+
+    await openRecipes(page);
+    await page.getByRole('button', { name: 'Run Build Rough Cut', exact: true }).click();
+
+    const preview = page.getByRole('region', { name: 'JOY Agent live proposal' });
+    await expect(preview).toBeVisible({ timeout: 40_000 });
+    await expect(preview).toHaveAttribute('data-agent-preview-ready', 'true', { timeout: 20_000 });
+
+    // Canonical timeline is untouched until approval.
+    await expect(introClip).toHaveAttribute('title', /0\.0s–10\.0s/);
+    await preview.getByRole('button', { name: /Approve & apply/ }).click();
+    await expect(introClip).toHaveAttribute('title', /0\.0s–6\.0s/, { timeout: 20_000 });
+
+    const undo = page.getByRole('button', { name: 'Undo', exact: true });
+    await expect(undo).toBeEnabled();
+    await undo.click();
+    await expect(introClip).toHaveAttribute('title', /0\.0s–10\.0s/, { timeout: 20_000 });
   });
 
   test('runs Verify Deliverable through the real Worker and reports an honest R1 report', async ({
