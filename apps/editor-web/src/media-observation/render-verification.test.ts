@@ -200,6 +200,50 @@ describe('final encoded export verification', () => {
     expect(result).toEqual({ status: 'unavailable', code: 'decoder-unavailable' });
   });
 
+  const silentExpectation = (): FinalEncodedExportVerificationRequest['expected'] => {
+    const { audioCodec: _audioCodec, ...rest } = request().expected;
+    return { ...rest, audioStreamCount: 0, audioSyncPredicates: [] };
+  };
+
+  it('verifies a deliberately silent export against zero audio streams', async () => {
+    const silentRequest = request({ expected: silentExpectation() });
+    const decoder = actualDecoder(decoded({ audioStreams: [] }));
+
+    const result = await createFinalEncodedExportVerifier({ decoder }).verify(silentRequest);
+
+    expect(result).toMatchObject({
+      status: 'verified',
+      facts: { audioStreamCount: 0, videoStreamCount: 1 },
+    });
+    expect(decoder.decode).toHaveBeenCalledWith(
+      expect.objectContaining({ requestedAudioWindows: [] }),
+    );
+    expect(
+      (result as { checks: readonly { id: string }[] }).checks.map((entry) => entry.id),
+    ).not.toContain('audio-decode');
+  });
+
+  it('fails closed for a silent-export expectation when the decoded artifact still carries audio', async () => {
+    const silentRequest = request({ expected: silentExpectation() });
+    const decoder = actualDecoder(decoded());
+
+    const result = await createFinalEncodedExportVerifier({ decoder }).verify(silentRequest);
+
+    expect(result.status).toBe('failed');
+  });
+
+  it('rejects a zero-audio expectation that still declares an audio codec', async () => {
+    const contradictory = request({
+      expected: { ...request().expected, audioStreamCount: 0, audioSyncPredicates: [] },
+    });
+
+    await expect(
+      createFinalEncodedExportVerifier({
+        decoder: actualDecoder(decoded({ audioStreams: [] })),
+      }).verify(contradictory),
+    ).rejects.toThrow(/invalid/i);
+  });
+
   it('requires bounded RGBA and PCM evidence even when no subjective creative predicate exists', async () => {
     const withoutCreativePredicates = request({
       expected: {

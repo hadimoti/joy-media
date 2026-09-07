@@ -7,13 +7,12 @@
  * bounded final-artifact facts/pixels/audio samples, and exposes only safe
  * aggregate verification facts to callers.
  *
- * Scope: this verifier currently expects every JOY encoded export to carry at
- * least one video and one audio stream (`audioStreamCount` defaults to 1 and
- * cannot be 0). A fully silent / audio-free export therefore fails closed with
- * `audio-streams-mismatch`; that is a deliberate scope limit, not a decoder
- * defect. Supporting `audioStreamCount: 0` (skipping the audio window / decode
- * / codec / sync checks in that case) is tracked O6 follow-up in
- * docs/reviews/joy-live-director-r1-landing-2026-09-06.md.
+ * Scope: this verifier expects every JOY encoded export to carry at least one
+ * video stream. `audioStreamCount` defaults to 1; pass `audioStreamCount: 0`
+ * for a deliberately silent / audio-free export — the verifier then requires
+ * the decoded artifact to carry zero audio streams and skips every audio
+ * window / decode / codec / sync check. A `0` expectation must not also carry
+ * an `audioCodec` or any `audioSyncPredicates`.
  */
 
 export const FINAL_ENCODED_EXPORT_VERIFIER_VERSION =
@@ -632,7 +631,11 @@ function normalizeExpectation(
     (input.videoCodec !== undefined && !isSafeToken(input.videoCodec)) ||
     (input.audioCodec !== undefined && !isSafeToken(input.audioCodec)) ||
     (input.videoStreamCount !== undefined && !isBoundedStreamCount(input.videoStreamCount)) ||
-    (input.audioStreamCount !== undefined && !isBoundedStreamCount(input.audioStreamCount)) ||
+    (input.audioStreamCount !== undefined &&
+      !isBoundedNonNegativeStreamCount(input.audioStreamCount)) ||
+    (input.audioStreamCount === 0 &&
+      (input.audioCodec !== undefined ||
+        (Array.isArray(input.audioSyncPredicates) && input.audioSyncPredicates.length > 0))) ||
     (input.durationToleranceUs !== undefined &&
       !isNonNegativeSafeInteger(input.durationToleranceUs)) ||
     (input.videoPtsToleranceUs !== undefined &&
@@ -671,8 +674,12 @@ function normalizeExpectation(
   // Blob, then retain only aggregate facts in the receipt. These probes make
   // a damaged `mdat` or unavailable WebCodecs path fail closed without
   // pretending to make a subjective creative claim.
+  const audioStreamCount = input.audioStreamCount ?? 1;
   const requiredVideoDecodePtsUs = Object.freeze([expectedVideoPtsUs[0]!]);
-  const requiredAudioDecodeWindows = Object.freeze([createRequiredAudioDecodeWindow(durationUs)]);
+  const requiredAudioDecodeWindows =
+    audioStreamCount === 0
+      ? Object.freeze([])
+      : Object.freeze([createRequiredAudioDecodeWindow(durationUs)]);
   const requestedPixelPtsUs = Object.freeze(
     [
       ...new Set([
@@ -695,7 +702,7 @@ function normalizeExpectation(
     ...(input.videoCodec === undefined ? {} : { videoCodec: input.videoCodec.toLowerCase() }),
     ...(input.audioCodec === undefined ? {} : { audioCodec: input.audioCodec.toLowerCase() }),
     videoStreamCount: input.videoStreamCount ?? 1,
-    audioStreamCount: input.audioStreamCount ?? 1,
+    audioStreamCount,
     durationToleranceUs: input.durationToleranceUs ?? 0,
     videoPtsToleranceUs: input.videoPtsToleranceUs ?? 0,
     visualPredicates,
@@ -1156,25 +1163,33 @@ function verifyDecodedFinalExport(
   if (decoded.videoStreams.length !== expected.videoStreamCount || decoded.videoStreams.length < 1)
     return failed('video-streams-mismatch');
   checks.push(check('video-streams', 'video-streams'));
-  if (decoded.audioStreams.length !== expected.audioStreamCount || decoded.audioStreams.length < 1)
+  if (decoded.audioStreams.length !== expected.audioStreamCount)
     return failed('audio-streams-mismatch');
   checks.push(check('audio-streams', 'audio-streams'));
 
+  // A silent export is verified against zero audio streams; every audio window,
+  // codec, decode-sample and sync check below is skipped in that case.
+  const hasAudio = expected.audioStreamCount > 0;
   const video = decoded.videoStreams[0]!;
-  const audio = decoded.audioStreams[0]!;
+  const audio = hasAudio ? decoded.audioStreams[0]! : undefined;
   if (video.width !== expected.width || video.height !== expected.height)
     return failed('dimensions-mismatch');
   checks.push(check('dimensions', 'dimensions'));
   if (
     !withinTolerance(decoded.durationUs, expected.durationUs, expected.durationToleranceUs) ||
     !withinTolerance(video.durationUs, expected.durationUs, expected.durationToleranceUs) ||
-    !withinTolerance(audio.durationUs, expected.durationUs, expected.durationToleranceUs)
+    (audio !== undefined &&
+      !withinTolerance(audio.durationUs, expected.durationUs, expected.durationToleranceUs))
   )
     return failed('duration-mismatch');
   checks.push(check('duration', 'duration'));
   if (expected.videoCodec !== undefined && video.codec !== expected.videoCodec)
     return failed('video-codec-mismatch');
-  if (expected.audioCodec !== undefined && audio.codec !== expected.audioCodec)
+  if (
+    expected.audioCodec !== undefined &&
+    audio !== undefined &&
+    audio.codec !== expected.audioCodec
+  )
     return failed('audio-codec-mismatch');
 
   if (video.presentationPtsComplete !== true) return failed('video-pts-incomplete');
@@ -1191,11 +1206,13 @@ function verifyDecodedFinalExport(
   }
   checks.push(check('decoded-video-sample', 'video-decode'));
 
-  for (const window of expected.requiredAudioDecodeWindows) {
-    if (!hasDecodedAudioEvidence(audio, window))
-      return failed('missing-decoded-audio', 'decoded-audio-sample');
+  if (audio !== undefined) {
+    for (const window of expected.requiredAudioDecodeWindows) {
+      if (!hasDecodedAudioEvidence(audio, window))
+        return failed('missing-decoded-audio', 'decoded-audio-sample');
+    }
+    checks.push(check('decoded-audio-sample', 'audio-decode'));
   }
-  checks.push(check('decoded-audio-sample', 'audio-decode'));
 
   for (const predicate of expected.visualPredicates) {
     const frame = findFrameForPts(video.frames, predicate.ptsUs, expected.videoPtsToleranceUs);
@@ -1211,10 +1228,12 @@ function verifyDecodedFinalExport(
     checks.push(check(predicate.id, 'black-frame'));
   }
 
-  for (const predicate of expected.audioSyncPredicates) {
-    if (!matchesAudioPeakSync(audio, predicate))
-      return failed('audio-sync-predicate-failed', predicate.id);
-    checks.push(check(predicate.id, 'audio-sync'));
+  if (audio !== undefined) {
+    for (const predicate of expected.audioSyncPredicates) {
+      if (!matchesAudioPeakSync(audio, predicate))
+        return failed('audio-sync-predicate-failed', predicate.id);
+      checks.push(check(predicate.id, 'audio-sync'));
+    }
   }
 
   return Object.freeze({
@@ -1433,6 +1452,10 @@ function isNonNegativeSafeInteger(value: unknown): value is number {
 
 function isBoundedStreamCount(value: unknown): value is number {
   return isPositiveSafeInteger(value) && value <= MAX_STREAMS;
+}
+
+function isBoundedNonNegativeStreamCount(value: unknown): value is number {
+  return isNonNegativeSafeInteger(value) && value <= MAX_STREAMS;
 }
 
 function boundedPositiveSafeInteger(value: unknown, maximum: number): number {

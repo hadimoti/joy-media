@@ -193,9 +193,12 @@ cancellation, and no preview revival after reload.
    `composition-observer`, `render-verification` and
    `final-encoded-export-decoder` are built, unit- and E2E-tested, and the
    encoded-export decoder gates export completion, but no ledger row claims
-   `readback: rendered-output`. `render-verification` also does not yet accept
-   `audioStreamCount: 0` — a fully silent export fails closed with
-   `audio-streams-mismatch` (documented as a scope limit in the module).
+   `readback: rendered-output`. **RESOLVED:** `render-verification` now accepts
+   `audioStreamCount: 0` — a deliberately silent export verifies against zero
+   audio streams and skips every audio window/decode/codec/sync check; a `0`
+   expectation carrying an `audioCodec` or `audioSyncPredicates` is rejected as
+   `invalid-request`, and a decoded artifact that still carries audio fails
+   closed (3 regressions in `render-verification.test.ts`).
 4. **V3 acceptance demonstration** (r1.md V3): the scripted end-to-end
    showcase — find the single-frame flash in exact mode, build a rough cut
    from observed source ranges, refine a Persian title over two turns,
