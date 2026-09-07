@@ -1,0 +1,348 @@
+name: r2-candidate
+
+# GitHub-hosted release-candidate gate for JOY Live Director R2 ("Living Looks").
+#
+# Deliberately hosted, not self-hosted: the owner must be able to power the
+# workshop PC down while the gate runs. It mirrors the lane shape of
+# `release-candidate.yml` (validate -> verify -> worker -> acceptance ->
+# real-service acceptance + source-bound release gate), every job checks out the
+# exact immutable CANDIDATE_SHA, and every lane runs twice.
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Full 40-character commit SHA to verify (must already be pushed to this repository)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: r2-candidate-${{ inputs.candidate_sha }}
+  cancel-in-progress: false
+
+env:
+  CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+  NODE_VERSION: '22'
+
+jobs:
+  validate-candidate:
+    name: validate-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Validate immutable candidate input
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          resolved_sha="$(git rev-parse HEAD)"
+          [[ "$resolved_sha" == "$CANDIDATE_SHA" ]] || { echo 'candidate_sha is not reachable from this repository' >&2; exit 1; }
+
+  verify:
+    name: verify (pass ${{ matrix.pass }})
+    runs-on: ubuntu-latest
+    needs: [validate-candidate]
+    strategy:
+      fail-fast: false
+      matrix:
+        pass: [1, 2]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Prepare toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          corepack enable
+          corepack prepare pnpm@11.15.0 --activate
+          node --version
+          pnpm --version
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
+      - run: pnpm install --frozen-lockfile
+      - name: Full source gate (typecheck + lint + format + unit + build + prod audit)
+        run: pnpm run verify:ci
+      - name: Verify no untracked residue
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)"
+
+  worker-package:
+    name: worker-package (pass ${{ matrix.pass }})
+    runs-on: windows-latest
+    needs: [validate-candidate]
+    strategy:
+      fail-fast: false
+      matrix:
+        pass: [1, 2]
+    timeout-minutes: 60
+    outputs:
+      evidence1: ${{ steps.publish-evidence.outputs.evidence1 }}
+      evidence2: ${{ steps.publish-evidence.outputs.evidence2 }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Prepare toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:CANDIDATE_SHA -notmatch '^[0-9a-f]{40}$') { throw 'candidate_sha must be a full lowercase commit SHA' }
+          corepack enable
+          corepack prepare pnpm@11.15.0 --activate
+          node --version
+          pnpm --version
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
+          ffmpeg -version | Select-Object -First 1
+          ffprobe -version | Select-Object -First 1
+      - run: pnpm install --frozen-lockfile
+      - name: Build Worker and run two exact self-test passes
+        id: build-worker
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          pnpm --filter @joy-media/worker build
+          $results = @{}
+          foreach ($pass in @('1', '2')) {
+            $output = Join-Path $env:RUNNER_TEMP ("joy-worker-" + $env:CANDIDATE_SHA + "-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + "-" + $pass + ".exe")
+            powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-worker-exe.ps1 -OutputPath $output
+            if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw "Worker executable was not produced for pass $pass." }
+            $result = & $output --joy-worker-self-test
+            if ($LASTEXITCODE -ne 0 -or $result -notmatch '"ok"\s*:\s*true') { throw "Worker executable self-test failed for pass $pass." }
+            $evidence = [ordered]@{
+              schemaVersion = 1
+              status        = 'verified'
+              execution     = 'github-hosted'
+              candidateSha  = $env:CANDIDATE_SHA
+              workflowRunId = $env:GITHUB_RUN_ID
+              attempt       = $env:GITHUB_RUN_ATTEMPT
+              lanePass      = [int]$pass
+              worker        = @{ selfTest = 'ok'; producer = 'build-worker-exe' }
+              verifiedAt    = (Get-Date).ToUniversalTime().ToString('o')
+            } | ConvertTo-Json -Depth 6
+            $results[$pass] = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($evidence))
+          }
+          Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'joy-media-windows-acceptance-outputs.json') -Value ($results | ConvertTo-Json) -Encoding utf8
+      - name: Publish Windows Worker acceptance outputs
+        id: publish-evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $results = Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'joy-media-windows-acceptance-outputs.json') -Raw | ConvertFrom-Json
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "evidence1=$($results.'1')$([Environment]::NewLine)")
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "evidence2=$($results.'2')$([Environment]::NewLine)")
+
+  acceptance:
+    name: acceptance ${{ matrix.profile }} (pass ${{ matrix.pass }})
+    runs-on: ubuntu-latest
+    needs: [validate-candidate, verify, worker-package]
+    strategy:
+      fail-fast: false
+      matrix:
+        pass: [1, 2]
+        profile:
+          [
+            desktop-primary,
+            desktop-compact,
+            desktop-minimum,
+            desktop-1280,
+            desktop-1440,
+            desktop-1581,
+            desktop-1920,
+          ]
+    timeout-minutes: 75
+    env:
+      CI: 'true'
+      PLAYWRIGHT_WORKERS: '1'
+      JOY_MEDIA_CI_ACCEPTANCE_PROFILE: fixture-only
+      PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/pw-report-${{ matrix.profile }}-${{ matrix.pass }}
+      PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/pw-results-${{ matrix.profile }}-${{ matrix.pass }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Prepare toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          corepack enable
+          corepack prepare pnpm@11.15.0 --activate
+          ffmpeg -version | head -n 1
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Disposable desktop acceptance journeys
+        run: pnpm exec playwright test tests/e2e --project=${{ matrix.profile }} --workers=1
+      - name: Verify acceptance teardown
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$PLAYWRIGHT_HTML_REPORT" "$PLAYWRIGHT_TEST_RESULTS_DIR"
+          test -z "$(git status --porcelain)"
+
+  real-service-acceptance:
+    name: real-service-acceptance (pass ${{ matrix.pass }})
+    runs-on: ubuntu-latest
+    needs: [validate-candidate, acceptance, worker-package]
+    strategy:
+      fail-fast: false
+      matrix:
+        pass: [1, 2]
+    timeout-minutes: 120
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: joy
+          POSTGRES_PASSWORD: joy
+          POSTGRES_DB: joymedia_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U joy -d joymedia_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      minio:
+        image: bitnami/minio:2025
+        env:
+          MINIO_ROOT_USER: joyminio
+          MINIO_ROOT_PASSWORD: joyminio-secret
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "curl -fsS http://localhost:9000/minio/health/ready || exit 1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      CI: 'true'
+      JOY_MEDIA_CI_ACCEPTANCE_PROFILE: real-services
+      JOY_MEDIA_CI_ACCEPTANCE_WORKER: disposable
+      JOY_MEDIA_CI_DATABASE_URL: postgresql://joy:joy@localhost:5432/joymedia_ci
+      JOY_MEDIA_CI_S3_ENDPOINT: http://joyminio:joyminio-secret@localhost:9000
+      JOY_MEDIA_CI_S3_ACCESS_KEY: joyminio
+      JOY_MEDIA_CI_S3_SECRET_KEY: joyminio-secret
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Prepare toolchain and MinIO client
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          corepack enable
+          corepack prepare pnpm@11.15.0 --activate
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
+          curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o "$RUNNER_TEMP/mc"
+          chmod +x "$RUNNER_TEMP/mc"
+          sudo mv "$RUNNER_TEMP/mc" /usr/local/bin/mc
+          mc --version
+          pg_isready -d "$JOY_MEDIA_CI_DATABASE_URL"
+          curl -fsS http://localhost:9000/minio/health/ready
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Bind Windows Worker evidence to the gate contract
+        env:
+          WINDOWS_EVIDENCE_1_B64: ${{ needs.worker-package.outputs.evidence1 }}
+          WINDOWS_EVIDENCE_2_B64: ${{ needs.worker-package.outputs.evidence2 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.pass }}" in
+            1) WINDOWS_EVIDENCE_B64="${WINDOWS_EVIDENCE_1_B64:-}" ;;
+            2) WINDOWS_EVIDENCE_B64="${WINDOWS_EVIDENCE_2_B64:-}" ;;
+            *) echo "unexpected real-service pass: ${{ matrix.pass }}" >&2; exit 1 ;;
+          esac
+          test -n "${WINDOWS_EVIDENCE_B64:-}" || { echo 'Windows Worker acceptance output is missing for this pass' >&2; exit 1; }
+          mkdir -p test-output/windows
+          printf '%s' "$WINDOWS_EVIDENCE_B64" | base64 --decode > test-output/windows/acceptance.json
+          test -s test-output/windows/acceptance.json
+      - name: Authenticated real-service desktop acceptance and evidence
+        run: |
+          set -euo pipefail
+          bash ops/self-hosted/linux-runner/real-service-acceptance.sh \
+            "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "${{ matrix.pass }}"
+          for required in \
+            test-output/browser/journeys.json \
+            test-output/release-performance/polling.json \
+            test-output/release-performance/effects-soak.json \
+            test-output/release-performance/timeline-integrity.json \
+            test-output/release-performance/editor.json \
+            test-output/delivery/result.json \
+            test-output/windows/acceptance.json \
+            test-output/operations/restore.json; do
+            test -s "$required" || { echo "required real-service evidence is missing: $required" >&2; exit 1; }
+          done
+      - name: Evaluate source-bound release gate
+        env:
+          JOY_RELEASE_OUTPUT: ${{ runner.temp }}/joy-media-release-gate-${{ matrix.pass }}
+        run: pnpm run release:gate
+      - name: Verify real-service acceptance teardown
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}"
+
+  r2-gate-summary:
+    name: r2-gate-summary
+    runs-on: ubuntu-latest
+    needs: [verify, worker-package, acceptance, real-service-acceptance]
+    if: always()
+    steps:
+      - name: Require every lane green
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail=0
+          for result in \
+            "verify=${{ needs.verify.result }}" \
+            "worker-package=${{ needs.worker-package.result }}" \
+            "acceptance=${{ needs.acceptance.result }}" \
+            "real-service-acceptance=${{ needs.real-service-acceptance.result }}"; do
+            name="${result%%=*}"
+            state="${result##*=}"
+            echo "$name: $state"
+            [[ "$state" == "success" ]] || fail=1
+          done
+          [[ "$fail" -eq 0 ]] || { echo 'one or more R2 gate lanes did not pass' >&2; exit 1; }
+          echo "R2 candidate $CANDIDATE_SHA: all lanes green x2"
