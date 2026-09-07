@@ -5,6 +5,30 @@ Branch: `codex/joy-live-director` — **pushed to `github`** (`git push github c
 Implementation base: `6a6a336c` (live foundation release)
 Landed range: `131e409c..` (this session's commits on top of Codex's `92018ca9`)
 
+## 2026-09-07 update — automated gate GREEN on `fd8497b0`
+
+- **CodeRabbit** — clean (per-commit across the whole branch + the full V1
+  delta `f7615432..fd8497b0`; last major finding — an aborted recipe run never
+  cancelling its Worker run — fixed in `fd8497b0`).
+- **local `pnpm -w run check`** — exit 0 on `fd8497b0` (typecheck + lint +
+  format + **vitest 4030 pass / 38 skip / 0 fail**).
+- **self-hosted `release-candidate.yml` run `34078187134`** on `fd8497b0` —
+  **`conclusion: success`, all 20 jobs green**: `validate-candidate`,
+  `windows-worker-clean` ×2, `linux-real-services` ×2, `acceptance` (7 desktop
+  profiles ×2), `real-service-acceptance` ×2.
+- **V1 recipe layer — host-wired + picker DONE** (see the V1 wiring design
+  doc): `createCreativeSkillEditorPrimitiveDeps` (all 5 primitives),
+  `createJoyAgentProposalStagingHandler` (shared with the direct edit path),
+  `runScopedCreativeSkillEditToolLoop`, `runEditorCreativeSkill`, and the Joy
+  Code **Recipes** picker (honest availability; a `ready-for-approval` staged
+  change routes into the existing approval UI).
+- **Still open for a full R1 candidate** (below, items 2–5): the coverage-ledger
+  per-op decision (a question FOR Astra), O6 `audioStreamCount: 0`, the V3
+  acceptance demonstration, a model-driven recipe run-through e2e (fixture
+  work), and the real BYOK model test (blocked on authorized credentials).
+- **Astra Opus review — still not started** (per plan: only on a
+  candidate-complete R1).
+
 ## Milestone-gate status (F/O/V groups landed + green)
 
 - **local `pnpm`** (typecheck / lint / format / test / build / worker-verifier
