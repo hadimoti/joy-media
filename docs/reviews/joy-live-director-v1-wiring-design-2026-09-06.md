@@ -123,28 +123,35 @@ baseRevision })` — wraps `runJoyAgentTask` and maps its terminal event to
       on cancel) and runs it through `runScopedCreativeSkillToolLoop`. Parity
       e2e stayed green (18–21 on desktop-primary). This is the `runScopedToolLoop`
       dep.
-- [ ] **Provide the remaining concrete `CreativeSkillEditorPrimitiveDeps` from
-      `App.tsx`** — a `createCreativeSkillEditorPrimitiveDeps(appGraph)` factory
-      holding per-run state so `runScopedToolLoop`
-      (= `runScopedCreativeSkillEditToolLoop` with the App graph:
-      `joyAgentEngineClientRef`, `appAgentPreviewStore`, the session-scoped
-      `preparedChanges`, `observationAdapterFactory`) and `readObservationCoverage`
-      share the observation manifest id (widen `recipe-scoped-host`'s
-      `onObservationCompleted` to forward `{observationId, manifestId}`).
-  - `readProjectContext` = a bounded session summary (tracks/clips/assets/objects),
-    no model call.
-  - `confirmPreviewRendered` = poll `appAgentPreviewStore.getBundle()` +
-    `isAgentPreviewBundleReady` for the prepared plan id, bounded wait.
-  - `readObservationCoverage` = `bridge.tools.coverage({ manifestId }, authority, signal)`
-    for the recorded id, mapped to `{coverageSummary, coverageComplete, evidenceIds, uncertainty}`.
-  - `verifyComposedAndEncoded` = for R1, `structural: passed` from the current
-    project-state readback + `rendered`/`audio-measured`/`encoded-output` as
-    `unavailable` with stated uncertainty (the O6 `composition-observer` /
-    `final-encoded-export-decoder` per-recipe wiring is open item #3). Keeps
-    `verify-deliverable` runnable and honest.
-- [ ] Modify `AgentPanel.tsx` — a recipe picker in the existing single project
-      conversation (not a new tab); disabled entries show `missingCapabilities`
-      / `missingOperations`; run events feed the V2 activity strings.
+- [x] **Concrete `CreativeSkillEditorPrimitiveDeps`** (`16d21c99`, `992f7a63`) —
+      `joy-agent/creative-skill-editor-deps.ts`
+      `createCreativeSkillEditorPrimitiveDeps(appGraph)` holds per-run
+      observation state keyed by `scope.runId`; `recipe-scoped-host`'s
+      `onObservationCompleted` widened to `{observationId, manifestId}`.
+  - `readProjectContext` = bounded session summary, no model call.
+  - `runScopedToolLoop` = `runScopedCreativeSkillEditToolLoop` with the graph.
+  - `readObservationCoverage` = `bridge.tools.coverage({ manifestId }, ...)`.
+  - `confirmPreviewRendered` = bounded wait on the shared preview store.
+  - `verifyComposedAndEncoded` = `validateSpikeProject` structural check +
+    `rendered`/`audio-measured`/`encoded-output` `unavailable` for R1.
+  - `entry-points.ts` `runEditorCreativeSkill({ skillId, scope, deps,
+isAuthorityCurrent })` composes primitives + `runCreativeSkill`.
+- [ ] **Wire it in `AgentPanel.tsx`** (the graph is already there — `joyAgentEngineClient`,
+      the session-scoped `preparedChanges`, `agentPreviewStore`, `proposalTargetsRef`,
+      `currentPreparedAuthority`, `latestSessionRef`, the observation-bridge
+      factory). Build `createCreativeSkillEditorPrimitiveDeps(...)` in a `useMemo`;
+      need two small helpers adapted from the `submitPrompt` closure:
+      `buildJoyAgentContextInput(session, selection)` (currently inline
+      `AgentPanel.tsx:1446-1513`) and `buildRecipeObservationBridge(scope, allowed)`
+      (adapted from `AgentPanel.tsx:1522-1584`), plus
+      `isAuthorityCurrent(scope)` = project id + revision unchanged and no newer
+      model run.
+- [ ] **Recipe picker in `AgentPanel.tsx`** — a list in the existing single
+      project conversation (not a new tab) from `listCreativeSkills()`; disabled
+      entries show `missingCapabilities` / `missingOperations`; clicking runs
+      `runEditorCreativeSkill` with `onEvent` feeding the V2 activity strings and
+      `appendMessage`. A `prepared-change` result flows into the same
+      `modelChangeSetId` preview-approval UI as a direct edit.
 - [ ] Modify `joy-code-conversation.ts` — a recipe run attaches to the same
       per-project conversation (Creative Brief especially: no separate history).
 - [ ] Create `tests/e2e/agent-director-skills.spec.ts` — on `desktop-primary`
