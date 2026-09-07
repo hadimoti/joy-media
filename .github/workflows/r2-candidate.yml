@@ -178,8 +178,6 @@ jobs:
       CI: 'true'
       PLAYWRIGHT_WORKERS: '1'
       JOY_MEDIA_CI_ACCEPTANCE_PROFILE: fixture-only
-      PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/pw-report-${{ matrix.profile }}-${{ matrix.pass }}
-      PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/pw-results-${{ matrix.profile }}-${{ matrix.pass }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -197,6 +195,10 @@ jobs:
           corepack enable
           corepack prepare pnpm@11.15.0 --activate
           ffmpeg -version | head -n 1
+          {
+            echo "PLAYWRIGHT_HTML_REPORT=$RUNNER_TEMP/pw-report-${{ matrix.profile }}-${{ matrix.pass }}"
+            echo "PLAYWRIGHT_TEST_RESULTS_DIR=$RUNNER_TEMP/pw-results-${{ matrix.profile }}-${{ matrix.pass }}"
+          } >> "$GITHUB_ENV"
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm exec playwright install --with-deps chromium
