@@ -8530,6 +8530,96 @@ label {
   flex: none;
   align-self: center;
 }
+
+/* ─── Living Looks (R2) ─── */
+.living-looks {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem 0.35rem 0;
+}
+.living-looks-intro {
+  margin: 0;
+  font-size: 0.78rem;
+  opacity: 0.75;
+}
+.living-looks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.living-look.is-unavailable {
+  opacity: 0.55;
+}
+.living-look-select {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.living-look-select[aria-pressed='true'] {
+  border-color: color-mix(in srgb, currentColor 40%, transparent);
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+.living-look-select > span {
+  font-size: 0.78rem;
+  opacity: 0.8;
+}
+.living-look-missing {
+  font-size: 0.72rem;
+  opacity: 0.7;
+}
+.living-look-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.living-look-editor fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 0.5rem;
+}
+.living-look-editor legend {
+  padding: 0 0.3rem;
+  font-size: 0.72rem;
+  opacity: 0.7;
+}
+.living-look-slot,
+.living-look-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+.living-look-slot select,
+.living-look-control select {
+  min-width: 8rem;
+}
+.living-look-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  opacity: 0.75;
+}
+.living-look-run {
+  align-self: flex-start;
+}
+
 .joy-code-creative-brief .creative-brief-panel {
   display: flex;
   min-width: 0;

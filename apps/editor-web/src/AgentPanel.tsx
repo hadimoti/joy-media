@@ -119,6 +119,15 @@ import { createCreativeSkillEditorPrimitiveDeps } from './joy-agent/creative-ski
 import type { CreativeSkillEditorPrimitiveDeps } from './joy-agent/creative-skill-editor-primitives.js';
 import { listCreativeSkills, runEditorCreativeSkill } from './joy-agent/entry-points.js';
 import type { CreativeSkillRunScope } from './joy-agent/skill-runner.js';
+import { BUILT_IN_LOOK_PACKS } from '@joy-media/motion-core';
+import { CONTENT_FONT_FAMILIES } from '@joy-media/project-schema';
+import { catalog as buildLookCatalog } from './joy-agent/look-operations.js';
+import { stageLookRun } from './joy-agent/look-run-host.js';
+import {
+  LivingLooksPanel,
+  type LivingLooksEntityOption,
+  type LivingLooksRunInput,
+} from './LivingLooksPanel.js';
 import {
   deriveJoyAgentConversationEntityReferences,
   resolveJoyAgentConversationEntityReference,
@@ -148,7 +157,7 @@ const CONVERSATION_TITLE_WORD =
   /\b(?:title|heading|text)\b|(?<![\p{L}\p{M}])(?:عنوان|تیتر|متن)(?![\p{L}\p{M}])/iu;
 const CONVERSATION_REFERENCE_AMBIGUOUS_MESSAGE =
   'JOY cannot safely determine which previous item to use. Select one item before continuing.';
-type ComposerCapability = 'edit' | 'creative-brief' | 'recipes';
+type ComposerCapability = 'edit' | 'creative-brief' | 'recipes' | 'looks';
 
 const LEGACY_JOY_AGENT_TOOL_NAMES = Object.freeze([
   'read_project_context',
@@ -480,6 +489,7 @@ export function AgentPanel({
   const [recipeRunningId, setRecipeRunningId] = useState<string | undefined>(undefined);
   const recipeRunScopeRef = useRef<CreativeSkillRunScope | undefined>(undefined);
   const recipeStagedChangeSetRef = useRef<string | undefined>(undefined);
+  const [lookRunningId, setLookRunningId] = useState<string | undefined>(undefined);
   // Production passes an App-owned controller so panel remounts cannot revive
   // authority or lose lifecycle evidence. Keep an isolated fallback for
   // focused component tests and older embedders that have not adopted F4 yet.
@@ -1097,6 +1107,37 @@ export function AgentPanel({
   );
 
   const creativeSkills = useMemo(() => listCreativeSkills(), []);
+  const lookCatalog = useMemo(
+    () =>
+      buildLookCatalog(BUILT_IN_LOOK_PACKS, {
+        availableFonts: CONTENT_FONT_FAMILIES as readonly string[],
+      }),
+    [],
+  );
+  const lookEntities = useMemo<readonly LivingLooksEntityOption[]>(() => {
+    const visual = Object.values(session.visualProject.visualObjects ?? {}).map((object) => ({
+      id: object.id,
+      label: `${object.id}${object.kind === 'text' && typeof object.text === 'string' ? ` — ${object.text.slice(0, 24)}` : ''}`,
+      kind: 'visual-object' as const,
+    }));
+    const captions: LivingLooksEntityOption[] = [];
+    for (const composition of Object.values(session.visualProject.compositions)) {
+      for (const track of composition.tracks) {
+        if (track.kind !== 'caption') continue;
+        for (const clip of track.clips) {
+          captions.push({ id: clip.id, label: `${clip.id} (caption)`, kind: 'caption-clip' });
+        }
+      }
+    }
+    return [...visual, ...captions];
+  }, [session.visualProject]);
+  const currentTextByObjectId = useMemo<Readonly<Record<string, string>>>(() => {
+    const map: Record<string, string> = {};
+    for (const object of Object.values(session.visualProject.visualObjects ?? {})) {
+      if (object.kind === 'text' && typeof object.text === 'string') map[object.id] = object.text;
+    }
+    return map;
+  }, [session.visualProject]);
   const isRecipeAuthorityCurrent = useCallback(
     (scope: CreativeSkillRunScope): boolean =>
       scope.runId === recipeRunScopeRef.current?.runId &&
@@ -2085,6 +2126,132 @@ export function AgentPanel({
     }
   }
 
+  async function runLook(request: LivingLooksRunInput): Promise<void> {
+    if (
+      lookRunningId !== undefined ||
+      recipeRunningId !== undefined ||
+      thinkingThreadId !== undefined ||
+      modelView !== undefined ||
+      pending !== undefined
+    )
+      return;
+    const definition = BUILT_IN_LOOK_PACKS.find((pack) => pack.id === request.definitionId);
+    const entry = lookCatalog.find((candidate) => candidate.definition.id === request.definitionId);
+    if (definition === undefined || entry === undefined || !entry.available) return;
+
+    const threadId = activeThread.id;
+    const scope: CreativeSkillRunScope = {
+      projectId: project.id,
+      runId: makeJoyCodeId('look'),
+      epoch: 1,
+      revision: session.projectRevisionId,
+    };
+    recipeRunScopeRef.current = scope;
+    recipeStagedChangeSetRef.current = undefined;
+    activeModelRunIdRef.current = scope.runId;
+    setLookRunningId(request.definitionId);
+    setAgentPhase('planning');
+    appendMessage(threadId, 'user', `Apply Look — ${definition.title}`);
+    const lifecycleRun = { runId: scope.runId, epoch: scope.epoch };
+
+    try {
+      beginRunLifecycle(lifecycleRun);
+      const rootComposition =
+        session.visualProject.compositions[session.visualProject.rootCompositionId];
+      const result = await stageLookRun(
+        {
+          getSession: () => latestSessionRef.current,
+          latestSessionRef,
+          preparedChanges,
+          agentPreviewStore,
+          proposalTargetsRef,
+          currentPreparedAuthority,
+          isAuthorityCurrent: isRecipeAuthorityCurrent,
+          onStaged: (staged, changeSetId) => {
+            if (recipeRunScopeRef.current?.runId === staged.runId)
+              recipeStagedChangeSetRef.current = changeSetId;
+          },
+        },
+        {
+          scope,
+          goal: `Apply the "${definition.title}" Look`,
+          currentTextByObjectId,
+          compileInput: {
+            definition,
+            definitionVersion: request.definitionVersion,
+            compositionId: session.visualProject.rootCompositionId,
+            compositionDurationUs: rootComposition?.durationUs ?? 30_000_000,
+            format:
+              (rootComposition?.height ?? 0) >= (rootComposition?.width ?? 0)
+                ? 'portrait'
+                : 'landscape',
+            entityBindings: request.entityBindings,
+            controlValues: request.controlValues,
+            overriddenBindingIds: [],
+            resolvedFonts: Object.fromEntries(
+              (CONTENT_FONT_FAMILIES as readonly string[]).map((family) => [family, family]),
+            ),
+          },
+        },
+      );
+      if (recipeRunScopeRef.current?.runId !== scope.runId) return;
+
+      if (result.kind === 'blocked') {
+        appendMessage(
+          threadId,
+          'assistant',
+          `“${definition.title}” could not be prepared (${result.reason}). No edit was applied.${
+            result.diagnostics.length > 0 ? `\n${result.diagnostics.join('\n')}` : ''
+          }`,
+        );
+        cancelRunLifecycle(scope.runId, 'Look blocked.');
+        setAgentPhase('failed');
+        if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
+        return;
+      }
+
+      const prepared = preparedChanges.getView(result.changeSetId);
+      if (prepared === undefined) {
+        appendMessage(
+          threadId,
+          'assistant',
+          'The Look prepared a change but its preview authority was lost. Try again.',
+        );
+        cancelRunLifecycle(scope.runId, 'Look preview authority lost.');
+        setAgentPhase('failed');
+        if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
+        return;
+      }
+
+      acceptRunLifecycle(lifecycleRun, 'preparing', { display: 'Look prepared a change.' });
+      acceptRunLifecycle(lifecycleRun, 'preview-ready', {
+        display: 'Look preview rendered and ready for review.',
+      });
+      acceptRunLifecycle(lifecycleRun, 'awaiting-approval', {
+        display: 'Review the live preview before applying.',
+      });
+      setPreparedModelChange(prepared.changeSetId);
+      setAgentPhase('awaiting-approval');
+      appendMessage(
+        threadId,
+        'assistant',
+        `“${definition.title}” prepared a reversible change (${result.operationCount} operation(s), ${result.changedBindingIds.length} binding(s)). Review the live preview before applying.`,
+      );
+    } catch (error) {
+      if (recipeRunScopeRef.current?.runId !== scope.runId) return;
+      appendMessage(
+        threadId,
+        'assistant',
+        error instanceof Error ? error.message : 'The Look run failed safely.',
+      );
+      cancelRunLifecycle(scope.runId, 'Look run failed.');
+      setAgentPhase('failed');
+      if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
+    } finally {
+      setLookRunningId((current) => (current === request.definitionId ? undefined : current));
+    }
+  }
+
   function rejectModelDraft() {
     const prepared = modelView;
     if (prepared === undefined) return;
@@ -2520,6 +2687,17 @@ export function AgentPanel({
               </span>
               Recipes
             </button>
+            <button
+              type="button"
+              className={`joy-code-capability ${composerCapability === 'looks' ? 'is-active' : ''}`}
+              aria-pressed={composerCapability === 'looks'}
+              onClick={() => setComposerCapability('looks')}
+            >
+              <span className="joy-code-capability-spark" aria-hidden="true">
+                ◑
+              </span>
+              Looks
+            </button>
           </div>
           {creativeBriefContext !== undefined && (
             <section className="joy-code-brief-artifact" aria-label="Attached Creative Brief">
@@ -2594,6 +2772,14 @@ export function AgentPanel({
               })}
             </ul>
           </div>
+          <LivingLooksPanel
+            hidden={composerCapability !== 'looks'}
+            catalog={lookCatalog}
+            entities={lookEntities}
+            runningLookId={lookRunningId}
+            busy={liveAgentBusy || recipeRunningId !== undefined}
+            onRun={(request) => void runLook(request)}
+          />
           <div
             className="joy-code-creative-brief"
             aria-label="Creative Brief capability"
