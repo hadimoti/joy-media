@@ -390,6 +390,17 @@ export async function runScopedCreativeSkillToolLoop(input: {
   readonly onRunStart?: (runId: string) => void;
   readonly signal?: AbortSignal;
 }): Promise<CreativeSkillScopedToolLoopResult> {
+  // The Worker event iterator has no cancel input; aborting the recipe run
+  // must reach the Worker through an explicit cancel on its captured run id.
+  let workerRunId: string | undefined;
+  const abort = (): void => {
+    if (workerRunId !== undefined) void input.client.cancel(workerRunId);
+  };
+  if (input.signal !== undefined) {
+    if (input.signal.aborted)
+      return Promise.resolve({ kind: 'failed', message: 'The recipe run was cancelled.' });
+    input.signal.addEventListener('abort', abort, { once: true });
+  }
   try {
     const event = await runJoyAgentTask({
       client: input.client,
@@ -398,7 +409,10 @@ export async function runScopedCreativeSkillToolLoop(input: {
       prompt: input.prompt,
       baseRevision: input.baseRevision,
       ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
-      ...(input.onRunStart === undefined ? {} : { onRunStart: input.onRunStart }),
+      onRunStart: (runId) => {
+        workerRunId = runId;
+        input.onRunStart?.(runId);
+      },
     });
     if (event.phase === 'awaiting-approval' && event.proposal !== undefined) {
       return {
@@ -426,5 +440,7 @@ export async function runScopedCreativeSkillToolLoop(input: {
       kind: 'failed',
       message: error instanceof Error ? error.message.slice(0, 480) : 'The recipe run failed.',
     };
+  } finally {
+    input.signal?.removeEventListener('abort', abort);
   }
 }

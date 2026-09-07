@@ -2014,6 +2014,7 @@ export function AgentPanel({
         );
         cancelRunLifecycle(scope.runId, 'Recipe unavailable.');
         setAgentPhase('cancelled');
+        if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
         return;
       }
       if (result.kind === 'blocked') {
@@ -2024,6 +2025,7 @@ export function AgentPanel({
         );
         cancelRunLifecycle(scope.runId, 'Recipe blocked.');
         setAgentPhase('failed');
+        if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
         return;
       }
       const artifactLines = result.artifacts

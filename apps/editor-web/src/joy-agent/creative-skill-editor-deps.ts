@@ -88,6 +88,7 @@ async function waitForPreviewAck(
     return bundle?.runId === planId && isAgentPreviewBundleReady(bundle);
   };
   if (ready()) return true;
+  if (signal.aborted) return false;
   return new Promise<boolean>((resolve) => {
     const finish = (value: boolean): void => {
       clearTimeout(timer);
