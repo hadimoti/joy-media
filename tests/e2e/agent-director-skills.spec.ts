@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { authenticate, openPanel, openReferenceWorkspace } from './wp29-r5-harness.js';
 
 /**
  * R1 V1 recipe-layer browser coverage. This exercises the real ESM modules
@@ -6,8 +7,9 @@ import { expect, test, type Page } from '@playwright/test';
  * `creative-skill-editor-primitives`) in a real browser with scripted host
  * primitives -- proving the stack loads and runs outside Node, keeps its
  * no-apply contract, computes honest availability, and rejects hostile
- * artifact text. The concrete `App.tsx`-wired primitives + the AgentPanel
- * picker are covered by their own follow-up specs.
+ * artifact text -- plus the AgentPanel recipe picker rendering the same honest
+ * availability. A model-driven recipe run-through is covered once the fake
+ * provider fixture supports the advisory tool-loop shape.
  */
 async function openHarness(page: Page): Promise<void> {
   await page.route('**/__joy-director-skills-harness', async (route) => {
@@ -183,5 +185,26 @@ test.describe('JOY Live Director creative recipes', () => {
     expect(result.unavailable).toBe('unavailable');
     expect(result.hostile).toBe('blocked');
     expect(result.hostileReason).toBe('invalid-artifact');
+  });
+
+  test('the Joy Code recipe picker renders the same honest availability matrix', async ({
+    page,
+  }) => {
+    await authenticate(page);
+    await openReferenceWorkspace(page);
+    await openPanel(page, 'Joy Code');
+    await page.getByRole('button', { name: 'Recipes', exact: true }).click();
+
+    const rows = page.locator('.joy-code-recipes-list .joy-code-recipe');
+    await expect(rows).toHaveCount(8);
+
+    for (const title of ['Watch and Map', 'Find Moment', 'Build Rough Cut', 'Verify Deliverable']) {
+      await expect(rows.filter({ hasText: title }).first()).not.toHaveClass(/is-unavailable/);
+    }
+    for (const title of ['Audio Balance', 'Title and Caption Polish']) {
+      const row = rows.filter({ hasText: title }).first();
+      await expect(row).toHaveClass(/is-unavailable/);
+      await expect(row.getByRole('button', { name: new RegExp(`Run ${title}`) })).toBeDisabled();
+    }
   });
 });
