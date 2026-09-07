@@ -136,34 +136,37 @@ baseRevision })` — wraps `runJoyAgentTask` and maps its terminal event to
     `rendered`/`audio-measured`/`encoded-output` `unavailable` for R1.
   - `entry-points.ts` `runEditorCreativeSkill({ skillId, scope, deps,
 isAuthorityCurrent })` composes primitives + `runCreativeSkill`.
-- [ ] **Wire it in `AgentPanel.tsx`** (the graph is already there — `joyAgentEngineClient`,
-      the session-scoped `preparedChanges`, `agentPreviewStore`, `proposalTargetsRef`,
-      `currentPreparedAuthority`, `latestSessionRef`, the observation-bridge
-      factory). Build `createCreativeSkillEditorPrimitiveDeps(...)` in a `useMemo`;
-      need two small helpers adapted from the `submitPrompt` closure:
-      `buildJoyAgentContextInput(session, selection)` (currently inline
-      `AgentPanel.tsx:1446-1513`) and `buildRecipeObservationBridge(scope, allowed)`
-      (adapted from `AgentPanel.tsx:1522-1584`), plus
-      `isAuthorityCurrent(scope)` = project id + revision unchanged and no newer
-      model run.
-- [ ] **Recipe picker in `AgentPanel.tsx`** — a list in the existing single
-      project conversation (not a new tab) from `listCreativeSkills()`; disabled
-      entries show `missingCapabilities` / `missingOperations`; clicking runs
-      `runEditorCreativeSkill` with `onEvent` feeding the V2 activity strings and
-      `appendMessage`. A `prepared-change` result flows into the same
-      `modelChangeSetId` preview-approval UI as a direct edit.
-- [ ] Modify `joy-code-conversation.ts` — a recipe run attaches to the same
-      per-project conversation (Creative Brief especially: no separate history).
-- [ ] Create `tests/e2e/agent-director-skills.spec.ts` — on `desktop-primary`
-      with the real Worker: run `find-moment` on `single-frame-flash-vfr` and
-      assert the cited interval; run `build-rough-cut` and assert a prepared
-      change that only commits after approval and reverses with one Undo; run
-      `verify-deliverable` and assert the `DirectorVerificationReport`
-      distinguishes rendered vs model-reviewed; assert an unavailable recipe
-      cannot be started; assert hostile OCR/transcript instruction text in an
-      artifact is rejected.
+- [x] **Fence the recipe observation bridge to its Worker run** (`9ba36632`) —
+      `runScopedCreativeSkillToolLoop` forwards `onRunStart`; `recipe-scoped-host`
+      captures the Worker run id and builds the recipe bridge via the App-owned
+      `observationAdapterFactory` with a `currentAuthority` bound to that exact
+      run. Deps gained `observationAdapterFactory` + `getModelId` +
+      `getPromptPolicyDigest` (replacing the opaque `buildObservationBridge`).
+- [x] **Extract `buildJoyAgentContextInput`** (`01ec7cd2`) —
+      `joy-agent/context-input.ts`; `submitPrompt` and the recipe deps both call it.
+- [x] **Wire it in `AgentPanel.tsx` + recipe picker** (`ef26f25c`, `9d268bf9`) —
+      a third composer capability "Recipes" lists `listCreativeSkills()` with
+      honest availability (dimmed + disabled Run + missing caps/ops for the
+      unavailable ones). `createCreativeSkillEditorPrimitiveDeps` built from the
+      existing panel graph; `runRecipe` allocates a `CreativeSkillRunScope`,
+      fences concurrent direct edits via `activeModelRunIdRef`, drives the run
+      lifecycle, routes a `ready-for-approval` staged change into the existing
+      `modelChangeSetId` approval UI, and posts advisory / blocked / unavailable
+      outcomes to the per-project conversation. `onStaged` passthrough added.
+      (Recipe runs already `appendMessage` to the per-project conversation — no
+      `joy-code-conversation.ts` change needed.)
+- [x] **`agent-director-skills.spec.ts`** (`76638d7d`) — added the browser check
+      that the picker renders the same runnable / visible-unavailable matrix as
+      the module-level availability test, with disabled Run buttons.
+- [ ] **Model-driven recipe run-through e2e** — run `verify-deliverable` and
+      `build-rough-cut` through the real Worker with a connected fake provider,
+      asserting the `DirectorVerificationReport` (structural vs unavailable) and
+      that a prepared rough-cut change only commits after approval and reverses
+      with one Undo. Blocked on extending `tests/e2e/fixtures/fake-openai-provider`
+      to emit an advisory (no-`validate_proposal`) tool-loop completion.
 - [ ] Update `docs/reviews/joy-live-director-coverage.json` `limitations` with
-      the recipe availability matrix.
+      the recipe availability matrix (already carries the V1 recipe note; refine
+      once the run-through e2e lands).
 
 ## The observe/propose split — resolution for the real primitives
 
