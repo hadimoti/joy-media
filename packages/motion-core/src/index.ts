@@ -180,3 +180,38 @@ export {
   type LayerWorldEvaluation,
 } from './evaluator.js';
 export type { LayerEvaluation, EvaluatedTransform, SceneEvaluation } from './evaluator.js';
+
+/* ─── Living Looks (R2) ─── */
+
+export {
+  LOOK_DEFINITION_SCHEMA_VERSION,
+  LOOK_OPERATION_KINDS,
+  validateLookDefinition,
+  compileLook,
+  mapLookControl,
+  type LookOperationKind,
+  type LookControlKind,
+  type LookBindingTarget,
+  type LookControl,
+  type LookScalarControl,
+  type LookEnumControl,
+  type LookColorControl,
+  type LookFontControl,
+  type LookBooleanControl,
+  type LookTemplateDrive,
+  type LookSlot,
+  type LookFormatConstraints,
+  type LookConstraints,
+  type LookProvenance,
+  type LookVerificationPredicate,
+  type LookDefinition,
+  type LookOperation,
+  type LookSetKeyframeOperation,
+  type LookSetTextTemplateOperation,
+  type LookSetCaptionTemplateOperation,
+  type LookAddTransitionOperation,
+  type LookCompilerDiagnostic,
+  type LookCompileInput,
+  type LookCompileResult,
+  type LookDefinitionDiagnostic,
+} from './looks/index.js';
