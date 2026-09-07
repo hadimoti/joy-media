@@ -53,26 +53,26 @@ in the apply path, no renderer in `motion-core`.
 
 ## Full-suite / build at this candidate
 
-| Check                                             | Result                                                                                                                                              |
-| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Check                                             | Result                                                                                                                                                                                                                       |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pnpm run verify:ci` (check + build + prod audit) | local at `7b8d351c`: **vitest 4211 passed / 38 skipped / 0 failed** (527 files); `tsc -b` + `eslint .` + `prettier --check` clean; hosted `r2-candidate.yml` `verify` lane passed ×2 on the pre-fix tree (run `34165045011`) |
-| CI green ×2                                       | `PENDING` — topology per the Opus infra decision (self-hosted `release-candidate.yml` for R2; heavy lanes → CI VPS for R3). GitHub-hosted acceptance is blocked on the account's Actions billing. |
-| CodeRabbit                                        | round 1 (base `855734cf`) — 14 findings; the valid R2 + R1-doc findings fixed in `38dc2958` / `7b8d351c`. Re-review `PENDING`.                       |
-| Font redistribution gate                          | ✅ `tooling/release/src/font-assets.test.ts` (6) — no retired-foundry ownership marker in any runtime surface; Vazirmatn is Fontsource OFL, bundled |
-| Coverage verifier                                 | ✅ unchanged — R2 adds no operation kinds                                                                                                           |
+| CI green ×2                                       | `PENDING` — topology per the Opus infra decision (self-hosted `release-candidate.yml` for R2; heavy lanes → CI VPS for R3). GitHub-hosted acceptance is blocked on the account's Actions billing.                            |
+| CodeRabbit                                        | round 1 (base `855734cf`) — 14 findings; the valid R2 + R1-doc findings fixed in `38dc2958` / `7b8d351c`. Re-review `PENDING`.                                                                                               |
+| Font redistribution gate                          | ✅ `tooling/release/src/font-assets.test.ts` (6) — no retired-foundry ownership marker in any runtime surface; Vazirmatn is Fontsource OFL, bundled                                                                          |
+| Coverage verifier                                 | ✅ unchanged — R2 adds no operation kinds                                                                                                                                                                                    |
 
 ## New tests (R2)
 
-| Area           | File                                                                                                                                               | Count         |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
-| L1 schema      | `packages/project-schema/src/{living-look,v3}.test.ts`                                                                                             | —             |
-| L2 compiler    | `packages/motion-core/src/looks/{validate,compile,compile-audio-bakes}.test.ts`                                                                    | 9 (bakes) + … |
-| L3 packs       | `packages/motion-core/src/looks/packs/{packs,packs-golden}.test.ts`                                                                                | 43 + 18       |
-| L4 core        | `packages/motion-core/src/looks/audio-reactive.test.ts`                                                                                            | 8             |
-| L4 bridge      | `apps/editor-web/src/joy-agent/look-audio-bridge.test.ts`                                                                                          | 8             |
-| Editor adapter | `apps/editor-web/src/joy-agent/{look-operations,look-run-host,look-packs-conformance}.test.ts`                                                     | 12 + 4 + 4    |
-| Panel          | `apps/editor-web/src/LivingLooksPanel.test.tsx`                                                                                                    | —             |
-| e2e            | `tests/e2e/agent-living-looks.spec.ts` (six packs render + run editorial-clean → staged preview → Approve → Undo; unavailable pack shown honestly) | 2             |
+| Area           | File                                                                                                                                       | Count                         |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------- |
+| L1 schema      | `packages/project-schema/src/{living-look,v3}.test.ts`                                                                                     | 152 + 131 assertions          |
+| L2 compiler    | `packages/motion-core/src/looks/{validate,compile,compile-audio-bakes}.test.ts`                                                            | 11 (bakes) + validate/compile |
+| L3 packs       | `packages/motion-core/src/looks/packs/{packs,packs-golden,packs-render-fidelity}.test.ts`                                                  | 43 + 18 + 12                  |
+| L4 core        | `packages/motion-core/src/looks/audio-reactive.test.ts`                                                                                    | 10                            |
+| L4 bridge      | `apps/editor-web/src/joy-agent/look-audio-bridge.test.ts`                                                                                  | 8                             |
+| Editor adapter | `apps/editor-web/src/joy-agent/{look-operations,look-run-host,look-packs-conformance}.test.ts`                                             | 12 + 4 + 4                    |
+| Panel          | `apps/editor-web/src/LivingLooksPanel.test.tsx`                                                                                            | 3                             |
+| e2e            | `tests/e2e/agent-living-looks.spec.ts` (six packs render + run editorial-clean → staged preview → Approve → Undo; all six shown available) | 2                             |
 
 ## Honesty / safety properties
 
