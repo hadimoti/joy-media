@@ -17,20 +17,31 @@ export function fixtureDefinition(overrides: Partial<LookDefinition> = {}): Look
     bindingTargets: [
       {
         bindingId: 'headline-opacity',
+        channel: 'keyframe',
         ownerSlotId: 'headline',
         ownerKind: 'visual-object',
         propertyId: 'opacity',
         timeDomain: 'composition',
       },
       {
-        bindingId: 'headline-scale',
+        bindingId: 'headline-scale-x',
+        channel: 'keyframe',
         ownerSlotId: 'headline',
         ownerKind: 'visual-object',
-        propertyId: 'scale',
+        propertyId: 'scaleX',
+        timeDomain: 'composition',
+      },
+      {
+        bindingId: 'headline-scale-y',
+        channel: 'keyframe',
+        ownerSlotId: 'headline',
+        ownerKind: 'visual-object',
+        propertyId: 'scaleY',
         timeDomain: 'composition',
       },
       {
         bindingId: 'deck-opacity',
+        channel: 'keyframe',
         ownerSlotId: 'deck',
         ownerKind: 'visual-object',
         propertyId: 'opacity',
@@ -38,16 +49,18 @@ export function fixtureDefinition(overrides: Partial<LookDefinition> = {}): Look
       },
       {
         bindingId: 'headline-template',
+        channel: 'text-template',
         ownerSlotId: 'headline',
         ownerKind: 'visual-object',
-        propertyId: 'template',
+        propertyId: 'text-template',
         timeDomain: 'composition',
       },
       {
         bindingId: 'captions-template',
+        channel: 'caption-template',
         ownerSlotId: 'captions',
         ownerKind: 'caption-clip',
-        propertyId: 'template',
+        propertyId: 'caption-template',
         timeDomain: 'caption-clip-local',
       },
     ],
@@ -59,7 +72,14 @@ export function fixtureDefinition(overrides: Partial<LookDefinition> = {}): Look
         default: 0.5,
         drives: [
           {
-            bindingId: 'headline-scale',
+            bindingId: 'headline-scale-x',
+            min: 1,
+            max: 1.4,
+            atFractions: [0, 0.2, 1],
+            interpolation: 'eased',
+          },
+          {
+            bindingId: 'headline-scale-y',
             min: 1,
             max: 1.4,
             atFractions: [0, 0.2, 1],
@@ -95,7 +115,7 @@ export function fixtureDefinition(overrides: Partial<LookDefinition> = {}): Look
           {
             bindingId: 'headline-template',
             target: 'text',
-            templateByOption: { 'ink-on-paper': 'title-light', 'paper-on-ink': 'title-dark' },
+            templateByOption: { 'ink-on-paper': 'clean-title', 'paper-on-ink': 'bold-stack' },
           },
         ],
       },
@@ -104,6 +124,15 @@ export function fixtureDefinition(overrides: Partial<LookDefinition> = {}): Look
         label: 'Show deck',
         kind: 'boolean',
         default: true,
+        drives: [
+          {
+            bindingId: 'deck-opacity',
+            whenTrue: 1,
+            whenFalse: 0,
+            atFractions: [0, 0.2],
+            interpolation: 'linear',
+          },
+        ],
       },
     ],
     constraints: {

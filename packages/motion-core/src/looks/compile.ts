@@ -122,6 +122,9 @@ export function compileLook(input: LookCompileInput): LookCompileResult {
   if (diagnostics.length > 0) return fail(diagnostics);
 
   const bindingById = new Map(definition.bindingTargets.map((t) => [t.bindingId, t]));
+  const requiredSlotIds = new Set(
+    definition.slots.filter((slot) => slot.required).map((slot) => slot.id),
+  );
   const overridden = new Set(input.overriddenBindingIds);
   const reset = new Set(input.resetBindingIds ?? []);
   const isWritable = (bindingId: string): boolean =>
@@ -149,11 +152,16 @@ export function compileLook(input: LookCompileInput): LookCompileResult {
     if (!isWritable(bindingId)) return;
     const ownerId = input.entityBindings[target.ownerSlotId];
     if (typeof ownerId !== 'string' || ownerId.length === 0) {
-      diagnostics.push({
-        code: 'LOOK_COMPILE_UNBOUND_SLOT',
-        message: `binding "${bindingId}" needs slot "${target.ownerSlotId}" bound`,
-        bindingId,
-      });
+      // A drive that targets an optional, unbound slot is simply skipped;
+      // required slots are already checked upfront so this only fires
+      // defensively.
+      if (requiredSlotIds.has(target.ownerSlotId)) {
+        diagnostics.push({
+          code: 'LOOK_COMPILE_UNBOUND_SLOT',
+          message: `binding "${bindingId}" needs required slot "${target.ownerSlotId}" bound`,
+          bindingId,
+        });
+      }
       return;
     }
     for (const fraction of atFractions) {
@@ -190,11 +198,16 @@ export function compileLook(input: LookCompileInput): LookCompileResult {
     if (!isWritable(bindingId)) return;
     const ownerId = input.entityBindings[target.ownerSlotId];
     if (typeof ownerId !== 'string' || ownerId.length === 0) {
-      diagnostics.push({
-        code: 'LOOK_COMPILE_UNBOUND_SLOT',
-        message: `binding "${bindingId}" needs slot "${target.ownerSlotId}" bound`,
-        bindingId,
-      });
+      // A drive that targets an optional, unbound slot is simply skipped;
+      // required slots are already checked upfront so this only fires
+      // defensively.
+      if (requiredSlotIds.has(target.ownerSlotId)) {
+        diagnostics.push({
+          code: 'LOOK_COMPILE_UNBOUND_SLOT',
+          message: `binding "${bindingId}" needs required slot "${target.ownerSlotId}" bound`,
+          bindingId,
+        });
+      }
       return;
     }
     if (surface === 'text') {
@@ -324,7 +337,7 @@ function compileControl(
         });
         return;
       }
-      for (const drive of control.drives ?? []) {
+      for (const drive of control.drives) {
         emitTemplate(drive.bindingId, drive.target, drive.templateByOption[option]!);
       }
       break;
@@ -346,16 +359,20 @@ function compileControl(
         });
         return;
       }
-      for (const drive of control.drives ?? []) {
+      for (const drive of control.drives) {
         emitTemplate(drive.bindingId, drive.target, drive.templateByOption[option]!);
       }
       break;
     }
     case 'boolean': {
-      // A boolean control gates nothing directly in R2's op vocabulary — the
-      // panel shows it and the value is persisted, but there is no accent
-      // operation kind to emit yet. Left as an explicit no-op rather than a
-      // fake effect.
+      const on = typeof raw === 'boolean' ? raw : control.default;
+      for (const drive of control.drives) {
+        if (on) {
+          emitKeyframes(drive.bindingId, drive.whenTrue, drive.atFractions, drive.interpolation);
+        } else if (drive.whenFalse !== 'omit') {
+          emitKeyframes(drive.bindingId, drive.whenFalse, drive.atFractions, drive.interpolation);
+        }
+      }
       break;
     }
     default: {

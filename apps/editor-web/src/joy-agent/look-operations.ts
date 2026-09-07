@@ -112,12 +112,37 @@ export function describe(definition: LookDefinition): LookDescription {
   };
 }
 
-/** One canonical operation per `LookOperation`. `idPrefix` keeps op ids stable and unique. */
+/**
+ * One or two canonical operations per `LookOperation`. A `text.setTemplate`
+ * that lands on an object whose current text is known also emits a dependent
+ * `text.setContent` restoring that text — `motion-core` is pure and cannot see
+ * the live document, so a bare template swap would replace the operator's words
+ * with the template's sample copy. `currentTextByObjectId` is the host's
+ * snapshot of the bound objects' text at plan time.
+ */
 export function translateLookOperations(
   operations: readonly LookOperation[],
   idPrefix: string,
+  currentTextByObjectId: Readonly<Record<string, string>> = {},
 ): readonly JoyCodePlanOperationV1[] {
-  return operations.map((operation, index) => translateOne(operation, `${idPrefix}-${index}`));
+  const out: JoyCodePlanOperationV1[] = [];
+  operations.forEach((operation, index) => {
+    const id = `${idPrefix}-${index}`;
+    out.push(translateOne(operation, id));
+    if (operation.kind === 'text.setTemplate') {
+      const preserved = currentTextByObjectId[operation.objectId];
+      if (typeof preserved === 'string' && preserved.length > 0) {
+        out.push({
+          id: `${id}-keep-text`,
+          dependsOn: [id],
+          kind: 'text.setContent',
+          objectId: operation.objectId,
+          content: preserved,
+        });
+      }
+    }
+  });
+  return out;
 }
 
 function translateOne(operation: LookOperation, id: string): JoyCodePlanOperationV1 {
@@ -189,13 +214,18 @@ export interface LookPlanResult {
  * `ok: false` with the compiler diagnostics on any failure — the caller never
  * gets a partial plan.
  */
-export function prepareLookPlan(input: LookCompileInput, goal: string): LookPlanResult {
+export function prepareLookPlan(
+  input: LookCompileInput,
+  goal: string,
+  currentTextByObjectId: Readonly<Record<string, string>> = {},
+): LookPlanResult {
   const compilation = compileLook(input);
   if (!compilation.ok) return { ok: false, compilation };
 
   const operations = translateLookOperations(
     compilation.operations,
     `look-${input.definition.id}-v${input.definition.version}`,
+    currentTextByObjectId,
   );
   const plan: JoyCodeModelPlanV1 = {
     schemaVersion: JOY_CODE_PLAN_SCHEMA_VERSION,

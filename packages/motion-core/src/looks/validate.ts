@@ -11,6 +11,7 @@
  *  - no URL, path, or executable fragment anywhere in the definition.
  */
 
+import { ANIMATABLE_PROPERTIES } from '@joy-media/project-schema';
 import {
   LOOK_DEFINITION_SCHEMA_VERSION,
   LOOK_OPERATION_KINDS,
@@ -18,6 +19,9 @@ import {
   type LookDefinition,
   type LookTemplateDrive,
 } from './types.js';
+
+const KEYFRAME_PROPERTY_IDS = new Set<string>(ANIMATABLE_PROPERTIES);
+const BINDING_CHANNELS = new Set<string>(['keyframe', 'text-template', 'caption-template']);
 
 export interface LookDefinitionDiagnostic {
   readonly code: string;
@@ -104,6 +108,7 @@ export function validateLookDefinition(definition: LookDefinition): LookDefiniti
   });
 
   const bindingIds = new Set<string>();
+  const bindingChannel = new Map<string, string>();
   definition.bindingTargets.forEach((target, index) => {
     const path = `bindingTargets[${index}]`;
     if (!ID_PATTERN.test(target.bindingId) || bindingIds.has(target.bindingId)) {
@@ -114,6 +119,14 @@ export function validateLookDefinition(definition: LookDefinition): LookDefiniti
       );
     }
     bindingIds.add(target.bindingId);
+    bindingChannel.set(target.bindingId, target.channel);
+    if (!BINDING_CHANNELS.has(target.channel)) {
+      push(
+        'LOOK_DEFINITION_BINDING_CHANNEL',
+        `binding channel "${target.channel}" must be keyframe / text-template / caption-template`,
+        `${path}.channel`,
+      );
+    }
     if (!slotIds.has(target.ownerSlotId)) {
       push(
         'LOOK_DEFINITION_BINDING_SLOT',
@@ -121,10 +134,18 @@ export function validateLookDefinition(definition: LookDefinition): LookDefiniti
         `${path}.ownerSlotId`,
       );
     }
-    if (target.propertyId.trim().length === 0) {
+    if (target.channel === 'keyframe') {
+      if (!KEYFRAME_PROPERTY_IDS.has(target.propertyId)) {
+        push(
+          'LOOK_DEFINITION_BINDING_PROPERTY',
+          `keyframe binding propertyId "${target.propertyId}" is not an animatable property`,
+          `${path}.propertyId`,
+        );
+      }
+    } else if (target.propertyId.trim().length === 0) {
       push(
         'LOOK_DEFINITION_BINDING_PROPERTY',
-        'binding propertyId must be non-empty',
+        'template binding propertyId marker must be non-empty',
         `${path}.propertyId`,
       );
     }
@@ -141,7 +162,7 @@ export function validateLookDefinition(definition: LookDefinition): LookDefiniti
       );
     }
     controlIds.add(control.id);
-    validateControl(control, path, bindingIds, definition, push);
+    validateControl(control, path, bindingIds, bindingChannel, definition, push);
   });
 
   for (const kind of definition.requiredOperationKinds) {
@@ -203,14 +224,23 @@ function validateControl(
   control: LookControl,
   path: string,
   bindingIds: ReadonlySet<string>,
+  bindingChannel: ReadonlyMap<string, string>,
   definition: LookDefinition,
   push: (code: string, message: string, path: string) => void,
 ): void {
-  const requireBinding = (bindingId: string, subPath: string): void => {
+  const requireKeyframeBinding = (bindingId: string, subPath: string): void => {
     if (!bindingIds.has(bindingId)) {
       push(
         'LOOK_DEFINITION_CONTROL_BINDING',
         `control drives unknown binding "${bindingId}"`,
+        subPath,
+      );
+      return;
+    }
+    if (bindingChannel.get(bindingId) !== 'keyframe') {
+      push(
+        'LOOK_DEFINITION_CONTROL_BINDING',
+        `control drives "${bindingId}" as a keyframe but that binding is a template channel`,
         subPath,
       );
     }
@@ -234,7 +264,7 @@ function validateControl(
       }
       control.drives.forEach((drive, i) => {
         const dp = `${path}.drives[${i}]`;
-        requireBinding(drive.bindingId, `${dp}.bindingId`);
+        requireKeyframeBinding(drive.bindingId, `${dp}.bindingId`);
         if (!isFiniteNumber(drive.min) || !isFiniteNumber(drive.max) || drive.min > drive.max) {
           push(
             'LOOK_DEFINITION_CONTROL_RANGE',
@@ -260,9 +290,16 @@ function validateControl(
           `${path}.options`,
         );
       }
+      if (control.drives.length === 0) {
+        push(
+          'LOOK_DEFINITION_CONTROL_DRIVES',
+          'an enum control with no effect is a fake slider — omit it',
+          `${path}.drives`,
+        );
+      }
       control.drives.forEach((drive, i) => {
         const dp = `${path}.drives[${i}]`;
-        requireBinding(drive.bindingId, `${dp}.bindingId`);
+        requireKeyframeBinding(drive.bindingId, `${dp}.bindingId`);
         for (const option of control.options) {
           if (!isFiniteNumber(drive.byOption[option])) {
             push(
@@ -271,6 +308,37 @@ function validateControl(
               dp,
             );
           }
+        }
+        if (!fractionsValid(drive.atFractions)) {
+          push(
+            'LOOK_DEFINITION_CONTROL_FRACTIONS',
+            'atFractions must be strictly increasing values in [0,1]',
+            `${dp}.atFractions`,
+          );
+        }
+      });
+      break;
+    }
+    case 'boolean': {
+      if (control.drives.length === 0) {
+        push(
+          'LOOK_DEFINITION_CONTROL_DRIVES',
+          'a boolean control with nothing to drive is a fake toggle — omit it',
+          `${path}.drives`,
+        );
+      }
+      control.drives.forEach((drive, i) => {
+        const dp = `${path}.drives[${i}]`;
+        requireKeyframeBinding(drive.bindingId, `${dp}.bindingId`);
+        if (
+          !isFiniteNumber(drive.whenTrue) ||
+          (drive.whenFalse !== 'omit' && !isFiniteNumber(drive.whenFalse))
+        ) {
+          push(
+            'LOOK_DEFINITION_CONTROL_BOOL_VALUE',
+            'boolean drive values must be finite or "omit"',
+            dp,
+          );
         }
         if (!fractionsValid(drive.atFractions)) {
           push(
@@ -302,11 +370,12 @@ function validateControl(
           );
         }
       });
-      validateTemplateDrives(
+      requireTemplateDrives(
         control.drives,
         control.palettePairs.map((p) => p.id),
         `${path}.drives`,
         bindingIds,
+        bindingChannel,
         push,
       );
       break;
@@ -329,11 +398,16 @@ function validateControl(
           );
         }
       }
-      validateTemplateDrives(control.drives, control.families, `${path}.drives`, bindingIds, push);
+      requireTemplateDrives(
+        control.drives,
+        control.families,
+        `${path}.drives`,
+        bindingIds,
+        bindingChannel,
+        push,
+      );
       break;
     }
-    case 'boolean':
-      break;
     default: {
       const exhaustive: never = control;
       void exhaustive;
@@ -341,14 +415,22 @@ function validateControl(
   }
 }
 
-function validateTemplateDrives(
-  drives: readonly LookTemplateDrive[] | undefined,
+function requireTemplateDrives(
+  drives: readonly LookTemplateDrive[],
   options: readonly string[],
   path: string,
   bindingIds: ReadonlySet<string>,
+  bindingChannel: ReadonlyMap<string, string>,
   push: (code: string, message: string, path: string) => void,
 ): void {
-  if (drives === undefined) return;
+  if (drives.length === 0) {
+    push(
+      'LOOK_DEFINITION_CONTROL_DRIVES',
+      'a colour/font control with no template drives compiles to nothing — a fake slider',
+      path,
+    );
+    return;
+  }
   drives.forEach((drive, i) => {
     const dp = `${path}[${i}]`;
     if (!bindingIds.has(drive.bindingId)) {
@@ -357,6 +439,15 @@ function validateTemplateDrives(
         `template drive names unknown binding "${drive.bindingId}"`,
         `${dp}.bindingId`,
       );
+    } else {
+      const expected = drive.target === 'text' ? 'text-template' : 'caption-template';
+      if (bindingChannel.get(drive.bindingId) !== expected) {
+        push(
+          'LOOK_DEFINITION_CONTROL_BINDING',
+          `template drive targets "${drive.target}" but binding "${drive.bindingId}" is not a ${expected} channel`,
+          `${dp}.bindingId`,
+        );
+      }
     }
     for (const option of options) {
       const templateId = drive.templateByOption[option];

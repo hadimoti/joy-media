@@ -45,7 +45,7 @@ describe('compileLook', () => {
     expect(kinds).toEqual(new Set(['motion.setKeyframe', 'text.setTemplate']));
     // energy 0.5 over [1, 1.4] -> 1.2 at 3 fractions
     const scaleOps = result.operations.filter(
-      (o) => o.kind === 'motion.setKeyframe' && o.bindingId === 'headline-scale',
+      (o) => o.kind === 'motion.setKeyframe' && o.bindingId === 'headline-scale-x',
     );
     expect(scaleOps.map((o) => (o as { value: number }).value)).toEqual([1.2, 1.2, 1.2]);
     expect(scaleOps.map((o) => (o as { timeUs: number }).timeUs)).toEqual([
@@ -65,20 +65,20 @@ describe('compileLook', () => {
   });
 
   it('never writes a binding the operator has overridden', () => {
-    const result = compileLook(baseInput({ overriddenBindingIds: ['headline-scale'] }));
+    const result = compileLook(baseInput({ overriddenBindingIds: ['headline-scale-x'] }));
     expect(result.ok).toBe(true);
-    expect(result.operations.some((o) => o.bindingId === 'headline-scale')).toBe(false);
-    expect(result.changedBindingIds).not.toContain('headline-scale');
+    expect(result.operations.some((o) => o.bindingId === 'headline-scale-x')).toBe(false);
+    expect(result.changedBindingIds).not.toContain('headline-scale-x');
   });
 
   it('an explicit reset re-opens exactly the named overridden binding', () => {
     const result = compileLook(
       baseInput({
-        overriddenBindingIds: ['headline-scale', 'headline-opacity'],
-        resetBindingIds: ['headline-scale'],
+        overriddenBindingIds: ['headline-scale-x', 'headline-opacity'],
+        resetBindingIds: ['headline-scale-x'],
       }),
     );
-    expect(result.operations.some((o) => o.bindingId === 'headline-scale')).toBe(true);
+    expect(result.operations.some((o) => o.bindingId === 'headline-scale-x')).toBe(true);
     expect(result.operations.some((o) => o.bindingId === 'headline-opacity')).toBe(false);
   });
 

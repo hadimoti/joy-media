@@ -42,6 +42,15 @@ export type LookOperationKind = (typeof LOOK_OPERATION_KINDS)[number];
 export type LookControlKind = 'scalar' | 'enum' | 'color' | 'font' | 'boolean';
 
 /**
+ * What surface a binding target writes:
+ *  - `keyframe`   — a `motion.setKeyframe` on `propertyId`, which must be a
+ *    real animatable property (`ANIMATABLE_PROPERTIES`);
+ *  - `text-template` / `caption-template` — a `*.setTemplate` swap; `propertyId`
+ *    is a marker, not an animatable property.
+ */
+export type LookBindingChannel = 'keyframe' | 'text-template' | 'caption-template';
+
+/**
  * A property address the compiler may write. `bindingId` is stable identity —
  * it is what a `LookInstance.overriddenBindingIds` entry and a control's
  * `drives` list refer to. `ownerSlotId` says which slot's resolved entity owns
@@ -50,6 +59,7 @@ export type LookControlKind = 'scalar' | 'enum' | 'color' | 'font' | 'boolean';
  */
 export interface LookBindingTarget {
   readonly bindingId: string;
+  readonly channel: LookBindingChannel;
   readonly ownerSlotId: string;
   readonly ownerKind: PropertyOwnerKindV2;
   readonly propertyId: string;
@@ -104,7 +114,12 @@ export interface LookTemplateDrive {
   readonly templateByOption: Readonly<Record<string, string>>;
 }
 
-/** A validated palette-pair control — never an arbitrary unmeasured colour. */
+/**
+ * A validated palette-pair control — never an arbitrary unmeasured colour. Its
+ * `drives` are required and non-empty: a `color` control that compiles to
+ * nothing is a fake slider (validation rejects it). Each palette-pair id must
+ * map to a real template id in every drive.
+ */
 export interface LookColorControl {
   readonly id: string;
   readonly label: string;
@@ -116,27 +131,44 @@ export interface LookColorControl {
     readonly background: string;
   }[];
   readonly default: string;
-  /** Optional template swaps keyed by palette-pair id. */
-  readonly drives?: readonly LookTemplateDrive[];
+  /** Template swaps keyed by palette-pair id. Required and non-empty. */
+  readonly drives: readonly LookTemplateDrive[];
 }
 
-/** A font control constrained to the bundled free catalogue. */
+/**
+ * A font control constrained to the bundled free catalogue. Its `drives` are
+ * required and non-empty for the same reason `LookColorControl.drives` is.
+ */
 export interface LookFontControl {
   readonly id: string;
   readonly label: string;
   readonly kind: 'font';
   readonly families: readonly string[];
   readonly default: string;
-  /** Optional template swaps keyed by font family. */
-  readonly drives?: readonly LookTemplateDrive[];
+  /** Template swaps keyed by font family. Required and non-empty. */
+  readonly drives: readonly LookTemplateDrive[];
 }
 
-/** A boolean control that toggles a declared, bounded accent. */
+/**
+ * A boolean control that toggles a declared, bounded accent. Its `drives` are
+ * required and non-empty — a boolean with nothing to drive is a fake toggle.
+ * Each drive writes `whenTrue` at its fractions when the operator's value is
+ * true and `whenFalse` (or nothing, when `whenFalse` is `'omit'`) when false.
+ */
+export interface LookBooleanDrive {
+  readonly bindingId: string;
+  readonly whenTrue: number;
+  readonly whenFalse: number | 'omit';
+  readonly atFractions: readonly number[];
+  readonly interpolation: 'hold' | 'linear' | 'eased';
+}
+
 export interface LookBooleanControl {
   readonly id: string;
   readonly label: string;
   readonly kind: 'boolean';
   readonly default: boolean;
+  readonly drives: readonly LookBooleanDrive[];
 }
 
 export type LookControl =

@@ -22,31 +22,27 @@ function fixtureDefinition(overrides: Partial<LookDefinition> = {}): LookDefinit
     ],
     bindingTargets: [
       {
-        bindingId: 'headline-scale',
+        bindingId: 'headline-scale-x',
+        channel: 'keyframe',
         ownerSlotId: 'headline',
         ownerKind: 'visual-object',
-        propertyId: 'scale',
+        propertyId: 'scaleX',
         timeDomain: 'composition',
       },
       {
         bindingId: 'headline-opacity',
+        channel: 'keyframe',
         ownerSlotId: 'headline',
-        ownerKind: 'visual-object',
-        propertyId: 'opacity',
-        timeDomain: 'composition',
-      },
-      {
-        bindingId: 'deck-opacity',
-        ownerSlotId: 'deck',
         ownerKind: 'visual-object',
         propertyId: 'opacity',
         timeDomain: 'composition',
       },
       {
         bindingId: 'headline-template',
+        channel: 'text-template',
         ownerSlotId: 'headline',
         ownerKind: 'visual-object',
-        propertyId: 'template',
+        propertyId: 'text-template',
         timeDomain: 'composition',
       },
     ],
@@ -58,7 +54,7 @@ function fixtureDefinition(overrides: Partial<LookDefinition> = {}): LookDefinit
         default: 0.5,
         drives: [
           {
-            bindingId: 'headline-scale',
+            bindingId: 'headline-scale-x',
             min: 1,
             max: 1.4,
             atFractions: [0, 0.2, 1],
@@ -79,7 +75,7 @@ function fixtureDefinition(overrides: Partial<LookDefinition> = {}): LookDefinit
           {
             bindingId: 'headline-template',
             target: 'text',
-            templateByOption: { 'ink-on-paper': 'title-light', 'paper-on-ink': 'title-dark' },
+            templateByOption: { 'ink-on-paper': 'clean-title', 'paper-on-ink': 'bold-stack' },
           },
         ],
       },
@@ -157,6 +153,34 @@ describe('translateLookOperations', () => {
     for (const op of plan!.operations) {
       expect(JOY_CODE_OPERATION_KINDS as readonly string[]).toContain(op.kind);
     }
+  });
+
+  it('a text.setTemplate on a known object emits a dependent text.setContent that restores the copy', () => {
+    const operations: LookOperation[] = [
+      { kind: 'text.setTemplate', bindingId: 'b1', objectId: 'title-1', templateId: 'clean-title' },
+    ];
+    const canonical = translateLookOperations(operations, 'look-x', {
+      'title-1': 'Our real headline',
+    });
+    expect(canonical.map((o) => o.kind)).toEqual(['text.setTemplate', 'text.setContent']);
+    const keep = canonical[1] as Extract<(typeof canonical)[number], { kind: 'text.setContent' }>;
+    expect(keep.content).toBe('Our real headline');
+    expect(keep.dependsOn).toEqual(['look-x-0']);
+  });
+
+  it('does not emit a text.setContent when the object text is unknown', () => {
+    const canonical = translateLookOperations(
+      [
+        {
+          kind: 'text.setTemplate',
+          bindingId: 'b1',
+          objectId: 'title-1',
+          templateId: 'clean-title',
+        },
+      ],
+      'look-x',
+    );
+    expect(canonical.map((o) => o.kind)).toEqual(['text.setTemplate']);
   });
 });
 

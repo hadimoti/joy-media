@@ -14,7 +14,13 @@ const SCALAR: LookScalarControl = {
   kind: 'scalar',
   default: 0.5,
   drives: [
-    { bindingId: 'headline-scale', min: 1, max: 1.4, atFractions: [0, 1], interpolation: 'eased' },
+    {
+      bindingId: 'headline-scale-x',
+      min: 1,
+      max: 1.4,
+      atFractions: [0, 1],
+      interpolation: 'eased',
+    },
   ],
 };
 
@@ -56,7 +62,7 @@ describe('validateLookDefinition', () => {
       ...SCALAR,
       drives: [
         {
-          bindingId: 'headline-scale',
+          bindingId: 'headline-scale-x',
           min: 2,
           max: 1,
           atFractions: [0, 1],
@@ -74,7 +80,7 @@ describe('validateLookDefinition', () => {
       const bad = withControls({
         ...SCALAR,
         drives: [
-          { bindingId: 'headline-scale', min: 1, max: 2, atFractions, interpolation: 'linear' },
+          { bindingId: 'headline-scale-x', min: 1, max: 2, atFractions, interpolation: 'linear' },
         ],
       });
       expect(validateLookDefinition(bad).map((d) => d.code)).toContain(
@@ -118,9 +124,62 @@ describe('validateLookDefinition', () => {
       kind: 'color',
       default: 'ink-on-paper',
       palettePairs: [{ id: 'ink-on-paper', foreground: 'rebeccapurple', background: '#fff' }],
+      drives: [
+        {
+          bindingId: 'headline-template',
+          target: 'text',
+          templateByOption: { 'ink-on-paper': 'clean-title' },
+        },
+      ],
     };
     expect(validateLookDefinition(withControls(SCALAR, colorControl)).map((d) => d.code)).toContain(
       'LOOK_DEFINITION_CONTROL_COLOR_HEX',
+    );
+  });
+
+  it('rejects a colour/font control with no template drives — a fake slider', () => {
+    const colorControl: LookColorControl = {
+      id: 'palette',
+      label: 'Palette',
+      kind: 'color',
+      default: 'ink-on-paper',
+      palettePairs: [{ id: 'ink-on-paper', foreground: '#111', background: '#fff' }],
+      drives: [],
+    };
+    expect(validateLookDefinition(withControls(SCALAR, colorControl)).map((d) => d.code)).toContain(
+      'LOOK_DEFINITION_CONTROL_DRIVES',
+    );
+  });
+
+  it('rejects a scalar control that drives a template-channel binding', () => {
+    const bad = withControls({
+      ...SCALAR,
+      drives: [
+        {
+          bindingId: 'headline-template',
+          min: 1,
+          max: 2,
+          atFractions: [0, 1],
+          interpolation: 'linear',
+        },
+      ],
+    });
+    expect(validateLookDefinition(bad).map((d) => d.code)).toContain(
+      'LOOK_DEFINITION_CONTROL_BINDING',
+    );
+  });
+
+  it('rejects a keyframe binding whose propertyId is not animatable', () => {
+    const def = fixtureDefinition();
+    const bad = {
+      ...def,
+      bindingTargets: [
+        { ...def.bindingTargets[0]!, propertyId: 'wobble' },
+        ...def.bindingTargets.slice(1),
+      ],
+    };
+    expect(validateLookDefinition(bad).map((d) => d.code)).toContain(
+      'LOOK_DEFINITION_BINDING_PROPERTY',
     );
   });
 
