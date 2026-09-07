@@ -14,12 +14,12 @@ is **not** a self-approval — Astra rules on the exact candidate below.
 | base     | `6a6a336c` (live foundation release, schema 5)                                             |
 
 The commit above (`855734cf`) is what `release-candidate.yml` runs on. Branch
-HEAD is one further **prose-only** pin commit ahead (this paragraph + the run
-id). `855734cf` = the round-1 candidate (`0cff0470`, CI-green code tree
-`369a4196`) plus the two Astra round-1 fixes (`f8d27577`, see the Astra section
-below). `f8d27577`'s source change is confined to the `observeSources` primitive
-contract shape + its two tests; the coverage verifier still passes (16 bounded
-operations, 8 domains unsupported).
+HEAD is **prose-only pin commits** ahead of it (`d67f32e4`, `1daf75e9`, and this
+one) touching only this file. `855734cf` = the round-1 candidate (`0cff0470`,
+CI-green code tree `369a4196`) plus the two Astra round-1 fixes (`f8d27577`, see
+the Astra section below). `f8d27577`'s source change is confined to the
+`observeSources` primitive contract shape + its two tests; the coverage verifier
+still passes (16 bounded operations, 8 domains unsupported).
 
 If Astra requires further changes, a new candidate SHA is cut and this bundle is
 re-dated; the review is always against one exact SHA/tree/lock triple.
@@ -159,15 +159,44 @@ not re-enforce a per-checkpoint cap (recipe observation is bounded by the
 tool-loop call budget, the O5 consent envelope, and the run-budget); recorded in
 `coverage.json` `limitations`.
 
-**Round 2:** this candidate returned to Astra for the follow-up ruling.
+**Round 2** (candidate `855734cf`, 2026-09-07): a fresh independent Opus review
+verified the identity triple, confirmed the `855734cf ← cbc583fc` non-doc delta
+is exactly the `observeSources` contract shape + its two tests with no behaviour
+change, and **independently traced the "bounded by X/Y/Z" claim to code** — one
+memoized tool-loop per recipe run capped at `maxToolSteps = 8`
+(`run-budget.ts` + `bounded-tool-loop.ts` rejects any higher caller value),
+the O5 consent envelope (`MAX_OBSERVATION_CONSENT_REQUESTS = 64`,
+`MAX_OBSERVATION_CONSENT_BYTES = 512 MiB`, 1 h TTL), and the run budget
+(60 s wall, 2 MiB output, 2 repairs). It opened all of item 1's corrected
+citations line-by-line and confirmed them, ran `vitest` (63 files / 420 tests
+pass) + `tsc -b` (exit 0), verified `release-candidate.yml` checks out
+`CANDIDATE_SHA` in every job, and concurred with the round-1 ruling on the open
+question.
+
+**Verdict:**
+`APPROVE_FOR_DEPLOY 855734cf0c875101a632426983db2638c2adddcd 54ccefce85daf174b25620b24b64b9d54c130dcc 36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3`
+— **contingent solely on `release-candidate.yml` run `34123884446` completing
+green across all remaining `acceptance` and `real-service-acceptance` jobs; if
+any fails, the approval is void and a new candidate is required.**
+
+Non-blocking R2 follow-ups from Astra: (1) consider deleting `budget` from the
+`observeSources` contract rather than documenting it (it is decorative —
+`readObservationCoverage` issues zero observation requests and returns one
+evidence id); (2) if kept, add a test pinning "R1 deliberately ignores
+`budget`"; (3) thread the manifest budget into the observation bridge and
+enforce it below the 8-step loop cap; (4) per-operation readback consumers per
+the ruled 9/7 split; (5) real BYOK live-model creative evaluation (already an
+owner-decided ledger limitation).
 
 ## Stop-before-deploy
 
-This candidate has: CodeRabbit clean + local `pnpm -w run check` green (4033
+R1 automated gate: **CodeRabbit clean + local `pnpm -w run check` green (4033
 tests) + two full green `release-candidate.yml` runs on the round-1 code tree +
-a fresh run on the exact SHA. It is with the independent Claude Opus reviewer
-("Astra") for the round-2 verdict: `APPROVE_FOR_DEPLOY <commit> <tree> <lock>`
-or a further change list. The implementer never self-approves. A live production
-deploy to joyst.ir additionally requires the owner's explicit go-ahead and
-follows the master guarded Sweden procedure. R2 and R3 remain closed until their
-own tasks and evidence pass.
+`34123884446` on the exact candidate + independent Opus `APPROVE_FOR_DEPLOY`
+(contingent on `34123884446` green).**
+
+Still required before any deploy: **the owner's explicit go-ahead.** A live
+production deploy to joyst.ir then follows the master guarded Sweden procedure
+(SSH, service management, DB backup) and the Gbrain writeback ritual. The
+implementer never self-approves and never deploys without the owner's
+go-ahead. R2 and R3 remain closed until their own tasks and evidence pass.
