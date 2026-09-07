@@ -50,7 +50,6 @@ import {
 import { CheckIcon, CloseIcon, PlayIcon, PlusIcon, SaveIcon, UndoIcon } from './icons.js';
 import { CreativeBriefPanel } from './CreativeBriefPanel.js';
 import { JoyCodeCompoundRunner } from './joy-code-compound-runner.js';
-import { resolveObjectIdForSelection } from './sticker-bindings.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 import {
   AgentObservationConsent,
@@ -115,6 +114,7 @@ import {
   type AgentPreviewStore,
 } from './agent-preview-store.js';
 import { createJoyAgentProposalStagingHandler } from './joy-agent/edit-proposal-staging.js';
+import { buildJoyAgentContextInput } from './joy-agent/context-input.js';
 import {
   deriveJoyAgentConversationEntityReferences,
   resolveJoyAgentConversationEntityReference,
@@ -1433,74 +1433,19 @@ export function AgentPanel({
         let activeObservationRun: JoyAgentRunIterator['run'] | undefined;
         let activeComposerHostLease: JoyAgentComposerHostLease | undefined;
         try {
-          const composition =
-            session.timelineProject.compositions[session.timelineProject.rootCompositionId];
           const baseRevision = session.projectRevisionId;
-          const selectedReferenceVisualObjectIds =
-            selectedEntityReference?.entityKind.startsWith('visual-') === true
-              ? [selectedEntityReference.entityId]
-              : [];
-          const contextInput: JoyAgentContextSnapshotInput = {
-            projectId: session.visualProject.id,
-            entityReferenceProjectId: session.timelineProject.id,
-            revision: session.projectRevisionId,
-            compositionId: session.timelineProject.rootCompositionId,
-            trackIds: composition?.tracks.map((track) => track.id) ?? [],
+          const contextInput: JoyAgentContextSnapshotInput = buildJoyAgentContextInput({
+            session,
             selectedClipIds,
-            selectedVisualObjectIds: [
-              ...new Set([
-                ...selectedClipIds
-                  .map((clipId) => resolveObjectIdForSelection(session.visualProject, [clipId]))
-                  .filter((id): id is string => id !== undefined),
-                ...selectedReferenceVisualObjectIds,
-              ]),
-            ],
             playheadUs,
-            ...(composition === undefined
-              ? {}
-              : {
-                  clips: composition.tracks.flatMap((track) =>
-                    track.clips.map((clip) => ({
-                      id: clip.id,
-                      trackId: track.id,
-                      startUs: clip.startUs,
-                      durationUs: clip.durationUs,
-                    })),
-                  ),
-                }),
-            assets: Object.values(session.visualProject.assets).map((asset) => ({
-              id: asset.id,
-              kind: asset.kind,
-              displayName: asset.displayName,
-            })),
-            visualObjects: Object.values(session.visualProject.visualObjects).map((object) => ({
-              id: object.id,
-              kind: object.kind,
-              ...(typeof object.text === 'string' ? { text: object.text } : {}),
-              transform: {
-                x: object.transform.x,
-                y: object.transform.y,
-                scaleX: object.transform.scaleX,
-                scaleY: object.transform.scaleY,
-                rotationDeg: object.transform.rotationDeg,
-                opacity: object.transform.opacity,
-              },
-              animatedProperties: [
-                ...Object.keys(object.animations ?? {}),
-                ...Object.values(session.visualProject.propertyAnimations ?? {})
-                  .filter((animation) => animation.binding.ownerId === object.id)
-                  .map((animation) => animation.binding.propertyId),
-              ],
-            })),
-            conversation: conversation.messages.slice(-8).map((message) => ({
+            conversationMessages: conversation.messages.slice(-8).map((message) => ({
               role: message.role,
               body: message.body,
             })),
-            ...(contextualEntityReferences.length === 0
-              ? {}
-              : { recentEntityReferences: contextualEntityReferences }),
+            recentEntityReferences: contextualEntityReferences,
+            ...(selectedEntityReference === undefined ? {} : { selectedEntityReference }),
             ...(creativeBriefContext === undefined ? {} : { creativeBrief: creativeBriefContext }),
-          };
+          });
           const mode =
             taskKind === 'creative-brief' ||
             joyAgentEngineClient.getStatus()?.capability === 'plan-only'
