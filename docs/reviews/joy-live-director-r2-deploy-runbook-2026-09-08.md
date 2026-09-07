@@ -64,7 +64,7 @@ build is root `pnpm build` (`pnpm -r --if-present build`), DB dump needs
       full `pnpm test` = **4196 passed / 38 skipped / 0 failed**, 526 files.)
 - [ ] Candidate identity re-verified in the worktree: `git rev-parse <candidate>`,
       `git rev-parse <candidate>^{tree}`, `git show <candidate>:pnpm-lock.yaml |
-    sha256sum`, base `855734cf` is an ancestor, candidate is an ancestor of
+  sha256sum`, base `855734cf` is an ancestor, candidate is an ancestor of
       branch HEAD, and any commits HEAD carries past the candidate touch only
       docs.
 - [ ] Astra `APPROVE_FOR_DEPLOY <sha> <tree> <lock>` on file for this exact
