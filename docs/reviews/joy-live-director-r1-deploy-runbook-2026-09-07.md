@@ -35,6 +35,11 @@ Therefore:
   reverses this release.
 - The built-in JOY Agent Engine Worker ships inside the editor-web static
   bundle (`verify:joy-agent-worker` gate), so it deploys with the web release.
+- One new runtime dependency: `mediabunny@1.55.7` (MPL-2.0, consumed as the
+  published package, documented in `joy-observation-decoder-selection.md`, in
+  the Astra bundle). `pnpm-lock.yaml` grows 26 lines, additive. The VPS build's
+  `pnpm install --frozen-lockfile` pulls it; step 3's sha256 check pins it. The
+  previous web bundle does not reference it, so rollback is clean.
 - `nginx`: only `joy-media.nginx.conf`'s own server blocks are validated /
   reloaded. No shared config edit, no unrelated service restart, no `joy-vps`
   checkout change, no filesystem sync/delete.
@@ -44,9 +49,17 @@ Therefore:
 - [x] CodeRabbit clean; `pnpm -w run check` exit 0 (4033 tests).
 - [x] `release-candidate.yml` green ×2 on the round-1 code tree
       (`34078187134`, `34097358089`).
+- [x] Candidate identity re-verified in the worktree 2026-09-07: commit
+      `855734cf` resolves, tree `54ccefce85daf174b25620b24b64b9d54c130dcc`,
+      `pnpm-lock.yaml` sha256 `36426937…8427b0b3`, base `6a6a336c` present,
+      candidate is an ancestor of branch HEAD. The 4 commits HEAD carries past
+      the candidate touch only 2 docs files (this runbook + the acceptance
+      bundle) — no runtime/build/lock/migration change, so Astra's approval on
+      `855734cf` still stands.
 - [ ] `release-candidate.yml` run `34123884446` on `855734cf` — **green,
       every `acceptance` + `real-service-acceptance` job**. Astra's approval is
-      void otherwise.
+      void otherwise. (2026-09-07 15:5x: 19/20 green, `real-service-acceptance
+      (pass 1)` the last job running, zero failures.)
 - [ ] Re-read live Gbrain / Desktop `VPS-AGENT-BRIEF.md` for concurrent JOY
       deployment ownership; coordinate, do not overwrite.
 - [ ] Identify the current-good web release name on the VPS for rollback.
