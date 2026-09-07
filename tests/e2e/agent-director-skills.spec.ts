@@ -228,13 +228,16 @@ test.describe('JOY Live Director creative recipes', () => {
     await dialog.getByRole('button', { name: 'Done' }).click();
 
     await openRecipes(page);
+    const assistantMessages = page.locator('.joy-code-message.is-assistant');
+    const before = await assistantMessages.count();
     await page.getByRole('button', { name: 'Run Verify Deliverable', exact: true }).click();
 
-    const messages = page.locator('.joy-code-messages');
-    await expect(messages).toContainText('Verify Deliverable', { timeout: 40_000 });
-    await expect(messages).toContainText(/completed/i, { timeout: 40_000 });
+    // Assert against the assistant reply this run appends, not the whole thread.
+    const runReply = assistantMessages.nth(before);
+    await expect(runReply).toContainText('Verify Deliverable', { timeout: 40_000 });
+    await expect(runReply).toContainText(/completed/i);
     // The R1 report is honest: structural is real, the O6 checks are unavailable.
-    await expect(messages).toContainText(/unavailable/i);
+    await expect(runReply).toContainText(/unavailable/i);
     // An advisory recipe never stages an approval card.
     await expect(page.getByRole('region', { name: 'JOY Agent live proposal' })).toHaveCount(0);
   });
