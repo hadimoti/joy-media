@@ -6,27 +6,27 @@ is **not** a self-approval — Astra rules on the exact candidate below.
 
 ## Candidate identity
 
-| Field       | Value                                                              |
-| ----------- | ----------------------------------------------------------------- |
-| commit      | `369a41966f5e6383f05f63732f4dfcc181594b9d` (branch `codex/joy-live-director`) |
-| tree        | `7a348582ccfd8b55da0413b65e445bf91f223691`                        |
-| lockfile    | `pnpm-lock.yaml` sha256 `36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3` |
-| base        | `6a6a336c` (live foundation release, schema 5)                     |
+| Field    | Value                                                                                      |
+| -------- | ------------------------------------------------------------------------------------------ |
+| commit   | `369a41966f5e6383f05f63732f4dfcc181594b9d` (branch `codex/joy-live-director`)              |
+| tree     | `7a348582ccfd8b55da0413b65e445bf91f223691`                                                 |
+| lockfile | `pnpm-lock.yaml` sha256 `36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3` |
+| base     | `6a6a336c` (live foundation release, schema 5)                                             |
 
 If Astra requires a change, a new candidate SHA is cut and this bundle is
 re-dated; the review is always against one exact SHA/tree/lock triple.
 
 ## Full-suite / build / security / performance at this candidate
 
-| Check                                            | Result                                                                                        |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `pnpm -w run check` (typecheck+lint+format+test) | exit 0 — **vitest 4033 passed / 38 skipped / 0 failed** (513 files)                          |
+| Check                                            | Result                                                                                                                                                |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm -w run check` (typecheck+lint+format+test) | exit 0 — **vitest 4033 passed / 38 skipped / 0 failed** (513 files)                                                                                   |
 | `release-candidate.yml` (self-hosted CI)         | run on this candidate — see the CI status appendix; the last full green was `34078187134` on `fd8497b0` and this candidate re-runs it (`34097358089`) |
-| CI lanes (each ×2)                               | `validate-candidate`, `windows-worker-clean`, `linux-real-services`, `acceptance` (7 desktop profiles), `real-service-acceptance` |
-| CodeRabbit                                       | clean — reviewed per-commit across the whole branch and again over the full V1 delta; every finding fixed |
-| BYOK security e2e                                | `tests/e2e/agent-byok-security.spec.ts` (4) — no key/baseUrl leak into UI, storage, or Worker messages |
-| Worker size gate                                 | `pnpm verify:joy-agent-worker` — engine.worker within budget                                 |
-| Coverage verifier                               | `node tooling/release/verify-agent-operation-coverage.mjs` — 16 bounded operations; 8 domains explicitly unsupported |
+| CI lanes (each ×2)                               | `validate-candidate`, `windows-worker-clean`, `linux-real-services`, `acceptance` (7 desktop profiles), `real-service-acceptance`                     |
+| CodeRabbit                                       | clean — reviewed per-commit across the whole branch and again over the full V1 delta; every finding fixed                                             |
+| BYOK security e2e                                | `tests/e2e/agent-byok-security.spec.ts` (4) — no key/baseUrl leak into UI, storage, or Worker messages                                                |
+| Worker size gate                                 | `pnpm verify:joy-agent-worker` — engine.worker within budget                                                                                          |
+| Coverage verifier                                | `node tooling/release/verify-agent-operation-coverage.mjs` — 16 bounded operations; 8 domains explicitly unsupported                                  |
 
 Stress cases from V3 are covered by existing specs: long media
 (`agent-observation-decode` `long-sequence.mp4`), low memory
@@ -41,15 +41,15 @@ two-writer & project switch (`prepared-change-store` authority tests,
 
 ## V3 demonstration checklist → evidence
 
-| V3 item                                            | Evidence                                                                                                                         |
-| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Find the single-frame flash via exact mode        | `tests/e2e/agent-observation-decode.spec.ts` decodes `single-frame-flash.mp4` in exhaustive mode and pins the flash PTS; `find-moment` recipe advertised runnable and unit-covered (`entry-points.test.ts`, `agent-director-skills.spec.ts` scripted) |
-| Construct a rough cut from observed source ranges  | **`agent-director-skills.spec.ts` "runs Build Rough Cut through the real Worker"** — picker → real Worker tool-loop → staged `timeline.trimClip` → Approve trims the clip 10s→6s → one Undo restores |
-| Refine a created Persian title over two turns      | `agent-director-lifecycle.spec.ts` "uses the prior committed title entity for a second-turn edit" + "rejects a follow-up proposal that targets another valid title"; Persian pronoun boundary handling unit-tested in `AgentPanel` |
-| Animate property / effect / transition             | `agent-live-preview.spec.ts` "creates a title and applies its dependent motion keyframe from an empty Worker object context"; `motion.setKeyframe` / `transition.addAtJunction` compiler + F5 readback unit tests (`joy-agent/*-readback`, `domain-parity.test.ts`) |
-| Balance real audio                                 | **Out of R1 scope** — `audio-balance` recipe is visible-but-**unavailable** (no verified `audio-mix` capability); `audio-observer` decode is unit-tested. Honest limitation in the coverage ledger. |
-| Operate on persisted 3D / HTML supported content   | `wp35-universal-timeline.spec.ts` (GLTF import → preview → durable rendered layer); `three-d-render-layer` + `html-scene-surfaces` persistence unit tests; `MotionPanel`/`TemplatesPanel` scene-preview teardown fixed (`f7615432`) |
-| Verify encoded output and one Undo/reload          | **`agent-director-skills.spec.ts` "runs Verify Deliverable through the real Worker"** — advisory recipe → honest R1 `DirectorVerificationReport` (structural real via `validateSpikeProject`; rendered/audio/encoded `unavailable` with stated uncertainty); `final-encoded-export-decoder.spec.ts` (4) proves real decode + `audioStreamCount: 0`; `agent-director-lifecycle` "does not revive an approval-capable preview after a browser reload" |
+| V3 item                                           | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Find the single-frame flash via exact mode        | `tests/e2e/agent-observation-decode.spec.ts` decodes `single-frame-flash.mp4` in exhaustive mode and pins the flash PTS; `find-moment` recipe advertised runnable and unit-covered (`entry-points.test.ts`, `agent-director-skills.spec.ts` scripted)                                                                                                                                                                                               |
+| Construct a rough cut from observed source ranges | **`agent-director-skills.spec.ts` "runs Build Rough Cut through the real Worker"** — picker → real Worker tool-loop → staged `timeline.trimClip` → Approve trims the clip 10s→6s → one Undo restores                                                                                                                                                                                                                                                |
+| Refine a created Persian title over two turns     | `agent-director-lifecycle.spec.ts` "uses the prior committed title entity for a second-turn edit" + "rejects a follow-up proposal that targets another valid title"; Persian pronoun boundary handling unit-tested in `AgentPanel`                                                                                                                                                                                                                  |
+| Animate property / effect / transition            | `agent-live-preview.spec.ts` "creates a title and applies its dependent motion keyframe from an empty Worker object context"; `motion.setKeyframe` / `transition.addAtJunction` compiler + F5 readback unit tests (`joy-agent/*-readback`, `domain-parity.test.ts`)                                                                                                                                                                                 |
+| Balance real audio                                | **Out of R1 scope** — `audio-balance` recipe is visible-but-**unavailable** (no verified `audio-mix` capability); `audio-observer` decode is unit-tested. Honest limitation in the coverage ledger.                                                                                                                                                                                                                                                 |
+| Operate on persisted 3D / HTML supported content  | `wp35-universal-timeline.spec.ts` (GLTF import → preview → durable rendered layer); `three-d-render-layer` + `html-scene-surfaces` persistence unit tests; `MotionPanel`/`TemplatesPanel` scene-preview teardown fixed (`f7615432`)                                                                                                                                                                                                                 |
+| Verify encoded output and one Undo/reload         | **`agent-director-skills.spec.ts` "runs Verify Deliverable through the real Worker"** — advisory recipe → honest R1 `DirectorVerificationReport` (structural real via `validateSpikeProject`; rendered/audio/encoded `unavailable` with stated uncertainty); `final-encoded-export-decoder.spec.ts` (4) proves real decode + `audioStreamCount: 0`; `agent-director-lifecycle` "does not revive an approval-capable preview after a browser reload" |
 
 ## Observation honesty proofs
 
