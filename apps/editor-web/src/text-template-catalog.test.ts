@@ -18,7 +18,11 @@ describe('native text template catalog', () => {
 
   it('includes RTL / Persian treatments on the deployed Vazirmatn face', () => {
     const rtl = TEXT_TEMPLATES.filter((t) => t.style.direction === 'rtl');
-    expect(rtl.map((t) => t.id)).toEqual(['rtl-editorial-title', 'rtl-name-role', 'rtl-quote-focus']);
+    expect(rtl.map((t) => t.id)).toEqual([
+      'rtl-editorial-title',
+      'rtl-name-role',
+      'rtl-quote-focus',
+    ]);
     for (const template of rtl) {
       expect(template.style.fontFamily).toBe('Vazirmatn Variable');
       expect(template.style.align).toBe('start');

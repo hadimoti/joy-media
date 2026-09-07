@@ -2,8 +2,8 @@
 
 Prepared 2026-09-07 by the implementer Claude session (Sonnet) that took R1
 through the full gate. **Every R1 release gate is satisfied. R1 is not
-deployed** — the session that finished the gate runs in Claude Code *auto
-mode*, whose classifier hard-blocks `ssh sweden` (and any SSH-backed MCP /
+deployed** — the session that finished the gate runs in Claude Code _auto
+mode_, whose classifier hard-blocks `ssh sweden` (and any SSH-backed MCP /
 `.mcp.json` write / terminal read), on every retry. The deploy needs a session
 that can reach the VPS. This document is that session's brief.
 
@@ -49,32 +49,32 @@ Everything that did **not** require the VPS is done and committed on
 
 ## 2. Gate status — ALL GREEN (frozen candidate)
 
-| Gate | Evidence |
-| --- | --- |
-| CodeRabbit clean | final pass on the candidate branch — clean |
-| Local `pnpm -w run check` | exit 0, 4033 tests |
-| Self-hosted CI ×2 (round-1 tree) | `release-candidate.yml` `34078187134` (`fd8497b0`) + `34097358089` (`369a4196`), all 20 jobs green each |
+| Gate                                      | Evidence                                                                                                                                                                                                                                                                               |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CodeRabbit clean                          | final pass on the candidate branch — clean                                                                                                                                                                                                                                             |
+| Local `pnpm -w run check`                 | exit 0, 4033 tests                                                                                                                                                                                                                                                                     |
+| Self-hosted CI ×2 (round-1 tree)          | `release-candidate.yml` `34078187134` (`fd8497b0`) + `34097358089` (`369a4196`), all 20 jobs green each                                                                                                                                                                                |
 | Self-hosted CI on the **exact candidate** | `release-candidate.yml` **`34123884446`** on `855734cf` — **20/20 jobs `success`, run conclusion `success`**, 2026-09-07 ~17:08 UTC. Zero failures. (`validate-candidate`, `linux-real-services` ×2, `windows-worker-clean` 2 passes, `acceptance` ×14, `real-service-acceptance` ×2.) |
-| Independent Opus ("Astra") | `APPROVE_FOR_DEPLOY 855734cf0c875101a632426983db2638c2adddcd 54ccefce85daf174b25620b24b64b9d54c130dcc 36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3` — round 2, contingency (CI `34123884446` green) now **satisfied**, so the approval is **in force**. |
-| Owner go-ahead | "wait for CI green then deploy R1" + "read our exact rules and do it yourself" |
+| Independent Opus ("Astra")                | `APPROVE_FOR_DEPLOY 855734cf0c875101a632426983db2638c2adddcd 54ccefce85daf174b25620b24b64b9d54c130dcc 36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3` — round 2, contingency (CI `34123884446` green) now **satisfied**, so the approval is **in force**.            |
+| Owner go-ahead                            | "wait for CI green then deploy R1" + "read our exact rules and do it yourself"                                                                                                                                                                                                         |
 
 Full evidence: `docs/reviews/joy-live-director-r1-acceptance-bundle-2026-09-07.md`
 (the Astra bundle) and `…-r1-deploy-runbook-2026-09-07.md` on the branch.
 
 ### Candidate identity (verify before deploy)
 
-| Field | Value |
-| --- | --- |
-| commit | `855734cf0c875101a632426983db2638c2adddcd` |
-| tree | `54ccefce85daf174b25620b24b64b9d54c130dcc` |
+| Field                   | Value                                                              |
+| ----------------------- | ------------------------------------------------------------------ |
+| commit                  | `855734cf0c875101a632426983db2638c2adddcd`                         |
+| tree                    | `54ccefce85daf174b25620b24b64b9d54c130dcc`                         |
 | `pnpm-lock.yaml` sha256 | `36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3` |
-| schema version | `5` — **unchanged** from live |
-| base (current live) | `6a6a336c` (Live Director *foundation* release) |
+| schema version          | `5` — **unchanged** from live                                      |
+| base (current live)     | `6a6a336c` (Live Director _foundation_ release)                    |
 
 Branch HEAD is a few commits past `855734cf` — **all docs-only** (this handoff,
 the runbook, the acceptance-bundle CI-green record). Deploy the **exact
-`855734cf`**, not HEAD. Astra's approval is void if any *runtime/build/lock/
-migration* file differs; docs do not.
+`855734cf`**, not HEAD. Astra's approval is void if any _runtime/build/lock/
+migration_ file differs; docs do not.
 
 ### Blast radius — web-bundle-only
 
@@ -120,7 +120,7 @@ WP-36 `733f584`, WP-35 `5273e34`, WP-34 `630c8ad`, WP-32, WP-29 …:
 - **Prior API env retained**: copy `/etc/joy-media/api.env` →
   `/etc/joy-media/api.env.before-<slug>-<UTCstamp>.env`.
 - **Release identity**: `deploy/joy-media-release-identity.sh write <path>
-  <commit> <tree> <lock-sha256> <schema>` into each immutable release
+<commit> <tree> <lock-sha256> <schema>` into each immutable release
   (`release-identity.env`). Only the four `JOY_MEDIA_RELEASE_*` keys are then
   merged into `/etc/joy-media/api.env` (`… release-identity.sh merge`).
 - **Validate → activate → verify**:
@@ -132,7 +132,7 @@ WP-36 `733f584`, WP-35 `5273e34`, WP-34 `630c8ad`, WP-32, WP-29 …:
   - signed-in browser smoke
 - **Rollback**: `deploy/joy-media-rollback.sh --apply <good-api-release> <good-web-release>`
   (atomic symlink pair + `JOY_MEDIA_RELEASE_*` env rewrite + `systemctl restart
-  joy-media@api` + `nginx` reload + 45 s health poll; self-restores on error).
+joy-media@api` + `nginx` reload + 45 s health poll; self-restores on error).
   Keep the DB backup until the deploy gate is accepted.
 - **Closeout**: Gbrain page `joy-media-<slug>-<date>` + `joy-media-state`
   timeline entry with SHAs / paths / hashes / backup facts; then the PC-side
@@ -249,6 +249,7 @@ the branch), then fetch on the VPS. The `vps` remote →
 `sweden:/opt/joy-media.git`.
 
 ### On failure
+
 `bash deploy/joy-media-rollback.sh --dry-run <good-api> <good-web>` then
 `--apply`. `<good-*>` = the C0 pre-deploy `current-api` / `web` targets. If only
 the web pointer moved: `ln -sfn <good-web> /opt/joy-media/.web.rb && mv -Tf
@@ -268,7 +269,7 @@ paths; read it before touching the VPS.
 
 > If you'd rather symlink (to track upstream edits), run from an elevated
 > shell: `New-Item -ItemType SymbolicLink -Path $HOME\.claude\skills\<name>
-> -Target $HOME\.agents\skills\<name>` and delete the copy.
+-Target $HOME\.agents\skills\<name>` and delete the copy.
 
 ### Gbrain MCP — NOT done (classifier blocked the `.mcp.json` write)
 
@@ -386,6 +387,7 @@ independent Opus "Astra" `APPROVE_FOR_DEPLOY` on that candidate → owner
 go-ahead → guarded deploy → closeout. **Never self-approve.**
 
 Astra's non-blocking R2 follow-ups (from the R1 review) to fold in early:
+
 1. delete `budget` from the `observeSources` contract (decorative in R1) — or
 2. add a test pinning "R1 deliberately ignores `budget`";
 3. thread the manifest observation budget into the observation bridge and
@@ -399,23 +401,23 @@ Astra's non-blocking R2 follow-ups (from the R1 review) to fold in early:
 
 ## 9. Pointers
 
-| What | Where |
-| --- | --- |
-| Master plan + release rules | `docs/superpowers/plans/2026-09-05-joy-live-director-master.md` |
-| R1 task list | `docs/superpowers/plans/2026-09-05-joy-live-director-r1.md` |
-| R2/R3 task list | `docs/superpowers/plans/2026-09-05-joy-live-director-r2-r3.md` |
-| Original next-agent plan | `C:\Users\HadiMoti\Desktop\joy-media-CLAUDE-agent-plan-2026-09-06.md` |
-| Astra acceptance bundle | `docs/reviews/joy-live-director-r1-acceptance-bundle-2026-09-07.md` |
-| Deploy runbook (C0–C6) | `docs/reviews/joy-live-director-r1-deploy-runbook-2026-09-07.md` |
-| Coverage ledger + verifier | `docs/reviews/joy-live-director-coverage.json`, `tooling/release/verify-agent-operation-coverage.mjs` |
-| Decoder (mediabunny) selection | `docs/reviews/joy-observation-decoder-selection.md` |
-| Deploy manifests + rollback | `deploy/README.md`, `deploy/joy-media-rollback.sh`, `deploy/joy-media-release-identity.sh` |
-| Historical deploy evidence | `STATE.md` (built-in engine 2026-09-04; WP-34/35/36 closeouts) |
-| VPS operational map | `~/.claude/skills/sweden-vps-ops/references/operational-map.md` |
-| Gbrain ritual | `~/.codex/AGENTS.md`, `~/.claude/skills/brain-ops/SKILL.md` |
-| Memory (update each session) | `C:\Users\HadiMoti\.claude\projects\C--Users-HadiMoti-joy-media\memory\joy-media-live-director-state.md` |
-| Worktree (work happens here) | `C:\Users\HadiMoti\.config\superpowers\worktrees\joy-media\joy-live-director` on `codex/joy-live-director` |
-| WIP safety snapshot | `stash@{0}` `e0eb6368`, tag `wip-snapshot-2026-09-06`, branch `codex/joy-live-director-wip` — never delete |
+| What                           | Where                                                                                                      |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| Master plan + release rules    | `docs/superpowers/plans/2026-09-05-joy-live-director-master.md`                                            |
+| R1 task list                   | `docs/superpowers/plans/2026-09-05-joy-live-director-r1.md`                                                |
+| R2/R3 task list                | `docs/superpowers/plans/2026-09-05-joy-live-director-r2-r3.md`                                             |
+| Original next-agent plan       | `C:\Users\HadiMoti\Desktop\joy-media-CLAUDE-agent-plan-2026-09-06.md`                                      |
+| Astra acceptance bundle        | `docs/reviews/joy-live-director-r1-acceptance-bundle-2026-09-07.md`                                        |
+| Deploy runbook (C0–C6)         | `docs/reviews/joy-live-director-r1-deploy-runbook-2026-09-07.md`                                           |
+| Coverage ledger + verifier     | `docs/reviews/joy-live-director-coverage.json`, `tooling/release/verify-agent-operation-coverage.mjs`      |
+| Decoder (mediabunny) selection | `docs/reviews/joy-observation-decoder-selection.md`                                                        |
+| Deploy manifests + rollback    | `deploy/README.md`, `deploy/joy-media-rollback.sh`, `deploy/joy-media-release-identity.sh`                 |
+| Historical deploy evidence     | `STATE.md` (built-in engine 2026-09-04; WP-34/35/36 closeouts)                                             |
+| VPS operational map            | `~/.claude/skills/sweden-vps-ops/references/operational-map.md`                                            |
+| Gbrain ritual                  | `~/.codex/AGENTS.md`, `~/.claude/skills/brain-ops/SKILL.md`                                                |
+| Memory (update each session)   | `C:\Users\HadiMoti\.claude\projects\C--Users-HadiMoti-joy-media\memory\joy-media-live-director-state.md`   |
+| Worktree (work happens here)   | `C:\Users\HadiMoti\.config\superpowers\worktrees\joy-media\joy-live-director` on `codex/joy-live-director` |
+| WIP safety snapshot            | `stash@{0}` `e0eb6368`, tag `wip-snapshot-2026-09-06`, branch `codex/joy-live-director-wip` — never delete |
 
 ### Hard limits (unchanged)
 

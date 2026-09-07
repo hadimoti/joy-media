@@ -192,7 +192,6 @@ describe('evaluateFrame', () => {
   it('skips disabled tracks', () => {
     const project = fixture();
     const mutated: SpikeProject = JSON.parse(JSON.stringify(project));
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mutated.compositions['root']!.tracks[1] as any).enabled = false;
     const result = evaluateFrame(mutated, 'root', 1.5 * SECOND);
     expect(result.frames.map((f) => f.assetId)).toEqual(['asset-a']);
