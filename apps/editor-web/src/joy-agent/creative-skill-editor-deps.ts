@@ -9,6 +9,7 @@
  * `readObservationCoverage` share exactly one bounded observation pass.
  */
 
+import { validateSpikeProject } from '@joy-media/project-schema';
 import type { AgentPreviewStore } from '../agent-preview-store.js';
 import { isAgentPreviewBundleReady } from '../agent-preview-store.js';
 import type { EditorSession } from '../editor-session.js';
@@ -197,20 +198,34 @@ export function createCreativeSkillEditorPrimitiveDeps(
     },
 
     async verifyComposedAndEncoded({ scope }) {
-      // R1 keeps the recipe path honest: structural state is readable now, but
-      // the O6 composition + encoded-output decoders are not yet wired as
-      // per-recipe verification consumers (coverage-ledger open item #3).
+      // R1 keeps the recipe path honest: the project schema validator is a real
+      // structural check, but the O6 composition + encoded-output decoders are
+      // not yet wired as per-recipe verification consumers (coverage-ledger
+      // open item #3).
+      const diagnostics = validateSpikeProject(graph.getSession().timelineProject);
+      const structural =
+        diagnostics.length === 0
+          ? ({
+              id: 'structural-schema',
+              method: 'structural' as const,
+              status: 'passed' as const,
+              evidenceIds: [`project-schema:${scope.revision}`],
+              summary: 'Project schema validation reported no diagnostics.',
+            } as const)
+          : ({
+              id: 'structural-schema',
+              method: 'structural' as const,
+              status: 'failed' as const,
+              evidenceIds: [`project-schema:${scope.revision}`],
+              summary: `Project schema validation reported ${diagnostics.length} diagnostic${
+                diagnostics.length === 1 ? '' : 's'
+              }.`,
+            } as const);
       const report = createDirectorVerificationReport({
         projectId: scope.projectId,
         revision: scope.revision,
         checks: [
-          {
-            id: 'structural-current',
-            method: 'structural',
-            status: 'passed',
-            evidenceIds: [`project-revision:${scope.revision}`],
-            summary: 'Current project state is internally consistent.',
-          },
+          structural,
           {
             id: 'rendered-unavailable',
             method: 'rendered',
@@ -240,7 +255,11 @@ export function createCreativeSkillEditorPrimitiveDeps(
       return {
         report,
         summary:
-          'Structural state verified. Rendered, audio, and encoded-output checks are unavailable in R1.',
+          diagnostics.length === 0
+            ? 'Project schema is valid. Rendered, audio, and encoded-output checks are unavailable in R1.'
+            : `Project schema reported ${diagnostics.length} diagnostic${
+                diagnostics.length === 1 ? '' : 's'
+              }. Rendered, audio, and encoded-output checks are unavailable in R1.`,
       };
     },
   };
