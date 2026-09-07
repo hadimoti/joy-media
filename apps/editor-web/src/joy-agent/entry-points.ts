@@ -1,7 +1,11 @@
 import type { CreativeBriefV1, CreativeSkillAvailability } from '@joy-media/agent-tools';
 import { resolveCreativeSkillAvailability, validateCreativeBrief } from '@joy-media/agent-tools';
 import type { JoyAgentEngineClient, JoyAgentRunHost } from './engine-client.js';
-import type { CreativeSkillScopedToolLoopResult } from './creative-skill-editor-primitives.js';
+import {
+  createCreativeSkillEditorPrimitives,
+  type CreativeSkillEditorPrimitiveDeps,
+  type CreativeSkillScopedToolLoopResult,
+} from './creative-skill-editor-primitives.js';
 import type {
   JoyAgentPreparedProposal,
   JoyAgentRunRequest,
@@ -338,6 +342,32 @@ export function runCreativeSkill(input: RunCreativeSkillInput): Promise<Creative
   return runner.run({
     skillId: input.skillId,
     scope: input.scope,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
+  });
+}
+
+/**
+ * Run one R1 creative recipe with the concrete editor-wired primitives. The
+ * caller builds `deps` once per `App.tsx` mount
+ * (`createCreativeSkillEditorPrimitiveDeps`); each run is isolated by its scope
+ * and gets a fresh memoized tool-loop shared by `observe`/`propose`.
+ */
+export function runEditorCreativeSkill(input: {
+  readonly skillId: string;
+  readonly scope: CreativeSkillRunScope;
+  readonly deps: CreativeSkillEditorPrimitiveDeps;
+  readonly isAuthorityCurrent: (scope: CreativeSkillRunScope) => boolean;
+  readonly seams?: CreativeSkillSeamAvailability;
+  readonly signal?: AbortSignal;
+  readonly onEvent?: (event: CreativeSkillCheckpointEvent) => void;
+}): Promise<CreativeSkillRunResult> {
+  return runCreativeSkill({
+    skillId: input.skillId,
+    scope: input.scope,
+    primitives: createCreativeSkillEditorPrimitives(input.deps, input.scope),
+    isAuthorityCurrent: input.isAuthorityCurrent,
+    ...(input.seams === undefined ? {} : { seams: input.seams }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
   });

@@ -58,7 +58,7 @@ export interface RecipeScopedEditRunDeps {
   /** Private host notification after a bounded source observation completes. */
   readonly onObservationCompleted?: (
     scope: CreativeSkillRunScope,
-    result: { readonly observationId: string },
+    result: { readonly observationId: string; readonly manifestId: string },
   ) => void | Promise<void>;
   /** Records the change-set id a recipe run staged, for later cleanup. */
   readonly onStaged?: (scope: CreativeSkillRunScope, changeSetId: string) => void;
@@ -142,7 +142,10 @@ export function runScopedCreativeSkillEditToolLoop(
       observationBridge === undefined
         ? undefined
         : async (result) => {
-            await deps.onObservationCompleted?.(scope, { observationId: result.observationId });
+            await deps.onObservationCompleted?.(scope, {
+              observationId: result.observationId,
+              manifestId: result.manifestId,
+            });
           },
     ),
     allowedToolNames: boundedAllowList,
