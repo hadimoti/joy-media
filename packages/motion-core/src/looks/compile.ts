@@ -132,6 +132,11 @@ export function compileLook(input: LookCompileInput): LookCompileResult {
   const isWritable = (bindingId: string): boolean =>
     !overridden.has(bindingId) || reset.has(bindingId);
 
+  // A binding with a pre-baked audio track: the bake is authoritative, so
+  // control drives that target it are skipped and the baked keyframes are
+  // emitted verbatim below.
+  const bakedBindingIds = new Set((input.audioBakes ?? []).map((b) => b.bindingId));
+
   const operations: LookOperation[] = [];
   const changed = new Set<string>();
   const usedKinds = new Set<LookOperationKind>();
@@ -159,6 +164,8 @@ export function compileLook(input: LookCompileInput): LookCompileResult {
       return;
     }
     if (!isWritable(bindingId)) return;
+    // An audio bake owns this binding — its keyframes replace the slider drive.
+    if (bakedBindingIds.has(bindingId)) return;
     const ownerId = input.entityBindings[target.ownerSlotId];
     if (typeof ownerId !== 'string' || ownerId.length === 0) {
       // A drive that targets an optional, unbound slot is simply skipped;
@@ -237,6 +244,84 @@ export function compileLook(input: LookCompileInput): LookCompileResult {
 
   for (const control of definition.controls) {
     compileControl(control, input, emitKeyframes, emitTemplate, diagnostics);
+  }
+
+  // Pre-baked audio-reactive tracks (L4). Emitted verbatim onto their binding
+  // after control drives were skipped for it.
+  for (const bake of input.audioBakes ?? []) {
+    const target = bindingById.get(bake.bindingId);
+    if (target === undefined) {
+      diagnostics.push({
+        code: 'LOOK_COMPILE_UNKNOWN_BINDING',
+        message: `audio bake references unknown binding "${bake.bindingId}"`,
+        bindingId: bake.bindingId,
+      });
+      continue;
+    }
+    if (target.channel !== 'keyframe') {
+      diagnostics.push({
+        code: 'LOOK_COMPILE_BAKE_CHANNEL',
+        message: `audio bake binding "${bake.bindingId}" is not a keyframe channel`,
+        bindingId: bake.bindingId,
+      });
+      continue;
+    }
+    if (!isWritable(bake.bindingId)) continue;
+    if (bake.keys.length < 2) {
+      diagnostics.push({
+        code: 'LOOK_COMPILE_BAKE_KEYS',
+        message: `audio bake binding "${bake.bindingId}" needs at least two keys`,
+        bindingId: bake.bindingId,
+      });
+      continue;
+    }
+    const ownerId = input.entityBindings[target.ownerSlotId];
+    if (typeof ownerId !== 'string' || ownerId.length === 0) {
+      if (requiredSlotIds.has(target.ownerSlotId)) {
+        diagnostics.push({
+          code: 'LOOK_COMPILE_UNBOUND_SLOT',
+          message: `audio bake "${bake.bindingId}" needs required slot "${target.ownerSlotId}" bound`,
+          bindingId: bake.bindingId,
+        });
+      }
+      continue;
+    }
+    let previousTimeUs = Number.NEGATIVE_INFINITY;
+    let bakeInvalid = false;
+    for (const key of bake.keys) {
+      if (
+        !Number.isFinite(key.timeUs) ||
+        !Number.isFinite(key.value) ||
+        key.timeUs < 0 ||
+        key.timeUs > input.compositionDurationUs ||
+        key.timeUs <= previousTimeUs
+      ) {
+        diagnostics.push({
+          code: 'LOOK_COMPILE_BAKE_KEYS',
+          message: `audio bake binding "${bake.bindingId}" has an out-of-range or non-increasing key`,
+          bindingId: bake.bindingId,
+        });
+        bakeInvalid = true;
+        break;
+      }
+      previousTimeUs = key.timeUs;
+    }
+    if (bakeInvalid) continue;
+    for (const key of bake.keys) {
+      operations.push({
+        kind: 'motion.setKeyframe',
+        bindingId: bake.bindingId,
+        ownerKind: target.ownerKind,
+        ownerId,
+        propertyId: target.propertyId,
+        timeDomain: target.timeDomain,
+        timeUs: Math.round(key.timeUs),
+        value: key.value,
+        interpolation: bake.interpolation ?? 'linear',
+      });
+    }
+    changed.add(bake.bindingId);
+    usedKinds.add('motion.setKeyframe');
   }
 
   if (diagnostics.length > 0) return fail(diagnostics);

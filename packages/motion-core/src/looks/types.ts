@@ -311,6 +311,21 @@ export interface LookCompilerDiagnostic {
 }
 
 /**
+ * A pre-baked keyframe track for one `keyframe`-channel binding, produced
+ * outside the compiler (the L4 audio bridge bakes a `motion.setKeyframe`
+ * trajectory from beat evidence). When a bake is supplied for a binding, the
+ * compiler emits those keyframes verbatim and skips every control drive that
+ * targets the same binding — the bake is the source of truth for it, exactly
+ * as a hand-edit override would be.
+ */
+export interface LookAudioBakeInput {
+  readonly bindingId: string;
+  readonly keys: readonly { readonly timeUs: number; readonly value: number }[];
+  /** Interpolation for the baked keyframes; defaults to `linear`. */
+  readonly interpolation?: 'hold' | 'linear' | 'eased';
+}
+
+/**
  * What the operator's action supplies. Either an existing `LookInstance`'s
  * `controlValues`/`entityBindings`/`overriddenBindingIds` (reapply / update),
  * or a fresh slot assignment for a first apply.
@@ -331,6 +346,8 @@ export interface LookCompileInput {
   readonly resetBindingIds?: readonly string[];
   /** Font family -> resolved (bundled) family. A missing entry is a dependency failure. */
   readonly resolvedFonts: Readonly<Record<string, string>>;
+  /** Pre-baked keyframe tracks (L4 audio-reactive) that supersede control drives on their bindings. */
+  readonly audioBakes?: readonly LookAudioBakeInput[];
 }
 
 export interface LookCompileResult {

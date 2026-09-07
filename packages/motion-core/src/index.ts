@@ -229,6 +229,7 @@ export {
   type LookSetCaptionTemplateOperation,
   type LookAddTransitionOperation,
   type LookCompilerDiagnostic,
+  type LookAudioBakeInput,
   type LookCompileInput,
   type LookCompileResult,
   type LookDefinitionDiagnostic,
