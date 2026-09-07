@@ -108,9 +108,11 @@ It does **not** assert that a pack "looks good" — that judgement is the owner'
   plenty of listening space. No scale, no translate.
 - **Slots:** lower-third / name-role (required), title card (optional), captions
   (optional).
-- **Controls:** Gentleness (scalar → lower-third/title opacity `0 → 0.55 → 1`
-  eased-in), Lower third (color → `name-role` / `accent` text templates),
-  Captions (enum → `joy-clean` / `joy-rtl-classic`).
+- **Controls:** Reveal (scalar, default 1 → lower-third/title opacity
+  `0 → 0.55 → 1` eased-in; the required lower third reaches full opacity at the
+  default, lower values hold it more transparent), Lower third (color →
+  `name-role` / `accent` text templates), Captions (enum → `joy-clean` /
+  `joy-rtl-classic`).
 - **Constraints:** portrait `120 / 44 / 2_500_000`; landscape `88 / 68 /
 2_500_000` — the longest `minHoldUs` of the six, deliberately.
 - **Required ops:** `motion.setKeyframe`, `text.setTemplate`, `caption.setTemplate`.

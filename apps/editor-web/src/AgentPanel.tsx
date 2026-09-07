@@ -2158,6 +2158,17 @@ export function AgentPanel({
       beginRunLifecycle(lifecycleRun);
       const rootComposition =
         session.visualProject.compositions[session.visualProject.rootCompositionId];
+      if (rootComposition === undefined) {
+        appendMessage(
+          threadId,
+          'assistant',
+          `“${definition.title}” could not be prepared: this project has no root composition. No edit was applied.`,
+        );
+        cancelRunLifecycle(scope.runId, 'Look blocked — no root composition.');
+        setAgentPhase('failed');
+        if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
+        return;
+      }
       const result = await stageLookRun(
         {
           getSession: () => latestSessionRef.current,
@@ -2180,11 +2191,8 @@ export function AgentPanel({
             definition,
             definitionVersion: request.definitionVersion,
             compositionId: session.visualProject.rootCompositionId,
-            compositionDurationUs: rootComposition?.durationUs ?? 30_000_000,
-            format:
-              (rootComposition?.height ?? 0) >= (rootComposition?.width ?? 0)
-                ? 'portrait'
-                : 'landscape',
+            compositionDurationUs: rootComposition.durationUs,
+            format: rootComposition.height >= rootComposition.width ? 'portrait' : 'landscape',
             entityBindings: request.entityBindings,
             controlValues: request.controlValues,
             overriddenBindingIds: [],

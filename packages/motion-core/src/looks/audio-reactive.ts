@@ -106,8 +106,8 @@ export function bakeAudioReactive(input: BakeAudioReactiveInput): BakeAudioReact
   if (!Number.isFinite(envelope.confidence) || envelope.confidence < 0 || envelope.confidence > 1) {
     return fail(bindingId, ['envelope.confidence must be in [0,1]']);
   }
-  if (envelope.samples.length === 0) {
-    return fail(bindingId, ['envelope has no samples']);
+  if (envelope.samples.length < 2) {
+    return fail(bindingId, ['envelope must have at least two samples']);
   }
   for (let i = 0; i < envelope.samples.length; i += 1) {
     const s = envelope.samples[i]!;

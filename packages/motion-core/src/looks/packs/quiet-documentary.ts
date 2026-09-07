@@ -36,13 +36,17 @@ export const quietDocumentary: LookDefinition = {
   ],
   controls: [
     {
-      id: 'gentleness',
-      label: 'Gentleness',
+      id: 'reveal',
+      label: 'Reveal',
       kind: 'scalar',
-      default: 0.7,
+      // Defaults to fully revealed — the required lower third must be legible.
+      // Lower values hold it more transparent for an even quieter treatment;
+      // the "gentle" identity is the eased profile + long holds, not a dim
+      // endpoint.
+      default: 1,
       drives: [
-        // A slow, soft fade to full opacity. Higher Gentleness spreads the
-        // approach further across the early window.
+        // A slow, soft eased fade in. The profile shapes the approach; the
+        // operator value sets how far it settles (1 = full opacity).
         {
           bindingId: 'lower-third-opacity',
           min: 0,

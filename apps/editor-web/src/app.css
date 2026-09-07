@@ -8565,7 +8565,7 @@ label {
   border-radius: 0.5rem;
   background: transparent;
   color: inherit;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 .living-look-select[aria-pressed='true'] {

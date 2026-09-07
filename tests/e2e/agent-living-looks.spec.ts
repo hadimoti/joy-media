@@ -59,8 +59,9 @@ test.describe('JOY Living Looks', () => {
   test('shows an unavailable pack honestly when the editor lacks a capability', async ({
     page,
   }) => {
-    // All six packs are available in the shipped editor; this asserts the
-    // honest-availability path exists rather than forcing a missing capability.
+    // The unavailable rendering path (is-unavailable class + "Needs:" reason) is
+    // unit-covered in LivingLooksPanel.test.tsx; here we assert the shipped
+    // editor exposes all six packs as available, so none is silently hidden.
     await authenticate(page);
     await openReferenceWorkspace(page);
     await openPanel(page, 'Joy Code');

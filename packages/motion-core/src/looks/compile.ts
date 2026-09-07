@@ -248,7 +248,17 @@ export function compileLook(input: LookCompileInput): LookCompileResult {
 
   // Pre-baked audio-reactive tracks (L4). Emitted verbatim onto their binding
   // after control drives were skipped for it.
+  const seenBakeBindings = new Set<string>();
   for (const bake of input.audioBakes ?? []) {
+    if (seenBakeBindings.has(bake.bindingId)) {
+      diagnostics.push({
+        code: 'LOOK_COMPILE_BAKE_DUPLICATE',
+        message: `audio bake binding "${bake.bindingId}" is supplied more than once`,
+        bindingId: bake.bindingId,
+      });
+      continue;
+    }
+    seenBakeBindings.add(bake.bindingId);
     const target = bindingById.get(bake.bindingId);
     if (target === undefined) {
       diagnostics.push({
@@ -286,15 +296,19 @@ export function compileLook(input: LookCompileInput): LookCompileResult {
       }
       continue;
     }
+    // Validate the rounded times — those are what land on the timeline, so a
+    // pair of raw times that round to the same microsecond is a collision.
     let previousTimeUs = Number.NEGATIVE_INFINITY;
     let bakeInvalid = false;
+    const roundedKeys: { timeUs: number; value: number }[] = [];
     for (const key of bake.keys) {
+      const timeUs = Math.round(key.timeUs);
       if (
-        !Number.isFinite(key.timeUs) ||
+        !Number.isFinite(timeUs) ||
         !Number.isFinite(key.value) ||
-        key.timeUs < 0 ||
-        key.timeUs > input.compositionDurationUs ||
-        key.timeUs <= previousTimeUs
+        timeUs < 0 ||
+        timeUs > input.compositionDurationUs ||
+        timeUs <= previousTimeUs
       ) {
         diagnostics.push({
           code: 'LOOK_COMPILE_BAKE_KEYS',
@@ -304,10 +318,11 @@ export function compileLook(input: LookCompileInput): LookCompileResult {
         bakeInvalid = true;
         break;
       }
-      previousTimeUs = key.timeUs;
+      previousTimeUs = timeUs;
+      roundedKeys.push({ timeUs, value: key.value });
     }
     if (bakeInvalid) continue;
-    for (const key of bake.keys) {
+    for (const key of roundedKeys) {
       operations.push({
         kind: 'motion.setKeyframe',
         bindingId: bake.bindingId,
@@ -315,7 +330,7 @@ export function compileLook(input: LookCompileInput): LookCompileResult {
         ownerId,
         propertyId: target.propertyId,
         timeDomain: target.timeDomain,
-        timeUs: Math.round(key.timeUs),
+        timeUs: key.timeUs,
         value: key.value,
         interpolation: bake.interpolation ?? 'linear',
       });

@@ -215,11 +215,11 @@ exports[`R2 Look pack golden compile > product-precision > portrait first-apply 
 exports[`R2 Look pack golden compile > quiet-documentary > landscape first-apply operations are stable 1`] = `
 [
   "kf lower-third-opacity opacity @0 = 0.000 (eased)",
-  "kf lower-third-opacity opacity @1440000 = 0.385 (eased)",
-  "kf lower-third-opacity opacity @3200000 = 0.700 (eased)",
+  "kf lower-third-opacity opacity @1440000 = 0.550 (eased)",
+  "kf lower-third-opacity opacity @3200000 = 1.000 (eased)",
   "kf title-opacity opacity @0 = 0.000 (eased)",
-  "kf title-opacity opacity @1760000 = 0.385 (eased)",
-  "kf title-opacity opacity @4000000 = 0.700 (eased)",
+  "kf title-opacity opacity @1760000 = 0.550 (eased)",
+  "kf title-opacity opacity @4000000 = 1.000 (eased)",
   "text lower-third-treatment -> name-role",
   "caption caption-treatment -> joy-clean",
 ]
@@ -228,11 +228,11 @@ exports[`R2 Look pack golden compile > quiet-documentary > landscape first-apply
 exports[`R2 Look pack golden compile > quiet-documentary > portrait first-apply operations are stable 1`] = `
 [
   "kf lower-third-opacity opacity @0 = 0.000 (eased)",
-  "kf lower-third-opacity opacity @1440000 = 0.385 (eased)",
-  "kf lower-third-opacity opacity @3200000 = 0.700 (eased)",
+  "kf lower-third-opacity opacity @1440000 = 0.550 (eased)",
+  "kf lower-third-opacity opacity @3200000 = 1.000 (eased)",
   "kf title-opacity opacity @0 = 0.000 (eased)",
-  "kf title-opacity opacity @1760000 = 0.385 (eased)",
-  "kf title-opacity opacity @4000000 = 0.700 (eased)",
+  "kf title-opacity opacity @1760000 = 0.550 (eased)",
+  "kf title-opacity opacity @4000000 = 1.000 (eased)",
   "text lower-third-treatment -> name-role",
   "caption caption-treatment -> joy-clean",
 ]

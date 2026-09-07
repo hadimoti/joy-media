@@ -105,6 +105,22 @@ describe('bakeAudioReactive', () => {
     ).toBe(false);
   });
 
+  it('rejects an envelope with fewer than two samples — one point cannot define motion', () => {
+    const oneSample = bakeAudioReactive(
+      baseInput({
+        envelope: {
+          evidenceVersion: 'v',
+          samples: [{ compositionTimeUs: 0, level: 0.9 }],
+          silent: false,
+          confidence: 0.9,
+        },
+      }),
+    );
+    expect(oneSample.ok).toBe(false);
+    expect(oneSample.keys).toEqual([]);
+    expect(bakeAudioReactive(baseInput({ envelope: envelope([]) })).ok).toBe(false);
+  });
+
   it('a descending property range still maps and clamps correctly', () => {
     const result = bakeAudioReactive(baseInput({ propertyMin: 0, propertyMax: -20, restValue: 0 }));
     expect(result.ok).toBe(true);

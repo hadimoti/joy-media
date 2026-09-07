@@ -131,7 +131,11 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
             props.onRun({
               definitionId: selected.definition.id,
               definitionVersion: selected.definition.version,
-              entityBindings: slotBindings,
+              // Drop optional slots left on the placeholder — the compiler
+              // treats an empty id as unbound, so only send real bindings.
+              entityBindings: Object.fromEntries(
+                Object.entries(slotBindings).filter(([, entityId]) => entityId.length > 0),
+              ),
               controlValues: {
                 ...Object.fromEntries(
                   selected.definition.controls.map((c) => [c.id, controlDefault(c)]),

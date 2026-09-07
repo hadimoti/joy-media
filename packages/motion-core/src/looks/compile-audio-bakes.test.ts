@@ -125,6 +125,38 @@ describe('compileLook — audio bakes', () => {
     expect(nonIncreasing.ok).toBe(false);
   });
 
+  it('fails closed when the same binding is baked twice', () => {
+    const result = compileLook(
+      baseInput({
+        audioBakes: [
+          { bindingId: 'headline-scale-x', keys: scaleXKeys },
+          { bindingId: 'headline-scale-x', keys: scaleXKeys },
+        ],
+      }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.map((d) => d.code)).toContain('LOOK_COMPILE_BAKE_DUPLICATE');
+  });
+
+  it('fails closed when two keys round to the same microsecond', () => {
+    const result = compileLook(
+      baseInput({
+        audioBakes: [
+          {
+            bindingId: 'headline-scale-x',
+            keys: [
+              { timeUs: 0, value: 1 },
+              { timeUs: 1_000_000.2, value: 1.1 },
+              { timeUs: 1_000_000.4, value: 1 },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.map((d) => d.code)).toContain('LOOK_COMPILE_BAKE_KEYS');
+  });
+
   it('skips a bake whose owner slot is an unbound optional slot', () => {
     const result = compileLook(
       baseInput({
