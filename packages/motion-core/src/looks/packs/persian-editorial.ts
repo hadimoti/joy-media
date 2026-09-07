@@ -4,7 +4,8 @@
  * Deliberate identity: native RTL hierarchy and mixed-script typography. The
  * RTL comes from the text and caption templates (`rtl-editorial-title`,
  * `rtl-name-role`, `joy-rtl-classic`) on the deployed Vazirmatn face — the
- * Fontiran gate stays closed. Motion mirrors the editorial rise but travels
+ * retired commercial-foundry gate stays closed. Motion mirrors the editorial
+ * rise but travels
  * from the reading side; `x` offsets are positive (leading edge on the right).
  * Idiomatic Persian typographic quality is owner-gated in the R2 bundle.
  */

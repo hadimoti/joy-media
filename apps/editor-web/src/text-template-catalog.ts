@@ -207,8 +207,9 @@ export const TEXT_TEMPLATES: readonly TextTemplateV1[] = [
     fill: { kind: 'solid', color: '#ffffff' },
     stroke: { color: '#f6c453', widthPx: 2, opacity: 1 },
   }),
-  // Persian / RTL treatments — Vazirmatn (OFL, already bundled). The Fontiran
-  // gate stays closed: these reference the deployed Fontsource face only.
+  // Persian / RTL treatments — Vazirmatn (OFL, already bundled). The retired
+  // commercial-foundry gate stays closed: these reference the deployed
+  // Fontsource face only.
   template(
     'rtl-editorial-title',
     'RTL Editorial Title',
