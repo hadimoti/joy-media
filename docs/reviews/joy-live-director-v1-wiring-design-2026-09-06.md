@@ -158,12 +158,20 @@ isAuthorityCurrent })` composes primitives + `runCreativeSkill`.
 - [x] **`agent-director-skills.spec.ts`** (`76638d7d`) — added the browser check
       that the picker renders the same runnable / visible-unavailable matrix as
       the module-level availability test, with disabled Run buttons.
-- [ ] **Model-driven recipe run-through e2e** — run `verify-deliverable` and
-      `build-rough-cut` through the real Worker with a connected fake provider,
-      asserting the `DirectorVerificationReport` (structural vs unavailable) and
-      that a prepared rough-cut change only commits after approval and reverses
-      with one Undo. Blocked on extending `tests/e2e/fixtures/fake-openai-provider`
-      to emit an advisory (no-`validate_proposal`) tool-loop completion.
+- [x] **Model-driven recipe run-through e2e (advisory path)** — `agent-director-skills.spec.ts`
+      "runs Verify Deliverable through the real Worker" drives the picker →
+      `runEditorCreativeSkill` → concrete primitives → advisory tool-loop
+      (new `advisoryAnswer` fake-provider mode) → `verifyComposedAndEncoded` →
+      the honest R1 report in the conversation, with no approval card.
+- [ ] **Edit-recipe run-through e2e (`build-rough-cut` approve + Undo)** — still
+      open: the Timeline Elements Showcase's human-readable track ids (`"Video 1"`)
+      are not valid model-plan identifiers, so a model `timeline.trimClip`
+      proposal against it is rejected before the staging handler. Needs a
+      video-bearing fixture project with token-safe clip/track ids (import a
+      generated fixture, or a dedicated showcase). The staged-change → approval
+      routing itself is unit-proven (`recipe-scoped-host.test.ts` drives a real
+      `validate_proposal`) and the direct-edit approve/Undo is covered by
+      `agent-live-preview` / `agent-director-lifecycle`.
 - [ ] Update `docs/reviews/joy-live-director-coverage.json` `limitations` with
       the recipe availability matrix (already carries the V1 recipe note; refine
       once the run-through e2e lands).

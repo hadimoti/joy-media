@@ -38,6 +38,13 @@ export interface FakeOpenAIProviderOptions {
   readonly proposalForContext?: (
     context: FakeOpenAIProviderContext,
   ) => Readonly<Record<string, unknown>>;
+  /**
+   * When set, an advisory tool-loop request answers with plain content after
+   * the first `read_project_context` call instead of proposing an edit. Used
+   * by recipes whose allow-list has no `validate_proposal` (find-moment,
+   * watch-and-map, verify-deliverable).
+   */
+  readonly advisoryAnswer?: string;
 }
 
 export interface FakeOpenAIProviderContext {
@@ -240,6 +247,10 @@ function responseBody(
   if (Array.isArray(requestBody.tools) && mode === 'tool-loop') {
     if (toolMessages === 0)
       return JSON.stringify(toolCall('read_project_context', 'read-1', { domain: 'overview' }));
+    if (options.advisoryAnswer !== undefined && toolMessages >= 1)
+      return JSON.stringify({
+        choices: [{ message: { role: 'assistant', content: options.advisoryAnswer } }],
+      });
     if (toolMessages === 1)
       return JSON.stringify(
         toolCall(

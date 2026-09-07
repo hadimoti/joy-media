@@ -1,5 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
 import { authenticate, openPanel, openReferenceWorkspace } from './wp29-r5-harness.js';
+import { configureJoyAgent, installFakeOpenAIProvider } from './fixtures/fake-openai-provider.js';
+
+async function openRecipes(page: Page): Promise<void> {
+  await openPanel(page, 'Joy Code');
+  await page.getByRole('button', { name: 'Recipes', exact: true }).click();
+  await expect(page.locator('.joy-code-recipes-list')).toBeVisible();
+}
 
 /**
  * R1 V1 recipe-layer browser coverage. This exercises the real ESM modules
@@ -206,5 +213,29 @@ test.describe('JOY Live Director creative recipes', () => {
       await expect(row).toHaveClass(/is-unavailable/);
       await expect(row.getByRole('button', { name: new RegExp(`Run ${title}`) })).toBeDisabled();
     }
+  });
+
+  test('runs Verify Deliverable through the real Worker and reports an honest R1 report', async ({
+    page,
+  }) => {
+    await authenticate(page);
+    await openReferenceWorkspace(page);
+    await openPanel(page, 'Joy Code');
+    await installFakeOpenAIProvider(page, {
+      advisoryAnswer: 'Captured the composed output window for verification.',
+    });
+    const dialog = await configureJoyAgent(page, 'JOY_E2E_VERIFY_KEY');
+    await dialog.getByRole('button', { name: 'Done' }).click();
+
+    await openRecipes(page);
+    await page.getByRole('button', { name: 'Run Verify Deliverable', exact: true }).click();
+
+    const messages = page.locator('.joy-code-messages');
+    await expect(messages).toContainText('Verify Deliverable', { timeout: 40_000 });
+    await expect(messages).toContainText(/completed/i, { timeout: 40_000 });
+    // The R1 report is honest: structural is real, the O6 checks are unavailable.
+    await expect(messages).toContainText(/unavailable/i);
+    // An advisory recipe never stages an approval card.
+    await expect(page.getByRole('region', { name: 'JOY Agent live proposal' })).toHaveCount(0);
   });
 });
