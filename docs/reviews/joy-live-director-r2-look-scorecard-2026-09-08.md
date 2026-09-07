@@ -92,8 +92,10 @@ It does **not** assert that a pack "looks good" — that judgement is the owner'
 - **Controls:** Energy (scalar → per-phrase `scaleX/scaleY` 1→0.55 spring-in +
   `y` drop), Entrance (enum snap/soft/hold → per-phrase opacity), Phrase
   treatment (color → `outline-impact` / `bold-stack`).
-- **Golden motion:** each bound phrase gets a staggered `0 → 0.12 → 0.24` fraction
-  entrance: opacity `0 → 1`, scale `0.73 → 1`, `y` `38.4 → 0`.
+- **Golden motion:** each bound phrase, staggered `0 → 0.12 → 0.24`: opacity
+  `0 → 1` entrance, hold, then an eased exit back to the per-option rest
+  (`snap` clears fully, `soft` to 0.3, `hold` stays up); scale `0.73 → 1`;
+  `y` `38.4 → 0`. Entrance / hold / exit as the identity claims.
 - **Constraints:** portrait `88 / 22 / 450_000`; landscape `60 / 34 / 450_000`.
 - **Required ops:** `motion.setKeyframe`, `text.setTemplate`. **Fonts:** none.
 - **Engineering self-check:** ✅ deterministic; every phrase hold spans ≥

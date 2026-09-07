@@ -56,11 +56,15 @@ const phrase = (n: 1 | 2 | 3) => {
       },
     ],
     entranceDrives: {
+      // Entrance -> hold -> exit on one opacity curve. Rise to `settled` over
+      // the first beat, hold, then fall back to the per-option rest at the end
+      // of the phrase window: `snap` clears fully, `soft` drops to 0.3, `hold`
+      // stays up (its rest is 1).
       bindingId: `${slot}-opacity`,
       byOption: { snap: 0, soft: 0.3, hold: 1 },
       settled: 1,
-      atFractions: [stagger, stagger + 0.06],
-      profile: [0, 1] as const,
+      atFractions: [stagger, stagger + 0.06, stagger + 0.55, stagger + 0.66],
+      profile: [0, 1, 1, 0] as const,
       interpolation: 'eased' as const,
     },
   };

@@ -163,7 +163,9 @@ cp -a apps/editor-web/dist "$dst"
 bash deploy/joy-media-release-identity.sh write "$dst/release-identity.env" \
   $CAND <tree-sha> <lock-sha256> 5
 test -f "$dst/index.html" && test -f "$dst/release-identity.env" && echo "staged OK"
-( cd "$dst" && find . -type f | sort | sha256sum )   # artifact digest -> record
+# Artifact digest over path + content of every file (order-stable), so a rename
+# or a same-length swap changes the digest.
+( cd "$dst" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum )
 sha256sum "$dst/index.html"
 ```
 
@@ -197,10 +199,15 @@ ln -sfn "$API" /opt/joy-media/releases/.current-api.new
 mv -Tf /opt/joy-media/releases/.current-api.new /opt/joy-media/releases/current-api
 mv -Tf /etc/joy-media/.api.env.new /etc/joy-media/api.env
 systemctl restart joy-media@api
+ok=0
 for i in $(seq 1 45); do
-  curl -fsS --max-time 3 http://127.0.0.1:8790/live >/dev/null &&
-  curl -fsS --max-time 3 http://127.0.0.1:8790/ready >/dev/null &&
-  { echo API_HEALTHY; break; }; sleep 1; done
+  if curl -fsS --max-time 3 http://127.0.0.1:8790/live >/dev/null &&
+     curl -fsS --max-time 3 http://127.0.0.1:8790/ready >/dev/null; then
+    ok=1; echo API_HEALTHY; break
+  fi
+  sleep 1
+done
+test "$ok" -eq 1 || { echo 'API did not become healthy — roll back' >&2; exit 1; }
 ```
 
 If the API is not re-archived per release, skip the block above — R2 changes no
@@ -210,14 +217,16 @@ API-touching release.
 ### C6 — public health
 
 ```bash
+set -e
 curl -k --noproxy '*' --resolve joyst.ir:443:127.0.0.1 -fsS -o /dev/null -w 'origin root %{http_code}\n' https://joyst.ir/
 curl -fsS -o /dev/null -w 'cf root %{http_code}\n' https://joyst.ir/
 curl -fsS -o /dev/null -w 'api health %{http_code}\n' https://joyst.ir/api/health
 curl -fsS https://joyst.ir/ | grep -o '<title>[^<]*'
-curl -fsS https://joyst.ir/release-identity.env || true
+curl -fsS https://joyst.ir/release-identity.env   # must print the candidate SHA
 ```
 
-**Checkpoint C6:** origin + CF root 200, `/api/health` `{"ok":true,…}`, served
+**Checkpoint C6:** every probe exits 0 (the `set -e` + `-f` make a non-2xx a
+hard stop); origin + CF root 200, `/api/health` `{"ok":true,…}`, served
 `release-identity.env` commit == the candidate, served `index.html` sha256 ==
 the C4 value, old entry bundle 404. On any failure → **On failure**.
 
