@@ -8480,6 +8480,56 @@ label {
   border: 0;
   background: transparent;
 }
+.joy-code-recipes {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem 0.35rem 0;
+}
+.joy-code-recipes-intro {
+  margin: 0;
+  font-size: 0.78rem;
+  opacity: 0.75;
+}
+.joy-code-recipes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.joy-code-recipe {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 0.5rem;
+}
+.joy-code-recipe.is-unavailable {
+  opacity: 0.55;
+}
+.joy-code-recipe-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.joy-code-recipe-copy > span {
+  font-size: 0.78rem;
+  opacity: 0.8;
+}
+.joy-code-recipe-missing {
+  font-size: 0.72rem;
+  opacity: 0.7;
+}
+.joy-code-recipe-run {
+  flex: none;
+  align-self: center;
+}
 .joy-code-creative-brief .creative-brief-panel {
   display: flex;
   min-width: 0;

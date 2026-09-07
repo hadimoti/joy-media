@@ -115,6 +115,10 @@ import {
 } from './agent-preview-store.js';
 import { createJoyAgentProposalStagingHandler } from './joy-agent/edit-proposal-staging.js';
 import { buildJoyAgentContextInput } from './joy-agent/context-input.js';
+import { createCreativeSkillEditorPrimitiveDeps } from './joy-agent/creative-skill-editor-deps.js';
+import type { CreativeSkillEditorPrimitiveDeps } from './joy-agent/creative-skill-editor-primitives.js';
+import { listCreativeSkills, runEditorCreativeSkill } from './joy-agent/entry-points.js';
+import type { CreativeSkillRunScope } from './joy-agent/skill-runner.js';
 import {
   deriveJoyAgentConversationEntityReferences,
   resolveJoyAgentConversationEntityReference,
@@ -144,7 +148,7 @@ const CONVERSATION_TITLE_WORD =
   /\b(?:title|heading|text)\b|(?<![\p{L}\p{M}])(?:عنوان|تیتر|متن)(?![\p{L}\p{M}])/iu;
 const CONVERSATION_REFERENCE_AMBIGUOUS_MESSAGE =
   'JOY cannot safely determine which previous item to use. Select one item before continuing.';
-type ComposerCapability = 'edit' | 'creative-brief';
+type ComposerCapability = 'edit' | 'creative-brief' | 'recipes';
 
 const LEGACY_JOY_AGENT_TOOL_NAMES = Object.freeze([
   'read_project_context',
@@ -473,6 +477,9 @@ export function AgentPanel({
   const [conversation, setConversation] = useState<JoyCodeConversation>(() =>
     initialJoyCodeConversation(storage, project.id),
   );
+  const [recipeRunningId, setRecipeRunningId] = useState<string | undefined>(undefined);
+  const recipeRunScopeRef = useRef<CreativeSkillRunScope | undefined>(undefined);
+  const recipeStagedChangeSetRef = useRef<string | undefined>(undefined);
   // Production passes an App-owned controller so panel remounts cannot revive
   // authority or lose lifecycle evidence. Keep an isolated fallback for
   // focused component tests and older embedders that have not adopted F4 yet.
@@ -1088,6 +1095,58 @@ export function AgentPanel({
     },
     [agentPreviewStore, preparedChanges],
   );
+
+  const creativeSkills = useMemo(() => listCreativeSkills(), []);
+  const isRecipeAuthorityCurrent = useCallback(
+    (scope: CreativeSkillRunScope): boolean =>
+      scope.runId === recipeRunScopeRef.current?.runId &&
+      scope.projectId === project.id &&
+      scope.revision === latestSessionRef.current.projectRevisionId &&
+      (activeModelRunIdRef.current === undefined || activeModelRunIdRef.current === scope.runId),
+    [project.id],
+  );
+  const creativeSkillDeps: CreativeSkillEditorPrimitiveDeps | undefined = useMemo(() => {
+    if (joyAgentEngineClient === undefined) return undefined;
+    return createCreativeSkillEditorPrimitiveDeps({
+      client: joyAgentEngineClient,
+      getSession: () => latestSessionRef.current,
+      latestSessionRef,
+      preparedChanges,
+      agentPreviewStore,
+      proposalTargetsRef,
+      buildContextInput: () =>
+        buildJoyAgentContextInput({
+          session: latestSessionRef.current,
+          selectedClipIds,
+          playheadUs,
+          conversationMessages: conversation.messages.slice(-8).map((message) => ({
+            role: message.role,
+            body: message.body,
+          })),
+        }),
+      currentPreparedAuthority,
+      isAuthorityCurrent: isRecipeAuthorityCurrent,
+      ...(observationAdapterFactory === undefined ? {} : { observationAdapterFactory }),
+      getModelId: () => joyAgentEngineClient.getStatus()?.modelId,
+      getPromptPolicyDigest: () => digestJoyAgentPolicy(latestSettingsRef.current),
+      onStaged: (scope, changeSetId) => {
+        if (recipeRunScopeRef.current?.runId === scope.runId)
+          recipeStagedChangeSetRef.current = changeSetId;
+      },
+    });
+    // currentPreparedAuthority closes over live session; the recipe deps read it
+    // through the accessors above, so it is intentionally not a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    joyAgentEngineClient,
+    preparedChanges,
+    agentPreviewStore,
+    observationAdapterFactory,
+    isRecipeAuthorityCurrent,
+    selectedClipIds,
+    playheadUs,
+    conversation.messages,
+  ]);
 
   useEffect(() => {
     // Do not save the prior project's conversation under a newly selected
@@ -1905,6 +1964,121 @@ export function AgentPanel({
     clearAgentPreviewForSourceRun(pending.runId);
   }
 
+  async function runRecipe(skillId: string): Promise<void> {
+    if (
+      recipeRunningId !== undefined ||
+      thinkingThreadId !== undefined ||
+      modelView !== undefined ||
+      pending !== undefined ||
+      creativeSkillDeps === undefined ||
+      joyAgentEngineClient === undefined
+    )
+      return;
+    const entry = creativeSkills.find((candidate) => candidate.skill.id === skillId);
+    if (entry === undefined || !entry.available) return;
+    const threadId = activeThread.id;
+    const scope: CreativeSkillRunScope = {
+      projectId: project.id,
+      runId: makeJoyCodeId('recipe'),
+      epoch: 1,
+      revision: session.projectRevisionId,
+    };
+    recipeRunScopeRef.current = scope;
+    recipeStagedChangeSetRef.current = undefined;
+    activeModelRunIdRef.current = scope.runId;
+    setRecipeRunningId(skillId);
+    setAgentPhase('connecting');
+    appendMessage(threadId, 'user', `Run recipe — ${entry.skill.title}`);
+    const lifecycleRun = { runId: scope.runId, epoch: scope.epoch };
+    try {
+      beginRunLifecycle(lifecycleRun);
+      const result = await runEditorCreativeSkill({
+        skillId,
+        scope,
+        deps: creativeSkillDeps,
+        isAuthorityCurrent: isRecipeAuthorityCurrent,
+        onEvent: (checkpoint) => {
+          if (recipeRunScopeRef.current?.runId !== scope.runId) return;
+          if (checkpoint.state === 'started') setAgentPhase('planning');
+        },
+      });
+      if (recipeRunScopeRef.current?.runId !== scope.runId) return;
+      if (result.kind === 'unavailable') {
+        appendMessage(
+          threadId,
+          'assistant',
+          `“${result.skill.title}” is unavailable: missing ${[
+            ...result.missingCapabilities,
+            ...result.missingOperations,
+          ].join(', ')}.`,
+        );
+        cancelRunLifecycle(scope.runId, 'Recipe unavailable.');
+        setAgentPhase('cancelled');
+        return;
+      }
+      if (result.kind === 'blocked') {
+        appendMessage(
+          threadId,
+          'assistant',
+          `“${result.skill.title}” was blocked (${result.reason}). No edit was applied.`,
+        );
+        cancelRunLifecycle(scope.runId, 'Recipe blocked.');
+        setAgentPhase('failed');
+        return;
+      }
+      const artifactLines = result.artifacts
+        .map(
+          (item) =>
+            `• ${item.summary}${item.uncertainty === undefined ? '' : ` (uncertainty: ${item.uncertainty})`}`,
+        )
+        .join('\n');
+      const staged = recipeStagedChangeSetRef.current;
+      if (result.kind === 'ready-for-approval' && staged !== undefined) {
+        const prepared = preparedChanges.getView(staged);
+        if (prepared === undefined) {
+          appendMessage(
+            threadId,
+            'assistant',
+            'The recipe prepared a change but its preview authority was lost. Try again.',
+          );
+          cancelRunLifecycle(scope.runId, 'Recipe preview authority lost.');
+          setAgentPhase('failed');
+          return;
+        }
+        acceptRunLifecycle(lifecycleRun, 'preview-ready', {
+          display: 'Recipe preview rendered and ready for review.',
+        });
+        acceptRunLifecycle(lifecycleRun, 'awaiting-approval', {
+          display: 'Review the live preview before applying.',
+        });
+        setPreparedModelChange(prepared.changeSetId);
+        setAgentPhase('awaiting-approval');
+        appendMessage(
+          threadId,
+          'assistant',
+          `“${result.skill.title}” prepared a reversible change. Review the live preview before applying.\n${artifactLines}`,
+        );
+        return;
+      }
+      appendMessage(threadId, 'assistant', `“${result.skill.title}” completed.\n${artifactLines}`);
+      acceptRunLifecycle(lifecycleRun, 'completed', { display: 'Recipe completed.' });
+      setAgentPhase('completed');
+      if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
+    } catch (error) {
+      if (recipeRunScopeRef.current?.runId !== scope.runId) return;
+      appendMessage(
+        threadId,
+        'assistant',
+        error instanceof Error ? error.message : 'The recipe run failed safely.',
+      );
+      cancelRunLifecycle(scope.runId, 'Recipe run failed.');
+      setAgentPhase('failed');
+      if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
+    } finally {
+      setRecipeRunningId((current) => (current === skillId ? undefined : current));
+    }
+  }
+
   function rejectModelDraft() {
     const prepared = modelView;
     if (prepared === undefined) return;
@@ -2329,6 +2503,17 @@ export function AgentPanel({
                 <span className="joy-code-capability-dot" aria-label="Brief attached" />
               )}
             </button>
+            <button
+              type="button"
+              className={`joy-code-capability ${composerCapability === 'recipes' ? 'is-active' : ''}`}
+              aria-pressed={composerCapability === 'recipes'}
+              onClick={() => setComposerCapability('recipes')}
+            >
+              <span className="joy-code-capability-spark" aria-hidden="true">
+                ☰
+              </span>
+              Recipes
+            </button>
           </div>
           {creativeBriefContext !== undefined && (
             <section className="joy-code-brief-artifact" aria-label="Attached Creative Brief">
@@ -2359,6 +2544,50 @@ export function AgentPanel({
               </div>
             </section>
           )}
+          <div
+            className="joy-code-recipes"
+            aria-label="Creative recipes"
+            hidden={composerCapability !== 'recipes'}
+          >
+            <p className="joy-code-recipes-intro">
+              Guided multi-step edits. Each runs through the same single JOY engine, staged preview,
+              and approval as a direct edit.
+            </p>
+            <ul className="joy-code-recipes-list">
+              {creativeSkills.map((entry) => {
+                const missing = [...entry.missingCapabilities, ...entry.missingOperations];
+                const running = recipeRunningId === entry.skill.id;
+                return (
+                  <li
+                    key={entry.skill.id}
+                    className={`joy-code-recipe ${entry.available ? '' : 'is-unavailable'}`}
+                  >
+                    <div className="joy-code-recipe-copy">
+                      <strong>{entry.skill.title}</strong>
+                      <span>{entry.skill.description}</span>
+                      {!entry.available && missing.length > 0 && (
+                        <span className="joy-code-recipe-missing">Needs: {missing.join(', ')}</span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      className="joy-code-recipe-run"
+                      disabled={
+                        !entry.available ||
+                        recipeRunningId !== undefined ||
+                        liveAgentBusy ||
+                        creativeSkillDeps === undefined
+                      }
+                      aria-label={`Run ${entry.skill.title}`}
+                      onClick={() => void runRecipe(entry.skill.id)}
+                    >
+                      {running ? 'Running…' : 'Run'}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
           <div
             className="joy-code-creative-brief"
             aria-label="Creative Brief capability"

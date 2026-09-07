@@ -50,6 +50,9 @@ export interface CreativeSkillEditorAppGraph {
   readonly getModelId?: () => string | undefined;
   /** Live prompt-policy digest for the observation authority fence. */
   readonly getPromptPolicyDigest?: () => string;
+  /** Records the change-set id a recipe run staged, so the caller can wire it
+   * into the existing preview-approval UI. */
+  readonly onStaged?: (scope: CreativeSkillRunScope, changeSetId: string) => void;
   /** Bounded wait for the renderer to acknowledge a staged preview. */
   readonly previewAckTimeoutMs?: number;
 }
@@ -143,6 +146,7 @@ export function createCreativeSkillEditorPrimitiveDeps(
     onObservationCompleted: (scope, result) => {
       stateFor(scope.runId).manifestId = result.manifestId;
     },
+    ...(graph.onStaged === undefined ? {} : { onStaged: graph.onStaged }),
   };
 
   return {
