@@ -8,30 +8,32 @@ is **not** a self-approval — Astra rules on the exact candidate below.
 
 | Field    | Value                                                                                      |
 | -------- | ------------------------------------------------------------------------------------------ |
-| commit   | `0cff0470541fc4eafdb9c694410918188f099266` (branch `codex/joy-live-director`)              |
-| tree     | `40661c7dbbe128a3909963ca9620dbd1932b258d`                                                 |
+| commit   | `__CANDIDATE_COMMIT__` (branch `codex/joy-live-director`)                                  |
+| tree     | `__CANDIDATE_TREE__`                                                                       |
 | lockfile | `pnpm-lock.yaml` sha256 `36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3` |
 | base     | `6a6a336c` (live foundation release, schema 5)                                             |
 
-The `0cff0470 ← 369a4196` delta is **docs-only** (this bundle, the r1-landing
-addendum, one coverage-ledger `limitations` string). All source, tests, tooling
-and lockfile are byte-identical to `369a4196`, which passed the full
-`release-candidate.yml` green (run `34097358089`).
+This candidate is the round-1 candidate (`0cff0470`, CI-green code tree
+`369a4196`) plus the two Astra round-1 fixes (`f8d27577`, see the Astra section
+below) and this pin. `f8d27577`'s source change is confined to the
+`observeSources` primitive contract shape + its two tests; the coverage
+verifier still passes (16 bounded operations, 8 domains unsupported), and a
+fresh `release-candidate.yml` run is dispatched on the exact SHA above.
 
-If Astra requires a change, a new candidate SHA is cut and this bundle is
+If Astra requires further changes, a new candidate SHA is cut and this bundle is
 re-dated; the review is always against one exact SHA/tree/lock triple.
 
 ## Full-suite / build / security / performance at this candidate
 
-| Check                                            | Result                                                                                                                                                                                    |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm -w run check` (typecheck+lint+format+test) | exit 0 — **vitest 4033 passed / 38 skipped / 0 failed** (513 files)                                                                                                                       |
-| `release-candidate.yml` (self-hosted CI)         | **two full green runs**: `34078187134` on `fd8497b0` and `34097358089` on `369a4196` (this candidate's code tree). A third run (`34120471651`) re-verifies the exact HEAD SHA `0cff0470`. |
-| CI lanes (each ×2)                               | `validate-candidate`, `windows-worker-clean`, `linux-real-services`, `acceptance` (7 desktop profiles), `real-service-acceptance`                                                         |
-| CodeRabbit                                       | clean — reviewed per-commit across the whole branch and again over the full V1 delta; every finding fixed                                                                                 |
-| BYOK security e2e                                | `tests/e2e/agent-byok-security.spec.ts` (4) — no key/baseUrl leak into UI, storage, or Worker messages                                                                                    |
-| Worker size gate                                 | `pnpm verify:joy-agent-worker` — engine.worker within budget                                                                                                                              |
-| Coverage verifier                                | `node tooling/release/verify-agent-operation-coverage.mjs` — 16 bounded operations; 8 domains explicitly unsupported                                                                      |
+| Check                                            | Result                                                                                                                                                                                                                       |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm -w run check` (typecheck+lint+format+test) | exit 0 — **vitest 4033 passed / 38 skipped / 0 failed** (513 files)                                                                                                                                                          |
+| `release-candidate.yml` (self-hosted CI)         | **two full green runs on the round-1 code tree**: `34078187134` (`fd8497b0`) and `34097358089` (`369a4196`). A fresh run (`__CANDIDATE_CI_RUN__`) is dispatched on the exact SHA above (round-1 + the Astra fix `f8d27577`). |
+| CI lanes (each ×2)                               | `validate-candidate`, `windows-worker-clean`, `linux-real-services`, `acceptance` (7 desktop profiles), `real-service-acceptance`                                                                                            |
+| CodeRabbit                                       | clean — reviewed per-commit across the whole branch and again over the full V1 delta; every finding fixed                                                                                                                    |
+| BYOK security e2e                                | `tests/e2e/agent-byok-security.spec.ts` (4) — no key/baseUrl leak into UI, storage, or Worker messages                                                                                                                       |
+| Worker size gate                                 | `pnpm verify:joy-agent-worker` — engine.worker within budget                                                                                                                                                                 |
+| Coverage verifier                                | `node tooling/release/verify-agent-operation-coverage.mjs` — 16 bounded operations; 8 domains explicitly unsupported                                                                                                         |
 
 Stress cases from V3 are covered by existing specs: long media
 (`agent-observation-decode` `long-sequence.mp4`), low memory
@@ -121,13 +123,50 @@ operation-specific rendered/audio browser consumer per advertised kind?) is
 stated in `joy-live-director-coverage-ledger-position-2026-09-07.md` for
 Astra's ruling.
 
+## Independent Opus ("Astra") review
+
+**Round 1** (candidate `cbc583fc`, 2026-09-07): `CHANGES_REQUIRED`. Astra
+independently verified the hard limits, the V1 recipe layer (closed 8-name tool
+catalog with no apply/commit; one shared staging handler; real run fence), the
+observation-honesty invariants (`modelComprehensionGuaranteed` is the literal
+type `false` and payloads that break it are rejected; `uncertainty` required
+for every `unavailable`/`model-reviewed` check), the coverage-verifier ratchet,
+and both green CI runs. Two blocking defects, both in the release's honesty
+thesis, neither a safety risk:
+
+1. this bundle's "exhausted budget says partial" proof cited the wrong file and
+   mechanism;
+2. `maxObservationRequests` / `maxEvidenceItems` were declared on the
+   `observeSources` primitive contract, passed by the adapter, then silently
+   dropped.
+
+**Ruling on the open coverage-ledger question:** _a first release is acceptable
+as-is; R1's advertising bar does **not** require an operation-specific
+rendered-frame or decoded-audio browser consumer per advertised kind._ The
+verifier ratchet is the protection and it works; nothing model-visible is
+unmediated; per-kind rendered verification is an R2 quality goal, not an R1
+safety gate. For R2 Astra specified the split — rendered-frame readback for the
+9 text / motion / caption-appearance / transition-add kinds; project-state
+readback for the 7 structural timeline / caption-timing / transition-remove
+kinds.
+
+**Fixes** (`f8d27577`): item 1 — bundle proof rewritten to cite
+`observation-tool-adapter.test.ts` ~221/276 + `observation-coverage.test.ts:47`,
+and to note the service fails closed with `budget-exceeded`. Item 2 — the two
+budget fields moved under a `budget` sub-object whose doc comment states R1 does
+not re-enforce a per-checkpoint cap (recipe observation is bounded by the
+tool-loop call budget, the O5 consent envelope, and the run-budget); recorded in
+`coverage.json` `limitations`.
+
+**Round 2:** this candidate returned to Astra for the follow-up ruling.
+
 ## Stop-before-deploy
 
-This candidate has: CodeRabbit clean + local `pnpm check` green + (pending) the
-full self-hosted `release-candidate.yml` green ×2. It now goes to the
-independent Claude Opus reviewer ("Astra"), who is given only this bundle + the
-candidate triple and must return `APPROVE_FOR_DEPLOY <commit> <tree> <lock>` or
-a change list. The implementer never self-approves. A live production deploy to
-joyst.ir additionally requires the owner's explicit go-ahead and follows the
-master guarded Sweden procedure. R2 and R3 remain closed until their own tasks
-and evidence pass.
+This candidate has: CodeRabbit clean + local `pnpm -w run check` green (4033
+tests) + two full green `release-candidate.yml` runs on the round-1 code tree +
+a fresh run on the exact SHA. It is with the independent Claude Opus reviewer
+("Astra") for the round-2 verdict: `APPROVE_FOR_DEPLOY <commit> <tree> <lock>`
+or a further change list. The implementer never self-approves. A live production
+deploy to joyst.ir additionally requires the owner's explicit go-ahead and
+follows the master guarded Sweden procedure. R2 and R3 remain closed until their
+own tasks and evidence pass.
