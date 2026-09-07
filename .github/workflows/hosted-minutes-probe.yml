@@ -1,0 +1,11 @@
+name: hosted-minutes-probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - run: echo "GitHub-hosted runner is available"; uname -a; date -u
