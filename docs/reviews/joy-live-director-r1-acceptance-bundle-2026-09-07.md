@@ -81,15 +81,21 @@ Undo as a manual edit. Proven by `agent-director-skills.spec.ts` "runs Build
 Rough Cut" reaching the identical approval region and `Undo` control asserted
 by `agent-live-preview.spec.ts`.
 
-## Real BYOK model / endpoint / capability — LABELLED BLOCKED
+## Real BYOK model / endpoint / capability — DOCUMENTED FOLLOW-UP (owner decision 2026-09-07)
 
 Per r1.md V3: no separately authorized test credentials, footage, or spend cap
-are available in this environment. **Live model compatibility and live
-creative evaluation are BLOCKED and are not claimed.** The deterministic fake
-provider (`tests/e2e/fixtures/fake-openai-provider.ts`) exercises the full
-Worker/host RPC/repair/approval path but does not substitute for a real model.
-Owner decision required: provide a scoped test key + cap, or accept R1 shipping
-with this labelled as a documented follow-up.
+are available in this environment, so **live model compatibility and live
+creative evaluation were not performed and are not claimed for R1.** The
+deterministic fake provider (`tests/e2e/fixtures/fake-openai-provider.ts`)
+exercises the full Worker / host RPC / repair / approval path but does not
+substitute for a real model.
+
+**Owner decision, 2026-09-07: ship R1 with live-model creative evaluation as a
+documented follow-up.** It is a first-run item for R2's evidence bundle, to be
+executed with a scoped authorized test key + spend cap. Nothing in R1 asserts
+or depends on live-model behaviour beyond the deterministic Worker contract
+tests; the BYOK security boundary itself is separately proven
+(`agent-byok-security.spec.ts`).
 
 ## Coverage ledger & limitations (from actual results)
 

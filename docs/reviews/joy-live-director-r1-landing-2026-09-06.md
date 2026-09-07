@@ -161,21 +161,19 @@ cancellation, and no preview revival after reload.
 
 ## Open items before the R1 candidate can be bundled for review
 
-1. **V1 recipe layer — core landed, integration + e2e open.** The full
-   testable stack now exists (24 unit tests, see
-   `joy-live-director-v1-wiring-design-2026-09-06.md`):
-   `creative-skill-runtime` (verified-seam capability map),
-   `creative-skill-host-adapter` (checkpoint → primitive adapter, no
-   apply/commit), `creative-skill-editor-primitives` (one memoized scoped
-   tool-loop shared by observe/propose; manifest-derived tool allow-list;
-   product-owned prompt templates), and `entry-points.ts`
-   `listCreativeSkills()` / `runCreativeSkill()`. **Still open**: the concrete
-   `CreativeSkillEditorPrimitiveDeps` assembled from `App.tsx`'s object graph
-   (thin wrappers over `runJoyAgentTask` / the observation host bridge / the
-   renderer-ack signal / the O6 decoders), the `AgentPanel.tsx` recipe picker,
-   and `tests/e2e/agent-director-skills.spec.ts`. Audio Balance and
-   Title/Caption Polish stay visible-but-unavailable for R1 (no verified
-   audio-mix op / RTL-text readback).
+_All resolved as of 2026-09-07 (candidate `369a4196`); left here for the audit
+trail._
+
+1. **V1 recipe layer — DONE.** Full host wiring landed: the shared
+   `createJoyAgentProposalStagingHandler` (used by the direct edit path and the
+   recipe path), `runScopedCreativeSkillEditToolLoop`,
+   `createCreativeSkillEditorPrimitiveDeps` (all 5 concrete primitives from the
+   `AgentPanel` graph), `runEditorCreativeSkill`, and the Joy Code **Recipes**
+   picker. Browser e2e (`agent-director-skills.spec.ts`): honest availability
+   matrix; `build-rough-cut` real-Worker run-through → staged change → Approve
+   → one Undo; `verify-deliverable` advisory run-through → honest report. Audio
+   Balance and Title/Caption Polish stay visible-but-unavailable for R1 (no
+   verified audio-mix op / RTL-text readback).
 2. **Coverage ledger reconciliation.** All 16 advertised ops are
    `verificationScope: bounded-proposal-path` / `readback: not-verified`.
    The F5 `*-readback` assertions (trim, move, split, created-title opacity
@@ -199,15 +197,19 @@ cancellation, and no preview revival after reload.
    expectation carrying an `audioCodec` or `audioSyncPredicates` is rejected as
    `invalid-request`, and a decoded artifact that still carries audio fails
    closed (3 regressions in `render-verification.test.ts`).
-4. **V3 acceptance demonstration** (r1.md V3): the scripted end-to-end
-   showcase — find the single-frame flash in exact mode, build a rough cut
-   from observed source ranges, refine a Persian title over two turns,
-   animate a property/effect/transition, balance real audio, verify encoded
-   output + one Undo/reload — has not been run and recorded as a bundle.
-5. **Real BYOK model compatibility** (r1.md V3): needs separately authorized
-   test credentials + spend cap; not run. Label live creative evaluation
-   blocked until an authorized model is available.
-6. **Live-memory sync pending** — VPS Gbrain MCP was unreachable this session.
+4. **V3 acceptance demonstration** (r1.md V3): **RECORDED** in
+   `docs/reviews/joy-live-director-r1-acceptance-bundle-2026-09-07.md` — the
+   candidate triple, full-suite results, the V3 checklist mapped to concrete
+   evidence (`build-rough-cut` and `verify-deliverable` now have real-Worker
+   browser run-throughs), observation-honesty proofs, and the same-trusted-path
+   proof. `balance real audio` is out of R1 scope (`audio-balance` visible-but-
+   unavailable).
+5. **Real BYOK model compatibility** (r1.md V3): **owner decision 2026-09-07 —
+   ship R1 with live-model creative evaluation as a documented follow-up.** It
+   is a first-run item for R2's evidence bundle (scoped authorized key + spend
+   cap). R1 asserts nothing that depends on live-model behaviour; the BYOK
+   security boundary is separately proven.
+6. **Live-memory sync pending** — VPS Gbrain writeback is a post-deploy ritual.
 
 ## Not in scope / unchanged
 
