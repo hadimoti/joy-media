@@ -1,12 +1,11 @@
 # JOY Live Director R2 ("Living Looks") — deploy runbook
 
 > **NOT YET DEPLOYED.** This is the guarded Sweden release procedure prepared for
-> the R2 candidate. It must not be executed until: CodeRabbit clean +
-> `r2-candidate.yml` (or the agreed CI topology) green ×2 on the exact candidate
->
-> - independent Opus ("Astra") `APPROVE_FOR_DEPLOY <sha> <tree> <lock>` on file +
->   **explicit owner go-ahead** + every pack's `OWNER_TASTE_REVIEW` verdict
->   recorded in the scorecard. The implementer never self-approves.
+> the R2 candidate. It must not be executed until every gate is satisfied:
+> CodeRabbit clean; the agreed CI topology green ×2 on the exact candidate;
+> independent Opus ("Astra") `APPROVE_FOR_DEPLOY <sha> <tree> <lock>` on file;
+> explicit owner go-ahead; every pack's `OWNER_TASTE_REVIEW` verdict recorded in
+> the scorecard. The implementer never self-approves.
 
 Recorded: 2026-09-08. Shape follows `deploy/README.md` "Release order" and the
 proven R1 runbook (`joy-live-director-r1-deploy-runbook-2026-09-07.md`), with the
