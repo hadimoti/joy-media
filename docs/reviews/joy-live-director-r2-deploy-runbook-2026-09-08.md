@@ -62,11 +62,10 @@ build is root `pnpm build` (`pnpm -r --if-present build`), DB dump needs
       the agreed hybrid). Record run ids.
 - [ ] `pnpm run verify:ci` locally exit 0 at the candidate. (At branch tip:
       full `pnpm test` = **4196 passed / 38 skipped / 0 failed**, 526 files.)
-- [ ] Candidate identity re-verified in the worktree: `git rev-parse <candidate>`,
-      `git rev-parse <candidate>^{tree}`, `git show <candidate>:pnpm-lock.yaml |
-  sha256sum`, base `855734cf` is an ancestor, candidate is an ancestor of
-      branch HEAD, and any commits HEAD carries past the candidate touch only
-      docs.
+- [ ] Candidate identity re-verified in the worktree: `git rev-parse` of the
+      candidate and its tree, `sha256sum` of `git show <candidate>:pnpm-lock.yaml`,
+      base `855734cf` is an ancestor, the candidate is an ancestor of branch HEAD,
+      and any commits HEAD carries past the candidate touch only docs.
 - [ ] Astra `APPROVE_FOR_DEPLOY <sha> <tree> <lock>` on file for this exact
       triple.
 - [ ] Every pack `OWNER_TASTE_REVIEW: APPROVED` (or an owner-recorded
