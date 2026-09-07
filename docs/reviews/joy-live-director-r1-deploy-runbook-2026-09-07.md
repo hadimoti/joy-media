@@ -125,7 +125,7 @@ VPS builds from — pull it, do not touch any `joy-vps` checkout):
 
 ```bash
 set -e
-SRC=/opt/joy-media/src           # <-- set from C0
+SRC=/opt/joy-media/repo          # <-- set from C0 (confirmed at execution)
 cd "$SRC"
 git fetch --all --prune --tags
 git worktree add --detach /opt/joy-media/build-855734cf 855734cf0c875101a632426983db2638c2adddcd
@@ -145,11 +145,12 @@ Any mismatch → stop, `git worktree remove` the build dir, re-cut.
 
 ```bash
 set -e
-mkdir -p /opt/joy-media/backups
+mkdir -p /opt/joy-media/data/backups
 ts=$(date -u +%Y%m%dT%H%M%SZ)
-DB=$(grep -oP '^JOY_MEDIA_DATABASE_URL=\K.*' /etc/joy-media/api.env)
-pg_dump --format=custom --file="/opt/joy-media/backups/joymedia-pre-r1-$ts.dump" "$DB"
-ls -lh "/opt/joy-media/backups/joymedia-pre-r1-$ts.dump"
+# The app DB role lacks LOCK on some tables — dump as the postgres superuser.
+sudo -u postgres pg_dump --format=custom joymedia \
+  > "/opt/joy-media/data/backups/joymedia-pre-r1-$ts.dump"
+ls -lh "/opt/joy-media/data/backups/joymedia-pre-r1-$ts.dump"
 ```
 
 **Checkpoint C2:** dump file exists, non-trivial size. Keep it until the deploy
@@ -162,7 +163,9 @@ set -e
 cd /opt/joy-media/build-855734cf
 CI=true npm_config_confirm_modules_purge=false pnpm install --frozen-lockfile
 sha256sum pnpm-lock.yaml
-pnpm --filter @joy-media/editor-web run build
+# Root build — `--filter @joy-media/editor-web` alone misses workspace deps
+# (e.g. @joy-media/playback-engine) that are not pre-built on a fresh worktree.
+CI=true pnpm build
 node tooling/release/verify-agent-operation-coverage.mjs
 test -f apps/editor-web/dist/index.html && echo "editor-web dist OK"
 ```
@@ -229,7 +232,7 @@ for i in $(seq 1 45); do
 
 ```bash
 curl -fsS -o /dev/null -w 'root %{http_code}\n' https://joyst.ir/
-curl -fsS -o /dev/null -w 'api  %{http_code}\n' https://joyst.ir/api/v1/health || true
+curl -fsS -o /dev/null -w 'api  %{http_code}\n' https://joyst.ir/api/health
 curl -fsS https://joyst.ir/ | grep -o '<title>[^<]*'
 curl -fsS https://joyst.ir/release-identity.env || true
 ```

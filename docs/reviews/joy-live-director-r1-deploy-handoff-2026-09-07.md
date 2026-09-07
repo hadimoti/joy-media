@@ -1,11 +1,18 @@
 # JOY Live Director R1 — deploy handoff for the next Claude session
 
+> **SUPERSEDED — R1 candidate `855734cf` was DEPLOYED 2026-09-07 ~18:00 UTC and
+> is live on `https://joyst.ir/`.** This handoff is kept as the historical brief
+> the deploy session worked from. For the actual deploy evidence see
+> `joy-live-director-r1-deploy-runbook-2026-09-07.md` → "Deploy record
+> (2026-09-07 UTC)" and `STATE.md` → "JOY Live Director R1 deployment".
+
 Prepared 2026-09-07 by the implementer Claude session (Sonnet) that took R1
-through the full gate. **Every R1 release gate is satisfied. R1 is not
-deployed** — the session that finished the gate runs in Claude Code _auto
-mode_, whose classifier hard-blocks `ssh sweden` (and any SSH-backed MCP /
-`.mcp.json` write / terminal read), on every retry. The deploy needs a session
-that can reach the VPS. This document is that session's brief.
+through the full gate. At the time of writing, every R1 release gate was
+satisfied but R1 was **not yet deployed** — the session that finished the gate
+ran in Claude Code _auto mode_, whose classifier hard-blocks `ssh sweden` (and
+any SSH-backed MCP / `.mcp.json` write / terminal read), on every retry. The
+deploy needed a session that could reach the VPS; a fresh interactive session
+then executed it.
 
 ---
 

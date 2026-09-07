@@ -180,7 +180,7 @@ green across all remaining `acceptance` and `real-service-acceptance` jobs; if
 any fails, the approval is void and a new candidate is required.**
 
 **Contingency satisfied — approval ACTIVE.** `release-candidate.yml` run
-`34123884446` (candidate `855734cf`) completed `2026-09-07T17:0x UTC`:
+`34123884446` (candidate `855734cf`) completed 2026-09-07 ~17:08 UTC:
 **20/20 jobs `success`, run conclusion `success`** — `validate-candidate`,
 `linux-real-services` ×2, `windows-worker-clean` (2 exact passes), `acceptance`
 ×14, `real-service-acceptance` ×2. Zero failures. Astra's `APPROVE_FOR_DEPLOY`
