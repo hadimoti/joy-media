@@ -9,7 +9,10 @@ import type { HostRpcHandlerContext } from './host-rpc.js';
 import { HostRpcDiagnosticError } from './host-rpc.js';
 import { PreparedChangeStore, type PreparedChangeAuthority } from './prepared-change-store.js';
 import { createJoyAgentRunController } from './run-controller.js';
-import { createJoyAgentComposerHostLease } from './composer-host-lease.js';
+import {
+  createJoyAgentComposerHostLease,
+  isJoyAgentComposerHostLeaseCurrent,
+} from './composer-host-lease.js';
 import { createJoyAgentProposalStagingHandler } from './edit-proposal-staging.js';
 
 const REVISION = 'rev-1';
@@ -67,6 +70,10 @@ function harness(overrides: { activeModelRunId?: string } = {}) {
     state: 'inspecting',
   });
   const lease = createJoyAgentComposerHostLease(controller, { runId: RUN_ID, epoch: EPOCH });
+  const hasHostAuthority = (rpcRun: { runId: string; epoch: number }): boolean =>
+    lease.run.runId === rpcRun.runId &&
+    lease.run.epoch === rpcRun.epoch &&
+    isJoyAgentComposerHostLeaseCurrent(lease);
   const staged: string[] = [];
   const authority = (hostRunId: string): PreparedChangeAuthority => ({
     projectId: liveSession.visualProject.id,
@@ -82,8 +89,8 @@ function harness(overrides: { activeModelRunId?: string } = {}) {
     contextProjectId: liveSession.visualProject.id,
     capturedSession: liveSession,
     latestSessionRef: { current: liveSession },
-    activeModelRunIdRef: { current: overrides.activeModelRunId ?? RUN_ID },
-    getComposerHostLease: () => lease,
+    hasHostAuthority,
+    isRunCurrent: () => (overrides.activeModelRunId ?? RUN_ID) === RUN_ID,
     selectedEntityReference: undefined,
     preparedChanges,
     currentPreparedAuthority: authority,

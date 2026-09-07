@@ -1631,8 +1631,12 @@ export function AgentPanel({
                     contextProjectId: contextInput.projectId,
                     capturedSession: session,
                     latestSessionRef,
-                    activeModelRunIdRef,
-                    getComposerHostLease: () => activeComposerHostLease,
+                    hasHostAuthority: (rpcRun) =>
+                      activeComposerHostLease !== undefined &&
+                      activeComposerHostLease.run.runId === rpcRun.runId &&
+                      activeComposerHostLease.run.epoch === rpcRun.epoch &&
+                      isJoyAgentComposerHostLeaseCurrent(activeComposerHostLease),
+                    isRunCurrent: () => activeModelRunIdRef.current === runId,
                     selectedEntityReference,
                     preparedChanges,
                     currentPreparedAuthority,

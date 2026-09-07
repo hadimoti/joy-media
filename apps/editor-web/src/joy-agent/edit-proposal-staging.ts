@@ -18,10 +18,8 @@ import type { EditorSession } from '../editor-session.js';
 import type { JoyAgentTarget } from '../agent-presence.js';
 import { compileJoyCodeCompoundDraft } from '../joy-code-compound-compiler.js';
 import { targetsForJoyCodeOperations } from '../agent-ui-targets.js';
-import type { JoyAgentComposerHostLease } from './composer-host-lease.js';
-import { isJoyAgentComposerHostLeaseCurrent } from './composer-host-lease.js';
 import type { BrowserProposal } from './bounded-tool-loop.js';
-import type { HostRpcHandlerContext } from './host-rpc.js';
+import type { HostRpcHandlerContext, HostRpcRun } from './host-rpc.js';
 import { HostRpcDiagnosticError } from './host-rpc.js';
 import type { JoyAgentPreparedHostResult } from './tool-bridge.js';
 import type { PreparedChangeAuthority, PreparedChangeStore } from './prepared-change-store.js';
@@ -33,7 +31,7 @@ import {
 import type { JoyAgentConversationEntityReference } from './conversation-entity-references.js';
 
 export interface JoyAgentProposalStagingDeps {
-  /** The active model run id this handler is bound to. */
+  /** Identifies this run; only used to derive the epoch-qualified host plan id. */
   readonly runId: string;
   /** The project revision captured when the run started. */
   readonly baseRevision: string;
@@ -43,10 +41,14 @@ export interface JoyAgentProposalStagingDeps {
   readonly capturedSession: EditorSession;
   /** Live session ref; its `.current` is re-read on every authority check. */
   readonly latestSessionRef: { readonly current: EditorSession };
-  /** Live active-model-run ref; `.current` must still equal `runId`. */
-  readonly activeModelRunIdRef: { readonly current: string | undefined };
-  /** Reads the run's composer host lease (assigned after the host is built). */
-  readonly getComposerHostLease: () => JoyAgentComposerHostLease | undefined;
+  /**
+   * True only while this exact Worker run still holds the trusted host methods.
+   * The direct editor path checks its composer host lease; the recipe path
+   * checks its run scope is still current.
+   */
+  readonly hasHostAuthority: (rpcRun: HostRpcRun) => boolean;
+  /** True only while this run is still the active model run for its surface. */
+  readonly isRunCurrent: () => boolean;
   /** A conversation follow-up constrains which entity the proposal may touch. */
   readonly selectedEntityReference: JoyAgentConversationEntityReference | undefined;
   /** Session-scoped prepared-change store. */
@@ -75,8 +77,8 @@ export function createJoyAgentProposalStagingHandler(
     contextProjectId,
     capturedSession: session,
     latestSessionRef,
-    activeModelRunIdRef,
-    getComposerHostLease,
+    hasHostAuthority,
+    isRunCurrent,
     selectedEntityReference,
     preparedChanges,
     currentPreparedAuthority,
@@ -99,19 +101,11 @@ export function createJoyAgentProposalStagingHandler(
         field,
         facts: { compilerCode },
       });
-    const hasCurrentHostLease = (): boolean => {
-      const lease = getComposerHostLease();
-      return (
-        lease !== undefined &&
-        lease.run.runId === rpcContext.run.runId &&
-        lease.run.epoch === rpcContext.run.epoch &&
-        isJoyAgentComposerHostLeaseCurrent(lease)
-      );
-    };
+    const hasCurrentHostLease = (): boolean => hasHostAuthority(rpcContext.run);
     rpcContext.signal.throwIfAborted();
     if (
       !hasCurrentHostLease() ||
-      activeModelRunIdRef.current !== runId ||
+      !isRunCurrent() ||
       session.projectRevisionId !== baseRevision ||
       latestSessionRef.current.visualProject.id !== contextProjectId ||
       latestSessionRef.current.projectRevisionId !== baseRevision
@@ -161,7 +155,7 @@ export function createJoyAgentProposalStagingHandler(
       rpcContext.signal.throwIfAborted();
       if (
         !hasCurrentHostLease() ||
-        activeModelRunIdRef.current !== runId ||
+        !isRunCurrent() ||
         session.projectRevisionId !== baseRevision ||
         latestSessionRef.current.projectRevisionId !== baseRevision
       )
