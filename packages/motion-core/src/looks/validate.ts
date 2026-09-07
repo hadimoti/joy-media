@@ -265,10 +265,12 @@ function validateControl(
       control.drives.forEach((drive, i) => {
         const dp = `${path}.drives[${i}]`;
         requireKeyframeBinding(drive.bindingId, `${dp}.bindingId`);
-        if (!isFiniteNumber(drive.min) || !isFiniteNumber(drive.max) || drive.min > drive.max) {
+        // A descending range (min > max) is legitimate — higher energy can mean
+        // a more negative Y lift. Only a zero-width range is a fake slider.
+        if (!isFiniteNumber(drive.min) || !isFiniteNumber(drive.max) || drive.min === drive.max) {
           push(
             'LOOK_DEFINITION_CONTROL_RANGE',
-            'scalar drive range must be finite and ordered',
+            'scalar drive range must be two distinct finite values',
             dp,
           );
         }
@@ -290,10 +292,11 @@ function validateControl(
           `${path}.options`,
         );
       }
-      if (control.drives.length === 0) {
+      const templateDrives = control.templateDrives ?? [];
+      if (control.drives.length === 0 && templateDrives.length === 0) {
         push(
           'LOOK_DEFINITION_CONTROL_DRIVES',
-          'an enum control with no effect is a fake slider — omit it',
+          'an enum control with no effect is a fake picker — omit it',
           `${path}.drives`,
         );
       }
@@ -315,6 +318,35 @@ function validateControl(
             'atFractions must be strictly increasing values in [0,1]',
             `${dp}.atFractions`,
           );
+        }
+      });
+      templateDrives.forEach((drive, i) => {
+        const dp = `${path}.templateDrives[${i}]`;
+        if (!bindingIds.has(drive.bindingId)) {
+          push(
+            'LOOK_DEFINITION_CONTROL_BINDING',
+            `enum template drive names unknown binding "${drive.bindingId}"`,
+            `${dp}.bindingId`,
+          );
+        } else {
+          const expected = drive.target === 'text' ? 'text-template' : 'caption-template';
+          if (bindingChannel.get(drive.bindingId) !== expected) {
+            push(
+              'LOOK_DEFINITION_CONTROL_BINDING',
+              `enum template drive targets "${drive.target}" but "${drive.bindingId}" is not a ${expected} channel`,
+              `${dp}.bindingId`,
+            );
+          }
+        }
+        for (const option of control.options) {
+          const templateId = drive.templateByOption[option];
+          if (typeof templateId !== 'string' || templateId.trim().length === 0) {
+            push(
+              'LOOK_DEFINITION_CONTROL_TEMPLATE',
+              `enum template drive missing a template id for option "${option}"`,
+              dp,
+            );
+          }
         }
       });
       break;

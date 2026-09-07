@@ -37,9 +37,11 @@ export function mapLookControl(value: number, minimum: number, maximum: number):
     value > 1 ||
     !Number.isFinite(minimum) ||
     !Number.isFinite(maximum) ||
-    minimum > maximum
+    minimum === maximum
   )
     throw new RangeError('Invalid Look control range');
+  // A descending range (minimum > maximum) is allowed — higher operator value
+  // then moves the property the other way (e.g. more lift = more negative y).
   return minimum + value * (maximum - minimum);
 }
 
@@ -325,6 +327,9 @@ function compileControl(
           drive.atFractions,
           drive.interpolation,
         );
+      }
+      for (const drive of control.templateDrives ?? []) {
+        emitTemplate(drive.bindingId, drive.target, drive.templateByOption[option]!);
       }
       break;
     }

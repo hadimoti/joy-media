@@ -33,3 +33,12 @@ export {
 } from './types.js';
 export { validateLookDefinition, type LookDefinitionDiagnostic } from './validate.js';
 export { compileLook, mapLookControl } from './compile.js';
+export {
+  BUILT_IN_LOOK_PACKS,
+  editorialClean,
+  productPrecision,
+  kineticType,
+  quietDocumentary,
+  musicPulse,
+  persianEditorial,
+} from './packs/index.js';

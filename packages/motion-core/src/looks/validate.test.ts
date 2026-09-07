@@ -57,22 +57,35 @@ describe('validateLookDefinition', () => {
     );
   });
 
-  it('rejects a scalar drive with an unordered or non-finite range', () => {
-    const bad = withControls({
+  it('rejects a zero-width or non-finite scalar drive range (but allows descending)', () => {
+    const zeroWidth = withControls({
       ...SCALAR,
       drives: [
         {
           bindingId: 'headline-scale-x',
-          min: 2,
+          min: 1,
           max: 1,
           atFractions: [0, 1],
           interpolation: 'linear',
         },
       ],
     });
-    expect(validateLookDefinition(bad).map((d) => d.code)).toContain(
+    expect(validateLookDefinition(zeroWidth).map((d) => d.code)).toContain(
       'LOOK_DEFINITION_CONTROL_RANGE',
     );
+    const descending = withControls({
+      ...SCALAR,
+      drives: [
+        {
+          bindingId: 'headline-scale-x',
+          min: 0,
+          max: -48,
+          atFractions: [0, 1],
+          interpolation: 'eased',
+        },
+      ],
+    });
+    expect(validateLookDefinition(descending)).toEqual([]);
   });
 
   it('rejects atFractions outside [0,1] or not strictly increasing', () => {

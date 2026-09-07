@@ -23,17 +23,21 @@ describe('mapLookControl', () => {
     expect([0, 0.5, 1].map((v) => mapLookControl(v, 10, 30))).toEqual([10, 20, 30]);
   });
 
-  it('throws on non-finite, out-of-range, or inverted inputs', () => {
+  it('throws on non-finite, out-of-range, or zero-width inputs', () => {
     const cases: ReadonlyArray<readonly [number, number, number]> = [
       [Number.NaN, 0, 1],
       [-0.1, 0, 1],
       [1.1, 0, 1],
-      [0.5, 1, 0],
+      [0.5, 5, 5],
       [0.5, Number.POSITIVE_INFINITY, 1],
     ];
     for (const [value, min, max] of cases) {
       expect(() => mapLookControl(value, min, max)).toThrow(RangeError);
     }
+  });
+
+  it('maps a descending range — 0.25 over [0, -48] is -12', () => {
+    expect(mapLookControl(0.25, 0, -48)).toBe(-12);
   });
 });
 

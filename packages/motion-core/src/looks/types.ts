@@ -87,31 +87,38 @@ export interface LookScalarControl {
   }[];
 }
 
-/** An enum control: one of a closed set of string options, each with a bounded effect. */
+/**
+ * A template-swap drive: the selected option chooses a text/caption template
+ * id, so a colour / font / variant choice compiles to a real `*.setTemplate`
+ * operation rather than a free-form style string.
+ */
+export interface LookTemplateDrive {
+  readonly bindingId: string;
+  readonly target: 'text' | 'caption';
+  readonly templateByOption: Readonly<Record<string, string>>;
+}
+
+/**
+ * An enum control: one of a closed set of string options. It may drive
+ * keyframes (`drives`, per-option numeric values), template swaps
+ * (`templateDrives`, per-option template ids), or both. It must drive at
+ * least one — an enum that compiles to nothing is a fake picker.
+ */
 export interface LookEnumControl {
   readonly id: string;
   readonly label: string;
   readonly kind: 'enum';
   readonly options: readonly string[];
   readonly default: string;
-  /** Per-option scalar overrides applied to the same driven bindings. */
+  /** Per-option scalar overrides applied to the driven keyframe bindings. */
   readonly drives: readonly {
     readonly bindingId: string;
     readonly byOption: Readonly<Record<string, number>>;
     readonly atFractions: readonly number[];
     readonly interpolation: 'hold' | 'linear' | 'eased';
   }[];
-}
-
-/**
- * A template-swap drive: the selected option chooses a text/caption template
- * id, so a colour or font choice compiles to a real `*.setTemplate` operation
- * rather than a free-form style string.
- */
-export interface LookTemplateDrive {
-  readonly bindingId: string;
-  readonly target: 'text' | 'caption';
-  readonly templateByOption: Readonly<Record<string, string>>;
+  /** Per-option template ids applied to the driven template bindings. */
+  readonly templateDrives?: readonly LookTemplateDrive[];
 }
 
 /**
