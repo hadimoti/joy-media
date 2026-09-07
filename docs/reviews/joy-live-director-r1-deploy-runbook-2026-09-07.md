@@ -1,11 +1,23 @@
 # JOY Live Director R1 — deploy runbook
 
+> **DEPLOYED 2026-09-07 ~18:00 UTC.** Candidate `855734cf` is live on
+> `https://joyst.ir/`. Executed C0–C6 over `ssh sweden` from an interactive
+> Claude session (the auto-mode classifier that blocked the finishing session
+> does not apply). Full evidence in `STATE.md` → "JOY Live Director R1
+> deployment (2026-09-07 UTC)" and the closeout section at the end of this
+> file. Two runbook path corrections were found during execution: VPS repo is
+> `/opt/joy-media/repo` (worktree base `/opt/joy-media/builds/joy-media-<sha>`),
+> and the build command is root `pnpm build` (`pnpm -r --if-present build`),
+> not `--filter @joy-media/editor-web` (which misses workspace deps like
+> `@joy-media/playback-engine`). DB dump needs `sudo -u postgres pg_dump
+> joymedia` — the app DB role lacks `LOCK` on some tables.
+
 Recorded: 2026-09-07. Owner deploy go-ahead given ("wait for CI green then
-deploy R1"). Independent Opus ("Astra") `APPROVE_FOR_DEPLOY` on the exact
-candidate is on file (contingent on CI `34123884446` green). This runbook is
-the repository's guarded Sweden release procedure (`deploy/README.md`
-"Release order") applied to this candidate. **Surfaced to the owner before
-execution.**
+deploy R1", then "read our exact rules and do it yourself"). Independent Opus
+("Astra") `APPROVE_FOR_DEPLOY` on the exact candidate is on file (contingency
+CI `34123884446` green — **satisfied, 20/20**). This runbook is the
+repository's guarded Sweden release procedure (`deploy/README.md` "Release
+order") applied to this candidate.
 
 ## Candidate
 
@@ -278,3 +290,24 @@ as a successful deployment.
 - [ ] Never edit / push the pull-only Desktop `gbrain` mirror.
 
 Then R2 "Living Looks" begins.
+
+---
+
+## Deploy record (2026-09-07 UTC)
+
+| Step | Result |
+| --- | --- |
+| C0 discover | live web `joy-media-6a6a336c…-web`, api `joy-media-6a6a336c…-api` (rollback targets); repo `/opt/joy-media/repo` (remotes `origin`, `vps-local`); node v22.23.1, pnpm 11.15.0, pg_dump 17.11 |
+| C1 candidate | pushed `855734cf` to `vps:/opt/joy-media.git` `live-director-r1`; VPS worktree HEAD `855734cf`, tree `54ccefce85daf174b25620b24b64b9d54c130dcc`, lock `36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3` — **exact Astra triple** |
+| C1 schema | `git diff 6a6a336c 855734cf -- apps/api packages/project-schema` = empty; no migration |
+| C2 DB backup | `joymedia-r1-855734cf-predeploy-20260907T175602Z.sql.gz`, 300,448 B, gzip OK, sha256 `39f9fce9395a22b69260531045694042b560467e5457cb008a655e90569778f1` |
+| C3 build | `pnpm install --frozen-lockfile` clean (lock sha unchanged); root `pnpm build` exit 0; `verify-agent-operation-coverage.mjs` OK (16 bounded ops / 8 unsupported); `verify:joy-agent-worker` OK; `dist/` 12 MB, entry `assets/index-BovH_lGk.js` |
+| C4 web release | `/opt/joy-media/web-releases/joy-media-855734cf…-web`; `index.html` sha256 `6cd1a8009903b46b49d0041908bfbe7cd954ab21b4140dcf86966039291d8a4e`; artifact digest `c1fffd7c4469c608ad32b05ed26097f20ac0d2c297ee5969184e51052c4cd2ae` |
+| C4b api archive | `/opt/joy-media/releases/joy-media-855734cf…-api`; `dist/server.js` sha256 `3ea0895722542a71adff0e663313a9392745d47580056a437fb7123f0ca6f4fa` — byte-identical to live; `dist/` tree identical |
+| C5 switch | `api.env` → `api.env.before-r1-855734cf-20260907T180009Z.env`; `JOY_MEDIA_RELEASE_*` merged; `current-api` + `web` symlinks flipped; `joy-media@api` restarted, healthy 2 s, `/ready` reports `commitSha 855734cf…` all checks true; `nginx -t` OK, reloaded |
+| C6 public | origin + CF `GET /` 200; `/api/health` `{"ok":true,…,"controlPlane":true}`; served `index.html` sha256 == `6cd1a800…`; entry bundle 200; old bundle 404 |
+| smoke | disposable project, editor clean, 0 JS errors; Joy Code → Recipes = 8 recipes, honest availability (Title/Caption + Audio Balance disabled with `Needs:` labels); reload stable; owner projects untouched; disposable → Trash |
+| cleanup | build worktree removed; `vps:/opt/joy-media.git` `live-director-r1` branch deleted; immutable releases + DB backup + `api.env.before-*` retained |
+
+**Rollback (until the gate is accepted):**
+`bash deploy/joy-media-rollback.sh --apply joy-media-6a6a336cdd4fb0126c002dda86167f5c92ebfe32-api joy-media-6a6a336cdd4fb0126c002dda86167f5c92ebfe32-web`

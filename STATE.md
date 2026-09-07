@@ -96,6 +96,76 @@ settings dialog shows `Built in · Browser Worker`, session-only provider/model/
 API-key controls, and `No external editor agent or local model process is used`.
 The old untracked VPS directories `  --legacy/` and `\\/` were preserved.
 
+## JOY Live Director R1 deployment (2026-09-07 UTC)
+
+R1 ("Live Director" foundation + perception + V1 recipes) is live on
+`https://joyst.ir/`. Candidate commit
+`855734cf0c875101a632426983db2638c2adddcd`, tree
+`54ccefce85daf174b25620b24b64b9d54c130dcc`, lockfile SHA-256
+`36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3`, schema `5`
+(unchanged from the `6a6a336c` foundation). Web-bundle-only change: no
+`apps/api`, no `packages/project-schema`, no Postgres migration
+(`git diff 6a6a336c 855734cf -- apps/api packages/project-schema` is empty);
+the rebuilt API archive's `dist/server.js` is byte-identical to the prior
+release (`sha256 3ea08957…`). One new runtime dependency shipped:
+`mediabunny@1.55.7` (MPL-2.0, published package, in the editor-web bundle).
+
+Release gate (all satisfied before deploy): CodeRabbit clean; local
+`pnpm -w run check` green; two full green `release-candidate.yml` runs on the
+round-1 code tree (`34078187134`, `34097358089`); `release-candidate.yml` run
+**`34123884446`** on the exact candidate — **20/20 jobs `success`**;
+independent Claude Opus ("Astra") `APPROVE_FOR_DEPLOY` on the exact
+commit/tree/lock; owner go-ahead.
+
+Active pointers:
+
+- API: `/opt/joy-media/releases/joy-media-855734cf0c875101a632426983db2638c2adddcd-api`
+- Web: `/opt/joy-media/web-releases/joy-media-855734cf0c875101a632426983db2638c2adddcd-web`
+- Both carry `release-identity.env` with the commit/tree/lock/schema above; the
+  same four `JOY_MEDIA_RELEASE_*` keys were merged into `/etc/joy-media/api.env`.
+
+Pre-deploy PostgreSQL `joymedia` dump (as the `postgres` superuser; the app
+role lacks `LOCK` on some tables):
+`/opt/joy-media/data/backups/joymedia-r1-855734cf-predeploy-20260907T175602Z.sql.gz`
+(300,448 bytes, gzip verified, SHA-256
+`39f9fce9395a22b69260531045694042b560467e5457cb008a655e90569778f1`). Prior API
+environment retained at
+`/etc/joy-media/api.env.before-r1-855734cf-20260907T180009Z.env`.
+
+Verification: `nginx -t` OK; `joy-media@api` restarted, healthy in 2 s; local
+`/live` + `/ready` green with `releaseIdentity.commitSha =
+855734cf0c875101a632426983db2638c2adddcd` and all readiness checks true;
+`nginx` reloaded (no config change — the shared `joy-wg-bot.conf` `joyst.ir`
+block was not touched). Origin (CF-bypass) and public `GET /` = 200,
+`/api/health` = `{"ok":true,"service":"joy-media-api","controlPlane":true}`,
+served `index.html` SHA-256
+`6cd1a8009903b46b49d0041908bfbe7cd954ab21b4140dcf86966039291d8a4e` (== the
+immutable web release), new entry bundle `assets/index-BovH_lGk.js` = 200, old
+`assets/index-DtQZeAb1.js` = 404. Full web artifact digest
+`c1fffd7c4469c608ad32b05ed26097f20ac0d2c297ee5969184e51052c4cd2ae`.
+
+Signed-in browser smoke (disposable project `r1-smoke-disposable-20260907`,
+moved to Trash after): editor mounts clean, no JS console errors (only the
+expected raw `/api/v1/auth/session` 401 — auth is a bearer token via the app's
+fetch interceptor, not a cookie); **Joy Code → Recipes shows all 8 R1 recipes
+with the honest availability matrix** — "Title and Caption Polish" (`Needs:
+rtl-text`) and "Audio Balance" (`Needs: audio-mix`) disabled, the rest
+runnable, header "Each runs through the same single JOY engine, staged preview,
+and approval as a direct edit"; reload stable, no revived approval card; the
+owner's two existing local projects untouched. Model-driven recipe execution
+(Build Rough Cut approve/Undo, Verify Deliverable report) was **not** run live —
+that needs a spend-capped test provider key, not the owner's; it is covered by
+CI's real-Worker `agent-director-skills.spec.ts` e2e and remains a documented
+R1 follow-up (real BYOK live-model creative evaluation).
+
+Rollback: `bash deploy/joy-media-rollback.sh --apply
+joy-media-6a6a336cdd4fb0126c002dda86167f5c92ebfe32-api
+joy-media-6a6a336cdd4fb0126c002dda86167f5c92ebfe32-web`. The DB backup and the
+`api.env.before-*` file are retained until the deploy gate is accepted.
+
+Next open milestone: **R2 "Living Looks"** (subplan
+`docs/superpowers/plans/2026-09-05-joy-live-director-r2-r3.md`), then R3.
+
 ## VPS access
 
 JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box, two apps.
