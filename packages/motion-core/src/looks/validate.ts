@@ -75,6 +75,17 @@ function fractionsValid(fractions: readonly unknown[]): boolean {
   );
 }
 
+function profileValid(
+  profile: readonly unknown[] | undefined,
+  atFractions: readonly unknown[],
+): boolean {
+  if (profile === undefined) return true;
+  return (
+    profile.length === atFractions.length &&
+    profile.every((w) => isFiniteNumber(w) && w >= 0 && w <= 1)
+  );
+}
+
 /** Returns a diagnostic per problem; an empty array means the definition is safe to compile. */
 export function validateLookDefinition(definition: LookDefinition): LookDefinitionDiagnostic[] {
   const diagnostics: LookDefinitionDiagnostic[] = [];
@@ -281,6 +292,13 @@ function validateControl(
             `${dp}.atFractions`,
           );
         }
+        if (!profileValid(drive.profile, drive.atFractions)) {
+          push(
+            'LOOK_DEFINITION_CONTROL_PROFILE',
+            'profile must be one weight in [0,1] per atFractions entry',
+            `${dp}.profile`,
+          );
+        }
       });
       break;
     }
@@ -317,6 +335,13 @@ function validateControl(
             'LOOK_DEFINITION_CONTROL_FRACTIONS',
             'atFractions must be strictly increasing values in [0,1]',
             `${dp}.atFractions`,
+          );
+        }
+        if (!profileValid(drive.profile, drive.atFractions)) {
+          push(
+            'LOOK_DEFINITION_CONTROL_PROFILE',
+            'profile must be one weight in [0,1] per atFractions entry',
+            `${dp}.profile`,
           );
         }
       });
@@ -377,6 +402,13 @@ function validateControl(
             'LOOK_DEFINITION_CONTROL_FRACTIONS',
             'atFractions must be strictly increasing values in [0,1]',
             `${dp}.atFractions`,
+          );
+        }
+        if (!profileValid(drive.profile, drive.atFractions)) {
+          push(
+            'LOOK_DEFINITION_CONTROL_PROFILE',
+            'profile must be one weight in [0,1] per atFractions entry',
+            `${dp}.profile`,
           );
         }
       });

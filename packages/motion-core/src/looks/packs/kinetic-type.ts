@@ -29,17 +29,21 @@ const phrase = (n: 1 | 2 | 3) => {
     ],
     energyDrives: [
       {
+        // Scale in from a shrunk state to 1, then hold. Higher Energy = a
+        // deeper shrink to spring out of.
         bindingId: `${slot}-scale-x`,
-        min: 0.9,
-        max: 0.6,
+        min: 1,
+        max: 0.55,
         atFractions: [stagger, stagger + 0.08, stagger + 0.16],
+        profile: [1, 0, 0],
         interpolation: 'eased' as const,
       },
       {
         bindingId: `${slot}-scale-y`,
-        min: 0.9,
-        max: 0.6,
+        min: 1,
+        max: 0.55,
         atFractions: [stagger, stagger + 0.08, stagger + 0.16],
+        profile: [1, 0, 0],
         interpolation: 'eased' as const,
       },
       {
@@ -47,13 +51,16 @@ const phrase = (n: 1 | 2 | 3) => {
         min: 0,
         max: 64,
         atFractions: [stagger, stagger + 0.1],
+        profile: [1, 0],
         interpolation: 'eased' as const,
       },
     ],
     entranceDrives: {
       bindingId: `${slot}-opacity`,
       byOption: { snap: 0, soft: 0.3, hold: 1 },
+      settled: 1,
       atFractions: [stagger, stagger + 0.06],
+      profile: [0, 1] as const,
       interpolation: 'eased' as const,
     },
   };

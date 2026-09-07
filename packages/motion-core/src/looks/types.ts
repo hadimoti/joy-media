@@ -66,6 +66,24 @@ export interface LookBindingTarget {
   readonly timeDomain: AnimationTimeDomainV2;
 }
 
+/**
+ * One binding a scalar control drives. The operator's `[0,1]` value scales an
+ * *excursion* from `min` towards `max`; the `profile` (one weight in `[0,1]`
+ * per `atFractions` entry) shapes that excursion over time, so a drive is a
+ * real trajectory — e.g. `atFractions: [0, 0.2, 1]` with `profile: [0, 1, 1]`
+ * rises from the resting `min` to the full mapped value and holds. The
+ * keyframe at fraction `i` is `min + operatorValue * profile[i] * (max - min)`.
+ * `profile` defaults to all-ones (a flat hold at the mapped value).
+ */
+export interface LookScalarDrive {
+  readonly bindingId: string;
+  readonly min: number;
+  readonly max: number;
+  readonly atFractions: readonly number[];
+  readonly profile?: readonly number[];
+  readonly interpolation: 'hold' | 'linear' | 'eased';
+}
+
 /** A scalar control: `[0,1]` operator value maps onto `[min,max]` per driven binding. */
 export interface LookScalarControl {
   readonly id: string;
@@ -73,18 +91,7 @@ export interface LookScalarControl {
   readonly kind: 'scalar';
   /** Default operator value in `[0,1]`. */
   readonly default: number;
-  /**
-   * The binding targets this control drives, each with the real property range
-   * `[min,max]` the `[0,1]` operator value maps onto, and the keyframe times
-   * (composition-fraction in `[0,1]`) the mapped value is written at.
-   */
-  readonly drives: readonly {
-    readonly bindingId: string;
-    readonly min: number;
-    readonly max: number;
-    readonly atFractions: readonly number[];
-    readonly interpolation: 'hold' | 'linear' | 'eased';
-  }[];
+  readonly drives: readonly LookScalarDrive[];
 }
 
 /**
@@ -110,11 +117,19 @@ export interface LookEnumControl {
   readonly kind: 'enum';
   readonly options: readonly string[];
   readonly default: string;
-  /** Per-option scalar overrides applied to the driven keyframe bindings. */
+  /**
+   * Per-option keyframe drives. `byOption[opt]` is the value at profile weight
+   * 0 (the start); `settled` is the value at weight 1 (the end the motion
+   * approaches). `profile` (one weight per `atFractions` entry, default
+   * all-ones) shapes the approach. With `settled` omitted the curve is flat at
+   * `byOption[opt]`.
+   */
   readonly drives: readonly {
     readonly bindingId: string;
     readonly byOption: Readonly<Record<string, number>>;
+    readonly settled?: number;
     readonly atFractions: readonly number[];
+    readonly profile?: readonly number[];
     readonly interpolation: 'hold' | 'linear' | 'eased';
   }[];
   /** Per-option template ids applied to the driven template bindings. */
@@ -167,6 +182,7 @@ export interface LookBooleanDrive {
   readonly whenTrue: number;
   readonly whenFalse: number | 'omit';
   readonly atFractions: readonly number[];
+  readonly profile?: readonly number[];
   readonly interpolation: 'hold' | 'linear' | 'eased';
 }
 

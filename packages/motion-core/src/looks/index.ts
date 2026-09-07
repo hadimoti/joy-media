@@ -9,6 +9,7 @@ export {
   type LookBindingTarget,
   type LookBooleanDrive,
   type LookScalarControl,
+  type LookScalarDrive,
   type LookEnumControl,
   type LookColorControl,
   type LookFontControl,

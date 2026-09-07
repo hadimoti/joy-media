@@ -136,10 +136,17 @@ export function compileLook(input: LookCompileInput): LookCompileResult {
   const changed = new Set<string>();
   const usedKinds = new Set<LookOperationKind>();
 
+  /**
+   * `restValue` is written where `profile[i]` is 0, `fullValue` where it is 1,
+   * linearly between. A missing `profile` is treated as all-ones (a flat hold
+   * at `fullValue`).
+   */
   const emitKeyframes = (
     bindingId: string,
-    value: number,
+    restValue: number,
+    fullValue: number,
     atFractions: readonly number[],
+    profile: readonly number[] | undefined,
     interpolation: 'hold' | 'linear' | 'eased',
   ): void => {
     const target = bindingById.get(bindingId);
@@ -166,7 +173,8 @@ export function compileLook(input: LookCompileInput): LookCompileResult {
       }
       return;
     }
-    for (const fraction of atFractions) {
+    atFractions.forEach((fraction, i) => {
+      const weight = profile === undefined ? 1 : (profile[i] ?? 1);
       operations.push({
         kind: 'motion.setKeyframe',
         bindingId,
@@ -175,10 +183,10 @@ export function compileLook(input: LookCompileInput): LookCompileResult {
         propertyId: target.propertyId,
         timeDomain: target.timeDomain,
         timeUs: fractionToUs(fraction, input.compositionDurationUs),
-        value,
+        value: restValue + weight * (fullValue - restValue),
         interpolation,
       });
-    }
+    });
     changed.add(bindingId);
     usedKinds.add('motion.setKeyframe');
   };
@@ -282,8 +290,10 @@ function compileControl(
   input: LookCompileInput,
   emitKeyframes: (
     bindingId: string,
-    value: number,
+    restValue: number,
+    fullValue: number,
     atFractions: readonly number[],
+    profile: readonly number[] | undefined,
     interpolation: 'hold' | 'linear' | 'eased',
   ) => void,
   emitTemplate: (bindingId: string, surface: 'text' | 'caption', templateId: string) => void,
@@ -302,10 +312,14 @@ function compileControl(
         return;
       }
       for (const drive of control.drives) {
+        // Excursion from the resting min towards the operator-scaled mapped
+        // value, shaped over time by the profile.
         emitKeyframes(
           drive.bindingId,
+          drive.min,
           mapLookControl(value01, drive.min, drive.max),
           drive.atFractions,
+          drive.profile,
           drive.interpolation,
         );
       }
@@ -324,7 +338,9 @@ function compileControl(
         emitKeyframes(
           drive.bindingId,
           drive.byOption[option]!,
+          drive.settled ?? drive.byOption[option]!,
           drive.atFractions,
+          drive.profile,
           drive.interpolation,
         );
       }
@@ -372,11 +388,16 @@ function compileControl(
     case 'boolean': {
       const on = typeof raw === 'boolean' ? raw : control.default;
       for (const drive of control.drives) {
-        if (on) {
-          emitKeyframes(drive.bindingId, drive.whenTrue, drive.atFractions, drive.interpolation);
-        } else if (drive.whenFalse !== 'omit') {
-          emitKeyframes(drive.bindingId, drive.whenFalse, drive.atFractions, drive.interpolation);
-        }
+        const value = on ? drive.whenTrue : drive.whenFalse;
+        if (value === 'omit') continue;
+        emitKeyframes(
+          drive.bindingId,
+          value,
+          value,
+          drive.atFractions,
+          drive.profile,
+          drive.interpolation,
+        );
       }
       break;
     }

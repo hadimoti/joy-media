@@ -41,20 +41,22 @@ export const quietDocumentary: LookDefinition = {
       kind: 'scalar',
       default: 0.7,
       drives: [
-        // Higher gentleness -> a longer, softer fade-in tail. Value maps the
-        // opacity reached at the early checkpoint (lower = slower to full).
+        // A slow, soft fade to full opacity. Higher Gentleness spreads the
+        // approach further across the early window.
         {
           bindingId: 'lower-third-opacity',
-          min: 0.7,
-          max: 0.2,
-          atFractions: [0, 0.12, 0.35],
+          min: 0,
+          max: 1,
+          atFractions: [0, 0.18, 0.4],
+          profile: [0, 0.55, 1],
           interpolation: 'eased',
         },
         {
           bindingId: 'title-opacity',
-          min: 0.7,
-          max: 0.2,
-          atFractions: [0, 0.14, 0.4],
+          min: 0,
+          max: 1,
+          atFractions: [0, 0.22, 0.5],
+          profile: [0, 0.55, 1],
           interpolation: 'eased',
         },
       ],

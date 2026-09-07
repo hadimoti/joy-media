@@ -211,6 +211,7 @@ export {
   type LookBooleanDrive,
   type LookControl,
   type LookScalarControl,
+  type LookScalarDrive,
   type LookEnumControl,
   type LookColorControl,
   type LookFontControl,

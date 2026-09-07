@@ -43,12 +43,14 @@ export const editorialClean: LookDefinition = {
       kind: 'scalar',
       default: 0.35,
       drives: [
-        // Rise distance: a low, tasteful travel. 0 -> settled, 1 -> a 48px lift.
+        // A low, tasteful rise: start lifted below the resting line, settle to
+        // it. Higher Energy = a bigger lift to travel through.
         {
           bindingId: 'headline-y',
           min: 0,
           max: -48,
           atFractions: [0, 0.18, 1],
+          profile: [1, 0, 0],
           interpolation: 'eased',
         },
         {
@@ -56,6 +58,7 @@ export const editorialClean: LookDefinition = {
           min: 0,
           max: -36,
           atFractions: [0, 0.24, 1],
+          profile: [1, 0, 0],
           interpolation: 'eased',
         },
       ],
@@ -69,14 +72,18 @@ export const editorialClean: LookDefinition = {
       drives: [
         {
           bindingId: 'headline-opacity',
-          byOption: { fade: 0, quick: 0.2, hold: 1 },
+          byOption: { fade: 0, quick: 0.35, hold: 1 },
+          settled: 1,
           atFractions: [0, 0.16],
+          profile: [0, 1],
           interpolation: 'eased',
         },
         {
           bindingId: 'deck-opacity',
-          byOption: { fade: 0, quick: 0.2, hold: 1 },
+          byOption: { fade: 0, quick: 0.35, hold: 1 },
+          settled: 1,
           atFractions: [0.08, 0.28],
+          profile: [0, 1],
           interpolation: 'eased',
         },
       ],

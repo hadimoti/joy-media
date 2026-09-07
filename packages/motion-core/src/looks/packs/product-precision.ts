@@ -52,6 +52,7 @@ export const productPrecision: LookDefinition = {
           min: 1,
           max: 1.1,
           atFractions: [0.6, 0.7, 0.8],
+          profile: [0, 1, 0],
           interpolation: 'eased',
         },
         {
@@ -59,6 +60,7 @@ export const productPrecision: LookDefinition = {
           min: 1,
           max: 1.1,
           atFractions: [0.6, 0.7, 0.8],
+          profile: [0, 1, 0],
           interpolation: 'eased',
         },
         {
@@ -66,6 +68,7 @@ export const productPrecision: LookDefinition = {
           min: 0,
           max: -24,
           atFractions: [0, 0.15],
+          profile: [1, 0],
           interpolation: 'eased',
         },
       ],
@@ -82,7 +85,9 @@ export const productPrecision: LookDefinition = {
         {
           bindingId: 'benefit-opacity',
           byOption: { staged: 0, together: 1 },
+          settled: 1,
           atFractions: [0.05, 0.3],
+          profile: [0, 1],
           interpolation: 'hold',
         },
       ],
@@ -98,6 +103,7 @@ export const productPrecision: LookDefinition = {
           min: 0,
           max: 1,
           atFractions: [0.05, 0.2],
+          profile: [0, 1],
           interpolation: 'eased',
         },
         {
@@ -105,6 +111,7 @@ export const productPrecision: LookDefinition = {
           min: 0,
           max: 1,
           atFractions: [0.6, 0.72],
+          profile: [0, 1],
           interpolation: 'eased',
         },
       ],

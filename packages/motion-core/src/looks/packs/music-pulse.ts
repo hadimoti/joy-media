@@ -49,6 +49,7 @@ export const musicPulse: LookDefinition = {
           min: 1,
           max: 1.12,
           atFractions: [0, 0.25, 0.5, 0.75, 1],
+          profile: [0, 1, 0, 1, 0],
           interpolation: 'eased',
         },
         {
@@ -56,6 +57,7 @@ export const musicPulse: LookDefinition = {
           min: 1,
           max: 1.12,
           atFractions: [0, 0.25, 0.5, 0.75, 1],
+          profile: [0, 1, 0, 1, 0],
           interpolation: 'eased',
         },
       ],
@@ -71,6 +73,7 @@ export const musicPulse: LookDefinition = {
           whenTrue: 1,
           whenFalse: 'omit',
           atFractions: [0, 0.1, 0.5, 0.6, 1],
+          profile: [0, 1, 0, 1, 0],
           interpolation: 'hold',
         },
       ],

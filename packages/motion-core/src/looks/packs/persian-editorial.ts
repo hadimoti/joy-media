@@ -45,12 +45,14 @@ export const persianEditorial: LookDefinition = {
       kind: 'scalar',
       default: 0.35,
       drives: [
-        // Positive x: the headline drifts in from the reading (right) side.
+        // Positive x: the headline drifts in from the reading (right) side and
+        // settles onto the baseline.
         {
           bindingId: 'headline-x',
           min: 0,
           max: 56,
           atFractions: [0, 0.2, 1],
+          profile: [1, 0, 0],
           interpolation: 'eased',
         },
       ],
@@ -64,14 +66,18 @@ export const persianEditorial: LookDefinition = {
       drives: [
         {
           bindingId: 'headline-opacity',
-          byOption: { fade: 0, quick: 0.25 },
+          byOption: { fade: 0, quick: 0.35 },
+          settled: 1,
           atFractions: [0, 0.16],
+          profile: [0, 1],
           interpolation: 'eased',
         },
         {
           bindingId: 'byline-opacity',
-          byOption: { fade: 0, quick: 0.25 },
+          byOption: { fade: 0, quick: 0.35 },
+          settled: 1,
           atFractions: [0.1, 0.3],
+          profile: [0, 1],
           interpolation: 'eased',
         },
       ],
