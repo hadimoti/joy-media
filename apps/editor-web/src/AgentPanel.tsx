@@ -49,7 +49,6 @@ import {
 } from './joy-code-conversation.js';
 import { CheckIcon, CloseIcon, PlayIcon, PlusIcon, SaveIcon, UndoIcon } from './icons.js';
 import { CreativeBriefPanel } from './CreativeBriefPanel.js';
-import { compileJoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
 import { JoyCodeCompoundRunner } from './joy-code-compound-runner.js';
 import { resolveObjectIdForSelection } from './sticker-bindings.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
@@ -62,7 +61,6 @@ import {
   createJoyAgentContextSnapshot,
   type JoyAgentContextSnapshotInput,
 } from './joy-agent/context-snapshot.js';
-import { HostRpcDiagnosticError } from './joy-agent/host-rpc.js';
 import { createJoyAgentHostRpcMethodsForSnapshot } from './joy-agent/tool-bridge.js';
 import type { JoyAgentObservationAdapterFactory } from './joy-agent/observation-host-factory.js';
 import type {
@@ -116,16 +114,12 @@ import {
   type AgentPreviewBundle,
   type AgentPreviewStore,
 } from './agent-preview-store.js';
-import { stageJoyAgentPreview } from './joy-agent/stage-preview.js';
+import { createJoyAgentProposalStagingHandler } from './joy-agent/edit-proposal-staging.js';
 import {
   deriveJoyAgentConversationEntityReferences,
   resolveJoyAgentConversationEntityReference,
   type JoyAgentConversationEntityReference,
 } from './joy-agent/conversation-entity-references.js';
-import {
-  constrainJoyAgentConversationTarget,
-  JOY_AGENT_CONVERSATION_TARGET_MISMATCH,
-} from './joy-agent/conversation-target-constraint.js';
 import {
   PreparedChangeStore,
   type PreparedChangeAuthority,
@@ -134,11 +128,7 @@ import {
   applyPreparedJoyCodeChange,
   type PreparedJoyCodeApplyOutcome,
 } from './joy-agent/prepared-apply-outcome.js';
-import {
-  inferJoyAgentTaskKind,
-  targetForJoyAgentTask,
-  targetsForJoyCodeOperations,
-} from './agent-ui-targets.js';
+import { inferJoyAgentTaskKind, targetForJoyAgentTask } from './agent-ui-targets.js';
 
 /** Every edit this panel commits is attributed to the built-in JOY engine. */
 const AGENT_ACTOR: AgentActor = { type: 'agent', id: 'joy-agent' };
@@ -1635,117 +1625,23 @@ export function AgentPanel({
             : {
                 methods: createJoyAgentHostRpcMethodsForSnapshot(
                   contextInput,
-                  async (proposal, rpcContext) => {
-                    const hostPlanId = `${runId}.epoch-${rpcContext.run.epoch}`;
-                    const reject = (
-                      field: string,
-                      compilerCode: string,
-                      retryable = true,
-                    ): HostRpcDiagnosticError =>
-                      new HostRpcDiagnosticError({
-                        code: 'JOY_AGENT_RPC_CANONICAL_REJECTED',
-                        retryable,
-                        operation: 'validate_proposal',
-                        field,
-                        facts: { compilerCode },
-                      });
-                    const hasCurrentHostLease = (): boolean =>
-                      activeComposerHostLease !== undefined &&
-                      activeComposerHostLease.run.runId === rpcContext.run.runId &&
-                      activeComposerHostLease.run.epoch === rpcContext.run.epoch &&
-                      isJoyAgentComposerHostLeaseCurrent(activeComposerHostLease);
-                    rpcContext.signal.throwIfAborted();
-                    if (
-                      !hasCurrentHostLease() ||
-                      activeModelRunIdRef.current !== runId ||
-                      session.projectRevisionId !== baseRevision ||
-                      latestSessionRef.current.visualProject.id !== contextInput.projectId ||
-                      latestSessionRef.current.projectRevisionId !== baseRevision
-                    )
-                      throw reject('run', 'JOY_AGENT_HOST_REVOKED', false);
-                    if (selectedEntityReference !== undefined) {
-                      const targetConstraint = constrainJoyAgentConversationTarget(
-                        selectedEntityReference,
-                        proposal.operations,
-                      );
-                      if (!targetConstraint.ok)
-                        throw reject(
-                          `operations.${targetConstraint.operationId}`,
-                          JOY_AGENT_CONVERSATION_TARGET_MISMATCH,
-                          false,
-                        );
-                    }
-                    const compiled = compileJoyCodeCompoundDraft({
-                      planId: hostPlanId,
-                      baseRevision,
-                      timeline: session.timelineProject,
-                      visualProject: session.visualProject,
-                      registeredAssetIds: Object.keys(session.visualProject.assets),
-                      operations: proposal.operations,
-                    });
-                    if (!compiled.ok)
-                      throw reject(
-                        'operations',
-                        compiled.error.code.slice(0, 64),
-                        compiled.error.code !== 'JOY_CODE_STALE_REVISION',
-                      );
-                    rpcContext.signal.throwIfAborted();
-                    if (
-                      !hasCurrentHostLease() ||
-                      session.projectRevisionId !== baseRevision ||
-                      latestSessionRef.current.projectRevisionId !== baseRevision
-                    )
-                      throw reject('run', 'JOY_AGENT_HOST_REVOKED', false);
-                    let preparedChangeSetId: string | undefined;
-                    try {
-                      const prepared = preparedChanges.prepare(
-                        compiled,
-                        currentPreparedAuthority(hostPlanId),
-                      );
-                      preparedChangeSetId = prepared.changeSetId;
-                      const preview = preparedChanges.getPreviewDraft(prepared.changeSetId);
-                      if (preview === undefined)
-                        throw new Error('JOY_CODE_PREPARED_CHANGE_MISSING');
-                      rpcContext.signal.throwIfAborted();
-                      stageJoyAgentPreview(agentPreviewStore, session, preview);
-                      rpcContext.signal.throwIfAborted();
-                      if (
-                        !hasCurrentHostLease() ||
-                        activeModelRunIdRef.current !== runId ||
-                        session.projectRevisionId !== baseRevision ||
-                        latestSessionRef.current.projectRevisionId !== baseRevision
-                      )
-                        throw reject('run', 'JOY_AGENT_HOST_REVOKED', false);
-                      stagedChangeSetId = prepared.changeSetId;
-                      proposalTargetsRef.current.set(
-                        prepared.planId,
-                        targetsForJoyCodeOperations(
-                          proposal.operations as unknown as readonly {
-                            readonly kind: string;
-                            readonly [key: string]: unknown;
-                          }[],
-                        ),
-                      );
-                      return {
-                        summary: proposal.summary,
-                        baseRevision,
-                        changeSetId: prepared.changeSetId,
-                        operationDigest: prepared.operationDigest,
-                        bindingDigest: prepared.bindingDigest,
-                        operationCount: proposal.operations.length,
-                      };
-                    } catch (error) {
-                      if (preparedChangeSetId !== undefined) {
-                        const prepared = preparedChanges.getView(preparedChangeSetId);
-                        preparedChanges.revoke(preparedChangeSetId);
-                        if (prepared !== undefined) {
-                          agentPreviewStore?.clear(prepared.planId);
-                          proposalTargetsRef.current.delete(prepared.planId);
-                        }
-                      }
-                      throw error;
-                    }
-                  },
+                  createJoyAgentProposalStagingHandler({
+                    runId,
+                    baseRevision,
+                    contextProjectId: contextInput.projectId,
+                    capturedSession: session,
+                    latestSessionRef,
+                    activeModelRunIdRef,
+                    getComposerHostLease: () => activeComposerHostLease,
+                    selectedEntityReference,
+                    preparedChanges,
+                    currentPreparedAuthority,
+                    agentPreviewStore,
+                    proposalTargetsRef,
+                    onStaged: (changeSetId) => {
+                      stagedChangeSetId = changeSetId;
+                    },
+                  }),
                   observationBridge?.tools,
                   observationBridge === undefined
                     ? undefined
