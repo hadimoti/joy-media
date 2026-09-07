@@ -9,8 +9,8 @@ owner-gated taste review (see the scorecard).
 
 | Field    | Value                                                                                                                                   |
 | -------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| commit   | `7956dff38c28ff5aa0628da0e381b2a4af5c6f0e` (branch `codex/joy-live-director`)                                                           |
-| tree     | `e7a0f545bf2d1199c45791654a46efd6f3df3407`                                                                                              |
+| commit   | `93d1c082ef4f86e4caca00effef8a2082cfd5af0` (branch `codex/joy-live-director`)                                                           |
+| tree     | `a92dce700411daef0366e09559eba18371c71afb`                                                                                              |
 | lockfile | `pnpm-lock.yaml` sha256 `36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3` (byte-identical to R1 — zero lockfile delta) |
 | base     | `855734cf0c875101a632426983db2638c2adddcd` (R1, **LIVE** on joyst.ir since 2026-09-07)                                                  |
 
@@ -19,9 +19,12 @@ requires changes, a new candidate SHA is cut and this bundle is re-dated. Branch
 HEAD may carry docs-only commits ahead of the candidate; the gate always runs on
 the pinned SHA.
 
-**Self-hosted `release-candidate.yml` run `34167709048`** dispatched on
-`7956dff3` 2026-09-08 (Opus CI ruling: R2 gates on the proven self-hosted
-instrument; R3 moves the heavy lanes to a dedicated CI VPS). ~4.5h unattended.
+**Self-hosted `release-candidate.yml`** — run `34167709048` on `7956dff3`
+green-lit the four heavy lanes (`validate-candidate`, `linux-real-services` ×2,
+`windows-worker-clean` 2 passes) then was cancelled when CodeRabbit round-2
+landed the `kinetic-type` exit fix (`93d1c082`); re-dispatched on `93d1c082`.
+Per the Opus CI ruling: R2 gates on the proven self-hosted instrument; R3 moves
+the heavy lanes to a dedicated CI VPS. ~4.5h unattended, needs ×2.
 
 ## What R2 is
 
