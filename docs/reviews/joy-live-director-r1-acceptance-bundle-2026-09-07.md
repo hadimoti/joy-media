@@ -179,6 +179,15 @@ question.
 green across all remaining `acceptance` and `real-service-acceptance` jobs; if
 any fails, the approval is void and a new candidate is required.**
 
+**Contingency satisfied — approval ACTIVE.** `release-candidate.yml` run
+`34123884446` (candidate `855734cf`) completed `2026-09-07T17:0x UTC`:
+**20/20 jobs `success`, run conclusion `success`** — `validate-candidate`,
+`linux-real-services` ×2, `windows-worker-clean` (2 exact passes), `acceptance`
+×14, `real-service-acceptance` ×2. Zero failures. Astra's `APPROVE_FOR_DEPLOY`
+on `855734cf` is now in force. With CodeRabbit clean + two prior full green
+`release-candidate.yml` runs + this run + the owner's explicit go-ahead, the R1
+release gate is open.
+
 Non-blocking R2 follow-ups from Astra: (1) consider deleting `budget` from the
 `observeSources` contract rather than documenting it (it is decorative —
 `readObservationCoverage` issues zero observation requests and returns one
