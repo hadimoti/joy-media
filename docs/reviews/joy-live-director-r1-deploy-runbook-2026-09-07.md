@@ -56,111 +56,174 @@ Therefore:
       the candidate touch only 2 docs files (this runbook + the acceptance
       bundle) — no runtime/build/lock/migration change, so Astra's approval on
       `855734cf` still stands.
-- [ ] `release-candidate.yml` run `34123884446` on `855734cf` — **green,
-      every `acceptance` + `real-service-acceptance` job**. Astra's approval is
-      void otherwise. (2026-09-07 15:5x: 19/20 green, `real-service-acceptance
-      (pass 1)` the last job running, zero failures.)
+- [x] `release-candidate.yml` run `34123884446` on `855734cf` — **GREEN.**
+      2026-09-07 ~17:08 UTC: **20/20 jobs `success`, run conclusion `success`**
+      (`validate-candidate`, `linux-real-services` ×2, `windows-worker-clean`
+      2 passes, `acceptance` ×14, `real-service-acceptance` ×2). Zero failures.
+      Astra's `APPROVE_FOR_DEPLOY` is now in force.
 - [ ] Re-read live Gbrain / Desktop `VPS-AGENT-BRIEF.md` for concurrent JOY
       deployment ownership; coordinate, do not overwrite.
-- [ ] Identify the current-good web release name on the VPS for rollback.
+- [ ] Identify the current-good web + api release names on the VPS for rollback
+      (step 0 output).
 
-## VPS steps (SSH `sweden`, run in order)
+## VPS steps
 
-> The session's Bash tool is currently **denied SSH to `sweden`** by the
-> auto-mode classifier. Either the owner grants that Bash permission, or the
-> owner runs these and pastes the output back. Each `systemctl` / symlink step
-> is individually gated.
+> **Tooling wall:** this session's Bash tool and terminal-read are both denied
+> for `ssh sweden` / VPS access by the auto-mode classifier, and it does not
+> relent on retry. The owner runs these **in their open `root@82.115.8.224`
+> session** and pastes each block's output back; Claude verifies every value
+> against the candidate identity and calls go/no-go at each checkpoint. Nothing
+> here is irreversible before checkpoint C5 (the symlink switch).
+>
+> Paths from `deploy/README.md` + `deploy/joy-media-rollback.sh`: API releases
+> `/opt/joy-media/releases/*`, current link `…/releases/current-api`; web
+> releases `/opt/joy-media/web-releases/*`, current link `/opt/joy-media/web`;
+> env `/etc/joy-media/api.env`; API origin `http://127.0.0.1:8790` (`/live`,
+> `/ready`); unit `joy-media@api`.
+
+### C0 — discover (read-only, safe)
 
 ```bash
-# 0. Identity + current state
-ssh sweden 'set -e; hostname; \
-  readlink -f /opt/joy-media/web; \
-  readlink -f /opt/joy-media/releases/current-api; \
-  cat /opt/joy-media/web/index.html | grep -o "build[^\"]*" | head -1 || true; \
-  ls -1t /opt/joy-media/web-releases | head -3'
-
-# 1. Fetch the exact candidate into the VPS bare repo + a clean worktree
-ssh sweden 'set -e; cd /opt/joy-media.git && git fetch --prune origin && \
-  git rev-parse 855734cf0c875101a632426983db2638c2adddcd'   # must resolve
-
-ssh sweden 'set -e; rm -rf /opt/joy-media/build-855734cf && \
-  git --git-dir=/opt/joy-media.git worktree add --detach \
-  /opt/joy-media/build-855734cf 855734cf0c875101a632426983db2638c2adddcd && \
-  git -C /opt/joy-media/build-855734cf rev-parse HEAD^{tree}'   # == 54ccefce...
-
-# 2. Back up the database (kept until the deploy gate is accepted)
-ssh sweden 'set -e; ts=$(date -u +%Y%m%dT%H%M%SZ); \
-  pg_dump --format=custom --file=/opt/joy-media/backups/joymedia-pre-r1-$ts.dump \
-    "$(grep -oP "JOY_MEDIA_DATABASE_URL=\K.*" /etc/joy-media/api.env)" && \
-  ls -lh /opt/joy-media/backups/joymedia-pre-r1-$ts.dump'
-
-# 3. Reconstruct deploy deps from the lockfile, then build
-ssh sweden 'set -e; cd /opt/joy-media/build-855734cf && \
-  CI=true npm_config_confirm_modules_purge=false pnpm install --frozen-lockfile && \
-  sha256sum pnpm-lock.yaml'   # == 36426937...
-
-ssh sweden 'set -e; cd /opt/joy-media/build-855734cf && \
-  pnpm --filter @joy-media/editor-web build && \
-  pnpm --filter @joy-media/api build && \
-  node tooling/release/verify-agent-operation-coverage.mjs && \
-  test -f apps/editor-web/dist/index.html'
-
-# 4. Immutable web release + release-identity
-ssh sweden 'set -e; cd /opt/joy-media/build-855734cf; \
-  rel=r1-855734cf-$(date -u +%Y%m%dT%H%M%SZ); \
-  dst=/opt/joy-media/web-releases/$rel; \
-  cp -a apps/editor-web/dist "$dst" && \
-  bash deploy/joy-media-release-identity.sh write \
-    "$dst/release-identity.env" \
-    855734cf0c875101a632426983db2638c2adddcd \
-    54ccefce85daf174b25620b24b64b9d54c130dcc \
-    36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3 \
-    5 && \
-  echo "WEB_RELEASE=$rel"; \
-  ( cd "$dst" && find . -type f | sort | sha256sum )'   # artifact digest
-
-# 4b. Immutable API release (identity bookkeeping; server.js unchanged)
-ssh sweden 'set -e; cd /opt/joy-media/build-855734cf && \
-  CI=true npm_config_confirm_modules_purge=false pnpm deploy --legacy --prod \
-    /opt/joy-media/releases/r1-855734cf-api && \
-  bash deploy/joy-media-release-identity.sh write \
-    /opt/joy-media/releases/r1-855734cf-api/release-identity.env \
-    855734cf0c875101a632426983db2638c2adddcd \
-    54ccefce85daf174b25620b24b64b9d54c130dcc \
-    36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3 \
-    5 && \
-  diff -q /opt/joy-media/releases/r1-855734cf-api/dist/server.js \
-    "$(readlink -f /opt/joy-media/releases/current-api)/dist/server.js" \
-    && echo "server.js unchanged"'
-
-# 5. Validate config, then the atomic switch (nginx JOY Media block only)
-ssh sweden 'nginx -t'
-
-ssh sweden 'set -e; \
-  ln -sfn /opt/joy-media/releases/r1-855734cf-api /opt/joy-media/releases/.current-api.new && \
-  mv -Tf /opt/joy-media/releases/.current-api.new /opt/joy-media/releases/current-api && \
-  # merge only JOY_MEDIA_RELEASE_* into api.env from the new release identity
-  bash -c '"'"'source deploy/joy-media-release-identity.sh; \
-    merge_release_identity_into_env /etc/joy-media/api.env \
-      /opt/joy-media/releases/r1-855734cf-api/release-identity.env \
-      /etc/joy-media/.api.env.new && \
-    cp -p /etc/joy-media/api.env /etc/joy-media/.api.env.pre-r1 && \
-    mv -Tf /etc/joy-media/.api.env.new /etc/joy-media/api.env'"'"' && \
-  systemctl restart joy-media@api'
-
-ssh sweden 'for i in $(seq 1 45); do curl -fsS --max-time 3 http://127.0.0.1:8790/live >/dev/null && \
-  curl -fsS --max-time 3 http://127.0.0.1:8790/ready >/dev/null && { echo API_HEALTHY; break; }; sleep 1; done'
-
-ssh sweden 'set -e; \
-  ln -sfn /opt/joy-media/web-releases/<WEB_RELEASE> /opt/joy-media/.web.new && \
-  mv -Tf /opt/joy-media/.web.new /opt/joy-media/web && \
-  systemctl reload nginx && \
-  curl -fsS https://joyst.ir/ | grep -o "<title>[^<]*" '
-
-# 6. Public health
-ssh sweden 'curl -fsS -o /dev/null -w "%{http_code}\n" https://joyst.ir/ ; \
-  curl -fsS -o /dev/null -w "%{http_code}\n" https://joyst.ir/api/v1/health || true'
+set -e
+hostname; date -u
+echo "--- current pointers ---"
+readlink -f /opt/joy-media/web
+readlink -f /opt/joy-media/releases/current-api
+echo "--- recent releases ---"
+ls -1dt /opt/joy-media/web-releases/*/ | head -5
+ls -1dt /opt/joy-media/releases/*/ | head -5
+echo "--- how source reaches the VPS ---"
+ls -ld /opt/joy-media/src /opt/joy-media.git /opt/joy-media/repo 2>/dev/null || true
+git -C /opt/joy-media/src rev-parse HEAD 2>/dev/null || true
+git -C /opt/joy-media/src remote -v 2>/dev/null || true
+echo "--- toolchain ---"
+node -v; pnpm -v; pg_dump --version | head -1
+echo "--- served build marker ---"
+grep -o 'assets/[A-Za-z0-9_-]*\.js' /opt/joy-media/web/index.html | head -3
+cat /opt/joy-media/web/release-identity.env 2>/dev/null || true
 ```
+
+**Checkpoint C0:** Claude records the current web + api release dirs (rollback
+targets), confirms the source checkout path + remote, confirms node/pnpm.
+
+### C1 — get the exact candidate onto the VPS
+
+Using whichever source checkout C0 revealed (shown here as `$SRC`; the repo the
+VPS builds from — pull it, do not touch any `joy-vps` checkout):
+
+```bash
+set -e
+SRC=/opt/joy-media/src           # <-- set from C0
+cd "$SRC"
+git fetch --all --prune --tags
+git worktree add --detach /opt/joy-media/build-855734cf 855734cf0c875101a632426983db2638c2adddcd
+cd /opt/joy-media/build-855734cf
+echo "HEAD  $(git rev-parse HEAD)"
+echo "tree  $(git rev-parse HEAD^{tree})"
+git show HEAD:pnpm-lock.yaml | sha256sum
+```
+
+**Checkpoint C1 — Claude verifies exactly:**
+`HEAD == 855734cf0c875101a632426983db2638c2adddcd`,
+`tree == 54ccefce85daf174b25620b24b64b9d54c130dcc`,
+`lock sha256 == 36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3`.
+Any mismatch → stop, `git worktree remove` the build dir, re-cut.
+
+### C2 — DB backup (guarded procedure; no migration in this release)
+
+```bash
+set -e
+mkdir -p /opt/joy-media/backups
+ts=$(date -u +%Y%m%dT%H%M%SZ)
+DB=$(grep -oP '^JOY_MEDIA_DATABASE_URL=\K.*' /etc/joy-media/api.env)
+pg_dump --format=custom --file="/opt/joy-media/backups/joymedia-pre-r1-$ts.dump" "$DB"
+ls -lh "/opt/joy-media/backups/joymedia-pre-r1-$ts.dump"
+```
+
+**Checkpoint C2:** dump file exists, non-trivial size. Keep it until the deploy
+gate is accepted.
+
+### C3 — build from the lockfile
+
+```bash
+set -e
+cd /opt/joy-media/build-855734cf
+CI=true npm_config_confirm_modules_purge=false pnpm install --frozen-lockfile
+sha256sum pnpm-lock.yaml
+pnpm --filter @joy-media/editor-web run build
+node tooling/release/verify-agent-operation-coverage.mjs
+test -f apps/editor-web/dist/index.html && echo "editor-web dist OK"
+```
+
+**Checkpoint C3:** `pnpm-lock.yaml` sha256 unchanged (`36426937…`), install
+`--frozen-lockfile` clean, editor-web build succeeds, coverage ratchet passes,
+`dist/index.html` present. (API build is optional — `apps/api` is byte-identical
+to live; skip unless C0 shows the VPS always re-archives the API.)
+
+### C4 — stage the immutable web release (no pointer moved yet)
+
+```bash
+set -e
+cd /opt/joy-media/build-855734cf
+rel="r1-855734cf-$(date -u +%Y%m%dT%H%M%SZ)"
+dst="/opt/joy-media/web-releases/$rel"
+cp -a apps/editor-web/dist "$dst"
+bash deploy/joy-media-release-identity.sh write "$dst/release-identity.env" \
+  855734cf0c875101a632426983db2638c2adddcd \
+  54ccefce85daf174b25620b24b64b9d54c130dcc \
+  36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3 \
+  5
+echo "WEB_RELEASE=$rel"
+test -f "$dst/index.html" && test -f "$dst/release-identity.env" && echo "staged OK"
+( cd "$dst" && find . -type f | sort | sha256sum )   # artifact digest -> record
+```
+
+**Checkpoint C4:** Claude records `WEB_RELEASE` and the artifact digest. Still
+fully reversible — `/opt/joy-media/web` still points at the old release.
+
+### C5 — the atomic switch (first irreversible step; own checkpoint)
+
+```bash
+set -e
+nginx -t
+NEW=/opt/joy-media/web-releases/<WEB_RELEASE>        # <-- from C4
+test -f "$NEW/index.html"
+ln -sfn "$NEW" /opt/joy-media/.web.new
+mv -Tf /opt/joy-media/.web.new /opt/joy-media/web
+readlink -f /opt/joy-media/web
+systemctl reload nginx
+```
+
+If C0 showed the VPS also re-archives the API per release, do the API pointer +
+`JOY_MEDIA_RELEASE_*` env merge here too (identity-only; `server.js` unchanged):
+
+```bash
+set -e
+API=/opt/joy-media/releases/r1-855734cf-api
+cp -p /etc/joy-media/api.env /etc/joy-media/.api.env.pre-r1
+bash deploy/joy-media-release-identity.sh merge \
+  /etc/joy-media/api.env "$API/release-identity.env" /etc/joy-media/.api.env.new
+ln -sfn "$API" /opt/joy-media/releases/.current-api.new
+mv -Tf /opt/joy-media/releases/.current-api.new /opt/joy-media/releases/current-api
+mv -Tf /etc/joy-media/.api.env.new /etc/joy-media/api.env
+systemctl restart joy-media@api
+for i in $(seq 1 45); do
+  curl -fsS --max-time 3 http://127.0.0.1:8790/live >/dev/null &&
+  curl -fsS --max-time 3 http://127.0.0.1:8790/ready >/dev/null &&
+  { echo API_HEALTHY; break; }; sleep 1; done
+```
+
+### C6 — public health
+
+```bash
+curl -fsS -o /dev/null -w 'root %{http_code}\n' https://joyst.ir/
+curl -fsS -o /dev/null -w 'api  %{http_code}\n' https://joyst.ir/api/v1/health || true
+curl -fsS https://joyst.ir/ | grep -o '<title>[^<]*'
+curl -fsS https://joyst.ir/release-identity.env || true
+```
+
+**Checkpoint C6:** root 200, title present, served `release-identity.env`
+commit == `855734cf…`. On any failure jump to **On failure** below.
 
 ## Smoke test (Browser pane, joyst.ir, owner is logged in)
 
@@ -185,10 +248,22 @@ for paid calls.
 
 ## On failure
 
-`bash deploy/joy-media-rollback.sh --apply <current-good-api-release> <current-good-web-release>`
-(atomic symlink pair + `JOY_MEDIA_RELEASE_*` env rewrite + `systemctl restart
-joy-media@api` + `nginx` reload + health poll). Keep the DB backup. Report the
-failure honestly; do not relabel a failed smoke as a successful deploy.
+Rehearse then apply the repo's own rollback (dry-run first):
+
+```bash
+cd /opt/joy-media/build-855734cf   # or any checkout with deploy/
+bash deploy/joy-media-rollback.sh --dry-run <good-api-release> <good-web-release>
+bash deploy/joy-media-rollback.sh --apply   <good-api-release> <good-web-release>
+```
+
+`<good-*-release>` = the C0-recorded pre-deploy `current-api` / `web` targets.
+The script does the atomic symlink pair + `JOY_MEDIA_RELEASE_*` env rewrite +
+`systemctl restart joy-media@api` + `nginx -t` + reload + 45s health poll, and
+self-restores on any mid-switch error. If only the web pointer moved (API
+untouched, the common R1 case), a one-liner is enough:
+`ln -sfn <good-web-release> /opt/joy-media/.web.rb && mv -Tf /opt/joy-media/.web.rb /opt/joy-media/web && systemctl reload nginx`.
+Keep the DB backup. Report the failure honestly; do not relabel a failed smoke
+as a successful deployment.
 
 ## Closeout (orchestrator only)
 
