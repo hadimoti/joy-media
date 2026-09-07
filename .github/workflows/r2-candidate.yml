@@ -248,17 +248,15 @@ jobs:
           --health-timeout 5s
           --health-retries 20
       minio:
-        image: bitnami/minio:2025
+        # bitnami/minio starts a server from its entrypoint (plain minio/minio
+        # would need `server /data` args, which GitHub services cannot pass).
+        image: bitnami/minio:latest
         env:
           MINIO_ROOT_USER: joyminio
           MINIO_ROOT_PASSWORD: joyminio-secret
+          MINIO_DEFAULT_BUCKETS: joy-media-ci
         ports:
           - 9000:9000
-        options: >-
-          --health-cmd "curl -fsS http://localhost:9000/minio/health/ready || exit 1"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 30
     env:
       CI: 'true'
       JOY_MEDIA_CI_ACCEPTANCE_PROFILE: real-services
@@ -296,7 +294,12 @@ jobs:
           sudo mv "$RUNNER_TEMP/mc" /usr/local/bin/mc
           mc --version
           pg_isready -d "$JOY_MEDIA_CI_DATABASE_URL"
-          curl -fsS http://localhost:9000/minio/health/ready
+          # MinIO has no service health-cmd (the image lacks curl); wait here.
+          for i in $(seq 1 60); do
+            curl -fsS http://localhost:9000/minio/health/ready && break
+            [ "$i" = 60 ] && { echo 'MinIO did not become ready' >&2; exit 1; }
+            sleep 2
+          done
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm exec playwright install --with-deps chromium
