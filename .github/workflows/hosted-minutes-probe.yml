@@ -1,6 +1,8 @@
 name: hosted-minutes-probe
 on:
-  workflow_dispatch:
+  push:
+    branches: [codex/joy-live-director]
+    paths: ['.github/workflows/hosted-minutes-probe.yml']
 permissions:
   contents: read
 jobs:
