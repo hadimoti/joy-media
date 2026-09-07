@@ -55,9 +55,9 @@ in the apply path, no renderer in `motion-core`.
 
 | Check                                             | Result                                                                                                                                              |
 | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm run verify:ci` (check + build + prod audit) | `PENDING` — local `pnpm test` at `990a6c5b`+flake-fix: vitest **4196 passed / 38 skipped / 0 failed** (526 files)                                   |
-| `r2-candidate.yml` (GitHub-hosted CI)             | `PENDING` — target: every lane green ×2 (verify, worker-package, acceptance 7 profiles, real-service-acceptance)                                    |
-| CodeRabbit                                        | `PENDING`                                                                                                                                           |
+| `pnpm run verify:ci` (check + build + prod audit) | local at `7b8d351c`: **vitest 4211 passed / 38 skipped / 0 failed** (527 files); `tsc -b` + `eslint .` + `prettier --check` clean; hosted `r2-candidate.yml` `verify` lane passed ×2 on the pre-fix tree (run `34165045011`) |
+| CI green ×2                                       | `PENDING` — topology per the Opus infra decision (self-hosted `release-candidate.yml` for R2; heavy lanes → CI VPS for R3). GitHub-hosted acceptance is blocked on the account's Actions billing. |
+| CodeRabbit                                        | round 1 (base `855734cf`) — 14 findings; the valid R2 + R1-doc findings fixed in `38dc2958` / `7b8d351c`. Re-review `PENDING`.                       |
 | Font redistribution gate                          | ✅ `tooling/release/src/font-assets.test.ts` (6) — no retired-foundry ownership marker in any runtime surface; Vazirmatn is Fontsource OFL, bundled |
 | Coverage verifier                                 | ✅ unchanged — R2 adds no operation kinds                                                                                                           |
 
