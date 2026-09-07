@@ -8,25 +8,30 @@ is **not** a self-approval — Astra rules on the exact candidate below.
 
 | Field    | Value                                                                                      |
 | -------- | ------------------------------------------------------------------------------------------ |
-| commit   | `369a41966f5e6383f05f63732f4dfcc181594b9d` (branch `codex/joy-live-director`)              |
-| tree     | `7a348582ccfd8b55da0413b65e445bf91f223691`                                                 |
+| commit   | `0cff0470541fc4eafdb9c694410918188f099266` (branch `codex/joy-live-director`)              |
+| tree     | `40661c7dbbe128a3909963ca9620dbd1932b258d`                                                 |
 | lockfile | `pnpm-lock.yaml` sha256 `36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3` |
 | base     | `6a6a336c` (live foundation release, schema 5)                                             |
+
+The `0cff0470 ← 369a4196` delta is **docs-only** (this bundle, the r1-landing
+addendum, one coverage-ledger `limitations` string). All source, tests, tooling
+and lockfile are byte-identical to `369a4196`, which passed the full
+`release-candidate.yml` green (run `34097358089`).
 
 If Astra requires a change, a new candidate SHA is cut and this bundle is
 re-dated; the review is always against one exact SHA/tree/lock triple.
 
 ## Full-suite / build / security / performance at this candidate
 
-| Check                                            | Result                                                                                                                                                |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm -w run check` (typecheck+lint+format+test) | exit 0 — **vitest 4033 passed / 38 skipped / 0 failed** (513 files)                                                                                   |
-| `release-candidate.yml` (self-hosted CI)         | run on this candidate — see the CI status appendix; the last full green was `34078187134` on `fd8497b0` and this candidate re-runs it (`34097358089`) |
-| CI lanes (each ×2)                               | `validate-candidate`, `windows-worker-clean`, `linux-real-services`, `acceptance` (7 desktop profiles), `real-service-acceptance`                     |
-| CodeRabbit                                       | clean — reviewed per-commit across the whole branch and again over the full V1 delta; every finding fixed                                             |
-| BYOK security e2e                                | `tests/e2e/agent-byok-security.spec.ts` (4) — no key/baseUrl leak into UI, storage, or Worker messages                                                |
-| Worker size gate                                 | `pnpm verify:joy-agent-worker` — engine.worker within budget                                                                                          |
-| Coverage verifier                                | `node tooling/release/verify-agent-operation-coverage.mjs` — 16 bounded operations; 8 domains explicitly unsupported                                  |
+| Check                                            | Result                                                                                                                                                                                    |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm -w run check` (typecheck+lint+format+test) | exit 0 — **vitest 4033 passed / 38 skipped / 0 failed** (513 files)                                                                                                                       |
+| `release-candidate.yml` (self-hosted CI)         | **two full green runs**: `34078187134` on `fd8497b0` and `34097358089` on `369a4196` (this candidate's code tree). A third run (`34120471651`) re-verifies the exact HEAD SHA `0cff0470`. |
+| CI lanes (each ×2)                               | `validate-candidate`, `windows-worker-clean`, `linux-real-services`, `acceptance` (7 desktop profiles), `real-service-acceptance`                                                         |
+| CodeRabbit                                       | clean — reviewed per-commit across the whole branch and again over the full V1 delta; every finding fixed                                                                                 |
+| BYOK security e2e                                | `tests/e2e/agent-byok-security.spec.ts` (4) — no key/baseUrl leak into UI, storage, or Worker messages                                                                                    |
+| Worker size gate                                 | `pnpm verify:joy-agent-worker` — engine.worker within budget                                                                                                                              |
+| Coverage verifier                                | `node tooling/release/verify-agent-operation-coverage.mjs` — 16 bounded operations; 8 domains explicitly unsupported                                                                      |
 
 Stress cases from V3 are covered by existing specs: long media
 (`agent-observation-decode` `long-sequence.mp4`), low memory
