@@ -97,11 +97,14 @@ export async function stageLookRun(deps: LookRunDeps, input: LookRunInput): Prom
     return { kind: 'blocked', reason: 'stale-authority', diagnostics: [] };
   }
 
+  const capturedSession = deps.getSession();
   const handler = createJoyAgentProposalStagingHandler({
     runId: scope.runId,
     baseRevision: scope.revision,
-    contextProjectId: scope.projectId,
-    capturedSession: deps.getSession(),
+    // The staging handler checks the live visual-project id against this, so it
+    // must be the document id, not the control-plane project id in the scope.
+    contextProjectId: capturedSession.visualProject.id,
+    capturedSession,
     latestSessionRef: deps.latestSessionRef,
     hasHostAuthority: isCurrent,
     isRunCurrent: isCurrent,

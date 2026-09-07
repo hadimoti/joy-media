@@ -87,7 +87,7 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
     !props.busy;
 
   return (
-    <div className="living-looks" aria-label="Living Looks" hidden={props.hidden}>
+    <div className="living-looks" role="region" aria-label="Living Looks" hidden={props.hidden}>
       <p className="living-looks-intro">
         Editable art-directed Looks. Each compiles to ordinary operations and runs through the same
         staged preview and approval as a direct edit.
