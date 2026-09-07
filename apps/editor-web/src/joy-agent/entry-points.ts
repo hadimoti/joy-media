@@ -385,6 +385,9 @@ export async function runScopedCreativeSkillToolLoop(input: {
   readonly prompt: string;
   readonly baseRevision: string;
   readonly onEvent?: (event: JoyAgentSafeEvent) => void;
+  /** Called with the Worker run id before the iterator starts (for the
+   * recipe observation authority fence). */
+  readonly onRunStart?: (runId: string) => void;
   readonly signal?: AbortSignal;
 }): Promise<CreativeSkillScopedToolLoopResult> {
   try {
@@ -395,6 +398,7 @@ export async function runScopedCreativeSkillToolLoop(input: {
       prompt: input.prompt,
       baseRevision: input.baseRevision,
       ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
+      ...(input.onRunStart === undefined ? {} : { onRunStart: input.onRunStart }),
     });
     if (event.phase === 'awaiting-approval' && event.proposal !== undefined) {
       return {

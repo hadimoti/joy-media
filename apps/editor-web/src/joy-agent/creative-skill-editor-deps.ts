@@ -17,10 +17,10 @@ import type { JoyAgentTarget } from '../agent-presence.js';
 import type { JoyAgentContextSnapshotInput } from './context-snapshot.js';
 import type { JoyAgentEngineClient } from './engine-client.js';
 import type { JoyAgentObservationHostBridge } from './observation-tool-adapter.js';
+import type { JoyAgentObservationAdapterFactory } from './observation-host-factory.js';
 import type { JoyAgentObservationToolAuthority } from './tool-bridge.js';
 import type { PreparedChangeAuthority, PreparedChangeStore } from './prepared-change-store.js';
 import type { CreativeSkillRunScope } from './skill-runner.js';
-import type { JoyAgentHostToolName } from './host-tool-contract.js';
 import { createDirectorVerificationReport } from './director-verifier.js';
 import type { CreativeSkillEditorPrimitiveDeps } from './creative-skill-editor-primitives.js';
 import {
@@ -41,14 +41,15 @@ export interface CreativeSkillEditorAppGraph {
   readonly currentPreparedAuthority: (hostRunId: string) => PreparedChangeAuthority;
   readonly isAuthorityCurrent: (scope: CreativeSkillRunScope) => boolean;
   /**
-   * Builds a recipe-scoped observation bridge. Returns undefined when local
-   * observation is unavailable in this browser (the recipe then reports no
-   * bounded source evidence rather than falling back to a URL/path).
+   * App-owned observation adapter factory. When present, recipes that need
+   * bounded source evidence get an isolated bridge fenced to their Worker run;
+   * when absent, those recipes honestly report no bounded source evidence.
    */
-  readonly buildObservationBridge?: (
-    scope: CreativeSkillRunScope,
-    allowedToolNames: readonly JoyAgentHostToolName[],
-  ) => JoyAgentObservationHostBridge | undefined;
+  readonly observationAdapterFactory?: JoyAgentObservationAdapterFactory;
+  /** Live BYOK model id (observation authority is void without one). */
+  readonly getModelId?: () => string | undefined;
+  /** Live prompt-policy digest for the observation authority fence. */
+  readonly getPromptPolicyDigest?: () => string;
   /** Bounded wait for the renderer to acknowledge a staged preview. */
   readonly previewAckTimeoutMs?: number;
 }
@@ -129,12 +130,15 @@ export function createCreativeSkillEditorPrimitiveDeps(
     buildContextInput: graph.buildContextInput,
     currentPreparedAuthority: graph.currentPreparedAuthority,
     isAuthorityCurrent: graph.isAuthorityCurrent,
-    buildObservationBridge: (scope, allowed) => {
-      const state = stateFor(scope.runId);
-      if (state.bridge === undefined && graph.buildObservationBridge !== undefined) {
-        state.bridge = graph.buildObservationBridge(scope, allowed);
-      }
-      return state.bridge;
+    ...(graph.observationAdapterFactory === undefined
+      ? {}
+      : { observationAdapterFactory: graph.observationAdapterFactory }),
+    ...(graph.getModelId === undefined ? {} : { getModelId: graph.getModelId }),
+    ...(graph.getPromptPolicyDigest === undefined
+      ? {}
+      : { getPromptPolicyDigest: graph.getPromptPolicyDigest }),
+    onObservationBridgeCreated: (scope, bridge) => {
+      stateFor(scope.runId).bridge = bridge;
     },
     onObservationCompleted: (scope, result) => {
       stateFor(scope.runId).manifestId = result.manifestId;

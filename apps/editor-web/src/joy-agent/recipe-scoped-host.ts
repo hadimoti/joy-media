@@ -18,6 +18,7 @@ import type { JoyAgentTarget } from '../agent-presence.js';
 import type { JoyAgentContextSnapshotInput } from './context-snapshot.js';
 import type { JoyAgentEngineClient, JoyAgentRunHost } from './engine-client.js';
 import { createJoyAgentHostRpcMethodsForSnapshot } from './tool-bridge.js';
+import type { JoyAgentObservationAdapterFactory } from './observation-host-factory.js';
 import type { JoyAgentObservationHostBridge } from './observation-tool-adapter.js';
 import type { PreparedChangeAuthority, PreparedChangeStore } from './prepared-change-store.js';
 import type { CreativeSkillRunScope } from './skill-runner.js';
@@ -48,13 +49,20 @@ export interface RecipeScopedEditRunDeps {
   /** True only while this recipe run scope is still current. */
   readonly isAuthorityCurrent: (scope: CreativeSkillRunScope) => boolean;
   /**
-   * Builds the recipe-scoped observation bridge when the allow-list needs it.
-   * Returns undefined when observation is unavailable in this browser.
+   * The App-owned observation adapter factory. When present and the recipe's
+   * allow-list needs source evidence, a recipe-scoped bridge is built here with
+   * a `currentAuthority` fenced to the exact Worker run this loop starts.
    */
-  readonly buildObservationBridge?: (
+  readonly observationAdapterFactory?: JoyAgentObservationAdapterFactory;
+  /** Live BYOK model id; the observation authority is void without one. */
+  readonly getModelId?: () => string | undefined;
+  /** Live prompt-policy digest for the observation authority fence. */
+  readonly getPromptPolicyDigest?: () => string;
+  /** Hands the recipe-scoped bridge back so the caller can read its coverage. */
+  readonly onObservationBridgeCreated?: (
     scope: CreativeSkillRunScope,
-    allowedToolNames: readonly JoyAgentHostToolName[],
-  ) => JoyAgentObservationHostBridge | undefined;
+    bridge: JoyAgentObservationHostBridge,
+  ) => void;
   /** Private host notification after a bounded source observation completes. */
   readonly onObservationCompleted?: (
     scope: CreativeSkillRunScope,
@@ -113,11 +121,16 @@ export function runScopedCreativeSkillEditToolLoop(
     onStaged: (changeSetId) => deps.onStaged?.(scope, changeSetId),
   });
 
+  // The Worker allocates its own run id; capture it before the iterator starts
+  // so the observation authority fence can bind to the exact live run.
+  let workerRun: { readonly runId: string; readonly epoch: number } | undefined;
+
   const needsObservation = boundedAllowList.some((name) => OBSERVE_TOOL_NAMES.has(name));
   const observationBridge =
-    needsObservation && deps.buildObservationBridge !== undefined
-      ? deps.buildObservationBridge(scope, boundedAllowList)
+    needsObservation && deps.observationAdapterFactory !== undefined
+      ? tryCreateObservationBridge(deps, scope, contextInput.projectId, isCurrent, () => workerRun)
       : undefined;
+  if (observationBridge !== undefined) deps.onObservationBridgeCreated?.(scope, observationBridge);
 
   const revokeStaged = (changeSetId: string | undefined): void => {
     if (changeSetId === undefined) return;
@@ -157,6 +170,41 @@ export function runScopedCreativeSkillEditToolLoop(
     host,
     prompt: input.prompt,
     baseRevision: scope.revision,
+    onRunStart: (runId) => {
+      workerRun = Object.freeze({ runId, epoch: 1 });
+    },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
+}
+
+function tryCreateObservationBridge(
+  deps: RecipeScopedEditRunDeps,
+  scope: CreativeSkillRunScope,
+  projectId: string,
+  isCurrent: () => boolean,
+  getWorkerRun: () => { readonly runId: string; readonly epoch: number } | undefined,
+) {
+  try {
+    return deps.observationAdapterFactory?.create({
+      projectId,
+      revision: scope.revision,
+      currentAuthority: () => {
+        const run = getWorkerRun();
+        if (!isCurrent() || run === undefined) return undefined;
+        const modelId = deps.getModelId?.() ?? '';
+        if (modelId.trim().length === 0) return undefined;
+        return Object.freeze({
+          projectId,
+          revision: scope.revision,
+          run,
+          modelId,
+          promptPolicyDigest: deps.getPromptPolicyDigest?.() ?? '',
+        });
+      },
+    });
+  } catch {
+    // Observation is an optional, locally bounded enhancement. A browser that
+    // cannot construct its isolated decoder keeps the safe legacy catalog.
+    return undefined;
+  }
 }
