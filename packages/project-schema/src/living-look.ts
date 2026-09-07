@@ -126,10 +126,7 @@ export function validateLookInstance(value: unknown, path = ''): ProjectDiagnost
   if (typeof candidate.id !== 'string' || !LOOK_ID_PATTERN.test(candidate.id)) {
     diagnostics.push({ code: CODE.id, message: 'id must be a stable id token', path: at('id') });
   }
-  if (
-    typeof candidate.definitionId !== 'string' ||
-    !LOOK_ID_PATTERN.test(candidate.definitionId)
-  ) {
+  if (typeof candidate.definitionId !== 'string' || !LOOK_ID_PATTERN.test(candidate.definitionId)) {
     diagnostics.push({
       code: CODE.definitionId,
       message: 'definitionId must be a stable id token',
@@ -316,7 +313,11 @@ export function validateLookInstances(value: unknown, path = 'lookInstances'): P
   if (value === undefined) return [];
   if (!isPlainObject(value)) {
     return [
-      { code: CODE_INSTANCES, message: 'lookInstances must be an object keyed by instance id', path },
+      {
+        code: CODE_INSTANCES,
+        message: 'lookInstances must be an object keyed by instance id',
+        path,
+      },
     ];
   }
   const diagnostics: ProjectDiagnostic[] = [];

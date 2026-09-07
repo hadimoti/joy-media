@@ -108,9 +108,7 @@ describe('LookInstance validation', () => {
   });
 
   it('accepts an instance whose overrides all name real bindings', () => {
-    expect(
-      validateLookInstance(baseInstance({ overriddenBindingIds: ['headline'] })),
-    ).toEqual([]);
+    expect(validateLookInstance(baseInstance({ overriddenBindingIds: ['headline'] }))).toEqual([]);
   });
 });
 

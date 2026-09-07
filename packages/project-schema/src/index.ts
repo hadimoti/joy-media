@@ -244,7 +244,17 @@ export {
 } from './creative.js';
 
 export type { JoyProjectV2, AnyJoyProject } from './v2.js';
-export { LATEST_PROJECT_SCHEMA_VERSION, isJoyProjectV2, validateJoyProjectV2 } from './v2.js';
+export { isJoyProjectV2, validateJoyProjectV2 } from './v2.js';
+
+export type { JoyProjectV3, AnyJoyProjectV3 } from './v3.js';
+export { LATEST_PROJECT_SCHEMA_VERSION, isJoyProjectV3, validateJoyProjectV3 } from './v3.js';
+
+export type { LookInstance, LookInstancesV3 } from './living-look.js';
+export {
+  isLookBindingWritable,
+  validateLookInstance,
+  validateLookInstances,
+} from './living-look.js';
 
 export type {
   TimelineElementKind,
@@ -279,8 +289,10 @@ export type {
   MigrationResult,
   V2MigrationReport,
   V2MigrationResult,
+  V3MigrationReport,
+  V3MigrationResult,
 } from './migration.js';
-export { migrateV0ToV1, migrateV1ToV2, migrateToLatest } from './migration.js';
+export { migrateV0ToV1, migrateV1ToV2, migrateV2ToV3, migrateToLatest } from './migration.js';
 
 export type {
   VoiceIdentity,

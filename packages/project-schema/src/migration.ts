@@ -5,6 +5,8 @@ import type { JoyProjectV1, AssetRecordV1, ClipV1 } from './v1.js';
 import { validateJoyProjectV1 } from './v1.js';
 import type { AnyJoyProject, JoyProjectV2 } from './v2.js';
 import { validateJoyProjectV2 } from './v2.js';
+import type { JoyProjectV3 } from './v3.js';
+import { validateJoyProjectV3 } from './v3.js';
 
 export interface MigrationReport {
   readonly fromVersion: 0;
@@ -26,6 +28,17 @@ export interface V2MigrationReport {
 export interface V2MigrationResult {
   readonly project: JoyProjectV2;
   readonly report: V2MigrationReport;
+}
+
+export interface V3MigrationReport {
+  readonly fromVersion: 2;
+  readonly toVersion: 3;
+  readonly defaultsApplied: readonly string[];
+}
+
+export interface V3MigrationResult {
+  readonly project: JoyProjectV3;
+  readonly report: V3MigrationReport;
 }
 
 /** Converts an immutable P00 spike project into the v1 document shape without I/O. */
@@ -128,9 +141,32 @@ export function migrateV1ToV2(project: JoyProjectV1): V2MigrationResult {
   };
 }
 
+/**
+ * v2 -> v3. Adds the Living Look instance container and nothing else.
+ *
+ * Like the v1 -> v2 step, this does *not* synthesise instances from anything in
+ * the existing document — a project has a Look only once an operator applies
+ * one. The property Phase 1 must hold is that a migrated project renders and
+ * edits exactly as it did before, so `lookInstances` is left absent rather
+ * than set to an empty map: "no Look was ever applied" and "every Look was
+ * detached" stay distinguishable.
+ */
+export function migrateV2ToV3(project: JoyProjectV2): V3MigrationResult {
+  const migrated: JoyProjectV3 = { ...project, schemaVersion: 3 };
+  const diagnostics = validateJoyProjectV3(migrated);
+  if (diagnostics.length > 0)
+    throw new Error(`v2 migration produced invalid v3: ${diagnostics[0]!.message}`);
+  return {
+    project: migrated,
+    report: { fromVersion: 2, toVersion: 3, defaultsApplied: [] },
+  };
+}
+
 /** Brings any known project version up to the latest schema. */
-export function migrateToLatest(project: AnyJoyProject): JoyProjectV2 {
-  return project.schemaVersion === 2 ? project : migrateV1ToV2(project).project;
+export function migrateToLatest(project: AnyJoyProject | JoyProjectV3): JoyProjectV3 {
+  if (project.schemaVersion === 3) return project;
+  const v2 = project.schemaVersion === 2 ? project : migrateV1ToV2(project).project;
+  return migrateV2ToV3(v2).project;
 }
 
 function migrateClip(clip: Clip, assets: Record<string, AssetRecordV1>): ClipV1 {
