@@ -178,6 +178,19 @@ blocker** (M8 and M7 themselves confirmed correct):
   code inspection for that path; the misleading `REDACTION-FAILURES.txt` wording
   is a follow-up nit.
 
-**Next:** re-reviewer confirms this fix on the final delta → freeze the reviewed
-SHA → `artifact-quota-check.yml` probe succeeds (quota accounting caught up) →
-one full `release-candidate-v2` gate run.
+**Fix re-review (`e3c1a049..6c21c589`) = SAFE TO FREEZE.** The reviewer read the
+current script + test at `6c21c589`, ran the new guard patterns under the
+container's byte-based `grep -E` (every redaction sentinel → zero matches; every
+genuine credential shape → matched), and confirmed the test-7 regression lock
+fails with the `e3c1a049` pattern and passes with the fix. No new findings; the
+broader bare-`Credential=`/`Security-Token=` match is intentional defense in
+depth. **31/31 harness green.**
+
+**Frozen candidate:** `6c21c589e47a8fc0fa1b843487de284e706329a2`
+· tree `bd52e21aeb9f5021e1be5b045f3b347eae8fab41`
+· `pnpm-lock.yaml` blob `4f2721172df53e834be167dc8d91d56bbaaacb88`.
+
+**Next (owner pre-authorized):** `artifact-quota-check.yml` probe uploads green
+(bounded poller, deadline 2026-09-09T10:30Z) → dispatch ONE
+`release-candidate-v2` gate on the frozen SHA, host quiet, no implementation
+changes during the run.
