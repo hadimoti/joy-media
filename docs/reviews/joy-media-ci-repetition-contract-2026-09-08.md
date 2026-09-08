@@ -68,21 +68,53 @@ facts** (see `joy-media-ci-open-items-2026-09-08.md` §3): the first proves pass
 cannot inherit pass 1 state (unique never-before-used names); the second proves
 pass 1 actually removed its own state.
 
-## What a second whole-workflow run did provide that this does not
+## What a second whole-workflow run did provide that this does NOT — honest accounting
 
-- **Runner-reboot / cold-cache resilience** — a second dispatch often landed
-  after other jobs, exercising a colder workspace. → Mitigated: the v2 workflow
-  keeps each browser job doing its own `pnpm install` + `pnpm build` +
-  `playwright install` (no shared artifact), so a cold path is still exercised
-  within one run.
-- **Dispatch-path / infra flake absorption** — two chances for a transient
-  runner hiccup. → `retries: 1` in `playwright.config.ts` and the bounded-retry
-  teardowns already absorb transient flake; a genuine infra failure fails the
-  one run and it is re-dispatched (a cancelled or failed run is never a pass).
+**Corrected after independent review.** The earlier version claimed cold-cache
+resilience was "mitigated"; it is not.
 
-If the reviewer judges the cold-path / infra-flake margin worth keeping, the
-minimal retention is **one automatic re-dispatch on infra-only failure**, not a
-blanket 2×. That is offered as the fallback, not the default.
+- **Runner-image / host drift, store integrity — NOT mitigated.** Both isolated
+  passes run **serially on the one `joy-media-acceptance` runner** with a
+  persistent workspace and a warm pnpm store (`benchmark-results` §"Isolation",
+  `open-items` §9). A second `pnpm install --frozen-lockfile` against the same
+  warm store on the same host, minutes later, does **not** exercise a rebooted
+  runner, a re-provisioned image, an evicted/corrupted store, a re-downloaded
+  Chromium, or a different day's transient infra. A second whole dispatch could
+  land on a different runner or a different day and did exercise those. The v2
+  contract gives that up. The `git clean -xdf` + per-job `pnpm build` inside one
+  run is a **warm-path** rebuild, not a cold path.
+- **`windows-worker-clean` — now built once per gate.** It does one
+  `pnpm install` + one `pnpm --filter @joy-media/worker build` for both its
+  internal passes. Under the 2× rule that install+build happened twice on the
+  Windows runner; now once.
+- **`prod-build-smoke` — a NEW _required_ lane with no pass matrix.** It runs
+  `pnpm build` + `vite preview` + 4 specs **exactly once per gate**. Under the
+  old rule the equivalent coverage (such as it was) got the 2× workflow repeat;
+  now it is single-execution. Either give it `pass: [1,2]` or accept it as
+  deliberately single-pass — this doc does not hide that it is single.
+- **`validate-candidate`, `gate-summary`** — likewise single per gate (they were
+  always cheap; noted for completeness).
+- **Dispatch-path / transient flake** — `retries: 1` in `playwright.config.ts`
+  and the bounded-retry teardowns absorb _some_ transient flake within a pass.
+
+## The offered fallback — and its current status
+
+The "one automatic re-dispatch on infra-only failure" mentioned earlier **does
+not exist in `release-candidate-v2.yml`**. There is no retry, no re-dispatch, and
+no infra-vs-product failure classification — `evaluateGateSummary` treats every
+non-`success` identically and cannot tell an infra flake from a product failure.
+Given the docs' own recorded journey-flake observation (`open-items` §9.1), an
+automatic "re-dispatch on infra failure" would in practice be a human deciding a
+red run was "infra" — which is the rerun-to-green pressure this change disclaims.
+
+**So the honest position is:** a red `release-candidate-v2` run is re-dispatched
+**only at owner discretion, with the reason recorded**, exactly as a red
+`release-candidate.yml` run is today. No automatic retry is claimed or built. If
+the reviewer judges the runner-drift / store-integrity margin worth keeping, the
+options are (a) implement a real infra-failure taxonomy + one auto re-dispatch,
+(b) keep a _periodic_ (not per-candidate) whole-workflow run on `main` HEAD as a
+drift canary, or (c) keep the 2× rule. This doc recommends **(b)** as the
+lowest-cost way to keep drift visible without doubling every candidate's gate.
 
 ## The effects soak stays at one-per-pass
 

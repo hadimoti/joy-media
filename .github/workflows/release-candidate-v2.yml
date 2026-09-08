@@ -641,15 +641,13 @@ jobs:
       - name: Require every lane green on both isolated passes
         shell: bash
         env:
-          LANE_RESULTS: ${{ toJSON(needs.*.result) }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
           set -euo pipefail
-          # Structured evaluation (tooling/release/src/ci-gate-summary.ts,
-          # unit-tested in ci-gate-summary.test.ts — success / failure /
-          # cancelled / skipped / missing-job / malformed cases): JSON.parse the
-          # results array, require its length to equal the expected lane count (a
-          # missing required job -> short array / "skipped"), and require every
-          # entry to be exactly "success".
-          # 6 lanes: linux-real-services, windows-worker-clean, acceptance-primary,
-          # acceptance-responsive, prod-build-smoke, real-service-acceptance.
-          node --experimental-strip-types tooling/release/src/ci-gate-summary.ts "$LANE_RESULTS" 6
+          # Structured, NAME-keyed evaluation (tooling/release/src/ci-gate-summary.ts,
+          # unit-tested): JSON.parse toJSON(needs), require its key set to be
+          # EXACTLY these lane names (a lane silently dropped from `needs:`, or an
+          # unexpected extra lane, fails), and require every lane's `result` to be
+          # exactly "success" (failure / cancelled / skipped / timed_out all fail).
+          node --experimental-strip-types tooling/release/src/ci-gate-summary.ts "$NEEDS_JSON" \
+            'linux-real-services,windows-worker-clean,acceptance-primary,acceptance-responsive,prod-build-smoke,real-service-acceptance'

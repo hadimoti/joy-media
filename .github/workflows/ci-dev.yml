@@ -113,8 +113,10 @@ jobs:
       JOY_MEDIA_E2E_API_PORT: ${{ matrix.api_port }}
       JOY_MEDIA_E2E_WEB_PORT: ${{ matrix.web_port }}
       JOY_MEDIA_E2E_API_URL: http://127.0.0.1:${{ matrix.api_port }}
-      PLAYWRIGHT_HTML_REPORT: playwright-report-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}
-      PLAYWRIGHT_TEST_RESULTS_DIR: playwright-test-results-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}
+      # RUNNER_TEMP, not the checkout — the release lanes' pattern. A relative
+      # path here would be an unignored, uncleaned dir on a persistent runner.
+      PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/playwright-report-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}
+      PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/playwright-test-results-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Verify runner toolchain
@@ -131,6 +133,13 @@ jobs:
       - run: pnpm exec playwright install chromium
       - name: Run browser audit (${{ matrix.label }})
         run: pnpm exec playwright test ${{ matrix.spec }} --project=${{ matrix.project }} --workers=${{ matrix.workers }}
+      - name: Verify no checkout residue
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $env:PLAYWRIGHT_HTML_REPORT, $env:PLAYWRIGHT_TEST_RESULTS_DIR
+          if ((git status --porcelain).Length -ne 0) { git status --porcelain; throw 'browser audit left residue in the checkout' }
 
   development-verification-summary:
     name: development verification summary (NOT release approval)
@@ -142,10 +151,10 @@ jobs:
       - name: Require every development lane green
         shell: bash
         env:
-          LANE_RESULTS: ${{ toJSON(needs.*.result) }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
           set -euo pipefail
-          # Structured evaluation (shared with release-candidate-v2). 3 lanes:
-          # static-and-unit, worker-package, browser.
-          node --experimental-strip-types tooling/release/src/ci-gate-summary.ts "$LANE_RESULTS" 3
+          # Structured, name-keyed evaluation (shared with release-candidate-v2).
+          node --experimental-strip-types tooling/release/src/ci-gate-summary.ts "$NEEDS_JSON" \
+            'static-and-unit,worker-package,browser'
           echo 'development verification passed — this is NOT a release approval'

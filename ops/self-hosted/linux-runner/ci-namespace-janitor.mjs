@@ -128,9 +128,11 @@ try {
   }
 
   let bucketLines = '';
+  let bucketInventoryComplete = true;
   try {
     bucketLines = await mc(['ls', 'joy-ci/']);
   } catch (error) {
+    bucketInventoryComplete = false;
     items.push({ kind: 'bucket-list-error', message: String(error) });
   }
   for (const line of bucketLines.split('\n')) {
@@ -185,6 +187,7 @@ try {
       unrecognized: items.filter((i) => i.classification === 'unrecognized').length,
       unknown: items.filter((i) => i.classification === 'unknown').length,
     },
+    bucketInventoryComplete,
     swept,
     sweepErrors,
     items,
@@ -195,8 +198,17 @@ try {
     `ci-namespace-janitor (${report.mode}): ${report.counts.total} namespaces — ` +
       `${report.counts.active} active, ${report.counts.orphan} orphan, ` +
       `${report.counts.notFound} not-found (quarantined), ${report.counts.unknown} unknown; ` +
-      `swept ${swept.length}`,
+      `swept ${swept.length}` +
+      (bucketInventoryComplete
+        ? ''
+        : ' — WARNING: MinIO bucket listing FAILED, bucket inventory INCOMPLETE'),
   );
+  if (!bucketInventoryComplete) {
+    console.error(
+      'ci-namespace-janitor: `mc ls joy-ci/` failed — the inventory is not a complete bucket census',
+    );
+    process.exitCode = 1;
+  }
   if (sweepErrors.length > 0) {
     console.error(`sweep errors:\n  ${sweepErrors.join('\n  ')}`);
     process.exitCode = 1;
