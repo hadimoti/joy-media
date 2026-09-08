@@ -22,6 +22,7 @@ import {
   assertJourneyTelemetryClean,
   buildProfileSummary,
   createJourneyTelemetry,
+  inspectJourneyTelemetry,
   sanitizeUrl,
 } from './real-service-evidence.mjs';
 import { createLeaseHeartbeatLoop, throwIfLeaseCanceled } from './lease-heartbeat.mjs';
@@ -297,11 +298,20 @@ try {
 
   if (realWorkerLifecycle !== undefined) {
     realWorkerLifecycle.stopped = true;
-    // realWorkerPromise resolves only once the export loop exits its current
+    // realWorkerPromise resolves once the export loop exits its current
     // iteration — after the disposable Worker thread finished and the per-job
     // source/output files were removed — so tempRoot/worker is quiescent before
-    // tempRoot is removed below.
-    await attempt('await export worker exit', () => realWorkerPromise ?? Promise.resolve());
+    // tempRoot is removed below. Bounded: if the loop is wedged inside a lease /
+    // mc / Worker-thread call, don't block teardown to the 120-min job timeout —
+    // record it and press on (tempRoot removal then reports any live residue).
+    await attempt('await export worker exit (bounded 60s)', async () => {
+      const outcome = await Promise.race([
+        (realWorkerPromise ?? Promise.resolve()).then(() => 'exited'),
+        new Promise((r) => setTimeout(() => r('timeout'), 60_000)),
+      ]);
+      if (outcome !== 'exited')
+        throw new Error('export worker did not exit within 60s of the stop request');
+    });
     realWorkerLifecycle = undefined;
   }
 
@@ -764,6 +774,57 @@ async function writeProfileMatrixEvidence(path, sourceProvenance, profiles, stat
   );
 }
 
+let journeyFailureWritten = false;
+function writeJourneyFailure(report) {
+  if (journeyFailureWritten) return;
+  journeyFailureWritten = true;
+  try {
+    mkdirSync(join(root, 'test-output/browser'), { recursive: true });
+    writeFileSync(
+      join(root, 'test-output/browser/journey-failure.json'),
+      `${JSON.stringify(report, null, 2)}\n`,
+      'utf8',
+    );
+  } catch {
+    /* best-effort; the thrown error still carries the detail */
+  }
+}
+function buildJourneyFailure(telemetry, thrownError) {
+  const thrown =
+    thrownError === undefined
+      ? undefined
+      : thrownError instanceof Error
+        ? thrownError.message
+        : String(thrownError);
+  const { failure } = inspectJourneyTelemetry(telemetry, {
+    phase: telemetry.phase,
+    candidateSha,
+    runId,
+    attempt: runAttempt,
+    pass,
+    thrown,
+  });
+  return (
+    failure ?? {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      journeyPhaseAtFailure: telemetry.phase ?? null,
+      thrown: thrown ?? null,
+      candidateSha,
+      runId,
+      attempt: runAttempt,
+      pass,
+      note: 'journey ended without a diagnosable telemetry problem',
+      consoleErrors: [],
+      failedRequests: [],
+      httpErrors: [],
+      unexpectedPageErrors: [],
+      summary: null,
+      message: `journey failure at phase "${telemetry.phase}"`,
+    }
+  );
+}
+
 async function recordJourney(
   baseUrl,
   apiBaseUrl,
@@ -821,426 +882,451 @@ async function recordJourney(
       phase: telemetry.phase,
     });
   });
-  telemetry.phase = 'open-projects';
-  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-  await page.getByRole('heading', { name: 'Projects' }).waitFor();
-  telemetry.phase = 'create-project';
-  const title = `Real service acceptance ${runId}-${pass}`;
-  await page.getByRole('button', { name: 'New project' }).click();
-  await page.getByPlaceholder('Project name').fill(title);
-  await page.getByRole('button', { name: 'Create project' }).click();
-  await page.getByRole('button', { name: 'File', exact: true }).waitFor();
+  const walkAndCollect = async () => {
+    telemetry.phase = 'open-projects';
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+    await page.getByRole('heading', { name: 'Projects' }).waitFor();
+    telemetry.phase = 'create-project';
+    const title = `Real service acceptance ${runId}-${pass}`;
+    await page.getByRole('button', { name: 'New project' }).click();
+    await page.getByPlaceholder('Project name').fill(title);
+    await page.getByRole('button', { name: 'Create project' }).click();
+    await page.getByRole('button', { name: 'File', exact: true }).waitFor();
 
-  telemetry.phase = 'enhance-effects';
-  const enhance = page.locator('.panel-tab[aria-label="Enhance"]').first();
-  await enhance.click();
-  const effectsTab = page
-    .getByRole('region', { name: 'Enhance tools', exact: true })
-    .getByRole('tab', { name: 'Effects', exact: true });
-  await effectsTab.click();
-  await page.locator('.effects-panel').waitFor();
-  telemetry.phase = 'inspector';
-  await page.locator('.panel-tab[aria-label="Inspector"]').first().click();
-  await page.getByRole('article', { name: 'Inspector', exact: true }).waitFor();
-  telemetry.phase = 'joy-code';
-  const joyCode = page.locator('.panel-tab[aria-label="Joy Code"]').first();
-  await joyCode.click();
-  await page.getByRole('article', { name: 'Joy Code', exact: true }).waitFor();
-  // Creative Brief is a composer capability inside the Joy Code panel, not a
-  // section tab. Toggling it reveals the embedded brief surface (its consent
-  // gate, until a BYOK model is connected).
-  telemetry.phase = 'creative-brief';
-  await page.getByRole('button', { name: 'Creative Brief', exact: true }).click();
-  await page.locator('.creative-brief-panel').waitFor();
-  // The 3D scene workspace is its own on-demand Dockview panel. Reveal it from
-  // the View menu when its dock tab is not already mounted.
-  telemetry.phase = '3d-scene';
-  let scene3dTab = page.locator('.panel-tab[aria-label="3D Scene"]').first();
-  if (!(await scene3dTab.isVisible())) {
-    await page.getByRole('button', { name: 'View', exact: true }).click();
-    await page.getByRole('menuitem', { name: '3D Scene', exact: true }).click();
-    scene3dTab = page.locator('.panel-tab[aria-label="3D Scene"]').first();
-  }
-  await scene3dTab.click();
-  await page.getByRole('article', { name: '3D Scene', exact: true }).waitFor();
-  await page.locator('.joy-code-3d').waitFor();
+    telemetry.phase = 'enhance-effects';
+    const enhance = page.locator('.panel-tab[aria-label="Enhance"]').first();
+    await enhance.click();
+    const effectsTab = page
+      .getByRole('region', { name: 'Enhance tools', exact: true })
+      .getByRole('tab', { name: 'Effects', exact: true });
+    await effectsTab.click();
+    await page.locator('.effects-panel').waitFor();
+    telemetry.phase = 'inspector';
+    await page.locator('.panel-tab[aria-label="Inspector"]').first().click();
+    await page.getByRole('article', { name: 'Inspector', exact: true }).waitFor();
+    telemetry.phase = 'joy-code';
+    const joyCode = page.locator('.panel-tab[aria-label="Joy Code"]').first();
+    await joyCode.click();
+    await page.getByRole('article', { name: 'Joy Code', exact: true }).waitFor();
+    // Creative Brief is a composer capability inside the Joy Code panel, not a
+    // section tab. Toggling it reveals the embedded brief surface (its consent
+    // gate, until a BYOK model is connected).
+    telemetry.phase = 'creative-brief';
+    await page.getByRole('button', { name: 'Creative Brief', exact: true }).click();
+    await page.locator('.creative-brief-panel').waitFor();
+    // The 3D scene workspace is its own on-demand Dockview panel. Reveal it from
+    // the View menu when its dock tab is not already mounted.
+    telemetry.phase = '3d-scene';
+    let scene3dTab = page.locator('.panel-tab[aria-label="3D Scene"]').first();
+    if (!(await scene3dTab.isVisible())) {
+      await page.getByRole('button', { name: 'View', exact: true }).click();
+      await page.getByRole('menuitem', { name: '3D Scene', exact: true }).click();
+      scene3dTab = page.locator('.panel-tab[aria-label="3D Scene"]').first();
+    }
+    await scene3dTab.click();
+    await page.getByRole('article', { name: '3D Scene', exact: true }).waitFor();
+    await page.locator('.joy-code-3d').waitFor();
 
-  const projectId = await readControlPlaneProjectId(page);
-  if (!projectId)
-    throw new Error('real-service acceptance did not resolve a control-plane project id');
-  const headers = { authorization: `Bearer ${sessionToken}`, 'content-type': 'application/json' };
-  const videoName = `real-video-${runId}-${pass}.mp4`;
-  const audioName = `real-audio-${runId}-${pass}.wav`;
-  telemetry.phase = 'import-media';
-  await importFixture(page, 'video.mp4', videoName);
-  await importFixture(page, 'audio.wav', audioName);
-  await resetAssetCatalogFilters(page);
-  await addAssetToTimeline(page, videoName);
-  // Motion/Spatial authoring requires an object-backed visual clip.  A newly
-  // created project starts with media-only clips, so place a first-party HTML
-  // scene on the imported video before applying a preset.  Keep this in the
-  // real-service journey (rather than seeding localStorage) so persistence is
-  // exercised through the same compound document transaction as production.
-  telemetry.phase = 'motion-preset';
-  await page.locator(`.timeline-clip[aria-label^="${videoName},"]`).click();
-  await enhance.click();
-  await page
-    .getByRole('region', { name: 'Enhance tools', exact: true })
-    .getByRole('tab', { name: /^Animate/ })
-    .click();
-  const motion = page.locator('.motion-panel');
-  await motion.waitFor();
-  await motion.getByRole('tab', { name: 'Scenes', exact: true }).click();
-  await motion
-    .getByRole('button', { name: /^Add .+ to selected clip$/ })
-    .first()
-    .click();
-  await motion.getByRole('tab', { name: 'Presets', exact: true }).click();
-  await motion
-    .locator('.motion-field', { hasText: 'Preset' })
-    .locator('select')
-    .selectOption('joy-pop-in');
-  await motion.getByRole('button', { name: 'Apply motion preset' }).click();
-  await motion.getByRole('img', { name: 'scaleX keyframes', exact: true }).waitFor();
-  await motion.getByRole('img', { name: 'scaleY keyframes', exact: true }).waitFor();
-  await motion.getByRole('img', { name: 'opacity keyframes', exact: true }).waitFor();
-  const motionObjectId = (await motion.locator('.motion-object-id').textContent())?.trim();
-  if (!motionObjectId || motionObjectId === 'Select a clip')
-    throw new Error('real-service journey did not resolve the Motion target object');
-  // Applying a preset targets the generated HTML-scene clip, not the
-  // imported media clip that the scene was placed above.  Keep that exact
-  // clip id for the reload check; selecting the imported video by display
-  // name would resolve its media controller (which intentionally has no
-  // animation channels) and make a valid persisted preset look missing.
-  const motionClipId = await page
-    .locator('.timeline-clip[data-element-kind="html-scene"][aria-pressed="true"]')
-    .first()
-    .getAttribute('data-clip-id');
-  if (!motionClipId)
-    throw new Error('real-service journey did not resolve the generated Motion clip id');
-  // The Enhance panel replaces the Create/Assets surface. Return to the
-  // catalog before resolving the second imported asset, and clear any kind
-  // filter that the import flow or prior interactions may have selected.
-  await page.locator('.panel-tab[aria-label="Create"]').first().click();
-  await page.getByRole('article', { name: 'Assets', exact: true }).waitFor();
-  await resetAssetCatalogFilters(page);
-  await addAssetToTimeline(page, audioName);
+    const projectId = await readControlPlaneProjectId(page);
+    if (!projectId)
+      throw new Error('real-service acceptance did not resolve a control-plane project id');
+    const headers = { authorization: `Bearer ${sessionToken}`, 'content-type': 'application/json' };
+    const videoName = `real-video-${runId}-${pass}.mp4`;
+    const audioName = `real-audio-${runId}-${pass}.wav`;
+    telemetry.phase = 'import-media';
+    await importFixture(page, 'video.mp4', videoName);
+    await importFixture(page, 'audio.wav', audioName);
+    await resetAssetCatalogFilters(page);
+    await addAssetToTimeline(page, videoName);
+    // Motion/Spatial authoring requires an object-backed visual clip.  A newly
+    // created project starts with media-only clips, so place a first-party HTML
+    // scene on the imported video before applying a preset.  Keep this in the
+    // real-service journey (rather than seeding localStorage) so persistence is
+    // exercised through the same compound document transaction as production.
+    telemetry.phase = 'motion-preset';
+    await page.locator(`.timeline-clip[aria-label^="${videoName},"]`).click();
+    await enhance.click();
+    await page
+      .getByRole('region', { name: 'Enhance tools', exact: true })
+      .getByRole('tab', { name: /^Animate/ })
+      .click();
+    const motion = page.locator('.motion-panel');
+    await motion.waitFor();
+    await motion.getByRole('tab', { name: 'Scenes', exact: true }).click();
+    await motion
+      .getByRole('button', { name: /^Add .+ to selected clip$/ })
+      .first()
+      .click();
+    await motion.getByRole('tab', { name: 'Presets', exact: true }).click();
+    await motion
+      .locator('.motion-field', { hasText: 'Preset' })
+      .locator('select')
+      .selectOption('joy-pop-in');
+    await motion.getByRole('button', { name: 'Apply motion preset' }).click();
+    await motion.getByRole('img', { name: 'scaleX keyframes', exact: true }).waitFor();
+    await motion.getByRole('img', { name: 'scaleY keyframes', exact: true }).waitFor();
+    await motion.getByRole('img', { name: 'opacity keyframes', exact: true }).waitFor();
+    const motionObjectId = (await motion.locator('.motion-object-id').textContent())?.trim();
+    if (!motionObjectId || motionObjectId === 'Select a clip')
+      throw new Error('real-service journey did not resolve the Motion target object');
+    // Applying a preset targets the generated HTML-scene clip, not the
+    // imported media clip that the scene was placed above.  Keep that exact
+    // clip id for the reload check; selecting the imported video by display
+    // name would resolve its media controller (which intentionally has no
+    // animation channels) and make a valid persisted preset look missing.
+    const motionClipId = await page
+      .locator('.timeline-clip[data-element-kind="html-scene"][aria-pressed="true"]')
+      .first()
+      .getAttribute('data-clip-id');
+    if (!motionClipId)
+      throw new Error('real-service journey did not resolve the generated Motion clip id');
+    // The Enhance panel replaces the Create/Assets surface. Return to the
+    // catalog before resolving the second imported asset, and clear any kind
+    // filter that the import flow or prior interactions may have selected.
+    await page.locator('.panel-tab[aria-label="Create"]').first().click();
+    await page.getByRole('article', { name: 'Assets', exact: true }).waitFor();
+    await resetAssetCatalogFilters(page);
+    await addAssetToTimeline(page, audioName);
 
-  telemetry.phase = 'export';
-  const firstDownload = await triggerExportDownload(page);
-  const exportAssetId = `real-export-${runId}-${pass}`;
-  const mixedBytes = await readFile(firstDownload.path);
-  const mixedDigest = firstDownload.sha256;
-  const reimportAssetId = `real-reimport-${runId}-${pass}`;
-  const exportedProbe = JSON.parse(
-    (
-      await execFile(
-        'ffprobe',
-        [
-          '-v',
-          'error',
-          '-print_format',
-          'json',
-          '-show_streams',
-          '-show_format',
-          firstDownload.path,
-        ],
-        { cwd: root },
-      )
-    ).stdout.toString('utf8'),
-  );
-  const exportRegistered = await page.evaluate(
-    async ({ projectId: id, assetId: mediaId, digest: sha, byteLength, requestHeaders }) => {
-      const response = await fetch(`/api/v1/projects/${id}/assets`, {
-        method: 'POST',
-        headers: requestHeaders,
-        body: JSON.stringify({
-          id: mediaId,
-          kind: 'video',
-          displayName: 'mixed-export.mp4',
-          sha256: sha,
-          bytes: byteLength,
-          descriptor: { mimeType: 'video/mp4', durationUs: 3_000_000, width: 320, height: 180 },
-          locations: [{ kind: 'opfs-cache', ref: `real-export-${mediaId}` }],
-        }),
-      });
-      return response.status;
-    },
-    {
-      projectId,
-      assetId: exportAssetId,
-      digest: mixedDigest,
-      byteLength: mixedBytes.byteLength,
-      requestHeaders: headers,
-    },
-  );
-  if (exportRegistered !== 201)
-    throw new Error(`real-service mixed export registration returned ${exportRegistered}`);
-  const exportUploaded = await page.evaluate(
-    async ({ projectId: id, assetId: mediaId, digest: sha, payload, sessionToken }) => {
-      const raw = atob(payload);
-      const body = Uint8Array.from(raw, (character) => character.charCodeAt(0));
-      const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${sessionToken}`,
-          'content-type': 'video/mp4',
-          'x-joy-sha256': sha,
-          'x-joy-bytes': String(body.byteLength),
-        },
-        body,
-      });
-      return response.status;
-    },
-    {
-      projectId,
-      assetId: exportAssetId,
-      digest: mixedDigest,
-      payload: mixedBytes.toString('base64'),
-      sessionToken,
-    },
-  );
-  if (exportUploaded !== 201)
-    throw new Error(`real-service mixed export upload returned ${exportUploaded}`);
-  const exportedDownload = await page.evaluate(
-    async ({ projectId: id, assetId: mediaId, sessionToken }) => {
-      const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
-        headers: { authorization: `Bearer ${sessionToken}` },
-      });
-      const content = new Uint8Array(await response.arrayBuffer());
-      const digest = Array.from(
-        new Uint8Array(await crypto.subtle.digest('SHA-256', content)),
-        (byte) => byte.toString(16).padStart(2, '0'),
-      ).join('');
-      let binary = '';
-      for (let offset = 0; offset < content.length; offset += 0x8000) {
-        binary += String.fromCharCode(...content.subarray(offset, offset + 0x8000));
-      }
-      return {
-        status: response.status,
-        bytes: content.byteLength,
-        digest,
-        payload: btoa(binary),
-      };
-    },
-    { projectId, assetId: exportAssetId, sessionToken },
-  );
-  if (
-    exportedDownload.status !== 200 ||
-    exportedDownload.bytes !== mixedBytes.byteLength ||
-    exportedDownload.digest !== mixedDigest
-  )
-    throw new Error('mixed export download failed integrity verification');
-  const exportedPath = join(tempRoot, `verified-delivery-${runId}-${pass}.mp4`);
-  await writeFile(exportedPath, Buffer.from(exportedDownload.payload, 'base64'));
-  const ffprobeResult = await execFile(
-    'ffprobe',
-    ['-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', exportedPath],
-    { cwd: root },
-  );
-  const ffprobe = JSON.parse(ffprobeResult.stdout.toString('utf8'));
-  const streamTypes = (Array.isArray(ffprobe.streams) ? ffprobe.streams : []).map(
-    (stream) => stream.codec_type,
-  );
-  if (!streamTypes.includes('video') || !streamTypes.includes('audio'))
-    throw new Error('mixed export ffprobe did not find both video and audio streams');
-  telemetry.phase = 'reimport-export';
-  await importFixture(page, firstDownload.path, firstDownload.filename);
-  const redownload = await redownloadMostRecentExport(page);
-  if (redownload.sha256 !== firstDownload.sha256 || redownload.bytes !== firstDownload.bytes) {
-    throw new Error('Recent processes redownload did not match the original JOY export bytes');
-  }
-  captureBrowserTelemetry = false;
-  const reimported = await page.evaluate(
-    async ({ projectId: id, assetId: mediaId, digest: sha, byteLength, requestHeaders }) => {
-      const response = await fetch(`/api/v1/projects/${id}/assets`, {
-        method: 'POST',
-        headers: requestHeaders,
-        body: JSON.stringify({
-          id: mediaId,
-          kind: 'video',
-          displayName: 'reimported-mixed-export.mp4',
-          sha256: sha,
-          bytes: byteLength,
-          descriptor: { mimeType: 'video/mp4', durationUs: 3_000_000, width: 320, height: 180 },
-          locations: [{ kind: 'opfs-cache', ref: `real-reimport-${mediaId}` }],
-        }),
-      });
-      return response.status;
-    },
-    {
-      projectId,
-      assetId: reimportAssetId,
-      digest: mixedDigest,
-      byteLength: mixedBytes.byteLength,
-      requestHeaders: headers,
-    },
-  );
-  if (reimported !== 201) throw new Error(`real-service re-import returned ${reimported}`);
-  const reimportUploaded = await page.evaluate(
-    async ({ projectId: id, assetId: mediaId, digest: sha, payload, sessionToken }) => {
-      const raw = atob(payload);
-      const body = Uint8Array.from(raw, (character) => character.charCodeAt(0));
-      const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${sessionToken}`,
-          'content-type': 'video/mp4',
-          'x-joy-sha256': sha,
-          'x-joy-bytes': String(body.byteLength),
-        },
-        body,
-      });
-      return response.status;
-    },
-    {
-      projectId,
-      assetId: reimportAssetId,
-      digest: mixedDigest,
-      payload: mixedBytes.toString('base64'),
-      sessionToken,
-    },
-  );
-  if (reimportUploaded !== 201)
-    throw new Error(`real-service re-import upload returned ${reimportUploaded}`);
-  const reimportDownloaded = await page.evaluate(
-    async ({ projectId: id, assetId: mediaId, sessionToken }) => {
-      const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
-        headers: { authorization: `Bearer ${sessionToken}` },
-      });
-      const content = new Uint8Array(await response.arrayBuffer());
-      const digest = Array.from(
-        new Uint8Array(await crypto.subtle.digest('SHA-256', content)),
-        (byte) => byte.toString(16).padStart(2, '0'),
-      ).join('');
-      return { status: response.status, bytes: content.byteLength, digest };
-    },
-    { projectId, assetId: reimportAssetId, sessionToken },
-  );
-  if (
-    reimportDownloaded.status !== 200 ||
-    reimportDownloaded.bytes !== mixedBytes.byteLength ||
-    reimportDownloaded.digest !== mixedDigest
-  )
-    throw new Error('real-service re-import download failed integrity verification');
-  const missingSourceStatus = await page.evaluate(
-    async ({ projectId: id, sessionToken }) =>
+    telemetry.phase = 'export';
+    const firstDownload = await triggerExportDownload(page);
+    const exportAssetId = `real-export-${runId}-${pass}`;
+    const mixedBytes = await readFile(firstDownload.path);
+    const mixedDigest = firstDownload.sha256;
+    const reimportAssetId = `real-reimport-${runId}-${pass}`;
+    const exportedProbe = JSON.parse(
       (
-        await fetch(`/api/v1/projects/${id}/assets/missing-source/original`, {
+        await execFile(
+          'ffprobe',
+          [
+            '-v',
+            'error',
+            '-print_format',
+            'json',
+            '-show_streams',
+            '-show_format',
+            firstDownload.path,
+          ],
+          { cwd: root },
+        )
+      ).stdout.toString('utf8'),
+    );
+    const exportRegistered = await page.evaluate(
+      async ({ projectId: id, assetId: mediaId, digest: sha, byteLength, requestHeaders }) => {
+        const response = await fetch(`/api/v1/projects/${id}/assets`, {
+          method: 'POST',
+          headers: requestHeaders,
+          body: JSON.stringify({
+            id: mediaId,
+            kind: 'video',
+            displayName: 'mixed-export.mp4',
+            sha256: sha,
+            bytes: byteLength,
+            descriptor: { mimeType: 'video/mp4', durationUs: 3_000_000, width: 320, height: 180 },
+            locations: [{ kind: 'opfs-cache', ref: `real-export-${mediaId}` }],
+          }),
+        });
+        return response.status;
+      },
+      {
+        projectId,
+        assetId: exportAssetId,
+        digest: mixedDigest,
+        byteLength: mixedBytes.byteLength,
+        requestHeaders: headers,
+      },
+    );
+    if (exportRegistered !== 201)
+      throw new Error(`real-service mixed export registration returned ${exportRegistered}`);
+    const exportUploaded = await page.evaluate(
+      async ({ projectId: id, assetId: mediaId, digest: sha, payload, sessionToken }) => {
+        const raw = atob(payload);
+        const body = Uint8Array.from(raw, (character) => character.charCodeAt(0));
+        const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${sessionToken}`,
+            'content-type': 'video/mp4',
+            'x-joy-sha256': sha,
+            'x-joy-bytes': String(body.byteLength),
+          },
+          body,
+        });
+        return response.status;
+      },
+      {
+        projectId,
+        assetId: exportAssetId,
+        digest: mixedDigest,
+        payload: mixedBytes.toString('base64'),
+        sessionToken,
+      },
+    );
+    if (exportUploaded !== 201)
+      throw new Error(`real-service mixed export upload returned ${exportUploaded}`);
+    const exportedDownload = await page.evaluate(
+      async ({ projectId: id, assetId: mediaId, sessionToken }) => {
+        const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
           headers: { authorization: `Bearer ${sessionToken}` },
-        })
-      ).status,
-    { projectId, sessionToken },
-  );
-  // The API maps a missing asset to its conflict-safe control-plane error
-  // (409) rather than leaking a storage existence signal; both statuses are
-  // accepted across the current local/production adapters.
-  if (missingSourceStatus !== 404 && missingSourceStatus !== 409)
-    throw new Error(`missing-source recovery returned ${missingSourceStatus}, expected 404/409`);
-  const deliveryRecovery = await page.evaluate(
-    async ({
-      projectId: id,
-      sessionToken,
-      assetId,
-      settleTimeoutMs,
-      pollIntervalMs,
-      pollRequestTimeoutMs,
-    }) => {
-      const requestHeaders = {
-        authorization: `Bearer ${sessionToken}`,
-        'content-type': 'application/json',
-      };
-      const createdResponse = await fetch(`/api/v1/projects/${id}/jobs`, {
-        method: 'POST',
-        headers: requestHeaders,
-        body: JSON.stringify({
-          id: `delivery-recovery-${Date.now()}`,
-          type: 'asset.thumbnail',
-          assetId,
-        }),
-      });
-      if (createdResponse.status !== 201) return { created: createdResponse.status };
-      const created = await createdResponse.json();
-      const jobId = created.data?.id;
-      if (typeof jobId !== 'string' || jobId.length === 0)
+        });
+        const content = new Uint8Array(await response.arrayBuffer());
+        const digest = Array.from(
+          new Uint8Array(await crypto.subtle.digest('SHA-256', content)),
+          (byte) => byte.toString(16).padStart(2, '0'),
+        ).join('');
+        let binary = '';
+        for (let offset = 0; offset < content.length; offset += 0x8000) {
+          binary += String.fromCharCode(...content.subarray(offset, offset + 0x8000));
+        }
         return {
-          created: createdResponse.status,
-          canceled: null,
-          cancelResponseState: null,
-          cancelResponseRequested: false,
-          cancelSettledState: null,
-          cancelPollAttempts: 0,
-          cancelPollStatus: null,
-          cancelPollError: 'malformed-create',
-          canceledState: null,
-          retried: null,
-          retriedState: null,
+          status: response.status,
+          bytes: content.byteLength,
+          digest,
+          payload: btoa(binary),
         };
-      const canceledResponse = await fetch(`/api/v1/projects/${id}/jobs/${jobId}/cancel`, {
-        method: 'POST',
-        headers: requestHeaders,
-        body: '{}',
-      });
-      const canceled = await canceledResponse.json();
-      const cancelResponseState = canceled.data?.state;
-      const cancelResponseRequested = canceled.data?.cancelRequested === true;
-      let cancelSettledState = cancelResponseState;
-      let cancelPollAttempts = 0;
-      let cancelPollStatus = null;
-      let cancelPollError = null;
-      const pollJobs = async () => {
-        const controller = new globalThis.AbortController();
-        const requestTimeout = setTimeout(() => controller.abort(), pollRequestTimeoutMs);
-        try {
-          const response = await fetch(`/api/v1/projects/${id}/jobs`, {
+      },
+      { projectId, assetId: exportAssetId, sessionToken },
+    );
+    if (
+      exportedDownload.status !== 200 ||
+      exportedDownload.bytes !== mixedBytes.byteLength ||
+      exportedDownload.digest !== mixedDigest
+    )
+      throw new Error('mixed export download failed integrity verification');
+    const exportedPath = join(tempRoot, `verified-delivery-${runId}-${pass}.mp4`);
+    await writeFile(exportedPath, Buffer.from(exportedDownload.payload, 'base64'));
+    const ffprobeResult = await execFile(
+      'ffprobe',
+      ['-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', exportedPath],
+      { cwd: root },
+    );
+    const ffprobe = JSON.parse(ffprobeResult.stdout.toString('utf8'));
+    const streamTypes = (Array.isArray(ffprobe.streams) ? ffprobe.streams : []).map(
+      (stream) => stream.codec_type,
+    );
+    if (!streamTypes.includes('video') || !streamTypes.includes('audio'))
+      throw new Error('mixed export ffprobe did not find both video and audio streams');
+    telemetry.phase = 'reimport-export';
+    await importFixture(page, firstDownload.path, firstDownload.filename);
+    const redownload = await redownloadMostRecentExport(page);
+    if (redownload.sha256 !== firstDownload.sha256 || redownload.bytes !== firstDownload.bytes) {
+      throw new Error('Recent processes redownload did not match the original JOY export bytes');
+    }
+    captureBrowserTelemetry = false;
+    const reimported = await page.evaluate(
+      async ({ projectId: id, assetId: mediaId, digest: sha, byteLength, requestHeaders }) => {
+        const response = await fetch(`/api/v1/projects/${id}/assets`, {
+          method: 'POST',
+          headers: requestHeaders,
+          body: JSON.stringify({
+            id: mediaId,
+            kind: 'video',
+            displayName: 'reimported-mixed-export.mp4',
+            sha256: sha,
+            bytes: byteLength,
+            descriptor: { mimeType: 'video/mp4', durationUs: 3_000_000, width: 320, height: 180 },
+            locations: [{ kind: 'opfs-cache', ref: `real-reimport-${mediaId}` }],
+          }),
+        });
+        return response.status;
+      },
+      {
+        projectId,
+        assetId: reimportAssetId,
+        digest: mixedDigest,
+        byteLength: mixedBytes.byteLength,
+        requestHeaders: headers,
+      },
+    );
+    if (reimported !== 201) throw new Error(`real-service re-import returned ${reimported}`);
+    const reimportUploaded = await page.evaluate(
+      async ({ projectId: id, assetId: mediaId, digest: sha, payload, sessionToken }) => {
+        const raw = atob(payload);
+        const body = Uint8Array.from(raw, (character) => character.charCodeAt(0));
+        const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${sessionToken}`,
+            'content-type': 'video/mp4',
+            'x-joy-sha256': sha,
+            'x-joy-bytes': String(body.byteLength),
+          },
+          body,
+        });
+        return response.status;
+      },
+      {
+        projectId,
+        assetId: reimportAssetId,
+        digest: mixedDigest,
+        payload: mixedBytes.toString('base64'),
+        sessionToken,
+      },
+    );
+    if (reimportUploaded !== 201)
+      throw new Error(`real-service re-import upload returned ${reimportUploaded}`);
+    const reimportDownloaded = await page.evaluate(
+      async ({ projectId: id, assetId: mediaId, sessionToken }) => {
+        const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
+          headers: { authorization: `Bearer ${sessionToken}` },
+        });
+        const content = new Uint8Array(await response.arrayBuffer());
+        const digest = Array.from(
+          new Uint8Array(await crypto.subtle.digest('SHA-256', content)),
+          (byte) => byte.toString(16).padStart(2, '0'),
+        ).join('');
+        return { status: response.status, bytes: content.byteLength, digest };
+      },
+      { projectId, assetId: reimportAssetId, sessionToken },
+    );
+    if (
+      reimportDownloaded.status !== 200 ||
+      reimportDownloaded.bytes !== mixedBytes.byteLength ||
+      reimportDownloaded.digest !== mixedDigest
+    )
+      throw new Error('real-service re-import download failed integrity verification');
+    const missingSourceStatus = await page.evaluate(
+      async ({ projectId: id, sessionToken }) =>
+        (
+          await fetch(`/api/v1/projects/${id}/assets/missing-source/original`, {
             headers: { authorization: `Bearer ${sessionToken}` },
-            signal: controller.signal,
-          });
-          if (!response.ok) return { response, error: 'http-error' };
-          try {
-            return { response, payload: await response.json() };
-          } catch {
-            return { response, error: 'malformed-jobs' };
-          }
-        } catch (error) {
+          })
+        ).status,
+      { projectId, sessionToken },
+    );
+    // The API maps a missing asset to its conflict-safe control-plane error
+    // (409) rather than leaking a storage existence signal; both statuses are
+    // accepted across the current local/production adapters.
+    if (missingSourceStatus !== 404 && missingSourceStatus !== 409)
+      throw new Error(`missing-source recovery returned ${missingSourceStatus}, expected 404/409`);
+    const deliveryRecovery = await page.evaluate(
+      async ({
+        projectId: id,
+        sessionToken,
+        assetId,
+        settleTimeoutMs,
+        pollIntervalMs,
+        pollRequestTimeoutMs,
+      }) => {
+        const requestHeaders = {
+          authorization: `Bearer ${sessionToken}`,
+          'content-type': 'application/json',
+        };
+        const createdResponse = await fetch(`/api/v1/projects/${id}/jobs`, {
+          method: 'POST',
+          headers: requestHeaders,
+          body: JSON.stringify({
+            id: `delivery-recovery-${Date.now()}`,
+            type: 'asset.thumbnail',
+            assetId,
+          }),
+        });
+        if (createdResponse.status !== 201) return { created: createdResponse.status };
+        const created = await createdResponse.json();
+        const jobId = created.data?.id;
+        if (typeof jobId !== 'string' || jobId.length === 0)
           return {
-            response: null,
-            error:
-              error instanceof Error && error.name === 'AbortError'
-                ? 'request-timeout'
-                : 'request-failed',
+            created: createdResponse.status,
+            canceled: null,
+            cancelResponseState: null,
+            cancelResponseRequested: false,
+            cancelSettledState: null,
+            cancelPollAttempts: 0,
+            cancelPollStatus: null,
+            cancelPollError: 'malformed-create',
+            canceledState: null,
+            retried: null,
+            retriedState: null,
           };
-        } finally {
-          globalThis.clearTimeout(requestTimeout);
+        const canceledResponse = await fetch(`/api/v1/projects/${id}/jobs/${jobId}/cancel`, {
+          method: 'POST',
+          headers: requestHeaders,
+          body: '{}',
+        });
+        const canceled = await canceledResponse.json();
+        const cancelResponseState = canceled.data?.state;
+        const cancelResponseRequested = canceled.data?.cancelRequested === true;
+        let cancelSettledState = cancelResponseState;
+        let cancelPollAttempts = 0;
+        let cancelPollStatus = null;
+        let cancelPollError = null;
+        const pollJobs = async () => {
+          const controller = new globalThis.AbortController();
+          const requestTimeout = setTimeout(() => controller.abort(), pollRequestTimeoutMs);
+          try {
+            const response = await fetch(`/api/v1/projects/${id}/jobs`, {
+              headers: { authorization: `Bearer ${sessionToken}` },
+              signal: controller.signal,
+            });
+            if (!response.ok) return { response, error: 'http-error' };
+            try {
+              return { response, payload: await response.json() };
+            } catch {
+              return { response, error: 'malformed-jobs' };
+            }
+          } catch (error) {
+            return {
+              response: null,
+              error:
+                error instanceof Error && error.name === 'AbortError'
+                  ? 'request-timeout'
+                  : 'request-failed',
+            };
+          } finally {
+            globalThis.clearTimeout(requestTimeout);
+          }
+        };
+        const cancelSettleDeadline = Date.now() + settleTimeoutMs;
+        while (Date.now() < cancelSettleDeadline) {
+          cancelPollAttempts += 1;
+          const {
+            response: jobsResponse,
+            payload: jobsPayload,
+            error: pollError,
+          } = await pollJobs();
+          cancelPollStatus = jobsResponse?.status ?? null;
+          if (pollError !== undefined) {
+            cancelPollError = pollError;
+            break;
+          }
+          if (!jobsPayload || typeof jobsPayload !== 'object' || !Array.isArray(jobsPayload.data)) {
+            cancelPollError = 'malformed-jobs';
+            break;
+          }
+          const settledJob = jobsPayload.data.find((job) => job && job.id === jobId);
+          if (!settledJob || typeof settledJob.state !== 'string') {
+            cancelPollError = 'job-missing';
+            break;
+          }
+          cancelSettledState = settledJob.state;
+          if (cancelSettledState === 'canceled') break;
+          if (cancelSettledState === 'failed' || cancelSettledState === 'succeeded') {
+            cancelPollError = `terminal-${cancelSettledState}`;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
         }
-      };
-      const cancelSettleDeadline = Date.now() + settleTimeoutMs;
-      while (Date.now() < cancelSettleDeadline) {
-        cancelPollAttempts += 1;
-        const { response: jobsResponse, payload: jobsPayload, error: pollError } = await pollJobs();
-        cancelPollStatus = jobsResponse?.status ?? null;
-        if (pollError !== undefined) {
-          cancelPollError = pollError;
-          break;
+        if (cancelSettledState !== 'canceled') {
+          return {
+            created: createdResponse.status,
+            canceled: canceledResponse.status,
+            cancelResponseState,
+            cancelResponseRequested,
+            cancelSettledState,
+            cancelPollAttempts,
+            cancelPollStatus,
+            cancelPollError,
+            canceledState: cancelSettledState,
+            retried: null,
+            retriedState: null,
+          };
         }
-        if (!jobsPayload || typeof jobsPayload !== 'object' || !Array.isArray(jobsPayload.data)) {
-          cancelPollError = 'malformed-jobs';
-          break;
-        }
-        const settledJob = jobsPayload.data.find((job) => job && job.id === jobId);
-        if (!settledJob || typeof settledJob.state !== 'string') {
-          cancelPollError = 'job-missing';
-          break;
-        }
-        cancelSettledState = settledJob.state;
-        if (cancelSettledState === 'canceled') break;
-        if (cancelSettledState === 'failed' || cancelSettledState === 'succeeded') {
-          cancelPollError = `terminal-${cancelSettledState}`;
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-      }
-      if (cancelSettledState !== 'canceled') {
+        const retryResponse = await fetch(`/api/v1/projects/${id}/jobs/${jobId}/retry`, {
+          method: 'POST',
+          headers: requestHeaders,
+          body: '{}',
+        });
+        const retried = await retryResponse.json();
         return {
           created: createdResponse.status,
           canceled: canceledResponse.status,
@@ -1251,303 +1337,290 @@ async function recordJourney(
           cancelPollStatus,
           cancelPollError,
           canceledState: cancelSettledState,
-          retried: null,
-          retriedState: null,
+          retried: retryResponse.status,
+          retriedState: retried.data?.state,
         };
-      }
-      const retryResponse = await fetch(`/api/v1/projects/${id}/jobs/${jobId}/retry`, {
-        method: 'POST',
-        headers: requestHeaders,
-        body: '{}',
-      });
-      const retried = await retryResponse.json();
-      return {
-        created: createdResponse.status,
-        canceled: canceledResponse.status,
-        cancelResponseState,
-        cancelResponseRequested,
-        cancelSettledState,
-        cancelPollAttempts,
-        cancelPollStatus,
-        cancelPollError,
-        canceledState: cancelSettledState,
-        retried: retryResponse.status,
-        retriedState: retried.data?.state,
-      };
-    },
-    {
-      projectId,
-      sessionToken,
-      assetId: reimportAssetId,
-      settleTimeoutMs: DELIVERY_CANCEL_SETTLE_TIMEOUT_MS,
-      pollIntervalMs: DELIVERY_CANCEL_POLL_INTERVAL_MS,
-      pollRequestTimeoutMs: DELIVERY_CANCEL_POLL_REQUEST_TIMEOUT_MS,
-    },
-  );
-  if (
-    deliveryRecovery.created !== 201 ||
-    ![200, 201].includes(deliveryRecovery.canceled) ||
-    deliveryRecovery.cancelSettledState !== 'canceled' ||
-    deliveryRecovery.canceledState !== 'canceled' ||
-    ![200, 201].includes(deliveryRecovery.retried) ||
-    deliveryRecovery.retriedState !== 'queued'
-  )
-    throw new Error(`delivery cancel/retry recovery failed: ${JSON.stringify(deliveryRecovery)}`);
-  var deliveryEvidence = {
-    sourceAssets: { video: true, audio: true },
-    mixedSourceExport: {
-      status: 'passed',
-      producer: 'joy-export-mp4',
-      filename: firstDownload.filename,
-      bytes: firstDownload.bytes,
-      sha256: firstDownload.sha256,
-      durableRedownloadMatched: true,
-    },
-    downloaded: { status: 200, bytes: exportedDownload.bytes, sha256: exportedDownload.digest },
-    ffprobe: {
-      status: 'passed',
-      streamTypes,
-      formatName: ffprobe.format?.format_name ?? null,
-      exportFormatName: exportedProbe.format?.format_name ?? null,
-    },
-    reimport: {
-      status: reimported,
-      assetId: reimportAssetId,
-      uploadStatus: reimportUploaded,
-      downloadStatus: reimportDownloaded.status,
-      bytes: reimportDownloaded.bytes,
-      sha256: reimportDownloaded.digest,
-    },
-    cancelRetry: deliveryRecovery,
-    missingSource: { status: missingSourceStatus },
-  };
-
-  // Reopen the active project before asserting Motion persistence.  This
-  // proves the persisted document can be reconstructed by a fresh editor
-  // session instead of merely finding data in the current React/localStorage
-  // process.  The clip/object and expected channels are carried through the
-  // check so unrelated animation data cannot satisfy this release gate.
-  captureBrowserTelemetry = true;
-  telemetry.phase = 'reload-persistence';
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: 'File', exact: true }).waitFor();
-  const reloadedClip = page.locator(`.timeline-clip[data-clip-id="${motionClipId}"]`).first();
-  await reloadedClip.waitFor({ timeout: 15_000 });
-  await reloadedClip.click();
-  if ((await reloadedClip.getAttribute('aria-pressed')) !== 'true')
-    throw new Error('real-service journey did not reselect the persisted Motion clip after reload');
-  await enhance.click();
-  await page
-    .getByRole('region', { name: 'Enhance tools', exact: true })
-    .getByRole('tab', { name: /^Animate/ })
-    .click();
-  const reloadedMotion = page.locator('.motion-panel');
-  await reloadedMotion.waitFor();
-  await reloadedMotion.getByRole('tab', { name: 'Presets', exact: true }).click();
-  const renderedMotionChannels = ['scaleX', 'scaleY', 'opacity'];
-  for (const channel of renderedMotionChannels)
-    await reloadedMotion.getByRole('img', { name: `${channel} keyframes`, exact: true }).waitFor();
-  const reloadedMotionObjectId = (
-    await reloadedMotion.locator('.motion-object-id').textContent()
-  )?.trim();
-  if (reloadedMotionObjectId !== motionObjectId)
-    throw new Error(
-      `real-service journey reopened a different Motion target: expected ${motionObjectId}, got ${reloadedMotionObjectId ?? '(none)'}`,
+      },
+      {
+        projectId,
+        sessionToken,
+        assetId: reimportAssetId,
+        settleTimeoutMs: DELIVERY_CANCEL_SETTLE_TIMEOUT_MS,
+        pollIntervalMs: DELIVERY_CANCEL_POLL_INTERVAL_MS,
+        pollRequestTimeoutMs: DELIVERY_CANCEL_POLL_REQUEST_TIMEOUT_MS,
+      },
     );
+    if (
+      deliveryRecovery.created !== 201 ||
+      ![200, 201].includes(deliveryRecovery.canceled) ||
+      deliveryRecovery.cancelSettledState !== 'canceled' ||
+      deliveryRecovery.canceledState !== 'canceled' ||
+      ![200, 201].includes(deliveryRecovery.retried) ||
+      deliveryRecovery.retriedState !== 'queued'
+    )
+      throw new Error(`delivery cancel/retry recovery failed: ${JSON.stringify(deliveryRecovery)}`);
+    var deliveryEvidence = {
+      sourceAssets: { video: true, audio: true },
+      mixedSourceExport: {
+        status: 'passed',
+        producer: 'joy-export-mp4',
+        filename: firstDownload.filename,
+        bytes: firstDownload.bytes,
+        sha256: firstDownload.sha256,
+        durableRedownloadMatched: true,
+      },
+      downloaded: { status: 200, bytes: exportedDownload.bytes, sha256: exportedDownload.digest },
+      ffprobe: {
+        status: 'passed',
+        streamTypes,
+        formatName: ffprobe.format?.format_name ?? null,
+        exportFormatName: exportedProbe.format?.format_name ?? null,
+      },
+      reimport: {
+        status: reimported,
+        assetId: reimportAssetId,
+        uploadStatus: reimportUploaded,
+        downloadStatus: reimportDownloaded.status,
+        bytes: reimportDownloaded.bytes,
+        sha256: reimportDownloaded.digest,
+      },
+      cancelRetry: deliveryRecovery,
+      missingSource: { status: missingSourceStatus },
+    };
 
-  const visualStorage = await page.evaluate(
-    ({ objectId, renderedChannels }) => {
-      const raw = localStorage.getItem('joy-media.visual-object-project-log.v1');
-      if (!raw)
+    // Reopen the active project before asserting Motion persistence.  This
+    // proves the persisted document can be reconstructed by a fresh editor
+    // session instead of merely finding data in the current React/localStorage
+    // process.  The clip/object and expected channels are carried through the
+    // check so unrelated animation data cannot satisfy this release gate.
+    captureBrowserTelemetry = true;
+    telemetry.phase = 'reload-persistence';
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: 'File', exact: true }).waitFor();
+    const reloadedClip = page.locator(`.timeline-clip[data-clip-id="${motionClipId}"]`).first();
+    await reloadedClip.waitFor({ timeout: 15_000 });
+    await reloadedClip.click();
+    if ((await reloadedClip.getAttribute('aria-pressed')) !== 'true')
+      throw new Error(
+        'real-service journey did not reselect the persisted Motion clip after reload',
+      );
+    await enhance.click();
+    await page
+      .getByRole('region', { name: 'Enhance tools', exact: true })
+      .getByRole('tab', { name: /^Animate/ })
+      .click();
+    const reloadedMotion = page.locator('.motion-panel');
+    await reloadedMotion.waitFor();
+    await reloadedMotion.getByRole('tab', { name: 'Presets', exact: true }).click();
+    const renderedMotionChannels = ['scaleX', 'scaleY', 'opacity'];
+    for (const channel of renderedMotionChannels)
+      await reloadedMotion
+        .getByRole('img', { name: `${channel} keyframes`, exact: true })
+        .waitFor();
+    const reloadedMotionObjectId = (
+      await reloadedMotion.locator('.motion-object-id').textContent()
+    )?.trim();
+    if (reloadedMotionObjectId !== motionObjectId)
+      throw new Error(
+        `real-service journey reopened a different Motion target: expected ${motionObjectId}, got ${reloadedMotionObjectId ?? '(none)'}`,
+      );
+
+    const visualStorage = await page.evaluate(
+      ({ objectId, renderedChannels }) => {
+        const raw = localStorage.getItem('joy-media.visual-object-project-log.v1');
+        if (!raw)
+          return {
+            objectId,
+            motionChannels: renderedChannels.length,
+            channels: renderedChannels,
+            storedChannels: [],
+            persistedAfterReload: false,
+          };
+        const parsed = JSON.parse(raw);
+        const storedChannels = new Set();
+        const visit = (value) => {
+          if (value === null || typeof value !== 'object') return;
+          if (value.id === objectId && value.animations && typeof value.animations === 'object')
+            Object.keys(value.animations).forEach((channel) => storedChannels.add(channel));
+          if (
+            value.type === 'object.replaceAnimation' &&
+            value.payload?.objectId === objectId &&
+            typeof value.payload.property === 'string'
+          )
+            storedChannels.add(value.payload.property);
+          if (Array.isArray(value)) value.forEach(visit);
+          else Object.values(value).forEach(visit);
+        };
+        visit(parsed);
+        const channels = [...renderedChannels];
+        const persistedAfterReload = channels.every((channel) => storedChannels.has(channel));
         return {
           objectId,
-          motionChannels: renderedChannels.length,
-          channels: renderedChannels,
-          storedChannels: [],
-          persistedAfterReload: false,
+          motionChannels: channels.length,
+          channels,
+          storedChannels: [...storedChannels],
+          persistedAfterReload,
         };
-      const parsed = JSON.parse(raw);
-      const storedChannels = new Set();
-      const visit = (value) => {
-        if (value === null || typeof value !== 'object') return;
-        if (value.id === objectId && value.animations && typeof value.animations === 'object')
-          Object.keys(value.animations).forEach((channel) => storedChannels.add(channel));
-        if (
-          value.type === 'object.replaceAnimation' &&
-          value.payload?.objectId === objectId &&
-          typeof value.payload.property === 'string'
-        )
-          storedChannels.add(value.payload.property);
-        if (Array.isArray(value)) value.forEach(visit);
-        else Object.values(value).forEach(visit);
-      };
-      visit(parsed);
-      const channels = [...renderedChannels];
-      const persistedAfterReload = channels.every((channel) => storedChannels.has(channel));
-      return {
-        objectId,
-        motionChannels: channels.length,
-        channels,
-        storedChannels: [...storedChannels],
-        persistedAfterReload,
-      };
-    },
-    { objectId: reloadedMotionObjectId, renderedChannels: renderedMotionChannels },
-  );
-  const expectedMotionChannels = ['scaleX', 'scaleY', 'opacity'];
-  if (
-    !visualStorage.persistedAfterReload ||
-    visualStorage.motionChannels !== expectedMotionChannels.length ||
-    !expectedMotionChannels.every((channel) => visualStorage.channels.includes(channel)) ||
-    !expectedMotionChannels.every((channel) => visualStorage.storedChannels.includes(channel))
-  )
-    throw new Error(
-      `real-service journey did not observe persisted Motion data for ${motionObjectId}: ${JSON.stringify(visualStorage)}`,
-    );
-  telemetry.phase = 'telemetry-assertion';
-  // Test hook: inject a browser console error + a failed request so the
-  // diagnostics + evidence-retention path can be exercised end-to-end against a
-  // real journey. Never set in the release workflow.
-  if (process.env.JOY_MEDIA_REAL_ACCEPTANCE_INJECT_JOURNEY_ERROR === '1') {
-    telemetry.consoleErrors.push({
-      text: 'INJECTED evidence-retention check: Failed to load resource: net::ERR_FILE_NOT_FOUND',
-      phase: telemetry.phase,
-      location: {
-        url: `${baseUrl}/assets/injected-probe.woff2`,
-        lineNumber: null,
-        columnNumber: null,
       },
-    });
-    telemetry.failedRequests.push({
-      url: `${baseUrl}/assets/injected-probe.woff2`,
-      method: 'GET',
-      resourceType: 'font',
-      failureText: 'net::ERR_FILE_NOT_FOUND',
+      { objectId: reloadedMotionObjectId, renderedChannels: renderedMotionChannels },
+    );
+    const expectedMotionChannels = ['scaleX', 'scaleY', 'opacity'];
+    if (
+      !visualStorage.persistedAfterReload ||
+      visualStorage.motionChannels !== expectedMotionChannels.length ||
+      !expectedMotionChannels.every((channel) => visualStorage.channels.includes(channel)) ||
+      !expectedMotionChannels.every((channel) => visualStorage.storedChannels.includes(channel))
+    )
+      throw new Error(
+        `real-service journey did not observe persisted Motion data for ${motionObjectId}: ${JSON.stringify(visualStorage)}`,
+      );
+    telemetry.phase = 'telemetry-assertion';
+    // Test hook: inject a browser console error + a failed request so the
+    // diagnostics + evidence-retention path can be exercised end-to-end against a
+    // real journey. Never set in the release workflow.
+    if (process.env.JOY_MEDIA_REAL_ACCEPTANCE_INJECT_JOURNEY_ERROR === '1') {
+      telemetry.consoleErrors.push({
+        text: 'INJECTED evidence-retention check: Failed to load resource: net::ERR_FILE_NOT_FOUND',
+        phase: telemetry.phase,
+        location: {
+          url: `${baseUrl}/assets/injected-probe.woff2`,
+          lineNumber: null,
+          columnNumber: null,
+        },
+      });
+      telemetry.failedRequests.push({
+        url: `${baseUrl}/assets/injected-probe.woff2`,
+        method: 'GET',
+        resourceType: 'font',
+        failureText: 'net::ERR_FILE_NOT_FOUND',
+        phase: telemetry.phase,
+      });
+    }
+    const browserTelemetry = assertJourneyTelemetryClean(telemetry, {
       phase: telemetry.phase,
-    });
-  }
-  const browserTelemetry = assertJourneyTelemetryClean(telemetry, {
-    phase: telemetry.phase,
-    candidateSha,
-    runId,
-    attempt: runAttempt,
-    pass,
-    onFailure: (report) => {
+      candidateSha,
+      runId,
+      attempt: runAttempt,
+      pass,
       // Persist the full sanitized diagnostic BEFORE the throw so the reason a
       // pass failed survives teardown + the next job's checkout.
-      mkdirSync(join(root, 'test-output/browser'), { recursive: true });
-      writeFileSync(
-        join(root, 'test-output/browser/journey-failure.json'),
-        `${JSON.stringify(report, null, 2)}\n`,
-        'utf8',
-      );
-    },
-  });
-  const source = await currentSourceProvenance(sourceSha);
-  const evidenceDirectory = join(root, 'test-output/browser/authenticated-editor-1.0');
-  await mkdir(evidenceDirectory, { recursive: true });
-  const verifiedAt = new Date().toISOString();
-  await writeFile(
-    join(evidenceDirectory, 'journey-evidence.json'),
-    `${JSON.stringify(
-      {
-        journeyId: 'authenticated-editor-1.0',
-        status: 'verified',
-        verifiedAt,
-        execution: 'real-services',
-        sourceProvenance: source,
-        browser: {
-          url: baseUrl,
-          title: await page.title(),
-          authenticated: true,
-          console: browserTelemetry.console,
-          pageErrors: browserTelemetry.pageErrors,
-          network: browserTelemetry.network,
-          profiles: profileSummaries,
-        },
-        assertions: {
-          effectsInspector: {
-            status: 'passed',
-            effectsVisible: true,
-            inspectorVisible: true,
-            recoveryErrorObserved: false,
+      onFailure: writeJourneyFailure,
+    });
+    const source = await currentSourceProvenance(sourceSha);
+    const evidenceDirectory = join(root, 'test-output/browser/authenticated-editor-1.0');
+    await mkdir(evidenceDirectory, { recursive: true });
+    const verifiedAt = new Date().toISOString();
+    await writeFile(
+      join(evidenceDirectory, 'journey-evidence.json'),
+      `${JSON.stringify(
+        {
+          journeyId: 'authenticated-editor-1.0',
+          status: 'verified',
+          verifiedAt,
+          execution: 'real-services',
+          sourceProvenance: source,
+          browser: {
+            url: baseUrl,
+            title: await page.title(),
+            authenticated: true,
+            console: browserTelemetry.console,
+            pageErrors: browserTelemetry.pageErrors,
+            network: browserTelemetry.network,
+            profiles: profileSummaries,
           },
-          joyCode3d: {
-            status: 'passed',
-            selected: true,
-            returnedToComposer: true,
-            urlStayed: baseUrl,
-          },
-          worker: {
-            status: 'disposable-real-service',
-            connectedCount: 1,
-            capabilities: ['render.export'],
-          },
-          verifiedDelivery: {
-            assetId: exportAssetId,
-            state: 'completed',
-            progress: 100,
-            receipt: {
-              bytes: exportedDownload.bytes,
-              sha256Prefix: exportedDownload.digest.slice(0, 12),
+          assertions: {
+            effectsInspector: {
+              status: 'passed',
+              effectsVisible: true,
+              inspectorVisible: true,
+              recoveryErrorObserved: false,
             },
-            inspection: 'verified',
-            browserPreview: 'Verified private derivative',
-          },
-          verifiedExport: {
-            channel: 'verified-delivery',
-            producer: 'joy-export-mp4',
-            inspection: {
-              state: 'passed',
-              artifact: 'owner-scoped object-store original',
+            joyCode3d: {
+              status: 'passed',
+              selected: true,
+              returnedToComposer: true,
+              urlStayed: baseUrl,
+            },
+            worker: {
+              status: 'disposable-real-service',
+              connectedCount: 1,
+              capabilities: ['render.export'],
+            },
+            verifiedDelivery: {
+              assetId: exportAssetId,
+              state: 'completed',
+              progress: 100,
+              receipt: {
+                bytes: exportedDownload.bytes,
+                sha256Prefix: exportedDownload.digest.slice(0, 12),
+              },
+              inspection: 'verified',
               browserPreview: 'Verified private derivative',
             },
-          },
-          motionPlacement: [
-            {
-              preset: 'Persisted animation channels',
-              clipId: motionClipId,
-              objectId: reloadedMotionObjectId,
-              channels: [visualStorage.channels?.[0] ?? 'x'],
-              persistedAfterReload: true,
+            verifiedExport: {
+              channel: 'verified-delivery',
+              producer: 'joy-export-mp4',
+              inspection: {
+                state: 'passed',
+                artifact: 'owner-scoped object-store original',
+                browserPreview: 'Verified private derivative',
+              },
             },
-            {
-              preset: 'Persisted animation channels',
-              clipId: motionClipId,
-              objectId: reloadedMotionObjectId,
-              channels: [visualStorage.channels?.[1] ?? 'opacity'],
-              persistedAfterReload: true,
+            motionPlacement: [
+              {
+                preset: 'Persisted animation channels',
+                clipId: motionClipId,
+                objectId: reloadedMotionObjectId,
+                channels: [visualStorage.channels?.[0] ?? 'x'],
+                persistedAfterReload: true,
+              },
+              {
+                preset: 'Persisted animation channels',
+                clipId: motionClipId,
+                objectId: reloadedMotionObjectId,
+                channels: [visualStorage.channels?.[1] ?? 'opacity'],
+                persistedAfterReload: true,
+              },
+            ],
+            timeline: {
+              ownerClipPresentAfterReload: true,
+              screenRecordingClipPresentAfterReload: true,
             },
-          ],
-          timeline: {
-            ownerClipPresentAfterReload: true,
-            screenRecordingClipPresentAfterReload: true,
           },
         },
-      },
-      null,
-      2,
-    )}\n`,
-    'utf8',
-  );
-  await writeFile(
-    join(root, 'test-output/browser/journeys.json'),
-    `${JSON.stringify(
-      [
-        {
-          id: 'authenticated-editor-1.0',
-          status: 'verified',
-          evidencePath: 'test-output/browser/authenticated-editor-1.0/journey-evidence.json',
-        },
-      ],
-      null,
-      2,
-    )}\n`,
-    'utf8',
-  );
-  await activePool.query('SELECT 1');
-  await context.close();
-  return deliveryEvidence;
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+    await writeFile(
+      join(root, 'test-output/browser/journeys.json'),
+      `${JSON.stringify(
+        [
+          {
+            id: 'authenticated-editor-1.0',
+            status: 'verified',
+            evidencePath: 'test-output/browser/authenticated-editor-1.0/journey-evidence.json',
+          },
+        ],
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+    await activePool.query('SELECT 1');
+    await context.close();
+    return deliveryEvidence;
+  };
+  try {
+    return await walkAndCollect();
+  } catch (error) {
+    // ANY throw in the ~660-line walk (a locator timeout, a non-201 upload, the
+    // cancel/retry recovery, the telemetry assertion) persists a phase-stamped
+    // journey-failure.json before propagating — not just the telemetry path.
+    writeJourneyFailure(buildJourneyFailure(telemetry, error));
+    throw error;
+  }
 }
 
 async function downloadSha256(download) {

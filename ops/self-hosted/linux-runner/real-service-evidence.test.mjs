@@ -17,6 +17,12 @@ test('sanitizeUrl: strips credentials, query and hash', () => {
   assert.equal(sanitizeUrl('not a url?x=1'), 'not a url');
 });
 
+test('sanitizeUrl: opaque schemes (data:, blob:, javascript:) never pass their payload through', () => {
+  assert.equal(sanitizeUrl('data:application/javascript;base64,QUtJQUY0S0U='), 'data:<opaque>');
+  assert.equal(sanitizeUrl('blob:http://127.0.0.1:5173/9f3c-1b7e'), 'blob:<opaque>');
+  assert.equal(sanitizeUrl('javascript:alert(document.cookie)'), 'javascript:<opaque>');
+});
+
 test('inspectJourneyTelemetry: clean telemetry -> no failure', () => {
   const t = createJourneyTelemetry();
   t.consoleWarnings.push({ text: 'benign', phase: 'joy-code' });

@@ -22,6 +22,9 @@ export function sanitizeUrl(raw) {
   const value = String(raw ?? '');
   try {
     const url = new URL(value);
+    // Opaque schemes (data:, blob:, javascript:, filesystem:) have an empty
+    // host and an unbounded, uncontrolled pathname — never pass that through.
+    if (url.host === '') return `${url.protocol}<opaque>`;
     // url.host excludes any user:pass@ userinfo; drop the query (may carry
     // tokens / presigned signatures) and the fragment.
     const base = `${url.protocol}//${url.host}${url.pathname}`;
@@ -103,7 +106,8 @@ export function inspectJourneyTelemetry(telemetry, context = {}) {
       `${summary.network.httpErrors} HTTP error(s): ${summary.network.httpErrorSamples.join(' | ')}`,
     );
 
-  if (problems.length === 0) return { summary, failure: null };
+  if (problems.length === 0 && !context.thrown) return { summary, failure: null };
+  if (context.thrown) problems.unshift(`journey threw: ${context.thrown}`);
 
   const netErrCodes = [
     ...telemetry.failedRequests.map((r) => (typeof r === 'string' ? r : r.failureText)),
@@ -113,6 +117,7 @@ export function inspectJourneyTelemetry(telemetry, context = {}) {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     journeyPhaseAtFailure: context.phase ?? telemetry.phase ?? null,
+    thrown: context.thrown ?? null,
     candidateSha: context.candidateSha ?? null,
     runId: context.runId ?? null,
     attempt: context.attempt ?? null,

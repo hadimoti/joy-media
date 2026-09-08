@@ -49,6 +49,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: verify:ci (format, lint, typecheck, full vitest, build, prod audit)
         run: pnpm run verify:ci
+      - name: harness unit tests (cross-platform subset — POSIX cases run on the Linux release gate)
+        run: pnpm run test:harness
 
   worker-package:
     name: Worker package build + self-test (development verification)

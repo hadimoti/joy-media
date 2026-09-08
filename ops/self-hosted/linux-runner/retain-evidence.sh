@@ -51,6 +51,15 @@ case "$persist_root" in
     exit 2 ;;
 esac
 
+# Redaction ENGINE must be present. A redaction pass that cannot run must fail
+# the gate, not silently pass unsanitized evidence through.
+command -v perl >/dev/null || { echo 'retain-evidence: FATAL — perl (redaction engine) not found' >&2; exit 2; }
+command -v sha256sum >/dev/null || { echo 'retain-evidence: FATAL — sha256sum not found' >&2; exit 2; }
+
+# Secret VALUES the harness holds and could (in principle) write. Only vars that
+# are actually in THIS step's environment can be redacted by value; the generic
+# post-redaction guard below covers Bearer / presigned / basic-auth shapes and
+# runtime-generated tokens regardless.
 SECRET_VARS=(
   JOY_MEDIA_CI_S3_ACCESS_KEY
   JOY_MEDIA_CI_S3_SECRET_KEY
@@ -58,7 +67,6 @@ SECRET_VARS=(
   JOY_MEDIA_CI_DATABASE_URL
   JOY_MEDIA_CI_S3_ENDPOINT
   JOY_MEDIA_CI_S3_HEALTHCHECK_URL
-  JOY_MEDIA_RELEASE_OBSERVER_TOKEN
 )
 
 # Explicit allowlist — structured, harness-authored JSON only.
@@ -111,37 +119,57 @@ urlenc() {
   printf '%s' "$o"
 }
 
+# A single perl invocation applies every rule. `perl` failing (missing module,
+# uncompilable regex after an edit, I/O error) exits non-zero -> the whole
+# script fails (no `|| true`). Secret VALUES come from the environment as
+# JM_V_0..N so shell metacharacters in them are irrelevant.
 redact_file() {
-  local f=$1 var value
+  local f=$1 var value i=0
+  local -a env_assign perl_rules
   for var in "${SECRET_VARS[@]}"; do
     value=${!var:-}
     [ -n "$value" ] || continue
-    JM_V="$value" JM_N="$var" perl -0777 -pi -e 's/\Q$ENV{JM_V}\E/<redacted:$ENV{JM_N}>/g' "$f" 2>/dev/null || true
-    JM_V="$(b64 "$value")" JM_N="$var:b64" perl -0777 -pi -e 's/\Q$ENV{JM_V}\E/<redacted:$ENV{JM_N}>/g' "$f" 2>/dev/null || true
-    JM_V="$(urlenc "$value")" JM_N="$var:url" perl -0777 -pi -e 's/\Q$ENV{JM_V}\E/<redacted:$ENV{JM_N}>/gi' "$f" 2>/dev/null || true
+    env_assign+=("JM_V_${i}=${value}" "JM_B_${i}=$(b64 "$value")" "JM_U_${i}=$(urlenc "$value")" "JM_N_${i}=${var}")
+    perl_rules+=(
+      "s/\\Q\$ENV{JM_V_${i}}\\E/<redacted:\$ENV{JM_N_${i}}>/g;"
+      "s/\\Q\$ENV{JM_B_${i}}\\E/<redacted:\$ENV{JM_N_${i}}:b64>/g;"
+      "s/\\Q\$ENV{JM_U_${i}}\\E/<redacted:\$ENV{JM_N_${i}}:url>/gi;"
+    )
+    i=$((i + 1))
   done
-  perl -0777 -pi -e 's/(?i)(authorization"?\s*[:=]\s*"?\s*Bearer\s+)[A-Za-z0-9._~+\/=-]+/$1<redacted>/g' "$f" 2>/dev/null || true
-  perl -0777 -pi -e 's/(?i)(Bearer\s+)[A-Za-z0-9._~+\/=-]{12,}/$1<redacted>/g' "$f" 2>/dev/null || true
-  perl -0777 -pi -e 's/(?i)((?:X-Amz-Signature|X-Amz-Credential|X-Amz-Security-Token|Signature)=)[^&"'"'"'\s]+/$1<redacted>/g' "$f" 2>/dev/null || true
-  perl -0777 -pi -e 's/([a-z][a-z0-9+.\-]*:\/\/)[^\/\s:@"]+:[^\/\s@"]+@/$1<redacted>@/gi' "$f" 2>/dev/null || true
+  # Generic credential shapes — independent of which vars are in scope.
+  perl_rules+=(
+    's/(?i)(authorization"?\s*[:=]\s*"?\s*Bearer\s+)[A-Za-z0-9._~+\/=-]+/$1<redacted:bearer>/g;'
+    's/(?i)(Bearer\s+)[A-Za-z0-9._~+\/=-]{12,}/$1<redacted:bearer>/g;'
+    's/(?i)((?:X-Amz-Signature|X-Amz-Credential|X-Amz-Security-Token|Signature|Expires)=)[^&"'"'"'\s]+/$1<redacted:presign>/g;'
+    's/([a-z][a-z0-9+.\-]*:\/\/)[^\/\s:@"]+:[^\/\s@"]+@/$1<redacted:userinfo>@/gi;'
+  )
+  env "${env_assign[@]}" perl -0777 -pi -e "${perl_rules[*]}" "$f"
 }
 while IFS= read -r -d '' f; do redact_file "$f"; done < <(find "$staging" -type f -print0)
 
-# Leak guard — quarantine any staged file still carrying a literal/base64 secret.
+# Leak guard — quarantine any staged file still carrying a secret in ANY of the
+# tracked forms (literal / base64 / url-encoded) or an obvious credential shape.
 quarantined=0
+quarantine() {
+  local hit=$1 why=$2
+  echo "retain-evidence: LEAK GUARD ($why) in ${hit#"$staging"/} — quarantining" >&2
+  echo "${hit#"$staging"/}: $why after redaction" >> "$staging/REDACTION-FAILURES.txt"
+  rm -f -- "$hit"
+  quarantined=$((quarantined + 1))
+}
 for var in "${SECRET_VARS[@]}"; do
   value=${!var:-}
   [ -n "$value" ] || continue
-  for needle in "$value" "$(b64 "$value")"; do
+  for needle in "$value" "$(b64 "$value")" "$(urlenc "$value")"; do
     [ ${#needle} -ge 8 ] || continue
-    while IFS= read -r -d '' hit; do
-      echo "retain-evidence: LEAK GUARD tripped for $var in ${hit#"$staging"/} — quarantining" >&2
-      echo "${hit#"$staging"/}: still contained $var after redaction" >> "$staging/REDACTION-FAILURES.txt"
-      rm -f -- "$hit"
-      quarantined=$((quarantined + 1))
-    done < <(grep -rlF --null -- "$needle" "$staging" 2>/dev/null)
+    while IFS= read -r -d '' hit; do quarantine "$hit" "still contained $var"; done \
+      < <(grep -rlF --null -- "$needle" "$staging" 2>/dev/null)
   done
 done
+# Residual credential shapes the value-scan cannot see (runtime tokens etc.).
+while IFS= read -r -d '' hit; do quarantine "$hit" "unredacted Bearer/presigned/basic-auth shape"; done \
+  < <(grep -rlZ -E -e 'Bearer [A-Za-z0-9._~+/=-]{16,}' -e 'X-Amz-Signature=[A-Za-z0-9%]{16,}' -e '://[^/[:space:]:@"]+:[^/[:space:]@"]+@' "$staging" 2>/dev/null)
 
 # Manifest (sha256 + JSON), computed over what actually remains after quarantine.
 ( cd "$staging" && find . -type f ! -name MANIFEST.sha256 ! -name MANIFEST.json -print0 \

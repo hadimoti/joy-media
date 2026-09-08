@@ -157,32 +157,37 @@ test('retain-evidence: FAILS when persistent-root is inside _work', posixOnly, a
 });
 
 test(
-  'retain-evidence: quarantines (does not persist) a file that survives redaction',
+  'retain-evidence: leak-guard QUARANTINES a file when redaction silently no-ops',
   posixOnly,
   async () => {
-    // Force a leak-guard hit: a secret with no configured var can't be redacted by
-    // value, but we CAN prove the guard by putting the *literal* configured secret
-    // in a way the regexes miss — embed it inside a longer token with no boundary.
-    const ws = await mkdtemp(join(tmpdir(), 'jm-ev-leak-'));
+    const ws = await mkdtemp(join(tmpdir(), 'jm-ev-q-'));
     await spawnSync('git', ['init', '-q'], { cwd: ws });
     const out = join(ws, 'test-output');
     await mkdir(join(out, 'operations'), { recursive: true });
     await writeFile(join(out, 'operations/teardown.json'), '{"clean":true}');
     await mkdir(join(out, 'ci-janitor'), { recursive: true });
-    // A JSON string containing the raw secret — redaction DOES catch this (literal
-    // match), so to test the guard we use a value NOT in SECRET_VARS mapping by
-    // pointing a var at a value the perl \Q\E will match, then confirming it's gone.
     await writeFile(join(out, 'ci-janitor/inventory.json'), JSON.stringify({ leak: FAKE_SECRET }));
-    const persist = await mkdtemp(join(tmpdir(), 'jm-ev-lp-'));
-    const r = spawnSync('bash', [RETAIN, ws, join(ws, '..', 'stg-l'), persist], {
+
+    // Stub `perl` as a no-op so redaction runs but changes nothing — the literal
+    // secret survives into staging and the leak-guard must catch + quarantine it.
+    const bin = await mkdtemp(join(tmpdir(), 'jm-ev-stub-'));
+    await writeFile(join(bin, 'perl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const persist = await mkdtemp(join(tmpdir(), 'jm-ev-qp-'));
+
+    const r = spawnSync('bash', [RETAIN, ws, join(ws, '..', 'stg-q'), persist], {
       cwd: ws,
       encoding: 'utf8',
-      env: env(),
+      env: { ...env(), PATH: `${bin}:${process.env.PATH}` },
     });
     assert.equal(r.status, 0, r.stderr);
     const dest = join(persist, 'unknown', '444-1-p2');
-    const inv = await readFile(join(dest, 'test-output/ci-janitor/inventory.json'), 'utf8');
-    assert.ok(!inv.includes(FAKE_SECRET), 'literal secret must be redacted, not persisted');
-    assert.ok(inv.includes('<redacted'), 'redaction marker expected');
+    await assert.rejects(
+      () => stat(join(dest, 'test-output/ci-janitor/inventory.json')),
+      'the leaking file must NOT be persisted',
+    );
+    const failures = await readFile(join(dest, 'REDACTION-FAILURES.txt'), 'utf8');
+    assert.match(failures, /ci-janitor\/inventory\.json/);
+    const manifest = JSON.parse(await readFile(join(dest, 'MANIFEST.json'), 'utf8'));
+    assert.ok(manifest.quarantinedCount >= 1, 'quarantinedCount must reflect the drop');
   },
 );

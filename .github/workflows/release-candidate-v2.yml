@@ -89,6 +89,11 @@ jobs:
           # shared artifact, so no job trusts another job's output.
           git clean -xdf -e node_modules -e '.pnpm-store'
           pnpm run verify:ci
+          # The self-hosted-CI harness unit tests (terminateProcessTree /
+          # removeDirWithRetry / classifyRun / retain-evidence redaction). Not
+          # matched by vitest's include glob, so run them explicitly on Linux
+          # where the POSIX-only cases actually execute.
+          pnpm run test:harness
           release_command="${JOY_MEDIA_CI_RELEASE_COMMAND:-}"
           test -x "$release_command" || { echo 'JOY_MEDIA_CI_RELEASE_COMMAND must point to the isolated Linux release harness' >&2; exit 1; }
           "$release_command" "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "${{ matrix.pass }}"
@@ -325,6 +330,19 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm exec playwright install chromium
+      - name: Measure the shipped editor entry-bundle graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The soak's initialEditorJsBytes budget measures the DEV entry module
+          # (/src/main.tsx) in the real-service lane and does not substantiate
+          # production bundle size. Measure the real artifact here: dist/index.html
+          # entry chunk + its modulepreload graph, raw AND gzip. Budgets are
+          # generous (a real regression, not noise) and the numbers are evidence.
+          node tooling/release/measure-entry-bundle.mjs \
+            apps/editor-web/dist \
+            test-output/prod-build/entry-bundle.json
+          test -s test-output/prod-build/entry-bundle.json
       - name: Smoke the production bundle through the app's public UI
         shell: bash
         env:
