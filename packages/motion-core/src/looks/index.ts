@@ -47,7 +47,6 @@ export {
 } from './audio-reactive.js';
 export {
   BUILT_IN_LOOK_PACKS,
-  HELD_LOOK_PACKS,
   editorialClean,
   productPrecision,
   kineticType,

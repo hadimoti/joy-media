@@ -330,14 +330,36 @@ function validateControl(
             );
           }
         }
-        if (!fractionsValid(drive.atFractions)) {
+        if (drive.periodsByOption !== undefined) {
+          // Rate mode: a generated pulse table. Every option needs a positive
+          // integer period count and a distinct peak (`settled`).
+          for (const option of control.options) {
+            const periods = drive.periodsByOption[option];
+            if (!Number.isInteger(periods) || (periods as number) < 1) {
+              push(
+                'LOOK_DEFINITION_CONTROL_PERIODS',
+                `periodsByOption["${option}"] must be an integer >= 1`,
+                `${dp}.periodsByOption`,
+              );
+            }
+          }
+          if (!isFiniteNumber(drive.settled)) {
+            push(
+              'LOOK_DEFINITION_CONTROL_PERIODS',
+              'an enum drive with periodsByOption needs a finite "settled" peak',
+              dp,
+            );
+          }
+          return;
+        }
+        if (!fractionsValid(drive.atFractions ?? [])) {
           push(
             'LOOK_DEFINITION_CONTROL_FRACTIONS',
             'atFractions must be strictly increasing values in [0,1]',
             `${dp}.atFractions`,
           );
         }
-        if (!profileValid(drive.profile, drive.atFractions)) {
+        if (!profileValid(drive.profile, drive.atFractions ?? [])) {
           push(
             'LOOK_DEFINITION_CONTROL_PROFILE',
             'profile must be one weight in [0,1] per atFractions entry',
@@ -389,11 +411,21 @@ function validateControl(
         requireKeyframeBinding(drive.bindingId, `${dp}.bindingId`);
         if (
           !isFiniteNumber(drive.whenTrue) ||
-          (drive.whenFalse !== 'omit' && !isFiniteNumber(drive.whenFalse))
+          (drive.whenFalse !== 'omit' && !isFiniteNumber(drive.whenFalse)) ||
+          (drive.rest !== undefined && !isFiniteNumber(drive.rest))
         ) {
           push(
             'LOOK_DEFINITION_CONTROL_BOOL_VALUE',
             'boolean drive values must be finite or "omit"',
+            dp,
+          );
+        }
+        if (drive.whenTrue === (drive.rest ?? 0)) {
+          // rest === whenTrue makes the on-state a flat hold; the profile is
+          // inert and the toggle does nothing visible.
+          push(
+            'LOOK_DEFINITION_CONTROL_BOOL_VALUE',
+            'boolean drive "whenTrue" must differ from "rest" so the toggle has a visible effect',
             dp,
           );
         }

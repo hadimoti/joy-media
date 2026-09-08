@@ -215,4 +215,69 @@ describe('validateLookDefinition', () => {
     };
     expect(validateLookDefinition(bad).map((d) => d.code)).toContain('LOOK_DEFINITION_CONSTRAINT');
   });
+
+  it('rejects a boolean drive whose whenTrue equals its rest (inert profile)', () => {
+    const def = withControls({
+      id: 'accent',
+      label: 'Accent',
+      kind: 'boolean',
+      default: false,
+      drives: [
+        {
+          bindingId: 'headline-opacity',
+          rest: 1,
+          whenTrue: 1,
+          whenFalse: 'omit',
+          atFractions: [0, 0.5, 1],
+          profile: [0, 1, 0],
+          interpolation: 'hold',
+        },
+      ],
+    });
+    expect(validateLookDefinition(def).map((d) => d.code)).toContain(
+      'LOOK_DEFINITION_CONTROL_BOOL_VALUE',
+    );
+  });
+
+  it('rejects an enum rate drive with a non-integer period count', () => {
+    const def = withControls({
+      id: 'rate',
+      label: 'Rate',
+      kind: 'enum',
+      options: ['calm', 'driving'],
+      default: 'calm',
+      drives: [
+        {
+          bindingId: 'headline-scale-x',
+          byOption: { calm: 1, driving: 1 },
+          settled: 1.12,
+          periodsByOption: { calm: 2.5, driving: 6 },
+          interpolation: 'eased',
+        },
+      ],
+    });
+    expect(validateLookDefinition(def).map((d) => d.code)).toContain(
+      'LOOK_DEFINITION_CONTROL_PERIODS',
+    );
+  });
+
+  it('accepts an enum rate drive with integer periods and a settled peak', () => {
+    const def = withControls({
+      id: 'rate',
+      label: 'Rate',
+      kind: 'enum',
+      options: ['calm', 'driving'],
+      default: 'calm',
+      drives: [
+        {
+          bindingId: 'headline-scale-x',
+          byOption: { calm: 1, driving: 1 },
+          settled: 1.12,
+          periodsByOption: { calm: 2, driving: 6 },
+          interpolation: 'eased',
+        },
+      ],
+    });
+    expect(validateLookDefinition(def)).toEqual([]);
+  });
 });

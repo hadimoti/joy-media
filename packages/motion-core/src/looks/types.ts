@@ -128,8 +128,17 @@ export interface LookEnumControl {
     readonly bindingId: string;
     readonly byOption: Readonly<Record<string, number>>;
     readonly settled?: number;
-    readonly atFractions: readonly number[];
+    readonly atFractions?: readonly number[];
     readonly profile?: readonly number[];
+    /**
+     * A rate control. When set, the selected option's period count generates a
+     * `2·periods + 1` evenly-spaced fraction table with an alternating
+     * `[0, 1, 0, …, 0]` profile — a real repeating pulse rather than a fixed
+     * table. `byOption[opt]` is the rest value, `settled` the peak (both
+     * required in this mode). `atFractions` / `profile` are ignored for options
+     * that name a period count.
+     */
+    readonly periodsByOption?: Readonly<Record<string, number>>;
     readonly interpolation: 'hold' | 'linear' | 'eased';
   }[];
   /** Per-option template ids applied to the driven template bindings. */
@@ -174,13 +183,18 @@ export interface LookFontControl {
 /**
  * A boolean control that toggles a declared, bounded accent. Its `drives` are
  * required and non-empty — a boolean with nothing to drive is a fake toggle.
- * Each drive writes `whenTrue` at its fractions when the operator's value is
- * true and `whenFalse` (or nothing, when `whenFalse` is `'omit'`) when false.
+ *
+ * When the operator's value is true, the drive shapes an excursion from `rest`
+ * (profile weight 0) towards `whenTrue` (profile weight 1) over `atFractions`,
+ * so a `profile` of `[0, 1, 0, 1, 0]` is a real on/off cut pattern rather than
+ * a flat hold. When false it writes `whenFalse` (a flat value) or nothing
+ * (`'omit'`). `rest` defaults to 0.
  */
 export interface LookBooleanDrive {
   readonly bindingId: string;
   readonly whenTrue: number;
   readonly whenFalse: number | 'omit';
+  readonly rest?: number;
   readonly atFractions: readonly number[];
   readonly profile?: readonly number[];
   readonly interpolation: 'hold' | 'linear' | 'eased';

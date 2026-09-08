@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ANIMATABLE_PROPERTIES } from '@joy-media/project-schema';
-import { BUILT_IN_LOOK_PACKS, HELD_LOOK_PACKS } from './index.js';
+import { BUILT_IN_LOOK_PACKS } from './index.js';
 import { validateLookDefinition } from '../validate.js';
 import { compileLook } from '../compile.js';
 import type { LookCompileInput, LookDefinition } from '../types.js';
@@ -24,22 +24,20 @@ function firstApplyInput(definition: LookDefinition): LookCompileInput {
 }
 
 describe('built-in Look packs', () => {
-  it('ships exactly four packs with unique ids', () => {
-    expect(BUILT_IN_LOOK_PACKS).toHaveLength(4);
-    expect(new Set(BUILT_IN_LOOK_PACKS.map((p) => p.id)).size).toBe(4);
+  it('ships exactly five packs with unique ids', () => {
+    expect(BUILT_IN_LOOK_PACKS).toHaveLength(5);
+    expect(new Set(BUILT_IN_LOOK_PACKS.map((p) => p.id)).size).toBe(5);
     expect(BUILT_IN_LOOK_PACKS.map((p) => p.id)).toEqual([
       'editorial-clean',
       'product-precision',
       'kinetic-type',
       'quiet-documentary',
+      'music-pulse',
     ]);
   });
 
-  it('holds music-pulse out of the shipping set for R2.1 and retires persian-editorial', () => {
-    expect(HELD_LOOK_PACKS.map((p) => p.id)).toEqual(['music-pulse']);
-    const ids = BUILT_IN_LOOK_PACKS.map((p) => p.id);
-    expect(ids).not.toContain('music-pulse');
-    expect(ids).not.toContain('persian-editorial');
+  it('retires persian-editorial (English-only app)', () => {
+    expect(BUILT_IN_LOOK_PACKS.map((p) => p.id)).not.toContain('persian-editorial');
   });
 
   for (const pack of BUILT_IN_LOOK_PACKS) {
@@ -101,10 +99,15 @@ describe('built-in Look packs', () => {
         );
       });
 
-      it('every required operation kind is one the compiler can emit', () => {
+      it('declared and emitted operation kinds agree on a full first apply', () => {
         const result = compileLook(firstApplyInput(pack));
+        // Nothing emitted that was not declared …
         for (const kind of result.dependencies.operationKinds) {
           expect(pack.requiredOperationKinds as readonly string[]).toContain(kind);
+        }
+        // … and nothing declared that a full apply never emits.
+        for (const kind of pack.requiredOperationKinds) {
+          expect(result.dependencies.operationKinds as readonly string[]).toContain(kind);
         }
       });
     });

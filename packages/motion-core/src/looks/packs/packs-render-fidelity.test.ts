@@ -6,7 +6,7 @@ import type { AnimationCurveV1, KeyframeV1 } from '@joy-media/project-schema';
 import type { LookCompileInput, LookDefinition } from '../types.js';
 
 /**
- * Render-fidelity checks for the four shipping R2 packs (L3b).
+ * Render-fidelity checks for the five R2 packs (L3b).
  *
  * The golden test pins the compiled *operation list*. This one closes the next
  * gap: once those `motion.setKeyframe` operations are keyframes on a curve, does

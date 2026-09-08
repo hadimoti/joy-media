@@ -127,3 +127,124 @@ describe('compileLook', () => {
     expect(result.operations.some((o) => o.bindingId === 'deck-opacity')).toBe(false);
   });
 });
+
+describe('compileLook — boolean drive rest value (GAP 3a)', () => {
+  const withAccent = (rest: number | undefined) =>
+    fixtureDefinition({
+      bindingTargets: [
+        {
+          bindingId: 'headline-opacity',
+          channel: 'keyframe',
+          ownerSlotId: 'headline',
+          ownerKind: 'visual-object',
+          propertyId: 'opacity',
+          timeDomain: 'composition',
+        },
+      ],
+      controls: [
+        {
+          id: 'accent',
+          label: 'Accent cuts',
+          kind: 'boolean',
+          default: false,
+          drives: [
+            {
+              bindingId: 'headline-opacity',
+              ...(rest === undefined ? {} : { rest }),
+              whenTrue: 1,
+              whenFalse: 'omit',
+              atFractions: [0, 0.25, 0.5, 0.75, 1],
+              profile: [0, 1, 0, 1, 0],
+              interpolation: 'hold',
+            },
+          ],
+        },
+      ],
+      requiredOperationKinds: ['motion.setKeyframe'],
+    });
+
+  it('shapes a real rest -> peak -> rest cut when on (profile is not inert)', () => {
+    const result = compileLook(
+      baseInput({
+        definition: withAccent(0),
+        entityBindings: { headline: 'title-1' },
+        controlValues: { accent: true },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    const values = result.operations
+      .filter((o) => o.kind === 'motion.setKeyframe' && o.bindingId === 'headline-opacity')
+      .map((o) => (o as { value: number }).value);
+    expect(values).toEqual([0, 1, 0, 1, 0]);
+  });
+
+  it('emits nothing for an omit whenFalse drive when off', () => {
+    const result = compileLook(
+      baseInput({
+        definition: withAccent(0),
+        entityBindings: { headline: 'title-1' },
+        controlValues: { accent: false },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.operations.some((o) => o.bindingId === 'headline-opacity')).toBe(false);
+  });
+});
+
+describe('compileLook — enum rate control (GAP 3b)', () => {
+  const withRate = () =>
+    fixtureDefinition({
+      bindingTargets: [
+        {
+          bindingId: 'headline-scale-x',
+          channel: 'keyframe',
+          ownerSlotId: 'headline',
+          ownerKind: 'visual-object',
+          propertyId: 'scaleX',
+          timeDomain: 'composition',
+        },
+      ],
+      controls: [
+        {
+          id: 'rate',
+          label: 'Pulse rate',
+          kind: 'enum',
+          options: ['calm', 'driving'],
+          default: 'calm',
+          drives: [
+            {
+              bindingId: 'headline-scale-x',
+              byOption: { calm: 1, driving: 1 },
+              settled: 1.12,
+              periodsByOption: { calm: 2, driving: 6 },
+              interpolation: 'eased',
+            },
+          ],
+        },
+      ],
+      requiredOperationKinds: ['motion.setKeyframe'],
+    });
+
+  it('generates 2*periods + 1 alternating rest/peak keyframes', () => {
+    for (const [option, periods] of [
+      ['calm', 2],
+      ['driving', 6],
+    ] as const) {
+      const result = compileLook(
+        baseInput({
+          definition: withRate(),
+          entityBindings: { headline: 'title-1' },
+          controlValues: { rate: option },
+        }),
+      );
+      expect(result.ok).toBe(true);
+      const values = result.operations
+        .filter((o) => o.kind === 'motion.setKeyframe' && o.bindingId === 'headline-scale-x')
+        .map((o) => (o as { value: number }).value);
+      expect(values).toHaveLength(2 * periods + 1);
+      expect(values.filter((v) => v === 1.12)).toHaveLength(periods);
+      expect(values[0]).toBe(1);
+      expect(values[values.length - 1]).toBe(1);
+    }
+  });
+});

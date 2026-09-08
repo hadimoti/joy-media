@@ -435,11 +435,27 @@ function compileControl(
         return;
       }
       for (const drive of control.drives) {
+        const periods = drive.periodsByOption?.[option];
+        if (typeof periods === 'number' && Number.isInteger(periods) && periods >= 1) {
+          // A rate control: generate a repeating rest -> peak -> rest pulse.
+          const steps = 2 * periods;
+          const fractions = Array.from({ length: steps + 1 }, (_, i) => i / steps);
+          const profile = fractions.map((_, i) => (i % 2 === 0 ? 0 : 1));
+          emitKeyframes(
+            drive.bindingId,
+            drive.byOption[option]!,
+            drive.settled ?? drive.byOption[option]!,
+            fractions,
+            profile,
+            drive.interpolation,
+          );
+          continue;
+        }
         emitKeyframes(
           drive.bindingId,
           drive.byOption[option]!,
           drive.settled ?? drive.byOption[option]!,
-          drive.atFractions,
+          drive.atFractions ?? [],
           drive.profile,
           drive.interpolation,
         );
@@ -488,12 +504,24 @@ function compileControl(
     case 'boolean': {
       const on = typeof raw === 'boolean' ? raw : control.default;
       for (const drive of control.drives) {
-        const value = on ? drive.whenTrue : drive.whenFalse;
-        if (value === 'omit') continue;
+        if (on) {
+          // Excursion from `rest` (weight 0) to `whenTrue` (weight 1), shaped by
+          // the profile — so `[0, 1, 0, 1, 0]` is a real cut, not a flat hold.
+          emitKeyframes(
+            drive.bindingId,
+            drive.rest ?? 0,
+            drive.whenTrue,
+            drive.atFractions,
+            drive.profile,
+            drive.interpolation,
+          );
+          continue;
+        }
+        if (drive.whenFalse === 'omit') continue;
         emitKeyframes(
           drive.bindingId,
-          value,
-          value,
+          drive.whenFalse,
+          drive.whenFalse,
           drive.atFractions,
           drive.profile,
           drive.interpolation,

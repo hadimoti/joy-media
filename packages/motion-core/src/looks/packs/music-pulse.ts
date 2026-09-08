@@ -1,17 +1,20 @@
 /**
- * Music Pulse (R2 L3) — HELD FOR R2.1, not in `BUILT_IN_LOOK_PACKS`.
+ * Music Pulse (R2 L3).
  *
- * Deliberate identity: audio-linked motion with bounded amplitude and
- * restrained accent cuts. In L3 the pulse rate and depth are operator sliders;
- * L4 replaces the operator value with a measured audio envelope written to the
- * identical binding targets. Silent audio yields a stable output because the
- * L3 default depth is small and L4's silence path is a constant curve.
+ * Deliberate identity: audio-linked motion with a bounded amplitude and
+ * restrained accent cuts.
  *
- * Held out of the R2 shipping set (owner-delegated taste review, 2026-09-08):
- * the "Accent cuts" toggle compiles to a permanent-on track rather than a
- * beat-gated one, and the slider-only fallback has no rate control so it emits
- * only two swells per composition regardless of length. Re-ships in R2.1 once
- * the compiler grows a real rate control and a beat-gated boolean drive.
+ * In L3 the operator picks a pulse *rate* (calm / steady / driving) which the
+ * compiler expands into that many rest -> peak -> rest cycles across the
+ * composition — a real repeating pulse, not two fixed swells. The amplitude is
+ * fixed and bounded (the subject only ever reaches 1.12x). "Accent cuts" is a
+ * genuine on/off cut pattern: the boolean drive shapes an excursion from the
+ * `rest` opacity to full and back on its beat fractions, so turning it off
+ * removes the keyframes entirely.
+ *
+ * L4 replaces the whole slider path with a measured audio envelope
+ * (`LookCompileInput.audioBakes`) written to the identical `subject-scale-*`
+ * bindings; silence / low confidence yields a flat rest line.
  */
 
 import type { LookDefinition } from '../types.js';
@@ -31,7 +34,12 @@ export const musicPulse: LookDefinition = {
   title: 'Music Pulse',
   description: 'Audio-reactive scale and opacity pulse with a bounded amplitude.',
   slots: [
-    { id: 'subject', label: 'Pulsing subject', ownerKind: 'visual-object', required: true },
+    {
+      id: 'subject',
+      label: 'Pulsing headline / logotype',
+      ownerKind: 'visual-object',
+      required: true,
+    },
     { id: 'accent', label: 'Accent mark', ownerKind: 'visual-object', required: false },
     { id: 'captions', label: 'Captions', ownerKind: 'caption-clip', required: false },
   ],
@@ -44,26 +52,27 @@ export const musicPulse: LookDefinition = {
   ],
   controls: [
     {
-      id: 'depth',
-      label: 'Pulse depth',
-      kind: 'scalar',
-      default: 0.3,
+      id: 'rate',
+      label: 'Pulse rate',
+      kind: 'enum',
+      options: ['calm', 'steady', 'driving'],
+      default: 'steady',
       drives: [
-        // Bounded amplitude: even at depth 1 the subject only reaches 1.12x.
+        // Bounded amplitude: rest 1 -> peak 1.12x. The rate picks how many
+        // rest -> peak -> rest cycles the compiler generates across the
+        // composition, so a longer clip keeps the same pulse, not a slower one.
         {
           bindingId: 'subject-scale-x',
-          min: 1,
-          max: 1.12,
-          atFractions: [0, 0.25, 0.5, 0.75, 1],
-          profile: [0, 1, 0, 1, 0],
+          byOption: { calm: 1, steady: 1, driving: 1 },
+          settled: 1.12,
+          periodsByOption: { calm: 2, steady: 4, driving: 6 },
           interpolation: 'eased',
         },
         {
           bindingId: 'subject-scale-y',
-          min: 1,
-          max: 1.12,
-          atFractions: [0, 0.25, 0.5, 0.75, 1],
-          profile: [0, 1, 0, 1, 0],
+          byOption: { calm: 1, steady: 1, driving: 1 },
+          settled: 1.12,
+          periodsByOption: { calm: 2, steady: 4, driving: 6 },
           interpolation: 'eased',
         },
       ],
@@ -76,6 +85,7 @@ export const musicPulse: LookDefinition = {
       drives: [
         {
           bindingId: 'accent-opacity',
+          rest: 0,
           whenTrue: 1,
           whenFalse: 'omit',
           atFractions: [0, 0.1, 0.5, 0.6, 1],
@@ -121,11 +131,18 @@ export const musicPulse: LookDefinition = {
     { safeMarginPx: 96, maxHeadlineChars: 28, minHoldUs: 300_000 },
     { safeMarginPx: 64, maxHeadlineChars: 40, minHoldUs: 300_000 },
   ),
-  provenance: { ...JOY_PROVENANCE, notes: 'L3 slider-driven; L4 wires the real audio envelope.' },
+  provenance: {
+    ...JOY_PROVENANCE,
+    notes:
+      'L3 rate-driven repeating pulse; L4 wires the real audio envelope onto the same bindings.',
+  },
   requiredOperationKinds: ['motion.setKeyframe', 'text.setTemplate', 'caption.setTemplate'],
   requiredFonts: [],
   verification: [
     structuralCheck('amplitude-bounded', 'Subject scale never exceeds the 1.12x pulse ceiling.'),
-    structuralCheck('silent-stable', 'A zero-depth compile writes a flat curve.'),
+    structuralCheck(
+      'pulse-repeats',
+      'The rate control emits at least two full rest -> peak cycles.',
+    ),
   ],
 };

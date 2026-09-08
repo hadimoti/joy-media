@@ -3,12 +3,12 @@ import { authenticate, openPanel, openReferenceWorkspace } from './wp29-r5-harne
 
 /**
  * R2 L2 browser coverage: the Living Looks capability in Joy Code renders the
- * four shipping packs with honest availability, and running a Look compiles a
+ * five shipping packs with honest availability, and running a Look compiles a
  * plan through the same staged-preview + approval path as a direct edit —
  * Approve applies it, one Undo restores it.
  */
 test.describe('JOY Living Looks', () => {
-  test('renders the four shipping packs and runs one through approve + Undo', async ({ page }) => {
+  test('renders the five shipping packs and runs one through approve + Undo', async ({ page }) => {
     await authenticate(page);
     await openReferenceWorkspace(page);
     await openPanel(page, 'Joy Code');
@@ -22,12 +22,11 @@ test.describe('JOY Living Looks', () => {
       'Product Precision',
       'Kinetic Type',
       'Quiet Documentary',
+      'Music Pulse',
     ]) {
       await expect(panel.getByText(title, { exact: true })).toBeVisible();
     }
-    for (const retired of ['Music Pulse', 'Persian Editorial']) {
-      await expect(panel.getByText(retired, { exact: true })).toHaveCount(0);
-    }
+    await expect(panel.getByText('Persian Editorial', { exact: true })).toHaveCount(0);
 
     // Editorial Clean is selected by default (first available). Its editor form
     // is visible and Run is disabled until the required headline slot is bound.
@@ -62,13 +61,13 @@ test.describe('JOY Living Looks', () => {
   }) => {
     // The unavailable rendering path (is-unavailable class + "Needs:" reason) is
     // unit-covered in LivingLooksPanel.test.tsx; here we assert the shipped
-    // editor exposes all four packs as available, so none is silently hidden.
+    // editor exposes all five packs as available, so none is silently hidden.
     await authenticate(page);
     await openReferenceWorkspace(page);
     await openPanel(page, 'Joy Code');
     await page.getByRole('button', { name: 'Looks', exact: true }).click();
     const panel = page.getByRole('region', { name: 'Living Looks' });
-    await expect(panel.locator('.living-look')).toHaveCount(4);
+    await expect(panel.locator('.living-look')).toHaveCount(5);
     // Every pack is selectable (available) in the shipped editor.
     await expect(panel.locator('.living-look.is-unavailable')).toHaveCount(0);
   });

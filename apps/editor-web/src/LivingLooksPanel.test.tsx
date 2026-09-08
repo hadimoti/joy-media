@@ -59,7 +59,7 @@ function q<T extends Element>(selector: string): T {
 }
 
 describe('LivingLooksPanel', () => {
-  it('lists all four shipping packs with honest availability', () => {
+  it('lists all five packs with honest availability', () => {
     const markup = renderToStaticMarkup(
       <LivingLooksPanel
         hidden={false}
