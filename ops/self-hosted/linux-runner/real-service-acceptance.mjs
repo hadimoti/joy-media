@@ -116,6 +116,92 @@ let browser;
 let realWorkerLifecycle;
 let realWorkerPromise;
 
+// Bounded ring buffer of the Vite dev server's stdout/stderr, redacted at
+// capture time. Flushed to test-output/browser/web-dev-server.log on any
+// journey failure so a server-side transform/resolve error is retained.
+const WEB_SERVER_LOG_MAX_LINES = 4000;
+const webServerLog = [];
+const webServerSecrets = [s3AccessKey, s3SecretKey, s3Endpoint, databaseUrl, token].filter(
+  (v) => typeof v === 'string' && v.length >= 6,
+);
+function redactWebServerLine(line) {
+  let out = line;
+  for (const secret of webServerSecrets) out = out.split(secret).join('«redacted»');
+  out = out.replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s@]+@/gi, '$1«redacted»@');
+  out = out.replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/g, '$1«redacted»');
+  return out.length > 2000 ? `${out.slice(0, 2000)}…[truncated]` : out;
+}
+function writeWebServerLog() {
+  if (webServerLog.length === 0) return null;
+  const rel = 'test-output/browser/web-dev-server.log';
+  try {
+    mkdirSync(join(root, 'test-output/browser'), { recursive: true });
+    writeFileSync(
+      join(root, rel),
+      `# Vite dev server (redacted, last ${webServerLog.length} of max ${WEB_SERVER_LOG_MAX_LINES} lines)\n` +
+        `${webServerLog.join('\n')}\n`,
+      'utf8',
+    );
+    return rel;
+  } catch {
+    return null;
+  }
+}
+
+// Declared at module scope (NOT before recordJourney) — recordJourney is called
+// from the top-level try, which runs before any statement placed after it.
+let journeyFailureWritten = false;
+function writeJourneyFailure(report) {
+  if (journeyFailureWritten) return;
+  journeyFailureWritten = true;
+  try {
+    mkdirSync(join(root, 'test-output/browser'), { recursive: true });
+    const webServerLogPath = writeWebServerLog();
+    writeFileSync(
+      join(root, 'test-output/browser/journey-failure.json'),
+      `${JSON.stringify({ ...report, webServerLog: webServerLogPath }, null, 2)}\n`,
+      'utf8',
+    );
+  } catch {
+    /* best-effort; the thrown error still carries the detail */
+  }
+}
+function buildJourneyFailure(telemetry, thrownError) {
+  const thrown =
+    thrownError === undefined
+      ? undefined
+      : thrownError instanceof Error
+        ? thrownError.message
+        : String(thrownError);
+  const { failure } = inspectJourneyTelemetry(telemetry, {
+    phase: telemetry.phase,
+    candidateSha,
+    runId,
+    attempt: runAttempt,
+    pass,
+    thrown,
+  });
+  return (
+    failure ?? {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      journeyPhaseAtFailure: telemetry.phase ?? null,
+      thrown: thrown ?? null,
+      candidateSha,
+      runId,
+      attempt: runAttempt,
+      pass,
+      note: 'journey ended without a diagnosable telemetry problem',
+      consoleErrors: [],
+      failedRequests: [],
+      httpErrors: [],
+      unexpectedPageErrors: [],
+      summary: null,
+      message: `journey failure at phase "${telemetry.phase}"`,
+    }
+  );
+}
+
 class MinioObjectStore {
   constructor(options) {
     this.options = options;
@@ -218,12 +304,25 @@ try {
         JOY_MEDIA_E2E_WEB_PORT: String(webPort),
       },
       detached: true,
-      stdio: ['ignore', 'ignore', 'ignore'],
+      // Capture the dev server's own transform/resolve errors — a browser
+      // net::ERR_FILE_NOT_FOUND on a Vite-served asset almost always has a
+      // corresponding server-side line. Kept as a bounded ring buffer and
+      // flushed (redacted) to test-output on failure. See writeWebServerLog().
+      stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
   webProcess.once('error', (error) => {
     webProcessError = error;
   });
+  const captureWebLine = (buf) => {
+    for (const line of buf.toString('utf8').split(/\r?\n/)) {
+      if (line === '') continue;
+      webServerLog.push(redactWebServerLine(line));
+      if (webServerLog.length > WEB_SERVER_LOG_MAX_LINES) webServerLog.shift();
+    }
+  };
+  webProcess.stdout?.on('data', captureWebLine);
+  webProcess.stderr?.on('data', captureWebLine);
   try {
     await waitForHttp(webUrl, 120_000);
   } catch (error) {
@@ -673,8 +772,16 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
   // assertions (the rest of wp35 needs fixtures and is engine-independent).
   const RESPONSIVE_GREP =
     '(keeps project controls, workspace navigation|login gate loads without fatal|renders backend track titles, mixed elements)';
-  const RESPONSIVE_MIN_TESTS = 3;
-  /** @type {{ project: string; specs: string[]; grep?: string; minTests: number }[]} */
+  // Exact spec titles that MUST pass at every non-primary viewport — a minimum
+  // count cannot prove the intended tests ran (a grep drift could match 3 of
+  // the wrong tests). These are the `spec.title` values in the Playwright JSON.
+  const RESPONSIVE_REQUIRED_TITLES = [
+    'keeps project controls, workspace navigation, and keyboard menus reachable',
+    'login gate loads without fatal browser errors or horizontal overflow',
+    'renders backend track titles, mixed elements, and Quarter preview controls',
+  ];
+  const RESPONSIVE_MIN_TESTS = RESPONSIVE_REQUIRED_TITLES.length;
+  /** @type {{ project: string; specs: string[]; grep?: string; minTests: number; requiredTitles?: string[] }[]} */
   const plan = smoke
     ? [
         {
@@ -697,6 +804,7 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
           specs: RESPONSIVE_SPECS,
           grep: RESPONSIVE_GREP,
           minTests: RESPONSIVE_MIN_TESTS,
+          requiredTitles: RESPONSIVE_REQUIRED_TITLES,
         })),
       ];
   const sourceProvenance = await currentSourceProvenance(candidateSha);
@@ -704,18 +812,21 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
   const matrixEvidencePath = join(root, 'test-output/browser/real-service-profile-matrix.json');
   await mkdir(dirname(matrixEvidencePath), { recursive: true });
   await rm(matrixEvidencePath, { force: true });
-  for (const { project, specs, grep, minTests } of plan) {
-    const report = join('/tmp', `joy-media-real-report-${project}-${runId}-${runAttempt}-${pass}`);
-    const results = join(
-      '/tmp',
-      `joy-media-real-results-${project}-${runId}-${runAttempt}-${pass}`,
-    );
+  for (const { project, specs, grep, minTests, requiredTitles } of plan) {
+    const tag = `${project}-${runId}-${runAttempt}-${pass}`;
+    const report = join('/tmp', `joy-media-real-report-${tag}`);
+    const results = join('/tmp', `joy-media-real-results-${tag}`);
+    // Read the Playwright JSON from a FILE, not stdout — `pnpm exec` prints its
+    // own preamble ("Scope: … / Lockfile passes … / Done in Nms") to stdout
+    // whenever its periodic lockfile check runs, which corrupts a stdout parse.
+    const jsonReport = join('/tmp', `joy-media-real-json-${tag}.json`);
+    await rm(jsonReport, { force: true });
     const startedAt = new Date().toISOString();
-    let result;
     let exitCode = 0;
     let failure;
+    let stderrText = '';
     try {
-      result = await execFile(
+      await execFile(
         'pnpm',
         [
           'exec',
@@ -736,6 +847,7 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
             JOY_MEDIA_E2E_API_URL: apiBaseUrl,
             PLAYWRIGHT_HTML_REPORT: report,
             PLAYWRIGHT_TEST_RESULTS_DIR: results,
+            PLAYWRIGHT_JSON_OUTPUT_NAME: jsonReport,
             PLAYWRIGHT_WORKERS: '1',
           },
         },
@@ -743,15 +855,24 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
     } catch (error) {
       failure = error;
       exitCode = typeof error?.code === 'number' ? error.code : 1;
-      result = {
-        stdout: Buffer.from(typeof error?.stdout === 'string' ? error.stdout : ''),
-        stderr: Buffer.from(typeof error?.stderr === 'string' ? error.stderr : ''),
-      };
+      stderrText = [
+        typeof error?.stdout === 'string' ? error.stdout : '',
+        typeof error?.stderr === 'string' ? error.stderr : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
     }
+    let reportText = '';
+    try {
+      reportText = await readFile(jsonReport, 'utf8');
+    } catch {
+      /* buildProfileSummary flags reportParseError on empty/missing */
+    }
+    await rm(jsonReport, { force: true });
     const finishedAt = new Date().toISOString();
     const summary = buildProfileSummary({
       project,
-      reportText: result.stdout.toString('utf8'),
+      reportText,
       exitCode,
       startedAt,
       finishedAt,
@@ -759,6 +880,11 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
     });
     summary.minTests = minTests;
     summary.metTestFloor = summary.stats.passed >= minTests;
+    summary.requiredTitles = requiredTitles ?? null;
+    summary.missingRequiredTitles = requiredTitles
+      ? requiredTitles.filter((t) => !summary.stats.passedTitles.includes(t))
+      : [];
+    summary.identityVerified = summary.missingRequiredTitles.length === 0;
     summaries.push(summary);
     await writeProfileMatrixEvidence(
       matrixEvidencePath,
@@ -769,16 +895,24 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
     await rm(report, { recursive: true, force: true });
     await rm(results, { recursive: true, force: true });
 
-    // A zero-exit run that ran too few tests (grep typo, spec renamed, reporter
-    // output unparseable) must NOT pass the lane whose whole purpose is
-    // per-viewport coverage.
-    const legFailed = failure !== undefined || summary.status !== 'passed' || !summary.metTestFloor;
+    // A zero-exit run that ran too few tests, or ran the WRONG tests (grep
+    // drift, spec renamed, reporter output unparseable), must NOT pass the lane
+    // whose whole purpose is per-viewport coverage. Identity beats count.
+    const legFailed =
+      failure !== undefined ||
+      summary.status !== 'passed' ||
+      !summary.metTestFloor ||
+      !summary.identityVerified;
     if (legFailed) {
       await writeProfileMatrixEvidence(matrixEvidencePath, sourceProvenance, summaries, 'failed');
       const why =
         failure !== undefined
-          ? `${failure.message}${[failure.stdout, failure.stderr].filter(Boolean).join('\n') ? `: ${[failure.stdout, failure.stderr].filter(Boolean).join('\n').slice(-4000)}` : ''}`
-          : `${project}: status=${summary.status} passed=${summary.stats.passed}/${summary.stats.total} (floor ${minTests}, parseError=${summary.stats.reportParseError})`;
+          ? `${failure.message}${stderrText ? `: ${stderrText.slice(-4000)}` : ''}`
+          : `${project}: status=${summary.status} passed=${summary.stats.passed}/${summary.stats.total} ` +
+            `(floor ${minTests}, parseError=${summary.stats.reportParseError})` +
+            (summary.missingRequiredTitles.length
+              ? ` — MISSING required test identities: ${JSON.stringify(summary.missingRequiredTitles)}`
+              : '');
       const err = failure ?? new Error(`real-service desktop matrix leg failed — ${why}`);
       if (failure) err.message = why;
       err.profileSummaries = summaries;
@@ -809,57 +943,6 @@ async function writeProfileMatrixEvidence(path, sourceProvenance, profiles, stat
       2,
     )}\n`,
     'utf8',
-  );
-}
-
-let journeyFailureWritten = false;
-function writeJourneyFailure(report) {
-  if (journeyFailureWritten) return;
-  journeyFailureWritten = true;
-  try {
-    mkdirSync(join(root, 'test-output/browser'), { recursive: true });
-    writeFileSync(
-      join(root, 'test-output/browser/journey-failure.json'),
-      `${JSON.stringify(report, null, 2)}\n`,
-      'utf8',
-    );
-  } catch {
-    /* best-effort; the thrown error still carries the detail */
-  }
-}
-function buildJourneyFailure(telemetry, thrownError) {
-  const thrown =
-    thrownError === undefined
-      ? undefined
-      : thrownError instanceof Error
-        ? thrownError.message
-        : String(thrownError);
-  const { failure } = inspectJourneyTelemetry(telemetry, {
-    phase: telemetry.phase,
-    candidateSha,
-    runId,
-    attempt: runAttempt,
-    pass,
-    thrown,
-  });
-  return (
-    failure ?? {
-      schemaVersion: 1,
-      generatedAt: new Date().toISOString(),
-      journeyPhaseAtFailure: telemetry.phase ?? null,
-      thrown: thrown ?? null,
-      candidateSha,
-      runId,
-      attempt: runAttempt,
-      pass,
-      note: 'journey ended without a diagnosable telemetry problem',
-      consoleErrors: [],
-      failedRequests: [],
-      httpErrors: [],
-      unexpectedPageErrors: [],
-      summary: null,
-      message: `journey failure at phase "${telemetry.phase}"`,
-    }
   );
 }
 

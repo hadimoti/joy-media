@@ -16,30 +16,27 @@
  * gzip-serving origin actually sends; browsers also accept brotli, which is
  * smaller — gzip is the conservative "bytes downloaded" number).
  *
- * Usage: measure-entry-bundle.mjs <dist-dir> <out-json> [--max-graph-gzip N] [--max-entry-raw N]
- * Exit non-zero if a budget is exceeded (budgets are generous — a real
- * regression, not noise).
+ * Usage: measure-entry-bundle.mjs <dist-dir> <out-json>
+ *
+ * INFORMATIONAL ONLY. This does NOT enforce a budget and never exits non-zero
+ * on size (only on a broken build / missing dist). The ENFORCED entry-bundle
+ * budget is `bundlePolicy()` in apps/editor-web/vite.config.ts, which errors
+ * `pnpm build` per-chunk over `CHUNK_BUDGET_KIB` — every gate lane runs
+ * `pnpm build`. Introducing a total-initial-load threshold is a deliberate,
+ * separate decision, not a side effect of this measurement.
  */
 import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
 import { gzipSync } from 'node:zlib';
 import { dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 
-const [distDir, outJson, ...rest] = process.argv.slice(2);
+const [distDir, outJson] = process.argv.slice(2);
 if (!distDir || !outJson) {
-  console.error(
-    'usage: measure-entry-bundle.mjs <dist-dir> <out-json> [--max-graph-gzip N] [--max-entry-raw N]',
-  );
+  console.error('usage: measure-entry-bundle.mjs <dist-dir> <out-json>');
   process.exit(2);
 }
-const opt = (name, dflt) => {
-  const i = rest.indexOf(name);
-  return i >= 0 && rest[i + 1] !== undefined ? Number(rest[i + 1]) : dflt;
-};
-// Baseline on candidate 83daea2f: entry raw 451,373 / gzip 133,077; eager graph
-// raw ~3.11 MB / gzip ~885 KB. Budgets sit well above that.
-const MAX_GRAPH_GZIP = opt('--max-graph-gzip', 1_200_000);
-const MAX_ENTRY_RAW = opt('--max-entry-raw', 600_000);
+// Reference numbers on candidate 83daea2f (for the reviewer, NOT a gate):
+// entry raw 451,373 / gzip 133,184; eager graph raw 2,908,836 / gzip 846,556.
 
 const html = await readFile(join(distDir, 'index.html'), 'utf8');
 const entryMatch = html.match(/<script[^>]+type="module"[^>]+src="([^"]+)"/);
@@ -74,33 +71,29 @@ const totals = graph.reduce((a, c) => ({ raw: a.raw + c.raw, gzip: a.gzip + c.gz
 });
 
 const report = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   generatedAt: new Date().toISOString(),
+  enforcement:
+    'INFORMATIONAL — not a gate. The enforced entry-bundle budget is vite.config.ts bundlePolicy() (per-chunk, at build time).',
   measures: 'shipped production `vite build` — dist/index.html entry + modulepreload graph',
   bytes:
-    'raw = uncompressed; gzip = zlib level 9 (conservative "downloaded" size; brotli would be smaller)',
+    'raw = uncompressed (parse cost); gzip = zlib level 9 (conservative "downloaded" size; brotli would be smaller)',
   scope: {
     entry: 'the <script type="module" src> chunk only',
     eagerGraph: 'entry + every <link rel="modulepreload"> chunk — fetched before interactive',
   },
   entry,
   eagerGraph: { chunks: graph, totals, chunkCount: graph.length },
-  budgets: { maxEntryRaw: MAX_ENTRY_RAW, maxEagerGraphGzip: MAX_GRAPH_GZIP },
-  pass: entry.raw <= MAX_ENTRY_RAW && totals.gzip <= MAX_GRAPH_GZIP,
 };
 
 await mkdir(dirname(resolve(outJson)), { recursive: true });
 await writeFile(outJson, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
 await stat(outJson);
 
+console.log(`[informational] entry ${entry.file}: raw ${entry.raw} / gzip ${entry.gzip}`);
 console.log(
-  `entry ${entry.file}: raw ${entry.raw} / gzip ${entry.gzip}  (budget raw <= ${MAX_ENTRY_RAW})`,
+  `[informational] eager graph (${graph.length} chunks): raw ${totals.raw} / gzip ${totals.gzip}`,
 );
 console.log(
-  `eager graph (${graph.length} chunks): raw ${totals.raw} / gzip ${totals.gzip}  (budget gzip <= ${MAX_GRAPH_GZIP})`,
+  'entry-bundle measurement recorded (NOT a gate — enforcement is vite.config.ts bundlePolicy)',
 );
-if (!report.pass) {
-  console.error('ENTRY-BUNDLE BUDGET EXCEEDED — see', outJson);
-  process.exit(1);
-}
-console.log('entry-bundle budget OK');

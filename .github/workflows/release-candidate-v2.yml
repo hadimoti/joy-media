@@ -300,16 +300,25 @@ jobs:
           set -euo pipefail
           # Per-viewport: wp32 panel-reachability + per-panel overflow;
           # golden-path login-gate overflow + axe scan; wp35 loaded-timeline
-          # transport/workspace geometry. --grep unions the three; --pass-with-no-tests
-          # is NOT set, so a grep that matches nothing fails the leg.
+          # transport/workspace geometry. --grep unions the three, then
+          # assert-playwright-titles verifies each of the 3 EXACT test titles ran
+          # and passed at that viewport (identity, not just a count).
           grep_re='(keeps project controls, workspace navigation|login gate loads without fatal|renders backend track titles, mixed elements)'
+          req_titles=(
+            'keeps project controls, workspace navigation, and keyboard menus reachable'
+            'login gate loads without fatal browser errors or horizontal overflow'
+            'renders backend track titles, mixed elements, and Quarter preview controls'
+          )
           for profile in desktop-compact desktop-minimum desktop-1280 desktop-1440 desktop-1581 desktop-1920; do
             echo "::group::responsive checkpoints @ $profile"
-            pnpm exec playwright test \
+            rj="$RUNNER_TEMP/pw-responsive-$profile-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
+            PLAYWRIGHT_JSON_OUTPUT_NAME="$rj" pnpm exec playwright test \
               tests/e2e/wp32-responsive-checkpoints.spec.ts \
               tests/e2e/golden-path.spec.ts \
               tests/e2e/wp35-universal-timeline.spec.ts \
-              --grep "$grep_re" --project="$profile" --workers=1
+              --grep "$grep_re" --project="$profile" --workers=1 --reporter=json,line
+            node tooling/release/assert-playwright-titles.mjs "$rj" "${req_titles[@]}"
+            rm -f "$rj"
             echo "::endgroup::"
           done
       - name: Verify acceptance teardown

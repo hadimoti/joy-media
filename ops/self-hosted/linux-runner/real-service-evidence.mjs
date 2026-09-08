@@ -172,6 +172,10 @@ export function summarizePlaywrightProjectReport(reportText) {
     timedOut: 0,
     interrupted: 0,
     reportParseError,
+    /** titles (spec title, most specific) that ran and PASSED */
+    passedTitles: [],
+    /** titles that ran but did NOT pass */
+    notPassedTitles: [],
   };
   visitSuites(report?.suites, stats);
   return stats;
@@ -189,16 +193,28 @@ function visitSpecs(specs, stats) {
   if (!Array.isArray(specs)) return;
   for (const spec of specs) {
     const tests = Array.isArray(spec?.tests) ? spec.tests : [];
+    const title = typeof spec?.title === 'string' ? spec.title : '';
     for (const test of tests) {
       stats.total += 1;
       const result =
         Array.isArray(test?.results) && test.results.length > 0 ? test.results.at(-1) : null;
       const status = result?.status ?? test?.outcome ?? 'unknown';
-      if (status === 'passed' || status === 'expected') stats.passed += 1;
-      else if (status === 'skipped') stats.skipped += 1;
-      else if (status === 'timedOut') stats.timedOut += 1;
-      else if (status === 'interrupted') stats.interrupted += 1;
-      else stats.failed += 1;
+      if (status === 'passed' || status === 'expected') {
+        stats.passed += 1;
+        if (title) stats.passedTitles.push(title);
+      } else if (status === 'skipped') {
+        stats.skipped += 1;
+        if (title) stats.notPassedTitles.push(title);
+      } else if (status === 'timedOut') {
+        stats.timedOut += 1;
+        if (title) stats.notPassedTitles.push(title);
+      } else if (status === 'interrupted') {
+        stats.interrupted += 1;
+        if (title) stats.notPassedTitles.push(title);
+      } else {
+        stats.failed += 1;
+        if (title) stats.notPassedTitles.push(title);
+      }
     }
   }
 }
