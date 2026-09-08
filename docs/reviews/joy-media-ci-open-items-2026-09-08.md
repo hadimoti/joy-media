@@ -231,19 +231,47 @@ failure signal survives the snapshot and the secret does not. The harness also
 gained `JOY_MEDIA_REAL_ACCEPTANCE_FORCE_FAIL=1` (test-only) to force a non-zero
 exit _after_ evidence is written, for the real dev-server integration check.
 
+## 9. Benchmark 4 result + two open blockers (2026-09-08)
+
+`gh run 34264913791` on frozen `83daea2f`, verified-quiet host, 1h51m56s. **The
+teardown fix and the reduced-repetition contract are confirmed by pass 1 (a full
+clean instance) and by both passes' `teardown.json` (`clean: true`, bounded
+`webTermination`, zero residue).** But the run **FAILED** and surfaced two
+blockers that are **not** in the teardown / repetition / coverage changes:
+
+1. **Pass 2 journey flake.** `assertJourneyTelemetryClean` failed on a
+   nondeterministic `Failed to load resource: net::ERR_FILE_NOT_FOUND` browser
+   console error in `recordJourney` (pass 1 ran the identical journey 60 s later,
+   0 errors). The assertion throws on `consoleErrors` before it would show the
+   URL-bearing `failedRequests`, so root cause is undetermined. **Needed:** make
+   `assertJourneyTelemetryClean` surface `failedRequests` alongside/ before
+   `consoleErrors`, then triage (app bug vs load-order race). Same class as R1's
+   `b634d3cd` / `f7615432`.
+2. **`actions/upload-artifact` failed on BOTH passes** —
+   `Failed to CreateArtifact: Artifact storage quota has been hit` (account-level;
+   same as the earlier hosted `r2-candidate` runs). `continue-on-error: true`
+   masked it as a green step. Durable evidence retention is therefore
+   **non-functional**: pass 2's structured evidence is permanently lost.
+   **Needed:** (a) a runner-local persistent fallback path outside `_work` (an
+   artifact upload alone is not enough here), (b) stop `continue-on-error` from
+   hiding the failure — surface it loudly / annotate, (c) the account
+   artifact-storage quota freed or raised.
+
+Neither is a threshold or a rerun question. Recorded for the reviewer + owner.
+
 ## Evidence still required before independent approval
 
-- Benchmark on the **corrected revision** (items 1–4 + §7 + §8) — measured wall
-  clock, pass/fail/skip per lane, the `teardown.json` records showing
-  `clean: true` for both passes (with the new `webTermination` /
-  `tempRootRemoval` sub-records), the `ci-janitor/inventory.json` classification
-  (with the `not-found` quarantine), the isolation sampler timeline, the
-  `prod-build-smoke` result, and a retrieved `real-service-evidence-*` artifact.
-- `pnpm test:harness` green (18 cases) + the real dev-server / process-launch
-  teardown integration run (normal shutdown / delayed exit / surviving child /
-  unrelated process preserved) on a quiet host.
-- Final benchmark on a **quiet host** — no competing real-service workload in any
-  container sharing that host — with contention measurements recorded.
+- A benchmark of the revision that resolves §9.1–§9.2 — both `real-service`
+  passes **and** cleanup green, with the `real-service-evidence-*` artifacts (or
+  the runner-local fallback) actually retrievable for both passes.
+- ✅ `pnpm test:harness` green (18 cases) + the real dev-server / process-launch
+  teardown integration run — **done** (`joy-media-ci-linux` + a real
+  smoke+`FORCE_FAIL` harness run: `teardown.json clean: true`,
+  `webTermination.state "terminated"`, no residue).
+- ✅ Quiet-host benchmark with contention measurements — **done** (benchmark 4;
+  no contention observed).
 - The revised repetition contract + coverage matrix reflecting the new lanes.
-- Independent review. A green benchmark alone approves nothing and authorizes no
-  deployment.
+- Independent review covering **both** the implementation and the
+  reduced-repetition / coverage contract. A green benchmark alone approves
+  nothing and authorizes no deployment; the **Astra `APPROVE_FOR_DEPLOY`** on the
+  final R2 candidate remains the deployment gate.

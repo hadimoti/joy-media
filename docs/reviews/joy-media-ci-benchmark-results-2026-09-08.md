@@ -127,4 +127,72 @@ contention/environment cause). Observer thresholds left unchanged.
 - `pnpm test:harness` — 18 `node:test` cases (teardown mechanics, classify,
   evidence retention), all green in `joy-media-ci-linux`.
 
-_Benchmark of the corrected revision to be run on a quiet host; results appended._
+## Benchmark 4 — corrected revision (frozen SHA `83daea2f`)
+
+`gh run 34264913791`, dispatched 2026-09-08 18:45:16Z on a **verified-quiet host**
+(resource sampler every 180s: only one CI container ever active, load ≤ 6.9 on an
+8+ core / 30 GiB box, `joy-media-ci-linux` idle throughout both real-service
+passes — **no contention**). **End-to-end 18:45:16Z → 20:37:12Z = 1h 51m 56s.**
+
+| Lane                               | Result       | Wall                                                |
+| ---------------------------------- | ------------ | --------------------------------------------------- |
+| validate-candidate                 | ✅           | 4m                                                  |
+| linux-real-services ×2             | ✅ ✅        | 3m + 1m                                             |
+| windows-worker-clean (2 passes)    | ✅           | 9m                                                  |
+| prod-build-smoke                   | ✅           | 18m                                                 |
+| acceptance-primary ×2              | ✅ ✅        | 11m + 8m                                            |
+| acceptance-responsive ×2           | ✅ ✅        | 2m + 7m                                             |
+| **real-service-acceptance pass 1** | ✅           | **41m** — full soak + journey + gate                |
+| **real-service-acceptance pass 2** | ❌           | 9m — aborted in `recordJourney` **before** the soak |
+| gate-summary                       | ❌ (correct) | 0m                                                  |
+
+**Pass 1 — complete and clean.** vitest `4254 collected / 0 failed`; Playwright
+`105 passed / 1 skipped / 0 failed` (desktop-primary 99/1 + 6 responsive 1/1);
+delivery journey + N/N-1 restore + `release:gate` all passed. **Soak PASSED with
+wide margin:** durationMs 1,800,398 (≥1,800,000); heapGrowthPercent **2.52**
+(≤20); uncaughtExceptions 0; navigationFailures 0; longTaskPercent **0** (<5);
+initialEditorJsBytes **7,506** (≤500,000); maxMountedPreviews 11 (≤12);
+maxPlayingPreviews 6 (≤6). `teardown.json` → **`clean: true`**,
+`webTermination.state "terminated"` (not escalated, 200 ms), `tempRootRemoval` +
+`verifyRootRemoval` removed on attempt 1, zero residue.
+
+**Pass 2 — FAILED, `assertJourneyTelemetryClean`:**
+`browser console errors observed: Failed to load resource: net::ERR_FILE_NOT_FOUND`
+during the editor walk in `recordJourney` (Creative Brief / 3D Scene / Motion),
+~7 min in, before the soak. `teardown.json` still `clean: true`. **Nondeterministic**
+— pass 1 ran the identical journey on the identical candidate 60 s later with 0
+console errors. Root cause **UNDETERMINED**: the failing URL was captured in
+`telemetry.failedRequests` but `assertJourneyTelemetryClean` throws on
+`console.errors` first (text has no URL), so it was never surfaced. Same class as
+the pre-existing real-service journey issues fixed during R1 (`b634d3cd`,
+`f7615432`).
+
+### What benchmark 4 establishes
+
+- **Teardown ordering fix — confirmed on BOTH passes** (`clean: true`, bounded
+  `terminateProcessTree`, no `tempRoot`/verify residue). The deterministic bench-3
+  bug is gone.
+- 404-quarantine janitor: ran inventory-only, `0 namespaces`, no error.
+- Redaction: `retain-evidence.sh` staged the allowlist both passes, `0 quarantined`.
+- **Reduced-repetition / coverage contract: exercised end-to-end** — one workflow,
+  two isolated passes; browser matrix (primary-full + 6 responsive); soak
+  one-per-pass. Pass 1 is a full clean instance of the new contract.
+
+### Two concrete failures — neither in the CI-contract / teardown code
+
+1. **Pass 2 journey flake (`ERR_FILE_NOT_FOUND`).** The gate correctly failed on a
+   real browser console error. Nondeterministic; root cause needs the failing URL
+   surfaced (check `failedRequests` before/with `consoleErrors` in
+   `assertJourneyTelemetryClean`), then app-bug-vs-load-race triage.
+2. **`actions/upload-artifact` failed on BOTH passes** —
+   `Failed to CreateArtifact: Artifact storage quota has been hit.` The account's
+   GitHub Actions artifact storage is exhausted (same billing/quota issue that hit
+   the earlier hosted `r2-candidate` runs). `continue-on-error: true` reported the
+   step as `success`. **Durable evidence retention is non-functional** until the
+   quota is freed/raised. Pass 1's full `test-output/` was manually rescued off the
+   idle runner; **pass 2's structured evidence is permanently lost** (its checkout
+   `git clean`'d it, RUNNER_TEMP purged, artifact never uploaded — only the step
+   log survives). This is exactly the "required evidence must not silently
+   disappear" hazard.
+
+_Both are for independent review + the owner. No rerun, no threshold change._

@@ -7,14 +7,14 @@ decision is the reviewer's, then the owner's.
 
 ## Revisions under review
 
-| Artifact                                                                   | Revision                 | Note                                                                                                                                                                                        |
-| -------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Frozen benchmark-4 revision** (workflow + harness + app + this evidence) | **`ca075c7c`**           | `codex/joy-live-director-ci-opt` tip. Contains R2 GAP 3 (`3eaa8cd7`, verified ancestor) + all CI-opt work. Every benchmark-4 job checks out this exact SHA.                                 |
-| — app content within it                                                    | `3eaa8cd7` (R2 GAP 3)    | the app code the gate runs against (ancestor of `ca075c7c`)                                                                                                                                 |
-| Benchmark 1 (speed)                                                        | ran on `cdbb771f`        | pre-hardening teardown → performance evidence only                                                                                                                                          |
-| Benchmark 2 (failed)                                                       | ran on `498c45fe`        | caught the janitor `pg`-resolution bug                                                                                                                                                      |
-| Benchmark 3 (hardened evidence)                                            | ran on `8c5a4445`        | teardown enforcement + janitor + prod-build-smoke; **FAILED** — common deterministic `tempRoot` residue on both passes + a pass-1-only undetermined soak failure (see §6)                   |
-| Benchmark 4 (corrected revision)                                           | dispatched on `ca075c7c` | §6 fix + bounded shutdown + 404 quarantine + hardened evidence retention; `pnpm test:harness` 18/18; real dev-server teardown integration `clean:true`. **Numbers appended on completion.** |
+| Artifact                                                                   | Revision                                 | Note                                                                                                                                                                                                                                                                                 |
+| -------------------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Frozen benchmark-4 revision** (workflow + harness + app + this evidence) | **`ca075c7c`**                           | `codex/joy-live-director-ci-opt` tip. Contains R2 GAP 3 (`3eaa8cd7`, verified ancestor) + all CI-opt work. Every benchmark-4 job checks out this exact SHA.                                                                                                                          |
+| — app content within it                                                    | `3eaa8cd7` (R2 GAP 3)                    | the app code the gate runs against (ancestor of `ca075c7c`)                                                                                                                                                                                                                          |
+| Benchmark 1 (speed)                                                        | ran on `cdbb771f`                        | pre-hardening teardown → performance evidence only                                                                                                                                                                                                                                   |
+| Benchmark 2 (failed)                                                       | ran on `498c45fe`                        | caught the janitor `pg`-resolution bug                                                                                                                                                                                                                                               |
+| Benchmark 3 (hardened evidence)                                            | ran on `8c5a4445`                        | teardown enforcement + janitor + prod-build-smoke; **FAILED** — common deterministic `tempRoot` residue on both passes + a pass-1-only undetermined soak failure (see §6)                                                                                                            |
+| Benchmark 4 (corrected revision)                                           | ran on `83daea2f` (`gh run 34264913791`) | Teardown fix **confirmed** (both passes `clean:true`). **FAILED** — pass 1 fully clean; pass 2 aborted in `recordJourney` on a nondeterministic `ERR_FILE_NOT_FOUND` console error (undetermined) + `upload-artifact` hit the account artifact-storage quota on both passes. See §5. |
 
 `main` carries only the **dispatch-only** `release-candidate-v2.yml` (workflow
 file only; `release-candidate.yml` and all product code untouched;
@@ -204,14 +204,43 @@ b3), vs the current gate's ~4h20–4h32 per run. Contract
 8.7–9h ≈ 5.4× faster.** The 30-min effects soak is retained one-per-pass (2 per
 gate, was 4); any 2→1 change is a **separate** proposal, not made here.
 
-**Benchmark 3 did not pass** — `real-service-acceptance` failed on both passes
-for the deterministic `tempRoot` teardown-ordering bug (§6 / open-items §7), plus
-an undetermined pass-1 soak failure (pass 2's soak passed on the same candidate).
-The **corrected revision** fixes the ordering bug, adds bounded process-group
-shutdown, the 404 quarantine, and evidence retention, and is proven by
-`pnpm test:harness` (18 `node:test` cases). **Its benchmark, on a quiet host with
-contention measurements recorded, is the number that gates this contract** — a
-green run there approves nothing on its own.
+**Benchmark 3 did not pass** — the deterministic `tempRoot` teardown-ordering bug
+on both passes (§6 / open-items §7) + a pass-1-only undetermined soak failure.
+
+**Benchmark 4** (corrected revision, frozen `83daea2f`, `gh run 34264913791`,
+verified-quiet host, **1h51m56s** end-to-end) — see
+`joy-media-ci-benchmark-results-2026-09-08.md`:
+
+- **Teardown fix confirmed on BOTH passes** (`clean: true`; bounded
+  `terminateProcessTree` → `state "terminated"`, not escalated; no `tempRoot` /
+  verify residue). Bench-3's deterministic bug is gone.
+- **Pass 1 fully clean** — vitest 4254/0-failed; Playwright 105 passed / 1 skipped
+  / 0 failed; delivery + N/N-1 restore + `release:gate` passed; **soak passed with
+  wide margin** (heapGrowth 2.52% ≤20, longTask 0 <5, initialEditorJs 7,506
+  ≤500k, all else at/under budget). This is one complete clean instance of the new
+  1-run/2-pass contract with the restructured browser matrix.
+- **Pass 2 FAILED** — `assertJourneyTelemetryClean` on a nondeterministic
+  `Failed to load resource: net::ERR_FILE_NOT_FOUND` browser console error during
+  `recordJourney`, ~7 min in, before the soak. Pass 1 ran the same journey 60 s
+  later with 0 console errors. Root cause **undetermined** (the failing URL was
+  captured in `failedRequests` but the assertion throws on `consoleErrors` first).
+  Same class as R1's pre-existing real-service journey fixes (`b634d3cd`,
+  `f7615432`). Not caused by, and not touching, the teardown / repetition /
+  coverage changes.
+- **`actions/upload-artifact` failed on BOTH passes** — `Artifact storage quota
+has been hit` (account-level; same issue as the earlier hosted `r2-candidate`
+  runs). `continue-on-error: true` masked it as a green step. **Durable evidence
+  retention is non-functional** until the quota is freed. Pass 1's `test-output/`
+  was manually rescued off the idle runner; **pass 2's structured evidence is
+  permanently lost**. The retain/redact/leak-guard mechanism itself worked
+  (`0 quarantined`).
+- **Resource samples: no contention** — one CI container active at a time, load
+  ≤ 6.9 on an 8-core / 30 GiB box, `joy-media-ci-linux` idle through both passes.
+
+**Benchmark 4 is a FAIL under the "both passes + cleanup must pass" rule.** No
+rerun, no threshold change. The two failures (journey flake; artifact quota +
+silent masking) are for this review and the owner to weigh — a green gate that
+loses required evidence is not an acceptable gate.
 
 ### Coverage / repetition changes for the reviewer
 
