@@ -280,12 +280,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
           test "${JOY_MEDIA_CI_ACCEPTANCE_PROFILE:-}" = 'fixture-only' || { echo 'JOY_MEDIA_CI_ACCEPTANCE_PROFILE=fixture-only is required' >&2; exit 1; }
+          node --version
           corepack enable pnpm
+          pnpm --version
+          test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}" || { echo 'OpenCLI profiles are forbidden on acceptance runners' >&2; exit 1; }
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm exec playwright install chromium
-      - name: Layout / overflow / panel-reachability at every non-primary viewport
+      - name: Layout / overflow / a11y / panel-reachability at every non-primary viewport
         shell: bash
         env:
           CI: true
@@ -294,9 +298,18 @@ jobs:
           PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-pw-results-responsive-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
+          # Per-viewport: wp32 panel-reachability + per-panel overflow;
+          # golden-path login-gate overflow + axe scan; wp35 loaded-timeline
+          # transport/workspace geometry. --grep unions the three; --pass-with-no-tests
+          # is NOT set, so a grep that matches nothing fails the leg.
+          grep_re='(keeps project controls, workspace navigation|login gate loads without fatal|renders backend track titles, mixed elements)'
           for profile in desktop-compact desktop-minimum desktop-1280 desktop-1440 desktop-1581 desktop-1920; do
             echo "::group::responsive checkpoints @ $profile"
-            pnpm exec playwright test tests/e2e/wp32-responsive-checkpoints.spec.ts --project="$profile" --workers=1
+            pnpm exec playwright test \
+              tests/e2e/wp32-responsive-checkpoints.spec.ts \
+              tests/e2e/golden-path.spec.ts \
+              tests/e2e/wp35-universal-timeline.spec.ts \
+              --grep "$grep_re" --project="$profile" --workers=1
             echo "::endgroup::"
           done
       - name: Verify acceptance teardown
@@ -312,7 +325,12 @@ jobs:
               "$RUNNER_TEMP"/*) ;;
               *) echo "refusing to clean output outside RUNNER_TEMP: $output_path" >&2; exit 1 ;;
             esac
-            rm -rf -- "$output_path" 2>/dev/null || true
+            removed=0
+            for attempt in $(seq 1 15); do
+              if rm -rf -- "$output_path" 2>/dev/null && test ! -e "$output_path"; then removed=1; break; fi
+              sleep 1
+            done
+            test "$removed" -eq 1 || { echo "unable to remove run-owned output after bounded retries: $output_path" >&2; exit 1; }
           done
           test -z "$(git status --porcelain)"
 
@@ -348,31 +366,35 @@ jobs:
         env:
           CI: true
           PLAYWRIGHT_WORKERS: 1
-          JOY_MEDIA_E2E_API_PORT: '4991'
-          JOY_MEDIA_E2E_API_URL: http://127.0.0.1:4991
-          PLAYWRIGHT_BASE_URL: http://127.0.0.1:4990
+          PW_PID_DIR: ${{ runner.temp }}/joy-media-prodsmoke-pids-${{ github.run_id }}-${{ github.run_attempt }}
           PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-pw-report-prodsmoke-${{ github.run_id }}-${{ github.run_attempt }}
           PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-pw-results-prodsmoke-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          # Serve the isolated e2e API and the *production* editor bundle
-          # (vite preview of dist/, with the mirrored /api proxy), then run the
-          # UI-journey specs that exercise import, decode/seek (preview each
-          # asset) and the encode/export Worker path against the shipped
-          # artifact. The dev-server-only white-box decoder specs
-          # (agent-observation-decode, final-encoded-export-decoder,
-          # agent-director-skills — they import('/src/*.ts') at runtime) are
-          # intentionally excluded; they still run in full against the dev
-          # server in acceptance-primary / real-service-acceptance.
-          pnpm --filter @joy-media/api exec tsx ../../tooling/e2e-server.ts &
-          api_pid=$!
-          trap 'kill $api_pid ${preview_pid:-} 2>/dev/null || true' EXIT
-          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:4991/health >/dev/null 2>&1 && break; sleep 1; done
-          curl -fsS http://127.0.0.1:4991/health >/dev/null
-          pnpm --filter @joy-media/editor-web exec vite preview --host 127.0.0.1 --port 4990 --strictPort &
-          preview_pid=$!
-          for i in $(seq 1 45); do curl -fsS http://127.0.0.1:4990/ >/dev/null 2>&1 && break; sleep 1; done
-          curl -fsS http://127.0.0.1:4990/ >/dev/null
+          mkdir -p "$PW_PID_DIR"
+          # Run-scoped ports (not fixed 4990/4991 — this lane shares the
+          # joy-media-ci label with linux-real-services, and two gate runs, or a
+          # v1 run, must not collide). --strictPort so a genuine clash fails loud.
+          api_port=$(( 21000 + (GITHUB_RUN_ID % 3000) ))
+          web_port=$(( api_port + 5000 ))
+          export JOY_MEDIA_E2E_API_PORT="$api_port"
+          export JOY_MEDIA_E2E_API_URL="http://127.0.0.1:${api_port}"
+          export PLAYWRIGHT_BASE_URL="http://127.0.0.1:${web_port}"
+          # Each server is its own process group (setsid) so teardown can signal
+          # the whole tree by pgid — no `pkill -f` sweeping other jobs.
+          setsid pnpm --filter @joy-media/api exec tsx ../../tooling/e2e-server.ts >"$PW_PID_DIR/api.log" 2>&1 &
+          echo $! > "$PW_PID_DIR/api.pid"
+          setsid pnpm --filter @joy-media/editor-web exec vite preview --host 127.0.0.1 --port "$web_port" --strictPort >"$PW_PID_DIR/web.log" 2>&1 &
+          echo $! > "$PW_PID_DIR/web.pid"
+          for i in $(seq 1 60); do curl -fsS "http://127.0.0.1:${api_port}/health" >/dev/null 2>&1 && break; sleep 1; done
+          curl -fsS "http://127.0.0.1:${api_port}/health" >/dev/null
+          for i in $(seq 1 45); do curl -fsS "http://127.0.0.1:${web_port}/" >/dev/null 2>&1 && break; sleep 1; done
+          curl -fsS "http://127.0.0.1:${web_port}/" >/dev/null
+          # Serve the *production* editor bundle (vite preview of dist/, mirrored
+          # /api proxy) + the isolated e2e API; run the UI-journey specs that
+          # exercise import, decode/seek and the encode/export Worker path
+          # against the shipped artifact. The dev-server-only white-box decoder
+          # specs stay in acceptance-primary / real-service-acceptance.
           pnpm exec playwright test \
             tests/e2e/authenticated-smoke.spec.ts \
             tests/e2e/wp32-real-project-journey.spec.ts \
@@ -383,15 +405,24 @@ jobs:
         if: always()
         shell: bash
         env:
+          PW_PID_DIR: ${{ runner.temp }}/joy-media-prodsmoke-pids-${{ github.run_id }}-${{ github.run_attempt }}
           PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-pw-report-prodsmoke-${{ github.run_id }}-${{ github.run_attempt }}
           PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-pw-results-prodsmoke-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          for output_path in "$PLAYWRIGHT_HTML_REPORT" "$PLAYWRIGHT_TEST_RESULTS_DIR"; do
+          alive() { kill -0 "$1" 2>/dev/null; }
+          for name in api web; do
+            pid_file="$PW_PID_DIR/$name.pid"
+            [ -s "$pid_file" ] || continue
+            pid=$(cat "$pid_file")
+            kill -TERM -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+            for i in $(seq 1 15); do alive "$pid" || break; sleep 1; done
+            if alive "$pid"; then kill -KILL -"$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true; sleep 2; fi
+            alive "$pid" && { echo "prod-smoke $name server $pid survived teardown" >&2; exit 1; } || true
+          done
+          for output_path in "$PLAYWRIGHT_HTML_REPORT" "$PLAYWRIGHT_TEST_RESULTS_DIR" "$PW_PID_DIR"; do
             case "$output_path" in "$RUNNER_TEMP"/*) rm -rf -- "$output_path" 2>/dev/null || true ;; esac
           done
-          pkill -f 'vite preview' 2>/dev/null || true
-          pkill -f 'tooling/e2e-server' 2>/dev/null || true
           test -z "$(git status --porcelain)"
 
   real-service-acceptance:

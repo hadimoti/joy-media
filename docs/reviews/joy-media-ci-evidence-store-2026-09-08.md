@@ -10,14 +10,14 @@ exactly where it goes and proves it persists.
 
 `docker inspect joy-media-ci-acceptance`:
 
-| | |
-| --- | --- |
-| image | `joy-media-ci-linux:2.337.0` |
-| entrypoint | `/usr/local/bin/joy-media-linux-runner` (`config.sh --replace` on first run, then `run.sh`) |
-| mount | **named volume** `joy-media-ci-acceptance-runner` → `/opt/actions-runner` |
-| runner user | `joyci` — uid/gid **1001** |
-| `/opt/actions-runner` perms | `755 joyci:joyci` |
-| backing fs | `/dev/sdd` — **1006.9 GB total, 31.4 GB used, 924.2 GB free (3 %)** |
+|                             |                                                                                             |
+| --------------------------- | ------------------------------------------------------------------------------------------- |
+| image                       | `joy-media-ci-linux:2.337.0`                                                                |
+| entrypoint                  | `/usr/local/bin/joy-media-linux-runner` (`config.sh --replace` on first run, then `run.sh`) |
+| mount                       | **named volume** `joy-media-ci-acceptance-runner` → `/opt/actions-runner`                   |
+| runner user                 | `joyci` — uid/gid **1001**                                                                  |
+| `/opt/actions-runner` perms | `755 joyci:joyci`                                                                           |
+| backing fs                  | `/dev/sdd` — **1006.9 GB total, 31.4 GB used, 924.2 GB free (3 %)**                         |
 
 `joy-media-ci-linux` has its **own** volume `joy-media-ci-linux-runner`; it runs
 `linux-real-services` (a lighter smoke) but **not** the `retain-evidence.sh`
@@ -25,12 +25,12 @@ step, so only the acceptance runner needs the store.
 
 ### What "persistent" has to mean here
 
-| location | survives job boundary | survives `docker rm` + recreate | survives `docker volume rm` / re-register |
-| --- | :-: | :-: | :-: |
-| `/tmp`, `$RUNNER_TEMP` (`_work/_temp`) | ❌ | ❌ | ❌ |
-| a dir in the checkout (`_work/<repo>`) | ❌ (`git clean`) | ❌ | ❌ |
-| a dir under the runner volume (`/opt/actions-runner/ci-evidence`) | ✅ | ✅ | ❌ (shares the runner volume's lifecycle) |
-| **a dedicated host bind mount** | ✅ | ✅ | ✅ (not a Docker object at all) |
+| location                                                          | survives job boundary | survives `docker rm` + recreate | survives `docker volume rm` / re-register |
+| ----------------------------------------------------------------- | :-------------------: | :-----------------------------: | :---------------------------------------: |
+| `/tmp`, `$RUNNER_TEMP` (`_work/_temp`)                            |          ❌           |               ❌                |                    ❌                     |
+| a dir in the checkout (`_work/<repo>`)                            |   ❌ (`git clean`)    |               ❌                |                    ❌                     |
+| a dir under the runner volume (`/opt/actions-runner/ci-evidence`) |          ✅           |               ✅                | ❌ (shares the runner volume's lifecycle) |
+| **a dedicated host bind mount**                                   |          ✅           |               ✅                |      ✅ (not a Docker object at all)      |
 
 "Outside `_work`" alone is **not** persistence — `_work/_temp` is outside the
 checkout and still per-job.
@@ -65,7 +65,7 @@ writable directory, or if it resolves inside the checkout / `_work` / `_temp`.
 
 - Survives **everything** short of deleting the host path: container recreation,
   `config.sh --replace` re-registration (only touches `.runner`), `docker volume
-  prune` / `rm`, `docker system prune -a`.
+prune` / `rm`, `docker system prune -a`.
 - The owner inspects it with plain `ls` / `du` / `find` / `tar` on the host — no
   `docker exec`, no `docker run --rm -v … alpine`.
 - Independent lifecycle: wiping/rebuilding the runner does not touch evidence;

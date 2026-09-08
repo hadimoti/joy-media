@@ -656,33 +656,60 @@ function safeToken(value) {
 async function runDesktopMatrix(baseUrl, apiBaseUrl) {
   // Restructured (2026-09-08, CI optimization). The full tests/e2e suite runs
   // against real services at the reference viewport; the other six viewports
-  // run only the layout-sensitive responsive-checkpoints spec against real
-  // services. Functional behaviour is viewport-independent on the single
-  // Chromium engine (covered by the primary run); overflow / panel-reachability
-  // at each viewport is covered by the responsive spec at that viewport. See
-  // docs/reviews/joy-media-ci-coverage-matrix-2026-09-08.md.
+  // run the layout-sensitive specs — panel-reachability + per-panel overflow
+  // (wp32-responsive-checkpoints), the login gate's overflow + axe scan
+  // (golden-path), and the loaded-timeline transport/workspace geometry
+  // (wp35-universal-timeline's "renders backend track titles" test). Functional
+  // behaviour is viewport-independent on the single Chromium engine (covered by
+  // the primary run). See docs/reviews/joy-media-ci-coverage-matrix-2026-09-08.md.
   const smoke = process.env.JOY_MEDIA_REAL_ACCEPTANCE_SMOKE_ONLY === '1';
-  const RESPONSIVE_SPEC = 'tests/e2e/wp32-responsive-checkpoints.spec.ts';
-  /** @type {{ project: string; spec: string }[]} */
+  const RESPONSIVE_SPECS = [
+    'tests/e2e/wp32-responsive-checkpoints.spec.ts',
+    'tests/e2e/golden-path.spec.ts',
+    'tests/e2e/wp35-universal-timeline.spec.ts',
+  ];
+  // Union grep — wp32's checkpoint test, golden-path's login-gate test, and the
+  // one wp35 test that carries per-viewport transport/workspace geometry
+  // assertions (the rest of wp35 needs fixtures and is engine-independent).
+  const RESPONSIVE_GREP =
+    '(keeps project controls, workspace navigation|login gate loads without fatal|renders backend track titles, mixed elements)';
+  const RESPONSIVE_MIN_TESTS = 3;
+  /** @type {{ project: string; specs: string[]; grep?: string; minTests: number }[]} */
   const plan = smoke
-    ? [{ project: 'desktop-primary', spec: 'tests/e2e/authenticated-smoke.spec.ts' }]
+    ? [
+        {
+          project: 'desktop-primary',
+          specs: ['tests/e2e/authenticated-smoke.spec.ts'],
+          minTests: 1,
+        },
+      ]
     : [
-        { project: 'desktop-primary', spec: 'tests/e2e' },
-        { project: 'desktop-compact', spec: RESPONSIVE_SPEC },
-        { project: 'desktop-minimum', spec: RESPONSIVE_SPEC },
-        { project: 'desktop-1280', spec: RESPONSIVE_SPEC },
-        { project: 'desktop-1440', spec: RESPONSIVE_SPEC },
-        { project: 'desktop-1581', spec: RESPONSIVE_SPEC },
-        { project: 'desktop-1920', spec: RESPONSIVE_SPEC },
+        { project: 'desktop-primary', specs: ['tests/e2e'], minTests: 80 },
+        ...[
+          'desktop-compact',
+          'desktop-minimum',
+          'desktop-1280',
+          'desktop-1440',
+          'desktop-1581',
+          'desktop-1920',
+        ].map((project) => ({
+          project,
+          specs: RESPONSIVE_SPECS,
+          grep: RESPONSIVE_GREP,
+          minTests: RESPONSIVE_MIN_TESTS,
+        })),
       ];
   const sourceProvenance = await currentSourceProvenance(candidateSha);
   const summaries = [];
   const matrixEvidencePath = join(root, 'test-output/browser/real-service-profile-matrix.json');
   await mkdir(dirname(matrixEvidencePath), { recursive: true });
   await rm(matrixEvidencePath, { force: true });
-  for (const { project, spec } of plan) {
-    const report = join('/tmp', `joy-media-real-report-${project}-${runId}-${pass}`);
-    const results = join('/tmp', `joy-media-real-results-${project}-${runId}-${pass}`);
+  for (const { project, specs, grep, minTests } of plan) {
+    const report = join('/tmp', `joy-media-real-report-${project}-${runId}-${runAttempt}-${pass}`);
+    const results = join(
+      '/tmp',
+      `joy-media-real-results-${project}-${runId}-${runAttempt}-${pass}`,
+    );
     const startedAt = new Date().toISOString();
     let result;
     let exitCode = 0;
@@ -694,8 +721,9 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
           'exec',
           'playwright',
           'test',
-          spec,
+          ...specs,
           `--project=${project}`,
+          ...(grep ? ['--grep', grep] : []),
           '--workers=1',
           '--reporter=json',
         ],
@@ -721,16 +749,17 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
       };
     }
     const finishedAt = new Date().toISOString();
-    summaries.push(
-      buildProfileSummary({
-        project,
-        reportText: result.stdout.toString('utf8'),
-        exitCode,
-        startedAt,
-        finishedAt,
-        sourceProvenance,
-      }),
-    );
+    const summary = buildProfileSummary({
+      project,
+      reportText: result.stdout.toString('utf8'),
+      exitCode,
+      startedAt,
+      finishedAt,
+      sourceProvenance,
+    });
+    summary.minTests = minTests;
+    summary.metTestFloor = summary.stats.passed >= minTests;
+    summaries.push(summary);
     await writeProfileMatrixEvidence(
       matrixEvidencePath,
       sourceProvenance,
@@ -739,12 +768,21 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
     );
     await rm(report, { recursive: true, force: true });
     await rm(results, { recursive: true, force: true });
-    if (failure !== undefined) {
+
+    // A zero-exit run that ran too few tests (grep typo, spec renamed, reporter
+    // output unparseable) must NOT pass the lane whose whole purpose is
+    // per-viewport coverage.
+    const legFailed = failure !== undefined || summary.status !== 'passed' || !summary.metTestFloor;
+    if (legFailed) {
       await writeProfileMatrixEvidence(matrixEvidencePath, sourceProvenance, summaries, 'failed');
-      const details = [failure.stdout, failure.stderr].filter(Boolean).join('\n');
-      failure.message = `${failure.message}${details ? `: ${details.slice(-4000)}` : ''}`;
-      failure.profileSummaries = summaries;
-      throw failure;
+      const why =
+        failure !== undefined
+          ? `${failure.message}${[failure.stdout, failure.stderr].filter(Boolean).join('\n') ? `: ${[failure.stdout, failure.stderr].filter(Boolean).join('\n').slice(-4000)}` : ''}`
+          : `${project}: status=${summary.status} passed=${summary.stats.passed}/${summary.stats.total} (floor ${minTests}, parseError=${summary.stats.reportParseError})`;
+      const err = failure ?? new Error(`real-service desktop matrix leg failed — ${why}`);
+      if (failure) err.message = why;
+      err.profileSummaries = summaries;
+      throw err;
     }
   }
   await writeProfileMatrixEvidence(matrixEvidencePath, sourceProvenance, summaries, 'passed');
