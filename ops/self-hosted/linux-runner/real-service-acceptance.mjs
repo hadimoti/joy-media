@@ -22,6 +22,7 @@ import {
   assertJourneyTelemetryClean,
   buildProfileSummary,
   createJourneyTelemetry,
+  createWebServerLog,
   inspectJourneyTelemetry,
   sanitizeUrl,
 } from './real-service-evidence.mjs';
@@ -116,30 +117,22 @@ let browser;
 let realWorkerLifecycle;
 let realWorkerPromise;
 
-// Bounded ring buffer of the Vite dev server's stdout/stderr, redacted at
-// capture time. Flushed to test-output/browser/web-dev-server.log on any
-// journey failure so a server-side transform/resolve error is retained.
-const WEB_SERVER_LOG_MAX_LINES = 4000;
-const webServerLog = [];
-const webServerSecrets = [s3AccessKey, s3SecretKey, s3Endpoint, databaseUrl, token].filter(
-  (v) => typeof v === 'string' && v.length >= 6,
-);
-function redactWebServerLine(line) {
-  let out = line;
-  for (const secret of webServerSecrets) out = out.split(secret).join('«redacted»');
-  out = out.replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s@]+@/gi, '$1«redacted»@');
-  out = out.replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/g, '$1«redacted»');
-  return out.length > 2000 ? `${out.slice(0, 2000)}…[truncated]` : out;
-}
+// Bounded, redacted capture of the Vite dev server's stdout/stderr — flushed to
+// test-output/browser/web-dev-server.log on any journey failure. Chunk-split-safe
+// redaction + line AND byte bounds live in createWebServerLog (tested).
+const webServerLogBuffer = createWebServerLog({
+  secrets: [s3AccessKey, s3SecretKey, s3Endpoint, databaseUrl, token],
+});
 function writeWebServerLog() {
-  if (webServerLog.length === 0) return null;
+  const { lines, maxLines, maxBytes } = webServerLogBuffer.flush();
+  if (lines.length === 0) return null;
   const rel = 'test-output/browser/web-dev-server.log';
   try {
     mkdirSync(join(root, 'test-output/browser'), { recursive: true });
     writeFileSync(
       join(root, rel),
-      `# Vite dev server (redacted, last ${webServerLog.length} of max ${WEB_SERVER_LOG_MAX_LINES} lines)\n` +
-        `${webServerLog.join('\n')}\n`,
+      `# Vite dev server (redacted; <= ${maxLines} lines / ${maxBytes} bytes, oldest dropped)\n` +
+        `${lines.join('\n')}\n`,
       'utf8',
     );
     return rel;
@@ -314,15 +307,8 @@ try {
   webProcess.once('error', (error) => {
     webProcessError = error;
   });
-  const captureWebLine = (buf) => {
-    for (const line of buf.toString('utf8').split(/\r?\n/)) {
-      if (line === '') continue;
-      webServerLog.push(redactWebServerLine(line));
-      if (webServerLog.length > WEB_SERVER_LOG_MAX_LINES) webServerLog.shift();
-    }
-  };
-  webProcess.stdout?.on('data', captureWebLine);
-  webProcess.stderr?.on('data', captureWebLine);
+  webProcess.stdout?.on('data', (buf) => webServerLogBuffer.chunk('stdout', buf));
+  webProcess.stderr?.on('data', (buf) => webServerLogBuffer.chunk('stderr', buf));
   try {
     await waitForHttp(webUrl, 120_000);
   } catch (error) {

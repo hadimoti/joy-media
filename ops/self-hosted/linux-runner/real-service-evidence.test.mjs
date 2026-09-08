@@ -1,3 +1,4 @@
+/* global Buffer */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -5,9 +6,46 @@ import {
   createJourneyTelemetry,
   inspectJourneyTelemetry,
   assertJourneyTelemetryClean,
+  createWebServerLog,
   sanitizeUrl,
   EXPECTED_SANDBOX_STORAGE_ERROR,
 } from './real-service-evidence.mjs';
+
+test('createWebServerLog: redacts a secret split across two stdout chunks', () => {
+  const secret = 'AKIA-SPLIT-SECRET-9f3c1b7e2d4a';
+  const log = createWebServerLog({ secrets: [secret] });
+  // secret straddles the chunk boundary AND there is no newline in chunk 1
+  log.chunk('stdout', Buffer.from('resolve error near AKIA-SPLIT-'));
+  log.chunk('stdout', Buffer.from('SECRET-9f3c1b7e2d4a in main.tsx\n'));
+  const { lines } = log.flush();
+  assert.equal(lines.length, 1);
+  assert.ok(!lines[0].includes(secret), 'secret must not survive a chunk split');
+  assert.match(lines[0], /«redacted»/);
+});
+
+test('createWebServerLog: enforces BOTH the line and byte bounds (oldest dropped)', () => {
+  const log = createWebServerLog({ maxLines: 5, maxBytes: 1_000_000 });
+  for (let i = 0; i < 20; i++) log.chunk('stderr', Buffer.from(`line ${i}\n`));
+  let { lines } = log.flush();
+  assert.equal(lines.length, 5);
+  assert.equal(lines[0], 'line 15');
+
+  const log2 = createWebServerLog({ maxLines: 100000, maxBytes: 200 });
+  for (let i = 0; i < 50; i++) log2.chunk('stdout', Buffer.from(`0123456789abcdef ${i}\n`));
+  lines = log2.flush().lines;
+  const total = lines.reduce((n, l) => n + Buffer.byteLength(l) + 1, 0);
+  assert.ok(total <= 200 + 20, `byte-bounded (~${total})`);
+});
+
+test('createWebServerLog: a trailing unterminated line is flushed, and bearer/presign shapes redacted', () => {
+  const log = createWebServerLog();
+  log.chunk('stderr', Buffer.from('GET /x?X-Amz-Signature=deadbeefcafe1234 401'));
+  log.chunk('stdout', Buffer.from('authorization: Bearer abcdefgh12345678'));
+  const { lines } = log.flush();
+  assert.equal(lines.length, 2);
+  assert.ok(lines.some((l) => /X-Amz-Signature=«redacted»/.test(l)));
+  assert.ok(lines.some((l) => /Bearer «redacted»/.test(l)));
+});
 
 test('sanitizeUrl: strips credentials, query and hash', () => {
   assert.equal(

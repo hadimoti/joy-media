@@ -311,12 +311,16 @@ jobs:
           )
           for profile in desktop-compact desktop-minimum desktop-1280 desktop-1440 desktop-1581 desktop-1920; do
             echo "::group::responsive checkpoints @ $profile"
-            rj="$RUNNER_TEMP/pw-responsive-$profile-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
+            # Report name unique to run/attempt/pass/profile; deleted before the
+            # run so a stale file can never satisfy the identity check.
+            rj="$RUNNER_TEMP/pw-responsive-${{ matrix.pass }}-$profile-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
+            rm -f "$rj"
             PLAYWRIGHT_JSON_OUTPUT_NAME="$rj" pnpm exec playwright test \
               tests/e2e/wp32-responsive-checkpoints.spec.ts \
               tests/e2e/golden-path.spec.ts \
               tests/e2e/wp35-universal-timeline.spec.ts \
               --grep "$grep_re" --project="$profile" --workers=1 --reporter=json,line
+            test -s "$rj" || { echo "no Playwright JSON report produced for $profile" >&2; exit 1; }
             node tooling/release/assert-playwright-titles.mjs "$rj" "${req_titles[@]}"
             rm -f "$rj"
             echo "::endgroup::"

@@ -1,4 +1,62 @@
-/* global URL */
+/* global URL, Buffer */
+
+/**
+ * A bounded, redacted line buffer for a subprocess's stdout+stderr. Both bounds
+ * apply (lines AND bytes; oldest dropped first). Redaction happens on the
+ * REASSEMBLED line, so a secret split across two `data` chunks — or across a
+ * chunk boundary that isn't a newline — is still caught. Per-stream partials.
+ */
+export function createWebServerLog({
+  secrets = [],
+  maxLines = 4000,
+  maxBytes = 512 * 1024,
+  lineMax = 2000,
+} = {}) {
+  const activeSecrets = secrets.filter((v) => typeof v === 'string' && v.length >= 6);
+  const lines = [];
+  let bytes = 0;
+  const partial = { stdout: '', stderr: '' };
+
+  const redact = (line) => {
+    let out = String(line);
+    for (const s of activeSecrets) out = out.split(s).join('«redacted»');
+    out = out.replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s@]+@/gi, '$1«redacted»@');
+    out = out.replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/g, '$1«redacted»');
+    out = out.replace(
+      /(X-Amz-(?:Signature|Credential|Security-Token)=)[^&\s"']+/gi,
+      '$1«redacted»',
+    );
+    return out.length > lineMax ? `${out.slice(0, lineMax)}…[truncated]` : out;
+  };
+  const push = (redacted) => {
+    lines.push(redacted);
+    bytes += Buffer.byteLength(redacted, 'utf8') + 1;
+    while (lines.length > 0 && (lines.length > maxLines || bytes > maxBytes)) {
+      bytes -= Buffer.byteLength(lines.shift(), 'utf8') + 1;
+    }
+  };
+  return {
+    chunk(stream, buf) {
+      const combined = (partial[stream] ?? '') + buf.toString('utf8');
+      const parts = combined.split(/\r?\n/);
+      partial[stream] = parts.pop() ?? '';
+      if (partial[stream].length > lineMax * 4) {
+        push(redact(partial[stream]));
+        partial[stream] = '';
+      }
+      for (const line of parts) if (line !== '') push(redact(line));
+    },
+    flush() {
+      for (const stream of ['stdout', 'stderr']) {
+        if (partial[stream] !== '') {
+          push(redact(partial[stream]));
+          partial[stream] = '';
+        }
+      }
+      return { lines: [...lines], maxLines, maxBytes };
+    },
+  };
+}
 
 export const EXPECTED_SANDBOX_STORAGE_ERROR =
   "Failed to read the 'localStorage' property from 'Window': The document is sandboxed and lacks the 'allow-same-origin' flag.";
