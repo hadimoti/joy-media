@@ -495,24 +495,33 @@ function safeToken(value) {
 }
 
 async function runDesktopMatrix(baseUrl, apiBaseUrl) {
-  const projects =
-    process.env.JOY_MEDIA_REAL_ACCEPTANCE_SMOKE_ONLY === '1'
-      ? ['desktop-primary']
-      : [
-          'desktop-primary',
-          'desktop-compact',
-          'desktop-minimum',
-          'desktop-1280',
-          'desktop-1440',
-          'desktop-1581',
-          'desktop-1920',
-        ];
+  // Restructured (2026-09-08, CI optimization). The full tests/e2e suite runs
+  // against real services at the reference viewport; the other six viewports
+  // run only the layout-sensitive responsive-checkpoints spec against real
+  // services. Functional behaviour is viewport-independent on the single
+  // Chromium engine (covered by the primary run); overflow / panel-reachability
+  // at each viewport is covered by the responsive spec at that viewport. See
+  // docs/reviews/joy-media-ci-coverage-matrix-2026-09-08.md.
+  const smoke = process.env.JOY_MEDIA_REAL_ACCEPTANCE_SMOKE_ONLY === '1';
+  const RESPONSIVE_SPEC = 'tests/e2e/wp32-responsive-checkpoints.spec.ts';
+  /** @type {{ project: string; spec: string }[]} */
+  const plan = smoke
+    ? [{ project: 'desktop-primary', spec: 'tests/e2e/authenticated-smoke.spec.ts' }]
+    : [
+        { project: 'desktop-primary', spec: 'tests/e2e' },
+        { project: 'desktop-compact', spec: RESPONSIVE_SPEC },
+        { project: 'desktop-minimum', spec: RESPONSIVE_SPEC },
+        { project: 'desktop-1280', spec: RESPONSIVE_SPEC },
+        { project: 'desktop-1440', spec: RESPONSIVE_SPEC },
+        { project: 'desktop-1581', spec: RESPONSIVE_SPEC },
+        { project: 'desktop-1920', spec: RESPONSIVE_SPEC },
+      ];
   const sourceProvenance = await currentSourceProvenance(candidateSha);
   const summaries = [];
   const matrixEvidencePath = join(root, 'test-output/browser/real-service-profile-matrix.json');
   await mkdir(dirname(matrixEvidencePath), { recursive: true });
   await rm(matrixEvidencePath, { force: true });
-  for (const project of projects) {
+  for (const { project, spec } of plan) {
     const report = join('/tmp', `joy-media-real-report-${project}-${runId}-${pass}`);
     const results = join('/tmp', `joy-media-real-results-${project}-${runId}-${pass}`);
     const startedAt = new Date().toISOString();
@@ -522,17 +531,7 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
     try {
       result = await execFile(
         'pnpm',
-        [
-          'exec',
-          'playwright',
-          'test',
-          ...(process.env.JOY_MEDIA_REAL_ACCEPTANCE_SMOKE_ONLY === '1'
-            ? ['tests/e2e/authenticated-smoke.spec.ts']
-            : ['tests/e2e']),
-          `--project=${project}`,
-          '--workers=1',
-          '--reporter=json',
-        ],
+        ['exec', 'playwright', 'test', spec, `--project=${project}`, '--workers=1', '--reporter=json'],
         {
           cwd: root,
           env: {
