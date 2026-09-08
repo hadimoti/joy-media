@@ -45,14 +45,28 @@ Each pass in `release-candidate-v2.yml`:
    - Worker id `real-service-render-worker-<run>-<pass>`
    - temp root `mkdtemp('/tmp/joy-media-real-acceptance-')` (unique)
    - free-port allocation per pass; `RUNNER_TEMP`-scoped report/results dirs.
-4. **`if: always()` teardown** asserting `git status --porcelain` empty, schema
-   dropped, bucket removed, temp root deleted, no OpenCLI profile leak.
-5. **Independent `pnpm run release:gate`** evaluation per pass.
+4. **Required teardown verification** (hardened on revision `84683cdc`): the
+   harness attempts every cleanup step, records — never swallows — each failure,
+   then re-inspects the runner for run-owned residue (schema, legacy schema,
+   bucket, objects, temp dir, web process) and **fails the pass** on any. It
+   writes `test-output/operations/teardown.json`; the workflow requires it and
+   fails on `clean !== true`. Plus `git status --porcelain` empty and no OpenCLI
+   profile leak.
+5. **Interruption recovery** — `ci-namespace-janitor.mjs` runs (inventory mode)
+   at the start of every pass, classifying every CI namespace by its owning
+   run's status; `active` / `unknown` are never touched; the evidence file is
+   required.
+6. **Independent `pnpm run release:gate`** evaluation per pass.
 
 Pass 2 therefore runs on a runner from which pass 1 has been fully torn down and
-verified clean — which is exactly the "clean-state, repeatable" evidence a second
-whole-workflow run was providing. A second workflow run adds a _third and fourth_
-repeat, not a _different kind_ of evidence.
+**verified** clean (not assumed clean) — which is exactly the "clean-state,
+repeatable" evidence a second whole-workflow run was providing. A second workflow
+run adds a _third and fourth_ repeat, not a _different kind_ of evidence.
+
+**Fresh-namespace isolation and pass-1 cleanup are reported as two distinct
+facts** (see `joy-media-ci-open-items-2026-09-08.md` §3): the first proves pass 2
+cannot inherit pass 1 state (unique never-before-used names); the second proves
+pass 1 actually removed its own state.
 
 ## What a second whole-workflow run did provide that this does not
 

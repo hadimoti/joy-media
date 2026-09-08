@@ -63,6 +63,23 @@ all 7 viewports, sequentially, per pass.
 (1 full-primary vs real services + 1 responsive-sweep vs real services). The
 soak, the delivery journey, the restore check, and both passes are untouched.
 
+## New release-gate lane — `prod-build-smoke` (added, no coverage removed)
+
+Runs the shipped production bundle (`vite build` → `vite preview` of `dist/` with
+the new `preview.proxy`) through the app's public UI:
+`authenticated-smoke` + `wp32-real-project-journey` + `wp30-animated-timeline-export`
+
+- `golden-path`. Covers, against the **built artifact** (not the dev server):
+  session/auth, disposable project, fixture register/upload/reload/read, **import →
+  preview each asset (decode/seek) → captions render**, **Export MP4 → verified
+  download (encode + Worker path)**, no-fatal-error / no-horizontal-overflow.
+
+This is **additive**. The dev-server-only white-box decoder specs
+(`agent-observation-decode`, `final-encoded-export-decoder`,
+`agent-director-skills` — they `import('/src/*.ts')` at runtime) are unchanged
+and still run in full against the dev server in `acceptance-primary` and
+`real-service-acceptance`.
+
 ## Development verification (`ci-dev.yml`, push / PR) — NOT a release gate
 
 Clearly labelled "development verification — not release approval". Runs:
@@ -90,4 +107,6 @@ decode (WebCodecs) · Worker lease / heartbeat / complete · N / N-1 restore.
 - The 2 isolated passes inside the workflow.
 - The 30-minute effects soak (one per pass).
 - `windows-worker-clean` scope (only the teardown-detection robustness — see benchmarks doc).
-- Real-service harness server (stays Vite dev — prod-build parity not achieved).
+- Real-service / `acceptance` harness server stays **Vite dev** so the ~16
+  `/src` white-box specs keep running; the new `prod-build-smoke` lane adds
+  built-artifact coverage alongside, it does not replace the dev-server lanes.
