@@ -29,14 +29,18 @@ workflow file only; `release-candidate.yml` and all product code untouched;
 **The 35-test delta is environment-gated tests that skip on the headless CI
 runner** — not lost, not a v2 regression:
 
-| Test file                                                 | Tests | Gate                                                     | Why it skips in CI                                                                                              |
-| --------------------------------------------------------- | ----- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `tooling/golden-render/src/first-party-scenes.test.ts`    | 31    | `describe.runIf(findChromiumExecutable() !== undefined)` | `linux-real-services` runs `verify:ci` **before** `playwright install chromium`, so no Chromium binary is found |
-| `packages/html-scene-runtime/src/chromium-driver.test.ts` | 2     | `describe.runIf(chromiumAvailable)`                      | same                                                                                                            |
-| `apps/api/src/whisper-transcribe.test.ts`                 | 1     | `describe.skipIf(!whisperAvailable)`                     | no Whisper model on the runner                                                                                  |
-| (1 more env-gated)                                        | 1     | —                                                        | —                                                                                                               |
+| Test file                                                 | CI-skipped | Gate                                                     | Why it skips in CI                                                                                              |
+| --------------------------------------------------------- | ---------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `tooling/golden-render/src/first-party-scenes.test.ts`    | 31 (file)  | `describe.runIf(findChromiumExecutable() !== undefined)` | `linux-real-services` runs `verify:ci` **before** `playwright install chromium`, so no Chromium binary is found |
+| `packages/html-scene-runtime/src/chromium-driver.test.ts` | 2 (file)   | `describe.runIf(chromiumAvailable)`                      | same                                                                                                            |
+| `apps/api/src/whisper-transcribe.test.ts`                 | 1 (file)   | `describe.skipIf(!whisperAvailable)`                     | no Whisper model on the runner                                                                                  |
 
-The **current** `release-candidate.yml` runs the identical
+Those 3 fully-skipped files account for **34** of the 35-test delta (verified
+from the CI log). The remaining **1** is a partial env `runIf`/`skipIf` inside a
+file that still reports other passing tests; the CI log does not name it and it
+was not chased further — the vitest **total is provably unchanged (4244)**, and
+this same behaviour holds on the current gate. The **current**
+`release-candidate.yml` runs the identical
 `pnpm run verify:ci` on the identical `[self-hosted, linux, x64, joy-media-ci]`
 runner (v1 lines 42, 77) → v1's gate **also** reports 4171/73 on Linux. The
 golden pixel + Chromium-scene coverage is exercised separately by the Playwright
@@ -54,9 +58,10 @@ golden pixel + Chromium-scene coverage is exercised separately by the Playwright
 | real-service-acceptance ×2 (primary-full + 6-responsive vs real services + 30-min soak + delivery journey + N/N-1 restore + `release:gate`) | ✅ `release:gate` passed each                                                      | 39m23s + 39m17s (serial) |
 | gate-summary                                                                                                                                | ❌ grep-parse bug on all-`success` input (**not a lane failure**) — replaced by §4 | 12s                      |
 
-**End-to-end: 1h37m11s.** The 1 skipped test in `acceptance-primary` is
-`wp29-r5-batch-e`'s cross-origin-iframe case (Chromium denies the capability;
-pre-existing `test.skip`).
+**End-to-end: 1h37m11s.** `acceptance-primary` reports the same `1 skipped` as a
+local `playwright test tests/e2e --project=desktop-primary` (a pre-existing
+`test.skip`, unchanged by this work — the CI log reports the count, not the
+name).
 
 ## 2. Separate isolation evidence, per resource
 
