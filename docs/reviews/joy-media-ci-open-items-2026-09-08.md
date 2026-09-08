@@ -240,36 +240,63 @@ clean instance) and by both passes' `teardown.json` (`clean: true`, bounded
 blockers that are **not** in the teardown / repetition / coverage changes:
 
 1. **Pass 2 journey flake.** `assertJourneyTelemetryClean` failed on a
-   nondeterministic `Failed to load resource: net::ERR_FILE_NOT_FOUND` browser
-   console error in `recordJourney` (pass 1 ran the identical journey 60 s later,
-   0 errors). The assertion throws on `consoleErrors` before it would show the
-   URL-bearing `failedRequests`, so root cause is undetermined. **Needed:** make
-   `assertJourneyTelemetryClean` surface `failedRequests` alongside/ before
-   `consoleErrors`, then triage (app bug vs load-order race). Same class as R1's
+   nondeterministic `net::ERR_FILE_NOT_FOUND` browser console error in
+   `recordJourney` (pass 1 ran the identical journey 60 s later, 0 errors); the
+   old assertion threw on `consoleErrors` before it would show the URL-bearing
+   `failedRequests`, so root cause is undetermined. Same class as R1's
    `b634d3cd` / `f7615432`.
+   **DONE (`45022c7c`):** `recordJourney` tracks a `journeyPhase`;
+   `requestfailed` captures `url`/`method`/`resourceType`/`failureText`;
+   `console` captures `location`. New `inspectJourneyTelemetry()` reports every
+   issue class together and writes a sanitized `journey-failure.json` (phase,
+   `netErrorCodesObserved`, full detail) **before** the throw, with an explicit
+   "`net::ERR_*` ≠ HTTP 404, cause undetermined" note. `sanitizeUrl` drops
+   userinfo + query + fragment. `real-service-evidence.test.mjs` (7 cases).
+   **Bounded reproduction:** run against the real dev server (smoke, no soak) —
+   B1 clean, B2 pending; the earlier FORCE_FAIL smoke run + bench-4 pass 1 were
+   also clean journeys. Flake rate ~1 in ≥4 real journeys. **Not suppressed, not
+   waived** — the enriched telemetry captures the resource on the next hit.
 2. **`actions/upload-artifact` failed on BOTH passes** —
    `Failed to CreateArtifact: Artifact storage quota has been hit` (account-level;
    same as the earlier hosted `r2-candidate` runs). `continue-on-error: true`
-   masked it as a green step. Durable evidence retention is therefore
-   **non-functional**: pass 2's structured evidence is permanently lost.
-   **Needed:** (a) a runner-local persistent fallback path outside `_work` (an
-   artifact upload alone is not enough here), (b) stop `continue-on-error` from
-   hiding the failure — surface it loudly / annotate, (c) the account
-   artifact-storage quota freed or raised.
+   masked it as a green step.
+   **DONE (`45022c7c`):** `retain-evidence.sh` now **requires**
+   `JOY_MEDIA_CI_EVIDENCE_ROOT` (a path outside the checkout and `_work`/`_temp`;
+   refuses a path inside any), writes `MANIFEST.sha256` + `MANIFEST.json`,
+   persists to `<root>/<candidateSha>/<run>-<attempt>-p<pass>/`, and re-verifies
+   every file against the manifest. New workflow step **"Verify retained
+   evidence"** (no `continue-on-error`): `sha256sum -c` + `teardown.json` present
+   & `clean:true` + (harness success ⇒ full required set) + no
+   `REDACTION-FAILURES.txt`. `upload-artifact`: `continue-on-error` removed,
+   `if-no-files-found: error` — **a failed upload now fails the job; a fallback
+   copy does not waive the required upload.** Verified end-to-end against a real
+   injected-failure journey run: `journey-failure.json` + all evidence persisted,
+   checksums verified, gate red.
+   **STILL NEEDED FROM THE OWNER:** (a) set `JOY_MEDIA_CI_EVIDENCE_ROOT` on the
+   `joy-media-acceptance` runner (e.g. `/opt/actions-runner/ci-evidence`);
+   (b) clear the artifact-storage quota — **read-only inventory: 50 artifacts /
+   4.62 GiB, all `playwright-evidence` from Aug-2026 abandoned hosted
+   experiments; proposal to delete all 50** (no historical evidence lost, no
+   storage purchase). Until (b), the full gate correctly fails on the upload.
 
-Neither is a threshold or a rerun question. Recorded for the reviewer + owner.
+Neither is a threshold or a rerun question.
 
 ## Evidence still required before independent approval
 
-- A benchmark of the revision that resolves §9.1–§9.2 — both `real-service`
-  passes **and** cleanup green, with the `real-service-evidence-*` artifacts (or
-  the runner-local fallback) actually retrievable for both passes.
-- ✅ `pnpm test:harness` green (18 cases) + the real dev-server / process-launch
-  teardown integration run — **done** (`joy-media-ci-linux` + a real
-  smoke+`FORCE_FAIL` harness run: `teardown.json clean: true`,
-  `webTermination.state "terminated"`, no residue).
-- ✅ Quiet-host benchmark with contention measurements — **done** (benchmark 4;
-  no contention observed).
+- **Owner:** set `JOY_MEDIA_CI_EVIDENCE_ROOT` on the runner; clear the artifact
+  quota (delete the 50 stale `playwright-evidence` artifacts).
+- A full gate run of the revision that resolves §9.1–§9.2 (HEAD ≥ `45022c7c`) —
+  **both** `real-service` passes **and** cleanup **and** durable evidence
+  (manifest + checksum + retrievable persistent copy) green for both passes.
+- ✅ `pnpm test:harness` green (**26** cases) + the real dev-server / process
+  teardown integration run + the injected-journey-failure + evidence-retention
+  focused checks — **done** in `joy-media-ci-acceptance` /
+  `joy-media-ci-linux`.
+- ✅ Quiet-host benchmark with resource measurements — **done** (benchmark 4; no
+  competing workload observed at 3-min resolution).
+- ⏳ Independent code review of the implementation + coverage/repetition contract
+  — **in progress** (a green benchmark does not gate this; findings feed the
+  owner + the deploy gate).
 - The revised repetition contract + coverage matrix reflecting the new lanes.
 - Independent review covering **both** the implementation and the
   reduced-repetition / coverage contract. A green benchmark alone approves
