@@ -7,18 +7,20 @@ decision is the reviewer's, then the owner's.
 
 ## Revisions under review
 
-| Artifact                                          | Revision              | Note                                                                                                                                                                         |
-| ------------------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Application candidate                             | `3eaa8cd7` (R2 GAP 3) | the app code the gate was benchmarked against                                                                                                                                |
-| CI-opt branch HEAD (workflow + harness + tooling) | `61bc4c44`            | corrected revision — §6 teardown-ordering fix + bounded shutdown + 404 quarantine + evidence retention, on top of `185f18c6` (janitor `pg` fix + structured gate-summary)    |
-| Benchmark 1 (speed)                               | ran on `cdbb771f`     | pre-hardening teardown → performance evidence only                                                                                                                           |
-| Benchmark 2 (failed)                              | ran on `498c45fe`     | caught the janitor `pg`-resolution bug                                                                                                                                       |
-| Benchmark 3 (hardened evidence)                   | ran on `8c5a4445`     | teardown enforcement + janitor + prod-build-smoke; **FAILED** — deterministic `tempRoot` residue on both passes (see §6) + an undetermined pass-1 soak failure               |
-| Corrected revision (this package)                 | `61bc4c44`            | fixes the §6 teardown-ordering bug, adds bounded shutdown, 404-quarantine janitor, evidence retention, `pnpm test:harness` (18 cases); **benchmark pending on a quiet host** |
+| Artifact                                                                   | Revision                 | Note                                                                                                                                                                                        |
+| -------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Frozen benchmark-4 revision** (workflow + harness + app + this evidence) | **`ca075c7c`**           | `codex/joy-live-director-ci-opt` tip. Contains R2 GAP 3 (`3eaa8cd7`, verified ancestor) + all CI-opt work. Every benchmark-4 job checks out this exact SHA.                                 |
+| — app content within it                                                    | `3eaa8cd7` (R2 GAP 3)    | the app code the gate runs against (ancestor of `ca075c7c`)                                                                                                                                 |
+| Benchmark 1 (speed)                                                        | ran on `cdbb771f`        | pre-hardening teardown → performance evidence only                                                                                                                                          |
+| Benchmark 2 (failed)                                                       | ran on `498c45fe`        | caught the janitor `pg`-resolution bug                                                                                                                                                      |
+| Benchmark 3 (hardened evidence)                                            | ran on `8c5a4445`        | teardown enforcement + janitor + prod-build-smoke; **FAILED** — common deterministic `tempRoot` residue on both passes + a pass-1-only undetermined soak failure (see §6)                   |
+| Benchmark 4 (corrected revision)                                           | dispatched on `ca075c7c` | §6 fix + bounded shutdown + 404 quarantine + hardened evidence retention; `pnpm test:harness` 18/18; real dev-server teardown integration `clean:true`. **Numbers appended on completion.** |
 
-`main` carries only the **dispatch-only** `release-candidate-v2.yml` (2 commits,
-workflow file only; `release-candidate.yml` and all product code untouched;
-`workflow_dispatch`-only, runs nothing on push).
+`main` carries only the **dispatch-only** `release-candidate-v2.yml` (workflow
+file only; `release-candidate.yml` and all product code untouched;
+`workflow_dispatch`-only, runs nothing on push). Its copy is synced to
+`185f18c6`; benchmark 4 runs the `ca075c7c` copy via `--ref` (main's copy is
+re-synced to `ca075c7c` as housekeeping when this package goes to review).
 
 ## 1. Complete results, including all skipped tests, and the 4190 vs 4171 explanation
 
