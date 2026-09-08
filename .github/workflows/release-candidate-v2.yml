@@ -390,7 +390,14 @@ jobs:
   gate-summary:
     name: gate-summary
     runs-on: [self-hosted, linux, x64, joy-media-ci]
-    needs: [linux-real-services, windows-worker-clean, acceptance-primary, acceptance-responsive, real-service-acceptance]
+    needs:
+      [
+        linux-real-services,
+        windows-worker-clean,
+        acceptance-primary,
+        acceptance-responsive,
+        real-service-acceptance,
+      ]
     if: always()
     steps:
       - name: Require every lane green on both isolated passes

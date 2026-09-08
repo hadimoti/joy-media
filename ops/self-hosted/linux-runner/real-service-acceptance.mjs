@@ -531,7 +531,15 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
     try {
       result = await execFile(
         'pnpm',
-        ['exec', 'playwright', 'test', spec, `--project=${project}`, '--workers=1', '--reporter=json'],
+        [
+          'exec',
+          'playwright',
+          'test',
+          spec,
+          `--project=${project}`,
+          '--workers=1',
+          '--reporter=json',
+        ],
         {
           cwd: root,
           env: {
