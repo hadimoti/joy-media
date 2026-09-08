@@ -3,6 +3,7 @@
 
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +22,7 @@ import {
   assertJourneyTelemetryClean,
   buildProfileSummary,
   createJourneyTelemetry,
+  sanitizeUrl,
 } from './real-service-evidence.mjs';
 import { createLeaseHeartbeatLoop, throwIfLeaseCanceled } from './lease-heartbeat.mjs';
 import { isAlive, removeDirWithRetry, terminateProcessTree } from './real-service-teardown.mjs';
@@ -780,33 +782,56 @@ async function recordJourney(
   let captureBrowserTelemetry = true;
   page.on('console', (message) => {
     if (!captureBrowserTelemetry) return;
-    if (message.type() === 'error') telemetry.consoleErrors.push(message.text());
-    if (message.type() === 'warning') telemetry.consoleWarnings.push(message.text());
+    const location = message.location?.() ?? {};
+    const entry = {
+      text: message.text(),
+      phase: telemetry.phase,
+      location: {
+        url: sanitizeUrl(location.url ?? ''),
+        lineNumber: location.lineNumber ?? null,
+        columnNumber: location.columnNumber ?? null,
+      },
+    };
+    if (message.type() === 'error') telemetry.consoleErrors.push(entry);
+    else if (message.type() === 'warning')
+      telemetry.consoleWarnings.push({ text: entry.text, phase: telemetry.phase });
   });
   page.on('pageerror', (error) => {
     if (!captureBrowserTelemetry) return;
-    telemetry.pageErrors.push(error.message);
+    telemetry.pageErrors.push({ message: error.message, phase: telemetry.phase });
   });
   page.on('requestfailed', (request) => {
     if (!captureBrowserTelemetry) return;
-    if (request.url().startsWith('http'))
-      telemetry.failedRequests.push(`${request.url()} ${request.failure()?.errorText ?? ''}`);
+    if (!request.url().startsWith('http')) return;
+    telemetry.failedRequests.push({
+      url: sanitizeUrl(request.url()),
+      method: request.method(),
+      resourceType: request.resourceType(),
+      failureText: request.failure()?.errorText ?? '',
+      phase: telemetry.phase,
+    });
   });
   page.on('response', (response) => {
     if (!captureBrowserTelemetry) return;
-    if (response.status() >= 400)
-      telemetry.httpErrors.push(
-        `${response.status()} ${response.request().method()} ${response.url()}`,
-      );
+    if (response.status() < 400) return;
+    telemetry.httpErrors.push({
+      status: response.status(),
+      method: response.request().method(),
+      url: sanitizeUrl(response.url()),
+      phase: telemetry.phase,
+    });
   });
+  telemetry.phase = 'open-projects';
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
   await page.getByRole('heading', { name: 'Projects' }).waitFor();
+  telemetry.phase = 'create-project';
   const title = `Real service acceptance ${runId}-${pass}`;
   await page.getByRole('button', { name: 'New project' }).click();
   await page.getByPlaceholder('Project name').fill(title);
   await page.getByRole('button', { name: 'Create project' }).click();
   await page.getByRole('button', { name: 'File', exact: true }).waitFor();
 
+  telemetry.phase = 'enhance-effects';
   const enhance = page.locator('.panel-tab[aria-label="Enhance"]').first();
   await enhance.click();
   const effectsTab = page
@@ -814,18 +839,22 @@ async function recordJourney(
     .getByRole('tab', { name: 'Effects', exact: true });
   await effectsTab.click();
   await page.locator('.effects-panel').waitFor();
+  telemetry.phase = 'inspector';
   await page.locator('.panel-tab[aria-label="Inspector"]').first().click();
   await page.getByRole('article', { name: 'Inspector', exact: true }).waitFor();
+  telemetry.phase = 'joy-code';
   const joyCode = page.locator('.panel-tab[aria-label="Joy Code"]').first();
   await joyCode.click();
   await page.getByRole('article', { name: 'Joy Code', exact: true }).waitFor();
   // Creative Brief is a composer capability inside the Joy Code panel, not a
   // section tab. Toggling it reveals the embedded brief surface (its consent
   // gate, until a BYOK model is connected).
+  telemetry.phase = 'creative-brief';
   await page.getByRole('button', { name: 'Creative Brief', exact: true }).click();
   await page.locator('.creative-brief-panel').waitFor();
   // The 3D scene workspace is its own on-demand Dockview panel. Reveal it from
   // the View menu when its dock tab is not already mounted.
+  telemetry.phase = '3d-scene';
   let scene3dTab = page.locator('.panel-tab[aria-label="3D Scene"]').first();
   if (!(await scene3dTab.isVisible())) {
     await page.getByRole('button', { name: 'View', exact: true }).click();
@@ -842,6 +871,7 @@ async function recordJourney(
   const headers = { authorization: `Bearer ${sessionToken}`, 'content-type': 'application/json' };
   const videoName = `real-video-${runId}-${pass}.mp4`;
   const audioName = `real-audio-${runId}-${pass}.wav`;
+  telemetry.phase = 'import-media';
   await importFixture(page, 'video.mp4', videoName);
   await importFixture(page, 'audio.wav', audioName);
   await resetAssetCatalogFilters(page);
@@ -851,6 +881,7 @@ async function recordJourney(
   // scene on the imported video before applying a preset.  Keep this in the
   // real-service journey (rather than seeding localStorage) so persistence is
   // exercised through the same compound document transaction as production.
+  telemetry.phase = 'motion-preset';
   await page.locator(`.timeline-clip[aria-label^="${videoName},"]`).click();
   await enhance.click();
   await page
@@ -895,6 +926,7 @@ async function recordJourney(
   await resetAssetCatalogFilters(page);
   await addAssetToTimeline(page, audioName);
 
+  telemetry.phase = 'export';
   const firstDownload = await triggerExportDownload(page);
   const exportAssetId = `real-export-${runId}-${pass}`;
   const mixedBytes = await readFile(firstDownload.path);
@@ -1012,6 +1044,7 @@ async function recordJourney(
   );
   if (!streamTypes.includes('video') || !streamTypes.includes('audio'))
     throw new Error('mixed export ffprobe did not find both video and audio streams');
+  telemetry.phase = 'reimport-export';
   await importFixture(page, firstDownload.path, firstDownload.filename);
   const redownload = await redownloadMostRecentExport(page);
   if (redownload.sha256 !== firstDownload.sha256 || redownload.bytes !== firstDownload.bytes) {
@@ -1295,6 +1328,7 @@ async function recordJourney(
   // process.  The clip/object and expected channels are carried through the
   // check so unrelated animation data cannot satisfy this release gate.
   captureBrowserTelemetry = true;
+  telemetry.phase = 'reload-persistence';
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.getByRole('button', { name: 'File', exact: true }).waitFor();
   const reloadedClip = page.locator(`.timeline-clip[data-clip-id="${motionClipId}"]`).first();
@@ -1370,7 +1404,45 @@ async function recordJourney(
     throw new Error(
       `real-service journey did not observe persisted Motion data for ${motionObjectId}: ${JSON.stringify(visualStorage)}`,
     );
-  const browserTelemetry = assertJourneyTelemetryClean(telemetry);
+  telemetry.phase = 'telemetry-assertion';
+  // Test hook: inject a browser console error + a failed request so the
+  // diagnostics + evidence-retention path can be exercised end-to-end against a
+  // real journey. Never set in the release workflow.
+  if (process.env.JOY_MEDIA_REAL_ACCEPTANCE_INJECT_JOURNEY_ERROR === '1') {
+    telemetry.consoleErrors.push({
+      text: 'INJECTED evidence-retention check: Failed to load resource: net::ERR_FILE_NOT_FOUND',
+      phase: telemetry.phase,
+      location: {
+        url: `${baseUrl}/assets/injected-probe.woff2`,
+        lineNumber: null,
+        columnNumber: null,
+      },
+    });
+    telemetry.failedRequests.push({
+      url: `${baseUrl}/assets/injected-probe.woff2`,
+      method: 'GET',
+      resourceType: 'font',
+      failureText: 'net::ERR_FILE_NOT_FOUND',
+      phase: telemetry.phase,
+    });
+  }
+  const browserTelemetry = assertJourneyTelemetryClean(telemetry, {
+    phase: telemetry.phase,
+    candidateSha,
+    runId,
+    attempt: runAttempt,
+    pass,
+    onFailure: (report) => {
+      // Persist the full sanitized diagnostic BEFORE the throw so the reason a
+      // pass failed survives teardown + the next job's checkout.
+      mkdirSync(join(root, 'test-output/browser'), { recursive: true });
+      writeFileSync(
+        join(root, 'test-output/browser/journey-failure.json'),
+        `${JSON.stringify(report, null, 2)}\n`,
+        'utf8',
+      );
+    },
+  });
   const source = await currentSourceProvenance(sourceSha);
   const evidenceDirectory = join(root, 'test-output/browser/authenticated-editor-1.0');
   await mkdir(evidenceDirectory, { recursive: true });

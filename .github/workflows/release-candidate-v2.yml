@@ -407,6 +407,16 @@ jobs:
             echo 'JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND must point to the isolated real-service acceptance harness' >&2
             exit 1
           }
+          # Durable evidence retention needs a persistent location OUTSIDE the
+          # checkout and _work/_temp (both are wiped between jobs). The runner
+          # operator sets this; e.g. /opt/actions-runner/ci-evidence.
+          evidence_root="${JOY_MEDIA_CI_EVIDENCE_ROOT:-}"
+          test -n "$evidence_root" || { echo 'JOY_MEDIA_CI_EVIDENCE_ROOT must point to a persistent evidence directory outside _work' >&2; exit 1; }
+          mkdir -p "$evidence_root"
+          test -d "$evidence_root" && test -w "$evidence_root" || { echo "JOY_MEDIA_CI_EVIDENCE_ROOT is not a writable directory: $evidence_root" >&2; exit 1; }
+          case "$evidence_root" in
+            *"$RUNNER_WORKSPACE"* | *"/_work/"* | *"/_temp/"*) echo "JOY_MEDIA_CI_EVIDENCE_ROOT must be outside the checkout / _work / _temp: $evidence_root" >&2; exit 1 ;;
+          esac
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm exec playwright install chromium
@@ -440,6 +450,7 @@ jobs:
           printf '%s' "$WINDOWS_EVIDENCE_B64" | base64 --decode > test-output/windows/acceptance.json
           test -s test-output/windows/acceptance.json
       - name: Run authenticated real-service desktop acceptance and evidence
+        id: harness
         shell: bash
         run: |
           set -euo pipefail
@@ -468,32 +479,72 @@ jobs:
         run: |
           set -euo pipefail
           pnpm run release:gate
-      - name: Retain real-service evidence (redacted, before workspace cleanup)
+      - name: Retain real-service evidence (durable, redacted, checksum-verified)
         if: always()
         shell: bash
         env:
           JOY_MEDIA_EVIDENCE_PASS: ${{ matrix.pass }}
         run: |
           set -uo pipefail
-          # The next job's checkout runs `git clean -ffdx`, wiping this pass's
-          # test-output/ before it can be inspected (pass 1 and pass 2 run
-          # serially on the one joy-media-acceptance runner). Copy an EXPLICIT
-          # allowlist of structured evidence into RUNNER_TEMP now, sanitize it
-          # (literal + base64 + url-encoded secrets, bearer headers, presigned
-          # signature params), leak-guard it, and let the next step upload it.
-          # Shared implementation, exercised by evidence-retention.test.mjs.
+          # Pass 1 and pass 2 run serially on the one joy-media-acceptance
+          # runner; pass 2's checkout `git clean`s pass 1's test-output/. This
+          # copies an EXPLICIT allowlist of structured evidence, sanitizes it
+          # (literal/base64/url-encoded secrets, Bearer headers, presigned
+          # params), leak-guards it, writes MANIFEST.sha256/.json, and PERSISTS
+          # it to $JOY_MEDIA_CI_EVIDENCE_ROOT (outside _work), re-verifying every
+          # file against the manifest. Non-zero exit => the pass fails. Shared
+          # impl, exercised by evidence-retention.test.mjs.
           bash ops/self-hosted/linux-runner/retain-evidence.sh \
             "$PWD" \
-            "${{ runner.temp }}/real-service-evidence-p${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}"
-      - name: Upload real-service evidence artifact (per pass, before next checkout)
+            "${{ runner.temp }}/real-service-evidence-p${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}" \
+            "$JOY_MEDIA_CI_EVIDENCE_ROOT"
+      - name: Verify retained evidence (required — missing evidence fails the gate)
         if: always()
-        continue-on-error: true
+        shell: bash
+        env:
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+        run: |
+          set -euo pipefail
+          root="$JOY_MEDIA_CI_EVIDENCE_ROOT/$CANDIDATE_SHA/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-p${{ matrix.pass }}"
+          test -d "$root" || { echo "durable evidence dir missing: $root" >&2; exit 1; }
+          test -s "$root/MANIFEST.sha256" && test -s "$root/MANIFEST.json" || { echo 'evidence manifest missing' >&2; exit 1; }
+          ( cd "$root" && sha256sum -c MANIFEST.sha256 ) || { echo 'evidence checksum verification FAILED' >&2; exit 1; }
+          test ! -s "$root/REDACTION-FAILURES.txt" || { echo 'a staged evidence file failed redaction (quarantined) — see REDACTION-FAILURES.txt' >&2; cat "$root/REDACTION-FAILURES.txt" >&2; exit 1; }
+          # teardown.json is required for EVERY pass outcome and must be clean.
+          test -s "$root/test-output/operations/teardown.json" || { echo 'teardown.json missing from retained evidence' >&2; exit 1; }
+          node -e '
+            const r = require(process.argv[1]);
+            if (r.clean !== true) { console.error("teardown not clean: " + JSON.stringify(r.residue || r)); process.exit(1); }
+            console.error("teardown verified clean: " + (r.verified || []).join(", "));
+          ' "$root/test-output/operations/teardown.json"
+          # If the harness step succeeded, the FULL required evidence set must be present.
+          if [ "$HARNESS_OUTCOME" = "success" ]; then
+            for rel in \
+              test-output/browser/journeys.json \
+              test-output/browser/real-service-profile-matrix.json \
+              test-output/release-performance/polling.json \
+              test-output/release-performance/effects-soak.json \
+              test-output/release-performance/timeline-integrity.json \
+              test-output/release-performance/editor.json \
+              test-output/delivery/result.json \
+              test-output/operations/restore.json \
+              test-output/windows/acceptance.json \
+              test-output/ci-janitor/inventory.json; do
+              test -s "$root/$rel" || { echo "required evidence missing after a successful harness run: $rel" >&2; exit 1; }
+            done
+          else
+            echo "harness outcome=$HARNESS_OUTCOME — a journey-failure.json is expected:"
+            test -s "$root/test-output/browser/journey-failure.json" && echo "  present" || echo "  (not written — pre-journey failure)"
+          fi
+          echo "retained evidence verified: $root"
+      - name: Upload real-service evidence artifact (per pass — REQUIRED, no silent masking)
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: real-service-evidence-run${{ github.run_id }}-attempt${{ github.run_attempt }}-pass${{ matrix.pass }}
           path: ${{ runner.temp }}/real-service-evidence-p${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
           retention-days: 14
-          if-no-files-found: warn
+          if-no-files-found: error
           overwrite: false
       - name: Verify real-service acceptance teardown
         if: always()
