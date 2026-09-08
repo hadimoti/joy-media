@@ -32,6 +32,9 @@ persist_root=${3:-}
 CANDIDATE_SHA=$( (cd "$ws" && git rev-parse --verify --quiet HEAD) 2>/dev/null || true )
 [ -n "$CANDIDATE_SHA" ] || CANDIDATE_SHA=unknown
 case "$CANDIDATE_SHA" in *[!0-9a-fA-F]*) CANDIDATE_SHA=unknown ;; esac
+if [ "$CANDIDATE_SHA" != unknown ] && [ ${#CANDIDATE_SHA} -ne 40 ]; then
+  echo "retain-evidence: WARNING — resolved candidate sha '$CANDIDATE_SHA' is ${#CANDIDATE_SHA} chars, not 40; the workflow verify step keys the path off the 40-char input and may not find this dir" >&2
+fi
 RUN=${GITHUB_RUN_ID:-local}
 ATTEMPT=${GITHUB_RUN_ATTEMPT:-1}
 PASS=${JOY_MEDIA_EVIDENCE_PASS:-0}

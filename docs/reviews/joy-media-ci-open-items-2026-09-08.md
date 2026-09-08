@@ -48,10 +48,14 @@ lifecycle are established before any escalation:
   unconditionally recreates its `MC_CONFIG_DIR` on every call — see §7.
 
 Mechanics extracted to `ops/self-hosted/linux-runner/real-service-teardown.mjs`
-and covered by `real-service-teardown.test.mjs` (16 cases: SIGTERM exit, delayed
-exit, unresponsive → SIGKILL, whole-group kill, unrelated process untouched,
+and covered by `real-service-teardown.test.mjs` (SIGTERM exit, delayed exit,
+unresponsive → SIGKILL, whole-group kill, unrelated process untouched,
 already-exited, populated-dir removal, writer-recreates-path reported,
-writer-stops-then-succeeds). `pnpm test:harness` runs them.
+writer-stops-then-succeeds). `pnpm test:harness` (**27 `node:test` cases** across
+`real-service-teardown` + `ci-namespace-classify` + `real-service-evidence` +
+`evidence-retention`) runs them, and is now invoked by `release-candidate-v2`
+(`linux-real-services`, full set on Linux) and `ci-dev` (cross-platform subset)
+— previously it was matched by no workflow (review B3).
 
 **Assertion:** each completed pass leaves **no run-owned schema, legacy schema,
 bucket, object, temp directory or child process**.
@@ -207,6 +211,13 @@ process-group shutdown; `await worker.terminate()`. See §1.
 
 ## 8. Evidence retention before workspace cleanup
 
+> **SUPERSEDED by §9.2** — this section describes the first (bench-4) evidence
+> retention attempt with `continue-on-error: true` and a `RUNNER_TEMP` copy.
+> The current contract is the durable, checksum-verified,
+> `JOY_MEDIA_CI_EVIDENCE_ROOT` store with a required "Verify retained evidence"
+> gate step and **no** `continue-on-error` on the upload. Read §9.2 for what
+> actually ships.
+
 **Was:** `real-service-acceptance (pass 1)` and `(pass 2)` run **serially on the
 one `joy-media-acceptance` runner**. Pass 2's `actions/checkout` runs
 `git clean -ffdx`, wiping pass 1's `test-output/` — including the observer's
@@ -252,10 +263,16 @@ blockers that are **not** in the teardown / repetition / coverage changes:
    `netErrorCodesObserved`, full detail) **before** the throw, with an explicit
    "`net::ERR_*` ≠ HTTP 404, cause undetermined" note. `sanitizeUrl` drops
    userinfo + query + fragment. `real-service-evidence.test.mjs` (7 cases).
-   **Bounded reproduction:** run against the real dev server (smoke, no soak) —
-   B1 clean, B2 pending; the earlier FORCE_FAIL smoke run + bench-4 pass 1 were
-   also clean journeys. Flake rate ~1 in ≥4 real journeys. **Not suppressed, not
-   waived** — the enriched telemetry captures the resource on the next hit.
+   **STATUS — UNRESOLVED FINDING (owner correction).** The `ERR_FILE_NOT_FOUND`
+   was **observed once** (benchmark-4 pass 2). Bounded diagnostic runs against
+   the real dev server (2 explicit + the FORCE_FAIL smoke + bench-4 pass 1 = 4
+   clean journeys) did **not** reproduce it — that establishes **neither a
+   failure rate nor a fixed cause**. The diagnostics work makes the **next**
+   occurrence analyzable (URL, resource type, phase, dev-server log — see M7
+   follow-up); it does **not** fix the underlying issue. The flake is **not
+   suppressed and not waived** — a recurrence fails the gate. Independent review
+   - the owner decide whether to gate on it or accept it with the diagnostic in
+     place.
 2. **`actions/upload-artifact` failed on BOTH passes** —
    `Failed to CreateArtifact: Artifact storage quota has been hit` (account-level;
    same as the earlier hosted `r2-candidate` runs). `continue-on-error: true`
@@ -272,14 +289,30 @@ blockers that are **not** in the teardown / repetition / coverage changes:
    copy does not waive the required upload.** Verified end-to-end against a real
    injected-failure journey run: `journey-failure.json` + all evidence persisted,
    checksums verified, gate red.
-   **STILL NEEDED FROM THE OWNER:** (a) set `JOY_MEDIA_CI_EVIDENCE_ROOT` on the
-   `joy-media-acceptance` runner (e.g. `/opt/actions-runner/ci-evidence`);
-   (b) clear the artifact-storage quota — **read-only inventory: 50 artifacts /
-   4.62 GiB, all `playwright-evidence` from Aug-2026 abandoned hosted
-   experiments; proposal to delete all 50** (no historical evidence lost, no
-   storage purchase). Until (b), the full gate correctly fails on the upload.
+   **Demonstrated end-to-end** (focused check, 2026-09-09): the "Verify retained
+   evidence" step passes on the persistent copy (`sha256sum -c`, `teardown.json`
+   `clean:true`, `journey-failure.json` retained) **before** the upload; a
+   simulated `upload-artifact` quota failure exits the step non-zero → the job is
+   RED; the persistent evidence is **still there and still checksum-verifies
+   after** the failed upload. Nothing silent; evidence never lost.
 
-Neither is a threshold or a rerun question.
+   **STILL NEEDED FROM THE OWNER** (setup, not code —
+   `joy-media-ci-evidence-store-2026-09-08.md`,
+   `joy-media-ci-artifact-inventory-2026-09-08.md`):
+   (a) provision the evidence store — **recommended: a host bind mount
+   `/srv/joy-media-ci/evidence → /opt/ci-evidence` (`chown 1001:1001`, `chmod
+750`)** on the `joy-media-ci-acceptance` runner, `JOY_MEDIA_CI_EVIDENCE_ROOT=/opt/ci-evidence`.
+   A bind mount survives container recreation, `config.sh --replace`, and
+   `docker volume rm`; a dir under the runner volume survives only the first two.
+   924 GB free on `/dev/sdd`; ~1 MB/gate-run.
+   (b) the artifact quota — **50 artifacts / 4.62 GiB, all `ci.yml`
+   `playwright-evidence` from 2026-08-11…15. 6 are referenced by `docs/qa/`
+   closeouts (~27.6 MiB); 44 are unreferenced (~4.59 GiB).** Recommendation:
+   delete the 44 unreferenced after the owner confirms the exact list. No storage
+   purchase. Until the quota is cleared the full gate correctly fails on the
+   upload step.
+
+Neither §9.1 nor §9.2 is a threshold or a rerun question.
 
 ## Evidence still required before independent approval
 
