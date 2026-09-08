@@ -166,22 +166,31 @@ jobs:
           # Detect a genuine leak: a joy-worker.exe whose command line references
           # THIS run's RUNNER_TEMP (so an unrelated joy-worker on the box, or a
           # concurrent job's, never trips this) that outlives a bounded settle
-          # window. The window is 30s because a Node SEA can take >15s to fully
-          # release under machine load after printing its self-test result.
+          # window. 30s because a Node SEA can take >15s to fully release under
+          # machine load after printing its self-test result.
+          #
+          # A joy-worker.exe whose CommandLine cannot be read is NOT assumed
+          # clean: we cannot prove it is not ours, so an unreadable one that
+          # survives the settle window fails the step just like a run-owned one.
           $ownedPattern = [regex]::Escape($env:RUNNER_TEMP)
-          function Get-OwnedWorkers {
-            @(Get-CimInstance Win32_Process -Filter "Name='joy-worker.exe'" -ErrorAction SilentlyContinue |
-              Where-Object { $_.CommandLine -and $_.CommandLine -match $ownedPattern })
+          function Get-SuspectWorkers {
+            $all = @(Get-CimInstance Win32_Process -Filter "Name='joy-worker.exe'" -ErrorAction SilentlyContinue)
+            $owned = @($all | Where-Object { $_.CommandLine -and ($_.CommandLine -match $ownedPattern) })
+            $unreadable = @($all | Where-Object { -not $_.CommandLine })
+            [pscustomobject]@{ Owned = $owned; Unreadable = $unreadable }
           }
-          $leaked = @()
+          $suspect = $null
           for ($attempt = 0; $attempt -lt 30; $attempt++) {
-            $leaked = Get-OwnedWorkers
-            if ($leaked.Count -eq 0) { break }
+            $suspect = Get-SuspectWorkers
+            if ($suspect.Owned.Count -eq 0 -and $suspect.Unreadable.Count -eq 0) { break }
             Start-Sleep -Seconds 1
           }
-          if ($leaked.Count -gt 0) {
-            $leaked | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-            throw "clean Worker teardown found a run-owned joy-worker process after a 30s settle: $($leaked.ProcessId -join ', ')"
+          $bad = @($suspect.Owned) + @($suspect.Unreadable)
+          if ($bad.Count -gt 0) {
+            $bad | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+            $ownedIds = ($suspect.Owned.ProcessId -join ', ')
+            $unreadableIds = ($suspect.Unreadable.ProcessId -join ', ')
+            throw "clean Worker teardown after a 30s settle — run-owned joy-worker: [$ownedIds]; joy-worker with unreadable command line (cannot prove not ours): [$unreadableIds]"
           }
 
   acceptance-primary:

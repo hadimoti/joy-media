@@ -58,38 +58,73 @@ for determinism and to guarantee one clean build, but it is not a headline lever
   (`devices['Desktop Chrome']`) differing only in `viewport` — restructuring the
   viewport matrix touches **zero** browser-engine coverage.
 
-## Production-build parity — **NOT achieved; keep the dev server**
+## Production-build parity — **NOT a parity problem; the ~16 tests are dev-server-only by design**
 
 The real-service harness serves the editor with `pnpm --filter
 @joy-media/editor-web dev` (Vite dev). A prod build (`vite build` → `vite
 preview` with a mirrored `/api` proxy) was tested end to end:
 
-| Server                             | `tests/e2e --project=desktop-primary --workers=2`                   |
-| ---------------------------------- | ------------------------------------------------------------------- |
-| Vite dev (current)                 | **99 passed** / 1 skipped                                           |
-| `vite preview` of the prod `dist/` | **83 passed** / 1 flaky / 1 skipped — **~16 tests unaccounted for** |
+| Server                             | `tests/e2e --project=desktop-primary --workers=2`           |
+| ---------------------------------- | ----------------------------------------------------------- |
+| Vite dev (current)                 | **99 passed** / 1 skipped                                   |
+| `vite preview` of the prod `dist/` | **83 passed** / 1 flaky / 1 skipped — **~16 tests not run** |
 
-The unaccounted specs cluster around `agent-observation-decode.spec.ts` and
-`final-encoded-export-decoder.spec.ts` (WebCodecs / dedicated browser-worker
-decode paths). Those same specs pass in 11.5 s against the dev server, so the
-gap is a **preview-server config parity problem** (worker module URLs / response
-headers), not a product defect. **Conclusion: do not switch the harness to a
-prod build in this pass — it would silently drop ~16 WebCodecs/decoder tests.**
-A header-parity preview server is a separate, reviewable follow-up.
+**Root cause (identified, not guessed):** `agent-observation-decode.spec.ts` and
+`final-encoded-export-decoder.spec.ts` do a **runtime dynamic import of a raw
+TypeScript source path** — `await import('/src/media-observation/observation-worker-client.ts')`
+— to white-box-test the internal decode Worker module. Vite dev transpiles and
+serves `/src/**/*.ts` on demand; a production build (`dist/`, bundled + hashed,
+no `/src/` and no `.ts`) cannot serve that path, so those tests error in setup
+and do not run. **This is not COOP/COEP** — the specs use a plain `Worker` +
+`VideoDecoder`/`AudioDecoder` and `observation-service.ts` explicitly avoids
+`SharedArrayBuffer`; nginx for joyst.ir (`deploy/joy-media.nginx.conf`) sets
+only `X-Content-Type-Options`.
 
-## Windows `windows-worker-clean` teardown flake — root cause
+**Implications for the owner's questions:**
+
+1. **Why ~16 tests are lost:** they reach into `/src/*.ts` at runtime — a
+   Vite-dev-only mechanism. Not a product defect and not a prod-config defect.
+2. **Does deployed production have the same problem:** N/A — these tests would
+   never run against _any_ built artifact (prod, `vite preview`, or joyst.ir);
+   they are internal-module tests bound to the dev server.
+3. **Do not count skipped decoder tests as production acceptance:** agreed — and
+   they never were. Both the current gate lanes (`acceptance` fixture-only and
+   `real-service-acceptance`) run against the Vite dev server, and **v2 keeps the
+   dev server for both** (prod-build switch rejected). So all 100 tests,
+   including the 16 `/src/` importers, **still run in v2's gate, twice**, exactly
+   as before. Nothing is lost by this optimization.
+
+**Tracked follow-up (not this pass):** a white-box test that imports `/src/*.ts`
+at runtime cannot be exercised against a shipped artifact. If a prod-representative
+render/decode path is ever wanted in the gate, those specs need rewriting to
+import the built module (or a dedicated prod-preview harness with a `/src` alias).
+Pre-existing test-design choice; out of scope for CI speed.
+
+## Windows `windows-worker-clean` teardown flake — root cause + fix + real-process test
 
 Run `34227092126` failed at the **workflow YAML step** "Verify clean Worker
 teardown" (not `worker-acceptance.ps1`, which has a thorough `finally` +
 `Stop-ProcessTree`). That step does `Get-Process -Name 'joy-worker'` — a
 **name-only match, any source** — with a 15 × 1 s wait, then force-kill + throw.
 `worker-acceptance.ps1` ends with `repair` / `update` / `rollback`
-`Invoke-WorkerSelfTest` calls (`& $Path --joy-worker-self-test`); under machine
-load a SEA `joy-worker.exe` can take >15 s to fully release after printing its
-result. **Fix (this branch):** match run-owned processes by command-line
-(`RUNNER_TEMP` / candidate), like `Get-WorkerRootProcesses` already does, and
-widen the settle window to ~30 s. Keeps genuine-leak detection, removes the
-load-sensitivity.
+`Invoke-WorkerSelfTest` calls; under machine load a SEA `joy-worker.exe` can take
+
+> 15 s to fully release after printing its result.
+
+**v2 fix:** classify `joy-worker.exe` processes by command line:
+
+- **run-owned** — `CommandLine` matches this job's `RUNNER_TEMP` → a leak if it
+  survives a **30 s** settle.
+- **unreadable** — `CommandLine` is null/unreadable → **also a failure** if it
+  survives the window: we cannot prove it is not ours, so it is not silently
+  passed.
+- **unrelated** — `CommandLine` readable and not matching `RUNNER_TEMP` → ignored.
+
+**Verified with real processes** (2026-09-08): two `timeout.exe` copies renamed
+`joy-worker.exe` were launched — one with `RUNNER_TEMP` in its arguments, one
+without. The detection matched **only** the run-owned one (correct PID),
+**ignored** the unrelated one, and saw **zero** unreadable-cmdline workers.
+Verdict: PASS — precise.
 
 ## Consolidated before → after (no double-counting)
 
