@@ -10,8 +10,8 @@ owner-delegated taste review (recorded in the scorecard; all four shipping packs
 
 | Field    | Value                                                                                                                                                            |
 | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| commit   | `PENDING` — re-cut 2026-09-08 after the taste fixes + `persian-editorial` retirement (branch `codex/joy-live-director`)                                          |
-| tree     | `PENDING`                                                                                                                                                        |
+| commit   | `7a509e6c5aeca07aa4dc6539b326b283f511078e` — re-cut 2026-09-08 after the taste fixes + `persian-editorial` retirement (branch `codex/joy-live-director`)         |
+| tree     | `71c57ff611fda8dade07d37e667fe5f89cc2b141`                                                                                                                       |
 | lockfile | `pnpm-lock.yaml` sha256 `36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3` (byte-identical to R1 — zero lockfile delta; R2 adds no dependencies) |
 | base     | `855734cf0c875101a632426983db2638c2adddcd` (R1, **LIVE** on joyst.ir since 2026-09-07)                                                                           |
 
