@@ -476,21 +476,25 @@ jobs:
         run: |
           set -uo pipefail
           # The next job's checkout runs `git clean -ffdx`, wiping this pass's
-          # test-output/ before it can be inspected. Snapshot + redact it into
-          # RUNNER_TEMP now so the next step can upload it as an artifact. Shared
-          # implementation, exercised by evidence-retention.test.mjs.
+          # test-output/ before it can be inspected (pass 1 and pass 2 run
+          # serially on the one joy-media-acceptance runner). Copy an EXPLICIT
+          # allowlist of structured evidence into RUNNER_TEMP now, sanitize it
+          # (literal + base64 + url-encoded secrets, bearer headers, presigned
+          # signature params), leak-guard it, and let the next step upload it.
+          # Shared implementation, exercised by evidence-retention.test.mjs.
           bash ops/self-hosted/linux-runner/retain-evidence.sh \
-            test-output \
+            "$PWD" \
             "${{ runner.temp }}/real-service-evidence-p${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}"
-      - name: Upload real-service evidence artifact
+      - name: Upload real-service evidence artifact (per pass, before next checkout)
         if: always()
         continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: real-service-evidence-p${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: real-service-evidence-run${{ github.run_id }}-attempt${{ github.run_attempt }}-pass${{ matrix.pass }}
           path: ${{ runner.temp }}/real-service-evidence-p${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
           retention-days: 14
           if-no-files-found: warn
+          overwrite: false
       - name: Verify real-service acceptance teardown
         if: always()
         shell: bash

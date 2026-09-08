@@ -145,26 +145,27 @@ deletion requires proven CI ownership **and** a confirmed `completed` status.
 completed→orphan / **404→not-found** / unknown / future-state→unknown;
 `isSweepable('not-found') === false`).
 
-**Recovery test — first run (2026-09-08, revision `185f18c6`, real CI Postgres +
-MinIO), 3 disposable schemas:**
+**Recovery test — corrected revision `61bc4c44` (2026-09-08, real CI Postgres +
+MinIO, 4 disposable schemas), `GITHUB_RUN_ID=34252332556`:**
 
-| Phase | Token                                  | `34239133175_9_1` (completed) | `34252332556_9_1` (active/current) | `99999999991_9_1` (404) | swept                                |
-| ----- | -------------------------------------- | ----------------------------- | ---------------------------------- | ----------------------- | ------------------------------------ |
-| 1     | **invalid**                            | `unknown`                     | `current`                          | `unknown`               | **[] — nothing deleted**             |
-| 2     | **valid**, `GITHUB_RUN_ID=34252332556` | `orphan` → **swept**          | `current` → **kept**               | `not-found` → **swept** | `[34239133175_9_1, 99999999991_9_1]` |
+| Phase | Token                | `34239133175_9_1` (completed run)         | `34252332556_9_1/_9_2` (current run) | `99999999991_9_1` (404) | swept                                                  |
+| ----- | -------------------- | ----------------------------------------- | ------------------------------------ | ----------------------- | ------------------------------------------------------ |
+| 1     | **invalid**          | `unknown` → kept                          | `current` → kept                     | `unknown` → kept        | **`[]` — nothing deleted**                             |
+| 2     | **valid**, `--sweep` | `orphan` (status `completed`) → **SWEPT** | `current` → **kept**                 | **`not-found` → KEPT**  | **`["ci_accept_34239133175_9_1"]`**, `sweepErrors: []` |
 
-This run used the **old** rule (`not-found` → `orphan`). Under the corrected
-rule the `99999999991_9_1` (404) row must be **kept**, not swept. **The recovery
-test is re-run on the corrected revision** alongside the quiet-host benchmark;
-expected phase-2 result: `orphan → swept`, `current → kept`, **`not-found` →
-kept**, `unknown → kept`. The v2 workflow runs inventory-only; `--sweep` is
-enabled after this review.
+Survivors after phase 2: the two current-run schemas + **the 404 schema**. Only
+the one namespace whose owning run status is provably `completed` was removed. An
+eligible abandoned namespace is cleaned while the current run and every
+unprovable namespace (404, unreadable) are untouched. All 4 test schemas dropped
+on exit. `pnpm test:harness` locks the same table deterministically
+(`ci-namespace-classify.test.mjs`).
 
-**Note:** phase 2 (`--sweep`) also cleared the 15 historical leaked namespaces
-(all `completed`-run, empty schemas / 0-byte buckets — enumerated in
-`joy-media-ci-open-items-2026-09-08.md` §6). This was a side effect of exercising
-`--sweep` against the shared store; those namespaces are gone. Their identities
-are preserved in that doc.
+**Note — first recovery run (revision `185f18c6`, superseded):** used the old
+rule (`not-found` → `orphan`) and swept `99999999991_9_1` plus, as a
+side-effect of exercising `--sweep` against the shared store, the 15 historical
+leaked namespaces (all `completed`-run, empty schemas / 0-byte buckets —
+identities preserved in `joy-media-ci-open-items-2026-09-08.md` §6). The v2
+workflow runs inventory-only; `--sweep` is enabled only after this review.
 
 ## 4. Gate-summary — structured JSON parsing + regression cases
 
@@ -239,9 +240,13 @@ file. Plus `ci-gate-summary.ts` + `.test.ts`, `ci-namespace-janitor.mjs` +
 
 ## 6. Benchmark 3 failure — deterministic `tempRoot` teardown-ordering bug (fixed)
 
-Both `real-service-acceptance` passes of benchmark 3 failed with the **identical,
-sole** residue `tempRoot /tmp/joy-media-real-acceptance-XXXXXX still present`
-after `rm(tempRoot)` ran without throwing.
+**The two passes did not have identical overall failures.** Both hit the **same
+deterministic teardown residue** — `tempRoot /tmp/joy-media-real-acceptance-XXXXXX
+still present` after `rm(tempRoot)` ran without throwing. **Pass 1 additionally**
+had an independent `release-performance-observer` (effects-soak) failure whose
+exact exceeded budget was lost to the next job's `git clean`; **pass 2's soak
+passed** on the same candidate. So: teardown residue = common + deterministic;
+soak failure = pass-1 only + undetermined.
 
 **Root cause (reproduced locally in `joy-media-ci-linux`):** the teardown's own
 post-cleanup bucket check, `mc ls joy-ci/<bucket>`, ran with
@@ -284,13 +289,40 @@ confirm**, a contention/environment cause. **Observer thresholds unchanged.**
 
 `real-service-acceptance (pass 1)` and `(pass 2)` run serially on the one
 `joy-media-acceptance` runner; pass 2's `checkout` `git clean`s pass 1's
-`test-output/`. Two `if: always()` steps now snapshot + redact `test-output/`
-(`retain-evidence.sh`, `perl \Q..\E` over every `JOY_MEDIA_CI_S3_*` /
-`JOY_MEDIA_CI_DATABASE_URL` / observer-token value) and upload it
-(`actions/upload-artifact@v4.6.2`, pinned SHA, `continue-on-error`, 14-day).
-`evidence-retention.test.mjs` proves an **intentionally-failed pass** fixture
-still yields a snapshot with the failure signal intact and the secret redacted.
+`test-output/`. Two `if: always()` steps, **before** the teardown-verify step
+(so a failed pass still runs them), stage + sanitize + upload:
 
-**On independent acceptance:** v2 replaces v1; `ci-dev.yml` gets scoped triggers
-(PR + push-to-`main` only, not every `codex/**`); the janitor `--sweep` is
-enabled. Then R2 completion resumes (GAP 1 / 2 / 4 / 5).
+- `retain-evidence.sh` copies an **explicit allowlist** of structured evidence
+  JSON (never a blanket `cp -a`), then scrubs each file of: literal secret values
+  **and their base64 / percent-encoded forms**, `Authorization: Bearer …`
+  headers, presigned-URL params (`X-Amz-Signature` / `Credential` /
+  `Security-Token` / `Signature`), and `scheme://user:pass@host`. A final
+  **leak-guard** re-scans the staged tree and quarantines (removes + records in
+  `REDACTION-FAILURES.txt`) any file that still matches a literal/base64 secret.
+- `actions/upload-artifact@v4.6.2` (pinned SHA, `continue-on-error`,
+  `overwrite: false`, 14-day) → artifact
+  **`real-service-evidence-run<id>-attempt<n>-pass<p>`** (run id + attempt + pass
+  in the name; each pass uploads from its own job before the next checkout).
+
+`evidence-retention.test.mjs` (in `pnpm test:harness`) proves an
+**intentionally-failed pass** fixture: the failure signal survives; the
+non-allowlisted file is not copied; no secret survives in any encoding; the
+leak-guard quarantines a file that would leak.
+
+### Review scope + deployment gate (unchanged)
+
+Independent review must cover **both** (1) the implementation (harness teardown,
+bounded shutdown, janitor, evidence retention) **and** (2) the
+**reduced-repetition / coverage contract** (`2 workflow runs → 1 run, 2 isolated
+passes`; browser viewport matrix; `runDesktopMatrix` 7→primary+6; soak 4→2 per
+gate). A green benchmark is **evidence, not deployment approval**.
+
+An additional Opus review of CI v2 is welcome, but the **previously agreed
+independent "Astra" review remains the deployment gate** — deployment still
+requires Astra's explicit `APPROVE_FOR_DEPLOY <sha> <tree> <lock>` on the final
+R2 candidate, then the owner's go-ahead. That requirement is unchanged here.
+
+**On independent acceptance of the CI contract:** v2 replaces v1; `ci-dev.yml`
+gets scoped triggers (PR + push-to-`main` only, not every `codex/**`); the
+janitor `--sweep` is enabled. Then R2 completion resumes (GAP 1 / 2 / 4 / 5),
+re-cut candidate → CodeRabbit → optimized gate → Astra → owner deploy go-ahead.

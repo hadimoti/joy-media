@@ -171,7 +171,9 @@ the next benchmark will classify each (expected: all `orphan`); enabling
 ## 7. Benchmark 3 root cause — deterministic `tempRoot` residue (fixed)
 
 Benchmark 3 (`gh run 34252332556`, candidate `8c5a4445`) failed
-`real-service-acceptance` on **both** passes with the **identical, only** residue:
+`real-service-acceptance` on **both** passes. **The passes' overall failures were
+not identical:** both hit the same deterministic teardown residue below; **pass 1
+also** had an independent, undetermined observer-soak failure (§ below).
 
 ```
 real-service teardown is not clean (pass N):
