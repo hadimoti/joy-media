@@ -1,9 +1,27 @@
-# GitHub Actions artifact storage — exact inventory (owner decision)
+# GitHub Actions artifact storage — inventory + deletion record
 
-The account's Actions **artifact storage quota is exhausted**, which is why
-`actions/upload-artifact` failed on both benchmark-4 real-service passes. This is
-the complete inventory so the owner can decide, per artifact, what (if anything)
-to delete. **Nothing has been deleted.**
+The account's Actions **artifact storage quota was exhausted**, which is why
+`actions/upload-artifact` failed on both benchmark-4 real-service passes.
+
+## DONE — 2026-09-09 (owner-approved)
+
+Per the owner's explicit approval ("delete the 44 specifically inventoried,
+unreferenced artifacts; preserve the six QA-referenced; recheck references;
+stop if the inventory or classification changed"):
+
+- **References re-checked against `docs/qa/`** (the actual closeout/evidence
+  records — a naive `docs/` grep is now polluted by _this_ inventory doc). Result
+  **unchanged**: the same **6** artifacts are referenced, **44** are not.
+- The computed 44-ID delete set was **cross-checked byte-for-byte** against the
+  "44 unreferenced" table below — exact match.
+- **44 artifacts deleted** (`gh api -X DELETE …/artifacts/<id>`), **0 failures**.
+- **6 kept** (`9197194787`, `9153039335`, `9114994065`, `9099815687`,
+  `9098859352`, `9097196418`).
+- Repo artifact storage now **6 artifacts / 28,985,329 bytes ≈ 27.6 MiB** (was
+  50 / 4.62 GiB). No storage purchased.
+
+This doc (the inventory) is retained as the record. The remaining tables are the
+pre-deletion state.
 
 ## Totals
 

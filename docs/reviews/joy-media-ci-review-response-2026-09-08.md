@@ -60,3 +60,67 @@ next benchmark, but M7 (log the dev server) should land before the flake in
 
 **A green benchmark still approves nothing.** The Astra `APPROVE_FOR_DEPLOY`
 gate on the final R2 candidate is separate and unaffected.
+
+---
+
+## Update 2026-09-09 — owner's pre-benchmark checklist + M7
+
+Commit `6779a375` on top of `06915066`:
+
+- **M7 → FIXED (upgraded from follow-up).** `webProcess` stdio `ignore` → `pipe`;
+  a 4000-line **redacted-at-capture** ring buffer (secret values, `://user:pass@`,
+  `Bearer` scrubbed) flushed to `test-output/browser/web-dev-server.log` on
+  **any** journey failure, allowlisted in `retain-evidence.sh`, referenced from
+  `journey-failure.json`. Verified in `joy-media-ci-acceptance`: log captured
+  (vite startup lines; a real transform/resolve error would land here), zero
+  secret leak. **This does not resolve §9.1** — the intermittent
+  `ERR_FILE_NOT_FOUND` is still open; M7 only makes the next occurrence
+  diagnosable.
+- **Coverage by test IDENTITY (owner check 3).** `runDesktopMatrix` now records
+  `stats.passedTitles` and fails a responsive leg unless the **3 exact required
+  test titles** (wp32 checkpoint / golden-path login-gate / wp35
+  transport-geometry) each ran and passed — a minimum count cannot prove the
+  intended tests ran. `tooling/release/assert-playwright-titles.mjs` does the
+  same for the `acceptance-responsive` **job** at every one of the 6 viewports.
+  Verified 3/3 identity-OK at `desktop-minimum`. Applies to both passes and both
+  paths (the job and the real-service harness).
+- **Bundle enforcement clarified (owner check 4 / decision 5).**
+  `measure-entry-bundle.mjs` is **informational only** — it no longer exits
+  non-zero on size, and its JSON `enforcement` field says so. The **enforced**
+  entry-bundle budget is `vite.config.ts` `bundlePolicy()` (per-chunk, at build
+  time; every gate lane runs `pnpm build`). **No new total-size threshold
+  introduced.** Reference numbers on `83daea2f`: entry raw 451,373 / gzip
+  133,184; eager modulepreload graph raw 2,908,836 / gzip 846,556.
+
+**Two latent bugs the verification surfaced (both fixed in `6779a375`):**
+
+1. `runDesktopMatrix` parsed the Playwright JSON from **stdout**, but `pnpm
+exec` prints its own preamble ("Scope: … / Lockfile passes … / Done in Nms")
+   whenever its periodic lockfile check fires → `JSON.parse` failed →
+   `reportParseError` → the leg "failed" with 0 tests. **A benchmark would have
+   failed intermittently on this.** Fixed: read `PLAYWRIGHT_JSON_OUTPUT_NAME`
+   from a file, never stdout.
+2. `writeJourneyFailure` / `journeyFailureWritten` were declared _after_ the
+   top-level `try` that calls `recordJourney` → `ReferenceError` (TDZ) on the
+   first real journey failure since the M5 commit (`bf93f1bc`). The M5 focused
+   check used `FORCE_FAIL` (throws _after_ the journey) so it never hit this.
+   Fixed: moved to module scope before the `try`.
+
+**Owner-side prerequisites — DONE:**
+
+- **`JOY_MEDIA_CI_EVIDENCE_ROOT`** — provisioned as a dedicated named volume
+  `joy-media-ci-evidence → /opt/ci-evidence` on `joy-media-ci-acceptance`
+  (Docker Desktop, so a named volume over a VM bind path). Runner reconnected
+  without re-registration; persistence proven across `docker restart` + full
+  container replacement + a fresh unrelated container; existing mounts and the
+  other CI containers untouched. See `joy-media-ci-evidence-store-2026-09-08.md`.
+- **Artifact quota** — the **44 unreferenced** artifacts deleted (references
+  re-checked against `docs/qa/` first, unchanged; delete set cross-checked
+  against the inventory table); **6 QA-referenced kept**. Storage now ~27.6 MiB
+  (was 4.62 GiB). No purchase. See `joy-media-ci-artifact-inventory-2026-09-08.md`.
+
+**Remaining follow-ups (do not block the benchmark):** M6 (narrow the ~280-line
+telemetry mute), m2 (grandchild sweep), m3 (`rm` errno), m4 (`/tmp` residue),
+m9-decision (delete `initialEditorJsBytes` from the soak predicate?), m11.
+
+**Next:** independent re-review of `6779a375` → freeze → one full gate run.

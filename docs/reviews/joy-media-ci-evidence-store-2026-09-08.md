@@ -1,10 +1,48 @@
-# CI v2 — persistent evidence store (owner setup)
+# CI v2 — persistent evidence store
 
 `release-candidate-v2.yml`'s `real-service-acceptance` job requires
 `JOY_MEDIA_CI_EVIDENCE_ROOT` — a directory that durably keeps each pass's
 redacted, checksum-verified evidence so a **failed** pass's structure survives
-the next job's `git clean` and the artifact-storage outage. This note specifies
-exactly where it goes and proves it persists.
+the next job's `git clean` and the artifact-storage outage.
+
+## PROVISIONED — 2026-09-09 (owner-approved, idle window)
+
+The acceptance runner is a **Docker Desktop** container on the CI host (`docker
+info` → `docker-desktop`, Linux). On Docker Desktop a VM bind path is not durable
+across a Docker Desktop reset, so a **dedicated named volume** was used (the
+proposal's stated alternative "if a host path is undesirable"):
+
+|            |                                                                          |
+| ---------- | ------------------------------------------------------------------------ |
+| volume     | `joy-media-ci-evidence` (created `docker volume create`)                 |
+| mount      | `-v joy-media-ci-evidence:/opt/ci-evidence` on `joy-media-ci-acceptance` |
+| env        | `JOY_MEDIA_CI_EVIDENCE_ROOT=/opt/ci-evidence`                            |
+| perms      | `750 joyci:joyci` (uid 1001 — the runner)                                |
+| backing fs | `/dev/sdd` — **927.9 GB free**                                           |
+
+**How it was applied:** verified all runners `online / busy:false` and zero
+in-progress runs; `docker stop` + `docker rm` + `docker run` re-creating
+`joy-media-ci-acceptance` with its **exact prior config** (image
+`joy-media-ci-linux:2.337.0`, entrypoint, `--restart unless-stopped`, both
+networks `joy-media-acceptance` + `joy-media-ci`, the **existing**
+`joy-media-ci-acceptance-runner:/opt/actions-runner` mount, and its env via
+`--env-file` from `docker inspect` — values never printed) **plus** the evidence
+volume and the env var. The env-file was deleted afterwards.
+
+**Verified:**
+
+- The runner reconnected to GitHub **without re-registration** (`.runner`
+  persists in the runner volume) — `joy-media-ci-acceptance: online`.
+- **Persistence on the exact mount:** a marker file written to `/opt/ci-evidence`
+  survived (a) `docker restart`, (b) a full `docker stop` + `docker rm` +
+  `docker run` cycle of the acceptance runner, and (c) reads from a **fresh
+  unrelated `alpine` container** mounting `joy-media-ci-evidence`. Then removed.
+- **Existing mounts / unrelated workloads preserved:** post-change mounts are
+  `joy-media-ci-acceptance-runner → /opt/actions-runner` (unchanged) +
+  `joy-media-ci-evidence → /opt/ci-evidence` (new); `joy-media-ci-linux`,
+  `joy-media-ci-minio`, `joy-media-ci-postgres` all still `Up` / healthy.
+
+The rest of this note is the original analysis / rationale.
 
 ## The runner container as it is today
 
