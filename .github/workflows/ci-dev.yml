@@ -12,12 +12,16 @@ name: ci-dev
 #
 # Affected-test selection is deliberately NOT used: any change to shared
 # runtime / controller / schema / render / CI config runs the whole set below.
+#
+# TRIGGERS: workflow_dispatch only for now. The push / pull_request triggers
+# (commented below) are enabled only after the independent reviewer accepts this
+# workflow as the development-verification gate and it replaces ci.yml.
 
 on:
-  push:
-    branches: [main, 'codex/**']
-  pull_request:
   workflow_dispatch:
+  # push:
+  #   branches: [main, 'codex/**']
+  # pull_request:
 
 concurrency:
   group: ci-dev-${{ github.workflow }}-${{ github.ref }}
