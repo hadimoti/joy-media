@@ -143,6 +143,9 @@ jobs:
         run: |
           set -euo pipefail
           echo "development verification lanes: $LANE_RESULTS"
-          bad=$(printf '%s' "$LANE_RESULTS" | tr -d '[]" ' | tr ',' '\n' | grep -vc '^success$' || true)
-          test "$bad" -eq 0 || { echo "$bad development lane(s) not green" >&2; exit 1; }
+          if printf '%s' "$LANE_RESULTS" | grep -qwE 'failure|cancelled|skipped|timed_out|action_required'; then
+            echo 'a development lane did not succeed' >&2; exit 1
+          fi
+          printf '%s' "$LANE_RESULTS" | grep -qw success || {
+            echo 'no successful development lane result recorded' >&2; exit 1; }
           echo 'development verification passed — this is NOT a release approval'

@@ -513,8 +513,13 @@ jobs:
         run: |
           set -euo pipefail
           echo "lane results: $LANE_RESULTS"
-          # Every dependency result must be exactly "success". A cancelled or
-          # failed run is never a passing repeatability result.
-          bad=$(printf '%s' "$LANE_RESULTS" | tr -d '[]" ' | tr ',' '\n' | grep -vc '^success$' || true)
-          test "$bad" -eq 0 || { echo "$bad release lane result(s) were not success" >&2; exit 1; }
+          # Any non-success token (failure / cancelled / skipped / timed_out /
+          # action_required) fails the gate. A cancelled or failed run is never
+          # a passing repeatability result. Parse token-wise so pretty-printed
+          # JSON with newlines cannot confuse the check.
+          if printf '%s' "$LANE_RESULTS" | grep -qwE 'failure|cancelled|skipped|timed_out|action_required'; then
+            echo 'a release lane did not succeed' >&2; exit 1
+          fi
+          printf '%s' "$LANE_RESULTS" | grep -qw success || {
+            echo 'no successful release lane result recorded' >&2; exit 1; }
           echo 'all release lanes succeeded on both isolated passes'
