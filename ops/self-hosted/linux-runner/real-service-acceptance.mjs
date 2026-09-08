@@ -2,7 +2,7 @@
 /* global process, setTimeout, URL, Buffer, window, fetch, atob, btoa, crypto, localStorage */
 
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +23,7 @@ import {
   createJourneyTelemetry,
 } from './real-service-evidence.mjs';
 import { createLeaseHeartbeatLoop, throwIfLeaseCanceled } from './lease-heartbeat.mjs';
+import { isAlive, removeDirWithRetry, terminateProcessTree } from './real-service-teardown.mjs';
 
 const requireFromApi = createRequire(new URL('../../../apps/api/package.json', import.meta.url));
 const { Pool } = requireFromApi('pg');
@@ -251,14 +252,27 @@ try {
     deliveryEvidence,
     restoreEvidence,
   );
+  // Test hook: prove the finally-block teardown + the workflow's evidence
+  // retention still run (and are recorded) when the harness exits non-zero
+  // AFTER all evidence has been written. Never set in the release workflow.
+  if (process.env.JOY_MEDIA_REAL_ACCEPTANCE_FORCE_FAIL === '1')
+    throw new Error('forced failure after evidence write (JOY_MEDIA_REAL_ACCEPTANCE_FORCE_FAIL=1)');
   primaryError = null;
 } catch (error) {
   primaryError = error instanceof Error ? error : new Error(String(error));
 } finally {
   // Teardown is a required acceptance item, not best-effort. Every step is
   // attempted; a deletion FAILURE is recorded (never swallowed); then the
-  // runner is re-inspected and any run-owned residue — schema, bucket,
-  // objects, child process — fails the pass.
+  // runner is re-inspected and any run-owned residue — schema, bucket, objects,
+  // temp root, child process — fails the pass.
+  //
+  // Ordering matters. `mc` UNCONDITIONALLY recreates its MC_CONFIG_DIR on every
+  // invocation (even a failing one), so: (1) object cleanup uses the run's mc
+  // config while tempRoot still exists, (2) the post-cleanup bucket check runs
+  // against a throwaway config OUTSIDE tempRoot, (3) tempRoot and that throwaway
+  // config are removed LAST with no `mc` call afterwards. The web dev server is
+  // spawned detached (a provably run-owned process group) and is shut down with
+  // a bounded request -> await -> escalate sequence, not a fire-and-forget kill.
   const cleanupIssues = [];
   const attempt = async (label, fn) => {
     try {
@@ -269,29 +283,39 @@ try {
   };
 
   if (browser) await attempt('browser.close', () => browser.close());
-  if (webProcess?.pid) {
-    await attempt('killTree(web)', async () => {
-      killTree(webProcess.pid);
+
+  let webTermination = { state: webProcess ? 'not-attempted' : 'never-spawned' };
+  if (webProcess) {
+    await attempt('terminate web dev server', async () => {
+      webTermination = await terminateProcessTree(webProcess, { graceMs: 15_000, killMs: 5_000 });
     });
   }
+
   if (apiServer) await attempt('apiServer.close', () => close(apiServer));
+
   if (realWorkerLifecycle !== undefined) {
     realWorkerLifecycle.stopped = true;
-    await attempt('worker.stop', () => realWorkerPromise ?? Promise.resolve());
+    // realWorkerPromise resolves only once the export loop exits its current
+    // iteration — after the disposable Worker thread finished and the per-job
+    // source/output files were removed — so tempRoot/worker is quiescent before
+    // tempRoot is removed below.
+    await attempt('await export worker exit', () => realWorkerPromise ?? Promise.resolve());
     realWorkerLifecycle = undefined;
   }
+
   if (pool) {
     await attempt('drop schema', () => pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`));
     await attempt('pool.end', () => pool.end());
   }
+
   await attempt('mc rm objects', () =>
     runMc(['rm', '--quiet', '--recursive', '--force', `joy-ci/${bucket}`]),
   );
   await attempt('mc rb bucket', () => runMc(['rb', '--quiet', `joy-ci/${bucket}`]));
-  await attempt('rm tempRoot', () => rm(tempRoot, { recursive: true, force: true }));
 
   // Re-inspect: prove nothing run-owned survived.
   const residue = [];
+
   let verifyPool;
   try {
     verifyPool = new Pool({ connectionString: databaseUrl });
@@ -305,25 +329,59 @@ try {
   } finally {
     await verifyPool?.end().catch(() => undefined);
   }
+
+  let verifyRoot;
   try {
-    await runMc(['ls', `joy-ci/${bucket}`]);
-    residue.push(`bucket joy-ci/${bucket} still present`);
-  } catch {
-    /* `mc ls` on a missing bucket errors — that is the wanted state. */
+    verifyRoot = await mkdtemp('/tmp/joy-media-real-verify-');
+    const verifyMcConfig = join(verifyRoot, 'mc');
+    await mkdir(verifyMcConfig, { recursive: true });
+    try {
+      await runMcWithConfig(verifyMcConfig, ['ls', `joy-ci/${bucket}`]);
+      residue.push(`bucket joy-ci/${bucket} still present`);
+    } catch {
+      /* `mc ls` on a missing bucket errors — that is the wanted state. */
+    }
+  } catch (error) {
+    residue.push(
+      `bucket re-inspection failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
-  try {
-    await stat(tempRoot);
-    residue.push(`tempRoot ${tempRoot} still present`);
-  } catch {
-    /* ENOENT is the wanted state. */
+
+  // Every producer that could touch tempRoot has now stopped. Remove tempRoot
+  // (and the throwaway verify config) last, with a bounded retry that records —
+  // never hides — a surviving writer.
+  const tempRootRemoval = await removeDirWithRetry(tempRoot, { attempts: 5, delayMs: 200 });
+  if (!tempRootRemoval.removed) {
+    residue.push(
+      `tempRoot ${tempRoot} still present after ${tempRootRemoval.attempts} attempt(s)` +
+        (tempRootRemoval.residualEntries.length
+          ? ` (entries: ${tempRootRemoval.residualEntries.join(', ')})`
+          : ''),
+    );
   }
-  if (webProcess?.pid && isAlive(webProcess.pid))
-    residue.push(`web process ${webProcess.pid} alive`);
+  let verifyRootRemoval = { removed: true, attempts: 0, residualEntries: [] };
+  if (verifyRoot) {
+    verifyRootRemoval = await removeDirWithRetry(verifyRoot, { attempts: 5, delayMs: 200 });
+    if (!verifyRootRemoval.removed) {
+      cleanupIssues.push(`verify config ${verifyRoot} still present`);
+    }
+  }
+
+  if (
+    webProcess?.pid &&
+    webTermination.state !== 'already-exited' &&
+    webTermination.state !== 'never-spawned' &&
+    isAlive(webProcess.pid)
+  ) {
+    residue.push(
+      `web process ${webProcess.pid} still alive after teardown (state: ${webTermination.state})`,
+    );
+  }
 
   const teardownFailures = [...cleanupIssues, ...residue];
   const checks = ['schema-dropped', 'bucket-removed', 'temp-root-removed', 'web-process-exited'];
   const teardownRecord = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: new Date().toISOString(),
     runId,
     attempt: runAttempt,
@@ -332,6 +390,9 @@ try {
     verified: teardownFailures.length === 0 ? checks : [],
     cleanupIssues,
     residue,
+    webTermination,
+    tempRootRemoval,
+    verifyRootRemoval,
   };
   await attempt('write teardown record', async () => {
     await mkdir(join(root, 'test-output/operations'), { recursive: true });
@@ -353,15 +414,6 @@ try {
 }
 
 if (primaryError) throw primaryError;
-
-function isAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 async function runRealServiceExportWorker(
   controlPlane,
@@ -549,27 +601,29 @@ async function executeExportInWorkerThread(input, outputPath) {
     `,
     { eval: true, workerData: { workerModule, input, outputPath } },
   );
-  await new Promise((resolve, reject) => {
-    let settled = false;
-    worker.once('message', (message) => {
-      if (settled) return;
-      settled = true;
-      if (message?.ok === true) resolve();
-      else reject(new Error(message?.error ?? 'real-service export thread failed'));
-      void worker.terminate();
-    });
-    worker.once('error', (error) => {
-      if (settled) return;
-      settled = true;
-      reject(error);
-    });
-    worker.once('exit', (code) => {
-      if (!settled && code !== 0) {
+  try {
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (fn, arg) => {
+        if (settled) return;
         settled = true;
-        reject(new Error(`real-service export thread exited with ${code}`));
-      }
+        fn(arg);
+      };
+      worker.once('message', (message) => {
+        if (message?.ok === true) finish(resolve);
+        else finish(reject, new Error(message?.error ?? 'real-service export thread failed'));
+      });
+      worker.once('error', (error) => finish(reject, error));
+      worker.once('exit', (code) => {
+        if (code !== 0) finish(reject, new Error(`real-service export thread exited with ${code}`));
+      });
     });
-  });
+  } finally {
+    // Fully tear down the disposable thread before the caller continues, so
+    // nothing from this export is still writing under the temp root when
+    // teardown later removes it.
+    await worker.terminate();
+  }
 }
 
 function privateDescriptor(asset) {
@@ -1790,15 +1844,4 @@ async function waitForHttp(url, timeout) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 500));
   }
   throw new Error(`timed out waiting for ${url}`);
-}
-function killTree(pid) {
-  try {
-    process.kill(-pid, 'SIGTERM');
-  } catch {
-    try {
-      process.kill(pid, 'SIGTERM');
-    } catch {
-      // Best-effort process cleanup.
-    }
-  }
 }

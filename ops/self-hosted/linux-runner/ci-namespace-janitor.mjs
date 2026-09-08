@@ -10,9 +10,11 @@
  * namespace and, only in `--sweep` mode, deletes the ones it can PROVE are
  * orphaned.
  *
- * Proof of orphan = the owning workflow run is terminal (completed with any
- * conclusion, or 404) AND its id is not the current `GITHUB_RUN_ID`. A run that
- * is `in_progress` / `queued`, or whose status cannot be read, is NEVER touched.
+ * Proof of orphan = the owning workflow run's status is exactly `completed` AND
+ * its id is not the current `GITHUB_RUN_ID`. A run that is `in_progress` /
+ * `queued`, whose status cannot be read, or for which the API returns 404 (id
+ * unknown — could be a purged old run, a malformed namespace, or a token gap) is
+ * NEVER swept. Classification lives in ci-namespace-classify.mjs.
  *
  * Modes:
  *   (default)  inventory only — writes test-output/ci-janitor/inventory.json,
@@ -27,6 +29,8 @@
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+
+import { classifyRun, isSweepable } from './ci-namespace-classify.mjs';
 
 // `pg` is a dependency of @joy-media/api; resolve it from that package's
 // context (the same pattern real-service-acceptance.mjs uses) so this script
@@ -98,14 +102,6 @@ async function runStatus(runId) {
   return result;
 }
 
-function classify(run) {
-  if (run.status === 'current') return 'current';
-  if (run.status === 'in_progress' || run.status === 'queued' || run.status === 'waiting')
-    return 'active';
-  if (run.status === 'completed' || run.status === 'not-found') return 'orphan';
-  return 'unknown';
-}
-
 const pool = new Pool({ connectionString: databaseUrl });
 const items = [];
 try {
@@ -127,7 +123,7 @@ try {
       attempt,
       pass,
       run,
-      classification: classify(run),
+      classification: classifyRun(run),
     });
   }
 
@@ -151,11 +147,11 @@ try {
       attempt,
       pass,
       run,
-      classification: classify(run),
+      classification: classifyRun(run),
     });
   }
 
-  const orphans = items.filter((i) => i.classification === 'orphan');
+  const orphans = items.filter((i) => isSweepable(i.classification));
   const swept = [];
   const sweepErrors = [];
   if (SWEEP) {
@@ -185,6 +181,8 @@ try {
       current: items.filter((i) => i.classification === 'current').length,
       active: items.filter((i) => i.classification === 'active').length,
       orphan: orphans.length,
+      notFound: items.filter((i) => i.classification === 'not-found').length,
+      unrecognized: items.filter((i) => i.classification === 'unrecognized').length,
       unknown: items.filter((i) => i.classification === 'unknown').length,
     },
     swept,
@@ -196,7 +194,8 @@ try {
   console.log(
     `ci-namespace-janitor (${report.mode}): ${report.counts.total} namespaces — ` +
       `${report.counts.active} active, ${report.counts.orphan} orphan, ` +
-      `${report.counts.unknown} unknown; swept ${swept.length}`,
+      `${report.counts.notFound} not-found (quarantined), ${report.counts.unknown} unknown; ` +
+      `swept ${swept.length}`,
   );
   if (sweepErrors.length > 0) {
     console.error(`sweep errors:\n  ${sweepErrors.join('\n  ')}`);

@@ -7,13 +7,14 @@ decision is the reviewer's, then the owner's.
 
 ## Revisions under review
 
-| Artifact                                          | Revision              | Note                                                                                                                                                                  |
-| ------------------------------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Application candidate                             | `3eaa8cd7` (R2 GAP 3) | the app code the gate was benchmarked against                                                                                                                         |
-| CI-opt branch HEAD (workflow + harness + tooling) | `185f18c6`            | janitor `pg` fix + structured gate-summary on top of the hardened `8c5a4445`                                                                                          |
-| Benchmark 1 (speed)                               | ran on `cdbb771f`     | pre-hardening teardown → performance evidence only                                                                                                                    |
-| Benchmark 2 (failed)                              | ran on `498c45fe`     | caught the janitor `pg`-resolution bug                                                                                                                                |
-| Benchmark 3 (hardened evidence)                   | ran on `8c5a4445`     | teardown enforcement + janitor + prod-build-smoke; gate-summary was still the grep form here — the `185f18c6` swap to the structured evaluator is unit-proven, see §4 |
+| Artifact                                          | Revision              | Note                                                                                                                                                              |
+| ------------------------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Application candidate                             | `3eaa8cd7` (R2 GAP 3) | the app code the gate was benchmarked against                                                                                                                     |
+| CI-opt branch HEAD (workflow + harness + tooling) | `185f18c6`            | janitor `pg` fix + structured gate-summary on top of the hardened `8c5a4445`                                                                                      |
+| Benchmark 1 (speed)                               | ran on `cdbb771f`     | pre-hardening teardown → performance evidence only                                                                                                                |
+| Benchmark 2 (failed)                              | ran on `498c45fe`     | caught the janitor `pg`-resolution bug                                                                                                                            |
+| Benchmark 3 (hardened evidence)                   | ran on `8c5a4445`     | teardown enforcement + janitor + prod-build-smoke; **FAILED** — deterministic `tempRoot` residue on both passes (see §6) + an undetermined pass-1 soak failure    |
+| Corrected revision (this package)                 | `<pending commit>`    | fixes the §6 teardown-ordering bug, adds bounded shutdown, 404-quarantine janitor, evidence retention, `pnpm test:harness`; **benchmark pending on a quiet host** |
 
 `main` carries only the **dispatch-only** `release-candidate-v2.yml` (2 commits,
 workflow file only; `release-candidate.yml` and all product code untouched;
@@ -127,26 +128,37 @@ GitHub ran pass 2 then pass 1 (matrix order not guaranteed), serially on the one
 ## 3. Interruption recovery + authenticated janitor classification (measured)
 
 `ci-namespace-janitor.mjs` classifies each CI namespace by the **owning workflow
-run's status** (GitHub Actions API, `GITHUB_TOKEN` + `actions: read`):
-`current` (= `GITHUB_RUN_ID`) / `active` (`in_progress`/`queued`/`waiting`) /
-`orphan` (`completed` any conclusion, or `not-found`) / `unknown` (API error).
-Default **inventory** mode writes `test-output/ci-janitor/inventory.json` and
-deletes nothing (v2 requires this evidence file). `--sweep` (double-gated by
-`JOY_MEDIA_CI_JANITOR_SWEEP=1`) deletes **only** `orphan`.
+run's status** (GitHub Actions API, `GITHUB_TOKEN` + `actions: read`) via
+`ci-namespace-classify.mjs`: `current` (= `GITHUB_RUN_ID`) / `active`
+(`in_progress`/`queued`/`waiting`) / `orphan` (**status exactly `completed`**) /
+`not-found` (**404 — quarantined, never swept**) / `unknown` (API error).
+`isSweepable()` is true **only for `orphan`**. Default **inventory** mode writes
+`test-output/ci-janitor/inventory.json` and deletes nothing (v2 requires this
+evidence file). `--sweep` (double-gated by `JOY_MEDIA_CI_JANITOR_SWEEP=1`)
+deletes **only** `orphan`.
 
-**Recovery test (2026-09-08, real CI Postgres + MinIO), 3 disposable schemas —
-owning runs: `34239133175` completed, `34252332556` the then-active benchmark 3,
-`99999999991` bogus/404:**
+**Why 404 ≠ orphan (owner correction, corrected revision):** a 404 for a run id
+can be a purged/very old run, a malformed or hand-created namespace, or a
+token/permission gap. None of those prove "a completed CI run owns this", so
+deletion requires proven CI ownership **and** a confirmed `completed` status.
+`ci-namespace-classify.test.mjs` locks the table (current / active /
+completed→orphan / **404→not-found** / unknown / future-state→unknown;
+`isSweepable('not-found') === false`).
+
+**Recovery test — first run (2026-09-08, revision `185f18c6`, real CI Postgres +
+MinIO), 3 disposable schemas:**
 
 | Phase | Token                                  | `34239133175_9_1` (completed) | `34252332556_9_1` (active/current) | `99999999991_9_1` (404) | swept                                |
 | ----- | -------------------------------------- | ----------------------------- | ---------------------------------- | ----------------------- | ------------------------------------ |
 | 1     | **invalid**                            | `unknown`                     | `current`                          | `unknown`               | **[] — nothing deleted**             |
 | 2     | **valid**, `GITHUB_RUN_ID=34252332556` | `orphan` → **swept**          | `current` → **kept**               | `not-found` → **swept** | `[34239133175_9_1, 99999999991_9_1]` |
 
-`sweepErrors: []`. After phase 2 the only survivor was the active-run schema.
-**When status is unknowable, nothing is touched; an active run's namespace is
-never touched; a proven-terminal namespace is cleaned.** The v2 workflow runs
-inventory-only; `--sweep` is enabled after this review.
+This run used the **old** rule (`not-found` → `orphan`). Under the corrected
+rule the `99999999991_9_1` (404) row must be **kept**, not swept. **The recovery
+test is re-run on the corrected revision** alongside the quiet-host benchmark;
+expected phase-2 result: `orphan → swept`, `current → kept`, **`not-found` →
+kept**, `unknown → kept`. The v2 workflow runs inventory-only; `--sweep` is
+enabled after this review.
 
 **Note:** phase 2 (`--sweep`) also cleared the 15 historical leaked namespaces
 (all `completed`-run, empty schemas / 0-byte buckets — enumerated in
@@ -182,13 +194,21 @@ happy path, and this form is strictly more correct.
 
 ## 5. Final measured runtime + the contract / coverage changes
 
-_Benchmark 3 numbers appended on completion._
+**Benchmark 1** (speed, `cdbb771f`) and **benchmark 3** (hardened, `8c5a4445`)
+both measured **one workflow ≈ 1h37m** end-to-end (16:38:52Z → 18:15:57Z for
+b3), vs the current gate's ~4h20–4h32 per run. Contract
+`2 workflow runs → 1 run, 2 isolated passes` → **end-to-end gate ≈ 1h37m vs ≈
+8.7–9h ≈ 5.4× faster.** The 30-min effects soak is retained one-per-pass (2 per
+gate, was 4); any 2→1 change is a **separate** proposal, not made here.
 
-Benchmark 1 (speed) established: **one workflow ≈ 1h37m** vs the current
-~4h20–4h32; contract `2 workflow runs → 1 run, 2 isolated passes` →
-**end-to-end gate ≈ 1h37m vs ≈ 8.7–9h ≈ 5.4× faster.** The 30-min effects soak
-is retained one-per-pass (2 per gate, was 4); any 2→1 change is a **separate**
-proposal, not made here.
+**Benchmark 3 did not pass** — `real-service-acceptance` failed on both passes
+for the deterministic `tempRoot` teardown-ordering bug (§6 / open-items §7), plus
+an undetermined pass-1 soak failure (pass 2's soak passed on the same candidate).
+The **corrected revision** fixes the ordering bug, adds bounded process-group
+shutdown, the 404 quarantine, and evidence retention, and is proven by
+`pnpm test:harness` (18 `node:test` cases). **Its benchmark, on a quiet host with
+contention measurements recorded, is the number that gates this contract** — a
+green run there approves nothing on its own.
 
 ### Coverage / repetition changes for the reviewer
 
@@ -212,8 +232,64 @@ proposal, not made here.
 
 `joy-media-ci-baseline-2026-09-08.md` · `…-benchmarks-…` · `…-coverage-matrix-…`
 · `…-repetition-contract-…` · `…-open-items-…` · `…-benchmark-results-…` · this
-file. Plus `ci-gate-summary.ts` + `.test.ts`, `ci-namespace-janitor.mjs`, and the
-hardened `real-service-acceptance.mjs` teardown.
+file. Plus `ci-gate-summary.ts` + `.test.ts`, `ci-namespace-janitor.mjs` +
+`ci-namespace-classify.mjs` + `.test.mjs`, the hardened + reordered
+`real-service-acceptance.mjs` teardown, `real-service-teardown.mjs` + `.test.mjs`,
+`retain-evidence.sh` + `evidence-retention.test.mjs`.
+
+## 6. Benchmark 3 failure — deterministic `tempRoot` teardown-ordering bug (fixed)
+
+Both `real-service-acceptance` passes of benchmark 3 failed with the **identical,
+sole** residue `tempRoot /tmp/joy-media-real-acceptance-XXXXXX still present`
+after `rm(tempRoot)` ran without throwing.
+
+**Root cause (reproduced locally in `joy-media-ci-linux`):** the teardown's own
+post-cleanup bucket check, `mc ls joy-ci/<bucket>`, ran with
+`MC_CONFIG_DIR = tempRoot/mc`. `mc` **unconditionally recreates its config
+directory** (writes `config.json`, `certs/`, `share/`) on every invocation, even
+a failing one. Sequence: `rm(tempRoot)` succeeds → `mc ls` recreates
+`tempRoot/mc` → `stat(tempRoot)` finds it → residue → pass fails. Ruled out:
+process-death race (`isAlive` never tripped), open file handle, wrong deletion
+path, un-awaited cleanup.
+
+**Fix (corrected revision):**
+
+- Post-cleanup bucket check uses a **throwaway `mc` config outside `tempRoot`**
+  (`mkdtemp('/tmp/joy-media-real-verify-')`); that dir is also removed at the end.
+- `tempRoot` is removed **last**, via `removeDirWithRetry` (bounded retry that
+  **records** residual entry names — never hides a live writer), with **no `mc`
+  call afterwards**.
+- Web dev server (spawned `detached` → provably run-owned group) shut down by
+  `terminateProcessTree`: SIGTERM → await-exit (≤15 s, ends on observed exit) →
+  SIGKILL owned group (≤5 s) → verify gone. Replaces fire-and-forget `killTree`.
+- `await worker.terminate()` on the export thread; `realWorkerPromise` awaited.
+- `teardown.json` → schemaVersion 2 with `webTermination`, `tempRootRemoval`,
+  `verifyRootRemoval` sub-records.
+
+`ops/self-hosted/linux-runner/real-service-teardown.mjs` +
+`real-service-teardown.test.mjs` — 16 `node:test` cases, green in
+`joy-media-ci-linux`: SIGTERM exit / delayed exit / unresponsive→SIGKILL /
+whole-group kill / **unrelated process untouched** / already-exited /
+populated-dir removal / writer-recreates-path **reported** /
+writer-stops-then-succeeds.
+
+**Separately:** benchmark-3 pass 1's `release-performance-observer` also exited 1
+(`status: "failed"`). The exact exceeded budget was in `effects-soak.json`, which
+the next job's `git clean` removed before it could be read → **evidence
+retention** was added (§ below). Pass 2's identical soak **passed** on the same
+candidate. Cause **UNDETERMINED**; a passing pass 2 **supports, does not
+confirm**, a contention/environment cause. **Observer thresholds unchanged.**
+
+### Evidence retention (added — corrected revision)
+
+`real-service-acceptance (pass 1)` and `(pass 2)` run serially on the one
+`joy-media-acceptance` runner; pass 2's `checkout` `git clean`s pass 1's
+`test-output/`. Two `if: always()` steps now snapshot + redact `test-output/`
+(`retain-evidence.sh`, `perl \Q..\E` over every `JOY_MEDIA_CI_S3_*` /
+`JOY_MEDIA_CI_DATABASE_URL` / observer-token value) and upload it
+(`actions/upload-artifact@v4.6.2`, pinned SHA, `continue-on-error`, 14-day).
+`evidence-retention.test.mjs` proves an **intentionally-failed pass** fixture
+still yields a snapshot with the failure signal intact and the secret redacted.
 
 **On independent acceptance:** v2 replaces v1; `ci-dev.yml` gets scoped triggers
 (PR + push-to-`main` only, not every `codex/**`); the janitor `--sweep` is

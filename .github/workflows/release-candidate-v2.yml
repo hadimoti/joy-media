@@ -468,6 +468,29 @@ jobs:
         run: |
           set -euo pipefail
           pnpm run release:gate
+      - name: Retain real-service evidence (redacted, before workspace cleanup)
+        if: always()
+        shell: bash
+        env:
+          JOY_MEDIA_EVIDENCE_PASS: ${{ matrix.pass }}
+        run: |
+          set -uo pipefail
+          # The next job's checkout runs `git clean -ffdx`, wiping this pass's
+          # test-output/ before it can be inspected. Snapshot + redact it into
+          # RUNNER_TEMP now so the next step can upload it as an artifact. Shared
+          # implementation, exercised by evidence-retention.test.mjs.
+          bash ops/self-hosted/linux-runner/retain-evidence.sh \
+            test-output \
+            "${{ runner.temp }}/real-service-evidence-p${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}"
+      - name: Upload real-service evidence artifact
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: real-service-evidence-p${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/real-service-evidence-p${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          if-no-files-found: warn
       - name: Verify real-service acceptance teardown
         if: always()
         shell: bash

@@ -77,4 +77,54 @@ pending a separate review.
   (validated locally 5/5 in 20.6s).
 - The `gate-summary` parsing fix.
 
-_Results appended when the run completes._
+**Result: FAILED to produce gate evidence.** `real-service-acceptance` never ran
+its body — the new `ci-namespace-janitor` step crashed with
+`Cannot find module 'pg'` (`createRequire(import.meta.url)` from
+`ops/self-hosted/linux-runner/`, which has no `node_modules`). Fixed on
+`8c5a4445` (`createRequire(new URL('../../../apps/api/package.json', …))`, the
+pattern `real-service-acceptance.mjs` already used). Not a lane/app failure.
+
+## Benchmark 3 — hardened run (revision `8c5a4445`)
+
+`gh run 34252332556`, dispatched 2026-09-08 16:38:52Z. **Total wall clock
+16:38:52Z → 18:15:57Z = 1h 37m 05s** (matches benchmark 1).
+
+| Lane                               | Result | Notes                                                                                                                            |
+| ---------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| validate-candidate                 | ✅     |                                                                                                                                  |
+| linux-real-services pass 1 / 2     | ✅ ✅  | `verify:ci` + real-service gate                                                                                                  |
+| windows-worker-clean               | ✅     | 2 internal passes, no flake                                                                                                      |
+| acceptance-primary pass 1 / 2      | ✅ ✅  | `tests/e2e` desktop-primary `--workers=2`                                                                                        |
+| acceptance-responsive pass 1 / 2   | ✅ ✅  | 6 viewports × `wp32-responsive-checkpoints`                                                                                      |
+| prod-build-smoke                   | ✅     | shipped bundle, public UI                                                                                                        |
+| ci-namespace-janitor (inventory)   | ✅     | ran, inventoried 29 namespaces                                                                                                   |
+| **real-service-acceptance pass 1** | ❌     | (a) observer soak exited 1 — **cause UNDETERMINED**, metric lost to `git clean`; (b) teardown residue `tempRoot … still present` |
+| **real-service-acceptance pass 2** | ❌     | soak **passed**; **only** failure = teardown residue `tempRoot … still present` (identical to pass 1)                            |
+| gate-summary                       | ❌     | correct — two lanes failed                                                                                                       |
+
+### Root cause (both passes, deterministic)
+
+`tempRoot … still present` = the teardown's own post-cleanup `mc ls` bucket check
+recreated `MC_CONFIG_DIR` (`tempRoot/mc`) **after** `rm(tempRoot)`. `mc`
+unconditionally recreates its config dir on any invocation — reproduced locally
+in `joy-media-ci-linux`. **Not** a process race / file handle / wrong path /
+un-awaited cleanup. See `joy-media-ci-open-items-2026-09-08.md` §7.
+
+The pass-1 soak failure is **separate and undetermined** — pass 2's identical
+soak passed on the same candidate (supports, does not confirm, a
+contention/environment cause). Observer thresholds left unchanged.
+
+### Corrected revision (pending benchmark)
+
+- Dedicated throwaway `mc` config **outside** `tempRoot` for the bucket check;
+  `tempRoot` removed **last** via `removeDirWithRetry`, nothing runs `mc` after.
+- Bounded process-group shutdown (`terminateProcessTree`: request → await →
+  SIGKILL owned group → verify), `await worker.terminate()`.
+- `not-found` (404) janitor class — **quarantined, never swept**.
+- `if: always()` evidence retention → redacted `test-output/` snapshot +
+  `actions/upload-artifact` (so a failed pass's observer metrics survive the next
+  job's `git clean`).
+- `pnpm test:harness` — 18 `node:test` cases (teardown mechanics, classify,
+  evidence retention), all green in `joy-media-ci-linux`.
+
+_Benchmark of the corrected revision to be run on a quiet host; results appended._
