@@ -214,28 +214,36 @@ verified-quiet host, **1h51m56s** end-to-end) — see
 - **Teardown fix confirmed on BOTH passes** (`clean: true`; bounded
   `terminateProcessTree` → `state "terminated"`, not escalated; no `tempRoot` /
   verify residue). Bench-3's deterministic bug is gone.
-- **Pass 1 fully clean** — vitest 4254/0-failed; Playwright 105 passed / 1 skipped
-  / 0 failed; delivery + N/N-1 restore + `release:gate` passed; **soak passed with
-  wide margin** (heapGrowth 2.52% ≤20, longTask 0 <5, initialEditorJs 7,506
-  ≤500k, all else at/under budget). This is one complete clean instance of the new
-  1-run/2-pass contract with the restructured browser matrix.
+- **Pass 1** — one clean instance of a **single** pass under the new contract
+  (vitest 4254/0-failed; Playwright 105 passed / 1 skipped / 0 failed; delivery +
+  N/N-1 restore + `release:gate` passed; soak passed every budget with wide
+  margin). **The contract requires BOTH isolated passes plus cleanup — benchmark
+  4 did not demonstrate that**, so it is not a completed two-pass contract.
 - **Pass 2 FAILED** — `assertJourneyTelemetryClean` on a nondeterministic
-  `Failed to load resource: net::ERR_FILE_NOT_FOUND` browser console error during
-  `recordJourney`, ~7 min in, before the soak. Pass 1 ran the same journey 60 s
-  later with 0 console errors. Root cause **undetermined** (the failing URL was
-  captured in `failedRequests` but the assertion throws on `consoleErrors` first).
-  Same class as R1's pre-existing real-service journey fixes (`b634d3cd`,
-  `f7615432`). Not caused by, and not touching, the teardown / repetition /
-  coverage changes.
+  `net::ERR_FILE_NOT_FOUND` browser console error during `recordJourney`, before
+  the soak. Root cause **undetermined**. **Fixed** (`45022c7c`): phase tracking +
+  enriched `requestfailed`/`console` capture + combined reporting + a persisted
+  `journey-failure.json` written before the throw, with an explicit
+  "ERR_FILE_NOT_FOUND ≠ HTTP 404" note. A bounded reproduction run is being done;
+  the flake is **not** suppressed.
 - **`actions/upload-artifact` failed on BOTH passes** — `Artifact storage quota
-has been hit` (account-level; same issue as the earlier hosted `r2-candidate`
-  runs). `continue-on-error: true` masked it as a green step. **Durable evidence
-  retention is non-functional** until the quota is freed. Pass 1's `test-output/`
-  was manually rescued off the idle runner; **pass 2's structured evidence is
-  permanently lost**. The retain/redact/leak-guard mechanism itself worked
-  (`0 quarantined`).
-- **Resource samples: no contention** — one CI container active at a time, load
-  ≤ 6.9 on an 8-core / 30 GiB box, `joy-media-ci-linux` idle through both passes.
+has been hit`; `continue-on-error: true` masked it green. **Fixed**
+  (`45022c7c`): durable checksum-verified retention to
+  `$JOY_MEDIA_CI_EVIDENCE_ROOT` outside `_work`, a required "Verify retained
+  evidence" gate step, and `continue-on-error` removed from the upload (a
+  fallback copy does not waive the required upload). Quota inventory: **50
+  artifacts / 4.62 GiB, all Aug-2026 `playwright-evidence` from abandoned hosted
+  experiments** — proposal to delete all 50 pending owner approval (nothing
+  historical lost).
+- The retain/redact/leak-guard **flagged nothing**, meaning **no known literal or
+  base64 secret value** survived redaction — not a proof that no
+  unanticipated-shape secret leaked.
+- **Resource samples: no competing workload _observed_ at 3-minute resolution**
+  (one CI container active at a time; `joy-media-ci-linux` idle through both
+  passes). Not proof that contention was impossible.
+- **`initialEditorJsBytes ≤ 500_000`** in the soak predicate measures only the
+  Vite **dev** entry module (`/src/main.tsx`, 7,506 B here) in this lane — inert
+  as a shipped-bundle budget. Flagged for review (predates CI-opt).
 
 **Benchmark 4 is a FAIL under the "both passes + cleanup must pass" rule.** No
 rerun, no threshold change. The two failures (journey flake; artifact quota +

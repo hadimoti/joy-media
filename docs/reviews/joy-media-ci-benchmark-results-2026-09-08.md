@@ -167,32 +167,102 @@ console errors. Root cause **UNDETERMINED**: the failing URL was captured in
 the pre-existing real-service journey issues fixed during R1 (`b634d3cd`,
 `f7615432`).
 
-### What benchmark 4 establishes
+### What benchmark 4 establishes — and what it does not
 
 - **Teardown ordering fix — confirmed on BOTH passes** (`clean: true`, bounded
   `terminateProcessTree`, no `tempRoot`/verify residue). The deterministic bench-3
   bug is gone.
 - 404-quarantine janitor: ran inventory-only, `0 namespaces`, no error.
-- Redaction: `retain-evidence.sh` staged the allowlist both passes, `0 quarantined`.
-- **Reduced-repetition / coverage contract: exercised end-to-end** — one workflow,
-  two isolated passes; browser matrix (primary-full + 6 responsive); soak
-  one-per-pass. Pass 1 is a full clean instance of the new contract.
+- Redaction: `retain-evidence.sh` staged the allowlist both passes and its
+  leak-guard flagged nothing. **This means no _known literal or base64 secret
+  value_ survived redaction — it is not a proof that no secret of an
+  unanticipated shape leaked.** (The v2 retention adds a checksum-verified
+  manifest and an explicit gate check; see §evidence-retention below.)
+- **Reduced-repetition / coverage contract: partially exercised.** Pass 1 is one
+  clean instance of a single pass under the new contract (one workflow, the
+  restructured browser matrix, soak one-per-pass). **The contract requires BOTH
+  isolated passes plus cleanup to succeed — benchmark 4 did not demonstrate
+  that.** It is not a completed two-pass contract.
+- **Contention: none _observed_.** The sampler ran at 3-minute resolution and
+  saw only one CI container active at a time with `joy-media-ci-linux` idle
+  through both real-service passes. That is evidence of no competing workload at
+  that sampling rate — **not proof that contention was impossible** (a sub-3-min
+  spike, or scheduler/IO contention the sampler does not measure, could still
+  occur).
 
-### Two concrete failures — neither in the CI-contract / teardown code
+### Two concrete failures from benchmark 4 — and the targeted fixes applied
 
-1. **Pass 2 journey flake (`ERR_FILE_NOT_FOUND`).** The gate correctly failed on a
-   real browser console error. Nondeterministic; root cause needs the failing URL
-   surfaced (check `failedRequests` before/with `consoleErrors` in
-   `assertJourneyTelemetryClean`), then app-bug-vs-load-race triage.
-2. **`actions/upload-artifact` failed on BOTH passes** —
-   `Failed to CreateArtifact: Artifact storage quota has been hit.` The account's
-   GitHub Actions artifact storage is exhausted (same billing/quota issue that hit
-   the earlier hosted `r2-candidate` runs). `continue-on-error: true` reported the
-   step as `success`. **Durable evidence retention is non-functional** until the
-   quota is freed/raised. Pass 1's full `test-output/` was manually rescued off the
-   idle runner; **pass 2's structured evidence is permanently lost** (its checkout
-   `git clean`'d it, RUNNER_TEMP purged, artifact never uploaded — only the step
-   log survives). This is exactly the "required evidence must not silently
-   disappear" hazard.
+**F1 — pass 2 journey flake (`ERR_FILE_NOT_FOUND`).** The gate correctly failed
+on a real browser console error during `recordJourney`. Nondeterministic
+(pass 1's identical journey on the same candidate was clean). The old
+`assertJourneyTelemetryClean` threw on `console.errors` first, so the
+URL-bearing `failedRequests` entry was never surfaced → root cause undetermined.
 
-_Both are for independent review + the owner. No rerun, no threshold change._
+_Fix (`45022c7c`)_: `recordJourney` now tracks a `journeyPhase` through the walk;
+`requestfailed` captures `url` / `method` / `resourceType` / `failureText`;
+`console` captures `location`. New `inspectJourneyTelemetry()` reports every
+issue class **together** and writes a sanitized `journey-failure.json` (phase,
+`netErrorCodesObserved`, full per-entry detail) **before** the throw, with an
+explicit note that `net::ERR_FILE_NOT_FOUND` is **not** proof of an HTTP 404.
+A bounded diagnostic reproduction run is being done separately; the flake is
+**not** being suppressed or waived.
+
+**F2 — `actions/upload-artifact` failed on BOTH passes** —
+`Failed to CreateArtifact: Artifact storage quota has been hit`. `continue-on-error: true`
+reported the step as `success`. Pass 1's `test-output/` was manually rescued off
+the idle runner; **pass 2's structured evidence was permanently lost**.
+
+_Fix (`45022c7c`)_:
+
+- `retain-evidence.sh` now **requires** a persistent root
+  (`$JOY_MEDIA_CI_EVIDENCE_ROOT`, e.g. `/opt/actions-runner/ci-evidence`)
+  **outside the checkout and `_work`/`_temp`**, refuses a path inside any of
+  them, writes `MANIFEST.sha256` + `MANIFEST.json`, persists to
+  `<root>/<candidateSha>/<run>-<attempt>-p<pass>/`, and **re-verifies every file
+  against the manifest**. Non-zero exit fails the pass.
+- New workflow step **"Verify retained evidence"** (no `continue-on-error`):
+  re-runs `sha256sum -c`, requires `teardown.json` present + `clean:true`, and —
+  when the harness step succeeded — the full required evidence set. A missing or
+  corrupt file fails the gate.
+- `upload-artifact`: `continue-on-error` **removed**, `if-no-files-found: error`.
+  A failed upload now fails the job. **A durable fallback copy does not silently
+  waive the required upload** — it just guarantees the evidence still exists to
+  diagnose the failure.
+- **Consequence:** the full gate cannot pass until the account artifact-storage
+  quota is cleared (see the quota inventory below).
+
+### Artifact storage quota — read-only inventory (2026-09-08)
+
+`repos/hadimoti/joy-media/actions/artifacts`: **50 artifacts, 4,961,371,159 bytes
+≈ 4.62 GiB, 0 flagged `expired`.** Every one is named `playwright-evidence*` and
+was created **2026-08-11 – 2026-08-15** by the abandoned hosted `r2-candidate.yml`
+/ `ci.yml` experiments. None are Live Director R1/R2 gate evidence (self-hosted
+`release-candidate.yml` uploads no artifacts) and none are from the CI-opt
+benchmarks. Top consumers: 3 artifacts at ~855 + 854 + 604 MiB; the top 12
+account for ~4.2 GiB.
+
+**Proposal (NOT executed — needs owner approval):** delete all 50. They are
+3–4-week-old transient HTML reports/traces from superseded experiments; their
+runs are long complete. Deleting them frees the full ~4.62 GiB and takes usage
+to ~0. Command per id: `gh api -X DELETE repos/hadimoti/joy-media/actions/artifacts/<id>`.
+**No historical evidence is lost** (these were debug aids, not gate records).
+Do not purchase additional storage without approval.
+
+### `initialEditorJsBytes` budget — flagged for review
+
+The soak's pass predicate includes `initialEditorJsBytes <= 500_000`. In the
+real-service lane the harness runs the **Vite dev server**, so this metric
+measures the first `/(main|index)…\.js` **resource** — i.e. the dev-transformed
+`/src/main.tsx` entry module (**7,506 bytes** in benchmark 4), **not** the
+shipped entry bundle. Against the dev server this budget is effectively inert: it
+can never approach 500 KB and says nothing about production bundle size. The
+`prod-build-smoke` lane serves the real `dist/assets/index-*.js` but does not run
+the observer. **To meaningfully enforce an entry-bundle budget, either run the
+observer against `vite preview` of `dist/`, or add an explicit byte check on
+`dist/assets/index-*.js`.** This predates the CI-opt work (it is in
+`release-performance-observer.mjs`, untouched here) but is in scope for the CI v2
+review because the soak predicate depends on it.
+
+_All of the above is for independent review + the owner. No threshold change; no
+rerun-to-green; the full gate run is deferred until the quota is cleared and the
+focused checks pass._
