@@ -2,7 +2,7 @@
 /* global process, setTimeout, URL, Buffer, window, fetch, atob, btoa, crypto, localStorage */
 
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -103,6 +103,7 @@ const webUrl = `http://127.0.0.1:${webPort}`;
 const token = 'joy-media-e2e-token';
 const owner = 'e2e-owner@example.test';
 const smokeOnly = process.env.JOY_MEDIA_REAL_ACCEPTANCE_SMOKE_ONLY === '1';
+let primaryError;
 let pool;
 let apiServer;
 let webProcess;
@@ -250,24 +251,116 @@ try {
     deliveryEvidence,
     restoreEvidence,
   );
+  primaryError = null;
+} catch (error) {
+  primaryError = error instanceof Error ? error : new Error(String(error));
 } finally {
-  if (browser) await browser.close().catch(() => undefined);
-  if (webProcess?.pid) killTree(webProcess.pid);
-  if (apiServer) await close(apiServer);
-  if (pool) {
-    if (realWorkerLifecycle !== undefined) {
-      realWorkerLifecycle.stopped = true;
-      await realWorkerPromise?.catch(() => undefined);
-      realWorkerLifecycle = undefined;
+  // Teardown is a required acceptance item, not best-effort. Every step is
+  // attempted; a deletion FAILURE is recorded (never swallowed); then the
+  // runner is re-inspected and any run-owned residue — schema, bucket,
+  // objects, child process — fails the pass.
+  const cleanupIssues = [];
+  const attempt = async (label, fn) => {
+    try {
+      await fn();
+    } catch (error) {
+      cleanupIssues.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
     }
-    await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined);
-    await pool.end().catch(() => undefined);
+  };
+
+  if (browser) await attempt('browser.close', () => browser.close());
+  if (webProcess?.pid) {
+    await attempt('killTree(web)', async () => {
+      killTree(webProcess.pid);
+    });
   }
-  await runMc(['rm', '--quiet', '--recursive', '--force', `joy-ci/${bucket}`]).catch(
-    () => undefined,
+  if (apiServer) await attempt('apiServer.close', () => close(apiServer));
+  if (realWorkerLifecycle !== undefined) {
+    realWorkerLifecycle.stopped = true;
+    await attempt('worker.stop', () => realWorkerPromise ?? Promise.resolve());
+    realWorkerLifecycle = undefined;
+  }
+  if (pool) {
+    await attempt('drop schema', () => pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`));
+    await attempt('pool.end', () => pool.end());
+  }
+  await attempt('mc rm objects', () =>
+    runMc(['rm', '--quiet', '--recursive', '--force', `joy-ci/${bucket}`]),
   );
-  await runMc(['rb', '--quiet', `joy-ci/${bucket}`]).catch(() => undefined);
-  await rm(tempRoot, { recursive: true, force: true });
+  await attempt('mc rb bucket', () => runMc(['rb', '--quiet', `joy-ci/${bucket}`]));
+  await attempt('rm tempRoot', () => rm(tempRoot, { recursive: true, force: true }));
+
+  // Re-inspect: prove nothing run-owned survived.
+  const residue = [];
+  let verifyPool;
+  try {
+    verifyPool = new Pool({ connectionString: databaseUrl });
+    const schemaLeft = await verifyPool.query(
+      'SELECT 1 FROM pg_namespace WHERE nspname = $1 OR nspname = $2 LIMIT 1',
+      [schema, `ci_legacy_${namespace}`],
+    );
+    if ((schemaLeft.rowCount ?? 0) > 0) residue.push(`schema ${schema}* still present`);
+  } catch (error) {
+    residue.push(`schema re-inspection failed: ${error instanceof Error ? error.message : error}`);
+  } finally {
+    await verifyPool?.end().catch(() => undefined);
+  }
+  try {
+    await runMc(['ls', `joy-ci/${bucket}`]);
+    residue.push(`bucket joy-ci/${bucket} still present`);
+  } catch {
+    /* `mc ls` on a missing bucket errors — that is the wanted state. */
+  }
+  try {
+    await stat(tempRoot);
+    residue.push(`tempRoot ${tempRoot} still present`);
+  } catch {
+    /* ENOENT is the wanted state. */
+  }
+  if (webProcess?.pid && isAlive(webProcess.pid))
+    residue.push(`web process ${webProcess.pid} alive`);
+
+  const teardownFailures = [...cleanupIssues, ...residue];
+  const checks = ['schema-dropped', 'bucket-removed', 'temp-root-removed', 'web-process-exited'];
+  const teardownRecord = {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    runId,
+    attempt: runAttempt,
+    pass,
+    clean: teardownFailures.length === 0,
+    verified: teardownFailures.length === 0 ? checks : [],
+    cleanupIssues,
+    residue,
+  };
+  await attempt('write teardown record', async () => {
+    await mkdir(join(root, 'test-output/operations'), { recursive: true });
+    await writeFile(
+      join(root, 'test-output/operations/teardown.json'),
+      `${JSON.stringify(teardownRecord, null, 2)}\n`,
+      'utf8',
+    );
+  });
+
+  if (teardownFailures.length > 0) {
+    const message = `real-service teardown is not clean (pass ${pass}):\n  - ${teardownFailures.join('\n  - ')}`;
+    if (primaryError) {
+      primaryError.message = `${primaryError.message}\n[teardown also failed]\n${message}`;
+    } else {
+      primaryError = new Error(message);
+    }
+  }
+}
+
+if (primaryError) throw primaryError;
+
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function runRealServiceExportWorker(
