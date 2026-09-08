@@ -95,8 +95,16 @@ test(
     const dest = join(persist, 'unknown', '444-1-p2'); // git rev-parse in a bare `git init` -> "unknown"
     await stat(dest);
     const manifest = JSON.parse(await readFile(join(dest, 'MANIFEST.json'), 'utf8'));
-    assert.ok(manifest.files.length >= 3);
+    assert.ok(manifest.files.length >= 4, 'all 4 allowlisted files must be retained');
     assert.equal(manifest.redactionApplied, true);
+    // The leak-guard must NOT fire on correctly-redacted content: `result.json`
+    // holds a presigned URL + Bearer header + DB userinfo that redaction handles,
+    // and its `<redacted:...>` sentinels must not look like live credentials.
+    assert.equal(manifest.quarantinedCount, 0, 'nothing should be quarantined here');
+    assert.ok(
+      !(await readFile(join(dest, 'REDACTION-FAILURES.txt'), 'utf8').catch(() => '')),
+      'no REDACTION-FAILURES.txt on a clean redaction',
+    );
 
     // every manifest entry verifies against the persisted copy
     const check = spawnSync('sha256sum', ['-c', 'MANIFEST.sha256'], {

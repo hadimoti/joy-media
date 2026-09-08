@@ -136,12 +136,10 @@ two items to land **before** freezing rather than after. Both done on top of
   `retain-evidence.sh` runs redaction in a `while … read` loop with no `set -e`;
   a non-zero `perl` exit was still discarded. Now `redact_file "$f" || { echo
   "retain-evidence: FATAL — redaction engine failed on $f" >&2; exit 1; }` — a
-  redaction-engine failure fails the pass and persists nothing. The generic
-  leak-guard scan was also widened to lock-step with `redact_file`'s rules
-  (`Bearer …{12,}`, `X-Amz-(Signature|Credential|Security-Token|Expires)=`,
-  `scheme://user:pass@`). New `pnpm test:harness` case: *"a redaction-engine
-  ERROR fails the pass (does NOT persist)"* — stubs `perl` to `exit 3`, asserts
-  non-zero exit + no `MANIFEST.json` under the persistent root. **31/31 green** in
+  redaction-engine failure fails the pass and persists nothing. New
+  `pnpm test:harness` case: *"a redaction-engine ERROR fails the pass (does NOT
+  persist)"* — stubs `perl` to `exit 3`, asserts non-zero exit + no
+  `MANIFEST.json` under the persistent root. **31/31 green** in
   `joy-media-ci-linux`.
 - **M7 top-level flush (was: only `writeJourneyFailure` flushed the buffer).**
   A `waitForHttp` dev-server-startup timeout and every `runDesktopMatrix` leg
@@ -154,6 +152,32 @@ two items to land **before** freezing rather than after. Both done on top of
 next occurrence diagnosable; it does not identify or fix the cause. A green gate
 does not close it.
 
-**Next:** re-reviewer checks this final delta → freeze the reviewed SHA →
-`artifact-quota-check.yml` probe succeeds (quota accounting caught up) → one full
-`release-candidate-v2` gate run.
+### Update 2026-09-09c — delta re-review found one blocker, fixed
+
+The independent review of `0cfb6ef8..e3c1a049` returned **DO NOT FREEZE — 1
+blocker** (M8 and M7 themselves confirmed correct):
+
+- **blocker — the leak-guard widening in `e3c1a049` quarantined *correctly
+  redacted* evidence.** The new arm `X-Amz-…=[^&"' ]{8,}` matches redaction's own
+  output `X-Amz-Signature=<redacted:presign>` (and `«redacted»` from the
+  dev-server log); the pre-existing `://user:pass@` arm likewise matches
+  `://<redacted:userinfo>@`. Result: a fully-redacted file is dropped from the
+  manifest and the persistent copy and falsely recorded in
+  `REDACTION-FAILURES.txt`. Test 7 was already silently quarantining
+  `delivery/result.json` and still passing.
+- **fix (this delta):** the generic scan now uses **positive** credential-shape
+  classes that cannot match a `<redacted:…>` / `«redacted»` sentinel —
+  `(X-Amz-)?(Signature|Credential|Security-Token)=[A-Za-z0-9%/+=_.~-]{16,}` and
+  `://[^<>/[:space:]:@"]+:[^<>/[:space:]@"]+@`. The "lock-step with `redact_file`"
+  comment is corrected to state the guard matches a *live* credential shape only.
+- **regression lock:** test 7 now asserts `manifest.quarantinedCount === 0` and
+  no `REDACTION-FAILURES.txt`. Verified it fails with the `e3c1a049` pattern and
+  passes with the fix. **31/31 green.**
+- Review minors accepted as-is: M7's top-level-catch flush has no unit test (it
+  is integration-shaped; the buffer mechanics are covered) — "FIXED" rests on
+  code inspection for that path; the misleading `REDACTION-FAILURES.txt` wording
+  is a follow-up nit.
+
+**Next:** re-reviewer confirms this fix on the final delta → freeze the reviewed
+SHA → `artifact-quota-check.yml` probe succeeds (quota accounting caught up) →
+one full `release-candidate-v2` gate run.

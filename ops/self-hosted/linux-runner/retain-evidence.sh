@@ -176,13 +176,16 @@ for var in "${SECRET_VARS[@]}"; do
   done
 done
 # Residual credential shapes the value-scan cannot see (runtime tokens etc.).
-# Kept in lock-step with redact_file's rules — if redaction misses one of these,
-# the file is quarantined rather than persisted.
+# These patterns match a *live* credential shape only: the character classes are
+# deliberately positive (real signature / userinfo characters) and long, so they
+# do NOT match redaction's own output — `<redacted:...>` / `«redacted»` contain
+# `<`, `:`, `>` (or multi-byte guillemets), none of which are in the classes.
+# A match here therefore means redaction genuinely missed something.
 while IFS= read -r -d '' hit; do quarantine "$hit" "unredacted Bearer/presigned/basic-auth shape"; done \
   < <(grep -rlZ -E \
         -e 'Bearer [A-Za-z0-9._~+/=-]{12,}' \
-        -e 'X-Amz-(Signature|Credential|Security-Token|Expires)=[^&"'"'"' ]{8,}' \
-        -e '://[^/[:space:]:@"]+:[^/[:space:]@"]+@' \
+        -e '(X-Amz-)?(Signature|Credential|Security-Token)=[A-Za-z0-9%/+=_.~-]{16,}' \
+        -e '://[^<>/[:space:]:@"]+:[^<>/[:space:]@"]+@' \
         "$staging" 2>/dev/null)
 
 # Manifest (sha256 + JSON), computed over what actually remains after quarantine.

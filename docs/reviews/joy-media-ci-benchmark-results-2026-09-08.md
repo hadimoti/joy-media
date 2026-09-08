@@ -125,7 +125,7 @@ contention/environment cause). Observer thresholds left unchanged.
   `actions/upload-artifact` (so a failed pass's observer metrics survive the next
   job's `git clean`).
 - `pnpm test:harness` — 31 `node:test` cases (teardown mechanics, classify,
-  evidence retention incl. redaction-engine-error, chunk-split-safe Vite log),
+  evidence retention incl. redaction-engine-error + leak-guard-vs-sentinel),
   all green in `joy-media-ci-linux`.
 
 ## Benchmark 4 — corrected revision (frozen SHA `83daea2f`)
