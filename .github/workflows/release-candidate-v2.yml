@@ -21,6 +21,7 @@ on:
 
 permissions:
   contents: read
+  actions: read # ci-namespace-janitor reads other runs' status to classify orphans
 
 concurrency:
   group: release-candidate-v2-${{ inputs.candidate_sha }}
@@ -310,6 +311,71 @@ jobs:
           done
           test -z "$(git status --porcelain)"
 
+  prod-build-smoke:
+    name: prod-build-smoke (shipped bundle, public UI)
+    runs-on: [self-hosted, linux, x64, joy-media-ci]
+    needs: [validate-candidate]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec playwright install chromium
+      - name: Smoke the production bundle through the app's public UI
+        shell: bash
+        env:
+          CI: true
+          PLAYWRIGHT_WORKERS: 1
+          JOY_MEDIA_E2E_API_PORT: '4991'
+          JOY_MEDIA_E2E_API_URL: http://127.0.0.1:4991
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:4990
+          PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-pw-report-prodsmoke-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-pw-results-prodsmoke-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          # Serve the isolated e2e API and the *production* editor bundle
+          # (vite preview of dist/, with the mirrored /api proxy), then run the
+          # UI-journey specs that exercise import, decode/seek (preview each
+          # asset) and the encode/export Worker path against the shipped
+          # artifact. The dev-server-only white-box decoder specs
+          # (agent-observation-decode, final-encoded-export-decoder,
+          # agent-director-skills — they import('/src/*.ts') at runtime) are
+          # intentionally excluded; they still run in full against the dev
+          # server in acceptance-primary / real-service-acceptance.
+          pnpm --filter @joy-media/api exec tsx ../../tooling/e2e-server.ts &
+          api_pid=$!
+          trap 'kill $api_pid ${preview_pid:-} 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:4991/health >/dev/null 2>&1 && break; sleep 1; done
+          curl -fsS http://127.0.0.1:4991/health >/dev/null
+          pnpm --filter @joy-media/editor-web exec vite preview --host 127.0.0.1 --port 4990 --strictPort &
+          preview_pid=$!
+          for i in $(seq 1 45); do curl -fsS http://127.0.0.1:4990/ >/dev/null 2>&1 && break; sleep 1; done
+          curl -fsS http://127.0.0.1:4990/ >/dev/null
+          pnpm exec playwright test \
+            tests/e2e/authenticated-smoke.spec.ts \
+            tests/e2e/wp32-real-project-journey.spec.ts \
+            tests/e2e/wp30-animated-timeline-export.spec.ts \
+            tests/e2e/golden-path.spec.ts \
+            --project=desktop-primary --workers=1
+      - name: Verify prod-build-smoke teardown
+        if: always()
+        shell: bash
+        env:
+          PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-pw-report-prodsmoke-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-pw-results-prodsmoke-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          for output_path in "$PLAYWRIGHT_HTML_REPORT" "$PLAYWRIGHT_TEST_RESULTS_DIR"; do
+            case "$output_path" in "$RUNNER_TEMP"/*) rm -rf -- "$output_path" 2>/dev/null || true ;; esac
+          done
+          pkill -f 'vite preview' 2>/dev/null || true
+          pkill -f 'tooling/e2e-server' 2>/dev/null || true
+          test -z "$(git status --porcelain)"
+
   real-service-acceptance:
     name: real-service-acceptance (pass ${{ matrix.pass }})
     runs-on: [self-hosted, linux, x64, joy-media-acceptance]
@@ -344,6 +410,19 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm exec playwright install chromium
+      - name: CI namespace janitor — inventory orphaned schemas/buckets (interruption recovery)
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Inventory only: classifies every ci_accept_* / joy-media-* namespace
+          # as current / active / orphan / unknown by looking up the owning
+          # run's status. Deletes nothing here — the report is release evidence.
+          # A sweep (JOY_MEDIA_CI_JANITOR_SWEEP=1 + --sweep) is enabled only
+          # after independent review.
+          node ops/self-hosted/linux-runner/ci-namespace-janitor.mjs
+          test -s test-output/ci-janitor/inventory.json
       - name: Bind Windows evidence to the gate contract
         env:
           WINDOWS_EVIDENCE_1_B64: ${{ needs.windows-worker-clean.outputs.evidence1 }}
@@ -378,7 +457,8 @@ jobs:
             test-output/release-performance/editor.json \
             test-output/delivery/result.json \
             test-output/windows/acceptance.json \
-            test-output/operations/restore.json; do
+            test-output/operations/restore.json \
+            test-output/ci-janitor/inventory.json; do
             test -s "$required" || { echo "required real-service evidence is missing: $required" >&2; exit 1; }
           done
       - name: Evaluate source-bound release gate
@@ -395,6 +475,22 @@ jobs:
           set -euo pipefail
           test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}"
           test -z "$(git status --porcelain)"
+          # Teardown verification is a required acceptance item. The harness
+          # re-inspects PostgreSQL, MinIO, the temp root and its child processes
+          # after cleanup and FAILS the pass on any run-owned residue (it no
+          # longer swallows deletion errors). It records the result here; a
+          # missing file or clean:false fails the step even if the harness
+          # somehow exited 0.
+          test -s test-output/operations/teardown.json || {
+            echo 'harness did not emit a teardown verification record' >&2; exit 1; }
+          node -e '
+            const r = require("./test-output/operations/teardown.json");
+            if (r.clean !== true) {
+              console.error("teardown not clean: " + JSON.stringify(r.residue || r));
+              process.exit(1);
+            }
+            console.error("teardown verified clean: " + (r.verified || []).join(", "));
+          '
 
   gate-summary:
     name: gate-summary
@@ -405,6 +501,7 @@ jobs:
         windows-worker-clean,
         acceptance-primary,
         acceptance-responsive,
+        prod-build-smoke,
         real-service-acceptance,
       ]
     if: always()
@@ -416,8 +513,13 @@ jobs:
         run: |
           set -euo pipefail
           echo "lane results: $LANE_RESULTS"
-          # Every dependency result must be exactly "success". A cancelled or
-          # failed run is never a passing repeatability result.
-          bad=$(printf '%s' "$LANE_RESULTS" | tr -d '[]" ' | tr ',' '\n' | grep -vc '^success$' || true)
-          test "$bad" -eq 0 || { echo "$bad release lane result(s) were not success" >&2; exit 1; }
+          # Any non-success token (failure / cancelled / skipped / timed_out /
+          # action_required) fails the gate. A cancelled or failed run is never
+          # a passing repeatability result. Parse token-wise so pretty-printed
+          # JSON with newlines cannot confuse the check.
+          if printf '%s' "$LANE_RESULTS" | grep -qwE 'failure|cancelled|skipped|timed_out|action_required'; then
+            echo 'a release lane did not succeed' >&2; exit 1
+          fi
+          printf '%s' "$LANE_RESULTS" | grep -qw success || {
+            echo 'no successful release lane result recorded' >&2; exit 1; }
           echo 'all release lanes succeeded on both isolated passes'
