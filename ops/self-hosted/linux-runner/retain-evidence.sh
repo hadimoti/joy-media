@@ -150,7 +150,11 @@ redact_file() {
   )
   env "${env_assign[@]}" perl -0777 -pi -e "${perl_rules[*]}" "$f"
 }
-while IFS= read -r -d '' f; do redact_file "$f"; done < <(find "$staging" -type f -print0)
+# A perl failure (missing module, uncompilable regex, I/O) MUST fail the pass —
+# unsanitized evidence must never be persisted.
+while IFS= read -r -d '' f; do
+  redact_file "$f" || { echo "retain-evidence: FATAL — redaction engine failed on $f" >&2; exit 1; }
+done < <(find "$staging" -type f -print0)
 
 # Leak guard — quarantine any staged file still carrying a secret in ANY of the
 # tracked forms (literal / base64 / url-encoded) or an obvious credential shape.
@@ -172,8 +176,14 @@ for var in "${SECRET_VARS[@]}"; do
   done
 done
 # Residual credential shapes the value-scan cannot see (runtime tokens etc.).
+# Kept in lock-step with redact_file's rules — if redaction misses one of these,
+# the file is quarantined rather than persisted.
 while IFS= read -r -d '' hit; do quarantine "$hit" "unredacted Bearer/presigned/basic-auth shape"; done \
-  < <(grep -rlZ -E -e 'Bearer [A-Za-z0-9._~+/=-]{16,}' -e 'X-Amz-Signature=[A-Za-z0-9%]{16,}' -e '://[^/[:space:]:@"]+:[^/[:space:]@"]+@' "$staging" 2>/dev/null)
+  < <(grep -rlZ -E \
+        -e 'Bearer [A-Za-z0-9._~+/=-]{12,}' \
+        -e 'X-Amz-(Signature|Credential|Security-Token|Expires)=[^&"'"'"' ]{8,}' \
+        -e '://[^/[:space:]:@"]+:[^/[:space:]@"]+@' \
+        "$staging" 2>/dev/null)
 
 # Manifest (sha256 + JSON), computed over what actually remains after quarantine.
 ( cd "$staging" && find . -type f ! -name MANIFEST.sha256 ! -name MANIFEST.json -print0 \

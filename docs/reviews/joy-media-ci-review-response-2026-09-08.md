@@ -9,7 +9,7 @@ maps every finding to what changed. HEAD after this response: see `git log`.
 | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **B1** | coverage-matrix doc falsely classified `wp35-universal-timeline` + `golden-path` as "functional"; their per-viewport layout / a11y assertions were dropped | **FIXED** | The 6-viewport sweep (`acceptance-responsive` job **and** `runDesktopMatrix`) now runs **3 layout specs** unioned via `--grep`: `wp32-responsive-checkpoints` + `golden-path` (login-gate overflow + axe) + `wp35`'s `renders backend track titles` test (loaded-timeline `.monitor-transport` / `.monitor-transport-end` / `.workspace` geometry). Doc table corrected. Verified 3/3 green at `desktop-compact`. |
 | **B2** | `wp32-responsive-checkpoints` measures overflow once, in the default layout; no coverage of Joy Code / Creative Brief / 3D Scene                           | **FIXED** | Re-measures `body.scrollWidth <= clientWidth` **after each of 11 panel opens**; panel list gains `Joy Code`, `Enhance`, `3D Scene`, and an inline Creative Brief reveal.                                                                                                                                                                                                                                          |
-| **B3** | `pnpm test:harness` (the node:test correctness suite) run by no workflow                                                                                   | **FIXED** | `release-candidate-v2` `linux-real-services` runs `pnpm test:harness` (full 27 cases on Linux) right after `verify:ci`; `ci-dev` `static-and-unit` runs the cross-platform subset.                                                                                                                                                                                                                                |
+| **B3** | `pnpm test:harness` (the node:test correctness suite) run by no workflow                                                                                   | **FIXED** | `release-candidate-v2` `linux-real-services` runs `pnpm test:harness` (full 31 cases on Linux) right after `verify:ci`; `ci-dev` `static-and-unit` runs the cross-platform subset.                                                                                                                                                                                                                                |
 | **B4** | `prod-build-smoke` uses unscoped `pkill -f 'vite preview'` on the shared `joy-media-ci` runner + fixed ports 4990/4991                                     | **FIXED** | Servers run under `setsid` (own process group), PIDs to `$RUNNER_TEMP`; teardown signals by pgid with bounded SIGTERM→wait→SIGKILL→verify and **fails** if a server survives. Ports are `21000 + run_id%3000` (+5000), `--strictPort`.                                                                                                                                                                            |
 
 ## Major
@@ -22,7 +22,7 @@ maps every finding to what changed. HEAD after this response: see `git log`.
 | **M4** | `runDesktopMatrix` writes the profile matrix `passed` unconditionally; a zero-test run passes                         | **FIXED**                | Matrix `status` is derived from the per-leg summaries; a leg fails if `status != passed` **or** fewer than `minTests` (3 responsive / 80 primary) passed. `/tmp` report dirs gained `runAttempt`.                                                                                                                                                           |
 | **M5** | `journey-failure.json` written only for telemetry-assertion failures                                                  | **FIXED**                | The entire `recordJourney` walk is wrapped — **any** throw (locator timeout, non-201 upload, cancel/retry, telemetry) persists a phase-stamped `journey-failure.json` (with `thrown`) before propagating.                                                                                                                                                   |
 | **M6** | telemetry capture disabled across ~280 lines of the journey                                                           | **PARTIAL / follow-up**  | Kept for now (the deliberately-failing `missing-source` request). Noted as a follow-up: narrow the mute or filter that one URL as a known-expected entry.                                                                                                                                                                                                   |
-| **M7** | the Vite dev-server stdout/stderr is discarded — the best `ERR_FILE_NOT_FOUND` artifact                               | **FOLLOW-UP (accepted)** | Not yet done. Highest-value next diagnostic step: pipe the dev server to `test-output/browser/web-dev-server.log` (bounded), allowlist it, reference it from `journey-failure.json`.                                                                                                                                                                        |
+| **M7** | the Vite dev-server stdout/stderr is discarded — the best `ERR_FILE_NOT_FOUND` artifact                               | **FIXED** | dev server `pipe`d into a bounded (line+byte, chunk-split-safe) redacted ring buffer, flushed on **any** harness failure — journey, dev-server-startup timeout, `runDesktopMatrix` leg, observer, restore (the top-level `catch` calls `writeWebServerLog()`, not only `writeJourneyFailure`). Allowlisted, referenced from `journey-failure.json`. See Update 2026-09-09b. |
 | **M8** | `retain-evidence.sh` had no `set -e` and every `perl` call swallowed its own error, so redaction could silently no-op | **FIXED**                | `command -v perl` + `sha256sum` required up front (FATAL if absent). All rules run in **one** `perl` invocation with the error-swallow removed — a `perl` failure fails the pass. Leak-guard extended to the url-encoded form + a generic Bearer / `X-Amz-Signature` / basic-auth scan. Dead `JOY_MEDIA_RELEASE_OBSERVER_TOKEN` dropped from `SECRET_VARS`. |
 | **M9** | the "quarantine" test does not test quarantine                                                                        | **FIXED**                | `evidence-retention.test.mjs` stubs `perl` as a no-op so a literal secret survives redaction, then asserts the file is **not** persisted, `REDACTION-FAILURES.txt` names it, and `MANIFEST.quarantinedCount >= 1`.                                                                                                                                          |
 
@@ -41,7 +41,7 @@ maps every finding to what changed. HEAD after this response: see `git log`.
 | **m9**  | `initialEditorJsBytes` is inert **and** redundant with `vite.config.ts` `bundlePolicy()` (build-time per-chunk gate) | **PARTIAL** — added `measure-entry-bundle.mjs` to `prod-build-smoke` (records the shipped entry + modulepreload graph, **raw AND gzip**: entry 451,373 / 133,184; eager graph 2,908,836 / 846,556; generous ceilings). The observer's `initialEditorJsBytes` predicate is **left as-is** but is now explicitly documented as a dev-lane sanity check, not production acceptance. Deleting it from the predicate is a follow-up decision for the reviewer. |
 | **m10** | requiring the gate to redden on artifact-upload failure is defensible but should be re-argued                        | **ADDRESSED (doc)** — `open-items` §9.2 states the position: the upload is required, its failure reddens the gate, the durable checksum-verified copy guarantees no evidence is lost, and the owner clears the quota. Not demoted to a warning.                                                                                                                                                                                                           |
 | **m11** | teardown-record write failure is dropped from the clean decision                                                     | **NOTED** — fail-safe today (the workflow catches a missing file); ordering fix is a follow-up.                                                                                                                                                                                                                                                                                                                                                           |
-| **m12** | doc inconsistencies (16 vs 27 cases; §8 stale; `CANDIDATE_SHA` no length check)                                      | **FIXED** — §8 gets a "SUPERSEDED by §9.2" banner; the case count is corrected; `retain-evidence.sh` warns if the resolved sha is not 40 chars.                                                                                                                                                                                                                                                                                                           |
+| **m12** | doc inconsistencies (16 vs 27 cases; §8 stale; `CANDIDATE_SHA` no length check)                                      | **FIXED** — §8 gets a "SUPERSEDED by §9.2" banner; the case count is corrected (now **31**, consistent across benchmark-results / open-items / this doc); `retain-evidence.sh` warns if the resolved sha is not 40 chars.                                                                                                                                                                                                                                                                                                           |
 | **m13** | `ci-dev.yml` writes Playwright output into the checkout, unignored, no teardown                                      | **FIXED** — `$RUNNER_TEMP` paths + a `git status --porcelain` residue check.                                                                                                                                                                                                                                                                                                                                                                              |
 | **m14** | scope-creep audit (`prod-build-smoke`, `ci-dev.yml`, janitor)                                                        | **NOTED** — `verify-agent-operation-coverage` / `font-assets.test.ts` are **not** in this diff (base code). `prod-build-smoke` is a net coverage gain but a new _required_ lane — hardened per B4/M1. `ci-dev.yml` is parked, dispatch-only, reviewed on its own merits.                                                                                                                                                                                  |
 
@@ -54,9 +54,9 @@ artifact quota. Until a full gate run is green on **both** passes with durable
 checksum-verified evidence, the contract is **not demonstrated end-to-end** —
 `benchmark-results` says this plainly and it is not softened here.
 
-Follow-ups (M6, M7, m2, m3, m4, m9-decision, m11): tracked above; none block the
-next benchmark, but M7 (log the dev server) should land before the flake in
-§9.1 is considered understood.
+Follow-ups (M6, m2, m3, m4, m9-decision, m11): tracked above; none block the
+next benchmark. M7 (log the dev server, flushed on any failure) landed in the
+pre-freeze delta — see Update 2026-09-09b.
 
 **A green benchmark still approves nothing.** The Astra `APPROVE_FOR_DEPLOY`
 gate on the final R2 candidate is separate and unaffected.
@@ -119,8 +119,41 @@ exec` prints its own preamble ("Scope: … / Lockfile passes … / Done in Nms")
   against the inventory table); **6 QA-referenced kept**. Storage now ~27.6 MiB
   (was 4.62 GiB). No purchase. See `joy-media-ci-artifact-inventory-2026-09-08.md`.
 
-**Remaining follow-ups (do not block the benchmark):** M6 (narrow the ~280-line
-telemetry mute), m2 (grandchild sweep), m3 (`rm` errno), m4 (`/tmp` residue),
-m9-decision (delete `initialEditorJsBytes` from the soak predicate?), m11.
+**Remaining follow-ups (do not block the benchmark):** M6 (the telemetry mute in
+`recordJourney`'s `catch` spans ~280 lines of the walk, not the ~10 the inline
+rationale explains — it also silences delivery cancel/retry recovery paths;
+narrow to the specific expected-error assertions), m2 (grandchild sweep), m3
+(`rm` errno), m4 (`/tmp` residue), m9-decision (delete `initialEditorJsBytes`
+from the soak predicate?), m11.
 
-**Next:** independent re-review of `6779a375` → freeze → one full gate run.
+## Update 2026-09-09b — pre-freeze delta (re-review of `6779a375`)
+
+The second independent re-review's verdict was "ready for a full benchmark", with
+two items to land **before** freezing rather than after. Both done on top of
+`0cfb6ef8`:
+
+- **M8 hard-fail (was: error-swallow removed but loop still bare).**
+  `retain-evidence.sh` runs redaction in a `while … read` loop with no `set -e`;
+  a non-zero `perl` exit was still discarded. Now `redact_file "$f" || { echo
+  "retain-evidence: FATAL — redaction engine failed on $f" >&2; exit 1; }` — a
+  redaction-engine failure fails the pass and persists nothing. The generic
+  leak-guard scan was also widened to lock-step with `redact_file`'s rules
+  (`Bearer …{12,}`, `X-Amz-(Signature|Credential|Security-Token|Expires)=`,
+  `scheme://user:pass@`). New `pnpm test:harness` case: *"a redaction-engine
+  ERROR fails the pass (does NOT persist)"* — stubs `perl` to `exit 3`, asserts
+  non-zero exit + no `MANIFEST.json` under the persistent root. **31/31 green** in
+  `joy-media-ci-linux`.
+- **M7 top-level flush (was: only `writeJourneyFailure` flushed the buffer).**
+  A `waitForHttp` dev-server-startup timeout and every `runDesktopMatrix` leg
+  failure left the Vite ring buffer unflushed. The top-level `catch` in
+  `real-service-acceptance.mjs` now calls `writeWebServerLog()` for **any**
+  failure and appends the retained path to the error message. Startup failure is
+  exactly the case the log exists for.
+
+**§9.1 (`net::ERR_FILE_NOT_FOUND`) remains OPEN and unresolved.** M7 makes the
+next occurrence diagnosable; it does not identify or fix the cause. A green gate
+does not close it.
+
+**Next:** re-reviewer checks this final delta → freeze the reviewed SHA →
+`artifact-quota-check.yml` probe succeeds (quota accounting caught up) → one full
+`release-candidate-v2` gate run.

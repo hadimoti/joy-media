@@ -51,7 +51,7 @@ Mechanics extracted to `ops/self-hosted/linux-runner/real-service-teardown.mjs`
 and covered by `real-service-teardown.test.mjs` (SIGTERM exit, delayed exit,
 unresponsive → SIGKILL, whole-group kill, unrelated process untouched,
 already-exited, populated-dir removal, writer-recreates-path reported,
-writer-stops-then-succeeds). `pnpm test:harness` (**27 `node:test` cases** across
+writer-stops-then-succeeds). `pnpm test:harness` (**31 `node:test` cases** across
 `real-service-teardown` + `ci-namespace-classify` + `real-service-evidence` +
 `evidence-retention`) runs them, and is now invoked by `release-candidate-v2`
 (`linux-real-services`, full set on Linux) and `ci-dev` (cross-platform subset)
@@ -316,12 +316,18 @@ Neither §9.1 nor §9.2 is a threshold or a rerun question.
 
 ## Evidence still required before independent approval
 
-- **Owner:** set `JOY_MEDIA_CI_EVIDENCE_ROOT` on the runner; clear the artifact
-  quota (delete the 50 stale `playwright-evidence` artifacts).
+- ✅ **Owner:** `JOY_MEDIA_CI_EVIDENCE_ROOT` set on the runner (dedicated
+  `joy-media-ci-evidence` Docker named volume — survives container replacement,
+  not volume deletion / Docker Desktop reset; not a backup). **Done.**
+- ✅ **Owner:** artifact-quota cleanup — 44 unreferenced artifacts deleted, 6
+  QA-referenced preserved (4.62 GiB → ~27.6 MiB live). **Done.** GitHub
+  recalculates storage accounting every 6–12 h; `artifact-quota-check.yml`
+  (workflow_dispatch) must upload a tiny sanitized probe successfully before the
+  full gate is dispatched — deletion succeeding does not prove the quota freed.
 - A full gate run of the revision that resolves §9.1–§9.2 (HEAD ≥ `45022c7c`) —
   **both** `real-service` passes **and** cleanup **and** durable evidence
   (manifest + checksum + retrievable persistent copy) green for both passes.
-- ✅ `pnpm test:harness` green (**26** cases) + the real dev-server / process
+- ✅ `pnpm test:harness` green (**31** cases) + the real dev-server / process
   teardown integration run + the injected-journey-failure + evidence-retention
   focused checks — **done** in `joy-media-ci-acceptance` /
   `joy-media-ci-linux`.

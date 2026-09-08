@@ -348,6 +348,17 @@ try {
   primaryError = null;
 } catch (error) {
   primaryError = error instanceof Error ? error : new Error(String(error));
+  // Flush the Vite dev-server log for ANY failure — a startup timeout, a
+  // runDesktopMatrix leg, the observer, restore — not only a journey failure.
+  // (writeJourneyFailure already flushes it for journey failures; a second
+  // flush of the same buffer is harmless.)
+  try {
+    const webServerLogPath = writeWebServerLog();
+    if (webServerLogPath)
+      primaryError.message += `\n[vite dev-server log retained: ${webServerLogPath}]`;
+  } catch {
+    /* best-effort */
+  }
 } finally {
   // Teardown is a required acceptance item, not best-effort. Every step is
   // attempted; a deletion FAILURE is recorded (never swallowed); then the

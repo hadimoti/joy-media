@@ -191,3 +191,31 @@ test(
     assert.ok(manifest.quarantinedCount >= 1, 'quarantinedCount must reflect the drop');
   },
 );
+
+test(
+  'retain-evidence: a redaction-engine ERROR fails the pass (does NOT persist)',
+  posixOnly,
+  async () => {
+    const ws = await mkdtemp(join(tmpdir(), 'jm-ev-perr-'));
+    await spawnSync('git', ['init', '-q'], { cwd: ws });
+    await mkdir(join(ws, 'test-output/operations'), { recursive: true });
+    await writeFile(join(ws, 'test-output/operations/teardown.json'), '{"clean":true}');
+    // Stub `perl` to EXIT NON-ZERO — redaction cannot run, so the pass must fail.
+    const bin = await mkdtemp(join(tmpdir(), 'jm-ev-perr-bin-'));
+    await writeFile(join(bin, 'perl'), '#!/bin/sh\necho "perl: boom" >&2\nexit 3\n', {
+      mode: 0o755,
+    });
+    const persist = await mkdtemp(join(tmpdir(), 'jm-ev-perr-p-'));
+    const r = spawnSync('bash', [RETAIN, ws, join(ws, '..', 'stg-pe'), persist], {
+      cwd: ws,
+      encoding: 'utf8',
+      env: { ...env(), PATH: `${bin}:${process.env.PATH}` },
+    });
+    assert.notEqual(r.status, 0, 'a perl failure must fail retain-evidence');
+    assert.match(r.stderr, /redaction engine failed/i);
+    await assert.rejects(
+      () => stat(join(persist, 'unknown', '444-1-p2', 'MANIFEST.json')),
+      'nothing may be persisted when redaction could not run',
+    );
+  },
+);
