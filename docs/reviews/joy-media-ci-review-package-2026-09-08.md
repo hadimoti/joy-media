@@ -7,14 +7,14 @@ decision is the reviewer's, then the owner's.
 
 ## Revisions under review
 
-| Artifact                                          | Revision              | Note                                                                                                                                                              |
-| ------------------------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Application candidate                             | `3eaa8cd7` (R2 GAP 3) | the app code the gate was benchmarked against                                                                                                                     |
-| CI-opt branch HEAD (workflow + harness + tooling) | `185f18c6`            | janitor `pg` fix + structured gate-summary on top of the hardened `8c5a4445`                                                                                      |
-| Benchmark 1 (speed)                               | ran on `cdbb771f`     | pre-hardening teardown → performance evidence only                                                                                                                |
-| Benchmark 2 (failed)                              | ran on `498c45fe`     | caught the janitor `pg`-resolution bug                                                                                                                            |
-| Benchmark 3 (hardened evidence)                   | ran on `8c5a4445`     | teardown enforcement + janitor + prod-build-smoke; **FAILED** — deterministic `tempRoot` residue on both passes (see §6) + an undetermined pass-1 soak failure    |
-| Corrected revision (this package)                 | `<pending commit>`    | fixes the §6 teardown-ordering bug, adds bounded shutdown, 404-quarantine janitor, evidence retention, `pnpm test:harness`; **benchmark pending on a quiet host** |
+| Artifact                                          | Revision              | Note                                                                                                                                                                         |
+| ------------------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Application candidate                             | `3eaa8cd7` (R2 GAP 3) | the app code the gate was benchmarked against                                                                                                                                |
+| CI-opt branch HEAD (workflow + harness + tooling) | `61bc4c44`            | corrected revision — §6 teardown-ordering fix + bounded shutdown + 404 quarantine + evidence retention, on top of `185f18c6` (janitor `pg` fix + structured gate-summary)    |
+| Benchmark 1 (speed)                               | ran on `cdbb771f`     | pre-hardening teardown → performance evidence only                                                                                                                           |
+| Benchmark 2 (failed)                              | ran on `498c45fe`     | caught the janitor `pg`-resolution bug                                                                                                                                       |
+| Benchmark 3 (hardened evidence)                   | ran on `8c5a4445`     | teardown enforcement + janitor + prod-build-smoke; **FAILED** — deterministic `tempRoot` residue on both passes (see §6) + an undetermined pass-1 soak failure               |
+| Corrected revision (this package)                 | `61bc4c44`            | fixes the §6 teardown-ordering bug, adds bounded shutdown, 404-quarantine janitor, evidence retention, `pnpm test:harness` (18 cases); **benchmark pending on a quiet host** |
 
 `main` carries only the **dispatch-only** `release-candidate-v2.yml` (2 commits,
 workflow file only; `release-candidate.yml` and all product code untouched;
