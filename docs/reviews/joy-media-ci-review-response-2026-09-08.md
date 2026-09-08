@@ -186,11 +186,36 @@ fails with the `e3c1a049` pattern and passes with the fix. No new findings; the
 broader bare-`Credential=`/`Security-Token=` match is intentional defense in
 depth. **31/31 harness green.**
 
-**Frozen candidate:** `6c21c589e47a8fc0fa1b843487de284e706329a2`
-· tree `bd52e21aeb9f5021e1be5b045f3b347eae8fab41`
-· `pnpm-lock.yaml` blob `4f2721172df53e834be167dc8d91d56bbaaacb88`.
+**Frozen candidate — `6c21c589`:**
 
-**Next (owner pre-authorized):** `artifact-quota-check.yml` probe uploads green
-(bounded poller, deadline 2026-09-09T10:30Z) → dispatch ONE
-`release-candidate-v2` gate on the frozen SHA, host quiet, no implementation
-changes during the run.
+| field | value |
+|---|---|
+| commit SHA | `6c21c589e47a8fc0fa1b843487de284e706329a2` |
+| tree SHA | `bd52e21aeb9f5021e1be5b045f3b347eae8fab41` |
+| `pnpm-lock.yaml` — Git blob ID | `4f2721172df53e834be167dc8d91d56bbaaacb88` |
+| `pnpm-lock.yaml` — content SHA-256 | `36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3` |
+| `release-candidate-v2.yml` — Git blob ID | `b5a5880d2c8677e40dcb5b3f7090317093c9d681` |
+| reviewed workflow-definition commit | last touched at `0cfb6ef8` (6 defensive lines implementing owner checklist item 4: unique/fresh Playwright report per pass, `rm -f` before + `test -s` after); unchanged through `6c21c589` and the branch tip |
+
+The two `pnpm-lock.yaml` identifiers are different hashes of the same file — the
+Git blob ID (`git hash-object`, SHA-1 of `blob <len>\0<content>`) and the raw
+content SHA-256. Both are recorded so review/deploy tooling cannot conflate them.
+
+**Workflow-revision pinning.** `gh workflow run` resolves the workflow YAML from
+its `--ref`; checking out `candidate_sha` in each job pins only the *code*, not
+the *workflow definition*. Dispatch therefore uses the tag
+**`ci-v2-gate-frozen-6c21c589`** (→ `6c21c589`) as `--ref`, so GitHub runs the
+reviewed workflow definition, and `-f candidate_sha=6c21c589e47a8fc0…` pins the
+checkout. After dispatch, record both `gh run view --json headSha` (workflow
+revision GitHub used) and the `validate-candidate` job's resolved candidate SHA.
+
+**Next (owner pre-authorized, conditional dispatch approval stands):** benchmark
+stays PAUSED until the `artifact-quota-check.yml` probe uploads green (bounded
+poller, one probe / 90 min, deadline 2026-09-09T10:30Z). The repeated
+`Artifact storage quota has been hit` is *consistent with* GitHub's documented
+6–12 h storage recalculation after the 44-artifact deletion, but that is a
+**hypothesis, not a confirmed cause** — the probe is the test. On green →
+dispatch ONE `release-candidate-v2` gate on the frozen tag, host quiet, no
+implementation changes during the run. If the deadline expires still blocked →
+stop probing, investigate account-wide Actions storage/billing + the exact
+error (no storage purchase).
