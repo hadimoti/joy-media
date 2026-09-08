@@ -136,16 +136,14 @@ jobs:
     if: always()
     runs-on: [self-hosted, windows, x64, joy-media-ci]
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Require every development lane green
         shell: bash
         env:
           LANE_RESULTS: ${{ toJSON(needs.*.result) }}
         run: |
           set -euo pipefail
-          echo "development verification lanes: $LANE_RESULTS"
-          if printf '%s' "$LANE_RESULTS" | grep -qwE 'failure|cancelled|skipped|timed_out|action_required'; then
-            echo 'a development lane did not succeed' >&2; exit 1
-          fi
-          printf '%s' "$LANE_RESULTS" | grep -qw success || {
-            echo 'no successful development lane result recorded' >&2; exit 1; }
+          # Structured evaluation (shared with release-candidate-v2). 3 lanes:
+          # static-and-unit, worker-package, browser.
+          node --experimental-strip-types tooling/release/src/ci-gate-summary.ts "$LANE_RESULTS" 3
           echo 'development verification passed — this is NOT a release approval'

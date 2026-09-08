@@ -506,20 +506,23 @@ jobs:
       ]
     if: always()
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
       - name: Require every lane green on both isolated passes
         shell: bash
         env:
           LANE_RESULTS: ${{ toJSON(needs.*.result) }}
         run: |
           set -euo pipefail
-          echo "lane results: $LANE_RESULTS"
-          # Any non-success token (failure / cancelled / skipped / timed_out /
-          # action_required) fails the gate. A cancelled or failed run is never
-          # a passing repeatability result. Parse token-wise so pretty-printed
-          # JSON with newlines cannot confuse the check.
-          if printf '%s' "$LANE_RESULTS" | grep -qwE 'failure|cancelled|skipped|timed_out|action_required'; then
-            echo 'a release lane did not succeed' >&2; exit 1
-          fi
-          printf '%s' "$LANE_RESULTS" | grep -qw success || {
-            echo 'no successful release lane result recorded' >&2; exit 1; }
-          echo 'all release lanes succeeded on both isolated passes'
+          # Structured evaluation (tooling/release/src/ci-gate-summary.ts,
+          # unit-tested in ci-gate-summary.test.ts — success / failure /
+          # cancelled / skipped / missing-job / malformed cases): JSON.parse the
+          # results array, require its length to equal the expected lane count (a
+          # missing required job -> short array / "skipped"), and require every
+          # entry to be exactly "success".
+          # 6 lanes: linux-real-services, windows-worker-clean, acceptance-primary,
+          # acceptance-responsive, prod-build-smoke, real-service-acceptance.
+          node --experimental-strip-types tooling/release/src/ci-gate-summary.ts "$LANE_RESULTS" 6
