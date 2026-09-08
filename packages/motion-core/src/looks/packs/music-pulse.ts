@@ -1,11 +1,17 @@
 /**
- * Music Pulse (R2 L3).
+ * Music Pulse (R2 L3) — HELD FOR R2.1, not in `BUILT_IN_LOOK_PACKS`.
  *
  * Deliberate identity: audio-linked motion with bounded amplitude and
  * restrained accent cuts. In L3 the pulse rate and depth are operator sliders;
  * L4 replaces the operator value with a measured audio envelope written to the
  * identical binding targets. Silent audio yields a stable output because the
  * L3 default depth is small and L4's silence path is a constant curve.
+ *
+ * Held out of the R2 shipping set (owner-delegated taste review, 2026-09-08):
+ * the "Accent cuts" toggle compiles to a permanent-on track rather than a
+ * beat-gated one, and the slider-only fallback has no rate control so it emits
+ * only two swells per composition regardless of length. Re-ships in R2.1 once
+ * the compiler grows a real rate control and a beat-gated boolean drive.
  */
 
 import type { LookDefinition } from '../types.js';

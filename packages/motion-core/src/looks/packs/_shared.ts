@@ -1,5 +1,5 @@
 /**
- * Shared builders for the six R2 Look packs (L3). Each pack is still authored
+ * Shared builders for the R2 Look packs (L3). Each pack is still authored
  * as explicit typed data — these helpers only remove the mechanical repetition
  * in binding-target and constraint shapes so the pack files read as intent.
  */

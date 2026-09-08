@@ -4,7 +4,7 @@ import { compileLook } from '../compile.js';
 import type { LookCompileInput, LookDefinition, LookOperation } from '../types.js';
 
 /**
- * Golden timing/geometry expectations for the six R2 packs (L3b).
+ * Golden timing/geometry expectations for the four shipping R2 packs (L3b).
  *
  * A pack compiles to a *stable* operation list for a fixed input — identical
  * keyframe times, values and templates — so any drift in a pack's authored

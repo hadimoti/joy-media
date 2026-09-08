@@ -4,12 +4,12 @@ exports[`R2 Look pack golden compile > editorial-clean > landscape first-apply o
 [
   "kf deck-opacity opacity @640000 = 0.000 (eased)",
   "kf deck-opacity opacity @2240000 = 1.000 (eased)",
-  "kf deck-y y @0 = -12.600 (eased)",
+  "kf deck-y y @0 = 12.600 (eased)",
   "kf deck-y y @1920000 = 0.000 (eased)",
   "kf deck-y y @8000000 = 0.000 (eased)",
   "kf headline-opacity opacity @0 = 0.000 (eased)",
   "kf headline-opacity opacity @1280000 = 1.000 (eased)",
-  "kf headline-y y @0 = -16.800 (eased)",
+  "kf headline-y y @0 = 16.800 (eased)",
   "kf headline-y y @1440000 = 0.000 (eased)",
   "kf headline-y y @8000000 = 0.000 (eased)",
   "text headline-treatment -> clean-title",
@@ -21,12 +21,12 @@ exports[`R2 Look pack golden compile > editorial-clean > portrait first-apply op
 [
   "kf deck-opacity opacity @640000 = 0.000 (eased)",
   "kf deck-opacity opacity @2240000 = 1.000 (eased)",
-  "kf deck-y y @0 = -12.600 (eased)",
+  "kf deck-y y @0 = 12.600 (eased)",
   "kf deck-y y @1920000 = 0.000 (eased)",
   "kf deck-y y @8000000 = 0.000 (eased)",
   "kf headline-opacity opacity @0 = 0.000 (eased)",
   "kf headline-opacity opacity @1280000 = 1.000 (eased)",
-  "kf headline-y y @0 = -16.800 (eased)",
+  "kf headline-y y @0 = 16.800 (eased)",
   "kf headline-y y @1440000 = 0.000 (eased)",
   "kf headline-y y @8000000 = 0.000 (eased)",
   "text headline-treatment -> clean-title",
@@ -73,6 +73,8 @@ exports[`R2 Look pack golden compile > kinetic-type > landscape first-apply oper
   "kf phrase-3-y y @1920000 = 38.400 (eased)",
   "kf phrase-3-y y @2720000 = 0.000 (eased)",
   "text phrase-1-treatment -> outline-impact",
+  "text phrase-2-treatment -> outline-impact",
+  "text phrase-3-treatment -> outline-impact",
 ]
 `;
 
@@ -115,70 +117,8 @@ exports[`R2 Look pack golden compile > kinetic-type > portrait first-apply opera
   "kf phrase-3-y y @1920000 = 38.400 (eased)",
   "kf phrase-3-y y @2720000 = 0.000 (eased)",
   "text phrase-1-treatment -> outline-impact",
-]
-`;
-
-exports[`R2 Look pack golden compile > music-pulse > landscape first-apply operations are stable 1`] = `
-[
-  "kf subject-scale-x scaleX @0 = 1.000 (eased)",
-  "kf subject-scale-x scaleX @2000000 = 1.036 (eased)",
-  "kf subject-scale-x scaleX @4000000 = 1.000 (eased)",
-  "kf subject-scale-x scaleX @6000000 = 1.036 (eased)",
-  "kf subject-scale-x scaleX @8000000 = 1.000 (eased)",
-  "kf subject-scale-y scaleY @0 = 1.000 (eased)",
-  "kf subject-scale-y scaleY @2000000 = 1.036 (eased)",
-  "kf subject-scale-y scaleY @4000000 = 1.000 (eased)",
-  "kf subject-scale-y scaleY @6000000 = 1.036 (eased)",
-  "kf subject-scale-y scaleY @8000000 = 1.000 (eased)",
-  "text subject-treatment -> neon-keyword",
-  "caption caption-treatment -> joy-karaoke-pop",
-]
-`;
-
-exports[`R2 Look pack golden compile > music-pulse > portrait first-apply operations are stable 1`] = `
-[
-  "kf subject-scale-x scaleX @0 = 1.000 (eased)",
-  "kf subject-scale-x scaleX @2000000 = 1.036 (eased)",
-  "kf subject-scale-x scaleX @4000000 = 1.000 (eased)",
-  "kf subject-scale-x scaleX @6000000 = 1.036 (eased)",
-  "kf subject-scale-x scaleX @8000000 = 1.000 (eased)",
-  "kf subject-scale-y scaleY @0 = 1.000 (eased)",
-  "kf subject-scale-y scaleY @2000000 = 1.036 (eased)",
-  "kf subject-scale-y scaleY @4000000 = 1.000 (eased)",
-  "kf subject-scale-y scaleY @6000000 = 1.036 (eased)",
-  "kf subject-scale-y scaleY @8000000 = 1.000 (eased)",
-  "text subject-treatment -> neon-keyword",
-  "caption caption-treatment -> joy-karaoke-pop",
-]
-`;
-
-exports[`R2 Look pack golden compile > persian-editorial > landscape first-apply operations are stable 1`] = `
-[
-  "kf byline-opacity opacity @800000 = 0.000 (eased)",
-  "kf byline-opacity opacity @2400000 = 1.000 (eased)",
-  "kf headline-opacity opacity @0 = 0.000 (eased)",
-  "kf headline-opacity opacity @1280000 = 1.000 (eased)",
-  "kf headline-x x @0 = 19.600 (eased)",
-  "kf headline-x x @1600000 = 0.000 (eased)",
-  "kf headline-x x @8000000 = 0.000 (eased)",
-  "text byline-treatment -> rtl-name-role",
-  "text headline-treatment -> rtl-editorial-title",
-  "caption caption-treatment -> joy-rtl-classic",
-]
-`;
-
-exports[`R2 Look pack golden compile > persian-editorial > portrait first-apply operations are stable 1`] = `
-[
-  "kf byline-opacity opacity @800000 = 0.000 (eased)",
-  "kf byline-opacity opacity @2400000 = 1.000 (eased)",
-  "kf headline-opacity opacity @0 = 0.000 (eased)",
-  "kf headline-opacity opacity @1280000 = 1.000 (eased)",
-  "kf headline-x x @0 = 19.600 (eased)",
-  "kf headline-x x @1600000 = 0.000 (eased)",
-  "kf headline-x x @8000000 = 0.000 (eased)",
-  "text byline-treatment -> rtl-name-role",
-  "text headline-treatment -> rtl-editorial-title",
-  "caption caption-treatment -> joy-rtl-classic",
+  "text phrase-2-treatment -> outline-impact",
+  "text phrase-3-treatment -> outline-impact",
 ]
 `;
 

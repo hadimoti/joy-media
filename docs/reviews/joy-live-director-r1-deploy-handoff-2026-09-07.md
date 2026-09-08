@@ -240,8 +240,10 @@ ln -sfn /opt/joy-media/releases/r1-855734cf-api-$ts /opt/joy-media/releases/.cur
 mv -Tf /opt/joy-media/releases/.current-api.new /opt/joy-media/releases/current-api
 mv -Tf /etc/joy-media/.api.env.new /etc/joy-media/api.env
 systemctl restart joy-media@api
+ok=0
 for i in $(seq 1 45); do curl -fsS --max-time 3 http://127.0.0.1:8790/live >/dev/null \
-  && curl -fsS --max-time 3 http://127.0.0.1:8790/ready >/dev/null && { echo API_HEALTHY; break; }; sleep 1; done
+  && curl -fsS --max-time 3 http://127.0.0.1:8790/ready >/dev/null && { ok=1; echo API_HEALTHY; break; }; sleep 1; done
+test "$ok" -eq 1 || { echo 'API never became healthy — roll back, do NOT reload nginx' >&2; exit 1; }
 systemctl reload nginx
 
 # C6 — public health + byte-match

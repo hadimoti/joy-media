@@ -3,28 +3,34 @@
 Recorded: 2026-09-08 (Claude implementer). This bundle is the evidence index for
 the independent Opus ("Astra") review of R2. It is **not** a self-approval —
 Astra rules on the exact candidate below, and R2 additionally carries
-owner-gated taste review (see the scorecard).
+owner-delegated taste review (recorded in the scorecard; all four shipping packs
+`APPROVED`).
 
 ## Candidate identity
 
-| Field    | Value                                                                                                                                   |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| commit   | `93d1c082ef4f86e4caca00effef8a2082cfd5af0` (branch `codex/joy-live-director`)                                                           |
-| tree     | `a92dce700411daef0366e09559eba18371c71afb`                                                                                              |
-| lockfile | `pnpm-lock.yaml` sha256 `36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3` (byte-identical to R1 — zero lockfile delta) |
-| base     | `855734cf0c875101a632426983db2638c2adddcd` (R1, **LIVE** on joyst.ir since 2026-09-07)                                                  |
+| Field    | Value                                                                                                                                                            |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| commit   | `PENDING` — re-cut 2026-09-08 after the taste fixes + `persian-editorial` retirement (branch `codex/joy-live-director`)                                          |
+| tree     | `PENDING`                                                                                                                                                        |
+| lockfile | `pnpm-lock.yaml` sha256 `36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3` (byte-identical to R1 — zero lockfile delta; R2 adds no dependencies) |
+| base     | `855734cf0c875101a632426983db2638c2adddcd` (R1, **LIVE** on joyst.ir since 2026-09-07)                                                                           |
 
 The review is always against one exact SHA / tree / lock triple. If Astra
 requires changes, a new candidate SHA is cut and this bundle is re-dated. Branch
 HEAD may carry docs-only commits ahead of the candidate; the gate always runs on
 the pinned SHA.
 
-**Self-hosted `release-candidate.yml`** — run `34167709048` on `7956dff3`
-green-lit the four heavy lanes (`validate-candidate`, `linux-real-services` ×2,
-`windows-worker-clean` 2 passes) then was cancelled when CodeRabbit round-2
-landed the `kinetic-type` exit fix (`93d1c082`); re-dispatched on `93d1c082`.
-Per the Opus CI ruling: R2 gates on the proven self-hosted instrument; R3 moves
-the heavy lanes to a dedicated CI VPS. ~4.5h unattended, needs ×2.
+**Candidate history.** `93d1c082` (tree `a92dce70…`) passed one full green
+self-hosted `release-candidate.yml` run (`34168068793`, 20/20). The
+owner-delegated taste review then landed three source changes — `editorial-clean`
+`y`-sign flip, `kinetic-type` `phrase-2/3` treatment bindings, `music-pulse`
+held out of `BUILT_IN_LOOK_PACKS` for R2.1 — and the owner retired
+`persian-editorial` (English-only app). That is a source change, so a new
+candidate is cut and the gate re-runs from scratch (×2).
+
+**Self-hosted `release-candidate.yml`** is the gate instrument. Per the Opus CI
+ruling: R2 gates on the proven self-hosted instrument; R3 moves the heavy lanes
+to a dedicated CI VPS. ~4.5h unattended, needs ×2 green on the exact candidate.
 
 ## What R2 is
 
@@ -45,12 +51,14 @@ in the apply path, no renderer in `motion-core`.
   (`apps/editor-web/src/joy-agent/look-operations.ts`) translates 1:1 to a
   JoyCode plan; `look-run-host.ts` stages it through
   `createJoyAgentProposalStagingHandler` — the R1 handler unchanged.
-- **L3** — six built-in packs as typed data
+- **L3** — four built-in packs as typed data
   (`packages/motion-core/src/looks/packs/`): editorial-clean, product-precision,
-  kinetic-type, quiet-documentary, music-pulse, persian-editorial. Typography and
-  palette are expressed through the **fixed** `TEXT_TEMPLATES` /
-  `JOY_CAPTION_TEMPLATES` catalogues (Opus L3 ruling) — no new op kinds, no R1
-  re-review. "No fake slider" is enforced mechanically.
+  kinetic-type, quiet-documentary. `music-pulse` is authored but held out of
+  `BUILT_IN_LOOK_PACKS` for R2.1 (kept covered by `music-pulse.test.ts`);
+  `persian-editorial` was retired (English-only app). Typography and palette are
+  expressed through the **fixed** `TEXT_TEMPLATES` / `JOY_CAPTION_TEMPLATES`
+  catalogues (Opus L3 ruling) — no new op kinds, no R1 re-review. "No fake
+  slider" is enforced mechanically.
 - **L4** — audio-reactive baking (`audio-reactive.ts` +
   `apps/editor-web/src/joy-agent/look-audio-bridge.ts`): R1's
   `BeatEnvelopeEstimate` → bounded, editable `motion.setKeyframe` keyframes on one
@@ -62,26 +70,26 @@ in the apply path, no renderer in `motion-core`.
 
 ## Full-suite / build at this candidate
 
-| Check                                             | Result                                                                                                                                                                                                                       |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm run verify:ci` (check + build + prod audit) | local at `7b8d351c`: **vitest 4211 passed / 38 skipped / 0 failed** (527 files); `tsc -b` + `eslint .` + `prettier --check` clean; hosted `r2-candidate.yml` `verify` lane passed ×2 on the pre-fix tree (run `34165045011`) |
-| CI green ×2                                       | `PENDING` — topology per the Opus infra decision (self-hosted `release-candidate.yml` for R2; heavy lanes → CI VPS for R3). GitHub-hosted acceptance is blocked on the account's Actions billing.                            |
-| CodeRabbit                                        | round 1 (base `855734cf`) — 14 findings; the valid R2 + R1-doc findings fixed in `38dc2958` / `7b8d351c`. Re-review `PENDING`.                                                                                               |
-| Font redistribution gate                          | ✅ `tooling/release/src/font-assets.test.ts` (6) — no retired-foundry ownership marker in any runtime surface; Vazirmatn is Fontsource OFL, bundled                                                                          |
-| Coverage verifier                                 | ✅ unchanged — R2 adds no operation kinds                                                                                                                                                                                    |
+| Check                                             | Result                                                                                                                                                                                           |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pnpm run verify:ci` (check + build + prod audit) | local at the re-cut candidate: **vitest 4190 passed / 38 skipped / 0 failed** (527 files); `tsc -b` + `eslint .` + `prettier --check` clean                                                      |
+| CI green ×2                                       | `PENDING` — self-hosted `release-candidate.yml` on the re-cut candidate. `93d1c082` (pre-taste-fix) had one green run (`34168068793`, 20/20); the re-cut candidate needs ×2.                     |
+| CodeRabbit                                        | round 1 (14) + round 2 (4) + round 3 (4, all docs) — all fixed. Round 4 on the re-cut candidate `PENDING`.                                                                                       |
+| Font redistribution gate                          | ✅ `tooling/release/src/font-assets.test.ts` — no retired-foundry ownership marker in any runtime surface; Vazirmatn is Fontsource OFL, bundled (still used by the standalone `rtl-*` templates) |
+| Coverage verifier                                 | ✅ unchanged — R2 adds no operation kinds                                                                                                                                                        |
 
 ## New tests (R2)
 
-| Area           | File                                                                                                                                       | Count                         |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------- |
-| L1 schema      | `packages/project-schema/src/{living-look,v3}.test.ts`                                                                                     | 152 + 131 assertions          |
-| L2 compiler    | `packages/motion-core/src/looks/{validate,compile,compile-audio-bakes}.test.ts`                                                            | 11 (bakes) + validate/compile |
-| L3 packs       | `packages/motion-core/src/looks/packs/{packs,packs-golden,packs-render-fidelity}.test.ts`                                                  | 43 + 18 + 12                  |
-| L4 core        | `packages/motion-core/src/looks/audio-reactive.test.ts`                                                                                    | 10                            |
-| L4 bridge      | `apps/editor-web/src/joy-agent/look-audio-bridge.test.ts`                                                                                  | 8                             |
-| Editor adapter | `apps/editor-web/src/joy-agent/{look-operations,look-run-host,look-packs-conformance}.test.ts`                                             | 12 + 4 + 4                    |
-| Panel          | `apps/editor-web/src/LivingLooksPanel.test.tsx`                                                                                            | 3                             |
-| e2e            | `tests/e2e/agent-living-looks.spec.ts` (six packs render + run editorial-clean → staged preview → Approve → Undo; all six shown available) | 2                             |
+| Area           | File                                                                                                                                                                                          | Count                         |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| L1 schema      | `packages/project-schema/src/{living-look,v3}.test.ts`                                                                                                                                        | 152 + 131 assertions          |
+| L2 compiler    | `packages/motion-core/src/looks/{validate,compile,compile-audio-bakes}.test.ts`                                                                                                               | 11 (bakes) + validate/compile |
+| L3 packs       | `packages/motion-core/src/looks/packs/{packs,packs-golden,packs-render-fidelity,music-pulse}.test.ts`                                                                                         | 30 + 12 + 8 + 2               |
+| L4 core        | `packages/motion-core/src/looks/audio-reactive.test.ts`                                                                                                                                       | 10                            |
+| L4 bridge      | `apps/editor-web/src/joy-agent/look-audio-bridge.test.ts`                                                                                                                                     | 8                             |
+| Editor adapter | `apps/editor-web/src/joy-agent/{look-operations,look-run-host,look-packs-conformance}.test.ts`                                                                                                | 12 + 4 + 4                    |
+| Panel          | `apps/editor-web/src/LivingLooksPanel.test.tsx`                                                                                                                                               | 3                             |
+| e2e            | `tests/e2e/agent-living-looks.spec.ts` (four packs render + run editorial-clean → staged preview → Approve → Undo; all four shown available; music-pulse + persian-editorial asserted absent) | 2                             |
 
 ## Honesty / safety properties
 
@@ -113,33 +121,36 @@ in the apply path, no renderer in `motion-core`.
    kinetic-type is **phrase-object-scoped**, not per-word; `text.insertTemplate`
    object creation for auto-placed callouts / per-word phrases is a compiler
    follow-up.
-2. **L4 panel path.** The pure core + host bridge are complete and tested;
-   feeding a decoded audio track's `audioBakes` from the panel into `runLook`
-   (music-pulse) + `tests/e2e/living-looks-audio-motion.spec.ts` (decode the
-   export for A/V alignment) are the remaining wiring. Recommendation: ship
-   music-pulse's audio path as an R2-first documented follow-up (parallels R1's
-   real-BYOK decision), with the slider-driven pulse honest in the meantime.
+2. **`music-pulse` — HELD for R2.1.** Authored, kept in the tree with its own
+   validation/compile coverage (`music-pulse.test.ts`), but out of
+   `BUILT_IN_LOOK_PACKS`. The taste review found the "Accent cuts" boolean
+   compiles to a permanent-on track and the slider-only pulse is rate-less;
+   both need compiler work (a live-rest boolean drive + a real rate control).
+   The L4 audio path (pure core + host bridge, both tested) also lands with
+   R2.1: feeding a decoded track's `audioBakes` from the panel into `runLook`
+   - `tests/e2e/living-looks-audio-motion.spec.ts`.
 3. **`LookInstance` persistence.** A Look currently commits its operations through
    the normal approve path (Undo works) but is not yet re-openable — the v1→v3
    editor-document bridge (`project-package.ts` / `project-document-hydration.ts`
    still read `JoyProjectV1`) and `looks.prepareUpdate` are R2 follow-ups.
 4. **L3b sample renders.** The numeric-tolerance harness landed as
-   `packs-render-fidelity.test.ts` (12 tests — compiled keyframes sampled back
+   `packs-render-fidelity.test.ts` (8 tests — compiled keyframes sampled back
    through the renderer evaluator). What remains is presentational only: a few
    sanitized sample renders attached to the scorecard for the owner's visual
    read. Not a pipeline gate.
 
-## Owner-gated (NOT self-certifiable)
+## Owner-delegated taste review — COMPLETE
 
-Per the Opus L3 ruling, the creator taste study and the Persian-script idiom
-review are the owner's. See
-`docs/reviews/joy-live-director-r2-look-scorecard-2026-09-08.md` — every pack
-carries `OWNER_TASTE_REVIEW: PENDING` and R2 does not ship a pack whose line
-still reads `PENDING`.
+Per the owner's standing delegation of taste calls on this project to Claude
+Opus, an Opus agent reviewed all packs on 2026-09-08. Result in
+`docs/reviews/joy-live-director-r2-look-scorecard-2026-09-08.md`: **all four
+shipping packs `APPROVED`** (editorial-clean and kinetic-type after their fixes
+landed in this candidate). `music-pulse` HELD for R2.1; `persian-editorial`
+RETIRED (English-only app — no Persian-script idiom review gate).
 
 ## Gate
 
-CodeRabbit clean + `r2-candidate.yml` green ×2 on the exact candidate +
+CodeRabbit clean + `release-candidate.yml` green ×2 on the exact candidate +
 independent Opus ("Astra") `APPROVE_FOR_DEPLOY <sha> <tree> <lock>` + owner
-go-ahead + owner taste verdicts recorded. The implementer never self-approves.
-No OpenAI / Codex anywhere in the toolchain.
+go-ahead. Owner taste verdicts are recorded (above). The implementer never
+self-approves. No OpenAI / Codex anywhere in the toolchain.

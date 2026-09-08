@@ -1,5 +1,16 @@
 # JOY Live Director R2 ("Living Looks") — resume handoff
 
+> **SUPERSEDED 2026-09-08 (later same day).** R2 was resumed and reshaped:
+> the owner-delegated Opus taste review approved four packs and required fixes
+> (`editorial-clean` `y`-sign, `kinetic-type` `phrase-2/3` treatment); the owner
+> retired `persian-editorial` (English-only app) and `music-pulse` is held for
+> R2.1. A **new candidate** was cut (the `93d1c082` triple below is stale). The
+> current state of record is
+> `docs/reviews/joy-live-director-r2-acceptance-bundle-2026-09-08.md` +
+> `docs/reviews/joy-live-director-r2-look-scorecard-2026-09-08.md`. The 7-step
+> plan below still describes the gate → CodeRabbit → Astra → owner go-ahead →
+> deploy → closeout shape; only the candidate identity and pack count changed.
+
 **Written 2026-09-08 ~07:40 UTC by session `joy-media-ef` (Sonnet).** The session
 that was driving the R2 gate (`joy-media-ae` / `local_393b56e5…`) went idle at
 **00:52 UTC — mid-run — and did not come back.** Gate run 1 finished green ~2.5h
@@ -127,7 +138,7 @@ Read `git log --oneline 855734cf..HEAD` for the full list. The load-bearing ones
 | `c28a0d3e` `990a6c5b`            | drift the hosted `verify:ci` lane caught (prettier, dead eslint-disable directives, a comment that tripped the font-redistribution gate) + a flaky-test poll-budget widen                                                                                                                                             |
 | `38dc2958` `7b8d351c`            | **CodeRabbit round 1** fixes (14 findings) — incl. quiet-documentary opacity bug (`Gentleness`→`Reveal` default 1), audio-reactive <2-sample reject, compile `audioBakes` dedup + rounded-time validation, LivingLooksPanel binding filter, AgentPanel `runLook` fail-closed, `text-align: start`, R1 doc corrections |
 | `45e1c283` `7956dff3` `7cd1bdab` | acceptance-bundle updates + candidate pins                                                                                                                                                                                                                                                                            |
-| `93d1c082`                       | **CodeRabbit round 2** fixes (4 findings) — kinetic-type now has a real exit keyframe (`profile [0,1,1,0]`), R2 runbook C6 hard-fails (no `                                                                                                                                                                           |     | true`under`set -e`), C5 health loop fails if unhealthy, C4 digest hashes path+content per file |
+| `93d1c082`                       | **CodeRabbit round 2** fixes (4 findings) — kinetic-type real exit keyframe (`profile [0,1,1,0]`); R2 runbook C6 hard-fails under `set -e` (no `\|\| true` probe suppression), C5 health loop fails if unhealthy, C4 digest hashes path+content per file                                                              |
 | `ef9d540e`                       | re-pin doc (docs-only)                                                                                                                                                                                                                                                                                                |
 
 **CodeRabbit rounds 1 & 2 are both fully addressed in `93d1c082`.**

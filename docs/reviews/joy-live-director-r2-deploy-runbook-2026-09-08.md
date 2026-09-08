@@ -45,7 +45,8 @@ build is root `pnpm build` (`pnpm -r --if-present build`), DB dump needs
   bundle, but the editor still reads `JoyProjectV1` (v2 and v3 dual-lens are
   dormant), so no persisted-document behaviour changes. `LookInstance`
   persistence is an explicit R2 follow-up (see the acceptance bundle).
-- **`packages/motion-core`**: the pure Look compiler + six packs + audio-reactive
+- **`packages/motion-core`**: the pure Look compiler + four shipping packs
+  (`music-pulse` held for R2.1, `persian-editorial` retired) + audio-reactive
   baker. No renderer, no wall-clock, no I/O; consumed by the editor bundle.
 - The built-in JOY Agent Engine Worker still ships inside the editor-web static
   bundle (`verify:joy-agent-worker` gate) — deploys with the web release.
@@ -159,6 +160,13 @@ set -e
 cd /opt/joy-media/builds/joy-media-$CAND
 rel="joy-media-$CAND-web"
 dst="/opt/joy-media/web-releases/$rel"
+# Never copy into or over a pre-existing release dir — a half-written retry must
+# not be activated. If $dst exists, verify it or pick a fresh suffixed name and
+# use THAT path in C5.
+if [ -e "$dst" ]; then
+  echo "release dir $dst already exists — inspect it; if partial, use rel=$rel-$(date -u +%H%M%SZ)" >&2
+  exit 1
+fi
 cp -a apps/editor-web/dist "$dst"
 bash deploy/joy-media-release-identity.sh write "$dst/release-identity.env" \
   $CAND <tree-sha> <lock-sha256> 5
@@ -169,8 +177,10 @@ test -f "$dst/index.html" && test -f "$dst/release-identity.env" && echo "staged
 sha256sum "$dst/index.html"
 ```
 
-**Checkpoint C4:** record `rel`, the artifact digest, and the `index.html`
-sha256. Still fully reversible.
+**Checkpoint C4:** record `rel` (the exact directory name — carry it into C5),
+the artifact digest, and the `index.html` sha256. A retry MUST use a new unique
+`rel` and propagate it forward, never reactivate a partial prior copy. Still
+fully reversible.
 
 ### C5 — the atomic switch (first irreversible step)
 
@@ -218,17 +228,27 @@ API-touching release.
 
 ```bash
 set -e
+C4_INDEX_SHA=<sha256 from C4>        # paste the value recorded at C4
 curl -k --noproxy '*' --resolve joyst.ir:443:127.0.0.1 -fsS -o /dev/null -w 'origin root %{http_code}\n' https://joyst.ir/
 curl -fsS -o /dev/null -w 'cf root %{http_code}\n' https://joyst.ir/
 curl -fsS -o /dev/null -w 'api health %{http_code}\n' https://joyst.ir/api/health
 curl -fsS https://joyst.ir/ | grep -o '<title>[^<]*'
-curl -fsS https://joyst.ir/release-identity.env   # must print the candidate SHA
+
+# Hard-fail if the served bundle is not the C4 artifact.
+served_sha=$(curl -fsS https://joyst.ir/ | sha256sum | cut -d' ' -f1)
+test "$served_sha" = "$C4_INDEX_SHA" || { echo "served index.html $served_sha != C4 $C4_INDEX_SHA" >&2; exit 1; }
+
+# Hard-fail if the served release identity is not exactly the candidate.
+served_commit=$(curl -fsS https://joyst.ir/release-identity.env | sed -n 's/^JOY_MEDIA_RELEASE_COMMIT=//p')
+test "$served_commit" = "$CAND" || { echo "served commit $served_commit != candidate $CAND" >&2; exit 1; }
+echo "C6 OK — served bundle + identity match the candidate"
 ```
 
 **Checkpoint C6:** every probe exits 0 (the `set -e` + `-f` make a non-2xx a
-hard stop); origin + CF root 200, `/api/health` `{"ok":true,…}`, served
-`release-identity.env` commit == the candidate, served `index.html` sha256 ==
-the C4 value, old entry bundle 404. On any failure → **On failure**.
+hard stop); origin + CF root 200, `/api/health` `{"ok":true,…}`; the two
+`test` guards make a served-artifact SHA mismatch or a served-commit mismatch a
+hard failure, not a visual check. Old entry bundle 404. On any failure → **On
+failure**.
 
 ## Smoke test (Browser pane, joyst.ir, owner logged in)
 

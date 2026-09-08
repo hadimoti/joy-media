@@ -48,7 +48,7 @@ export const editorialClean: LookDefinition = {
         {
           bindingId: 'headline-y',
           min: 0,
-          max: -48,
+          max: 48,
           atFractions: [0, 0.18, 1],
           profile: [1, 0, 0],
           interpolation: 'eased',
@@ -56,7 +56,7 @@ export const editorialClean: LookDefinition = {
         {
           bindingId: 'deck-y',
           min: 0,
-          max: -36,
+          max: 36,
           atFractions: [0, 0.24, 1],
           profile: [1, 0, 0],
           interpolation: 'eased',

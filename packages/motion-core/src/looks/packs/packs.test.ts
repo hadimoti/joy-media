@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ANIMATABLE_PROPERTIES } from '@joy-media/project-schema';
-import { BUILT_IN_LOOK_PACKS } from './index.js';
+import { BUILT_IN_LOOK_PACKS, HELD_LOOK_PACKS } from './index.js';
 import { validateLookDefinition } from '../validate.js';
 import { compileLook } from '../compile.js';
 import type { LookCompileInput, LookDefinition } from '../types.js';
@@ -24,17 +24,22 @@ function firstApplyInput(definition: LookDefinition): LookCompileInput {
 }
 
 describe('built-in Look packs', () => {
-  it('ships exactly six packs with unique ids', () => {
-    expect(BUILT_IN_LOOK_PACKS).toHaveLength(6);
-    expect(new Set(BUILT_IN_LOOK_PACKS.map((p) => p.id)).size).toBe(6);
+  it('ships exactly four packs with unique ids', () => {
+    expect(BUILT_IN_LOOK_PACKS).toHaveLength(4);
+    expect(new Set(BUILT_IN_LOOK_PACKS.map((p) => p.id)).size).toBe(4);
     expect(BUILT_IN_LOOK_PACKS.map((p) => p.id)).toEqual([
       'editorial-clean',
       'product-precision',
       'kinetic-type',
       'quiet-documentary',
-      'music-pulse',
-      'persian-editorial',
     ]);
+  });
+
+  it('holds music-pulse out of the shipping set for R2.1 and retires persian-editorial', () => {
+    expect(HELD_LOOK_PACKS.map((p) => p.id)).toEqual(['music-pulse']);
+    const ids = BUILT_IN_LOOK_PACKS.map((p) => p.id);
+    expect(ids).not.toContain('music-pulse');
+    expect(ids).not.toContain('persian-editorial');
   });
 
   for (const pack of BUILT_IN_LOOK_PACKS) {

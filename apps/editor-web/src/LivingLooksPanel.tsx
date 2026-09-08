@@ -1,7 +1,7 @@
 /**
  * Living Looks panel (R2 / L2 wiring).
  *
- * Lists the six built-in Look packs with the same honest availability the R1
+ * Lists the built-in Look packs with the same honest availability the R1
  * recipe picker uses, lets the operator bind each pack's semantic slots to real
  * project entities and set its few controls, and runs one Look through the
  * shared staged-preview + approval path (`onRun`). Agent-issued and manual

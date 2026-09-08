@@ -90,6 +90,8 @@ export const kineticType: LookDefinition = {
     ...p2.bindings,
     ...p3.bindings,
     textTemplateBinding('phrase-1-treatment', 'phrase-1'),
+    textTemplateBinding('phrase-2-treatment', 'phrase-2'),
+    textTemplateBinding('phrase-3-treatment', 'phrase-3'),
   ],
   controls: [
     {
@@ -119,6 +121,16 @@ export const kineticType: LookDefinition = {
       drives: [
         {
           bindingId: 'phrase-1-treatment',
+          target: 'text',
+          templateByOption: { impact: 'outline-impact', stack: 'bold-stack' },
+        },
+        {
+          bindingId: 'phrase-2-treatment',
+          target: 'text',
+          templateByOption: { impact: 'outline-impact', stack: 'bold-stack' },
+        },
+        {
+          bindingId: 'phrase-3-treatment',
           target: 'text',
           templateByOption: { impact: 'outline-impact', stack: 'bold-stack' },
         },
