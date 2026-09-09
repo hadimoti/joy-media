@@ -1,8 +1,15 @@
-# GAP 1a — Look Instances server synchronization (Option A) — design
+# GAP 1a — Look Instances server synchronization (the additive server-sync extension) — design
 
-Owner approved Option A (`develop + test the additive migration and API changes`;
+> **Naming:** this is **the additive server-sync extension** to the existing
+> session-document sync. It is _not_ a reversal of the session-document
+> architecture decision (**approach B** — the dedicated Look Instances document
+> in its own local persistence log). Approach B stands; this design only adds
+> the server round-trip for that document. Earlier notes that called this
+> "Option A" are superseded by this term.
+
+Owner approved developing + testing the additive migration and API changes;
 **does NOT authorize applying to production now**; final migration/deploy gated by
-external Astra candidate-specific approval).
+external Astra candidate-specific approval.
 
 ## Requirements (owner, verbatim mapping)
 

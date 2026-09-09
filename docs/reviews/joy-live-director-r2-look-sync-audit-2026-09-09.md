@@ -75,7 +75,13 @@ the R2 deploy runbook currently states does not happen.
 
 ## 6. Scope decision (owner)
 
-### Option A — build Look Instances server sync in R2 (recommended)
+> **Naming note (added 2026-09-09):** the two choices below are labelled
+> "Scope choice 1 / 2" to avoid colliding with the separate session-document
+> **approach A/B** decision (approach B — the dedicated Look Instances local log —
+> stands and is unaffected). Choice 1 is now referred to elsewhere as **"the
+> additive server-sync extension"**.
+
+### Scope choice 1 — build the additive server-sync extension in R2 (recommended)
 
 - New nullable `look_instances jsonb` column on `project_documents` (per-revision,
   so it is atomic with the visual doc's existing CAS revision) **or** a sibling
@@ -93,7 +99,7 @@ the R2 deploy runbook currently states does not happen.
   across `apps/api` + `apps/editor-web`. Est. **~1–1.5 days**.
 - Result: Looks are fully cross-device, same as the rest of the creative doc.
 
-### Option B — ship R2 with Look Instances local-first + guardrails
+### Scope choice 2 — ship R2 with Look Instances local-first + guardrails
 
 - A one-line indicator in the Living Looks panel: **"Looks are saved on this
   device"** (distinct from the cloud-backed visual doc).
@@ -107,8 +113,8 @@ the R2 deploy runbook currently states does not happen.
 
 ### Recommendation
 
-**Option A.** The owner ruled "finish R2 to the approved plan — no apply-only
-partial release." The plan's L1 line is _"Include instances in session revision,
+**Scope choice 1 (the additive server-sync extension).** The owner ruled "finish
+R2 to the approved plan — no apply-only partial release." The plan's L1 line is _"Include instances in session revision,
 atomic journal, Undo **and package portability**."_ Package portability is done;
 a Look that silently vanishes on the owner's second device is the class of
 partial the owner rejected. The cost is a production DB migration on a live

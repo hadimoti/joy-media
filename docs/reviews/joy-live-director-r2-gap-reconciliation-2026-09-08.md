@@ -307,9 +307,13 @@ v3 project-schema widening the original text implied.
 server persists only the visual creative document (`JoyProjectV1`), unflagged and
 cross-device-by-design; Look **keyframes** ride it, Look **Instance records** do
 not, so a cross-device / storage-loss reopen silently degrades an applied Look to
-loose keyframes. Option A = build sync now (production DB migration, schema 5→6;
-recommended). Option B = local-first + in-app indicator + R2.1 follow-up. GAP
-1b/1c/5 do not depend on this and proceed.
+loose keyframes. The two scope options here were: **build the additive server-sync
+extension now** (additive DB migration; recommended) vs local-first + in-app
+indicator + R2.1 follow-up. The owner approved building + testing the additive
+server-sync extension (dev/test only; production apply Astra-gated). This is
+**not** a change to the session-document architecture (approach B — the dedicated
+Look Instances local log); it only adds the server round-trip for that document.
+GAP 1b/1c/5 do not depend on this and proceed.
 
 ---
 
@@ -371,13 +375,21 @@ capability**, not just a shared internal helper:
   instance gone / keyframes stay / one Undo restores; stale scope → failed,
   nothing staged; `look_update` recompiles). Plus `living-look-run.test.ts`,
   `look-tool-bridge.test.ts`, `LivingLooksPanel.test.tsx` "Ask JOY".
-- Full `pnpm -w run check` on frozen **`f80e029a`**: 532 files / 4263 tests pass;
-  the one failure (`tooling/release/src/font-assets.test.ts` "is clean through
-  the same scanner used by release:gate") is the **known pre-existing 5 s
-  filesystem-walk timeout under full-suite parallel load** — passes in 212 ms in
-  isolation on the same SHA (documented earlier). Not caused by this work (all
-  changes are under `apps/editor-web/src/joy-agent/`, `LivingLooksPanel`,
-  `AgentPanel`, `app.css`).
+- Full `pnpm -w run check` runs on frozen SHAs in this range:
+  - `f80e029a`: 532 files / 4263 tests pass **except** one —
+    `tooling/release/src/font-assets.test.ts` "is clean through the same scanner
+    used by release:gate" **timed out at 5 s**. Re-run in isolation on the same
+    SHA: **passes in 212 ms**. Both the failing full-check log
+    (`scratchpad/full-check-f80e029a.log`) and the passing isolated run are
+    retained.
+  - `4d3c8ce1` and `1bf0e656`: full check **fully green** (533 files / 4264 and
+    4289 tests) — the font-assets timeout did **not** recur.
+  - **Framing:** this is an **intermittent failure with suspected full-suite
+    load sensitivity** — the root cause has **not been reproduced** or fixed. It
+    is not "known/benign" and must be watched on the final R2 candidate's gate;
+    a recurrence there blocks acceptance until explained. It is not caused by
+    this work (all changes are under `apps/editor-web/src/joy-agent/`,
+    `LivingLooksPanel`, `AgentPanel`, `apps/api/src/*`, docs).
 
 **Known follow-up (not blocking GAP 5 acceptance):** the agent context
 (`read_project_context`) does not yet expose applied Look instance ids as a
@@ -385,10 +397,14 @@ paged domain, so `look_update` / `look_reset_overrides` / `look_detach` are
 agent-reachable within a thread (the staging message names the instance ids) but
 not from a cold context. A `looks` context domain is a small, safe follow-up.
 
-### Update 2026-09-09d — GAP 1a server synchronization (Option A) landed (`4b9e580d..961eb070`)
+### Update 2026-09-09d — GAP 1a: the additive server-sync extension landed (`4b9e580d..961eb070`)
 
-Owner-approved Option A: developed + tested the additive migration and API
-changes. **Not authorized for production apply** — the production migration /
+Owner-approved: developed + tested the **additive server-sync extension** — the
+additive migration and API changes that round-trip the Look Instances document
+to the server. **This is not a reversal of the session-document architecture
+(approach B — the dedicated local log); it only adds the server round-trip.**
+Earlier commit messages in this range that say "Option A" mean exactly this
+extension. **Not authorized for production apply** — the production migration /
 deploy is gated by external Astra's candidate-specific `APPROVE_FOR_DEPLOY`.
 
 - **Migration** `006-look-instances` (the next free ledger id, R7) —
@@ -443,3 +459,70 @@ CI docs, plus small touches to `apps/editor-web/vite.config.ts` (preview proxy
 only), `tests/e2e/wp32-responsive-checkpoints.spec.ts`, and `package.json`
 (`test:harness`). When CI v2 is accepted, fold that branch into
 `codex/joy-live-director` before cutting the final R2 candidate.
+
+---
+
+## Pre-acceptance verification checklist (owner, 2026-09-09) — MUST be explicit before final acceptance
+
+These are gates on the **final R2 candidate**, not on any interim checkpoint SHA.
+A green `pnpm -w run check` on an interim SHA (e.g. `1bf0e656`) is checkpoint
+evidence only.
+
+### Sync atomicity (server CAS alone is not enough)
+
+- [ ] Verify remote hydration cannot leave the visual document and the Look
+      Instances document at **different revisions** after an interruption or a
+      failure mid-hydrate (partial `synchronizeVisualProject` then throw before
+      `synchronizeLookInstances`, and vice versa; a `saveSnapshot` quota/schema
+      failure on either half). The pair must end either both-applied or
+      both-unapplied, and a reopen must not surface a mixed state.
+
+### Conflict handling
+
+- [ ] Concurrent devices: two sessions writing from the same base revision — the
+      second gets `revision-conflict`, neither the visual doc nor the Look doc
+      half-applied.
+- [ ] Stale revision on read; retry after a conflict (the autosync entry is
+      marked conflicted and the local doc is left for recovery).
+- [ ] A local edit made while a remote fetch is in flight → `local-changed`,
+      neither `synchronizeVisualProject` nor `synchronizeLookInstances` called.
+
+### Compatibility
+
+- [ ] An older client that omits `lookInstances` on PUT preserves the stored
+      value (carry-forward).
+- [ ] An explicit `{ instances: {} }` clears it.
+- [ ] An unauthorized (owner-denied) or malformed write changes **neither**
+      document — no partial application.
+
+### Agent safety (not only successful apply / detach)
+
+- [ ] Rejection of a staged agent Look change (operator `Reject`) → nothing
+      applied, run cancelled.
+- [ ] Cancellation mid-run → staged change revoked, preview cleared.
+- [ ] Stale approval — a revision moved between stage and approve → the runner
+      throws `JOY_CODE_STALE_REVISION` / `..._STALE_SESSION`, nothing applied.
+- [ ] Duplicate approval — the same approval handle applied twice → the second
+      is an idempotent replay (no second Undo entry, no second write).
+- [ ] **Reporting accuracy:** the deterministic tool-loop tests
+      (`bounded-tool-loop`, `look-scoped-host`) prove the _plumbing_ — tool call
+      → host method → staging → approval → commit → Undo. They are **not**
+      live-model quality evidence and must not be described as such.
+
+### Audio / export (GAP 2 + GAP 4)
+
+- [ ] Decode the **exported media** and assert it actually contains the expected
+      audio-reactive motion (the scale/opacity peak lands within tolerance of
+      the beat) **and** synchronized audio. Numeric compiler tests
+      (`bakeAudioReactive`, `packs-render-fidelity`) alone do **not** close
+      GAP 2 or GAP 4.
+
+### Release gating
+
+- [ ] Merge `codex/joy-live-director-ci-opt` into `codex/joy-live-director`
+      **only after** CI v2 is independently accepted.
+- [ ] Run `pnpm -w run check` on the resulting **final R2 SHA** (frozen).
+- [ ] External Astra candidate-specific `APPROVE_FOR_DEPLOY <sha> <tree> <lock>`.
+- [ ] The GitHub artifact-upload blockage is a **separate release blocker**
+      (owner must fix Actions billing) — it does not pause audio/render
+      implementation.
