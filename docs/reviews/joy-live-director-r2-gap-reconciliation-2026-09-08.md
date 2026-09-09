@@ -270,15 +270,30 @@ No mocking away the compiler, persistence, or renderer. Earlier green CI on
 
 ## Status ledger (updated as tasks land)
 
-| Gap                                                       | State                                 | Candidate  |
-| --------------------------------------------------------- | ------------------------------------- | ---------- |
-| 1a Look-Instances persistence (approach B)                | **LOCAL DONE; sync = OWNER DECISION** | `4a7a8e1b` |
-| 1b host ops (prepareUpdate/detach/resetOverrides/persist) | IN PROGRESS                           | —          |
-| 1c panel reopen/adjust/detach                             | NOT STARTED                           | —          |
-| 2 audio end-to-end + A/V test                             | NOT STARTED                           | —          |
-| 3 Music Pulse honest (boolean rest + rate control + slot) | **DONE**                              | `3eaa8cd7` |
-| 4 rendered-frame + export acceptance                      | NOT STARTED                           | —          |
-| 5 manual/agent parity for update/detach                   | NOT STARTED                           | —          |
+| Gap                                                       | State                                        | Candidate  |
+| --------------------------------------------------------- | -------------------------------------------- | ---------- |
+| 1a Look-Instances persistence (approach B)                | **LOCAL DONE; sync = OWNER DECISION**        | `4a7a8e1b` |
+| 1b host ops (prepareUpdate/detach/resetOverrides/persist) | **MOSTLY DONE** (override-wiring pending)    | `ae28704e` |
+| 1c panel reopen/adjust/detach                             | **DONE** (e2e passing)                       | `e07f2ea8` |
+| 2 audio end-to-end + A/V test                             | NOT STARTED                                  | —          |
+| 3 Music Pulse honest (boolean rest + rate control + slot) | **DONE**                                     | `3eaa8cd7` |
+| 4 rendered-frame + export acceptance                      | NOT STARTED                                  | —          |
+| 5 manual/agent parity for update/detach                   | **STRUCTURAL** (agent-capability scope call) | `2546ce30` |
+
+**GAP 1b / 1c landed** (`0797e809` → `4f41af53` → `13dfbdd9` → `e07f2ea8` →
+`2546ce30` + e2e `72b2d680`; plan `joy-live-director-r2-gap1b-plan-2026-09-09.md`).
+`look-instance-operations.ts` pure helpers (one code path, manual == agent);
+the `LookInstance` write threaded through the approval compound and **folded into
+`operationDigest`** (byte-identical for non-Look changes); `AgentPanel.runLook`
+branches apply/update/reset/detach; `LivingLooksPanel` "Applied Looks" section
+(reopen / adjust / reset-overrides / detach / orphan marker). **Full
+`pnpm -w run check` green (530 files, 4241 tests)** + the extended
+`agent-living-looks` e2e passes on desktop-primary (apply → reload → still there
+→ adjust → detach → Undo restores). **Remaining:** call
+`markOverridesFromCommittedKeys` in `App.tsx`'s visual-object property-commit
+compound (logic done + tested, `App.tsx` seam pending); GAP 5 dedicated agent
+Look capability is a net-new-surface **owner scope call** (parity is structural —
+`runLook` is one path).
 
 **GAP 1a local persistence landed** as a canonical Look Instances document in
 its own persistence log, joined to the visual document through the compound-write
