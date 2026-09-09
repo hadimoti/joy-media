@@ -270,12 +270,56 @@ No mocking away the compiler, persistence, or renderer. Earlier green CI on
 
 ## Status ledger (updated as tasks land)
 
-| Gap                                                       | State       | Candidate |
-| --------------------------------------------------------- | ----------- | --------- |
-| 1a editor v3 bridge                                       | NOT STARTED | —         |
-| 1b host ops (prepareUpdate/detach/resetOverrides/persist) | NOT STARTED | —         |
-| 1c panel reopen/adjust/detach                             | NOT STARTED | —         |
-| 2 audio end-to-end + A/V test                             | NOT STARTED | —         |
-| 3 Music Pulse honest (boolean rest + rate control + slot) | NOT STARTED | —         |
-| 4 rendered-frame + export acceptance                      | NOT STARTED | —         |
-| 5 manual/agent parity for update/detach                   | NOT STARTED | —         |
+| Gap                                                       | State       | Candidate  |
+| --------------------------------------------------------- | ----------- | ---------- |
+| 1a editor v3 bridge                                       | NOT STARTED | —          |
+| 1b host ops (prepareUpdate/detach/resetOverrides/persist) | NOT STARTED | —          |
+| 1c panel reopen/adjust/detach                             | NOT STARTED | —          |
+| 2 audio end-to-end + A/V test                             | NOT STARTED | —          |
+| 3 Music Pulse honest (boolean rest + rate control + slot) | **DONE**    | `3eaa8cd7` |
+| 4 rendered-frame + export acceptance                      | NOT STARTED | —          |
+| 5 manual/agent parity for update/detach                   | NOT STARTED | —          |
+
+---
+
+## Verified reconciliation — 2026-09-09 (session `joy-media-62`)
+
+Re-checked the ledger against the actual tree at R2 HEAD **`3eaa8cd7`**
+(`codex/joy-live-director`, local == `github/codex/joy-live-director`, working
+tree clean). Method: read the named files / grep the named symbols /
+`git show --stat` the GAP-3 commit. **Preserve completed work — nothing here is
+to be re-implemented.**
+
+| Item                                                                                         | Prior claim                | Verified @ `3eaa8cd7`                                                                                                                                                                                                                                                                                                                                                                                    |
+| -------------------------------------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Foundation — L1 schema, L2 compiler/adapter/apply-host/apply-panel, L3 packs, L4 core+bridge | DONE, keep + re-verify     | **PRESENT.** All 10 named files exist; `validateJoyProjectV3` / `isJoyProjectV3` / `LATEST_PROJECT_SCHEMA_VERSION` exported. `BUILT_IN_LOOK_PACKS` = **5 packs** (`persian-editorial` retired `7a509e6c` — English-only, correct).                                                                                                                                                                       |
+| GAP 1a — editor reads/writes schema v3                                                       | NOT STARTED                | **NOT STARTED.** `project-package.ts` + `project-document-hydration.ts` still type/validate `JoyProjectV1` only; no `migrateToLatest` at the document boundary.                                                                                                                                                                                                                                          |
+| GAP 1b — `prepareUpdate` / `detach` / `resetOverrides` + persist-on-apply                    | NOT STARTED                | **NOT STARTED.** None of those symbols in `look-operations.ts` / `look-run-host.ts`. Apply commits ops only (Undo works); no `LookInstance` record.                                                                                                                                                                                                                                                      |
+| GAP 1c — panel reopen/adjust/detach                                                          | NOT STARTED                | **NOT STARTED** (blocked on 1b).                                                                                                                                                                                                                                                                                                                                                                         |
+| GAP 2 — audio-reactive motion end to end + A/V decode test                                   | NOT STARTED                | **NOT STARTED.** L4 core + bridge present & unit-tested; **no panel path**, **no `tests/e2e/living-looks-audio-motion.spec.ts`** (only `agent-living-looks.spec.ts`).                                                                                                                                                                                                                                    |
+| GAP 3 — Music Pulse is honest                                                                | NOT STARTED (doc predates) | **DONE @ `3eaa8cd7`.** `LookBooleanDrive.rest?`, `LookEnumDrive.periodsByOption?`, `rate` enum, subject-slot relabel, `validate.ts`/`compile.ts` rules + `compile.test.ts`(+121)/`validate.test.ts`(+65), goldens re-blessed, `packs.test.ts` 5-pack loop, `musicPulse` back in `BUILT_IN_LOOK_PACKS`. Commit records `pnpm test` 4206 pass / 0 fail + tsc/eslint/prettier clean. Matches spec 3a/3b/3c. |
+| GAP 4 — rendered-frame + encoded-export acceptance                                           | NOT STARTED                | **NOT STARTED.** No `tests/e2e/living-looks-render.spec.ts`, no sample renders. `packs-render-fidelity.test.ts` (numeric) present — **stays**, supplemented not replaced.                                                                                                                                                                                                                                |
+| GAP 5 — manual / agent parity for update / detach                                            | NOT STARTED                | **NOT STARTED.** Apply parity exists (`onRun` + `runLook` → `stageLookRun`). No `updateLook` / `detachLook`; update/detach/override paths don't exist yet to have parity.                                                                                                                                                                                                                                |
+
+**Net remaining R2 implementation: GAP 1a → 1b (+ GAP 5) → 1c → GAP 2 → GAP 4**,
+in the Sequencing order above. GAP 3 is done. Foundation is intact and needs only
+re-verification at the final candidate (full `pnpm test` + tsc + lint +
+`agent-living-looks` e2e), not rework.
+
+**Open R2 _acceptance_ items (not implementation):**
+
+- Per-pack owner taste verdicts re-confirmed for the **final** candidate's 5
+  shipping packs (verdicts were applied once at `770511d3` / `7a509e6c`; any pack
+  still `PENDING` in the scorecard does not ship).
+- Fresh full gate on the completed R2 candidate via the **accepted optimized
+  gate** (after CI v2 is independently accepted) — the stale `93d1c082` /
+  `7a509e6c` runs do not carry.
+- External **Astra** candidate-specific `APPROVE_FOR_DEPLOY <sha> <tree> <lock>`.
+- Owner go-ahead → guarded Sweden deploy → closeout.
+
+**Branch-integration note:** `codex/joy-live-director-ci-opt` forked from this
+exact R2 HEAD (`merge-base` = `3eaa8cd7`); its diff is CI harness + workflows +
+CI docs, plus small touches to `apps/editor-web/vite.config.ts` (preview proxy
+only), `tests/e2e/wp32-responsive-checkpoints.spec.ts`, and `package.json`
+(`test:harness`). When CI v2 is accepted, fold that branch into
+`codex/joy-live-director` before cutting the final R2 candidate.
