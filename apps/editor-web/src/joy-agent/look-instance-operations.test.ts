@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { editorialClean } from '@joy-media/motion-core';
+import { canonicalBindingKey } from '@joy-media/project-schema';
 import type { LookInstance, LookInstancesDocument } from '@joy-media/project-schema';
 import {
   buildLookInstanceRecord,
   detachLookInstance,
+  lookBindingKeyIndex,
   lookInstanceUpdateCompileInput,
   markLookBindingOverridden,
+  markOverridesFromCommittedKeys,
   orphanedLookInstanceIds,
   upsertLookInstance,
 } from './look-instance-operations.js';
@@ -107,6 +110,27 @@ describe('look-instance-operations (GAP 1b + 5)', () => {
     expect(markLookBindingOverridden(d1, 'look-1', ['aa'])).toBe(d1);
     // unknown instance -> no-op
     expect(markLookBindingOverridden(d1, 'look-404', ['aa'])).toBe(d1);
+  });
+
+  it('markOverridesFromCommittedKeys marks a hand-edited linked binding (manual == agent)', () => {
+    const inst = buildLookInstanceRecord('look-1', compileInput());
+    const d = upsertLookInstance(doc(), inst);
+    const defs = new Map([[editorialClean.id, editorialClean]]);
+
+    const kfTarget = editorialClean.bindingTargets.find((t) => t.channel === 'keyframe')!;
+    const committedKey = canonicalBindingKey({
+      ownerKind: kfTarget.ownerKind,
+      ownerId: inst.entityBindings[kfTarget.ownerSlotId]!,
+      propertyId: kfTarget.propertyId,
+      timeDomain: kfTarget.timeDomain,
+    });
+    expect([...lookBindingKeyIndex(inst, editorialClean).keys()]).toContain(committedKey);
+
+    const marked = markOverridesFromCommittedKeys(d, defs, [committedKey]);
+    expect(marked.instances['look-1']!.overriddenBindingIds).toContain(kfTarget.bindingId);
+    // idempotent + no-op when nothing matches
+    expect(markOverridesFromCommittedKeys(marked, defs, [committedKey])).toBe(marked);
+    expect(markOverridesFromCommittedKeys(d, defs, ['not-a-binding-key'])).toBe(d);
   });
 
   it('orphanedLookInstanceIds flags an instance bound to a missing object', () => {

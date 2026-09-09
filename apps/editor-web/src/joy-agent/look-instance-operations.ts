@@ -20,6 +20,7 @@
 
 import type { LookDefinition, LookCompileInput } from '@joy-media/motion-core';
 import type { LookInstance, LookInstancesDocument } from '@joy-media/project-schema';
+import { canonicalBindingKey } from '@joy-media/project-schema';
 
 function uniqueSorted(ids: Iterable<string>): readonly string[] {
   return [...new Set(ids)].sort();
@@ -140,6 +141,60 @@ export function markLookBindingOverridden(
     return document;
   }
   return upsertLookInstance(document, { ...instance, overriddenBindingIds: next });
+}
+
+/**
+ * The canonical `propertyAnimations` key each of an instance's keyframe-channel
+ * bindings compiles to, mapped back to its stable `bindingId`. Used to translate
+ * "the operator just committed a keyframe on key K" into "binding B of instance
+ * I is now hand-edited".
+ */
+export function lookBindingKeyIndex(
+  instance: LookInstance,
+  definition: LookDefinition,
+): ReadonlyMap<string, string> {
+  const index = new Map<string, string>();
+  for (const target of definition.bindingTargets) {
+    if (target.channel !== 'keyframe') continue;
+    const ownerId = instance.entityBindings[target.ownerSlotId];
+    if (ownerId === undefined) continue;
+    index.set(
+      canonicalBindingKey({
+        ownerKind: target.ownerKind,
+        ownerId,
+        propertyId: target.propertyId,
+        timeDomain: target.timeDomain,
+      }),
+      target.bindingId,
+    );
+  }
+  return index;
+}
+
+/**
+ * Given a set of `propertyAnimations` keys the operator (or a user-directed
+ * agent) just committed, return `document` with every affected Look binding
+ * added to its instance's `overriddenBindingIds`. The canonical
+ * "operator hand-edited a linked binding" write — call it in the SAME compound
+ * as the property edit so one Undo reverts both. A no-op when nothing matches.
+ */
+export function markOverridesFromCommittedKeys(
+  document: LookInstancesDocument,
+  definitionsById: ReadonlyMap<string, LookDefinition>,
+  committedKeys: Iterable<string>,
+): LookInstancesDocument {
+  const keys = new Set(committedKeys);
+  if (keys.size === 0) return document;
+  let next = document;
+  for (const instance of Object.values(document.instances)) {
+    const definition = definitionsById.get(instance.definitionId);
+    if (definition === undefined) continue;
+    const index = lookBindingKeyIndex(instance, definition);
+    const hit: string[] = [];
+    for (const [key, bindingId] of index) if (keys.has(key)) hit.push(bindingId);
+    if (hit.length > 0) next = markLookBindingOverridden(next, instance.id, hit);
+  }
+  return next;
 }
 
 /**
