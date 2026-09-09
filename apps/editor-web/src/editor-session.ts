@@ -352,6 +352,17 @@ export class EditorSession {
       initialSeed.lookInstances ?? emptyLookInstancesDocument(initialTimeline.id),
     );
     this.#lookInstancesLogInitialized = lookInstances.persisted;
+    // A materialized duplicate / import carries a populated seed — persist it
+    // now (like the graph and artifact seeds) rather than leaving it lazy, so
+    // the new project keeps its Looks on the next reopen.
+    if (
+      !lookInstances.persisted &&
+      initialSeed.lookInstances !== undefined &&
+      Object.keys(initialSeed.lookInstances.instances).length > 0
+    ) {
+      this.#lookInstancesPersistence.initialize(initialSeed.lookInstances);
+      this.#lookInstancesLogInitialized = true;
+    }
     const recoveryWarnings = [
       ...timeline.warnings,
       ...visualObjects.warnings,

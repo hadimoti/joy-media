@@ -3,11 +3,13 @@ import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import type {
   AssetRecordV1,
   JoyProjectV1,
+  LookInstancesDocument,
   SpikeProject,
   WorkflowGraphV2,
 } from '@joy-media/project-schema';
 import {
   validateJoyProjectV1,
+  validateLookInstancesDocument,
   validateSpikeProject,
   validateWorkflowGraph,
 } from '@joy-media/project-schema';
@@ -148,6 +150,8 @@ export function parseProjectPackage(value: unknown): PortableProjectPackageV1 {
     throw new Error('JOY project package has no source project identity.');
   if (!isRecord(value.documents.timeline) || !isRecord(value.documents.visual))
     throw new Error('JOY project package is missing editable documents.');
+  if (value.documents.lookInstances !== undefined && !isRecord(value.documents.lookInstances))
+    throw new Error('JOY project package has an invalid Look Instances document.');
   if (!Array.isArray(value.media)) throw new Error('JOY project package has no media manifest.');
   for (const media of value.media) {
     if (!isRecord(media) || !isRecord(media.asset) || typeof media.asset.id !== 'string')
@@ -246,11 +250,24 @@ export async function importProjectPackage(
     pkg.documents.artifacts === undefined
       ? undefined
       : (remapJson(pkg.documents.artifacts, replacements) as ArtifactStore);
+  // A package that predates the Look Instances document simply has no key here;
+  // it imports as a project with no Looks. A present-but-populated document is
+  // carried across with the new project id (its `entityBindings` name
+  // visual-object ids, which `remapJson` leaves alone unless an asset rename
+  // touches them).
+  const lookInstances =
+    pkg.documents.lookInstances === undefined ||
+    Object.keys(pkg.documents.lookInstances.instances).length === 0
+      ? undefined
+      : ({
+          ...remapJson(pkg.documents.lookInstances, replacements),
+          id,
+        } as LookInstancesDocument);
   // Validate every document before any replacement purge or private-cache write.
   // EditorSession performs the same checks while persisting, but doing them at
   // this boundary keeps collision:'replace' non-destructive for malformed
   // packages (including documents that parse as JSON but violate their schema).
-  assertImportedDocumentsValid(timeline, visual, graph);
+  assertImportedDocumentsValid(timeline, visual, graph, lookInstances);
   const entry: ProjectCatalogEntry = {
     id,
     title: visual.title,
@@ -267,11 +284,12 @@ export async function importProjectPackage(
     storage,
     timeline,
     visual,
-    graph === undefined && artifacts === undefined
+    graph === undefined && artifacts === undefined && lookInstances === undefined
       ? {}
       : {
           ...(graph === undefined ? {} : { graph }),
           ...(artifacts === undefined ? {} : { artifacts }),
+          ...(lookInstances === undefined ? {} : { lookInstances }),
         },
   );
   upsertCatalogProject(storage, entry);
@@ -286,6 +304,7 @@ function assertImportedDocumentsValid(
   timeline: SpikeProject,
   visual: JoyProjectV1,
   graph: WorkflowGraphV2 | undefined,
+  lookInstances: LookInstancesDocument | undefined,
 ): void {
   const diagnostics = [
     ...validateSpikeProject(timeline).map((diagnostic) => ({
@@ -298,6 +317,12 @@ function assertImportedDocumentsValid(
       : validateWorkflowGraph(graph, 'graph').map((diagnostic) => ({
           ...diagnostic,
           document: 'graph',
+        }))),
+    ...(lookInstances === undefined
+      ? []
+      : validateLookInstancesDocument(lookInstances).map((diagnostic) => ({
+          ...diagnostic,
+          document: 'lookInstances',
         }))),
   ];
   const first = diagnostics[0];
