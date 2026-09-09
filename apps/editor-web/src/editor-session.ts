@@ -34,8 +34,15 @@ import {
   validateArtifactProvenance,
   readDualLensFlags,
   EMPTY_WORKFLOW_GRAPH,
+  emptyLookInstancesDocument,
+  validateLookInstancesDocument,
 } from '@joy-media/project-schema';
-import type { JoyProjectV1, SpikeProject, WorkflowGraphV2 } from '@joy-media/project-schema';
+import type {
+  JoyProjectV1,
+  LookInstancesDocument,
+  SpikeProject,
+  WorkflowGraphV2,
+} from '@joy-media/project-schema';
 import type { ProjectRevisionId } from '@joy-media/agent-tools';
 import { EditorCommandController } from './command-controller.js';
 import {
@@ -48,7 +55,8 @@ import { createExecutionReceipt, type ExecutionReceipt } from './execution-recei
 
 export interface HistoryEntry {
   readonly id: string;
-  readonly source: 'timeline' | 'visual-object' | 'graph' | 'artifact' | 'compound' | 'document';
+  readonly source:
+    'timeline' | 'visual-object' | 'graph' | 'artifact' | 'look-instance' | 'compound' | 'document';
   readonly label: string;
   /** Present when this entry is past (`undo`) or future (`redo`) relative to the cursor. */
   readonly direction: 'undo' | 'redo' | 'current';
@@ -57,11 +65,13 @@ export interface HistoryEntry {
 }
 
 /**
- * `document-snapshot` exists because a whole-document replacement has no
- * command form and therefore no inverse the object history can compute. The
- * session keeps the before/after pair itself so it can still be undone.
+ * `document-snapshot` and `look-instance` exist because a whole-document
+ * replacement has no command form and therefore no inverse the object history
+ * can compute. The session keeps the before/after pair itself so it can still
+ * be undone.
  */
-type EditorOperation = 'timeline' | 'visual-object' | 'document-snapshot' | 'graph' | 'artifact';
+type EditorOperation =
+  'timeline' | 'visual-object' | 'document-snapshot' | 'graph' | 'artifact' | 'look-instance';
 
 /**
  * The graph needs an id to share the persistence adapter shape, and the adapter
@@ -81,6 +91,7 @@ interface PersistedArtifactDocument {
 
 export const WORKFLOW_GRAPH_LOG_KEY = 'joy-media.workflow-graph-log.v1';
 export const CREATIVE_ARTIFACT_LOG_KEY = 'joy-media.creative-artifact-log.v1';
+export const LOOK_INSTANCES_LOG_KEY = 'joy-media.look-instances-log.v1';
 const TIMELINE_PROJECT_LOG_KEY = 'joy-media.timeline-project-log.v1';
 const VISUAL_OBJECT_PROJECT_LOG_KEY = 'joy-media.visual-object-project-log.v1';
 const COMPOUND_WRITE_JOURNAL_PREFIX = 'joy-media.editor-compound-write.v1';
@@ -148,6 +159,7 @@ export interface AgentCompoundExecution {
 export interface EditorSessionSeed {
   readonly graph?: WorkflowGraphV2;
   readonly artifacts?: ArtifactStore;
+  readonly lookInstances?: LookInstancesDocument;
 }
 
 /**
@@ -215,6 +227,20 @@ const graphAdapter: PersistenceAdapter<PersistedGraphDocument, GraphTransaction>
 };
 
 /**
+ * Look Instances are persisted whole (snapshot only) — a Look apply / update /
+ * detach always replaces the document as one value, so there is no transaction
+ * algebra and `apply` is never reached. The before/after pair the compound
+ * journal needs is kept on `#lookInstancesSnapshotUndo`, exactly like
+ * `document-snapshot`.
+ */
+const lookInstancesAdapter: PersistenceAdapter<LookInstancesDocument, never> = {
+  projectId: (document) => document.id,
+  schemaVersion: (document) => document.schemaVersion,
+  validate: (document) => validateLookInstancesDocument(document),
+  apply: (document) => document,
+};
+
+/**
  * Keeps the creative documents out of React state while still notifying the UI
  * after every durable local transaction. The two current schema slices retain
  * separate logs until timeline commands graduate to the v1 project document.
@@ -251,6 +277,22 @@ export class EditorSession {
   readonly #artifactRedo: ArtifactTransactionRecord[] = [];
   readonly #snapshotUndo: { before: JoyProjectV1; after: JoyProjectV1 }[] = [];
   readonly #snapshotRedo: { before: JoyProjectV1; after: JoyProjectV1 }[] = [];
+  // Look Instances are not behind the Dual Lens flag — every project has this
+  // log, empty until the first Look apply. Snapshot-only, like the visual
+  // document replacement above.
+  readonly #lookInstancesPersistence: LocalProjectPersistence<LookInstancesDocument, never>;
+  readonly #lookInstancesSnapshotUndo: {
+    before: LookInstancesDocument;
+    after: LookInstancesDocument;
+  }[] = [];
+  readonly #lookInstancesSnapshotRedo: {
+    before: LookInstancesDocument;
+    after: LookInstancesDocument;
+  }[] = [];
+  #lookInstancesDocument: LookInstancesDocument;
+  #lookInstancesRevision: number;
+  /** False until the first Look write creates the log on disk (lazy init). */
+  #lookInstancesLogInitialized: boolean;
   #artifactDocument: PersistedArtifactDocument;
   #artifactRevision: number;
   #graphDocument: PersistedGraphDocument;
@@ -293,9 +335,28 @@ export class EditorSession {
     // may be an intentional user-selected 16:9 aspect ratio; rewriting it to
     // portrait here would make aspect-ratio changes disappear after refresh.
     const visualObjects = recoverOrInitialize(this.#visualObjectPersistence, initialVisualProject);
-    const recoveryWarnings = [...timeline.warnings, ...visualObjects.warnings];
+    this.#lookInstancesPersistence = new LocalProjectPersistence(
+      new BrowserProjectStore(storage, LOOK_INSTANCES_LOG_KEY),
+      lookInstancesAdapter,
+    );
+    // A project that predates Look Instances has no log key. It loads as the
+    // empty document held only in memory — the log is NOT created on open, so an
+    // existing project is never rewritten just because this document was added.
+    // The log is initialized lazily inside the first Look write's compound plan.
+    const lookInstances = recoverLookInstancesOrEmpty(
+      this.#lookInstancesPersistence,
+      initialSeed.lookInstances ?? emptyLookInstancesDocument(initialVisualProject.id),
+    );
+    this.#lookInstancesLogInitialized = lookInstances.persisted;
+    const recoveryWarnings = [
+      ...timeline.warnings,
+      ...visualObjects.warnings,
+      ...lookInstances.warnings,
+    ];
     this.#timelineRevision = timeline.revision;
     this.#visualObjectRevision = visualObjects.revision;
+    this.#lookInstancesDocument = lookInstances.document;
+    this.#lookInstancesRevision = lookInstances.revision;
     this.#timeline = new EditorCommandController(timeline.project);
     this.#visualObjects = new VisualObjectProjectHistory(visualObjects.project);
     this.agentIdempotency = new BrowserAgentIdempotencyStore(storage, initialTimeline.id);
@@ -352,6 +413,34 @@ export class EditorSession {
   }
 
   /**
+   * The canonical Look Instances document. A project that has never applied a
+   * Look returns the empty document; the log itself is not created until the
+   * first Look write.
+   */
+  get lookInstances(): LookInstancesDocument {
+    return this.#lookInstancesDocument;
+  }
+
+  /**
+   * Instance ids whose `entityBindings` no longer all resolve to a live visual
+   * object — a bound object was deleted after the Look was applied. The
+   * document still loads (a dangling reference is content, not corruption); the
+   * L2 compiler skips an unresolved binding and the panel surfaces it as
+   * "target removed — rebind or remove". A write that *introduces* a dangling
+   * binding is rejected up front (see `#assertLookInstanceReferencesResolve`),
+   * so this can only ever be the result of a later deletion, never a silent
+   * apply-to-missing-object.
+   */
+  get orphanedLookInstanceIds(): readonly string[] {
+    const live = this.#visualObjects.present.visualObjects;
+    return Object.values(this.#lookInstancesDocument.instances)
+      .filter((instance) =>
+        Object.values(instance.entityBindings).some((target) => live[target] === undefined),
+      )
+      .map((instance) => instance.id);
+  }
+
+  /**
    * Durable, opaque revision id for the complete local creative document.
    *
    * Both component revisions come from the verified persistence logs and are
@@ -365,6 +454,7 @@ export class EditorSession {
       this.#visualObjectRevision,
       this.#graphRevision,
       this.#artifactRevision,
+      this.#lookInstancesRevision,
     );
   }
 
@@ -532,6 +622,7 @@ export class EditorSession {
       readonly graph?: GraphTransaction;
       readonly artifacts?: ArtifactTransaction;
       readonly timeline?: CommandTransaction;
+      readonly lookInstances?: LookInstancesDocument;
     },
   ): void {
     this.#assertPersistenceReady();
@@ -555,6 +646,7 @@ export class EditorSession {
       readonly graph?: GraphTransaction;
       readonly artifacts?: ArtifactTransaction;
       readonly timeline?: CommandTransaction;
+      readonly lookInstances?: LookInstancesDocument;
     },
     execution: AgentCompoundExecution,
   ): ExecutionReceipt {
@@ -596,11 +688,39 @@ export class EditorSession {
     return receipt;
   }
 
+  /**
+   * Rejects a Look Instances write that would leave a NEW or CHANGED instance
+   * pointing at a visual object (`entityBindings` target or `createdEntityId`)
+   * that is not present in `visual`. This is the "never silently apply a Look
+   * Instance to a missing object" guarantee, enforced at the one chokepoint
+   * every Look apply / update / detach passes through.
+   */
+  #assertLookInstanceReferencesResolve(
+    nextDocument: LookInstancesDocument,
+    visual: JoyProjectV1,
+  ): void {
+    const current = this.#lookInstancesDocument.instances;
+    for (const [id, instance] of Object.entries(nextDocument.instances)) {
+      if (JSON.stringify(current[id]) === JSON.stringify(instance)) continue;
+      const missing = [
+        ...Object.values(instance.entityBindings),
+        ...instance.createdEntityIds,
+      ].filter((entityId) => visual.visualObjects[entityId] === undefined);
+      if (missing.length > 0) {
+        throw new PersistenceError(
+          'PERSISTENCE_COMPOUND_LOOK_INSTANCE_DANGLING',
+          `look instance "${id}" references visual object(s) that do not exist: ${[...new Set(missing)].join(', ')}`,
+        );
+      }
+    }
+  }
+
   #prepareCompound(parts: {
     readonly document?: JoyProjectV1;
     readonly graph?: GraphTransaction;
     readonly artifacts?: ArtifactTransaction;
     readonly timeline?: CommandTransaction;
+    readonly lookInstances?: LookInstancesDocument;
   }): PreparedCompoundDispatch {
     const operations: EditorOperation[] = [];
     const persistencePlans: CompoundPersistencePlan[] = [];
@@ -625,6 +745,26 @@ export class EditorSession {
           `compound document is invalid: [${first.code}] ${first.message}`,
         );
       }
+    }
+    if (parts.lookInstances !== undefined) {
+      const diagnostics = validateLookInstancesDocument(parts.lookInstances);
+      if (diagnostics.length > 0) {
+        const first = diagnostics[0]!;
+        throw new PersistenceError(
+          'PERSISTENCE_COMPOUND_LOOK_INSTANCES_INVALID',
+          `compound look instances document is invalid: [${first.code}] ${first.message}`,
+        );
+      }
+      // A Look Instance may never be created or changed to point at a visual
+      // object that isn't in the document this same compound is writing (or the
+      // current one if the compound leaves the visual document untouched).
+      // Pre-existing instances that already dangle from an earlier deletion are
+      // left alone — they surface via `orphanedLookInstanceIds`, they are not a
+      // reason to reject an unrelated write.
+      this.#assertLookInstanceReferencesResolve(
+        parts.lookInstances,
+        parts.document ?? this.#visualObjects.present,
+      );
     }
     const graphResult =
       parts.graph === undefined
@@ -673,6 +813,31 @@ export class EditorSession {
         },
       });
       operations.push('document-snapshot');
+    }
+
+    if (parts.lookInstances !== undefined) {
+      const before = this.#lookInstancesDocument;
+      const nextDocument = parts.lookInstances;
+      const initializeLog = !this.#lookInstancesLogInitialized;
+      persistencePlans.push({
+        storageKey: LOOK_INSTANCES_LOG_KEY,
+        projectId: before.id,
+        persist: () => {
+          // Lazy creation: a legacy project's log is written for the first time
+          // here, inside the prepared journal, so a crash rolls the log away
+          // entirely (its pre-image was captured as absent).
+          if (initializeLog) this.#lookInstancesPersistence.initialize(before);
+          this.#lookInstancesPersistence.saveSnapshot(nextDocument, false);
+        },
+        commit: () => {
+          this.#lookInstancesDocument = nextDocument;
+          this.#lookInstancesRevision += 1;
+          this.#lookInstancesLogInitialized = true;
+          this.#lookInstancesSnapshotUndo.push({ before, after: nextDocument });
+          this.#lookInstancesSnapshotRedo.length = 0;
+        },
+      });
+      operations.push('look-instance');
     }
 
     if (parts.graph !== undefined && graphResult !== undefined) {
@@ -795,6 +960,23 @@ export class EditorSession {
         },
       };
     }
+    if (operation === 'look-instance') {
+      const record = this.#lookInstancesSnapshotUndo.at(-1);
+      if (record === undefined) throw missingHistoryRecord('Undo', operation);
+      return {
+        storageKey: LOOK_INSTANCES_LOG_KEY,
+        projectId: record.before.id,
+        persist: () => {
+          this.#lookInstancesPersistence.saveSnapshot(record.before, false);
+        },
+        commit: () => {
+          this.#lookInstancesDocument = record.before;
+          this.#lookInstancesSnapshotUndo.pop();
+          this.#lookInstancesRevision += 1;
+          this.#lookInstancesSnapshotRedo.push(record);
+        },
+      };
+    }
     if (operation === 'timeline') {
       const before = this.#timeline.project;
       const record = this.#timeline.undoRecords[0];
@@ -899,6 +1081,23 @@ export class EditorSession {
         },
       };
     }
+    if (operation === 'look-instance') {
+      const record = this.#lookInstancesSnapshotRedo.at(-1);
+      if (record === undefined) throw missingHistoryRecord('Redo', operation);
+      return {
+        storageKey: LOOK_INSTANCES_LOG_KEY,
+        projectId: record.after.id,
+        persist: () => {
+          this.#lookInstancesPersistence.saveSnapshot(record.after, false);
+        },
+        commit: () => {
+          this.#lookInstancesDocument = record.after;
+          this.#lookInstancesSnapshotRedo.pop();
+          this.#lookInstancesRevision += 1;
+          this.#lookInstancesSnapshotUndo.push(record);
+        },
+      };
+    }
     if (operation === 'timeline') {
       const before = this.#timeline.project;
       const record = this.#timeline.redoRecords[0];
@@ -991,6 +1190,7 @@ export class EditorSession {
       this.#visualObjectRevision + Number(operations.includes('document-snapshot')),
       this.#graphRevision + Number(operations.includes('graph')),
       this.#artifactRevision + Number(operations.includes('artifact')),
+      this.#lookInstancesRevision + Number(operations.includes('look-instance')),
     );
   }
 
@@ -1113,6 +1313,7 @@ export class EditorSession {
     this.#graphRedo.length = 0;
     this.#artifactRedo.length = 0;
     this.#snapshotRedo.length = 0;
+    this.#lookInstancesSnapshotRedo.length = 0;
   }
 }
 
@@ -1277,6 +1478,9 @@ function assertRecoverableRollbackProjectRecord(
       return;
     case CREATIVE_ARTIFACT_LOG_KEY:
       assertRecordRecoversWithAdapter(record, storageKey, projectId, artifactAdapter);
+      return;
+    case LOOK_INSTANCES_LOG_KEY:
+      assertRecordRecoversWithAdapter(record, storageKey, projectId, lookInstancesAdapter);
       return;
     default:
       throw new Error(`unsupported project-log storage key ${storageKey}`);
@@ -1566,18 +1770,47 @@ function recoverOrInitialize<P, T>(
   }
 }
 
+/**
+ * Like `recoverOrInitialize` but never writes on a missing log: a project that
+ * predates the Look Instances document loads as the empty document in memory,
+ * `persisted: false`. The log is created lazily by the first Look write.
+ */
+function recoverLookInstancesOrEmpty(
+  persistence: LocalProjectPersistence<LookInstancesDocument, never>,
+  empty: LookInstancesDocument,
+): {
+  readonly document: LookInstancesDocument;
+  readonly revision: number;
+  readonly warnings: readonly string[];
+  readonly persisted: boolean;
+} {
+  try {
+    const recovered = persistence.recover(empty.id);
+    return {
+      document: recovered.project,
+      revision: recovered.revision,
+      warnings: recovered.warnings,
+      persisted: true,
+    };
+  } catch (error) {
+    if (!(error instanceof PersistenceError) || error.code !== 'PERSISTENCE_NOT_FOUND') throw error;
+    return { document: empty, revision: 0, warnings: [], persisted: false };
+  }
+}
+
 function encodeProjectRevision(
   projectId: string,
   timelineRevision: number,
   visualObjectRevision: number,
   graphRevision: number,
   artifactRevision: number,
+  lookInstancesRevision: number,
 ): ProjectRevisionId {
-  // Graph and artifacts are part of the creative document, so editing either has
-  // to move the revision an agent plan was built against — otherwise a plan made
-  // before a node or a script changed would still look current and commit
-  // against stale structure.
-  return `local-revision:v1:${encodeURIComponent(projectId)}:timeline=${timelineRevision}:document=${visualObjectRevision}:graph=${graphRevision}:artifacts=${artifactRevision}`;
+  // Graph, artifacts and Look Instances are all part of the creative document,
+  // so editing any of them has to move the revision an agent plan was built
+  // against — otherwise a plan made before a node, a script or a Look changed
+  // would still look current and commit against stale structure.
+  return `local-revision:v1:${encodeURIComponent(projectId)}:timeline=${timelineRevision}:document=${visualObjectRevision}:graph=${graphRevision}:artifacts=${artifactRevision}:looks=${lookInstancesRevision}`;
 }
 
 function persistenceProjectId(project: unknown): string {
