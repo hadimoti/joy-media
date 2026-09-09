@@ -119,16 +119,13 @@ import { createCreativeSkillEditorPrimitiveDeps } from './joy-agent/creative-ski
 import type { CreativeSkillEditorPrimitiveDeps } from './joy-agent/creative-skill-editor-primitives.js';
 import { listCreativeSkills, runEditorCreativeSkill } from './joy-agent/entry-points.js';
 import type { CreativeSkillRunScope } from './joy-agent/skill-runner.js';
-import { BUILT_IN_LOOK_PACKS, type LookDefinition } from '@joy-media/motion-core';
+import { BUILT_IN_LOOK_PACKS } from '@joy-media/motion-core';
 import { CONTENT_FONT_FAMILIES } from '@joy-media/project-schema';
 import { catalog as buildLookCatalog } from './joy-agent/look-operations.js';
-import {
-  buildLookInstanceRecord,
-  detachLookInstance,
-  lookInstanceUpdateCompileInput,
-  upsertLookInstance,
-} from './joy-agent/look-instance-operations.js';
+import { detachLookInstance } from './joy-agent/look-instance-operations.js';
 import { stageLookRun } from './joy-agent/look-run-host.js';
+import { runScopedLookToolLoop } from './joy-agent/look-scoped-host.js';
+import { resolveLivingLookRun } from './joy-agent/living-look-run.js';
 import {
   LivingLooksPanel,
   type LivingLooksAppliedView,
@@ -319,6 +316,9 @@ function toExecutionResult(run: AtomicRunResult): ExecutionResult {
     rollbackAvailable: run.committed,
   };
 }
+
+/** Sentinel `runningLookId` while an agent-driven Look tool-loop is in flight. */
+const AGENT_LOOK_RUN_ID = '__agent-look__';
 
 function makeJoyCodeId(prefix: string): string {
   const randomPart =
@@ -2185,68 +2185,19 @@ export function AgentPanel({
     const resolvedFonts = Object.fromEntries(
       (CONTENT_FONT_FAMILIES as readonly string[]).map((family) => [family, family]),
     );
-    const rootComposition =
-      session.visualProject.compositions[session.visualProject.rootCompositionId];
-    const format: 'portrait' | 'landscape' =
-      rootComposition !== undefined && rootComposition.height >= rootComposition.width
-        ? 'portrait'
-        : 'landscape';
-
-    // Resolve the definition, the compile input, and the next Look Instances
-    // document once, per request kind. apply = fresh instance; update / reset =
-    // recompile a stored instance's pinned definition.
-    let definition: LookDefinition | undefined;
-    let instanceId: string;
-    let lookCompileInput: Parameters<typeof buildLookInstanceRecord>[1] | undefined;
-    if (request.kind === 'apply') {
-      definition = BUILT_IN_LOOK_PACKS.find((pack) => pack.id === request.definitionId);
-      const entry = lookCatalog.find((c) => c.definition.id === request.definitionId);
-      if (
-        definition === undefined ||
-        entry === undefined ||
-        !entry.available ||
-        rootComposition === undefined
-      )
-        return;
-      instanceId = makeJoyCodeId('look');
-      lookCompileInput = {
-        definition,
-        definitionVersion: request.definitionVersion,
-        compositionId: session.visualProject.rootCompositionId,
-        compositionDurationUs: rootComposition.durationUs,
-        format,
-        entityBindings: request.entityBindings,
-        controlValues: request.controlValues,
-        overriddenBindingIds: [],
-        resolvedFonts,
-      };
-    } else {
-      const stored = session.lookInstances.instances[request.instanceId];
-      if (stored === undefined || rootComposition === undefined) return;
-      definition = BUILT_IN_LOOK_PACKS.find((pack) => pack.id === stored.definitionId);
-      const entry = lookCatalog.find((c) => c.definition.id === stored.definitionId);
-      if (definition === undefined || entry === undefined || !entry.available) return;
-      instanceId = stored.id;
-      lookCompileInput = lookInstanceUpdateCompileInput(
-        stored,
-        request.kind === 'update'
-          ? {
-              ...(request.nextControlValues === undefined
-                ? {}
-                : { nextControlValues: request.nextControlValues }),
-              ...(request.nextEntityBindings === undefined
-                ? {}
-                : { nextEntityBindings: request.nextEntityBindings }),
-            }
-          : { resetBindingIds: request.bindingIds },
-        {
-          definition,
-          compositionDurationUs: rootComposition.durationUs,
-          format,
-          resolvedFonts,
-        },
-      );
-    }
+    // One shared resolution: the panel (here) and an agent `look_*` tool call
+    // both feed the identical `LivingLooksRunInput` into `resolveLivingLookRun`
+    // and get the identical definition / compile input / next Look Instances
+    // document, so a manual and an agent adjustment produce a byte-identical
+    // staged change (GAP 5 parity).
+    const resolution = resolveLivingLookRun(session, request, {
+      resolvedFonts,
+      availableFonts: CONTENT_FONT_FAMILIES as readonly string[],
+      makeInstanceId: () => makeJoyCodeId('look'),
+      currentTextByObjectId,
+    });
+    if (resolution.kind !== 'run') return;
+    const { definition, compileInput: lookCompileInput, verb } = resolution;
 
     const threadId = activeThread.id;
     const scope: CreativeSkillRunScope = {
@@ -2260,35 +2211,15 @@ export function AgentPanel({
     activeModelRunIdRef.current = scope.runId;
     setLookRunningId(definition.id);
     setAgentPhase('planning');
-    const verb =
-      request.kind === 'apply'
-        ? 'Apply'
-        : request.kind === 'reset'
-          ? 'Reset overrides on'
-          : 'Adjust';
     appendMessage(threadId, 'user', `${verb} Look — ${definition.title}`);
     const lifecycleRun = { runId: scope.runId, epoch: scope.epoch };
 
     try {
       beginRunLifecycle(lifecycleRun);
-      if (rootComposition === undefined) {
-        appendMessage(
-          threadId,
-          'assistant',
-          `“${definition.title}” could not be prepared: this project has no root composition. No edit was applied.`,
-        );
-        cancelRunLifecycle(scope.runId, 'Look blocked — no root composition.');
-        setAgentPhase('failed');
-        if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
-        return;
-      }
-      // Persist / update the reopenable Look Instance atomically with the
-      // keyframes (R2 / GAP 1b) — instance record and keyframes commit + undo
-      // together via the approval compound.
-      const lookInstancesWrite = upsertLookInstance(
-        session.lookInstances,
-        buildLookInstanceRecord(instanceId, lookCompileInput),
-      );
+      // The reopenable Look Instance is persisted atomically with the keyframes
+      // (R2 / GAP 1b) — instance record and keyframes commit + undo together via
+      // the approval compound.
+      const lookInstancesWrite = resolution.lookInstancesWrite;
       const result = await stageLookRun(
         {
           getSession: () => latestSessionRef.current,
@@ -2366,6 +2297,145 @@ export function AgentPanel({
       if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
     } finally {
       setLookRunningId((current) => (current === definition.id ? undefined : current));
+    }
+  }
+
+  /**
+   * Ask the JOY agent to work with a Look in words (GAP 5). The model drives the
+   * `look_*` intent tools through a scoped tool-loop; the host resolves +
+   * compiles the Look and stages a reversible change. The terminal result flows
+   * into the SAME approval card and Undo as a manual Look run — an agent Look
+   * (detach included) is never auto-applied.
+   */
+  async function runAgentLook(prompt: string): Promise<void> {
+    if (
+      joyAgentEngineClient === undefined ||
+      lookRunningId !== undefined ||
+      recipeRunningId !== undefined ||
+      thinkingThreadId !== undefined ||
+      modelView !== undefined ||
+      pending !== undefined
+    )
+      return;
+    const trimmed = prompt.trim().slice(0, 2_000);
+    if (trimmed.length === 0) return;
+
+    const threadId = activeThread.id;
+    const resolvedFonts = Object.fromEntries(
+      (CONTENT_FONT_FAMILIES as readonly string[]).map((family) => [family, family]),
+    );
+    const scope: CreativeSkillRunScope = {
+      projectId: project.id,
+      runId: makeJoyCodeId('look'),
+      epoch: 1,
+      revision: session.projectRevisionId,
+    };
+    recipeRunScopeRef.current = scope;
+    recipeStagedChangeSetRef.current = undefined;
+    activeModelRunIdRef.current = scope.runId;
+    setLookRunningId(AGENT_LOOK_RUN_ID);
+    setAgentPhase('connecting');
+    appendMessage(threadId, 'user', `Look — ${trimmed}`);
+    const lifecycleRun = { runId: scope.runId, epoch: scope.epoch };
+
+    try {
+      beginRunLifecycle(lifecycleRun);
+      const result = await runScopedLookToolLoop(
+        {
+          client: joyAgentEngineClient,
+          getSession: () => latestSessionRef.current,
+          latestSessionRef,
+          preparedChanges,
+          agentPreviewStore,
+          proposalTargetsRef,
+          currentPreparedAuthority,
+          isAuthorityCurrent: isRecipeAuthorityCurrent,
+          buildContextInput: () =>
+            buildJoyAgentContextInput({
+              session: latestSessionRef.current,
+              selectedClipIds,
+              playheadUs,
+              conversationMessages: conversation.messages.slice(-8).map((message) => ({
+                role: message.role,
+                body: message.body,
+              })),
+            }),
+          lookRunContext: {
+            resolvedFonts,
+            availableFonts: CONTENT_FONT_FAMILIES as readonly string[],
+            makeInstanceId: () => makeJoyCodeId('look'),
+            currentTextByObjectId,
+          },
+          onStaged: (staged, changeSetId) => {
+            if (recipeRunScopeRef.current?.runId === staged.runId)
+              recipeStagedChangeSetRef.current = changeSetId;
+          },
+        },
+        {
+          scope,
+          prompt: trimmed,
+          onRunStart: () => setAgentPhase('planning'),
+        },
+      );
+      if (recipeRunScopeRef.current?.runId !== scope.runId) return;
+
+      if (result.kind === 'failed') {
+        appendMessage(
+          threadId,
+          'assistant',
+          `The Look request could not be prepared (${result.message}). No edit was applied.`,
+        );
+        cancelRunLifecycle(scope.runId, 'Look request failed.');
+        setAgentPhase('failed');
+        if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
+        return;
+      }
+      if (result.kind === 'answer') {
+        appendMessage(threadId, 'assistant', result.text);
+        acceptRunLifecycle(lifecycleRun, 'completed', { display: 'Look request completed.' });
+        setAgentPhase('completed');
+        if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
+        return;
+      }
+
+      const prepared = preparedChanges.getView(result.changeSetId);
+      if (prepared === undefined) {
+        appendMessage(
+          threadId,
+          'assistant',
+          'The Look prepared a change but its preview authority was lost. Try again.',
+        );
+        cancelRunLifecycle(scope.runId, 'Look preview authority lost.');
+        setAgentPhase('failed');
+        if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
+        return;
+      }
+      acceptRunLifecycle(lifecycleRun, 'preparing', { display: 'JOY prepared a Look change.' });
+      acceptRunLifecycle(lifecycleRun, 'preview-ready', {
+        display: 'Look preview rendered and ready for review.',
+      });
+      acceptRunLifecycle(lifecycleRun, 'awaiting-approval', {
+        display: 'Review the live preview before applying.',
+      });
+      setPreparedModelChange(prepared.changeSetId);
+      setAgentPhase('awaiting-approval');
+      appendMessage(
+        threadId,
+        'assistant',
+        `JOY prepared a reversible Look change (${result.operationCount} operation(s)). Review the live preview before applying.`,
+      );
+    } catch (error) {
+      if (recipeRunScopeRef.current?.runId !== scope.runId) return;
+      appendMessage(
+        threadId,
+        'assistant',
+        error instanceof Error ? error.message : 'The Look run failed safely.',
+      );
+      cancelRunLifecycle(scope.runId, 'Look run failed.');
+      setAgentPhase('failed');
+      if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
+    } finally {
+      setLookRunningId((current) => (current === AGENT_LOOK_RUN_ID ? undefined : current));
     }
   }
 
@@ -2897,6 +2967,12 @@ export function AgentPanel({
             runningLookId={lookRunningId}
             busy={liveAgentBusy || recipeRunningId !== undefined}
             onRun={(request) => void runLook(request)}
+            {...(creativeSkillDeps === undefined
+              ? {}
+              : {
+                  onAgentRun: (prompt: string) => void runAgentLook(prompt),
+                  agentBusy: lookRunningId === AGENT_LOOK_RUN_ID,
+                })}
           />
           <div
             className="joy-code-creative-brief"

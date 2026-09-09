@@ -8544,6 +8544,43 @@ label {
   font-size: 0.78rem;
   opacity: 0.75;
 }
+.living-looks-agent {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 0.5rem;
+}
+.living-looks-agent > label {
+  font-size: 0.74rem;
+  opacity: 0.8;
+}
+.living-looks-agent-prompt {
+  width: 100%;
+  min-height: 2.4rem;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+  resize: vertical;
+}
+.living-looks-agent-run {
+  align-self: flex-start;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  color: inherit;
+  cursor: pointer;
+}
+.living-looks-agent-run:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .living-looks-list {
   display: flex;
   flex-direction: column;

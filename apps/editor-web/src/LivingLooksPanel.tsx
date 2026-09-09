@@ -64,6 +64,14 @@ export interface LivingLooksPanelProps {
   readonly runningLookId: string | undefined;
   readonly busy: boolean;
   readonly onRun: (input: LivingLooksRunInput) => void;
+  /**
+   * Ask the JOY agent to apply / adjust / reset / detach a Look in words. The
+   * agent drives the same `look_*` tools; the result is a staged change the
+   * operator approves through the same approval card as a manual run (GAP 5).
+   * Absent when no structured-tool model is configured.
+   */
+  readonly onAgentRun?: (prompt: string) => void;
+  readonly agentBusy?: boolean;
 }
 
 function controlDefault(control: LookControl): number | string | boolean {
@@ -184,6 +192,7 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
   const [selectedId, setSelectedId] = useState<string | undefined>(
     catalog.find((entry) => entry.available)?.definition.id,
   );
+  const [agentPrompt, setAgentPrompt] = useState('');
   const [bindings, setBindings] = useState<Record<string, Record<string, string>>>({});
   const [values, setValues] = useState<Record<string, Record<string, number | string | boolean>>>(
     {},
@@ -232,6 +241,38 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
         Editable art-directed Looks. Each compiles to ordinary operations and runs through the same
         staged preview and approval as a direct edit.
       </p>
+
+      {props.onAgentRun !== undefined && (
+        <form
+          className="living-looks-agent"
+          aria-label="Ask the agent to work with Looks"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const prompt = agentPrompt.trim();
+            if (prompt.length === 0 || props.agentBusy === true || props.busy) return;
+            props.onAgentRun?.(prompt);
+            setAgentPrompt('');
+          }}
+        >
+          <label htmlFor="living-looks-agent-prompt">Ask JOY to work with a Look</label>
+          <textarea
+            id="living-looks-agent-prompt"
+            className="living-looks-agent-prompt"
+            rows={2}
+            placeholder="e.g. apply Editorial Clean to the headline, then soften the entrance"
+            value={agentPrompt}
+            disabled={props.agentBusy === true || props.busy}
+            onChange={(event) => setAgentPrompt(event.target.value)}
+          />
+          <button
+            type="submit"
+            className="living-looks-agent-run"
+            disabled={agentPrompt.trim().length === 0 || props.agentBusy === true || props.busy}
+          >
+            {props.agentBusy === true ? 'JOY is working…' : 'Ask JOY'}
+          </button>
+        </form>
+      )}
 
       {(props.applied ?? []).length > 0 && (
         <section className="applied-looks" aria-label="Applied Looks">

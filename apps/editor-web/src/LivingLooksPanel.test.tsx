@@ -178,6 +178,38 @@ describe('LivingLooksPanel', () => {
     expect(updateCall![0].instanceId).toBe('look-1');
   });
 
+  it('shows the "Ask JOY" agent affordance only when onAgentRun is provided', () => {
+    const withoutAgent = renderToStaticMarkup(
+      <LivingLooksPanel
+        hidden={false}
+        catalog={CATALOG}
+        entities={ENTITIES}
+        runningLookId={undefined}
+        busy={false}
+        onRun={() => undefined}
+      />,
+    );
+    expect(withoutAgent).not.toContain('living-looks-agent');
+
+    const onAgentRun = vi.fn();
+    mount({ onAgentRun });
+    const textarea = q<HTMLTextAreaElement>('.living-looks-agent-prompt');
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        'value',
+      )!.set!;
+      setter.call(textarea, 'apply editorial clean to the headline');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => {
+      q<HTMLFormElement>('.living-looks-agent').dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      );
+    });
+    expect(onAgentRun).toHaveBeenCalledWith('apply editorial clean to the headline');
+  });
+
   it('marks an orphaned applied Look', () => {
     const clean = BUILT_IN_LOOK_PACKS.find((p) => p.id === 'editorial-clean')!;
     const markup = renderToStaticMarkup(
