@@ -320,10 +320,23 @@ Neither §9.1 nor §9.2 is a threshold or a rerun question.
   `joy-media-ci-evidence` Docker named volume — survives container replacement,
   not volume deletion / Docker Desktop reset; not a backup). **Done.**
 - ✅ **Owner:** artifact-quota cleanup — 44 unreferenced artifacts deleted, 6
-  QA-referenced preserved (4.62 GiB → ~27.6 MiB live). **Done.** GitHub
-  recalculates storage accounting every 6–12 h; `artifact-quota-check.yml`
-  (workflow_dispatch) must upload a tiny sanitized probe successfully before the
-  full gate is dispatched — deletion succeeding does not prove the quota freed.
+  QA-referenced preserved (4.62 GiB → ~27.6 MiB live). **Done.**
+- ⛔ **BLOCKER (2026-09-09): `Artifact storage quota has been hit` persists.**
+  Bounded `artifact-quota-check.yml` probes at 23:17 / 00:48 / 02:19 / 07:46 /
+  09:15 Z all failed with the same message — the last **~11 h after the delete**,
+  well past GitHub's 6–12 h recalc window. Investigation: account-wide non-expired
+  Actions artifact usage is **6 files / ~27.6 MiB, ALL in `joy-media`** (every
+  other `hadimoti` repo has 0). 27.6 MiB is far under any GitHub artifact-storage
+  limit (free plan 500 MiB) → this is **not** recalc lag and **not** real
+  capacity. Consistent with the account's known failed-payment / ~zero-hosted-
+  minutes state (§6): a billing freeze blocks artifact uploads regardless of
+  usage. **OWNER ACTION:** fix the GitHub Actions billing / payment method for
+  `hadimoti` (Settings → Billing and plans). Do **not** purchase storage — it
+  will not help a payment freeze. Probing is **stopped**. Until this clears, the
+  one approved `release-candidate-v2` dispatch stays correctly blocked on the
+  `Verify retained evidence` + `upload-artifact` steps (no continue-on-error).
+  The frozen candidate `6c21c589` + tag `ci-v2-gate-frozen-6c21c589` + the
+  SAFE-TO-FREEZE reviews all remain valid.
 - A full gate run of the revision that resolves §9.1–§9.2 (HEAD ≥ `45022c7c`) —
   **both** `real-service` passes **and** cleanup **and** durable evidence
   (manifest + checksum + retrievable persistent copy) green for both passes.
