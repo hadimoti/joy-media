@@ -270,24 +270,31 @@ No mocking away the compiler, persistence, or renderer. Earlier green CI on
 
 ## Status ledger (updated as tasks land)
 
-| Gap                                                       | State       | Candidate  |
-| --------------------------------------------------------- | ----------- | ---------- |
-| 1a editor Look-Instances persistence (approach B)         | **DONE**    | `842b4003` |
-| 1b host ops (prepareUpdate/detach/resetOverrides/persist) | NOT STARTED | —          |
-| 1c panel reopen/adjust/detach                             | NOT STARTED | —          |
-| 2 audio end-to-end + A/V test                             | NOT STARTED | —          |
-| 3 Music Pulse honest (boolean rest + rate control + slot) | **DONE**    | `3eaa8cd7` |
-| 4 rendered-frame + export acceptance                      | NOT STARTED | —          |
-| 5 manual/agent parity for update/detach                   | NOT STARTED | —          |
+| Gap                                                       | State                                 | Candidate  |
+| --------------------------------------------------------- | ------------------------------------- | ---------- |
+| 1a Look-Instances persistence (approach B)                | **LOCAL DONE; sync = OWNER DECISION** | `4a7a8e1b` |
+| 1b host ops (prepareUpdate/detach/resetOverrides/persist) | IN PROGRESS                           | —          |
+| 1c panel reopen/adjust/detach                             | NOT STARTED                           | —          |
+| 2 audio end-to-end + A/V test                             | NOT STARTED                           | —          |
+| 3 Music Pulse honest (boolean rest + rate control + slot) | **DONE**                              | `3eaa8cd7` |
+| 4 rendered-frame + export acceptance                      | NOT STARTED                           | —          |
+| 5 manual/agent parity for update/detach                   | NOT STARTED                           | —          |
 
-**GAP 1a landed** as a canonical Look Instances document in its own persistence
-log, joined to the visual document through the compound-write journal (approach
-B — see `joy-live-director-r2-gap1a-architecture-2026-09-09.md`). Commits
-`3f9efba6` (schema) → `330b342e` (EditorSession participant) → `ecbc4199`
-(integration + failure-injection matrix + crash recovery) → `b661f54a`
-(package/duplication/purge) → `842b4003` (doc). Full `pnpm -w run check` green
-(529 files, 4230 tests, tsc + lint + format). Not the v3 project-schema widening
-the original text implied.
+**GAP 1a local persistence landed** as a canonical Look Instances document in
+its own persistence log, joined to the visual document through the compound-write
+journal (approach B — `joy-live-director-r2-gap1a-architecture-2026-09-09.md`).
+Commits `3f9efba6` → `330b342e` → `ecbc4199` → `b661f54a` → `842b4003`. Full
+`pnpm -w run check` green (529 files, 4230 tests, tsc + lint + format). Not the
+v3 project-schema widening the original text implied.
+
+**GAP 1a server sync is an OPEN OWNER SCOPE DECISION** —
+`joy-live-director-r2-look-sync-audit-2026-09-09.md` (commit `4a7a8e1b`). The
+server persists only the visual creative document (`JoyProjectV1`), unflagged and
+cross-device-by-design; Look **keyframes** ride it, Look **Instance records** do
+not, so a cross-device / storage-loss reopen silently degrades an applied Look to
+loose keyframes. Option A = build sync now (production DB migration, schema 5→6;
+recommended). Option B = local-first + in-app indicator + R2.1 follow-up. GAP
+1b/1c/5 do not depend on this and proceed.
 
 ---
 
