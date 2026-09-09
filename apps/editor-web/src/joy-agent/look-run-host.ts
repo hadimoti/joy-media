@@ -68,33 +68,32 @@ export type LookRunResult =
       readonly diagnostics: readonly string[];
     };
 
+/** A Look-Instances-only staged change (agent `look_detach`, GAP 5). */
+export interface LookInstancesOnlyRunInput {
+  readonly scope: CreativeSkillRunScope;
+  /** The next document with the instance removed; keyframes are left alone. */
+  readonly lookInstancesWrite: LookInstancesDocument;
+  readonly summary: string;
+  readonly signal?: AbortSignal;
+}
+
 const STAGE_DEADLINE_MS = 30_000;
 
-export async function stageLookRun(deps: LookRunDeps, input: LookRunInput): Promise<LookRunResult> {
-  const { scope } = input;
-
-  const planResult = prepareLookPlan(input.compileInput, input.goal, input.currentTextByObjectId);
-  if (!planResult.ok || planResult.plan === undefined) {
-    return {
-      kind: 'blocked',
-      reason: 'compile-failed',
-      diagnostics: planResult.compilation.diagnostics.map((d) => `${d.code}: ${d.message}`),
-    };
-  }
-  if (planResult.plan.operations.length === 0) {
-    return { kind: 'blocked', reason: 'no-operations', diagnostics: [] };
-  }
-
-  let proposal: ReturnType<typeof validateBrowserProposal>;
-  try {
-    proposal = validateBrowserProposal({
-      summary: planResult.plan.summary,
-      operations: planResult.plan.operations,
-    });
-  } catch {
-    return { kind: 'blocked', reason: 'invalid-proposal', diagnostics: [] };
-  }
-
+/**
+ * Run one prepared Look proposal through the shared `validate_proposal` staging
+ * handler. `proposal.operations` may be empty for a Look-Instances-only change
+ * (agent detach); every lease / stale-revision / host-authority check inside the
+ * handler applies identically.
+ */
+async function runLookStaging(
+  deps: LookRunDeps,
+  scope: CreativeSkillRunScope,
+  proposal: { readonly summary: string; readonly operations: readonly unknown[] },
+  lookInstancesWrite: LookInstancesDocument | undefined,
+  changedBindingIds: readonly string[],
+  signal: AbortSignal | undefined,
+  minOperationCount: number,
+): Promise<LookRunResult> {
   const isCurrent = (): boolean => {
     try {
       return deps.isAuthorityCurrent(scope) === true;
@@ -123,15 +122,13 @@ export async function stageLookRun(deps: LookRunDeps, input: LookRunInput): Prom
     agentPreviewStore: deps.agentPreviewStore,
     proposalTargetsRef: deps.proposalTargetsRef,
     onStaged: (changeSetId) => deps.onStaged?.(scope, changeSetId),
-    ...(input.lookInstancesWrite === undefined
-      ? {}
-      : { lookInstancesWrite: input.lookInstancesWrite }),
+    ...(lookInstancesWrite === undefined ? {} : { lookInstancesWrite }),
   });
 
   const controller = new AbortController();
-  if (input.signal !== undefined) {
-    if (input.signal.aborted) controller.abort();
-    else input.signal.addEventListener('abort', () => controller.abort(), { once: true });
+  if (signal !== undefined) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
   const rpcContext: HostRpcHandlerContext = Object.freeze({
     run: { runId: scope.runId, epoch: scope.epoch },
@@ -141,12 +138,15 @@ export async function stageLookRun(deps: LookRunDeps, input: LookRunInput): Prom
   });
 
   try {
-    const result = await handler(proposal, rpcContext);
+    const result = await handler(proposal as Parameters<typeof handler>[0], rpcContext);
     return {
       kind: 'ready-for-approval',
       changeSetId: result.changeSetId,
-      operationCount: result.operationCount,
-      changedBindingIds: planResult.compilation.changedBindingIds,
+      // A Look-Instances-only compound has zero visual operations; report the
+      // instance write itself as one change so the approval card and the
+      // downstream host-result parser see a positive count.
+      operationCount: Math.max(result.operationCount, minOperationCount),
+      changedBindingIds,
       summary: result.summary,
     };
   } catch (error) {
@@ -164,4 +164,60 @@ export async function stageLookRun(deps: LookRunDeps, input: LookRunInput): Prom
       diagnostics: [],
     };
   }
+}
+
+export async function stageLookRun(deps: LookRunDeps, input: LookRunInput): Promise<LookRunResult> {
+  const planResult = prepareLookPlan(input.compileInput, input.goal, input.currentTextByObjectId);
+  if (!planResult.ok || planResult.plan === undefined) {
+    return {
+      kind: 'blocked',
+      reason: 'compile-failed',
+      diagnostics: planResult.compilation.diagnostics.map((d) => `${d.code}: ${d.message}`),
+    };
+  }
+  if (planResult.plan.operations.length === 0) {
+    return { kind: 'blocked', reason: 'no-operations', diagnostics: [] };
+  }
+
+  let proposal: ReturnType<typeof validateBrowserProposal>;
+  try {
+    proposal = validateBrowserProposal({
+      summary: planResult.plan.summary,
+      operations: planResult.plan.operations,
+    });
+  } catch {
+    return { kind: 'blocked', reason: 'invalid-proposal', diagnostics: [] };
+  }
+
+  return runLookStaging(
+    deps,
+    input.scope,
+    proposal,
+    input.lookInstancesWrite,
+    planResult.compilation.changedBindingIds,
+    input.signal,
+    1,
+  );
+}
+
+/**
+ * Stage a Look-Instances-only change (agent `look_detach`, GAP 5): the instance
+ * record is dropped and the authored keyframes stay as ordinary editable
+ * animation. There is no visual diff to preview, but it still stages, approves
+ * and undoes through the same compound journal and approval card as every other
+ * agent Look change — an agent detach is never auto-applied.
+ */
+export function stageLookInstancesOnly(
+  deps: LookRunDeps,
+  input: LookInstancesOnlyRunInput,
+): Promise<LookRunResult> {
+  return runLookStaging(
+    deps,
+    input.scope,
+    { summary: input.summary.slice(0, 512), operations: [] },
+    input.lookInstancesWrite,
+    [],
+    input.signal,
+    1,
+  );
 }

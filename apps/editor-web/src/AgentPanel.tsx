@@ -2230,7 +2230,14 @@ export function AgentPanel({
       lookCompileInput = lookInstanceUpdateCompileInput(
         stored,
         request.kind === 'update'
-          ? { nextControlValues: request.nextControlValues }
+          ? {
+              ...(request.nextControlValues === undefined
+                ? {}
+                : { nextControlValues: request.nextControlValues }),
+              ...(request.nextEntityBindings === undefined
+                ? {}
+                : { nextEntityBindings: request.nextEntityBindings }),
+            }
           : { resetBindingIds: request.bindingIds },
         {
           definition,

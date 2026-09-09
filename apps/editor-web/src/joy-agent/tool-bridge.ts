@@ -13,6 +13,7 @@ import {
 } from './context-snapshot.js';
 import { isJoyAgentConversationEntityReference } from './conversation-entity-references.js';
 import { validateBrowserProposal, type BrowserProposal } from './bounded-tool-loop.js';
+import { createLookHostRpcMethods, type PrepareLookHandler } from './look-tool-bridge.js';
 import {
   HostRpcDiagnosticError,
   type HostRpcHandlerContext,
@@ -273,10 +274,21 @@ export interface JoyAgentHostToolBridgeOptions {
    * The caller must use the canonical compiler and the session-owned prepared
    * change store. It returns display-safe opaque identities only.
    */
-  readonly prepareProposal: (
+  /**
+   * Required for every run that advertises `validate_proposal`. A Look-scoped
+   * run omits it — `validate_proposal` stays in the method map but is never in
+   * that run's allow-list, so the model cannot reach it.
+   */
+  readonly prepareProposal?: (
     proposal: BrowserProposal,
     context: HostRpcHandlerContext,
   ) => Promise<JoyAgentPreparedHostResult> | JoyAgentPreparedHostResult;
+  /**
+   * The deterministic Living Look intent handler (R2 / GAP 5). Present only for
+   * a Look-scoped run; it resolves + compiles the Look and stages a reversible
+   * preview through the same `validate_proposal` staging handler.
+   */
+  readonly prepareLook?: PrepareLookHandler;
   /** Optional until the trusted host wires a concrete local observation adapter. */
   readonly observation?: JoyAgentObservationToolAdapter;
   /**
@@ -1146,6 +1158,12 @@ export function createJoyAgentHostRpcMethods(
     },
     execute: async (proposal, context) => {
       context.signal.throwIfAborted();
+      if (options.prepareProposal === undefined)
+        throw diagnostic('JOY_AGENT_RPC_CANONICAL_REJECTED', {
+          field: 'operations',
+          compilerCode: 'JOY_AGENT_VALIDATE_PROPOSAL_UNAVAILABLE',
+          retryable: false,
+        });
       try {
         return await options.prepareProposal(proposal, context);
       } catch (error) {
@@ -1165,6 +1183,7 @@ export function createJoyAgentHostRpcMethods(
   const baseMethods = {
     read_project_context: readProjectContext as HostRpcMethod<unknown, unknown>,
     validate_proposal: validateProposal as HostRpcMethod<unknown, unknown>,
+    ...(options.prepareLook === undefined ? {} : createLookHostRpcMethods(options.prepareLook)),
   } as const;
   const observation = options.observation;
   if (observation === undefined) return baseMethods as HostRpcMethods;
@@ -1302,7 +1321,7 @@ export function createJoyAgentHostRpcMethodsForSnapshot(
 ): HostRpcMethods {
   return createJoyAgentHostRpcMethods({
     context: createJoyAgentPagedContext(input),
-    prepareProposal,
+    ...(prepareProposal === undefined ? {} : { prepareProposal }),
     ...(observation === undefined ? {} : { observation }),
     ...(onObservationCompleted === undefined ? {} : { onObservationCompleted }),
   });

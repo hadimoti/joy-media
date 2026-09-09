@@ -36,7 +36,10 @@ export type LivingLooksRunInput =
   | {
       readonly kind: 'update';
       readonly instanceId: string;
-      readonly nextControlValues: Readonly<Record<string, number | string | boolean>>;
+      /** Omit to change only bindings; omit both for a no-op recompile. */
+      readonly nextControlValues?: Readonly<Record<string, number | string | boolean>>;
+      /** An agent may rebind slots (e.g. after an object was replaced). */
+      readonly nextEntityBindings?: Readonly<Record<string, string>>;
     }
   | { readonly kind: 'reset'; readonly instanceId: string; readonly bindingIds: readonly string[] }
   | { readonly kind: 'detach'; readonly instanceId: string };
