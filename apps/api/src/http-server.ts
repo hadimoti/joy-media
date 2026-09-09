@@ -900,6 +900,12 @@ async function route(
           projectId: result.record.projectId,
           revisionId: result.record.revisionId,
           document: result.record.document,
+          // R2 / GAP 1a: present only once a revision has carried Look info. A
+          // legacy client ignores the key; a Look-aware client treats an absent
+          // key as "no server Look info" and keeps its local Look document.
+          ...(result.record.lookInstances === undefined
+            ? {}
+            : { lookInstances: result.record.lookInstances }),
         },
       });
       return;
@@ -948,6 +954,9 @@ async function route(
         ownerId: actor.id,
         revisionId: validation.envelope.revisionId,
         document: validation.envelope.document,
+        ...(validation.envelope.lookInstances === undefined
+          ? {}
+          : { lookInstances: validation.envelope.lookInstances }),
       },
       validation.envelope.baseRevisionId,
     );

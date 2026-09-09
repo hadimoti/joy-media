@@ -214,6 +214,25 @@ describe('ordered PostgreSQL migrations', () => {
     );
   });
 
+  it('adds the additive nullable look_instances column (006, R2 / GAP 1a)', async () => {
+    const migration = POSTGRES_MIGRATIONS.find((m) => m.id === '006-look-instances');
+    expect(migration).toBeDefined();
+    const queries: string[] = [];
+    await migration!.up({
+      query: async (sql: string) => {
+        queries.push(sql);
+        return { rows: [] };
+      },
+    });
+    expect(
+      queries.some((q) =>
+        /ALTER TABLE project_documents ADD COLUMN IF NOT EXISTS look_instances jsonb/i.test(q),
+      ),
+    ).toBe(true);
+    // Additive + nullable — never NOT NULL, never a DROP.
+    expect(queries.some((q) => /NOT NULL|DROP/i.test(q))).toBe(false);
+  });
+
   it('fails closed when an applied migration checksum has drifted', async () => {
     const { pool } = createRecordingPool([
       { id: POSTGRES_MIGRATIONS[0]!.id, checksum: 'sha256:unexpected' },

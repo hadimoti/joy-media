@@ -23,12 +23,18 @@ import type {
 } from './project-document-store.js';
 import {
   validateProjectDocumentRecord,
+  validateLookInstanceBindingsResolve,
   isValidProjectDocumentRecord,
   InMemoryProjectDocumentStore,
   UnavailableProjectDocumentStore,
   INITIAL_REVISION,
+  MAX_LOOK_INSTANCES_PER_DOCUMENT,
 } from './project-document-store.js';
-import type { ProjectRevisionId, JoyProjectV1 } from '@joy-media/project-schema';
+import type {
+  ProjectRevisionId,
+  JoyProjectV1,
+  LookInstancesDocument,
+} from '@joy-media/project-schema';
 
 // ============================================================================
 // Fixtures
@@ -995,5 +1001,247 @@ describe('UnavailableProjectDocumentStore', () => {
 
     const listResult = store.listRevisions(TEST_OWNER, TEST_PROJECT);
     expect(listResult).toEqual([]);
+  });
+});
+
+// ============================================================================
+// Look Instances synchronization (R2 / GAP 1a)
+// ============================================================================
+
+describe('InMemoryProjectDocumentStore — Look Instances (GAP 1a)', () => {
+  const PROJECT_A = 'project-a' as ProjectId;
+  const OWNER_X = 'owner-x' as OwnerId;
+  const REV_1 = 'rev-1' as ProjectRevisionId;
+  const REV_2 = 'rev-2' as ProjectRevisionId;
+  const REV_3 = 'rev-3' as ProjectRevisionId;
+
+  function docWithObject(id: string, objectId: string): JoyProjectV1 {
+    const base = minimalValidJoyProjectV1(id);
+    return {
+      ...base,
+      visualObjects: {
+        [objectId]: {
+          id: objectId,
+          kind: 'text',
+          text: 'Headline',
+          transform: {
+            x: 0,
+            y: 0,
+            scaleX: 1,
+            scaleY: 1,
+            rotationDeg: 0,
+            opacity: 1,
+            crop: { left: 0, top: 0, right: 0, bottom: 0 },
+          },
+        },
+      } as JoyProjectV1['visualObjects'],
+    };
+  }
+
+  function lookDoc(
+    id: string,
+    instances: LookInstancesDocument['instances'] = {},
+  ): LookInstancesDocument {
+    return { id, schemaVersion: 1, instances };
+  }
+
+  function instance(objectId: string) {
+    return {
+      id: 'look-1',
+      definitionId: 'editorial-clean',
+      definitionVersion: 1,
+      compositionId: 'comp-1',
+      entityBindings: { headline: objectId },
+      controlValues: { energy: 0.5 },
+      overriddenBindingIds: [],
+      createdEntityIds: [],
+    };
+  }
+
+  function store() {
+    return new InMemoryProjectDocumentStore((p) => (p === PROJECT_A ? OWNER_X : undefined));
+  }
+
+  function record(
+    revisionId: ProjectRevisionId,
+    document: JoyProjectV1,
+    lookInstances?: LookInstancesDocument,
+  ): ProjectDocumentRecord {
+    return {
+      projectId: PROJECT_A,
+      ownerId: OWNER_X,
+      revisionId,
+      document,
+      ...(lookInstances === undefined ? {} : { lookInstances }),
+    };
+  }
+
+  it('writes lookInstances with the visual doc and reads both back (R1)', () => {
+    const s = store();
+    const doc = docWithObject('project-a', 'obj-1');
+    const looks = lookDoc('project-a', { 'look-1': instance('obj-1') });
+    expect(s.writeDocument(OWNER_X, record(REV_1, doc, looks), INITIAL_REVISION).kind).toBe(
+      'stored',
+    );
+    const read = s.readDocument(OWNER_X, PROJECT_A) as ProjectDocumentReadOutcomeReady;
+    expect(read.record.lookInstances).toEqual(looks);
+  });
+
+  it('carries the previous lookInstances forward when a write omits it (R2)', () => {
+    const s = store();
+    const doc = docWithObject('project-a', 'obj-1');
+    const looks = lookDoc('project-a', { 'look-1': instance('obj-1') });
+    s.writeDocument(OWNER_X, record(REV_1, doc, looks), INITIAL_REVISION);
+    // A legacy / visual-only write: no lookInstances key.
+    expect(s.writeDocument(OWNER_X, record(REV_2, doc), REV_1).kind).toBe('stored');
+    const read = s.readDocument(OWNER_X, PROJECT_A) as ProjectDocumentReadOutcomeReady;
+    expect(read.record.lookInstances).toEqual(looks);
+  });
+
+  it('an explicit empty document replaces the prior value (R3)', () => {
+    const s = store();
+    const doc = docWithObject('project-a', 'obj-1');
+    s.writeDocument(
+      OWNER_X,
+      record(REV_1, doc, lookDoc('project-a', { 'look-1': instance('obj-1') })),
+      INITIAL_REVISION,
+    );
+    s.writeDocument(OWNER_X, record(REV_2, doc, lookDoc('project-a', {})), REV_1);
+    const read = s.readDocument(OWNER_X, PROJECT_A) as ProjectDocumentReadOutcomeReady;
+    expect(read.record.lookInstances).toEqual(lookDoc('project-a', {}));
+  });
+
+  it('rejects a malformed lookInstances document (R5)', () => {
+    const s = store();
+    const doc = docWithObject('project-a', 'obj-1');
+    const bad = {
+      id: 'project-a',
+      schemaVersion: 2,
+      instances: {},
+    } as unknown as LookInstancesDocument;
+    const result = s.writeDocument(OWNER_X, record(REV_1, doc, bad), INITIAL_REVISION);
+    expect(result.kind).toBe('invalid-document');
+  });
+
+  it('rejects a lookInstances instance that binds an object absent from the same write (R5)', () => {
+    const s = store();
+    const doc = docWithObject('project-a', 'obj-1');
+    const looks = lookDoc('project-a', { 'look-1': instance('obj-MISSING') });
+    const result = s.writeDocument(
+      OWNER_X,
+      record(REV_1, doc, looks),
+      INITIAL_REVISION,
+    ) as ProjectDocumentWriteOutcomeInvalidDocument;
+    expect(result.kind).toBe('invalid-document');
+    expect(
+      result.diagnostics.some((d) => d.code === 'PROJECT_DOCUMENT_LOOK_INSTANCE_DANGLING'),
+    ).toBe(true);
+  });
+
+  it('keeps an already-dangling instance on a later control-only write (orphan round trip)', () => {
+    const s = store();
+    const doc = docWithObject('project-a', 'obj-1');
+    s.writeDocument(
+      OWNER_X,
+      record(REV_1, doc, lookDoc('project-a', { 'look-1': instance('obj-1') })),
+      INITIAL_REVISION,
+    );
+    // The object is deleted; the instance stays, now orphaned, control value changed.
+    const docNoObject = minimalValidJoyProjectV1('project-a');
+    const orphanedInstance = { ...instance('obj-1'), controlValues: { energy: 0.9 } };
+    const result = s.writeDocument(
+      OWNER_X,
+      record(REV_2, docNoObject, lookDoc('project-a', { 'look-1': orphanedInstance })),
+      REV_1,
+    );
+    expect(result.kind).toBe('stored');
+  });
+
+  it('rejects a lookInstances document over the instance cap (R5)', () => {
+    const s = store();
+    const doc = docWithObject('project-a', 'obj-1');
+    const instances: Record<string, ReturnType<typeof instance>> = {};
+    for (let i = 0; i <= MAX_LOOK_INSTANCES_PER_DOCUMENT; i += 1) {
+      instances[`look-${i}`] = { ...instance('obj-1'), id: `look-${i}` };
+    }
+    const result = s.writeDocument(
+      OWNER_X,
+      record(REV_1, doc, lookDoc('project-a', instances)),
+      INITIAL_REVISION,
+    );
+    expect(result.kind).toBe('invalid-document');
+  });
+
+  it('a CAS conflict applies neither the visual doc nor the Look doc (R1, R6)', () => {
+    const s = store();
+    const doc = docWithObject('project-a', 'obj-1');
+    s.writeDocument(
+      OWNER_X,
+      record(REV_1, doc, lookDoc('project-a', { 'look-1': instance('obj-1') })),
+      INITIAL_REVISION,
+    );
+    // Second writer still on REV_1 as base after another write advanced the head.
+    s.writeDocument(OWNER_X, record(REV_2, doc, lookDoc('project-a', {})), REV_1);
+    const stale = s.writeDocument(
+      OWNER_X,
+      record(
+        REV_3,
+        doc,
+        lookDoc('project-a', { 'look-9': { ...instance('obj-1'), id: 'look-9' } }),
+      ),
+      REV_1,
+    );
+    expect(stale.kind).toBe('revision-conflict');
+    const read = s.readDocument(OWNER_X, PROJECT_A) as ProjectDocumentReadOutcomeReady;
+    expect(read.record.revisionId).toBe(REV_2);
+    expect(read.record.lookInstances).toEqual(lookDoc('project-a', {}));
+  });
+});
+
+describe('validateLookInstanceBindingsResolve', () => {
+  const doc = minimalValidJoyProjectV1('p');
+  const docWithObj: JoyProjectV1 = {
+    ...doc,
+    visualObjects: {
+      'obj-1': {
+        id: 'obj-1',
+        kind: 'text',
+        transform: {
+          x: 0,
+          y: 0,
+          scaleX: 1,
+          scaleY: 1,
+          rotationDeg: 0,
+          opacity: 1,
+          crop: { left: 0, top: 0, right: 0, bottom: 0 },
+        },
+      },
+    } as JoyProjectV1['visualObjects'],
+  };
+
+  it('returns no diagnostics when next is undefined', () => {
+    expect(validateLookInstanceBindingsResolve(undefined, undefined, doc)).toEqual([]);
+  });
+
+  it('flags a new instance binding an absent object', () => {
+    const next: LookInstancesDocument = {
+      id: 'p',
+      schemaVersion: 1,
+      instances: {
+        'l-1': {
+          id: 'l-1',
+          definitionId: 'editorial-clean',
+          definitionVersion: 1,
+          compositionId: 'c',
+          entityBindings: { headline: 'obj-x' },
+          controlValues: {},
+          overriddenBindingIds: [],
+          createdEntityIds: [],
+        },
+      },
+    };
+    const diag = validateLookInstanceBindingsResolve(next, undefined, docWithObj);
+    expect(diag).toHaveLength(1);
+    expect(diag[0]!.code).toBe('PROJECT_DOCUMENT_LOOK_INSTANCE_DANGLING');
   });
 });

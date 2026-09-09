@@ -196,12 +196,27 @@ const STOCK_VIDEO_MIGRATION: PostgresMigration = {
   },
 };
 
+const LOOK_INSTANCES_MIGRATION: PostgresMigration = {
+  id: '006-look-instances',
+  checksum: 'sha256:look-instances-2026-09-09',
+  up: async (database) => {
+    // Additive + nullable: an older API build simply does not read the column,
+    // so a forward deploy is safe and a rollback keeps the column and its data
+    // (see docs/reviews/joy-live-director-r2-deploy-runbook — a DROP COLUMN is a
+    // separate, explicit, last-resort step and never the default rollback).
+    await database.query(
+      'ALTER TABLE project_documents ADD COLUMN IF NOT EXISTS look_instances jsonb;',
+    );
+  },
+};
+
 export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
   BASELINE_MIGRATION,
   ASSET_REVOCATION_PRIMARY_KEY_MIGRATION,
   WORKER_LEASE_GENERATION_MIGRATION,
   PROJECT_ASSET_ACCESS_MIGRATION,
   STOCK_VIDEO_MIGRATION,
+  LOOK_INSTANCES_MIGRATION,
 ];
 
 export async function runPostgresMigrations(database: MigrationDatabase): Promise<void> {

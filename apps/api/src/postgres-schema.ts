@@ -68,4 +68,5 @@ CREATE TABLE IF NOT EXISTS project_documents (
   PRIMARY KEY (project_id, revision_id)
 );
 CREATE INDEX IF NOT EXISTS project_documents_project_revision_idx ON project_documents (project_id, revision_id);
+ALTER TABLE project_documents ADD COLUMN IF NOT EXISTS look_instances jsonb;
 `;

@@ -68,6 +68,49 @@ function validEnvelope(
 }
 
 // ============================================================================
+// Look Instances envelope (R2 / GAP 1a)
+// ============================================================================
+
+describe('validateProjectDocumentSyncRequest - lookInstances (GAP 1a)', () => {
+  const emptyLooks = { id: EXPECTED_PROJECT_ID, schemaVersion: 1 as const, instances: {} };
+
+  it('accepts an envelope without lookInstances (legacy client)', () => {
+    const result = validateProjectDocumentSyncRequest(validEnvelope(), EXPECTED_PROJECT_ID);
+    expect(result.valid).toBe(true);
+    if (result.valid) expect('lookInstances' in result.envelope).toBe(false);
+  });
+
+  it('accepts and carries an explicit empty lookInstances document', () => {
+    const result = validateProjectDocumentSyncRequest(
+      { ...(validEnvelope() as object), lookInstances: emptyLooks },
+      EXPECTED_PROJECT_ID,
+    );
+    expect(result.valid).toBe(true);
+    if (result.valid) expect(result.envelope.lookInstances).toEqual(emptyLooks);
+  });
+
+  it('rejects a malformed lookInstances document', () => {
+    const result = validateProjectDocumentSyncRequest(
+      {
+        ...(validEnvelope() as object),
+        lookInstances: { id: 'x', schemaVersion: 9, instances: {} },
+      },
+      EXPECTED_PROJECT_ID,
+    );
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.path === 'lookInstances')).toBe(true);
+  });
+
+  it('still rejects an unknown top-level field alongside lookInstances', () => {
+    const result = validateProjectDocumentSyncRequest(
+      { ...(validEnvelope() as object), lookInstances: emptyLooks, somethingElse: 1 },
+      EXPECTED_PROJECT_ID,
+    );
+    expect(result.valid).toBe(false);
+  });
+});
+
+// ============================================================================
 // Valid Requests
 // ============================================================================
 

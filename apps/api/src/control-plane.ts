@@ -41,6 +41,8 @@ interface InternalProjectDocumentRecord {
   readonly ownerId: InternalOwnerId;
   readonly revisionId: string;
   readonly document: unknown;
+  /** The canonical Look Instances document (R2 / GAP 1a); absent = not carried. */
+  readonly lookInstances?: unknown;
 }
 
 type InternalProjectDocumentReadOutcome =
@@ -96,7 +98,12 @@ const INTERNAL_INITIAL_REVISION = '';
 class InternalInMemoryProjectDocumentStore {
   private readonly store: Map<
     InternalProjectId,
-    { readonly ownerId: InternalOwnerId; readonly revisionId: string; readonly document: unknown }
+    {
+      readonly ownerId: InternalOwnerId;
+      readonly revisionId: string;
+      readonly document: unknown;
+      readonly lookInstances?: unknown;
+    }
   > = new Map();
   private readonly revisions: Map<InternalProjectId, Set<string>> = new Map();
 
@@ -133,6 +140,9 @@ class InternalInMemoryProjectDocumentStore {
         ownerId,
         revisionId: current.revisionId,
         document: this.deepCopy(current.document),
+        ...(current.lookInstances === undefined
+          ? {}
+          : { lookInstances: this.deepCopy(current.lookInstances) }),
       },
     };
   }
@@ -162,10 +172,17 @@ class InternalInMemoryProjectDocumentStore {
         actualBaseRevisionId: currentRevisionId,
       };
     }
+    // R2 / GAP 1a: an absent lookInstances carries the prior value forward
+    // (omission is never deletion); an explicit value replaces it.
+    const nextLookInstances =
+      record.lookInstances !== undefined ? record.lookInstances : current?.lookInstances;
     this.store.set(record.projectId, {
       ownerId,
       revisionId: record.revisionId,
       document: this.deepCopy(record.document),
+      ...(nextLookInstances === undefined
+        ? {}
+        : { lookInstances: this.deepCopy(nextLookInstances) }),
     });
     let revSet = this.revisions.get(record.projectId);
     if (revSet === undefined) {

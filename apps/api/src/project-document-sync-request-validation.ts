@@ -6,8 +6,12 @@
  * JoyProjectV1 document validity. Forbids projectId, owner, and any server-only fields.
  */
 
-import type { JoyProjectV1, ProjectDiagnostic } from '@joy-media/project-schema';
-import { validateJoyProjectV1 } from '@joy-media/project-schema';
+import type {
+  JoyProjectV1,
+  LookInstancesDocument,
+  ProjectDiagnostic,
+} from '@joy-media/project-schema';
+import { validateJoyProjectV1, validateLookInstancesDocument } from '@joy-media/project-schema';
 import type { ProjectRevisionId, ProjectId } from '@joy-media/project-schema';
 
 export type { ProjectId, ProjectRevisionId, JoyProjectV1 };
@@ -83,6 +87,14 @@ export interface ProjectDocumentSyncEnvelope {
    * and is allowed to differ from the owner-scoped control-plane project ID in the URL path.
    */
   readonly document: JoyProjectV1;
+
+  /**
+   * The canonical Look Instances document (R2 / GAP 1a). Optional: when absent
+   * the server carries the previous revision's value forward (omission is never
+   * deletion). An explicit `{ id, schemaVersion: 1, instances: {} }` persists an
+   * intentional "all Looks detached" state.
+   */
+  readonly lookInstances?: LookInstancesDocument;
 }
 
 // ============================================================================
@@ -128,9 +140,20 @@ const FORBIDDEN_TOP_LEVEL_FIELDS = new Set([
 ]);
 
 /**
- * Allowed top-level fields in the sync envelope - must be exactly these.
+ * Required top-level fields in the sync envelope - all must be present.
  */
-const ALLOWED_TOP_LEVEL_FIELDS = new Set(['baseRevisionId', 'revisionId', 'document']);
+const REQUIRED_TOP_LEVEL_FIELDS = new Set(['baseRevisionId', 'revisionId', 'document']);
+
+/** Optional top-level fields the envelope may also carry (R2 / GAP 1a). */
+const OPTIONAL_TOP_LEVEL_FIELDS = new Set(['lookInstances']);
+
+/**
+ * Every top-level field the envelope may contain - required plus optional.
+ */
+const ALLOWED_TOP_LEVEL_FIELDS = new Set([
+  ...REQUIRED_TOP_LEVEL_FIELDS,
+  ...OPTIONAL_TOP_LEVEL_FIELDS,
+]);
 
 // ============================================================================
 // Helper Functions
@@ -236,7 +259,7 @@ export function validateProjectDocumentSyncRequest(
 
   // Check for missing required fields
   const missingFields: string[] = [];
-  for (const field of ALLOWED_TOP_LEVEL_FIELDS) {
+  for (const field of REQUIRED_TOP_LEVEL_FIELDS) {
     if (!(field in env)) {
       missingFields.push(field);
     }
@@ -341,6 +364,21 @@ export function validateProjectDocumentSyncRequest(
     }
   }
 
+  // Validate the optional lookInstances document (R2 / GAP 1a). Absent is a
+  // legacy / visual-only save; a present value is structurally validated here
+  // and re-checked (schema + caps + binding consistency) by the store.
+  const hasLookInstances = 'lookInstances' in env;
+  if (hasLookInstances) {
+    const lookDiagnostics = validateLookInstancesDocument(env.lookInstances, 'lookInstances');
+    if (lookDiagnostics.length > 0) {
+      errors.push({
+        code: 'invalid-document',
+        message: `lookInstances is not a valid Look Instances document: ${lookDiagnostics.length} diagnostic(s)`,
+        path: 'lookInstances',
+      });
+    }
+  }
+
   // If we have any errors, return failure
   if (errors.length > 0) {
     return { valid: false, errors: Object.freeze(errors.slice()) };
@@ -353,6 +391,7 @@ export function validateProjectDocumentSyncRequest(
       baseRevisionId: baseRevisionIdValue as ProjectRevisionId,
       revisionId: revisionIdValue as ProjectRevisionId,
       document: documentValue as JoyProjectV1,
+      ...(hasLookInstances ? { lookInstances: env.lookInstances as LookInstancesDocument } : {}),
     },
     errors: Object.freeze([] as const),
   };

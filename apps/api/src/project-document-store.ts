@@ -5,9 +5,21 @@
  * This module defines only types and pure validation - NO I/O.
  */
 
-import type { JoyProjectV1, ProjectDiagnostic } from '@joy-media/project-schema';
-import { validateJoyProjectV1 } from '@joy-media/project-schema';
+import type {
+  JoyProjectV1,
+  LookInstancesDocument,
+  ProjectDiagnostic,
+} from '@joy-media/project-schema';
+import { validateJoyProjectV1, validateLookInstancesDocument } from '@joy-media/project-schema';
 import type { ProjectRevisionId } from '@joy-media/project-schema';
+
+/**
+ * Server-side cap on one project's Look Instances document (R2 / GAP 1a). Looks
+ * are few — a handful per composition — so a small ceiling on the instance count
+ * and the serialized size is a defence-in-depth guard, not a real product limit.
+ */
+export const MAX_LOOK_INSTANCES_PER_DOCUMENT = 128;
+export const MAX_LOOK_INSTANCES_DOCUMENT_BYTES = 256 * 1024;
 
 // ============================================================================
 // Identity and Record Types
@@ -28,6 +40,17 @@ export interface ProjectDocumentRecord {
   readonly ownerId: OwnerId;
   readonly revisionId: ProjectRevisionId;
   readonly document: JoyProjectV1;
+  /**
+   * The canonical Look Instances document (R2 / GAP 1a). Written under the SAME
+   * `revisionId` as `document` — one atomic CAS row.
+   *
+   * `undefined` means "this write did not carry Look info" — a legacy client, or
+   * a visual-only save. The store then **copies forward** the previous
+   * revision's value (omission is never deletion). An explicit
+   * `{ id, schemaVersion: 1, instances: {} }` is a real value that replaces it —
+   * that is how an intentional "all Looks detached" state is persisted.
+   */
+  readonly lookInstances?: LookInstancesDocument;
 }
 
 // ============================================================================
@@ -188,7 +211,95 @@ export function validateProjectDocumentRecord(candidate: unknown): readonly Proj
     diagnostics.push(...docDiagnostics);
   }
 
+  // Validate the optional Look Instances document (R2 / GAP 1a). `undefined` is
+  // a legacy / visual-only write and is carried forward by the store; only a
+  // present value is structurally validated + capped here.
+  if (record.lookInstances !== undefined) {
+    diagnostics.push(...validateLookInstancesDocument(record.lookInstances, 'lookInstances'));
+    const instances = isRecord(record.lookInstances)
+      ? (record.lookInstances as { readonly instances?: unknown }).instances
+      : undefined;
+    if (isRecord(instances) && Object.keys(instances).length > MAX_LOOK_INSTANCES_PER_DOCUMENT) {
+      diagnostics.push({
+        code: 'PROJECT_DOCUMENT_LOOK_INSTANCES_TOO_MANY',
+        message: `lookInstances.instances must not exceed ${MAX_LOOK_INSTANCES_PER_DOCUMENT} entries`,
+        path: 'lookInstances.instances',
+      });
+    }
+    if (serializedByteLength(record.lookInstances) > MAX_LOOK_INSTANCES_DOCUMENT_BYTES) {
+      diagnostics.push({
+        code: 'PROJECT_DOCUMENT_LOOK_INSTANCES_TOO_LARGE',
+        message: `lookInstances must serialize to at most ${MAX_LOOK_INSTANCES_DOCUMENT_BYTES} bytes`,
+        path: 'lookInstances',
+      });
+    }
+  }
+
   return diagnostics;
+}
+
+/**
+ * Binding-consistency check (R2 / GAP 1a R5), mirroring the editor's
+ * `EditorSession#assertLookInstanceReferencesResolve`: a NEW or RETARGETED
+ * `entityBindings` target (or a new `createdEntityIds` entry) on an instance
+ * must name a visual object present in the SAME write's `document`. A binding
+ * that already dangled from an earlier deletion is left alone — the editor keeps
+ * such an instance as `orphaned`, and rejecting its round-trip here would break
+ * cross-device sync.
+ */
+export function validateLookInstanceBindingsResolve(
+  next: LookInstancesDocument | undefined,
+  prior: LookInstancesDocument | undefined,
+  document: JoyProjectV1,
+): readonly ProjectDiagnostic[] {
+  if (next === undefined) return [];
+  const priorInstances = (prior?.instances ?? {}) as Record<
+    string,
+    {
+      readonly entityBindings?: Record<string, string>;
+      readonly createdEntityIds?: readonly string[];
+    }
+  >;
+  const visualObjects = (document.visualObjects ?? {}) as Record<string, unknown>;
+  const diagnostics: ProjectDiagnostic[] = [];
+  for (const [id, rawInstance] of Object.entries(next.instances)) {
+    const instance = rawInstance as {
+      readonly entityBindings?: Record<string, string>;
+      readonly createdEntityIds?: readonly string[];
+    };
+    const stored = priorInstances[id];
+    if (stored !== undefined && JSON.stringify(stored) === JSON.stringify(rawInstance)) continue;
+    const entityBindings = instance.entityBindings ?? {};
+    const createdEntityIds = instance.createdEntityIds ?? [];
+    const missing = [
+      ...Object.entries(entityBindings)
+        .filter(
+          ([key, entityId]) => stored === undefined || stored.entityBindings?.[key] !== entityId,
+        )
+        .map(([, entityId]) => entityId),
+      ...createdEntityIds.filter(
+        (entityId) => stored === undefined || !(stored.createdEntityIds ?? []).includes(entityId),
+      ),
+    ].filter((entityId) => visualObjects[entityId] === undefined);
+    if (missing.length > 0) {
+      diagnostics.push({
+        code: 'PROJECT_DOCUMENT_LOOK_INSTANCE_DANGLING',
+        message: `lookInstances instance "${id}" references visual object(s) absent from this write's document: ${[
+          ...new Set(missing),
+        ].join(', ')}`,
+        path: `lookInstances.instances.${id}`,
+      });
+    }
+  }
+  return diagnostics;
+}
+
+function serializedByteLength(value: unknown): number {
+  try {
+    return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
 }
 
 /**
@@ -279,6 +390,8 @@ interface StoredDocument {
   readonly ownerId: OwnerId;
   readonly revisionId: ProjectRevisionId;
   readonly document: JoyProjectV1;
+  /** Present once any revision has carried Look info; carried forward otherwise. */
+  readonly lookInstances?: LookInstancesDocument;
 }
 
 /**
@@ -299,6 +412,22 @@ export class InMemoryProjectDocumentStore implements ProjectDocumentStore {
   private readonly currentHead: Map<ProjectId, ProjectRevisionId> = new Map();
 
   constructor(private readonly lookupOwner: ProjectOwnerLookup) {}
+
+  private recordFromStored(
+    projectId: ProjectId,
+    ownerId: OwnerId,
+    stored: StoredDocument,
+  ): ProjectDocumentRecord {
+    return {
+      projectId,
+      ownerId,
+      revisionId: stored.revisionId,
+      document: this.deepCopy(stored.document),
+      ...(stored.lookInstances === undefined
+        ? {}
+        : { lookInstances: this.deepCopy(stored.lookInstances) }),
+    };
+  }
 
   readDocument(
     callerId: OwnerId,
@@ -343,12 +472,7 @@ export class InMemoryProjectDocumentStore implements ProjectDocumentStore {
         // Found the historical revision - return it
         return {
           kind: 'ready',
-          record: {
-            projectId,
-            ownerId,
-            revisionId: stored.revisionId,
-            document: this.deepCopy(stored.document),
-          },
+          record: this.recordFromStored(projectId, ownerId, stored),
         };
       } else {
         // Revision doesn't exist - return stale with current head info
@@ -376,12 +500,7 @@ export class InMemoryProjectDocumentStore implements ProjectDocumentStore {
       if (stored !== undefined) {
         return {
           kind: 'ready',
-          record: {
-            projectId,
-            ownerId,
-            revisionId: stored.revisionId,
-            document: this.deepCopy(stored.document),
-          },
+          record: this.recordFromStored(projectId, ownerId, stored),
         };
       }
     }
@@ -458,11 +577,34 @@ export class InMemoryProjectDocumentStore implements ProjectDocumentStore {
       this.documents.set(record.projectId, docMap);
     }
 
+    // Look Instances (R2 / GAP 1a): an absent value carries forward the previous
+    // revision's document (omission is never deletion); an explicit value —
+    // including `{ instances: {} }` — replaces it.
+    const priorHead = docMap.get(this.currentHead.get(record.projectId) ?? INITIAL_REVISION);
+    const nextLookInstances =
+      record.lookInstances !== undefined ? record.lookInstances : priorHead?.lookInstances;
+
+    const bindingDiagnostics = validateLookInstanceBindingsResolve(
+      record.lookInstances,
+      priorHead?.lookInstances,
+      record.document,
+    );
+    if (bindingDiagnostics.length > 0) {
+      return {
+        kind: 'invalid-document',
+        projectId: record.projectId,
+        diagnostics: bindingDiagnostics,
+      };
+    }
+
     // Store defensive copy of the new document
     const stored: StoredDocument = {
       ownerId,
       revisionId: record.revisionId,
       document: this.deepCopy(record.document),
+      ...(nextLookInstances === undefined
+        ? {}
+        : { lookInstances: this.deepCopy(nextLookInstances) }),
     };
     docMap.set(record.revisionId, stored);
 
