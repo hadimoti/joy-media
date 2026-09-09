@@ -356,6 +356,70 @@ describe('EditorSession — Look Instances document (GAP 1a)', () => {
     expect(store.values.get(journalKey)).toBeUndefined();
   });
 
+  it.each(['document', 'look-instance'] as const)(
+    'synchronizeDocuments: a failure at %s leaves the visual doc and Look doc at the SAME revision (GAP 1a atomicity)',
+    (failurePoint) => {
+      const values = new Map<string, string>();
+      const initialTimeline = buildReferenceSpikeProject();
+      let armed = false;
+      let injected = false;
+      const storage = {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          const shouldFail =
+            armed &&
+            !injected &&
+            ((failurePoint === 'document' && key === VISUAL_KEY) ||
+              (failurePoint === 'look-instance' && key === LOOK_INSTANCES_LOG_KEY));
+          if (shouldFail) {
+            injected = true;
+            throw new Error(`injected ${failurePoint} failure`);
+          }
+          values.set(key, value);
+        },
+        removeItem: (key: string) => values.delete(key),
+      };
+      const session = new EditorSession(storage, initialTimeline, INITIAL_EDITOR_PROJECT);
+      const beforeVisual = session.visualProject;
+      const beforeLooks = session.lookInstances;
+      const beforeRevision = session.projectRevisionId;
+
+      armed = true;
+      expect(() =>
+        session.synchronizeDocuments({ ...beforeVisual, title: 'Server hydrate' }, lookDoc()),
+      ).toThrow();
+      expect(injected).toBe(true);
+
+      // Neither half moved, and the revision string (which encodes BOTH the
+      // visual and the look revision counters) is unchanged — no mixed state.
+      expect(session.visualProject).toEqual(beforeVisual);
+      expect(session.lookInstances).toEqual(beforeLooks);
+      expect(session.projectRevisionId).toBe(beforeRevision);
+
+      injected = true;
+      const reopened = new EditorSession(storage, initialTimeline, INITIAL_EDITOR_PROJECT);
+      expect(reopened.visualProject.title).toBe(INITIAL_EDITOR_PROJECT.title);
+      expect(reopened.lookInstances.instances).toEqual({});
+      expect(reopened.projectRevisionId).toBe(beforeRevision);
+    },
+  );
+
+  it('synchronizeDocuments applies both together and advances one combined revision', () => {
+    const store = memoryStorage();
+    const session = newSession(store);
+    const before = session.projectRevisionId;
+
+    session.synchronizeDocuments({ ...session.visualProject, title: 'Both' }, lookDoc());
+    expect(session.visualProject.title).toBe('Both');
+    expect(session.lookInstances.instances['look-1']).toEqual(instance());
+    expect(session.projectRevisionId).not.toBe(before);
+
+    const reopened = newSession(store);
+    expect(reopened.visualProject.title).toBe('Both');
+    expect(reopened.lookInstances.instances['look-1']).toEqual(instance());
+    expect(reopened.projectRevisionId).toBe(session.projectRevisionId);
+  });
+
   it('synchronizeLookInstances applies a server document as a snapshot (no Undo) and reopens', () => {
     const store = memoryStorage();
     const session = newSession(store);

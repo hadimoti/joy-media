@@ -197,15 +197,26 @@ function makeDeps(
   };
 }
 
+function approveStaged(
+  preparedChanges: PreparedChangeStore,
+  changeSetId: string,
+  authorityFor: (hostRunId: string) => PreparedChangeAuthority,
+): {
+  readonly approval: ReturnType<PreparedChangeStore['approve']>;
+  readonly authority: PreparedChangeAuthority;
+} {
+  const view = preparedChanges.getView(changeSetId)!;
+  const authority = authorityFor(view.hostRunId);
+  return { approval: preparedChanges.approve(changeSetId, authority), authority };
+}
+
 function applyStaged(
   session: EditorSession,
   preparedChanges: PreparedChangeStore,
   changeSetId: string,
   authorityFor: (hostRunId: string) => PreparedChangeAuthority,
 ): void {
-  const view = preparedChanges.getView(changeSetId)!;
-  const authority = authorityFor(view.hostRunId);
-  const approval = preparedChanges.approve(changeSetId, authority);
+  const { approval, authority } = approveStaged(preparedChanges, changeSetId, authorityFor);
   const applied = new JoyCodeCompoundRunner().apply(session, preparedChanges, approval, authority);
   expect(applied).toMatchObject({ applied: true });
 }
@@ -316,5 +327,100 @@ describe('runScopedLookToolLoop — actual agent Look tool-loop (GAP 5)', () => 
       [editorialClean.controls[0]!.id]: 0.9,
     });
     expect(agentDraft.operationDigest).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  // Agent safety — not only the successful apply / detach path.
+  it('rejecting a staged agent Look change applies nothing', async () => {
+    const { session } = newSession();
+    const { deps, preparedChanges, scope } = makeDeps(session, APPLY_INTENT);
+    const result = await runScopedLookToolLoop(deps, { scope, prompt: 'apply' });
+    if (result.kind !== 'prepared') throw new Error('stage failed');
+
+    // Operator Reject == the store revokes the staged change.
+    const view = preparedChanges.getView(result.changeSetId)!;
+    preparedChanges.revoke(result.changeSetId);
+    expect(preparedChanges.getView(result.changeSetId)).toBeUndefined();
+    expect(preparedChanges.getPreviewDraft(result.changeSetId)).toBeUndefined();
+    expect(session.lookInstances.instances).toEqual({});
+    expect(session.visualProject.propertyAnimations ?? {}).toEqual({});
+    // A revoked change-set cannot be resurrected into an executable edit.
+    expect(() =>
+      preparedChanges.approve(result.changeSetId, {
+        ...({} as PreparedChangeAuthority),
+        projectId: session.timelineProject.id,
+        hostRunId: view.hostRunId,
+        sessionIdentity: session,
+        sessionEpoch: 1,
+        revision: session.projectRevisionId,
+        policy: DEFAULT_AGENT_POLICY,
+      }),
+    ).toThrow();
+  });
+
+  it('a pre-cancelled run stages nothing and reports failed', async () => {
+    const { session } = newSession();
+    const { deps, preparedChanges, scope } = makeDeps(session, APPLY_INTENT);
+    const controller = new AbortController();
+    controller.abort();
+    const result = await runScopedLookToolLoop(deps, {
+      scope,
+      prompt: 'apply',
+      signal: controller.signal,
+    });
+    expect(result.kind).toBe('failed');
+    expect(session.lookInstances.instances).toEqual({});
+    expect(session.visualProject.propertyAnimations ?? {}).toEqual({});
+  });
+
+  it('a stale approval (a revision moved between stage and apply) is refused', async () => {
+    const { session } = newSession();
+    const { deps, preparedChanges, authorityFor, scope } = makeDeps(session, APPLY_INTENT);
+    const result = await runScopedLookToolLoop(deps, { scope, prompt: 'apply' });
+    if (result.kind !== 'prepared') throw new Error('stage failed');
+    const { approval, authority } = approveStaged(
+      preparedChanges,
+      result.changeSetId,
+      authorityFor,
+    );
+
+    // A concurrent local change advances the project revision after approval.
+    session.synchronizeVisualProject({ ...session.visualProject, title: 'Concurrent edit' });
+
+    expect(() =>
+      new JoyCodeCompoundRunner().apply(
+        session,
+        preparedChanges,
+        approval,
+        authorityFor(preparedChanges.getView(result.changeSetId)?.hostRunId ?? authority.hostRunId),
+      ),
+    ).toThrow(/STALE/);
+    expect(session.lookInstances.instances).toEqual({});
+  });
+
+  it('a duplicate approval replays the durable receipt without a second Undo entry', async () => {
+    const { session } = newSession();
+    const { deps, preparedChanges, authorityFor, scope } = makeDeps(session, APPLY_INTENT);
+    const result = await runScopedLookToolLoop(deps, { scope, prompt: 'apply' });
+    if (result.kind !== 'prepared') throw new Error('stage failed');
+    const instanceId = Object.keys(
+      preparedChanges.getPreviewDraft(result.changeSetId)!.lookInstances!.instances,
+    )[0]!;
+
+    const { approval, authority } = approveStaged(
+      preparedChanges,
+      result.changeSetId,
+      authorityFor,
+    );
+    const first = new JoyCodeCompoundRunner().apply(session, preparedChanges, approval, authority);
+    expect(first).toMatchObject({ applied: true, replayed: false });
+    const historyAfterFirst = session.historyEntries.length;
+
+    const second = new JoyCodeCompoundRunner().apply(session, preparedChanges, approval, authority);
+    // The second approval is an idempotent replay of the durable receipt — no
+    // new write, no second Undo entry.
+    expect(second).toMatchObject({ replayed: true });
+    expect(session.historyEntries).toHaveLength(historyAfterFirst);
+    expect(session.lookInstances.instances[instanceId]).toBeDefined();
+    expect(second.revisionId).toBe(first.revisionId);
   });
 });

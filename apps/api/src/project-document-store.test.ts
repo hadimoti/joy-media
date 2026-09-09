@@ -1157,6 +1157,27 @@ describe('InMemoryProjectDocumentStore — Look Instances (GAP 1a)', () => {
     expect(result.kind).toBe('stored');
   });
 
+  it('an owner-denied Look-carrying write changes neither document (R5)', () => {
+    const s = new InMemoryProjectDocumentStore((p) => (p === PROJECT_A ? OWNER_X : undefined));
+    const doc = docWithObject('project-a', 'obj-1');
+    s.writeDocument(
+      OWNER_X,
+      record(REV_1, doc, lookDoc('project-a', { 'look-1': instance('obj-1') })),
+      INITIAL_REVISION,
+    );
+    const denied = s.writeDocument(
+      'someone-else' as OwnerId,
+      record(REV_2, doc, lookDoc('project-a', {})),
+      REV_1,
+    );
+    expect(denied.kind).toBe('owner-denied');
+    const read = s.readDocument(OWNER_X, PROJECT_A) as ProjectDocumentReadOutcomeReady;
+    expect(read.record.revisionId).toBe(REV_1);
+    expect(read.record.lookInstances).toEqual(
+      lookDoc('project-a', { 'look-1': instance('obj-1') }),
+    );
+  });
+
   it('rejects a lookInstances document over the instance cap (R5)', () => {
     const s = store();
     const doc = docWithObject('project-a', 'obj-1');

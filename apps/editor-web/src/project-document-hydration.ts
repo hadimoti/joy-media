@@ -21,6 +21,16 @@ export interface ProjectHydrationSession {
    * local document from an absent remote value.
    */
   synchronizeLookInstances(next: LookInstancesDocument): void;
+  /**
+   * Apply the server's visual document and Look Instances document together as
+   * one atomic snapshot. `undefined` means "no change". This is the path
+   * hydration uses when both need to change, so a persistence failure cannot
+   * leave the two documents at different revisions (R2 / GAP 1a).
+   */
+  synchronizeDocuments(
+    visual: JoyProjectV1 | undefined,
+    lookInstances: LookInstancesDocument | undefined,
+  ): void;
 }
 
 export type LoadProjectDocument = () => Promise<BrowserProjectDocument | undefined>;
@@ -80,7 +90,11 @@ export async function hydrateProjectDocument(
   if (visualSame && !looksNeedApply) {
     return { kind: 'unchanged', revisionId: remote.revisionId };
   }
-  if (!visualSame) session.synchronizeVisualProject(remote.document);
-  if (looksNeedApply) session.synchronizeLookInstances(remote.lookInstances!);
+  // Apply both together so a persistence failure can never leave the visual doc
+  // and the Look Instances doc at different revisions (R2 / GAP 1a).
+  session.synchronizeDocuments(
+    visualSame ? undefined : remote.document,
+    looksNeedApply ? remote.lookInstances : undefined,
+  );
   return { kind: 'hydrated', revisionId: remote.revisionId };
 }

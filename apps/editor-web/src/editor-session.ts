@@ -997,6 +997,79 @@ export class EditorSession {
     this.#lookInstancesRevision += 1;
   }
 
+  /**
+   * Apply the server's visual document **and** Look Instances document together
+   * as one atomic snapshot (R2 / GAP 1a). Both are written under one
+   * prepared-journal compound: either both persist and both swap in memory, or
+   * neither does. This is what keeps a hydration interruption / persistence
+   * failure from leaving the two documents at different revisions. Pass
+   * `undefined` for a document that does not need to change. Snapshot-only — no
+   * history entry, so Undo does not revert a sync.
+   */
+  synchronizeDocuments(
+    visual: JoyProjectV1 | undefined,
+    lookInstances: LookInstancesDocument | undefined,
+  ): void {
+    this.#assertPersistenceReady();
+    if (lookInstances !== undefined) {
+      const diagnostics = validateLookInstancesDocument(lookInstances);
+      if (diagnostics.length > 0) {
+        throw new PersistenceError(
+          'PERSISTENCE_LOOK_INSTANCES_SYNC_INVALID',
+          `server Look Instances document is invalid: ${diagnostics[0]!.message}`,
+        );
+      }
+    }
+    const nextVisual = visual;
+    const nextLook =
+      lookInstances !== undefined &&
+      JSON.stringify(lookInstances) !== JSON.stringify(this.#lookInstancesDocument)
+        ? lookInstances
+        : undefined;
+    if (nextVisual === undefined && nextLook === undefined) return;
+    if (nextVisual !== undefined && nextLook === undefined) {
+      this.synchronizeVisualProject(nextVisual);
+      return;
+    }
+    if (nextVisual === undefined && nextLook !== undefined) {
+      this.synchronizeLookInstances(nextLook);
+      return;
+    }
+    if (nextVisual === undefined || nextLook === undefined) return;
+
+    // Both change → one prepared-journal compound.
+    const initializeLog = !this.#lookInstancesLogInitialized;
+    const lookBefore = this.#lookInstancesDocument;
+    let persistedVisual: JoyProjectV1 | undefined;
+    const plans: CompoundPersistencePlan[] = [
+      {
+        storageKey: VISUAL_OBJECT_PROJECT_LOG_KEY,
+        projectId: this.#visualObjects.present.id,
+        persist: () => {
+          persistedVisual = this.#visualObjectPersistence.saveSnapshot(nextVisual, false);
+        },
+        commit: () => {
+          this.#visualObjects.replacePresent(persistedVisual ?? nextVisual);
+          this.#visualObjectRevision += 1;
+        },
+      },
+      {
+        storageKey: LOOK_INSTANCES_LOG_KEY,
+        projectId: lookBefore.id,
+        persist: () => {
+          if (initializeLog) this.#lookInstancesPersistence.initialize(lookBefore);
+          this.#lookInstancesPersistence.saveSnapshot(nextLook, false);
+        },
+        commit: () => {
+          this.#lookInstancesDocument = nextLook;
+          this.#lookInstancesRevision += 1;
+          this.#lookInstancesLogInitialized = true;
+        },
+      },
+    ];
+    this.#commitPersistencePlans(plans);
+  }
+
   /** Persist project metadata without adding a creative undo entry. */
   renameProjectTitle(title: string): JoyProjectV1 {
     this.#assertPersistenceReady();

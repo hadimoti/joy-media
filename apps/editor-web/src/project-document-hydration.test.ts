@@ -47,6 +47,7 @@ function sessionFor(
     revision: 'local-1',
     synchronizeVisualProject: vi.fn((next) => next),
     synchronizeLookInstances: vi.fn(),
+    synchronizeDocuments: vi.fn(),
   } as unknown as ProjectHydrationSession & { revision: string };
   Object.defineProperty(result, 'projectRevisionId', {
     get: () => result.revision as ProjectRevisionId,
@@ -64,7 +65,10 @@ describe('project document hydration', () => {
     }));
 
     expect(result).toEqual({ kind: 'hydrated', revisionId: 'server-2' });
-    expect(session.synchronizeVisualProject).toHaveBeenCalledWith(document('From another device'));
+    expect(session.synchronizeDocuments).toHaveBeenCalledWith(
+      document('From another device'),
+      undefined,
+    );
   });
 
   it('does not rewrite the local project when it changes during a slow read', async () => {
@@ -79,7 +83,7 @@ describe('project document hydration', () => {
     });
 
     expect(result).toEqual({ kind: 'local-changed', revisionId: 'server-2' });
-    expect(session.synchronizeVisualProject).not.toHaveBeenCalled();
+    expect(session.synchronizeDocuments).not.toHaveBeenCalled();
   });
 
   it('does not write an identical document', async () => {
@@ -91,7 +95,7 @@ describe('project document hydration', () => {
     }));
 
     expect(result).toEqual({ kind: 'unchanged', revisionId: 'server-1' });
-    expect(session.synchronizeVisualProject).not.toHaveBeenCalled();
+    expect(session.synchronizeDocuments).not.toHaveBeenCalled();
   });
 
   it('rejects mismatched or invalid remote documents before local persistence', async () => {
@@ -110,11 +114,11 @@ describe('project document hydration', () => {
         document: { ...document(), id: 'wrong-editor-id' },
       })),
     ).rejects.toThrow('expected editorProjectId=editor-doc-1');
-    expect(session.synchronizeVisualProject).not.toHaveBeenCalled();
+    expect(session.synchronizeDocuments).not.toHaveBeenCalled();
   });
 
   // R2 / GAP 1a
-  it('applies a remote Look Instances document on hydrate (R4)', async () => {
+  it('applies the visual doc and Look Instances doc together in one atomic call (R4)', async () => {
     const session = sessionFor();
     const remoteLooks = looks(['look-1']);
     const result = await hydrateProjectDocument(session, binding, async () => ({
@@ -124,7 +128,11 @@ describe('project document hydration', () => {
       lookInstances: remoteLooks,
     }));
     expect(result).toEqual({ kind: 'hydrated', revisionId: 'server-2' });
-    expect(session.synchronizeLookInstances).toHaveBeenCalledWith(remoteLooks);
+    expect(session.synchronizeDocuments).toHaveBeenCalledTimes(1);
+    expect(session.synchronizeDocuments).toHaveBeenCalledWith(
+      document('From another device'),
+      remoteLooks,
+    );
   });
 
   it('does not apply a remote Look document when a local edit landed during the read (R4)', async () => {
@@ -139,7 +147,7 @@ describe('project document hydration', () => {
       };
     });
     expect(result).toEqual({ kind: 'local-changed', revisionId: 'server-2' });
-    expect(session.synchronizeLookInstances).not.toHaveBeenCalled();
+    expect(session.synchronizeDocuments).not.toHaveBeenCalled();
   });
 
   it('keeps the local Look document when the server row carries none (R4)', async () => {
@@ -151,8 +159,10 @@ describe('project document hydration', () => {
       // No lookInstances key — an older server row.
     }));
     expect(result).toEqual({ kind: 'hydrated', revisionId: 'server-2' });
-    expect(session.synchronizeVisualProject).toHaveBeenCalled();
-    expect(session.synchronizeLookInstances).not.toHaveBeenCalled();
+    expect(session.synchronizeDocuments).toHaveBeenCalledWith(
+      document('Visual only from another device'),
+      undefined,
+    );
   });
 
   it('syncs a changed remote Look document even when the visual doc is identical', async () => {
@@ -164,8 +174,7 @@ describe('project document hydration', () => {
       lookInstances: looks(['look-remote']),
     }));
     expect(result).toEqual({ kind: 'hydrated', revisionId: 'server-2' });
-    expect(session.synchronizeVisualProject).not.toHaveBeenCalled();
-    expect(session.synchronizeLookInstances).toHaveBeenCalledWith(looks(['look-remote']));
+    expect(session.synchronizeDocuments).toHaveBeenCalledWith(undefined, looks(['look-remote']));
   });
 
   it('rejects an invalid remote Look Instances document before local persistence', async () => {
@@ -182,6 +191,6 @@ describe('project document hydration', () => {
         } as unknown as LookInstancesDocument,
       })),
     ).rejects.toThrow(/Look Instances/);
-    expect(session.synchronizeLookInstances).not.toHaveBeenCalled();
+    expect(session.synchronizeDocuments).not.toHaveBeenCalled();
   });
 });

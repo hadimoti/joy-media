@@ -36,8 +36,11 @@ function sessionFor(
 ): ProjectHydrationSession & { revision: ProjectRevisionId } {
   const result = {
     visualProject: project,
+    lookInstances: { id: binding.editorProjectId, schemaVersion: 1, instances: {} },
     revision: 'local-1' as ProjectRevisionId,
     synchronizeVisualProject: vi.fn((next: JoyProjectV1) => next),
+    synchronizeLookInstances: vi.fn(),
+    synchronizeDocuments: vi.fn(),
   } as unknown as ProjectHydrationSession & { revision: ProjectRevisionId };
   Object.defineProperty(result, 'projectRevisionId', {
     get: () => result.revision,
@@ -86,7 +89,7 @@ describe('ordinary project document autosync', () => {
       autosync.schedule(binding, session.visualProject, session.projectRevisionId, 'owner-1');
       await vi.advanceTimersByTimeAsync(DOCUMENT_AUTOSYNC_DEBOUNCE_MS);
       expect(sync).not.toHaveBeenCalled();
-      expect(session.synchronizeVisualProject).toHaveBeenCalledWith(document('Remote head'));
+      expect(session.synchronizeDocuments).toHaveBeenCalledWith(document('Remote head'), undefined);
       expect(
         getControlPlaneProjectBinding(storage, binding.editorProjectId, 'owner-1'),
       ).toMatchObject({ documentRevisionId: 'remote-head-1' });
@@ -323,6 +326,61 @@ describe('ordinary project document autosync', () => {
       expect(
         getControlPlaneProjectBinding(storage, nextBinding.editorProjectId, 'owner-2'),
       ).toMatchObject({ documentRevisionId: 'local-b' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // R2 / GAP 1a
+  it('forwards the queued lookInstances document to the transport under the same revision', async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = memoryStorage();
+      const sync = syncTransport();
+      const autosync = new ProjectDocumentAutosync({ storage, syncProjectDocument: sync });
+      const lookInstances = {
+        id: binding.editorProjectId,
+        schemaVersion: 1 as const,
+        instances: {},
+      };
+
+      autosync.schedule(binding, document('With looks'), 'local-2', 'owner-1', lookInstances);
+      await vi.advanceTimersByTimeAsync(DOCUMENT_AUTOSYNC_DEBOUNCE_MS);
+
+      expect(sync).toHaveBeenCalledWith(
+        binding.controlPlaneProjectId,
+        expect.objectContaining({ revisionId: 'local-2', lookInstances }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a CAS conflict on a Look-carrying write leaves recovery untouched and stops writes', async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = memoryStorage();
+      const sync = vi.fn().mockRejectedValue(new ConflictError('revision conflict'));
+      const outcomes: string[] = [];
+      const autosync = new ProjectDocumentAutosync({
+        storage,
+        syncProjectDocument: sync as unknown as SyncProjectDocument,
+        onResult: (r) => outcomes.push(r.kind),
+      });
+      const lookInstances = {
+        id: binding.editorProjectId,
+        schemaVersion: 1 as const,
+        instances: {},
+      };
+
+      autosync.schedule(binding, document(), 'local-2', 'owner-1', lookInstances);
+      await vi.advanceTimersByTimeAsync(DOCUMENT_AUTOSYNC_DEBOUNCE_MS);
+      // A further scheduled write after a conflict is dropped (no second call).
+      autosync.schedule(binding, document('Later'), 'local-3', 'owner-1', lookInstances);
+      await vi.advanceTimersByTimeAsync(DOCUMENT_AUTOSYNC_DEBOUNCE_MS);
+
+      expect(outcomes).toEqual(['conflict']);
+      expect(sync).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
