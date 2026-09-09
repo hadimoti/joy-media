@@ -321,22 +321,53 @@ Neither §9.1 nor §9.2 is a threshold or a rerun question.
   not volume deletion / Docker Desktop reset; not a backup). **Done.**
 - ✅ **Owner:** artifact-quota cleanup — 44 unreferenced artifacts deleted, 6
   QA-referenced preserved (4.62 GiB → ~27.6 MiB live). **Done.**
-- ⛔ **BLOCKER (2026-09-09): `Artifact storage quota has been hit` persists.**
-  Bounded `artifact-quota-check.yml` probes at 23:17 / 00:48 / 02:19 / 07:46 /
-  09:15 Z all failed with the same message — the last **~11 h after the delete**,
-  well past GitHub's 6–12 h recalc window. Investigation: account-wide non-expired
-  Actions artifact usage is **6 files / ~27.6 MiB, ALL in `joy-media`** (every
-  other `hadimoti` repo has 0). 27.6 MiB is far under any GitHub artifact-storage
-  limit (free plan 500 MiB) → this is **not** recalc lag and **not** real
-  capacity. Consistent with the account's known failed-payment / ~zero-hosted-
-  minutes state (§6): a billing freeze blocks artifact uploads regardless of
-  usage. **OWNER ACTION:** fix the GitHub Actions billing / payment method for
-  `hadimoti` (Settings → Billing and plans). Do **not** purchase storage — it
-  will not help a payment freeze. Probing is **stopped**. Until this clears, the
-  one approved `release-candidate-v2` dispatch stays correctly blocked on the
-  `Verify retained evidence` + `upload-artifact` steps (no continue-on-error).
-  The frozen candidate `6c21c589` + tag `ci-v2-gate-frozen-6c21c589` + the
-  SAFE-TO-FREEZE reviews all remain valid.
+- ⛔ **BLOCKER (2026-09-09): artifact uploads remain blocked; cause unresolved.
+  A billing restriction is a hypothesis, not a confirmed cause.**
+  - **What is directly observed.** Bounded `artifact-quota-check.yml` probes at
+    23:17 / 00:48 / 02:19 / 07:46 / 09:15 Z all failed. The verbatim step error
+    (run `34333645269`, job `upload-probe`, `actions/upload-artifact` step):
+    `Failed to CreateArtifact: Artifact storage quota has been hit. Unable to
+    upload any new artifacts. Usage is recalculated every 6-12 hours.` The last
+    probe was **~11 h after the 44-artifact delete (~22:30 Z 2026-09-08)**,
+    past GitHub's stated 6–12 h recalculation window. Current account-wide
+    non-expired Actions artifact usage measured via `gh api` is **6 files /
+    ~27.6 MiB, all in `joy-media`** (every other `hadimoti` repo: 0), well under
+    the free-plan 500 MiB artifact allowance.
+  - **What is NOT established.** No explicit billing/restriction explanation is
+    available: `hadimoti` is a personal account, `joy-media` is a private User
+    repo with `plan: null` on the repo payload, and the billing endpoints
+    (`user/settings/billing/actions`, `.../shared-storage`,
+    `users/hadimoti/settings/billing/usage`) all require the `user` OAuth scope,
+    which this `gh` token (`gist, read:org, repo, workflow`) lacks. The scope was
+    **not** added — that is an owner-side auth change. So "the account's Actions
+    billing is frozen" remains an inference from the symptom + the separate
+    payment-history evidence below; it is **not** confirmed, and neither is
+    "recalculation lag". Both stay as competing hypotheses.
+  - **Separate payment-history evidence (prior, independent).** On **2026-09-08**,
+    dispatch of `.github/workflows/r2-candidate.yml` (run **`34165045011`**) had
+    its cheap lanes pass (`verify` ×2, `worker-package` ×2) but **all 14
+    acceptance jobs were rejected before starting with:** _"recent account
+    payments have failed or your spending limit needs to be increased."_ Source:
+    `docs/reviews/joy-live-director-r2-resume-handoff-2026-09-08.md` §6. This is
+    real evidence of an Actions payment problem on the account **as of that
+    date**; it does not by itself prove the 2026-09-09 artifact-upload failure has
+    the same cause.
+  - **OWNER ACTION.** Check **Settings → Billing and plans** for `hadimoti` and
+    report the exact restriction shown (payment failure, spending-limit at $0,
+    storage over limit, or none). Do **not** purchase storage or change payment
+    details on the strength of this inference. If the billing UI shows no explicit
+    explanation, open the GitHub Support request drafted at
+    `docs/reviews/github-support-artifact-quota-2026-09-09.md` (failed run IDs,
+    deletion time, current usage all pre-filled).
+  - **Probing is stopped** (bounded window elapsed). Until this clears, the one
+    approved `release-candidate-v2` dispatch stays correctly blocked on the
+    `Verify retained evidence` + `upload-artifact` steps (no continue-on-error).
+    **Local retained-evidence verification is a distinct concern** — it runs on
+    the self-hosted runner against the `joy-media-ci-evidence` volume and is not
+    shown to be affected by any GitHub billing state; only the `upload-artifact`
+    hand-off to GitHub-hosted storage is blocked. The frozen candidate `6c21c589`
+    + tag `ci-v2-gate-frozen-6c21c589` + the SAFE-TO-FREEZE reviews all remain
+    valid and unchanged.
 - A full gate run of the revision that resolves §9.1–§9.2 (HEAD ≥ `45022c7c`) —
   **both** `real-service` passes **and** cleanup **and** durable evidence
   (manifest + checksum + retrievable persistent copy) green for both passes.
