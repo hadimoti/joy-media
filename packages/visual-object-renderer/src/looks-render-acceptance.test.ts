@@ -157,6 +157,9 @@ describe('R2 Look pack rendered-frame + preview/export acceptance (GAP 4)', () =
       ['portrait', PORTRAIT],
       ['landscape', LANDSCAPE],
     ] as const) {
+      // Each case renders three frames through both the Pixi preview and the
+      // headless export adapters; the first case in a worker also pays adapter
+      // cold-start, so allow well past the 5s default (cf. first-party-scenes).
       it(`${definition.id} (${name}): identical preview/export at 3 frames, with real motion`, () => {
         const { project, animatedKeys } = applyLook(
           baseProject(dims.width, dims.height),
@@ -210,7 +213,7 @@ describe('R2 Look pack rendered-frame + preview/export acceptance (GAP 4)', () =
             `${definition.id} (${name}): the rendered frame changes over the motion`,
           ).toBe(true);
         }
-      });
+      }, 30_000);
     }
   }
 });
