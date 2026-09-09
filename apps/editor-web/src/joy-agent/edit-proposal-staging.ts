@@ -13,6 +13,7 @@
  * the observation tools, and the surrounding run-consumption loop.
  */
 
+import type { LookInstancesDocument } from '@joy-media/project-schema';
 import type { AgentPreviewStore } from '../agent-preview-store.js';
 import type { EditorSession } from '../editor-session.js';
 import type { JoyAgentTarget } from '../agent-presence.js';
@@ -61,6 +62,13 @@ export interface JoyAgentProposalStagingDeps {
   readonly proposalTargetsRef: { readonly current: Map<string, readonly JoyAgentTarget[]> };
   /** Records the staged change-set id so the run loop can revoke it. */
   readonly onStaged: (changeSetId: string) => void;
+  /**
+   * The full next Look Instances document to write on approval (R2 / GAP 1b).
+   * Set only by the Living Look apply / update / reset / detach path; every
+   * other consumer of this handler leaves it undefined and its drafts /
+   * digests are byte-identical to before.
+   */
+  readonly lookInstancesWrite?: LookInstancesDocument;
 }
 
 export type JoyAgentPrepareProposalHandler = (
@@ -85,6 +93,7 @@ export function createJoyAgentProposalStagingHandler(
     agentPreviewStore,
     proposalTargetsRef,
     onStaged,
+    lookInstancesWrite,
   } = deps;
 
   return async (proposal, rpcContext) => {
@@ -130,6 +139,7 @@ export function createJoyAgentProposalStagingHandler(
       visualProject: session.visualProject,
       registeredAssetIds: Object.keys(session.visualProject.assets),
       operations: proposal.operations,
+      ...(lookInstancesWrite === undefined ? {} : { lookInstances: lookInstancesWrite }),
     });
     if (!compiled.ok)
       throw reject(

@@ -562,6 +562,149 @@ describe('Joy Code compound runner', () => {
       session.agentIdempotency.getExecutionReceipt(first.view.executionId)?.operationDigest,
     ).toBe(firstDraft.operationDigest);
   });
+
+  it('commits a Look Instance atomically with its keyframes; one undo reverts both (GAP 1b)', () => {
+    const session = new EditorSession(
+      storage(),
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const lookInstances = {
+      id: session.timelineProject.id,
+      schemaVersion: 1 as const,
+      instances: {
+        'look-1': {
+          id: 'look-1',
+          definitionId: 'editorial-clean',
+          definitionVersion: 1,
+          compositionId: 'root',
+          entityBindings: { headline: 'intro-title' },
+          controlValues: { energy: 0.5 },
+          overriddenBindingIds: [] as readonly string[],
+          createdEntityIds: [] as readonly string[],
+        },
+      },
+    };
+    const draft = compileJoyCodeCompoundDraft({
+      planId: 'look-runner-1',
+      baseRevision: session.projectRevisionId,
+      timeline: session.timelineProject,
+      visualProject: session.visualProject,
+      registeredAssetIds: [],
+      operations: [
+        {
+          id: 'kf',
+          dependsOn: [],
+          kind: 'motion.setKeyframe',
+          binding: {
+            ownerKind: 'visual-object',
+            ownerId: 'intro-title',
+            propertyId: 'opacity',
+            timeDomain: 'composition',
+          },
+          key: { kind: 'scalar', timeUs: 0, value: 0, interpolation: 'eased' },
+        },
+      ],
+      lookInstances,
+    });
+    expect(draft.ok).toBe(true);
+    if (!draft.ok) return;
+    // A non-Look draft's digest is untouched by this feature; a Look draft folds
+    // the document into the digest.
+    expect(draft.lookInstances).toEqual(lookInstances);
+
+    const runner = new JoyCodeCompoundRunner();
+    const authority = authorityFor(session);
+    const prepared = prepareApproved(draft, authority);
+    const applied = runner.apply(session, prepared.store, prepared.approval, authority);
+    expect(applied).toMatchObject({ applied: true, replayed: false });
+
+    expect(session.lookInstances.instances['look-1']).toEqual(lookInstances.instances['look-1']);
+    // the keyframe landed too (motion.setKeyframe writes propertyAnimations)
+    const animsAfter = session.visualProject.propertyAnimations ?? {};
+    expect(Object.keys(animsAfter).length).toBeGreaterThan(0);
+    // revision advanced on BOTH the document and the looks counter
+    expect(session.projectRevisionId).toContain(':looks=1');
+
+    session.undo();
+    expect(session.lookInstances.instances).toEqual({});
+    expect(session.visualProject.propertyAnimations ?? {}).toEqual({});
+  });
+
+  it('folds lookInstances into operationDigest — and leaves a non-Look digest untouched', () => {
+    const session = new EditorSession(
+      storage(),
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const ops = [
+      {
+        id: 'kf',
+        dependsOn: [],
+        kind: 'motion.setKeyframe' as const,
+        binding: {
+          ownerKind: 'visual-object' as const,
+          ownerId: 'intro-title',
+          propertyId: 'opacity',
+          timeDomain: 'composition' as const,
+        },
+        key: { kind: 'scalar' as const, timeUs: 0, value: 0, interpolation: 'eased' as const },
+      },
+    ];
+    const base = {
+      planId: 'digest-1',
+      baseRevision: session.projectRevisionId,
+      timeline: session.timelineProject,
+      visualProject: session.visualProject,
+      registeredAssetIds: [],
+      operations: ops,
+    };
+    const noLook = compileJoyCodeCompoundDraft(base);
+    const withLookA = compileJoyCodeCompoundDraft({
+      ...base,
+      lookInstances: {
+        id: session.timelineProject.id,
+        schemaVersion: 1,
+        instances: {
+          'look-1': {
+            id: 'look-1',
+            definitionId: 'editorial-clean',
+            definitionVersion: 1,
+            compositionId: 'root',
+            entityBindings: { headline: 'intro-title' },
+            controlValues: { energy: 0.5 },
+            overriddenBindingIds: [],
+            createdEntityIds: [],
+          },
+        },
+      },
+    });
+    const withLookB = compileJoyCodeCompoundDraft({
+      ...base,
+      lookInstances: {
+        id: session.timelineProject.id,
+        schemaVersion: 1,
+        instances: {
+          'look-1': {
+            id: 'look-1',
+            definitionId: 'editorial-clean',
+            definitionVersion: 1,
+            compositionId: 'root',
+            entityBindings: { headline: 'intro-title' },
+            controlValues: { energy: 0.9 },
+            overriddenBindingIds: [],
+            createdEntityIds: [],
+          },
+        },
+      },
+    });
+    if (!noLook.ok || !withLookA.ok || !withLookB.ok) throw new Error('fixture');
+    // A change to the Look Instances document moves the digest.
+    expect(withLookA.operationDigest).not.toBe(withLookB.operationDigest);
+    // A non-Look change is unaffected (this same digest predates the feature).
+    expect(noLook.operationDigest).not.toBe(withLookA.operationDigest);
+    expect(noLook.lookInstances).toBeUndefined();
+  });
 });
 
 function timelineWithAudioTrack() {

@@ -2,6 +2,7 @@ import { applyTransaction, type CommandTransaction, type SpikeCommand } from '@j
 import {
   canonicalBindingKey,
   type JoyProjectV1,
+  type LookInstancesDocument,
   type PropertyBindingV2,
   type SpikeProject,
 } from '@joy-media/project-schema';
@@ -33,6 +34,14 @@ export interface JoyCodeCompoundCompilerInput {
    */
   readonly registeredAssetIds?: readonly string[];
   readonly operations: readonly JoyCodePlanOperationV1[];
+  /**
+   * The full next Look Instances document to persist atomically with these
+   * operations (R2 / GAP 1b). Set only by the Living Look apply / update /
+   * reset / detach path. It is folded into `operationDigest` so the write is
+   * bound to the same approval as the keyframes; when absent, the digest and
+   * the draft are byte-identical to before.
+   */
+  readonly lookInstances?: LookInstancesDocument;
 }
 
 export interface JoyCodeCompoundGroup {
@@ -52,6 +61,11 @@ export interface JoyCodeCompoundDraft {
   readonly document: JoyProjectV1;
   /** Explicit because immutable prepared snapshots no longer share live object identity. */
   readonly documentChanged: boolean;
+  /**
+   * The full next Look Instances document to write on approval, or absent for a
+   * change that touches no Look. Bound into `operationDigest`.
+   */
+  readonly lookInstances?: LookInstancesDocument;
   readonly groups: readonly JoyCodeCompoundGroup[];
   readonly warnings: readonly string[];
   readonly requiresManualApproval: true;
@@ -337,6 +351,8 @@ export function compileJoyCodeCompoundDraft(
       version: 1,
       baseRevision: input.baseRevision,
       operations: input.operations,
+      // Absent for every non-Look change -> the digest is byte-identical to before.
+      ...(input.lookInstances === undefined ? {} : { lookInstances: input.lookInstances }),
     }),
   );
   const draft: JoyCodeCompoundDraft = {
@@ -348,6 +364,7 @@ export function compileJoyCodeCompoundDraft(
       commands.length === 0 ? undefined : { label: `Joy Code plan ${input.planId}`, commands },
     document,
     documentChanged: document !== input.visualProject,
+    ...(input.lookInstances === undefined ? {} : { lookInstances: input.lookInstances }),
     groups,
     warnings: [],
     requiresManualApproval: true,

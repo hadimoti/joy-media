@@ -23,6 +23,7 @@ import type { PreparedChangeAuthority, PreparedChangeStore } from './prepared-ch
 import type { CreativeSkillRunScope } from './skill-runner.js';
 import { prepareLookPlan } from './look-operations.js';
 import type { LookCompileInput } from '@joy-media/motion-core';
+import type { LookInstancesDocument } from '@joy-media/project-schema';
 
 export interface LookRunDeps {
   readonly getSession: () => EditorSession;
@@ -42,6 +43,14 @@ export interface LookRunInput {
   readonly goal: string;
   /** objectId -> current text, so a template swap keeps the operator's copy. */
   readonly currentTextByObjectId?: Readonly<Record<string, string>>;
+  /**
+   * The full next Look Instances document to persist atomically with this run's
+   * keyframes on approval (R2 / GAP 1b). The caller has already upserted /
+   * removed the instance for apply / update / reset / detach and validated its
+   * `entityBindings` against the composition. Omit for a preview-only run that
+   * records no instance.
+   */
+  readonly lookInstancesWrite?: LookInstancesDocument;
   readonly signal?: AbortSignal;
 }
 
@@ -114,6 +123,9 @@ export async function stageLookRun(deps: LookRunDeps, input: LookRunInput): Prom
     agentPreviewStore: deps.agentPreviewStore,
     proposalTargetsRef: deps.proposalTargetsRef,
     onStaged: (changeSetId) => deps.onStaged?.(scope, changeSetId),
+    ...(input.lookInstancesWrite === undefined
+      ? {}
+      : { lookInstancesWrite: input.lookInstancesWrite }),
   });
 
   const controller = new AbortController();

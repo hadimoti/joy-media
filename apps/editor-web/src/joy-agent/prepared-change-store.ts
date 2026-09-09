@@ -314,6 +314,9 @@ function canonicalDraft(draft: JoyCodeCompoundDraft): string {
     ...(draft.timeline === undefined ? {} : { timeline: draft.timeline }),
     document: draft.document,
     documentChanged: draft.documentChanged,
+    // Absent for every non-Look change -> the serialized draft (and therefore
+    // compiledDigest / bindingDigest) is byte-identical to before.
+    ...(draft.lookInstances === undefined ? {} : { lookInstances: draft.lookInstances }),
     groups: draft.groups,
     warnings: draft.warnings,
     requiresManualApproval: draft.requiresManualApproval,

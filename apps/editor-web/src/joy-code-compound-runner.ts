@@ -96,6 +96,10 @@ export class JoyCodeCompoundRunner {
         `JOY_CODE_STALE_REVISION: expected ${view.baseRevision}, got ${session.projectRevisionId}`,
       );
     const document = draft.documentChanged ? draft.document : undefined;
+    // The Look Instances write (R2 / GAP 1b) rides the same compound. It is
+    // bound into `operationDigest` and `bindingDigest`, so an approval covers it
+    // exactly as it covers the keyframes.
+    const lookInstances = draft.lookInstances;
     // Calculate expected state before the one-way commit. Re-applying a
     // transaction after commit could double-apply split/remove/insert actions.
     const timelineBefore = session.timelineProject;
@@ -111,6 +115,7 @@ export class JoyCodeCompoundRunner {
         {
           ...(draft.timeline === undefined ? {} : { timeline: draft.timeline }),
           ...(document === undefined ? {} : { document }),
+          ...(lookInstances === undefined ? {} : { lookInstances }),
         },
         {
           executionId: view.executionId,
@@ -126,7 +131,14 @@ export class JoyCodeCompoundRunner {
         );
       throw error;
     }
-    assertCommittedPreparedPayload(session, receipt, view.executionId, document, expectedTimeline);
+    assertCommittedPreparedPayload(
+      session,
+      receipt,
+      view.executionId,
+      document,
+      expectedTimeline,
+      lookInstances,
+    );
     // First operation-specific F5 readback slice. This remains intentionally
     // narrow: a mixed transaction can alter a split half later in the same
     // compound edit, so it needs ordered per-operation observation rather than
@@ -177,6 +189,7 @@ function assertCommittedPreparedPayload(
   executionId: string,
   expectedDocument: ApprovedPreparedChange['draft']['document'] | undefined,
   expectedTimeline: ReturnType<typeof applyTransaction>['project'] | undefined,
+  expectedLookInstances: ApprovedPreparedChange['draft']['lookInstances'] | undefined,
 ): void {
   if (session.projectRevisionId !== receipt.resultRevision)
     throw new Error('JOY_CODE_VERIFICATION_FAILED: committed revision could not be read back');
@@ -197,6 +210,13 @@ function assertCommittedPreparedPayload(
     canonicalJson(expectedTimeline) !== canonicalJson(session.timelineProject)
   )
     throw new Error('JOY_CODE_VERIFICATION_FAILED: timeline state differs from approved payload');
+  if (
+    expectedLookInstances !== undefined &&
+    canonicalJson(expectedLookInstances) !== canonicalJson(session.lookInstances)
+  )
+    throw new Error(
+      'JOY_CODE_VERIFICATION_FAILED: look instances state differs from approved payload',
+    );
 }
 
 function assertPreparedPayload(prepared: ApprovedPreparedChange): void {
