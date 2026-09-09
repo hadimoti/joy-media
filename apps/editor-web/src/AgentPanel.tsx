@@ -122,6 +122,10 @@ import type { CreativeSkillRunScope } from './joy-agent/skill-runner.js';
 import { BUILT_IN_LOOK_PACKS } from '@joy-media/motion-core';
 import { CONTENT_FONT_FAMILIES } from '@joy-media/project-schema';
 import { catalog as buildLookCatalog } from './joy-agent/look-operations.js';
+import {
+  buildLookInstanceRecord,
+  upsertLookInstance,
+} from './joy-agent/look-instance-operations.js';
 import { stageLookRun } from './joy-agent/look-run-host.js';
 import {
   LivingLooksPanel,
@@ -2169,6 +2173,28 @@ export function AgentPanel({
         if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
         return;
       }
+      const lookCompileInput = {
+        definition,
+        definitionVersion: request.definitionVersion,
+        compositionId: session.visualProject.rootCompositionId,
+        compositionDurationUs: rootComposition.durationUs,
+        format: (rootComposition.height >= rootComposition.width ? 'portrait' : 'landscape') as
+          'portrait' | 'landscape',
+        entityBindings: request.entityBindings,
+        controlValues: request.controlValues,
+        overriddenBindingIds: [] as readonly string[],
+        resolvedFonts: Object.fromEntries(
+          (CONTENT_FONT_FAMILIES as readonly string[]).map((family) => [family, family]),
+        ),
+      };
+      // Persist a reopenable Look Instance atomically with the keyframes
+      // (R2 / GAP 1b). The apply is a first apply -> a fresh instance id, no
+      // overrides. The instance record and the keyframes commit together and
+      // undo together via the approval compound.
+      const lookInstancesWrite = upsertLookInstance(
+        session.lookInstances,
+        buildLookInstanceRecord(makeJoyCodeId('look'), lookCompileInput),
+      );
       const result = await stageLookRun(
         {
           getSession: () => latestSessionRef.current,
@@ -2187,19 +2213,8 @@ export function AgentPanel({
           scope,
           goal: `Apply the "${definition.title}" Look`,
           currentTextByObjectId,
-          compileInput: {
-            definition,
-            definitionVersion: request.definitionVersion,
-            compositionId: session.visualProject.rootCompositionId,
-            compositionDurationUs: rootComposition.durationUs,
-            format: rootComposition.height >= rootComposition.width ? 'portrait' : 'landscape',
-            entityBindings: request.entityBindings,
-            controlValues: request.controlValues,
-            overriddenBindingIds: [],
-            resolvedFonts: Object.fromEntries(
-              (CONTENT_FONT_FAMILIES as readonly string[]).map((family) => [family, family]),
-            ),
-          },
+          compileInput: lookCompileInput,
+          lookInstancesWrite,
         },
       );
       if (recipeRunScopeRef.current?.runId !== scope.runId) return;
