@@ -272,13 +272,22 @@ No mocking away the compiler, persistence, or renderer. Earlier green CI on
 
 | Gap                                                       | State       | Candidate  |
 | --------------------------------------------------------- | ----------- | ---------- |
-| 1a editor v3 bridge                                       | NOT STARTED | —          |
+| 1a editor Look-Instances persistence (approach B)         | **DONE**    | `842b4003` |
 | 1b host ops (prepareUpdate/detach/resetOverrides/persist) | NOT STARTED | —          |
 | 1c panel reopen/adjust/detach                             | NOT STARTED | —          |
 | 2 audio end-to-end + A/V test                             | NOT STARTED | —          |
 | 3 Music Pulse honest (boolean rest + rate control + slot) | **DONE**    | `3eaa8cd7` |
 | 4 rendered-frame + export acceptance                      | NOT STARTED | —          |
 | 5 manual/agent parity for update/detach                   | NOT STARTED | —          |
+
+**GAP 1a landed** as a canonical Look Instances document in its own persistence
+log, joined to the visual document through the compound-write journal (approach
+B — see `joy-live-director-r2-gap1a-architecture-2026-09-09.md`). Commits
+`3f9efba6` (schema) → `330b342e` (EditorSession participant) → `ecbc4199`
+(integration + failure-injection matrix + crash recovery) → `b661f54a`
+(package/duplication/purge) → `842b4003` (doc). Full `pnpm -w run check` green
+(529 files, 4230 tests, tsc + lint + format). Not the v3 project-schema widening
+the original text implied.
 
 ---
 
