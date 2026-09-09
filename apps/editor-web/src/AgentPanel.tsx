@@ -119,16 +119,19 @@ import { createCreativeSkillEditorPrimitiveDeps } from './joy-agent/creative-ski
 import type { CreativeSkillEditorPrimitiveDeps } from './joy-agent/creative-skill-editor-primitives.js';
 import { listCreativeSkills, runEditorCreativeSkill } from './joy-agent/entry-points.js';
 import type { CreativeSkillRunScope } from './joy-agent/skill-runner.js';
-import { BUILT_IN_LOOK_PACKS } from '@joy-media/motion-core';
+import { BUILT_IN_LOOK_PACKS, type LookDefinition } from '@joy-media/motion-core';
 import { CONTENT_FONT_FAMILIES } from '@joy-media/project-schema';
 import { catalog as buildLookCatalog } from './joy-agent/look-operations.js';
 import {
   buildLookInstanceRecord,
+  detachLookInstance,
+  lookInstanceUpdateCompileInput,
   upsertLookInstance,
 } from './joy-agent/look-instance-operations.js';
 import { stageLookRun } from './joy-agent/look-run-host.js';
 import {
   LivingLooksPanel,
+  type LivingLooksAppliedView,
   type LivingLooksEntityOption,
   type LivingLooksRunInput,
 } from './LivingLooksPanel.js';
@@ -1142,6 +1145,25 @@ export function AgentPanel({
     }
     return map;
   }, [session.visualProject]);
+  const appliedLooks = useMemo<readonly LivingLooksAppliedView[]>(() => {
+    const orphaned = new Set(session.orphanedLookInstanceIds);
+    return Object.values(session.lookInstances.instances)
+      .filter((instance) => instance.compositionId === session.visualProject.rootCompositionId)
+      .map((instance) => ({
+        instanceId: instance.id,
+        definitionId: instance.definitionId,
+        title:
+          BUILT_IN_LOOK_PACKS.find((pack) => pack.id === instance.definitionId)?.title ??
+          instance.definitionId,
+        controlValues: instance.controlValues,
+        overriddenBindingIds: instance.overriddenBindingIds,
+        orphaned: orphaned.has(instance.id),
+      }));
+  }, [
+    session.lookInstances,
+    session.orphanedLookInstanceIds,
+    session.visualProject.rootCompositionId,
+  ]);
   const isRecipeAuthorityCurrent = useCallback(
     (scope: CreativeSkillRunScope): boolean =>
       scope.runId === recipeRunScopeRef.current?.runId &&
@@ -2130,7 +2152,27 @@ export function AgentPanel({
     }
   }
 
+  /** Detach drops the instance record and leaves the authored keyframes. It
+   * touches one document, so it commits directly (one Undo) with no preview. */
+  function detachLook(instanceId: string): void {
+    const instance = session.lookInstances.instances[instanceId];
+    if (instance === undefined) return;
+    const definition = BUILT_IN_LOOK_PACKS.find((pack) => pack.id === instance.definitionId);
+    session.dispatchCompound(`Detach Look — ${definition?.title ?? instance.definitionId}`, {
+      lookInstances: detachLookInstance(session.lookInstances, instanceId),
+    });
+    appendMessage(
+      activeThread.id,
+      'assistant',
+      `Detached “${definition?.title ?? instance.definitionId}”. Its styling stays as ordinary editable keyframes; one Undo restores the Look.`,
+    );
+  }
+
   async function runLook(request: LivingLooksRunInput): Promise<void> {
+    if (request.kind === 'detach') {
+      detachLook(request.instanceId);
+      return;
+    }
     if (
       lookRunningId !== undefined ||
       recipeRunningId !== undefined ||
@@ -2139,9 +2181,65 @@ export function AgentPanel({
       pending !== undefined
     )
       return;
-    const definition = BUILT_IN_LOOK_PACKS.find((pack) => pack.id === request.definitionId);
-    const entry = lookCatalog.find((candidate) => candidate.definition.id === request.definitionId);
-    if (definition === undefined || entry === undefined || !entry.available) return;
+
+    const resolvedFonts = Object.fromEntries(
+      (CONTENT_FONT_FAMILIES as readonly string[]).map((family) => [family, family]),
+    );
+    const rootComposition =
+      session.visualProject.compositions[session.visualProject.rootCompositionId];
+    const format: 'portrait' | 'landscape' =
+      rootComposition !== undefined && rootComposition.height >= rootComposition.width
+        ? 'portrait'
+        : 'landscape';
+
+    // Resolve the definition, the compile input, and the next Look Instances
+    // document once, per request kind. apply = fresh instance; update / reset =
+    // recompile a stored instance's pinned definition.
+    let definition: LookDefinition | undefined;
+    let instanceId: string;
+    let lookCompileInput: Parameters<typeof buildLookInstanceRecord>[1] | undefined;
+    if (request.kind === 'apply') {
+      definition = BUILT_IN_LOOK_PACKS.find((pack) => pack.id === request.definitionId);
+      const entry = lookCatalog.find((c) => c.definition.id === request.definitionId);
+      if (
+        definition === undefined ||
+        entry === undefined ||
+        !entry.available ||
+        rootComposition === undefined
+      )
+        return;
+      instanceId = makeJoyCodeId('look');
+      lookCompileInput = {
+        definition,
+        definitionVersion: request.definitionVersion,
+        compositionId: session.visualProject.rootCompositionId,
+        compositionDurationUs: rootComposition.durationUs,
+        format,
+        entityBindings: request.entityBindings,
+        controlValues: request.controlValues,
+        overriddenBindingIds: [],
+        resolvedFonts,
+      };
+    } else {
+      const stored = session.lookInstances.instances[request.instanceId];
+      if (stored === undefined || rootComposition === undefined) return;
+      definition = BUILT_IN_LOOK_PACKS.find((pack) => pack.id === stored.definitionId);
+      const entry = lookCatalog.find((c) => c.definition.id === stored.definitionId);
+      if (definition === undefined || entry === undefined || !entry.available) return;
+      instanceId = stored.id;
+      lookCompileInput = lookInstanceUpdateCompileInput(
+        stored,
+        request.kind === 'update'
+          ? { nextControlValues: request.nextControlValues }
+          : { resetBindingIds: request.bindingIds },
+        {
+          definition,
+          compositionDurationUs: rootComposition.durationUs,
+          format,
+          resolvedFonts,
+        },
+      );
+    }
 
     const threadId = activeThread.id;
     const scope: CreativeSkillRunScope = {
@@ -2153,15 +2251,19 @@ export function AgentPanel({
     recipeRunScopeRef.current = scope;
     recipeStagedChangeSetRef.current = undefined;
     activeModelRunIdRef.current = scope.runId;
-    setLookRunningId(request.definitionId);
+    setLookRunningId(definition.id);
     setAgentPhase('planning');
-    appendMessage(threadId, 'user', `Apply Look — ${definition.title}`);
+    const verb =
+      request.kind === 'apply'
+        ? 'Apply'
+        : request.kind === 'reset'
+          ? 'Reset overrides on'
+          : 'Adjust';
+    appendMessage(threadId, 'user', `${verb} Look — ${definition.title}`);
     const lifecycleRun = { runId: scope.runId, epoch: scope.epoch };
 
     try {
       beginRunLifecycle(lifecycleRun);
-      const rootComposition =
-        session.visualProject.compositions[session.visualProject.rootCompositionId];
       if (rootComposition === undefined) {
         appendMessage(
           threadId,
@@ -2173,27 +2275,12 @@ export function AgentPanel({
         if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
         return;
       }
-      const lookCompileInput = {
-        definition,
-        definitionVersion: request.definitionVersion,
-        compositionId: session.visualProject.rootCompositionId,
-        compositionDurationUs: rootComposition.durationUs,
-        format: (rootComposition.height >= rootComposition.width ? 'portrait' : 'landscape') as
-          'portrait' | 'landscape',
-        entityBindings: request.entityBindings,
-        controlValues: request.controlValues,
-        overriddenBindingIds: [] as readonly string[],
-        resolvedFonts: Object.fromEntries(
-          (CONTENT_FONT_FAMILIES as readonly string[]).map((family) => [family, family]),
-        ),
-      };
-      // Persist a reopenable Look Instance atomically with the keyframes
-      // (R2 / GAP 1b). The apply is a first apply -> a fresh instance id, no
-      // overrides. The instance record and the keyframes commit together and
-      // undo together via the approval compound.
+      // Persist / update the reopenable Look Instance atomically with the
+      // keyframes (R2 / GAP 1b) — instance record and keyframes commit + undo
+      // together via the approval compound.
       const lookInstancesWrite = upsertLookInstance(
         session.lookInstances,
-        buildLookInstanceRecord(makeJoyCodeId('look'), lookCompileInput),
+        buildLookInstanceRecord(instanceId, lookCompileInput),
       );
       const result = await stageLookRun(
         {
@@ -2211,7 +2298,7 @@ export function AgentPanel({
         },
         {
           scope,
-          goal: `Apply the "${definition.title}" Look`,
+          goal: `${verb} the "${definition.title}" Look`,
           currentTextByObjectId,
           compileInput: lookCompileInput,
           lookInstancesWrite,
@@ -2271,7 +2358,7 @@ export function AgentPanel({
       setAgentPhase('failed');
       if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
     } finally {
-      setLookRunningId((current) => (current === request.definitionId ? undefined : current));
+      setLookRunningId((current) => (current === definition.id ? undefined : current));
     }
   }
 
@@ -2799,6 +2886,7 @@ export function AgentPanel({
             hidden={composerCapability !== 'looks'}
             catalog={lookCatalog}
             entities={lookEntities}
+            applied={appliedLooks}
             runningLookId={lookRunningId}
             busy={liveAgentBusy || recipeRunningId !== undefined}
             onRun={(request) => void runLook(request)}

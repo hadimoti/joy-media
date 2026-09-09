@@ -19,17 +19,45 @@ export interface LivingLooksEntityOption {
   readonly kind: 'visual-object' | 'caption-clip';
 }
 
-export interface LivingLooksRunInput {
+/**
+ * One operator (or user-directed agent) intent. `apply` is a first apply;
+ * `update` / `reset` recompile a stored instance; `detach` drops the record and
+ * leaves the authored keyframes. The panel and an agent capability emit the
+ * identical shape and it flows through one host op (GAP 1b + 5).
+ */
+export type LivingLooksRunInput =
+  | {
+      readonly kind: 'apply';
+      readonly definitionId: string;
+      readonly definitionVersion: number;
+      readonly entityBindings: Readonly<Record<string, string>>;
+      readonly controlValues: Readonly<Record<string, number | string | boolean>>;
+    }
+  | {
+      readonly kind: 'update';
+      readonly instanceId: string;
+      readonly nextControlValues: Readonly<Record<string, number | string | boolean>>;
+    }
+  | { readonly kind: 'reset'; readonly instanceId: string; readonly bindingIds: readonly string[] }
+  | { readonly kind: 'detach'; readonly instanceId: string };
+
+/** An applied Look instance, as the panel needs to render + adjust it. */
+export interface LivingLooksAppliedView {
+  readonly instanceId: string;
   readonly definitionId: string;
-  readonly definitionVersion: number;
-  readonly entityBindings: Readonly<Record<string, string>>;
+  readonly title: string;
   readonly controlValues: Readonly<Record<string, number | string | boolean>>;
+  readonly overriddenBindingIds: readonly string[];
+  /** A bound visual object was deleted after the Look was applied. */
+  readonly orphaned: boolean;
 }
 
 export interface LivingLooksPanelProps {
   readonly hidden: boolean;
   readonly catalog: readonly LookCatalogEntry[];
   readonly entities: readonly LivingLooksEntityOption[];
+  /** Looks already applied to the active composition. */
+  readonly applied?: readonly LivingLooksAppliedView[];
   readonly runningLookId: string | undefined;
   readonly busy: boolean;
   readonly onRun: (input: LivingLooksRunInput) => void;
@@ -37,6 +65,115 @@ export interface LivingLooksPanelProps {
 
 function controlDefault(control: LookControl): number | string | boolean {
   return control.default;
+}
+
+/** A single Look control input — shared by the apply form and the adjust rows. */
+function LookControlInput(props: {
+  readonly control: LookControl;
+  readonly value: number | string | boolean;
+  readonly onChange: (value: number | string | boolean) => void;
+}): ReactElement {
+  const { control, value, onChange } = props;
+  if (control.kind === 'scalar') {
+    return (
+      <input
+        type="range"
+        min={0}
+        max={1}
+        step={0.01}
+        value={typeof value === 'number' ? value : control.default}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+    );
+  }
+  if (control.kind === 'boolean') {
+    return (
+      <input
+        type="checkbox"
+        checked={typeof value === 'boolean' ? value : control.default}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+    );
+  }
+  const optionList =
+    control.kind === 'enum'
+      ? control.options
+      : control.kind === 'color'
+        ? control.palettePairs.map((p) => p.id)
+        : control.families;
+  return (
+    <select
+      value={typeof value === 'string' ? value : String(control.default)}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      {optionList.map((option) => (
+        <option key={option} value={option}>
+          {option}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function AppliedLookRow(props: {
+  readonly applied: LivingLooksAppliedView;
+  readonly controls: readonly LookControl[];
+  readonly busy: boolean;
+  readonly onRun: (input: LivingLooksRunInput) => void;
+}): ReactElement {
+  const { applied, controls, busy, onRun } = props;
+  return (
+    <li className={`applied-look ${applied.orphaned ? 'is-orphaned' : ''}`}>
+      <div className="applied-look-head">
+        <strong>{applied.title}</strong>
+        <button
+          type="button"
+          className="applied-look-detach"
+          disabled={busy}
+          onClick={() => onRun({ kind: 'detach', instanceId: applied.instanceId })}
+        >
+          Detach
+        </button>
+      </div>
+      {applied.orphaned && (
+        <p className="applied-look-orphan">Bound object removed — rebind or detach.</p>
+      )}
+      {applied.overriddenBindingIds.length > 0 && (
+        <button
+          type="button"
+          className="applied-look-reset"
+          disabled={busy}
+          onClick={() =>
+            onRun({
+              kind: 'reset',
+              instanceId: applied.instanceId,
+              bindingIds: applied.overriddenBindingIds,
+            })
+          }
+        >
+          Reset {applied.overriddenBindingIds.length} hand-edited binding(s) to Look control
+        </button>
+      )}
+      <div className="applied-look-controls">
+        {controls.map((control) => (
+          <label key={control.id} className="applied-look-control">
+            <span>{control.label}</span>
+            <LookControlInput
+              control={control}
+              value={applied.controlValues[control.id] ?? control.default}
+              onChange={(value) =>
+                onRun({
+                  kind: 'update',
+                  instanceId: applied.instanceId,
+                  nextControlValues: { [control.id]: value },
+                })
+              }
+            />
+          </label>
+        ))}
+      </div>
+    </li>
+  );
 }
 
 export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
@@ -92,6 +229,29 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
         Editable art-directed Looks. Each compiles to ordinary operations and runs through the same
         staged preview and approval as a direct edit.
       </p>
+
+      {(props.applied ?? []).length > 0 && (
+        <section className="applied-looks" aria-label="Applied Looks">
+          <h3>Applied Looks</h3>
+          <ul className="applied-looks-list">
+            {(props.applied ?? []).map((applied) => {
+              const definition = catalog.find(
+                (entry) => entry.definition.id === applied.definitionId,
+              )?.definition;
+              return (
+                <AppliedLookRow
+                  key={applied.instanceId}
+                  applied={applied}
+                  controls={definition?.controls ?? []}
+                  busy={props.busy || props.runningLookId !== undefined}
+                  onRun={props.onRun}
+                />
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
       <ul className="living-looks-list">
         {catalog.map((entry) => {
           const missing = [...entry.missingOperationKinds, ...entry.missingFonts];
@@ -129,6 +289,7 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
             event.preventDefault();
             if (!canRun) return;
             props.onRun({
+              kind: 'apply',
               definitionId: selected.definition.id,
               definitionVersion: selected.definition.version,
               // Drop optional slots left on the placeholder — the compiler

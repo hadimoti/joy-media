@@ -124,5 +124,83 @@ describe('LivingLooksPanel', () => {
     expect(arg.entityBindings.headline).toBe('title-1');
     const clean = BUILT_IN_LOOK_PACKS.find((p) => p.id === 'editorial-clean')!;
     for (const control of clean.controls) expect(arg.controlValues[control.id]).toBeDefined();
+    expect(arg.kind).toBe('apply');
+  });
+
+  it('an applied Look row emits detach / reset / update inputs', () => {
+    const onRun = vi.fn();
+    const clean = BUILT_IN_LOOK_PACKS.find((p) => p.id === 'editorial-clean')!;
+    mount({
+      onRun,
+      applied: [
+        {
+          instanceId: 'look-1',
+          definitionId: 'editorial-clean',
+          title: clean.title,
+          controlValues: {},
+          overriddenBindingIds: ['b1', 'b2'],
+          orphaned: false,
+        },
+      ],
+    });
+
+    expect(container!.querySelector('.applied-looks')).not.toBeNull();
+
+    act(() => {
+      container!.querySelector<HTMLButtonElement>('.applied-look-reset')!.click();
+    });
+    expect(onRun).toHaveBeenCalledWith({
+      kind: 'reset',
+      instanceId: 'look-1',
+      bindingIds: ['b1', 'b2'],
+    });
+
+    act(() => {
+      container!.querySelector<HTMLButtonElement>('.applied-look-detach')!.click();
+    });
+    expect(onRun).toHaveBeenCalledWith({ kind: 'detach', instanceId: 'look-1' });
+
+    const firstControl = container!.querySelector<HTMLInputElement>(
+      '.applied-look-control input, .applied-look-control select',
+    )!;
+    act(() => {
+      if (firstControl instanceof HTMLInputElement && firstControl.type === 'range') {
+        const setter = Object.getOwnPropertyDescriptor(
+          window.HTMLInputElement.prototype,
+          'value',
+        )!.set!;
+        setter.call(firstControl, '0.5');
+      }
+      firstControl.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const updateCall = onRun.mock.calls.find((c) => c[0]?.kind === 'update');
+    expect(updateCall).toBeDefined();
+    expect(updateCall![0].instanceId).toBe('look-1');
+  });
+
+  it('marks an orphaned applied Look', () => {
+    const clean = BUILT_IN_LOOK_PACKS.find((p) => p.id === 'editorial-clean')!;
+    const markup = renderToStaticMarkup(
+      <LivingLooksPanel
+        hidden={false}
+        catalog={CATALOG}
+        entities={ENTITIES}
+        applied={[
+          {
+            instanceId: 'look-1',
+            definitionId: 'editorial-clean',
+            title: clean.title,
+            controlValues: {},
+            overriddenBindingIds: [],
+            orphaned: true,
+          },
+        ]}
+        runningLookId={undefined}
+        busy={false}
+        onRun={() => undefined}
+      />,
+    );
+    expect(markup).toMatch(/is-orphaned/);
+    expect(markup).toContain('rebind or detach');
   });
 });
