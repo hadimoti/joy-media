@@ -327,12 +327,15 @@ const EVIDENCE_COVERAGE_TOOL: BrowserAgentToolDefinition = {
   },
 };
 
-const OBSERVATION_TOOLS: Readonly<
-  Record<
-    Exclude<JoyAgentHostToolName, 'read_project_context' | 'validate_proposal'>,
-    BrowserAgentToolDefinition
-  >
-> = {
+type ObservationToolName =
+  | 'media_describe'
+  | 'media_observe'
+  | 'media_frames'
+  | 'media_transcript'
+  | 'evidence_read'
+  | 'evidence_coverage';
+
+const OBSERVATION_TOOLS: Readonly<Record<ObservationToolName, BrowserAgentToolDefinition>> = {
   media_describe: MEDIA_DESCRIBE_TOOL,
   media_observe: MEDIA_OBSERVE_TOOL,
   media_frames: MEDIA_FRAMES_TOOL,
@@ -340,6 +343,142 @@ const OBSERVATION_TOOLS: Readonly<
   evidence_read: EVIDENCE_READ_TOOL,
   evidence_coverage: EVIDENCE_COVERAGE_TOOL,
 };
+
+/**
+ * Living Look intent tools (R2 / GAP 5). Deterministic host tools: the model
+ * names which pack / instance / controls it wants; the trusted host compiles
+ * the exact Look plan, stages a reversible preview and returns opaque
+ * identities. A successful call is terminal for the turn (like
+ * `validate_proposal`) and applies nothing — the operator approves the staged
+ * change through the same approval card and Undo as any other agent edit. The
+ * ids are pattern-bounded here; the host validates that the pack / instance
+ * actually exists and that the control values fit the definition, returning a
+ * repairable diagnostic when they do not.
+ */
+const LOOK_ID_PATTERN = '^[a-z][a-z0-9-]{1,63}$';
+const LOOK_INSTANCE_ID_PATTERN = '^look-[A-Za-z0-9][A-Za-z0-9-]{7,64}$';
+const LOOK_BINDING_ID_PATTERN = '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$';
+const LOOK_SLOT_ID_PATTERN = '^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$';
+const LOOK_CONTROL_ID_PATTERN = '^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$';
+const LOOK_ENTITY_ID_PATTERN = '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$';
+
+const LOOK_CONTROL_VALUE_SCHEMA = {
+  type: 'object',
+  description: 'controlId -> value. Values are bounded by the definition control kind.',
+  additionalProperties: {
+    anyOf: [{ type: 'number' }, { type: 'string', maxLength: 120 }, { type: 'boolean' }],
+  },
+  propertyNames: { pattern: LOOK_CONTROL_ID_PATTERN },
+  maxProperties: 32,
+} as const;
+
+const LOOK_ENTITY_BINDINGS_SCHEMA = {
+  type: 'object',
+  description: 'slotId -> existing visual object id.',
+  additionalProperties: { type: 'string', pattern: LOOK_ENTITY_ID_PATTERN },
+  propertyNames: { pattern: LOOK_SLOT_ID_PATTERN },
+  maxProperties: 32,
+} as const;
+
+const LOOK_APPLY_TOOL: BrowserAgentToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'look_apply',
+    description:
+      'Apply one built-in Living Look to the root composition. The host compiles it deterministically and stages a reversible preview for operator approval; it never applies the edit itself.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['definitionId', 'entityBindings', 'controlValues'],
+      properties: {
+        definitionId: { type: 'string', pattern: LOOK_ID_PATTERN, maxLength: 64 },
+        entityBindings: LOOK_ENTITY_BINDINGS_SCHEMA,
+        controlValues: LOOK_CONTROL_VALUE_SCHEMA,
+      },
+    },
+  },
+};
+
+const LOOK_UPDATE_TOOL: BrowserAgentToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'look_update',
+    description:
+      'Adjust an already-applied Living Look instance: change its control values and/or its entity bindings. The host recompiles the pinned definition and stages a reversible preview for approval.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['instanceId'],
+      properties: {
+        instanceId: { type: 'string', pattern: LOOK_INSTANCE_ID_PATTERN, maxLength: 80 },
+        nextControlValues: LOOK_CONTROL_VALUE_SCHEMA,
+        nextEntityBindings: LOOK_ENTITY_BINDINGS_SCHEMA,
+      },
+    },
+  },
+};
+
+const LOOK_RESET_OVERRIDES_TOOL: BrowserAgentToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'look_reset_overrides',
+    description:
+      'Put hand-edited bindings of a Living Look instance back under Look control, then recompile. Stages a reversible preview for approval.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['instanceId', 'bindingIds'],
+      properties: {
+        instanceId: { type: 'string', pattern: LOOK_INSTANCE_ID_PATTERN, maxLength: 80 },
+        bindingIds: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 64,
+          items: { type: 'string', pattern: LOOK_BINDING_ID_PATTERN },
+        },
+      },
+    },
+  },
+};
+
+const LOOK_DETACH_TOOL: BrowserAgentToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'look_detach',
+    description:
+      'Detach a Living Look instance: drop the reopenable Look record and leave its authored keyframes as ordinary editable animation. Stages a reversible change (no visual diff) for operator approval — an agent detach is never auto-applied.',
+    strict: true,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['instanceId'],
+      properties: {
+        instanceId: { type: 'string', pattern: LOOK_INSTANCE_ID_PATTERN, maxLength: 80 },
+      },
+    },
+  },
+};
+
+const LOOK_TOOLS: Readonly<
+  Record<
+    'look_apply' | 'look_update' | 'look_reset_overrides' | 'look_detach',
+    BrowserAgentToolDefinition
+  >
+> = {
+  look_apply: LOOK_APPLY_TOOL,
+  look_update: LOOK_UPDATE_TOOL,
+  look_reset_overrides: LOOK_RESET_OVERRIDES_TOOL,
+  look_detach: LOOK_DETACH_TOOL,
+};
+
+const LOOK_TOOL_NAME_SET: ReadonlySet<JoyAgentHostToolName> = new Set(
+  Object.keys(LOOK_TOOLS) as (keyof typeof LOOK_TOOLS)[],
+);
+
+/** True for the deterministic Look intent tools that are terminal on success. */
+export function isLookIntentToolName(name: JoyAgentHostToolName): boolean {
+  return LOOK_TOOL_NAME_SET.has(name);
+}
 
 function toolDefinitionFor(
   name: JoyAgentHostToolName,
@@ -351,7 +490,8 @@ function toolDefinitionFor(
       throw new Error('JOY_AGENT_VALIDATE_PROPOSAL_REQUIRES_SCHEMA');
     return createValidateProposalTool(proposalParameters);
   }
-  return OBSERVATION_TOOLS[name];
+  if (LOOK_TOOL_NAME_SET.has(name)) return LOOK_TOOLS[name as keyof typeof LOOK_TOOLS];
+  return OBSERVATION_TOOLS[name as ObservationToolName];
 }
 
 /**
@@ -592,7 +732,11 @@ export async function runBoundedToolExchange(
           contextRead = true;
           if (contextReadStep < 0) contextReadStep = step;
           result = { ok: true, context: hostResult, applied: false };
-        } else if (name === 'validate_proposal') {
+        } else if (name === 'validate_proposal' || LOOK_TOOL_NAME_SET.has(name)) {
+          // A Look intent tool is deterministic and terminal, exactly like
+          // `validate_proposal`: the host has staged a reversible preview and
+          // returned only opaque identities. A later provider message cannot
+          // replace it.
           return { kind: 'prepared', proposal: parsePreparedProposal(hostResult) };
         } else {
           result = { ok: true, evidence: hostResult, applied: false };

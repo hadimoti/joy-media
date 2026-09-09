@@ -87,6 +87,10 @@ describe('mounted Worker bounded semantic tool exchange', () => {
       'media_transcript',
       'evidence_read',
       'evidence_coverage',
+      'look_apply',
+      'look_update',
+      'look_reset_overrides',
+      'look_detach',
     ]);
 
     const allowedToolNames = [
@@ -618,5 +622,113 @@ describe('mounted Worker bounded semantic tool exchange', () => {
       ),
     ).rejects.toMatchObject({ diagnostic: { code: 'JOY_AGENT_RPC_CANONICAL_REJECTED' } });
     expect(step).toBe(2);
+  });
+
+  it('advertises Look intent tools only when explicitly allowed', () => {
+    const proposalParameters = agentTools.createModelVisibleJoyCodeProposalParameters();
+    expect(BROWSER_AGENT_TOOLS.map((tool) => tool.function.name)).not.toContain('look_apply');
+    const catalog = createBrowserAgentToolCatalog(proposalParameters, [
+      'read_project_context',
+      'look_apply',
+      'look_update',
+      'look_reset_overrides',
+      'look_detach',
+    ]);
+    expect(catalog.tools.map((tool) => tool.function.name)).toEqual([
+      'read_project_context',
+      'look_apply',
+      'look_update',
+      'look_reset_overrides',
+      'look_detach',
+    ]);
+    const applyTool = catalog.tools.find((tool) => tool.function.name === 'look_apply');
+    expect(applyTool?.function.parameters).toMatchObject({
+      required: ['definitionId', 'entityBindings', 'controlValues'],
+    });
+  });
+
+  it('treats a Look intent tool call as terminal, like validate_proposal', async () => {
+    const lookInput = {
+      definitionId: 'editorial-clean',
+      entityBindings: { title: 'text-1' },
+      controlValues: { emphasis: 0.6 },
+    };
+    const lookPrepared = {
+      summary: 'Apply the "Editorial Clean" Look',
+      baseRevision: 'revision',
+      changeSetId: 'change-set-look-1',
+      operationDigest: 'c'.repeat(64),
+      bindingDigest: 'd'.repeat(64),
+      operationCount: 3,
+    } as const satisfies HostRpcJson;
+    const host = vi.fn<BrowserAgentHostCall>(async (method, args) => {
+      if (method === 'read_project_context') return frozenPage;
+      expect(method).toBe('look_apply');
+      expect(args).toEqual(lookInput);
+      return lookPrepared;
+    });
+    let step = 0;
+    const outcome = await runBoundedToolExchange(
+      [],
+      async () => {
+        if (step++ === 0)
+          return response({
+            tool_calls: [call('read', 'read_project_context', { domain: 'overview' })],
+          });
+        return response({ tool_calls: [call('apply-look', 'look_apply', lookInput)] });
+      },
+      host,
+      {
+        allowedToolNames: ['read_project_context', 'look_apply', 'look_update', 'look_detach'],
+      },
+    );
+    expect(host.mock.calls.map(([method]) => method)).toEqual([
+      'read_project_context',
+      'look_apply',
+    ]);
+    expect(outcome).toEqual({ kind: 'prepared', proposal: lookPrepared });
+  });
+
+  it('requires project context before a Look intent tool', async () => {
+    const lookPrepared = {
+      summary: 'Detach the "Editorial Clean" Look',
+      baseRevision: 'revision',
+      changeSetId: 'change-set-look-2',
+      operationDigest: 'e'.repeat(64),
+      bindingDigest: 'f'.repeat(64),
+      operationCount: 1,
+    } as const satisfies HostRpcJson;
+    const host = vi.fn<BrowserAgentHostCall>(async (method) =>
+      method === 'read_project_context' ? frozenPage : lookPrepared,
+    );
+    let step = 0;
+    const outcome = await runBoundedToolExchange(
+      [],
+      async (messages) => {
+        if (step++ === 0)
+          return response({
+            tool_calls: [
+              call('read', 'read_project_context', { domain: 'overview' }),
+              call('too-early', 'look_detach', { instanceId: 'look-abcdefgh' }),
+            ],
+          });
+        expect(lastToolResult(messages)).toEqual({
+          ok: false,
+          code: 'JOY_AGENT_CONTEXT_REQUIRED',
+          repairable: true,
+          applied: false,
+        });
+        return response({
+          tool_calls: [call('detach', 'look_detach', { instanceId: 'look-abcdefgh' })],
+        });
+      },
+      host,
+      { allowedToolNames: ['read_project_context', 'look_detach'] },
+    );
+    expect(outcome).toEqual({ kind: 'prepared', proposal: lookPrepared });
+    expect(host.mock.calls.map(([method]) => method)).toEqual([
+      'read_project_context',
+      'look_detach',
+    ]);
   });
 });

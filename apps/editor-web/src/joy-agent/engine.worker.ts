@@ -1360,13 +1360,23 @@ function failureMessage(
   return { code, message: 'Provider request failed' };
 }
 
-function systemInstruction(taskKind: JoyAgentTaskKind, structured: boolean): string {
+function systemInstruction(
+  taskKind: JoyAgentTaskKind,
+  structured: boolean,
+  allowedToolNames: readonly string[] = [],
+): string {
+  const lookOnly =
+    structured &&
+    allowedToolNames.some((name) => name.startsWith('look_')) &&
+    !allowedToolNames.includes('validate_proposal');
   const taskInstruction =
     taskKind === 'creative-brief'
       ? 'Return only one JSON CreativeBriefV1 object. Do not include markdown or edit operations.'
-      : structured
-        ? 'Use read_project_context before validate_proposal. Send typed operations only to validate_proposal. If the canonical host returns a repair diagnostic, fix only the reported issue and retry within the bounded budget. A successful validation creates an immutable preview, never an applied edit. Do not invent object, clip, asset, property, track, or template IDs.'
-        : 'Return a concise answer or clarification only. Plan-only mode cannot create edit operations.';
+      : lookOnly
+        ? "Use read_project_context before any look_* tool. Call exactly one of look_apply, look_update, look_reset_overrides, or look_detach with the operator's intent — the host compiles the Look deterministically and stages a reversible preview for approval; it never applies the edit. Use existing visual-object ids from the context for entityBindings; do not invent ids. If the host returns a repair diagnostic, fix only the reported issue and retry within the bounded budget."
+        : structured
+          ? 'Use read_project_context before validate_proposal. Send typed operations only to validate_proposal. If the canonical host returns a repair diagnostic, fix only the reported issue and retry within the bounded budget. A successful validation creates an immutable preview, never an applied edit. Do not invent object, clip, asset, property, track, or template IDs.'
+          : 'Return a concise answer or clarification only. Plan-only mode cannot create edit operations.';
   // The literal operation registry call is kept here for release verification
   // and makes the provider’s visible vocabulary explicit without handing it a
   // compiler, editor object, or writable capability.

@@ -108,11 +108,17 @@ function assertSupportedMotionBinding(document: JoyProjectV1, binding: PropertyB
 export function compileJoyCodeCompoundDraft(
   input: JoyCodeCompoundCompilerInput,
 ): JoyCodeCompoundCompileResult {
-  if (input.operations.length === 0)
+  if (input.operations.length === 0 && input.lookInstances === undefined)
     return {
       ok: false,
       error: { code: 'JOY_CODE_COMPOUND_EMPTY', message: 'Joy Code plan contains no operations' },
     };
+  // A Look-Instances-only compound (agent `look_detach`, GAP 5) carries zero
+  // visual operations: the instance record is dropped and the authored keyframes
+  // stay as ordinary editable animation. It still stages, previews (no diff),
+  // approves and undoes through the same compound journal — `lookInstances` is
+  // folded into `operationDigest` below exactly as for a keyframe-bearing Look
+  // change, so the write is bound to one approval.
   const registeredAssets = joyCodeAssetDescriptorsFromProject(input.visualProject);
   const resolvedReferences = resolveJoyCodeOperationReferences(input.planId, input.operations);
   if (!resolvedReferences.ok) return { ok: false, error: resolvedReferences.error };

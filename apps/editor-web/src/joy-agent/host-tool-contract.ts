@@ -13,6 +13,17 @@ export const JOY_AGENT_HOST_TOOL_NAMES = [
   'media_transcript',
   'evidence_read',
   'evidence_coverage',
+  // Living Look intent tools (R2 / GAP 5). Deterministic host tools like
+  // `validate_proposal`: the model supplies intent (which pack, which controls,
+  // which instance) and the trusted host compiles the exact Look plan, stages a
+  // reversible preview, and returns only opaque identities. A successful call is
+  // terminal for the turn and never applies an edit — the operator approves the
+  // staged change through the same approval card and Undo as every other agent
+  // edit.
+  'look_apply',
+  'look_update',
+  'look_reset_overrides',
+  'look_detach',
 ] as const;
 
 export type JoyAgentHostToolName = (typeof JOY_AGENT_HOST_TOOL_NAMES)[number];

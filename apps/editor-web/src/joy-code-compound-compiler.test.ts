@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
-import { canonicalBindingKey } from '@joy-media/project-schema';
+import {
+  canonicalBindingKey,
+  emptyLookInstancesDocument,
+  type LookInstancesDocument,
+} from '@joy-media/project-schema';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
 import { compileJoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
 
@@ -328,6 +332,49 @@ describe('Joy Code compound compiler', () => {
     if (!result.ok) return;
     expect(result.document.propertyAnimations?.[canonicalBindingKey(binding)]).toBeUndefined();
     expect(result.document.universalTimeline?.items).toEqual([]);
+  });
+
+  it('rejects a plan with zero operations and no Look Instances write', () => {
+    const result = compileJoyCodeCompoundDraft({
+      planId: 'compound-empty',
+      baseRevision: 'rev-empty',
+      timeline: buildReferenceSpikeProject(),
+      visualProject: INITIAL_EDITOR_PROJECT,
+      registeredAssetIds: [],
+      operations: [],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('JOY_CODE_COMPOUND_EMPTY');
+  });
+
+  it('compiles a Look-Instances-only compound (zero visual operations) for agent detach', () => {
+    const lookInstances: LookInstancesDocument = {
+      ...emptyLookInstancesDocument(INITIAL_EDITOR_PROJECT.id),
+      instances: {},
+    };
+    const input = {
+      planId: 'compound-look-only',
+      baseRevision: 'rev-look-only',
+      timeline: buildReferenceSpikeProject(),
+      visualProject: INITIAL_EDITOR_PROJECT,
+      registeredAssetIds: [],
+      operations: [],
+      lookInstances,
+    };
+    const first = compileJoyCodeCompoundDraft(input);
+    const second = compileJoyCodeCompoundDraft(input);
+    expect(first.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(first.groups).toEqual([]);
+    expect(first.timeline).toBeUndefined();
+    expect(first.documentChanged).toBe(false);
+    expect(first.document).toBe(INITIAL_EDITOR_PROJECT);
+    expect(first.lookInstances).toEqual(lookInstances);
+    expect(first.operationDigest).toMatch(/^[0-9a-f]{64}$/);
+    expect(first.proposalHash).toBe(`joy-code-proposal-${first.operationDigest}`);
+    // Byte-stable, and distinct from the same zero operations without the write.
+    expect(second.operationDigest).toBe(first.operationDigest);
   });
 });
 
