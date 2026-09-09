@@ -1,7 +1,11 @@
 import { DerivativeAuthorityRevokedError } from './asset-resolver.js';
 import { getStoredMediaToken } from './media-session.js';
 import type { GpuPreviewFrameRequest } from '@joy-media/job-protocol';
-import type { JoyProjectV1, ProjectRevisionId } from '@joy-media/project-schema';
+import type {
+  JoyProjectV1,
+  LookInstancesDocument,
+  ProjectRevisionId,
+} from '@joy-media/project-schema';
 
 const browserProjections = import('./browser-projections.js');
 
@@ -195,6 +199,12 @@ export interface BrowserProjectDocument {
   readonly projectId: string;
   readonly revisionId: ProjectRevisionId;
   readonly document: JoyProjectV1;
+  /**
+   * The canonical Look Instances document (R2 / GAP 1a). Absent when the server
+   * row predates Look sync (or has never carried Look info) — a Look-aware
+   * client then keeps its local Look document untouched.
+   */
+  readonly lookInstances?: LookInstancesDocument;
 }
 
 export interface BrowserProjectDuplicateResult {
@@ -717,6 +727,12 @@ export class BrowserControlPlaneClient {
       readonly baseRevisionId: ProjectRevisionId;
       readonly revisionId: ProjectRevisionId;
       readonly document: JoyProjectV1;
+      /**
+       * The canonical Look Instances document (R2 / GAP 1a). Omit to leave the
+       * server's stored value untouched (a visual-only save); pass an explicit
+       * value — including `{ instances: {} }` — to replace it.
+       */
+      readonly lookInstances?: LookInstancesDocument;
     },
   ): Promise<{ readonly projectId: string; readonly revisionId: ProjectRevisionId }> {
     return this.request(`/v1/projects/${encodeURIComponent(projectId)}/document`, {

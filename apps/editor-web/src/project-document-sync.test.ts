@@ -450,4 +450,33 @@ describe('project-document-sync', () => {
     // Original document should be unchanged
     expect(originalDocument).toEqual(document);
   });
+
+  // R2 / GAP 1a
+  it('forwards an explicit lookInstances document to the transport', async () => {
+    const storage = memoryStorage();
+    const syncProjectDocument: SyncProjectDocument = vi.fn().mockResolvedValue(successResponse);
+    const lookInstances = { id: 'local-edit-1', schemaVersion: 1 as const, instances: {} };
+
+    await syncProjectDocumentBinding(binding, document, revisionId, storage, syncProjectDocument, {
+      lookInstances,
+    });
+
+    expect(syncProjectDocument).toHaveBeenCalledWith('project-server-1', {
+      baseRevisionId: '',
+      revisionId,
+      document,
+      lookInstances,
+    });
+  });
+
+  it('omits lookInstances from the payload when none is supplied (legacy shape)', async () => {
+    const storage = memoryStorage();
+    const syncProjectDocument: SyncProjectDocument = vi.fn().mockResolvedValue(successResponse);
+
+    await syncProjectDocumentBinding(binding, document, revisionId, storage, syncProjectDocument);
+
+    const [, params] = (syncProjectDocument as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0]!;
+    expect('lookInstances' in (params as object)).toBe(false);
+  });
 });

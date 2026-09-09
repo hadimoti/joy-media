@@ -970,6 +970,33 @@ export class EditorSession {
     return project;
   }
 
+  /**
+   * Apply a server Look Instances document (R2 / GAP 1a) as a snapshot — no
+   * history entry, exactly like `synchronizeVisualProject`. The hydration layer
+   * only calls this when the local session is still at the observed revision and
+   * the server actually carried a Look document, so it never silently drops a
+   * populated local document from an absent remote value. An explicit empty
+   * `{ instances: {} }` is a real state and legitimately clears the local one.
+   */
+  synchronizeLookInstances(next: LookInstancesDocument): void {
+    this.#assertPersistenceReady();
+    const diagnostics = validateLookInstancesDocument(next);
+    if (diagnostics.length > 0) {
+      throw new PersistenceError(
+        'PERSISTENCE_LOOK_INSTANCES_SYNC_INVALID',
+        `server Look Instances document is invalid: ${diagnostics[0]!.message}`,
+      );
+    }
+    if (JSON.stringify(next) === JSON.stringify(this.#lookInstancesDocument)) return;
+    if (!this.#lookInstancesLogInitialized) {
+      this.#lookInstancesPersistence.initialize(this.#lookInstancesDocument);
+      this.#lookInstancesLogInitialized = true;
+    }
+    this.#lookInstancesPersistence.saveSnapshot(next, false);
+    this.#lookInstancesDocument = next;
+    this.#lookInstancesRevision += 1;
+  }
+
   /** Persist project metadata without adding a creative undo entry. */
   renameProjectTitle(title: string): JoyProjectV1 {
     this.#assertPersistenceReady();

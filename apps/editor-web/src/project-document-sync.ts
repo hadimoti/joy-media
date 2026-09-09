@@ -1,5 +1,9 @@
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
-import type { JoyProjectV1, ProjectRevisionId } from '@joy-media/project-schema';
+import type {
+  JoyProjectV1,
+  LookInstancesDocument,
+  ProjectRevisionId,
+} from '@joy-media/project-schema';
 import {
   type ControlPlaneProjectBinding,
   getControlPlaneProjectBinding,
@@ -45,6 +49,8 @@ export type SyncProjectDocument = (
     readonly baseRevisionId: ProjectRevisionId;
     readonly revisionId: ProjectRevisionId;
     readonly document: JoyProjectV1;
+    /** The canonical Look Instances document (R2 / GAP 1a); omit to leave it. */
+    readonly lookInstances?: LookInstancesDocument;
   },
 ) => Promise<{ readonly projectId: string; readonly revisionId: ProjectRevisionId }>;
 
@@ -90,7 +96,7 @@ export function syncProjectDocumentBinding(
   revisionId: ProjectRevisionId,
   storage: BrowserKeyValueStore,
   syncProjectDocument: SyncProjectDocument,
-  options: DocumentSyncOptions = {},
+  options: DocumentSyncOptions & { readonly lookInstances?: LookInstancesDocument } = {},
 ): Promise<DocumentSyncResult> {
   const ownerKey = options.ownerKey ?? 'local';
   const queueKey = `${ownerKey}:${binding.editorProjectId}`;
@@ -104,6 +110,7 @@ export function syncProjectDocumentBinding(
       storage,
       syncProjectDocument,
       ownerKey,
+      options.lookInstances,
     );
   // Start the first request synchronously so callers can observe immediate
   // transport invocation; only later requests wait behind the current CAS
@@ -123,6 +130,7 @@ function performProjectDocumentSync(
   storage: BrowserKeyValueStore,
   syncProjectDocument: SyncProjectDocument,
   ownerKey: string,
+  lookInstances: LookInstancesDocument | undefined,
 ): Promise<DocumentSyncResult> {
   const latestBinding =
     getControlPlaneProjectBinding(storage, binding.editorProjectId, ownerKey) ?? binding;
@@ -154,6 +162,7 @@ function performProjectDocumentSync(
     baseRevisionId,
     revisionId,
     document,
+    ...(lookInstances === undefined ? {} : { lookInstances }),
   })
     .then((response) => {
       // Only persist if the response matches both the binding's control-plane

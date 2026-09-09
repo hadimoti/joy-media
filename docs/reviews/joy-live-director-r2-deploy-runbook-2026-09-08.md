@@ -16,13 +16,13 @@ build is root `pnpm build` (`pnpm -r --if-present build`), DB dump needs
 
 ## Candidate
 
-| Field  | Value                                                         |
-| ------ | ------------------------------------------------------------- |
-| commit | `PENDING`                                                     |
-| tree   | `PENDING`                                                     |
-| lock   | `PENDING` (sha256 of `pnpm-lock.yaml`)                        |
-| schema | `5` — **unchanged**                                           |
-| base   | `855734cf0c875101a632426983db2638c2adddcd` (R1, current live) |
+| Field  | Value                                                                  |
+| ------ | ---------------------------------------------------------------------- |
+| commit | `PENDING`                                                              |
+| tree   | `PENDING`                                                              |
+| lock   | `PENDING` (sha256 of `pnpm-lock.yaml`)                                 |
+| schema | migration ledger gains `006-look-instances` (additive nullable column) |
+| base   | `855734cf0c875101a632426983db2638c2adddcd` (R1, current live)          |
 
 ## Blast radius — web-bundle-only, cleaner than R1
 
@@ -30,21 +30,48 @@ build is root `pnpm build` (`pnpm -r --if-present build`), DB dump needs
 **only**: `apps/editor-web`, `packages/{motion-core,project-schema}`, `tests/`,
 `tooling/`, `docs/`, `.github/`. Verified at branch HEAD:
 
-- **No Postgres migration.** `apps/api/src/postgres-migrations.ts`
-  `POSTGRES_MIGRATIONS` is byte-identical at `855734cf` and the candidate —
-  same five ids `001-baseline` … `005-stock-video`. Schema stays `5`.
-- **No `apps/api` runtime change.** The only `apps/api` diff is
-  `resumable-original-upload.test.ts` (a test-only poll-budget widen). The API
-  release / `joy-media@api` service does not change; its `dist/server.js` is
-  byte-equivalent to live.
+- **One additive Postgres migration (R2 GAP 1a — Look Instances sync).**
+  `apps/api/src/postgres-migrations.ts` `POSTGRES_MIGRATIONS` gains **one** id:
+  `006-look-instances` → `ALTER TABLE project_documents ADD COLUMN IF NOT EXISTS
+look_instances jsonb`. Additive + **nullable**; never `NOT NULL`, never a
+  `DROP`. `runPostgresMigrations` applies it once inside its advisory-locked
+  transaction on API startup; the ledger checksum
+  (`sha256:look-instances-2026-09-09`) makes a later accidental edit a startup
+  failure rather than silent drift.
+  - **Forward-compatible:** an older API build simply does not read the column,
+    so a partial rollout (new web + old api, or vice versa) is safe — the
+    editor's PUT `lookInstances` field is optional and an old API ignores it;
+    an old web build never sends it and the server carries the last value
+    forward.
+  - **Rollback = code rollback only, keep the column + data.** Deploy the
+    previous API build; `006-look-instances` stays applied and the
+    `look_instances` column and its rows remain, simply unread. A destructive
+    `ALTER TABLE project_documents DROP COLUMN look_instances` is a **separate,
+    explicit, last-resort** step (it would lose any operator Look records that
+    only exist server-side after a cross-device edit) — never the default
+    rollback, and only after confirming no client still depends on server Look
+    state.
+  - **This migration is NOT authorized for production apply yet** (owner: Option
+    A develop+test only). It lands on the branch and is tested against the
+    in-memory + pg-mem stores; the production apply happens with the R2 deploy,
+    gated by external Astra's candidate-specific `APPROVE_FOR_DEPLOY`.
+- **`apps/api` runtime changes are limited to the Look Instances sync seam**
+  (`project-document-store.ts`, `postgres-control-plane.ts`, `control-plane.ts`,
+  `http-server.ts`, `project-document-sync-request-validation.ts`,
+  `postgres-migrations.ts`, `postgres-schema.ts`) plus
+  `resumable-original-upload.test.ts` (test-only). The document GET/PUT contract
+  gains one optional `lookInstances` field; every other route is unchanged.
 - **No new dependency.** `pnpm-lock.yaml` and every `package.json` are unchanged
   `855734cf..<candidate>` — zero lock delta. (R1 added `mediabunny`; R2 adds
   nothing.) Rollback is a pure pointer flip.
 - **`packages/project-schema`**: schema **v3** lands additively
-  (`living-look.ts`, `v3.ts`, `migrateV2ToV3`). It ships inside the editor-web
-  bundle, but the editor still reads `JoyProjectV1` (v2 and v3 dual-lens are
-  dormant), so no persisted-document behaviour changes. `LookInstance`
-  persistence is an explicit R2 follow-up (see the acceptance bundle).
+  (`living-look.ts`, `v3.ts`, `migrateV2ToV3`) plus the standalone
+  `look-instances-document.ts` (its own explicit schema + validator). The editor
+  still reads `JoyProjectV1` for the visual document; the Look Instances document
+  is a separate per-project log (`joy-media.look-instances-log.v1`), persisted
+  locally (GAP 1a-local) and — with this release — synced to the server
+  alongside the visual document under one atomic CAS revision (GAP 1a-sync, the
+  `look_instances` column).
 - **`packages/motion-core`**: the pure Look compiler + four shipping packs
   (`music-pulse` held for R2.1, `persian-editorial` retired) + audio-reactive
   baker. No renderer, no wall-clock, no I/O; consumed by the editor bundle.
@@ -121,7 +148,7 @@ git diff --name-only 855734cf..HEAD -- apps/api packages/project-schema/src/inde
 **Checkpoint C1:** `HEAD`, `tree`, `lock sha256` == the Astra triple exactly.
 Any mismatch → `git worktree remove` and re-cut.
 
-### C2 — DB backup (guarded procedure; no migration in this release)
+### C2 — DB backup (guarded procedure; one additive migration in this release)
 
 ```bash
 set -e
@@ -134,7 +161,11 @@ sha256sum /opt/joy-media/data/backups/joymedia-r2-$CAND-predeploy-$ts.dump
 ```
 
 **Checkpoint C2:** dump exists, non-trivial size. Keep until the deploy gate is
-accepted. (No schema change to reverse — code rollback fully reverses R2.)
+accepted. The only schema change is the additive nullable `look_instances`
+column (migration `006-look-instances`); code rollback alone fully reverses R2
+behaviour and the column + data are retained (see C0/§ "additive Postgres
+migration"). The `pg_dump` is the safety net if a destructive column drop is
+ever chosen as a deliberate later step.
 
 ### C3 — build from the lockfile
 

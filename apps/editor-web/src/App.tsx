@@ -1593,6 +1593,10 @@ function EditorWorkspace({
       session.visualProject,
       session.projectRevisionId,
       controlPlaneOwnerKey,
+      // R2 / GAP 1a: the current Look Instances document rides the same PUT
+      // under the same revision id. The project revision already advances on a
+      // Look-only write (`:looks=N`), so this effect fires for a pure detach.
+      session.lookInstances,
     );
   }, [
     controlPlaneOwnerKey,
@@ -1602,6 +1606,7 @@ function EditorWorkspace({
     remoteDocumentBootstrapProjectId,
     session.projectRevisionId,
     session.visualProject,
+    session.lookInstances,
   ]);
   useEffect(() => {
     const autosync = remoteDocumentAutosyncRef.current;

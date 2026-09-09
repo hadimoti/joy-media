@@ -355,4 +355,47 @@ describe('EditorSession — Look Instances document (GAP 1a)', () => {
     expect(kept.visualProject.title).toBe('v1');
     expect(store.values.get(journalKey)).toBeUndefined();
   });
+
+  it('synchronizeLookInstances applies a server document as a snapshot (no Undo) and reopens', () => {
+    const store = memoryStorage();
+    const session = newSession(store);
+    const historyBefore = session.historyEntries.length;
+
+    session.synchronizeLookInstances(lookDoc());
+    expect(session.lookInstances.instances['look-1']).toEqual(instance());
+    expect(session.historyEntries).toHaveLength(historyBefore);
+    expect(store.values.has(LOOK_INSTANCES_LOG_KEY)).toBe(true);
+
+    const reopened = newSession(store);
+    expect(reopened.lookInstances.instances['look-1']).toEqual(instance());
+  });
+
+  it('synchronizeLookInstances with an explicit empty document clears the local one', () => {
+    const store = memoryStorage();
+    const session = newSession(store);
+    session.dispatchCompound('Apply', { lookInstances: lookDoc() });
+    expect(session.lookInstances.instances['look-1']).toBeDefined();
+
+    session.synchronizeLookInstances(emptyLookInstancesDocument(PROJECT_ID));
+    expect(session.lookInstances.instances).toEqual({});
+
+    const reopened = newSession(store);
+    expect(reopened.lookInstances.instances).toEqual({});
+  });
+
+  it('synchronizeLookInstances rejects a malformed server document', () => {
+    const session = newSession();
+    let thrown: unknown;
+    try {
+      session.synchronizeLookInstances({
+        id: PROJECT_ID,
+        schemaVersion: 5,
+        instances: {},
+      } as unknown as LookInstancesDocument);
+    } catch (error) {
+      thrown = error;
+    }
+    expect((thrown as { code?: string }).code).toBe('PERSISTENCE_LOOK_INSTANCES_SYNC_INVALID');
+    expect((thrown as Error).message).toMatch(/invalid/);
+  });
 });
