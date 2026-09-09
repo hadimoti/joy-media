@@ -148,27 +148,50 @@ via these **bounded, enumerable** integration points:
 `assertImportedDocumentsValid` (`project-package.ts`) are the concrete
 export/import edit points; `project-lifecycle.ts` duplication is the third.
 
-## Entity-reference integrity (deleted / replaced visual objects)
+## Entity-reference integrity (deleted / replaced visual objects) — RESOLVED
 
 A `LookInstance` holds `entityBindings` (slot → visual-object id) and
-`createdEntityIds`. If the user deletes a bound visual object:
+`createdEntityIds`. The session layer defines two distinct behaviours (both
+implemented + tested in `editor-session.ts` / `editor-session-look-instances.test.ts`):
 
-- **The instances document is NOT cascade-edited by the deletion.** Cascading
-  would either (a) break the atomic undo of the deletion (the instance edit would
-  need to ride the same compound, across an unrelated user action), or (b) leave
-  a window where the deletion is undone but the binding isn't restored.
-- **`validateLookInstancesDocument` does NOT fail on a dangling id.** Recovery and
-  open must always succeed; a dangling binding is a _content_ condition, not a
-  _corruption_.
-- **Resolution is at use:** the Look compiler (L2) already treats a binding whose
-  target is absent as "skip that binding" (fail-closed, zero ops). GAP 1c's panel
-  surfaces a dangling binding as "target removed — rebind or remove"; `detach`
-  and `resetOverrides` always work regardless.
-- **Replace (id changes):** `remapJson` on import already rewrites ids inside the
-  instances document. In-editor "replace object" keeps the id, so no dangling ref.
+- **On write — REJECT.** `EditorSession.#assertLookInstanceReferencesResolve`
+  runs inside `#prepareCompound`. Any instance that is **new or changed** in the
+  write and whose `entityBindings` target or `createdEntityId` is not a key in
+  the visual document being written by the same compound (or the current one, if
+  the compound leaves the visual document untouched) → the whole compound is
+  rejected with `PERSISTENCE_COMPOUND_LOOK_INSTANCE_DANGLING`, nothing persisted.
+  **A Look Instance is never silently applied to a missing object.** Instances
+  left untouched by the write are not re-checked (a project that already carries
+  an orphan is not bricked by an unrelated Look edit).
+- **On read — MARK ORPHANED.** `validateLookInstancesDocument` does not fail on a
+  dangling id, so recovery and open always succeed. `EditorSession` exposes
+  `orphanedLookInstanceIds` (instances whose `entityBindings` no longer all
+  resolve). This is only ever reachable by a **later** deletion of a bound
+  object, never by an apply. The L2 compiler skips an unresolved binding
+  (fail-closed, zero ops); GAP 1c's panel surfaces it as "target removed —
+  rebind or remove"; `detach` / `resetOverrides` always work.
+- **The instances document is NOT cascade-edited by a deletion.** Cascading
+  would either break the atomic undo of the deletion or leave a window where the
+  deletion is undone but the binding isn't restored.
+- **Replace (id changes):** `remapJson` on import/duplicate rewrites ids inside
+  the instances document. In-editor "replace object" keeps the id, so no
+  dangling ref.
 
-This is the same posture the editor already takes for e.g. a caption clip that
-references a deleted caption document — resolve-at-use, never fail-load.
+Same posture the editor already takes for a caption clip referencing a deleted
+caption document — resolve-at-use, never fail-load — with an added up-front
+rejection so a dangling binding can only ever arrive by deletion, not by apply.
+
+## Implementation status (2026-09-09)
+
+| Piece                                                                                                                                                                           | Commit     | Tests                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------ |
+| `LookInstancesDocument` schema + validator                                                                                                                                      | `3f9efba6` | project-schema +8 (212 total)              |
+| `EditorSession` compound participant (adapter, `#prepareCompound`, undo/redo, recovery switch, `PROJECT_LOG_STORAGE_KEYS`, revision, orphan accessor, dangling-write rejection) | `330b342e` | editor-session\* 37/37 unchanged           |
+| Integration + crash-recovery + failure-injection matrix                                                                                                                         | `ecbc4199` | `editor-session-look-instances.test.ts` 11 |
+| Package export/import + duplication + purge                                                                                                                                     | `b661f54a` | `project-package-look-instances.test.ts` 5 |
+
+Full `pnpm -w run check` (typecheck + lint + format + every package's tests)
+green is the completion gate — GAP 1a is not "done" until that passes.
 
 ## Test plan (all under `pnpm --filter` scopes; project-schema + property-system + editor-web + typecheck)
 
