@@ -9,6 +9,7 @@ import {
   createJoyAgentPagedContext,
   type JoyAgentContextSnapshot,
   type JoyAgentContextSnapshotInput,
+  type JoyAgentLookInstanceContext,
   type JoyAgentPagedContext,
 } from './context-snapshot.js';
 import { isJoyAgentConversationEntityReference } from './conversation-entity-references.js';
@@ -82,6 +83,30 @@ type HostContextDomain = (typeof HOST_CONTEXT_DOMAINS)[number];
 const MAX_HOST_PAGE_SIZE = 32;
 const LOOK_INSTANCE_ID_PATTERN = /^look-[A-Za-z0-9][A-Za-z0-9-]{7,64}$/;
 const LOOK_DEFINITION_ID_PATTERN = /^[a-z][a-z0-9-]{1,63}$/;
+
+/**
+ * Re-assert the opaque-id shape of every Look instance at the host-RPC
+ * publication boundary. The snapshot sanitized these already; repeating the
+ * check here means a hand-constructed context cannot smuggle an arbitrary token
+ * into a Worker response, and — crucially — a record dropped *here* is reported
+ * as an omission so `overview` and `looks` never present an incomplete
+ * projection as an empty one.
+ */
+function assertedLookInstances(context: JoyAgentPagedContext): {
+  readonly instances: readonly JoyAgentLookInstanceContext[];
+  readonly incomplete: boolean;
+} {
+  const instances = context.lookInstances.filter(
+    (instance) =>
+      LOOK_INSTANCE_ID_PATTERN.test(instance.instanceId) &&
+      LOOK_DEFINITION_ID_PATTERN.test(instance.definitionId),
+  );
+  return { instances, incomplete: instances.length !== context.lookInstances.length };
+}
+
+function withLookOmission(omitted: readonly string[], incomplete: boolean): readonly string[] {
+  return incomplete ? [...new Set([...omitted, 'lookInstances'])] : omitted;
+}
 
 export interface JoyAgentPreparedHostResult {
   readonly summary: string;
@@ -1003,6 +1028,7 @@ function pageForContext(
   if (input.domain === 'overview') {
     if (input.cursor !== 0 || input.query !== undefined)
       throw diagnostic('JOY_AGENT_RPC_INVALID_REQUEST', { field: 'cursor' });
+    const overviewLooks = assertedLookInstances(context);
     // The snapshot normally performed this validation already. Repeat it at
     // the actual host-RPC publication boundary so a hand-constructed context
     // cannot smuggle arbitrary project names, text, URLs, or credentials into
@@ -1038,13 +1064,16 @@ function pageForContext(
       // A reopened project's applied Looks are discoverable from `overview`
       // alone: a non-zero count tells a fresh session to page the `looks`
       // domain for the instance ids / pinned pack + version / bindings /
-      // overrides it needs, with no prior chat context.
-      lookInstanceCount: context.lookInstances.length,
-      orphanedLookInstanceCount: context.lookInstances.filter((instance) => instance.orphaned)
+      // overrides it needs, with no prior chat context. The count reflects the
+      // boundary-re-asserted set; if any record was rejected here the `omitted`
+      // list carries `lookInstances` so a zero count is never mistaken for
+      // "no Look applied".
+      lookInstanceCount: overviewLooks.instances.length,
+      orphanedLookInstanceCount: overviewLooks.instances.filter((instance) => instance.orphaned)
         .length,
       creativeBriefAvailable: context.snapshot.creativeBrief !== undefined,
       ...(recentEntityReferences.length === 0 ? {} : { recentEntityReferences }),
-      omitted: [...context.omitted],
+      omitted: [...withLookOmission(context.omitted, overviewLooks.incomplete)],
       catalogs: {
         text: TEXT_TEMPLATES.map((template) => template.id),
         captions: JOY_CAPTION_TEMPLATES.map((template) => template.id),
@@ -1065,30 +1094,29 @@ function pageForContext(
     };
   }
   if (input.domain === 'looks') {
-    // Re-assert the opaque-id shape at the publication boundary — the snapshot
-    // sanitized these already, but a hand-constructed context must not smuggle
-    // an arbitrary token into the Worker response. Optional `query` matches the
-    // pack id / instance id / pack title.
-    const instances = context.lookInstances.filter(
+    // Boundary-re-assert every record, then apply the optional `query` (pack id
+    // / instance id / pack title). A record rejected by the re-assertion is an
+    // omission; a record merely filtered out by `query` is not.
+    const asserted = assertedLookInstances(context);
+    const instances = asserted.instances.filter(
       (instance) =>
-        LOOK_INSTANCE_ID_PATTERN.test(instance.instanceId) &&
-        LOOK_DEFINITION_ID_PATTERN.test(instance.definitionId) &&
-        (input.query === undefined ||
-          instance.definitionId.includes(input.query) ||
-          instance.instanceId.toLowerCase().includes(input.query) ||
-          (instance.packTitle ?? '').toLowerCase().includes(input.query)),
+        input.query === undefined ||
+        instance.definitionId.includes(input.query) ||
+        instance.instanceId.toLowerCase().includes(input.query) ||
+        (instance.packTitle ?? '').toLowerCase().includes(input.query),
     );
     const page = nextPage(
       instances as unknown as readonly HostRpcJson[],
       input.cursor,
       input.pageSize,
     );
+    const omitted = withLookOmission(context.omitted, asserted.incomplete);
     return {
       projectId: context.snapshot.projectId,
       revision,
       domain: 'looks',
       ...page,
-      ...(context.omitted.length === 0 ? {} : { omitted: [...context.omitted] }),
+      ...(omitted.length === 0 ? {} : { omitted: [...omitted] }),
     };
   }
   const source =

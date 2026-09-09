@@ -425,7 +425,7 @@ describe('P1 — cold-session Living Look discoverability', () => {
     expect(instances[0]).not.toHaveProperty('packLatestVersion');
   });
 
-  it('case 4 — project B never exposes project A instances, even reusing a stale context builder', async () => {
+  it('case 4 — a Look id discovered from project A cannot be presented as, or mutate, project B', async () => {
     const storeA = memoryStorage();
     newSession(storeA).dispatchCompound('A', {
       lookInstances: lookDoc([instance({ id: 'look-cold-aaaa-1111-2222-333333333333' })]),
@@ -435,16 +435,57 @@ describe('P1 — cold-session Living Look discoverability', () => {
       lookInstances: lookDoc([instance({ id: 'look-cold-bbbb-1111-2222-333333333333' })]),
     });
 
-    const hostB = reopenHost(storeB);
-    const { instances } = await discoverLooks(hostB.methods);
-    expect(instances.map((i) => i.instanceId)).toEqual(['look-cold-bbbb-1111-2222-333333333333']);
-    expect(JSON.stringify(instances)).not.toContain('look-cold-aaaa');
+    // Cold session against A: discover A's instance id purely from host tools.
+    const hostA = reopenHost(storeA);
+    const { instances: aInstances } = await discoverLooks(hostA.methods);
+    const discoveredAId = aInstances[0]!.instanceId as string;
+    expect(discoveredAId).toBe('look-cold-aaaa-1111-2222-333333333333');
 
-    const overview = (await invokeContext(hostB.methods, { domain: 'overview' })) as Record<
+    // Cold session against B: B's `looks` domain shows only B's instance, and
+    // the response keeps the repository's visual-document vs timeline-project
+    // identity split (projectId = visual doc; entityReferenceProjectId = the
+    // canonical timeline project) — A's ids appear nowhere.
+    const hostB = reopenHost(storeB);
+    const { instances: bInstances } = await discoverLooks(hostB.methods);
+    expect(bInstances.map((i) => i.instanceId)).toEqual(['look-cold-bbbb-1111-2222-333333333333']);
+    expect(JSON.stringify(bInstances)).not.toContain('look-cold-aaaa');
+    const overviewB = (await invokeContext(hostB.methods, { domain: 'overview' })) as Record<
       string,
       HostRpcJson
     >;
-    expect(overview.projectId).toBe(hostB.session.visualProject.id);
+    expect(overviewB.projectId).toBe(hostB.session.visualProject.id);
+    expect(hostB.session.visualProject.id).not.toBe(hostB.session.timelineProject.id);
+    const looksB = (await invokeContext(hostB.methods, {
+      domain: 'looks',
+      cursor: 0,
+      pageSize: 8,
+    })) as Record<string, HostRpcJson>;
+    expect(looksB.projectId).toBe(hostB.session.visualProject.id);
+
+    // Feed A's discovered id into a mutation run scoped to session B. It resolves
+    // against B's Look document, finds nothing, and is refused — no revision
+    // bump, no history entry, B's own instance untouched.
+    const sessionB = newSession(storeB);
+    const beforeRevision = sessionB.projectRevisionId;
+    const beforeHistory = sessionB.historyEntries.length;
+    const run = makeLookDeps(sessionB, {
+      kind: 'update',
+      instanceId: discoveredAId,
+      nextControlValues: { [editorialClean.controls[0]!.id]: 0.9 },
+    });
+    const result = await runScopedLookToolLoop(run.deps, {
+      scope: run.scope,
+      prompt: 'turn A up (wrong project)',
+    });
+    expect(result.kind).not.toBe('prepared');
+    expect(sessionB.projectRevisionId).toBe(beforeRevision);
+    expect(sessionB.historyEntries).toHaveLength(beforeHistory);
+    expect(sessionB.lookInstances.instances[discoveredAId]).toBeUndefined();
+    expect(
+      sessionB.lookInstances.instances['look-cold-bbbb-1111-2222-333333333333']!.controlValues[
+        editorialClean.controls[0]!.id
+      ],
+    ).toBe(0.5);
   });
 
   it('case 5 — update / reset / detach derive ids from discovery, stage without mutating, then apply and Undo', async () => {
@@ -556,10 +597,12 @@ describe('P1 — cold-session Living Look discoverability', () => {
     });
   });
 
-  it('case 6 — unsafe stored text in a Look record is redacted at the context boundary; size controls hold', async () => {
+  it('case 6 — unsafe stored text (URL / drive path) in a Look record is dropped at the context boundary and flagged in `omitted`', async () => {
+    // This case proves redaction only. Nested caps, over-long identifiers,
+    // malformed collection shapes and genuinely oversized input — and that each
+    // is reported in `omitted` — are covered in `cold-session-look-omission.test.ts`.
     const store = memoryStorage();
     const seed = newSession(store);
-    // A malformed/hostile control value written straight to the sync log.
     seed.synchronizeLookInstances(
       lookDoc([
         {
@@ -576,8 +619,10 @@ describe('P1 — cold-session Living Look discoverability', () => {
     );
 
     const session = newSession(store);
-    // Inject an unsafe value into the context input the way a corrupted
-    // in-memory record could, and confirm the snapshot drops it.
+    // `containsForbiddenPayload` blocks a URL / path from ever *persisting* in a
+    // control value or binding target, so the hostile value is injected into the
+    // context input the way a corrupted in-memory record or a future looser
+    // persistence path could, then confirmed dropped at the sanitizer boundary.
     const input = buildJoyAgentContextInput({ session, selectedClipIds: [], playheadUs: 0 });
     const tampered = {
       ...input,
@@ -591,11 +636,21 @@ describe('P1 — cold-session Living Look discoverability', () => {
     expect(JSON.stringify(paged.lookInstances)).not.toContain('exfiltrate.example');
     expect(JSON.stringify(paged.lookInstances)).not.toContain('C:\\Users');
     expect(paged.omitted).toContain('lookInstances');
-    // The safe fields survived.
+    // The record itself is still discoverable; only the unsafe fields are gone.
     expect(paged.lookInstances[0]).toMatchObject({
       instanceId: 'look-cold-safe-1111-2222-333333333333',
+      definitionId: editorialClean.id,
       controlValues: { label: 'ok-value', accent: 'plain text' },
     });
+    expect(paged.lookInstances[0]).not.toHaveProperty('packTitle');
+    // The same signal reaches the host `looks` response, not just the paged view.
+    const methods = createJoyAgentHostRpcMethods({ context: paged });
+    const looks = (await invokeContext(methods, {
+      domain: 'looks',
+      cursor: 0,
+      pageSize: 8,
+    })) as Record<string, HostRpcJson>;
+    expect(looks.omitted).toContain('lookInstances');
   });
 
   it('case 7 — the integration crosses real persistence hydration: a mutated fixture is not accepted as "reopened"', async () => {

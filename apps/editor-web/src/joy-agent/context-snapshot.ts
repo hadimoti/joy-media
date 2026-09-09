@@ -124,6 +124,24 @@ function safeText(value: unknown, maxLength: number): string | undefined {
   return normalized.length === 0 || UNSAFE_CONTEXT_TEXT.test(normalized) ? undefined : normalized;
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Accept an identifier only if it is already valid — never a truncated,
+ * trimmed, or otherwise altered version of a longer string. A mutation key that
+ * `safeText` would silently shorten into a *different* id must be rejected, not
+ * forwarded, so a caller cannot act on an identity the project never held.
+ */
+function exactId(value: unknown, pattern: RegExp, maxLength: number): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  if (value.length === 0 || value.length > maxLength) return undefined;
+  if (value !== value.trim()) return undefined;
+  if (UNSAFE_CONTEXT_TEXT.test(value)) return undefined;
+  return pattern.test(value) ? value : undefined;
+}
+
 function byteLength(value: unknown): number {
   try {
     return new TextEncoder().encode(JSON.stringify(value)).byteLength;
@@ -186,55 +204,107 @@ export interface JoyAgentContextSnapshotInput {
 }
 
 /**
- * Re-sanitize persisted Look-instance context at the boundary. Drops any record
- * (or field) that fails the same opaque-id / bounded-scalar rules the rest of
- * the snapshot enforces; a drop is reported through `omitted`.
+ * Re-sanitize persisted Look-instance context at the boundary. Every rejected
+ * record, rejected field, dropped list entry, and truncated collection is
+ * reported through `omitted` (the reserved `'lookInstances'` label) so a reader
+ * can always tell an *incomplete* projection from an *empty* project. Malformed
+ * runtime shapes (a non-array where a list is expected, a scalar where a map is
+ * expected) are handled predictably here — they never reach a bare
+ * `.slice`/`.map`/`Object.entries` that could throw.
  */
 function sanitizeLookInstances(
   input: readonly JoyAgentLookInstanceContext[] | undefined,
   omitted: Set<string>,
 ): JoyAgentLookInstanceContext[] {
   if (input === undefined) return [];
+  if (!Array.isArray(input)) {
+    omitted.add('lookInstances');
+    return [];
+  }
   if (input.length > MAX_LOOK_INSTANCES) omitted.add('lookInstances');
   const out: JoyAgentLookInstanceContext[] = [];
-  for (const raw of input.slice(0, MAX_LOOK_INSTANCES) as readonly JoyAgentLookInstanceContext[]) {
-    if (raw === null || typeof raw !== 'object') {
+  for (const raw of input.slice(0, MAX_LOOK_INSTANCES)) {
+    const sanitized = sanitizeLookInstance(raw, omitted);
+    if (sanitized !== undefined) out.push(sanitized);
+  }
+  return out;
+}
+
+/** Filter a persisted id list, reporting truncation and every dropped entry. */
+function sanitizeLookIdList(
+  value: unknown,
+  cap: number,
+  omitted: Set<string>,
+  accept: (id: string) => boolean,
+): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    omitted.add('lookInstances');
+    return [];
+  }
+  if (value.length > cap) omitted.add('lookInstances');
+  const out: string[] = [];
+  for (const entry of value.slice(0, cap)) {
+    const id = exactId(entry, LOOK_TOKEN_PATTERN, 128);
+    if (id === undefined || !accept(id)) {
       omitted.add('lookInstances');
       continue;
     }
-    const instanceId = safeText(raw.instanceId, 80);
-    const definitionId = safeText(raw.definitionId, 64);
-    const compositionId = safeText(raw.compositionId, 128);
-    if (
-      instanceId === undefined ||
-      !LOOK_INSTANCE_ID_PATTERN.test(instanceId) ||
-      definitionId === undefined ||
-      !LOOK_DEFINITION_ID_PATTERN.test(definitionId) ||
-      compositionId === undefined ||
-      typeof raw.definitionVersion !== 'number' ||
-      !Number.isInteger(raw.definitionVersion) ||
-      raw.definitionVersion < 1
-    ) {
-      omitted.add('lookInstances');
-      continue;
-    }
-    const entityBindings: Record<string, string> = {};
-    for (const [key, value] of Object.entries(raw.entityBindings ?? {}).slice(
-      0,
-      MAX_LOOK_BINDINGS,
-    )) {
-      const target = safeText(value, 128);
+    out.push(id);
+  }
+  return out;
+}
+
+function sanitizeLookInstance(
+  raw: unknown,
+  omitted: Set<string>,
+): JoyAgentLookInstanceContext | undefined {
+  if (!isPlainRecord(raw)) {
+    omitted.add('lookInstances');
+    return undefined;
+  }
+  const instanceId = exactId(raw.instanceId, LOOK_INSTANCE_ID_PATTERN, 80);
+  const definitionId = exactId(raw.definitionId, LOOK_DEFINITION_ID_PATTERN, 64);
+  const compositionId = exactId(raw.compositionId, LOOK_TOKEN_PATTERN, 128);
+  const definitionVersion = raw.definitionVersion;
+  if (
+    instanceId === undefined ||
+    definitionId === undefined ||
+    compositionId === undefined ||
+    typeof definitionVersion !== 'number' ||
+    !Number.isInteger(definitionVersion) ||
+    definitionVersion < 1
+  ) {
+    omitted.add('lookInstances');
+    return undefined;
+  }
+
+  // entityBindings: bindingId -> entity id. A non-record shape (array, scalar)
+  // is reported and the record kept with no bindings — never read positionally.
+  const entityBindings: Record<string, string> = {};
+  if (raw.entityBindings !== undefined && !isPlainRecord(raw.entityBindings)) {
+    omitted.add('lookInstances');
+  } else if (isPlainRecord(raw.entityBindings)) {
+    const entries = Object.entries(raw.entityBindings);
+    if (entries.length > MAX_LOOK_BINDINGS) omitted.add('lookInstances');
+    for (const [key, value] of entries.slice(0, MAX_LOOK_BINDINGS)) {
+      const target = exactId(value, LOOK_TOKEN_PATTERN, 128);
       if (!LOOK_TOKEN_PATTERN.test(key) || target === undefined) {
         omitted.add('lookInstances');
         continue;
       }
       entityBindings[key] = target;
     }
-    const controlValues: Record<string, number | string | boolean> = {};
-    for (const [key, value] of Object.entries(raw.controlValues ?? {}).slice(
-      0,
-      MAX_LOOK_CONTROL_VALUES,
-    )) {
+  }
+  const knownBindingIds = new Set(Object.keys(entityBindings));
+
+  const controlValues: Record<string, number | string | boolean> = {};
+  if (raw.controlValues !== undefined && !isPlainRecord(raw.controlValues)) {
+    omitted.add('lookInstances');
+  } else if (isPlainRecord(raw.controlValues)) {
+    const entries = Object.entries(raw.controlValues);
+    if (entries.length > MAX_LOOK_CONTROL_VALUES) omitted.add('lookInstances');
+    for (const [key, value] of entries.slice(0, MAX_LOOK_CONTROL_VALUES)) {
       if (!LOOK_TOKEN_PATTERN.test(key)) {
         omitted.add('lookInstances');
         continue;
@@ -250,46 +320,59 @@ function sanitizeLookInstances(
         controlValues[key] = text;
       }
     }
-    const knownBindingIds = new Set(Object.keys(entityBindings));
-    const overriddenBindingIds = (raw.overriddenBindingIds ?? [])
-      .slice(0, MAX_LOOK_OVERRIDES)
-      .map((id) => safeText(id, 128))
-      .filter((id): id is string => id !== undefined && LOOK_TOKEN_PATTERN.test(id));
-    const missingBindingIds = (raw.missingBindingIds ?? [])
-      .slice(0, MAX_LOOK_BINDINGS)
-      .map((id) => safeText(id, 128))
-      .filter((id): id is string => id !== undefined && knownBindingIds.has(id));
-    const createdEntityIds = (raw.createdEntityIds ?? [])
-      .slice(0, MAX_LOOK_CREATED_ENTITIES)
-      .map((id) => safeText(id, 128))
-      .filter((id): id is string => id !== undefined);
-    const packTitle = raw.packTitle === undefined ? undefined : safeText(raw.packTitle, 160);
-    const packStatus = raw.packStatus === 'known' ? 'known' : 'unknown';
-    const packLatestVersionValid =
+  }
+
+  const overriddenBindingIds = sanitizeLookIdList(
+    raw.overriddenBindingIds,
+    MAX_LOOK_OVERRIDES,
+    omitted,
+    () => true,
+  );
+  const missingBindingIds = sanitizeLookIdList(
+    raw.missingBindingIds,
+    MAX_LOOK_BINDINGS,
+    omitted,
+    (id) => knownBindingIds.has(id),
+  );
+  const createdEntityIds = sanitizeLookIdList(
+    raw.createdEntityIds,
+    MAX_LOOK_CREATED_ENTITIES,
+    omitted,
+    () => true,
+  );
+
+  let packTitle: string | undefined;
+  if (raw.packTitle !== undefined) {
+    packTitle = safeText(raw.packTitle, 160);
+    if (packTitle === undefined) omitted.add('lookInstances');
+  }
+  let packLatestVersion: number | undefined;
+  if (raw.packLatestVersion !== undefined) {
+    if (
       typeof raw.packLatestVersion === 'number' &&
       Number.isInteger(raw.packLatestVersion) &&
-      raw.packLatestVersion >= 1;
-    out.push(
-      Object.freeze({
-        instanceId,
-        definitionId,
-        definitionVersion: raw.definitionVersion,
-        compositionId,
-        packStatus,
-        ...(packStatus === 'known' && packTitle !== undefined ? { packTitle } : {}),
-        ...(packStatus === 'known' && packLatestVersionValid
-          ? { packLatestVersion: raw.packLatestVersion }
-          : {}),
-        entityBindings: Object.freeze(entityBindings),
-        missingBindingIds: Object.freeze(missingBindingIds),
-        orphaned: missingBindingIds.length > 0 || raw.orphaned === true,
-        overriddenBindingIds: Object.freeze(overriddenBindingIds),
-        controlValues: Object.freeze(controlValues),
-        createdEntityIds: Object.freeze(createdEntityIds),
-      }),
-    );
+      raw.packLatestVersion >= 1
+    )
+      packLatestVersion = raw.packLatestVersion;
+    else omitted.add('lookInstances');
   }
-  return out;
+  const packStatus = raw.packStatus === 'known' ? 'known' : 'unknown';
+
+  return Object.freeze({
+    instanceId,
+    definitionId,
+    definitionVersion,
+    compositionId,
+    packStatus,
+    ...(packStatus === 'known' && packTitle !== undefined ? { packTitle } : {}),
+    ...(packStatus === 'known' && packLatestVersion !== undefined ? { packLatestVersion } : {}),
+    entityBindings: Object.freeze(entityBindings),
+    missingBindingIds: Object.freeze(missingBindingIds),
+    orphaned: missingBindingIds.length > 0 || raw.orphaned === true,
+    overriddenBindingIds: Object.freeze(overriddenBindingIds),
+    controlValues: Object.freeze(controlValues),
+    createdEntityIds: Object.freeze(createdEntityIds),
+  });
 }
 
 /** Build one immutable, byte-bounded model context; never forwards project objects. */
@@ -634,13 +717,20 @@ export function createJoyAgentPagedContext(
   const trackIds = pageChunks(normalizeTrackIds, 128)
     .flatMap((page) => createJoyAgentContextSnapshot({ ...common, trackIds: page }).trackIds ?? [])
     .slice(0, JOY_AGENT_HOST_CONTEXT_MAX_RECORDS);
-  const normalizeLookInstances = input.lookInstances ?? [];
-  const lookInstances = pageChunks(normalizeLookInstances, MAX_LOOK_INSTANCES)
-    .flatMap(
-      (page) =>
-        createJoyAgentContextSnapshot({ ...common, lookInstances: page }).lookInstances ?? [],
-    )
+  const normalizeLookInstances = Array.isArray(input.lookInstances) ? input.lookInstances : [];
+  if (input.lookInstances !== undefined && !Array.isArray(input.lookInstances))
+    omitted.push('lookInstances');
+  const lookInstanceChunks = pageChunks(normalizeLookInstances, MAX_LOOK_INSTANCES).map((page) =>
+    createJoyAgentContextSnapshot({ ...common, lookInstances: page }),
+  );
+  const lookInstances = lookInstanceChunks
+    .flatMap((chunk) => chunk.lookInstances ?? [])
     .slice(0, JOY_AGENT_HOST_CONTEXT_MAX_RECORDS);
+  // Preserve omission metadata from EVERY Look chunk — including chunks past the
+  // first MAX_LOOK_INSTANCES that the compact model snapshot never inspects, so
+  // a field truncated or dropped only in a later chunk is still reported.
+  if (lookInstanceChunks.some((chunk) => chunk.omitted.includes('lookInstances')))
+    omitted.push('lookInstances');
 
   if (clips.length < normalizeClips.length) omitted.push('clips');
   if (assets.length < normalizeAssets.length) omitted.push('assets');
