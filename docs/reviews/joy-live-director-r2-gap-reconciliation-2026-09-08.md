@@ -439,8 +439,35 @@ deploy is gated by external Astra's candidate-specific `APPROVE_FOR_DEPLOY`.
   hydration R4 ×5, sync forward/omit, editor-session snapshot/empty/malformed).
 
 **GAP 1a is now local-verified AND sync-implemented** (dev+test; production apply
-Astra-gated). GAP 5 + GAP 1a-sync done. Remaining: **GAP 2 audio → GAP 4
-rendered/export acceptance.**
+Astra-gated). GAP 5 + GAP 1a-sync done.
+
+### Update 2026-09-09e — GAP 2 + GAP 4 (`961eb070..c629acde`)
+
+- **GAP 2 (audio-reactive Looks end to end):** `resolveLookAudioBakeTargets`
+  (motion-core) + `bakeLookFromAudio` (decoded PCM → R1 beat envelope → look
+  envelope → bounded keyframe tracks) + `loadCompositionAudioForLook`
+  (resolve/fetch/decode, effects injected) + `LivingLooksRunInput.audioBakes`
+  threaded through `resolveLivingLookRun` into `LookCompileInput.audioBakes` (the
+  compiler already emits baked keys verbatim). Panel: "Bake motion from
+  composition audio" on the apply form + applied-look row, shown only with an
+  audio track present + a keyframe binding. Silence / low beat confidence → flat
+  rest line (no invented downbeat); a source speed change re-derives the timing.
+  Tests: `audio-bake-targets` (4), `living-look-audio` (5), `living-look-audio-source`
+  (6), `living-look-audio-render` (2 — via `sampleCurve`), `LivingLooksPanel`
+  bake affordance (2), e2e `living-looks-audio-motion.spec.ts` (real-browser
+  decode).
+- **GAP 4 (rendered-frame + export acceptance):**
+  `looks-render-acceptance.test.ts` — 5 packs × portrait/landscape through the
+  single `buildRenderFrameIRFromProject` boundary, Pixi-preview vs
+  headless-export pixel parity at first/mid/settle, real motion + legibility.
+  Supplements (does not replace) `packs-render-fidelity.test.ts`.
+- **Deferred (owner/CI-gated, not implementation):** the fully-exported-MP4
+  decode-and-check-the-scale-peak-and-A/V-sync step; and the sanitized
+  sample-render taste read for the scorecard.
+
+Remaining: **fold `codex/joy-live-director-ci-opt` (after CI v2 accepted) → final
+R2 candidate → full check on that SHA → Astra `APPROVE_FOR_DEPLOY`.** No R2
+implementation gaps remain.
 
 **Open R2 _acceptance_ items (not implementation):**
 
@@ -508,11 +535,29 @@ evidence only.
 
 ### Audio / export (GAP 2 + GAP 4)
 
-- [ ] Decode the **exported media** and assert it actually contains the expected
-      audio-reactive motion (the scale/opacity peak lands within tolerance of
-      the beat) **and** synchronized audio. Numeric compiler tests
-      (`bakeAudioReactive`, `packs-render-fidelity`) alone do **not** close
-      GAP 2 or GAP 4.
+- [~] **Partly covered — the render/evaluator side is done; the fully-exported-media
+  pixel + A/V-sync check remains an owner/CI acceptance step.**
+  - [x] GAP 2 render path: `living-look-audio-render.test.ts` + the e2e
+        `living-looks-audio-motion.spec.ts` drive synthetic beat audio →
+        `bakeLookFromAudio` → `compileLook` → `sampleCurve` (the renderer's own
+        evaluator, shared by Monitor + export). The subject scale peaks near the
+        majority of beats and rests between, inside `[1, 1.12]`; silence renders
+        flat. The e2e does the decode in a **real browser AudioContext**.
+  - [x] GAP 4 render path: `packages/visual-object-renderer/src/looks-render-acceptance.test.ts`
+        renders each of the 5 packs × portrait/landscape through
+        `buildRenderFrameIRFromProject` (the one Monitor+export project→frame
+        boundary) and asserts the **Pixi preview adapter and the headless export
+        adapter produce pixel-identical output** at first/mid/settle frames, with
+        real motion + legibility invariants.
+  - [ ] **Still owner/CI-gated:** export a Music-Pulse-with-audio-bake project to
+        an actual MP4 through the browser export pipeline, decode it with
+        `createBrowserFinalEncodedExportDecoder`, and confirm (a) a decoded video
+        frame near a beat shows the scale peak and (b) a synchronized audio
+        track is present. This needs the full export pipeline + a real workspace
+        audio asset — the same class of step as the per-pack taste reviews.
+        Numeric compiler tests (`bakeAudioReactive`, `packs-render-fidelity`) alone
+        do **not** close GAP 2/4 — the above render/evaluator/adapter-parity tests
+        do the real work; only the final encoded-media check is deferred.
 
 ### Release gating
 
