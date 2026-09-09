@@ -21,48 +21,47 @@ boundary, one Undo grouping.
 
 ## Landed
 
-| Commit     | What                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0797e809` | `look-instance-operations.ts` — pure helpers: `buildLookInstanceRecord` (a reset drops exactly the reset bindings from `overriddenBindingIds`), `upsertLookInstance` / `detachLookInstance`, `lookInstanceUpdateCompileInput`, `markLookBindingOverridden` (idempotent), `orphanedLookInstanceIds`. 6 unit tests.                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `4f41af53` | Threaded the `LookInstance` write through the approval compound. `JoyCodeCompoundCompilerInput` / `JoyCodeCompoundDraft` gain an optional `lookInstances`, folded into `operationDigest` (+ `compiledDigest`/`bindingDigest` via `canonicalDraft`). Every spread is `...(x === undefined ? {} : {...})` → a non-Look change's digest and serialized draft are **byte-identical** to before. `edit-proposal-staging` `lookInstancesWrite?`; `look-run-host` `LookRunInput.lookInstancesWrite?`; runner → `commitAgentCompound({ …, lookInstances })` + committed-payload readback verifies `session.lookInstances`. Tests: a Look draft commits the instance atomically with keyframes, one undo reverts BOTH; the digest moves on a `lookInstances` change, not on a non-Look change. |
-| `13dfbdd9` | `AgentPanel.runLook` (apply) now builds a `LookInstance` from its `compileInput` and passes `upsertLookInstance(session.lookInstances, record)` as `lookInstancesWrite`. **A Look apply is now reopenable, and one Undo reverts the instance + keyframes together.**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Commit                             | What                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0797e809`                         | `look-instance-operations.ts` — pure helpers: `buildLookInstanceRecord` (a reset drops exactly the reset bindings from `overriddenBindingIds`), `upsertLookInstance` / `detachLookInstance`, `lookInstanceUpdateCompileInput`, `markLookBindingOverridden` (idempotent), `orphanedLookInstanceIds`. 6 unit tests.                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `4f41af53`                         | Threaded the `LookInstance` write through the approval compound. `JoyCodeCompoundCompilerInput` / `JoyCodeCompoundDraft` gain an optional `lookInstances`, folded into `operationDigest` (+ `compiledDigest`/`bindingDigest` via `canonicalDraft`). Every spread is `...(x === undefined ? {} : {...})` → a non-Look change's digest and serialized draft are **byte-identical** to before. `edit-proposal-staging` `lookInstancesWrite?`; `look-run-host` `LookRunInput.lookInstancesWrite?`; runner → `commitAgentCompound({ …, lookInstances })` + committed-payload readback verifies `session.lookInstances`. Tests: a Look draft commits the instance atomically with keyframes, one undo reverts BOTH; the digest moves on a `lookInstances` change, not on a non-Look change. |
+| `13dfbdd9`                         | `AgentPanel.runLook` (apply) persists a reopenable `LookInstance` atomically with the keyframes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `e07f2ea8`                         | `LivingLooksRunInput` → discriminated union (`apply`/`update`/`reset`/`detach`); `LivingLooksPanel` "Applied Looks" section (list, editable controls → `update`, Detach, reset-overrides, orphan marker); `AgentPanel.runLook` branches (`update`/`reset` → `lookInstanceUpdateCompileInput` → same `stageLookRun`; `detach` → direct `dispatchCompound`). `appliedLooks` memo from `session.lookInstances` + `orphanedLookInstanceIds`. +2 panel tests.                                                                                                                                                                                                                                                                                                                              |
+| `2546ce30`                         | `lookBindingKeyIndex` + `markOverridesFromCommittedKeys` — map committed `propertyAnimations` keys back to `LookInstance.overriddenBindingIds`; idempotent; manual == agent. +1 test.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| e2e (`agent-living-looks.spec.ts`) | **PASSING on desktop-primary**: apply → Approve → Applied Looks lists it → `page.reload()` → the Look is still there (persisted) → adjust a control → Approve → Detach removes it → one Undo restores it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+
+**Full `pnpm -w run check` green through `e07f2ea8`** (4240 tests). `2546ce30`
+
+- the e2e add tests still to be re-confirmed by a full run.
 
 ## Remaining GAP 1b/5
 
-### 1. Panel + input model — `LivingLooksPanel.tsx` / `AgentPanel.tsx`
+### 1. Panel + input model — ✅ DONE (`e07f2ea8`, e2e passing)
 
-- `LivingLooksPanel` lists the applied `LookInstance`s for the active composition
-  (`session.lookInstances`, filtered by `compositionId`), with the pack title,
-  the operator's control values, and an "override" marker on any binding in
-  `overriddenBindingIds`. Orphaned instances (`session.orphanedLookInstanceIds`)
-  render "target removed — rebind or remove".
-- `LivingLooksRunInput` gains a discriminated `kind`: `apply` (as now),
-  `update` (`instanceId` + `nextControlValues` / `nextEntityBindings`),
-  `reset` (`instanceId` + `bindingIds`), `detach` (`instanceId`).
-- `AgentPanel.runLook` branches on `kind`:
-  - `update` / `reset` → `lookInstanceUpdateCompileInput(instance, change, ctx)` →
-    `prepareLookPlan` → `stageLookRun` with
-    `lookInstancesWrite = upsertLookInstance(doc, buildLookInstanceRecord(instance.id, updatedInput))`.
-  - `detach` → no plan; `session.dispatchCompound('Detach Look', { lookInstances: detachLookInstance(doc, instanceId) })` directly (one document, trivially atomic, one Undo).
+### 2. Agent capability — `updateLook` / `detachLook` (SCOPE CALL)
 
-### 2. Agent capability — `runLook` / `updateLook` / `detachLook`
+Looks are currently a **manual-only** capability (`LivingLooksPanel`); there is no
+agent-facing Look tool (the _recipe_ system is the agent's creative layer). GAP 5
+"manual/agent parity" is **structurally satisfied**: `runLook` is the single code
+path for apply/update/reset/detach, `look-instance-operations` is one code path,
+and a test proves manual and agent override-marking are identical. A dedicated
+agent `applyLook` / `updateLook` / `detachLook` capability (schema + tool-loop
+registration + prompt) is net-new surface — **owner scope call**: is
+agent-driven Look application in R2, or is the manual panel + the existing recipe
+system sufficient? If yes, it is a thin wrapper that constructs the same
+`LivingLooksRunInput` and calls `runLook` — one GAP-5 byte-identical-change-set
+test.
 
-Add to the composer capability manifest (same registry the recipes use). Each
-capability is a thin wrapper that constructs the same `LivingLooksRunInput` and
-calls the identical host op. A user-directed `updateLook` and a manual panel
-`update` with the same inputs must produce byte-identical change-sets (GAP 5
-test).
+### 3. Override marking — Inspector property-commit seam (LOGIC DONE, WIRING PENDING)
 
-### 3. Override marking — Inspector property-commit seam
+`markOverridesFromCommittedKeys` (`2546ce30`) is the tested logic. Remaining: call
+it in `App.tsx`'s visual-object property-commit compound — when a manual (or
+user-directed agent) keyframe edit commits `propertyAnimations` keys, pass
+`markOverridesFromCommittedKeys(session.lookInstances, defsById, committedKeys)`
+as the `lookInstances` part of the SAME `dispatchCompound` so one Undo reverts
+both. Deep `App.tsx` seam — identify the exact visual-object commit call site.
 
-When a manual Inspector edit (or a user-directed agent edit) commits a keyframe
-on a binding that a `LookInstance` links, add that `bindingId` to the instance's
-`overriddenBindingIds` **in the same compound** via `markLookBindingOverridden`.
-Hook the existing visual-object property-commit path in `App.tsx` /
-`dispatchVisualObjects` so manual and agent edits mark identically. A reapply
-then leaves that binding alone until an explicit `reset`.
-
-### 4. e2e — `tests/e2e/agent-living-looks.spec.ts` (extended)
+### 4. e2e — ✅ DONE (extended `agent-living-looks.spec.ts`, passing)
 
 apply a Look → reload the project → the Look is still listed and reopenable →
 adjust a control → Approve → Undo/Redo restore exactly → hand-edit one bound
