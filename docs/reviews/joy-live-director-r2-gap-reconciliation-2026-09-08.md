@@ -337,6 +337,54 @@ in the Sequencing order above. GAP 3 is done. Foundation is intact and needs onl
 re-verification at the final candidate (full `pnpm test` + tsc + lint +
 `agent-living-looks` e2e), not rework.
 
+### Update 2026-09-09c — GAP 5 real agent Look capability landed (`e65c132a..f80e029a`)
+
+GAP 1a-local, GAP 1b, GAP 1c and the Inspector override-marking seam were
+completed earlier (see Update 2026-09-09b). **GAP 5 now has real agent
+capability**, not just a shared internal helper:
+
+- **4 model-visible host tools** — `look_apply`, `look_update`,
+  `look_reset_overrides`, `look_detach` — added to the closed
+  `JOY_AGENT_HOST_TOOL_NAMES` vocabulary; protocol validation auto-extends.
+  Pattern-bounded schemas in `bounded-tool-loop.ts`; terminal on success like
+  `validate_proposal`; opt-in only (absent from every default allow-list).
+- **One resolution path** (`joy-agent/living-look-run.ts` `resolveLivingLookRun`)
+  shared by the panel (`runLook`) and the agent host method — a manual and an
+  agent adjustment stage a byte-identical change.
+- **Same canonical operation path** — the agent tool → `look-tool-bridge.ts`
+  host method → `resolveLivingLookRun` → `stageLookRun` /
+  `stageLookInstancesOnly` → the shared `validate_proposal` staging handler
+  (leases, stale-revision, host-authority all enforced) → the same approval card
+  → `JoyCodeCompoundRunner` → atomic compound + one Undo. `look_detach` from the
+  agent STAGES for approval (a zero-visual-operation `lookInstances`-only
+  compound — new `JOY_CODE_COMPOUND_EMPTY` carve-out); the manual panel Detach
+  button still commits directly on the operator's click.
+- **Scoped loop** (`joy-agent/look-scoped-host.ts` `runScopedLookToolLoop`) reuses
+  the built-in Worker via `runScopedCreativeSkillToolLoop`; no separate route
+  around leases / stale-revision / approval.
+- **UI**: `LivingLooksPanel` "Ask JOY" affordance → `AgentPanel.runAgentLook`,
+  shown only when a structured-tool model is configured.
+- **Actual tool-loop execution tests**: `bounded-tool-loop.test.ts` (real bounded
+  loop, model emits `look_apply` → terminal prepared); `look-scoped-host.test.ts`
+  (real scoped loop against a real `EditorSession`: apply → commit → one Undo
+  reverts keyframes + instance; agent detach staged not auto-applied → approve →
+  instance gone / keyframes stay / one Undo restores; stale scope → failed,
+  nothing staged; `look_update` recompiles). Plus `living-look-run.test.ts`,
+  `look-tool-bridge.test.ts`, `LivingLooksPanel.test.tsx` "Ask JOY".
+- Full `pnpm -w run check` on frozen **`f80e029a`**: 532 files / 4263 tests pass;
+  the one failure (`tooling/release/src/font-assets.test.ts` "is clean through
+  the same scanner used by release:gate") is the **known pre-existing 5 s
+  filesystem-walk timeout under full-suite parallel load** — passes in 212 ms in
+  isolation on the same SHA (documented earlier). Not caused by this work (all
+  changes are under `apps/editor-web/src/joy-agent/`, `LivingLooksPanel`,
+  `AgentPanel`, `app.css`).
+
+**Known follow-up (not blocking GAP 5 acceptance):** the agent context
+(`read_project_context`) does not yet expose applied Look instance ids as a
+paged domain, so `look_update` / `look_reset_overrides` / `look_detach` are
+agent-reachable within a thread (the staging message names the instance ids) but
+not from a cold context. A `looks` context domain is a small, safe follow-up.
+
 **Open R2 _acceptance_ items (not implementation):**
 
 - Per-pack owner taste verdicts re-confirmed for the **final** candidate's 5

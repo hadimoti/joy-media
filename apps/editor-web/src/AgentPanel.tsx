@@ -2419,10 +2419,18 @@ export function AgentPanel({
       });
       setPreparedModelChange(prepared.changeSetId);
       setAgentPhase('awaiting-approval');
+      // Name the affected Look instance id(s) in the thread so a follow-up agent
+      // turn ("now soften the entrance") can target them via conversation
+      // context without the raw ids being exposed through the Worker boundary.
+      const stagedLookIds = Object.keys(
+        preparedChanges.getPreviewDraft(prepared.changeSetId)?.lookInstances?.instances ?? {},
+      );
       appendMessage(
         threadId,
         'assistant',
-        `JOY prepared a reversible Look change (${result.operationCount} operation(s)). Review the live preview before applying.`,
+        `JOY prepared a reversible Look change (${result.operationCount} operation(s)). Review the live preview before applying.${
+          stagedLookIds.length > 0 ? ` Look instance(s): ${stagedLookIds.join(', ')}.` : ''
+        }`,
       );
     } catch (error) {
       if (recipeRunScopeRef.current?.runId !== scope.runId) return;
