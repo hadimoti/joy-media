@@ -76,9 +76,12 @@ const HOST_CONTEXT_DOMAINS = [
   'assets',
   'visual-objects',
   'titles',
+  'looks',
 ] as const;
 type HostContextDomain = (typeof HOST_CONTEXT_DOMAINS)[number];
 const MAX_HOST_PAGE_SIZE = 32;
+const LOOK_INSTANCE_ID_PATTERN = /^look-[A-Za-z0-9][A-Za-z0-9-]{7,64}$/;
+const LOOK_DEFINITION_ID_PATTERN = /^[a-z][a-z0-9-]{1,63}$/;
 
 export interface JoyAgentPreparedHostResult {
   readonly summary: string;
@@ -1032,6 +1035,13 @@ function pageForContext(
       clipCount: context.clips.length,
       assetCount: context.assets.length,
       visualObjectCount: context.visualObjects.length,
+      // A reopened project's applied Looks are discoverable from `overview`
+      // alone: a non-zero count tells a fresh session to page the `looks`
+      // domain for the instance ids / pinned pack + version / bindings /
+      // overrides it needs, with no prior chat context.
+      lookInstanceCount: context.lookInstances.length,
+      orphanedLookInstanceCount: context.lookInstances.filter((instance) => instance.orphaned)
+        .length,
       creativeBriefAvailable: context.snapshot.creativeBrief !== undefined,
       ...(recentEntityReferences.length === 0 ? {} : { recentEntityReferences }),
       omitted: [...context.omitted],
@@ -1052,6 +1062,33 @@ function pageForContext(
       revision,
       available: true,
       creativeBrief: JSON.parse(JSON.stringify(context.snapshot.creativeBrief)) as HostRpcJson,
+    };
+  }
+  if (input.domain === 'looks') {
+    // Re-assert the opaque-id shape at the publication boundary — the snapshot
+    // sanitized these already, but a hand-constructed context must not smuggle
+    // an arbitrary token into the Worker response. Optional `query` matches the
+    // pack id / instance id / pack title.
+    const instances = context.lookInstances.filter(
+      (instance) =>
+        LOOK_INSTANCE_ID_PATTERN.test(instance.instanceId) &&
+        LOOK_DEFINITION_ID_PATTERN.test(instance.definitionId) &&
+        (input.query === undefined ||
+          instance.definitionId.includes(input.query) ||
+          instance.instanceId.toLowerCase().includes(input.query) ||
+          (instance.packTitle ?? '').toLowerCase().includes(input.query)),
+    );
+    const page = nextPage(
+      instances as unknown as readonly HostRpcJson[],
+      input.cursor,
+      input.pageSize,
+    );
+    return {
+      projectId: context.snapshot.projectId,
+      revision,
+      domain: 'looks',
+      ...page,
+      ...(context.omitted.length === 0 ? {} : { omitted: [...context.omitted] }),
     };
   }
   const source =

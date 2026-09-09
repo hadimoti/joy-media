@@ -6,9 +6,13 @@
  */
 
 import type { CreativeBriefV1 } from '@joy-media/agent-tools';
+import { BUILT_IN_LOOK_PACKS } from '@joy-media/motion-core';
 import type { EditorSession } from '../editor-session.js';
 import { resolveObjectIdForSelection } from '../sticker-bindings.js';
-import type { JoyAgentContextSnapshotInput } from './context-snapshot.js';
+import type {
+  JoyAgentContextSnapshotInput,
+  JoyAgentLookInstanceContext,
+} from './context-snapshot.js';
 import type { JoyAgentConversationEntityReference } from './conversation-entity-references.js';
 
 export interface BuildJoyAgentContextInput {
@@ -38,6 +42,36 @@ export function buildJoyAgentContextInput(
     input.selectedEntityReference?.entityKind.startsWith('visual-') === true
       ? [input.selectedEntityReference.entityId]
       : [];
+
+  // Applied Look instances from the reopened canonical `LookInstancesDocument`.
+  // This is the only path by which a fresh agent session — no prior chat, no
+  // owner-supplied ids — can discover the instance ids, pinned pack + version,
+  // bindings, orphan state and overrides it needs to reason about
+  // `look_update` / `look_reset_overrides` / `look_detach`.
+  const liveVisualObjectIds = new Set(Object.keys(session.visualProject.visualObjects));
+  const orphanedInstanceIds = new Set(session.orphanedLookInstanceIds);
+  const lookInstances: JoyAgentLookInstanceContext[] = Object.values(
+    session.lookInstances.instances,
+  ).map((instance) => {
+    const pack = BUILT_IN_LOOK_PACKS.find((candidate) => candidate.id === instance.definitionId);
+    const missingBindingIds = Object.entries(instance.entityBindings)
+      .filter(([, target]) => !liveVisualObjectIds.has(target))
+      .map(([bindingId]) => bindingId);
+    return {
+      instanceId: instance.id,
+      definitionId: instance.definitionId,
+      definitionVersion: instance.definitionVersion,
+      compositionId: instance.compositionId,
+      packStatus: pack === undefined ? ('unknown' as const) : ('known' as const),
+      ...(pack === undefined ? {} : { packTitle: pack.title, packLatestVersion: pack.version }),
+      entityBindings: instance.entityBindings,
+      missingBindingIds,
+      orphaned: missingBindingIds.length > 0 || orphanedInstanceIds.has(instance.id),
+      overriddenBindingIds: instance.overriddenBindingIds,
+      controlValues: instance.controlValues,
+      createdEntityIds: instance.createdEntityIds,
+    };
+  });
 
   return {
     projectId: session.visualProject.id,
@@ -97,6 +131,7 @@ export function buildJoyAgentContextInput(
     ...(input.recentEntityReferences === undefined || input.recentEntityReferences.length === 0
       ? {}
       : { recentEntityReferences: input.recentEntityReferences }),
+    ...(lookInstances.length === 0 ? {} : { lookInstances }),
     ...(input.creativeBrief === undefined ? {} : { creativeBrief: input.creativeBrief }),
   };
 }

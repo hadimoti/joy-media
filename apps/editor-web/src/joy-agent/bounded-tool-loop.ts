@@ -128,13 +128,22 @@ const READ_PROJECT_CONTEXT_TOOL: BrowserAgentToolDefinition = {
   function: {
     name: 'read_project_context',
     description:
-      'Read one frozen, paged project context domain. Use overview first; then query tracks, clips, assets, visual-objects, titles, or the attached Creative Brief with a cursor and optional title query.',
+      'Read one frozen, paged project context domain. Use overview first; then query tracks, clips, assets, visual-objects, titles, looks, or the attached Creative Brief with a cursor and optional query. The looks domain lists the reopened project’s applied Living Look instances — instance id, pinned pack id + version, entity bindings, missing/orphaned targets, hand-edited overrides — which is how you discover what look_update / look_reset_overrides / look_detach must target when there is no prior chat context. overview reports lookInstanceCount and orphanedLookInstanceCount.',
     parameters: {
       type: 'object',
       properties: {
         domain: {
           type: 'string',
-          enum: ['overview', 'brief', 'tracks', 'clips', 'assets', 'visual-objects', 'titles'],
+          enum: [
+            'overview',
+            'brief',
+            'tracks',
+            'clips',
+            'assets',
+            'visual-objects',
+            'titles',
+            'looks',
+          ],
         },
         cursor: { type: 'integer', minimum: 0 },
         pageSize: { type: 'integer', minimum: 1, maximum: 32 },
@@ -404,7 +413,7 @@ const LOOK_UPDATE_TOOL: BrowserAgentToolDefinition = {
   function: {
     name: 'look_update',
     description:
-      'Adjust an already-applied Living Look instance: change its control values and/or its entity bindings. The host recompiles the pinned definition and stages a reversible preview for approval.',
+      'Adjust an already-applied Living Look instance: change its control values and/or its entity bindings. Get the instanceId (and its current control values / bindings / overrides) from read_project_context domain=looks. The host recompiles the pinned definition and stages a reversible preview for approval.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -423,7 +432,7 @@ const LOOK_RESET_OVERRIDES_TOOL: BrowserAgentToolDefinition = {
   function: {
     name: 'look_reset_overrides',
     description:
-      'Put hand-edited bindings of a Living Look instance back under Look control, then recompile. Stages a reversible preview for approval.',
+      'Put hand-edited bindings of a Living Look instance back under Look control, then recompile. Get the instanceId and its overriddenBindingIds from read_project_context domain=looks. Stages a reversible preview for approval.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -446,7 +455,7 @@ const LOOK_DETACH_TOOL: BrowserAgentToolDefinition = {
   function: {
     name: 'look_detach',
     description:
-      'Detach a Living Look instance: drop the reopenable Look record and leave its authored keyframes as ordinary editable animation. Stages a reversible change (no visual diff) for operator approval — an agent detach is never auto-applied.',
+      'Detach a Living Look instance: drop the reopenable Look record and leave its authored keyframes as ordinary editable animation. Get the instanceId from read_project_context domain=looks. Stages a reversible change (no visual diff) for operator approval — an agent detach is never auto-applied.',
     strict: true,
     parameters: {
       type: 'object',
