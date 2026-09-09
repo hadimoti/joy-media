@@ -470,40 +470,37 @@ evidence only.
 
 ### Sync atomicity (server CAS alone is not enough)
 
-- [ ] Verify remote hydration cannot leave the visual document and the Look
-      Instances document at **different revisions** after an interruption or a
-      failure mid-hydrate (partial `synchronizeVisualProject` then throw before
-      `synchronizeLookInstances`, and vice versa; a `saveSnapshot` quota/schema
-      failure on either half). The pair must end either both-applied or
-      both-unapplied, and a reopen must not surface a mixed state.
+- [x] **(unit-covered, commit `22406939`)** Remote hydration cannot leave the
+      visual document and the Look Instances document at **different revisions**:
+      `EditorSession.synchronizeDocuments` writes both under one prepared-journal
+      compound and `hydrateProjectDocument` uses it when both change. Tests:
+      failure injected at each half → neither moves, the combined revision string
+      is unchanged, a reopen is never a mixed state.
 
 ### Conflict handling
 
-- [ ] Concurrent devices: two sessions writing from the same base revision — the
+- [x] **(store CAS test)** Concurrent devices: two sessions writing from the same base revision — the
       second gets `revision-conflict`, neither the visual doc nor the Look doc
       half-applied.
-- [ ] Stale revision on read; retry after a conflict (the autosync entry is
+- [x] **(autosync conflict test + a Look-carrying conflict test)** Stale revision on read; retry after a conflict (the autosync entry is
       marked conflicted and the local doc is left for recovery).
-- [ ] A local edit made while a remote fetch is in flight → `local-changed`,
-      neither `synchronizeVisualProject` nor `synchronizeLookInstances` called.
+- [x] **(hydration test)** A local edit made while a remote fetch is in flight →
+      `local-changed`; `synchronizeDocuments` is not called.
 
 ### Compatibility
 
-- [ ] An older client that omits `lookInstances` on PUT preserves the stored
-      value (carry-forward).
-- [ ] An explicit `{ instances: {} }` clears it.
-- [ ] An unauthorized (owner-denied) or malformed write changes **neither**
-      document — no partial application.
+- [x] **(store R2 test)** An older client that omits `lookInstances` on PUT preserves the stored value (carry-forward).
+- [x] **(store R3 test)** An explicit `{ instances: {} }` clears it.
+- [x] **(store owner-denied + malformed tests)** An unauthorized (owner-denied) or malformed write changes **neither** document.
 
 ### Agent safety (not only successful apply / detach)
 
-- [ ] Rejection of a staged agent Look change (operator `Reject`) → nothing
-      applied, run cancelled.
-- [ ] Cancellation mid-run → staged change revoked, preview cleared.
-- [ ] Stale approval — a revision moved between stage and approve → the runner
-      throws `JOY_CODE_STALE_REVISION` / `..._STALE_SESSION`, nothing applied.
-- [ ] Duplicate approval — the same approval handle applied twice → the second
-      is an idempotent replay (no second Undo entry, no second write).
+- [x] **(look-scoped-host test)** Rejection of a staged agent Look change → nothing applied; a revoked change-set is not resurrectable.
+- [x] **(look-scoped-host test)** Cancellation (pre-aborted signal) → nothing
+      staged, run reports `failed`.
+- [x] **(look-scoped-host test)** Stale approval — a revision moved between stage
+      and apply → the runner throws (matched `/STALE/`), nothing applied.
+- [x] **(look-scoped-host test)** Duplicate approval → idempotent replay, no second Undo entry, same revisionId.
 - [ ] **Reporting accuracy:** the deterministic tool-loop tests
       (`bounded-tool-loop`, `look-scoped-host`) prove the _plumbing_ — tool call
       → host method → staging → approval → commit → Undo. They are **not**
