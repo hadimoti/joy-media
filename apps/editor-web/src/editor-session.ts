@@ -717,9 +717,21 @@ export class EditorSession {
     const current = this.#lookInstancesDocument.instances;
     for (const [id, instance] of Object.entries(nextDocument.instances)) {
       if (JSON.stringify(current[id]) === JSON.stringify(instance)) continue;
+      const stored = current[id];
+      // Only entity references this write ADDS or RETARGETS are checked. A
+      // binding whose target is unchanged was already validated when it was
+      // set, so an override-mark or a control-value update on an instance that
+      // already dangles from an earlier deletion is not rejected — it stays
+      // visible via `orphanedLookInstanceIds`.
+      const isNewOrRetargeted = (entityId: string, key?: string): boolean =>
+        stored === undefined || key === undefined || stored.entityBindings[key] !== entityId;
       const missing = [
-        ...Object.values(instance.entityBindings),
-        ...instance.createdEntityIds,
+        ...Object.entries(instance.entityBindings)
+          .filter(([key, entityId]) => isNewOrRetargeted(entityId, key))
+          .map(([, entityId]) => entityId),
+        ...instance.createdEntityIds.filter((entityId) =>
+          stored === undefined ? true : !stored.createdEntityIds.includes(entityId),
+        ),
       ].filter((entityId) => visual.visualObjects[entityId] === undefined);
       if (missing.length > 0) {
         throw new PersistenceError(
@@ -917,6 +929,29 @@ export class EditorSession {
     this.#snapshotRedo.length = 0;
     this.#record('document-snapshot', 'Replace project document', 0);
     return project;
+  }
+
+  /**
+   * Replace the visual document AND write a Look Instances document that a
+   * caller has already updated (e.g. marking `overriddenBindingIds` for a
+   * manual or user-directed-agent edit that touched a Look-linked binding).
+   * When the Look document is unchanged this is exactly `replaceVisualProject`;
+   * otherwise both commit through one prepared-journal compound and one Undo
+   * reverts them together (R2 / GAP 1b — override marking).
+   */
+  replaceVisualProjectWithLookOverrides(
+    next: JoyProjectV1,
+    nextLookInstances: LookInstancesDocument,
+    label = 'Edit with Look override',
+  ): JoyProjectV1 {
+    this.#assertPersistenceReady();
+    if (JSON.stringify(nextLookInstances) === JSON.stringify(this.#lookInstancesDocument)) {
+      return this.replaceVisualProject(next);
+    }
+    const prepared = this.#prepareCompound({ document: next, lookInstances: nextLookInstances });
+    this.#commitPersistencePlans(prepared.persistencePlans);
+    this.#recordCompound(prepared.operations, label, prepared.commandCount);
+    return this.#visualObjects.present;
   }
 
   /**

@@ -176,6 +176,68 @@ describe('EditorSession — Look Instances document (GAP 1a)', () => {
     expect(session.lookInstances.instances['look-2']).toBeDefined();
   });
 
+  it('replaceVisualProjectWithLookOverrides commits the edit + the override atomically; one Undo reverts both', () => {
+    const store = memoryStorage();
+    const session = newSession(store);
+    session.dispatchCompound('Apply', { lookInstances: lookDoc() });
+    const baseTitle = session.visualProject.title;
+
+    // Mark 'headline' overridden alongside a title edit.
+    const nextDoc = {
+      ...session.lookInstances,
+      instances: {
+        'look-1': {
+          ...session.lookInstances.instances['look-1']!,
+          overriddenBindingIds: ['headline'],
+        },
+      },
+    };
+    session.replaceVisualProjectWithLookOverrides(
+      { ...session.visualProject, title: 'Hand edited' },
+      nextDoc,
+    );
+    expect(session.visualProject.title).toBe('Hand edited');
+    expect(session.lookInstances.instances['look-1']!.overriddenBindingIds).toEqual(['headline']);
+    const reopened = newSession(store);
+    expect(reopened.visualProject.title).toBe('Hand edited');
+    expect(reopened.lookInstances.instances['look-1']!.overriddenBindingIds).toEqual(['headline']);
+
+    session.undo();
+    expect(session.visualProject.title).toBe(baseTitle);
+    expect(session.lookInstances.instances['look-1']!.overriddenBindingIds).toEqual([]);
+
+    // An unchanged Look doc -> plain replaceVisualProject (no look-instance op).
+    session.replaceVisualProjectWithLookOverrides(
+      { ...session.visualProject, title: 'Plain' },
+      session.lookInstances,
+    );
+    expect(session.visualProject.title).toBe('Plain');
+  });
+
+  it('an override-mark on an already-orphaned instance is NOT rejected', () => {
+    const session = newSession();
+    session.dispatchCompound('Apply', { lookInstances: lookDoc() });
+    const { 'intro-title': _gone, ...rest } = session.visualProject.visualObjects;
+    session.replaceVisualProject({ ...session.visualProject, visualObjects: rest });
+    expect(session.orphanedLookInstanceIds).toEqual(['look-1']);
+
+    // The instance's entityBindings are unchanged; only overriddenBindingIds moves.
+    expect(() =>
+      session.dispatchCompound('Mark override on an orphan', {
+        lookInstances: {
+          ...session.lookInstances,
+          instances: {
+            'look-1': {
+              ...session.lookInstances.instances['look-1']!,
+              overriddenBindingIds: ['headline'],
+            },
+          },
+        },
+      }),
+    ).not.toThrow();
+    expect(session.lookInstances.instances['look-1']!.overriddenBindingIds).toEqual(['headline']);
+  });
+
   it.each(['document', 'look-instance', 'journal-commit'] as const)(
     'a failure at %s never leaves only the visual edit or only the Look Instance',
     (failurePoint) => {

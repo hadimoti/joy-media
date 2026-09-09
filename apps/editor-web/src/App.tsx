@@ -65,6 +65,8 @@ import type {
   VisualObjectV1,
 } from '@joy-media/project-schema';
 import { normalizePlaybackRate, sourceTimeAtVideoClipTime } from '@joy-media/project-schema';
+import { BUILT_IN_LOOK_PACKS } from '@joy-media/motion-core';
+import { markOverridesFromCommittedKeys } from './joy-agent/look-instance-operations.js';
 import { type VisualObjectTransaction } from '@joy-media/property-system';
 import {
   evaluateCameraExpressionTransform,
@@ -147,6 +149,8 @@ function useOwnerVisibleDockviewPanel(api: IDockviewPanelProps['api']): boolean 
 }
 
 const CLIP_FRAME_CACHE_LIMIT = 120;
+/** Pinned Look definitions by id — for mapping a committed keyframe back to a Look binding. */
+const LOOK_DEFINITIONS_BY_ID = new Map(BUILT_IN_LOOK_PACKS.map((pack) => [pack.id, pack]));
 const MotionStudioShell = lazy(() =>
   import('./motion-studio/index.js').then((module) => ({ default: module.MotionStudioShell })),
 );
@@ -2700,7 +2704,27 @@ function EditorWorkspace({
 
   const replaceVisualProject = useCallback(
     (next: JoyProjectV1) => {
-      session.replaceVisualProject(next);
+      // If the edit added/changed a propertyAnimations key that a Look links,
+      // mark that binding overridden in the SAME compound so one Undo reverts
+      // both (R2 / GAP 1b — override marking, manual == user-directed agent).
+      const before = session.visualProject.propertyAnimations ?? {};
+      const after = next.propertyAnimations ?? {};
+      const changedKeys = Object.keys(after).filter(
+        (key) => JSON.stringify(after[key]) !== JSON.stringify(before[key]),
+      );
+      const nextLookInstances =
+        changedKeys.length === 0
+          ? session.lookInstances
+          : markOverridesFromCommittedKeys(
+              session.lookInstances,
+              LOOK_DEFINITIONS_BY_ID,
+              changedKeys,
+            );
+      if (nextLookInstances === session.lookInstances) {
+        session.replaceVisualProject(next);
+      } else {
+        session.replaceVisualProjectWithLookOverrides(next, nextLookInstances);
+      }
       invalidateAgentPreviewAfterEdit(session);
       setRevision((revision) => revision + 1);
     },
