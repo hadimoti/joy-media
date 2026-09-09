@@ -119,6 +119,9 @@ export function resolveLivingLookRun(
     if (definition === undefined || !available)
       return { kind: 'blocked', reason: 'look-unavailable' };
     const instanceId = context.makeInstanceId();
+    // A per-run `audioBakes` on the request (a fresh bake from the composition
+    // audio, GAP 2) wins over any context default.
+    const audioBakes = request.audioBakes ?? context.audioBakes;
     const compileInput: LookCompileInput = {
       definition,
       // The pinned version is the definition's own; a caller-supplied value is
@@ -134,7 +137,7 @@ export function resolveLivingLookRun(
       controlValues: request.controlValues,
       overriddenBindingIds: [],
       resolvedFonts: context.resolvedFonts,
-      ...(context.audioBakes === undefined ? {} : { audioBakes: context.audioBakes }),
+      ...(audioBakes === undefined ? {} : { audioBakes }),
     };
     return {
       kind: 'run',
@@ -158,6 +161,8 @@ export function resolveLivingLookRun(
   const { available } = availabilityFor(stored.definitionId, context);
   if (definition === undefined || !available)
     return { kind: 'blocked', reason: 'look-unavailable' };
+  const updateAudioBakes =
+    request.kind === 'update' ? (request.audioBakes ?? context.audioBakes) : context.audioBakes;
 
   const compileInput = lookInstanceUpdateCompileInput(
     stored,
@@ -176,7 +181,7 @@ export function resolveLivingLookRun(
       compositionDurationUs: root.durationUs,
       format,
       resolvedFonts: context.resolvedFonts,
-      ...(context.audioBakes === undefined ? {} : { audioBakes: context.audioBakes }),
+      ...(updateAudioBakes === undefined ? {} : { audioBakes: updateAudioBakes }),
     },
   );
   const verb = request.kind === 'update' ? 'Adjust' : 'Reset overrides on';

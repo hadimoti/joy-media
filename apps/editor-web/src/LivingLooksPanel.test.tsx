@@ -210,6 +210,55 @@ describe('LivingLooksPanel', () => {
     expect(onAgentRun).toHaveBeenCalledWith('apply editorial clean to the headline');
   });
 
+  it('offers "bake from audio" only when onBakeFromAudio is set and the pack has a keyframe binding', () => {
+    // No onBakeFromAudio -> no button.
+    mount({ onRun: vi.fn() });
+    expect(container!.querySelector('.living-look-bake-audio')).toBeNull();
+
+    const onBakeFromAudio = vi.fn();
+    mount({ onBakeFromAudio, onRun: vi.fn() });
+    const headlineSelect = q<HTMLSelectElement>('.living-look-slot select');
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        'value',
+      )!.set!;
+      setter.call(headlineSelect, 'title-1');
+      headlineSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const bake = container!.querySelector<HTMLButtonElement>('.living-look-bake-audio');
+    expect(bake).not.toBeNull();
+    act(() => bake!.click());
+    expect(onBakeFromAudio).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'apply', definitionId: 'editorial-clean' }),
+    );
+  });
+
+  it('an applied row bakes an update from audio', () => {
+    const onBakeFromAudio = vi.fn();
+    const clean = BUILT_IN_LOOK_PACKS.find((p) => p.id === 'editorial-clean')!;
+    mount({
+      onRun: vi.fn(),
+      onBakeFromAudio,
+      applied: [
+        {
+          instanceId: 'look-1',
+          definitionId: 'editorial-clean',
+          title: clean.title,
+          controlValues: {},
+          overriddenBindingIds: [],
+          orphaned: false,
+        },
+      ],
+    });
+    const bake = container!.querySelector<HTMLButtonElement>(
+      '.applied-look .applied-look-bake-audio',
+    );
+    expect(bake).not.toBeNull();
+    act(() => bake!.click());
+    expect(onBakeFromAudio).toHaveBeenCalledWith({ kind: 'update', instanceId: 'look-1' });
+  });
+
   it('marks an orphaned applied Look', () => {
     const clean = BUILT_IN_LOOK_PACKS.find((p) => p.id === 'editorial-clean')!;
     const markup = renderToStaticMarkup(

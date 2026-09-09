@@ -119,13 +119,18 @@ import { createCreativeSkillEditorPrimitiveDeps } from './joy-agent/creative-ski
 import type { CreativeSkillEditorPrimitiveDeps } from './joy-agent/creative-skill-editor-primitives.js';
 import { listCreativeSkills, runEditorCreativeSkill } from './joy-agent/entry-points.js';
 import type { CreativeSkillRunScope } from './joy-agent/skill-runner.js';
-import { BUILT_IN_LOOK_PACKS } from '@joy-media/motion-core';
+import { BUILT_IN_LOOK_PACKS, type LookDefinition } from '@joy-media/motion-core';
 import { CONTENT_FONT_FAMILIES } from '@joy-media/project-schema';
 import { catalog as buildLookCatalog } from './joy-agent/look-operations.js';
 import { detachLookInstance } from './joy-agent/look-instance-operations.js';
 import { stageLookRun } from './joy-agent/look-run-host.js';
 import { runScopedLookToolLoop } from './joy-agent/look-scoped-host.js';
 import { resolveLivingLookRun } from './joy-agent/living-look-run.js';
+import { bakeLookFromAudio } from './living-look-audio.js';
+import {
+  loadCompositionAudioForLook,
+  selectCompositionAudioClip,
+} from './living-look-audio-source.js';
 import {
   LivingLooksPanel,
   type LivingLooksAppliedView,
@@ -443,6 +448,7 @@ export function AgentPanel({
   agentPresenceStore,
   agentPreviewStore,
   observationAdapterFactory,
+  resolveAudioAssetUrl,
   storage,
 }: {
   readonly project: SpikeProject;
@@ -472,6 +478,12 @@ export function AgentPanel({
    * resolver, decoder, cache, or evidence store.
    */
   readonly observationAdapterFactory?: JoyAgentObservationAdapterFactory;
+  /**
+   * Resolve one project audio asset id to a fetchable URL, for the Living Looks
+   * "bake motion from audio" path (R2 / GAP 2). Absent → the affordance is
+   * hidden.
+   */
+  readonly resolveAudioAssetUrl?: (assetId: string) => Promise<string>;
   /** Writer-fenced browser persistence owned by the writable editor root. */
   readonly storage: ProjectWriterStorage;
 }) {
@@ -1138,6 +1150,10 @@ export function AgentPanel({
     }
     return [...visual, ...captions];
   }, [session.visualProject]);
+  const compositionAudioClip = useMemo(
+    () => selectCompositionAudioClip(session.visualProject),
+    [session.visualProject],
+  );
   const currentTextByObjectId = useMemo<Readonly<Record<string, string>>>(() => {
     const map: Record<string, string> = {};
     for (const object of Object.values(session.visualProject.visualObjects ?? {})) {
@@ -2301,6 +2317,79 @@ export function AgentPanel({
   }
 
   /**
+   * Decode the active composition's audio and bake its beat envelope onto the
+   * Look's keyframe bindings (R2 / GAP 2), then run the Look with those baked
+   * tracks. The bake supersedes the slider drive on those bindings; the run
+   * itself is the same staged-preview + approval + Undo path.
+   */
+  async function bakeLookFromCompositionAudio(
+    request: Extract<LivingLooksRunInput, { kind: 'apply' | 'update' }>,
+  ): Promise<void> {
+    if (resolveAudioAssetUrl === undefined || compositionAudioClip === undefined) {
+      appendMessage(
+        activeThread.id,
+        'assistant',
+        'This composition has no audio track to bake motion from.',
+      );
+      return;
+    }
+    let definition: LookDefinition | undefined;
+    let controlValues: Readonly<Record<string, number | string | boolean>>;
+    if (request.kind === 'apply') {
+      definition = BUILT_IN_LOOK_PACKS.find((pack) => pack.id === request.definitionId);
+      controlValues = request.controlValues;
+    } else {
+      const stored = session.lookInstances.instances[request.instanceId];
+      if (stored === undefined) return;
+      definition = BUILT_IN_LOOK_PACKS.find((pack) => pack.id === stored.definitionId);
+      controlValues = { ...stored.controlValues, ...(request.nextControlValues ?? {}) };
+    }
+    if (definition === undefined) return;
+
+    appendMessage(activeThread.id, 'assistant', 'Decoding the composition audio…');
+    const loaded = await loadCompositionAudioForLook({
+      visual: session.visualProject,
+      resolveAssetUrl: resolveAudioAssetUrl,
+      createAudioContext: () => new AudioContext(),
+    });
+    if (loaded.kind === 'no-audio') {
+      appendMessage(activeThread.id, 'assistant', 'No audio track was found to bake from.');
+      return;
+    }
+    if (loaded.kind === 'error') {
+      appendMessage(
+        activeThread.id,
+        'assistant',
+        `The composition audio could not be prepared (${loaded.message}). No bake was applied.`,
+      );
+      return;
+    }
+
+    const baked = bakeLookFromAudio({
+      definition,
+      controlValues,
+      audio: loaded.audio,
+      clip: loaded.clip,
+    });
+    if (baked.audioBakes.length === 0) {
+      appendMessage(
+        activeThread.id,
+        'assistant',
+        `Nothing to bake: ${baked.diagnostics[0] ?? 'this Look has no audio-driveable keyframe binding.'}`,
+      );
+      return;
+    }
+    appendMessage(
+      activeThread.id,
+      'assistant',
+      baked.silent
+        ? 'The audio reads as silent — baking a flat rest line (no beat invented).'
+        : `Baked ${baked.audioBakes.length} audio-reactive track(s) from the composition beat (confidence ${(baked.confidence * 100).toFixed(0)}%).`,
+    );
+    await runLook({ ...request, audioBakes: baked.audioBakes });
+  }
+
+  /**
    * Ask the JOY agent to work with a Look in words (GAP 5). The model drives the
    * `look_*` intent tools through a scoped tool-loop; the host resolves +
    * compiles the Look and stages a reversible change. The terminal result flows
@@ -2980,6 +3069,11 @@ export function AgentPanel({
               : {
                   onAgentRun: (prompt: string) => void runAgentLook(prompt),
                   agentBusy: lookRunningId === AGENT_LOOK_RUN_ID,
+                })}
+            {...(resolveAudioAssetUrl === undefined || compositionAudioClip === undefined
+              ? {}
+              : {
+                  onBakeFromAudio: (request) => void bakeLookFromCompositionAudio(request),
                 })}
           />
           <div

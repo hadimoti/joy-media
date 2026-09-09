@@ -8581,6 +8581,22 @@ label {
   opacity: 0.5;
   cursor: default;
 }
+.living-look-bake-audio,
+.applied-look-bake-audio {
+  align-self: flex-start;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+.living-look-bake-audio:disabled,
+.applied-look-bake-audio:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .living-looks-list {
   display: flex;
   flex-direction: column;

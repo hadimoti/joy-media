@@ -1820,6 +1820,13 @@ function EditorWorkspace({
     },
     [mediaResolver],
   );
+  const resolveAudioAssetUrl = useCallback(
+    async (assetId: string): Promise<string> => {
+      const source = await mediaResolver.resolve(assetId);
+      return source.url;
+    },
+    [mediaResolver],
+  );
   const exportEditableProject = useCallback(async () => {
     const entry = getCatalogProject(storage, projectId);
     if (entry === undefined) {
@@ -6584,6 +6591,7 @@ function EditorWorkspace({
           joyAgentEngineClient={joyAgentEngineClientRef.current!}
           joyAgentRunController={joyAgentRunController}
           observationAdapterFactory={observationAdapterFactory}
+          resolveAudioAssetUrl={resolveAudioAssetUrl}
           agentPresenceStore={appAgentPresenceStore}
           agentPreviewStore={appAgentPreviewStore}
         />

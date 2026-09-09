@@ -198,6 +198,8 @@ export {
   LOOK_AUDIO_REACTIVE_VERSION,
   LOOK_AUDIO_MIN_CONFIDENCE,
   bakeAudioReactive,
+  resolveLookAudioBakeTargets,
+  type LookAudioBakeTarget,
   type LookAudioEnvelope,
   type LookAudioEnvelopeSample,
   type BakeAudioReactiveInput,

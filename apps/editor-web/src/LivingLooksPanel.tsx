@@ -10,7 +10,7 @@
 
 import { useMemo, useState, type ReactElement } from 'react';
 import type { LookCatalogEntry } from './joy-agent/look-operations.js';
-import type { LookControl } from '@joy-media/motion-core';
+import type { LookAudioBakeInput, LookControl } from '@joy-media/motion-core';
 
 export interface LivingLooksEntityOption {
   readonly id: string;
@@ -32,6 +32,11 @@ export type LivingLooksRunInput =
       readonly definitionVersion: number;
       readonly entityBindings: Readonly<Record<string, string>>;
       readonly controlValues: Readonly<Record<string, number | string | boolean>>;
+      /**
+       * Pre-baked audio-reactive keyframe tracks (R2 / L4, GAP 2). When present
+       * the baked keys supersede the slider drive on those bindings.
+       */
+      readonly audioBakes?: readonly LookAudioBakeInput[];
     }
   | {
       readonly kind: 'update';
@@ -40,6 +45,8 @@ export type LivingLooksRunInput =
       readonly nextControlValues?: Readonly<Record<string, number | string | boolean>>;
       /** An agent may rebind slots (e.g. after an object was replaced). */
       readonly nextEntityBindings?: Readonly<Record<string, string>>;
+      /** Re-bake audio-reactive tracks for this instance (GAP 2). */
+      readonly audioBakes?: readonly LookAudioBakeInput[];
     }
   | { readonly kind: 'reset'; readonly instanceId: string; readonly bindingIds: readonly string[] }
   | { readonly kind: 'detach'; readonly instanceId: string };
@@ -72,6 +79,13 @@ export interface LivingLooksPanelProps {
    */
   readonly onAgentRun?: (prompt: string) => void;
   readonly agentBusy?: boolean;
+  /**
+   * Bake the composition's audio beat onto this Look's keyframe bindings
+   * (R2 / GAP 2), then run it. Absent when the composition has no audio track.
+   */
+  readonly onBakeFromAudio?: (
+    request: Extract<LivingLooksRunInput, { kind: 'apply' | 'update' }>,
+  ) => void;
 }
 
 function controlDefault(control: LookControl): number | string | boolean {
@@ -130,9 +144,13 @@ function AppliedLookRow(props: {
   readonly applied: LivingLooksAppliedView;
   readonly controls: readonly LookControl[];
   readonly busy: boolean;
+  readonly bakeable: boolean;
   readonly onRun: (input: LivingLooksRunInput) => void;
+  readonly onBakeFromAudio?: (
+    request: Extract<LivingLooksRunInput, { kind: 'apply' | 'update' }>,
+  ) => void;
 }): ReactElement {
-  const { applied, controls, busy, onRun } = props;
+  const { applied, controls, busy, bakeable, onRun, onBakeFromAudio } = props;
   return (
     <li className={`applied-look ${applied.orphaned ? 'is-orphaned' : ''}`}>
       <div className="applied-look-head">
@@ -146,6 +164,16 @@ function AppliedLookRow(props: {
           Detach
         </button>
       </div>
+      {bakeable && onBakeFromAudio !== undefined && (
+        <button
+          type="button"
+          className="applied-look-bake-audio"
+          disabled={busy}
+          onClick={() => onBakeFromAudio({ kind: 'update', instanceId: applied.instanceId })}
+        >
+          Bake motion from composition audio
+        </button>
+      )}
       {applied.orphaned && (
         <p className="applied-look-orphan">Bound object removed — rebind or detach.</p>
       )}
@@ -288,7 +316,13 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
                   applied={applied}
                   controls={definition?.controls ?? []}
                   busy={props.busy || props.runningLookId !== undefined}
+                  bakeable={
+                    definition?.bindingTargets.some((t) => t.channel === 'keyframe') === true
+                  }
                   onRun={props.onRun}
+                  {...(props.onBakeFromAudio === undefined
+                    ? {}
+                    : { onBakeFromAudio: props.onBakeFromAudio })}
                 />
               );
             })}
@@ -449,6 +483,33 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
           >
             {props.runningLookId === selected.definition.id ? 'Running…' : 'Run Look'}
           </button>
+
+          {props.onBakeFromAudio !== undefined &&
+            selected.definition.bindingTargets.some((t) => t.channel === 'keyframe') && (
+              <button
+                type="button"
+                className="living-look-bake-audio"
+                disabled={!canRun}
+                onClick={() =>
+                  props.onBakeFromAudio?.({
+                    kind: 'apply',
+                    definitionId: selected.definition.id,
+                    definitionVersion: selected.definition.version,
+                    entityBindings: Object.fromEntries(
+                      Object.entries(slotBindings).filter(([, entityId]) => entityId.length > 0),
+                    ),
+                    controlValues: {
+                      ...Object.fromEntries(
+                        selected.definition.controls.map((c) => [c.id, controlDefault(c)]),
+                      ),
+                      ...controlValues,
+                    },
+                  })
+                }
+              >
+                Run with motion baked from composition audio
+              </button>
+            )}
         </form>
       )}
     </div>

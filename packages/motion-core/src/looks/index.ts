@@ -45,6 +45,7 @@ export {
   type BakedKey,
   type BakeAudioReactiveResult,
 } from './audio-reactive.js';
+export { resolveLookAudioBakeTargets, type LookAudioBakeTarget } from './audio-bake-targets.js';
 export {
   BUILT_IN_LOOK_PACKS,
   editorialClean,
