@@ -343,9 +343,13 @@ export class EditorSession {
     // empty document held only in memory — the log is NOT created on open, so an
     // existing project is never rewritten just because this document was added.
     // The log is initialized lazily inside the first Look write's compound plan.
+    // Keyed on the timeline project id, like the graph and artifact documents —
+    // every per-project secondary document shares that id. (`entityBindings`
+    // still resolve against the visual document's objects, see
+    // `#assertLookInstanceReferencesResolve`.)
     const lookInstances = recoverLookInstancesOrEmpty(
       this.#lookInstancesPersistence,
-      initialSeed.lookInstances ?? emptyLookInstancesDocument(initialVisualProject.id),
+      initialSeed.lookInstances ?? emptyLookInstancesDocument(initialTimeline.id),
     );
     this.#lookInstancesLogInitialized = lookInstances.persisted;
     const recoveryWarnings = [
@@ -1738,6 +1742,7 @@ const PROJECT_LOG_STORAGE_KEYS = new Set([
   VISUAL_OBJECT_PROJECT_LOG_KEY,
   WORKFLOW_GRAPH_LOG_KEY,
   CREATIVE_ARTIFACT_LOG_KEY,
+  LOOK_INSTANCES_LOG_KEY,
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
