@@ -256,6 +256,13 @@ export {
   validateLookInstances,
 } from './living-look.js';
 
+export type { LookInstancesDocument } from './look-instances-document.js';
+export {
+  LOOK_INSTANCES_DOCUMENT_SCHEMA_VERSION,
+  emptyLookInstancesDocument,
+  validateLookInstancesDocument,
+} from './look-instances-document.js';
+
 export type {
   TimelineElementKind,
   TimelinePlacementKind,
