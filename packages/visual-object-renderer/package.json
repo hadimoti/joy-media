@@ -24,6 +24,7 @@
   "devDependencies": {
     "@joy-media/renderer-pixi": "workspace:*",
     "@joy-media/renderer-headless": "workspace:*",
-    "@joy-media/golden-render": "workspace:*"
+    "@joy-media/golden-render": "workspace:*",
+    "@joy-media/motion-core": "workspace:*"
   }
 }

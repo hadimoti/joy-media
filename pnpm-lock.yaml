@@ -539,6 +539,9 @@ importers:
       '@joy-media/golden-render':
         specifier: workspace:*
         version: link:../../tooling/golden-render
+      '@joy-media/motion-core':
+        specifier: workspace:*
+        version: link:../motion-core
       '@joy-media/renderer-headless':
         specifier: workspace:*
         version: link:../renderer-headless

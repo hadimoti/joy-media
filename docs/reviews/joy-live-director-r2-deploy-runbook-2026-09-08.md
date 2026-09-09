@@ -62,9 +62,12 @@ look_instances jsonb`. Additive + **nullable**; never `NOT NULL`, never a
   `postgres-migrations.ts`, `postgres-schema.ts`) plus
   `resumable-original-upload.test.ts` (test-only). The document GET/PUT contract
   gains one optional `lookInstances` field; every other route is unchanged.
-- **No new dependency.** `pnpm-lock.yaml` and every `package.json` are unchanged
-  `855734cf..<candidate>` — zero lock delta. (R1 added `mediabunny`; R2 adds
-  nothing.) Rollback is a pure pointer flip.
+- **No new external dependency.** R2 adds no npm package. `pnpm-lock.yaml` changes
+  by a handful of lines only — internal `link:` workspace-graph entries for test
+  tooling (`@joy-media/visual-object-renderer` gains a `@joy-media/motion-core`
+  **devDependency** so `packages/visual-object-renderer/src/looks-render-acceptance.test.ts`
+  — GAP 4 — can drive `compileLook`). No runtime bundle or `apps/api` dependency
+  changes. Rollback is a pure pointer flip.
 - **`packages/project-schema`**: schema **v3** lands additively
   (`living-look.ts`, `v3.ts`, `migrateV2ToV3`) plus the standalone
   `look-instances-document.ts` (its own explicit schema + validator). The editor

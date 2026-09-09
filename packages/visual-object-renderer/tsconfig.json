@@ -9,6 +9,7 @@
     { "path": "../transition-shaders" },
     { "path": "../renderer-pixi" },
     { "path": "../renderer-headless" },
+    { "path": "../motion-core" },
     { "path": "../../tooling/golden-render" }
   ]
 }
