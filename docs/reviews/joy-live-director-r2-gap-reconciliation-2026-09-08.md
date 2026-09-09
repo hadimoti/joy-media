@@ -385,6 +385,47 @@ paged domain, so `look_update` / `look_reset_overrides` / `look_detach` are
 agent-reachable within a thread (the staging message names the instance ids) but
 not from a cold context. A `looks` context domain is a small, safe follow-up.
 
+### Update 2026-09-09d — GAP 1a server synchronization (Option A) landed (`4b9e580d..961eb070`)
+
+Owner-approved Option A: developed + tested the additive migration and API
+changes. **Not authorized for production apply** — the production migration /
+deploy is gated by external Astra's candidate-specific `APPROVE_FOR_DEPLOY`.
+
+- **Migration** `006-look-instances` (the next free ledger id, R7) —
+  `ALTER TABLE project_documents ADD COLUMN IF NOT EXISTS look_instances jsonb`,
+  additive + nullable. Test asserts additive / nullable / no-DROP.
+- **Store** (`project-document-store.ts`, `postgres-control-plane.ts`,
+  `control-plane.ts`): `ProjectDocumentRecord.lookInstances?` written under the
+  SAME `revisionId` as the visual document — one atomic CAS row (R1). Absent =
+  carry the previous revision's value forward (R2); explicit `{ instances: {} }`
+  replaces it (R3). Structural validation + instance-count + byte caps (R5).
+  `validateLookInstanceBindingsResolve` mirrors the editor's
+  `#assertLookInstanceReferencesResolve` — a new/retargeted binding must name an
+  object in the same write's document; an already-orphaned instance round-trips.
+- **HTTP** (`http-server.ts`, `project-document-sync-request-validation.ts`):
+  GET returns `lookInstances` only when a revision carried it (legacy clients
+  ignore the key); PUT accepts an OPTIONAL `lookInstances` field (strict
+  unknown-field rejection preserved; malformed → reject).
+- **Client** (`control-plane-client.ts`, `project-document-sync.ts`,
+  `project-document-autosync.ts`, `App.tsx`): `session.lookInstances` rides
+  every autosync PUT under the same revision; a pure detach advances the
+  revision (`:looks=N`) so its PUT fires.
+- **Hydration** (`project-document-hydration.ts`,
+  `EditorSession.synchronizeLookInstances`): the remote Look document is applied
+  only on `hydrated` (local unchanged) as a snapshot with no history entry; on
+  `local-changed` it is left untouched; an absent remote value never clears a
+  populated local document; a changed remote Look doc syncs even when the visual
+  doc is byte-identical; malformed remote → reject before any local write (R4).
+- **Rollback** (deploy runbook updated): code rollback alone reverses R2
+  behaviour; the `look_instances` column and its data are retained; a
+  `DROP COLUMN` is a separate explicit last-resort (R8).
+- 47 new/changed api + editor tests green (store R1–R6, envelope, migration 006,
+  hydration R4 ×5, sync forward/omit, editor-session snapshot/empty/malformed).
+
+**GAP 1a is now local-verified AND sync-implemented** (dev+test; production apply
+Astra-gated). GAP 5 + GAP 1a-sync done. Remaining: **GAP 2 audio → GAP 4
+rendered/export acceptance.**
+
 **Open R2 _acceptance_ items (not implementation):**
 
 - Per-pack owner taste verdicts re-confirmed for the **final** candidate's 5

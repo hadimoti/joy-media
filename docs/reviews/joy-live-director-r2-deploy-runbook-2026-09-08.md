@@ -24,11 +24,12 @@ build is root `pnpm build` (`pnpm -r --if-present build`), DB dump needs
 | schema | migration ledger gains `006-look-instances` (additive nullable column) |
 | base   | `855734cf0c875101a632426983db2638c2adddcd` (R1, current live)          |
 
-## Blast radius — web-bundle-only, cleaner than R1
+## Blast radius — editor-web bundle + one additive API migration
 
 `git diff --name-only 855734cf..<candidate>` (at the current branch tip) touches
-**only**: `apps/editor-web`, `packages/{motion-core,project-schema}`, `tests/`,
-`tooling/`, `docs/`, `.github/`. Verified at branch HEAD:
+`apps/editor-web`, `apps/api` (the Look Instances sync seam — see the first
+bullet), `packages/{motion-core,project-schema}`, `tests/`, `tooling/`, `docs/`,
+`.github/`. Verified at branch HEAD:
 
 - **One additive Postgres migration (R2 GAP 1a — Look Instances sync).**
   `apps/api/src/postgres-migrations.ts` `POSTGRES_MIGRATIONS` gains **one** id:
