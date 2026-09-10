@@ -840,6 +840,10 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
           env: {
             ...process.env,
             CI: 'true',
+            // Enable the shipping export matrix only in the isolated
+            // real-service lane. Fixture-only desktop jobs keep this opt-in
+            // guard unset and therefore record NOT RUN.
+            JOY_P3_REAL_EXPORTS: smoke ? '0' : '1',
             PLAYWRIGHT_BASE_URL: baseUrl,
             JOY_MEDIA_E2E_API_URL: apiBaseUrl,
             PLAYWRIGHT_HTML_REPORT: report,

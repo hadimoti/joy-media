@@ -581,17 +581,22 @@ jobs:
           ' "$root/test-output/operations/teardown.json"
           # If the harness step succeeded, the FULL required evidence set must be present.
           if [ "$HARNESS_OUTCOME" = "success" ]; then
-            for rel in \
-              test-output/browser/journeys.json \
-              test-output/browser/real-service-profile-matrix.json \
-              test-output/release-performance/polling.json \
-              test-output/release-performance/effects-soak.json \
-              test-output/release-performance/timeline-integrity.json \
-              test-output/release-performance/editor.json \
-              test-output/delivery/result.json \
-              test-output/operations/restore.json \
-              test-output/windows/acceptance.json \
-              test-output/ci-janitor/inventory.json; do
+            required_evidence=(
+              test-output/browser/journeys.json
+              test-output/browser/real-service-profile-matrix.json
+              test-output/release-performance/polling.json
+              test-output/release-performance/effects-soak.json
+              test-output/release-performance/timeline-integrity.json
+              test-output/release-performance/editor.json
+              test-output/delivery/result.json
+              test-output/operations/restore.json
+              test-output/windows/acceptance.json
+              test-output/ci-janitor/inventory.json
+            )
+            if [ "${JOY_MEDIA_REAL_ACCEPTANCE_SMOKE_ONLY:-0}" != "1" ]; then
+              required_evidence+=(test-output/browser/p3-export-matrix.json)
+            fi
+            for rel in "${required_evidence[@]}"; do
               test -s "$root/$rel" || { echo "required evidence missing after a successful harness run: $rel" >&2; exit 1; }
             done
           else

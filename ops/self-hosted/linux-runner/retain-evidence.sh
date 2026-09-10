@@ -77,6 +77,7 @@ ALLOW=(
   test-output/browser/journeys.json
   test-output/browser/authenticated-editor-1.0/journey-evidence.json
   test-output/browser/real-service-profile-matrix.json
+  test-output/browser/p3-export-matrix.json
   test-output/browser/journey-failure.json
   test-output/browser/web-dev-server.log
   test-output/release-performance/polling.json
