@@ -197,13 +197,31 @@ test.describe('JOY R2 P3 shipping browser export matrix', () => {
       return;
     }
     await authenticate(page);
-    const matrix: Array<Record<string, unknown>> = [];
+    const matrixPath = 'test-output/browser/p3-export-matrix.json';
+    const matrix: Array<Record<string, unknown>> = LOOK_PACKS.flatMap((pack) =>
+      PRESETS.map((preset) => ({
+        caseId: `${pack.id}/${preset.id}`,
+        pack: pack.id,
+        preset: preset.id,
+        result: 'NOT RUN',
+      })),
+    );
+    const persistMatrix = async (): Promise<void> => {
+      await mkdir('test-output/browser', { recursive: true });
+      await writeFile(matrixPath, `${JSON.stringify(matrix, null, 2)}\n`, 'utf8');
+    };
+    await persistMatrix();
     const failures: string[] = [];
 
     for (const pack of LOOK_PACKS) {
       for (const preset of PRESETS) {
         const caseId = `${pack.id}/${preset.id}`;
-        const evidence: Record<string, unknown> = { caseId, pack: pack.id, preset: preset.id };
+        const evidence: Record<string, unknown> = {
+          caseId,
+          pack: pack.id,
+          preset: preset.id,
+        };
+        const matrixIndex = matrix.findIndex((entry) => entry.caseId === caseId);
         try {
           await returnToProjectSelector(page);
           await openReferenceWorkspace(page);
@@ -262,7 +280,8 @@ test.describe('JOY R2 P3 shipping browser export matrix', () => {
           evidence.error = error instanceof Error ? error.message : String(error);
           failures.push(`${caseId}: ${String(evidence.error)}`);
         } finally {
-          matrix.push(evidence);
+          matrix[matrixIndex] = evidence;
+          await persistMatrix();
           await testInfo.attach(`${caseId.replaceAll('/', '-')}.json`, {
             body: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`),
             contentType: 'application/json',
@@ -270,9 +289,6 @@ test.describe('JOY R2 P3 shipping browser export matrix', () => {
         }
       }
     }
-    const matrixPath = 'test-output/browser/p3-export-matrix.json';
-    await mkdir('test-output/browser', { recursive: true });
-    await writeFile(matrixPath, `${JSON.stringify(matrix, null, 2)}\n`, 'utf8');
     await testInfo.attach('p3-export-matrix.json', {
       body: Buffer.from(`${JSON.stringify(matrix, null, 2)}\n`),
       contentType: 'application/json',
