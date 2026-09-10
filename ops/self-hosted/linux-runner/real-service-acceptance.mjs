@@ -319,7 +319,12 @@ try {
     }
     throw error;
   }
+  // Keep the broad desktop contract and the expensive ten-case P3 export
+  // matrix as separate bounded phases. This prevents a single Playwright test
+  // timeout from consuming the budget reserved for delivery, observer, and
+  // teardown, while still requiring both phases on a full run.
   const profileSummaries = await runDesktopMatrix(webUrl, apiUrl);
+  if (!smokeOnly) await runP3ExportMatrix(webUrl, apiUrl);
   const deliveryEvidence = await recordJourney(
     webUrl,
     apiUrl,
@@ -843,7 +848,8 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
             // Enable the shipping export matrix only in the isolated
             // real-service lane. Fixture-only desktop jobs keep this opt-in
             // guard unset and therefore record NOT RUN.
-            JOY_P3_REAL_EXPORTS: smoke ? '0' : '1',
+            // P3 is executed in its own bounded phase after this broad matrix.
+            JOY_P3_REAL_EXPORTS: '0',
             PLAYWRIGHT_BASE_URL: baseUrl,
             JOY_MEDIA_E2E_API_URL: apiBaseUrl,
             PLAYWRIGHT_HTML_REPORT: report,
@@ -922,6 +928,62 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
   }
   await writeProfileMatrixEvidence(matrixEvidencePath, sourceProvenance, summaries, 'passed');
   return summaries;
+}
+
+async function runP3ExportMatrix(baseUrl, apiBaseUrl) {
+  const report = join('/tmp', `joy-media-p3-report-${runId}-${runAttempt}-${pass}`);
+  const results = join('/tmp', `joy-media-p3-results-${runId}-${runAttempt}-${pass}`);
+  const jsonReport = join('/tmp', `joy-media-p3-json-${runId}-${runAttempt}-${pass}.json`);
+  await rm(jsonReport, { force: true });
+  let failure;
+  try {
+    await execFile(
+      'pnpm',
+      [
+        'exec',
+        'playwright',
+        'test',
+        'tests/e2e/r2-p3-shipping-export-acceptance.spec.ts',
+        '--project=desktop-primary',
+        '--workers=1',
+        '--reporter=json',
+      ],
+      {
+        cwd: root,
+        env: {
+          ...process.env,
+          CI: 'true',
+          JOY_P3_REAL_EXPORTS: '1',
+          PLAYWRIGHT_BASE_URL: baseUrl,
+          JOY_MEDIA_E2E_API_URL: apiBaseUrl,
+          PLAYWRIGHT_HTML_REPORT: report,
+          PLAYWRIGHT_TEST_RESULTS_DIR: results,
+          PLAYWRIGHT_JSON_OUTPUT_NAME: jsonReport,
+          PLAYWRIGHT_WORKERS: '1',
+        },
+      },
+    );
+  } catch (error) {
+    failure = error instanceof Error ? error : new Error(String(error));
+  }
+  await rm(jsonReport, { force: true });
+  await rm(report, { recursive: true, force: true });
+  await rm(results, { recursive: true, force: true });
+  if (failure) throw failure;
+  const matrixPath = join(root, 'test-output/browser/p3-export-matrix.json');
+  try {
+    const matrix = JSON.parse(await readFile(matrixPath, 'utf8'));
+    if (
+      !Array.isArray(matrix) ||
+      matrix.length !== 10 ||
+      matrix.some((row) => row.result !== 'PASS')
+    )
+      throw new Error('P3 export matrix did not contain ten PASS rows');
+  } catch (error) {
+    throw new Error(
+      `P3 export matrix evidence is missing or invalid: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 async function writeProfileMatrixEvidence(path, sourceProvenance, profiles, status) {
