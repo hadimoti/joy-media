@@ -124,6 +124,45 @@ function safeText(value: unknown, maxLength: number): string | undefined {
   return normalized.length === 0 || UNSAFE_CONTEXT_TEXT.test(normalized) ? undefined : normalized;
 }
 
+/**
+ * Variant of `safeText` used ONLY for the bounded string fields that a model
+ * acts on by *identity* — `controlValues` text entries and `packTitle` on a
+ * Living Look instance. Unlike `safeText`, this helper refuses to truncate a
+ * too-long input into a *different* id; it rejects the value (returning
+ * `undefined`) and records the reserved `'lookInstances'` omission label so a
+ * reader can always tell an *incomplete* projection from an *empty* one.
+ *
+ * Do NOT route clips / assets / conversation bodies / visual-object text
+ * through this helper: those fields are bounded in length by the sanitizer
+ * but the model never reads them as a mutation key, so silent truncation is
+ * safe there and is deliberately preserved to avoid widening the omission
+ * surface for cosmetic fields.
+ */
+function safeTextReporting(
+  value: unknown,
+  maxLength: number,
+  omitted: Set<string>,
+): string | undefined {
+  if (typeof value !== 'string') {
+    // A non-string where a model-facing identity string was expected is a
+    // rejected field — record it so a reader can distinguish "this Look had
+    // no value to project" from "this Look had nothing to project". Silent
+    // drops here were the defect behind the P1-R2 review.
+    omitted.add('lookInstances');
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    omitted.add('lookInstances');
+    return undefined;
+  }
+  if (trimmed.length > maxLength || UNSAFE_CONTEXT_TEXT.test(trimmed)) {
+    omitted.add('lookInstances');
+    return undefined;
+  }
+  return trimmed;
+}
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -312,11 +351,8 @@ function sanitizeLookInstance(
       if (typeof value === 'number' && Number.isFinite(value)) controlValues[key] = value;
       else if (typeof value === 'boolean') controlValues[key] = value;
       else {
-        const text = safeText(value, 120);
-        if (text === undefined) {
-          omitted.add('lookInstances');
-          continue;
-        }
+        const text = safeTextReporting(value, 120, omitted);
+        if (text === undefined) continue;
         controlValues[key] = text;
       }
     }
@@ -343,8 +379,7 @@ function sanitizeLookInstance(
 
   let packTitle: string | undefined;
   if (raw.packTitle !== undefined) {
-    packTitle = safeText(raw.packTitle, 160);
-    if (packTitle === undefined) omitted.add('lookInstances');
+    packTitle = safeTextReporting(raw.packTitle, 160, omitted);
   }
   let packLatestVersion: number | undefined;
   if (raw.packLatestVersion !== undefined) {

@@ -26,6 +26,7 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
 ## Git / branch / lock
 
 ### D-01 — `main` identity: local vs GitHub — RESOLVED
+
 - **Claim:** local `main` `6a6a336c`; "GitHub main observed by reviewer `93552f7a`".
 - **Observation:** local `main` = `6a6a336c`, tracks **`vps/main`** (not github).
   `git ls-remote github refs/heads/main` = `93552f7a`. `6a6a336c` **is an ancestor
@@ -36,6 +37,7 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
   Deployed production identity remains **UNVERIFIED** in P0 (out of scope; needs the VPS).
 
 ### D-02 — GitHub `main` advanced past the handoff record — RESOLVED
+
 - **Claim:** handoff: "`main` gained 2 dispatch-only workflow-file commits".
 - **Observation:** `6a6a336c..93552f7a` = **5** commits, all dispatch-only CI
   (`f766c981`, `a0a9f309`, `d40fdca4`, `0f70b52d`, `93552f7a` —
@@ -46,6 +48,7 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
   checkout intentionally not updated. Not reverted.
 
 ### D-03 — "R2 adds no deps / lock unchanged since R1" — RESOLVED (lock identity diverged between candidates)
+
 - **Claim:** the technical-acceptance handoff, **for candidate `7a509e6c`**, states
   `pnpm-lock.yaml` raw SHA-256 `36426937…` "(unchanged since R1 — R2 adds no deps)".
 - **Observation (binary-safe `git cat-file blob <rev>:pnpm-lock.yaml | sha256sum`):**
@@ -69,6 +72,7 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
   modified. Do not retroactively call the `7a509e6c` statement "false".
 
 ### D-17 — frozen CI tag: object vs peeled commit — CONFIRMED (not a mutation)
+
 - **Claim:** `ci-v2-gate-frozen-6c21c589` → `44b2b11f…` vs peeled `6c21c589…`.
 - **Observation:** local + `git ls-remote github`: annotated **tag object**
   `44b2b11fac73be6b03058b3dd73d9d26540fd261`; `^{}` peeled **commit**
@@ -81,27 +85,29 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
 ## Full-workspace check / test-timeout failures
 
 ### D-04 — "render timeout" at `0a829af4` — CONFIRMED
+
 - **Claim:** plan: `full-check-0a829af4.log` = render timeout.
 - **Observation (`session-6672909d-logs/full-check-0a829af4.log`, 84 110 B):**
   `SHA: 0a829af4…`, `CHECK_EXIT: 1`. `looks-render-acceptance.test.ts`
   (10 tests | 1 failed | 28152 ms). Sole failure:
   `R2 Look pack rendered-frame + preview/export acceptance (GAP 4) >
-  editorial-clean (portrait): identical preview/export at 3 frames, with real
-  motion 5091ms` → `Error: Test timed out in 5000ms.` The **other 9** GAP-4 pack
+editorial-clean (portrait): identical preview/export at 3 frames, with real
+motion 5091ms` → `Error: Test timed out in 5000ms.` The **other 9** GAP-4 pack
   cases in the same file passed (2365–3244 ms). `Tests 4327 passed / 1 failed /
-  38 skipped`. In this same run, `font-assets.test.ts` **passed** (6 tests, 408 ms).
+38 skipped`. In this same run, `font-assets.test.ts` **passed** (6 tests, 408 ms).
 - **Impact:** the first GAP-4 acceptance case (cold, first in the suite) exceeded
   Vitest's 5 s default by ~91 ms under full-suite load.
 - **Resolution:** fixed forward by the next (and only) commit — see D-06.
 
 ### D-05 — "font-assets failure at `f80e029a`" — RESOLVED (a test timeout, not a gate assertion failure)
+
 - **Claim:** handoff/plan: "font-assets timeout … cold-start / load sensitivity";
   elsewhere shorthand "font-assets failure".
 - **Observation (`session-6672909d-logs/full-check-f80e029a.log`, 81 962 B):**
   `SHA: f80e029a…`, `CHECK_EXIT: 1`. `tooling/release/src/font-assets.test.ts`
   (6 tests | 1 failed | 13903 ms). Sole failure:
   `editor font redistribution gate > is clean through the same scanner used by
-  release:gate 13694ms` → `Error: Test timed out in 5000ms.` Stack top
+release:gate 13694ms` → `Error: Test timed out in 5000ms.` Stack top
   `font-assets.test.ts:104:3`; the case body's first statement (line 105) is
   `const result = scanFontAssets(repositoryRoot);`. The **other 5** cases in that
   file passed (0–202 ms). `Tests 4263 passed / 1 failed / 38 skipped (4302)`;
@@ -109,7 +115,7 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
   checkpoint** than `0a829af4` / `d01770b1` (539 files). At `0a829af4` (D-04) the
   same file passed.
 - **Impact:** **not** a Fontiran / redistribution-gate assertion failure. Same
-  failure *mode* as D-04 (Vitest 5 s default exceeded), a different test, on a
+  failure _mode_ as D-04 (Vitest 5 s default exceeded), a different test, on a
   flaky basis (passed at `0a829af4`, timed out at `f80e029a`).
 - **Resolution / remaining hypothesis:** the timeout establishes only that the 5 s
   budget was exceeded (reported case duration ~13.7 s). It does **not** establish
@@ -119,10 +125,11 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
   5 s and its green status that run depends on the case finishing in time.
 
 ### D-06 — "green full check on `d01770b1`" — CONFIRMED, with a caveat
+
 - **Claim:** "`pnpm -w run check` green at `d01770b1`; 538 files / 4328 tests pass / 0 fail".
 - **Observation (`full-check-d01770b1.log`):** `SHA: d01770b1…`, `CHECK_EXIT: 0`,
   `Test Files 538 passed | 1 skipped (539)`, `Tests 4328 passed | 38 skipped
-  (4366)`, `Duration 46.56s`. `git log 0a829af4..d01770b1` = **exactly one commit**:
+(4366)`, `Duration 46.56s`. `git log 0a829af4..d01770b1` = **exactly one commit**:
   `d01770b1 test(r2): GAP 4 — give render/export acceptance cases a 30s timeout`.
   `git show d01770b1:…looks-render-acceptance.test.ts` → the GAP-4 `it(...)` block
   ends `}, 30_000);`. `font-assets.test.ts` unchanged (still default).
@@ -138,14 +145,16 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
 ## Sample inventory & media
 
 ### D-07 — "11 MP4s" — RESOLVED
+
 - **Claim:** `r2-technical-acceptance-handoff` TL;DR: "generated 11 MP4s (10 proxy
-  + 1 A/V sync fixture + 4 intended-resolution samples)". (10+1+4 = 15.)
+  - 1 A/V sync fixture + 4 intended-resolution samples)". (10+1+4 = 15.)
 - **Observation:** on disk / in the preserved bundle: **10** proxy, **4** intended,
   **1** `av-sync-fixture.mp4` → **15 MP4 files**. `manifest.json` `generatedAt`
   16:25:11Z; `intended/manifest.json` 17:35:10Z.
 - **Resolution:** **15** MP4 files (10 + 4 + 1). Reviewer's count (15) is correct.
 
 ### D-08 — "all 10 proxy + 4 intended decode = PASS" — GAP (partial coverage)
+
 - **Claim:** handoff: "Container-level decode of all 10 proxy MP4s = PASS"; and the
   4 intended files "decode with correct dims, frame count, duration, sample rate".
 - **Observation:** `samples-out/verify/verify-report.json` `sampleCount = 11`; its
@@ -161,6 +170,7 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
   verifier covered 0 of 4.
 
 ### D-09 — "intended renders = 241 frames / 8.021 s" — RESOLVED (240 frames; the 21 ms is a real, separate video start offset)
+
 - **Claim:** handoff / gallery: intended-resolution renders produce **241 frames /
   8.021 s** instead of 240 / 8.000 s; plan P3 lists "fix the 241-frame concat
   sample generator"; the plan warns against an "extra-frame fix on an unproven
@@ -198,13 +208,14 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
   **UNVERIFIED** — no packet/edit-list receipt pins it.
 - **Resolution:** the plan's "concat extra-frame fix" would target a non-existent
   241st frame. The real artefact is a **21.029 ms video-start offset present only
-  in the 8-segment `-c copy` path**. Whether the *shipping* export path uses a
+  in the 8-segment `-c copy` path**. Whether the _shipping_ export path uses a
   single-call encode (like the proxy path, no offset) or a segmented one is a
   **path audit deferred to P2/P3** — not done here. **Do not** relax any authored
   frame count; **do not** "fix" a 241st frame; **do not** yet label the 21 ms
   effect cosmetic, harmless, or shipping-path-excluded.
 
 ### D-13 — "midToSettle = 0.00 for 3/10 packs" — CONFIRMED (phrasing note)
+
 - **Observation:** `verify-report.json` `motion.midToSettle`: editorial-clean 0.00
   (both orientations), product-precision 0.00 (both), music-pulse 0.00 (both),
   quiet-documentary 0.01, kinetic-type 0.04 → **6 of 10 proxy samples** have
@@ -217,6 +228,7 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
 ## A/V sync fixture
 
 ### D-10 — "A/V delta −0.24 ms, sub-frame accurate" — RESOLVED (precision claim not supported by the method)
+
 - **Claim:** handoff: "video first red PTS 1 999 995 µs (offset −0.01 ms), audio
   centroid 1 999 758 µs, A/V delta **−0.24 ms** vs ±33 ms tolerance".
 - **Observation (`verify-av-sync.mjs`, 271 lines, preserved copy sha256
@@ -228,7 +240,7 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
   - on the first frame whose mean colour passes the red test,
     `firstFlashPtsUs = us` (**line 116**, inside the `if` at line 115) — i.e. the
     field is assigned the **loop seek variable**, `1 500 000 + 15·33 333 =
-    1 999 995`. It is not read back from a decoded packet/frame PTS.
+1 999 995`. It is not read back from a decoded packet/frame PTS.
   - `firstFlashOffsetMsFromExpected = (1 999 995 − 2 000 000)/1000 = −0.005` — grid
     arithmetic.
   - the audio side **is** a real measurement: `centroidPtsUs` (line 197) from the
@@ -249,6 +261,7 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
   measurement is P1-adjacent verifier work (deferred; see provenance report §9).
 
 ### D-14 — A/V fixture as "Music Pulse audio-bake export proof" — GAP
+
 - **Claim:** implied linkage of the fixture's A/V result to GAP 2 (Music Pulse
   decoded-PCM → beat envelope → `bakeLookFromAudio` → `audioBakes`).
 - **Observation:** `render-av-sync-fixture.mjs` (94 lines) builds solid-colour P6
@@ -266,6 +279,7 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
   GAP 2 acceptance remains **GAP**.
 
 ### D-15 — `av-sync-report.json` `peakValue = 32768` — RESOLVED (not int16 overflow)
+
 - **Observation:** `verify-av-sync.mjs` computes `peakValue` as the maximum
   `Math.abs(sample)` over the decoded PCM; the `aevalsrc` sine is generated at
   amplitude 1.0 (line 68). `verify-report.json` also reports the fixture's
@@ -282,6 +296,7 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
 ## Verifier correctness
 
 ### D-11 — `countedFrames = 0` / `firstFramePtsSeconds = null` in `verify-report.json` — RESOLVED (structural, not decode evidence)
+
 - **Observation:** `verify-look-samples.mjs` `probe()` runs `ffprobe` with
   `-count_packets` (line 54) and `-count_frames` (line 55) but **without
   `-show_frames`**, so `probeJson.frames` is `undefined`; therefore the
@@ -293,10 +308,11 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
   evidence. The per-sample frame count the report does carry (`video.nbFrames`) is
   container stream metadata (`nb_frames`), not a decode.
 - **Resolution:** P0-R1 obtained genuine decode counts with `ffprobe
-  -count_frames` (`nb_read_frames`) for **all 15** files (proxy 240, intended 240,
+-count_frames` (`nb_read_frames`) for **all 15** files (proxy 240, intended 240,
   fixture 180) — recorded in `per-sample.json` and the provenance report §2.
 
 ### D-12 — "container-level PASS" is asserted by the verifier — RESOLVED (only `verify-look-samples.mjs` has no assertions)
+
 - **Observation:**
   - `verify-look-samples.mjs` (355 lines) has **no pass/fail assertions**. It
     pushes to `report.failures` **only** inside `catch (error)` when
@@ -321,6 +337,7 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
 ## Build / renderer provenance
 
 ### D-16 — BITMAP glyph limitation (J/O/Y only) — CONFIRMED
+
 - **Observation:** `git show d01770b1:packages/renderer-headless/src/index.ts`
   (377 lines): `const BITMAP: Readonly<Record<string, readonly string[]>> = {`
   at **line 369**, entries `J` / `O` / `Y` (5-row × 3-col) at **lines 370–372**,
@@ -338,12 +355,13 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
   run on the real shipping browser/export renderer (plan P2), not this bitmap.
 
 ### D-19 — source → build → media linkage — GAP (check ≠ build; no receipt binds dist to the renders)
+
 - **Claim:** (none) — `manifest.json` records only `frozenSha` (git HEAD `d01770b1`).
 - **Observation (static, read-only):**
   - The root `check` script is
     `pnpm typecheck && pnpm lint && pnpm format:check && pnpm test`. It contains
     **no `pnpm build` step.** `verify:ci` is `pnpm check && pnpm build &&
-    pnpm audit:prod`. The preserved `full-check-d01770b1.log` records `CHECK_EXIT`
+pnpm audit:prod`. The preserved `full-check-d01770b1.log` records `CHECK_EXIT`
     and the `check` script, **not** `verify:ci`.
   - `typecheck` = `tsc -b` at the repo root. Each of the six imported packages has
     `"build": "tsc -b"`, `tsconfig.json` `compilerOptions.outDir = "dist"`,
@@ -377,6 +395,7 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
   are superseded by that list.
 
 ### D-18 — "SAFE TO FREEZE" reviewer receipt — RESOLVED (documented secondary claim; no independent artefact located)
+
 - **Claim:** plan §3.3 / handoff: independent review of `e3c1a049..6c21c589`
   returned **SAFE TO FREEZE**; earlier `0cfb6ef8..e3c1a049` review = agent
   `ab3412457a7670bc0` (status "pending").
@@ -398,6 +417,7 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
 ## Concurrent / freshness
 
 ### D-20 — concurrent-work freshness — RESOLVED (noted, not touched)
+
 - **Observation (mtimes, local +0330):**
   - `apps/editor-web/src/looks-encoded-sample-acceptance.test.ts` (untracked on
     `codex/joy-live-director`) — SHA-256
@@ -416,6 +436,7 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
   P1 touches it.
 
 ### D-21 — plan/backup filename divergence — RESOLVED (not a discrepancy)
+
 - **Observation:** `joy-director-r2-and-ci-close-plan-2026-09-09.md` and
   `joydirectorr2andcicloseplan20260909.before-codex-review.md` are
   **byte-identical** (both SHA-256
