@@ -10,19 +10,25 @@ test.describe('WP-32 responsive workflow checkpoints', () => {
     const title = `WP32 responsive ${testInfo.project.name}-${Date.now()}`;
     await openDisposableWorkspace(page, title);
 
-    const dimensions = await page.evaluate(() => ({
-      bodyWidth: document.body.scrollWidth,
-      viewportWidth: document.documentElement.clientWidth,
-      bodyHeight: document.body.scrollHeight,
-      viewportHeight: document.documentElement.clientHeight,
-    }));
-    expect(dimensions.bodyWidth).toBeLessThanOrEqual(dimensions.viewportWidth);
-    expect(dimensions.bodyHeight).toBeGreaterThan(0);
+    const noHorizontalOverflow = async (where: string) => {
+      const d = await page.evaluate(() => ({
+        bodyWidth: document.body.scrollWidth,
+        viewportWidth: document.documentElement.clientWidth,
+        bodyHeight: document.body.scrollHeight,
+      }));
+      expect(d.bodyHeight, `${where}: body has height`).toBeGreaterThan(0);
+      expect(d.bodyWidth, `${where}: no horizontal overflow`).toBeLessThanOrEqual(d.viewportWidth);
+    };
+    await noHorizontalOverflow('default layout');
 
     await expect(page.getByRole('button', { name: 'Export MP4' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Recent processes' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Workspace preset' })).toBeVisible();
 
+    // Every panel: reachable AND opening it introduces no overflow at this
+    // viewport (previously overflow was measured once, in the default layout).
+    // Includes the R2 surfaces the real-service journey walks — Joy Code,
+    // Enhance, 3D Scene, Creative Brief — which had no per-viewport coverage.
     for (const label of [
       'Assets',
       'Timeline',
@@ -30,7 +36,10 @@ test.describe('WP-32 responsive workflow checkpoints', () => {
       'Audio',
       'Inspector',
       'Color',
+      'Enhance',
       'Workflows',
+      'Joy Code',
+      '3D Scene',
     ]) {
       let navigation = page.locator('.panel-tab[aria-label="Timeline"]').first();
       if (label === 'Timeline') {
@@ -43,7 +52,15 @@ test.describe('WP-32 responsive workflow checkpoints', () => {
       if (label === 'Workflows') {
         await expect(page.getByText('No saved workflows', { exact: true })).toBeVisible();
       }
+      await noHorizontalOverflow(`after opening ${label}`);
     }
+
+    // Creative Brief is a composer capability inside the Joy Code panel, not a
+    // dock tab — reveal it the way the app does, then re-check overflow.
+    await openPanel(page, 'Joy Code');
+    await page.getByRole('button', { name: 'Creative Brief', exact: true }).click();
+    await expect(page.locator('.creative-brief-panel')).toBeVisible();
+    await noHorizontalOverflow('after opening Creative Brief');
 
     const fileMenu = page.getByRole('button', { name: 'File' });
     await fileMenu.focus();
