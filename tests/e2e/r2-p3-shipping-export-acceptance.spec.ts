@@ -47,6 +47,10 @@ async function returnToProjectSelector(page: Page): Promise<void> {
   await page.evaluate((key) => {
     window.localStorage.setItem(key, JSON.stringify({ version: 1, projectId: null }));
   }, ACTIVE_PROJECT_KEY);
+  // The first navigation may already have mounted the editor using the
+  // previously persisted id. Reload so App's initial state reads the cleared
+  // selection and renders the Projects library before the next case.
+  await page.reload({ waitUntil: 'domcontentloaded' });
 }
 
 function probeExport(path: string): {
