@@ -28,7 +28,7 @@ describe('real-service evidence helpers', () => {
     const telemetry = createJourneyTelemetry();
     telemetry.consoleErrors.push('boom');
 
-    expect(() => assertJourneyTelemetryClean(telemetry)).toThrow(/console errors observed/);
+    expect(() => assertJourneyTelemetryClean(telemetry)).toThrow(/console error\(s\): boom/);
   });
 
   it('builds a machine-readable per-profile summary from Playwright JSON output', () => {

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { sha256Hex } from './sha256.js';
 
 export interface VoiceOverSession {
   readonly sessionId: string;
@@ -12,10 +12,7 @@ export interface VoiceOverSession {
 
 export function createVoiceOverSession(sampleRate: number, channels: 1 | 2 = 1): VoiceOverSession {
   return {
-    sessionId: createHash('sha256')
-      .update(`${sampleRate}-${channels}-${Date.now()}`)
-      .digest('hex')
-      .slice(0, 16),
+    sessionId: sha256Hex(`${sampleRate}-${channels}-${Date.now()}`).slice(0, 16),
     startedAt: new Date().toISOString(),
     sampleRate,
     channels,

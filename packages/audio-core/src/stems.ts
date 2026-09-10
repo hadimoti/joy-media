@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { sha256Bytes } from './sha256.js';
 
 export interface PreviewStem {
   readonly stemId: string;
@@ -54,8 +54,14 @@ export class PreviewStemCache {
 }
 
 export function computeStemHash(effectParams: unknown, inputSamples: Float32Array): string {
-  const hash = createHash('sha256');
-  hash.update(JSON.stringify(effectParams));
-  hash.update(Buffer.from(inputSamples.buffer, inputSamples.byteOffset, inputSamples.byteLength));
-  return hash.digest('hex');
+  const effectParamsBytes = new TextEncoder().encode(JSON.stringify(effectParams));
+  const samplesBytes = new Uint8Array(
+    inputSamples.buffer,
+    inputSamples.byteOffset,
+    inputSamples.byteLength,
+  );
+  const combined = new Uint8Array(effectParamsBytes.length + samplesBytes.length);
+  combined.set(effectParamsBytes);
+  combined.set(samplesBytes, effectParamsBytes.length);
+  return sha256Bytes(combined);
 }

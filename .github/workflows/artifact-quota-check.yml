@@ -1,0 +1,37 @@
+name: artifact-quota-check
+
+# One-shot utility (NOT part of any gate). Uploads a tiny sanitized file to
+# confirm `actions/upload-artifact` works — i.e. the artifact-storage quota has
+# actually refreshed after a cleanup. Deletion succeeding does NOT mean the
+# quota accounting has caught up (GitHub recalculates every 6–12 h).
+# workflow_dispatch only; runs on a self-hosted runner (no billed minutes).
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  upload-probe:
+    runs-on: [self-hosted, linux, x64, joy-media-ci]
+    timeout-minutes: 5
+    steps:
+      - name: Build a tiny sanitized probe file
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p probe
+          printf '%s\n' \
+            '{ "probe": "artifact-quota-check", "at": "'"$(date -u +%FT%TZ)"'", "contains_secrets": false }' \
+            > probe/quota-probe.json
+          wc -c probe/quota-probe.json
+      - name: Upload the probe (REQUIRED — no continue-on-error)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: artifact-quota-probe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: probe/quota-probe.json
+          retention-days: 1
+          if-no-files-found: error
+      - name: Result
+        run: echo 'upload-artifact succeeded — artifact storage quota is available for release-candidate-v2'

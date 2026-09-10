@@ -49,21 +49,68 @@ export interface JoyAgentContextSnapshot {
     readonly transform?: Readonly<Record<string, number>>;
     readonly animatedProperties: readonly string[];
   }[];
+  /**
+   * Applied Living Look instances read from the reopened canonical
+   * `LookInstancesDocument`. Present only when the project has at least one; an
+   * absent field and an empty project both mean "no Look is applied". Every
+   * field is an opaque id, an enum, a bounded scalar map, or a small id list —
+   * the same value classes a persisted `LookInstance` already admits.
+   */
+  readonly lookInstances?: readonly JoyAgentLookInstanceContext[];
   /** A validated, read-only brief artifact attached to the next Composer run. */
   readonly creativeBrief?: CreativeBriefV1;
   readonly omitted: readonly string[];
+}
+
+/**
+ * One applied Living Look instance, reduced to the identities and state a cold
+ * agent session needs to reason about `look_update` / `look_reset_overrides` /
+ * `look_detach` — without any prior chat memory or owner-supplied ids. It never
+ * carries a project document, URL, path, or credential.
+ */
+export interface JoyAgentLookInstanceContext {
+  /** The canonical Look-instance id (`look-…`), the mutation tools' key. */
+  readonly instanceId: string;
+  readonly definitionId: string;
+  /** The pack version this instance is pinned to (never "latest"). */
+  readonly definitionVersion: number;
+  readonly compositionId: string;
+  /** Whether the pinned pack id still resolves to a known built-in definition. */
+  readonly packStatus: 'known' | 'unknown';
+  readonly packTitle?: string;
+  /** The catalogue's current version for this pack, when the pack is known. */
+  readonly packLatestVersion?: number;
+  /** bindingId -> bound entity id. */
+  readonly entityBindings: Readonly<Record<string, string>>;
+  /** Binding ids whose target entity is no longer a live visual object. */
+  readonly missingBindingIds: readonly string[];
+  /** True when any binding target is missing (mirrors the panel's orphan flag). */
+  readonly orphaned: boolean;
+  /** Bindings the operator hand-edited; a reset must name these. */
+  readonly overriddenBindingIds: readonly string[];
+  readonly controlValues: Readonly<Record<string, number | string | boolean>>;
+  readonly createdEntityIds: readonly string[];
 }
 
 const MAX_CONTEXT_BYTES = 60_000;
 const MAX_CLIPS = 128;
 const MAX_ASSETS = 128;
 const MAX_VISUAL_OBJECTS = 128;
+const MAX_LOOK_INSTANCES = 64;
+const MAX_LOOK_BINDINGS = 32;
+const MAX_LOOK_CONTROL_VALUES = 32;
+const MAX_LOOK_OVERRIDES = 64;
+const MAX_LOOK_CREATED_ENTITIES = 64;
+const LOOK_INSTANCE_ID_PATTERN = /^look-[A-Za-z0-9][A-Za-z0-9-]{7,64}$/;
+const LOOK_DEFINITION_ID_PATTERN = /^[a-z][a-z0-9-]{1,63}$/;
+const LOOK_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const RESERVED_OMISSION_LABELS = [
   'selectedClipIds',
   'selectedVisualObjectIds',
   'clips',
   'assets',
   'visualObjects',
+  'lookInstances',
   'recentEntityReferences',
   'conversation',
   'trackIds',
@@ -75,6 +122,63 @@ function safeText(value: unknown, maxLength: number): string | undefined {
   if (typeof value !== 'string') return undefined;
   const normalized = value.trim().slice(0, maxLength);
   return normalized.length === 0 || UNSAFE_CONTEXT_TEXT.test(normalized) ? undefined : normalized;
+}
+
+/**
+ * Variant of `safeText` used ONLY for the bounded string fields that a model
+ * acts on by *identity* — `controlValues` text entries and `packTitle` on a
+ * Living Look instance. Unlike `safeText`, this helper refuses to truncate a
+ * too-long input into a *different* id; it rejects the value (returning
+ * `undefined`) and records the reserved `'lookInstances'` omission label so a
+ * reader can always tell an *incomplete* projection from an *empty* one.
+ *
+ * Do NOT route clips / assets / conversation bodies / visual-object text
+ * through this helper: those fields are bounded in length by the sanitizer
+ * but the model never reads them as a mutation key, so silent truncation is
+ * safe there and is deliberately preserved to avoid widening the omission
+ * surface for cosmetic fields.
+ */
+function safeTextReporting(
+  value: unknown,
+  maxLength: number,
+  omitted: Set<string>,
+): string | undefined {
+  if (typeof value !== 'string') {
+    // A non-string where a model-facing identity string was expected is a
+    // rejected field — record it so a reader can distinguish "this Look had
+    // no value to project" from "this Look had nothing to project". Silent
+    // drops here were the defect behind the P1-R2 review.
+    omitted.add('lookInstances');
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    omitted.add('lookInstances');
+    return undefined;
+  }
+  if (trimmed.length > maxLength || UNSAFE_CONTEXT_TEXT.test(trimmed)) {
+    omitted.add('lookInstances');
+    return undefined;
+  }
+  return trimmed;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Accept an identifier only if it is already valid — never a truncated,
+ * trimmed, or otherwise altered version of a longer string. A mutation key that
+ * `safeText` would silently shorten into a *different* id must be rejected, not
+ * forwarded, so a caller cannot act on an identity the project never held.
+ */
+function exactId(value: unknown, pattern: RegExp, maxLength: number): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  if (value.length === 0 || value.length > maxLength) return undefined;
+  if (value !== value.trim()) return undefined;
+  if (UNSAFE_CONTEXT_TEXT.test(value)) return undefined;
+  return pattern.test(value) ? value : undefined;
 }
 
 function byteLength(value: unknown): number {
@@ -127,8 +231,183 @@ export interface JoyAgentContextSnapshotInput {
     readonly role: 'user' | 'assistant';
     readonly body: string;
   }[];
+  /**
+   * Applied Look instances, already read from the hydrated canonical
+   * `LookInstancesDocument`. Treated as untrusted here and re-sanitized like
+   * every other field; a record that fails validation is dropped and reported
+   * in `omitted`.
+   */
+  readonly lookInstances?: readonly JoyAgentLookInstanceContext[];
   /** Optional validated brief context; bounded before crossing into the Worker. */
   readonly creativeBrief?: CreativeBriefV1;
+}
+
+/**
+ * Re-sanitize persisted Look-instance context at the boundary. Every rejected
+ * record, rejected field, dropped list entry, and truncated collection is
+ * reported through `omitted` (the reserved `'lookInstances'` label) so a reader
+ * can always tell an *incomplete* projection from an *empty* project. Malformed
+ * runtime shapes (a non-array where a list is expected, a scalar where a map is
+ * expected) are handled predictably here — they never reach a bare
+ * `.slice`/`.map`/`Object.entries` that could throw.
+ */
+function sanitizeLookInstances(
+  input: readonly JoyAgentLookInstanceContext[] | undefined,
+  omitted: Set<string>,
+): JoyAgentLookInstanceContext[] {
+  if (input === undefined) return [];
+  if (!Array.isArray(input)) {
+    omitted.add('lookInstances');
+    return [];
+  }
+  if (input.length > MAX_LOOK_INSTANCES) omitted.add('lookInstances');
+  const out: JoyAgentLookInstanceContext[] = [];
+  for (const raw of input.slice(0, MAX_LOOK_INSTANCES)) {
+    const sanitized = sanitizeLookInstance(raw, omitted);
+    if (sanitized !== undefined) out.push(sanitized);
+  }
+  return out;
+}
+
+/** Filter a persisted id list, reporting truncation and every dropped entry. */
+function sanitizeLookIdList(
+  value: unknown,
+  cap: number,
+  omitted: Set<string>,
+  accept: (id: string) => boolean,
+): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    omitted.add('lookInstances');
+    return [];
+  }
+  if (value.length > cap) omitted.add('lookInstances');
+  const out: string[] = [];
+  for (const entry of value.slice(0, cap)) {
+    const id = exactId(entry, LOOK_TOKEN_PATTERN, 128);
+    if (id === undefined || !accept(id)) {
+      omitted.add('lookInstances');
+      continue;
+    }
+    out.push(id);
+  }
+  return out;
+}
+
+function sanitizeLookInstance(
+  raw: unknown,
+  omitted: Set<string>,
+): JoyAgentLookInstanceContext | undefined {
+  if (!isPlainRecord(raw)) {
+    omitted.add('lookInstances');
+    return undefined;
+  }
+  const instanceId = exactId(raw.instanceId, LOOK_INSTANCE_ID_PATTERN, 80);
+  const definitionId = exactId(raw.definitionId, LOOK_DEFINITION_ID_PATTERN, 64);
+  const compositionId = exactId(raw.compositionId, LOOK_TOKEN_PATTERN, 128);
+  const definitionVersion = raw.definitionVersion;
+  if (
+    instanceId === undefined ||
+    definitionId === undefined ||
+    compositionId === undefined ||
+    typeof definitionVersion !== 'number' ||
+    !Number.isInteger(definitionVersion) ||
+    definitionVersion < 1
+  ) {
+    omitted.add('lookInstances');
+    return undefined;
+  }
+
+  // entityBindings: bindingId -> entity id. A non-record shape (array, scalar)
+  // is reported and the record kept with no bindings — never read positionally.
+  const entityBindings: Record<string, string> = {};
+  if (raw.entityBindings !== undefined && !isPlainRecord(raw.entityBindings)) {
+    omitted.add('lookInstances');
+  } else if (isPlainRecord(raw.entityBindings)) {
+    const entries = Object.entries(raw.entityBindings);
+    if (entries.length > MAX_LOOK_BINDINGS) omitted.add('lookInstances');
+    for (const [key, value] of entries.slice(0, MAX_LOOK_BINDINGS)) {
+      const target = exactId(value, LOOK_TOKEN_PATTERN, 128);
+      if (!LOOK_TOKEN_PATTERN.test(key) || target === undefined) {
+        omitted.add('lookInstances');
+        continue;
+      }
+      entityBindings[key] = target;
+    }
+  }
+  const knownBindingIds = new Set(Object.keys(entityBindings));
+
+  const controlValues: Record<string, number | string | boolean> = {};
+  if (raw.controlValues !== undefined && !isPlainRecord(raw.controlValues)) {
+    omitted.add('lookInstances');
+  } else if (isPlainRecord(raw.controlValues)) {
+    const entries = Object.entries(raw.controlValues);
+    if (entries.length > MAX_LOOK_CONTROL_VALUES) omitted.add('lookInstances');
+    for (const [key, value] of entries.slice(0, MAX_LOOK_CONTROL_VALUES)) {
+      if (!LOOK_TOKEN_PATTERN.test(key)) {
+        omitted.add('lookInstances');
+        continue;
+      }
+      if (typeof value === 'number' && Number.isFinite(value)) controlValues[key] = value;
+      else if (typeof value === 'boolean') controlValues[key] = value;
+      else {
+        const text = safeTextReporting(value, 120, omitted);
+        if (text === undefined) continue;
+        controlValues[key] = text;
+      }
+    }
+  }
+
+  const overriddenBindingIds = sanitizeLookIdList(
+    raw.overriddenBindingIds,
+    MAX_LOOK_OVERRIDES,
+    omitted,
+    () => true,
+  );
+  const missingBindingIds = sanitizeLookIdList(
+    raw.missingBindingIds,
+    MAX_LOOK_BINDINGS,
+    omitted,
+    (id) => knownBindingIds.has(id),
+  );
+  const createdEntityIds = sanitizeLookIdList(
+    raw.createdEntityIds,
+    MAX_LOOK_CREATED_ENTITIES,
+    omitted,
+    () => true,
+  );
+
+  let packTitle: string | undefined;
+  if (raw.packTitle !== undefined) {
+    packTitle = safeTextReporting(raw.packTitle, 160, omitted);
+  }
+  let packLatestVersion: number | undefined;
+  if (raw.packLatestVersion !== undefined) {
+    if (
+      typeof raw.packLatestVersion === 'number' &&
+      Number.isInteger(raw.packLatestVersion) &&
+      raw.packLatestVersion >= 1
+    )
+      packLatestVersion = raw.packLatestVersion;
+    else omitted.add('lookInstances');
+  }
+  const packStatus = raw.packStatus === 'known' ? 'known' : 'unknown';
+
+  return Object.freeze({
+    instanceId,
+    definitionId,
+    definitionVersion,
+    compositionId,
+    packStatus,
+    ...(packStatus === 'known' && packTitle !== undefined ? { packTitle } : {}),
+    ...(packStatus === 'known' && packLatestVersion !== undefined ? { packLatestVersion } : {}),
+    entityBindings: Object.freeze(entityBindings),
+    missingBindingIds: Object.freeze(missingBindingIds),
+    orphaned: missingBindingIds.length > 0 || raw.orphaned === true,
+    overriddenBindingIds: Object.freeze(overriddenBindingIds),
+    controlValues: Object.freeze(controlValues),
+    createdEntityIds: Object.freeze(createdEntityIds),
+  });
 }
 
 /** Build one immutable, byte-bounded model context; never forwards project objects. */
@@ -241,6 +520,8 @@ export function createJoyAgentContextSnapshot(
       return body === undefined ? undefined : { role: message.role, body };
     })
     .filter((message): message is NonNullable<typeof message> => message !== undefined);
+  const lookInstances = sanitizeLookInstances(input.lookInstances, omitted);
+  if (lookInstances.length !== (input.lookInstances?.length ?? 0)) omitted.add('lookInstances');
   if (clips.length !== (input.clips?.length ?? 0) || (input.clips?.length ?? 0) > MAX_CLIPS)
     omitted.add('clips');
   if (assets.length !== (input.assets?.length ?? 0) || (input.assets?.length ?? 0) > MAX_ASSETS)
@@ -312,6 +593,7 @@ export function createJoyAgentContextSnapshot(
     assets: [] as typeof assets,
     recentEntityReferences: [] as typeof recentEntityReferences,
     visualObjects: [] as typeof visualObjects,
+    lookInstances: [] as typeof lookInstances,
     conversation: [] as typeof conversation,
     ...(creativeBrief === undefined ? {} : { creativeBrief }),
   };
@@ -320,7 +602,13 @@ export function createJoyAgentContextSnapshot(
   let snapshot = base;
   const append = <
     K extends
-      'trackIds' | 'clips' | 'assets' | 'recentEntityReferences' | 'visualObjects' | 'conversation',
+      | 'trackIds'
+      | 'clips'
+      | 'assets'
+      | 'recentEntityReferences'
+      | 'visualObjects'
+      | 'lookInstances'
+      | 'conversation',
   >(
     key: K,
     records: readonly (K extends 'trackIds'
@@ -333,7 +621,9 @@ export function createJoyAgentContextSnapshot(
             ? (typeof recentEntityReferences)[number]
             : K extends 'visualObjects'
               ? (typeof visualObjects)[number]
-              : (typeof conversation)[number])[],
+              : K extends 'lookInstances'
+                ? (typeof lookInstances)[number]
+                : (typeof conversation)[number])[],
     label: string,
   ): void => {
     const kept: unknown[] = [];
@@ -358,11 +648,13 @@ export function createJoyAgentContextSnapshot(
   append('clips', boundedClips, 'clips');
   append('visualObjects', boundedVisualObjects, 'visualObjects');
   append('assets', assets, 'assets');
+  append('lookInstances', lookInstances, 'lookInstances');
   append('recentEntityReferences', recentEntityReferences, 'recentEntityReferences');
   append('conversation', conversation, 'conversation');
   const {
     conversation: packedConversation,
     recentEntityReferences: packedRecentEntityReferences,
+    lookInstances: packedLookInstances,
     ...snapshotWithoutOptionalCollections
   } = snapshot;
   const finalSnapshot = {
@@ -370,6 +662,9 @@ export function createJoyAgentContextSnapshot(
     ...(packedConversation.length > 0 ? { conversation: Object.freeze(packedConversation) } : {}),
     ...(packedRecentEntityReferences.length > 0
       ? { recentEntityReferences: Object.freeze(packedRecentEntityReferences) }
+      : {}),
+    ...(packedLookInstances.length > 0
+      ? { lookInstances: Object.freeze(packedLookInstances) }
       : {}),
     trackIds: Object.freeze(snapshot.trackIds ?? []),
     clips: Object.freeze(snapshot.clips),
@@ -396,6 +691,7 @@ export interface JoyAgentPagedContext {
   readonly clips: JoyAgentContextSnapshot['clips'];
   readonly assets: JoyAgentContextSnapshot['assets'];
   readonly visualObjects: NonNullable<JoyAgentContextSnapshot['visualObjects']>;
+  readonly lookInstances: NonNullable<JoyAgentContextSnapshot['lookInstances']>;
   readonly trackIds: readonly string[];
   readonly omitted: readonly string[];
 }
@@ -456,17 +752,34 @@ export function createJoyAgentPagedContext(
   const trackIds = pageChunks(normalizeTrackIds, 128)
     .flatMap((page) => createJoyAgentContextSnapshot({ ...common, trackIds: page }).trackIds ?? [])
     .slice(0, JOY_AGENT_HOST_CONTEXT_MAX_RECORDS);
+  const normalizeLookInstances = Array.isArray(input.lookInstances) ? input.lookInstances : [];
+  if (input.lookInstances !== undefined && !Array.isArray(input.lookInstances))
+    omitted.push('lookInstances');
+  const lookInstanceChunks = pageChunks(normalizeLookInstances, MAX_LOOK_INSTANCES).map((page) =>
+    createJoyAgentContextSnapshot({ ...common, lookInstances: page }),
+  );
+  const lookInstances = lookInstanceChunks
+    .flatMap((chunk) => chunk.lookInstances ?? [])
+    .slice(0, JOY_AGENT_HOST_CONTEXT_MAX_RECORDS);
+  // Preserve omission metadata from EVERY Look chunk — including chunks past the
+  // first MAX_LOOK_INSTANCES that the compact model snapshot never inspects, so
+  // a field truncated or dropped only in a later chunk is still reported.
+  if (lookInstanceChunks.some((chunk) => chunk.omitted.includes('lookInstances')))
+    omitted.push('lookInstances');
 
   if (clips.length < normalizeClips.length) omitted.push('clips');
   if (assets.length < normalizeAssets.length) omitted.push('assets');
   if (visualObjects.length < normalizeVisualObjects.length) omitted.push('visualObjects');
   if (trackIds.length < normalizeTrackIds.length) omitted.push('trackIds');
+  if (lookInstances.length < normalizeLookInstances.length) omitted.push('lookInstances');
   if (normalizeClips.length > JOY_AGENT_HOST_CONTEXT_MAX_RECORDS) omitted.push('host-clips-cap');
   if (normalizeAssets.length > JOY_AGENT_HOST_CONTEXT_MAX_RECORDS) omitted.push('host-assets-cap');
   if (normalizeVisualObjects.length > JOY_AGENT_HOST_CONTEXT_MAX_RECORDS)
     omitted.push('host-visual-objects-cap');
   if (normalizeTrackIds.length > JOY_AGENT_HOST_CONTEXT_MAX_RECORDS)
     omitted.push('host-track-ids-cap');
+  if (normalizeLookInstances.length > JOY_AGENT_HOST_CONTEXT_MAX_RECORDS)
+    omitted.push('host-look-instances-cap');
 
   return Object.freeze({
     snapshot,
@@ -474,6 +787,8 @@ export function createJoyAgentPagedContext(
     assets: freezeRecords(assets),
     visualObjects:
       freezeRecords<NonNullable<JoyAgentContextSnapshot['visualObjects']>[number]>(visualObjects),
+    lookInstances:
+      freezeRecords<NonNullable<JoyAgentContextSnapshot['lookInstances']>[number]>(lookInstances),
     trackIds: Object.freeze([...trackIds]),
     omitted: uniqueOmitted([...snapshot.omitted, ...omitted]),
   });
