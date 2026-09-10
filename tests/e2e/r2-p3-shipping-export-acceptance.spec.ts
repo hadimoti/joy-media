@@ -72,7 +72,7 @@ function probeExport(path: string): {
       'error',
       '-count_frames',
       '-show_entries',
-      'format=format_name,duration:stream=codec_type,codec_name,width,height,nb_read_frames,sample_rate',
+      'format=format_name,duration:stream=codec_type,codec_name,width,height,nb_read_frames,sample_rate,duration',
       '-of',
       'json',
       path,
