@@ -5,6 +5,16 @@
 redacted, checksum-verified evidence so a **failed** pass's structure survives
 the next job's `git clean` and the artifact-storage outage.
 
+## Artifact-quota handling (2026-09-10)
+
+The v2 release workflow still attempts a GitHub Actions artifact upload, but
+the upload is best-effort because GitHub account storage can be unavailable
+for 6–12 hours after cleanup. The upload step remains visible in the job log
+and its outcome is written to each pass's durable evidence directory as
+`ARTIFACT-UPLOAD-STATUS.txt`. The redacted, checksum-verified durable store is
+the authoritative evidence copy during a quota outage; an upload error is not
+silently treated as a source failure.
+
 ## PROVISIONED — 2026-09-09 (owner-approved, idle window)
 
 The acceptance runner is a **Docker Desktop** container on the CI host (`docker
