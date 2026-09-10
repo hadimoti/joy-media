@@ -155,9 +155,15 @@ jobs:
           # A self-test worker process may still be exiting when this step runs.
           # Give it a bounded window to disappear on its own before declaring a
           # leak; only a process that outlives that window is a real defect.
+          $expectedPaths = @(
+            Join-Path $env:RUNNER_TEMP ("joy-worker-clean-" + $env:CANDIDATE_SHA + "-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + "-1.exe"),
+            Join-Path $env:RUNNER_TEMP ("joy-worker-clean-" + $env:CANDIDATE_SHA + "-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + "-2.exe")
+          )
           $leakedWorkers = @()
           for ($attempt = 0; $attempt -lt 15; $attempt++) {
-            $leakedWorkers = @(Get-Process -Name 'joy-worker' -ErrorAction SilentlyContinue)
+            $leakedWorkers = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+              $_.Name -like 'joy-worker*' -and $_.Path -and $expectedPaths -contains $_.Path
+            })
             if ($leakedWorkers.Count -eq 0) { break }
             Start-Sleep -Seconds 1
           }
