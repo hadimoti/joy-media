@@ -59,6 +59,8 @@ function probeExport(path: string): {
   readonly height: number;
   readonly duration: number;
   readonly frames: number;
+  readonly timestampCount: number;
+  readonly frameRate: string;
   readonly audioCodec?: string;
   readonly audioSampleRate?: number;
   readonly audioDuration?: number;
@@ -72,7 +74,7 @@ function probeExport(path: string): {
       'error',
       '-count_frames',
       '-show_entries',
-      'format=format_name,duration:stream=codec_type,codec_name,width,height,nb_read_frames,sample_rate,duration',
+      'format=format_name,duration:stream=codec_type,codec_name,width,height,nb_read_frames,sample_rate,duration,r_frame_rate',
       '-of',
       'json',
       path,
@@ -89,6 +91,7 @@ function probeExport(path: string): {
       readonly nb_read_frames?: string;
       readonly sample_rate?: string;
       readonly duration?: string;
+      readonly r_frame_rate?: string;
     }[];
   };
   const video = parsed.streams?.find((stream) => stream.codec_type === 'video');
@@ -119,6 +122,8 @@ function probeExport(path: string): {
     height: video?.height ?? 0,
     duration: Number(parsed.format?.duration ?? 0),
     frames: Number(video?.nb_read_frames ?? timestamps.length),
+    timestampCount: timestamps.length,
+    frameRate: video?.r_frame_rate ?? '',
     ...(audio?.codec_name === undefined ? {} : { audioCodec: audio.codec_name }),
     ...(audio?.sample_rate === undefined ? {} : { audioSampleRate: Number(audio.sample_rate) }),
     ...(audio?.duration === undefined
@@ -263,6 +268,8 @@ test.describe('JOY R2 P3 shipping browser export matrix', () => {
           expect(probe.height).toBe(preset.height);
           expect(probe.duration).toBeGreaterThan(0);
           expect(probe.frames).toBeGreaterThan(0);
+          expect(probe.timestampCount).toBe(probe.frames);
+          expect(probe.frameRate).toBe('30/1');
           expect(probe.ptsMonotonic).toBe(true);
           if (probe.avDriftSeconds !== undefined)
             expect(probe.avDriftSeconds).toBeLessThanOrEqual(0.05);
