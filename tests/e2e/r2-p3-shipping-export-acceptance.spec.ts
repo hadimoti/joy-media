@@ -40,6 +40,10 @@ async function returnToProjectSelector(page: Page): Promise<void> {
   // The reference project is intentionally persisted. Clear only the active
   // selection before the next cold navigation so each matrix case exercises
   // the real selector/reopen path without inheriting the previous editor.
+  // Playwright starts a fresh test page at about:blank; establish the app
+  // origin before reading or writing localStorage so the reset itself cannot
+  // fail with a document-security error.
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.evaluate((key) => {
     window.localStorage.setItem(key, JSON.stringify({ version: 1, projectId: null }));
   }, ACTIVE_PROJECT_KEY);
