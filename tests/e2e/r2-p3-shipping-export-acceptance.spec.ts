@@ -28,7 +28,22 @@ const LOOK_PACKS: readonly LookPack[] = [
   { id: 'quiet-documentary', title: 'Quiet Documentary' },
   { id: 'music-pulse', title: 'Music Pulse' },
 ];
-const EXPORT_TIMEOUT_MS = 240_000;
+// The browser stage is followed by real Worker verification/remux. The
+// self-hosted real-service harness gives that bounded path a 35-minute window;
+// keep the matrix aligned so a valid export is not reported as a browser
+// download timeout while the Worker is still finishing.
+const EXPORT_TIMEOUT_MS = 35 * 60_000;
+
+const ACTIVE_PROJECT_KEY = 'joy-media.active-project.v1';
+
+async function returnToProjectSelector(page: Page): Promise<void> {
+  // The reference project is intentionally persisted. Clear only the active
+  // selection before the next cold navigation so each matrix case exercises
+  // the real selector/reopen path without inheriting the previous editor.
+  await page.evaluate((key) => {
+    window.localStorage.setItem(key, JSON.stringify({ version: 1, projectId: null }));
+  }, ACTIVE_PROJECT_KEY);
+}
 
 function probeExport(path: string): {
   readonly format: string;
@@ -182,6 +197,7 @@ test.describe('JOY R2 P3 shipping browser export matrix', () => {
         const caseId = `${pack.id}/${preset.id}`;
         const evidence: Record<string, unknown> = { caseId, pack: pack.id, preset: preset.id };
         try {
+          await returnToProjectSelector(page);
           await openReferenceWorkspace(page);
           const videoName = `p3-${pack.id}-${preset.id}.mp4`;
           await importMediaFixture(page, 'video.mp4', videoName);
