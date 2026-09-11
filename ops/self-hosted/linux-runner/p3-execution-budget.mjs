@@ -131,8 +131,16 @@ export function runOwnedP3Process(
     throw new Error('p3-execution-budget: budget is required');
   if (typeof terminate !== 'function')
     throw new Error('p3-execution-budget: terminate callback is required');
-  const stage = stageBudgetMs ?? Math.max(0, budget.remainingMs() - budget.cleanupReserveMs);
-  if (!budget.canStart(stage)) {
+  const remainingSnapshot = budget.remainingMs();
+  const reserve = budget.cleanupReserveMs;
+  const stage = stageBudgetMs ?? Math.max(0, remainingSnapshot - reserve);
+  if (stageBudgetMs === undefined) {
+    if (remainingSnapshot < stage + reserve) {
+      return Promise.reject(
+        new Error('p3-execution-budget: stage plus cleanup reserve does not fit'),
+      );
+    }
+  } else if (!budget.canStart(stage)) {
     return Promise.reject(
       new Error('p3-execution-budget: stage plus cleanup reserve does not fit'),
     );

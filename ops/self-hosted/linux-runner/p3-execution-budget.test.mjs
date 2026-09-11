@@ -128,4 +128,66 @@ describe('runOwnedP3Process', () => {
       expect(progress.map((event) => event.phase)).toContain('deadline');
     },
   );
+
+  it('admits the derived default stage without a double-read race when budget is sufficient', async () => {
+    let tick = 1_000;
+    const budget = createP3ExecutionBudget({
+      workBudgetMs: 500,
+      cleanupReserveMs: 100,
+      now: () => tick,
+      utcNow: () => '2026-09-11T06:00:00.000Z',
+    });
+    tick = 1_050;
+    const result = await runOwnedP3Process(
+      process.execPath,
+      ['-e', "process.stdout.write('child-ok')"],
+      {
+        budget,
+        terminate: async () => ({ state: 'not-needed' }),
+        spawnFn: spawn,
+        maxOutputBytes: 64,
+      },
+    );
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe('child-ok');
+  });
+
+  it('rejects a derived default stage that cannot honor the cleanup reserve', async () => {
+    let tick = 1_000;
+    const budget = createP3ExecutionBudget({
+      workBudgetMs: 500,
+      cleanupReserveMs: 200,
+      now: () => tick,
+      utcNow: () => '2026-09-11T06:00:00.000Z',
+    });
+    tick = 1_400;
+    await expect(
+      runOwnedP3Process(process.execPath, ['-e', "process.stdout.write('child-ok')"], {
+        budget,
+        terminate: async () => ({ state: 'not-needed' }),
+        spawnFn: spawn,
+        maxOutputBytes: 64,
+      }),
+    ).rejects.toThrow(/stage plus cleanup reserve does not fit/);
+  });
+
+  it('keeps explicit stageBudgetMs admission fail-closed', async () => {
+    let tick = 1_000;
+    const budget = createP3ExecutionBudget({
+      workBudgetMs: 500,
+      cleanupReserveMs: 0,
+      now: () => tick,
+      utcNow: () => '2026-09-11T06:00:00.000Z',
+    });
+    tick = 1_100;
+    await expect(
+      runOwnedP3Process(process.execPath, ['-e', "process.stdout.write('child-ok')"], {
+        budget,
+        stageBudgetMs: 450,
+        terminate: async () => ({ state: 'not-needed' }),
+        spawnFn: spawn,
+        maxOutputBytes: 64,
+      }),
+    ).rejects.toThrow(/stage plus cleanup reserve does not fit/);
+  });
 });
