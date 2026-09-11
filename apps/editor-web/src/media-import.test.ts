@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { BrowserAsset, BrowserAssetRegistration } from './control-plane-client.js';
 import {
+  describeMedia,
   importMediaFile,
   normalizedMimeType,
   sniffMediaMimeType,
@@ -232,3 +233,129 @@ async function digest(file: File): Promise<string> {
   const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer()));
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
+
+describe('describeMedia (timed-media blob lifecycle)', () => {
+  // Regression for real-service-acceptance: reimport of an exported MP4
+  // surfaced `net::ERR_FILE_NOT_FOUND (blob:<opaque>:0)` because
+  // describeTimedMedia revoked its object URL after removeAttribute('src')
+  // + load(). The browser's resource-fetch on the now-revoked URL races
+  // with cleanup. Revoke must happen before the element is detached.
+  it('revokes the object URL before removing src and calling load()', async () => {
+    const events: string[] = [];
+    const url = 'blob:fake-timed-media';
+    const fakeVideo: Record<string, unknown> = {
+      preload: '',
+      src: '',
+      duration: 2.5,
+      videoWidth: 1920,
+      videoHeight: 1080,
+      onloadedmetadata: null,
+      onerror: null,
+      removeAttribute(name: string) {
+        if (name === 'src') events.push('removeAttribute:src');
+      },
+      load() {
+        events.push('load');
+      },
+    };
+    Object.defineProperty(fakeVideo, 'onloadedmetadata', {
+      get() {
+        return (this as { __onloadedmetadata?: unknown }).__onloadedmetadata ?? null;
+      },
+      set(handler: ((ev: Event) => unknown) | null) {
+        (this as { __onloadedmetadata?: unknown }).__onloadedmetadata = handler;
+        if (handler !== null) {
+          // Simulate the browser firing `loadedmetadata` after `src` is set.
+          queueMicrotask(() => {
+            handler.call(fakeVideo as unknown as HTMLVideoElement, new Event('loadedmetadata'));
+          });
+        }
+      },
+    });
+
+    // The test suite runs under the default Node environment (no jsdom), so
+    // `globalThis.document` is undefined. describeTimedMedia's DOM branch
+    // requires both `document` and `URL.createObjectURL`; install a minimal
+    // document mock for the duration of this test, then restore it. Spying
+    // Node's `URL.createObjectURL` / `revokeObjectURL` exercises the real
+    // finally-block cleanup order without pulling in jsdom just for one
+    // regression.
+    type DocumentLike = Pick<Document, 'createElement'>;
+    const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+    const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const fakeDocument: DocumentLike = {
+      createElement(tag: string): HTMLElement {
+        if (tag === 'video') return fakeVideo as unknown as HTMLElement;
+        throw new Error(`describeMedia test stub does not implement createElement("${tag}")`);
+      },
+    };
+    // describeTimedMedia uses `window.setTimeout` / `window.clearTimeout`
+    // for the metadata-read timeout; provide thin shims that delegate to
+    // the Node timer globals so the real cleanup path runs to completion.
+    const fakeWindow = {
+      setTimeout(handler: (...args: unknown[]) => void, ms?: number): unknown {
+        return setTimeout(handler, ms);
+      },
+      clearTimeout(handle: unknown): void {
+        clearTimeout(handle as Parameters<typeof clearTimeout>[0]);
+      },
+    };
+    Object.defineProperty(globalThis, 'document', {
+      value: fakeDocument,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(globalThis, 'window', {
+      value: fakeWindow,
+      configurable: true,
+      writable: true,
+    });
+
+    const createUrl = vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      events.push('createObjectURL');
+      return url;
+    });
+    const revokeUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation((value) => {
+      events.push(`revokeObjectURL:${value}`);
+    });
+
+    try {
+      const file = new File(['mp4-bytes'], 'reimport.mp4', { type: 'video/mp4' });
+      const descriptor = await describeMedia(file, 'video', 'video/mp4');
+
+      expect(createUrl).toHaveBeenCalledOnce();
+      expect(revokeUrl).toHaveBeenCalledExactlyOnceWith(url);
+      expect(descriptor).toEqual({
+        mimeType: 'video/mp4',
+        durationUs: 2_500_000,
+        width: 1920,
+        height: 1080,
+      });
+
+      // The revoke must happen BEFORE removeAttribute('src') and load();
+      // any order that revokes last surfaces a `net::ERR_FILE_NOT_FOUND`
+      // for the still-pending blob URL on Chromium during reimport.
+      const revokeIndex = events.indexOf(`revokeObjectURL:${url}`);
+      const removeSrcIndex = events.indexOf('removeAttribute:src');
+      const loadIndex = events.indexOf('load');
+      expect(revokeIndex).toBeGreaterThanOrEqual(0);
+      expect(removeSrcIndex).toBeGreaterThanOrEqual(0);
+      expect(loadIndex).toBeGreaterThanOrEqual(0);
+      expect(revokeIndex).toBeLessThan(removeSrcIndex);
+      expect(revokeIndex).toBeLessThan(loadIndex);
+    } finally {
+      createUrl.mockRestore();
+      revokeUrl.mockRestore();
+      if (originalDocument === undefined) {
+        Reflect.deleteProperty(globalThis, 'document');
+      } else {
+        Object.defineProperty(globalThis, 'document', originalDocument);
+      }
+      if (originalWindow === undefined) {
+        Reflect.deleteProperty(globalThis, 'window');
+      } else {
+        Object.defineProperty(globalThis, 'window', originalWindow);
+      }
+    }
+  });
+});
