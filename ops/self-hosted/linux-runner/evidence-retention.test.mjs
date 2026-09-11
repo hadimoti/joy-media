@@ -62,6 +62,19 @@ async function buildFailedPassWorkspace() {
       note: 'net::ERR_* is not proof of HTTP 404',
     }),
   );
+  await writeFile(
+    join(out, 'browser/p3-export-matrix.json'),
+    JSON.stringify({ status: 'partial' }),
+  );
+  await writeFile(
+    join(out, 'browser/p3-export-matrix-copy.json'),
+    JSON.stringify({ status: 'partial' }),
+  );
+  await writeFile(join(out, 'browser/p3-export-json.json'), JSON.stringify({ status: 'partial' }));
+  await writeFile(join(out, 'browser/p3-progress.jsonl'), '{"phase":"p3-start"}\n');
+  await writeFile(join(out, 'browser/p3-child-stdout-tail.txt'), 'bounded stdout tail\n');
+  await writeFile(join(out, 'browser/p3-child-stderr-tail.txt'), 'bounded stderr tail\n');
+  await writeFile(join(out, 'browser/p3-lane-evidence.json'), JSON.stringify({ status: 'passed' }));
   await mkdir(join(out, 'delivery'), { recursive: true });
   await writeFile(
     join(out, 'delivery/result.json'),
@@ -95,7 +108,10 @@ test(
     const dest = join(persist, 'unknown', '444-1-p2'); // git rev-parse in a bare `git init` -> "unknown"
     await stat(dest);
     const manifest = JSON.parse(await readFile(join(dest, 'MANIFEST.json'), 'utf8'));
-    assert.ok(manifest.files.length >= 4, 'all 4 allowlisted files must be retained');
+    assert.ok(
+      manifest.files.length >= 11,
+      'all allowlisted P3 and operational files must be retained',
+    );
     assert.equal(manifest.redactionApplied, true);
     // The leak-guard must NOT fire on correctly-redacted content: `result.json`
     // holds a presigned URL + Bearer header + DB userinfo that redaction handles,
@@ -123,6 +139,19 @@ test(
       files.some((f) => f.endsWith('journey-failure.json')),
       'journey-failure.json should be retained',
     );
+    for (const expected of [
+      'p3-export-matrix.json',
+      'p3-export-matrix-copy.json',
+      'p3-export-json.json',
+      'p3-progress.jsonl',
+      'p3-child-stdout-tail.txt',
+      'p3-child-stderr-tail.txt',
+      'p3-lane-evidence.json',
+    ])
+      assert.ok(
+        files.some((f) => f.endsWith(expected)),
+        `${expected} should be retained`,
+      );
 
     // no secret in any encoding anywhere
     const b64 = Buffer.from(FAKE_SECRET).toString('base64');

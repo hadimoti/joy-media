@@ -78,6 +78,12 @@ ALLOW=(
   test-output/browser/authenticated-editor-1.0/journey-evidence.json
   test-output/browser/real-service-profile-matrix.json
   test-output/browser/p3-export-matrix.json
+  test-output/browser/p3-export-matrix-copy.json
+  test-output/browser/p3-export-json.json
+  test-output/browser/p3-progress.jsonl
+  test-output/browser/p3-child-stdout-tail.txt
+  test-output/browser/p3-child-stderr-tail.txt
+  test-output/browser/p3-lane-evidence.json
   test-output/browser/journey-failure.json
   test-output/browser/web-dev-server.log
   test-output/release-performance/polling.json
@@ -102,6 +108,33 @@ for rel in "${ALLOW[@]}"; do
   cp -- "$src" "$staging/$rel" || { echo "retain-evidence: copy failed for $rel" >&2; exit 1; }
   copied=$((copied + 1))
 done
+
+# P3 export gallery: copy every retained MP4 + representative frame under
+# test-output/browser/p3-export-gallery/ when its manifest exists. The manifest
+# is the existence contract — without it the gallery is not authoritative and
+# is not picked up. Files inside the gallery are exactly what the P3 browser
+# acceptance test produced; nothing in the gallery is parsed, so a binary
+# leak-guard is the only invariant (the perl + grep guards below apply).
+P3_GALLERY_SRC="$ws/test-output/browser/p3-export-gallery"
+P3_GALLERY_STAGED="$staging/test-output/browser/p3-export-gallery"
+if [ -f "$P3_GALLERY_SRC/manifest.json" ]; then
+  mkdir -p "$P3_GALLERY_STAGED"
+  # Recursive copy with the relative directory tree preserved. The pinned
+  # ubuntu:24.04 runner image (Dockerfile pinned to
+  # sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517)
+  # installs coreutils + `tar` but NOT `cpio`. Pipeline the gallery through
+  # tar so intermediate subdirectories are created implicitly and modes/times
+  # are preserved:
+  #   cd $src && tar -cf - . | (cd $dst && tar -xf -)
+  # GNU tar's default strips the leading `./`, so `./case__id/export.mp4`
+  # becomes `case__id/export.mp4` inside `$P3_GALLERY_STAGED`.
+  ( cd "$P3_GALLERY_SRC" && tar -cf - . ) \
+    | ( cd "$P3_GALLERY_STAGED" && tar -xf - ) \
+    || { echo "retain-evidence: FATAL — p3 gallery copy failed" >&2; exit 1; }
+  gallery_files=$(find "$P3_GALLERY_STAGED" -type f | wc -l | tr -d ' ')
+  echo "retain-evidence: p3 gallery staged $gallery_files file(s) (manifest present)"
+  copied=$((copied + gallery_files))
+fi
 
 {
   echo "collected_at=$(date -u +%FT%TZ)"

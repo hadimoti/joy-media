@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* global process, setTimeout, URL, Buffer, window, fetch, atob, btoa, crypto, localStorage */
+/* global clearInterval, process, setInterval, setTimeout, URL, Buffer, window, fetch, atob, btoa, crypto, localStorage */
 
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -28,6 +28,9 @@ import {
 } from './real-service-evidence.mjs';
 import { createLeaseHeartbeatLoop, throwIfLeaseCanceled } from './lease-heartbeat.mjs';
 import { isAlive, removeDirWithRetry, terminateProcessTree } from './real-service-teardown.mjs';
+import { validateP3Matrix } from './p3-case-registry.mjs';
+import { createP3ExecutionBudget, runOwnedP3Process } from './p3-execution-budget.mjs';
+import { parseLaneMode } from './p3-lane-mode.mjs';
 
 const requireFromApi = createRequire(new URL('../../../apps/api/package.json', import.meta.url));
 const { Pool } = requireFromApi('pg');
@@ -71,6 +74,17 @@ const REAL_SERVICE_EXPORT_DOWNLOAD_TIMEOUT_MS = 35 * 60_000;
 const DELIVERY_CANCEL_SETTLE_TIMEOUT_MS = 60_000;
 const DELIVERY_CANCEL_POLL_INTERVAL_MS = 250;
 const DELIVERY_CANCEL_POLL_REQUEST_TIMEOUT_MS = 5_000;
+const P3_DEFAULT_CLEANUP_RESERVE_MS = 3 * 60_000;
+const P3_PROGRESS_MAX_LINES = 256;
+
+function optionalBudgetEnv(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0)
+    throw new Error(`${name} must be a non-negative number`);
+  return value;
+}
 
 const root = resolve(fileURLToPath(new URL('../../../', import.meta.url)));
 const [candidateSha, runId, runAttempt, pass] = process.argv.slice(2);
@@ -108,6 +122,7 @@ const webUrl = `http://127.0.0.1:${webPort}`;
 const token = 'joy-media-e2e-token';
 const owner = 'e2e-owner@example.test';
 const smokeOnly = process.env.JOY_MEDIA_REAL_ACCEPTANCE_SMOKE_ONLY === '1';
+const laneMode = parseLaneMode(process.env.JOY_MEDIA_CI_LANE_MODE, { smokeOnly });
 let primaryError;
 let pool;
 let apiServer;
@@ -319,32 +334,53 @@ try {
     }
     throw error;
   }
-  // Keep the broad desktop contract and the expensive ten-case P3 export
-  // matrix as separate bounded phases. This prevents a single Playwright test
-  // timeout from consuming the budget reserved for delivery, observer, and
-  // teardown, while still requiring both phases on a full run.
-  const profileSummaries = await runDesktopMatrix(webUrl, apiUrl);
-  if (!smokeOnly) await runP3ExportMatrix(webUrl, apiUrl);
-  const deliveryEvidence = await recordJourney(
-    webUrl,
-    apiUrl,
-    token,
-    candidateSha,
-    pool,
-    profileSummaries,
-  );
-  if (!smokeOnly) {
-    await runObserver(webUrl, token);
+  if (laneMode === 'p3') {
+    // P3-only qualification owns the same real services and teardown but does
+    // not emit success-shaped broad-suite, delivery, soak or restore records.
+    await runP3ExportMatrix(webUrl, apiUrl);
+    await mkdir(join(root, 'test-output/browser'), { recursive: true });
+    await writeFile(
+      join(root, 'test-output/browser/p3-lane-evidence.json'),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          status: 'passed',
+          execution: 'p3-only',
+          candidateSha,
+          workflowRunId: runId,
+          attempt: runAttempt,
+          pass,
+          cases: 20,
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+  } else {
+    // The full lane keeps the broad desktop contract and all operational
+    // evidence. P3 is a separate bounded lane so its timeout cannot consume
+    // the delivery/observer/restore budget.
+    const profileSummaries = await runDesktopMatrix(webUrl, apiUrl);
+    const deliveryEvidence = await recordJourney(
+      webUrl,
+      apiUrl,
+      token,
+      candidateSha,
+      pool,
+      profileSummaries,
+    );
+    if (!smokeOnly) await runObserver(webUrl, token);
+    const restoreEvidence = await verifyRestoreCompatibility(databaseUrl, namespace);
+    await recordOperationalEvidence(
+      candidateSha,
+      runId,
+      runAttempt,
+      pass,
+      deliveryEvidence,
+      restoreEvidence,
+    );
   }
-  const restoreEvidence = await verifyRestoreCompatibility(databaseUrl, namespace);
-  await recordOperationalEvidence(
-    candidateSha,
-    runId,
-    runAttempt,
-    pass,
-    deliveryEvidence,
-    restoreEvidence,
-  );
   // Test hook: prove the finally-block teardown + the workflow's evidence
   // retention still run (and are recorded) when the harness exits non-zero
   // AFTER all evidence has been written. Never set in the release workflow.
@@ -934,10 +970,61 @@ async function runP3ExportMatrix(baseUrl, apiBaseUrl) {
   const report = join('/tmp', `joy-media-p3-report-${runId}-${runAttempt}-${pass}`);
   const results = join('/tmp', `joy-media-p3-results-${runId}-${runAttempt}-${pass}`);
   const jsonReport = join('/tmp', `joy-media-p3-json-${runId}-${runAttempt}-${pass}.json`);
+  // Evidence retention: keep the Playwright JSON report under /tmp until the
+  // matrix has been read and a copy persisted into the run-owned durable
+  // directory, so a hard kill between matrix-write and retention still leaves
+  // a verifiable failure trail.
+  // Keep P3 diagnostics in the checkout's allowlisted test-output tree until
+  // retain-evidence.sh copies and checksums them. Writing directly into the
+  // persistent destination would be erased when retention replaces that tree.
+  const evidenceJson = join(root, 'test-output/browser/p3-export-json.json');
+  const evidenceMatrix = join(root, 'test-output/browser/p3-export-matrix-copy.json');
+  const progressPath = join(root, 'test-output/browser/p3-progress.jsonl');
+  const childStdoutPath = join(root, 'test-output/browser/p3-child-stdout-tail.txt');
+  const childStderrPath = join(root, 'test-output/browser/p3-child-stderr-tail.txt');
+  const workBudgetMs = optionalBudgetEnv('JOY_P3_EXECUTION_DEADLINE_MS', Infinity);
+  const cleanupReserveMs = optionalBudgetEnv(
+    'JOY_P3_CLEANUP_RESERVE_MS',
+    P3_DEFAULT_CLEANUP_RESERVE_MS,
+  );
+  const totalBudgetMs = workBudgetMs === Infinity ? Infinity : workBudgetMs + cleanupReserveMs;
+  const budget = createP3ExecutionBudget({
+    workBudgetMs: totalBudgetMs,
+    cleanupReserveMs,
+  });
+  let progressQueue = Promise.resolve();
+  let progressLines = 0;
+  const writeProgress = ({ caseId = null, phase, result = null }) => {
+    if (progressLines >= P3_PROGRESS_MAX_LINES) return progressQueue;
+    progressLines += 1;
+    const record = budget.progress({
+      candidateSha,
+      runId,
+      runAttempt,
+      pass,
+      caseId,
+      phase,
+      result,
+    });
+    progressQueue = progressQueue.then(() =>
+      writeFile(progressPath, `${JSON.stringify(record)}\n`, { encoding: 'utf8', flag: 'a' }),
+    );
+    return progressQueue;
+  };
   await rm(jsonReport, { force: true });
+  // issuedAt is created once by the browser spec and persisted in every row.
+  // Validate the run identity here without inventing a second wall-clock
+  // timestamp that could never match the browser's matrix.
+  const expectedProvenance = { candidateSha, runId, runAttempt, pass };
   let failure;
+  let progressHeartbeat;
   try {
-    await execFile(
+    await mkdir(join(root, 'test-output/browser'), { recursive: true });
+    await writeProgress({ phase: 'p3-start' });
+    progressHeartbeat = setInterval(() => {
+      void writeProgress({ phase: 'p3-heartbeat' });
+    }, 60_000);
+    const childResult = await runOwnedP3Process(
       'pnpm',
       [
         'exec',
@@ -946,42 +1033,92 @@ async function runP3ExportMatrix(baseUrl, apiBaseUrl) {
         'tests/e2e/r2-p3-shipping-export-acceptance.spec.ts',
         '--project=desktop-primary',
         '--workers=1',
+        // Retries are disabled specifically for P3 so a slow 60-minute attempt
+        // cannot silently double its wall-time via CI's default retry policy.
+        // The repo's playwright.config.ts sets `retries: 1` when CI=1; this
+        // explicit override scopes the P3 invocation narrowly. The unrelated
+        // retry policy in playwright.config.ts is intentionally untouched.
+        '--retries=0',
         '--reporter=json',
       ],
       {
-        cwd: root,
-        env: {
-          ...process.env,
-          CI: 'true',
-          JOY_P3_REAL_EXPORTS: '1',
-          PLAYWRIGHT_BASE_URL: baseUrl,
-          JOY_MEDIA_E2E_API_URL: apiBaseUrl,
-          PLAYWRIGHT_HTML_REPORT: report,
-          PLAYWRIGHT_TEST_RESULTS_DIR: results,
-          PLAYWRIGHT_JSON_OUTPUT_NAME: jsonReport,
-          PLAYWRIGHT_WORKERS: '1',
+        budget,
+        terminate: (child) =>
+          terminateProcessTree(child, { graceMs: 15_000, killMs: 5_000, pollMs: 200 }),
+        spawnOptions: {
+          cwd: root,
+          env: {
+            ...process.env,
+            CI: 'true',
+            JOY_P3_REAL_EXPORTS: '1',
+            PLAYWRIGHT_BASE_URL: baseUrl,
+            JOY_MEDIA_E2E_API_URL: apiBaseUrl,
+            PLAYWRIGHT_HTML_REPORT: report,
+            PLAYWRIGHT_TEST_RESULTS_DIR: results,
+            PLAYWRIGHT_JSON_OUTPUT_NAME: jsonReport,
+            PLAYWRIGHT_WORKERS: '1',
+            JOY_MEDIA_CI_CANDIDATE_SHA: candidateSha,
+            JOY_MEDIA_CI_RUN_ID: runId,
+            JOY_MEDIA_CI_RUN_ATTEMPT: runAttempt,
+            JOY_MEDIA_CI_LANE_PASS: pass,
+            JOY_P3_PROGRESS_PATH: progressPath,
+            JOY_P3_PROGRESS_STARTED_AT_MS: String(Date.now()),
+            JOY_P3_EXECUTION_DEADLINE_MS: String(workBudgetMs),
+          },
+        },
+        onProgress: ({ phase, result }) => {
+          void writeProgress({ phase, result });
         },
       },
     );
+    await writeFile(childStdoutPath, childResult.stdout, 'utf8');
+    await writeFile(childStderrPath, childResult.stderr, 'utf8');
+    await writeProgress({ phase: 'p3-child-finished', result: 'PASS' });
   } catch (error) {
     failure = error instanceof Error ? error : new Error(String(error));
+    await writeProgress({
+      phase: error?.code === 'P3_DEADLINE' ? 'p3-deadline' : 'p3-failed',
+      result: 'FAIL',
+    });
+    if (typeof error?.stdout === 'string') await writeFile(childStdoutPath, error.stdout, 'utf8');
+    if (typeof error?.stderr === 'string') await writeFile(childStderrPath, error.stderr, 'utf8');
+  } finally {
+    if (progressHeartbeat !== undefined) clearInterval(progressHeartbeat);
+  }
+  await progressQueue;
+  // Preserve Playwright JSON before any cleanup. A hard crash after this
+  // point still leaves the JSON trail so a reviewer can diagnose the matrix.
+  try {
+    const jsonText = await readFile(jsonReport, 'utf8');
+    await writeFile(evidenceJson, jsonText, 'utf8');
+  } catch {
+    /* missing JSON is not fatal; the matrix evidence below is the contract */
   }
   await rm(jsonReport, { force: true });
   await rm(report, { recursive: true, force: true });
   await rm(results, { recursive: true, force: true });
   if (failure) throw failure;
   const matrixPath = join(root, 'test-output/browser/p3-export-matrix.json');
+  let matrix;
   try {
-    const matrix = JSON.parse(await readFile(matrixPath, 'utf8'));
-    if (
-      !Array.isArray(matrix) ||
-      matrix.length !== 10 ||
-      matrix.some((row) => row.result !== 'PASS')
-    )
-      throw new Error('P3 export matrix did not contain ten PASS rows');
+    matrix = JSON.parse(await readFile(matrixPath, 'utf8'));
   } catch (error) {
     throw new Error(
-      `P3 export matrix evidence is missing or invalid: ${error instanceof Error ? error.message : String(error)}`,
+      `P3 export matrix evidence is missing or unreadable: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  // Persist a copy of the matrix alongside the JSON evidence so a verifier
+  // can find them in one run-owned directory.
+  try {
+    await writeFile(evidenceMatrix, `${JSON.stringify(matrix, null, 2)}\n`, 'utf8');
+  } catch {
+    /* non-fatal */
+  }
+  const validation = validateP3Matrix(matrix, expectedProvenance);
+  if (!validation.ok) {
+    throw new Error(
+      `P3 export matrix invalid (${validation.problems.length} problem(s)): ` +
+        validation.problems.slice(0, 20).join('; '),
     );
   }
 }

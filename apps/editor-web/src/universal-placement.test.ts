@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { applyTransaction, type CommandTransaction } from '@joy-media/commands';
+import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
 import {
   updateUniversalTimelineForTransaction,
   upsertUniversalTimelineBinding,
@@ -111,6 +113,52 @@ describe('universal placement binding', () => {
       ],
     });
     expect(removed.universalTimeline?.items.some((item) => item.id === 'added-video')).toBe(false);
+  });
+
+  it('marks clips inserted on an audio track as audio in the universal timeline', () => {
+    const transaction: CommandTransaction = {
+      label: 'Add audio',
+      commands: [
+        {
+          type: 'timeline.addTrack',
+          payload: {
+            compositionId: 'root',
+            track: {
+              id: 'audio-track',
+              kind: 'video',
+              family: 'audio',
+              order: 1,
+              enabled: true,
+              clips: [],
+            },
+          },
+        },
+        {
+          type: 'timeline.insertClip',
+          payload: {
+            compositionId: 'root',
+            trackId: 'audio-track',
+            clip: {
+              id: 'voice-music-pulse',
+              kind: 'video',
+              assetId: 'music-pulse.wav',
+              startUs: 0,
+              durationUs: 3_000_000,
+              sourceInUs: 0,
+            },
+          },
+        },
+      ],
+    };
+    const timeline = applyTransaction(buildReferenceSpikeProject(), transaction).project;
+    const next = updateUniversalTimelineForTransaction(
+      INITIAL_EDITOR_PROJECT,
+      transaction,
+      timeline,
+    );
+    expect(next.universalTimeline?.items).toContainEqual(
+      expect.objectContaining({ id: 'voice-music-pulse', elementKind: 'audio' }),
+    );
   });
 
   it('assigns a fresh deterministic within-track order on cross-track moves', () => {

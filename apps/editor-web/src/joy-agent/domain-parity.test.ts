@@ -688,7 +688,13 @@ describe('F5 text title + opacity keyframe vertical parity', () => {
     const applied = new JoyCodeCompoundRunner().apply(agentSession, store, approval, authority);
     expect(applied).toMatchObject({ applied: true, replayed: false });
     expect(agentSession.timelineProject).toEqual(manualSession.timelineProject);
-    expect(agentSession.visualProject).toEqual(manualSession.visualProject);
+    // `visualProject.updatedAt` is a per-transaction document timestamp
+    // refreshed independently by each manual and agent dispatch, so compare
+    // creative/document state while normalizing only that metadata field.
+    expect({
+      ...agentSession.visualProject,
+      updatedAt: manualSession.visualProject.updatedAt,
+    }).toEqual(manualSession.visualProject);
     expect(agentSession.visualProject.visualObjects[titleId]).toEqual(
       draft.document.visualObjects[titleId],
     );
@@ -702,7 +708,10 @@ describe('F5 text title + opacity keyframe vertical parity', () => {
     expect(agentSession.visualProject).toEqual(beforeDocument);
     agentSession.redo();
     expect(agentSession.timelineProject).toEqual(manualSession.timelineProject);
-    expect(agentSession.visualProject).toEqual(manualSession.visualProject);
+    expect({
+      ...agentSession.visualProject,
+      updatedAt: manualSession.visualProject.updatedAt,
+    }).toEqual(manualSession.visualProject);
 
     const reopened = new EditorSession(
       durableStorage,
@@ -710,7 +719,10 @@ describe('F5 text title + opacity keyframe vertical parity', () => {
       INITIAL_EDITOR_PROJECT,
     );
     expect(reopened.timelineProject).toEqual(agentSession.timelineProject);
-    expect(reopened.visualProject).toEqual(agentSession.visualProject);
+    expect({
+      ...reopened.visualProject,
+      updatedAt: agentSession.visualProject.updatedAt,
+    }).toEqual(agentSession.visualProject);
     expect(reopened.visualProject.propertyAnimations?.[canonicalBindingKey(binding)]).toEqual(
       draft.document.propertyAnimations?.[canonicalBindingKey(binding)],
     );

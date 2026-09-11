@@ -193,11 +193,14 @@ export function updateUniversalTimelineForTransaction(
             item.compositionId === command.payload.compositionId &&
             item.trackId === command.payload.trackId,
         );
+        const targetTrack = timeline?.compositions[command.payload.compositionId]?.tracks.find(
+          (track) => track.id === command.payload.trackId,
+        );
         items.push({
           id: command.payload.clip.id,
           compositionId: command.payload.compositionId,
           trackId: command.payload.trackId,
-          elementKind: command.payload.expectedFamily === 'audio' ? 'audio' : 'video',
+          elementKind: targetTrack?.family === 'audio' ? 'audio' : 'video',
           startUs: command.payload.clip.startUs,
           durationUs: command.payload.clip.durationUs,
           source:

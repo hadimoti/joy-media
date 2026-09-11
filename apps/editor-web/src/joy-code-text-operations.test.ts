@@ -31,43 +31,31 @@ describe('Joy Code text operations', () => {
       kind: 'text',
     });
     expect(result.timeline?.commands).toHaveLength(2);
-    expect(result.document).toEqual(
-      compileJoyCodeTextOperation({
-        planId: 'plan-text',
-        operationIndex: 0,
-        timeline: buildReferenceSpikeProject(),
-        visualProject: INITIAL_EDITOR_PROJECT,
-        operation: {
-          id: 'title',
-          dependsOn: [],
-          kind: 'text.insertTemplate',
-          templateId: 'clean-title',
-          content: 'سلام جهان',
-          startUs: 2_000_000,
-          durationUs: 3_000_000,
-          placementPreset: 'center',
-        },
-      }).ok
-        ? (
-            compileJoyCodeTextOperation({
-              planId: 'plan-text',
-              operationIndex: 0,
-              timeline: buildReferenceSpikeProject(),
-              visualProject: INITIAL_EDITOR_PROJECT,
-              operation: {
-                id: 'title',
-                dependsOn: [],
-                kind: 'text.insertTemplate',
-                templateId: 'clean-title',
-                content: 'سلام جهان',
-                startUs: 2_000_000,
-                durationUs: 3_000_000,
-                placementPreset: 'center',
-              },
-            }) as { ok: true; document: unknown }
-          ).document
-        : undefined,
-    );
+    const second = compileJoyCodeTextOperation({
+      planId: 'plan-text',
+      operationIndex: 0,
+      timeline: buildReferenceSpikeProject(),
+      visualProject: INITIAL_EDITOR_PROJECT,
+      operation: {
+        id: 'title',
+        dependsOn: [],
+        kind: 'text.insertTemplate',
+        templateId: 'clean-title',
+        content: 'سلام جهان',
+        startUs: 2_000_000,
+        durationUs: 3_000_000,
+        placementPreset: 'center',
+      },
+    });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    // `updatedAt` is a per-transaction document timestamp refreshed by the
+    // template preparation that now persists `joy.timelineElementKinds`;
+    // it is not a creative result of this operation.
+    expect({
+      ...result.document,
+      updatedAt: second.document.updatedAt,
+    }).toEqual(second.document);
   });
 
   it('updates only an existing text object and rejects unknown templates/invalid content', () => {
