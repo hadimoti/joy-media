@@ -2,7 +2,7 @@
 /* global clearInterval, process, setInterval, setTimeout, URL, Buffer, window, fetch, atob, btoa, crypto, localStorage */
 
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
@@ -819,6 +819,24 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
     'renders backend track titles, mixed elements, and Quarter preview controls',
   ];
   const RESPONSIVE_MIN_TESTS = RESPONSIVE_REQUIRED_TITLES.length;
+  // Explicit desktop-primary spec list (deterministic, sorted, exact filename
+  // match). The P3 shipping-export matrix spec is intentionally excluded here:
+  // its top-level import of ./helpers/p3-export-observer.mjs triggers a Vitest /
+  // ESM "Cannot require() ES Module ... in a cycle" error during Playwright's
+  // module-load phase, before any grep / filter can run. The dedicated P3 lane
+  // (runP3ExportMatrix) loads that exact spec separately. Listing every other
+  // top-level spec positionally keeps Playwright's loader out of the excluded
+  // module entirely while preserving every other test.
+  const EXCLUDED_DESKTOP_PRIMARY_SPEC = 'r2-p3-shipping-export-acceptance.spec.ts';
+  const desktopPrimarySpecs = (await readdir(join(root, 'tests/e2e'), { withFileTypes: true }))
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        entry.name.endsWith('.spec.ts') &&
+        entry.name !== EXCLUDED_DESKTOP_PRIMARY_SPEC,
+    )
+    .map((entry) => `tests/e2e/${entry.name}`)
+    .sort();
   /** @type {{ project: string; specs: string[]; grep?: string; minTests: number; requiredTitles?: string[] }[]} */
   const plan = smoke
     ? [
@@ -829,7 +847,7 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
         },
       ]
     : [
-        { project: 'desktop-primary', specs: ['tests/e2e'], minTests: 80 },
+        { project: 'desktop-primary', specs: desktopPrimarySpecs, minTests: 80 },
         ...[
           'desktop-compact',
           'desktop-minimum',
