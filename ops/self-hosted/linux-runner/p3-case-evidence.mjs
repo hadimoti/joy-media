@@ -21,6 +21,22 @@ import { dirname } from 'node:path';
 
 import { P3_PHASES, P3_RESULTS, P3_CASE_REGISTRY } from './p3-case-registry.mjs';
 
+/** Errno codes that signal the platform refused to rename a temp file
+ *  over an existing destination — Windows raises EEXIST / EPERM / EBUSY
+ *  / ENOTEMPTY for `rename(tmp, target)` when `target` already exists.
+ *  The set is narrow and platform-derived so the helper does not depend on
+ *  OS sniffing; any non-listed error is treated as a real I/O failure and
+ *  surfaced to the caller unchanged. */
+const RENAME_OVER_TARGET_ERRNOS = new Set(['EEXIST', 'EPERM', 'EBUSY', 'ENOTEMPTY']);
+
+/** Default dependency bundle for `persistP3CaseEvidence`. The DI seam is
+ *  internal-only: production callers should not pass `deps`. The bundle
+ *  captures the four filesystem primitives the helper uses so a unit test
+ *  can substitute deterministic fakes without touching globals. */
+function defaultPersistDeps() {
+  return { mkdir, rename, rm, writeFile };
+}
+
 export const P3_CASE_EVIDENCE_SCHEMA_VERSION = 1;
 
 export const P3_CASE_EVIDENCE_PATH = 'test-output/browser/p3-case-evidence.json';
@@ -105,21 +121,81 @@ export function setCaseFinished(aggregate, caseId, result, evidence, error = nul
   };
 }
 
-/** Atomically persist the aggregate. Writes to a sibling `.tmp` and renames
- *  over the target; if the rename fails the previous file is restored from
- *  a `rm(tmp)` so a half-written file is never the durable copy. Throws on
- *  any I/O failure so the caller can decide whether to log + continue or
- *  fail the case — but never silently leaves a torn file on disk. */
-export async function persistP3CaseEvidence(aggregate, targetPath = P3_CASE_EVIDENCE_PATH) {
-  await mkdir(dirname(targetPath), { recursive: true });
+/** Atomically persist the aggregate. Writes the new payload to a sibling
+ *  `.tmp` and renames it over the durable target. The durable target is
+ *  never removed before the rename succeeds, so a failed rename leaves the
+ *  previous known-good bytes in place — the failure path only cleans up
+ *  the temporary file. On platforms whose `rename` refuses to overwrite an
+ *  existing destination (Windows raises EEXIST / EPERM / EBUSY / ENOTEMPTY
+ *  for `rename(tmp, target)` when `target` already exists), the existing
+ *  target is staged aside to `.tmp.prev`, then the temp is renamed over
+ *  the target, then the aside is removed — so the only window during which
+ *  the durable path is missing is the brief rename-to-aside step, and the
+ *  tmp + aside are cleaned up on any later failure so no torn file is
+ *  ever the durable copy. Throws on any unrecoverable I/O failure so the
+ *  caller can decide whether to log + continue or fail the case.
+ *
+ *  The optional `deps` argument is an internal-only dependency-injection
+ *  seam used by the unit tests to substitute the filesystem functions.
+ *  Callers (and production code) should leave it unset; the defaults are
+ *  the real `node:fs/promises` bindings. The seam exists only so a test
+ *  can deterministically simulate a rename-over-target refusal without
+ *  monkey-patching globals or spawning a child process. */
+export async function persistP3CaseEvidence(
+  aggregate,
+  targetPath = P3_CASE_EVIDENCE_PATH,
+  deps = defaultPersistDeps(),
+) {
+  await deps.mkdir(dirname(targetPath), { recursive: true });
   const tmp = `${targetPath}${P3_CASE_EVIDENCE_TMP_SUFFIX}`;
+  const backup = `${tmp}.prev`;
   const payload = `${JSON.stringify(aggregate, null, 2)}\n`;
+  let targetExisted = false;
+  let backupCreated = false;
+  let renamed = false;
   try {
-    await writeFile(tmp, payload, 'utf8');
-    await rm(targetPath, { force: true });
-    await rename(tmp, targetPath);
+    await deps.writeFile(tmp, payload, 'utf8');
+    try {
+      await deps.rename(tmp, targetPath);
+      renamed = true;
+    } catch (renameError) {
+      const code = renameError && renameError.code;
+      const isOverTargetRefusal = typeof code === 'string' && RENAME_OVER_TARGET_ERRNOS.has(code);
+      if (!isOverTargetRefusal) throw renameError;
+      // Platform refused to rename-over-target: stage the existing target
+      // aside so the temp can take its place atomically.
+      try {
+        await deps.rename(targetPath, backup);
+        backupCreated = true;
+        targetExisted = true;
+      } catch (asideError) {
+        if (!asideError || asideError.code !== 'ENOENT') throw asideError;
+        // Target is gone — nothing to preserve.
+        targetExisted = false;
+      }
+      await deps.rename(tmp, targetPath);
+      renamed = true;
+      if (backupCreated) {
+        await deps.rm(backup, { force: true });
+        backupCreated = false;
+      }
+    }
   } catch (error) {
-    await rm(tmp, { force: true });
+    if (!renamed) {
+      // The durable target still holds its prior bytes (or never existed);
+      // only the tmp and any staged backup are throwaway state.
+      await deps.rm(tmp, { force: true });
+      if (backupCreated) {
+        if (targetExisted) {
+          await deps.rename(backup, targetPath).catch(() => {});
+        } else {
+          await deps.rm(backup, { force: true });
+        }
+      }
+    } else {
+      await deps.rm(tmp, { force: true });
+      if (backupCreated) await deps.rm(backup, { force: true });
+    }
     throw error;
   }
 }

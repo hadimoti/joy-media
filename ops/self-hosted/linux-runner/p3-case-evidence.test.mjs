@@ -11,15 +11,16 @@
 
 import { existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   P3_CASE_EVIDENCE_PATH,
   P3_CASE_EVIDENCE_SCHEMA_VERSION,
+  P3_CASE_EVIDENCE_TMP_SUFFIX,
   newP3CaseEvidence,
   persistP3CaseEvidence,
   setCaseFinished,
@@ -248,6 +249,67 @@ describe('p3-case-evidence aggregate', () => {
     ]);
     expect(parsed.slice1.slice(1)).toEqual(parsed.slice2);
     expect(['-', '[stdin]']).toContain(parsed.slice1[0]);
+  });
+
+  it('preserves the prior durable bytes when the temp-to-target rename is refused (Windows semantics)', async () => {
+    const priorBytes = `${JSON.stringify(
+      {
+        schemaVersion: P3_CASE_EVIDENCE_SCHEMA_VERSION,
+        provenance: VALID_PROVENANCE,
+        generatedAt: '2026-09-11T00:00:00.000Z',
+        sentinel: 'prior-known-good',
+        cases: [],
+      },
+      null,
+      2,
+    )}\n`;
+    const targetPath = join(workdir, P3_CASE_EVIDENCE_PATH);
+    await mkdir(dirname(targetPath), { recursive: true });
+    // Seed the prior known-good durable file directly via the real
+    // node:fs/promises (the helper's real `writeFile`, not a fake) so the
+    // helper sees an existing target and the aside-staging branch is
+    // exercised.
+    await writeFile(targetPath, priorBytes, 'utf8');
+    const tmpPath = `${targetPath}${P3_CASE_EVIDENCE_TMP_SUFFIX}`;
+    const backupPath = `${tmpPath}.prev`;
+    const recordedCalls = [];
+    const { rename: realRename } = await import('node:fs/promises');
+    const fakeRename = async (src, dst) => {
+      recordedCalls.push({ src, dst });
+      if (src === tmpPath && dst === targetPath) {
+        const err = new Error('synthetic rename-over-target refusal');
+        err.code = 'EEXIST';
+        throw err;
+      }
+      return realRename(src, dst);
+    };
+    const fakeDeps = {
+      mkdir,
+      writeFile: async (path, data) => writeFile(path, data, 'utf8'),
+      rename: fakeRename,
+      rm: async (path) => rm(path, { force: true }),
+    };
+
+    const aggregate = newP3CaseEvidence(VALID_PROVENANCE);
+    let thrown = null;
+    try {
+      await persistP3CaseEvidence(aggregate, targetPath, fakeDeps);
+    } catch (err) {
+      thrown = err;
+    }
+
+    // The rename-over-target refusal must surface so the caller can react.
+    expect(thrown).not.toBeNull();
+    expect(thrown.code).toBe('EEXIST');
+    // The aside-staging branch fired before the rejection propagated.
+    expect(recordedCalls.some((c) => c.src === targetPath && c.dst === backupPath)).toBe(true);
+    // The durable target still holds the prior bytes — the failure path
+    // did not destroy the last known-good aggregate.
+    const observedBytes = await readFile(targetPath, 'utf8');
+    expect(observedBytes).toBe(priorBytes);
+    // No temporary file remains from the failed attempt.
+    expect(existsSync(tmpPath)).toBe(false);
+    expect(existsSync(backupPath)).toBe(false);
   });
 });
 
