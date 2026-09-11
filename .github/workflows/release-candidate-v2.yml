@@ -760,10 +760,15 @@ jobs:
               test-output/browser/p3-export-matrix.json \
               test-output/browser/p3-lane-evidence.json \
               test-output/browser/p3-progress.jsonl \
-              test-output/browser/p3-child-stdout-tail.txt \
-              test-output/browser/p3-child-stderr-tail.txt; do
+              test-output/browser/p3-child-stdout-tail.txt; do
               test -s "$root/$rel" || { echo "required P3 evidence missing: $rel" >&2; exit 1; }
             done
+            # The successful P3 child may legitimately emit zero bytes on stderr
+            # (it is a diagnostic tail, not a required-content stream). Require
+            # existence, not non-emptiness, so a clean 0-byte tail still satisfies
+            # the required-evidence loop; checksum/teardown/provenance above
+            # already guard against the file being absent or replaced.
+            test -f "$root/test-output/browser/p3-child-stderr-tail.txt" || { echo "required P3 evidence missing: test-output/browser/p3-child-stderr-tail.txt" >&2; exit 1; }
           fi
       - name: Upload P3 evidence artifact (best effort; durable evidence is authoritative)
         id: upload-p3-artifact
