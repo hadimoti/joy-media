@@ -31,12 +31,39 @@ import {
   newP3Matrix,
   p3Provenance,
 } from '../../ops/self-hosted/linux-runner/p3-case-registry.mjs';
+import {
+  newP3CaseEvidence,
+  persistP3CaseEvidence,
+  setCaseFinished,
+  setCaseStarted,
+} from '../../ops/self-hosted/linux-runner/p3-case-evidence.mjs';
 
 // P3MatrixRow mirrors the runtime shape produced by newP3Matrix() and the
 // helpers in p3-case-registry.mjs. The registry is pure ESM with JSDoc
 // typedefs, so the TS type is derived locally here from ReturnType — keeps
 // the contract in one place without a second .d.ts file.
 type P3MatrixRow = ReturnType<typeof newP3Matrix>[number];
+// P3CaseEvidenceAggregate mirrors the runtime shape produced by
+// newP3CaseEvidence() in p3-case-evidence.mjs. The helper mutates via
+// immutable return values (setCaseStarted / setCaseFinished always return a
+// new aggregate), so the typed alias is intentionally the readonly shape.
+type P3CaseEvidenceRow = {
+  readonly caseId: string;
+  readonly pack: string;
+  readonly preset: string;
+  readonly kind: string;
+  readonly phase: 'NOT RUN' | 'started' | 'PASS' | 'FAIL';
+  readonly result: 'NOT RUN' | 'PASS' | 'FAIL';
+  readonly reason: string | null;
+  readonly error: string | null;
+  readonly evidence: Readonly<Record<string, unknown>> | null;
+};
+type P3CaseEvidenceAggregate = {
+  readonly schemaVersion: number;
+  readonly provenance: Readonly<Record<string, string>>;
+  readonly generatedAt: string;
+  readonly cases: readonly P3CaseEvidenceRow[];
+};
 type CaseKind = 'export' | 'cancel';
 
 type ExportPreset = (typeof P3_PRESETS)[number];
@@ -962,6 +989,10 @@ async function copyGalleryAssets(
   };
 }
 
+interface CaseEvidenceHolder {
+  aggregate: P3CaseEvidenceAggregate;
+}
+
 interface RunExportCaseInputBase {
   readonly page: Page;
   readonly testInfo: TestInfo;
@@ -971,6 +1002,8 @@ interface RunExportCaseInputBase {
   readonly projectIds: Set<string>;
   readonly failures: string[];
   readonly persistMatrix: () => Promise<void>;
+  readonly caseEvidence: CaseEvidenceHolder;
+  readonly persistCaseEvidence: () => Promise<void>;
 }
 // The export case pushes gallery entries as it produces downloads; the
 // cancel case has nothing to add. Splitting the optional field off lets
@@ -990,6 +1023,8 @@ async function runExportCase({
   projectIds,
   failures,
   persistMatrix,
+  caseEvidence,
+  persistCaseEvidence,
 }: RunExportCaseInput): Promise<void> {
   const caseId = `${pack.id}/${preset.id}`;
   const evidence: Record<string, unknown> = {
@@ -1006,6 +1041,12 @@ async function runExportCase({
   // and atomic-persistence contract remains intact.
   matrix.splice(0, matrix.length, ...markStarted(matrix, caseId, 'arming observer'));
   await persistMatrix();
+  // Mirror the started transition into the per-case evidence aggregate so
+  // the durable bundle records the same intent. Reassign (immutable helper)
+  // and persist atomically — a forced interruption here leaves a partial
+  // aggregate with `phase: started, result: NOT RUN` rather than a torn file.
+  caseEvidence.aggregate = setCaseStarted(caseEvidence.aggregate, caseId, 'arming observer');
+  await persistCaseEvidence();
   let timedOut = false;
   let observer: ReturnType<typeof armExportObserver> | undefined;
   try {
@@ -1264,6 +1305,19 @@ async function runExportCase({
       ...markResult(matrix, caseId, finalResult, String(evidence.error ?? '')),
     );
     await persistMatrix();
+    // Persist the rich per-case evidence into the durable aggregate so the
+    // retained bundle carries projectBefore / projectAfter / persisted timeline
+    // expectations / ffprobe / sync events / pixel samples / spatial checks /
+    // gallery entry alongside the matrix verdict. Same atomic write shape as
+    // `persistMatrix`.
+    caseEvidence.aggregate = setCaseFinished(
+      caseEvidence.aggregate,
+      caseId,
+      finalResult,
+      evidence,
+      evidence.error === undefined ? null : String(evidence.error),
+    );
+    await persistCaseEvidence();
     await testInfo.attach(`${caseId.replaceAll('/', '-')}.json`, {
       body: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`),
       contentType: 'application/json',
@@ -1280,6 +1334,8 @@ async function runCancelCase({
   matrix,
   projectIds,
   persistMatrix,
+  caseEvidence,
+  persistCaseEvidence,
 }: RunCancelCaseInput): Promise<void> {
   const caseId = `cancel/${pack.id}/${preset.id}`;
   const evidence: Record<string, unknown> = {
@@ -1296,6 +1352,10 @@ async function runCancelCase({
   // preserved.
   matrix.splice(0, matrix.length, ...markStarted(matrix, caseId, 'arming cancel observer'));
   await persistMatrix();
+  // Same intent for the per-case evidence aggregate — atomic persistence keeps
+  // the durable bundle in lockstep with the matrix.
+  caseEvidence.aggregate = setCaseStarted(caseEvidence.aggregate, caseId, 'arming cancel observer');
+  await persistCaseEvidence();
   // Held in the outer scope so the finally can dispose listeners/timers on
   // any path (success, click failure, cancel click failure, assertion fail).
   let observer: ReturnType<typeof armExportObserver> | undefined;
@@ -1427,6 +1487,17 @@ async function runCancelCase({
       ...markResult(matrix, caseId, finalResult, String(evidence.error ?? '')),
     );
     await persistMatrix();
+    // Persist the rich per-case evidence into the durable aggregate so the
+    // retained bundle carries projectBefore / projectAfter / cleanup checks
+    // alongside the matrix verdict. Same atomic write shape as `persistMatrix`.
+    caseEvidence.aggregate = setCaseFinished(
+      caseEvidence.aggregate,
+      caseId,
+      finalResult,
+      evidence,
+      evidence.error === undefined ? null : String(evidence.error),
+    );
+    await persistCaseEvidence();
     // Best-effort late disposal — if cancel clicks already settled the
     // observer, this is a no-op (settle() is idempotent).
     observer?.settle({ kind: 'page-closed' });
@@ -1475,6 +1546,18 @@ test.describe('JOY R2 P3 shipping browser export matrix', () => {
       await rename(tmp, MATRIX_PATH);
     };
     await persistMatrix();
+    // Per-case evidence aggregate. Initialize BEFORE authentication / setup so
+    // an early failure (auth, webServer boot, etc.) leaves a truthful
+    // `NOT RUN` ledger. The atomic persistence shape mirrors the matrix above
+    // and is keyed to the same candidate/run/attempt/pass provenance.
+    const caseEvidence: CaseEvidenceHolder = {
+      aggregate: newP3CaseEvidence(provenance),
+    };
+    const persistCaseEvidence = async (): Promise<void> => {
+      await mkdir('test-output/browser', { recursive: true });
+      await persistP3CaseEvidence(caseEvidence.aggregate);
+    };
+    await persistCaseEvidence();
     await writeP3Progress({ phase: 'matrix-initialized' });
 
     const gallery: GalleryEntry[] = [];
@@ -1499,6 +1582,8 @@ test.describe('JOY R2 P3 shipping browser export matrix', () => {
             projectIds,
             failures,
             persistMatrix,
+            caseEvidence,
+            persistCaseEvidence,
           });
         }
       }
@@ -1517,6 +1602,8 @@ test.describe('JOY R2 P3 shipping browser export matrix', () => {
             matrix,
             projectIds,
             persistMatrix,
+            caseEvidence,
+            persistCaseEvidence,
           });
         }
       }

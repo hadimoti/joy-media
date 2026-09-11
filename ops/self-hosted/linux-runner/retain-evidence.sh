@@ -84,6 +84,7 @@ ALLOW=(
   test-output/browser/p3-child-stdout-tail.txt
   test-output/browser/p3-child-stderr-tail.txt
   test-output/browser/p3-lane-evidence.json
+  test-output/browser/p3-case-evidence.json
   test-output/browser/journey-failure.json
   test-output/browser/web-dev-server.log
   test-output/release-performance/polling.json

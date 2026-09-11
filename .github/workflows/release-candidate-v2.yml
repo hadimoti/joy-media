@@ -780,10 +780,21 @@ jobs:
             for rel in \
               test-output/browser/p3-export-matrix.json \
               test-output/browser/p3-lane-evidence.json \
+              test-output/browser/p3-case-evidence.json \
               test-output/browser/p3-progress.jsonl \
               test-output/browser/p3-child-stdout-tail.txt; do
               test -s "$root/$rel" || { echo "required P3 evidence missing: $rel" >&2; exit 1; }
             done
+            node --input-type=module - \
+              "$root/test-output/browser/p3-case-evidence.json" \
+              "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "${{ matrix.pass }}" <<'NODE'
+            import { readFile } from 'node:fs/promises';
+            import { validateP3CaseEvidenceForSuccess } from './ops/self-hosted/linux-runner/p3-case-evidence.mjs';
+            // Node places the stdin marker at argv[1], so workflow arguments begin at argv[2].
+            const [evidencePath, candidateSha, runId, runAttempt, pass] = process.argv.slice(2);
+            const aggregate = JSON.parse(await readFile(evidencePath, 'utf8'));
+            validateP3CaseEvidenceForSuccess(aggregate, { candidateSha, runId, runAttempt, pass });
+          NODE
             # The successful P3 child may legitimately emit zero bytes on stderr
             # (it is a diagnostic tail, not a required-content stream). Require
             # existence, not non-emptiness, so a clean 0-byte tail still satisfies
