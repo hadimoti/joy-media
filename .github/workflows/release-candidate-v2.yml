@@ -236,7 +236,28 @@ jobs:
           PLAYWRIGHT_WORKERS: 2
           PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-pw-report-primary-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
           PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-pw-results-primary-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
-        run: pnpm exec playwright test tests/e2e --project=desktop-primary --workers=2
+        run: |
+          set -euo pipefail
+          # Exclude the P3 shipping-export matrix spec from *discovery* (not just filtering).
+          # --grep-invert runs after Playwright imports the spec, which is too late: the spec's
+          # top-level imports of tests/e2e/helpers/p3-export-observer.mjs trigger a Vitest
+          # "Cannot require() ES Module ... in a cycle" error during module load. That spec
+          # only runs safely inside the dedicated JOY_MEDIA_CI_LANE_MODE=p3 lane; everywhere
+          # else we must keep it out of the loader entirely. Building an explicit positional
+          # argument list keeps every other desktop-primary test and prevents the excluded
+          # module from being imported at all.
+          desktop_specs=()
+          for spec in tests/e2e/*.spec.ts; do
+            case "$(basename "$spec")" in
+              r2-p3-shipping-export-acceptance.spec.ts) continue ;;
+            esac
+            desktop_specs+=("$spec")
+          done
+          if [ "${#desktop_specs[@]}" -eq 0 ]; then
+            echo "::error::no acceptance specs remained after excluding r2-p3-shipping-export-acceptance.spec.ts" >&2
+            exit 1
+          fi
+          pnpm exec playwright test "${desktop_specs[@]}" --project=desktop-primary --workers=2
       - name: Verify acceptance teardown
         if: always()
         shell: bash
