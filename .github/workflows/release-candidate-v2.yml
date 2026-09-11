@@ -762,7 +762,7 @@ jobs:
           bash ops/self-hosted/linux-runner/retain-evidence.sh \
             "$PWD" \
             "${{ runner.temp }}/p3-evidence-p${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}" \
-            "$JOY_MEDIA_CI_EVIDENCE_ROOT"
+            "$JOY_MEDIA_CI_EVIDENCE_ROOT/$CANDIDATE_SHA/p3"
       - name: Verify retained P3 evidence
         if: always()
         shell: bash
@@ -770,7 +770,7 @@ jobs:
           HARNESS_OUTCOME: ${{ steps.harness.outcome }}
         run: |
           set -euo pipefail
-          root="$JOY_MEDIA_CI_EVIDENCE_ROOT/$CANDIDATE_SHA/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-p${{ matrix.pass }}"
+          root="$JOY_MEDIA_CI_EVIDENCE_ROOT/$CANDIDATE_SHA/p3/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-p${{ matrix.pass }}"
           test -d "$root" || { echo "durable P3 evidence dir missing: $root" >&2; exit 1; }
           test -s "$root/MANIFEST.sha256" && test -s "$root/MANIFEST.json" || { echo 'P3 evidence manifest missing' >&2; exit 1; }
           ( cd "$root" && sha256sum -c MANIFEST.sha256 ) || { echo 'P3 evidence checksum verification failed' >&2; exit 1; }
@@ -807,7 +807,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          root="$JOY_MEDIA_CI_EVIDENCE_ROOT/$CANDIDATE_SHA/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-p${{ matrix.pass }}"
+          root="$JOY_MEDIA_CI_EVIDENCE_ROOT/$CANDIDATE_SHA/p3/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-p${{ matrix.pass }}"
           test -d "$root"
           {
             printf 'candidate_sha=%s\n' "$CANDIDATE_SHA"
