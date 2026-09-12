@@ -628,46 +628,22 @@ jobs:
             test -s "$root/test-output/browser/journey-failure.json" && echo "  present" || echo "  (not written — pre-journey failure)"
           fi
           echo "retained evidence verified: $root"
-      - name: Upload real-service evidence artifact (best effort; durable evidence is authoritative)
-        id: upload-real-service-artifact
-        if: always()
-        # GitHub artifact storage is account-scoped and can remain unavailable
-        # for 6–12 hours after cleanup. The acceptance runner's durable,
-        # redacted, checksum-verified evidence store is the authoritative copy;
-        # keep the upload attempt visible but do not turn a platform quota
-        # outage into a false source failure.
-        continue-on-error: true
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: real-service-evidence-run${{ github.run_id }}-attempt${{ github.run_attempt }}-pass${{ matrix.pass }}
-          path: ${{ runner.temp }}/real-service-evidence-p${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
-          retention-days: 14
-          if-no-files-found: error
-          overwrite: false
-      - name: Record artifact upload outcome in durable evidence store
+      - name: Record artifact upload policy in durable evidence store
         if: always()
         shell: bash
         run: |
           set -euo pipefail
           root="$JOY_MEDIA_CI_EVIDENCE_ROOT/$CANDIDATE_SHA/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-p${{ matrix.pass }}"
           test -d "$root" || { echo "durable evidence dir missing: $root" >&2; exit 1; }
-          outcome='${{ steps.upload-real-service-artifact.outcome }}'
           {
             printf 'candidate_sha=%s\n' "$CANDIDATE_SHA"
             printf 'run_id=%s\n' "$GITHUB_RUN_ID"
             printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
             printf 'pass=%s\n' '${{ matrix.pass }}'
-            printf 'upload_outcome=%s\n' "$outcome"
-            if [ "$outcome" = 'success' ]; then
-              printf 'source=github-actions-artifact\n'
-            else
-              printf 'source=durable-evidence-store\n'
-              printf 'reason=artifact upload unavailable; inspect the workflow log for the platform error\n'
-            fi
+            printf 'upload_outcome=disabled\n'
+            printf 'source=durable-evidence-store\n'
+            printf 'reason=github-artifact-upload-disabled-by-policy\n'
           } > "$root/ARTIFACT-UPLOAD-STATUS.txt"
-          if [ "$outcome" != 'success' ]; then
-            echo "::warning::GitHub artifact upload outcome=$outcome; durable evidence store is authoritative for this pass."
-          fi
       - name: Verify real-service acceptance teardown
         if: always()
         shell: bash
@@ -802,18 +778,7 @@ jobs:
             # already guard against the file being absent or replaced.
             test -f "$root/test-output/browser/p3-child-stderr-tail.txt" || { echo "required P3 evidence missing: test-output/browser/p3-child-stderr-tail.txt" >&2; exit 1; }
           fi
-      - name: Upload P3 evidence artifact (best effort; durable evidence is authoritative)
-        id: upload-p3-artifact
-        if: always()
-        continue-on-error: true
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: p3-evidence-run${{ github.run_id }}-attempt${{ github.run_attempt }}-pass${{ matrix.pass }}
-          path: ${{ runner.temp }}/p3-evidence-p${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
-          retention-days: 14
-          if-no-files-found: error
-          overwrite: false
-      - name: Record P3 artifact upload outcome
+      - name: Record P3 artifact upload policy in durable evidence store
         if: always()
         shell: bash
         run: |
@@ -825,8 +790,9 @@ jobs:
             printf 'run_id=%s\n' "$GITHUB_RUN_ID"
             printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
             printf 'pass=%s\n' '${{ matrix.pass }}'
-            printf 'upload_outcome=%s\n' '${{ steps.upload-p3-artifact.outcome }}'
-            printf 'source=%s\n' "${{ steps.upload-p3-artifact.outcome == 'success' && 'github-actions-artifact' || 'durable-evidence-store' }}"
+            printf 'upload_outcome=disabled\n'
+            printf 'source=durable-evidence-store\n'
+            printf 'reason=github-artifact-upload-disabled-by-policy\n'
           } > "$root/ARTIFACT-UPLOAD-STATUS.txt"
       - name: Verify P3 teardown
         if: always()
