@@ -67,7 +67,7 @@ describe('v2 release-candidate artifact upload policy', () => {
   });
 
   it('declares 14 job instances across both passes', () => {
-    const jobKeys = Array.from(workflow.matchAll(/^  ([a-z0-9-]+):$/gm), (m) => m[1]);
+    const jobKeys = Array.from(workflow.matchAll(/^\s{2}([a-z0-9-]+):$/gm), (m) => m[1]);
     const uniqueKeys = [...new Set(jobKeys)];
     expect(uniqueKeys).toEqual([
       'validate-candidate',
