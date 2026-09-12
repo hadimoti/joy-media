@@ -251,7 +251,7 @@ describe('p3-case-evidence aggregate', () => {
     expect(['-', '[stdin]']).toContain(parsed.slice1[0]);
   });
 
-  it('preserves the prior durable bytes when the temp-to-target rename is refused (Windows semantics)', async () => {
+  it('preserves the prior durable bytes when the temp-to-target rename is refused (fail-closed)', async () => {
     const priorBytes = `${JSON.stringify(
       {
         schemaVersion: P3_CASE_EVIDENCE_SCHEMA_VERSION,
@@ -267,12 +267,11 @@ describe('p3-case-evidence aggregate', () => {
     await mkdir(dirname(targetPath), { recursive: true });
     // Seed the prior known-good durable file directly via the real
     // node:fs/promises (the helper's real `writeFile`, not a fake) so the
-    // helper sees an existing target and the aside-staging branch is
-    // exercised.
+    // helper sees an existing target and must preserve it on refusal.
     await writeFile(targetPath, priorBytes, 'utf8');
     const tmpPath = `${targetPath}${P3_CASE_EVIDENCE_TMP_SUFFIX}`;
-    const backupPath = `${tmpPath}.prev`;
     const recordedCalls = [];
+    const removedPaths = [];
     const { rename: realRename } = await import('node:fs/promises');
     const fakeRename = async (src, dst) => {
       recordedCalls.push({ src, dst });
@@ -287,7 +286,10 @@ describe('p3-case-evidence aggregate', () => {
       mkdir,
       writeFile: async (path, data) => writeFile(path, data, 'utf8'),
       rename: fakeRename,
-      rm: async (path) => rm(path, { force: true }),
+      rm: async (path) => {
+        removedPaths.push(path);
+        return rm(path, { force: true });
+      },
     };
 
     const aggregate = newP3CaseEvidence(VALID_PROVENANCE);
@@ -301,15 +303,74 @@ describe('p3-case-evidence aggregate', () => {
     // The rename-over-target refusal must surface so the caller can react.
     expect(thrown).not.toBeNull();
     expect(thrown.code).toBe('EEXIST');
-    // The aside-staging branch fired before the rejection propagated.
-    expect(recordedCalls.some((c) => c.src === targetPath && c.dst === backupPath)).toBe(true);
+    // Fail-closed behavior attempts only the temp-to-target rename. It never
+    // moves the durable target aside, even briefly.
+    expect(recordedCalls).toEqual([{ src: tmpPath, dst: targetPath }]);
+    expect(removedPaths).toEqual([tmpPath]);
     // The durable target still holds the prior bytes — the failure path
     // did not destroy the last known-good aggregate.
     const observedBytes = await readFile(targetPath, 'utf8');
     expect(observedBytes).toBe(priorBytes);
     // No temporary file remains from the failed attempt.
     expect(existsSync(tmpPath)).toBe(false);
-    expect(existsSync(backupPath)).toBe(false);
+    expect(existsSync(`${tmpPath}.prev`)).toBe(false);
+  });
+
+  it.each(['EEXIST', 'EPERM', 'EBUSY', 'ENOTEMPTY'])(
+    'fails closed for overwrite refusal %s without moving the durable target',
+    async (code) => {
+      const priorBytes = 'prior-known-good-bytes\n';
+      const targetPath = join(workdir, P3_CASE_EVIDENCE_PATH);
+      await mkdir(dirname(targetPath), { recursive: true });
+      await writeFile(targetPath, priorBytes, 'utf8');
+      const tmpPath = `${targetPath}${P3_CASE_EVIDENCE_TMP_SUFFIX}`;
+      const calls = [];
+      const { rename: realRename } = await import('node:fs/promises');
+      const fakeDeps = {
+        mkdir,
+        writeFile: async (path, data) => writeFile(path, data, 'utf8'),
+        rename: async (src, dst) => {
+          calls.push({ src, dst });
+          const error = new Error(`synthetic ${code}`);
+          error.code = code;
+          if (src === tmpPath && dst === targetPath) throw error;
+          return realRename(src, dst);
+        },
+        rm: async (path) => rm(path, { force: true }),
+      };
+
+      await expect(
+        persistP3CaseEvidence(newP3CaseEvidence(VALID_PROVENANCE), targetPath, fakeDeps),
+      ).rejects.toMatchObject({ code });
+      expect(calls).toEqual([{ src: tmpPath, dst: targetPath }]);
+      expect(await readFile(targetPath, 'utf8')).toBe(priorBytes);
+      expect(existsSync(tmpPath)).toBe(false);
+      expect(existsSync(`${tmpPath}.prev`)).toBe(false);
+    },
+  );
+
+  it('rethrows non-overwrite rename failures and still removes only the temporary file', async () => {
+    const priorBytes = 'prior-known-good-bytes\n';
+    const targetPath = join(workdir, P3_CASE_EVIDENCE_PATH);
+    await mkdir(dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, priorBytes, 'utf8');
+    const tmpPath = `${targetPath}${P3_CASE_EVIDENCE_TMP_SUFFIX}`;
+    const error = Object.assign(new Error('synthetic I/O failure'), { code: 'EIO' });
+    const fakeDeps = {
+      mkdir,
+      writeFile: async (path, data) => writeFile(path, data, 'utf8'),
+      rename: async () => {
+        throw error;
+      },
+      rm: async (path) => rm(path, { force: true }),
+    };
+
+    await expect(
+      persistP3CaseEvidence(newP3CaseEvidence(VALID_PROVENANCE), targetPath, fakeDeps),
+    ).rejects.toBe(error);
+    expect(await readFile(targetPath, 'utf8')).toBe(priorBytes);
+    expect(existsSync(tmpPath)).toBe(false);
+    expect(existsSync(`${tmpPath}.prev`)).toBe(false);
   });
 });
 
