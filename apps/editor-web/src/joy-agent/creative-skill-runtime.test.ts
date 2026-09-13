@@ -25,7 +25,7 @@ describe('creative skill runtime capability computation', () => {
     ).toEqual(['project-context', 'canonical-prepare', 'preview', 'approval']);
   });
 
-  it('adds observation, transcript, audio, composition and encoded-output when their seams are present', () => {
+  it('adds only the seams explicitly marked as present', () => {
     const capabilities = computeCreativeSkillCapabilities({
       ...R1_EDITOR_CREATIVE_SKILL_SEAMS,
     });
@@ -35,10 +35,10 @@ describe('creative skill runtime capability computation', () => {
         'evidence-coverage',
         'transcript-evidence',
         'audio-analysis',
-        'composition-capture',
-        'encoded-output-verification',
       ]),
     );
+    expect(capabilities).not.toContain('composition-capture');
+    expect(capabilities).not.toContain('encoded-output-verification');
   });
 
   it('keeps audio-mix and rtl-text out of the R1 capability set', () => {
@@ -47,7 +47,7 @@ describe('creative skill runtime capability computation', () => {
     expect(capabilities).not.toContain('rtl-text');
   });
 
-  it('produces a runtime whose availability leaves audio-balance and title-and-caption-polish visible-unavailable', () => {
+  it('produces a runtime whose availability leaves unsupported recipes visible-unavailable', () => {
     const runtime = createEditorCreativeSkillRuntime(R1_EDITOR_CREATIVE_SKILL_SEAMS);
     const availability = resolveCreativeSkillAvailability(runtime);
     const byId = new Map(availability.map((entry) => [entry.skill.id, entry]));
@@ -56,8 +56,14 @@ describe('creative skill runtime capability computation', () => {
     expect(byId.get('watch-and-map')?.available).toBe(true);
     expect(byId.get('find-moment')?.available).toBe(true);
     expect(byId.get('build-rough-cut')?.available).toBe(true);
-    expect(byId.get('motion-and-transition-polish')?.available).toBe(true);
-    expect(byId.get('verify-deliverable')?.available).toBe(true);
+    expect(byId.get('motion-and-transition-polish')?.available).toBe(false);
+    expect(byId.get('motion-and-transition-polish')?.missingCapabilities).toContain(
+      'composition-capture',
+    );
+    expect(byId.get('verify-deliverable')?.available).toBe(false);
+    expect(byId.get('verify-deliverable')?.missingCapabilities).toEqual(
+      expect.arrayContaining(['composition-capture', 'encoded-output-verification']),
+    );
 
     expect(byId.get('audio-balance')?.available).toBe(false);
     expect(byId.get('audio-balance')?.missingCapabilities).toContain('audio-mix');

@@ -199,4 +199,21 @@ describe('createCreativeSkillEditorPrimitives', () => {
       }),
     ).rejects.toThrow();
   });
+
+  it('fails observation before reading coverage when the scoped tool-loop fails', async () => {
+    const d = deps({
+      runScopedToolLoop: vi.fn(async () => ({ kind: 'failed' as const, message: 'provider down' })),
+    });
+    await expect(
+      createCreativeSkillEditorPrimitives(d, scope).observeSources({
+        skillId: 'watch-and-map',
+        scope,
+        signal: new AbortController().signal,
+        privacyRequirement: 'local-only',
+        evidenceRequirements: ['source-sampled'],
+        budget: { maxObservationRequests: 2, maxEvidenceItems: 128 },
+      }),
+    ).rejects.toThrow('JOY_CREATIVE_SKILL_TOOL_LOOP');
+    expect(d.readObservationCoverage).not.toHaveBeenCalled();
+  });
 });

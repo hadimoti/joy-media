@@ -157,6 +157,30 @@ describe('creative skill host adapter', () => {
     expect(result.kind === 'blocked' && result.reason).toBe('invalid-artifact');
   });
 
+  it('blocks source recipes when the host returns no bounded evidence IDs', async () => {
+    const prims = primitives({
+      observeSources: vi.fn(async () => ({
+        evidenceIds: [],
+        coverageSummary: 'Sampled source coverage.',
+        coverageComplete: false,
+      })),
+    });
+    const result = await runner(prims).run({ skillId: 'watch-and-map', scope });
+    expect(result).toMatchObject({ kind: 'blocked', reason: 'adapter-failed', artifacts: [] });
+  });
+
+  it('blocks Find Moment unless exhaustive coverage and a moment are both returned', async () => {
+    const prims = primitives({
+      observeSources: vi.fn(async () => ({
+        evidenceIds: ['frame-1'],
+        coverageSummary: 'Sampled source coverage.',
+        coverageComplete: false,
+      })),
+    });
+    const result = await runner(prims).run({ skillId: 'find-moment', scope });
+    expect(result).toMatchObject({ kind: 'blocked', reason: 'adapter-failed', artifacts: [] });
+  });
+
   it('passes the recipe consent requirement and budget to the observation primitive', async () => {
     const prims = primitives();
     await runner(prims).run({ skillId: 'watch-and-map', scope });

@@ -179,7 +179,8 @@ export function createCreativeSkillEditorPrimitives(
 
     async observeSources(input) {
       const skill = manifestFor(input.skillId);
-      await ensureToolLoop(skill, input.signal);
+      const result = await ensureToolLoop(skill, input.signal);
+      if (result.kind === 'failed') throw new CreativeSkillToolLoopFailure(result.message);
       const coverage = await deps.readObservationCoverage({
         scope: input.scope,
         signal: input.signal,

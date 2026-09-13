@@ -111,6 +111,7 @@ export function createCreativeSkillHostAdapter(
   let preparedChangeSetId: string | undefined;
   let lastCoverageSummary: string | undefined;
   let lastCoverageComplete = false;
+  let lastEvidenceIds: readonly string[] = [];
 
   const remember = (summary: string): void => {
     priorSummaries.push(summary.slice(0, MAX_ARTIFACT_SUMMARY));
@@ -122,11 +123,13 @@ export function createCreativeSkillHostAdapter(
     kind: CreativeSkillArtifactKind,
     summary: string,
     uncertainty?: string,
+    evidenceIds?: readonly string[],
   ): CreativeSkillArtifact =>
     Object.freeze({
       id: `${kind}:${input.scope.runId}:${suffix}`,
       kind,
       summary: summary.slice(0, MAX_ARTIFACT_SUMMARY),
+      ...(evidenceIds === undefined ? {} : { evidenceIds: Object.freeze([...evidenceIds]) }),
       ...(uncertainty === undefined
         ? {}
         : { uncertainty: uncertainty.slice(0, MAX_ARTIFACT_SUMMARY) }),
@@ -159,8 +162,21 @@ export function createCreativeSkillHostAdapter(
           maxEvidenceItems: input.skill.budget.maxEvidenceItems,
         },
       });
+      if (requiresSourceEvidence(input.skill.evidenceRequirements)) {
+        if (!hasBoundedEvidence(result.evidenceIds))
+          throw new CreativeSkillHostAdapterFailure('OBSERVATION_MISSING_EVIDENCE');
+        if (result.coverageSummary.trim().length === 0)
+          throw new CreativeSkillHostAdapterFailure('OBSERVATION_MISSING_COVERAGE');
+        if (input.skill.evidenceRequirements.includes('source-exhaustive')) {
+          if (!result.coverageComplete)
+            throw new CreativeSkillHostAdapterFailure('OBSERVATION_INCOMPLETE_COVERAGE');
+          if (result.moment === undefined || result.moment.summary.trim().length === 0)
+            throw new CreativeSkillHostAdapterFailure('OBSERVATION_MISSING_MOMENT');
+        }
+      }
       lastCoverageSummary = result.coverageSummary;
       lastCoverageComplete = result.coverageComplete;
+      lastEvidenceIds = Object.freeze([...result.evidenceIds]);
       remember(result.coverageSummary);
       const artifacts: CreativeSkillArtifact[] =
         result.moment === undefined
@@ -171,6 +187,7 @@ export function createCreativeSkillHostAdapter(
                 'evidence',
                 result.coverageSummary,
                 result.uncertainty,
+                result.evidenceIds,
               ),
             ]
           : [
@@ -180,6 +197,7 @@ export function createCreativeSkillHostAdapter(
                 'moment',
                 result.moment.summary,
                 result.uncertainty,
+                result.evidenceIds,
               ),
             ];
       return step(artifacts);
@@ -255,8 +273,25 @@ export function createCreativeSkillHostAdapter(
           lastCoverageComplete
             ? undefined
             : 'Coverage is a sampled subset; it is not exhaustive source understanding.',
+          lastEvidenceIds,
         ),
       ]);
     },
   });
+}
+
+const SAFE_EVIDENCE_ID = /^[A-Za-z0-9][A-Za-z0-9._:@=-]{0,255}$/;
+
+function requiresSourceEvidence(requirements: readonly string[]): boolean {
+  return requirements.includes('source-sampled') || requirements.includes('source-exhaustive');
+}
+
+function hasBoundedEvidence(value: readonly string[]): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= 512 &&
+    value.every((id) => typeof id === 'string' && SAFE_EVIDENCE_ID.test(id)) &&
+    new Set(value).size === value.length
+  );
 }

@@ -22,6 +22,8 @@ export interface CreativeSkillArtifact {
   readonly id: string;
   readonly kind: CreativeSkillArtifactKind;
   readonly summary: string;
+  /** Opaque evidence IDs returned by the scoped host observation. */
+  readonly evidenceIds?: readonly string[];
   readonly uncertainty?: string;
 }
 
@@ -284,6 +286,7 @@ function normalizeArtifacts(value: unknown): readonly CreativeSkillArtifact[] | 
       typeof record.kind !== 'string' ||
       !ARTIFACT_KINDS.has(record.kind as CreativeSkillArtifactKind) ||
       !isSafeText(record.summary, 512) ||
+      (record.evidenceIds !== undefined && !isSafeEvidenceIds(record.evidenceIds)) ||
       (record.uncertainty !== undefined && !isSafeText(record.uncertainty, 512)) ||
       ids.has(record.id)
     )
@@ -294,6 +297,9 @@ function normalizeArtifacts(value: unknown): readonly CreativeSkillArtifact[] | 
         id: record.id,
         kind: record.kind as CreativeSkillArtifactKind,
         summary: record.summary,
+        ...(record.evidenceIds === undefined
+          ? {}
+          : { evidenceIds: Object.freeze([...(record.evidenceIds as readonly string[])]) }),
         ...(record.uncertainty === undefined ? {} : { uncertainty: record.uncertainty as string }),
       }),
     );
@@ -336,9 +342,20 @@ function hasArtifactFields(value: Record<string, unknown>): boolean {
     'id',
     'kind',
     'summary',
+    ...(value.evidenceIds === undefined ? [] : ['evidenceIds']),
     ...(value.uncertainty === undefined ? [] : ['uncertainty']),
   ]);
   return keys.length === expected.size && keys.every((key) => expected.has(key));
+}
+
+function isSafeEvidenceIds(value: unknown): value is readonly string[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= 512 &&
+    value.every((item) => isSafeId(item)) &&
+    new Set(value).size === value.length
+  );
 }
 
 function isSafeId(value: unknown): value is string {

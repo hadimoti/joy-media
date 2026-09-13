@@ -35,11 +35,10 @@ export interface CreativeSkillSeamAvailability {
 }
 
 /**
- * The R1 truth for the browser editor host: the observation bridge, transcript
- * and audio-measurement adapters and both verification decoders are wired and
- * have passing browser specs; a verified audio-mix operation and an RTL-text
- * readback do not exist yet, so `audio-balance` and `title-and-caption-polish`
- * stay visible-unavailable.
+ * The R1 truth for the browser editor host: observation, transcript and audio
+ * measurement are wired. Composition capture and encoded-output verification
+ * are not wired into the recipe path yet, so Verify Deliverable stays visible-
+ * unavailable alongside audio-mix and RTL-text recipes.
  */
 export const R1_EDITOR_CREATIVE_SKILL_SEAMS: CreativeSkillSeamAvailability = Object.freeze({
   projectContext: true,
@@ -49,8 +48,8 @@ export const R1_EDITOR_CREATIVE_SKILL_SEAMS: CreativeSkillSeamAvailability = Obj
   observationBridge: true,
   transcriptEvidence: true,
   audioAnalysis: true,
-  compositionCapture: true,
-  encodedOutputVerification: true,
+  compositionCapture: false,
+  encodedOutputVerification: false,
   audioMix: false,
   rtlTextReadback: false,
 });
