@@ -157,6 +157,7 @@ interface ParsedConsentScope {
 }
 
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
+const REVISION_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/=-]{0,255}$/;
 const FRAME_ID = /^[A-Za-z0-9][A-Za-z0-9._:@=-]{0,511}$/;
 const SHA_256 = /^[a-f0-9]{64}$/i;
 const SIMPLE_MIME_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,127}$/;
@@ -537,7 +538,7 @@ function parseAuthority(value: unknown): ObservationTransferAuthority | undefine
     !isPlainRecord(value) ||
     !hasExactKeys(value, ['projectId', 'revision', 'run', 'modelId', 'promptPolicyDigest']) ||
     !isOpaqueId(value.projectId) ||
-    !isOpaqueId(value.revision) ||
+    !isRevisionId(value.revision) ||
     !isOpaqueId(value.modelId) ||
     !isOpaqueId(value.promptPolicyDigest) ||
     candidateRun === undefined ||
@@ -666,7 +667,7 @@ function parseManifest(value: unknown): EvidenceManifestLookup | undefined {
     !isOpaqueId(identity.projectId) ||
     typeof identity.assetDigest !== 'string' ||
     !SHA_256.test(identity.assetDigest) ||
-    !isOpaqueId(identity.projectRevision) ||
+    !isRevisionId(identity.projectRevision) ||
     !isOpaqueId(identity.modelId) ||
     !isOpaqueId(identity.promptPolicyDigest)
   ) {
@@ -811,6 +812,10 @@ function isObservationModality(value: unknown): value is ObservationModality {
 
 function isOpaqueId(value: unknown): value is string {
   return typeof value === 'string' && OPAQUE_ID.test(value) && !UNSAFE_LOCATION.test(value);
+}
+
+function isRevisionId(value: unknown): value is string {
+  return typeof value === 'string' && REVISION_ID.test(value) && !UNSAFE_LOCATION.test(value);
 }
 
 function isFrameId(value: unknown): value is string {

@@ -199,6 +199,16 @@ describe('observation review controller', () => {
     expect(fixture.fake.send).not.toHaveBeenCalled();
   });
 
+  it('accepts the editor revision receipt format used by live observation manifests', () => {
+    const live = authority({ revision: 'local-revision:v1:project-1:timeline=1:document=4' });
+    const fixture = controllerFixture();
+    fixture.setLive(live);
+    expect(fixture.controller.prepareReview(preparation({ authority: live }))).toMatchObject({
+      status: 'consent-required',
+      request: { scope: live },
+    });
+  });
+
   it('has one host-only grant path and returns only sanitized analysis/evidence identities', async () => {
     const fixture = controllerFixture();
     const emitted: string[] = [];

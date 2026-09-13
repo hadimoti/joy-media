@@ -463,7 +463,9 @@ async function sendObservationEvidence(
   active: ActiveObservationTransfer,
   message: Extract<PrivateObservationMainToWorkerMessage, { readonly type: 'evidence' }>,
 ): Promise<void> {
-  if (activeObservationTransfers.get(active.transferId) !== active) return;
+  if (activeObservationTransfers.get(active.transferId) !== active) {
+    return;
+  }
   if (
     message.sessionEpoch !== active.sessionEpoch ||
     !sameEvidenceIds(
@@ -1374,9 +1376,21 @@ function systemInstruction(
       ? 'Return only one JSON CreativeBriefV1 object. Do not include markdown or edit operations.'
       : lookOnly
         ? "Use read_project_context before any look_* tool. Call exactly one of look_apply, look_update, look_reset_overrides, or look_detach with the operator's intent — the host compiles the Look deterministically and stages a reversible preview for approval; it never applies the edit. Use existing visual-object ids from the context for entityBindings; do not invent ids. If the host returns a repair diagnostic, fix only the reported issue and retry within the bounded budget."
-        : structured
-          ? 'Use read_project_context before validate_proposal. Send typed operations only to validate_proposal. If the canonical host returns a repair diagnostic, fix only the reported issue and retry within the bounded budget. A successful validation creates an immutable preview, never an applied edit. Do not invent object, clip, asset, property, track, or template IDs.'
-          : 'Return a concise answer or clarification only. Plan-only mode cannot create edit operations.';
+        : structured &&
+            allowedToolNames.some((name) =>
+              [
+                'media_describe',
+                'media_observe',
+                'media_frames',
+                'media_transcript',
+                'evidence_read',
+                'evidence_coverage',
+              ].includes(name),
+            )
+          ? 'Use read_project_context with overview first, then read the assets or clips needed for the task. Before validate_proposal, perform the bounded source observation required by the available observation tools and inspect its returned opaque evidence/coverage result. Send typed operations only to validate_proposal after observation succeeds. If the canonical host returns a repair diagnostic, fix only the reported issue and retry within the bounded budget. A successful validation creates an immutable preview, never an applied edit. Do not invent object, clip, asset, property, track, or template IDs.'
+          : structured
+            ? 'Use read_project_context before validate_proposal. Send typed operations only to validate_proposal. If the canonical host returns a repair diagnostic, fix only the reported issue and retry within the bounded budget. A successful validation creates an immutable preview, never an applied edit. Do not invent object, clip, asset, property, track, or template IDs.'
+            : 'Return a concise answer or clarification only. Plan-only mode cannot create edit operations.';
   // The literal operation registry call is kept here for release verification
   // and makes the provider’s visible vocabulary explicit without handing it a
   // compiler, editor object, or writable capability.
@@ -1513,7 +1527,10 @@ async function run(request: JoyAgentRunRequest): Promise<void> {
         )
       : undefined;
     const messages: readonly unknown[] = [
-      { role: 'system', content: systemInstruction(taskKind, structured) },
+      {
+        role: 'system',
+        content: systemInstruction(taskKind, structured, request.allowedToolNames),
+      },
       {
         role: 'user',
         content: structured
@@ -1555,9 +1572,10 @@ async function run(request: JoyAgentRunRequest): Promise<void> {
           const remainingMs = active.budget.deadlineAtMs - Date.now();
           if (remainingMs <= 0) consumeBudget(active, 'check');
           try {
-            return await hostRpc.call(active.rpcRun, method, args, {
+            const hostResult = await hostRpc.call(active.rpcRun, method, args, {
               deadlineMs: Math.max(1, Math.min(15_000, remainingMs)),
             });
+            return hostResult;
           } catch (error) {
             if (
               error instanceof HostRpcError &&

@@ -20,6 +20,7 @@ import type { JoyAgentEngineClient, JoyAgentRunHost } from './engine-client.js';
 import { createJoyAgentHostRpcMethodsForSnapshot } from './tool-bridge.js';
 import type { JoyAgentObservationAdapterFactory } from './observation-host-factory.js';
 import type { JoyAgentObservationHostBridge } from './observation-tool-adapter.js';
+import type { ObservationTransferAuthority } from './observation-transfer-service.js';
 import type { PreparedChangeAuthority, PreparedChangeStore } from './prepared-change-store.js';
 import type { CreativeSkillRunScope } from './skill-runner.js';
 import { runScopedCreativeSkillToolLoop } from './entry-points.js';
@@ -58,6 +59,8 @@ export interface RecipeScopedEditRunDeps {
   readonly getModelId?: () => string | undefined;
   /** Live prompt-policy digest for the observation authority fence. */
   readonly getPromptPolicyDigest?: () => string;
+  /** Reviewed observation authority retained by the mounted editor UI. */
+  readonly getObservationAuthority?: () => ObservationTransferAuthority | undefined;
   /** Hands the recipe-scoped bridge back so the caller can read its coverage. */
   readonly onObservationBridgeCreated?: (
     scope: CreativeSkillRunScope,
@@ -66,6 +69,7 @@ export interface RecipeScopedEditRunDeps {
   /** Private host notification after a bounded source observation completes. */
   readonly onObservationCompleted?: (
     scope: CreativeSkillRunScope,
+    bridge: JoyAgentObservationHostBridge,
     result: { readonly observationId: string; readonly manifestId: string },
   ) => void | Promise<void>;
   /** Records the change-set id a recipe run staged, for later cleanup. */
@@ -155,7 +159,7 @@ export function runScopedCreativeSkillEditToolLoop(
       observationBridge === undefined
         ? undefined
         : async (result) => {
-            await deps.onObservationCompleted?.(scope, {
+            await deps.onObservationCompleted?.(scope, observationBridge, {
               observationId: result.observationId,
               manifestId: result.manifestId,
             });
@@ -184,22 +188,62 @@ function tryCreateObservationBridge(
   isCurrent: () => boolean,
   getWorkerRun: () => { readonly runId: string; readonly epoch: number } | undefined,
 ) {
+  let retainedAuthority:
+    | {
+        readonly projectId: string;
+        readonly revision: string;
+        readonly run: { readonly runId: string; readonly epoch: number };
+        readonly modelId: string;
+        readonly promptPolicyDigest: string;
+      }
+    | undefined;
   try {
     return deps.observationAdapterFactory?.create({
       projectId,
       revision: scope.revision,
       currentAuthority: () => {
         const run = getWorkerRun();
-        if (!isCurrent() || run === undefined) return undefined;
+        const liveSession = deps.latestSessionRef.current;
+        if (!isCurrent()) return undefined;
+        if (
+          liveSession.visualProject.id !== projectId ||
+          liveSession.projectRevisionId !== scope.revision
+        )
+          return undefined;
         const modelId = deps.getModelId?.() ?? '';
-        if (modelId.trim().length === 0) return undefined;
-        return Object.freeze({
+        const promptPolicyDigest = deps.getPromptPolicyDigest?.() ?? '';
+        if (modelId.trim().length === 0 || run === undefined) return undefined;
+        const reviewed = deps.getObservationAuthority?.();
+        if (
+          reviewed !== undefined &&
+          reviewed.projectId === projectId &&
+          reviewed.revision === scope.revision &&
+          reviewed.modelId === modelId &&
+          reviewed.promptPolicyDigest === promptPolicyDigest &&
+          reviewed.run.runId === run.runId &&
+          reviewed.run.epoch === run.epoch
+        ) {
+          retainedAuthority = reviewed;
+          return reviewed;
+        }
+        if (
+          retainedAuthority !== undefined &&
+          retainedAuthority.projectId === projectId &&
+          retainedAuthority.revision === scope.revision &&
+          modelId === retainedAuthority.modelId &&
+          promptPolicyDigest === retainedAuthority.promptPolicyDigest &&
+          run.runId === retainedAuthority.run.runId &&
+          run.epoch === retainedAuthority.run.epoch
+        )
+          return retainedAuthority;
+        retainedAuthority = Object.freeze({
           projectId,
           revision: scope.revision,
           run,
           modelId,
-          promptPolicyDigest: deps.getPromptPolicyDigest?.() ?? '',
+          promptPolicyDigest,
         });
+        return retainedAuthority;
       },
     });
   } catch {

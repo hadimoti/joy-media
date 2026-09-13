@@ -18,6 +18,7 @@ import type { JoyAgentContextSnapshotInput } from './context-snapshot.js';
 import type { JoyAgentEngineClient } from './engine-client.js';
 import type { JoyAgentObservationHostBridge } from './observation-tool-adapter.js';
 import type { JoyAgentObservationAdapterFactory } from './observation-host-factory.js';
+import type { ObservationTransferAuthority } from './observation-transfer-service.js';
 import type {
   JoyAgentEvidenceCoverageResult,
   JoyAgentObservationToolAuthority,
@@ -53,6 +54,19 @@ export interface CreativeSkillEditorAppGraph {
   readonly getModelId?: () => string | undefined;
   /** Live prompt-policy digest for the observation authority fence. */
   readonly getPromptPolicyDigest?: () => string;
+  /** Returns the live Worker observation authority after review approval. */
+  readonly getObservationAuthority?: () => ObservationTransferAuthority | undefined;
+  /** Registers a private recipe observation candidate in the mounted UI. */
+  readonly onObservationCompleted?: (
+    scope: CreativeSkillRunScope,
+    bridge: JoyAgentObservationHostBridge,
+    observationId: string,
+  ) => void | Promise<void>;
+  /** Waits for the owner-approved review of the exact recipe observation. */
+  readonly waitForObservationReview?: (
+    scope: CreativeSkillRunScope,
+    signal: AbortSignal,
+  ) => Promise<void>;
   /** Records the change-set id a recipe run staged, so the caller can wire it
    * into the existing preview-approval UI. */
   readonly onStaged?: (scope: CreativeSkillRunScope, changeSetId: string) => void;
@@ -182,11 +196,15 @@ export function createCreativeSkillEditorPrimitiveDeps(
     ...(graph.getPromptPolicyDigest === undefined
       ? {}
       : { getPromptPolicyDigest: graph.getPromptPolicyDigest }),
+    ...(graph.getObservationAuthority === undefined
+      ? {}
+      : { getObservationAuthority: graph.getObservationAuthority }),
     onObservationBridgeCreated: (scope, bridge) => {
       stateFor(scope.runId).bridge = bridge;
     },
-    onObservationCompleted: (scope, result) => {
+    onObservationCompleted: (scope, bridge, result) => {
       stateFor(scope.runId).manifestId = result.manifestId;
+      return graph.onObservationCompleted?.(scope, bridge, result.observationId);
     },
     ...(graph.onStaged === undefined ? {} : { onStaged: graph.onStaged }),
   };
@@ -209,14 +227,20 @@ export function createCreativeSkillEditorPrimitiveDeps(
           evidenceIds: [],
         };
       }
-      const authority: JoyAgentObservationToolAuthority = {
+      await graph.waitForObservationReview?.(scope, signal);
+      const authority = graph.getObservationAuthority?.() ?? {
         projectId: scope.projectId,
         revision: scope.revision,
         run: { runId: scope.runId, epoch: scope.epoch },
       };
+      const toolAuthority: JoyAgentObservationToolAuthority = {
+        projectId: authority.projectId,
+        revision: authority.revision,
+        run: { runId: authority.run.runId, epoch: authority.run.epoch },
+      };
       const coverage = await state.bridge.tools.coverage(
         { manifestId: state.manifestId },
-        authority,
+        toolAuthority,
         signal,
       );
       if (!hasUsableObservationCoverage(coverage))

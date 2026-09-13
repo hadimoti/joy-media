@@ -49,6 +49,20 @@ describe('AssetLibraryPanel successful import contract', () => {
     expect(panelSource).not.toContain('<span>Add to timeline</span>');
   });
 
+  it('carries verified import integrity metadata through the timeline callback', () => {
+    const callbackContract = panelSource.slice(
+      panelSource.indexOf('readonly onAddToTimeline?:'),
+      panelSource.indexOf('/** Attach image/video to the built-in JOY Agent Engine'),
+    );
+    expect(callbackContract).toContain("readonly sha256: BrowserAsset['sha256'];");
+    expect(callbackContract).toContain("readonly bytes: BrowserAsset['bytes'];");
+    const cardAction = panelSource.slice(
+      panelSource.indexOf('aria-label={`Add ${asset.displayName}'),
+    );
+    expect(cardAction).toContain('sha256: asset.sha256,');
+    expect(cardAction).toContain('bytes: asset.bytes,');
+  });
+
   it('loads the account and cloud libraries without waiting for project binding readiness', () => {
     const refreshPath = panelSource.slice(
       panelSource.indexOf('const refresh = useCallback'),

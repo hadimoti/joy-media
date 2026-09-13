@@ -403,15 +403,18 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
           (payload, index) =>
             payload.modality !== 'image' || payload.evidenceId !== item.request.evidenceIds[index],
         )
-      )
+      ) {
         throw new Error('invalid evidence');
+      }
       for (const payload of payloads) {
         const copy = payload.data.slice();
-        if (!(copy.buffer instanceof ArrayBuffer) || !payload.mimeType.startsWith('image/'))
+        if (!(copy.buffer instanceof ArrayBuffer) || !payload.mimeType.startsWith('image/')) {
           throw new Error('invalid evidence');
+        }
         totalBytes += copy.byteLength;
-        if (copy.byteLength === 0 || totalBytes > item.request.maxBytes)
+        if (copy.byteLength === 0 || totalBytes > item.request.maxBytes) {
           throw new Error('invalid evidence');
+        }
         evidence.push({
           evidenceId: payload.evidenceId,
           mimeType: payload.mimeType,

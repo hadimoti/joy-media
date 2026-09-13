@@ -46,6 +46,7 @@ interface ApprovedScope {
 }
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
+const REVISION_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/=-]{0,255}$/;
 
 /**
  * Creates one disposable, image-only transfer path. Granting merely captures
@@ -282,7 +283,7 @@ function isAuthority(value: unknown): value is ObservationTransferAuthority {
     isRecord(value) &&
     hasExactKeys(value, ['projectId', 'revision', 'run', 'modelId', 'promptPolicyDigest']) &&
     isId(value.projectId) &&
-    isId(value.revision) &&
+    isRevisionId(value.revision) &&
     isId(value.modelId) &&
     isId(value.promptPolicyDigest) &&
     isRecord(value.run) &&
@@ -445,6 +446,10 @@ function isNonNegativeInteger(value: unknown): value is number {
 
 function isId(value: unknown): value is string {
   return typeof value === 'string' && SAFE_ID.test(value) && !value.includes('://');
+}
+
+function isRevisionId(value: unknown): value is string {
+  return typeof value === 'string' && REVISION_ID.test(value) && !value.includes('://');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

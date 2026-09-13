@@ -5180,6 +5180,8 @@ function EditorWorkspace({
       readonly assetId: string;
       readonly kind: 'video' | 'audio' | 'image';
       readonly displayName: string;
+      readonly sha256: string;
+      readonly bytes: number;
       readonly descriptor: {
         readonly mimeType: string;
         readonly durationUs?: number;
@@ -5206,6 +5208,8 @@ function EditorWorkspace({
                 id: asset.assetId,
                 kind: asset.kind,
                 displayName: asset.displayName,
+                sha256: asset.sha256,
+                bytes: asset.bytes,
                 descriptor: asset.descriptor,
               }),
               visualObjects: {

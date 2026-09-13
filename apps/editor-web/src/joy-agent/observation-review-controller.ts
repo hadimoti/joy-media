@@ -262,6 +262,10 @@ interface ActiveReview {
 }
 
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
+// Editor revision receipts use bounded key/value segments (for example,
+// `timeline=1:document=4`). Keep the equals sign confined to this identity
+// field; project, model, and provider identifiers retain the stricter ID rule.
+const REVISION_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/=-]{0,255}$/;
 const FRAME_ID = /^[A-Za-z0-9][A-Za-z0-9._:@=-]{0,511}$/;
 const SHA_256 = /^[a-f0-9]{64}$/i;
 const UNSAFE_LOCATION = /(?:\b(?:https?|file|data|blob):|\b[A-Za-z]:|(?:^|\/)\.{1,2}(?:\/|$)|\\)/i;
@@ -449,7 +453,9 @@ export function createObservationReviewController(
     const review = active;
     if (review === undefined || state.status !== 'consent-required') return state;
     const grant = normalizeGrant(rawGrant);
-    if (grant === undefined) return failActive('consent-invalid', review);
+    if (grant === undefined) {
+      return failActive('consent-invalid', review);
+    }
     if (!sameAuthority(readCurrentAuthority(options), review.preparation.authority)) {
       return cancelActive(
         cancellationReasonForAuthority(review.preparation.authority, readCurrentAuthority(options)),
@@ -465,7 +471,9 @@ export function createObservationReviewController(
       return failActive('capability-mismatch', review);
     }
     const now = readNow(options);
-    if (now === undefined) return failActive('consent-invalid', review);
+    if (now === undefined) {
+      return failActive('consent-invalid', review);
+    }
     if (grant.expiresAtMs <= now) return failActive('consent-expired', review);
 
     try {
@@ -485,7 +493,9 @@ export function createObservationReviewController(
 
     const controller = new AbortController();
     review.controller = controller;
-    if (!armExpiry(review, grant.expiresAtMs)) return failActive('consent-invalid', review);
+    if (!armExpiry(review, grant.expiresAtMs)) {
+      return failActive('consent-invalid', review);
+    }
     setState(transferringState(review.preparation.summary));
 
     let result: ObservationTransferServiceResult;
@@ -675,7 +685,7 @@ function normalizeAuthority(value: unknown): ObservationTransferAuthority | unde
     !isPlainRecord(value.run) ||
     !hasExactKeys(value.run, ['runId', 'epoch']) ||
     !isOpaqueId(value.projectId) ||
-    !isOpaqueId(value.revision) ||
+    !isRevisionId(value.revision) ||
     !isOpaqueId(value.run.runId) ||
     !isPositiveSafeInteger(value.run.epoch) ||
     !isOpaqueId(value.modelId) ||
@@ -711,7 +721,7 @@ function normalizeManifest(value: unknown): EvidenceManifestLookup | undefined {
     !isOpaqueId(value.scope.identity.projectId) ||
     typeof value.scope.identity.assetDigest !== 'string' ||
     !SHA_256.test(value.scope.identity.assetDigest) ||
-    !isOpaqueId(value.scope.identity.projectRevision) ||
+    !isRevisionId(value.scope.identity.projectRevision) ||
     !isOpaqueId(value.scope.identity.modelId) ||
     !isOpaqueId(value.scope.identity.promptPolicyDigest)
   ) {
@@ -984,6 +994,10 @@ function isObservationModality(value: unknown): value is ObservationModality {
 
 function isOpaqueId(value: unknown): value is string {
   return typeof value === 'string' && OPAQUE_ID.test(value) && !UNSAFE_LOCATION.test(value);
+}
+
+function isRevisionId(value: unknown): value is string {
+  return typeof value === 'string' && REVISION_ID.test(value) && !UNSAFE_LOCATION.test(value);
 }
 
 function isFrameId(value: unknown): value is string {

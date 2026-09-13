@@ -63,6 +63,7 @@ export interface CreateObservationTransferEvidenceResolverOptions {
 
 const FRAME_ID = /^[A-Za-z0-9][A-Za-z0-9._:@=-]{0,511}$/;
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
+const REVISION_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/=-]{0,255}$/;
 const SHA_256 = /^[a-f0-9]{64}$/i;
 const UNSAFE_LOCATION = /(?:\b(?:https?|file|data|blob):|\b[A-Za-z]:|(?:^|\/)\.{1,2}(?:\/|$)|\\)/i;
 
@@ -356,7 +357,7 @@ function normalizeManifest(value: unknown): EvidenceManifestLookup | undefined {
     !isOpaqueId(identity.projectId) ||
     typeof identity.assetDigest !== 'string' ||
     !SHA_256.test(identity.assetDigest) ||
-    !isOpaqueId(identity.projectRevision) ||
+    !isRevisionId(identity.projectRevision) ||
     !isOpaqueId(identity.modelId) ||
     !isOpaqueId(identity.promptPolicyDigest)
   ) {
@@ -387,7 +388,7 @@ function normalizeAuthority(value: unknown): ObservationTransferAuthority | unde
   if (!isPlainRecord(run) || !hasExactKeys(run, ['runId', 'epoch'])) return undefined;
   if (
     !isOpaqueId(value.projectId) ||
-    !isOpaqueId(value.revision) ||
+    !isRevisionId(value.revision) ||
     !isOpaqueId(run.runId) ||
     typeof run.epoch !== 'number' ||
     !Number.isSafeInteger(run.epoch) ||
@@ -540,7 +541,7 @@ function isCacheIdentity(value: unknown): value is ObservationCacheIdentity {
     !isOpaqueId(value.projectId) ||
     typeof value.assetDigest !== 'string' ||
     !SHA_256.test(value.assetDigest) ||
-    !isOpaqueId(value.projectRevision) ||
+    !isRevisionId(value.projectRevision) ||
     !isOpaqueId(value.modelId) ||
     !isOpaqueId(value.promptPolicyDigest) ||
     !isOpaqueId(value.streamId) ||
@@ -627,6 +628,10 @@ function isFrameId(value: unknown): value is string {
 
 function isOpaqueId(value: unknown): value is string {
   return typeof value === 'string' && OPAQUE_ID.test(value) && !UNSAFE_LOCATION.test(value);
+}
+
+function isRevisionId(value: unknown): value is string {
+  return typeof value === 'string' && REVISION_ID.test(value) && !UNSAFE_LOCATION.test(value);
 }
 
 function isObservationModality(value: unknown): value is ObservationModality {

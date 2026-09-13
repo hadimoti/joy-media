@@ -598,7 +598,125 @@ describe('mounted Worker bounded semantic tool exchange', () => {
         host,
       ),
     ).rejects.toThrow('tool limit');
-    expect(modelSteps).toBe(4);
+    expect(modelSteps).toBe(5);
+  });
+
+  it('allows one bounded observation-backed preparation and rejects a fifth tool exchange', async () => {
+    const assetsPage = {
+      projectId: 'project',
+      revision: 'revision',
+      domain: 'assets',
+      items: [{ id: 'asset-authored', kind: 'video', displayName: 'Source clip' }],
+    } as const satisfies HostRpcJson;
+    const observationResult = {
+      observationId: 'observation-1',
+      manifestId: 'manifest-1',
+      mode: 'overview',
+      range: { startUs: 0, endUs: 1_000_000 },
+      status: 'complete',
+      intendedFrameCount: 1,
+      decodedFrameCount: 1,
+      omittedFrameCount: 0,
+    } as const satisfies HostRpcJson;
+    const host = vi.fn<BrowserAgentHostCall>(async (method, args) => {
+      if (method === 'read_project_context')
+        return args !== null &&
+          typeof args === 'object' &&
+          !Array.isArray(args) &&
+          'domain' in args &&
+          args.domain === 'assets'
+          ? assetsPage
+          : frozenPage;
+      if (method === 'media_observe') {
+        expect(args).toMatchObject({ assetId: 'asset-authored' });
+        return observationResult;
+      }
+      expect(method).toBe('validate_proposal');
+      expect(args).toEqual(proposal);
+      return opaquePrepared;
+    });
+    let requests = 0;
+    const outcome = await runBoundedToolExchange(
+      [],
+      async (messages) => {
+        if (requests++ === 0)
+          return response({
+            tool_calls: [call('overview', 'read_project_context', { domain: 'overview' })],
+          });
+        if (requests === 2)
+          return response({
+            tool_calls: [call('assets', 'read_project_context', { domain: 'assets' })],
+          });
+        if (requests === 3)
+          return response({
+            tool_calls: [
+              call('observe', 'media_observe', {
+                assetId: 'asset-authored',
+                range: { startUs: 0, endUs: 1_000_000 },
+                mode: 'overview',
+                maxFrames: 1,
+                maxMetadataBytes: 1024,
+              }),
+            ],
+          });
+        expect(lastToolResult(messages)).toMatchObject({
+          ok: true,
+          evidence: { observationId: 'observation-1', manifestId: 'manifest-1' },
+        });
+        return response({ tool_calls: [call('prepare', 'validate_proposal', proposal)] });
+      },
+      host,
+      {
+        allowedToolNames: ['read_project_context', 'media_observe', 'validate_proposal'],
+      },
+    );
+    expect(outcome).toEqual({ kind: 'prepared', proposal: opaquePrepared });
+    expect(requests).toBe(4);
+    expect(host.mock.calls.map(([method]) => method)).toEqual([
+      'read_project_context',
+      'read_project_context',
+      'media_observe',
+      'validate_proposal',
+    ]);
+
+    let fifthRequests = 0;
+    const fifthHost = vi.fn<BrowserAgentHostCall>(async () => frozenPage);
+    await expect(
+      runBoundedToolExchange(
+        [],
+        async () => {
+          fifthRequests += 1;
+          return response({
+            tool_calls: [
+              call(`step-${fifthRequests}`, 'read_project_context', { domain: 'overview' }),
+            ],
+          });
+        },
+        fifthHost,
+      ),
+    ).rejects.toThrow('tool limit');
+    expect(fifthRequests).toBe(5);
+    expect(fifthHost).toHaveBeenCalledTimes(4);
+
+    let boundedRequests = 0;
+    const boundedHost = vi.fn<BrowserAgentHostCall>(async () => frozenPage);
+    await expect(
+      runBoundedToolExchange(
+        [],
+        async () => {
+          boundedRequests += 1;
+          return response({
+            tool_calls: [
+              call(`bounded-${boundedRequests}`, 'read_project_context', { domain: 'overview' }),
+            ],
+          });
+        },
+        boundedHost,
+        { maxToolCalls: 3 },
+      ),
+    ).rejects.toThrow('tool limit');
+    expect(boundedRequests).toBe(4);
+    expect(boundedHost).toHaveBeenCalledTimes(3);
   });
 
   it('does not retry a non-repairable canonical rejection', async () => {

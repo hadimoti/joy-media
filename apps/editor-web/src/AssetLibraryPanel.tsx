@@ -145,6 +145,9 @@ export function AssetLibraryPanel({
     readonly assetId: string;
     readonly kind: 'image' | 'video' | 'audio';
     readonly displayName: string;
+    /** Import-time integrity metadata required by the observation bridge. */
+    readonly sha256: BrowserAsset['sha256'];
+    readonly bytes: BrowserAsset['bytes'];
     readonly descriptor: BrowserAsset['descriptor'];
   }) => void;
   /** Attach image/video to the built-in JOY Agent Engine for editing. */
@@ -504,6 +507,8 @@ export function AssetLibraryPanel({
       readonly assetId: string;
       readonly kind: 'image' | 'video' | 'audio';
       readonly displayName: string;
+      readonly sha256: BrowserAsset['sha256'];
+      readonly bytes: BrowserAsset['bytes'];
       readonly descriptor: BrowserAsset['descriptor'];
     }) => {
       if (timelineAddRef.current.has(asset.assetId)) {
@@ -549,6 +554,8 @@ export function AssetLibraryPanel({
             assetId: associated.id,
             kind: associated.kind,
             displayName: associated.displayName,
+            sha256: associated.sha256,
+            bytes: associated.bytes,
             descriptor: associated.descriptor,
           };
         }
@@ -1458,6 +1465,8 @@ export function AssetLibraryPanel({
                                 assetId: asset.id,
                                 kind: asset.kind,
                                 displayName: asset.displayName,
+                                sha256: asset.sha256,
+                                bytes: asset.bytes,
                                 descriptor: asset.descriptor,
                               });
                             }}

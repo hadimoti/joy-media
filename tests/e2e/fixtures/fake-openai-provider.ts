@@ -3,6 +3,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 /** HTTPS-only origin intercepted by Playwright; production never allowlists it. */
 export const FAKE_PROVIDER_BASE_URL = 'https://joy-agent-fixture.example/v1';
 export const FAKE_PROVIDER_MODEL = 'fixture/joy-agent';
+const MEDIA_CAPABILITY_PROBE_ACK = 'JOY_MEDIA_CAPABILITY_PROBE_OK_V1';
 
 export type FakeProviderMode =
   'tool-loop' | 'plan-only' | 'malformed' | 'oversize' | 'slow' | 'redirect' | 'auth' | 'network';
@@ -39,6 +40,12 @@ export interface FakeOpenAIProviderOptions {
     context: FakeOpenAIProviderContext,
   ) => Readonly<Record<string, unknown>>;
   /**
+   * Keep the old context -> validate sequence for negative evidence-gate
+   * coverage. The default fixture follows the real observation contract when
+   * the recipe allow-list exposes media_observe.
+   */
+  readonly skipObservation?: boolean;
+  /**
    * When set, an advisory tool-loop request answers with plain content after
    * the first `read_project_context` call instead of proposing an edit. Used
    * by recipes whose allow-list has no `validate_proposal` (find-moment,
@@ -48,6 +55,7 @@ export interface FakeOpenAIProviderOptions {
 }
 
 export interface FakeOpenAIProviderContext {
+  readonly assetIds: readonly string[];
   readonly recentEntityReferences: readonly {
     readonly entityId: string;
     readonly entityKind: string;
@@ -138,8 +146,58 @@ function isPlanOnlyProbe(requestBody: Readonly<Record<string, unknown>>): boolea
   );
 }
 
+function isMediaCapabilityProbe(requestBody: Readonly<Record<string, unknown>>): boolean {
+  const messages = messagesOf(requestBody);
+  const content = messages[0]?.content;
+  if (!Array.isArray(content)) return false;
+  return content.some(
+    (part) =>
+      part !== null &&
+      typeof part === 'object' &&
+      !Array.isArray(part) &&
+      typeof (part as Readonly<Record<string, unknown>>).text === 'string' &&
+      /This is JOY's synthetic (?:image|audio|video) capability test\./.test(
+        (part as Readonly<Record<string, unknown>>).text as string,
+      ),
+  );
+}
+
 function toolMessageCount(requestBody: Readonly<Record<string, unknown>>): number {
   return messagesOf(requestBody).filter((message) => message.role === 'tool').length;
+}
+
+type FixtureToolName =
+  'read_project_context' | 'media_observe' | 'evidence_coverage' | 'validate_proposal';
+
+function toolCallsOf(requestBody: Readonly<Record<string, unknown>>): readonly ProviderMessage[] {
+  return messagesOf(requestBody).filter((message) => message.role === 'tool');
+}
+
+function latestToolResult(requestBody: Readonly<Record<string, unknown>>): unknown {
+  const result = toolCallsOf(requestBody).at(-1)?.content;
+  if (typeof result !== 'string') return undefined;
+  try {
+    return JSON.parse(result);
+  } catch {
+    return undefined;
+  }
+}
+
+function observationEnabled(
+  requestBody: Readonly<Record<string, unknown>>,
+  options: FakeOpenAIProviderOptions,
+): boolean {
+  if (options.skipObservation === true || !Array.isArray(requestBody.tools)) return false;
+  return requestBody.tools.some((tool) => {
+    if (tool === null || typeof tool !== 'object' || Array.isArray(tool)) return false;
+    const fn = (tool as Readonly<Record<string, unknown>>).function;
+    return (
+      fn !== null &&
+      typeof fn === 'object' &&
+      !Array.isArray(fn) &&
+      (fn as Readonly<Record<string, unknown>>).name === 'media_observe'
+    );
+  });
 }
 
 /**
@@ -150,31 +208,44 @@ function toolMessageCount(requestBody: Readonly<Record<string, unknown>>): numbe
 function contextFromRequest(
   requestBody: Readonly<Record<string, unknown>>,
 ): FakeOpenAIProviderContext {
-  const toolResult = [...messagesOf(requestBody)]
-    .reverse()
-    .find((message) => message.role === 'tool' && typeof message.content === 'string');
-  if (toolResult === undefined || typeof toolResult.content !== 'string')
-    return { recentEntityReferences: [] };
-  try {
-    const parsed = JSON.parse(toolResult.content) as { context?: unknown };
-    const context = parsed.context;
-    if (context === null || typeof context !== 'object' || Array.isArray(context))
-      return { recentEntityReferences: [] };
-    const references = (context as { recentEntityReferences?: unknown }).recentEntityReferences;
-    if (!Array.isArray(references)) return { recentEntityReferences: [] };
-    return {
-      recentEntityReferences: references.flatMap((reference) => {
-        if (reference === null || typeof reference !== 'object' || Array.isArray(reference))
-          return [];
-        const candidate = reference as { entityId?: unknown; entityKind?: unknown };
-        return typeof candidate.entityId === 'string' && typeof candidate.entityKind === 'string'
-          ? [{ entityId: candidate.entityId, entityKind: candidate.entityKind }]
-          : [];
-      }),
-    };
-  } catch {
-    return { recentEntityReferences: [] };
-  }
+  const results = toolCallsOf(requestBody)
+    .map((message) => {
+      if (typeof message.content !== 'string') return undefined;
+      try {
+        return JSON.parse(message.content) as { context?: unknown };
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((value): value is { context?: unknown } => value !== undefined);
+  const contexts = results
+    .map((value) => value.context)
+    .filter(
+      (value): value is Record<string, unknown> =>
+        value !== null && typeof value === 'object' && !Array.isArray(value),
+    );
+  const assetIds = contexts.flatMap((context) => {
+    const items = context.items;
+    if (!Array.isArray(items)) return [];
+    return items.flatMap((item) => {
+      if (item === null || typeof item !== 'object' || Array.isArray(item)) return [];
+      const id = (item as Readonly<Record<string, unknown>>).id;
+      return typeof id === 'string' ? [id] : [];
+    });
+  });
+  const references = contexts.flatMap((context) => {
+    const value = context.recentEntityReferences;
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((reference) => {
+      if (reference === null || typeof reference !== 'object' || Array.isArray(reference))
+        return [];
+      const candidate = reference as { entityId?: unknown; entityKind?: unknown };
+      return typeof candidate.entityId === 'string' && typeof candidate.entityKind === 'string'
+        ? [{ entityId: candidate.entityId, entityKind: candidate.entityKind }]
+        : [];
+    });
+  });
+  return { assetIds: [...new Set(assetIds)], recentEntityReferences: references };
 }
 
 function requestStage(requestBody: Readonly<Record<string, unknown>>): FakeProviderRequestStage {
@@ -189,7 +260,7 @@ function requestStage(requestBody: Readonly<Record<string, unknown>>): FakeProvi
   return 'other';
 }
 
-function toolCall(name: 'read_project_context' | 'validate_proposal', id: string, args: unknown) {
+function toolCall(name: FixtureToolName, id: string, args: unknown) {
   return {
     choices: [
       {
@@ -215,6 +286,10 @@ function responseBody(
   const forcedProbe = isForcedProbe(requestBody);
   const probeContinuation = isProbeContinuation(requestBody);
   const planOnlyProbe = isPlanOnlyProbe(requestBody);
+  if (isMediaCapabilityProbe(requestBody))
+    return JSON.stringify({
+      choices: [{ message: { role: 'assistant', content: MEDIA_CAPABILITY_PROBE_ACK } }],
+    });
   if (forcedProbe && mode !== 'plan-only')
     return JSON.stringify({
       choices: [
@@ -251,7 +326,36 @@ function responseBody(
       return JSON.stringify({
         choices: [{ message: { role: 'assistant', content: options.advisoryAnswer } }],
       });
-    if (toolMessages === 1)
+    if (toolMessages === 1 && observationEnabled(requestBody, options))
+      return JSON.stringify(toolCall('read_project_context', 'read-2', { domain: 'assets' }));
+    if (toolMessages === 2 && observationEnabled(requestBody, options)) {
+      const assetId = contextFromRequest(requestBody).assetIds[0];
+      if (assetId === undefined)
+        return JSON.stringify({
+          choices: [{ message: { content: 'No source asset was available.' } }],
+        });
+      return JSON.stringify(
+        toolCall('media_observe', 'observe-1', {
+          assetId,
+          // The committed video.mp4 fixture is three seconds long; keep the
+          // request inside the real imported descriptor's bounded duration.
+          range: { startUs: 0, endUs: 3_000_000 },
+          mode: 'overview',
+          maxFrames: 4,
+          maxMetadataBytes: 4096,
+        }),
+      );
+    }
+    if (toolMessages === 3 && observationEnabled(requestBody, options)) {
+      const observation = latestToolResult(requestBody) as
+        { evidence?: { observationId?: unknown; manifestId?: unknown } } | undefined;
+      if (
+        typeof observation?.evidence?.observationId !== 'string' ||
+        typeof observation.evidence.manifestId !== 'string'
+      )
+        return JSON.stringify({
+          choices: [{ message: { content: 'Observation did not produce a manifest.' } }],
+        });
       return JSON.stringify(
         toolCall(
           'validate_proposal',
@@ -261,7 +365,22 @@ function responseBody(
             DEFAULT_PROPOSAL,
         ),
       );
-    if (toolMessages === 2 && options.repairProposal !== undefined)
+    }
+    if (toolMessages === 1 && !observationEnabled(requestBody, options))
+      return JSON.stringify(
+        toolCall(
+          'validate_proposal',
+          'validate-1',
+          options.proposalForContext?.(contextFromRequest(requestBody)) ??
+            options.proposal ??
+            DEFAULT_PROPOSAL,
+        ),
+      );
+    if (
+      ((toolMessages === 2 && !observationEnabled(requestBody, options)) ||
+        (toolMessages === 5 && observationEnabled(requestBody, options))) &&
+      options.repairProposal !== undefined
+    )
       return JSON.stringify(toolCall('validate_proposal', 'validate-2', options.repairProposal));
   }
   return JSON.stringify({

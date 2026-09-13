@@ -57,6 +57,7 @@ const MAX_TOOL_METADATA_BYTES = 32 * 1024;
 const MAX_THUMBNAIL_BYTES = 32 * 1024 * 1024;
 const DEFAULT_MAX_THUMBNAIL_BYTES = 8 * 1024 * 1024;
 const MAX_IDENTIFIER_LENGTH = 128;
+const MAX_REVISION_IDENTIFIER_LENGTH = 256;
 const MAX_FRAME_IDENTIFIER_LENGTH = 512;
 const MAX_TRANSCRIPT_ITEMS = 4_096;
 const SHA_256 = /^[a-f0-9]{64}$/i;
@@ -303,8 +304,9 @@ export function createJoyAgentObservationHostBridge(
     authority: JoyAgentObservationToolAuthority,
   ): void => {
     const current = requireCurrentAuthority(authority, options);
-    if (!sameAuthority(record.authority, current))
+    if (!sameAuthority(record.authority, current)) {
       throw new JoyAgentObservationToolAdapterError('stale-authority');
+    }
   };
 
   const createRecord = (
@@ -752,7 +754,8 @@ function isObservationRunAuthorityCurrent(
   options: NormalizedOptions,
 ): boolean {
   try {
-    const current = normalizeCurrentAuthority(options.currentAuthority(), options.projectId);
+    const rawCurrent = options.currentAuthority();
+    const current = normalizeCurrentAuthority(rawCurrent, options.projectId);
     return (
       candidate.projectId === current.projectId &&
       candidate.projectRevision === current.revision &&
@@ -809,16 +812,19 @@ function requireCurrentAuthority(
   authority: JoyAgentObservationToolAuthority,
   options: NormalizedOptions,
 ): JoyAgentObservationCurrentAuthority {
+  let rawCurrent: unknown;
   try {
     assertToolAuthority(authority, options.projectId);
-    const current = normalizeCurrentAuthority(options.currentAuthority(), options.projectId);
+    rawCurrent = options.currentAuthority();
+    const current = normalizeCurrentAuthority(rawCurrent, options.projectId);
     if (
       current.projectId !== authority.projectId ||
       current.revision !== authority.revision ||
       current.run.runId !== authority.run.runId ||
       current.run.epoch !== authority.run.epoch
-    )
+    ) {
       throw new Error();
+    }
     return current;
   } catch {
     throw new JoyAgentObservationToolAdapterError('stale-authority');
@@ -850,7 +856,7 @@ function normalizeCurrentAuthority(
     throw new Error();
   if (value.projectId !== expectedProjectId) throw new Error();
   assertSafeIdentifier(value.projectId, 'projectId');
-  assertSafeIdentifier(value.revision, 'revision');
+  assertSafeRevisionIdentifier(value.revision, 'revision');
   assertHostRun(value.run);
   assertSafeIdentifier(value.modelId, 'modelId');
   assertSafeIdentifier(value.promptPolicyDigest, 'promptPolicyDigest');
@@ -1123,7 +1129,7 @@ function assertToolAuthority(
     throw new Error();
   if (value.projectId !== expectedProjectId) throw new Error();
   assertSafeIdentifier(value.projectId, 'projectId');
-  assertSafeIdentifier(value.revision, 'revision');
+  assertSafeRevisionIdentifier(value.revision, 'revision');
   assertHostRun(value.run);
 }
 
@@ -1494,6 +1500,20 @@ function assertSafeIdentifier(
   value: unknown,
   _label: string,
   maxLength = MAX_IDENTIFIER_LENGTH,
+): asserts value is string {
+  if (
+    typeof value !== 'string' ||
+    value.length > maxLength ||
+    !OPAQUE_IDENTIFIER.test(value) ||
+    UNSAFE_LOCATION.test(value)
+  )
+    throw new JoyAgentObservationToolAdapterError('invalid-request');
+}
+
+function assertSafeRevisionIdentifier(
+  value: unknown,
+  _label: string,
+  maxLength = MAX_REVISION_IDENTIFIER_LENGTH,
 ): asserts value is string {
   if (
     typeof value !== 'string' ||

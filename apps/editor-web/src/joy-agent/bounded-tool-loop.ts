@@ -54,11 +54,14 @@ export type BrowserAgentHostCall = (
 ) => Promise<HostRpcJson>;
 
 /**
- * This only bounds malformed provider transcript iteration. It is deliberately
- * separate from the execution budget: each actual tool call is charged to the
- * versioned run budget supplied by the Worker below.
+ * This only bounds malformed provider transcript iteration. Four tool-bearing
+ * exchanges are needed by an observation-backed edit (overview, assets,
+ * bounded observation, then canonical validation); the fifth exchange is
+ * reserved for a non-tool response and therefore rejects tool calls. It is
+ * deliberately separate from the execution budget: each actual tool call is
+ * charged to the versioned run budget supplied by the Worker below.
  */
-const MAX_PARSER_MODEL_EXCHANGES = 4;
+const MAX_PARSER_MODEL_EXCHANGES = 5;
 const DEFAULT_MAX_TOOL_CALLS = MAX_JOY_AGENT_RUN_BUDGET_V1.maxToolSteps;
 const MAX_TOOL_RESULT_BYTES = 65_536;
 const MAX_MODEL_ANSWER_CHARS = 8_192;

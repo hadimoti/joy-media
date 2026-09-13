@@ -186,6 +186,8 @@ interface PrivateObservationReviewLease {
   readonly candidate: JoyAgentObservationReviewCandidate;
   readonly leaseId: string;
   readonly expiresAtMs: number;
+  /** Recipe scope that owns this candidate; direct edits leave it absent. */
+  readonly recipeRunId?: string;
 }
 
 interface ObservationReviewDisplay {
@@ -198,6 +200,14 @@ interface ObservationReviewUiState {
   readonly status: ObservationReviewState['status'];
   readonly analysis?: string;
   readonly message?: string;
+}
+
+interface ObservationReviewWaiter {
+  readonly scope: CreativeSkillRunScope;
+  readonly resolve: () => void;
+  readonly reject: (error: Error) => void;
+  unsubscribe?: () => void;
+  timer?: number;
 }
 
 const OBSERVATION_REVIEW_PROMPT =
@@ -567,6 +577,7 @@ export function AgentPanel({
   const observationReviewLeaseRef = useRef<PrivateObservationReviewLease | undefined>(undefined);
   const observationReviewControllerRef = useRef<ObservationReviewController | undefined>(undefined);
   const observationReviewRegistrationRef = useRef(0);
+  const observationReviewWaiterRef = useRef<ObservationReviewWaiter | undefined>(undefined);
   const [observationReviewDisplay, setObservationReviewDisplay] = useState<
     ObservationReviewDisplay | undefined
   >(undefined);
@@ -589,14 +600,33 @@ export function AgentPanel({
     runController.getSnapshot,
   );
 
+  const settleObservationReviewWaiter = useCallback((error?: Error): void => {
+    const waiter = observationReviewWaiterRef.current;
+    if (waiter === undefined) return;
+    observationReviewWaiterRef.current = undefined;
+    waiter.unsubscribe?.();
+    if (waiter.timer !== undefined) window.clearTimeout(waiter.timer);
+    if (error === undefined) waiter.resolve();
+    else waiter.reject(error);
+  }, []);
+
+  const settleObservationReviewWaiterFor = useCallback(
+    (waiter: ObservationReviewWaiter, error?: Error): void => {
+      if (observationReviewWaiterRef.current !== waiter) return;
+      settleObservationReviewWaiter(error);
+    },
+    [settleObservationReviewWaiter],
+  );
+
   const discardObservationReview = useCallback((): void => {
     observationReviewRegistrationRef.current += 1;
     observationReviewControllerRef.current?.dispose();
     observationReviewControllerRef.current = undefined;
     observationReviewLeaseRef.current = undefined;
+    settleObservationReviewWaiter(new Error('JOY observation review was dismissed.'));
     setObservationReviewDisplay(undefined);
     setObservationReviewUi({ status: 'idle' });
-  }, []);
+  }, [settleObservationReviewWaiter]);
 
   const currentObservationReviewAuthority = useCallback(():
     ObservationTransferAuthority | undefined => {
@@ -618,7 +648,11 @@ export function AgentPanel({
   }, [joyAgentEngineClient]);
 
   const registerObservationReviewCandidate = useCallback(
-    async (bridge: JoyAgentObservationHostBridge, observationId: string): Promise<void> => {
+    async (
+      recipeScope: CreativeSkillRunScope | undefined,
+      bridge: JoyAgentObservationHostBridge,
+      observationId: string,
+    ): Promise<void> => {
       const client = joyAgentEngineClient;
       if (client === undefined) return;
       const candidate = bridge.createReviewCandidate(observationId);
@@ -658,6 +692,7 @@ export function AgentPanel({
         candidate,
         leaseId: lease.leaseId,
         expiresAtMs: lease.expiresAtMs,
+        ...(recipeScope === undefined ? {} : { recipeRunId: recipeScope.runId }),
       });
       setObservationReviewDisplay(
         Object.freeze({
@@ -669,6 +704,71 @@ export function AgentPanel({
       setObservationReviewUi({ status: 'idle' });
     },
     [joyAgentEngineClient],
+  );
+
+  const bindObservationReviewWaiter = useCallback(
+    (controller: ObservationReviewController): void => {
+      const waiter = observationReviewWaiterRef.current;
+      if (waiter === undefined) return;
+      const removePreviousBinding = waiter.unsubscribe;
+      removePreviousBinding?.();
+      const observe = (state: ObservationReviewState): void => {
+        if (state.status === 'reviewed') settleObservationReviewWaiterFor(waiter);
+        else if (state.status === 'failed' || state.status === 'cancelled')
+          settleObservationReviewWaiterFor(
+            waiter,
+            new Error(`JOY observation review ${state.status}.`),
+          );
+      };
+      const unsubscribe = controller.subscribe(observe);
+      waiter.unsubscribe = () => {
+        removePreviousBinding?.();
+        unsubscribe();
+      };
+      observe(controller.getState());
+    },
+    [settleObservationReviewWaiterFor],
+  );
+
+  const waitForObservationReview = useCallback(
+    (scope: CreativeSkillRunScope, signal: AbortSignal): Promise<void> => {
+      const review = observationReviewLeaseRef.current;
+      if (
+        review === undefined ||
+        review.recipeRunId !== scope.runId ||
+        review.candidate.authority.projectId !== scope.projectId ||
+        review.candidate.authority.revision !== scope.revision ||
+        review.candidate.authority.run.epoch !== scope.epoch
+      ) {
+        return Promise.reject(new Error('JOY observation review is unavailable for this run.'));
+      }
+      const current = observationReviewControllerRef.current?.getState();
+      if (current?.status === 'reviewed') return Promise.resolve();
+      if (current?.status === 'failed' || current?.status === 'cancelled')
+        return Promise.reject(new Error(`JOY observation review ${current.status}.`));
+      if (signal.aborted) return Promise.reject(new Error('JOY observation review was cancelled.'));
+      return new Promise<void>((resolve, reject) => {
+        settleObservationReviewWaiter(new Error('JOY observation review was superseded.'));
+        const waiter: ObservationReviewWaiter = { scope, resolve, reject };
+        observationReviewWaiterRef.current = waiter;
+        const onAbort = (): void => {
+          if (observationReviewWaiterRef.current !== waiter) return;
+          observationReviewControllerRef.current?.cancel();
+          discardObservationReview();
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        const timer = window.setTimeout(() => {
+          if (observationReviewWaiterRef.current !== waiter) return;
+          observationReviewControllerRef.current?.cancel();
+          discardObservationReview();
+        }, OBSERVATION_REVIEW_TTL_MS);
+        waiter.timer = timer;
+        waiter.unsubscribe = () => signal.removeEventListener('abort', onAbort);
+        const controller = observationReviewControllerRef.current;
+        if (controller !== undefined) bindObservationReviewWaiter(controller);
+      });
+    },
+    [bindObservationReviewWaiter, discardObservationReview, settleObservationReviewWaiter],
   );
 
   const prepareObservationReview = useCallback((): void => {
@@ -727,28 +827,42 @@ export function AgentPanel({
         }),
     });
     observationReviewControllerRef.current = controller;
-    controller.subscribe((next) => setObservationReviewUi(reviewUiState(next)));
+    controller.subscribe((next) => {
+      setObservationReviewUi(reviewUiState(next));
+      const waiter = observationReviewWaiterRef.current;
+      const lease = observationReviewLeaseRef.current;
+      if (waiter === undefined || lease?.recipeRunId !== waiter.scope.runId) return;
+      if (next.status === 'reviewed') settleObservationReviewWaiterFor(waiter);
+      else if (next.status === 'failed' || next.status === 'cancelled')
+        settleObservationReviewWaiterFor(
+          waiter,
+          new Error(`JOY observation review ${next.status}.`),
+        );
+    });
+    bindObservationReviewWaiter(controller);
     const providerCapability =
       status.capability === 'tool-loop'
         ? ({ state: 'structured-tools', diagnostic: 'structured-tool-proven' } as const)
         : status.capability === 'plan-only'
           ? ({ state: 'plan-only', diagnostic: 'plan-only-proven' } as const)
           : ({ state: 'unavailable', diagnostic: 'provider-probe-missing' } as const);
-    setObservationReviewUi(
-      reviewUiState(
-        controller.prepareReview({
-          authority: candidate.authority,
-          manifest: candidate.manifest,
-          range: candidate.range,
-          evidenceIds: candidate.evidenceIds,
-          modalities: ['image'],
-          prompt: OBSERVATION_REVIEW_PROMPT,
-          providerCapability,
-          mediaCapability: { modelId: candidate.authority.modelId, modalities: ['image'] },
-        }),
-      ),
-    );
-  }, [currentObservationReviewAuthority, joyAgentEngineClient]);
+    const preparedReviewState = controller.prepareReview({
+      authority: candidate.authority,
+      manifest: candidate.manifest,
+      range: candidate.range,
+      evidenceIds: candidate.evidenceIds,
+      modalities: ['image'],
+      prompt: OBSERVATION_REVIEW_PROMPT,
+      providerCapability,
+      mediaCapability: { modelId: candidate.authority.modelId, modalities: ['image'] },
+    });
+    setObservationReviewUi(reviewUiState(preparedReviewState));
+  }, [
+    bindObservationReviewWaiter,
+    currentObservationReviewAuthority,
+    joyAgentEngineClient,
+    settleObservationReviewWaiterFor,
+  ]);
 
   const approveObservationReview = useCallback((): void => {
     const controller = observationReviewControllerRef.current;
@@ -931,9 +1045,10 @@ export function AgentPanel({
       observationReviewControllerRef.current?.dispose();
       observationReviewControllerRef.current = undefined;
       observationReviewLeaseRef.current = undefined;
+      settleObservationReviewWaiter(new Error('JOY observation review was interrupted.'));
       preparedChangesRef.current.clear();
     };
-  }, [revokeActiveComposerHostLease]);
+  }, [revokeActiveComposerHostLease, settleObservationReviewWaiter]);
 
   useEffect(() => {
     const previous = sessionScopeRef.current;
@@ -1212,6 +1327,10 @@ export function AgentPanel({
       ...(observationAdapterFactory === undefined ? {} : { observationAdapterFactory }),
       getModelId: () => joyAgentEngineClient.getStatus()?.modelId,
       getPromptPolicyDigest: () => digestJoyAgentPolicy(latestSettingsRef.current),
+      getObservationAuthority: currentObservationReviewAuthority,
+      onObservationCompleted: (scope, bridge, observationId) =>
+        registerObservationReviewCandidate(scope, bridge, observationId),
+      waitForObservationReview,
       onStaged: (scope, changeSetId) => {
         if (recipeRunScopeRef.current?.runId === scope.runId)
           recipeStagedChangeSetRef.current = changeSetId;
@@ -1229,6 +1348,8 @@ export function AgentPanel({
     selectedClipIds,
     playheadUs,
     conversation.messages,
+    registerObservationReviewCandidate,
+    waitForObservationReview,
   ]);
 
   useEffect(() => {
@@ -1597,8 +1718,13 @@ export function AgentPanel({
           const capturedModelId = joyAgentEngineClient.getStatus()?.modelId;
           const capturedPolicyDigest = digestJoyAgentPolicy(latestSettingsRef.current);
           let observationBridge: JoyAgentObservationHostBridge | undefined;
+          // Free-form edits stay on the ordinary proposal path unless the
+          // request is explicitly about source media. Recipe runs have their
+          // own scoped bridge and therefore do not use this direct-path gate.
+          const directObservationRequired = taskKind === 'asset-edit' || taskKind === 'media-job';
           if (
             structured &&
+            directObservationRequired &&
             capturedModelId !== undefined &&
             capturedModelId.trim().length > 0 &&
             observationAdapterFactory !== undefined
@@ -1738,6 +1864,7 @@ export function AgentPanel({
                     ? undefined
                     : async (result) => {
                         await registerObservationReviewCandidate(
+                          undefined,
                           observationBridge!,
                           result.observationId,
                         );
