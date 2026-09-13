@@ -524,6 +524,9 @@ export function AgentPanel({
   );
   const [recipeRunningId, setRecipeRunningId] = useState<string | undefined>(undefined);
   const recipeRunScopeRef = useRef<CreativeSkillRunScope | undefined>(undefined);
+  // Shared invocation fence for deterministic recipes and Living Looks. Every
+  // staged path must register here so Stop/project transitions invalidate the
+  // exact run before its preview can be approved.
   const recipeInvocationRef = useRef<RecipeInvocation | undefined>(undefined);
   const recipeStagedChangeSetRef = useRef<string | undefined>(undefined);
   const [lookRunningId, setLookRunningId] = useState<string | undefined>(undefined);
@@ -2448,6 +2451,12 @@ export function AgentPanel({
       epoch: 1,
       revision: session.projectRevisionId,
     };
+    const lookController = new AbortController();
+    recipeInvocationRef.current = Object.freeze({
+      scope,
+      contextProjectId: session.visualProject.id,
+      controller: lookController,
+    });
     recipeRunScopeRef.current = scope;
     recipeStagedChangeSetRef.current = undefined;
     activeModelRunIdRef.current = scope.runId;
@@ -2482,6 +2491,7 @@ export function AgentPanel({
           currentTextByObjectId,
           compileInput: lookCompileInput,
           lookInstancesWrite,
+          signal: lookController.signal,
         },
       );
       if (recipeRunScopeRef.current?.runId !== scope.runId) return;
@@ -2494,7 +2504,7 @@ export function AgentPanel({
             result.diagnostics.length > 0 ? `\n${result.diagnostics.join('\n')}` : ''
           }`,
         );
-        cancelRunLifecycle(scope.runId, 'Look blocked.');
+        cancelRecipeInvocation(scope.runId, 'Look blocked.');
         setAgentPhase('failed');
         if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
         return;
@@ -2507,7 +2517,7 @@ export function AgentPanel({
           'assistant',
           'The Look prepared a change but its preview authority was lost. Try again.',
         );
-        cancelRunLifecycle(scope.runId, 'Look preview authority lost.');
+        cancelRecipeInvocation(scope.runId, 'Look preview authority lost.');
         setAgentPhase('failed');
         if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
         return;
@@ -2534,11 +2544,16 @@ export function AgentPanel({
         'assistant',
         error instanceof Error ? error.message : 'The Look run failed safely.',
       );
-      cancelRunLifecycle(scope.runId, 'Look run failed.');
+      cancelRecipeInvocation(scope.runId, 'Look run failed.');
       setAgentPhase('failed');
       if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
     } finally {
       setLookRunningId((current) => (current === definition.id ? undefined : current));
+      if (recipeInvocationRef.current?.scope.runId === scope.runId) {
+        const lifecycle = runController.getSnapshot().run;
+        if (lifecycle?.scope.runId !== scope.runId || lifecycle.state !== 'awaiting-approval')
+          finishRecipeInvocation(scope.runId);
+      }
     }
   }
 
@@ -2645,6 +2660,12 @@ export function AgentPanel({
       epoch: 1,
       revision: session.projectRevisionId,
     };
+    const lookController = new AbortController();
+    recipeInvocationRef.current = Object.freeze({
+      scope,
+      contextProjectId: session.visualProject.id,
+      controller: lookController,
+    });
     recipeRunScopeRef.current = scope;
     recipeStagedChangeSetRef.current = undefined;
     activeModelRunIdRef.current = scope.runId;
@@ -2689,6 +2710,7 @@ export function AgentPanel({
         {
           scope,
           prompt: trimmed,
+          signal: lookController.signal,
           onRunStart: () => setAgentPhase('planning'),
         },
       );
@@ -2700,7 +2722,7 @@ export function AgentPanel({
           'assistant',
           `The Look request could not be prepared (${result.message}). No edit was applied.`,
         );
-        cancelRunLifecycle(scope.runId, 'Look request failed.');
+        cancelRecipeInvocation(scope.runId, 'Look request failed.');
         setAgentPhase('failed');
         if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
         return;
@@ -2720,7 +2742,7 @@ export function AgentPanel({
           'assistant',
           'The Look prepared a change but its preview authority was lost. Try again.',
         );
-        cancelRunLifecycle(scope.runId, 'Look preview authority lost.');
+        cancelRecipeInvocation(scope.runId, 'Look preview authority lost.');
         setAgentPhase('failed');
         if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
         return;
@@ -2754,11 +2776,16 @@ export function AgentPanel({
         'assistant',
         error instanceof Error ? error.message : 'The Look run failed safely.',
       );
-      cancelRunLifecycle(scope.runId, 'Look run failed.');
+      cancelRecipeInvocation(scope.runId, 'Look run failed.');
       setAgentPhase('failed');
       if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
     } finally {
       setLookRunningId((current) => (current === AGENT_LOOK_RUN_ID ? undefined : current));
+      if (recipeInvocationRef.current?.scope.runId === scope.runId) {
+        const lifecycle = runController.getSnapshot().run;
+        if (lifecycle?.scope.runId !== scope.runId || lifecycle.state !== 'awaiting-approval')
+          finishRecipeInvocation(scope.runId);
+      }
     }
   }
 
