@@ -863,6 +863,8 @@ async function applyLook(page: Page, pack: LookPack): Promise<void> {
   await expect(preview).toHaveAttribute('data-agent-preview-ready', 'true', { timeout: 30_000 });
   await preview.getByRole('button', { name: /Approve & apply/ }).click();
   if (pack.id === 'music-pulse') {
+    const panel = page.getByRole('region', { name: 'Living Looks' });
+    await panel.getByRole('button', { name: /Activity/ }).click();
     await expect(
       page.getByText(
         /Baked \d+ audio-reactive track\(s\) from the composition beat(?: \(confidence \d+%\))?\./,
@@ -874,6 +876,10 @@ async function applyLook(page: Page, pack: LookPack): Promise<void> {
   await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeEnabled({
     timeout: 20_000,
   });
+  await page
+    .getByRole('region', { name: 'Living Looks' })
+    .getByRole('tab', { name: 'Applied', exact: true })
+    .click();
   await expect(
     page.getByRole('region', { name: 'Applied Looks' }).getByText(pack.title, { exact: true }),
   ).toBeVisible({ timeout: 20_000 });
@@ -1086,6 +1092,10 @@ async function runExportCase({
     await page.reload({ waitUntil: 'domcontentloaded' });
     await openPanel(page, 'Joy Code');
     await page.getByRole('button', { name: 'Looks', exact: true }).click();
+    await page
+      .getByRole('region', { name: 'Living Looks' })
+      .getByRole('tab', { name: 'Applied', exact: true })
+      .click();
     await expect(
       page.getByRole('region', { name: 'Applied Looks' }).getByText(pack.title, { exact: true }),
     ).toBeVisible();
@@ -1396,6 +1406,10 @@ async function runCancelCase({
     await page.reload({ waitUntil: 'domcontentloaded' });
     await openPanel(page, 'Joy Code');
     await page.getByRole('button', { name: 'Looks', exact: true }).click();
+    await page
+      .getByRole('region', { name: 'Living Looks' })
+      .getByRole('tab', { name: 'Applied', exact: true })
+      .click();
     await expect(
       page.getByRole('region', { name: 'Applied Looks' }).getByText(pack.title, { exact: true }),
     ).toBeVisible();
