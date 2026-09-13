@@ -36,9 +36,10 @@ The authorized v2 CI run `34761098952` completed successfully with all 14 jobs
 green and zero GitHub artifact creation/download attempts; durable evidence and
 disabled-upload receipts passed. The five current built-in Look packs include
 the repaired `music-pulse` (`3eaa8cd7`). Production remains on `61b70e...` and
-has not been changed. Deployment is held pending exact-candidate CodeRabbit
-review and external Astra `APPROVE_FOR_DEPLOY`; Sol's read-only review found no
-P0/P1 defect and did not substitute for those gates.
+has not been changed. Sol issued the owner-authorized exact-candidate approval
+token; CodeRabbit is optional under the owner's 2026-09-14 rule. Deployment is
+proceeding only through the guarded runbook with the exact triple and web-only
+scope.
 
 ## Built-in JOY Agent Engine implementation (2026-09-04)
 

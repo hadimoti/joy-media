@@ -2,8 +2,9 @@
 
 > **NOT YET DEPLOYED.** This is the guarded Sweden release procedure prepared for
 > the R2 candidate. It must not be executed until every gate is satisfied:
-> CodeRabbit clean; the agreed CI topology green ×2 on the exact candidate;
-> independent Opus ("Astra") `APPROVE_FOR_DEPLOY <sha> <tree> <lock>` on file;
+> the agreed CI topology green ×2 on the exact candidate; independent Sol
+> `APPROVE_FOR_DEPLOY <sha> <tree> <lock>` on file under the owner's
+> 2026-09-14 reviewer rule (CodeRabbit is optional);
 > explicit owner go-ahead; every pack's `OWNER_TASTE_REVIEW` verdict recorded in
 > the scorecard. The implementer never self-approves.
 
@@ -96,7 +97,8 @@ look_instances jsonb`. Additive + **nullable**; never `NOT NULL`, never a
 
 ## Pre-flight (local)
 
-- [ ] CodeRabbit clean on the R2 delta (`61b70e61..<candidate>`).
+- [ ] CodeRabbit result on the R2 delta (`61b70e61..<candidate>`) if available
+      (optional under the owner's Sol reviewer rule).
 - [ ] CI green ×2 on the exact candidate (topology per the Opus infra decision —
       hosted `r2-candidate.yml`, self-hosted `release-candidate.yml` adapted, or
       the agreed hybrid). Record run ids.
@@ -106,8 +108,8 @@ look_instances jsonb`. Additive + **nullable**; never `NOT NULL`, never a
       candidate and its tree, `sha256sum` of `git show <candidate>:pnpm-lock.yaml`,
       base `61b70e61` is an ancestor, the candidate is an ancestor of branch HEAD,
       and any commits HEAD carries past the candidate touch only docs.
-- [ ] Astra `APPROVE_FOR_DEPLOY <sha> <tree> <lock>` on file for this exact
-      triple.
+- [ ] Sol `APPROVE_FOR_DEPLOY <sha> <tree> <lock>` on file for this exact
+      triple (owner-approved reviewer substitute for Astra, 2026-09-14).
 - [ ] Every pack `OWNER_TASTE_REVIEW: APPROVED` (or an owner-recorded
       ship-with-N-packs decision) in
       `joy-live-director-r2-look-scorecard-2026-09-08.md`.
@@ -157,7 +159,7 @@ git show HEAD:pnpm-lock.yaml | sha256sum
 git diff --name-only 61b70e61..HEAD -- apps/api packages/project-schema/src/index.ts | grep -v '\.test\.' || echo "no api/schema-surface runtime change"
 ```
 
-**Checkpoint C1:** `HEAD`, `tree`, `lock sha256` == the Astra triple exactly.
+**Checkpoint C1:** `HEAD`, `tree`, `lock sha256` == the Sol-approved triple exactly.
 Any mismatch → `git worktree remove` and re-cut.
 
 ### C2 — DB backup (guarded procedure; no new migration in this candidate)
@@ -367,4 +369,4 @@ Then R3 "Linked Versions" begins.
 
 ## Deploy record
 
-**Current status (2026-09-14): NOT EXECUTED.** Candidate identity and pack records are reconciled; CodeRabbit and exact-candidate Astra approval remain mandatory before C0–C6.
+**Current status (2026-09-14): Sol-approved for guarded deployment.** CodeRabbit is optional under the owner's rule; execute C0–C6 only with the exact Sol-approved triple and owner deploy authorization.
