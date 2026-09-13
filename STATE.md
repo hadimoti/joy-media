@@ -26,6 +26,20 @@ no console errors. A compact 1024×768 desktop pass also kept Effects categories
 the 3D tab, Timeline controls, and Worker state reachable. That historical
 checkpoint is superseded by the built-in-engine release below.
 
+## JOY Live Director R2 current candidate hold (2026-09-14)
+
+Candidate `56cea6eeb581845f871dc8da56b7422625116375` is an exact web-only
+descendant of the live R2 release `61b70e61f3ce293770313611bc51014300abc117`.
+Its tree is `c9407db18207fd9ec754051afe3529133c4c4313` and its lockfile SHA-256
+is `a2eedfcde29bbc619df1b3e57d9c0eb06676b50dc47735839101ff1518878cac`.
+The authorized v2 CI run `34761098952` completed successfully with all 14 jobs
+green and zero GitHub artifact creation/download attempts; durable evidence and
+disabled-upload receipts passed. The five current built-in Look packs include
+the repaired `music-pulse` (`3eaa8cd7`). Production remains on `61b70e...` and
+has not been changed. Deployment is held pending exact-candidate CodeRabbit
+review and external Astra `APPROVE_FOR_DEPLOY`; Sol's read-only review found no
+P0/P1 defect and did not substitute for those gates.
+
 ## Built-in JOY Agent Engine implementation (2026-09-04)
 
 The approved replacement for the former KiloCode/code-server, server-planner,

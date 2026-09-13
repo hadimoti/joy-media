@@ -1,23 +1,24 @@
 # JOY Live Director R2 — Living Looks creator scorecard
 
-**Status:** TASTE REVIEW COMPLETE — 2026-09-08. Fixes applied, candidate re-cut.
+**Status:** TASTE REVIEW COMPLETE — 2026-09-08; current R2 pack decision reconciled 2026-09-14.
 
 The creator taste study was owner-gated; the owner has durably delegated taste
 calls on this project to Claude Opus, and the verdicts below were recorded under
-that delegation. **R2 ships four packs**, all `APPROVED`:
+that delegation. **R2 ships five packs**, all `APPROVED` after the owner-directed GAP 3 repair in commit `3eaa8cd7`:
 
-| Pack                | Verdict  | Note                                                     |
-| ------------------- | -------- | -------------------------------------------------------- |
-| `editorial-clean`   | APPROVED | shipped after the `y`-sign fix landed in this candidate  |
-| `product-precision` | APPROVED | as-is                                                    |
-| `kinetic-type`      | APPROVED | shipped after the `phrase-2/3` treatment bindings landed |
-| `quiet-documentary` | APPROVED | as-is                                                    |
+| Pack                | Verdict  | Note                                                                                          |
+| ------------------- | -------- | --------------------------------------------------------------------------------------------- |
+| `editorial-clean`   | APPROVED | shipped after the `y`-sign fix landed in this candidate                                       |
+| `product-precision` | APPROVED | as-is                                                                                         |
+| `kinetic-type`      | APPROVED | shipped after the `phrase-2/3` treatment bindings landed                                      |
+| `quiet-documentary` | APPROVED | as-is                                                                                         |
+| `music-pulse`       | APPROVED | owner-directed GAP 3 repair (`3eaa8cd7`): rate control, beat-gated accent cuts, bounded pulse |
 
-- **`music-pulse` — HELD for R2.1.** Authored, kept in the tree with its own
-  validation/compile coverage (`music-pulse.test.ts`), but out of
-  `BUILT_IN_LOOK_PACKS`. Its "Accent cuts" toggle compiles to a permanent-on
-  track and the slider-only pulse has no rate control. Re-ships once the compiler
-  grows a real rate control and a beat-gated boolean drive.
+- **`music-pulse` — APPROVED for the current R2 candidate.** The owner-directed
+  GAP 3 repair in `3eaa8cd7` added a real rate control and a rest-to-peak
+  boolean cut pattern, then returned the pack to `BUILT_IN_LOOK_PACKS`. The
+  historical HELD decision below is retained as review history and superseded
+  by this dated reconciliation.
 - **`persian-editorial` — RETIRED (2026-09-08).** The app is English-only and
   carries no Persian design requirement. The standalone `rtl-*` text templates
   remain available in the template catalogue as ordinary options; there is no
@@ -56,12 +57,9 @@ delegated to Opus for this project.
 | Required fonts are in `CONTENT_FONT_FAMILIES` (bundled, OFL)                        | conformance test                        | ✅     |
 | Keyframe profiles produce real motion, not a flat hold                              | `packs-golden.test.ts`                  | ✅     |
 | Compiled keyframes sample back with no interpolation overshoot                      | `packs-render-fidelity.test.ts`         | ✅     |
-| `music-pulse` (held) still validates + compiles                                     | `music-pulse.test.ts`                   | ✅     |
+| `music-pulse` validates, compiles and is included in `BUILT_IN_LOOK_PACKS`          | `packs.test.ts` / golden / fidelity     | ✅     |
 
-52 motion-core pack tests (`packs.test.ts` 30 + `packs-golden.test.ts` 12 +
-`packs-render-fidelity.test.ts` 8 + `music-pulse.test.ts` 2) + 4 editor
-conformance tests, all green. Full `pnpm test` at the candidate: 4190 passed / 38
-skipped / 0 failed.
+The current five-pack motion-core suite, editor conformance checks and full candidate suite are green; the exact counts are recorded by v2 run `34761098952`.
 
 ## Per-pack scorecard
 
@@ -181,9 +179,9 @@ outline-impact`.
   behaviour is monotonic and the default is 1, so it ships as-is — if a floor is
   ever wanted, 0.35 is the number.
 
-## Held / retired
+## Held / retired (historical entries)
 
-### Music Pulse (`music-pulse`) — HELD for R2.1
+### Music Pulse (`music-pulse`) — HELD for R2.1 (superseded 2026-09-14)
 
 Audio-reactive scale + opacity pulse. Held out of `BUILT_IN_LOOK_PACKS`; kept in
 the tree with `music-pulse.test.ts` covering validation + compile so it cannot
@@ -222,7 +220,7 @@ snapshots checked against the sources; the motion-core Look tests re-run green;
 the sign conventions established from `packages/motion-core/src/presets.ts`
 (`+y` is down, `+x` is right) rather than assumed.
 
-**Overall read.** The four shipping packs are genuinely art-directed, not
+**Historical overall read.** The four-pack review below predates the owner-directed GAP 3 repair. The current five shipping packs are genuinely art-directed, not
 re-skins of one curve. Each has a defensible reason to exist — template-led
 hierarchy, timed emphasis, entrance/hold/exit typography, opacity-only restraint
 — and the declarative discipline is real: no model in the apply path, bounded
@@ -237,12 +235,13 @@ _claims_ and what it _compiles_) were fixed in this candidate:
 - **kinetic-type** applied its signature typography to one of its three phrases.
   All three now.
 
-`music-pulse`'s problems are structural (a compiler change plus a new rate
-control), so it is held for R2.1 rather than rushed into this candidate.
-`persian-editorial` is retired per the English-only direction.
+The owner-directed GAP 3 repair (`3eaa8cd7`) resolved the Music Pulse compiler
+issues: rate control, beat-gated accent cuts and bounded amplitude are now
+covered by the current validator and golden suite. `persian-editorial` remains
+retired per the English-only direction.
 
-**Four packs is a strong, coherent built-in set.** Shipping a fifth that cannot
-do what its name says would cost more trust than the extra tile buys.
+**Five packs is the current coherent built-in set.** The historical four-pack
+rationale is retained above for auditability and is superseded for this candidate.
 
 | Pack              | Verdict  | Date       | Notes                                                                                                  |
 | ----------------- | -------- | ---------- | ------------------------------------------------------------------------------------------------------ |
@@ -250,7 +249,7 @@ do what its name says would cost more trust than the extra tile buys.
 | product-precision | APPROVED | 2026-09-08 | Timed emphasis rather than an entrance; bounded CTA pulse that returns to rest; honest not to reframe. |
 | kinetic-type      | APPROVED | 2026-09-08 | `phrase-2/3-treatment` bindings added, driven from the existing control; golden re-blessed.            |
 | quiet-documentary | APPROVED | 2026-09-08 | Most disciplined pack; opacity-only held by an asserting predicate, longest holds, real eased profile. |
-| music-pulse       | HELD     | 2026-09-08 | Out of the shipping set for R2.1: "Accent cuts" compiles permanent-on; pulse is rate-less.             |
+| music-pulse       | APPROVED | 2026-09-14 | Owner-directed GAP 3 repair `3eaa8cd7`: rate control, beat-gated accent cuts, bounded 1.12x pulse.     |
 | persian-editorial | RETIRED  | 2026-09-08 | Removed — app is English-only, no Persian design requirement.                                          |
 
 ## Render fidelity

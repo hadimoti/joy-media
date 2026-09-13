@@ -16,22 +16,27 @@ build is root `pnpm build` (`pnpm -r --if-present build`), DB dump needs
 
 ## Candidate
 
-| Field  | Value                                                                  |
-| ------ | ---------------------------------------------------------------------- |
-| commit | `PENDING`                                                              |
-| tree   | `PENDING`                                                              |
-| lock   | `PENDING` (sha256 of `pnpm-lock.yaml`)                                 |
-| schema | migration ledger gains `006-look-instances` (additive nullable column) |
-| base   | `855734cf0c875101a632426983db2638c2adddcd` (R1, current live)          |
+| Field  | Value                                                              |
+| ------ | ------------------------------------------------------------------ |
+| commit | `56cea6eeb581845f871dc8da56b7422625116375`                         |
+| tree   | `c9407db18207fd9ec754051afe3529133c4c4313`                         |
+| lock   | `a2eedfcde29bbc619df1b3e57d9c0eb06676b50dc47735839101ff1518878cac` |
+| schema | existing schema 6; no new migration in this web-only candidate     |
+| base   | `61b70e61f3ce293770313611bc51014300abc117` (current live R2)       |
 
-## Blast radius — editor-web bundle + one additive API migration
+**Current candidate reconciliation (2026-09-14).** The candidate is the exact
+post-R2 UI/fixture commit above; it is an ancestor of the final v2 run and is
+web-only relative to the currently live R2 release `61b70e61f3ce293770313611bc51014300abc117`.
+The release procedure below remains guarded and has not been executed.
 
-`git diff --name-only 855734cf..<candidate>` (at the current branch tip) touches
+## Blast radius — editor-web bundle (API and migration already live)
+
+`git diff --name-only 61b70e61f3ce293770313611bc51014300abc117..<candidate>` (at the current branch tip) touches
 `apps/editor-web`, `apps/api` (the Look Instances sync seam — see the first
 bullet), `packages/{motion-core,project-schema}`, `tests/`, `tooling/`, `docs/`,
 `.github/`. Verified at branch HEAD:
 
-- **One additive Postgres migration (R2 GAP 1a — Look Instances sync).**
+- **The additive Postgres migration (R2 GAP 1a — Look Instances sync) is already live.**
   `apps/api/src/postgres-migrations.ts` `POSTGRES_MIGRATIONS` gains **one** id:
   `006-look-instances` → `ALTER TABLE project_documents ADD COLUMN IF NOT EXISTS
 look_instances jsonb`. Additive + **nullable**; never `NOT NULL`, never a
@@ -52,10 +57,9 @@ look_instances jsonb`. Additive + **nullable**; never `NOT NULL`, never a
     only exist server-side after a cross-device edit) — never the default
     rollback, and only after confirming no client still depends on server Look
     state.
-  - **This migration is NOT authorized for production apply yet** (owner: Option
-    A develop+test only). It lands on the branch and is tested against the
-    in-memory + pg-mem stores; the production apply happens with the R2 deploy,
-    gated by external Astra's candidate-specific `APPROVE_FOR_DEPLOY`.
+  - It is not part of the current web-only candidate delta. The candidate is
+    tested against the in-memory + pg-mem stores; no production migration apply
+    is authorized or required for this rollout.
 - **`apps/api` runtime changes are limited to the Look Instances sync seam**
   (`project-document-store.ts`, `postgres-control-plane.ts`, `control-plane.ts`,
   `http-server.ts`, `project-document-sync-request-validation.ts`,
@@ -76,8 +80,8 @@ look_instances jsonb`. Additive + **nullable**; never `NOT NULL`, never a
   locally (GAP 1a-local) and — with this release — synced to the server
   alongside the visual document under one atomic CAS revision (GAP 1a-sync, the
   `look_instances` column).
-- **`packages/motion-core`**: the pure Look compiler + four shipping packs
-  (`music-pulse` held for R2.1, `persian-editorial` retired) + audio-reactive
+- **`packages/motion-core`**: the pure Look compiler + five shipping packs
+  (including the owner-directed repaired `music-pulse`; `persian-editorial` retired) + audio-reactive
   baker. No renderer, no wall-clock, no I/O; consumed by the editor bundle.
 - The built-in JOY Agent Engine Worker still ships inside the editor-web static
   bundle (`verify:joy-agent-worker` gate) — deploys with the web release.
@@ -88,7 +92,7 @@ look_instances jsonb`. Additive + **nullable**; never `NOT NULL`, never a
 
 ## Pre-flight (local)
 
-- [ ] CodeRabbit clean on the R2 delta (`855734cf..<candidate>`).
+- [ ] CodeRabbit clean on the R2 delta (`61b70e61..<candidate>`).
 - [ ] CI green ×2 on the exact candidate (topology per the Opus infra decision —
       hosted `r2-candidate.yml`, self-hosted `release-candidate.yml` adapted, or
       the agreed hybrid). Record run ids.
@@ -96,7 +100,7 @@ look_instances jsonb`. Additive + **nullable**; never `NOT NULL`, never a
       full `pnpm test` = **4196 passed / 38 skipped / 0 failed**, 526 files.)
 - [ ] Candidate identity re-verified in the worktree: `git rev-parse` of the
       candidate and its tree, `sha256sum` of `git show <candidate>:pnpm-lock.yaml`,
-      base `855734cf` is an ancestor, the candidate is an ancestor of branch HEAD,
+      base `61b70e61` is an ancestor, the candidate is an ancestor of branch HEAD,
       and any commits HEAD carries past the candidate touch only docs.
 - [ ] Astra `APPROVE_FOR_DEPLOY <sha> <tree> <lock>` on file for this exact
       triple.
@@ -146,13 +150,13 @@ cd /opt/joy-media/builds/joy-media-$CAND
 echo "HEAD  $(git rev-parse HEAD)"
 echo "tree  $(git rev-parse HEAD^{tree})"
 git show HEAD:pnpm-lock.yaml | sha256sum
-git diff --name-only 855734cf..HEAD -- apps/api packages/project-schema/src/index.ts | grep -v '\.test\.' || echo "no api/schema-surface runtime change"
+git diff --name-only 61b70e61..HEAD -- apps/api packages/project-schema/src/index.ts | grep -v '\.test\.' || echo "no api/schema-surface runtime change"
 ```
 
 **Checkpoint C1:** `HEAD`, `tree`, `lock sha256` == the Astra triple exactly.
 Any mismatch → `git worktree remove` and re-cut.
 
-### C2 — DB backup (guarded procedure; one additive migration in this release)
+### C2 — DB backup (guarded procedure; no new migration in this candidate)
 
 ```bash
 set -e
@@ -292,7 +296,7 @@ paid calls. Re-verify `GET /api/v1/auth/session` via the UI first (re-login if
 dropped).
 
 - [ ] New disposable project → editor loads clean, 0 JS console errors.
-- [ ] Joy Code panel → **Looks** capability → the **six** built-in packs render
+- [ ] Joy Code panel → **Looks** capability → the **five** built-in packs render
       with honest availability (any unavailable pack shows its `Needs:` labels,
       not a broken control).
 - [ ] Pick **Editorial Clean** → bind the Headline slot to a text object →
@@ -339,4 +343,4 @@ Then R3 "Linked Versions" begins.
 
 ## Deploy record
 
-_(empty — fill on execution)_
+**Current status (2026-09-14): NOT EXECUTED.** Candidate identity and pack records are reconciled; CodeRabbit and exact-candidate Astra approval remain mandatory before C0–C6.
