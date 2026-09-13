@@ -8495,10 +8495,15 @@ label {
 }
 .joy-code-recipes {
   display: flex;
+  flex: 1 1 0;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
   gap: 0.5rem;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 0.5rem 0.35rem 0;
+  scrollbar-gutter: stable;
 }
 .joy-code-recipes[hidden],
 .living-looks[hidden],
