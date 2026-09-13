@@ -8500,6 +8500,11 @@ label {
   gap: 0.5rem;
   padding: 0.5rem 0.35rem 0;
 }
+.joy-code-recipes[hidden],
+.living-looks[hidden],
+.joy-code-creative-brief[hidden] {
+  display: none;
+}
 .joy-code-recipes-intro {
   margin: 0;
   font-size: 0.78rem;
