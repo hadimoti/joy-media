@@ -59,6 +59,53 @@ function q<T extends Element>(selector: string): T {
 }
 
 describe('LivingLooksPanel', () => {
+  it('uses Browse, Configure, and Applied as accessible mutually exclusive sections', () => {
+    mount();
+    const tabs = Array.from(container!.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+    expect(tabs.map((tab) => tab.textContent?.trim())).toEqual(['Browse', 'Configure', 'Applied']);
+    expect(container!.querySelector('#living-looks-browse')).not.toBeNull();
+    expect(container!.querySelector('#living-looks-configure')).toBeNull();
+
+    act(() => q<HTMLButtonElement>('.living-look-select').click());
+    expect(container!.querySelector('#living-looks-configure')).not.toBeNull();
+    expect(container!.querySelector('#living-looks-browse')).toBeNull();
+
+    act(() => q<HTMLButtonElement>('#living-looks-tab-applied').click());
+    expect(container!.querySelector('.applied-looks')).not.toBeNull();
+    expect(container!.querySelector('#living-looks-configure')).toBeNull();
+  });
+
+  it('keeps the draft while opening the Controls accordion and switching sections', () => {
+    mount();
+    act(() => q<HTMLButtonElement>('#living-looks-tab-configure').click());
+    const headlineSelect = q<HTMLSelectElement>('.living-look-slot select');
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        'value',
+      )!.set!;
+      setter.call(headlineSelect, 'title-1');
+      headlineSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const controls = q<HTMLDetailsElement>('.living-look-accordion:nth-of-type(2)');
+    expect(controls.open).toBe(false);
+    act(() => controls.querySelector<HTMLElement>('summary')!.click());
+    expect(controls.open).toBe(true);
+    act(() => q<HTMLButtonElement>('#living-looks-tab-browse').click());
+    act(() => q<HTMLButtonElement>('#living-looks-tab-configure').click());
+    expect(q<HTMLSelectElement>('.living-look-slot select').value).toBe('title-1');
+    expect(q<HTMLDetailsElement>('.living-look-accordion:nth-of-type(2)').open).toBe(true);
+  });
+
+  it('exposes Activity as a compact control without changing the Looks draft', () => {
+    const onToggleActivity = vi.fn();
+    mount({ onToggleActivity, activityOpen: false });
+    const activity = q<HTMLButtonElement>('.living-looks-activity');
+    expect(activity.getAttribute('aria-expanded')).toBe('false');
+    act(() => activity.click());
+    expect(onToggleActivity).toHaveBeenCalledTimes(1);
+  });
+
   it('lists all five packs with honest availability', () => {
     const markup = renderToStaticMarkup(
       <LivingLooksPanel
@@ -95,6 +142,8 @@ describe('LivingLooksPanel', () => {
   it('keeps Run disabled until the required slot is bound, then emits bound inputs', () => {
     const onRun = vi.fn();
     mount({ onRun });
+
+    act(() => q<HTMLButtonElement>('[role="tab"]:not([aria-selected="true"])').click());
 
     const runButton = q<HTMLButtonElement>('.living-look-run');
     expect(runButton.disabled).toBe(true);
@@ -144,6 +193,7 @@ describe('LivingLooksPanel', () => {
       ],
     });
 
+    act(() => q<HTMLButtonElement>('[role="tab"][aria-controls="living-looks-applied"]').click());
     expect(container!.querySelector('.applied-looks')).not.toBeNull();
 
     act(() => {
@@ -217,6 +267,7 @@ describe('LivingLooksPanel', () => {
 
     const onBakeFromAudio = vi.fn();
     mount({ onBakeFromAudio, onRun: vi.fn() });
+    act(() => q<HTMLButtonElement>('[role="tab"][aria-controls="living-looks-configure"]').click());
     const headlineSelect = q<HTMLSelectElement>('.living-look-slot select');
     act(() => {
       const setter = Object.getOwnPropertyDescriptor(
@@ -251,6 +302,7 @@ describe('LivingLooksPanel', () => {
         },
       ],
     });
+    act(() => q<HTMLButtonElement>('[role="tab"][aria-controls="living-looks-applied"]').click());
     const bake = container!.querySelector<HTMLButtonElement>(
       '.applied-look .applied-look-bake-audio',
     );
@@ -261,27 +313,20 @@ describe('LivingLooksPanel', () => {
 
   it('marks an orphaned applied Look', () => {
     const clean = BUILT_IN_LOOK_PACKS.find((p) => p.id === 'editorial-clean')!;
-    const markup = renderToStaticMarkup(
-      <LivingLooksPanel
-        hidden={false}
-        catalog={CATALOG}
-        entities={ENTITIES}
-        applied={[
-          {
-            instanceId: 'look-1',
-            definitionId: 'editorial-clean',
-            title: clean.title,
-            controlValues: {},
-            overriddenBindingIds: [],
-            orphaned: true,
-          },
-        ]}
-        runningLookId={undefined}
-        busy={false}
-        onRun={() => undefined}
-      />,
-    );
-    expect(markup).toMatch(/is-orphaned/);
-    expect(markup).toContain('rebind or detach');
+    mount({
+      applied: [
+        {
+          instanceId: 'look-1',
+          definitionId: 'editorial-clean',
+          title: clean.title,
+          controlValues: {},
+          overriddenBindingIds: [],
+          orphaned: true,
+        },
+      ],
+    });
+    act(() => q<HTMLButtonElement>('[role="tab"][aria-controls="living-looks-applied"]').click());
+    expect(container!.querySelector('.applied-look')?.className).toContain('is-orphaned');
+    expect(container!.textContent).toContain('rebind or detach');
   });
 });

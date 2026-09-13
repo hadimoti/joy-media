@@ -86,6 +86,9 @@ export interface LivingLooksPanelProps {
   readonly onBakeFromAudio?: (
     request: Extract<LivingLooksRunInput, { kind: 'apply' | 'update' }>,
   ) => void;
+  /** Toggle the sibling Joy Code activity history without stealing the Looks viewport. */
+  readonly activityOpen?: boolean;
+  readonly onToggleActivity?: () => void;
 }
 
 function controlDefault(control: LookControl): number | string | boolean {
@@ -217,9 +220,12 @@ function AppliedLookRow(props: {
 
 export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
   const { catalog, entities } = props;
+  type LooksTab = 'browse' | 'configure' | 'applied';
   const [selectedId, setSelectedId] = useState<string | undefined>(
     catalog.find((entry) => entry.available)?.definition.id,
   );
+  const [activeTab, setActiveTab] = useState<LooksTab>('browse');
+  const [controlsOpen, setControlsOpen] = useState(false);
   const [agentPrompt, setAgentPrompt] = useState('');
   const [bindings, setBindings] = useState<Record<string, Record<string, string>>>({});
   const [values, setValues] = useState<Record<string, Record<string, number | string | boolean>>>(
@@ -263,11 +269,58 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
     props.runningLookId === undefined &&
     !props.busy;
 
-  return (
-    <div className="living-looks" role="region" aria-label="Living Looks" hidden={props.hidden}>
+  const selectLook = (definitionId: string): void => {
+    setSelectedId(definitionId);
+    setControlsOpen(false);
+    setActiveTab('configure');
+  };
+
+  const renderAppliedLooks = (): ReactElement => (
+    <section className="applied-looks" aria-label="Applied Looks">
+      <div className="living-looks-section-heading">
+        <div>
+          <span className="living-looks-kicker">Applied</span>
+          <h3>Applied Looks</h3>
+        </div>
+        <span className="living-looks-count">{(props.applied ?? []).length}</span>
+      </div>
+      {(props.applied ?? []).length === 0 ? (
+        <p className="living-looks-empty">Applied Looks will appear here after approval.</p>
+      ) : (
+        <ul className="applied-looks-list">
+          {(props.applied ?? []).map((applied) => {
+            const definition = catalog.find(
+              (entry) => entry.definition.id === applied.definitionId,
+            )?.definition;
+            return (
+              <AppliedLookRow
+                key={applied.instanceId}
+                applied={applied}
+                controls={definition?.controls ?? []}
+                busy={props.busy || props.runningLookId !== undefined}
+                bakeable={definition?.bindingTargets.some((t) => t.channel === 'keyframe') === true}
+                onRun={props.onRun}
+                {...(props.onBakeFromAudio === undefined
+                  ? {}
+                  : { onBakeFromAudio: props.onBakeFromAudio })}
+              />
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+
+  const renderBrowse = (): ReactElement => (
+    <section
+      id="living-looks-browse"
+      className="living-looks-tab-panel"
+      role="tabpanel"
+      aria-labelledby="living-looks-tab-browse"
+    >
       <p className="living-looks-intro">
-        Editable art-directed Looks. Each compiles to ordinary operations and runs through the same
-        staged preview and approval as a direct edit.
+        Editable art-directed Looks. Choose a pack to configure its bindings and controls, then run
+        it through the same staged preview and approval as a direct edit.
       </p>
 
       {props.onAgentRun !== undefined && (
@@ -302,35 +355,7 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
         </form>
       )}
 
-      {(props.applied ?? []).length > 0 && (
-        <section className="applied-looks" aria-label="Applied Looks">
-          <h3>Applied Looks</h3>
-          <ul className="applied-looks-list">
-            {(props.applied ?? []).map((applied) => {
-              const definition = catalog.find(
-                (entry) => entry.definition.id === applied.definitionId,
-              )?.definition;
-              return (
-                <AppliedLookRow
-                  key={applied.instanceId}
-                  applied={applied}
-                  controls={definition?.controls ?? []}
-                  busy={props.busy || props.runningLookId !== undefined}
-                  bakeable={
-                    definition?.bindingTargets.some((t) => t.channel === 'keyframe') === true
-                  }
-                  onRun={props.onRun}
-                  {...(props.onBakeFromAudio === undefined
-                    ? {}
-                    : { onBakeFromAudio: props.onBakeFromAudio })}
-                />
-              );
-            })}
-          </ul>
-        </section>
-      )}
-
-      <ul className="living-looks-list">
+      <ul className="living-looks-list" aria-label="Look packs">
         {catalog.map((entry) => {
           const missing = [...entry.missingOperationKinds, ...entry.missingFonts];
           const active = entry.definition.id === selectedId;
@@ -346,7 +371,7 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
                 className="living-look-select"
                 aria-pressed={active}
                 disabled={!entry.available}
-                onClick={() => setSelectedId(entry.definition.id)}
+                onClick={() => selectLook(entry.definition.id)}
               >
                 <strong>{entry.definition.title}</strong>
                 <span>{entry.definition.description}</span>
@@ -358,8 +383,19 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
           );
         })}
       </ul>
+    </section>
+  );
 
-      {selected !== undefined && selected.available && (
+  const renderConfigure = (): ReactElement => (
+    <section
+      id="living-looks-configure"
+      className="living-looks-tab-panel living-looks-configure"
+      role="tabpanel"
+      aria-labelledby="living-looks-tab-configure"
+    >
+      {selected === undefined || !selected.available ? (
+        <p className="living-looks-empty">Choose an available Look from Browse to configure it.</p>
+      ) : (
         <form
           className="living-look-editor"
           aria-label={`${selected.definition.title} controls`}
@@ -370,8 +406,6 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
               kind: 'apply',
               definitionId: selected.definition.id,
               definitionVersion: selected.definition.version,
-              // Drop optional slots left on the placeholder — the compiler
-              // treats an empty id as unbound, so only send real bindings.
               entityBindings: Object.fromEntries(
                 Object.entries(slotBindings).filter(([, entityId]) => entityId.length > 0),
               ),
@@ -384,90 +418,114 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
             });
           }}
         >
-          <fieldset className="living-look-slots">
-            <legend>Bind slots</legend>
-            {selected.definition.slots.map((slot) => {
-              const options = entities.filter((entity) =>
-                slot.ownerKind === 'caption-clip'
-                  ? entity.kind === 'caption-clip'
-                  : entity.kind === 'visual-object',
-              );
-              return (
-                <label key={slot.id} className="living-look-slot">
-                  <span>
-                    {slot.label}
-                    {slot.required ? ' *' : ''}
-                  </span>
-                  <select
-                    value={slotBindings[slot.id] ?? ''}
-                    onChange={(event) => setBinding(slot.id, event.target.value)}
-                  >
-                    <option value="">—</option>
-                    {options.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              );
-            })}
-          </fieldset>
+          <div className="living-look-configure-header">
+            <button
+              type="button"
+              className="living-look-back"
+              onClick={() => setActiveTab('browse')}
+            >
+              ← Browse Looks
+            </button>
+            <strong>{selected.definition.title}</strong>
+          </div>
 
-          <fieldset className="living-look-controls">
-            <legend>Controls</legend>
-            {selected.definition.controls.map((control) => {
-              const current = controlValues[control.id] ?? control.default;
-              if (control.kind === 'scalar') {
+          <details className="living-look-accordion" open>
+            <summary>Bind slots</summary>
+            <fieldset className="living-look-slots">
+              <legend className="sr-only">Bind slots</legend>
+              {selected.definition.slots.map((slot) => {
+                const options = entities.filter((entity) =>
+                  slot.ownerKind === 'caption-clip'
+                    ? entity.kind === 'caption-clip'
+                    : entity.kind === 'visual-object',
+                );
+                return (
+                  <label key={slot.id} className="living-look-slot">
+                    <span>
+                      {slot.label}
+                      {slot.required ? ' *' : ''}
+                    </span>
+                    <select
+                      value={slotBindings[slot.id] ?? ''}
+                      onChange={(event) => setBinding(slot.id, event.target.value)}
+                    >
+                      <option value="">—</option>
+                      {options.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                );
+              })}
+            </fieldset>
+          </details>
+
+          <details className="living-look-accordion" open={controlsOpen}>
+            <summary
+              onClick={(event) => {
+                event.preventDefault();
+                setControlsOpen((open) => !open);
+              }}
+            >
+              Controls
+            </summary>
+            <fieldset className="living-look-controls">
+              <legend className="sr-only">Controls</legend>
+              {selected.definition.controls.map((control) => {
+                const current = controlValues[control.id] ?? control.default;
+                if (control.kind === 'scalar') {
+                  return (
+                    <label key={control.id} className="living-look-control">
+                      <span>{control.label}</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={typeof current === 'number' ? current : control.default}
+                        onChange={(event) => setValue(control.id, Number(event.target.value))}
+                      />
+                    </label>
+                  );
+                }
+                if (control.kind === 'boolean') {
+                  return (
+                    <label key={control.id} className="living-look-control">
+                      <span>{control.label}</span>
+                      <input
+                        type="checkbox"
+                        checked={typeof current === 'boolean' ? current : control.default}
+                        onChange={(event) => setValue(control.id, event.target.checked)}
+                      />
+                    </label>
+                  );
+                }
+                const optionList =
+                  control.kind === 'enum'
+                    ? control.options
+                    : control.kind === 'color'
+                      ? control.palettePairs.map((p) => p.id)
+                      : control.families;
                 return (
                   <label key={control.id} className="living-look-control">
                     <span>{control.label}</span>
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={typeof current === 'number' ? current : control.default}
-                      onChange={(event) => setValue(control.id, Number(event.target.value))}
-                    />
+                    <select
+                      value={typeof current === 'string' ? current : String(control.default)}
+                      onChange={(event) => setValue(control.id, event.target.value)}
+                    >
+                      {optionList.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                 );
-              }
-              if (control.kind === 'boolean') {
-                return (
-                  <label key={control.id} className="living-look-control">
-                    <span>{control.label}</span>
-                    <input
-                      type="checkbox"
-                      checked={typeof current === 'boolean' ? current : control.default}
-                      onChange={(event) => setValue(control.id, event.target.checked)}
-                    />
-                  </label>
-                );
-              }
-              const optionList =
-                control.kind === 'enum'
-                  ? control.options
-                  : control.kind === 'color'
-                    ? control.palettePairs.map((p) => p.id)
-                    : control.families;
-              return (
-                <label key={control.id} className="living-look-control">
-                  <span>{control.label}</span>
-                  <select
-                    value={typeof current === 'string' ? current : String(control.default)}
-                    onChange={(event) => setValue(control.id, event.target.value)}
-                  >
-                    {optionList.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              );
-            })}
-          </fieldset>
+              })}
+            </fieldset>
+          </details>
 
           {requiredUnbound.length > 0 && (
             <p className="living-look-hint">
@@ -475,43 +533,112 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
             </p>
           )}
 
-          <button
-            type="submit"
-            className="living-look-run"
-            disabled={!canRun}
-            aria-label={`Run ${selected.definition.title}`}
-          >
-            {props.runningLookId === selected.definition.id ? 'Running…' : 'Run Look'}
-          </button>
+          <div className="living-look-editor-footer">
+            <button
+              type="submit"
+              className="living-look-run"
+              disabled={!canRun}
+              aria-label={`Run ${selected.definition.title}`}
+            >
+              {props.runningLookId === selected.definition.id ? 'Running…' : 'Run Look'}
+            </button>
 
-          {props.onBakeFromAudio !== undefined &&
-            selected.definition.bindingTargets.some((t) => t.channel === 'keyframe') && (
-              <button
-                type="button"
-                className="living-look-bake-audio"
-                disabled={!canRun}
-                onClick={() =>
-                  props.onBakeFromAudio?.({
-                    kind: 'apply',
-                    definitionId: selected.definition.id,
-                    definitionVersion: selected.definition.version,
-                    entityBindings: Object.fromEntries(
-                      Object.entries(slotBindings).filter(([, entityId]) => entityId.length > 0),
-                    ),
-                    controlValues: {
-                      ...Object.fromEntries(
-                        selected.definition.controls.map((c) => [c.id, controlDefault(c)]),
+            {props.onBakeFromAudio !== undefined &&
+              selected.definition.bindingTargets.some((t) => t.channel === 'keyframe') && (
+                <button
+                  type="button"
+                  className="living-look-bake-audio"
+                  disabled={!canRun}
+                  onClick={() =>
+                    props.onBakeFromAudio?.({
+                      kind: 'apply',
+                      definitionId: selected.definition.id,
+                      definitionVersion: selected.definition.version,
+                      entityBindings: Object.fromEntries(
+                        Object.entries(slotBindings).filter(([, entityId]) => entityId.length > 0),
                       ),
-                      ...controlValues,
-                    },
-                  })
-                }
-              >
-                Run with motion baked from composition audio
-              </button>
-            )}
+                      controlValues: {
+                        ...Object.fromEntries(
+                          selected.definition.controls.map((c) => [c.id, controlDefault(c)]),
+                        ),
+                        ...controlValues,
+                      },
+                    })
+                  }
+                >
+                  Run with motion baked from composition audio
+                </button>
+              )}
+          </div>
         </form>
       )}
+    </section>
+  );
+
+  return (
+    <div className="living-looks" role="region" aria-label="Living Looks" hidden={props.hidden}>
+      <div className="living-looks-header">
+        <div className="living-looks-title-row">
+          <div>
+            <span className="living-looks-kicker">Joy Code</span>
+            <h2>Living Looks</h2>
+          </div>
+          {props.onToggleActivity !== undefined && (
+            <button
+              type="button"
+              className="living-looks-activity"
+              aria-expanded={props.activityOpen === true}
+              onClick={props.onToggleActivity}
+            >
+              Activity
+              {props.activityOpen === true ? ' (hide)' : ''}
+            </button>
+          )}
+        </div>
+        <div className="living-looks-tabs" role="tablist" aria-label="Living Looks sections">
+          {(['browse', 'configure', 'applied'] as const).map((tab, index, tabs) => (
+            <button
+              key={tab}
+              id={`living-looks-tab-${tab}`}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab}
+              aria-controls={`living-looks-${tab}`}
+              tabIndex={activeTab === tab ? 0 : -1}
+              onClick={() => setActiveTab(tab)}
+              onKeyDown={(event) => {
+                const direction =
+                  event.key === 'ArrowRight' || event.key === 'ArrowDown'
+                    ? 1
+                    : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+                      ? -1
+                      : event.key === 'Home'
+                        ? -index
+                        : event.key === 'End'
+                          ? tabs.length - 1 - index
+                          : 0;
+                if (direction === 0) return;
+                event.preventDefault();
+                const nextIndex = (index + direction + tabs.length) % tabs.length;
+                const nextTab = tabs[nextIndex]!;
+                setActiveTab(nextTab);
+                document.getElementById(`living-looks-tab-${nextTab}`)?.focus();
+              }}
+            >
+              {tab[0]!.toUpperCase() + tab.slice(1)}
+              {tab === 'applied' && (props.applied ?? []).length > 0
+                ? ` (${(props.applied ?? []).length})`
+                : ''}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="living-looks-viewport">
+        {activeTab === 'browse' && renderBrowse()}
+        {activeTab === 'configure' && renderConfigure()}
+        {activeTab === 'applied' && renderAppliedLooks()}
+      </div>
     </div>
   );
 }

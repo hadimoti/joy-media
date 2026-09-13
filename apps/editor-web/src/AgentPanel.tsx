@@ -516,6 +516,10 @@ export function AgentPanel({
   const [agentPhase, setAgentPhase] = useState<JoyAgentPhase | undefined>(undefined);
   const [agentRunId, setAgentRunId] = useState<string | undefined>(undefined);
   const [composerCapability, setComposerCapability] = useState<ComposerCapability>('edit');
+  const [looksActivityOpen, setLooksActivityOpen] = useState(false);
+  useEffect(() => {
+    if (composerCapability !== 'looks') setLooksActivityOpen(false);
+  }, [composerCapability]);
   const [draft, setDraft] = useState('');
   const [attachError, setAttachError] = useState<string | undefined>(undefined);
   const [attaching, setAttaching] = useState(false);
@@ -3190,7 +3194,9 @@ export function AgentPanel({
           </div>
         )}
         <section
-          className={`joy-code-composer is-${composerCapability} ${liveAgentBusy ? 'is-agent-busy' : ''}`}
+          className={`joy-code-composer is-${composerCapability} ${
+            liveAgentBusy ? 'is-agent-busy' : ''
+          } ${looksActivityOpen ? 'is-activity-open' : ''}`}
           aria-label="Joy Code composer"
           aria-busy={liveAgentBusy}
           data-agent-phase={liveAgentPhase}
@@ -3337,6 +3343,8 @@ export function AgentPanel({
               : {
                   onBakeFromAudio: (request) => void bakeLookFromCompositionAudio(request),
                 })}
+            activityOpen={looksActivityOpen}
+            onToggleActivity={() => setLooksActivityOpen((open) => !open)}
           />
           <div
             className="joy-code-creative-brief"

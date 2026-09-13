@@ -28,6 +28,8 @@ test.describe('JOY Living Looks', () => {
     }
     await expect(panel.getByText('Persian Editorial', { exact: true })).toHaveCount(0);
 
+    await panel.getByRole('tab', { name: 'Configure', exact: true }).click();
+
     // Editorial Clean is selected by default (first available). Its editor form
     // is visible and Run is disabled until the required headline slot is bound.
     const editor = panel.getByRole('form', { name: /Editorial Clean controls/ });
@@ -50,6 +52,8 @@ test.describe('JOY Living Looks', () => {
 
     await preview.getByRole('button', { name: /Approve & apply/ }).click();
 
+    await panel.getByRole('tab', { name: /Applied/ }).click();
+
     const undo = page.getByRole('button', { name: 'Undo', exact: true });
     await expect(undo).toBeEnabled({ timeout: 20_000 });
     await undo.click();
@@ -65,6 +69,7 @@ test.describe('JOY Living Looks', () => {
     await page.getByRole('button', { name: 'Looks', exact: true }).click();
     const panel = page.getByRole('region', { name: 'Living Looks' });
     await expect(panel).toBeVisible();
+    await panel.getByRole('tab', { name: 'Configure', exact: true }).click();
 
     // Apply Editorial Clean.
     const editor = panel.getByRole('form', { name: /Editorial Clean controls/ });
@@ -80,12 +85,15 @@ test.describe('JOY Living Looks', () => {
       timeout: 20_000,
     });
 
+    await panel.getByRole('tab', { name: /Applied/ }).click();
+
     // The applied Look is listed, and survives a full browser reload.
     const applied = panel.getByRole('region', { name: 'Applied Looks' });
     await expect(applied.getByText('Editorial Clean', { exact: true })).toBeVisible();
     await page.reload({ waitUntil: 'domcontentloaded' });
     await openPanel(page, 'Joy Code');
     await page.getByRole('button', { name: 'Looks', exact: true }).click();
+    await panel.getByRole('tab', { name: /Applied/ }).click();
     await expect(applied.getByText('Editorial Clean', { exact: true })).toBeVisible();
 
     // Adjust a control -> the same staged-preview + approval path.
@@ -122,5 +130,33 @@ test.describe('JOY Living Looks', () => {
     await expect(panel.locator('.living-look')).toHaveCount(5);
     // Every pack is selectable (available) in the shipped editor.
     await expect(panel.locator('.living-look.is-unavailable')).toHaveCount(0);
+  });
+
+  test('keeps the Looks setup in one owned viewport', async ({ page }) => {
+    await authenticate(page);
+    await openReferenceWorkspace(page);
+    await openPanel(page, 'Joy Code');
+    await page.getByRole('button', { name: 'Looks', exact: true }).click();
+    const panel = page.getByRole('region', { name: 'Living Looks' });
+    const metrics = await panel.evaluate((element) => {
+      const composer = element.closest('.joy-code-panel');
+      const body = composer?.querySelector<HTMLElement>('.joy-panel-body');
+      const viewport = element.querySelector<HTMLElement>('.living-looks-viewport');
+      const messages = composer?.querySelector<HTMLElement>('.joy-code-messages');
+      return {
+        bodyScrollTop: body?.scrollTop ?? -1,
+        bodyOverflow: body === null ? '' : getComputedStyle(body).overflowY,
+        viewportOverflow: viewport === null ? '' : getComputedStyle(viewport).overflowY,
+        viewportClientHeight: viewport?.clientHeight ?? 0,
+        viewportScrollHeight: viewport?.scrollHeight ?? 0,
+        messagesDisplay: messages === null ? '' : getComputedStyle(messages).display,
+      };
+    });
+    expect(metrics.bodyScrollTop).toBe(0);
+    expect(metrics.bodyOverflow).toBe('hidden');
+    expect(metrics.viewportOverflow).toBe('auto');
+    expect(metrics.viewportClientHeight).toBeGreaterThan(0);
+    expect(metrics.viewportScrollHeight).toBeGreaterThanOrEqual(metrics.viewportClientHeight);
+    expect(metrics.messagesDisplay).not.toBe('none');
   });
 });

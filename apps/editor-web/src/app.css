@@ -7964,6 +7964,19 @@ label {
 .joy-code-composer {
   position: relative;
 }
+.joy-code-composer.is-looks:not(.is-activity-open) .joy-code-messages {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: visible;
+}
+.joy-code-composer.is-looks:not(.is-activity-open) .joy-code-messages > .joy-code-message,
+.joy-code-composer.is-looks:not(.is-activity-open) .joy-code-welcome {
+  display: none;
+}
+.joy-code-composer.is-looks.is-activity-open .joy-code-messages {
+  flex: 0 1 34%;
+  min-height: 7rem;
+}
 .joy-code-history {
   min-height: 0;
   overflow: auto;
@@ -8534,10 +8547,103 @@ label {
 /* ─── Living Looks (R2) ─── */
 .living-looks {
   display: flex;
+  flex: 1 1 0;
+  min-height: 0;
   min-width: 0;
   flex-direction: column;
   gap: 0.5rem;
+  overflow: hidden;
   padding: 0.5rem 0.35rem 0;
+}
+.living-looks-header {
+  flex: none;
+  display: grid;
+  gap: 0.45rem;
+}
+.living-looks-title-row,
+.living-looks-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.living-looks-title-row h2,
+.living-looks-section-heading h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+.living-looks-kicker {
+  display: block;
+  color: var(--joy-text-faint);
+  font-size: 0.64rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.living-looks-count {
+  min-width: 1.4rem;
+  padding: 0.15rem 0.35rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-size: 0.7rem;
+  text-align: center;
+}
+.living-looks-tabs {
+  display: flex;
+  min-width: 0;
+  gap: 0.25rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.living-looks-tabs button,
+.living-looks-activity,
+.living-look-back {
+  flex: none;
+  min-height: 1.7rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+.living-looks-tabs button[aria-selected='true'] {
+  border-color: color-mix(in srgb, currentColor 42%, transparent);
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+.living-looks-tabs button:focus-visible,
+.living-looks-activity:focus-visible,
+.living-look-back:focus-visible,
+.living-look-accordion summary:focus-visible,
+.living-look-select:focus-visible,
+.living-look-run:focus-visible {
+  outline: 2px solid var(--joy-accent, currentColor);
+  outline-offset: 2px;
+}
+.living-looks-activity {
+  font-size: 0.68rem;
+}
+.living-looks-viewport {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0 0.05rem 0.5rem;
+  scrollbar-gutter: stable;
+}
+.living-looks-tab-panel {
+  display: grid;
+  min-width: 0;
+  gap: 0.5rem;
+}
+.living-looks-section-heading {
+  margin-bottom: 0.15rem;
+}
+.living-looks-empty {
+  margin: 0.35rem 0;
+  color: var(--joy-text-faint);
+  font-size: 0.78rem;
 }
 .living-looks-intro {
   margin: 0;
@@ -8635,8 +8741,54 @@ label {
 }
 .living-look-editor {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 0.5rem;
+}
+.living-look-configure-header {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.15rem 0 0.35rem;
+  background: var(--joy-bg-panel, var(--joy-bg));
+}
+.living-look-configure-header > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.living-look-accordion {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 0.5rem;
+}
+.living-look-accordion summary {
+  padding: 0.45rem 0.6rem;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 600;
+  list-style-position: inside;
+}
+.living-look-accordion fieldset {
+  margin: 0 0.35rem 0.35rem;
+  border: 0;
+}
+.living-look-editor-footer {
+  position: sticky;
+  z-index: 1;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0 0.15rem;
+  background: var(--joy-bg-panel, var(--joy-bg));
 }
 .living-look-editor fieldset {
   display: flex;
@@ -8660,9 +8812,15 @@ label {
   gap: 0.5rem;
   font-size: 0.8rem;
 }
+.living-look-slot > span,
+.living-look-control > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .living-look-slot select,
 .living-look-control select {
-  min-width: 8rem;
+  min-width: min(8rem, 48%);
+  max-width: 60%;
 }
 .living-look-hint {
   margin: 0;
