@@ -210,6 +210,13 @@ interface ObservationReviewWaiter {
   timer?: number;
 }
 
+interface RecipeInvocation {
+  readonly scope: CreativeSkillRunScope;
+  /** Visual-document identity used by the observation bridge. */
+  readonly contextProjectId: string;
+  readonly controller: AbortController;
+}
+
 const OBSERVATION_REVIEW_PROMPT =
   'Review only the explicitly approved image evidence. Describe observable visual facts and possible edit opportunities without making edits.';
 const OBSERVATION_REVIEW_TTL_MS = 2 * 60 * 1_000;
@@ -517,6 +524,7 @@ export function AgentPanel({
   );
   const [recipeRunningId, setRecipeRunningId] = useState<string | undefined>(undefined);
   const recipeRunScopeRef = useRef<CreativeSkillRunScope | undefined>(undefined);
+  const recipeInvocationRef = useRef<RecipeInvocation | undefined>(undefined);
   const recipeStagedChangeSetRef = useRef<string | undefined>(undefined);
   const [lookRunningId, setLookRunningId] = useState<string | undefined>(undefined);
   // Production passes an App-owned controller so panel remounts cannot revive
@@ -655,6 +663,11 @@ export function AgentPanel({
     ): Promise<void> => {
       const client = joyAgentEngineClient;
       if (client === undefined) return;
+      if (
+        recipeScope !== undefined &&
+        recipeInvocationRef.current?.scope.runId !== recipeScope.runId
+      )
+        return;
       const candidate = bridge.createReviewCandidate(observationId);
       const status = client.getStatus();
       if (
@@ -733,10 +746,19 @@ export function AgentPanel({
   const waitForObservationReview = useCallback(
     (scope: CreativeSkillRunScope, signal: AbortSignal): Promise<void> => {
       const review = observationReviewLeaseRef.current;
+      const invocation = recipeInvocationRef.current;
       if (
+        invocation === undefined ||
+        invocation.scope.runId !== scope.runId ||
+        invocation.controller.signal.aborted ||
         review === undefined ||
         review.recipeRunId !== scope.runId ||
-        review.candidate.authority.projectId !== scope.projectId ||
+        // The recipe lifecycle scope identifies the durable editor project;
+        // observation authority identifies the visual document carried by the
+        // captured context. Those IDs are associated, but are not required to
+        // be equal.
+        review.candidate.authority.projectId !== invocation.contextProjectId ||
+        latestSessionRef.current.visualProject.id !== invocation.contextProjectId ||
         review.candidate.authority.revision !== scope.revision ||
         review.candidate.authority.run.epoch !== scope.epoch
       ) {
@@ -969,6 +991,52 @@ export function AgentPanel({
     [agentPreviewStore],
   );
 
+  const cancelRecipeInvocation = useCallback(
+    (runId?: string, display = 'JOY recipe run cancelled.'): boolean => {
+      const invocation = recipeInvocationRef.current;
+      if (invocation === undefined || (runId !== undefined && invocation.scope.runId !== runId))
+        return false;
+      recipeInvocationRef.current = undefined;
+      if (recipeRunScopeRef.current?.runId === invocation.scope.runId)
+        recipeRunScopeRef.current = undefined;
+      invocation.controller.abort();
+      discardObservationReview();
+      const changeSetId = recipeStagedChangeSetRef.current;
+      recipeStagedChangeSetRef.current = undefined;
+      if (changeSetId !== undefined) {
+        const prepared = preparedChanges.getView(changeSetId);
+        preparedChanges.revoke(changeSetId);
+        if (prepared !== undefined) {
+          agentPreviewStore?.clear(prepared.planId);
+          proposalTargetsRef.current.delete(prepared.planId);
+        }
+      }
+      cancelRunLifecycle(invocation.scope.runId, display);
+      agentPresenceStore?.clear();
+      clearAgentPreviewForSourceRun(invocation.scope.runId);
+      setRecipeRunningId(undefined);
+      if (activeModelRunIdRef.current === invocation.scope.runId)
+        activeModelRunIdRef.current = undefined;
+      setAgentPhase('cancelled');
+      return true;
+    },
+    [
+      agentPresenceStore,
+      agentPreviewStore,
+      cancelRunLifecycle,
+      clearAgentPreviewForSourceRun,
+      discardObservationReview,
+      preparedChanges,
+    ],
+  );
+
+  const finishRecipeInvocation = useCallback((runId: string): void => {
+    const invocation = recipeInvocationRef.current;
+    if (invocation === undefined || invocation.scope.runId !== runId) return;
+    recipeInvocationRef.current = undefined;
+    if (recipeRunScopeRef.current?.runId === runId) recipeRunScopeRef.current = undefined;
+  }, []);
+
   useEffect(() => {
     const deferred = deferredPreviewApprovalRef.current;
     if (deferred === undefined) return;
@@ -1041,6 +1109,9 @@ export function AgentPanel({
     return () => {
       revokeActiveComposerHostLease();
       deferredPreviewApprovalRef.current = undefined;
+      const recipeInvocation = recipeInvocationRef.current;
+      if (recipeInvocation !== undefined)
+        cancelRecipeInvocation(recipeInvocation.scope.runId, 'JOY recipe run interrupted.');
       observationReviewRegistrationRef.current += 1;
       observationReviewControllerRef.current?.dispose();
       observationReviewControllerRef.current = undefined;
@@ -1048,7 +1119,7 @@ export function AgentPanel({
       settleObservationReviewWaiter(new Error('JOY observation review was interrupted.'));
       preparedChangesRef.current.clear();
     };
-  }, [revokeActiveComposerHostLease, settleObservationReviewWaiter]);
+  }, [cancelRecipeInvocation, revokeActiveComposerHostLease, settleObservationReviewWaiter]);
 
   useEffect(() => {
     const previous = sessionScopeRef.current;
@@ -1087,6 +1158,12 @@ export function AgentPanel({
           )
         : false;
     if (lease !== undefined) revokeActiveComposerHostLease(lease.run.runId);
+    const recipeInvocation = recipeInvocationRef.current;
+    if (recipeInvocation !== undefined)
+      cancelRecipeInvocation(
+        recipeInvocation.scope.runId,
+        'JOY recipe run interrupted because the editor project changed.',
+      );
     if (runIdToCancel !== undefined) {
       if (
         !interruptedByExactLease &&
@@ -1116,6 +1193,7 @@ export function AgentPanel({
   }, [
     agentPresenceStore,
     agentPreviewStore,
+    cancelRecipeInvocation,
     discardObservationReview,
     joyAgentEngineClient,
     preparedChanges,
@@ -1298,6 +1376,8 @@ export function AgentPanel({
   const isRecipeAuthorityCurrent = useCallback(
     (scope: CreativeSkillRunScope): boolean =>
       scope.runId === recipeRunScopeRef.current?.runId &&
+      scope.runId === recipeInvocationRef.current?.scope.runId &&
+      recipeInvocationRef.current.controller.signal.aborted === false &&
       scope.projectId === project.id &&
       scope.revision === latestSessionRef.current.projectRevisionId &&
       (activeModelRunIdRef.current === undefined || activeModelRunIdRef.current === scope.runId),
@@ -1398,9 +1478,10 @@ export function AgentPanel({
       appendMessage(pending.threadId, 'assistant', 'Stopped. The proposed edit was not applied.');
       updateThreadStatus(pending.threadId, 'draft');
     }
-    const commandRunId = agentRunId ?? presenceState.runId;
+    const commandRunId = agentRunId ?? presenceState.runId ?? runLifecycle.run?.scope.runId;
     if (command.type === 'stop') {
-      if (commandRunId !== undefined) {
+      const recipeCancelled = cancelRecipeInvocation(commandRunId);
+      if (!recipeCancelled && commandRunId !== undefined) {
         cancelRunLifecycle(commandRunId);
         if (joyAgentEngineClient !== undefined) void joyAgentEngineClient.cancel(commandRunId);
       }
@@ -1416,12 +1497,14 @@ export function AgentPanel({
     agentPreviewStore,
     agentRunId,
     cancelRunLifecycle,
+    cancelRecipeInvocation,
     clearAgentPreviewForSourceRun,
     command,
     discardPreparedModelChange,
     joyAgentEngineClient,
     pending,
     presenceState.runId,
+    runLifecycle.run,
   ]);
 
   function appendMessage(_threadId: string, role: 'user' | 'assistant', body: string): void {
@@ -2177,6 +2260,7 @@ export function AgentPanel({
   async function runRecipe(skillId: string): Promise<void> {
     if (
       recipeRunningId !== undefined ||
+      recipeInvocationRef.current !== undefined ||
       thinkingThreadId !== undefined ||
       modelView !== undefined ||
       pending !== undefined ||
@@ -2193,6 +2277,12 @@ export function AgentPanel({
       epoch: 1,
       revision: session.projectRevisionId,
     };
+    const recipeController = new AbortController();
+    recipeInvocationRef.current = Object.freeze({
+      scope,
+      contextProjectId: session.visualProject.id,
+      controller: recipeController,
+    });
     recipeRunScopeRef.current = scope;
     recipeStagedChangeSetRef.current = undefined;
     activeModelRunIdRef.current = scope.runId;
@@ -2207,6 +2297,7 @@ export function AgentPanel({
         scope,
         deps: creativeSkillDeps,
         isAuthorityCurrent: isRecipeAuthorityCurrent,
+        signal: recipeController.signal,
         onEvent: (checkpoint) => {
           if (recipeRunScopeRef.current?.runId !== scope.runId) return;
           if (checkpoint.state === 'started') setAgentPhase('planning');
@@ -2291,7 +2382,15 @@ export function AgentPanel({
       setAgentPhase('failed');
       if (activeModelRunIdRef.current === scope.runId) activeModelRunIdRef.current = undefined;
     } finally {
-      setRecipeRunningId((current) => (current === skillId ? undefined : current));
+      if (recipeInvocationRef.current?.scope.runId === scope.runId) {
+        setRecipeRunningId((current) => (current === skillId ? undefined : current));
+        const lifecycle = runController.getSnapshot().run;
+        if (lifecycle?.scope.runId !== scope.runId || lifecycle.state !== 'awaiting-approval') {
+          recipeInvocationRef.current = undefined;
+          if (recipeRunScopeRef.current?.runId === scope.runId)
+            recipeRunScopeRef.current = undefined;
+        }
+      }
     }
   }
 
@@ -2667,10 +2766,16 @@ export function AgentPanel({
     const prepared = modelView;
     if (prepared === undefined) return;
     const sourceRunId = sourceRunIdForPreparedPlan(prepared.planId);
+    const recipeCancelled = cancelRecipeInvocation(
+      sourceRunId,
+      'JOY preview rejected. No edits were applied.',
+    );
     activeModelRunIdRef.current = undefined;
-    cancelRunLifecycle(sourceRunId, 'JOY preview rejected. No edits were applied.');
-    void joyAgentEngineClient?.cancel(sourceRunId);
-    discardPreparedModelChange(sourceRunId);
+    if (!recipeCancelled) {
+      cancelRunLifecycle(sourceRunId, 'JOY preview rejected. No edits were applied.');
+      void joyAgentEngineClient?.cancel(sourceRunId);
+      discardPreparedModelChange(sourceRunId);
+    }
     setAgentPhase('cancelled');
     appendMessage(activeThread.id, 'assistant', 'JOY preview rejected. No edits were applied.');
     agentPresenceStore?.clear();
@@ -2707,6 +2812,7 @@ export function AgentPanel({
         discardPreparedModelChange(sourceRunIdForPreparedPlan(prepared.planId));
         void joyAgentEngineClient?.cancel(sourceRunIdForPreparedPlan(prepared.planId));
       }
+      finishRecipeInvocation(sourceRunId);
       if (lifecycleRun !== undefined)
         acceptRunLifecycle(lifecycleRun, 'failed', { display: 'JOY apply failed safely.' });
       setAgentPhase('failed');
@@ -2758,6 +2864,7 @@ export function AgentPanel({
     );
     activeModelRunIdRef.current = undefined;
     discardPreparedModelChange(sourceRunIdForPreparedPlan(prepared.planId));
+    finishRecipeInvocation(sourceRunId);
     setAgentPhase('completed');
     if (lifecycleRun !== undefined)
       acceptRunLifecycle(lifecycleRun, 'completed', {
@@ -3038,7 +3145,8 @@ export function AgentPanel({
                 <button
                   type="button"
                   onClick={() => {
-                    if (activeRunId !== undefined) {
+                    const recipeCancelled = cancelRecipeInvocation(activeRunId);
+                    if (!recipeCancelled && activeRunId !== undefined) {
                       cancelRunLifecycle(activeRunId);
                       void joyAgentEngineClient.cancel(activeRunId);
                     }

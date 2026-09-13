@@ -10,6 +10,7 @@ import type {
   JoyAgentRunIterator,
   JoyAgentRunHost,
 } from './engine-client.js';
+import type { JoyAgentObservationHostBridge } from './observation-tool-adapter.js';
 import type { HostRpcJson, HostRpcMethod } from './host-rpc.js';
 import { JOY_AGENT_PROTOCOL_VERSION, type JoyAgentSafeEvent } from './protocol.js';
 import { PreparedChangeStore, type PreparedChangeAuthority } from './prepared-change-store.js';
@@ -187,5 +188,65 @@ describe('runScopedCreativeSkillEditToolLoop', () => {
 
     expect(result.kind).toBe('failed');
     expect(d.staged).toEqual([]);
+  });
+
+  it('keeps observation authority in the visual identity domain', async () => {
+    const d = deps();
+    const durableProjectId = SCOPE.projectId;
+    const visualProjectId = 'visual-document-a';
+    const baseSession = d.value.latestSessionRef.current;
+    const visualSession = {
+      ...baseSession,
+      visualProject: { ...baseSession.visualProject, id: visualProjectId },
+    } as EditorSession;
+    let readAuthority: (() => unknown) | undefined;
+    const bridge = {
+      tools: {},
+      createEvidenceResolver: vi.fn(),
+      createReviewCandidate: vi.fn(),
+      markReviewedEvidence: vi.fn(),
+    } as unknown as JoyAgentObservationHostBridge;
+    const recipeDeps = {
+      ...d.value,
+      getSession: () => visualSession,
+      latestSessionRef: { current: visualSession },
+      buildContextInput: () => ({ projectId: visualProjectId, revision: REVISION }),
+      getModelId: () => 'model-a',
+      getPromptPolicyDigest: () => 'policy-a',
+      observationAdapterFactory: {
+        create: (input: { readonly currentAuthority: () => unknown }) => {
+          readAuthority = input.currentAuthority;
+          return bridge;
+        },
+      },
+    };
+
+    const result = await runScopedCreativeSkillEditToolLoop(
+      recipeDeps,
+      input({ allowedToolNames: ['media_observe', 'validate_proposal'] }),
+    );
+    expect(result.kind).toBe('prepared');
+    expect(readAuthority).toBeDefined();
+    const authority = readAuthority!() as {
+      projectId: string;
+      revision: string;
+      run: { runId: string; epoch: number };
+      modelId: string;
+      promptPolicyDigest: string;
+    };
+    expect(authority).toMatchObject({
+      projectId: visualProjectId,
+      revision: REVISION,
+      modelId: 'model-a',
+      promptPolicyDigest: 'policy-a',
+      run: { epoch: 1 },
+    });
+    expect(authority.projectId).not.toBe(durableProjectId);
+
+    recipeDeps.latestSessionRef.current = {
+      ...visualSession,
+      visualProject: { ...visualSession.visualProject, id: 'wrong-document' },
+    } as EditorSession;
+    expect(readAuthority!()).toBeUndefined();
   });
 });

@@ -327,4 +327,66 @@ describe('JOY Agent entry points', () => {
       }),
     ).resolves.toMatchObject({ kind: 'failed' });
   });
+
+  it('does not allocate a Worker when a recipe is already aborted', async () => {
+    const client = fakeClient([]);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      runScopedCreativeSkillToolLoop({
+        client,
+        host,
+        prompt: 'prepare a rough cut',
+        baseRevision: 'rev-1',
+        signal: controller.signal,
+      }),
+    ).resolves.toEqual({ kind: 'failed', message: 'The recipe run was cancelled.' });
+    expect(client.startRun).not.toHaveBeenCalled();
+  });
+
+  it('cancels the exact allocated Worker run when a recipe is aborted in flight', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let startedRunId: string | undefined;
+    const cancel = vi.fn(async () => undefined);
+    const startRun = vi.fn(() =>
+      Object.assign(
+        (async function* () {
+          await gate;
+          yield event('cancelled');
+        })(),
+        { run: { runId: 'transport-run', epoch: 1 } },
+      ),
+    );
+    const client = {
+      ...fakeClient([]),
+      startRun,
+      cancel,
+    } as JoyAgentEngineClient;
+    const controller = new AbortController();
+    const result = runScopedCreativeSkillToolLoop({
+      client,
+      host,
+      prompt: 'prepare a rough cut',
+      baseRevision: 'rev-1',
+      signal: controller.signal,
+      onRunStart: (runId) => {
+        startedRunId = runId;
+      },
+    });
+
+    await vi.waitFor(() => expect(startRun).toHaveBeenCalledTimes(1));
+    expect(startedRunId).toEqual(expect.any(String));
+    controller.abort();
+    expect(cancel).toHaveBeenCalledWith(startedRunId);
+    expect(cancel).not.toHaveBeenCalledWith('recipe-run-1');
+    release();
+    await expect(result).resolves.toEqual({
+      kind: 'failed',
+      message: 'The recipe run was cancelled.',
+    });
+  });
 });
