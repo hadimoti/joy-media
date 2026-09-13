@@ -31,12 +31,16 @@ The release procedure below remains guarded and has not been executed.
 
 ## Blast radius — editor-web bundle (API and migration already live)
 
-`git diff --name-only 61b70e61f3ce293770313611bc51014300abc117..<candidate>` (at the current branch tip) touches
-`apps/editor-web`, `apps/api` (the Look Instances sync seam — see the first
-bullet), `packages/{motion-core,project-schema}`, `tests/`, `tooling/`, `docs/`,
-`.github/`. Verified at branch HEAD:
+`git diff --name-only 61b70e61f3ce293770313611bc51014300abc117..<candidate>` (at
+the current branch tip) touches the editor-web UI/fixtures, the v2 workflow,
+`docs/SELF-HOSTED-CI.md`, `packages/agent-tools`, `tests/`, and
+`tooling/release/src/ci-artifact-policy.test.ts`. It has **no** `apps/api`,
+`packages/project-schema`, migration, or server-runtime path; the API and schema
+remain the already-live R2 surface described below. The following API/schema
+items are historical context for that live surface, not candidate changes.
+Verified at branch HEAD:
 
-- **The additive Postgres migration (R2 GAP 1a — Look Instances sync) is already live.**
+- **Historical live R2 surface — the additive Postgres migration (R2 GAP 1a — Look Instances sync) is already live.**
   `apps/api/src/postgres-migrations.ts` `POSTGRES_MIGRATIONS` gains **one** id:
   `006-look-instances` → `ALTER TABLE project_documents ADD COLUMN IF NOT EXISTS
 look_instances jsonb`. Additive + **nullable**; never `NOT NULL`, never a
@@ -60,7 +64,7 @@ look_instances jsonb`. Additive + **nullable**; never `NOT NULL`, never a
   - It is not part of the current web-only candidate delta. The candidate is
     tested against the in-memory + pg-mem stores; no production migration apply
     is authorized or required for this rollout.
-- **`apps/api` runtime changes are limited to the Look Instances sync seam**
+- **Historical live R2 surface — `apps/api` runtime changes are limited to the Look Instances sync seam**
   (`project-document-store.ts`, `postgres-control-plane.ts`, `control-plane.ts`,
   `http-server.ts`, `project-document-sync-request-validation.ts`,
   `postgres-migrations.ts`, `postgres-schema.ts`) plus
@@ -72,7 +76,7 @@ look_instances jsonb`. Additive + **nullable**; never `NOT NULL`, never a
   **devDependency** so `packages/visual-object-renderer/src/looks-render-acceptance.test.ts`
   — GAP 4 — can drive `compileLook`). No runtime bundle or `apps/api` dependency
   changes. Rollback is a pure pointer flip.
-- **`packages/project-schema`**: schema **v3** lands additively
+- **Historical live R2 surface — `packages/project-schema`**: schema **v3** lands additively
   (`living-look.ts`, `v3.ts`, `migrateV2ToV3`) plus the standalone
   `look-instances-document.ts` (its own explicit schema + validator). The editor
   still reads `JoyProjectV1` for the visual document; the Look Instances document
@@ -199,21 +203,22 @@ set -e
 cd /opt/joy-media/builds/joy-media-$CAND
 rel="joy-media-$CAND-web"
 dst="/opt/joy-media/web-releases/$rel"
-# Never copy into or over a pre-existing release dir — a half-written retry must
-# not be activated. If $dst exists, verify it or pick a fresh suffixed name and
-# use THAT path in C5.
+# Never copy into or over a pre-existing release dir. A retry gets a fresh,
+# candidate-prefixed name and that exact name is carried into C5.
 if [ -e "$dst" ]; then
-  echo "release dir $dst already exists — inspect it; if partial, use rel=$rel-$(date -u +%H%M%SZ)" >&2
-  exit 1
+  rel="${rel}-$(date -u +%Y%m%dT%H%M%SZ)"
+  dst="/opt/joy-media/web-releases/$rel"
+  test ! -e "$dst"
 fi
 cp -a apps/editor-web/dist "$dst"
 bash deploy/joy-media-release-identity.sh write "$dst/release-identity.env" \
-  $CAND <tree-sha> <lock-sha256> 5
+  $CAND <tree-sha> <lock-sha256> 6
 test -f "$dst/index.html" && test -f "$dst/release-identity.env" && echo "staged OK"
 # Artifact digest over path + content of every file (order-stable), so a rename
 # or a same-length swap changes the digest.
 ( cd "$dst" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum )
 sha256sum "$dst/index.html"
+printf '%s\n' "$rel" > "/opt/joy-media/.joy-media-$CAND-web-release-name"
 ```
 
 **Checkpoint C4:** record `rel` (the exact directory name — carry it into C5),
@@ -226,7 +231,14 @@ fully reversible.
 ```bash
 set -e
 nginx -t
-NEW=/opt/joy-media/web-releases/joy-media-$CAND-web
+REL_FILE="/opt/joy-media/.joy-media-$CAND-web-release-name"
+test -s "$REL_FILE"
+rel="$(cat "$REL_FILE")"
+case "$rel" in
+  "joy-media-$CAND"-web|"joy-media-$CAND"-web-*) ;;
+  *) echo "staged release name does not belong to candidate: $rel" >&2; exit 1 ;;
+esac
+NEW="/opt/joy-media/web-releases/$rel"
 test -f "$NEW/index.html"
 ln -sfn "$NEW" /opt/joy-media/.web.new
 mv -Tf /opt/joy-media/.web.new /opt/joy-media/web
@@ -268,26 +280,38 @@ API-touching release.
 ```bash
 set -e
 C4_INDEX_SHA=<sha256 from C4>        # paste the value recorded at C4
+CAND=<candidate sha from C1>
+CAND_TREE=<tree sha from C1>
+CAND_LOCK=<lock sha256 from C1>
+CAND_SCHEMA=6
 curl -k --noproxy '*' --resolve joyst.ir:443:127.0.0.1 -fsS -o /dev/null -w 'origin root %{http_code}\n' https://joyst.ir/
 curl -fsS -o /dev/null -w 'cf root %{http_code}\n' https://joyst.ir/
 curl -fsS -o /dev/null -w 'api health %{http_code}\n' https://joyst.ir/api/health
+identity=$(curl -fsS https://joyst.ir/release-identity.env)
+printf '%s\n' "$identity" | grep -q '^JOY_MEDIA_RELEASE_COMMIT_SHA='
+printf '%s\n' "$identity" | grep -q '^JOY_MEDIA_RELEASE_TREE_HASH='
+printf '%s\n' "$identity" | grep -q '^JOY_MEDIA_RELEASE_LOCKFILE_SHA256='
+printf '%s\n' "$identity" | grep -q '^JOY_MEDIA_RELEASE_SCHEMA_VERSION='
+printf '%s\n' "$identity" | grep -q "^JOY_MEDIA_RELEASE_COMMIT_SHA=${CAND}$"
+printf '%s\n' "$identity" | grep -q "^JOY_MEDIA_RELEASE_TREE_HASH=${CAND_TREE}$"
+printf '%s\n' "$identity" | grep -q "^JOY_MEDIA_RELEASE_LOCKFILE_SHA256=${CAND_LOCK}$"
+printf '%s\n' "$identity" | grep -q "^JOY_MEDIA_RELEASE_SCHEMA_VERSION=${CAND_SCHEMA}$"
 curl -fsS https://joyst.ir/ | grep -o '<title>[^<]*'
 
 # Hard-fail if the served bundle is not the C4 artifact.
 served_sha=$(curl -fsS https://joyst.ir/ | sha256sum | cut -d' ' -f1)
 test "$served_sha" = "$C4_INDEX_SHA" || { echo "served index.html $served_sha != C4 $C4_INDEX_SHA" >&2; exit 1; }
 
-# Hard-fail if the served release identity is not exactly the candidate.
-served_commit=$(curl -fsS https://joyst.ir/release-identity.env | sed -n 's/^JOY_MEDIA_RELEASE_COMMIT=//p')
-test "$served_commit" = "$CAND" || { echo "served commit $served_commit != candidate $CAND" >&2; exit 1; }
-echo "C6 OK — served bundle + identity match the candidate"
+# Hard-fail if the served release identity is not exactly the candidate's full
+# commit/tree/lock/schema tuple.
+echo "C6 OK — served bundle + full release identity match the candidate"
 ```
 
 **Checkpoint C6:** every probe exits 0 (the `set -e` + `-f` make a non-2xx a
-hard stop); origin + CF root 200, `/api/health` `{"ok":true,…}`; the two
-`test` guards make a served-artifact SHA mismatch or a served-commit mismatch a
-hard failure, not a visual check. Old entry bundle 404. On any failure → **On
-failure**.
+hard stop); origin + CF root 200, `/api/health` `{"ok":true,…}`; the served
+index digest and all four release-identity fields (commit, tree, lock, schema)
+must match C4/C1 exactly. These are hard failures, not visual checks. Old entry
+bundle 404. On any failure → **On failure**.
 
 ## Smoke test (Browser pane, joyst.ir, owner logged in)
 
