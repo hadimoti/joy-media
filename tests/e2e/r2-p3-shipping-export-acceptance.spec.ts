@@ -878,7 +878,7 @@ async function applyLook(page: Page, pack: LookPack): Promise<void> {
   });
   await page
     .getByRole('region', { name: 'Living Looks' })
-    .getByRole('tab', { name: 'Applied', exact: true })
+    .getByRole('tab', { name: /^Applied/ })
     .click();
   await expect(
     page.getByRole('region', { name: 'Applied Looks' }).getByText(pack.title, { exact: true }),
@@ -1094,7 +1094,7 @@ async function runExportCase({
     await page.getByRole('button', { name: 'Looks', exact: true }).click();
     await page
       .getByRole('region', { name: 'Living Looks' })
-      .getByRole('tab', { name: 'Applied', exact: true })
+      .getByRole('tab', { name: /^Applied/ })
       .click();
     await expect(
       page.getByRole('region', { name: 'Applied Looks' }).getByText(pack.title, { exact: true }),
@@ -1408,7 +1408,7 @@ async function runCancelCase({
     await page.getByRole('button', { name: 'Looks', exact: true }).click();
     await page
       .getByRole('region', { name: 'Living Looks' })
-      .getByRole('tab', { name: 'Applied', exact: true })
+      .getByRole('tab', { name: /^Applied/ })
       .click();
     await expect(
       page.getByRole('region', { name: 'Applied Looks' }).getByText(pack.title, { exact: true }),
