@@ -199,7 +199,7 @@ describe('JOY Agent entry points', () => {
   it('lists R1 recipes with honest availability from verified seams only', () => {
     const byId = new Map(listCreativeSkills().map((entry) => [entry.skill.id, entry]));
     expect(byId.get('build-rough-cut')?.available).toBe(true);
-    expect(byId.get('find-moment')?.available).toBe(true);
+    expect(byId.get('find-moment')?.available).toBe(false);
     expect(byId.get('audio-balance')?.available).toBe(false);
     expect(byId.get('title-and-caption-polish')?.available).toBe(false);
     // With the observation bridge absent, source-observation recipes withhold.
@@ -210,6 +210,7 @@ describe('JOY Agent entry points', () => {
         preview: true,
         approval: true,
         observationBridge: false,
+        boundedSourceMoment: false,
         transcriptEvidence: false,
         audioAnalysis: false,
         compositionCapture: true,

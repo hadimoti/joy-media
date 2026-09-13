@@ -8,7 +8,8 @@ import type { JoyAgentTarget } from '../agent-presence.js';
 import { createAgentPreviewStore } from '../agent-preview-store.js';
 import { PreparedChangeStore, type PreparedChangeAuthority } from './prepared-change-store.js';
 import type { CreativeSkillRunScope } from './skill-runner.js';
-import { stageLookRun, type LookRunDeps } from './look-run-host.js';
+import { canonicalCompilerCode, stageLookRun, type LookRunDeps } from './look-run-host.js';
+import { HostRpcDiagnosticError } from './host-rpc.js';
 
 const REVISION = 'rev-1';
 const SCOPE: CreativeSkillRunScope = {
@@ -124,6 +125,21 @@ function compileInput(overrides: Partial<LookCompileInput> = {}): LookCompileInp
 }
 
 describe('stageLookRun', () => {
+  it('reads only whitelisted nested compiler codes and fails closed otherwise', () => {
+    const diagnostic = (compilerCode?: unknown) =>
+      new HostRpcDiagnosticError({
+        code: 'JOY_AGENT_RPC_CANONICAL_REJECTED',
+        retryable: true,
+        ...(compilerCode === undefined ? {} : { facts: { compilerCode: compilerCode as never } }),
+      });
+    expect(canonicalCompilerCode(diagnostic('LOOK_COMPILE_VERSION_MISMATCH'))).toBe(
+      'LOOK_COMPILE_VERSION_MISMATCH',
+    );
+    expect(canonicalCompilerCode(diagnostic())).toBe('staging-rejected');
+    expect(canonicalCompilerCode(diagnostic(42))).toBe('staging-rejected');
+    expect(canonicalCompilerCode(diagnostic('PRIVATE_PROVIDER_FAILURE'))).toBe('staging-rejected');
+  });
+
   it('stages a Look plan through the shared validate_proposal handler and returns a change set', async () => {
     const d = deps();
     const result = await stageLookRun(d.value, {

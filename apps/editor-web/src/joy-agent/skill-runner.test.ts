@@ -14,6 +14,7 @@ const runtime = {
     'approval',
     'source-observation',
     'evidence-coverage',
+    'bounded-source-moment',
     'transcript-evidence',
     'audio-analysis',
     'audio-mix',
@@ -190,5 +191,47 @@ describe('creative skill runner', () => {
         signal: controller.signal,
       }),
     ).resolves.toMatchObject({ kind: 'blocked', reason: 'cancelled' });
+  });
+
+  it('retains safe evidence IDs and rejects duplicate provenance IDs at normalization', async () => {
+    const worker = adapter();
+    (worker.inspect as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      artifacts: [
+        {
+          id: 'context-1',
+          kind: 'context',
+          summary: 'Read',
+          evidenceIds: ['evidence-a', 'evidence-b'],
+        },
+      ],
+    });
+    const runner = createCreativeSkillRunner({
+      runtime,
+      adapter: worker,
+      isAuthorityCurrent: () => true,
+    });
+    const result = await runner.run({
+      skillId: 'creative-brief',
+      scope: { projectId: 'project-1', runId: 'run-1', epoch: 1, revision: 'revision-1' },
+    });
+    expect(result.kind).toBe('ready-for-approval');
+    expect(result.artifacts[0]?.evidenceIds).toEqual(['evidence-a', 'evidence-b']);
+    expect(Object.isFrozen(result.artifacts[0]?.evidenceIds)).toBe(true);
+
+    (worker.inspect as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      artifacts: [
+        {
+          id: 'context-2',
+          kind: 'context',
+          summary: 'Read',
+          evidenceIds: ['evidence-a', 'evidence-a'],
+        },
+      ],
+    });
+    const rejected = await runner.run({
+      skillId: 'creative-brief',
+      scope: { projectId: 'project-1', runId: 'run-2', epoch: 1, revision: 'revision-1' },
+    });
+    expect(rejected).toMatchObject({ kind: 'blocked', reason: 'invalid-artifact', artifacts: [] });
   });
 });

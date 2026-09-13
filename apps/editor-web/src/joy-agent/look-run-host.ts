@@ -125,8 +125,6 @@ const CANONICAL_LOOK_DIAGNOSTIC_CODES = new Set([
   'LOOK_DEFINITION_TITLE',
   'LOOK_DEFINITION_VERIFICATION_ID',
   'LOOK_DEFINITION_VERSION',
-  'JOY_AGENT_HOST_REVOKED',
-  'JOY_AGENT_CONVERSATION_TARGET_MISMATCH',
   'JOY_CODE_MOTION_KEYFRAME_REJECTED',
   'JOY_CODE_PREPARED_CHANGE_MISSING',
   'JOY_CODE_STALE_REVISION',
@@ -136,7 +134,7 @@ const CANONICAL_LOOK_DIAGNOSTIC_CODES = new Set([
   'JOY_CODE_TRANSITION_DURATION_INVALID',
 ]);
 
-function canonicalCompilerCode(error: HostRpcDiagnosticError): string {
+export function canonicalCompilerCode(error: HostRpcDiagnosticError): string {
   const value = error.diagnostic.facts?.compilerCode;
   return typeof value === 'string' && CANONICAL_LOOK_DIAGNOSTIC_CODES.has(value)
     ? value

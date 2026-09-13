@@ -8,7 +8,10 @@ import { createAgentPreviewStore } from '../agent-preview-store.js';
 import type { JoyAgentEngineClient } from './engine-client.js';
 import { PreparedChangeStore, type PreparedChangeAuthority } from './prepared-change-store.js';
 import type { CreativeSkillRunScope } from './skill-runner.js';
-import { createCreativeSkillEditorPrimitiveDeps } from './creative-skill-editor-deps.js';
+import {
+  createCreativeSkillEditorPrimitiveDeps,
+  hasUsableObservationCoverage,
+} from './creative-skill-editor-deps.js';
 
 const REVISION = 'rev-1';
 const SCOPE: CreativeSkillRunScope = {
@@ -55,6 +58,32 @@ function graph(over: { agentPreviewStore?: ReturnType<typeof createAgentPreviewS
 const signal = new AbortController().signal;
 
 describe('createCreativeSkillEditorPrimitiveDeps', () => {
+  it('rejects zero-reviewed coverage even when a manifest id exists', () => {
+    expect(
+      hasUsableObservationCoverage({
+        status: 'complete',
+        intendedFrameCount: 4,
+        decodedFrameCount: 4,
+        submittedFrameCount: 4,
+        reviewedFrameCount: 0,
+        exhaustiveInput: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('accepts positive partial coverage without upgrading it to exhaustive', () => {
+    expect(
+      hasUsableObservationCoverage({
+        status: 'partial',
+        intendedFrameCount: 4,
+        decodedFrameCount: 2,
+        submittedFrameCount: 2,
+        reviewedFrameCount: 1,
+        exhaustiveInput: false,
+      }),
+    ).toBe(true);
+  });
+
   it('summarizes the live session for readProjectContext without a model call', async () => {
     const deps = createCreativeSkillEditorPrimitiveDeps(graph());
     const context = await deps.readProjectContext({

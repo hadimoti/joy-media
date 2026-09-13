@@ -12,6 +12,10 @@ import { R1_EDITOR_CREATIVE_SKILL_SEAMS } from './creative-skill-runtime.js';
 import { createEditorCreativeSkillRuntime } from './creative-skill-runtime.js';
 
 const scope = { projectId: 'project-1', runId: 'run-1', epoch: 1, revision: 'revision-1' };
+const FULL_EDITOR_SEAMS = {
+  ...R1_EDITOR_CREATIVE_SKILL_SEAMS,
+  boundedSourceMoment: true,
+} as const;
 
 function report() {
   return createDirectorVerificationReport({
@@ -140,7 +144,7 @@ describe('createCreativeSkillEditorPrimitives', () => {
     const d = deps();
     const primitives = createCreativeSkillEditorPrimitives(d, scope);
     const runner = createCreativeSkillRunner({
-      runtime: createEditorCreativeSkillRuntime(R1_EDITOR_CREATIVE_SKILL_SEAMS),
+      runtime: createEditorCreativeSkillRuntime(FULL_EDITOR_SEAMS),
       adapter: createCreativeSkillHostAdapter(primitives),
       isAuthorityCurrent: () => true,
     });
@@ -169,7 +173,7 @@ describe('createCreativeSkillEditorPrimitives', () => {
       })),
     });
     const runner = createCreativeSkillRunner({
-      runtime: createEditorCreativeSkillRuntime(R1_EDITOR_CREATIVE_SKILL_SEAMS),
+      runtime: createEditorCreativeSkillRuntime(FULL_EDITOR_SEAMS),
       adapter: createCreativeSkillHostAdapter(createCreativeSkillEditorPrimitives(d, scope)),
       isAuthorityCurrent: () => true,
     });

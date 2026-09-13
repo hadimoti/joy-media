@@ -15,6 +15,7 @@ describe('creative skill runtime capability computation', () => {
         preview: true,
         approval: true,
         observationBridge: false,
+        boundedSourceMoment: false,
         transcriptEvidence: false,
         audioAnalysis: false,
         compositionCapture: false,
@@ -37,6 +38,7 @@ describe('creative skill runtime capability computation', () => {
         'audio-analysis',
       ]),
     );
+    expect(capabilities).not.toContain('bounded-source-moment');
     expect(capabilities).not.toContain('composition-capture');
     expect(capabilities).not.toContain('encoded-output-verification');
   });
@@ -54,7 +56,8 @@ describe('creative skill runtime capability computation', () => {
 
     expect(byId.get('creative-brief')?.available).toBe(true);
     expect(byId.get('watch-and-map')?.available).toBe(true);
-    expect(byId.get('find-moment')?.available).toBe(true);
+    expect(byId.get('find-moment')?.available).toBe(false);
+    expect(byId.get('find-moment')?.missingCapabilities).toContain('bounded-source-moment');
     expect(byId.get('build-rough-cut')?.available).toBe(true);
     expect(byId.get('motion-and-transition-polish')?.available).toBe(false);
     expect(byId.get('motion-and-transition-polish')?.missingCapabilities).toContain(
@@ -75,6 +78,7 @@ describe('creative skill runtime capability computation', () => {
     const runtime = createEditorCreativeSkillRuntime({
       ...R1_EDITOR_CREATIVE_SKILL_SEAMS,
       observationBridge: false,
+      boundedSourceMoment: false,
       transcriptEvidence: false,
       audioAnalysis: false,
     });

@@ -15,6 +15,7 @@ describe('creative skill manifests', () => {
       'approval',
       'source-observation',
       'evidence-coverage',
+      'bounded-source-moment',
       'transcript-evidence',
       'audio-analysis',
       'audio-mix',
@@ -67,6 +68,27 @@ describe('creative skill manifests', () => {
     ).toMatchObject({
       available: false,
       missingOperations: ['caption.setSegmentText'],
+    });
+  });
+
+  it('keeps Find Moment unavailable without a bounded cited moment capability', () => {
+    const unavailable = resolveCreativeSkillAvailability({
+      ...fullRuntime,
+      capabilities: fullRuntime.capabilities.filter(
+        (capability) => capability !== 'bounded-source-moment',
+      ),
+    });
+    expect(unavailable.find((item) => item.skill.id === 'find-moment')).toMatchObject({
+      available: false,
+      missingCapabilities: ['bounded-source-moment'],
+    });
+    const available = resolveCreativeSkillAvailability({
+      ...fullRuntime,
+      capabilities: [...fullRuntime.capabilities, 'bounded-source-moment'],
+    });
+    expect(available.find((item) => item.skill.id === 'find-moment')).toMatchObject({
+      available: true,
+      missingCapabilities: [],
     });
   });
 

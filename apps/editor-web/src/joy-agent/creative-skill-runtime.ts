@@ -20,6 +20,8 @@ export interface CreativeSkillSeamAvailability {
   readonly approval: boolean;
   /** The observation host bridge (source samples + evidence coverage). */
   readonly observationBridge: boolean;
+  /** A bounded, cited source-moment result (not wired in the R1 editor). */
+  readonly boundedSourceMoment: boolean;
   /** Local transcript evidence adapter. */
   readonly transcriptEvidence: boolean;
   /** Bounded local audio measurement. */
@@ -46,6 +48,7 @@ export const R1_EDITOR_CREATIVE_SKILL_SEAMS: CreativeSkillSeamAvailability = Obj
   preview: true,
   approval: true,
   observationBridge: true,
+  boundedSourceMoment: false,
   transcriptEvidence: true,
   audioAnalysis: true,
   compositionCapture: false,
@@ -63,6 +66,7 @@ export function computeCreativeSkillCapabilities(
   if (seams.preview) capabilities.push('preview');
   if (seams.approval) capabilities.push('approval');
   if (seams.observationBridge) capabilities.push('source-observation', 'evidence-coverage');
+  if (seams.boundedSourceMoment) capabilities.push('bounded-source-moment');
   if (seams.transcriptEvidence) capabilities.push('transcript-evidence');
   if (seams.audioAnalysis) capabilities.push('audio-analysis');
   if (seams.compositionCapture) capabilities.push('composition-capture');

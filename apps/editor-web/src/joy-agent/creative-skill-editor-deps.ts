@@ -18,7 +18,10 @@ import type { JoyAgentContextSnapshotInput } from './context-snapshot.js';
 import type { JoyAgentEngineClient } from './engine-client.js';
 import type { JoyAgentObservationHostBridge } from './observation-tool-adapter.js';
 import type { JoyAgentObservationAdapterFactory } from './observation-host-factory.js';
-import type { JoyAgentObservationToolAuthority } from './tool-bridge.js';
+import type {
+  JoyAgentEvidenceCoverageResult,
+  JoyAgentObservationToolAuthority,
+} from './tool-bridge.js';
 import type { PreparedChangeAuthority, PreparedChangeStore } from './prepared-change-store.js';
 import type { CreativeSkillRunScope } from './skill-runner.js';
 import { createDirectorVerificationReport } from './director-verifier.js';
@@ -60,6 +63,44 @@ export interface CreativeSkillEditorAppGraph {
 interface RunObservationState {
   bridge: JoyAgentObservationHostBridge | undefined;
   manifestId: string | undefined;
+}
+
+/**
+ * Accept only terminal, internally consistent coverage. A manifest identity
+ * by itself is not evidence: at least one intended frame must have reached a
+ * reviewed state before a recipe may cite it.
+ */
+export function hasUsableObservationCoverage(
+  coverage: Pick<
+    JoyAgentEvidenceCoverageResult,
+    | 'status'
+    | 'intendedFrameCount'
+    | 'decodedFrameCount'
+    | 'submittedFrameCount'
+    | 'reviewedFrameCount'
+    | 'exhaustiveInput'
+  >,
+): boolean {
+  const counts = [
+    coverage.intendedFrameCount,
+    coverage.decodedFrameCount,
+    coverage.submittedFrameCount,
+    coverage.reviewedFrameCount,
+  ];
+  return (
+    (coverage.status === 'complete' || coverage.status === 'partial') &&
+    counts.every((count) => Number.isSafeInteger(count) && count >= 0) &&
+    coverage.intendedFrameCount > 0 &&
+    coverage.reviewedFrameCount > 0 &&
+    coverage.reviewedFrameCount <= coverage.submittedFrameCount &&
+    coverage.submittedFrameCount <= coverage.decodedFrameCount &&
+    coverage.decodedFrameCount <= coverage.intendedFrameCount &&
+    (!coverage.exhaustiveInput ||
+      (coverage.status === 'complete' &&
+        coverage.decodedFrameCount === coverage.intendedFrameCount &&
+        coverage.submittedFrameCount === coverage.intendedFrameCount &&
+        coverage.reviewedFrameCount === coverage.intendedFrameCount))
+  );
 }
 
 function summarizeSession(session: EditorSession): string {
@@ -178,6 +219,8 @@ export function createCreativeSkillEditorPrimitiveDeps(
         authority,
         signal,
       );
+      if (!hasUsableObservationCoverage(coverage))
+        throw new RangeError('JOY_OBSERVATION_COVERAGE_INVALID');
       const complete = coverage.status === 'complete' && coverage.exhaustiveInput;
       return {
         coverageSummary:

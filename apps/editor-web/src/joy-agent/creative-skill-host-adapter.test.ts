@@ -15,6 +15,7 @@ const runtime = {
     'approval',
     'source-observation',
     'evidence-coverage',
+    'bounded-source-moment',
     'transcript-evidence',
     'audio-analysis',
     'composition-capture',
@@ -96,6 +97,10 @@ describe('creative skill host adapter', () => {
     expect(result.kind).toBe('completed');
     expect(result.artifacts.map((a) => a.kind)).toEqual(['context', 'moment', 'verification']);
     expect(result.artifacts.find((a) => a.kind === 'moment')?.summary).toContain('1.500s');
+    expect(result.artifacts.find((a) => a.kind === 'moment')?.evidenceIds).toEqual(['flash-frame']);
+    expect(result.artifacts.find((a) => a.kind === 'verification')?.evidenceIds).toEqual([
+      'flash-frame',
+    ]);
     expect(prims.prepareChange).not.toHaveBeenCalled();
     expect(prims.stagePreview).not.toHaveBeenCalled();
   });
@@ -161,6 +166,18 @@ describe('creative skill host adapter', () => {
     const prims = primitives({
       observeSources: vi.fn(async () => ({
         evidenceIds: [],
+        coverageSummary: 'Sampled source coverage.',
+        coverageComplete: false,
+      })),
+    });
+    const result = await runner(prims).run({ skillId: 'watch-and-map', scope });
+    expect(result).toMatchObject({ kind: 'blocked', reason: 'adapter-failed', artifacts: [] });
+  });
+
+  it('rejects duplicate evidence IDs instead of publishing ambiguous provenance', async () => {
+    const prims = primitives({
+      observeSources: vi.fn(async () => ({
+        evidenceIds: ['frame-1', 'frame-1'],
         coverageSummary: 'Sampled source coverage.',
         coverageComplete: false,
       })),
