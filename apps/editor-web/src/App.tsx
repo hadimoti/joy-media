@@ -448,6 +448,7 @@ import {
   selectExportAudioClips,
 } from './export-audio.js';
 import { PlaybackOperationGate, playMediaWhenCurrent } from './playback-operation.js';
+import { seekPreviewMedia as seekDetachedVideo } from './preview-media-seek.js';
 import { playbackStartAtOrAfter, playbackTargetAfterClip } from './timeline-playback.js';
 import { timelineEffectiveDurationUs } from './timeline-layout.js';
 import { buildSpeedRampPresentation, buildSpeedRampTransaction } from './speed-ramp.js';
@@ -769,28 +770,6 @@ function playheadForSourceTime(
   if (rate === 0) return freezePlayheadUs;
   const direction = clip.reversed === true ? -1 : 1;
   return clip.startUs + ((sourceTimeUs - clip.sourceInUs) * direction) / rate;
-}
-
-function seekDetachedVideo(video: HTMLVideoElement, timeUs: number): Promise<void> {
-  const seconds = timeUs / 1_000_000;
-  if (Math.abs(video.currentTime - seconds) < 0.001) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const cleanup = () => {
-      video.removeEventListener('seeked', onSeeked);
-      video.removeEventListener('error', onError);
-    };
-    const onSeeked = () => {
-      cleanup();
-      resolve();
-    };
-    const onError = () => {
-      cleanup();
-      reject(new Error(`Unable to seek preview media to ${seconds}s`));
-    };
-    video.addEventListener('seeked', onSeeked, { once: true });
-    video.addEventListener('error', onError, { once: true });
-    video.currentTime = seconds;
-  });
 }
 
 async function decodeStillFrame(sourceUrl: string): Promise<ImageDataLike> {
