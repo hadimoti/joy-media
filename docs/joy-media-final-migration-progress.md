@@ -319,3 +319,114 @@ path itself is untested against the real API) is unverified end-to-end.
 codebase area (`apps/api`) with no dependency on the wave 1-3 desktop work. The wave 1 runtime
 smoke test gate remains the thing to clear before trusting any of `apps/desktop`'s Electron
 wiring end-to-end.
+
+---
+
+## Wave 4 — VPS account/site routes (COMPLETE for the API surface; editor-web panel + live cutover deferred)
+
+**Commit:** see `git log` for the commit adding `apps/api/src/entitlement-signing.ts`,
+`account-service.ts`, `release-metadata-service.ts`, `hosted-route-retirement.ts`, and the
+matching `http-server.ts`/`server.ts`/`postgres-migrations.ts` wiring (wave 4 commit, after the
+wave 3 commit).
+
+**What was done:**
+
+- `entitlement-signing.ts`: Ed25519 signing (`node:crypto`, no JWT library — a plain, auditable
+  `{payload, signature}` JSON shape) satisfying the locked decision that device/session
+  entitlements be "signed, time-bounded, revocable, and safe under clock rollback/offline use."
+  `readEntitlementSigningKeyFromCredential` reads the private key only from the systemd
+  `LoadCredential=` directory `joy-media@api.service` already uses for its other secrets
+  (`stock-video-credentials.ts` precedent) — never generated, never committed, never logged.
+  `DisabledEntitlementSigner` fallback when unconfigured.
+- `account-service.ts`: `AccountService` (devices, subscriptions, entitlement issuance), same
+  `pool`-backed-class-plus-`Disabled*`-fallback shape as `MediaAuthService`/`DisabledMediaAuth`.
+  Identity is always the `mediaAuth` actor id (OTP contact) — the same identity domain as
+  `/v1/auth/*`, not the legacy `ApiAuthentication` project/worker/job actor. Revocation works by
+  _absence of reissuance_: a revoked device can never get a new entitlement, and every issued
+  entitlement expires on its own within 72h (configurable) — no live revocation-check network
+  call is needed on every offline use, which is what makes offline verification safe.
+  `selectPlan` records a pending plan (status stays `none` — wave 5's payment confirmation is
+  what activates it via the included-but-unwired `activateSubscription` hook) and refuses to
+  touch an already-active subscription. `getSubscription` computes `expired` at read time by
+  comparing `current_period_end` to `now` — no separate expiry cron/job/state to go stale.
+- `release-metadata-service.ts`: public read model (`GET /v1/releases/:channel`, no auth) for
+  the installer/download page and the desktop app's own update check; `publish` exists but is
+  reachable only by direct call, not any HTTP route — wave 7's job.
+- `hosted-route-retirement.ts`: generalizes `joy-agent-route-retirement.ts`'s `{code, message}`
+  fail-closed shape to the exact 7 hosted project/media/Worker-pairing routes the wave 0 design
+  doc names (`POST /v1/projects`, `POST /v1/projects/ensure`, `GET /v1/library/cloud-assets`,
+  `GET /v1/library/my-assets`, `POST /v1/worker-pair/offers`, `POST /v1/worker-pair/claim`,
+  `GET /v1/workers`), one flag per group, exact method+pathname matching (never a prefix regex
+  — tested that a project sub-route like `/v1/projects/:id/preview-sessions` is never matched).
+  Every flag reads `env[VAR] === 'true'` and defaults `false`; `server.ts` reads them from
+  `process.env` but this worktree never sets any of them.
+- Migration `007-account-devices-subscriptions-entitlements` (additive-only: `account_devices`,
+  `account_subscriptions`, `release_metadata` tables), following the existing checksummed
+  `PostgresMigration` ledger pattern — appended, not editing an applied migration.
+- `http-server.ts`: 8 new routes wired in — `POST`/`GET /v1/devices`,
+  `POST /v1/devices/:id/revoke`, `GET`/`POST /v1/account/subscription`,
+  `POST /v1/entitlements/refresh`, `GET /v1/entitlements/public-key` (public),
+  `GET /v1/releases/:channel` (public) — plus the hosted-route-retirement check placed right
+  after the existing JOY Agent retirement check (same position, same "auth checked first"
+  ordering). New `AccountServiceError`/`ReleaseMetadataError` branches in `respondError`. All
+  four new `ControlPlaneHttpServerOptions` fields (`account`, `releases`,
+  `entitlementPublicKeyPem`, `hostedRouteRetirement`) are optional with safe disabled/empty/all-
+  off defaults, so every existing caller of `createControlPlaneHttpServer` (tests included)
+  keeps behaving exactly as before without being updated.
+- `server.ts`: real wiring — reads the signing key from its systemd credential path, constructs
+  `AccountService`/`ReleaseMetadataService` when `pool` is configured (else the `Disabled*`
+  fallbacks), reads the three retirement flags from `process.env`.
+- `docs/joy-media-final-migration-design.md` updated (wave 4 status).
+
+**Explicitly deferred (not silently dropped):**
+
+- No `apps/editor-web` UI calls any of the 8 new routes — no account/device/subscription panel
+  exists yet. This wave only built the API surface that panel will call.
+- `deploy/joy-media-api.override.conf` (the real, tracked systemd override this Sweden VPS
+  deploy uses) was **deliberately not edited** to add a
+  `LoadCredentialEncrypted=joy-media-entitlement-signing-key:...` line. Unlike the nginx config
+  doc mirror, this file's precedent (`docs/reviews/...deploy-handoff...`) suggests it may be
+  applied close to verbatim during a real deploy — adding that line without the owner first
+  creating `/etc/credstore.encrypted/joy-media-entitlement-signing-key` via `systemd-creds
+encrypt` would make `systemctl restart joy-media@api.service` fail outright (systemd refuses
+  to start a unit whose `LoadCredentialEncrypted=` target is missing). That is a live-deploy
+  risk this worktree will not take; Codex/the owner should add that line together with actually
+  provisioning the credential, as one atomic ops step.
+- No cutover flag was set anywhere real; `isRetiredHostedRoute` is exercised only by this
+  wave's own tests and stays inert in every actual deployment today.
+- `activateSubscription` (the wave 5 payment-confirmation hook) exists and is tested but is not
+  called from any route — wave 5's job.
+
+**Commands run (this worktree):**
+
+- `pnpm --filter @joy-media/api build` (`tsc -b`, including a from-scratch rebuild after
+  deleting `dist/`/`*.tsbuildinfo` to rule out an incremental-build false pass) → **passes**.
+- `pnpm vitest run apps/api` → **454/454 passed** across 34 files (37 pre-existing skips
+  unrelated to this wave); this wave added 65 net-new tests (5 new test files: 12 in
+  `entitlement-signing.test.ts`, 19 in `account-service.test.ts`, 8 in
+  `release-metadata-service.test.ts`, 9 in `hosted-route-retirement.test.ts`, 16 in
+  `http-server-account-routes.test.ts`; plus 1 new case in `postgres-migrations.test.ts`).
+  `account-service.test.ts` and `release-metadata-service.test.ts` run against real SQL via
+  `pg-mem` (same harness `media-auth.test.ts` already established), not a mocked pool.
+- `pnpm typecheck` (root, all 42 workspace projects) → **passes**.
+- `pnpm lint` (root eslint) → **passes, 0 problems**.
+- `pnpm format:check` (root prettier) → **same single pre-existing failure** as waves 1-3
+  (`apps/editor-web/src/playback-loop-contract.test.ts`, unrelated, predates this worktree). All
+  files this wave touched are prettier-clean.
+
+**Known gap:** `options.mediaAuth`/`options.account`/etc. being accessed without an optional
+check inside `route()` relies on that function's parameter type intersection
+(`ControlPlaneHttpServerOptions & { readonly mediaAuth: MediaAuthApi; ... }`) marking them
+non-optional — this is the file's own pre-existing pattern (confirmed by a from-scratch build),
+not something this wave introduced, but it means a future caller of the internal `route()`
+function directly (not `createControlPlaneHttpServer`) could in principle bypass the defaulting.
+Not a new risk this wave created; flagged for completeness.
+
+**Next gate:** none required to start wave 5 (USDC/Alchemy) as far as _code_ goes — wave 5's
+`activateSubscription` hook already exists. However wave 5 itself is blocked per the wave 0
+design doc: no in-repo Nutrized/USDC/Alchemy reference exists, and checkout must stay disabled
+regardless per the locked owner decisions. Before wave 4's account/device/subscription routes
+are trusted in production: (1) the owner/Codex must provision the
+`joy-media-entitlement-signing-key` systemd credential and add the corresponding
+`LoadCredentialEncrypted=` line to `deploy/joy-media-api.override.conf` together, (2) run the
+migration against the real database, (3) build the `apps/editor-web` account panel UI.

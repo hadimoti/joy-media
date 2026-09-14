@@ -210,6 +210,49 @@ const LOOK_INSTANCES_MIGRATION: PostgresMigration = {
   },
 };
 
+const ACCOUNT_DEVICES_SUBSCRIPTIONS_ENTITLEMENTS_MIGRATION: PostgresMigration = {
+  id: '007-account-devices-subscriptions-entitlements',
+  checksum: 'sha256:account-devices-subscriptions-entitlements-2026-09-14',
+  up: async (database) => {
+    // Owned by account-service.ts, independent of the legacy project/media control-plane
+    // tables — same independence media_allowed_users/media_otp_codes/media_sessions already
+    // have from the tables above. See docs/joy-media-final-migration-design.md §4/§6.
+    await database.query(`
+      CREATE TABLE IF NOT EXISTS account_devices (
+        id text PRIMARY KEY,
+        owner_id text NOT NULL,
+        display_name text NOT NULL,
+        created_at timestamptz NOT NULL,
+        revoked_at timestamptz
+      );
+      CREATE INDEX IF NOT EXISTS account_devices_owner_idx ON account_devices (owner_id, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS account_subscriptions (
+        owner_id text PRIMARY KEY,
+        plan text NOT NULL,
+        status text NOT NULL,
+        current_period_end timestamptz,
+        updated_at timestamptz NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS release_metadata (
+        id text PRIMARY KEY,
+        channel text NOT NULL,
+        version text NOT NULL,
+        download_url text NOT NULL,
+        sha256 text NOT NULL,
+        signature text NOT NULL,
+        min_supported_version text,
+        published_at timestamptz NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS release_metadata_channel_version_idx
+        ON release_metadata (channel, version);
+      CREATE INDEX IF NOT EXISTS release_metadata_channel_published_idx
+        ON release_metadata (channel, published_at DESC);
+    `);
+  },
+};
+
 export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
   BASELINE_MIGRATION,
   ASSET_REVOCATION_PRIMARY_KEY_MIGRATION,
@@ -217,6 +260,7 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
   PROJECT_ASSET_ACCESS_MIGRATION,
   STOCK_VIDEO_MIGRATION,
   LOOK_INSTANCES_MIGRATION,
+  ACCOUNT_DEVICES_SUBSCRIPTIONS_ENTITLEMENTS_MIGRATION,
 ];
 
 export async function runPostgresMigrations(database: MigrationDatabase): Promise<void> {

@@ -233,6 +233,24 @@ describe('ordered PostgreSQL migrations', () => {
     expect(queries.some((q) => /NOT NULL|DROP/i.test(q))).toBe(false);
   });
 
+  it('creates the account devices/subscriptions/release-metadata tables (007)', async () => {
+    const migration = POSTGRES_MIGRATIONS.find(
+      (m) => m.id === '007-account-devices-subscriptions-entitlements',
+    );
+    expect(migration).toBeDefined();
+    const queries: string[] = [];
+    await migration!.up({
+      query: async (sql: string) => {
+        queries.push(sql);
+        return { rows: [] };
+      },
+    });
+    const combined = queries.join('\n');
+    expect(combined).toContain('CREATE TABLE IF NOT EXISTS account_devices');
+    expect(combined).toContain('CREATE TABLE IF NOT EXISTS account_subscriptions');
+    expect(combined).toContain('CREATE TABLE IF NOT EXISTS release_metadata');
+  });
+
   it('fails closed when an applied migration checksum has drifted', async () => {
     const { pool } = createRecordingPool([
       { id: POSTGRES_MIGRATIONS[0]!.id, checksum: 'sha256:unexpected' },

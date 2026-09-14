@@ -141,7 +141,16 @@ per the lead brief's stop conditions.
   `apps/editor-web/src/joy-agent/**` (the large, live, tested JOY Agent engine) — see
   `docs/joy-media-final-migration-progress.md`'s wave 3 entry for why and what remains.
 - Wave 4: `apps/api/src/**` new route modules + `postgres-migrations.ts` additions,
-  `apps/editor-web` account panel UI, `deploy/` doc updates (not live changes).
+  `apps/editor-web` account panel UI, `deploy/` doc updates (not live changes). **Status:
+  implemented** for the server side — `entitlement-signing.ts` (Ed25519, systemd-credential
+  read), `account-service.ts` (devices/subscriptions/entitlement issuance),
+  `release-metadata-service.ts`, `hosted-route-retirement.ts` (flag-gated, all flags default
+  off), migration `007-account-devices-subscriptions-entitlements`, and the matching
+  `http-server.ts`/`server.ts` wiring. **Not implemented:** any `apps/editor-web` account panel
+  UI (no renderer code calls the new routes yet) and `deploy/joy-media-api.override.conf` is
+  deliberately left untouched — see `docs/joy-media-final-migration-progress.md`'s wave 4 entry
+  for why adding its `LoadCredentialEncrypted=` line myself would be a live-deploy risk, not a
+  doc-only change.
 - Wave 5: new `packages/invoice-ledger` (or `apps/api/src/invoice-*.ts`), disabled by default.
 - Wave 6: new `tooling/archive/**` export/checksum scripts, runbooks under `docs/`.
 - Wave 7: `apps/desktop` packaging/signing scripts, `docs/joy-media-final-migration-progress.md`

@@ -27,6 +27,17 @@ import {
 import { PexelsStockVideoProvider } from './pexels-stock-video-provider.js';
 import { PixabayStockVideoProvider } from './pixabay-stock-video-provider.js';
 import { PostgresStockVideoRepository, StockVideoService } from './stock-video.js';
+import {
+  createEd25519EntitlementSigner,
+  DisabledEntitlementSigner,
+  readEntitlementSigningKeyFromCredential,
+} from './entitlement-signing.js';
+import { AccountService, DisabledAccountService } from './account-service.js';
+import {
+  DisabledReleaseMetadataService,
+  ReleaseMetadataService,
+} from './release-metadata-service.js';
+import { readHostedRouteRetirementFlags } from './hosted-route-retirement.js';
 
 await start();
 
@@ -101,6 +112,30 @@ async function start(): Promise<void> {
           privateObjectStore,
         })
       : undefined;
+  // Never generated, never committed, never logged — read only from the systemd
+  // LoadCredential= file the owner/Codex provisions out-of-band (wave 4). Absent ->
+  // DisabledEntitlementSigner, same "feature reads as unconfigured, process still starts"
+  // shape as mediaAuth/mailer/telegram above.
+  const entitlementSigningKey = readEntitlementSigningKeyFromCredential((path, encoding) =>
+    readFileSync(path, encoding),
+  );
+  const entitlementSigner =
+    entitlementSigningKey === undefined
+      ? new DisabledEntitlementSigner()
+      : createEd25519EntitlementSigner(entitlementSigningKey);
+  const account =
+    pool === undefined
+      ? new DisabledAccountService()
+      : new AccountService({ pool, signer: entitlementSigner });
+  const releases =
+    pool === undefined
+      ? new DisabledReleaseMetadataService()
+      : new ReleaseMetadataService({ pool });
+  // Every flag defaults false; this deployment's actual environment does not set any of
+  // them, so this line changes nothing about today's routing (wave 4/6 - see
+  // hosted-route-retirement.ts's module doc).
+  const hostedRouteRetirement = readHostedRouteRetirementFlags(process.env);
+
   createControlPlaneHttpServer({
     controlPlane,
     // Public /v1 (project/job/asset routes) stays disabled unless durable state
@@ -111,6 +146,10 @@ async function start(): Promise<void> {
         durableControlPlane === undefined ? undefined : mediaAuth.authenticate(request),
     },
     mediaAuth,
+    account,
+    releases,
+    entitlementPublicKeyPem: entitlementSigner.publicKeyPem,
+    hostedRouteRetirement,
     clientAddressResolver,
     audioDenoise: new SpectralDenoiseService(audioDenoiseLedger),
     readiness: productionReadinessOptions({
