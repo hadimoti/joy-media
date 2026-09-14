@@ -97,6 +97,20 @@ export { extractVoiceUsage, formatVoiceLabel, attachVoiceMetadata } from './voic
 export type { SynthesisAuditLog, SynthesisAuditEntry } from './synthesis-audit.js';
 export { createSynthesisAuditLog } from './synthesis-audit.js';
 
+// Re-export BYOK provider-profile validation (JOY Media desktop migration, wave 3)
+export type { ByokProvider, ProviderProfileInput, ValidationIssue } from './validation.js';
+export { BYOK_PROVIDERS, validateProviderProfileInput } from './validation.js';
+
+// Re-export the direct-provider capability probe adapter (wave 3)
+export type {
+  DirectProviderErrorCode,
+  DirectProviderProbeRequest,
+  DirectProviderProbeReport,
+  FetchLike,
+  FetchResponseLike,
+} from './adapters/openai-compatible.js';
+export { probeOpenAiCompatibleProvider } from './adapters/openai-compatible.js';
+
 // ===== V1 Backward Compatibility =====
 
 export function createLocalWhisperProvider(

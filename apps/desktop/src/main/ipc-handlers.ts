@@ -5,7 +5,14 @@ import { normalizeStartupPreference } from '../worker-status.js';
 import type { WorkerStatus } from '../worker-status.js';
 import type { FileRegistry } from './file-registry.js';
 import type { WorkerSupervisor } from './worker-supervisor.js';
-import type { JobRecord, LocalDatabase, MediaKind } from '../store/local-database.js';
+import type {
+  JobRecord,
+  LocalDatabase,
+  MediaKind,
+  ProviderProfile,
+} from '../store/local-database.js';
+import { validateProviderProfileInput } from '@joy-media/provider-sdk';
+import type { DirectProviderProbeReport, SecretStore } from '@joy-media/provider-sdk';
 
 /** Native "select a file" prompt, injected so main-process wiring stays unit-testable. */
 export type ShowOpenDialog = () => Promise<{
@@ -21,13 +28,25 @@ export type ProbeMedia = (path: string) => Promise<{
   readonly kind: MediaKind;
 }>;
 
+/** Runs the host-side direct-provider connectivity probe (never exposes the key to the
+ * renderer). Injected — see main/electron-entry.ts for the real wiring to
+ * provider-sdk's `probeOpenAiCompatibleProvider` + global `fetch`. */
+export type ProbeProvider = (request: {
+  readonly baseUrl: string;
+  readonly apiKey: string;
+  readonly modelId: string;
+}) => Promise<DirectProviderProbeReport>;
+
 export interface IpcHandlerDeps {
   readonly fileRegistry: FileRegistry;
   readonly workerSupervisor: WorkerSupervisor;
   readonly showOpenDialog: ShowOpenDialog;
   readonly localDatabase: LocalDatabase;
   readonly probeMedia: ProbeMedia;
+  readonly secretStore: SecretStore;
+  readonly probeProvider: ProbeProvider;
   readonly now?: () => string;
+  readonly newId?: () => string;
 }
 
 export interface IpcResult {
@@ -41,6 +60,7 @@ export type IpcHandler = (payload: unknown) => Promise<IpcResult> | IpcResult;
 /** Builds the channel -> handler dispatch table. Never exposed directly to the renderer. */
 export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcHandler> {
   const now = deps.now ?? (() => new Date().toISOString());
+  const newId = deps.newId ?? (() => crypto.randomUUID());
 
   return {
     'desktop.select-file': async () => {
@@ -105,6 +125,97 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       );
       return { ok: true, data: updated };
     },
+    'desktop.provider-profile.save': async (payload): Promise<IpcResult> => {
+      const request = asSaveProviderProfileRequest(payload);
+      if (request === undefined) {
+        return { ok: false, error: 'Invalid provider profile request' };
+      }
+      const issues = validateProviderProfileInput(request);
+      if (issues.length > 0) {
+        return { ok: false, error: issues.map((issue) => issue.message).join('; ') };
+      }
+
+      const timestamp = now();
+      let id = request.id;
+      let secretHandleId: string;
+      let createdAt: string;
+      if (id !== undefined) {
+        const existing = deps.localDatabase.getProviderProfile(id);
+        if (existing === undefined) return { ok: false, error: 'Unknown provider profile id' };
+        secretHandleId = existing.secretHandleId;
+        createdAt = existing.createdAt;
+      } else {
+        id = newId();
+        secretHandleId = newId();
+        createdAt = timestamp;
+      }
+
+      // The key is written to OS-protected storage before the (secret-free) profile metadata
+      // is saved, so a crash between the two calls never leaves a profile pointing at a
+      // handle that was never actually written.
+      await deps.secretStore.set(secretHandleId, request.apiKey);
+      const profile: ProviderProfile = {
+        id,
+        provider: request.provider,
+        baseUrl: request.baseUrl,
+        modelId: request.modelId,
+        secretHandleId,
+        createdAt,
+        updatedAt: timestamp,
+      };
+      deps.localDatabase.saveProviderProfile(profile);
+      return { ok: true, data: profile };
+    },
+    'desktop.provider-profile.list': (): IpcResult => ({
+      ok: true,
+      data: deps.localDatabase.listProviderProfiles(),
+    }),
+    'desktop.provider-profile.delete': async (payload): Promise<IpcResult> => {
+      const id = asProfileId(payload);
+      if (id === undefined) return { ok: false, error: 'Invalid profile id' };
+      const existing = deps.localDatabase.getProviderProfile(id);
+      if (existing === undefined) return { ok: false, error: 'Unknown provider profile id' };
+      await deps.secretStore.delete(existing.secretHandleId);
+      deps.localDatabase.deleteProviderProfile(id);
+      return { ok: true };
+    },
+    'desktop.provider-profile.begin-session': async (payload): Promise<IpcResult> => {
+      const id = asProfileId(payload);
+      if (id === undefined) return { ok: false, error: 'Invalid profile id' };
+      const profile = deps.localDatabase.getProviderProfile(id);
+      if (profile === undefined) return { ok: false, error: 'Unknown provider profile id' };
+      const apiKey = await deps.secretStore.get(profile.secretHandleId);
+      if (apiKey === null) return { ok: false, error: 'Provider key is no longer available' };
+      // Volatile, one-time handoff: the caller must discard this plaintext key when the
+      // session ends and never persist or log it — mirrors
+      // apps/editor-web/src/joy-agent/byok-session.ts's forgetByokConfig semantics for the
+      // existing manual-entry BYOK flow this is designed to slot into.
+      return {
+        ok: true,
+        data: {
+          provider: profile.provider,
+          baseUrl: profile.baseUrl,
+          modelId: profile.modelId,
+          apiKey,
+        },
+      };
+    },
+    'desktop.provider-profile.test': async (payload): Promise<IpcResult> => {
+      const id = asProfileId(payload);
+      if (id === undefined) return { ok: false, error: 'Invalid profile id' };
+      const profile = deps.localDatabase.getProviderProfile(id);
+      if (profile === undefined) return { ok: false, error: 'Unknown provider profile id' };
+      const apiKey = await deps.secretStore.get(profile.secretHandleId);
+      if (apiKey === null) return { ok: false, error: 'Provider key is no longer available' };
+      // The key is used for exactly this one probe call and never returned to the caller —
+      // `report` is the redacted shape documented in provider-sdk's openai-compatible adapter.
+      const report = await deps.probeProvider({
+        baseUrl: profile.baseUrl,
+        apiKey,
+        modelId: profile.modelId,
+      });
+      return { ok: true, data: report };
+    },
   };
 }
 
@@ -163,6 +274,37 @@ function asJobId(value: unknown): string | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = (value as { jobId?: unknown }).jobId;
   return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
+}
+
+function asProfileId(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = (value as { id?: unknown }).id;
+  return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
+}
+
+interface SaveProviderProfileRequest {
+  readonly id?: string;
+  readonly provider: string;
+  readonly baseUrl: string;
+  readonly modelId: string;
+  readonly apiKey: string;
+}
+
+function asSaveProviderProfileRequest(value: unknown): SaveProviderProfileRequest | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate['provider'] !== 'string') return undefined;
+  if (typeof candidate['baseUrl'] !== 'string') return undefined;
+  if (typeof candidate['modelId'] !== 'string') return undefined;
+  if (typeof candidate['apiKey'] !== 'string' || candidate['apiKey'].length === 0) return undefined;
+  if (candidate['id'] !== undefined && typeof candidate['id'] !== 'string') return undefined;
+  return {
+    ...(candidate['id'] !== undefined ? { id: candidate['id'] as string } : {}),
+    provider: candidate['provider'],
+    baseUrl: candidate['baseUrl'],
+    modelId: candidate['modelId'],
+    apiKey: candidate['apiKey'],
+  };
 }
 
 export type { WorkerStatus };

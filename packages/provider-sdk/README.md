@@ -10,3 +10,23 @@
 **Must not:** Provider-specific fields leaking into core schemas (§2.12); providers mutating projects (§21.9).
 
 Dependency rule (§9.1): the graph points inward — apps depend on packages, packages depend on schema/primitives, never the reverse, and core packages never import from `apps/*`.
+
+## BYOK desktop migration additions (wave 3)
+
+Two modules added for the JOY Media desktop migration's BYOK/JOY-Agent wave, both
+host-agnostic (no `node:*`, `electron`, or `apps/*` imports) so they work the same from
+`apps/desktop`'s Electron main process today or, if a future wave decides to, from a browser
+Worker:
+
+- `validation.ts` — `validateProviderProfileInput`: fails closed on an unsupported provider, an
+  empty model id, or an insecure base URL (only `https://`, or `http://` to a loopback host).
+  Field names (`provider`, `baseUrl`, `modelId`) mirror
+  `apps/editor-web/src/joy-agent/protocol.ts`'s `ByokSessionConfig` deliberately.
+- `adapters/openai-compatible.ts` — `probeOpenAiCompatibleProvider`: a dependency-injected
+  connectivity probe (tiny synthetic request, never real content) that confirms a profile's
+  credentials and base URL work, returning a redacted report that never contains the provider
+  response body, endpoint, or credential.
+
+Persistent, encrypted secret storage (Electron `safeStorage`/DPAPI) and the IPC surface that
+uses these two modules live in `apps/desktop/src/main/secrets/` and
+`apps/desktop/src/main/ipc-handlers.ts` — see that package's README.

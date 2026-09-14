@@ -218,3 +218,104 @@ path, and survive an actual crash" is still unverified end-to-end.
 items above (project-store IPC wiring, job dispatch to the Worker), the wave 1 runtime smoke
 test gate should be cleared first, since both build directly on `electron-entry.ts` actually
 running.
+
+---
+
+## Wave 3 — JOY Agent/BYOK behind desktop host (COMPLETE for the host-side substrate; editor-web integration deferred)
+
+**Commit:** see `git log` for the commit adding `packages/provider-sdk/src/validation.ts`,
+`packages/provider-sdk/src/adapters/openai-compatible.ts`, and
+`apps/desktop/src/main/secrets/**` (wave 3 commit, after the wave 2 commit).
+
+**A scoping decision made before writing any code:** the brief says "move the existing JOY
+Agent protocol and local engine behind the desktop host." That engine is
+`apps/editor-web/src/joy-agent/**` — roughly 90 files, live, heavily tested, the product's
+actual working AI-editing feature today (`byok-session.ts`, `engine.worker.ts`,
+`run-controller.ts`, the approval/revision/readback chain, etc.). Actually relocating it into
+`apps/desktop` in one pass, with no way to runtime-smoke-test the result in this session (see
+the wave 1/2 known gap), would risk regressing a live feature with no way to catch the
+regression before it's committed. That is exactly the kind of change the lead brief's own
+engineering-discipline section warns against. Instead, this wave builds the new
+**desktop-host-only capability the browser-only implementation structurally cannot have** —
+OS-protected persistent key storage — as additive infrastructure the existing engine can be
+wired into later, and does not touch a single file under `apps/editor-web/src/joy-agent/`.
+
+**What was done:**
+
+- `packages/provider-sdk/src/validation.ts`: `validateProviderProfileInput` — fails closed on
+  an unsupported provider, empty model id, or insecure base URL (`https://` only, except
+  `http://` to a loopback host for local OpenAI-compatible servers like Ollama). Field names
+  (`provider`, `baseUrl`, `modelId`) deliberately match
+  `apps/editor-web/src/joy-agent/protocol.ts`'s existing `ByokSessionConfig`.
+- `packages/provider-sdk/src/adapters/openai-compatible.ts`: `probeOpenAiCompatibleProvider` —
+  a dependency-injected (no `fetch`/`node:*`/`electron` import) connectivity probe: a tiny,
+  fixed synthetic request, never real content. Maps HTTP 401/403 → `AUTH_FAILED`, other
+  non-2xx → `PROVIDER_INCOMPATIBLE`, an oversized response → `RESPONSE_TOO_LARGE`, an
+  `AbortError` → `TIMEOUT`, anything else → `NETWORK_ERROR`. The report never includes the
+  response body, endpoint, or credential — tested explicitly (`JSON.stringify(report)` must
+  never contain the fake secret or the fake leaking body used in tests).
+- `apps/desktop/src/main/secrets/electron-secret-store.ts`: `createElectronSecretStore` —
+  implements provider-sdk's existing `SecretStore` contract (the same one
+  `createMemorySecretStore` implements) over Electron's `safeStorage` (OS-level DPAPI on
+  Windows) plus `LocalDatabase`'s new `secrets` table for ciphertext only. Refuses to store a
+  key at all if `safeStorage.isEncryptionAvailable()` is false, rather than a plaintext
+  fallback. `redact()` mirrors the in-memory reference implementation's semantics: every value
+  this instance has ever encrypted or decrypted stays redactable, even after deletion.
+- `apps/desktop/src/store/local-database.ts`: two new tables — `secrets` (ciphertext only,
+  keyed by handle id) and `provider_profiles` (non-secret metadata: `provider`, `baseUrl`,
+  `modelId`, a `secretHandleId` pointer — never the key) — plus CRUD methods for both.
+- `apps/desktop/src/main/ipc-handlers.ts`: five new channels —
+  `desktop.provider-profile.save` (validates, writes the key to `safeStorage` _before_ writing
+  profile metadata, so a crash between the two never orphans a profile pointing at a
+  never-written handle; rejects an `id` that doesn't already exist rather than creating a
+  forged profile), `.list` (metadata only — tested that the JSON response never contains a
+  saved secret), `.delete` (removes both profile and secret), `.begin-session` (a **volatile,
+  one-time** plaintext handoff of a `ByokSessionConfig`-shaped object, matching
+  `apps/editor-web/src/joy-agent/byok-session.ts`'s existing `forgetByokConfig` volatility
+  contract for manually-entered keys), `.test` (runs the host-side probe with the resolved key
+  and returns only the redacted report — the key never reaches the renderer for a connectivity
+  test). Added to `ipc.ts`, `preload/ipc-channels.cjs` (kept in sync), and wired for real in
+  `electron-entry.ts` (`safeStorage` import, `createElectronSecretStore`,
+  `probeOpenAiCompatibleProvider(request, fetch)`).
+- `apps/desktop/package.json`/`tsconfig.json`: added `@joy-media/provider-sdk` as a real
+  dependency (workspace TS project reference).
+- Updated `apps/desktop/README.md` (new "BYOK / JOY Agent provider profiles" section) and
+  `packages/provider-sdk/README.md` (new addendum) with the same explicit "not yet wired into
+  the renderer" framing as the wave 2 deferrals.
+
+**Explicitly deferred (not silently dropped):**
+
+- No code under `apps/editor-web/src/joy-agent/` was touched. `byok-session.ts`'s manual
+  key-entry flow still works exactly as it does today; a future wave would add a call to
+  `desktop.provider-profile.begin-session` (or a profile-management UI) as an alternative to
+  typing the key in each session — this wave only makes that call possible, not automatic.
+- The `.test` probe and `.begin-session` handoff are both real and tested against a mocked
+  `SecretStore`/`fetch`, but neither has been exercised against Electron's real `safeStorage`
+  (needs a real OS session — see the running known gap) or a real provider endpoint.
+
+**Commands run (this worktree):**
+
+- `pnpm --filter @joy-media/provider-sdk build` (`tsc -b`) → **passes**.
+- `pnpm --filter @joy-media/desktop build` (`tsc -b`) → **passes**.
+- `pnpm vitest run apps/desktop packages/provider-sdk` → **214/214 passed** across 24 files, up
+  from 171 tests across 21 files combined at the end of wave 2 (desktop: 56→84 tests, 10→11
+  files — new `secrets/electron-secret-store.test.ts` (10 tests), `local-database.test.ts`
+  21→33 tests, `ipc-handlers.test.ts` 13→22 tests; provider-sdk: 115→130 tests, 11→13 files —
+  new `validation.test.ts` (7 tests) and `adapters/openai-compatible.test.ts` (8 tests)).
+- `pnpm typecheck` (root, all 42 workspace projects) → **passes**.
+- `pnpm lint` (root eslint) → **passes, 0 problems** (one `@typescript-eslint/consistent-type-imports`
+  violation from an inline `import()` type annotation was caught and fixed during this wave).
+- `pnpm format:check` (root prettier) → **same single pre-existing failure** as waves 1-2
+  (`apps/editor-web/src/playback-loop-contract.test.ts`, unrelated, predates this worktree). All
+  files this wave touched are prettier-clean.
+
+**Known gap:** same running gap as waves 1-2 — no real Electron window/process in this session,
+so `safeStorage`'s actual availability/behavior (it can return
+`isEncryptionAvailable() === false` on a machine without OS credential protection configured,
+which the code handles by refusing to store rather than falling back to plaintext, but that
+path itself is untested against the real API) is unverified end-to-end.
+
+**Next gate:** none required to start wave 4 (VPS account/site routes) — it is a different
+codebase area (`apps/api`) with no dependency on the wave 1-3 desktop work. The wave 1 runtime
+smoke test gate remains the thing to clear before trusting any of `apps/desktop`'s Electron
+wiring end-to-end.

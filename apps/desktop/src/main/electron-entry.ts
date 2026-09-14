@@ -7,7 +7,7 @@
  * Do not add business logic here. Add it to a testable sibling module and call it from
  * here instead.
  */
-import { app, BrowserWindow, dialog, ipcMain, protocol, session } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, protocol, safeStorage, session } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -26,6 +26,8 @@ import { registerShutdownHooks } from './shutdown.js';
 import { resolveDesktopPaths } from '../store/paths.js';
 import { LocalDatabase } from '../store/local-database.js';
 import { checksumFile, classifyMediaKind } from './media-checksum.js';
+import { createElectronSecretStore } from './secrets/electron-secret-store.js';
+import { probeOpenAiCompatibleProvider } from '@joy-media/provider-sdk';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = process.env['NODE_ENV'] !== 'production';
@@ -57,6 +59,7 @@ if (!app.requestSingleInstanceLock()) {
     command: process.execPath,
     args: [join(__dirname, '..', '..', '..', 'worker', 'src', 'index.ts')],
   });
+  const secretStore = createElectronSecretStore(localDatabase, safeStorage);
   const ipcHandlers = createIpcHandlers({
     fileRegistry,
     workerSupervisor,
@@ -72,6 +75,8 @@ if (!app.requestSingleInstanceLock()) {
         : await dialog.showOpenDialog({ properties: ['openFile'] });
       return { canceled: result.canceled, path: result.filePaths[0] };
     },
+    secretStore,
+    probeProvider: (request) => probeOpenAiCompatibleProvider(request, fetch),
   });
 
   ipcMain.handle('joy-desktop-ipc', (_event, request: IpcRequest) =>

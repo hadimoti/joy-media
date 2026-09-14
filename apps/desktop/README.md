@@ -1,9 +1,10 @@
 # JOY Media desktop shell
 
 This package is the desktop host for JOY Media: a real Electron main/preload bootstrap
-(wave 1) plus a local SQLite-backed runtime (wave 2) of the final migration, built on top of
-a dependency-free policy contract. It deliberately does not contain editor, timeline,
-rendering, or agent logic: those remain in `apps/editor-web` and shared packages.
+(wave 1), a local SQLite-backed runtime (wave 2), and encrypted BYOK provider-profile storage
+(wave 3) of the final migration, built on top of a dependency-free policy contract. It
+deliberately does not contain editor, timeline, rendering, or agent logic: those remain in
+`apps/editor-web` and shared packages.
 
 ## Layout
 
@@ -12,9 +13,9 @@ rendering, or agent logic: those remain in `apps/editor-web` and shared packages
   milestone; still exported as a library via `src/index.ts`).
 - `src/main/` — the Electron main process, split into small, dependency-injected, unit-tested
   modules (`file-registry.ts`, `worker-supervisor.ts`, `ipc-handlers.ts`, `window.ts`,
-  `shutdown.ts`, `media-checksum.ts`) plus the thin, untested wiring entry
-  `electron-entry.ts` that imports the real `electron` module and calls into them. Business
-  logic belongs in the testable modules, never in `electron-entry.ts`.
+  `shutdown.ts`, `media-checksum.ts`, `secrets/electron-secret-store.ts`) plus the thin,
+  untested wiring entry `electron-entry.ts` that imports the real `electron` module and calls
+  into them. Business logic belongs in the testable modules, never in `electron-entry.ts`.
 - `src/store/` — the desktop-only local runtime database (wave 2): `paths.ts` resolves the
   per-user database file and media root under Electron's `userData` directory (pure — the
   caller passes that path in, so it's testable without Electron), and `local-database.ts`
@@ -58,6 +59,45 @@ rendering, or agent logic: those remain in `apps/editor-web` and shared packages
   the Worker is stopped, on every shutdown path (`before-quit`, `window-all-closed`, `SIGINT`,
   `SIGTERM`).
 
+## BYOK / JOY Agent provider profiles (wave 3)
+
+Implements the locked owner decision that provider API keys live only in "Windows-protected
+storage (DPAPI/Keychain equivalent) through the host" — never in renderer state, project
+files, logs, telemetry, Git, or Gbrain. Does **not** move
+`apps/editor-web/src/joy-agent/**`'s live, heavily-tested agent engine into this package —
+that is a large, high-risk refactor of working code this pass deliberately did not attempt
+without a real Electron runtime available to smoke-test it against (see the known gap below).
+Instead, this wave adds the desktop-host-side substrate that engine can be wired into later:
+
+- **Encrypted storage:** `main/secrets/electron-secret-store.ts`'s `createElectronSecretStore`
+  implements `@joy-media/provider-sdk`'s `SecretStore` contract (the same interface
+  `createMemorySecretStore` implements) over Electron's `safeStorage` — OS-level DPAPI on
+  Windows, Keychain on macOS, libsecret on Linux — plus `LocalDatabase`'s new `secrets` table
+  for ciphertext persistence. The table only ever holds ciphertext; `set`/`get` refuse to run
+  if `safeStorage.isEncryptionAvailable()` is false rather than falling back to plaintext.
+- **Provider profiles:** `LocalDatabase`'s new `provider_profiles` table stores non-secret
+  metadata only (`provider`, `baseUrl`, `modelId`, a `secretHandleId` pointer — never the key
+  itself). Field names deliberately mirror
+  `apps/editor-web/src/joy-agent/protocol.ts`'s `ByokSessionConfig`.
+- **Model/base-URL validation:** `@joy-media/provider-sdk`'s new `validateProviderProfileInput`
+  fails closed on an unsupported provider, empty model id, or insecure base URL (`https://`
+  only, except `http://` to a loopback host for local OpenAI-compatible servers).
+- **IPC surface** (`ipc-handlers.ts`): `desktop.provider-profile.save` (validates, then writes
+  the key to `safeStorage` before writing profile metadata — so a crash between the two never
+  leaves a profile pointing at a handle that was never written), `.list` (metadata only),
+  `.delete` (removes both the profile and its secret), `.begin-session` (a **volatile, one-time**
+  plaintext handoff of a `ByokSessionConfig`-shaped object — the same shape and volatility
+  contract `apps/editor-web/src/joy-agent/byok-session.ts`'s `forgetByokConfig` already
+  enforces for manually-entered keys today), and `.test` (runs
+  `@joy-media/provider-sdk`'s `probeOpenAiCompatibleProvider` host-side with the resolved key
+  and returns only a redacted report — the key never reaches the renderer for a connectivity
+  test).
+
+**Explicitly deferred:** no renderer-side code calls any of these five channels yet.
+`apps/editor-web`'s BYOK UI still works exactly as it does today (manual key entry each
+session); wiring it to call `desktop.provider-profile.begin-session` instead — and building a
+profile-management UI — is future work, same honesty pattern as wave 2's deferred items.
+
 ## Boundaries
 
 - **Editor origin:** only the configured JOY production origin and explicit loopback development origins may request the bridge. Unknown origins are rejected before IPC dispatch.
@@ -77,7 +117,8 @@ worktree: this background session has no interactive display, and the `electron`
 binary download is gated by `pnpm-workspace.yaml`'s `allowBuilds` supply-chain allowlist (it
 does not currently include `electron`). Add `electron: true` there (an explicit owner/Codex
 decision, not something this package does for itself) and run a real smoke test before treating
-wave 1 or wave 2 as done end-to-end.
+wave 1, wave 2, or wave 3 as done end-to-end — including whether `safeStorage` is actually
+available/unlocked in a real user session, which only a real OS session can confirm.
 
 ## Commands
 

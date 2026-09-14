@@ -4,6 +4,7 @@ import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
 import type { SupervisedChild } from './worker-supervisor.js';
 import { LocalDatabase } from '../store/local-database.js';
+import { createMemorySecretStore } from '@joy-media/provider-sdk';
 
 function deps() {
   const fileRegistry = createFileRegistry(() => 'ref-1');
@@ -23,13 +24,19 @@ function deps() {
     byteSize: 123,
     kind: 'video' as const,
   }));
+  const secretStore = createMemorySecretStore();
+  const probeProvider = vi.fn(async () => ({ ok: true, modelId: 'gpt-4o-mini' }));
+  let idCount = 0;
   return {
     fileRegistry,
     workerSupervisor,
     showOpenDialog,
     localDatabase,
     probeMedia,
+    secretStore,
+    probeProvider,
     now: () => 'T0',
+    newId: () => `id-${++idCount}`,
   };
 }
 
@@ -213,5 +220,203 @@ describe('IPC dispatch', () => {
     });
     expect(result.ok).toBe(false);
     expect(d.localDatabase.getJob('job-1')?.status).toBe('done');
+  });
+
+  it('provider-profile.save rejects an invalid profile and stores nothing', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openai-compatible',
+        baseUrl: 'not-a-url',
+        modelId: 'gpt-4o-mini',
+        apiKey: 'sk-secret',
+      },
+    });
+    expect(result.ok).toBe(false);
+    expect(d.localDatabase.listProviderProfiles()).toEqual([]);
+  });
+
+  it('provider-profile.save creates a profile, stores the key in the secret store, and never returns it', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.example.com/v1',
+        modelId: 'gpt-4o-mini',
+        apiKey: 'sk-secret',
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(JSON.stringify(result.data)).not.toContain('sk-secret');
+    const saved = d.localDatabase.listProviderProfiles();
+    expect(saved).toHaveLength(1);
+    expect(await d.secretStore.get(saved[0]!.secretHandleId)).toBe('sk-secret');
+  });
+
+  it('provider-profile.save with an unknown id is rejected rather than creating a forged profile', async () => {
+    const handlers = createIpcHandlers(deps());
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        id: 'forged-id',
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.example.com/v1',
+        modelId: 'gpt-4o-mini',
+        apiKey: 'sk-secret',
+      },
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it('provider-profile.save with a real id rotates the key and keeps the same profile id', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const created = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.example.com/v1',
+        modelId: 'gpt-4o-mini',
+        apiKey: 'sk-old',
+      },
+    });
+    const id = (created.data as { id: string }).id;
+    const updated = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        id,
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.example.com/v1',
+        modelId: 'gpt-4o',
+        apiKey: 'sk-new',
+      },
+    });
+    expect(updated.ok).toBe(true);
+    expect((updated.data as { id: string }).id).toBe(id);
+    expect(d.localDatabase.listProviderProfiles()).toHaveLength(1);
+    const profile = d.localDatabase.getProviderProfile(id)!;
+    expect(await d.secretStore.get(profile.secretHandleId)).toBe('sk-new');
+  });
+
+  it('provider-profile.list never includes a secret value', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'x',
+        apiKey: 'sk-secret',
+      },
+    });
+    const list = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.provider-profile.list',
+    });
+    expect(list.ok).toBe(true);
+    expect(JSON.stringify(list.data)).not.toContain('sk-secret');
+  });
+
+  it('provider-profile.delete removes both the profile and its secret', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const created = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'x',
+        apiKey: 'sk-secret',
+      },
+    });
+    const profile = created.data as { id: string; secretHandleId: string };
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.provider-profile.delete',
+      payload: { id: profile.id },
+    });
+    expect(result.ok).toBe(true);
+    expect(d.localDatabase.getProviderProfile(profile.id)).toBeUndefined();
+    expect(await d.secretStore.get(profile.secretHandleId)).toBeNull();
+  });
+
+  it('provider-profile.begin-session hands back the plaintext key once, ByokSessionConfig-shaped', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const created = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.example.com/v1',
+        modelId: 'gpt-4o-mini',
+        apiKey: 'sk-secret',
+      },
+    });
+    const id = (created.data as { id: string }).id;
+    const session = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.provider-profile.begin-session',
+      payload: { id },
+    });
+    expect(session).toEqual({
+      ok: true,
+      data: {
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.example.com/v1',
+        modelId: 'gpt-4o-mini',
+        apiKey: 'sk-secret',
+      },
+    });
+  });
+
+  it('provider-profile.begin-session fails for an unknown id', async () => {
+    const handlers = createIpcHandlers(deps());
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.provider-profile.begin-session',
+      payload: { id: 'missing' },
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it('provider-profile.test probes with the resolved key but never returns it to the caller', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const created = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.example.com/v1',
+        modelId: 'gpt-4o-mini',
+        apiKey: 'sk-secret',
+      },
+    });
+    const id = (created.data as { id: string }).id;
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.provider-profile.test',
+      payload: { id },
+    });
+    expect(result).toEqual({ ok: true, data: { ok: true, modelId: 'gpt-4o-mini' } });
+    expect(d.probeProvider).toHaveBeenCalledWith({
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'sk-secret',
+      modelId: 'gpt-4o-mini',
+    });
+    expect(JSON.stringify(result)).not.toContain('sk-secret');
   });
 });

@@ -11,6 +11,9 @@
     "dev:electron": "electron .",
     "package:dev": "node scripts/package-dev.mjs"
   },
+  "dependencies": {
+    "@joy-media/provider-sdk": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "^22.16.0",
     "electron": "^44.3.0"

@@ -134,7 +134,12 @@ per the lead brief's stop conditions.
   forcing a native/`node:sqlite` dependency onto browser-targeted packages), Worker supervision
   in `apps/desktop/src/main/worker-supervisor.ts`.
 - Wave 3: `packages/provider-sdk/src/**` (extend, do not fork), `apps/desktop/src/main/secrets/**`
-  (DPAPI wrapper).
+  (DPAPI/Keychain wrapper). **Status: implemented** as `provider-sdk`'s `validation.ts` +
+  `adapters/openai-compatible.ts`, and `apps/desktop`'s `main/secrets/electron-secret-store.ts`
+  (Electron `safeStorage`-backed `SecretStore`) plus `store/local-database.ts`'s new `secrets`
+  and `provider_profiles` tables and five new IPC channels. Deliberately does **not** relocate
+  `apps/editor-web/src/joy-agent/**` (the large, live, tested JOY Agent engine) — see
+  `docs/joy-media-final-migration-progress.md`'s wave 3 entry for why and what remains.
 - Wave 4: `apps/api/src/**` new route modules + `postgres-migrations.ts` additions,
   `apps/editor-web` account panel UI, `deploy/` doc updates (not live changes).
 - Wave 5: new `packages/invoice-ledger` (or `apps/api/src/invoice-*.ts`), disabled by default.
