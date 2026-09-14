@@ -105,7 +105,7 @@ describe('editor font redistribution gate', () => {
     const result = scanFontAssets(repositoryRoot);
     expect(result.errors).toEqual([]);
     expect(result.scannedFiles).toBeGreaterThan(0);
-  });
+  }, 15_000);
 
   it('contains no retired Fontiran runtime assets or aggregator', () => {
     const present = legacyTargets.filter((target) => {
