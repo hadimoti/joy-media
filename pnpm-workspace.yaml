@@ -3,6 +3,7 @@ packages:
   - 'packages/*'
   - 'tooling/*'
 allowBuilds:
+  electron: true
   esbuild: true
 overrides:
   '@xmldom/xmldom': 0.8.15

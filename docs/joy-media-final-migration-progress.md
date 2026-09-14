@@ -854,3 +854,134 @@ been opened in any session; `release:publish` needs a real database and the
 pinned in a real desktop build before `desktop.check-for-update` can ever return anything but
 `release-key-unconfigured`; and the wave 1 runtime smoke test remains the prerequisite before
 any of `apps/desktop`'s Electron wiring — old or new — is trusted end-to-end.
+
+---
+
+## Wave 9 — Real Electron runtime smoke test (COMPLETE)
+
+**Context:** every prior wave's entry (0 through 8) names the same standing gap: no session had
+ever actually launched `apps/desktop`'s Electron main process. `pnpm --filter @joy-media/desktop
+test` only ever exercised the pure, injected-dependency modules under `src/main/**` — it never
+imported `electron` itself, so `app.whenReady`, real `BrowserWindow` construction, and the real
+`ipcMain.handle('joy-desktop-ipc', ...)` registration had zero evidence behind them. This wave
+closes that gap with an automated, non-interactive runtime check instead of leaving it as a
+manual "someone should open the app once" action item.
+
+**What was done:**
+
+- Added a `--smoke` branch to `apps/desktop/src/main/electron-entry.ts`, gated on
+  `process.argv.includes('--smoke')`, checked once at module load. Inside the existing
+  `app.whenReady().then(...)` callback (unchanged otherwise — same window/session/protocol
+  wiring every other launch path goes through):
+  - The `BrowserWindow` is constructed with `show: false` instead of the default visible
+    window — same secure `webPreferences` (`buildSecureWebPreferences`), same
+    `loadURL(resolveRendererTarget(isDev))` call, same `setWindowOpenHandler` denial. Nothing
+    about window security or wiring is skipped or mocked for smoke mode.
+  - Logs `[joy-desktop] electron runtime smoke passed: app ready, window initialized, IPC
+wired`. This claim is truthful, not aspirational, at the point it is logged:
+    `ipcMain.handle('joy-desktop-ipc', ...)` is registered unconditionally earlier in this same
+    module, before the `--smoke` check even exists in the file, so by the time this line runs
+    the app is ready, the window is constructed, and IPC is wired.
+  - Calls `app.quit()` after a 300ms `setTimeout`, giving the log line time to flush to stdout
+    before the process exits, then exits on its own — no manual Cmd+Q, no test harness needed
+    to kill the process.
+  - Updated this file's top-of-file doc comment, which previously pointed here (at "the wave 1
+    smoke-test gap") as the reason the file had no test coverage; it now describes what
+    `test:smoke` does and does not prove instead.
+- Added `"test:smoke": "electron . --smoke"` to `apps/desktop/package.json`'s `scripts`,
+  alongside the existing `dev:electron` (`electron .`) — both run the built `dist/main/
+electron-entry.js` `main` entry, so `pnpm --filter @joy-media/desktop build` must precede
+  either.
+
+**What this proves, and what it still doesn't:**
+
+- Proves, with a real Electron binary and a real exit code, that `app.whenReady()` resolves,
+  `BrowserWindow` construction with this app's real secure `webPreferences` does not throw, and
+  `ipcMain.handle` registration succeeds — the three things every prior wave's entry could only
+  claim from unit tests of the pure modules feeding into this file, never from the file itself.
+- Does **not** prove the renderer actually loads and paints (the window is never shown and
+  `loadURL`'s result is never awaited, matching the pre-existing `void win.loadURL(...)` in the
+  non-smoke path), that a real `joy-desktop-ipc` round trip from a loaded renderer succeeds, or
+  that packaging/signing (wave 7) produces a launchable artifact. Those remain open, same as
+  every prior wave's entry already said.
+
+**Commands run (this worktree, this session):**
+
+- `pnpm --filter @joy-media/desktop build` (`tsc -b`) → **passes**.
+- `pnpm --filter @joy-media/desktop test` → **90/90 passed** across 12 files, unchanged from
+  wave 8 — this wave adds no new unit tests, since the smoke path only exists to be run under a
+  real Electron binary, not `vitest`'s Node process.
+- `pnpm --filter @joy-media/desktop test:smoke` (equivalently `pnpm exec electron . --smoke`
+  from `apps/desktop`) → printed exactly `[joy-desktop] electron runtime smoke passed: app
+ready, window initialized, IPC wired` and exited `0` on its own, twice (once invoked directly
+  via `pnpm exec electron . --smoke`, once via the `pnpm run test:smoke` script itself) — the
+  first real Electron window construction and clean exit in this project's history.
+- `pnpm typecheck` (root, `tsc -b`) → **passes**.
+
+**Next gate:** none for `apps/desktop` main-process wiring. The packaging/signing gates from
+wave 7/8 (certificate, `JOY_MEDIA_RELEASE_SIGNING_PUBLIC_KEY`, `release:publish` credentials)
+are unchanged by this wave.
+
+---
+
+## Wave 10 — editor-web typed `window.joyDesktop` client (COMPLETE)
+
+**Context:** `apps/editor-web` had no code at all that referenced `window.joyDesktop` — the
+bridge `preload.cjs` installs only exposes a generic, untyped `invoke(channel, payload)` plus
+the raw channel list (see wave 1/7 entries above). Anything in the editor that needs to detect
+the desktop host, read Worker status, prompt a native file picker, or check for an update would
+otherwise have had to call that untyped `invoke` directly, one channel string at a time, with no
+shared request/response types and no test coverage.
+
+**What was done:**
+
+- Added `apps/editor-web/src/desktop-client.ts`: typed wrappers around `window.joyDesktop`,
+  covering the four use cases that exist today —
+  - `isDesktopHost()` — `typeof window !== 'undefined' && window.joyDesktop !== undefined`; safe
+    to call from any environment, including one with no `window` at all.
+  - `selectDesktopFile()` — wraps `desktop.select-file`; resolves to a typed
+    `DesktopFileSelection` (mirrors `apps/desktop/src/file-boundary.ts`'s `OpaqueFileRef`) or
+    `undefined` if the user cancels the native dialog.
+  - `getDesktopWorkerStatus()` — wraps `desktop.worker-status`; resolves to a typed
+    `DesktopWorkerStatus` (mirrors `apps/desktop/src/worker-status.ts`'s `WorkerStatus`).
+  - `checkForDesktopUpdate(request)` — wraps `desktop.check-for-update`; takes a
+    `DesktopUpdateCheckRequest` (the manifest the caller already fetched from the existing
+    public `GET /v1/releases/:channel` route, plus the caller's own subscription state) and
+    resolves to a typed `DesktopUpdateDecision` (mirrors `apps/desktop/src/main/
+auto-update-policy.ts`'s `AutoUpdateDecision`). Does not fetch the manifest itself and
+    cannot download or install anything — the pinned signing key and running version stay
+    main-process-only, unchanged from wave 7/8.
+  - All four throw or reject with `'joy-desktop bridge is unavailable outside the desktop
+host'` if called outside the desktop shell, rather than silently returning `undefined` data
+    or throwing a raw `TypeError` on `window.joyDesktop` being `undefined`.
+  - `apps/desktop` is a sibling app, not a workspace package, so this module never imports from
+    it — every mirrored type is redeclared locally, with a doc comment pointing at the
+    `apps/desktop` source of truth it mirrors, the same pattern `apps/desktop/src/main/
+ipc-handlers.ts` already uses for its own request/response shape guards.
+- Added `apps/editor-web/src/desktop-client.test.ts` (`@vitest-environment jsdom`, the same
+  per-file pragma `html-scene-browser-host.test.ts` already uses to get a real mutable
+  `window`): 9 tests covering both the "outside the desktop host" rejection path and the
+  "bridge present" path (mocked `invoke`) for all three async helpers, plus `isDesktopHost`'s
+  two states. Each test restores `window.joyDesktop` to absent in `afterEach` so no test's mock
+  bridge leaks into the next.
+
+**Commands run (this worktree, this session):**
+
+- `pnpm vitest run apps/editor-web/src/desktop-client.test.ts` → **9/9 passed**.
+- `pnpm --filter @joy-media/editor-web test` → **288 files / 1680 tests passed** (up from 287
+  files / 1671 tests before this wave's one new test file — no other editor-web test changed).
+- `pnpm typecheck` (root, `tsc -b`) → **passes**, both before and after this wave's change.
+
+**Explicitly deferred (not silently dropped):**
+
+- No panel or UI component calls any of these four helpers yet — same "substrate built, UI
+  wiring deferred" pattern as wave 7's `desktop.check-for-update` entry above. Nothing in the
+  editor currently shows desktop-host-only affordances (a native file picker button, a Worker
+  status indicator, an update banner).
+- `checkForDesktopUpdate` still has no caller that fetches a manifest from
+  `GET /v1/releases/:channel` or reads `GET /v1/account/subscription` — that wiring, and where
+  an "update available" UI would render, remains open.
+
+**Next gate:** none required for further `apps/editor-web`/`apps/desktop` work. Building actual
+UI on top of `desktop-client.ts` (file-picker button, Worker status indicator, update banner) is
+real follow-up work this wave only makes possible.

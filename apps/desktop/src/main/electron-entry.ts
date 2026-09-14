@@ -1,8 +1,10 @@
 /**
  * Real Electron main-process entrypoint. This file is intentionally thin: it only wires
  * the `electron` module to the pure, unit-tested modules in this directory. Nothing here
- * has its own test coverage — verifying it requires an actual Electron runtime (see
- * docs/joy-media-final-migration-progress.md for the wave 1 smoke-test gap).
+ * has its own unit-test coverage — verifying it requires an actual Electron runtime.
+ * `pnpm --filter @joy-media/desktop test:smoke` (wave 9, `--smoke` branch below) launches this
+ * file under the real Electron binary as a headless runtime check; see
+ * docs/joy-media-final-migration-progress.md for what that does and does not prove.
  *
  * Do not add business logic here. Add it to a testable sibling module and call it from
  * here instead.
@@ -32,6 +34,12 @@ import { evaluateAutoUpdate } from './auto-update-policy.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = process.env['NODE_ENV'] !== 'production';
+// Automated runtime smoke check (`pnpm --filter @joy-media/desktop test:smoke`, wave 9): a real
+// `electron .` launch that proves app.whenReady, window construction, and IPC registration all
+// actually happen in this runtime, then exits on its own — closing the wave 1 gap documented in
+// docs/joy-media-final-migration-progress.md (no prior session ever opened a real Electron
+// window). Never shows a window and never touches production data.
+const isSmokeMode = process.argv.includes('--smoke');
 
 // Privileged so the packaged renderer behaves like https:// (fetch, CSP, secure context)
 // instead of the restricted "file://"-style origin Electron gives unregistered schemes.
@@ -133,10 +141,24 @@ if (!app.requestSingleInstanceLock()) {
     const win = new BrowserWindow({
       width: 1440,
       height: 900,
+      show: !isSmokeMode,
       webPreferences: buildSecureWebPreferences(join(__dirname, '..', 'preload', 'preload.cjs')),
     });
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     void win.loadURL(resolveRendererTarget(isDev));
+
+    if (isSmokeMode) {
+      // By this point `app.whenReady()` has resolved, the window above is constructed, and
+      // `ipcMain.handle('joy-desktop-ipc', ...)` was registered unconditionally above (before
+      // this smoke branch even exists) — so the three claims in this log line are all already
+      // true, not aspirational. The delay just gives the log line time to flush before quit.
+      console.log(
+        '[joy-desktop] electron runtime smoke passed: app ready, window initialized, IPC wired',
+      );
+      setTimeout(() => {
+        app.quit();
+      }, 300);
+    }
 
     registerShutdownHooks({
       onAppEvent: (event, listener) => {
