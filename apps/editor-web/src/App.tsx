@@ -2550,15 +2550,28 @@ function EditorWorkspace({
     const decoderResourceToken = `${previewResourcePrefixRef.current}:primary`;
     recordPreviewResourceCreated('primary-decoder', decoderResourceToken);
     handleMediaReady(decoder, createHtmlVideoMediaClock(video));
-    const firstClip = activeVideoClipAt(session.timelineProject, 0, [], session.visualProject);
-    if (firstClip !== undefined && firstClip.kind === 'video') {
-      void mediaResolver
-        .resolve(firstClip.assetId)
-        .then((source) => {
-          if (videoRef.current === video) video.src = source.url;
-        })
-        .catch(() => undefined);
-    }
+    // A project edit replaces the media resolver and invalidates any in-flight
+    // read owned by the previous render. Rehydrate the decoder from the live
+    // playhead instead of preloading the first clip at 0s; otherwise a newly
+    // placed library asset can stay selected on the timeline while the monitor
+    // keeps the prior frame indefinitely.
+    const current = stateRef.current;
+    const shouldPlay = current.playing;
+    const epoch = playbackOperation.begin(shouldPlay);
+    setPreviewVideoFrame(undefined);
+    void syncMediaToPlayhead(current.playheadUs, shouldPlay, epoch)
+      .then((ready) => {
+        if (ready || !playbackOperation.isCurrent(epoch)) return;
+        playbackOperation.begin(false);
+        stateRef.current = { ...stateRef.current, playing: false };
+        setState((active) => ({ ...active, playing: false }));
+      })
+      .catch(() => {
+        if (!playbackOperation.isCurrent(epoch)) return;
+        playbackOperation.begin(false);
+        stateRef.current = { ...stateRef.current, playing: false };
+        setState((active) => ({ ...active, playing: false }));
+      });
     return () => {
       playbackOperation.begin(false);
       video.pause();
@@ -2573,7 +2586,7 @@ function EditorWorkspace({
       captureCanvas.height = 0;
       recordPreviewResourceReleased('primary-decoder', decoderResourceToken);
     };
-  }, [handleMediaReady, mediaResolver, session]);
+  }, [handleMediaReady, mediaResolver, session, syncMediaToPlayhead]);
   const togglePlayback = useCallback(() => {
     const current = stateRef.current;
     const operation = playbackOperationRef.current;
