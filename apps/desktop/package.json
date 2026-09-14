@@ -3,14 +3,16 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/main/electron-entry.js",
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run --config vitest.config.ts",
+    "dev:electron": "electron .",
     "package:dev": "node scripts/package-dev.mjs"
   },
   "devDependencies": {
-    "@types/node": "^22.16.0"
+    "@types/node": "^22.16.0",
+    "electron": "^44.3.0"
   }
 }

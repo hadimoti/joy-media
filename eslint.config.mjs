@@ -58,6 +58,22 @@ export default tseslint.config(
     },
   },
   {
+    // Electron preload scripts must be CommonJS (see the comment in preload.cjs for why)
+    // and run in a browser-like renderer-adjacent context, so they get both CJS and
+    // `window` globals rather than the tooling-script set below.
+    files: ['apps/desktop/src/preload/*.cjs'],
+    languageOptions: {
+      globals: {
+        require: 'readonly',
+        module: 'writable',
+        window: 'readonly',
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
+  {
     files: ['**/bin/**/*.{mjs,cjs,js}', 'tooling/**/*.mjs', 'scripts/*.cjs'],
     languageOptions: {
       globals: {
