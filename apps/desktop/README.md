@@ -150,6 +150,16 @@ pnpm --filter @joy-media/desktop test
 pnpm --filter @joy-media/desktop build
 pnpm --filter @joy-media/desktop dev:electron   # needs `electron` allow-built first, see above
 pnpm desktop:package
+pnpm --filter @joy-media/desktop package:unpacked
 ```
 
 `desktop:package` creates `apps/desktop/dist/joy-media-desktop-dev.json`, a deterministic package manifest containing the shell contract version, runtime requirements, and explicit `signing: blocked` metadata. A signed Windows installer requires a future owner-approved native runtime and certificate/tooling (wave 7).
+
+`package:unpacked` (`node scripts/package-release.mjs --unpacked`, also accepts `--staging`) writes
+the same `dist/joy-media-release-plan.json` release-plan file but with `status:
+'staging-unpacked'` / `signing: 'unsigned'` and exits `0` — it skips the certificate and
+release-signing-key checks entirely, because it is explicitly not a distributable artifact. Use
+it to unblock local/staging packaging smoke tests without the owner-provided Windows signing
+certificate. Running `package:release` (or `package-release.mjs` with no flag) still fails closed
+with exit code `2` whenever `JOY_MEDIA_WINDOWS_CERTIFICATE_PATH` or
+`JOY_MEDIA_RELEASE_SIGNING_PUBLIC_KEY` is unset — that strictness is unchanged.

@@ -11,7 +11,8 @@
     "test:smoke": "electron . --smoke",
     "dev:electron": "electron .",
     "package:dev": "node scripts/package-dev.mjs",
-    "package:release": "node scripts/package-release.mjs"
+    "package:release": "node scripts/package-release.mjs",
+    "package:unpacked": "node scripts/package-release.mjs --unpacked"
   },
   "dependencies": {
     "@joy-media/provider-sdk": "workspace:*"

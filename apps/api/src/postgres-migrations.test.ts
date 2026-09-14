@@ -267,6 +267,26 @@ describe('ordered PostgreSQL migrations', () => {
     expect(combined).toContain('usdc_invoices_txhash_logindex_idx');
   });
 
+  it.each(['007-account-devices-subscriptions-entitlements', '008-usdc-invoices'])(
+    'keeps migration %s DDL idempotent and additive',
+    async (id) => {
+      const migration = POSTGRES_MIGRATIONS.find((candidate) => candidate.id === id);
+      expect(migration).toBeDefined();
+      const queries: string[] = [];
+      await migration!.up({
+        query: async (sql: string) => {
+          queries.push(sql);
+          return { rows: [] };
+        },
+      });
+
+      const combined = queries.join('\n');
+      expect(combined).not.toMatch(/CREATE TABLE(?!\s+IF NOT EXISTS)/iu);
+      expect(combined).not.toMatch(/CREATE(?: UNIQUE)? INDEX(?!\s+IF NOT EXISTS)/iu);
+      expect(combined).not.toMatch(/\b(?:DROP|TRUNCATE|DELETE)\b/iu);
+    },
+  );
+
   it('fails closed when an applied migration checksum has drifted', async () => {
     const { pool } = createRecordingPool([
       { id: POSTGRES_MIGRATIONS[0]!.id, checksum: 'sha256:unexpected' },
