@@ -9,8 +9,8 @@
  * Do not add business logic here. Add it to a testable sibling module and call it from
  * here instead.
  */
-import { app, BrowserWindow, dialog, ipcMain, protocol, safeStorage, session } from 'electron';
-import { fileURLToPath } from 'node:url';
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, safeStorage, session } from 'electron';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -128,7 +128,11 @@ if (!app.requestSingleInstanceLock()) {
         const url = new URL(request.url);
         const rendererRoot = join(__dirname, '..', '..', 'renderer');
         const filePath = join(rendererRoot, url.pathname === '/' ? 'index.html' : url.pathname);
-        return fetch(`file://${filePath.replace(/\\/g, '/')}`);
+        // The global `fetch` (Node/undici) this used to call has no `file:` scheme support and
+        // always rejects with "not implemented... yet..." — Electron's own `net.fetch` is the
+        // documented way to serve a local file from `protocol.handle`, and the only one of the
+        // two that actually works here.
+        return net.fetch(pathToFileURL(filePath).toString());
       });
     }
 
@@ -147,7 +151,7 @@ if (!app.requestSingleInstanceLock()) {
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     void win.loadURL(resolveRendererTarget(isDev));
 
-    if (isSmokeMode) {
+    if (isSmokeMode && isDev) {
       // By this point `app.whenReady()` has resolved, the window above is constructed, and
       // `ipcMain.handle('joy-desktop-ipc', ...)` was registered unconditionally above (before
       // this smoke branch even exists) — so the three claims in this log line are all already
@@ -158,6 +162,44 @@ if (!app.requestSingleInstanceLock()) {
       setTimeout(() => {
         app.quit();
       }, 300);
+    } else if (isSmokeMode) {
+      // Packaged smoke (`test:smoke-packaged`): unlike the dev-mode branch above, this waits
+      // for the real `joy-media-app://renderer/index.html` load to actually finish before
+      // declaring success, so a missing/broken `apps/desktop/renderer` staging
+      // (`package-release.mjs --unpacked`/`--staging`) or a broken preload bridge fails the
+      // check with a non-zero exit instead of a false-positive log line.
+      let failureReason: string | undefined;
+      win.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
+        failureReason ??= `did-fail-load: ${errorCode} ${errorDescription}`;
+      });
+      win.webContents.on('preload-error', (_event, preloadPath, error) => {
+        failureReason ??= `preload-error: ${preloadPath}: ${error.message}`;
+      });
+      win.webContents.on('render-process-gone', (_event, details) => {
+        failureReason ??= `render-process-gone: ${details.reason}`;
+      });
+      const finishSmoke = () => {
+        setTimeout(() => {
+          if (failureReason) {
+            console.error(`[joy-desktop] packaged renderer smoke failed: ${failureReason}`);
+            app.exit(1);
+          } else {
+            console.log(
+              `[joy-desktop] packaged renderer smoke passed: loaded ${resolveRendererTarget(isDev)} cleanly`,
+            );
+            app.exit(0);
+          }
+        }, 300);
+      };
+      win.webContents.once('did-finish-load', finishSmoke);
+      // `did-finish-load` never fires on a hard load failure - fail on our own timeout instead
+      // of hanging forever.
+      setTimeout(() => {
+        if (!win.isDestroyed()) {
+          failureReason ??= 'timed out waiting for did-finish-load';
+          finishSmoke();
+        }
+      }, 5000);
     }
 
     registerShutdownHooks({

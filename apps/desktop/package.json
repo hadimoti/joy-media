@@ -6,12 +6,14 @@
   "main": "./dist/main/electron-entry.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && node scripts/copy-static.mjs",
     "test": "vitest run --config vitest.config.ts",
     "test:smoke": "electron . --smoke",
+    "test:smoke-packaged": "node scripts/smoke-packaged.mjs",
     "dev:electron": "electron .",
     "package:dev": "node scripts/package-dev.mjs",
     "package:release": "node scripts/package-release.mjs",
+    "package:staging": "node scripts/package-release.mjs --staging",
     "package:unpacked": "node scripts/package-release.mjs --unpacked"
   },
   "dependencies": {
