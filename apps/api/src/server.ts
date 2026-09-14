@@ -38,6 +38,7 @@ import {
   ReleaseMetadataService,
 } from './release-metadata-service.js';
 import { readHostedRouteRetirementFlags } from './hosted-route-retirement.js';
+import { readLegacyEditorRetired } from './legacy-editor-retirement.js';
 import {
   AlchemyJsonRpcTransport,
   readAlchemyRpcUrlFromCredential,
@@ -142,6 +143,8 @@ async function start(): Promise<void> {
   // them, so this line changes nothing about today's routing (wave 4/6 - see
   // hosted-route-retirement.ts's module doc).
   const hostedRouteRetirement = readHostedRouteRetirementFlags(process.env);
+  // Coarser kill switch (wave 6) — false in this deployment's actual environment today.
+  const legacyEditorRetired = readLegacyEditorRetired(process.env);
 
   // USDC checkout (wave 5). Every one of these five conditions is unset in this deployment's
   // actual environment today, so `usdcCheckout` always resolves to the Disabled fallback here
@@ -194,9 +197,14 @@ async function start(): Promise<void> {
     // Public /v1 (project/job/asset routes) stays disabled unless durable state
     // is configured; /v1/auth is served by mediaAuth regardless (it owns its
     // own allow-list/session tables independently of the control plane).
+    // `legacyEditorRetired` is wave 6's coarser kill switch (see
+    // legacy-editor-retirement.ts) — false in this deployment's actual environment today, so
+    // this line changes nothing about current routing.
     authentication: {
       authenticate: (request) =>
-        durableControlPlane === undefined ? undefined : mediaAuth.authenticate(request),
+        legacyEditorRetired || durableControlPlane === undefined
+          ? undefined
+          : mediaAuth.authenticate(request),
     },
     mediaAuth,
     account,

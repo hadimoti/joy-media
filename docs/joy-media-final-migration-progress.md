@@ -566,3 +566,105 @@ line), (2) real USD prices must replace the `$0.00` placeholders, (3) the webhoo
 parser must be validated against a real Alchemy delivery, (4) the "live-wallet test gate" from
 the locked owner decision must actually be recorded by the owner/Codex before
 `JOY_MEDIA_USDC_CHECKOUT_ENABLED=true` is ever set anywhere.
+
+---
+
+## Wave 6 — Archive/cutover guards (COMPLETE for the tooling/runbook surface; live wiring deferred)
+
+**Commit:** see `git log` for the commit adding `tooling/archive/**`,
+`apps/api/src/legacy-editor-retirement.ts`, `deploy/joy-media-cutover-nginx-boundary.md`, and
+`docs/joy-media-final-migration-backup-restore-runbook.md` (wave 6 commit, after the wave 5
+commit).
+
+**What was done:**
+
+- `tooling/archive` (new package, registered in root `tsconfig.json` references like
+  `tooling/golden-render`/`tooling/benchmark` — unlike `tooling/release`, which has no
+  `package.json` and is not typechecked by `pnpm typecheck`, this package deliberately follows
+  the "real package" convention for full `tsc -b` coverage):
+  - `manifest.ts` — `buildManifest`/`verifyManifest`: per-entry SHA-256 plus a top-level
+    `manifestChecksum` over the sorted (name, checksum, length) triples, so the manifest itself
+    can be checked for tampering independently of re-hashing every entry.
+  - `encryption.ts` — AES-256-GCM (`node:crypto`), a fresh random key per export returned to
+    the caller and never persisted by this package. Tested that a wrong key or tampered
+    ciphertext both fail the same way (GCM's auth tag makes them indistinguishable by design).
+  - `archive-export.ts` — `exportOwnerArchive(ownerId, source)`: builds one owner's project
+    documents + media assets into a manifest + encrypted bundle. `ProjectArchiveSource` is
+    dependency-injected — this package never opens a database connection. A display-name
+    sanitizer strips path separators and `..` sequences so a media asset's name can never
+    escape its `media/<projectId>/` namespace (tested with a literal `../../etc/passwd` input).
+  - `archive-import.ts` — `importOwnerArchive(encrypted, keyBase64)`: the "clear import
+    boundary" the locked decision requires — decrypts, then verifies every checksum before
+    returning anything. Tested that a tampered _plaintext_ (re-encrypted with the same, correct
+    key) is caught by the manifest-checksum check specifically, independent of the
+    ciphertext-authenticity check already covered by `encryption.test.ts`.
+  - `integrity-verification.ts` — `verifyNoDataLoss(manifest, expectedProjectCount)`: compares
+    against an independently-supplied count, never the archive's own entries, so a source query
+    that silently dropped rows is still caught.
+  - 38 tests total, all passing against real `node:crypto`, no mocks for the crypto layer.
+- `apps/api/src/legacy-editor-retirement.ts`: a single coarse kill switch
+  (`JOY_MEDIA_LEGACY_EDITOR_RETIRED`, default `false`) distinct from wave 4's per-route
+  `hosted-route-retirement.ts` — when true, the legacy `authentication.authenticate` every
+  project/worker/job route in `http-server.ts` requires always returns `undefined`, the same
+  way it already behaves today when `durableControlPlane` is unconfigured. Wired into
+  `server.ts`; never set in this worktree.
+- `deploy/joy-media-cutover-nginx-boundary.md`: a proposal (explicitly marked as such, not
+  applied) for the target `joyst.ir` Nginx boundary once the desktop app is primary — narrows
+  the served static site and the proxied `/v1/*` prefix from "everything" to
+  auth/devices/account/entitlements/releases/billing only. Includes an explicit sequencing
+  section (application-level retirement flags first, archive exports before any route
+  narrows, Nginx narrowing last, as defense-in-depth on top of the flags — not a replacement).
+  The existing `deploy/joy-media.nginx.conf` (documents the _current_ live config) was **not**
+  touched.
+- `docs/joy-media-final-migration-backup-restore-runbook.md`: documents `pg_dump`/`pg_restore`
+  procedures (none of which already existed in this repo — only a one-line reminder in
+  `deploy/README.md`), a per-owner archive-export cutover checklist built on `tooling/archive`,
+  a no-data-loss verification checklist, and a rollback decision tree that explicitly defers to
+  the existing, already-tested `deploy/joy-media-rollback.sh` for release-level rollback rather
+  than duplicating it — this runbook only fills the two gaps that didn't already have one
+  (database backup/restore, per-owner data archival).
+
+**Explicitly deferred (not silently dropped):**
+
+- No `ProjectArchiveSource` implementation backed by the real
+  `project-document-store.ts`/`private-object-store.ts` exists yet — `tooling/archive` only
+  ever runs against a fake source in tests. Wiring it to production data (and deciding how an
+  export is actually triggered and delivered to an owner — a route? a CLI an operator runs?) is
+  explicitly left for a follow-up pass, so this worktree never opens a connection to the real
+  database.
+- No desktop-side import wiring: `importOwnerArchive` exists and is tested, but nothing in
+  `apps/desktop` calls it yet (same "SqliteProjectStore not wired into `electron-entry.ts`"
+  boundary noted in the wave 2 entry — general project open/save IPC has to land first).
+- `deploy/joy-media-cutover-nginx-boundary.md` is a proposal only; `joy-media.nginx.conf` (the
+  live-config mirror) was not edited.
+- No `pg_dump`/`pg_restore` command in the new runbook has actually been run — this worktree
+  has no VPS access; the runbook is written for Codex/the owner to execute.
+
+**Commands run (this worktree):**
+
+- `pnpm --filter @joy-media/archive build` (`tsc -b`) → **passes**.
+- `pnpm --filter @joy-media/api build` (`tsc -b`) → **passes**.
+- `pnpm vitest run apps/api tooling/archive` → **588/588 passed** across 47 files (37
+  pre-existing skips unrelated to this wave); this wave added 40 net-new tests: `manifest.test.ts`
+  (11), `encryption.test.ts` (9), `archive-export.test.ts` (7), `archive-import.test.ts` (6),
+  `integrity-verification.test.ts` (5) in `tooling/archive`, plus `legacy-editor-retirement.test.ts`
+  (2) in `apps/api`.
+- `pnpm typecheck` (root, all 43 workspace projects — `tooling/archive` added to the graph) →
+  **passes**.
+- `pnpm lint` (root eslint) → **passes, 0 problems** (one `no-control-regex` violation from a
+  literal `�-` character-class regex was caught and rewritten as an explicit
+  char-code filter during this wave).
+- `pnpm format:check` (root prettier) → **same single pre-existing failure** as waves 1-5
+  (`apps/editor-web/src/playback-loop-contract.test.ts`, unrelated, predates this worktree). All
+  files this wave touched are prettier-clean.
+
+**Known gap:** same as every prior `apps/api`-only wave — no live VPS/database access from this
+session, so nothing in the new runbook or the `tooling/archive` package's eventual real-data
+wiring has been exercised against production. The crypto/manifest/state-machine logic itself
+(the part this worktree _can_ verify) is tested thoroughly; the "does this actually work against
+a real `joymedia` database and a real owner's hosted projects" question is explicitly for
+Codex/the owner to answer per the new runbook.
+
+**Next gate:** wave 7 (packaging/release) can proceed — it does not depend on wave 6's runbook
+being executed. Before any archive/cutover step is taken for real: the wave 6 runbook's §5
+no-data-loss checklist should be followed exactly, starting with a fresh `pg_dump`.

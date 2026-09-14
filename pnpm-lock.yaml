@@ -558,6 +558,8 @@ importers:
 
   packages/workflow-engine: {}
 
+  tooling/archive: {}
+
   tooling/benchmark:
     dependencies:
       '@joy-media/test-fixtures':

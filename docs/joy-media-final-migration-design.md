@@ -163,7 +163,16 @@ per the lead brief's stop conditions.
   remains deliberately out of scope (on-chain refund execution, an operator-facing
   reconciliation UI/route, and validating `alchemy-webhook.ts`'s payload parser against a real
   Alchemy delivery).
-- Wave 6: new `tooling/archive/**` export/checksum scripts, runbooks under `docs/`.
+- Wave 6: new `tooling/archive/**` export/checksum scripts, runbooks under `docs/`. **Status:
+  implemented** — `tooling/archive` (manifest/encryption/export/import/no-data-loss
+  verification, all tested, none wired to a live data source), `apps/api/src/
+legacy-editor-retirement.ts` (coarse VPS kill switch, defaults off),
+  `deploy/joy-media-cutover-nginx-boundary.md` (proposal, not applied), and
+  `docs/joy-media-final-migration-backup-restore-runbook.md` (DB backup/restore + archive
+  cutover checklist, referencing the existing `joy-media-rollback.sh` rather than duplicating
+  it). See `docs/joy-media-final-migration-progress.md`'s wave 6 entry for what remains
+  deliberately unwired (a real `ProjectArchiveSource`, an export/import route or CLI, desktop
+  import wiring).
 - Wave 7: `apps/desktop` packaging/signing scripts, `docs/joy-media-final-migration-progress.md`
   final acceptance section.
 
