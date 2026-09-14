@@ -65,6 +65,14 @@ combination: keep `JsonFileProjectStore` (already atomic via temp-file + rename)
 short-term transactional store and file a follow-up wave-2 task to swap in SQLite once the
 runtime allows it — never ship an un-atomic store.
 
+**Status: implemented in wave 2** as `packages/project-persistence/src/sqlite-store.ts`
+(`SqliteProjectStore`, exported from the `./desktop` subpath) plus
+`apps/desktop/src/store/local-database.ts` (`LocalDatabase`, media manifest + job queue). The
+Electron/Node-version re-check from §3 is still open: it needs a real Electron process, which
+this worktree cannot run (see the wave 1/2 "known gap" entries in
+`docs/joy-media-final-migration-progress.md`). `SqliteProjectStore` itself is not yet wired into
+`electron-entry.ts` — see that progress-log entry for why.
+
 Schema (wave 2 draft): `projects`, `snapshots`, `transactions`, `media_manifest` (path, checksum,
 kind, byte size, last-verified-at), `provider_profiles` (encrypted blob + metadata only, no
 plaintext keys ever touch this DB — keys live in DPAPI-protected storage per the locked owner

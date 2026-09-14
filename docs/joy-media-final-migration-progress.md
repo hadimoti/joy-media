@@ -131,3 +131,90 @@ worktree without further owner input.
 **Next gate:** none required to start wave 2 (local runtime) — it can proceed against the
 dependency-injected module boundaries already in place. The runtime smoke test above should
 happen before any packaged build is trusted, and definitely before wave 7 signing.
+
+---
+
+## Wave 2 — Local runtime (COMPLETE for the desktop-host substrate; editor-web wiring deferred)
+
+**Commit:** see `git log` for the commit adding `packages/project-persistence/src/sqlite-store.ts`
+and `apps/desktop/src/store/**` (wave 2 commit, after the wave 1 commit).
+
+**What was done:**
+
+- `packages/project-persistence/src/sqlite-store.ts`: `SqliteProjectStore<P,T>`, a `node:sqlite`
+  implementation of the existing `ProjectStore<P,T>` contract (same interface
+  `JsonFileProjectStore` and `BrowserProjectStore` already implement). Two tables
+  (`snapshots`, `transactions`), WAL journal mode, every multi-row write wrapped in
+  `BEGIN IMMEDIATE`/`COMMIT` with `ROLLBACK` on error (tested by poisoning a payload with a
+  BigInt mid-batch and confirming the prior row survives). Exported from the package's
+  `./desktop` subpath only — never the browser-safe `.` entry `apps/editor-web`'s Vite bundle
+  resolves — same convention `desktop-store.ts` already established.
+- `apps/desktop/src/store/paths.ts`: pure `resolveDesktopPaths(userDataDir)` → database file +
+  media root, so path resolution is testable without Electron's `app.getPath`.
+- `apps/desktop/src/store/local-database.ts`: `LocalDatabase`, a second `node:sqlite` connection
+  (safe under WAL) to the same file, owning two desktop-host-only concerns:
+  - **Media manifest** (`media_manifest` table): `recordMedia`/`getMedia`/`listMedia`/
+    `removeMedia`, keyed by the same opaque ref id `file-registry.ts` mints.
+  - **Job queue** (`jobs` table): `enqueueJob`/`updateJobStatus`/`getJob`/`listJobs`, plus
+    `recoverInterrupted()` — marks every `queued`/`running` job `cancelled` with
+    `error: "interrupted by shutdown"`, called once at main-process startup before any new job
+    can be enqueued. This is the crash-recovery contract for jobs.
+- `apps/desktop/src/main/media-checksum.ts`: streaming SHA-256 (`checksumFile`), extension-based
+  `classifyMediaKind`, and `fileExistsWithSize` for future re-verification passes.
+- Wired into `ipc-handlers.ts` / `electron-entry.ts`:
+  - `desktop.select-file` now probes the chosen file and records it into the media manifest;
+    `desktop.revoke-file` removes that record too.
+  - `desktop.request-derivative` now enqueues a `queued` job and returns its id alongside the
+    existing approval token.
+  - Two new `IPC_CHANNELS`: `desktop.job-status` (`{jobId}` → `JobRecord`) and
+    `desktop.cancel-job` (`{jobId}` → cancels, refusing an already-finished job). Added to
+    `ipc.ts`, `preload/ipc-channels.cjs` (kept in sync — `preload.test.ts`'s guard catches
+    drift), and `desktop.test.ts` needed no change (it doesn't assert the full channel list).
+  - `electron-entry.ts` now resolves `paths = resolveDesktopPaths(app.getPath('userData'))`,
+    creates the media root directory, opens `LocalDatabase`, calls `recoverInterrupted()` before
+    handling any IPC, and closes it inside `shutdown.ts`'s flush step (after the Worker stops).
+
+**Explicitly deferred (not silently dropped), same honesty pattern as the wave 1 gap:**
+
+- `SqliteProjectStore` is **not yet constructed in `electron-entry.ts`**: no IPC channel opens
+  or saves a project through it. Wiring it in requires new IPC channels (open/save/list/delete
+  project) plus a renderer-side decision in `apps/editor-web` about when to use the desktop
+  store instead of its current browser store — a sensitive change to a live, tested app that
+  this pass deliberately did not touch, to avoid regressing working editor code without a
+  runtime smoke test available in this session (see the wave 1 gap).
+- `desktop.request-derivative` enqueues a job row but **does not dispatch it to the Worker**:
+  no job-protocol wire format between the desktop host and the Worker child process exists yet.
+  A queued job sits `queued` until cancelled or the app restarts (at which point
+  `recoverInterrupted()` cancels it). Real dispatch is follow-up work.
+- "Monitor/preview data path" and "offline-first editor startup" from the wave 2 brief are not
+  addressed: both are `apps/editor-web` runtime-selection concerns (which data source to read
+  from, live GPU preview transport) that depend on the project-store wiring above landing first.
+- Media probing here is extension-based classification + a full-file hash, not the Worker's real
+  demux/codec/duration probe — intentionally, per the existing README boundary ("the Worker
+  remains the owner of probing, hashing, and derivative generation").
+
+**Commands run (this worktree):**
+
+- `pnpm --filter @joy-media/project-persistence build` (`tsc -b`) → **passes**.
+- `pnpm vitest run packages/project-persistence` → **17/17 passed** (11 existing +
+  6 new `sqlite-store.test.ts`).
+- `pnpm --filter @joy-media/desktop build` (`tsc -b`) → **passes**.
+- `pnpm --filter @joy-media/desktop test` → **56/56 passed** across 10 files (up from 27/27 at
+  wave 1: +`store/paths.test.ts`, +`store/local-database.test.ts`, +`main/media-checksum.test.ts`, and `ipc-handlers.test.ts` grew from 6 to 13 tests).
+- `pnpm typecheck` (root, all 42 workspace projects) → **passes**.
+- `pnpm lint` (root eslint) → **passes, 0 problems**.
+- `pnpm format:check` (root prettier) → **same single pre-existing failure** as wave 1
+  (`apps/editor-web/src/playback-loop-contract.test.ts`, unrelated, predates this worktree). All
+  files this wave touched are prettier-clean.
+
+**Known gap:** same as wave 1 — nothing in `apps/desktop` has been runtime-smoke-tested with a
+real Electron window in this session (no display, `electron`'s binary not downloaded). The
+`LocalDatabase`/`SqliteProjectStore` code paths are exercised by real `node:sqlite` in unit
+tests (not mocked), which is a meaningfully stronger guarantee than the Electron-API-mocked main
+process code, but "does the whole app start up, open the SQLite file under a real `userData`
+path, and survive an actual crash" is still unverified end-to-end.
+
+**Next gate:** none required to start wave 3 (JOY Agent/BYOK). Before resuming the deferred
+items above (project-store IPC wiring, job dispatch to the Worker), the wave 1 runtime smoke
+test gate should be cleared first, since both build directly on `electron-entry.ts` actually
+running.

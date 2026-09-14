@@ -12,6 +12,8 @@ const IPC_CHANNELS = Object.freeze([
   'desktop.request-derivative',
   'desktop.worker-status',
   'desktop.startup-preference',
+  'desktop.job-status',
+  'desktop.cancel-job',
 ]);
 
 module.exports = { IPC_CHANNELS };

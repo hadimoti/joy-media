@@ -10,6 +10,7 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, session } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { mkdirSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { parseProjectDeepLink } from '../deep-link.js';
 import { createFileRegistry } from './file-registry.js';
@@ -22,6 +23,9 @@ import {
   resolveRendererTarget,
 } from './window.js';
 import { registerShutdownHooks } from './shutdown.js';
+import { resolveDesktopPaths } from '../store/paths.js';
+import { LocalDatabase } from '../store/local-database.js';
+import { checksumFile, classifyMediaKind } from './media-checksum.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = process.env['NODE_ENV'] !== 'production';
@@ -38,6 +42,13 @@ protocol.registerSchemesAsPrivileged([
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
+  const paths = resolveDesktopPaths(app.getPath('userData'));
+  mkdirSync(paths.mediaRoot, { recursive: true });
+  const localDatabase = new LocalDatabase({ filePath: paths.databaseFile });
+  // Anything still `queued`/`running` from a previous process is stale by definition: the
+  // Worker that would have finished it is gone. Do this before any new job can be enqueued.
+  localDatabase.recoverInterrupted();
+
   const fileRegistry = createFileRegistry();
   const workerSupervisor = createWorkerSupervisor({
     spawn: (command, args, options) => spawn(command, args, options),
@@ -49,6 +60,11 @@ if (!app.requestSingleInstanceLock()) {
   const ipcHandlers = createIpcHandlers({
     fileRegistry,
     workerSupervisor,
+    localDatabase,
+    probeMedia: async (path) => {
+      const probe = await checksumFile(path);
+      return { ...probe, kind: classifyMediaKind(path) };
+    },
     showOpenDialog: async () => {
       const win = BrowserWindow.getFocusedWindow();
       const result = win
@@ -112,7 +128,11 @@ if (!app.requestSingleInstanceLock()) {
       onProcessSignal: (signalName, listener) => process.on(signalName, listener),
       stopWorker: () => workerSupervisor.stop(),
       flush: () => {
-        // Wave 2: flush the local project store here before the process exits.
+        // SqliteProjectStore (packages/project-persistence's desktop subpath) is not yet
+        // wired here: no IPC channel opens/saves a project through it yet (see
+        // docs/joy-media-final-migration-progress.md's wave 2 entry). LocalDatabase is the
+        // one open handle this process holds today.
+        localDatabase.close();
       },
       quit: () => app.quit(),
     });

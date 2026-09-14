@@ -5,6 +5,8 @@ export const IPC_CHANNELS = [
   'desktop.request-derivative',
   'desktop.worker-status',
   'desktop.startup-preference',
+  'desktop.job-status',
+  'desktop.cancel-job',
 ] as const;
 export type IpcChannel = (typeof IPC_CHANNELS)[number];
 export interface IpcRequest {
