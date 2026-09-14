@@ -1,5 +1,9 @@
 import { extractCandidateTxHashes, verifyAlchemyWebhookSignature } from './alchemy-webhook.js';
-import { observeTransferFromReceipt, verifyTransferAgainstInvoice } from './usdc-confirmation.js';
+import {
+  ChainObservationError,
+  observeTransferFromReceipt,
+  verifyTransferAgainstInvoice,
+} from './usdc-confirmation.js';
 import type { ConfirmationPolicy, JsonRpcTransport } from './usdc-confirmation.js';
 import type { Invoice, UsdcInvoiceLedger } from './usdc-invoice-ledger.js';
 import type { BillingPlan } from './usdc-catalog.js';
@@ -96,12 +100,25 @@ export class UsdcCheckoutService implements UsdcCheckoutApi {
    * all normal, expected, retry-later states, not errors.
    */
   async attemptConfirmation(txHash: string): Promise<Invoice | undefined> {
-    const observation = await observeTransferFromReceipt(
-      txHash,
-      this.transport,
-      this.policy.expectedChainId,
-      this.policy.expectedContractAddress,
-    );
+    let observation;
+    try {
+      observation = await observeTransferFromReceipt(
+        txHash,
+        this.transport,
+        this.policy.expectedChainId,
+        this.policy.expectedContractAddress,
+      );
+    } catch (error) {
+      // A receipt with no Transfer log on the expected contract (or one whose indexed
+      // topics are malformed) is "not ours" exactly like a wrong-recipient or wrong-amount
+      // transfer: some other token/activity landed in the same Alchemy address-activity
+      // webhook batch. Swallowing it here (rather than letting it propagate) keeps the
+      // documented "never throws for not yet / not ours / not enough confirmations" contract
+      // above true, and keeps `handleWebhook` processing every other candidate hash in the
+      // same delivery instead of aborting the whole batch on one unrelated transaction.
+      if (error instanceof ChainObservationError) return undefined;
+      throw error;
+    }
     if (observation === undefined) return undefined; // not yet mined
 
     const candidate = await this.ledger.findPendingInvoiceForTransfer(

@@ -139,6 +139,29 @@ describe('AccountService subscriptions', () => {
     });
   });
 
+  it('refuses to activate a subscription for an owner who never selected a plan', async () => {
+    // This is the shape a USDC payment confirmation would hit if checkout were ever reached
+    // for an owner who paid without first calling selectPlan (POST /v1/account/subscription):
+    // activateSubscription only UPDATEs an existing row, it never inserts one.
+    const { account } = await service({ now: () => 1_000 });
+    await expect(
+      account.activateSubscription('user@example.com', 1_000 + 86_400_000),
+    ).rejects.toMatchObject({ code: 'SUBSCRIPTION_NOT_FOUND' });
+  });
+
+  it('extends (overwrites, not stacks) an already-active subscription on a renewal activation', async () => {
+    const { account } = await service({ now: () => 1_000 });
+    await account.selectPlan('user@example.com', 'monthly');
+    await account.activateSubscription('user@example.com', 2_000);
+    expect((await account.getSubscription('user@example.com')).currentPeriodEnd).toBe(2_000);
+
+    // A renewal payment confirms later, before the first period lapses: the new period end
+    // simply replaces the old one rather than adding to it.
+    const renewed = await account.activateSubscription('user@example.com', 5_000);
+    expect(renewed).toMatchObject({ status: 'active', currentPeriodEnd: 5_000 });
+    expect((await account.getSubscription('user@example.com')).currentPeriodEnd).toBe(5_000);
+  });
+
   it('reports status expired once the current period end has passed, without a separate expiry job', async () => {
     let now = 1_000;
     const { account } = await service({ now: () => now });
