@@ -176,6 +176,14 @@ legacy-editor-retirement.ts` (coarse VPS kill switch, defaults off),
 - Wave 7: `apps/desktop` packaging/signing scripts, `docs/joy-media-final-migration-progress.md`
   final acceptance section.
 
+Wave 7 implementation status (2026-09-14): release manifests now have a separate Ed25519
+signing contract and a fail-closed publish adapter; the desktop has a pure signature,
+subscription, URL, hash, and version gate; and Windows packaging is represented by an
+unsigned development command plus an owner-gated release-plan command. No certificate, private
+key, public release, or deployment is included. The actual Electron packaging/signing toolchain,
+real Electron smoke, pinned production public key, and release publication remain owner/Codex
+acceptance gates.
+
 ## 7. Test/build baseline captured at wave 0
 
 Baseline commands (from repo root, this worktree) and their result are recorded in

@@ -77,6 +77,12 @@ export function verifyManifest(
       reason: `entry count mismatch: manifest says ${manifest.entryCount}, archive has ${recomputed.entryCount}`,
     };
   }
+  if (recomputed.totalByteLength !== manifest.totalByteLength) {
+    return {
+      ok: false,
+      reason: `total byte length mismatch: manifest says ${manifest.totalByteLength}, archive has ${recomputed.totalByteLength}`,
+    };
+  }
   for (let index = 0; index < manifest.entries.length; index++) {
     const expected = manifest.entries[index]!;
     const actual = recomputed.entries[index]!;

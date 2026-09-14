@@ -668,3 +668,40 @@ Codex/the owner to answer per the new runbook.
 **Next gate:** wave 7 (packaging/release) can proceed — it does not depend on wave 6's runbook
 being executed. Before any archive/cutover step is taken for real: the wave 6 runbook's §5
 no-data-loss checklist should be followed exactly, starting with a fresh `pg_dump`.
+
+---
+
+## Wave 7 — Signed packaging/update evidence (IMPLEMENTED SCAFFOLD; public release blocked)
+
+**Implementation record:** Codex completed the bounded Wave 7 fallback after the Claude Code
+provider session limit and a Kilo free-route worker was stopped when its enforced isolation
+policy mis-resolved the worktree path. The Kilo session was real (`ses_f5f9bd6aeffeUveXzRlgZGRPZv`,
+resolved `poolside/laguna-s-2.1:free`) but produced no source diff; no Kilo implementation is
+claimed. The fallback is committed and pushed as `96ecfbf1` (`feat: wave 7 signed release and
+updater scaffolding`) on `codex/joy-media-final-migration-20260914`.
+
+**What was done:**
+
+- `apps/api/src/release-signing.ts` now has focused Ed25519 signing/verification coverage,
+  credential-file lookup coverage, and the separate `release-publish.ts` adapter that signs the
+  exact stored payload before calling the existing private metadata API. Missing signing material
+  fails closed.
+- `apps/desktop/src/main/auto-update-policy.ts` is a pure, network-free gate: active
+  subscription, pinned public key, Ed25519 signature, HTTPS allowlisted `joyst.ir` host, SHA-256,
+  semver, downgrade, minimum-version, and opt-in download checks are all explicit. It never
+  fetches or installs an artifact itself.
+- `apps/desktop/scripts/package-release.mjs` and `package:release` emit a blocked release plan
+  unless owner-provided signing/toolchain gates are present; `package:dev` remains the only
+  unsigned local package path.
+- Wave 6 archive verification now checks top-level byte totals and normalizes malformed manifest/
+  entry shapes through `ArchiveImportError` before any bytes are trusted.
+
+**Explicit gates remain:** no real Electron window or packaged renderer smoke; no electron-builder
+or equivalent owner-approved packaging toolchain; no Windows code-signing certificate; no pinned
+production release public key; no public installer, release metadata publication, VPS mutation,
+route retirement, payment activation, database migration, or deployment. CI is intentionally not
+run per owner instruction; focused tests/builds are the only verification for this fallback.
+
+**Verification recorded for `96ecfbf1`:** the five touched test files passed `29/29`; API,
+desktop, and archive TypeScript builds passed; `package:dev` wrote the unsigned development
+manifest; and `package:release` intentionally exited `2` after writing a blocked release plan.

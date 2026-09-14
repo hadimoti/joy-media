@@ -43,24 +43,32 @@ export function importOwnerArchive(
   } catch {
     throw new ArchiveImportError('ARCHIVE_PAYLOAD_INVALID', 'decrypted archive is not valid JSON');
   }
-  if (
-    typeof bundle !== 'object' ||
-    bundle === null ||
-    !Array.isArray(bundle.entries) ||
-    typeof bundle.manifest !== 'object'
-  ) {
+  if (!isRecord(bundle) || !Array.isArray(bundle.entries) || !isRecord(bundle.manifest)) {
     throw new ArchiveImportError(
       'ARCHIVE_PAYLOAD_INVALID',
       'decrypted archive does not have the expected {manifest, entries} shape',
     );
   }
 
-  const entries: ArchiveEntry[] = bundle.entries.map((entry) => ({
-    name: entry.name,
-    bytes: Buffer.from(entry.bytesBase64, 'base64'),
-  }));
+  if (!isArchiveManifestShape(bundle.manifest)) {
+    throw new ArchiveImportError(
+      'ARCHIVE_PAYLOAD_INVALID',
+      'decrypted archive manifest has an invalid shape',
+    );
+  }
 
-  const verification = verifyManifest(entries, bundle.manifest);
+  const entries: ArchiveEntry[] = [];
+  for (const entry of bundle.entries) {
+    if (!isRecord(entry) || typeof entry.name !== 'string' || typeof entry.bytesBase64 !== 'string') {
+      throw new ArchiveImportError(
+        'ARCHIVE_PAYLOAD_INVALID',
+        'decrypted archive contains an invalid entry shape',
+      );
+    }
+    entries.push({ name: entry.name, bytes: Buffer.from(entry.bytesBase64, 'base64') });
+  }
+
+  const verification = verifyManifest(entries, bundle.manifest as ArchiveManifest);
   if (!verification.ok) {
     throw new ArchiveImportError(
       'ARCHIVE_CHECKSUM_MISMATCH',
@@ -69,4 +77,26 @@ export function importOwnerArchive(
   }
 
   return { manifest: bundle.manifest, entries };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isArchiveManifestShape(value: Record<string, unknown>): boolean {
+  return (
+    value.formatVersion === 1 &&
+    typeof value.createdAt === 'string' &&
+    Number.isInteger(value.entryCount) &&
+    Number.isInteger(value.totalByteLength) &&
+    typeof value.manifestChecksum === 'string' &&
+    Array.isArray(value.entries) &&
+    value.entries.every(
+      (entry) =>
+        isRecord(entry) &&
+        typeof entry.name === 'string' &&
+        typeof entry.sha256 === 'string' &&
+        Number.isInteger(entry.byteLength),
+    )
+  );
 }

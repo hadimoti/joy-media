@@ -97,4 +97,24 @@ describe('importOwnerArchive', () => {
 
     expect(() => importOwnerArchive(reEncrypted, exported.keyBase64)).toThrow(ArchiveImportError);
   });
+
+  it('normalizes malformed entry shapes as ArchiveImportError before trusting bytes', async () => {
+    const exported = await exportOwnerArchive(
+      'user@example.com',
+      sourceWithOneProject(),
+      () => 'T0',
+    );
+    const key = Buffer.from(exported.keyBase64, 'base64');
+    const tamperedBundle = {
+      manifest: exported.manifest,
+      entries: [{ name: 'projects/proj-1.json' }],
+    };
+    const encrypted = encryptArchive(Buffer.from(JSON.stringify(tamperedBundle), 'utf8'), key);
+    expect(() => importOwnerArchive(encrypted, exported.keyBase64)).toThrowError(
+      ArchiveImportError,
+    );
+    expect(() => importOwnerArchive(encrypted, exported.keyBase64)).toThrowError(
+      expect.objectContaining({ code: 'ARCHIVE_PAYLOAD_INVALID' }),
+    );
+  });
 });

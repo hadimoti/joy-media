@@ -84,4 +84,14 @@ describe('verifyManifest', () => {
     const tampered = { ...manifest, manifestChecksum: 'f'.repeat(64) };
     expect(verifyManifest(entries, tampered).ok).toBe(false);
   });
+
+  it('rejects a manifest whose top-level total byte length was tampered with', () => {
+    const entries = [entry('a.txt', 'hello')];
+    const manifest = buildManifest(entries, () => 'T0');
+    const tampered = { ...manifest, totalByteLength: manifest.totalByteLength + 1 };
+    expect(verifyManifest(entries, tampered)).toEqual({
+      ok: false,
+      reason: 'total byte length mismatch: manifest says 6, archive has 5',
+    });
+  });
 });

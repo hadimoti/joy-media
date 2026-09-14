@@ -9,7 +9,8 @@
     "build": "tsc -b",
     "test": "vitest run --config vitest.config.ts",
     "dev:electron": "electron .",
-    "package:dev": "node scripts/package-dev.mjs"
+    "package:dev": "node scripts/package-dev.mjs",
+    "package:release": "node scripts/package-release.mjs"
   },
   "dependencies": {
     "@joy-media/provider-sdk": "workspace:*"
