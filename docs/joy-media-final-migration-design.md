@@ -152,6 +152,17 @@ per the lead brief's stop conditions.
   for why adding its `LoadCredentialEncrypted=` line myself would be a live-deploy risk, not a
   doc-only change.
 - Wave 5: new `packages/invoice-ledger` (or `apps/api/src/invoice-*.ts`), disabled by default.
+  **Status: implemented** as `apps/api/src/usdc-catalog.ts` (USD prices, exact base-unit
+  conversion — placeholder $0.00 prices), `usdc-invoice-ledger.ts` (Postgres-backed invoice
+  state machine), `usdc-confirmation.ts` (pure on-chain verification + RPC receipt decoding),
+  `alchemy-transport.ts`/`alchemy-webhook.ts` (protected RPC/webhook, both credential-sourced),
+  `usdc-checkout-service.ts` (orchestration), migration `008-usdc-invoices`, and 4 new
+  `http-server.ts` routes. `JOY_MEDIA_USDC_CHECKOUT_ENABLED` defaults `false` and this
+  worktree never sets it — see `docs/joy-media-final-migration-progress.md`'s wave 5 entry for
+  the full verification trail, the "why no contract address is hardcoded" rationale, and what
+  remains deliberately out of scope (on-chain refund execution, an operator-facing
+  reconciliation UI/route, and validating `alchemy-webhook.ts`'s payload parser against a real
+  Alchemy delivery).
 - Wave 6: new `tooling/archive/**` export/checksum scripts, runbooks under `docs/`.
 - Wave 7: `apps/desktop` packaging/signing scripts, `docs/joy-media-final-migration-progress.md`
   final acceptance section.

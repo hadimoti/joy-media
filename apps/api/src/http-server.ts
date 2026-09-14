@@ -70,6 +70,13 @@ import {
   type ReleaseChannel,
   type ReleaseMetadataApi,
 } from './release-metadata-service.js';
+import {
+  DisabledUsdcCheckoutService,
+  UsdcCheckoutError,
+  type UsdcCheckoutApi,
+} from './usdc-checkout-service.js';
+import { CatalogError } from './usdc-catalog.js';
+import { UsdcLedgerError } from './usdc-invoice-ledger.js';
 
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
 const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 600;
@@ -115,6 +122,9 @@ export interface ControlPlaneHttpServerOptions {
   /** Flag-gated fail-closed retirement for hosted project/media/Worker-pairing routes; every
    * flag defaults false (see hosted-route-retirement.ts). */
   readonly hostedRouteRetirement?: HostedRouteRetirementFlags;
+  /** USDC checkout (wave 5). `DisabledUsdcCheckoutService` when unset — every route stays
+   * reachable, `createInvoice`/`handleWebhook` just report CHECKOUT_DISABLED. */
+  readonly usdcCheckout?: UsdcCheckoutApi;
   readonly privateObjectStore?: PrivateObjectStore;
   readonly resumableOriginalUploads?: ResumableOriginalUploadCoordinator;
   /** Optional authenticated Pexels/Pixabay stock-video broker. */
@@ -161,6 +171,7 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
     releases: options.releases ?? new DisabledReleaseMetadataService(),
     entitlementPublicKeyPem: options.entitlementPublicKeyPem ?? '',
     hostedRouteRetirement: options.hostedRouteRetirement ?? ALL_HOSTED_ROUTE_RETIREMENT_DISABLED,
+    usdcCheckout: options.usdcCheckout ?? new DisabledUsdcCheckoutService(),
   };
   const rateLimitWindowMs = options.rateLimit?.windowMs ?? DEFAULT_RATE_LIMIT_WINDOW_MS;
   const rateLimitMaxRequests = options.rateLimit?.maxRequests ?? DEFAULT_RATE_LIMIT_MAX_REQUESTS;
@@ -206,6 +217,7 @@ async function route(
     readonly releases: ReleaseMetadataApi;
     readonly entitlementPublicKeyPem: string;
     readonly hostedRouteRetirement: HostedRouteRetirementFlags;
+    readonly usdcCheckout: UsdcCheckoutApi;
   },
   request: IncomingMessage,
   response: ServerResponse,
@@ -696,6 +708,67 @@ async function route(
       requiredString(body, 'deviceId'),
     );
     respondNoStoreJson(response, 200, { data: entitlement });
+    return;
+  }
+
+  // USDC checkout (wave 5). Same mediaAuth identity domain as the routes above.
+  // `usdcCheckout.createInvoice`/`handleWebhook` report CHECKOUT_DISABLED whenever the flag
+  // is off (always, in every deployment today) or the service is unconfigured — see
+  // usdc-checkout-service.ts's module doc.
+  if (request.method === 'POST' && url.pathname === '/v1/billing/invoices') {
+    const mediaActor = await options.mediaAuth.authenticate(request);
+    if (mediaActor === undefined)
+      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+    const body = await readJson(request, maxJsonBodyBytes);
+    const plan = requiredString(body, 'plan');
+    if (plan !== 'monthly' && plan !== 'yearly') {
+      throw new ControlPlaneError('REQUEST_INVALID', 'plan must be "monthly" or "yearly"');
+    }
+    const invoice = await options.usdcCheckout.createInvoice(mediaActor.id, plan);
+    respondNoStoreJson(response, 201, { data: invoice });
+    return;
+  }
+
+  const invoiceStatusMatch = /^\/v1\/billing\/invoices\/([^/]+)$/.exec(url.pathname);
+  if (request.method === 'GET' && invoiceStatusMatch !== null) {
+    const mediaActor = await options.mediaAuth.authenticate(request);
+    if (mediaActor === undefined)
+      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+    const invoice = await options.usdcCheckout.getOwnedInvoice(
+      mediaActor.id,
+      decodeURIComponent(invoiceStatusMatch[1]!),
+    );
+    respondNoStoreJson(response, 200, { data: invoice });
+    return;
+  }
+
+  const submitTxMatch = /^\/v1\/billing\/invoices\/([^/]+)\/submit-tx$/.exec(url.pathname);
+  if (request.method === 'POST' && submitTxMatch !== null) {
+    const mediaActor = await options.mediaAuth.authenticate(request);
+    if (mediaActor === undefined)
+      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+    const invoiceId = decodeURIComponent(submitTxMatch[1]!);
+    await options.usdcCheckout.getOwnedInvoice(mediaActor.id, invoiceId); // ownership check
+    const body = await readJson(request, maxJsonBodyBytes);
+    await options.usdcCheckout.attemptConfirmation(requiredString(body, 'txHash'));
+    const refreshed = await options.usdcCheckout.getOwnedInvoice(mediaActor.id, invoiceId);
+    respondNoStoreJson(response, 200, { data: refreshed });
+    return;
+  }
+
+  // Public — authenticated by HMAC signature (alchemy-webhook.ts), not a session: this is a
+  // machine-to-machine delivery from Alchemy, not a browser/desktop caller. The exact raw
+  // bytes are read and never re-serialized, so the signature check compares against precisely
+  // what Alchemy signed.
+  if (request.method === 'POST' && url.pathname === '/v1/billing/webhooks/alchemy') {
+    const bytes = await readBytes(request, maxJsonBodyBytes);
+    const rawBody = Buffer.from(bytes).toString('utf8');
+    const signatureHeader = request.headers['x-alchemy-signature'];
+    await options.usdcCheckout.handleWebhook(
+      rawBody,
+      typeof signatureHeader === 'string' ? signatureHeader : undefined,
+    );
+    respondJson(response, 200, { data: { ok: true } });
     return;
   }
 
@@ -2770,6 +2843,28 @@ function respondError(response: ServerResponse, error: unknown): void {
   }
   if (error instanceof ReleaseMetadataError) {
     const status = error.code === 'RELEASE_SERVICE_UNCONFIGURED' ? 503 : 400;
+    respondJson(response, status, { error: { code: error.code, message: error.message } });
+    return;
+  }
+  if (error instanceof UsdcCheckoutError) {
+    const status =
+      error.code === 'CHECKOUT_DISABLED'
+        ? 503
+        : error.code === 'INVOICE_NOT_FOUND'
+          ? 404
+          : error.code === 'WEBHOOK_SIGNATURE_INVALID'
+            ? 401
+            : 400;
+    respondJson(response, status, { error: { code: error.code, message: error.message } });
+    return;
+  }
+  if (error instanceof UsdcLedgerError || error instanceof CatalogError) {
+    const status =
+      error.code === 'INVOICE_NOT_FOUND'
+        ? 404
+        : error.code === 'INVOICE_NOT_CONFIRMABLE' || error.code === 'INVOICE_NOT_REFUNDABLE'
+          ? 409
+          : 400;
     respondJson(response, status, { error: { code: error.code, message: error.message } });
     return;
   }

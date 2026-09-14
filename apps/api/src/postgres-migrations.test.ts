@@ -251,6 +251,22 @@ describe('ordered PostgreSQL migrations', () => {
     expect(combined).toContain('CREATE TABLE IF NOT EXISTS release_metadata');
   });
 
+  it('creates the usdc_invoices table with its uniqueness indexes (008)', async () => {
+    const migration = POSTGRES_MIGRATIONS.find((m) => m.id === '008-usdc-invoices');
+    expect(migration).toBeDefined();
+    const queries: string[] = [];
+    await migration!.up({
+      query: async (sql: string) => {
+        queries.push(sql);
+        return { rows: [] };
+      },
+    });
+    const combined = queries.join('\n');
+    expect(combined).toContain('CREATE TABLE IF NOT EXISTS usdc_invoices');
+    expect(combined).toContain('usdc_invoices_pending_amount_idx');
+    expect(combined).toContain('usdc_invoices_txhash_logindex_idx');
+  });
+
   it('fails closed when an applied migration checksum has drifted', async () => {
     const { pool } = createRecordingPool([
       { id: POSTGRES_MIGRATIONS[0]!.id, checksum: 'sha256:unexpected' },

@@ -253,6 +253,41 @@ const ACCOUNT_DEVICES_SUBSCRIPTIONS_ENTITLEMENTS_MIGRATION: PostgresMigration = 
   },
 };
 
+const USDC_INVOICES_MIGRATION: PostgresMigration = {
+  id: '008-usdc-invoices',
+  checksum: 'sha256:usdc-invoices-2026-09-14',
+  up: async (database) => {
+    // Owned by usdc-invoice-ledger.ts. amount_usdc_base_units is `text`, not a numeric column:
+    // it holds an exact bigint-as-decimal-string, never a float — see that module's doc.
+    await database.query(`
+      CREATE TABLE IF NOT EXISTS usdc_invoices (
+        id text PRIMARY KEY,
+        owner_id text NOT NULL,
+        plan text NOT NULL,
+        amount_usdc_base_units text NOT NULL,
+        recipient_address text NOT NULL,
+        contract_address text NOT NULL,
+        chain_id integer NOT NULL,
+        status text NOT NULL,
+        created_at timestamptz NOT NULL,
+        expires_at timestamptz NOT NULL,
+        confirmed_at timestamptz,
+        tx_hash text,
+        log_index integer,
+        refunded_at timestamptz,
+        refund_reason text
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS usdc_invoices_pending_amount_idx
+        ON usdc_invoices (recipient_address, amount_usdc_base_units) WHERE status = 'pending';
+      CREATE UNIQUE INDEX IF NOT EXISTS usdc_invoices_txhash_logindex_idx
+        ON usdc_invoices (tx_hash, log_index);
+      CREATE INDEX IF NOT EXISTS usdc_invoices_owner_plan_idx
+        ON usdc_invoices (owner_id, plan, status);
+      CREATE INDEX IF NOT EXISTS usdc_invoices_created_idx ON usdc_invoices (created_at DESC);
+    `);
+  },
+};
+
 export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
   BASELINE_MIGRATION,
   ASSET_REVOCATION_PRIMARY_KEY_MIGRATION,
@@ -261,6 +296,7 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
   STOCK_VIDEO_MIGRATION,
   LOOK_INSTANCES_MIGRATION,
   ACCOUNT_DEVICES_SUBSCRIPTIONS_ENTITLEMENTS_MIGRATION,
+  USDC_INVOICES_MIGRATION,
 ];
 
 export async function runPostgresMigrations(database: MigrationDatabase): Promise<void> {

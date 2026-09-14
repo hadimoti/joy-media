@@ -430,3 +430,139 @@ are trusted in production: (1) the owner/Codex must provision the
 `joy-media-entitlement-signing-key` systemd credential and add the corresponding
 `LoadCredentialEncrypted=` line to `deploy/joy-media-api.override.conf` together, (2) run the
 migration against the real database, (3) build the `apps/editor-web` account panel UI.
+
+---
+
+## Wave 5 — USDC/Alchemy invoice ledger (COMPLETE for the API surface; checkout stays disabled, editor-web UI + reconciliation route deferred)
+
+**Commit:** see `git log` for the commit adding `apps/api/src/usdc-catalog.ts`,
+`usdc-invoice-ledger.ts`, `usdc-confirmation.ts`, `alchemy-transport.ts`, `alchemy-webhook.ts`,
+`usdc-checkout-service.ts`, and the matching `http-server.ts`/`server.ts`/
+`postgres-migrations.ts` wiring (wave 5 commit, after the wave 4 commit).
+
+**No in-repo Nutrized reference existed to adapt (confirmed at wave 0)**, so every piece here
+is designed from scratch against the locked owner decisions alone — "Use the exact Nutrized
+public USDC contract and recipient only after protected verification of deployed
+configuration" specifically forbids inventing or hardcoding one, including the well-known
+canonical Ethereum-mainnet USDC contract address: this worktree never writes that address
+anywhere. Every route and service takes the recipient/contract address as required,
+non-defaulted configuration.
+
+**What was done:**
+
+- `usdc-catalog.ts`: USD price catalog + exact decimal-string → USDC-base-unit conversion (no
+  `Number()`/float math anywhere in the path — `usdToUsdcBaseUnits('999999.99')` is exact).
+  **Prices are placeholders: `$0.00` for both plans**, overridable via
+  `JOY_MEDIA_USDC_MONTHLY_PRICE_USD`/`JOY_MEDIA_USDC_YEARLY_PRICE_USD`. `$0.00` is deliberate,
+  not lazy: even if the disabled gate were ever bypassed, a real on-chain USDC transfer of
+  exactly zero cannot happen, so no placeholder invoice can ever actually confirm.
+- `usdc-confirmation.ts`: `verifyTransferAgainstInvoice` (pure — chain/contract/recipient/exact
+  amount/confirmation-count checks, no I/O, fully unit-tested) and
+  `observeTransferFromReceipt` (decodes a real ERC20 `Transfer` log from a JSON-RPC receipt —
+  the event topic hash is public protocol data, safe to hardcode unlike the contract address).
+- `alchemy-transport.ts`: `AlchemyJsonRpcTransport`, a fixed-shape JSON-RPC HTTP client whose
+  URL (the credential — Alchemy's auth is URL-embedded) is read only from the systemd
+  credential directory and never appears in a thrown error message (tested explicitly). Also
+  reads the separate webhook HMAC signing key from its own credential id.
+- `alchemy-webhook.ts`: `verifyAlchemyWebhookSignature` (HMAC-SHA256 over the _raw_ body,
+  `timingSafeEqual` comparison) and `extractCandidateTxHashes`, explicitly documented as a
+  best-effort payload parser **not validated against a real Alchemy delivery** — every field it
+  extracts is independently re-derived from the chain via RPC before anything is trusted (see
+  known gap below).
+- `usdc-invoice-ledger.ts`: `UsdcInvoiceLedger` — ERC20 transfers carry no memo, so pending
+  invoices are disambiguated by a unique _exact amount_ (catalog price + a small per-invoice
+  base-unit nudge), enforced by a Postgres partial unique index on
+  `(recipient_address, amount_usdc_base_units) WHERE status = 'pending'` (confirmed working
+  against real pg-mem SQL, including the retry-on-collision path). `confirmInvoice` is a
+  compare-and-set (`WHERE status = 'pending'`) that is also replay-safe (identical evidence
+  resubmitted returns the same row) and collision-safe (a second unique index on
+  `(tx_hash, log_index)` means the same on-chain event can never confirm two different
+  invoices — tested explicitly). `expireStalePending`/`refundInvoice` are real, explicit state
+  transitions (unlike wave 4's subscriptions, an invoice's `pending` status is not just
+  computed on read, because expiry must free the amount slot the uniqueness index reserved).
+  `listForReconciliation` returns every field as-is — the row shape itself contains no secret.
+- `usdc-checkout-service.ts`: orchestrates create → observe → verify → confirm → activate.
+  "Exactly-once entitlement activation" comes from `AccountService.activateSubscription` being
+  an idempotent _overwrite_, not a separate dedup guard — documented explicitly, and tested
+  that re-running confirmation with the same evidence is a no-op the second time (the ledger's
+  own "no longer pending" check stops it before a second activation call). `createInvoice`
+  throws `CHECKOUT_DISABLED` whenever `checkoutEnabled` is false — the default, and the only
+  value this worktree ever sets.
+- Migration `008-usdc-invoices` (additive-only, both unique indexes), appended to the ledger.
+- `http-server.ts`: 4 new routes — `POST`/`GET /v1/billing/invoices`(`/:id`),
+  `POST /v1/billing/invoices/:id/submit-tx` (mediaAuth-authenticated, a user-submitted-hash
+  fallback if a webhook is ever missed), and the public `POST /v1/billing/webhooks/alchemy`
+  (authenticated by HMAC signature, not a session — reads the _exact raw bytes_ via the
+  existing `readBytes` helper so the signature check compares against precisely what Alchemy
+  signed, never a re-serialized JSON.parse/stringify round trip). New
+  `UsdcCheckoutError`/`UsdcLedgerError`/`CatalogError` → HTTP status branches in `respondError`.
+  `usdcCheckout` is optional with a `DisabledUsdcCheckoutService` default, same safe-default
+  shape as every other wave 4/5 option.
+- `server.ts`: constructs the real `UsdcCheckoutService` only when _all five_ of pool, the
+  Alchemy RPC credential, the webhook signing-key credential, and the owner-configured
+  recipient/contract addresses are present — none are, in this worktree, so it always falls
+  back to `DisabledUsdcCheckoutService`. `JOY_MEDIA_USDC_CHECKOUT_ENABLED` is read but never
+  set here, independently gating checkout even if everything else were configured.
+
+**Explicitly deferred (not silently dropped):**
+
+- No `apps/editor-web` UI calls any of the 4 new routes — no checkout/payment UI exists yet.
+- `UsdcInvoiceLedger.listForReconciliation`/`UsdcCheckoutService.listForReconciliation` exist
+  and are tested but are **not wired to any HTTP route**: an operator-facing reconciliation
+  view needs an admin-identity decision this repo has no established pattern for (media auth's
+  allow-list has only an `enabled` boolean, no role field) — inventing one (e.g., hardcoding a
+  specific email as "admin") would be presumptuous and is exactly the kind of decision this
+  worktree defers to the owner, same as every other cross-cutting gate in this migration.
+- No on-chain refund execution: `refundInvoice` only records that a refund happened by other
+  means. Actually moving USDC back to a payer needs a signing wallet — explicitly out of scope
+  per "do not read or print secrets" / no wallet key material handled anywhere in this repo.
+- `alchemy-webhook.ts`'s `extractCandidateTxHashes` payload shape follows Alchemy's documented
+  Address Activity schema as of this writing but **has not been checked against a real Alchemy
+  webhook delivery** — this worktree has no Alchemy account/webhook to test against. This is
+  a real gap, though a bounded one: every field the parser extracts is independently
+  re-verified against the chain via RPC before anything is trusted, so a parser mismatch fails
+  closed (no confirmation) rather than fails open.
+- No periodic sweep calls `UsdcInvoiceLedger.expireStalePending()` — it exists, is tested, and
+  is exactly the kind of thing a cron/scheduler would call, but no scheduler exists in this
+  repo to wire it to.
+- No `LoadCredentialEncrypted=` lines were added to `deploy/joy-media-api.override.conf` for
+  the two new Alchemy credentials, for the same live-deploy-risk reason as wave 4's entitlement
+  signing key (see that wave's entry) — Codex/the owner should add them together with actually
+  provisioning the credentials.
+
+**Commands run (this worktree):**
+
+- `pnpm --filter @joy-media/api build` (`tsc -b`) → **passes**.
+- `pnpm vitest run apps/api` → **548/548 passed** across 41 files (37 pre-existing skips
+  unrelated to this wave); this wave added 94 net-new tests across 9 new files:
+  `usdc-catalog.test.ts` (13), `usdc-confirmation.test.ts` (14), `alchemy-webhook.test.ts` (11),
+  `alchemy-transport.test.ts` (10), `usdc-invoice-ledger.test.ts` (20, against real pg-mem
+  SQL — including the partial-unique-index collision/retry path and the cross-invoice
+  duplicate-evidence race), `usdc-checkout-service.test.ts` (14),
+  `http-server-billing-routes.test.ts` (11), plus 1 new case in `postgres-migrations.test.ts`
+  for migration 008. (`AccountApi` gained an `activateSubscription` method this wave — no new
+  test needed since wave 4's `account-service.test.ts` already exercises the concrete
+  implementation those new tests call through the interface.)
+- `pnpm typecheck` (root, all 42 workspace projects) → **passes**.
+- `pnpm lint` (root eslint) → **passes, 0 problems**.
+- `pnpm format:check` (root prettier) → **same single pre-existing failure** as waves 1-4
+  (`apps/editor-web/src/playback-loop-contract.test.ts`, unrelated, predates this worktree). All
+  files this wave touched are prettier-clean.
+
+**Known gap:** same running gap as waves 1-4 (no real Electron/OS session in this background
+job) does not apply here — wave 5 is entirely `apps/api`, tested end-to-end against real SQL
+via pg-mem. The gap specific to this wave is the untested-against-a-real-delivery webhook
+payload parser noted above, and that `AlchemyJsonRpcTransport`/`observeTransferFromReceipt`
+have never been run against a real Ethereum RPC endpoint (only against fakes/canned receipts) —
+both are inherent to having no Alchemy account or live-wallet access in this worktree, which is
+precisely the "live-wallet test gate" the locked owner decision requires before checkout is
+ever enabled.
+
+**Next gate:** wave 6 (archive/cutover guards) can proceed — it does not depend on wave 5's
+USDC pieces going live. Before USDC checkout is ever enabled in production: (1) owner-verified
+recipient/contract addresses and Alchemy credentials must be provisioned exactly as wave 4's
+entitlement key was (systemd `LoadCredentialEncrypted=`, added together with the deploy-config
+line), (2) real USD prices must replace the `$0.00` placeholders, (3) the webhook payload
+parser must be validated against a real Alchemy delivery, (4) the "live-wallet test gate" from
+the locked owner decision must actually be recorded by the owner/Codex before
+`JOY_MEDIA_USDC_CHECKOUT_ENABLED=true` is ever set anywhere.

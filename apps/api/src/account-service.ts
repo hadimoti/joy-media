@@ -83,6 +83,8 @@ export interface AccountApi {
   revokeDevice(ownerId: string, deviceId: string): Promise<void>;
   getSubscription(ownerId: string): Promise<Subscription>;
   selectPlan(ownerId: string, plan: 'monthly' | 'yearly'): Promise<Subscription>;
+  /** wave 5's activation hook — see the class-level doc on `activateSubscription`. */
+  activateSubscription(ownerId: string, currentPeriodEndMs: number): Promise<Subscription>;
   issueEntitlement(ownerId: string, deviceId: string): Promise<SignedEntitlement>;
 }
 
@@ -262,6 +264,12 @@ export class DisabledAccountService implements AccountApi {
     return defaultSubscription(ownerId, Date.now());
   }
   async selectPlan(_ownerId: string, _plan: 'monthly' | 'yearly'): Promise<Subscription> {
+    throw new AccountServiceError(
+      'ACCOUNT_SERVICE_UNCONFIGURED',
+      'account service is not configured',
+    );
+  }
+  async activateSubscription(_ownerId: string, _currentPeriodEndMs: number): Promise<Subscription> {
     throw new AccountServiceError(
       'ACCOUNT_SERVICE_UNCONFIGURED',
       'account service is not configured',
