@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { WorkerControlPlaneClient } from './control-plane-client.js';
 import { WorkerSessionExpiredError } from './control-plane-client.js';
 import { WorkerDaemon } from './worker-daemon.js';
 import { StaticLocalAssetSourceRegistry, WorkerRuntime } from './runtime.js';
 import type { GpuPreviewHost } from './gpu-preview-host.js';
+
+// Independent of `process.cwd()` (which is `apps/worker` under `pnpm --filter @joy-media/worker
+// test`, not the repo root) so this fixture resolves the same way from any invocation.
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 describe('WorkerDaemon', () => {
   it('stops on session expiry so a supervisor can restart through pairing', async () => {
@@ -213,7 +218,7 @@ describe('WorkerDaemon', () => {
     } as unknown as WorkerControlPlaneClient;
     const derivativeDirectory = mkdtempSync(join(tmpdir(), 'joy-media-daemon-'));
     const source = join(
-      process.cwd(),
+      repoRoot,
       'apps',
       'editor-web',
       'public',

@@ -15,6 +15,7 @@ import { dirname, resolve } from 'node:path';
 const desktopRoot = resolve(import.meta.dirname, '..');
 const repoRoot = resolve(desktopRoot, '..', '..');
 const editorWebDistDir = resolve(repoRoot, 'apps', 'editor-web', 'dist');
+const workerDistDir = resolve(repoRoot, 'apps', 'worker', 'dist');
 const rendererStagingDir = resolve(desktopRoot, 'renderer');
 const desktopDistDir = resolve(desktopRoot, 'dist');
 const unpackedDir = resolve(desktopDistDir, 'joy-media-unpacked');
@@ -49,17 +50,21 @@ async function stageRenderer() {
  * `apps/desktop/dist/joy-media-unpacked` — a production package manifest, the compiled main
  * entry, preload bridge, and store modules (copied from `apps/desktop/dist`, which
  * `pnpm --filter @joy-media/desktop build` must have already produced, including the
- * `scripts/copy-static.mjs` preload `.cjs` copy), plus the staged renderer from
- * `stageRenderer()`.
+ * `scripts/copy-static.mjs` preload `.cjs` copy), the staged renderer from `stageRenderer()`,
+ * and the compiled worker package (`apps/worker/dist`, from `pnpm --filter @joy-media/worker
+ * build`) staged as `joy-media-unpacked/worker`.
  *
  * The copy is laid out as `joy-media-unpacked/dist/{main,preload,store,...}` +
- * `joy-media-unpacked/renderer/`, mirroring `apps/desktop/dist/` + `apps/desktop/renderer/`
- * exactly (not flattened to `joy-media-unpacked/{main,renderer,...}`) because
- * `electron-entry.ts`'s packaged-mode renderer path is `join(__dirname, '..', '..',
- * 'renderer')` from the compiled `dist/main/electron-entry.js` — two directories up from
- * `main/` must land on the directory that has `renderer/` as a sibling. Flattening one level
- * out (verified against a real Electron launch, not just inspection) makes that arithmetic
- * land one directory too high and fail with `ERR_FILE_NOT_FOUND`.
+ * `joy-media-unpacked/renderer/` + `joy-media-unpacked/worker/`, mirroring `apps/desktop/dist/`
+ * + `apps/desktop/renderer/` exactly for the first two (not flattened to
+ * `joy-media-unpacked/{main,renderer,...}`) because `electron-entry.ts`'s packaged-mode
+ * renderer path is `join(__dirname, '..', '..', 'renderer')` from the compiled
+ * `dist/main/electron-entry.js` — two directories up from `main/` must land on the directory
+ * that has `renderer/` as a sibling. Flattening one level out (verified against a real
+ * Electron launch, not just inspection) makes that arithmetic land one directory too high and
+ * fail with `ERR_FILE_NOT_FOUND`. `worker-entry.ts`'s `resolveWorkerEntry` walks the same
+ * `../../worker/index.js` path from `dist/main`, so `worker/` must sit at that same sibling
+ * level too.
  */
 async function assembleUnpacked() {
   if (!existsSync(compiledMainEntry)) {
@@ -70,6 +75,12 @@ async function assembleUnpacked() {
   }
   if (!existsSync(resolve(rendererStagingDir, 'index.html'))) {
     throw new Error(`${rendererStagingDir} has no index.html — stageRenderer() must run first.`);
+  }
+  if (!existsSync(resolve(workerDistDir, 'index.js'))) {
+    throw new Error(
+      `${workerDistDir} has no index.js. Run 'pnpm --filter @joy-media/worker build' before ` +
+        `packaging --staging/--unpacked.`,
+    );
   }
 
   await rm(unpackedDir, { recursive: true, force: true });
@@ -92,6 +103,14 @@ async function assembleUnpacked() {
   }
 
   await cp(rendererStagingDir, resolve(unpackedDir, 'renderer'), { recursive: true });
+
+  // Compiled worker package, staged as a sibling of dist/ and renderer/ so
+  // `worker-entry.ts`'s `resolveWorkerEntry` finds it at `<mainDirname>/../../worker/index.js`.
+  // Test output is excluded the same way the desktop dist copy above is.
+  await cp(workerDistDir, resolve(unpackedDir, 'worker'), {
+    recursive: true,
+    filter: (source) => !/\.test\.(js|d\.ts)(\.map)?$/.test(source.replaceAll('\\', '/')),
+  });
 
   const desktopPackageJson = JSON.parse(
     await readFile(resolve(desktopRoot, 'package.json'), 'utf8'),

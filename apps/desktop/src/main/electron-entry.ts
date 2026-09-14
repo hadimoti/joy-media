@@ -17,6 +17,7 @@ import { spawn } from 'node:child_process';
 import { parseProjectDeepLink } from '../deep-link.js';
 import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
+import { resolveWorkerEntry } from './worker-entry.js';
 import { createIpcHandlers, dispatchIpcRequest } from './ipc-handlers.js';
 import type { IpcRequest } from '../ipc.js';
 import {
@@ -61,12 +62,11 @@ if (!app.requestSingleInstanceLock()) {
   localDatabase.recoverInterrupted();
 
   const fileRegistry = createFileRegistry();
+  const workerEntry = resolveWorkerEntry({ mainDirname: __dirname, execPath: process.execPath });
   const workerSupervisor = createWorkerSupervisor({
     spawn: (command, args, options) => spawn(command, args, options),
-    // Wave 1 dev default: run the worker package's TS entry directly via tsx. Wave 2 swaps
-    // this for the built apps/worker/dist entry and a real job-protocol handshake.
-    command: process.execPath,
-    args: [join(__dirname, '..', '..', '..', 'worker', 'src', 'index.ts')],
+    command: workerEntry.command,
+    args: workerEntry.args,
   });
   const secretStore = createElectronSecretStore(localDatabase, safeStorage);
   const ipcHandlers = createIpcHandlers({

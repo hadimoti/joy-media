@@ -1,12 +1,17 @@
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   readUpscaleDerivative,
   runUpscaleJob,
   upscalingAvailabilityFromEnvironment,
 } from './local-upscaling.js';
+
+// Independent of `process.cwd()` (which is `apps/worker` under `pnpm --filter @joy-media/worker
+// test`, not the repo root) so this fixture resolves the same way from any invocation.
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 describe('local upscaling runner', () => {
   it('advertises only an explicitly configured image runner', () => {
@@ -29,14 +34,7 @@ describe('local upscaling runner', () => {
 
   it('runs a private image request, verifies the output, and keeps only an opaque receipt', async () => {
     const derivativeDirectory = mkdtempSync(join(tmpdir(), 'joy-upscale-result-'));
-    const sourcePath = join(
-      process.cwd(),
-      'apps',
-      'editor-web',
-      'public',
-      'assets',
-      '24_pixel.png',
-    );
+    const sourcePath = join(repoRoot, 'apps', 'editor-web', 'public', 'assets', '24_pixel.png');
     const copyRunner = [
       "const fs=require('node:fs');",
       "const i=process.argv.indexOf('--request');",
