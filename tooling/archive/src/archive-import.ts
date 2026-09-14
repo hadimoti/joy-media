@@ -59,7 +59,11 @@ export function importOwnerArchive(
 
   const entries: ArchiveEntry[] = [];
   for (const entry of bundle.entries) {
-    if (!isRecord(entry) || typeof entry.name !== 'string' || typeof entry.bytesBase64 !== 'string') {
+    if (
+      !isRecord(entry) ||
+      typeof entry.name !== 'string' ||
+      typeof entry.bytesBase64 !== 'string'
+    ) {
       throw new ArchiveImportError(
         'ARCHIVE_PAYLOAD_INVALID',
         'decrypted archive contains an invalid entry shape',

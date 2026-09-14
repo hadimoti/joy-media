@@ -26,6 +26,10 @@ function deps() {
   }));
   const secretStore = createMemorySecretStore();
   const probeProvider = vi.fn(async () => ({ ok: true, modelId: 'gpt-4o-mini' }));
+  const checkForUpdate = vi.fn((): { status: 'current'; reason: 'not-newer' } => ({
+    status: 'current',
+    reason: 'not-newer',
+  }));
   let idCount = 0;
   return {
     fileRegistry,
@@ -35,6 +39,7 @@ function deps() {
     probeMedia,
     secretStore,
     probeProvider,
+    checkForUpdate,
     now: () => 'T0',
     newId: () => `id-${++idCount}`,
   };
@@ -418,5 +423,38 @@ describe('IPC dispatch', () => {
       modelId: 'gpt-4o-mini',
     });
     expect(JSON.stringify(result)).not.toContain('sk-secret');
+  });
+
+  it('check-for-update forwards a well-shaped request to the injected policy check', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const manifest = {
+      payload: {
+        channel: 'stable' as const,
+        version: '1.2.0',
+        downloadUrl: 'https://joyst.ir/downloads/joy-media-1.2.0.exe',
+        sha256: 'a'.repeat(64),
+      },
+      signature: 'sig',
+    };
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.check-for-update',
+      payload: { manifest, subscriptionActive: true },
+    });
+    expect(result).toEqual({ ok: true, data: { status: 'current', reason: 'not-newer' } });
+    expect(d.checkForUpdate).toHaveBeenCalledWith({ manifest, subscriptionActive: true });
+  });
+
+  it('check-for-update rejects a malformed request without calling the injected policy check', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.check-for-update',
+      payload: { manifest: { payload: {}, signature: 'sig' }, subscriptionActive: true },
+    });
+    expect(result.ok).toBe(false);
+    expect(d.checkForUpdate).not.toHaveBeenCalled();
   });
 });

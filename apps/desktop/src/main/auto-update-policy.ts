@@ -65,7 +65,8 @@ export function evaluateAutoUpdate(options: {
     !isSignedManifestShape(options.manifest) ||
     !isValidSha256(payload.sha256) ||
     !isAllowedDownloadUrl(payload.downloadUrl, options.allowedHosts ?? DEFAULT_RELEASE_HOSTS) ||
-    (payload.minSupportedVersion !== undefined && parseVersion(payload.minSupportedVersion) === undefined)
+    (payload.minSupportedVersion !== undefined &&
+      parseVersion(payload.minSupportedVersion) === undefined)
   ) {
     return { status: 'blocked', reason: 'manifest-invalid' };
   }
@@ -81,7 +82,9 @@ export function evaluateAutoUpdate(options: {
     return { status: 'current', reason: 'not-newer' };
   }
   const minimum =
-    payload.minSupportedVersion === undefined ? undefined : parseVersion(payload.minSupportedVersion);
+    payload.minSupportedVersion === undefined
+      ? undefined
+      : parseVersion(payload.minSupportedVersion);
   return {
     status: 'update',
     manifest: options.manifest,
@@ -148,7 +151,12 @@ function canonicalize(payload: ReleaseManifestPayload): Buffer {
   );
 }
 
-type ParsedVersion = readonly [major: number, minor: number, patch: number, prerelease: string | undefined];
+type ParsedVersion = readonly [
+  major: number,
+  minor: number,
+  patch: number,
+  prerelease: string | undefined,
+];
 
 function parseVersion(value: string): ParsedVersion | undefined {
   const match = VERSION_PATTERN.exec(value);

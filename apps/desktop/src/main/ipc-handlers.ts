@@ -13,6 +13,7 @@ import type {
 } from '../store/local-database.js';
 import { validateProviderProfileInput } from '@joy-media/provider-sdk';
 import type { DirectProviderProbeReport, SecretStore } from '@joy-media/provider-sdk';
+import type { AutoUpdateDecision, SignedReleaseManifest } from './auto-update-policy.js';
 
 /** Native "select a file" prompt, injected so main-process wiring stays unit-testable. */
 export type ShowOpenDialog = () => Promise<{
@@ -37,6 +38,18 @@ export type ProbeProvider = (request: {
   readonly modelId: string;
 }) => Promise<DirectProviderProbeReport>;
 
+/** Evaluates a release manifest the renderer already fetched from the public
+ * `GET /v1/releases/:channel` route against the pinned release-signing public key and the
+ * running app's own version. Injected so the two pieces of trust material a compromised
+ * renderer must never be able to supply itself — the pinned public key and the app's real
+ * running version (`app.getVersion()`) — stay main-process-only; see main/electron-entry.ts
+ * for the real wiring to `../auto-update-policy.js`'s `evaluateAutoUpdate`. This never
+ * downloads or installs anything — see that module's own doc comment. */
+export type CheckForUpdate = (request: {
+  readonly manifest: SignedReleaseManifest;
+  readonly subscriptionActive: boolean;
+}) => AutoUpdateDecision;
+
 export interface IpcHandlerDeps {
   readonly fileRegistry: FileRegistry;
   readonly workerSupervisor: WorkerSupervisor;
@@ -45,6 +58,7 @@ export interface IpcHandlerDeps {
   readonly probeMedia: ProbeMedia;
   readonly secretStore: SecretStore;
   readonly probeProvider: ProbeProvider;
+  readonly checkForUpdate: CheckForUpdate;
   readonly now?: () => string;
   readonly newId?: () => string;
 }
@@ -216,6 +230,11 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       });
       return { ok: true, data: report };
     },
+    'desktop.check-for-update': (payload): IpcResult => {
+      const request = asCheckForUpdateRequest(payload);
+      if (request === undefined) return { ok: false, error: 'Invalid update check request' };
+      return { ok: true, data: deps.checkForUpdate(request) };
+    },
   };
 }
 
@@ -304,6 +323,37 @@ function asSaveProviderProfileRequest(value: unknown): SaveProviderProfileReques
     baseUrl: candidate['baseUrl'],
     modelId: candidate['modelId'],
     apiKey: candidate['apiKey'],
+  };
+}
+
+function asCheckForUpdateRequest(
+  value: unknown,
+): { manifest: SignedReleaseManifest; subscriptionActive: boolean } | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const manifest = candidate['manifest'];
+  if (typeof candidate['subscriptionActive'] !== 'boolean') return undefined;
+  if (typeof manifest !== 'object' || manifest === null) return undefined;
+  const manifestCandidate = manifest as Record<string, unknown>;
+  const payload = manifestCandidate['payload'];
+  if (typeof manifestCandidate['signature'] !== 'string') return undefined;
+  if (typeof payload !== 'object' || payload === null) return undefined;
+  const payloadCandidate = payload as Record<string, unknown>;
+  if (payloadCandidate['channel'] !== 'stable' && payloadCandidate['channel'] !== 'beta') {
+    return undefined;
+  }
+  if (typeof payloadCandidate['version'] !== 'string') return undefined;
+  if (typeof payloadCandidate['downloadUrl'] !== 'string') return undefined;
+  if (typeof payloadCandidate['sha256'] !== 'string') return undefined;
+  if (
+    payloadCandidate['minSupportedVersion'] !== undefined &&
+    typeof payloadCandidate['minSupportedVersion'] !== 'string'
+  ) {
+    return undefined;
+  }
+  return {
+    manifest: manifest as SignedReleaseManifest,
+    subscriptionActive: candidate['subscriptionActive'],
   };
 }
 

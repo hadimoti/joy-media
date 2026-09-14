@@ -705,3 +705,152 @@ run per owner instruction; focused tests/builds are the only verification for th
 **Verification recorded for `96ecfbf1`:** the five touched test files passed `29/29`; API,
 desktop, and archive TypeScript builds passed; `package:dev` wrote the unsigned development
 manifest; and `package:release` intentionally exited `2` after writing a blocked release plan.
+
+---
+
+## Wave 8 — Fresh Sonnet 5 audit of wave 7 (COMPLETE for the gaps found; no deploy/signing/secrets)
+
+**Context:** a new Sonnet 5 session (after the prior session's usage limit reset) re-audited the
+committed wave 7 scaffold (`0c909c61`) end-to-end before treating it as done, per the standing
+instruction to do a substantive review rather than take the prior session's "IMPLEMENTED
+SCAFFOLD" framing at face value. This wave is code-only: no deploy, VPS/joyst.ir change, secret
+access, payment activation, production data migration, or signed release was performed or
+attempted.
+
+**Baseline established before any change (this worktree, this session):**
+
+- `pnpm typecheck` (root, `tsc -b`) → **passes**, before and after.
+- `pnpm vitest run apps/api apps/desktop tooling/archive` → **684/684 passed** (baseline, before
+  this wave's new tests).
+- `pnpm lint` (root eslint) → **failed**, 4 errors, all `no-undef 'process' is not defined` in
+  `apps/desktop/scripts/package-release.mjs` (see finding 3 below). Confirmed pre-existing (not
+  introduced by this session) by stashing this session's own working changes and re-running
+  lint against the untouched `0c909c61` tree — identical 4 errors.
+- `pnpm format:check` (root prettier) → **failed** on 6 files beyond the one pre-existing,
+  unrelated failure every prior wave's entry records (`playback-loop-contract.test.ts`): every
+  file wave 7 (`0c909c61`) itself touched or added —
+  `apps/api/src/release-signing.ts`, `apps/desktop/scripts/package-release.mjs`,
+  `apps/desktop/src/main/auto-update-policy.ts` and its test,
+  `tooling/archive/src/archive-import.ts`. Wave 7's own progress-log entry never records a
+  `pnpm lint` or `pnpm format:check` run at all — both were apparently never actually run before
+  that commit, unlike every wave before it.
+
+**Findings (substantive review of wave 7's actual wiring, not just its tests):**
+
+1. **`createReleasePublisher` (`apps/api/src/release-publish.ts`) had zero callers anywhere in
+   the repository outside its own unit test.** `grep -rl 'release-publish\|createReleasePublisher'`
+   across the whole repo (excluding `dist/`) returned only `release-publish.ts` and
+   `release-publish.test.ts`. `server.ts` never imports `release-signing.ts` or
+   `release-publish.ts` at all. The wave 4/5 documented pattern ("not reachable from any route
+   ... the wave 7 publish pipeline calls it directly") promised a direct-call path that did not
+   exist — there was no way, even in principle, for a signed row to ever reach
+   `release_metadata` short of writing ad hoc code. This is exactly the "release metadata API
+   integration" gap named for this audit.
+2. **`evaluateAutoUpdate` (`apps/desktop/src/main/auto-update-policy.ts`) had zero callers
+   anywhere outside its own unit test.** `grep -rl 'evaluateAutoUpdate\|auto-update-policy'`
+   under `apps/desktop/src` (excluding tests) returned only the module itself. No IPC channel,
+   no `electron-entry.ts` wiring — the "desktop updater contract" was a correct, well-tested,
+   pure function with no way for the running app to ever call it. This is the "desktop updater
+   contract" gap named for this audit.
+3. **`pnpm lint` was broken by wave 7's own new file.** `apps/desktop/scripts/package-release.mjs`
+   uses `process.env`/`process.exitCode`, but `eslint.config.mjs`'s Node-globals override only
+   matched `**/bin/**/*.{mjs,cjs,js}`, `tooling/**/*.mjs`, and `scripts/*.cjs` (root-level) — not
+   `apps/*/scripts/*.mjs`, the pattern the sibling `package-dev.mjs` also lives under but never
+   tripped this rule because it happens not to reference `process`. Root `pnpm lint` has been
+   failing since `0c909c61` landed.
+4. **`pnpm format:check` was broken by 6 of wave 7's own files** (listed above) — none were run
+   through Prettier before that commit, unlike every prior wave's own stated verification step.
+5. **Archive integrity (`tooling/archive`) re-reviewed independently:** `verifyManifest`'s
+   wave-7-added `totalByteLength` check, `archive-import.ts`'s wave-7-added exhaustive shape
+   guards (`isRecord`/`isArchiveManifestShape`, every `bundle.entries[]` member checked before
+   `Buffer.from`), and the entry-count-before-index-access ordering were re-verified by hand for
+   sound logic (no out-of-bounds access, no silently-accepted malformed shape) and found correct
+   — no further changes made here beyond what wave 7 already landed. `manifest.ts`/
+   `archive-import.ts`/`encryption.ts` still take a fake `ProjectArchiveSource` only in tests, as
+   documented; that remains correctly out of scope (needs a real database connection this
+   worktree does not have).
+
+**What was done (fixes for findings 1-4; finding 5 needed no code change):**
+
+- **Finding 1 fix:** added `apps/api/src/release-publish-cli.ts` — `parseReleasePublishInput`
+  (validates an untrusted deserialized JSON value: non-empty `id`, `channel` is exactly
+  `"stable"`/`"beta"`, non-empty `version`, `https://` `downloadUrl`, 64-hex-char `sha256`,
+  optional string `minSupportedVersion` — fails closed on every other shape) and
+  `runReleasePublish(raw, publisher)` (validates, then calls the injected `ReleasePublisher`).
+  Added `apps/api/src/scripts/publish-release.ts`, a thin, deliberately untested wiring shell
+  (same "tested logic / untested edge wiring" split as `server.ts` itself) that reads a release
+  JSON file path from `process.argv`, refuses to run without both `JOY_MEDIA_DATABASE_URL` and
+  the `joy-media-release-signing-key` systemd credential present, then constructs the real
+  `ReleaseMetadataService`/`createEd25519ReleaseSigner`/`createReleasePublisher` chain and calls
+  `runReleasePublish`. Wired as `pnpm --filter @joy-media/api release:publish <file>` in
+  `apps/api/package.json`. **This worktree has neither a real database nor that credential, so
+  this script has never been run, here or anywhere** — it exists so the publish pipeline has an
+  actual caller instead of dead code with no path from a release artifact to a `release_metadata`
+  row. No HTTP route was added — the locked "no public publish route" decision stands.
+- **Finding 2 fix:** added `desktop.check-for-update` to `apps/desktop/src/ipc.ts`'s
+  `IPC_CHANNELS` and the mirrored `apps/desktop/src/preload/ipc-channels.cjs` (the existing
+  `preload.test.ts` drift guard catches any future mismatch). Added a `CheckForUpdate` injected
+  dependency type and handler to `apps/desktop/src/main/ipc-handlers.ts`, with a payload parser
+  (`asCheckForUpdateRequest`) that fails closed on any malformed manifest/payload shape without
+  ever calling the injected function. Wired the real dependency in `electron-entry.ts`: the
+  renderer is expected to fetch the `SignedReleaseManifest` itself from the existing public
+  `GET /v1/releases/:channel` route and its own subscription state from the existing
+  `GET /v1/account/subscription` route, then call this channel with
+  `{manifest, subscriptionActive}`. The two pieces of trust material a compromised renderer must
+  never be able to supply itself — the pinned release-signing public key
+  (`JOY_MEDIA_RELEASE_SIGNING_PUBLIC_KEY`, a public key, not a secret) and the app's actual
+  running version — are resolved only inside `electron-entry.ts` via `process.env` and
+  `app.getVersion()`, never accepted from the IPC payload. `evaluateAutoUpdate` itself is
+  unchanged; this only gives it a caller. Documented in a new "Auto-update policy check (wave 7)"
+  section of `apps/desktop/README.md`, including that no renderer code calls it yet and that the
+  channel always returns `release-key-unconfigured` today because
+  `JOY_MEDIA_RELEASE_SIGNING_PUBLIC_KEY` is unset in every deployment.
+- **Finding 3 fix:** extended `eslint.config.mjs`'s Node-globals override file list to include
+  `apps/*/scripts/*.mjs`.
+- **Finding 4 fix:** ran Prettier on exactly the 6 flagged pre-existing files plus this wave's
+  own new/edited files; the pre-existing `playback-loop-contract.test.ts` failure was left
+  untouched (confirmed via `git log -1 -- <file>` to predate this worktree, same as every prior
+  wave's entry).
+
+**Explicitly deferred (not silently dropped):**
+
+- `desktop.check-for-update` still has no renderer-side caller — no UI shows an available
+  update, downloads it, or installs it. That pipeline (progress UI, download, and where the
+  installer handoff happens) is real follow-up work this channel only makes possible, exactly
+  the same honesty pattern as every other wave's "substrate built, UI wiring deferred" note.
+- `release:publish` has never been run against a real database or a real signing key in this or
+  any session — provisioning both remains an owner/Codex ops action, same gate wave 4's
+  entitlement-signing-key entry already names.
+- No renderer/editor-web code was touched by this wave — this audit's fixes are entirely
+  `apps/api`, `apps/desktop/src/main` and `apps/desktop/src/preload`, plus tooling config.
+
+**Commands run (this worktree, this session):**
+
+- `pnpm typecheck` (root, `tsc -b`) → **passes**, both before and after every change in this
+  wave.
+- `pnpm --filter @joy-media/desktop build` / `pnpm --filter @joy-media/api build` → **pass**.
+- `pnpm --filter @joy-media/desktop test` → **90/90 passed** across 12 files (up from 88 tests
+  before this wave's 2 new `ipc-handlers.test.ts` cases for `desktop.check-for-update`).
+- `pnpm vitest run apps/api/src/release*` → **28/28 passed** (up from 14, this wave's new
+  `release-publish-cli.test.ts` adds 14).
+- `pnpm vitest run apps/api apps/desktop tooling/archive` → **700/700 passed** across 62 files (1
+  pre-existing skip), up from the 684/684 baseline captured above.
+- `pnpm vitest run` (whole repo, every workspace) → **4746/4746 passed, 38 skipped**, 0
+  failures — a full-repo regression check this audit ran that no single prior wave's entry
+  records at this scope.
+- `pnpm lint` (root eslint) → **passes, 0 problems** (was 4 errors before finding 3's fix).
+- `pnpm format:check` (root prettier) → **same single pre-existing failure** as every prior wave
+  (`apps/editor-web/src/playback-loop-contract.test.ts`, confirmed to predate this worktree) —
+  down from 7 failures (6 wave-7 files + that one) before finding 4's fix.
+- `pnpm desktop:package` → succeeded, wrote the unsigned dev manifest, unchanged behavior.
+- `pnpm --filter @joy-media/desktop package:release` → intentionally exited `2` after writing a
+  blocked release plan, unchanged behavior (still no certificate, still no public key
+  configured in this worktree).
+
+**Next gate:** none required for further wave 8-adjacent work on `apps/desktop`/`apps/api`. The
+running gates from every prior wave are unchanged by this audit: no real Electron window has
+been opened in any session; `release:publish` needs a real database and the
+`joy-media-release-signing-key` credential; `JOY_MEDIA_RELEASE_SIGNING_PUBLIC_KEY` needs to be
+pinned in a real desktop build before `desktop.check-for-update` can ever return anything but
+`release-key-unconfigured`; and the wave 1 runtime smoke test remains the prerequisite before
+any of `apps/desktop`'s Electron wiring — old or new — is trusted end-to-end.

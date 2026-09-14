@@ -75,7 +75,9 @@ export function createEd25519ReleaseSigner(privateKeyPem: string): ReleaseSigner
       `release signing key must be Ed25519, got "${privateKey.asymmetricKeyType ?? 'unknown'}"`,
     );
   }
-  const publicKeyPem = createPublicKey(privateKey).export({ type: 'spki', format: 'pem' }).toString();
+  const publicKeyPem = createPublicKey(privateKey)
+    .export({ type: 'spki', format: 'pem' })
+    .toString();
 
   return {
     publicKeyPem,
@@ -96,7 +98,10 @@ export class DisabledReleaseSigner implements ReleaseSigner {
   }
 }
 
-export function verifyReleaseManifest(signed: SignedReleaseManifest, publicKeyPem: string): boolean {
+export function verifyReleaseManifest(
+  signed: SignedReleaseManifest,
+  publicKeyPem: string,
+): boolean {
   let publicKey: KeyObject;
   try {
     publicKey = createPublicKey(publicKeyPem);

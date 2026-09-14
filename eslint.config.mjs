@@ -74,7 +74,12 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/bin/**/*.{mjs,cjs,js}', 'tooling/**/*.mjs', 'scripts/*.cjs'],
+    files: [
+      '**/bin/**/*.{mjs,cjs,js}',
+      'tooling/**/*.mjs',
+      'scripts/*.cjs',
+      'apps/*/scripts/*.mjs',
+    ],
     languageOptions: {
       globals: {
         require: 'readonly',

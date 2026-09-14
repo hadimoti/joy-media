@@ -184,6 +184,14 @@ key, public release, or deployment is included. The actual Electron packaging/si
 real Electron smoke, pinned production public key, and release publication remain owner/Codex
 acceptance gates.
 
+Wave 7 audit (2026-09-14, fresh Sonnet 5 session): the Ed25519 publish adapter and the desktop
+signature gate had no caller anywhere outside their own unit tests — see
+`docs/joy-media-final-migration-progress.md`'s wave 8 entry for the exact evidence and the
+fixes (a real `desktop.check-for-update` IPC channel, and a real, owner-run-only
+`pnpm --filter @joy-media/api release:publish` CLI). Also found and fixed: `pnpm lint` and
+`pnpm format:check` were broken by wave 7's own files (never actually run/fixed before that
+wave's commit) — both pass clean again.
+
 ## 7. Test/build baseline captured at wave 0
 
 Baseline commands (from repo root, this worktree) and their result are recorded in

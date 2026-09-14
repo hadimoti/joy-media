@@ -19,6 +19,7 @@ const IPC_CHANNELS = Object.freeze([
   'desktop.provider-profile.delete',
   'desktop.provider-profile.begin-session',
   'desktop.provider-profile.test',
+  'desktop.check-for-update',
 ]);
 
 module.exports = { IPC_CHANNELS };

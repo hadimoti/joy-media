@@ -12,6 +12,7 @@ export const IPC_CHANNELS = [
   'desktop.provider-profile.delete',
   'desktop.provider-profile.begin-session',
   'desktop.provider-profile.test',
+  'desktop.check-for-update',
 ] as const;
 export type IpcChannel = (typeof IPC_CHANNELS)[number];
 export interface IpcRequest {

@@ -10,8 +10,12 @@ const output = resolve(import.meta.dirname, '../dist/joy-media-release-plan.json
 const certificatePath = process.env.JOY_MEDIA_WINDOWS_CERTIFICATE_PATH;
 const releasePublicKey = process.env.JOY_MEDIA_RELEASE_SIGNING_PUBLIC_KEY;
 const blockedReasons = [
-  ...(certificatePath === undefined ? ['JOY_MEDIA_WINDOWS_CERTIFICATE_PATH is not configured'] : []),
-  ...(releasePublicKey === undefined ? ['JOY_MEDIA_RELEASE_SIGNING_PUBLIC_KEY is not configured'] : []),
+  ...(certificatePath === undefined
+    ? ['JOY_MEDIA_WINDOWS_CERTIFICATE_PATH is not configured']
+    : []),
+  ...(releasePublicKey === undefined
+    ? ['JOY_MEDIA_RELEASE_SIGNING_PUBLIC_KEY is not configured']
+    : []),
   'owner-approved Windows packaging/signing toolchain is not enabled by this scaffold',
 ];
 const plan = {

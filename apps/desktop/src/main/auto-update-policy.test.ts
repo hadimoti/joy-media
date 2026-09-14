@@ -4,7 +4,9 @@ import { evaluateAutoUpdate } from './auto-update-policy.js';
 
 function release() {
   const { privateKey } = generateKeyPairSync('ed25519');
-  const publicKeyPem = createPublicKey(privateKey).export({ type: 'spki', format: 'pem' }).toString();
+  const publicKeyPem = createPublicKey(privateKey)
+    .export({ type: 'spki', format: 'pem' })
+    .toString();
   const payload = {
     channel: 'stable',
     version: '1.2.0',
@@ -14,11 +16,9 @@ function release() {
   } as const;
   const manifest = {
     payload,
-    signature: sign(
-      null,
-      Buffer.from(JSON.stringify(payload), 'utf8'),
-      privateKey,
-    ).toString('base64url'),
+    signature: sign(null, Buffer.from(JSON.stringify(payload), 'utf8'), privateKey).toString(
+      'base64url',
+    ),
   };
   // The policy's canonical payload has the same stable field order as this fixture.
   return { manifest, publicKeyPem };
@@ -40,7 +40,12 @@ describe('evaluateAutoUpdate', () => {
   it('requires an active subscription and a pinned key', () => {
     const { manifest, publicKeyPem } = release();
     expect(
-      evaluateAutoUpdate({ manifest, currentVersion: '1.1.0', subscriptionActive: false, pinnedPublicKeyPem: publicKeyPem }),
+      evaluateAutoUpdate({
+        manifest,
+        currentVersion: '1.1.0',
+        subscriptionActive: false,
+        pinnedPublicKeyPem: publicKeyPem,
+      }),
     ).toEqual({ status: 'blocked', reason: 'subscription-required' });
     expect(
       evaluateAutoUpdate({ manifest, currentVersion: '1.1.0', subscriptionActive: true }),
@@ -60,11 +65,35 @@ describe('evaluateAutoUpdate', () => {
         pinnedPublicKeyPem: publicKeyPem,
       }),
     ).toEqual({ status: 'blocked', reason: 'signature-invalid' });
-    const unsafe = { ...manifest, payload: { ...manifest.payload, downloadUrl: 'http://joyst.ir/file.exe' } };
-    expect(evaluateAutoUpdate({ manifest: unsafe, currentVersion: '1.1.0', subscriptionActive: true, pinnedPublicKeyPem: publicKeyPem })).toEqual({ status: 'blocked', reason: 'manifest-invalid' });
+    const unsafe = {
+      ...manifest,
+      payload: { ...manifest.payload, downloadUrl: 'http://joyst.ir/file.exe' },
+    };
+    expect(
+      evaluateAutoUpdate({
+        manifest: unsafe,
+        currentVersion: '1.1.0',
+        subscriptionActive: true,
+        pinnedPublicKeyPem: publicKeyPem,
+      }),
+    ).toEqual({ status: 'blocked', reason: 'manifest-invalid' });
     const malformedHash = { ...manifest, payload: { ...manifest.payload, sha256: 'bad' } };
-    expect(evaluateAutoUpdate({ manifest: malformedHash, currentVersion: '1.1.0', subscriptionActive: true, pinnedPublicKeyPem: publicKeyPem })).toEqual({ status: 'blocked', reason: 'manifest-invalid' });
-    expect(evaluateAutoUpdate({ manifest, currentVersion: '2.0.0', subscriptionActive: true, pinnedPublicKeyPem: publicKeyPem })).toEqual({ status: 'current', reason: 'not-newer' });
+    expect(
+      evaluateAutoUpdate({
+        manifest: malformedHash,
+        currentVersion: '1.1.0',
+        subscriptionActive: true,
+        pinnedPublicKeyPem: publicKeyPem,
+      }),
+    ).toEqual({ status: 'blocked', reason: 'manifest-invalid' });
+    expect(
+      evaluateAutoUpdate({
+        manifest,
+        currentVersion: '2.0.0',
+        subscriptionActive: true,
+        pinnedPublicKeyPem: publicKeyPem,
+      }),
+    ).toEqual({ status: 'current', reason: 'not-newer' });
   });
 
   it('marks a release forced when the current version is below its minimum', () => {

@@ -98,6 +98,29 @@ Instead, this wave adds the desktop-host-side substrate that engine can be wired
 session); wiring it to call `desktop.provider-profile.begin-session` instead — and building a
 profile-management UI — is future work, same honesty pattern as wave 2's deferred items.
 
+## Auto-update policy check (wave 7)
+
+`main/auto-update-policy.ts`'s `evaluateAutoUpdate` is a pure, network-free gate (active
+subscription, pinned public key, Ed25519 signature over `apps/api/src/release-signing.ts`'s
+canonical payload, HTTPS `joyst.ir` allow-list, SHA-256 shape, semver compare, downgrade and
+minimum-version checks) — it decides whether a manifest is trustworthy and newer, never fetches
+or installs anything itself. `desktop.check-for-update` is the IPC channel that gives it a real
+caller: the renderer fetches a `SignedReleaseManifest` from the public `GET /v1/releases/:channel`
+route and its own subscription state from `GET /v1/account/subscription` (both existing wave 4
+routes), then calls this channel with `{ manifest, subscriptionActive }`. The two pieces of trust
+material a compromised renderer must never be able to supply — the pinned release-signing public
+key (`JOY_MEDIA_RELEASE_SIGNING_PUBLIC_KEY`, a public key, not a secret) and the app's actual
+running version (`app.getVersion()`) — are resolved only in `electron-entry.ts`, never accepted
+from the IPC payload.
+
+**Explicitly deferred:** no renderer-side code calls `desktop.check-for-update` yet, and nothing
+downloads or installs the update artifact even when the decision is `status: 'update'` — a
+download/install pipeline (and where its progress surfaces in the UI) is separate follow-up work
+this channel only makes possible. `JOY_MEDIA_RELEASE_SIGNING_PUBLIC_KEY` is not set in any
+deployment today, so the channel always returns `{status: 'blocked', reason:
+'release-key-unconfigured'}` until the owner pins the real key alongside provisioning
+`apps/api`'s `joy-media-release-signing-key` credential (see `release-signing.ts`'s module doc).
+
 ## Boundaries
 
 - **Editor origin:** only the configured JOY production origin and explicit loopback development origins may request the bridge. Unknown origins are rejected before IPC dispatch.

@@ -28,6 +28,7 @@ import { LocalDatabase } from '../store/local-database.js';
 import { checksumFile, classifyMediaKind } from './media-checksum.js';
 import { createElectronSecretStore } from './secrets/electron-secret-store.js';
 import { probeOpenAiCompatibleProvider } from '@joy-media/provider-sdk';
+import { evaluateAutoUpdate } from './auto-update-policy.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = process.env['NODE_ENV'] !== 'production';
@@ -77,6 +78,20 @@ if (!app.requestSingleInstanceLock()) {
     },
     secretStore,
     probeProvider: (request) => probeOpenAiCompatibleProvider(request, fetch),
+    // Pure, network-free decision (see auto-update-policy.ts). The renderer fetches the
+    // manifest from the public `GET /v1/releases/:channel` route and its own subscription
+    // status from `GET /v1/account/subscription` itself; the pinned public key and the app's
+    // actual running version — trust material a compromised renderer must never be able to
+    // supply itself — come only from the main process's own environment and `app.getVersion()`,
+    // never from the IPC payload.
+    checkForUpdate: (request) => {
+      const pinnedPublicKeyPem = process.env['JOY_MEDIA_RELEASE_SIGNING_PUBLIC_KEY'];
+      return evaluateAutoUpdate({
+        ...request,
+        currentVersion: app.getVersion(),
+        ...(pinnedPublicKeyPem === undefined ? {} : { pinnedPublicKeyPem }),
+      });
+    },
   });
 
   ipcMain.handle('joy-desktop-ipc', (_event, request: IpcRequest) =>

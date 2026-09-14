@@ -14,7 +14,8 @@
   "scripts": {
     "build": "tsc -b",
     "dev": "tsx src/server.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "release:publish": "tsx src/scripts/publish-release.ts"
   },
   "devDependencies": {
     "@types/nodemailer": "^8.0.1",
