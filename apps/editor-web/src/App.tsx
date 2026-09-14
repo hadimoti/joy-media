@@ -1264,6 +1264,10 @@ function EditorWorkspace({
   const replacementAudioRef = useRef<HTMLAudioElement | null>(null);
   const decoderRef = useRef<HtmlMediaDecoder | null>(null);
   const clockRef = useRef<MediaClock | null>(null);
+  // Decoder setup is declared after the playback capture effect. Bump this
+  // token whenever fresh refs are installed so an active playback effect that
+  // previously observed null refs is reattached in the following render.
+  const [mediaReadyRevision, setMediaReadyRevision] = useState(0);
   /** Last decoded RGBA per timeline clip id — feeds dual-texture transitions. */
   const clipFrameCacheRef = useRef<Map<string, ImageDataLike>>(new Map());
   const [clipFrameTick, setClipFrameTick] = useState(0);
@@ -2157,6 +2161,12 @@ function EditorWorkspace({
         video.pause();
         replacementAudio.pause();
         await seekDetachedVideo(video, sourceTimeUs);
+        if (
+          !operation.isCurrent(epoch) ||
+          videoRef.current !== video ||
+          decoderRef.current !== decoder
+        )
+          return false;
         if (decoder !== null) {
           const token = scheduler.current.requestToken();
           const frame = decoder.captureCurrentFrame(token);
@@ -2529,12 +2539,14 @@ function EditorWorkspace({
     rememberClipFrame,
     session,
     controlPlaneProject,
+    mediaReadyRevision,
     state.playing,
     syncMediaToPlayhead,
   ]);
   const handleMediaReady = useCallback((decoder: HtmlMediaDecoder, clock: MediaClock) => {
     decoderRef.current = decoder;
     clockRef.current = clock;
+    setMediaReadyRevision((revision) => revision + 1);
   }, []);
   useEffect(() => {
     const video = videoRef.current;

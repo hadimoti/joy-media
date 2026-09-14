@@ -14,6 +14,10 @@ const decoderSetupBlock = appSource.slice(
   appSource.indexOf('const handleMediaReady = useCallback'),
   appSource.indexOf('const togglePlayback = useCallback'),
 );
+const playbackCaptureBlock = appSource.slice(
+  appSource.indexOf('if (!state.playing) return;'),
+  appSource.indexOf('const handleMediaReady = useCallback'),
+);
 
 describe('App loop and Space transport contract', () => {
   it('moves the authoritative playhead before loading the next or wrapped clip', () => {
@@ -56,6 +60,11 @@ describe('App loop and Space transport contract', () => {
     expect(decoderSetupBlock).not.toContain(
       'activeVideoClipAt(session.timelineProject, 0, [], session.visualProject)',
     );
+    expect(decoderSetupBlock).toContain(
+      'setMediaReadyRevision((revision) => revision + 1);',
+    );
+    expect(playbackCaptureBlock).toContain('mediaReadyRevision,');
+    expect(appSource).toContain('decoderRef.current !== decoder');
   });
 
   it('guards repeated Space and shortcut-owned controls', () => {
