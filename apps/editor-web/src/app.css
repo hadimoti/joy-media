@@ -8507,7 +8507,8 @@ label {
 }
 .joy-code-recipes[hidden],
 .living-looks[hidden],
-.joy-code-creative-brief[hidden] {
+.joy-code-creative-brief[hidden],
+.joy-code-messages[hidden] {
   display: none;
 }
 .joy-code-recipes-intro {

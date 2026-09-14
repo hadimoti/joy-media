@@ -2277,6 +2277,10 @@ export function AgentPanel({
       return;
     const entry = creativeSkills.find((candidate) => candidate.skill.id === skillId);
     if (entry === undefined || !entry.available) return;
+    // Recipe progress, observation consent, and approval controls are rendered
+    // in the Edit stream. Move there before starting so a recipe can never wait
+    // for input behind the Recipes catalog.
+    setComposerCapability('edit');
     const threadId = activeThread.id;
     const scope: CreativeSkillRunScope = {
       projectId: project.id,
@@ -3367,6 +3371,7 @@ export function AgentPanel({
           <div
             className={`joy-code-messages${activeThread?.messages.length === 0 ? ' is-empty' : ''}`}
             aria-live="polite"
+            hidden={composerCapability === 'creative-brief' || composerCapability === 'recipes'}
           >
             {activeThread?.messages.length === 0 && (
               <div className="joy-code-welcome">
