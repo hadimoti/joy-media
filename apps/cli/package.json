@@ -11,8 +11,9 @@
     "joy": "./bin/joy-media.mjs"
   },
   "scripts": {
-    "build": "tsc -b",
-    "test": "vitest run"
+    "build": "tsc -b && node scripts/bundle.mjs",
+    "bundle": "node scripts/bundle.mjs",
+    "test": "vitest run --root ../.. apps/cli/src"
   },
   "dependencies": {
     "@joy-media/joy-agent-engine": "workspace:*",

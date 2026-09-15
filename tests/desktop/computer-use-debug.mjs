@@ -1,3 +1,4 @@
+/* global Response, document */
 import { _electron as electron } from '@playwright/test';
 import { resolve, join } from 'node:path';
 import { mkdirSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
@@ -260,7 +261,9 @@ try {
   }
   try {
     rmSync(tempUserData, { recursive: true, force: true });
-  } catch {}
+  } catch {
+    // Non-fatal cleanup
+  }
 }
 
 process.exit(report.passed ? 0 : 1);

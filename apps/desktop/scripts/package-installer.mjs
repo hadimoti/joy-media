@@ -70,11 +70,44 @@ await cp(unpackedDir, appResourcesDir, { recursive: true });
 
 // Copy standalone worker executable if present
 const workerExe = resolve(workerBinDir, 'joy-worker.exe');
+let workerSha256 = null;
 if (existsSync(workerExe)) {
   const destWorkerExe = resolve(appResourcesDir, 'worker', 'joy-worker.exe');
   await cp(workerExe, destWorkerExe);
   console.log('Embedded standalone joy-worker.exe into resources/app/worker/');
+  workerSha256 = await computeSha256(destWorkerExe);
 }
+
+// Stage bundled @joy-media/cli into resources/app/cli/
+console.log('Building and staging bundled @joy-media/cli...');
+const cliRoot = resolve(repoRoot, 'apps', 'cli');
+const cliBuildResult = spawnSync(
+  process.execPath,
+  [resolve(cliRoot, 'scripts', 'bundle.mjs')],
+  { cwd: cliRoot, stdio: 'inherit', env: process.env },
+);
+if (cliBuildResult.status !== 0) {
+  throw new Error(`Failed to bundle CLI: status ${cliBuildResult.status}`);
+}
+
+const cliDestDir = resolve(appResourcesDir, 'cli');
+await mkdir(cliDestDir, { recursive: true });
+const bundledCliPath = resolve(cliDestDir, 'joy-media-bundle.mjs');
+await cp(
+  resolve(cliRoot, 'dist', 'joy-media-bundle.mjs'),
+  bundledCliPath,
+);
+console.log('Embedded bundled CLI into resources/app/cli/joy-media-bundle.mjs');
+
+// Create Windows CLI wrappers in standalone distribution root
+const cliCmdContent = `@echo off
+setlocal
+set "ELECTRON_RUN_AS_NODE=1"
+"%~dp0joy-media.exe" "%~dp0resources\\app\\cli\\joy-media-bundle.mjs" %*
+`;
+await writeFile(resolve(standaloneDir, 'joy.cmd'), cliCmdContent, 'utf8');
+await writeFile(resolve(standaloneDir, 'joy-media.cmd'), cliCmdContent, 'utf8');
+console.log('Generated joy.cmd and joy-media.cmd launchers in distribution root');
 
 // 3. Generate Windows installer setup script and uninstaller
 console.log('3. Generating Windows installer setup script...');
@@ -122,6 +155,16 @@ $smShortcut.WorkingDirectory = $InstallPath
 $smShortcut.Description = "JOY Media Desktop Application"
 $smShortcut.Save()
 
+# Register InstallPath in User PATH environment variable
+$userPath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::User)
+$pathParts = if ($userPath) { $userPath -split ';' | Where-Object { $_ -ne '' } } else { @() }
+if ($pathParts -notcontains $InstallPath) {
+    $newPath = ($pathParts + $InstallPath) -join ';'
+    [Environment]::SetEnvironmentVariable("Path", $newPath, [EnvironmentVariableTarget]::User)
+    $env:Path = "$env:Path;$InstallPath"
+    Write-Host "Added $InstallPath to User PATH ('joy' and 'joy-media' commands registered globally)." -ForegroundColor Green
+}
+
 # Register Uninstaller in Windows Registry
 $uninstallKey = "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\JoyMedia"
 New-Item -Path $uninstallKey -Force | Out-Null
@@ -135,7 +178,7 @@ Set-ItemProperty -Path $uninstallKey -Name "UninstallString" -Value ('"' + $unin
 
 Write-Host "JOY Media successfully installed!" -ForegroundColor Green
 if (-not $Silent) {
-    Write-Host "You can now launch JOY Media from your Desktop or Start Menu."
+    Write-Host "Launch JOY Media from Desktop/Start Menu, or run 'joy doctor' from any terminal."
 }
 `;
 
@@ -149,6 +192,7 @@ set "INSTALL_DIR=%LOCALAPPDATA%\\Programs\\JOY Media"
 del "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\JOY Media.lnk" 2>nul
 del "%USERPROFILE%\\Desktop\\JOY Media.lnk" 2>nul
 reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\JoyMedia" /f 2>nul
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$p = [Environment]::GetEnvironmentVariable('Path', 'User'); if ($p) { $np = ($p -split ';' | Where-Object { $_ -ne '' -and $_ -ne '%INSTALL_DIR%' }) -join ';'; [Environment]::SetEnvironmentVariable('Path', $np, 'User') }" 2>nul
 echo Cleaning application files...
 rmdir /s /q "%INSTALL_DIR%" 2>nul
 echo JOY Media has been uninstalled.
@@ -203,7 +247,11 @@ console.log(
 console.log(`SHA256: ${zipSha256}`);
 
 // 5. Generate SHA256SUMS.txt and release manifest
-const sha256SumsContent = `${zipSha256}  ${releaseZipName}\n${exeSha256}  joy-media.exe\n`;
+const cliSha256 = await computeSha256(resolve(standaloneDir, 'resources', 'app', 'cli', 'joy-media-bundle.mjs'));
+let sha256SumsContent = `${zipSha256}  ${releaseZipName}\n${exeSha256}  joy-media.exe\n${cliSha256}  joy-media-bundle.mjs\n`;
+if (workerSha256) {
+  sha256SumsContent += `${workerSha256}  joy-worker.exe\n`;
+}
 await writeFile(resolve(releasesDir, 'SHA256SUMS.txt'), sha256SumsContent, 'utf8');
 
 const releaseManifest = {
@@ -228,12 +276,36 @@ const releaseManifest = {
       type: 'standalone-binary',
       sha256: exeSha256,
     },
+    ...(workerSha256
+      ? [
+          {
+            fileName: 'joy-worker.exe',
+            type: 'standalone-worker',
+            sha256: workerSha256,
+          },
+        ]
+      : []),
+    {
+      fileName: 'joy-media-bundle.mjs',
+      type: 'standalone-cli-bundle',
+      sha256: cliSha256,
+    },
+    {
+      fileName: 'joy.cmd',
+      type: 'cli-launcher',
+    },
+    {
+      fileName: 'joy-media.cmd',
+      type: 'cli-launcher',
+    },
   ],
   installer: {
     script: 'Setup-JoyMedia.ps1',
     wrapper: 'install.cmd',
     installDirectory: '%LOCALAPPDATA%\\Programs\\JOY Media',
     shortcuts: ['Desktop', 'StartMenu'],
+    cliCommands: ['joy', 'joy-media'],
+    environment: { pathRegistered: true },
   },
 };
 

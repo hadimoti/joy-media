@@ -43,4 +43,5 @@ const inlinedPreload = preloadSource.replace(
 
 await mkdir(distPreloadDir, { recursive: true });
 await writeFile(resolve(distPreloadDir, 'preload.cjs'), inlinedPreload, 'utf8');
+await writeFile(resolve(distPreloadDir, 'ipc-channels.cjs'), await readFile(resolve(srcPreloadDir, 'ipc-channels.cjs')));
 process.stdout.write(`Wrote self-contained preload bridge into ${distPreloadDir}\n`);

@@ -16,6 +16,7 @@ export default tseslint.config(
       '**/.claude/worktrees/**',
       '**/web-releases/**',
       '**/releases/**',
+      'apps/desktop/renderer/**',
       'debug-env.js',
       'fetch-patch.cjs',
       '.tmp-p3-debug.mts',
@@ -79,6 +80,7 @@ export default tseslint.config(
       'tooling/**/*.mjs',
       'scripts/*.cjs',
       'apps/*/scripts/*.mjs',
+      'tests/**/*.mjs',
     ],
     languageOptions: {
       globals: {

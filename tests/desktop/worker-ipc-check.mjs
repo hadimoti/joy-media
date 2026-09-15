@@ -11,7 +11,7 @@
  */
 
 import { resolve, join } from 'node:path';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 
@@ -31,7 +31,7 @@ const { createWorkerSupervisor } = workerSupervisorModule;
 const { resolveWorkerEntry } = workerEntryModule;
 const { createFileRegistry } = fileRegistryModule;
 const { LocalDatabase } = localDbModule;
-const { IPC_CHANNELS } = ipcChannelsModule;
+const { IPC_CHANNELS: _IPC_CHANNELS } = ipcChannelsModule;
 
 console.log('=== JOY Media Desktop Worker IPC & LocalDatabase Verification ===\n');
 
@@ -112,19 +112,19 @@ try {
   const fileRegistry = createFileRegistry();
 
   let childSpawned = false;
-  let childKilled = false;
+  let _childKilled = false;
   const fakeChild = {
-    once: (event, listener) => {
+    once: (_event, _listener) => {
       // simulate healthy long-running process
     },
-    kill: (signal) => {
-      childKilled = true;
+    kill: (_signal) => {
+      _childKilled = true;
       return true;
     },
   };
 
   const supervisor = createWorkerSupervisor({
-    spawn: (cmd, args, opts) => {
+    spawn: (_cmd, _args, _opts) => {
       childSpawned = true;
       return fakeChild;
     },
@@ -143,7 +143,7 @@ try {
     fileRegistry,
     workerSupervisor: supervisor,
     localDatabase: localDb,
-    probeMedia: async (path) => ({
+    probeMedia: async (_path) => ({
       checksum: 'sha256-mock-video-checksum',
       byteSize: 1048576,
       kind: 'video',
@@ -311,7 +311,9 @@ try {
 } finally {
   try {
     rmSync(tempDir, { recursive: true, force: true });
-  } catch {}
+  } catch {
+    // Non-fatal cleanup
+  }
 }
 
 process.exit(allChecksPassed ? 0 : 1);
