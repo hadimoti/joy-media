@@ -14,7 +14,9 @@
     "package:dev": "node scripts/package-dev.mjs",
     "package:release": "node scripts/package-release.mjs",
     "package:staging": "node scripts/package-release.mjs --staging",
-    "package:unpacked": "node scripts/package-release.mjs --unpacked"
+    "package:unpacked": "node scripts/package-release.mjs --unpacked",
+    "package:installer": "node scripts/package-installer.mjs",
+    "test:smoke-standalone": "node scripts/smoke-standalone.mjs"
   },
   "dependencies": {
     "@joy-media/provider-sdk": "workspace:*"

@@ -34,12 +34,21 @@ if (!existsSync(compiledMainEntry)) {
       `before test:smoke-packaged.`,
   );
 } else {
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const tempUserData = mkdtempSync(join(tmpdir(), 'joy-media-smoke-pkg-'));
   const electronPath = /** @type {string} */ (require('electron'));
-  const result = spawnSync(electronPath, ['.', '--smoke'], {
+  const result = spawnSync(electronPath, ['.', '--smoke', `--user-data-dir=${tempUserData}`], {
     cwd: desktopRoot,
     env: { ...process.env, NODE_ENV: 'production' },
     encoding: 'utf8',
   });
+  try {
+    rmSync(tempUserData, { recursive: true, force: true });
+  } catch {
+    // Non-fatal cleanup
+  }
   const stdout = result.stdout ?? '';
   const stderr = result.stderr ?? '';
   process.stdout.write(stdout);

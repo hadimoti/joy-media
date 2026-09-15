@@ -37,6 +37,18 @@ joy-media/
 └─ plan/        the partitioned work plan (this is what agents execute)
 ```
 
+## Desktop Application & Release Packaging
+
+JOY Media is packaged as an offline-first Windows Electron desktop application with local Worker AI inference companions and a lean VPS control plane:
+
+- **Build Unpacked**: `pnpm --filter @joy-media/desktop package:unpacked`
+- **Build Installer & Portable Package**: `pnpm --filter @joy-media/desktop package:installer`
+- **Smoke Tests**:
+  - `pnpm --filter @joy-media/desktop test:smoke-packaged` (Electron runtime smoke)
+  - `pnpm --filter @joy-media/desktop test:smoke-standalone` (Native `joy-media.exe` standalone smoke)
+
+Release artifacts (`joy-media-windows-x64-v1.0.0.zip`, `SHA256SUMS.txt`, `joy-media-release-manifest.json`) are generated in `apps/desktop/dist/releases/`.
+
 ## Repo boundary
 
 This is the standalone `joy-media` repository (owner decision Q16, 2026-07-19) — the isolated service/repository boundary master plan §5.3 asks for. It was seeded from `joy-vps` (planning history there up to 2026-07-19); `joy-vps` keeps a pointer and remains the home of VPS operations. Only part X01 of this plan may touch the live VPS.
