@@ -1,4 +1,5 @@
 export const ALLOWED_EDITOR_ORIGINS = [
+  'joy-media-app://renderer',
   'https://joyst.ir',
   'https://www.joyst.ir',
   'http://localhost:5173',

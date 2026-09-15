@@ -37,6 +37,26 @@ describe('resolveWorkerEntry', () => {
     expect(result).toEqual({ command: execPath, args: [unpackedEntry] });
   });
 
+  it('targets the packaged/unpacked standalone joy-worker.exe when present', () => {
+    const unpackedExe = join(mainDirname, '..', '..', 'worker', 'joy-worker.exe');
+    const result = resolveWorkerEntry({
+      mainDirname,
+      execPath,
+      fileExists: (path) => path === unpackedExe,
+    });
+    expect(result).toEqual({ command: unpackedExe, args: [] });
+  });
+
+  it('targets the repo-layout joy-worker.exe when dist/index.js is absent', () => {
+    const compiledExe = join(mainDirname, '..', '..', '..', 'worker', 'bin', 'joy-worker.exe');
+    const result = resolveWorkerEntry({
+      mainDirname,
+      execPath,
+      fileExists: (path) => path === compiledExe,
+    });
+    expect(result).toEqual({ command: compiledExe, args: [] });
+  });
+
   it('falls back to running src/index.ts through tsx when nothing is compiled', () => {
     const workerRoot = join(mainDirname, '..', '..', '..', 'worker');
     const tsxCli = join(workerRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
@@ -45,3 +65,4 @@ describe('resolveWorkerEntry', () => {
     expect(result).toEqual({ command: execPath, args: [tsxCli, devEntry] });
   });
 });
+

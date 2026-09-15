@@ -22,21 +22,30 @@ export interface ResolveWorkerEntryOptions {
 /**
  * Resolves what to spawn for the local AI worker, checking in order:
  *
- * 1. Packaged/unpacked layout: `<mainDirname>/../../worker/index.js` — the compiled worker
+ * 1. Packaged/unpacked layout standalone binary: `<mainDirname>/../../worker/joy-worker.exe` —
+ *    embedded by `package-installer.mjs`.
+ * 2. Packaged/unpacked layout script: `<mainDirname>/../../worker/index.js` — the compiled worker
  *    entry `package-release.mjs --unpacked` stages as a sibling of `dist/` and `renderer/`
  *    inside `joy-media-unpacked/` (see that script's `assembleUnpacked` and
  *    `copy-static.mjs`'s worker-staging step).
- * 2. Repo dev layout with a prior worker build: `<mainDirname>/../../../worker/dist/index.js`,
+ * 3. Repo dev layout with a prior worker build: `<mainDirname>/../../../worker/dist/index.js`,
  *    i.e. `apps/worker/dist/index.js` from `pnpm --filter @joy-media/worker build`.
- * 3. Repo dev layout with no build yet: falls back to running `apps/worker/src/index.ts`
+ * 4. Repo dev layout with a standalone worker binary: `<mainDirname>/../../../worker/bin/joy-worker.exe`.
+ * 5. Repo dev layout with no build yet: falls back to running `apps/worker/src/index.ts`
  *    directly through the `tsx` loader resolved from `apps/worker`'s own `node_modules` (the
  *    desktop package does not depend on `tsx` itself, so it must be resolved from there).
  *
- * Both compiled candidates are run with `node <entry.js>` — no shell, no `.cmd`/`.ps1` shim
- * resolution — matching how `worker-supervisor.ts`'s `spawn` is always called directly.
+ * Both compiled script candidates are run with `node <entry.js>` — no shell, no `.cmd`/`.ps1` shim
+ * resolution — matching how `worker-supervisor.ts`'s `spawn` is always called directly. Standalone
+ * binaries are spawned directly with empty arguments.
  */
 export function resolveWorkerEntry(options: ResolveWorkerEntryOptions): WorkerEntryCommand {
   const { mainDirname, execPath, fileExists = existsSync } = options;
+
+  const unpackedExe = join(mainDirname, '..', '..', 'worker', 'joy-worker.exe');
+  if (fileExists(unpackedExe)) {
+    return { command: unpackedExe, args: [] };
+  }
 
   const unpackedEntry = join(mainDirname, '..', '..', 'worker', 'index.js');
   if (fileExists(unpackedEntry)) {
@@ -47,6 +56,11 @@ export function resolveWorkerEntry(options: ResolveWorkerEntryOptions): WorkerEn
   const compiledEntry = join(workerRoot, 'dist', 'index.js');
   if (fileExists(compiledEntry)) {
     return { command: execPath, args: [compiledEntry] };
+  }
+
+  const compiledExe = join(workerRoot, 'bin', 'joy-worker.exe');
+  if (fileExists(compiledExe)) {
+    return { command: compiledExe, args: [] };
   }
 
   const tsxCli = join(workerRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');

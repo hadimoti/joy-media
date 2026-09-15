@@ -25,3 +25,7 @@ apps/worker/bin/
 # Staged production renderer copied from apps/editor-web/dist by package-release.mjs
 # (--unpacked/--staging); rebuild with `pnpm --filter @joy-media/desktop package:unpacked`.
 apps/desktop/renderer/
+
+# Task scheduler scratch
+.task/
+
