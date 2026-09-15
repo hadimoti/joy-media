@@ -95,6 +95,8 @@ async function assembleUnpacked() {
   const distEntries = await readdir(desktopDistDir, { withFileTypes: true });
   for (const entry of distEntries) {
     if (entry.name === 'joy-media-unpacked') continue; // this run's own previous output
+    if (entry.name === 'joy-media-win32-x64') continue; // standalone distribution directory
+    if (entry.name === 'releases') continue; // release zip archives and checksums
     if (entry.name.endsWith('.json')) continue; // dev/release-plan evidence, not runtime
     await cp(resolve(desktopDistDir, entry.name), resolve(unpackedDistDir, entry.name), {
       recursive: true,
