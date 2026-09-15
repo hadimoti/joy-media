@@ -14,6 +14,7 @@ import {
   getStoredMediaToken,
   type MediaSessionStorage,
 } from './media-session.js';
+import { isDesktopHost } from './desktop-client.js';
 
 export type JoySessionState =
   | { readonly kind: 'unknown' }
@@ -32,21 +33,43 @@ export type JoySessionState =
       readonly avatarObjectUrl: string | undefined;
     };
 
+const DESKTOP_CREATOR_SESSION: JoySessionState = {
+  kind: 'ready',
+  subject: 'local-creator',
+  displayName: 'Local Creator',
+  method: undefined,
+  avatarAvailable: false,
+  avatarObjectUrl: undefined,
+};
+
 export async function probeJoySession(
   storage: MediaSessionStorage,
   fetchFn: typeof fetch = fetch,
 ): Promise<JoySessionState> {
   const token = getStoredMediaToken(storage);
-  if (token === undefined) return { kind: 'signed-out' };
+  if (token === undefined) {
+    if (isDesktopHost()) {
+      return DESKTOP_CREATOR_SESSION;
+    }
+    return { kind: 'signed-out' };
+  }
   try {
     const response = await fetchFn('/api/v1/auth/session', {
       headers: { authorization: `Bearer ${token}` },
     });
     if (response.status === 401) {
       clearStoredMediaToken(storage);
+      if (isDesktopHost()) {
+        return DESKTOP_CREATOR_SESSION;
+      }
       return { kind: 'signed-out' };
     }
-    if (!response.ok) return { kind: 'unavailable' };
+    if (!response.ok) {
+      if (isDesktopHost()) {
+        return DESKTOP_CREATOR_SESSION;
+      }
+      return { kind: 'unavailable' };
+    }
     const body = (await response.json()) as {
       data?: {
         contact?: unknown;
@@ -88,7 +111,10 @@ export async function probeJoySession(
       avatarObjectUrl,
     };
   } catch {
-    // A network outage is not evidence that the session ended.
+    // In desktop mode, a network outage or offline state is normal.
+    if (isDesktopHost()) {
+      return DESKTOP_CREATOR_SESSION;
+    }
     return { kind: 'unavailable' };
   }
 }

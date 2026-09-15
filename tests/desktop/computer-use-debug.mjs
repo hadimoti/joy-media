@@ -152,27 +152,26 @@ try {
     };
   });
 
-  // Click the "Token" tab button in LoginGate
-  const tokenTabBtn = window.locator('button.lmethod-btn:has-text("Token")');
-  await tokenTabBtn.waitFor({ state: 'visible', timeout: 5000 });
-  await tokenTabBtn.click();
-  await new Promise((r) => setTimeout(r, 400));
-
-  // Enter session token
-  const authInput = window.locator('input.auth-input');
-  await authInput.waitFor({ state: 'visible', timeout: 5000 });
-  await authInput.fill('operator-offline-debug-token');
-  await new Promise((r) => setTimeout(r, 300));
-
-  // Submit token
-  const submitBtn = window.locator('button.login-btn');
-  await submitBtn.click();
-  console.log('Submitted token form, awaiting unlock transition...');
-
-  // Wait for login card to disappear
-  await window.waitForSelector('.login-screen', { state: 'detached', timeout: 10000 }).catch(() => {
-    console.log('Note: .login-screen detach wait finished');
-  });
+  // Step 4: Check if login screen is present or if instant offline creator session unlocked
+  console.log('4. Verifying offline desktop creator session status...');
+  const isLoginVisible = await window.locator('.login-screen').isVisible().catch(() => false);
+  if (isLoginVisible) {
+    console.log('Login screen visible; performing Token login flow to unlock workspace...');
+    const tokenTabBtn = window.locator('button.lmethod-btn:has-text("Token")');
+    if (await tokenTabBtn.isVisible()) {
+      await tokenTabBtn.click();
+      await new Promise((r) => setTimeout(r, 400));
+      const authInput = window.locator('input.auth-input');
+      await authInput.fill('operator-offline-debug-token');
+      await new Promise((r) => setTimeout(r, 300));
+      const submitBtn = window.locator('button.login-btn');
+      await submitBtn.click();
+      console.log('Submitted token form, awaiting unlock transition...');
+      await window.waitForSelector('.login-screen', { state: 'detached', timeout: 10000 }).catch(() => {});
+    }
+  } else {
+    console.log('✔ Instant offline creator mode unlocked automatically! No login gate shown.');
+  }
   await new Promise((r) => setTimeout(r, 1500));
 
   // Step 2 Screenshot: Unlocked Project Library
