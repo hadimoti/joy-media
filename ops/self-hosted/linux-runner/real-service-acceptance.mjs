@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-/* global process, setTimeout, URL, Buffer, window, fetch, atob, btoa, crypto, localStorage */
+/* global clearInterval, process, setInterval, setTimeout, URL, Buffer, window, fetch, atob, btoa, crypto, localStorage */
 
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,8 +22,15 @@ import {
   assertJourneyTelemetryClean,
   buildProfileSummary,
   createJourneyTelemetry,
+  createWebServerLog,
+  inspectJourneyTelemetry,
+  sanitizeUrl,
 } from './real-service-evidence.mjs';
 import { createLeaseHeartbeatLoop, throwIfLeaseCanceled } from './lease-heartbeat.mjs';
+import { isAlive, removeDirWithRetry, terminateProcessTree } from './real-service-teardown.mjs';
+import { validateP3Matrix } from './p3-case-registry.mjs';
+import { createP3ExecutionBudget, runOwnedP3Process } from './p3-execution-budget.mjs';
+import { parseLaneMode } from './p3-lane-mode.mjs';
 
 const requireFromApi = createRequire(new URL('../../../apps/api/package.json', import.meta.url));
 const { Pool } = requireFromApi('pg');
@@ -66,6 +74,17 @@ const REAL_SERVICE_EXPORT_DOWNLOAD_TIMEOUT_MS = 35 * 60_000;
 const DELIVERY_CANCEL_SETTLE_TIMEOUT_MS = 60_000;
 const DELIVERY_CANCEL_POLL_INTERVAL_MS = 250;
 const DELIVERY_CANCEL_POLL_REQUEST_TIMEOUT_MS = 5_000;
+const P3_DEFAULT_CLEANUP_RESERVE_MS = 3 * 60_000;
+const P3_PROGRESS_MAX_LINES = 256;
+
+function optionalBudgetEnv(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0)
+    throw new Error(`${name} must be a non-negative number`);
+  return value;
+}
 
 const root = resolve(fileURLToPath(new URL('../../../', import.meta.url)));
 const [candidateSha, runId, runAttempt, pass] = process.argv.slice(2);
@@ -103,6 +122,8 @@ const webUrl = `http://127.0.0.1:${webPort}`;
 const token = 'joy-media-e2e-token';
 const owner = 'e2e-owner@example.test';
 const smokeOnly = process.env.JOY_MEDIA_REAL_ACCEPTANCE_SMOKE_ONLY === '1';
+const laneMode = parseLaneMode(process.env.JOY_MEDIA_CI_LANE_MODE, { smokeOnly });
+let primaryError;
 let pool;
 let apiServer;
 let webProcess;
@@ -110,6 +131,84 @@ let webProcessError;
 let browser;
 let realWorkerLifecycle;
 let realWorkerPromise;
+
+// Bounded, redacted capture of the Vite dev server's stdout/stderr — flushed to
+// test-output/browser/web-dev-server.log on any journey failure. Chunk-split-safe
+// redaction + line AND byte bounds live in createWebServerLog (tested).
+const webServerLogBuffer = createWebServerLog({
+  secrets: [s3AccessKey, s3SecretKey, s3Endpoint, databaseUrl, token],
+});
+function writeWebServerLog() {
+  const { lines, maxLines, maxBytes } = webServerLogBuffer.flush();
+  if (lines.length === 0) return null;
+  const rel = 'test-output/browser/web-dev-server.log';
+  try {
+    mkdirSync(join(root, 'test-output/browser'), { recursive: true });
+    writeFileSync(
+      join(root, rel),
+      `# Vite dev server (redacted; <= ${maxLines} lines / ${maxBytes} bytes, oldest dropped)\n` +
+        `${lines.join('\n')}\n`,
+      'utf8',
+    );
+    return rel;
+  } catch {
+    return null;
+  }
+}
+
+// Declared at module scope (NOT before recordJourney) — recordJourney is called
+// from the top-level try, which runs before any statement placed after it.
+let journeyFailureWritten = false;
+function writeJourneyFailure(report) {
+  if (journeyFailureWritten) return;
+  journeyFailureWritten = true;
+  try {
+    mkdirSync(join(root, 'test-output/browser'), { recursive: true });
+    const webServerLogPath = writeWebServerLog();
+    writeFileSync(
+      join(root, 'test-output/browser/journey-failure.json'),
+      `${JSON.stringify({ ...report, webServerLog: webServerLogPath }, null, 2)}\n`,
+      'utf8',
+    );
+  } catch {
+    /* best-effort; the thrown error still carries the detail */
+  }
+}
+function buildJourneyFailure(telemetry, thrownError) {
+  const thrown =
+    thrownError === undefined
+      ? undefined
+      : thrownError instanceof Error
+        ? thrownError.message
+        : String(thrownError);
+  const { failure } = inspectJourneyTelemetry(telemetry, {
+    phase: telemetry.phase,
+    candidateSha,
+    runId,
+    attempt: runAttempt,
+    pass,
+    thrown,
+  });
+  return (
+    failure ?? {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      journeyPhaseAtFailure: telemetry.phase ?? null,
+      thrown: thrown ?? null,
+      candidateSha,
+      runId,
+      attempt: runAttempt,
+      pass,
+      note: 'journey ended without a diagnosable telemetry problem',
+      consoleErrors: [],
+      failedRequests: [],
+      httpErrors: [],
+      unexpectedPageErrors: [],
+      summary: null,
+      message: `journey failure at phase "${telemetry.phase}"`,
+    }
+  );
+}
 
 class MinioObjectStore {
   constructor(options) {
@@ -213,12 +312,18 @@ try {
         JOY_MEDIA_E2E_WEB_PORT: String(webPort),
       },
       detached: true,
-      stdio: ['ignore', 'ignore', 'ignore'],
+      // Capture the dev server's own transform/resolve errors — a browser
+      // net::ERR_FILE_NOT_FOUND on a Vite-served asset almost always has a
+      // corresponding server-side line. Kept as a bounded ring buffer and
+      // flushed (redacted) to test-output on failure. See writeWebServerLog().
+      stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
   webProcess.once('error', (error) => {
     webProcessError = error;
   });
+  webProcess.stdout?.on('data', (buf) => webServerLogBuffer.chunk('stdout', buf));
+  webProcess.stderr?.on('data', (buf) => webServerLogBuffer.chunk('stderr', buf));
   try {
     await waitForHttp(webUrl, 120_000);
   } catch (error) {
@@ -229,46 +334,235 @@ try {
     }
     throw error;
   }
-  const profileSummaries = await runDesktopMatrix(webUrl, apiUrl);
-  const deliveryEvidence = await recordJourney(
-    webUrl,
-    apiUrl,
-    token,
-    candidateSha,
-    pool,
-    profileSummaries,
-  );
-  if (!smokeOnly) {
-    await runObserver(webUrl, token);
+  if (laneMode === 'p3') {
+    // P3-only qualification owns the same real services and teardown but does
+    // not emit success-shaped broad-suite, delivery, soak or restore records.
+    await runP3ExportMatrix(webUrl, apiUrl);
+    await mkdir(join(root, 'test-output/browser'), { recursive: true });
+    await writeFile(
+      join(root, 'test-output/browser/p3-lane-evidence.json'),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          status: 'passed',
+          execution: 'p3-only',
+          candidateSha,
+          workflowRunId: runId,
+          attempt: runAttempt,
+          pass,
+          cases: 20,
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+  } else {
+    // The full lane keeps the broad desktop contract and all operational
+    // evidence. P3 is a separate bounded lane so its timeout cannot consume
+    // the delivery/observer/restore budget.
+    const profileSummaries = await runDesktopMatrix(webUrl, apiUrl);
+    const deliveryEvidence = await recordJourney(
+      webUrl,
+      apiUrl,
+      token,
+      candidateSha,
+      pool,
+      profileSummaries,
+    );
+    if (!smokeOnly) await runObserver(webUrl, token);
+    const restoreEvidence = await verifyRestoreCompatibility(databaseUrl, namespace);
+    await recordOperationalEvidence(
+      candidateSha,
+      runId,
+      runAttempt,
+      pass,
+      deliveryEvidence,
+      restoreEvidence,
+    );
   }
-  const restoreEvidence = await verifyRestoreCompatibility(databaseUrl, namespace);
-  await recordOperationalEvidence(
-    candidateSha,
-    runId,
-    runAttempt,
-    pass,
-    deliveryEvidence,
-    restoreEvidence,
-  );
+  // Test hook: prove the finally-block teardown + the workflow's evidence
+  // retention still run (and are recorded) when the harness exits non-zero
+  // AFTER all evidence has been written. Never set in the release workflow.
+  if (process.env.JOY_MEDIA_REAL_ACCEPTANCE_FORCE_FAIL === '1')
+    throw new Error('forced failure after evidence write (JOY_MEDIA_REAL_ACCEPTANCE_FORCE_FAIL=1)');
+  primaryError = null;
+} catch (error) {
+  primaryError = error instanceof Error ? error : new Error(String(error));
+  // Flush the Vite dev-server log for ANY failure — a startup timeout, a
+  // runDesktopMatrix leg, the observer, restore — not only a journey failure.
+  // (writeJourneyFailure already flushes it for journey failures; a second
+  // flush of the same buffer is harmless.)
+  try {
+    const webServerLogPath = writeWebServerLog();
+    if (webServerLogPath)
+      primaryError.message += `\n[vite dev-server log retained: ${webServerLogPath}]`;
+  } catch {
+    /* best-effort */
+  }
 } finally {
-  if (browser) await browser.close().catch(() => undefined);
-  if (webProcess?.pid) killTree(webProcess.pid);
-  if (apiServer) await close(apiServer);
-  if (pool) {
-    if (realWorkerLifecycle !== undefined) {
-      realWorkerLifecycle.stopped = true;
-      await realWorkerPromise?.catch(() => undefined);
-      realWorkerLifecycle = undefined;
+  // Teardown is a required acceptance item, not best-effort. Every step is
+  // attempted; a deletion FAILURE is recorded (never swallowed); then the
+  // runner is re-inspected and any run-owned residue — schema, bucket, objects,
+  // temp root, child process — fails the pass.
+  //
+  // Ordering matters. `mc` UNCONDITIONALLY recreates its MC_CONFIG_DIR on every
+  // invocation (even a failing one), so: (1) object cleanup uses the run's mc
+  // config while tempRoot still exists, (2) the post-cleanup bucket check runs
+  // against a throwaway config OUTSIDE tempRoot, (3) tempRoot and that throwaway
+  // config are removed LAST with no `mc` call afterwards. The web dev server is
+  // spawned detached (a provably run-owned process group) and is shut down with
+  // a bounded request -> await -> escalate sequence, not a fire-and-forget kill.
+  const cleanupIssues = [];
+  const attempt = async (label, fn) => {
+    try {
+      await fn();
+    } catch (error) {
+      cleanupIssues.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
     }
-    await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined);
-    await pool.end().catch(() => undefined);
+  };
+
+  if (browser) await attempt('browser.close', () => browser.close());
+
+  let webTermination = { state: webProcess ? 'not-attempted' : 'never-spawned' };
+  if (webProcess) {
+    await attempt('terminate web dev server', async () => {
+      webTermination = await terminateProcessTree(webProcess, { graceMs: 15_000, killMs: 5_000 });
+    });
   }
-  await runMc(['rm', '--quiet', '--recursive', '--force', `joy-ci/${bucket}`]).catch(
-    () => undefined,
+
+  if (apiServer) await attempt('apiServer.close', () => close(apiServer));
+
+  if (realWorkerLifecycle !== undefined) {
+    realWorkerLifecycle.stopped = true;
+    // realWorkerPromise resolves once the export loop exits its current
+    // iteration — after the disposable Worker thread finished and the per-job
+    // source/output files were removed — so tempRoot/worker is quiescent before
+    // tempRoot is removed below. Bounded: if the loop is wedged inside a lease /
+    // mc / Worker-thread call, don't block teardown to the 120-min job timeout —
+    // record it and press on (tempRoot removal then reports any live residue).
+    await attempt('await export worker exit (bounded 60s)', async () => {
+      const outcome = await Promise.race([
+        (realWorkerPromise ?? Promise.resolve()).then(() => 'exited'),
+        new Promise((r) => setTimeout(() => r('timeout'), 60_000)),
+      ]);
+      if (outcome !== 'exited')
+        throw new Error('export worker did not exit within 60s of the stop request');
+    });
+    realWorkerLifecycle = undefined;
+  }
+
+  if (pool) {
+    await attempt('drop schema', () => pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`));
+    await attempt('pool.end', () => pool.end());
+  }
+
+  await attempt('mc rm objects', () =>
+    runMc(['rm', '--quiet', '--recursive', '--force', `joy-ci/${bucket}`]),
   );
-  await runMc(['rb', '--quiet', `joy-ci/${bucket}`]).catch(() => undefined);
-  await rm(tempRoot, { recursive: true, force: true });
+  await attempt('mc rb bucket', () => runMc(['rb', '--quiet', `joy-ci/${bucket}`]));
+
+  // Re-inspect: prove nothing run-owned survived.
+  const residue = [];
+
+  let verifyPool;
+  try {
+    verifyPool = new Pool({ connectionString: databaseUrl });
+    const schemaLeft = await verifyPool.query(
+      'SELECT 1 FROM pg_namespace WHERE nspname = $1 OR nspname = $2 LIMIT 1',
+      [schema, `ci_legacy_${namespace}`],
+    );
+    if ((schemaLeft.rowCount ?? 0) > 0) residue.push(`schema ${schema}* still present`);
+  } catch (error) {
+    residue.push(`schema re-inspection failed: ${error instanceof Error ? error.message : error}`);
+  } finally {
+    await verifyPool?.end().catch(() => undefined);
+  }
+
+  let verifyRoot;
+  try {
+    verifyRoot = await mkdtemp('/tmp/joy-media-real-verify-');
+    const verifyMcConfig = join(verifyRoot, 'mc');
+    await mkdir(verifyMcConfig, { recursive: true });
+    try {
+      await runMcWithConfig(verifyMcConfig, ['ls', `joy-ci/${bucket}`]);
+      residue.push(`bucket joy-ci/${bucket} still present`);
+    } catch {
+      /* `mc ls` on a missing bucket errors — that is the wanted state. */
+    }
+  } catch (error) {
+    residue.push(
+      `bucket re-inspection failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  // Every producer that could touch tempRoot has now stopped. Remove tempRoot
+  // (and the throwaway verify config) last, with a bounded retry that records —
+  // never hides — a surviving writer.
+  const tempRootRemoval = await removeDirWithRetry(tempRoot, { attempts: 5, delayMs: 200 });
+  if (!tempRootRemoval.removed) {
+    residue.push(
+      `tempRoot ${tempRoot} still present after ${tempRootRemoval.attempts} attempt(s)` +
+        (tempRootRemoval.residualEntries.length
+          ? ` (entries: ${tempRootRemoval.residualEntries.join(', ')})`
+          : ''),
+    );
+  }
+  let verifyRootRemoval = { removed: true, attempts: 0, residualEntries: [] };
+  if (verifyRoot) {
+    verifyRootRemoval = await removeDirWithRetry(verifyRoot, { attempts: 5, delayMs: 200 });
+    if (!verifyRootRemoval.removed) {
+      cleanupIssues.push(`verify config ${verifyRoot} still present`);
+    }
+  }
+
+  if (
+    webProcess?.pid &&
+    webTermination.state !== 'already-exited' &&
+    webTermination.state !== 'never-spawned' &&
+    isAlive(webProcess.pid)
+  ) {
+    residue.push(
+      `web process ${webProcess.pid} still alive after teardown (state: ${webTermination.state})`,
+    );
+  }
+
+  const teardownFailures = [...cleanupIssues, ...residue];
+  const checks = ['schema-dropped', 'bucket-removed', 'temp-root-removed', 'web-process-exited'];
+  const teardownRecord = {
+    schemaVersion: 2,
+    generatedAt: new Date().toISOString(),
+    runId,
+    attempt: runAttempt,
+    pass,
+    clean: teardownFailures.length === 0,
+    verified: teardownFailures.length === 0 ? checks : [],
+    cleanupIssues,
+    residue,
+    webTermination,
+    tempRootRemoval,
+    verifyRootRemoval,
+  };
+  await attempt('write teardown record', async () => {
+    await mkdir(join(root, 'test-output/operations'), { recursive: true });
+    await writeFile(
+      join(root, 'test-output/operations/teardown.json'),
+      `${JSON.stringify(teardownRecord, null, 2)}\n`,
+      'utf8',
+    );
+  });
+
+  if (teardownFailures.length > 0) {
+    const message = `real-service teardown is not clean (pass ${pass}):\n  - ${teardownFailures.join('\n  - ')}`;
+    if (primaryError) {
+      primaryError.message = `${primaryError.message}\n[teardown also failed]\n${message}`;
+    } else {
+      primaryError = new Error(message);
+    }
+  }
 }
+
+if (primaryError) throw primaryError;
 
 async function runRealServiceExportWorker(
   controlPlane,
@@ -456,27 +750,29 @@ async function executeExportInWorkerThread(input, outputPath) {
     `,
     { eval: true, workerData: { workerModule, input, outputPath } },
   );
-  await new Promise((resolve, reject) => {
-    let settled = false;
-    worker.once('message', (message) => {
-      if (settled) return;
-      settled = true;
-      if (message?.ok === true) resolve();
-      else reject(new Error(message?.error ?? 'real-service export thread failed'));
-      void worker.terminate();
-    });
-    worker.once('error', (error) => {
-      if (settled) return;
-      settled = true;
-      reject(error);
-    });
-    worker.once('exit', (code) => {
-      if (!settled && code !== 0) {
+  try {
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (fn, arg) => {
+        if (settled) return;
         settled = true;
-        reject(new Error(`real-service export thread exited with ${code}`));
-      }
+        fn(arg);
+      };
+      worker.once('message', (message) => {
+        if (message?.ok === true) finish(resolve);
+        else finish(reject, new Error(message?.error ?? 'real-service export thread failed'));
+      });
+      worker.once('error', (error) => finish(reject, error));
+      worker.once('exit', (code) => {
+        if (code !== 0) finish(reject, new Error(`real-service export thread exited with ${code}`));
+      });
     });
-  });
+  } finally {
+    // Fully tear down the disposable thread before the caller continues, so
+    // nothing from this export is still writing under the temp root when
+    // teardown later removes it.
+    await worker.terminate();
+  }
 }
 
 function privateDescriptor(asset) {
@@ -495,41 +791,106 @@ function safeToken(value) {
 }
 
 async function runDesktopMatrix(baseUrl, apiBaseUrl) {
-  const projects =
-    process.env.JOY_MEDIA_REAL_ACCEPTANCE_SMOKE_ONLY === '1'
-      ? ['desktop-primary']
-      : [
-          'desktop-primary',
+  // Restructured (2026-09-08, CI optimization). The full tests/e2e suite runs
+  // against real services at the reference viewport; the other six viewports
+  // run the layout-sensitive specs — panel-reachability + per-panel overflow
+  // (wp32-responsive-checkpoints), the login gate's overflow + axe scan
+  // (golden-path), and the loaded-timeline transport/workspace geometry
+  // (wp35-universal-timeline's "renders backend track titles" test). Functional
+  // behaviour is viewport-independent on the single Chromium engine (covered by
+  // the primary run). See docs/reviews/joy-media-ci-coverage-matrix-2026-09-08.md.
+  const smoke = process.env.JOY_MEDIA_REAL_ACCEPTANCE_SMOKE_ONLY === '1';
+  const RESPONSIVE_SPECS = [
+    'tests/e2e/wp32-responsive-checkpoints.spec.ts',
+    'tests/e2e/golden-path.spec.ts',
+    'tests/e2e/wp35-universal-timeline.spec.ts',
+  ];
+  // Union grep — wp32's checkpoint test, golden-path's login-gate test, and the
+  // one wp35 test that carries per-viewport transport/workspace geometry
+  // assertions (the rest of wp35 needs fixtures and is engine-independent).
+  const RESPONSIVE_GREP =
+    '(keeps project controls, workspace navigation|login gate loads without fatal|renders backend track titles, mixed elements)';
+  // Exact spec titles that MUST pass at every non-primary viewport — a minimum
+  // count cannot prove the intended tests ran (a grep drift could match 3 of
+  // the wrong tests). These are the `spec.title` values in the Playwright JSON.
+  const RESPONSIVE_REQUIRED_TITLES = [
+    'keeps project controls, workspace navigation, and keyboard menus reachable',
+    'login gate loads without fatal browser errors or horizontal overflow',
+    'renders backend track titles, mixed elements, and Quarter preview controls',
+  ];
+  const RESPONSIVE_MIN_TESTS = RESPONSIVE_REQUIRED_TITLES.length;
+  // Explicit desktop-primary spec list (deterministic, sorted, exact filename
+  // match). The P3 shipping-export matrix spec is intentionally excluded here:
+  // its top-level import of ./helpers/p3-export-observer.mjs triggers a Vitest /
+  // ESM "Cannot require() ES Module ... in a cycle" error during Playwright's
+  // module-load phase, before any grep / filter can run. The dedicated P3 lane
+  // (runP3ExportMatrix) loads that exact spec separately. Listing every other
+  // top-level spec positionally keeps Playwright's loader out of the excluded
+  // module entirely while preserving every other test.
+  const EXCLUDED_DESKTOP_PRIMARY_SPEC = 'r2-p3-shipping-export-acceptance.spec.ts';
+  const desktopPrimarySpecs = (await readdir(join(root, 'tests/e2e'), { withFileTypes: true }))
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        entry.name.endsWith('.spec.ts') &&
+        entry.name !== EXCLUDED_DESKTOP_PRIMARY_SPEC,
+    )
+    .map((entry) => `tests/e2e/${entry.name}`)
+    .sort();
+  /** @type {{ project: string; specs: string[]; grep?: string; minTests: number; requiredTitles?: string[] }[]} */
+  const plan = smoke
+    ? [
+        {
+          project: 'desktop-primary',
+          specs: ['tests/e2e/authenticated-smoke.spec.ts'],
+          minTests: 1,
+        },
+      ]
+    : [
+        { project: 'desktop-primary', specs: desktopPrimarySpecs, minTests: 80 },
+        ...[
           'desktop-compact',
           'desktop-minimum',
           'desktop-1280',
           'desktop-1440',
           'desktop-1581',
           'desktop-1920',
-        ];
+        ].map((project) => ({
+          project,
+          specs: RESPONSIVE_SPECS,
+          grep: RESPONSIVE_GREP,
+          minTests: RESPONSIVE_MIN_TESTS,
+          requiredTitles: RESPONSIVE_REQUIRED_TITLES,
+        })),
+      ];
   const sourceProvenance = await currentSourceProvenance(candidateSha);
   const summaries = [];
   const matrixEvidencePath = join(root, 'test-output/browser/real-service-profile-matrix.json');
   await mkdir(dirname(matrixEvidencePath), { recursive: true });
   await rm(matrixEvidencePath, { force: true });
-  for (const project of projects) {
-    const report = join('/tmp', `joy-media-real-report-${project}-${runId}-${pass}`);
-    const results = join('/tmp', `joy-media-real-results-${project}-${runId}-${pass}`);
+  for (const { project, specs, grep, minTests, requiredTitles } of plan) {
+    const tag = `${project}-${runId}-${runAttempt}-${pass}`;
+    const report = join('/tmp', `joy-media-real-report-${tag}`);
+    const results = join('/tmp', `joy-media-real-results-${tag}`);
+    // Read the Playwright JSON from a FILE, not stdout — `pnpm exec` prints its
+    // own preamble ("Scope: … / Lockfile passes … / Done in Nms") to stdout
+    // whenever its periodic lockfile check runs, which corrupts a stdout parse.
+    const jsonReport = join('/tmp', `joy-media-real-json-${tag}.json`);
+    await rm(jsonReport, { force: true });
     const startedAt = new Date().toISOString();
-    let result;
     let exitCode = 0;
     let failure;
+    let stderrText = '';
     try {
-      result = await execFile(
+      await execFile(
         'pnpm',
         [
           'exec',
           'playwright',
           'test',
-          ...(process.env.JOY_MEDIA_REAL_ACCEPTANCE_SMOKE_ONLY === '1'
-            ? ['tests/e2e/authenticated-smoke.spec.ts']
-            : ['tests/e2e']),
+          ...specs,
           `--project=${project}`,
+          ...(grep ? ['--grep', grep] : []),
           '--workers=1',
           '--reporter=json',
         ],
@@ -538,10 +899,16 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
           env: {
             ...process.env,
             CI: 'true',
+            // Enable the shipping export matrix only in the isolated
+            // real-service lane. Fixture-only desktop jobs keep this opt-in
+            // guard unset and therefore record NOT RUN.
+            // P3 is executed in its own bounded phase after this broad matrix.
+            JOY_P3_REAL_EXPORTS: '0',
             PLAYWRIGHT_BASE_URL: baseUrl,
             JOY_MEDIA_E2E_API_URL: apiBaseUrl,
             PLAYWRIGHT_HTML_REPORT: report,
             PLAYWRIGHT_TEST_RESULTS_DIR: results,
+            PLAYWRIGHT_JSON_OUTPUT_NAME: jsonReport,
             PLAYWRIGHT_WORKERS: '1',
           },
         },
@@ -549,22 +916,37 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
     } catch (error) {
       failure = error;
       exitCode = typeof error?.code === 'number' ? error.code : 1;
-      result = {
-        stdout: Buffer.from(typeof error?.stdout === 'string' ? error.stdout : ''),
-        stderr: Buffer.from(typeof error?.stderr === 'string' ? error.stderr : ''),
-      };
+      stderrText = [
+        typeof error?.stdout === 'string' ? error.stdout : '',
+        typeof error?.stderr === 'string' ? error.stderr : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
     }
+    let reportText = '';
+    try {
+      reportText = await readFile(jsonReport, 'utf8');
+    } catch {
+      /* buildProfileSummary flags reportParseError on empty/missing */
+    }
+    await rm(jsonReport, { force: true });
     const finishedAt = new Date().toISOString();
-    summaries.push(
-      buildProfileSummary({
-        project,
-        reportText: result.stdout.toString('utf8'),
-        exitCode,
-        startedAt,
-        finishedAt,
-        sourceProvenance,
-      }),
-    );
+    const summary = buildProfileSummary({
+      project,
+      reportText,
+      exitCode,
+      startedAt,
+      finishedAt,
+      sourceProvenance,
+    });
+    summary.minTests = minTests;
+    summary.metTestFloor = summary.stats.passed >= minTests;
+    summary.requiredTitles = requiredTitles ?? null;
+    summary.missingRequiredTitles = requiredTitles
+      ? requiredTitles.filter((t) => !summary.stats.passedTitles.includes(t))
+      : [];
+    summary.identityVerified = summary.missingRequiredTitles.length === 0;
+    summaries.push(summary);
     await writeProfileMatrixEvidence(
       matrixEvidencePath,
       sourceProvenance,
@@ -573,16 +955,190 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
     );
     await rm(report, { recursive: true, force: true });
     await rm(results, { recursive: true, force: true });
-    if (failure !== undefined) {
+
+    // A zero-exit run that ran too few tests, or ran the WRONG tests (grep
+    // drift, spec renamed, reporter output unparseable), must NOT pass the lane
+    // whose whole purpose is per-viewport coverage. Identity beats count.
+    const legFailed =
+      failure !== undefined ||
+      summary.status !== 'passed' ||
+      !summary.metTestFloor ||
+      !summary.identityVerified;
+    if (legFailed) {
       await writeProfileMatrixEvidence(matrixEvidencePath, sourceProvenance, summaries, 'failed');
-      const details = [failure.stdout, failure.stderr].filter(Boolean).join('\n');
-      failure.message = `${failure.message}${details ? `: ${details.slice(-4000)}` : ''}`;
-      failure.profileSummaries = summaries;
-      throw failure;
+      const why =
+        failure !== undefined
+          ? `${failure.message}${stderrText ? `: ${stderrText.slice(-4000)}` : ''}`
+          : `${project}: status=${summary.status} passed=${summary.stats.passed}/${summary.stats.total} ` +
+            `(floor ${minTests}, parseError=${summary.stats.reportParseError})` +
+            (summary.missingRequiredTitles.length
+              ? ` — MISSING required test identities: ${JSON.stringify(summary.missingRequiredTitles)}`
+              : '');
+      const err = failure ?? new Error(`real-service desktop matrix leg failed — ${why}`);
+      if (failure) err.message = why;
+      err.profileSummaries = summaries;
+      throw err;
     }
   }
   await writeProfileMatrixEvidence(matrixEvidencePath, sourceProvenance, summaries, 'passed');
   return summaries;
+}
+
+async function runP3ExportMatrix(baseUrl, apiBaseUrl) {
+  const report = join('/tmp', `joy-media-p3-report-${runId}-${runAttempt}-${pass}`);
+  const results = join('/tmp', `joy-media-p3-results-${runId}-${runAttempt}-${pass}`);
+  const jsonReport = join('/tmp', `joy-media-p3-json-${runId}-${runAttempt}-${pass}.json`);
+  // Evidence retention: keep the Playwright JSON report under /tmp until the
+  // matrix has been read and a copy persisted into the run-owned durable
+  // directory, so a hard kill between matrix-write and retention still leaves
+  // a verifiable failure trail.
+  // Keep P3 diagnostics in the checkout's allowlisted test-output tree until
+  // retain-evidence.sh copies and checksums them. Writing directly into the
+  // persistent destination would be erased when retention replaces that tree.
+  const evidenceJson = join(root, 'test-output/browser/p3-export-json.json');
+  const evidenceMatrix = join(root, 'test-output/browser/p3-export-matrix-copy.json');
+  const progressPath = join(root, 'test-output/browser/p3-progress.jsonl');
+  const childStdoutPath = join(root, 'test-output/browser/p3-child-stdout-tail.txt');
+  const childStderrPath = join(root, 'test-output/browser/p3-child-stderr-tail.txt');
+  const workBudgetMs = optionalBudgetEnv('JOY_P3_EXECUTION_DEADLINE_MS', Infinity);
+  const cleanupReserveMs = optionalBudgetEnv(
+    'JOY_P3_CLEANUP_RESERVE_MS',
+    P3_DEFAULT_CLEANUP_RESERVE_MS,
+  );
+  const totalBudgetMs = workBudgetMs === Infinity ? Infinity : workBudgetMs + cleanupReserveMs;
+  const budget = createP3ExecutionBudget({
+    workBudgetMs: totalBudgetMs,
+    cleanupReserveMs,
+  });
+  let progressQueue = Promise.resolve();
+  let progressLines = 0;
+  const writeProgress = ({ caseId = null, phase, result = null }) => {
+    if (progressLines >= P3_PROGRESS_MAX_LINES) return progressQueue;
+    progressLines += 1;
+    const record = budget.progress({
+      candidateSha,
+      runId,
+      runAttempt,
+      pass,
+      caseId,
+      phase,
+      result,
+    });
+    progressQueue = progressQueue.then(() =>
+      writeFile(progressPath, `${JSON.stringify(record)}\n`, { encoding: 'utf8', flag: 'a' }),
+    );
+    return progressQueue;
+  };
+  await rm(jsonReport, { force: true });
+  // issuedAt is created once by the browser spec and persisted in every row.
+  // Validate the run identity here without inventing a second wall-clock
+  // timestamp that could never match the browser's matrix.
+  const expectedProvenance = { candidateSha, runId, runAttempt, pass };
+  let failure;
+  let progressHeartbeat;
+  try {
+    await mkdir(join(root, 'test-output/browser'), { recursive: true });
+    await writeProgress({ phase: 'p3-start' });
+    progressHeartbeat = setInterval(() => {
+      void writeProgress({ phase: 'p3-heartbeat' });
+    }, 60_000);
+    const childResult = await runOwnedP3Process(
+      'pnpm',
+      [
+        'exec',
+        'playwright',
+        'test',
+        'tests/e2e/r2-p3-shipping-export-acceptance.spec.ts',
+        '--project=desktop-primary',
+        '--workers=1',
+        // Retries are disabled specifically for P3 so a slow 60-minute attempt
+        // cannot silently double its wall-time via CI's default retry policy.
+        // The repo's playwright.config.ts sets `retries: 1` when CI=1; this
+        // explicit override scopes the P3 invocation narrowly. The unrelated
+        // retry policy in playwright.config.ts is intentionally untouched.
+        '--retries=0',
+        '--reporter=json',
+      ],
+      {
+        budget,
+        terminate: (child) =>
+          terminateProcessTree(child, { graceMs: 15_000, killMs: 5_000, pollMs: 200 }),
+        spawnOptions: {
+          cwd: root,
+          env: {
+            ...process.env,
+            CI: 'true',
+            JOY_P3_REAL_EXPORTS: '1',
+            PLAYWRIGHT_BASE_URL: baseUrl,
+            JOY_MEDIA_E2E_API_URL: apiBaseUrl,
+            PLAYWRIGHT_HTML_REPORT: report,
+            PLAYWRIGHT_TEST_RESULTS_DIR: results,
+            PLAYWRIGHT_JSON_OUTPUT_NAME: jsonReport,
+            PLAYWRIGHT_WORKERS: '1',
+            JOY_MEDIA_CI_CANDIDATE_SHA: candidateSha,
+            JOY_MEDIA_CI_RUN_ID: runId,
+            JOY_MEDIA_CI_RUN_ATTEMPT: runAttempt,
+            JOY_MEDIA_CI_LANE_PASS: pass,
+            JOY_P3_PROGRESS_PATH: progressPath,
+            JOY_P3_PROGRESS_STARTED_AT_MS: String(Date.now()),
+            JOY_P3_EXECUTION_DEADLINE_MS: String(workBudgetMs),
+          },
+        },
+        onProgress: ({ phase, result }) => {
+          void writeProgress({ phase, result });
+        },
+      },
+    );
+    await writeFile(childStdoutPath, childResult.stdout, 'utf8');
+    await writeFile(childStderrPath, childResult.stderr, 'utf8');
+    await writeProgress({ phase: 'p3-child-finished', result: 'PASS' });
+  } catch (error) {
+    failure = error instanceof Error ? error : new Error(String(error));
+    await writeProgress({
+      phase: error?.code === 'P3_DEADLINE' ? 'p3-deadline' : 'p3-failed',
+      result: 'FAIL',
+    });
+    if (typeof error?.stdout === 'string') await writeFile(childStdoutPath, error.stdout, 'utf8');
+    if (typeof error?.stderr === 'string') await writeFile(childStderrPath, error.stderr, 'utf8');
+  } finally {
+    if (progressHeartbeat !== undefined) clearInterval(progressHeartbeat);
+  }
+  await progressQueue;
+  // Preserve Playwright JSON before any cleanup. A hard crash after this
+  // point still leaves the JSON trail so a reviewer can diagnose the matrix.
+  try {
+    const jsonText = await readFile(jsonReport, 'utf8');
+    await writeFile(evidenceJson, jsonText, 'utf8');
+  } catch {
+    /* missing JSON is not fatal; the matrix evidence below is the contract */
+  }
+  await rm(jsonReport, { force: true });
+  await rm(report, { recursive: true, force: true });
+  await rm(results, { recursive: true, force: true });
+  if (failure) throw failure;
+  const matrixPath = join(root, 'test-output/browser/p3-export-matrix.json');
+  let matrix;
+  try {
+    matrix = JSON.parse(await readFile(matrixPath, 'utf8'));
+  } catch (error) {
+    throw new Error(
+      `P3 export matrix evidence is missing or unreadable: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  // Persist a copy of the matrix alongside the JSON evidence so a verifier
+  // can find them in one run-owned directory.
+  try {
+    await writeFile(evidenceMatrix, `${JSON.stringify(matrix, null, 2)}\n`, 'utf8');
+  } catch {
+    /* non-fatal */
+  }
+  const validation = validateP3Matrix(matrix, expectedProvenance);
+  if (!validation.ok) {
+    throw new Error(
+      `P3 export matrix invalid (${validation.problems.length} problem(s)): ` +
+        validation.problems.slice(0, 20).join('; '),
+    );
+  }
 }
 
 async function writeProfileMatrixEvidence(path, sourceProvenance, profiles, status) {
@@ -626,431 +1182,490 @@ async function recordJourney(
   let captureBrowserTelemetry = true;
   page.on('console', (message) => {
     if (!captureBrowserTelemetry) return;
-    if (message.type() === 'error') telemetry.consoleErrors.push(message.text());
-    if (message.type() === 'warning') telemetry.consoleWarnings.push(message.text());
+    const location = message.location?.() ?? {};
+    const entry = {
+      text: message.text(),
+      phase: telemetry.phase,
+      location: {
+        url: sanitizeUrl(location.url ?? ''),
+        lineNumber: location.lineNumber ?? null,
+        columnNumber: location.columnNumber ?? null,
+      },
+    };
+    if (message.type() === 'error') telemetry.consoleErrors.push(entry);
+    else if (message.type() === 'warning')
+      telemetry.consoleWarnings.push({ text: entry.text, phase: telemetry.phase });
   });
   page.on('pageerror', (error) => {
     if (!captureBrowserTelemetry) return;
-    telemetry.pageErrors.push(error.message);
+    telemetry.pageErrors.push({ message: error.message, phase: telemetry.phase });
   });
   page.on('requestfailed', (request) => {
     if (!captureBrowserTelemetry) return;
-    if (request.url().startsWith('http'))
-      telemetry.failedRequests.push(`${request.url()} ${request.failure()?.errorText ?? ''}`);
+    if (!request.url().startsWith('http')) return;
+    telemetry.failedRequests.push({
+      url: sanitizeUrl(request.url()),
+      method: request.method(),
+      resourceType: request.resourceType(),
+      failureText: request.failure()?.errorText ?? '',
+      phase: telemetry.phase,
+    });
   });
   page.on('response', (response) => {
     if (!captureBrowserTelemetry) return;
-    if (response.status() >= 400)
-      telemetry.httpErrors.push(
-        `${response.status()} ${response.request().method()} ${response.url()}`,
-      );
+    if (response.status() < 400) return;
+    telemetry.httpErrors.push({
+      status: response.status(),
+      method: response.request().method(),
+      url: sanitizeUrl(response.url()),
+      phase: telemetry.phase,
+    });
   });
-  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-  await page.getByRole('heading', { name: 'Projects' }).waitFor();
-  const title = `Real service acceptance ${runId}-${pass}`;
-  await page.getByRole('button', { name: 'New project' }).click();
-  await page.getByPlaceholder('Project name').fill(title);
-  await page.getByRole('button', { name: 'Create project' }).click();
-  await page.getByRole('button', { name: 'File', exact: true }).waitFor();
+  const walkAndCollect = async () => {
+    telemetry.phase = 'open-projects';
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+    await page.getByRole('heading', { name: 'Projects' }).waitFor();
+    telemetry.phase = 'create-project';
+    const title = `Real service acceptance ${runId}-${pass}`;
+    await page.getByRole('button', { name: 'New project' }).click();
+    await page.getByPlaceholder('Project name').fill(title);
+    await page.getByRole('button', { name: 'Create project' }).click();
+    await page.getByRole('button', { name: 'File', exact: true }).waitFor();
 
-  const enhance = page.locator('.panel-tab[aria-label="Enhance"]').first();
-  await enhance.click();
-  const effectsTab = page
-    .getByRole('region', { name: 'Enhance tools', exact: true })
-    .getByRole('tab', { name: 'Effects', exact: true });
-  await effectsTab.click();
-  await page.locator('.effects-panel').waitFor();
-  await page.locator('.panel-tab[aria-label="Inspector"]').first().click();
-  await page.getByRole('article', { name: 'Inspector', exact: true }).waitFor();
-  const joyCode = page.locator('.panel-tab[aria-label="Joy Code"]').first();
-  await joyCode.click();
-  const joyCodeBrief = page
-    .getByRole('tablist', { name: 'Joy Code sections', exact: true })
-    // PanelShell keeps the short visual label while exposing the migration
-    // alias as the accessible name. Target the contract users and assistive
-    // technology receive, not the painted text node.
-    .getByRole('tab', { name: 'Creative Brief', exact: true });
-  await joyCodeBrief.click();
-  await page.getByRole('article', { name: 'Joy Code', exact: true }).waitFor();
-  await page.locator('.creative-brief-panel').waitFor();
-  const joyCode3d = page
-    .getByRole('tablist', { name: 'Joy Code sections', exact: true })
-    .getByRole('tab', { name: '3d', exact: true });
-  await joyCode3d.click();
-  await page.locator('.joy-code-3d').waitFor();
+    telemetry.phase = 'enhance-effects';
+    const enhance = page.locator('.panel-tab[aria-label="Enhance"]').first();
+    await enhance.click();
+    const effectsTab = page
+      .getByRole('region', { name: 'Enhance tools', exact: true })
+      .getByRole('tab', { name: 'Effects', exact: true });
+    await effectsTab.click();
+    await page.locator('.effects-panel').waitFor();
+    telemetry.phase = 'inspector';
+    await page.locator('.panel-tab[aria-label="Inspector"]').first().click();
+    await page.getByRole('article', { name: 'Inspector', exact: true }).waitFor();
+    telemetry.phase = 'joy-code';
+    const joyCode = page.locator('.panel-tab[aria-label="Joy Code"]').first();
+    await joyCode.click();
+    await page.getByRole('article', { name: 'Joy Code', exact: true }).waitFor();
+    // Creative Brief is a composer capability inside the Joy Code panel, not a
+    // section tab. Toggling it reveals the embedded brief surface (its consent
+    // gate, until a BYOK model is connected).
+    telemetry.phase = 'creative-brief';
+    await page.getByRole('button', { name: 'Creative Brief', exact: true }).click();
+    await page.locator('.creative-brief-panel').waitFor();
+    // The 3D scene workspace is its own on-demand Dockview panel. Reveal it from
+    // the View menu when its dock tab is not already mounted.
+    telemetry.phase = '3d-scene';
+    let scene3dTab = page.locator('.panel-tab[aria-label="3D Scene"]').first();
+    if (!(await scene3dTab.isVisible())) {
+      await page.getByRole('button', { name: 'View', exact: true }).click();
+      await page.getByRole('menuitem', { name: '3D Scene', exact: true }).click();
+      scene3dTab = page.locator('.panel-tab[aria-label="3D Scene"]').first();
+    }
+    await scene3dTab.click();
+    await page.getByRole('article', { name: '3D Scene', exact: true }).waitFor();
+    await page.locator('.joy-code-3d').waitFor();
 
-  const projectId = await readControlPlaneProjectId(page);
-  if (!projectId)
-    throw new Error('real-service acceptance did not resolve a control-plane project id');
-  const headers = { authorization: `Bearer ${sessionToken}`, 'content-type': 'application/json' };
-  const videoName = `real-video-${runId}-${pass}.mp4`;
-  const audioName = `real-audio-${runId}-${pass}.wav`;
-  await importFixture(page, 'video.mp4', videoName);
-  await importFixture(page, 'audio.wav', audioName);
-  await resetAssetCatalogFilters(page);
-  await addAssetToTimeline(page, videoName);
-  // Motion/Spatial authoring requires an object-backed visual clip.  A newly
-  // created project starts with media-only clips, so place a first-party HTML
-  // scene on the imported video before applying a preset.  Keep this in the
-  // real-service journey (rather than seeding localStorage) so persistence is
-  // exercised through the same compound document transaction as production.
-  await page.locator(`.timeline-clip[aria-label^="${videoName},"]`).click();
-  await enhance.click();
-  await page
-    .getByRole('region', { name: 'Enhance tools', exact: true })
-    .getByRole('tab', { name: /^Animate/ })
-    .click();
-  const motion = page.locator('.motion-panel');
-  await motion.waitFor();
-  await motion.getByRole('tab', { name: 'Scenes', exact: true }).click();
-  await motion
-    .getByRole('button', { name: /^Add .+ to selected clip$/ })
-    .first()
-    .click();
-  await motion.getByRole('tab', { name: 'Presets', exact: true }).click();
-  await motion
-    .locator('.motion-field', { hasText: 'Preset' })
-    .locator('select')
-    .selectOption('joy-pop-in');
-  await motion.getByRole('button', { name: 'Apply motion preset' }).click();
-  await motion.getByRole('img', { name: 'scaleX keyframes', exact: true }).waitFor();
-  await motion.getByRole('img', { name: 'scaleY keyframes', exact: true }).waitFor();
-  await motion.getByRole('img', { name: 'opacity keyframes', exact: true }).waitFor();
-  const motionObjectId = (await motion.locator('.motion-object-id').textContent())?.trim();
-  if (!motionObjectId || motionObjectId === 'Select a clip')
-    throw new Error('real-service journey did not resolve the Motion target object');
-  // Applying a preset targets the generated HTML-scene clip, not the
-  // imported media clip that the scene was placed above.  Keep that exact
-  // clip id for the reload check; selecting the imported video by display
-  // name would resolve its media controller (which intentionally has no
-  // animation channels) and make a valid persisted preset look missing.
-  const motionClipId = await page
-    .locator('.timeline-clip[data-element-kind="html-scene"][aria-pressed="true"]')
-    .first()
-    .getAttribute('data-clip-id');
-  if (!motionClipId)
-    throw new Error('real-service journey did not resolve the generated Motion clip id');
-  // The Enhance panel replaces the Create/Assets surface. Return to the
-  // catalog before resolving the second imported asset, and clear any kind
-  // filter that the import flow or prior interactions may have selected.
-  await page.locator('.panel-tab[aria-label="Create"]').first().click();
-  await page.getByRole('article', { name: 'Assets', exact: true }).waitFor();
-  await resetAssetCatalogFilters(page);
-  await addAssetToTimeline(page, audioName);
+    const projectId = await readControlPlaneProjectId(page);
+    if (!projectId)
+      throw new Error('real-service acceptance did not resolve a control-plane project id');
+    const headers = { authorization: `Bearer ${sessionToken}`, 'content-type': 'application/json' };
+    const videoName = `real-video-${runId}-${pass}.mp4`;
+    const audioName = `real-audio-${runId}-${pass}.wav`;
+    telemetry.phase = 'import-media';
+    await importFixture(page, 'video.mp4', videoName);
+    await importFixture(page, 'audio.wav', audioName);
+    await resetAssetCatalogFilters(page);
+    await addAssetToTimeline(page, videoName);
+    // Motion/Spatial authoring requires an object-backed visual clip.  A newly
+    // created project starts with media-only clips, so place a first-party HTML
+    // scene on the imported video before applying a preset.  Keep this in the
+    // real-service journey (rather than seeding localStorage) so persistence is
+    // exercised through the same compound document transaction as production.
+    telemetry.phase = 'motion-preset';
+    await page.locator(`.timeline-clip[aria-label^="${videoName},"]`).click();
+    await enhance.click();
+    await page
+      .getByRole('region', { name: 'Enhance tools', exact: true })
+      .getByRole('tab', { name: /^Animate/ })
+      .click();
+    const motion = page.locator('.motion-panel');
+    await motion.waitFor();
+    await motion.getByRole('tab', { name: 'Scenes', exact: true }).click();
+    await motion
+      .getByRole('button', { name: /^Add .+ to selected clip$/ })
+      .first()
+      .click();
+    await motion.getByRole('tab', { name: 'Presets', exact: true }).click();
+    await motion
+      .locator('.motion-field', { hasText: 'Preset' })
+      .locator('select')
+      .selectOption('joy-pop-in');
+    await motion.getByRole('button', { name: 'Apply motion preset' }).click();
+    await motion.getByRole('img', { name: 'scaleX keyframes', exact: true }).waitFor();
+    await motion.getByRole('img', { name: 'scaleY keyframes', exact: true }).waitFor();
+    await motion.getByRole('img', { name: 'opacity keyframes', exact: true }).waitFor();
+    const motionObjectId = (await motion.locator('.motion-object-id').textContent())?.trim();
+    if (!motionObjectId || motionObjectId === 'Select a clip')
+      throw new Error('real-service journey did not resolve the Motion target object');
+    // Applying a preset targets the generated HTML-scene clip, not the
+    // imported media clip that the scene was placed above.  Keep that exact
+    // clip id for the reload check; selecting the imported video by display
+    // name would resolve its media controller (which intentionally has no
+    // animation channels) and make a valid persisted preset look missing.
+    const motionClipId = await page
+      .locator('.timeline-clip[data-element-kind="html-scene"][aria-pressed="true"]')
+      .first()
+      .getAttribute('data-clip-id');
+    if (!motionClipId)
+      throw new Error('real-service journey did not resolve the generated Motion clip id');
+    // The Enhance panel replaces the Create/Assets surface. Return to the
+    // catalog before resolving the second imported asset, and clear any kind
+    // filter that the import flow or prior interactions may have selected.
+    await page.locator('.panel-tab[aria-label="Create"]').first().click();
+    await page.getByRole('article', { name: 'Assets', exact: true }).waitFor();
+    await resetAssetCatalogFilters(page);
+    await addAssetToTimeline(page, audioName);
 
-  const firstDownload = await triggerExportDownload(page);
-  const exportAssetId = `real-export-${runId}-${pass}`;
-  const mixedBytes = await readFile(firstDownload.path);
-  const mixedDigest = firstDownload.sha256;
-  const reimportAssetId = `real-reimport-${runId}-${pass}`;
-  const exportedProbe = JSON.parse(
-    (
-      await execFile(
-        'ffprobe',
-        [
-          '-v',
-          'error',
-          '-print_format',
-          'json',
-          '-show_streams',
-          '-show_format',
-          firstDownload.path,
-        ],
-        { cwd: root },
-      )
-    ).stdout.toString('utf8'),
-  );
-  const exportRegistered = await page.evaluate(
-    async ({ projectId: id, assetId: mediaId, digest: sha, byteLength, requestHeaders }) => {
-      const response = await fetch(`/api/v1/projects/${id}/assets`, {
-        method: 'POST',
-        headers: requestHeaders,
-        body: JSON.stringify({
-          id: mediaId,
-          kind: 'video',
-          displayName: 'mixed-export.mp4',
-          sha256: sha,
-          bytes: byteLength,
-          descriptor: { mimeType: 'video/mp4', durationUs: 3_000_000, width: 320, height: 180 },
-          locations: [{ kind: 'opfs-cache', ref: `real-export-${mediaId}` }],
-        }),
-      });
-      return response.status;
-    },
-    {
-      projectId,
-      assetId: exportAssetId,
-      digest: mixedDigest,
-      byteLength: mixedBytes.byteLength,
-      requestHeaders: headers,
-    },
-  );
-  if (exportRegistered !== 201)
-    throw new Error(`real-service mixed export registration returned ${exportRegistered}`);
-  const exportUploaded = await page.evaluate(
-    async ({ projectId: id, assetId: mediaId, digest: sha, payload, sessionToken }) => {
-      const raw = atob(payload);
-      const body = Uint8Array.from(raw, (character) => character.charCodeAt(0));
-      const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${sessionToken}`,
-          'content-type': 'video/mp4',
-          'x-joy-sha256': sha,
-          'x-joy-bytes': String(body.byteLength),
-        },
-        body,
-      });
-      return response.status;
-    },
-    {
-      projectId,
-      assetId: exportAssetId,
-      digest: mixedDigest,
-      payload: mixedBytes.toString('base64'),
-      sessionToken,
-    },
-  );
-  if (exportUploaded !== 201)
-    throw new Error(`real-service mixed export upload returned ${exportUploaded}`);
-  const exportedDownload = await page.evaluate(
-    async ({ projectId: id, assetId: mediaId, sessionToken }) => {
-      const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
-        headers: { authorization: `Bearer ${sessionToken}` },
-      });
-      const content = new Uint8Array(await response.arrayBuffer());
-      const digest = Array.from(
-        new Uint8Array(await crypto.subtle.digest('SHA-256', content)),
-        (byte) => byte.toString(16).padStart(2, '0'),
-      ).join('');
-      let binary = '';
-      for (let offset = 0; offset < content.length; offset += 0x8000) {
-        binary += String.fromCharCode(...content.subarray(offset, offset + 0x8000));
-      }
-      return {
-        status: response.status,
-        bytes: content.byteLength,
-        digest,
-        payload: btoa(binary),
-      };
-    },
-    { projectId, assetId: exportAssetId, sessionToken },
-  );
-  if (
-    exportedDownload.status !== 200 ||
-    exportedDownload.bytes !== mixedBytes.byteLength ||
-    exportedDownload.digest !== mixedDigest
-  )
-    throw new Error('mixed export download failed integrity verification');
-  const exportedPath = join(tempRoot, `verified-delivery-${runId}-${pass}.mp4`);
-  await writeFile(exportedPath, Buffer.from(exportedDownload.payload, 'base64'));
-  const ffprobeResult = await execFile(
-    'ffprobe',
-    ['-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', exportedPath],
-    { cwd: root },
-  );
-  const ffprobe = JSON.parse(ffprobeResult.stdout.toString('utf8'));
-  const streamTypes = (Array.isArray(ffprobe.streams) ? ffprobe.streams : []).map(
-    (stream) => stream.codec_type,
-  );
-  if (!streamTypes.includes('video') || !streamTypes.includes('audio'))
-    throw new Error('mixed export ffprobe did not find both video and audio streams');
-  await importFixture(page, firstDownload.path, firstDownload.filename);
-  const redownload = await redownloadMostRecentExport(page);
-  if (redownload.sha256 !== firstDownload.sha256 || redownload.bytes !== firstDownload.bytes) {
-    throw new Error('Recent processes redownload did not match the original JOY export bytes');
-  }
-  captureBrowserTelemetry = false;
-  const reimported = await page.evaluate(
-    async ({ projectId: id, assetId: mediaId, digest: sha, byteLength, requestHeaders }) => {
-      const response = await fetch(`/api/v1/projects/${id}/assets`, {
-        method: 'POST',
-        headers: requestHeaders,
-        body: JSON.stringify({
-          id: mediaId,
-          kind: 'video',
-          displayName: 'reimported-mixed-export.mp4',
-          sha256: sha,
-          bytes: byteLength,
-          descriptor: { mimeType: 'video/mp4', durationUs: 3_000_000, width: 320, height: 180 },
-          locations: [{ kind: 'opfs-cache', ref: `real-reimport-${mediaId}` }],
-        }),
-      });
-      return response.status;
-    },
-    {
-      projectId,
-      assetId: reimportAssetId,
-      digest: mixedDigest,
-      byteLength: mixedBytes.byteLength,
-      requestHeaders: headers,
-    },
-  );
-  if (reimported !== 201) throw new Error(`real-service re-import returned ${reimported}`);
-  const reimportUploaded = await page.evaluate(
-    async ({ projectId: id, assetId: mediaId, digest: sha, payload, sessionToken }) => {
-      const raw = atob(payload);
-      const body = Uint8Array.from(raw, (character) => character.charCodeAt(0));
-      const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${sessionToken}`,
-          'content-type': 'video/mp4',
-          'x-joy-sha256': sha,
-          'x-joy-bytes': String(body.byteLength),
-        },
-        body,
-      });
-      return response.status;
-    },
-    {
-      projectId,
-      assetId: reimportAssetId,
-      digest: mixedDigest,
-      payload: mixedBytes.toString('base64'),
-      sessionToken,
-    },
-  );
-  if (reimportUploaded !== 201)
-    throw new Error(`real-service re-import upload returned ${reimportUploaded}`);
-  const reimportDownloaded = await page.evaluate(
-    async ({ projectId: id, assetId: mediaId, sessionToken }) => {
-      const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
-        headers: { authorization: `Bearer ${sessionToken}` },
-      });
-      const content = new Uint8Array(await response.arrayBuffer());
-      const digest = Array.from(
-        new Uint8Array(await crypto.subtle.digest('SHA-256', content)),
-        (byte) => byte.toString(16).padStart(2, '0'),
-      ).join('');
-      return { status: response.status, bytes: content.byteLength, digest };
-    },
-    { projectId, assetId: reimportAssetId, sessionToken },
-  );
-  if (
-    reimportDownloaded.status !== 200 ||
-    reimportDownloaded.bytes !== mixedBytes.byteLength ||
-    reimportDownloaded.digest !== mixedDigest
-  )
-    throw new Error('real-service re-import download failed integrity verification');
-  const missingSourceStatus = await page.evaluate(
-    async ({ projectId: id, sessionToken }) =>
+    telemetry.phase = 'export';
+    const firstDownload = await triggerExportDownload(page);
+    const exportAssetId = `real-export-${runId}-${pass}`;
+    const mixedBytes = await readFile(firstDownload.path);
+    const mixedDigest = firstDownload.sha256;
+    const reimportAssetId = `real-reimport-${runId}-${pass}`;
+    const exportedProbe = JSON.parse(
       (
-        await fetch(`/api/v1/projects/${id}/assets/missing-source/original`, {
+        await execFile(
+          'ffprobe',
+          [
+            '-v',
+            'error',
+            '-print_format',
+            'json',
+            '-show_streams',
+            '-show_format',
+            firstDownload.path,
+          ],
+          { cwd: root },
+        )
+      ).stdout.toString('utf8'),
+    );
+    const exportRegistered = await page.evaluate(
+      async ({ projectId: id, assetId: mediaId, digest: sha, byteLength, requestHeaders }) => {
+        const response = await fetch(`/api/v1/projects/${id}/assets`, {
+          method: 'POST',
+          headers: requestHeaders,
+          body: JSON.stringify({
+            id: mediaId,
+            kind: 'video',
+            displayName: 'mixed-export.mp4',
+            sha256: sha,
+            bytes: byteLength,
+            descriptor: { mimeType: 'video/mp4', durationUs: 3_000_000, width: 320, height: 180 },
+            locations: [{ kind: 'opfs-cache', ref: `real-export-${mediaId}` }],
+          }),
+        });
+        return response.status;
+      },
+      {
+        projectId,
+        assetId: exportAssetId,
+        digest: mixedDigest,
+        byteLength: mixedBytes.byteLength,
+        requestHeaders: headers,
+      },
+    );
+    if (exportRegistered !== 201)
+      throw new Error(`real-service mixed export registration returned ${exportRegistered}`);
+    const exportUploaded = await page.evaluate(
+      async ({ projectId: id, assetId: mediaId, digest: sha, payload, sessionToken }) => {
+        const raw = atob(payload);
+        const body = Uint8Array.from(raw, (character) => character.charCodeAt(0));
+        const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${sessionToken}`,
+            'content-type': 'video/mp4',
+            'x-joy-sha256': sha,
+            'x-joy-bytes': String(body.byteLength),
+          },
+          body,
+        });
+        return response.status;
+      },
+      {
+        projectId,
+        assetId: exportAssetId,
+        digest: mixedDigest,
+        payload: mixedBytes.toString('base64'),
+        sessionToken,
+      },
+    );
+    if (exportUploaded !== 201)
+      throw new Error(`real-service mixed export upload returned ${exportUploaded}`);
+    const exportedDownload = await page.evaluate(
+      async ({ projectId: id, assetId: mediaId, sessionToken }) => {
+        const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
           headers: { authorization: `Bearer ${sessionToken}` },
-        })
-      ).status,
-    { projectId, sessionToken },
-  );
-  // The API maps a missing asset to its conflict-safe control-plane error
-  // (409) rather than leaking a storage existence signal; both statuses are
-  // accepted across the current local/production adapters.
-  if (missingSourceStatus !== 404 && missingSourceStatus !== 409)
-    throw new Error(`missing-source recovery returned ${missingSourceStatus}, expected 404/409`);
-  const deliveryRecovery = await page.evaluate(
-    async ({
-      projectId: id,
-      sessionToken,
-      assetId,
-      settleTimeoutMs,
-      pollIntervalMs,
-      pollRequestTimeoutMs,
-    }) => {
-      const requestHeaders = {
-        authorization: `Bearer ${sessionToken}`,
-        'content-type': 'application/json',
-      };
-      const createdResponse = await fetch(`/api/v1/projects/${id}/jobs`, {
-        method: 'POST',
-        headers: requestHeaders,
-        body: JSON.stringify({
-          id: `delivery-recovery-${Date.now()}`,
-          type: 'asset.thumbnail',
-          assetId,
-        }),
-      });
-      if (createdResponse.status !== 201) return { created: createdResponse.status };
-      const created = await createdResponse.json();
-      const jobId = created.data?.id;
-      if (typeof jobId !== 'string' || jobId.length === 0)
+        });
+        const content = new Uint8Array(await response.arrayBuffer());
+        const digest = Array.from(
+          new Uint8Array(await crypto.subtle.digest('SHA-256', content)),
+          (byte) => byte.toString(16).padStart(2, '0'),
+        ).join('');
+        let binary = '';
+        for (let offset = 0; offset < content.length; offset += 0x8000) {
+          binary += String.fromCharCode(...content.subarray(offset, offset + 0x8000));
+        }
         return {
-          created: createdResponse.status,
-          canceled: null,
-          cancelResponseState: null,
-          cancelResponseRequested: false,
-          cancelSettledState: null,
-          cancelPollAttempts: 0,
-          cancelPollStatus: null,
-          cancelPollError: 'malformed-create',
-          canceledState: null,
-          retried: null,
-          retriedState: null,
+          status: response.status,
+          bytes: content.byteLength,
+          digest,
+          payload: btoa(binary),
         };
-      const canceledResponse = await fetch(`/api/v1/projects/${id}/jobs/${jobId}/cancel`, {
-        method: 'POST',
-        headers: requestHeaders,
-        body: '{}',
-      });
-      const canceled = await canceledResponse.json();
-      const cancelResponseState = canceled.data?.state;
-      const cancelResponseRequested = canceled.data?.cancelRequested === true;
-      let cancelSettledState = cancelResponseState;
-      let cancelPollAttempts = 0;
-      let cancelPollStatus = null;
-      let cancelPollError = null;
-      const pollJobs = async () => {
-        const controller = new globalThis.AbortController();
-        const requestTimeout = setTimeout(() => controller.abort(), pollRequestTimeoutMs);
-        try {
-          const response = await fetch(`/api/v1/projects/${id}/jobs`, {
+      },
+      { projectId, assetId: exportAssetId, sessionToken },
+    );
+    if (
+      exportedDownload.status !== 200 ||
+      exportedDownload.bytes !== mixedBytes.byteLength ||
+      exportedDownload.digest !== mixedDigest
+    )
+      throw new Error('mixed export download failed integrity verification');
+    const exportedPath = join(tempRoot, `verified-delivery-${runId}-${pass}.mp4`);
+    await writeFile(exportedPath, Buffer.from(exportedDownload.payload, 'base64'));
+    const ffprobeResult = await execFile(
+      'ffprobe',
+      ['-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', exportedPath],
+      { cwd: root },
+    );
+    const ffprobe = JSON.parse(ffprobeResult.stdout.toString('utf8'));
+    const streamTypes = (Array.isArray(ffprobe.streams) ? ffprobe.streams : []).map(
+      (stream) => stream.codec_type,
+    );
+    if (!streamTypes.includes('video') || !streamTypes.includes('audio'))
+      throw new Error('mixed export ffprobe did not find both video and audio streams');
+    telemetry.phase = 'reimport-export';
+    await importFixture(page, firstDownload.path, firstDownload.filename);
+    const redownload = await redownloadMostRecentExport(page);
+    if (redownload.sha256 !== firstDownload.sha256 || redownload.bytes !== firstDownload.bytes) {
+      throw new Error('Recent processes redownload did not match the original JOY export bytes');
+    }
+    captureBrowserTelemetry = false;
+    const reimported = await page.evaluate(
+      async ({ projectId: id, assetId: mediaId, digest: sha, byteLength, requestHeaders }) => {
+        const response = await fetch(`/api/v1/projects/${id}/assets`, {
+          method: 'POST',
+          headers: requestHeaders,
+          body: JSON.stringify({
+            id: mediaId,
+            kind: 'video',
+            displayName: 'reimported-mixed-export.mp4',
+            sha256: sha,
+            bytes: byteLength,
+            descriptor: { mimeType: 'video/mp4', durationUs: 3_000_000, width: 320, height: 180 },
+            locations: [{ kind: 'opfs-cache', ref: `real-reimport-${mediaId}` }],
+          }),
+        });
+        return response.status;
+      },
+      {
+        projectId,
+        assetId: reimportAssetId,
+        digest: mixedDigest,
+        byteLength: mixedBytes.byteLength,
+        requestHeaders: headers,
+      },
+    );
+    if (reimported !== 201) throw new Error(`real-service re-import returned ${reimported}`);
+    const reimportUploaded = await page.evaluate(
+      async ({ projectId: id, assetId: mediaId, digest: sha, payload, sessionToken }) => {
+        const raw = atob(payload);
+        const body = Uint8Array.from(raw, (character) => character.charCodeAt(0));
+        const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${sessionToken}`,
+            'content-type': 'video/mp4',
+            'x-joy-sha256': sha,
+            'x-joy-bytes': String(body.byteLength),
+          },
+          body,
+        });
+        return response.status;
+      },
+      {
+        projectId,
+        assetId: reimportAssetId,
+        digest: mixedDigest,
+        payload: mixedBytes.toString('base64'),
+        sessionToken,
+      },
+    );
+    if (reimportUploaded !== 201)
+      throw new Error(`real-service re-import upload returned ${reimportUploaded}`);
+    const reimportDownloaded = await page.evaluate(
+      async ({ projectId: id, assetId: mediaId, sessionToken }) => {
+        const response = await fetch(`/api/v1/projects/${id}/assets/${mediaId}/original`, {
+          headers: { authorization: `Bearer ${sessionToken}` },
+        });
+        const content = new Uint8Array(await response.arrayBuffer());
+        const digest = Array.from(
+          new Uint8Array(await crypto.subtle.digest('SHA-256', content)),
+          (byte) => byte.toString(16).padStart(2, '0'),
+        ).join('');
+        return { status: response.status, bytes: content.byteLength, digest };
+      },
+      { projectId, assetId: reimportAssetId, sessionToken },
+    );
+    if (
+      reimportDownloaded.status !== 200 ||
+      reimportDownloaded.bytes !== mixedBytes.byteLength ||
+      reimportDownloaded.digest !== mixedDigest
+    )
+      throw new Error('real-service re-import download failed integrity verification');
+    const missingSourceStatus = await page.evaluate(
+      async ({ projectId: id, sessionToken }) =>
+        (
+          await fetch(`/api/v1/projects/${id}/assets/missing-source/original`, {
             headers: { authorization: `Bearer ${sessionToken}` },
-            signal: controller.signal,
-          });
-          if (!response.ok) return { response, error: 'http-error' };
-          try {
-            return { response, payload: await response.json() };
-          } catch {
-            return { response, error: 'malformed-jobs' };
-          }
-        } catch (error) {
+          })
+        ).status,
+      { projectId, sessionToken },
+    );
+    // The API maps a missing asset to its conflict-safe control-plane error
+    // (409) rather than leaking a storage existence signal; both statuses are
+    // accepted across the current local/production adapters.
+    if (missingSourceStatus !== 404 && missingSourceStatus !== 409)
+      throw new Error(`missing-source recovery returned ${missingSourceStatus}, expected 404/409`);
+    const deliveryRecovery = await page.evaluate(
+      async ({
+        projectId: id,
+        sessionToken,
+        assetId,
+        settleTimeoutMs,
+        pollIntervalMs,
+        pollRequestTimeoutMs,
+      }) => {
+        const requestHeaders = {
+          authorization: `Bearer ${sessionToken}`,
+          'content-type': 'application/json',
+        };
+        const createdResponse = await fetch(`/api/v1/projects/${id}/jobs`, {
+          method: 'POST',
+          headers: requestHeaders,
+          body: JSON.stringify({
+            id: `delivery-recovery-${Date.now()}`,
+            type: 'asset.thumbnail',
+            assetId,
+          }),
+        });
+        if (createdResponse.status !== 201) return { created: createdResponse.status };
+        const created = await createdResponse.json();
+        const jobId = created.data?.id;
+        if (typeof jobId !== 'string' || jobId.length === 0)
           return {
-            response: null,
-            error:
-              error instanceof Error && error.name === 'AbortError'
-                ? 'request-timeout'
-                : 'request-failed',
+            created: createdResponse.status,
+            canceled: null,
+            cancelResponseState: null,
+            cancelResponseRequested: false,
+            cancelSettledState: null,
+            cancelPollAttempts: 0,
+            cancelPollStatus: null,
+            cancelPollError: 'malformed-create',
+            canceledState: null,
+            retried: null,
+            retriedState: null,
           };
-        } finally {
-          globalThis.clearTimeout(requestTimeout);
+        const canceledResponse = await fetch(`/api/v1/projects/${id}/jobs/${jobId}/cancel`, {
+          method: 'POST',
+          headers: requestHeaders,
+          body: '{}',
+        });
+        const canceled = await canceledResponse.json();
+        const cancelResponseState = canceled.data?.state;
+        const cancelResponseRequested = canceled.data?.cancelRequested === true;
+        let cancelSettledState = cancelResponseState;
+        let cancelPollAttempts = 0;
+        let cancelPollStatus = null;
+        let cancelPollError = null;
+        const pollJobs = async () => {
+          const controller = new globalThis.AbortController();
+          const requestTimeout = setTimeout(() => controller.abort(), pollRequestTimeoutMs);
+          try {
+            const response = await fetch(`/api/v1/projects/${id}/jobs`, {
+              headers: { authorization: `Bearer ${sessionToken}` },
+              signal: controller.signal,
+            });
+            if (!response.ok) return { response, error: 'http-error' };
+            try {
+              return { response, payload: await response.json() };
+            } catch {
+              return { response, error: 'malformed-jobs' };
+            }
+          } catch (error) {
+            return {
+              response: null,
+              error:
+                error instanceof Error && error.name === 'AbortError'
+                  ? 'request-timeout'
+                  : 'request-failed',
+            };
+          } finally {
+            globalThis.clearTimeout(requestTimeout);
+          }
+        };
+        const cancelSettleDeadline = Date.now() + settleTimeoutMs;
+        while (Date.now() < cancelSettleDeadline) {
+          cancelPollAttempts += 1;
+          const {
+            response: jobsResponse,
+            payload: jobsPayload,
+            error: pollError,
+          } = await pollJobs();
+          cancelPollStatus = jobsResponse?.status ?? null;
+          if (pollError !== undefined) {
+            cancelPollError = pollError;
+            break;
+          }
+          if (!jobsPayload || typeof jobsPayload !== 'object' || !Array.isArray(jobsPayload.data)) {
+            cancelPollError = 'malformed-jobs';
+            break;
+          }
+          const settledJob = jobsPayload.data.find((job) => job && job.id === jobId);
+          if (!settledJob || typeof settledJob.state !== 'string') {
+            cancelPollError = 'job-missing';
+            break;
+          }
+          cancelSettledState = settledJob.state;
+          if (cancelSettledState === 'canceled') break;
+          if (cancelSettledState === 'failed' || cancelSettledState === 'succeeded') {
+            cancelPollError = `terminal-${cancelSettledState}`;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
         }
-      };
-      const cancelSettleDeadline = Date.now() + settleTimeoutMs;
-      while (Date.now() < cancelSettleDeadline) {
-        cancelPollAttempts += 1;
-        const { response: jobsResponse, payload: jobsPayload, error: pollError } = await pollJobs();
-        cancelPollStatus = jobsResponse?.status ?? null;
-        if (pollError !== undefined) {
-          cancelPollError = pollError;
-          break;
+        if (cancelSettledState !== 'canceled') {
+          return {
+            created: createdResponse.status,
+            canceled: canceledResponse.status,
+            cancelResponseState,
+            cancelResponseRequested,
+            cancelSettledState,
+            cancelPollAttempts,
+            cancelPollStatus,
+            cancelPollError,
+            canceledState: cancelSettledState,
+            retried: null,
+            retriedState: null,
+          };
         }
-        if (!jobsPayload || typeof jobsPayload !== 'object' || !Array.isArray(jobsPayload.data)) {
-          cancelPollError = 'malformed-jobs';
-          break;
-        }
-        const settledJob = jobsPayload.data.find((job) => job && job.id === jobId);
-        if (!settledJob || typeof settledJob.state !== 'string') {
-          cancelPollError = 'job-missing';
-          break;
-        }
-        cancelSettledState = settledJob.state;
-        if (cancelSettledState === 'canceled') break;
-        if (cancelSettledState === 'failed' || cancelSettledState === 'succeeded') {
-          cancelPollError = `terminal-${cancelSettledState}`;
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-      }
-      if (cancelSettledState !== 'canceled') {
+        const retryResponse = await fetch(`/api/v1/projects/${id}/jobs/${jobId}/retry`, {
+          method: 'POST',
+          headers: requestHeaders,
+          body: '{}',
+        });
+        const retried = await retryResponse.json();
         return {
           created: createdResponse.status,
           canceled: canceledResponse.status,
@@ -1061,264 +1676,290 @@ async function recordJourney(
           cancelPollStatus,
           cancelPollError,
           canceledState: cancelSettledState,
-          retried: null,
-          retriedState: null,
+          retried: retryResponse.status,
+          retriedState: retried.data?.state,
         };
-      }
-      const retryResponse = await fetch(`/api/v1/projects/${id}/jobs/${jobId}/retry`, {
-        method: 'POST',
-        headers: requestHeaders,
-        body: '{}',
-      });
-      const retried = await retryResponse.json();
-      return {
-        created: createdResponse.status,
-        canceled: canceledResponse.status,
-        cancelResponseState,
-        cancelResponseRequested,
-        cancelSettledState,
-        cancelPollAttempts,
-        cancelPollStatus,
-        cancelPollError,
-        canceledState: cancelSettledState,
-        retried: retryResponse.status,
-        retriedState: retried.data?.state,
-      };
-    },
-    {
-      projectId,
-      sessionToken,
-      assetId: reimportAssetId,
-      settleTimeoutMs: DELIVERY_CANCEL_SETTLE_TIMEOUT_MS,
-      pollIntervalMs: DELIVERY_CANCEL_POLL_INTERVAL_MS,
-      pollRequestTimeoutMs: DELIVERY_CANCEL_POLL_REQUEST_TIMEOUT_MS,
-    },
-  );
-  if (
-    deliveryRecovery.created !== 201 ||
-    ![200, 201].includes(deliveryRecovery.canceled) ||
-    deliveryRecovery.cancelSettledState !== 'canceled' ||
-    deliveryRecovery.canceledState !== 'canceled' ||
-    ![200, 201].includes(deliveryRecovery.retried) ||
-    deliveryRecovery.retriedState !== 'queued'
-  )
-    throw new Error(`delivery cancel/retry recovery failed: ${JSON.stringify(deliveryRecovery)}`);
-  var deliveryEvidence = {
-    sourceAssets: { video: true, audio: true },
-    mixedSourceExport: {
-      status: 'passed',
-      producer: 'joy-export-mp4',
-      filename: firstDownload.filename,
-      bytes: firstDownload.bytes,
-      sha256: firstDownload.sha256,
-      durableRedownloadMatched: true,
-    },
-    downloaded: { status: 200, bytes: exportedDownload.bytes, sha256: exportedDownload.digest },
-    ffprobe: {
-      status: 'passed',
-      streamTypes,
-      formatName: ffprobe.format?.format_name ?? null,
-      exportFormatName: exportedProbe.format?.format_name ?? null,
-    },
-    reimport: {
-      status: reimported,
-      assetId: reimportAssetId,
-      uploadStatus: reimportUploaded,
-      downloadStatus: reimportDownloaded.status,
-      bytes: reimportDownloaded.bytes,
-      sha256: reimportDownloaded.digest,
-    },
-    cancelRetry: deliveryRecovery,
-    missingSource: { status: missingSourceStatus },
-  };
-
-  // Reopen the active project before asserting Motion persistence.  This
-  // proves the persisted document can be reconstructed by a fresh editor
-  // session instead of merely finding data in the current React/localStorage
-  // process.  The clip/object and expected channels are carried through the
-  // check so unrelated animation data cannot satisfy this release gate.
-  captureBrowserTelemetry = true;
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: 'File', exact: true }).waitFor();
-  const reloadedClip = page.locator(`.timeline-clip[data-clip-id="${motionClipId}"]`).first();
-  await reloadedClip.waitFor({ timeout: 15_000 });
-  await reloadedClip.click();
-  if ((await reloadedClip.getAttribute('aria-pressed')) !== 'true')
-    throw new Error('real-service journey did not reselect the persisted Motion clip after reload');
-  await enhance.click();
-  await page
-    .getByRole('region', { name: 'Enhance tools', exact: true })
-    .getByRole('tab', { name: /^Animate/ })
-    .click();
-  const reloadedMotion = page.locator('.motion-panel');
-  await reloadedMotion.waitFor();
-  await reloadedMotion.getByRole('tab', { name: 'Presets', exact: true }).click();
-  const renderedMotionChannels = ['scaleX', 'scaleY', 'opacity'];
-  for (const channel of renderedMotionChannels)
-    await reloadedMotion.getByRole('img', { name: `${channel} keyframes`, exact: true }).waitFor();
-  const reloadedMotionObjectId = (
-    await reloadedMotion.locator('.motion-object-id').textContent()
-  )?.trim();
-  if (reloadedMotionObjectId !== motionObjectId)
-    throw new Error(
-      `real-service journey reopened a different Motion target: expected ${motionObjectId}, got ${reloadedMotionObjectId ?? '(none)'}`,
+      },
+      {
+        projectId,
+        sessionToken,
+        assetId: reimportAssetId,
+        settleTimeoutMs: DELIVERY_CANCEL_SETTLE_TIMEOUT_MS,
+        pollIntervalMs: DELIVERY_CANCEL_POLL_INTERVAL_MS,
+        pollRequestTimeoutMs: DELIVERY_CANCEL_POLL_REQUEST_TIMEOUT_MS,
+      },
     );
+    if (
+      deliveryRecovery.created !== 201 ||
+      ![200, 201].includes(deliveryRecovery.canceled) ||
+      deliveryRecovery.cancelSettledState !== 'canceled' ||
+      deliveryRecovery.canceledState !== 'canceled' ||
+      ![200, 201].includes(deliveryRecovery.retried) ||
+      deliveryRecovery.retriedState !== 'queued'
+    )
+      throw new Error(`delivery cancel/retry recovery failed: ${JSON.stringify(deliveryRecovery)}`);
+    var deliveryEvidence = {
+      sourceAssets: { video: true, audio: true },
+      mixedSourceExport: {
+        status: 'passed',
+        producer: 'joy-export-mp4',
+        filename: firstDownload.filename,
+        bytes: firstDownload.bytes,
+        sha256: firstDownload.sha256,
+        durableRedownloadMatched: true,
+      },
+      downloaded: { status: 200, bytes: exportedDownload.bytes, sha256: exportedDownload.digest },
+      ffprobe: {
+        status: 'passed',
+        streamTypes,
+        formatName: ffprobe.format?.format_name ?? null,
+        exportFormatName: exportedProbe.format?.format_name ?? null,
+      },
+      reimport: {
+        status: reimported,
+        assetId: reimportAssetId,
+        uploadStatus: reimportUploaded,
+        downloadStatus: reimportDownloaded.status,
+        bytes: reimportDownloaded.bytes,
+        sha256: reimportDownloaded.digest,
+      },
+      cancelRetry: deliveryRecovery,
+      missingSource: { status: missingSourceStatus },
+    };
 
-  const visualStorage = await page.evaluate(
-    ({ objectId, renderedChannels }) => {
-      const raw = localStorage.getItem('joy-media.visual-object-project-log.v1');
-      if (!raw)
+    // Reopen the active project before asserting Motion persistence.  This
+    // proves the persisted document can be reconstructed by a fresh editor
+    // session instead of merely finding data in the current React/localStorage
+    // process.  The clip/object and expected channels are carried through the
+    // check so unrelated animation data cannot satisfy this release gate.
+    captureBrowserTelemetry = true;
+    telemetry.phase = 'reload-persistence';
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: 'File', exact: true }).waitFor();
+    const reloadedClip = page.locator(`.timeline-clip[data-clip-id="${motionClipId}"]`).first();
+    await reloadedClip.waitFor({ timeout: 15_000 });
+    await reloadedClip.click();
+    if ((await reloadedClip.getAttribute('aria-pressed')) !== 'true')
+      throw new Error(
+        'real-service journey did not reselect the persisted Motion clip after reload',
+      );
+    await enhance.click();
+    await page
+      .getByRole('region', { name: 'Enhance tools', exact: true })
+      .getByRole('tab', { name: /^Animate/ })
+      .click();
+    const reloadedMotion = page.locator('.motion-panel');
+    await reloadedMotion.waitFor();
+    await reloadedMotion.getByRole('tab', { name: 'Presets', exact: true }).click();
+    const renderedMotionChannels = ['scaleX', 'scaleY', 'opacity'];
+    for (const channel of renderedMotionChannels)
+      await reloadedMotion
+        .getByRole('img', { name: `${channel} keyframes`, exact: true })
+        .waitFor();
+    const reloadedMotionObjectId = (
+      await reloadedMotion.locator('.motion-object-id').textContent()
+    )?.trim();
+    if (reloadedMotionObjectId !== motionObjectId)
+      throw new Error(
+        `real-service journey reopened a different Motion target: expected ${motionObjectId}, got ${reloadedMotionObjectId ?? '(none)'}`,
+      );
+
+    const visualStorage = await page.evaluate(
+      ({ objectId, renderedChannels }) => {
+        const raw = localStorage.getItem('joy-media.visual-object-project-log.v1');
+        if (!raw)
+          return {
+            objectId,
+            motionChannels: renderedChannels.length,
+            channels: renderedChannels,
+            storedChannels: [],
+            persistedAfterReload: false,
+          };
+        const parsed = JSON.parse(raw);
+        const storedChannels = new Set();
+        const visit = (value) => {
+          if (value === null || typeof value !== 'object') return;
+          if (value.id === objectId && value.animations && typeof value.animations === 'object')
+            Object.keys(value.animations).forEach((channel) => storedChannels.add(channel));
+          if (
+            value.type === 'object.replaceAnimation' &&
+            value.payload?.objectId === objectId &&
+            typeof value.payload.property === 'string'
+          )
+            storedChannels.add(value.payload.property);
+          if (Array.isArray(value)) value.forEach(visit);
+          else Object.values(value).forEach(visit);
+        };
+        visit(parsed);
+        const channels = [...renderedChannels];
+        const persistedAfterReload = channels.every((channel) => storedChannels.has(channel));
         return {
           objectId,
-          motionChannels: renderedChannels.length,
-          channels: renderedChannels,
-          storedChannels: [],
-          persistedAfterReload: false,
+          motionChannels: channels.length,
+          channels,
+          storedChannels: [...storedChannels],
+          persistedAfterReload,
         };
-      const parsed = JSON.parse(raw);
-      const storedChannels = new Set();
-      const visit = (value) => {
-        if (value === null || typeof value !== 'object') return;
-        if (value.id === objectId && value.animations && typeof value.animations === 'object')
-          Object.keys(value.animations).forEach((channel) => storedChannels.add(channel));
-        if (
-          value.type === 'object.replaceAnimation' &&
-          value.payload?.objectId === objectId &&
-          typeof value.payload.property === 'string'
-        )
-          storedChannels.add(value.payload.property);
-        if (Array.isArray(value)) value.forEach(visit);
-        else Object.values(value).forEach(visit);
-      };
-      visit(parsed);
-      const channels = [...renderedChannels];
-      const persistedAfterReload = channels.every((channel) => storedChannels.has(channel));
-      return {
-        objectId,
-        motionChannels: channels.length,
-        channels,
-        storedChannels: [...storedChannels],
-        persistedAfterReload,
-      };
-    },
-    { objectId: reloadedMotionObjectId, renderedChannels: renderedMotionChannels },
-  );
-  const expectedMotionChannels = ['scaleX', 'scaleY', 'opacity'];
-  if (
-    !visualStorage.persistedAfterReload ||
-    visualStorage.motionChannels !== expectedMotionChannels.length ||
-    !expectedMotionChannels.every((channel) => visualStorage.channels.includes(channel)) ||
-    !expectedMotionChannels.every((channel) => visualStorage.storedChannels.includes(channel))
-  )
-    throw new Error(
-      `real-service journey did not observe persisted Motion data for ${motionObjectId}: ${JSON.stringify(visualStorage)}`,
+      },
+      { objectId: reloadedMotionObjectId, renderedChannels: renderedMotionChannels },
     );
-  const browserTelemetry = assertJourneyTelemetryClean(telemetry);
-  const source = await currentSourceProvenance(sourceSha);
-  const evidenceDirectory = join(root, 'test-output/browser/authenticated-editor-1.0');
-  await mkdir(evidenceDirectory, { recursive: true });
-  const verifiedAt = new Date().toISOString();
-  await writeFile(
-    join(evidenceDirectory, 'journey-evidence.json'),
-    `${JSON.stringify(
-      {
-        journeyId: 'authenticated-editor-1.0',
-        status: 'verified',
-        verifiedAt,
-        execution: 'real-services',
-        sourceProvenance: source,
-        browser: {
-          url: baseUrl,
-          title: await page.title(),
-          authenticated: true,
-          console: browserTelemetry.console,
-          pageErrors: browserTelemetry.pageErrors,
-          network: browserTelemetry.network,
-          profiles: profileSummaries,
+    const expectedMotionChannels = ['scaleX', 'scaleY', 'opacity'];
+    if (
+      !visualStorage.persistedAfterReload ||
+      visualStorage.motionChannels !== expectedMotionChannels.length ||
+      !expectedMotionChannels.every((channel) => visualStorage.channels.includes(channel)) ||
+      !expectedMotionChannels.every((channel) => visualStorage.storedChannels.includes(channel))
+    )
+      throw new Error(
+        `real-service journey did not observe persisted Motion data for ${motionObjectId}: ${JSON.stringify(visualStorage)}`,
+      );
+    telemetry.phase = 'telemetry-assertion';
+    // Test hook: inject a browser console error + a failed request so the
+    // diagnostics + evidence-retention path can be exercised end-to-end against a
+    // real journey. Never set in the release workflow.
+    if (process.env.JOY_MEDIA_REAL_ACCEPTANCE_INJECT_JOURNEY_ERROR === '1') {
+      telemetry.consoleErrors.push({
+        text: 'INJECTED evidence-retention check: Failed to load resource: net::ERR_FILE_NOT_FOUND',
+        phase: telemetry.phase,
+        location: {
+          url: `${baseUrl}/assets/injected-probe.woff2`,
+          lineNumber: null,
+          columnNumber: null,
         },
-        assertions: {
-          effectsInspector: {
-            status: 'passed',
-            effectsVisible: true,
-            inspectorVisible: true,
-            recoveryErrorObserved: false,
+      });
+      telemetry.failedRequests.push({
+        url: `${baseUrl}/assets/injected-probe.woff2`,
+        method: 'GET',
+        resourceType: 'font',
+        failureText: 'net::ERR_FILE_NOT_FOUND',
+        phase: telemetry.phase,
+      });
+    }
+    const browserTelemetry = assertJourneyTelemetryClean(telemetry, {
+      phase: telemetry.phase,
+      candidateSha,
+      runId,
+      attempt: runAttempt,
+      pass,
+      // Persist the full sanitized diagnostic BEFORE the throw so the reason a
+      // pass failed survives teardown + the next job's checkout.
+      onFailure: writeJourneyFailure,
+    });
+    const source = await currentSourceProvenance(sourceSha);
+    const evidenceDirectory = join(root, 'test-output/browser/authenticated-editor-1.0');
+    await mkdir(evidenceDirectory, { recursive: true });
+    const verifiedAt = new Date().toISOString();
+    await writeFile(
+      join(evidenceDirectory, 'journey-evidence.json'),
+      `${JSON.stringify(
+        {
+          journeyId: 'authenticated-editor-1.0',
+          status: 'verified',
+          verifiedAt,
+          execution: 'real-services',
+          sourceProvenance: source,
+          browser: {
+            url: baseUrl,
+            title: await page.title(),
+            authenticated: true,
+            console: browserTelemetry.console,
+            pageErrors: browserTelemetry.pageErrors,
+            network: browserTelemetry.network,
+            profiles: profileSummaries,
           },
-          joyCode3d: {
-            status: 'passed',
-            selected: true,
-            returnedToComposer: true,
-            urlStayed: baseUrl,
-          },
-          worker: {
-            status: 'disposable-real-service',
-            connectedCount: 1,
-            capabilities: ['render.export'],
-          },
-          verifiedDelivery: {
-            assetId: exportAssetId,
-            state: 'completed',
-            progress: 100,
-            receipt: {
-              bytes: exportedDownload.bytes,
-              sha256Prefix: exportedDownload.digest.slice(0, 12),
+          assertions: {
+            effectsInspector: {
+              status: 'passed',
+              effectsVisible: true,
+              inspectorVisible: true,
+              recoveryErrorObserved: false,
             },
-            inspection: 'verified',
-            browserPreview: 'Verified private derivative',
-          },
-          verifiedExport: {
-            channel: 'verified-delivery',
-            producer: 'joy-export-mp4',
-            inspection: {
-              state: 'passed',
-              artifact: 'owner-scoped object-store original',
+            joyCode3d: {
+              status: 'passed',
+              selected: true,
+              returnedToComposer: true,
+              urlStayed: baseUrl,
+            },
+            worker: {
+              status: 'disposable-real-service',
+              connectedCount: 1,
+              capabilities: ['render.export'],
+            },
+            verifiedDelivery: {
+              assetId: exportAssetId,
+              state: 'completed',
+              progress: 100,
+              receipt: {
+                bytes: exportedDownload.bytes,
+                sha256Prefix: exportedDownload.digest.slice(0, 12),
+              },
+              inspection: 'verified',
               browserPreview: 'Verified private derivative',
             },
-          },
-          motionPlacement: [
-            {
-              preset: 'Persisted animation channels',
-              clipId: motionClipId,
-              objectId: reloadedMotionObjectId,
-              channels: [visualStorage.channels?.[0] ?? 'x'],
-              persistedAfterReload: true,
+            verifiedExport: {
+              channel: 'verified-delivery',
+              producer: 'joy-export-mp4',
+              inspection: {
+                state: 'passed',
+                artifact: 'owner-scoped object-store original',
+                browserPreview: 'Verified private derivative',
+              },
             },
-            {
-              preset: 'Persisted animation channels',
-              clipId: motionClipId,
-              objectId: reloadedMotionObjectId,
-              channels: [visualStorage.channels?.[1] ?? 'opacity'],
-              persistedAfterReload: true,
+            motionPlacement: [
+              {
+                preset: 'Persisted animation channels',
+                clipId: motionClipId,
+                objectId: reloadedMotionObjectId,
+                channels: [visualStorage.channels?.[0] ?? 'x'],
+                persistedAfterReload: true,
+              },
+              {
+                preset: 'Persisted animation channels',
+                clipId: motionClipId,
+                objectId: reloadedMotionObjectId,
+                channels: [visualStorage.channels?.[1] ?? 'opacity'],
+                persistedAfterReload: true,
+              },
+            ],
+            timeline: {
+              ownerClipPresentAfterReload: true,
+              screenRecordingClipPresentAfterReload: true,
             },
-          ],
-          timeline: {
-            ownerClipPresentAfterReload: true,
-            screenRecordingClipPresentAfterReload: true,
           },
         },
-      },
-      null,
-      2,
-    )}\n`,
-    'utf8',
-  );
-  await writeFile(
-    join(root, 'test-output/browser/journeys.json'),
-    `${JSON.stringify(
-      [
-        {
-          id: 'authenticated-editor-1.0',
-          status: 'verified',
-          evidencePath: 'test-output/browser/authenticated-editor-1.0/journey-evidence.json',
-        },
-      ],
-      null,
-      2,
-    )}\n`,
-    'utf8',
-  );
-  await activePool.query('SELECT 1');
-  await context.close();
-  return deliveryEvidence;
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+    await writeFile(
+      join(root, 'test-output/browser/journeys.json'),
+      `${JSON.stringify(
+        [
+          {
+            id: 'authenticated-editor-1.0',
+            status: 'verified',
+            evidencePath: 'test-output/browser/authenticated-editor-1.0/journey-evidence.json',
+          },
+        ],
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+    await activePool.query('SELECT 1');
+    await context.close();
+    return deliveryEvidence;
+  };
+  try {
+    return await walkAndCollect();
+  } catch (error) {
+    // ANY throw in the ~660-line walk (a locator timeout, a non-201 upload, the
+    // cancel/retry recovery, the telemetry assertion) persists a phase-stamped
+    // journey-failure.json before propagating — not just the telemetry path.
+    writeJourneyFailure(buildJourneyFailure(telemetry, error));
+    throw error;
+  }
 }
 
 async function downloadSha256(download) {
@@ -1687,15 +2328,4 @@ async function waitForHttp(url, timeout) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 500));
   }
   throw new Error(`timed out waiting for ${url}`);
-}
-function killTree(pid) {
-  try {
-    process.kill(-pid, 'SIGTERM');
-  } catch {
-    try {
-      process.kill(pid, 'SIGTERM');
-    } catch {
-      // Best-effort process cleanup.
-    }
-  }
 }

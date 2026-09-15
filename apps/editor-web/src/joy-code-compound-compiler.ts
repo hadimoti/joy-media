@@ -2,6 +2,7 @@ import { applyTransaction, type CommandTransaction, type SpikeCommand } from '@j
 import {
   canonicalBindingKey,
   type JoyProjectV1,
+  type LookInstancesDocument,
   type PropertyBindingV2,
   type SpikeProject,
 } from '@joy-media/project-schema';
@@ -11,11 +12,13 @@ import {
   applyPropertyAnimationCommand,
   readLegacyPropertyAnimation,
 } from '@joy-media/property-system';
+import { canonicalJson, sha256Hex } from '@joy-media/workflow-engine';
 import { compileJoyCodeTimelineOperations } from './joy-code-timeline-compiler.js';
 import { compileJoyCodeTextOperation } from './joy-code-text-operations.js';
 import { compileJoyCodeCaptionOperation } from './joy-code-caption-operations.js';
 import { compileJoyCodeTransitionOperation } from './joy-code-transition-operations.js';
 import { resolveJoyCodeOperationReferences } from './joy-code-operation-references.js';
+import { joyCodeAssetDescriptorsFromProject } from './joy-code-asset-descriptors.js';
 import { audioStateFromProject } from './timeline-presentation.js';
 import { prepareTimelinePresentation } from './timeline-presentation.js';
 
@@ -24,8 +27,21 @@ export interface JoyCodeCompoundCompilerInput {
   readonly baseRevision: string;
   readonly timeline: SpikeProject;
   readonly visualProject: JoyProjectV1;
-  readonly registeredAssetIds: readonly string[];
+  /**
+   * Retained temporarily so existing host call sites stay source-compatible.
+   * Timeline asset authority ignores this bare-ID list and derives trusted
+   * descriptors from visualProject.assets for every compile.
+   */
+  readonly registeredAssetIds?: readonly string[];
   readonly operations: readonly JoyCodePlanOperationV1[];
+  /**
+   * The full next Look Instances document to persist atomically with these
+   * operations (R2 / GAP 1b). Set only by the Living Look apply / update /
+   * reset / detach path. It is folded into `operationDigest` so the write is
+   * bound to the same approval as the keyframes; when absent, the digest and
+   * the draft are byte-identical to before.
+   */
+  readonly lookInstances?: LookInstancesDocument;
 }
 
 export interface JoyCodeCompoundGroup {
@@ -38,9 +54,18 @@ export interface JoyCodeCompoundGroup {
 export interface JoyCodeCompoundDraft {
   readonly planId: string;
   readonly baseRevision: string;
+  /** Canonical SHA-256 over the bounded model operations and revision. */
+  readonly operationDigest: string;
   readonly proposalHash: string;
   readonly timeline: CommandTransaction | undefined;
   readonly document: JoyProjectV1;
+  /** Explicit because immutable prepared snapshots no longer share live object identity. */
+  readonly documentChanged: boolean;
+  /**
+   * The full next Look Instances document to write on approval, or absent for a
+   * change that touches no Look. Bound into `operationDigest`.
+   */
+  readonly lookInstances?: LookInstancesDocument;
   readonly groups: readonly JoyCodeCompoundGroup[];
   readonly warnings: readonly string[];
   readonly requiresManualApproval: true;
@@ -83,11 +108,18 @@ function assertSupportedMotionBinding(document: JoyProjectV1, binding: PropertyB
 export function compileJoyCodeCompoundDraft(
   input: JoyCodeCompoundCompilerInput,
 ): JoyCodeCompoundCompileResult {
-  if (input.operations.length === 0)
+  if (input.operations.length === 0 && input.lookInstances === undefined)
     return {
       ok: false,
       error: { code: 'JOY_CODE_COMPOUND_EMPTY', message: 'Joy Code plan contains no operations' },
     };
+  // A Look-Instances-only compound (agent `look_detach`, GAP 5) carries zero
+  // visual operations: the instance record is dropped and the authored keyframes
+  // stay as ordinary editable animation. It still stages, previews (no diff),
+  // approves and undoes through the same compound journal — `lookInstances` is
+  // folded into `operationDigest` below exactly as for a keyframe-bearing Look
+  // change, so the write is bound to one approval.
+  const registeredAssets = joyCodeAssetDescriptorsFromProject(input.visualProject);
   const resolvedReferences = resolveJoyCodeOperationReferences(input.planId, input.operations);
   if (!resolvedReferences.ok) return { ok: false, error: resolvedReferences.error };
   const operations = resolvedReferences.operations;
@@ -137,7 +169,7 @@ export function compileJoyCodeCompoundDraft(
         planId: input.planId,
         project: timeline,
         operations: [operation],
-        registeredAssetIds: input.registeredAssetIds,
+        registeredAssets,
         operationIndex,
       });
       if (!result.ok) return { ok: false, error: result.error };
@@ -320,25 +352,28 @@ export function compileJoyCodeCompoundDraft(
       affectedIds: result.affectedIds,
     });
   }
+  const operationDigest = sha256Hex(
+    canonicalJson({
+      version: 1,
+      baseRevision: input.baseRevision,
+      operations: input.operations,
+      // Absent for every non-Look change -> the digest is byte-identical to before.
+      ...(input.lookInstances === undefined ? {} : { lookInstances: input.lookInstances }),
+    }),
+  );
   const draft: JoyCodeCompoundDraft = {
     planId: input.planId,
     baseRevision: input.baseRevision,
-    proposalHash: `joy-code-proposal-${stableHash(JSON.stringify(input.operations))}`,
+    operationDigest,
+    proposalHash: `joy-code-proposal-${operationDigest}`,
     timeline:
       commands.length === 0 ? undefined : { label: `Joy Code plan ${input.planId}`, commands },
     document,
+    documentChanged: document !== input.visualProject,
+    ...(input.lookInstances === undefined ? {} : { lookInstances: input.lookInstances }),
     groups,
     warnings: [],
     requiresManualApproval: true,
   };
   return { ok: true, ...draft };
-}
-
-function stableHash(value: string): string {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0');
 }

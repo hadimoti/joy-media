@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   BoundedLog,
@@ -14,6 +15,10 @@ import {
 } from './runtime.js';
 import type { UnsupportedWorkerJobError } from './runtime.js';
 import { ffmpegFilterPath, gpuDerivativeLocalRef, rnnoiseFilter } from './local-gpu.js';
+
+// Independent of `process.cwd()` (which is `apps/worker` under `pnpm --filter @joy-media/worker
+// test`, not the repo root) so this fixture resolves the same way from any invocation.
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 describe('Worker runtime', () => {
   it.each(['text.openrouter', 'video.runway', 'edit.higgsfield'])(
     'fails closed before invoking provider job %s',
@@ -93,7 +98,7 @@ describe('Worker runtime', () => {
   it('creates a real bounded JPEG thumbnail and retains only an opaque local reference', async () => {
     const derivativeDirectory = mkdtempSync(join(tmpdir(), 'joy-media-derivatives-'));
     const source = join(
-      process.cwd(),
+      repoRoot,
       'apps',
       'editor-web',
       'public',
@@ -144,7 +149,7 @@ describe('Worker runtime', () => {
   it('cancels an in-flight real thumbnail and leaves no derivative behind', async () => {
     const derivativeDirectory = mkdtempSync(join(tmpdir(), 'joy-media-canceled-'));
     const source = join(
-      process.cwd(),
+      repoRoot,
       'apps',
       'editor-web',
       'public',

@@ -32,6 +32,9 @@ describe('text template insertion', () => {
     expect(session.visualProject.pluginData['joy.clipObjects']).toMatchObject({
       [inserted!.clipId]: inserted!.objectId,
     });
+    expect(session.visualProject.pluginData['joy.timelineElementKinds']).toMatchObject({
+      [inserted!.clipId]: 'text',
+    });
     const timelineClips = session.timelineProject.compositions.root!.tracks.flatMap(
       (track) => track.clips,
     );

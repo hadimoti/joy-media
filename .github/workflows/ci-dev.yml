@@ -1,0 +1,160 @@
+name: ci-dev
+
+# DEVELOPMENT VERIFICATION — NOT a release approval.
+#
+# Fast feedback on every push / PR: static checks, the full unit/integration
+# suite, the Worker package self-test, the full browser suite at the reference
+# viewport, and responsive checkpoints at the two tightest viewports. It does
+# NOT run the real-service acceptance lane, the effects soak, or the encoded
+# real-export delivery journey — those live only in release-candidate(-v2).yml
+# and only a green run there, plus independent review and the owner's
+# deployment go-ahead, authorizes a deploy.
+#
+# Affected-test selection is deliberately NOT used: any change to shared
+# runtime / controller / schema / render / CI config runs the whole set below.
+#
+# TRIGGERS: workflow_dispatch only for now. The push / pull_request triggers
+# (commented below) are enabled only after the independent reviewer accepts this
+# workflow as the development-verification gate and it replaces ci.yml.
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [main, 'codex/**']
+  # pull_request:
+
+concurrency:
+  group: ci-dev-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  static-and-unit:
+    name: static + unit/integration (development verification)
+    runs-on: [self-hosted, windows, x64, joy-media-ci]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Verify runner toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --version
+          corepack enable pnpm
+          pnpm --version
+          ffmpeg -version
+          ffprobe -version
+      - run: pnpm install --frozen-lockfile
+      - name: verify:ci (format, lint, typecheck, full vitest, build, prod audit)
+        run: pnpm run verify:ci
+      - name: harness unit tests (cross-platform subset — POSIX cases run on the Linux release gate)
+        run: pnpm run test:harness
+
+  worker-package:
+    name: Worker package build + self-test (development verification)
+    needs: static-and-unit
+    runs-on: [self-hosted, windows, x64, joy-media-ci]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Verify runner toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --version
+          corepack enable pnpm
+          pnpm --version
+          ffmpeg -version
+          ffprobe -version
+      - run: pnpm install --frozen-lockfile
+      - name: Build Worker and package self-test executable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          pnpm --filter @joy-media/worker build
+          $output = Join-Path $env:RUNNER_TEMP ("joy-worker-" + $env:GITHUB_SHA + "-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + ".exe")
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-worker-exe.ps1 -OutputPath $output
+          if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw 'Worker executable was not produced.' }
+          $result = & $output --joy-worker-self-test
+          if ($LASTEXITCODE -ne 0 -or $result -notmatch '"ok"\s*:\s*true') { throw 'Worker executable self-test failed.' }
+
+  browser:
+    name: browser suite (development verification) — ${{ matrix.label }}
+    needs: static-and-unit
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: desktop-primary full
+            project: desktop-primary
+            spec: tests/e2e
+            workers: '2'
+            api_port: 4174
+            web_port: 4173
+          - label: desktop-compact responsive
+            project: desktop-compact
+            spec: tests/e2e/wp32-responsive-checkpoints.spec.ts
+            workers: '1'
+            api_port: 4274
+            web_port: 4273
+          - label: desktop-minimum responsive
+            project: desktop-minimum
+            spec: tests/e2e/wp32-responsive-checkpoints.spec.ts
+            workers: '1'
+            api_port: 4374
+            web_port: 4373
+    runs-on: [self-hosted, windows, x64, joy-media-ci]
+    timeout-minutes: 45
+    env:
+      CI: true
+      PLAYWRIGHT_WORKERS: ${{ matrix.workers }}
+      JOY_MEDIA_E2E_API_PORT: ${{ matrix.api_port }}
+      JOY_MEDIA_E2E_WEB_PORT: ${{ matrix.web_port }}
+      JOY_MEDIA_E2E_API_URL: http://127.0.0.1:${{ matrix.api_port }}
+      # RUNNER_TEMP, not the checkout — the release lanes' pattern. A relative
+      # path here would be an unignored, uncleaned dir on a persistent runner.
+      PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/playwright-report-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}
+      PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/playwright-test-results-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Verify runner toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --version
+          corepack enable pnpm
+          pnpm --version
+          ffmpeg -version
+          ffprobe -version
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec playwright install chromium
+      - name: Run browser audit (${{ matrix.label }})
+        run: pnpm exec playwright test ${{ matrix.spec }} --project=${{ matrix.project }} --workers=${{ matrix.workers }}
+      - name: Verify no checkout residue
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $env:PLAYWRIGHT_HTML_REPORT, $env:PLAYWRIGHT_TEST_RESULTS_DIR
+          if ((git status --porcelain).Length -ne 0) { git status --porcelain; throw 'browser audit left residue in the checkout' }
+
+  development-verification-summary:
+    name: development verification summary (NOT release approval)
+    needs: [static-and-unit, worker-package, browser]
+    if: always()
+    runs-on: [self-hosted, windows, x64, joy-media-ci]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Require every development lane green
+        shell: bash
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          # Structured, name-keyed evaluation (shared with release-candidate-v2).
+          node --experimental-strip-types tooling/release/src/ci-gate-summary.ts "$NEEDS_JSON" \
+            'static-and-unit,worker-package,browser'
+          echo 'development verification passed — this is NOT a release approval'

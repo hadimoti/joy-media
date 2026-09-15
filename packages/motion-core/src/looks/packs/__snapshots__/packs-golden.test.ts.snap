@@ -1,0 +1,241 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`R2 Look pack golden compile > editorial-clean > landscape first-apply operations are stable 1`] = `
+[
+  "kf deck-opacity opacity @640000 = 0.000 (eased)",
+  "kf deck-opacity opacity @2240000 = 1.000 (eased)",
+  "kf deck-y y @0 = 12.600 (eased)",
+  "kf deck-y y @1920000 = 0.000 (eased)",
+  "kf deck-y y @8000000 = 0.000 (eased)",
+  "kf headline-opacity opacity @0 = 0.000 (eased)",
+  "kf headline-opacity opacity @1280000 = 1.000 (eased)",
+  "kf headline-y y @0 = 16.800 (eased)",
+  "kf headline-y y @1440000 = 0.000 (eased)",
+  "kf headline-y y @8000000 = 0.000 (eased)",
+  "text headline-treatment -> clean-title",
+  "caption caption-treatment -> joy-clean",
+]
+`;
+
+exports[`R2 Look pack golden compile > editorial-clean > portrait first-apply operations are stable 1`] = `
+[
+  "kf deck-opacity opacity @640000 = 0.000 (eased)",
+  "kf deck-opacity opacity @2240000 = 1.000 (eased)",
+  "kf deck-y y @0 = 12.600 (eased)",
+  "kf deck-y y @1920000 = 0.000 (eased)",
+  "kf deck-y y @8000000 = 0.000 (eased)",
+  "kf headline-opacity opacity @0 = 0.000 (eased)",
+  "kf headline-opacity opacity @1280000 = 1.000 (eased)",
+  "kf headline-y y @0 = 16.800 (eased)",
+  "kf headline-y y @1440000 = 0.000 (eased)",
+  "kf headline-y y @8000000 = 0.000 (eased)",
+  "text headline-treatment -> clean-title",
+  "caption caption-treatment -> joy-clean",
+]
+`;
+
+exports[`R2 Look pack golden compile > kinetic-type > landscape first-apply operations are stable 1`] = `
+[
+  "kf phrase-1-opacity opacity @0 = 0.000 (eased)",
+  "kf phrase-1-opacity opacity @480000 = 1.000 (eased)",
+  "kf phrase-1-opacity opacity @4400000 = 1.000 (eased)",
+  "kf phrase-1-opacity opacity @5280000 = 0.000 (eased)",
+  "kf phrase-1-scale-x scaleX @0 = 0.730 (eased)",
+  "kf phrase-1-scale-x scaleX @640000 = 1.000 (eased)",
+  "kf phrase-1-scale-x scaleX @1280000 = 1.000 (eased)",
+  "kf phrase-1-scale-y scaleY @0 = 0.730 (eased)",
+  "kf phrase-1-scale-y scaleY @640000 = 1.000 (eased)",
+  "kf phrase-1-scale-y scaleY @1280000 = 1.000 (eased)",
+  "kf phrase-1-y y @0 = 38.400 (eased)",
+  "kf phrase-1-y y @800000 = 0.000 (eased)",
+  "kf phrase-2-opacity opacity @960000 = 0.000 (eased)",
+  "kf phrase-2-opacity opacity @1440000 = 1.000 (eased)",
+  "kf phrase-2-opacity opacity @5360000 = 1.000 (eased)",
+  "kf phrase-2-opacity opacity @6240000 = 0.000 (eased)",
+  "kf phrase-2-scale-x scaleX @960000 = 0.730 (eased)",
+  "kf phrase-2-scale-x scaleX @1600000 = 1.000 (eased)",
+  "kf phrase-2-scale-x scaleX @2240000 = 1.000 (eased)",
+  "kf phrase-2-scale-y scaleY @960000 = 0.730 (eased)",
+  "kf phrase-2-scale-y scaleY @1600000 = 1.000 (eased)",
+  "kf phrase-2-scale-y scaleY @2240000 = 1.000 (eased)",
+  "kf phrase-2-y y @960000 = 38.400 (eased)",
+  "kf phrase-2-y y @1760000 = 0.000 (eased)",
+  "kf phrase-3-opacity opacity @1920000 = 0.000 (eased)",
+  "kf phrase-3-opacity opacity @2400000 = 1.000 (eased)",
+  "kf phrase-3-opacity opacity @6320000 = 1.000 (eased)",
+  "kf phrase-3-opacity opacity @7200000 = 0.000 (eased)",
+  "kf phrase-3-scale-x scaleX @1920000 = 0.730 (eased)",
+  "kf phrase-3-scale-x scaleX @2560000 = 1.000 (eased)",
+  "kf phrase-3-scale-x scaleX @3200000 = 1.000 (eased)",
+  "kf phrase-3-scale-y scaleY @1920000 = 0.730 (eased)",
+  "kf phrase-3-scale-y scaleY @2560000 = 1.000 (eased)",
+  "kf phrase-3-scale-y scaleY @3200000 = 1.000 (eased)",
+  "kf phrase-3-y y @1920000 = 38.400 (eased)",
+  "kf phrase-3-y y @2720000 = 0.000 (eased)",
+  "text phrase-1-treatment -> outline-impact",
+  "text phrase-2-treatment -> outline-impact",
+  "text phrase-3-treatment -> outline-impact",
+]
+`;
+
+exports[`R2 Look pack golden compile > kinetic-type > portrait first-apply operations are stable 1`] = `
+[
+  "kf phrase-1-opacity opacity @0 = 0.000 (eased)",
+  "kf phrase-1-opacity opacity @480000 = 1.000 (eased)",
+  "kf phrase-1-opacity opacity @4400000 = 1.000 (eased)",
+  "kf phrase-1-opacity opacity @5280000 = 0.000 (eased)",
+  "kf phrase-1-scale-x scaleX @0 = 0.730 (eased)",
+  "kf phrase-1-scale-x scaleX @640000 = 1.000 (eased)",
+  "kf phrase-1-scale-x scaleX @1280000 = 1.000 (eased)",
+  "kf phrase-1-scale-y scaleY @0 = 0.730 (eased)",
+  "kf phrase-1-scale-y scaleY @640000 = 1.000 (eased)",
+  "kf phrase-1-scale-y scaleY @1280000 = 1.000 (eased)",
+  "kf phrase-1-y y @0 = 38.400 (eased)",
+  "kf phrase-1-y y @800000 = 0.000 (eased)",
+  "kf phrase-2-opacity opacity @960000 = 0.000 (eased)",
+  "kf phrase-2-opacity opacity @1440000 = 1.000 (eased)",
+  "kf phrase-2-opacity opacity @5360000 = 1.000 (eased)",
+  "kf phrase-2-opacity opacity @6240000 = 0.000 (eased)",
+  "kf phrase-2-scale-x scaleX @960000 = 0.730 (eased)",
+  "kf phrase-2-scale-x scaleX @1600000 = 1.000 (eased)",
+  "kf phrase-2-scale-x scaleX @2240000 = 1.000 (eased)",
+  "kf phrase-2-scale-y scaleY @960000 = 0.730 (eased)",
+  "kf phrase-2-scale-y scaleY @1600000 = 1.000 (eased)",
+  "kf phrase-2-scale-y scaleY @2240000 = 1.000 (eased)",
+  "kf phrase-2-y y @960000 = 38.400 (eased)",
+  "kf phrase-2-y y @1760000 = 0.000 (eased)",
+  "kf phrase-3-opacity opacity @1920000 = 0.000 (eased)",
+  "kf phrase-3-opacity opacity @2400000 = 1.000 (eased)",
+  "kf phrase-3-opacity opacity @6320000 = 1.000 (eased)",
+  "kf phrase-3-opacity opacity @7200000 = 0.000 (eased)",
+  "kf phrase-3-scale-x scaleX @1920000 = 0.730 (eased)",
+  "kf phrase-3-scale-x scaleX @2560000 = 1.000 (eased)",
+  "kf phrase-3-scale-x scaleX @3200000 = 1.000 (eased)",
+  "kf phrase-3-scale-y scaleY @1920000 = 0.730 (eased)",
+  "kf phrase-3-scale-y scaleY @2560000 = 1.000 (eased)",
+  "kf phrase-3-scale-y scaleY @3200000 = 1.000 (eased)",
+  "kf phrase-3-y y @1920000 = 38.400 (eased)",
+  "kf phrase-3-y y @2720000 = 0.000 (eased)",
+  "text phrase-1-treatment -> outline-impact",
+  "text phrase-2-treatment -> outline-impact",
+  "text phrase-3-treatment -> outline-impact",
+]
+`;
+
+exports[`R2 Look pack golden compile > music-pulse > landscape first-apply operations are stable 1`] = `
+[
+  "kf subject-scale-x scaleX @0 = 1.000 (eased)",
+  "kf subject-scale-x scaleX @1000000 = 1.120 (eased)",
+  "kf subject-scale-x scaleX @2000000 = 1.000 (eased)",
+  "kf subject-scale-x scaleX @3000000 = 1.120 (eased)",
+  "kf subject-scale-x scaleX @4000000 = 1.000 (eased)",
+  "kf subject-scale-x scaleX @5000000 = 1.120 (eased)",
+  "kf subject-scale-x scaleX @6000000 = 1.000 (eased)",
+  "kf subject-scale-x scaleX @7000000 = 1.120 (eased)",
+  "kf subject-scale-x scaleX @8000000 = 1.000 (eased)",
+  "kf subject-scale-y scaleY @0 = 1.000 (eased)",
+  "kf subject-scale-y scaleY @1000000 = 1.120 (eased)",
+  "kf subject-scale-y scaleY @2000000 = 1.000 (eased)",
+  "kf subject-scale-y scaleY @3000000 = 1.120 (eased)",
+  "kf subject-scale-y scaleY @4000000 = 1.000 (eased)",
+  "kf subject-scale-y scaleY @5000000 = 1.120 (eased)",
+  "kf subject-scale-y scaleY @6000000 = 1.000 (eased)",
+  "kf subject-scale-y scaleY @7000000 = 1.120 (eased)",
+  "kf subject-scale-y scaleY @8000000 = 1.000 (eased)",
+  "text subject-treatment -> neon-keyword",
+  "caption caption-treatment -> joy-karaoke-pop",
+]
+`;
+
+exports[`R2 Look pack golden compile > music-pulse > portrait first-apply operations are stable 1`] = `
+[
+  "kf subject-scale-x scaleX @0 = 1.000 (eased)",
+  "kf subject-scale-x scaleX @1000000 = 1.120 (eased)",
+  "kf subject-scale-x scaleX @2000000 = 1.000 (eased)",
+  "kf subject-scale-x scaleX @3000000 = 1.120 (eased)",
+  "kf subject-scale-x scaleX @4000000 = 1.000 (eased)",
+  "kf subject-scale-x scaleX @5000000 = 1.120 (eased)",
+  "kf subject-scale-x scaleX @6000000 = 1.000 (eased)",
+  "kf subject-scale-x scaleX @7000000 = 1.120 (eased)",
+  "kf subject-scale-x scaleX @8000000 = 1.000 (eased)",
+  "kf subject-scale-y scaleY @0 = 1.000 (eased)",
+  "kf subject-scale-y scaleY @1000000 = 1.120 (eased)",
+  "kf subject-scale-y scaleY @2000000 = 1.000 (eased)",
+  "kf subject-scale-y scaleY @3000000 = 1.120 (eased)",
+  "kf subject-scale-y scaleY @4000000 = 1.000 (eased)",
+  "kf subject-scale-y scaleY @5000000 = 1.120 (eased)",
+  "kf subject-scale-y scaleY @6000000 = 1.000 (eased)",
+  "kf subject-scale-y scaleY @7000000 = 1.120 (eased)",
+  "kf subject-scale-y scaleY @8000000 = 1.000 (eased)",
+  "text subject-treatment -> neon-keyword",
+  "caption caption-treatment -> joy-karaoke-pop",
+]
+`;
+
+exports[`R2 Look pack golden compile > product-precision > landscape first-apply operations are stable 1`] = `
+[
+  "kf benefit-opacity opacity @400000 = 0.000 (hold)",
+  "kf benefit-opacity opacity @2400000 = 1.000 (hold)",
+  "kf callout-opacity opacity @400000 = 0.000 (eased)",
+  "kf callout-opacity opacity @1600000 = 1.000 (eased)",
+  "kf callout-x x @0 = -9.600 (eased)",
+  "kf callout-x x @1200000 = 0.000 (eased)",
+  "kf cta-opacity opacity @4800000 = 0.000 (eased)",
+  "kf cta-opacity opacity @5760000 = 1.000 (eased)",
+  "kf cta-scale-x scaleX @4800000 = 1.000 (eased)",
+  "kf cta-scale-x scaleX @5600000 = 1.040 (eased)",
+  "kf cta-scale-x scaleX @6400000 = 1.000 (eased)",
+  "kf cta-scale-y scaleY @4800000 = 1.000 (eased)",
+  "kf cta-scale-y scaleY @5600000 = 1.040 (eased)",
+  "kf cta-scale-y scaleY @6400000 = 1.000 (eased)",
+  "text callout-treatment -> accent-lower-third",
+  "text cta-treatment -> cta-punch",
+]
+`;
+
+exports[`R2 Look pack golden compile > product-precision > portrait first-apply operations are stable 1`] = `
+[
+  "kf benefit-opacity opacity @400000 = 0.000 (hold)",
+  "kf benefit-opacity opacity @2400000 = 1.000 (hold)",
+  "kf callout-opacity opacity @400000 = 0.000 (eased)",
+  "kf callout-opacity opacity @1600000 = 1.000 (eased)",
+  "kf callout-x x @0 = -9.600 (eased)",
+  "kf callout-x x @1200000 = 0.000 (eased)",
+  "kf cta-opacity opacity @4800000 = 0.000 (eased)",
+  "kf cta-opacity opacity @5760000 = 1.000 (eased)",
+  "kf cta-scale-x scaleX @4800000 = 1.000 (eased)",
+  "kf cta-scale-x scaleX @5600000 = 1.040 (eased)",
+  "kf cta-scale-x scaleX @6400000 = 1.000 (eased)",
+  "kf cta-scale-y scaleY @4800000 = 1.000 (eased)",
+  "kf cta-scale-y scaleY @5600000 = 1.040 (eased)",
+  "kf cta-scale-y scaleY @6400000 = 1.000 (eased)",
+  "text callout-treatment -> accent-lower-third",
+  "text cta-treatment -> cta-punch",
+]
+`;
+
+exports[`R2 Look pack golden compile > quiet-documentary > landscape first-apply operations are stable 1`] = `
+[
+  "kf lower-third-opacity opacity @0 = 0.000 (eased)",
+  "kf lower-third-opacity opacity @1440000 = 0.550 (eased)",
+  "kf lower-third-opacity opacity @3200000 = 1.000 (eased)",
+  "kf title-opacity opacity @0 = 0.000 (eased)",
+  "kf title-opacity opacity @1760000 = 0.550 (eased)",
+  "kf title-opacity opacity @4000000 = 1.000 (eased)",
+  "text lower-third-treatment -> name-role",
+  "caption caption-treatment -> joy-clean",
+]
+`;
+
+exports[`R2 Look pack golden compile > quiet-documentary > portrait first-apply operations are stable 1`] = `
+[
+  "kf lower-third-opacity opacity @0 = 0.000 (eased)",
+  "kf lower-third-opacity opacity @1440000 = 0.550 (eased)",
+  "kf lower-third-opacity opacity @3200000 = 1.000 (eased)",
+  "kf title-opacity opacity @0 = 0.000 (eased)",
+  "kf title-opacity opacity @1760000 = 0.550 (eased)",
+  "kf title-opacity opacity @4000000 = 1.000 (eased)",
+  "text lower-third-treatment -> name-role",
+  "caption caption-treatment -> joy-clean",
+]
+`;

@@ -1,6 +1,6 @@
 /** P00.7 deterministic PCM waveform, audio-clock, and local Worker-export proof. */
 
-import { createHash } from 'node:crypto';
+import { sha256Bytes } from './sha256.js';
 
 const US_PER_SECOND = 1_000_000n;
 
@@ -147,7 +147,7 @@ export function exportPcm16Wav(samples: Float32Array, sampleRate: number): PcmWa
     sampleRate,
     sampleCount: samples.length,
     bytes,
-    sha256: createHash('sha256').update(bytes).digest('hex'),
+    sha256: sha256Bytes(bytes),
   };
 }
 

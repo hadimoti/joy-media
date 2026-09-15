@@ -45,7 +45,11 @@ import {
   workerDerivativeId,
 } from './control-plane.js';
 import { runPostgresMigrations } from './postgres-migrations.js';
-import { validateProjectDocumentRecord } from './project-document-store.js';
+import {
+  validateLookInstanceBindingsResolve,
+  validateProjectDocumentRecord,
+} from './project-document-store.js';
+import type { JoyProjectV1, LookInstancesDocument } from '@joy-media/project-schema';
 
 const FIXTURE_THUMBNAIL_SHA256 = '78bf4c43aa7ab3a14c9f1e34f3333f9f612a08191affba3fb9c3e6de88378735';
 const FIXTURE_THUMBNAIL_BYTES = 14;
@@ -60,6 +64,8 @@ interface PostgresProjectDocumentRecord {
   readonly ownerId: PostgresOwnerId;
   readonly revisionId: string;
   readonly document: unknown;
+  /** The canonical Look Instances document (R2 / GAP 1a); absent = not carried. */
+  readonly lookInstances?: unknown;
 }
 
 type PostgresProjectDocumentReadOutcome =
@@ -139,7 +145,7 @@ class PostgresProjectDocumentStore {
     const targetRevision = revisionId ?? currentHeadRev;
 
     const docResult = await this.pool.query<ProjectDocumentRow>(
-      'SELECT schema_version, document FROM project_documents WHERE project_id = $1 AND revision_id = $2',
+      'SELECT schema_version, document, look_instances FROM project_documents WHERE project_id = $1 AND revision_id = $2',
       [projectId, targetRevision],
     );
 
@@ -167,11 +173,13 @@ class PostgresProjectDocumentStore {
       return { kind: 'unavailable', message: 'Project document store is unavailable' };
     }
 
+    const parsedLookInstances = parseJsonColumn(row.look_instances);
     const record: PostgresProjectDocumentRecord = {
       projectId,
       ownerId: project.owner_id,
       revisionId: targetRevision,
       document: parsedDocument,
+      ...(parsedLookInstances === undefined ? {} : { lookInstances: parsedLookInstances }),
     };
 
     const diagnostics = validateProjectDocumentRecord(record);
@@ -181,12 +189,7 @@ class PostgresProjectDocumentStore {
 
     return {
       kind: 'ready',
-      record: {
-        projectId,
-        ownerId: project.owner_id,
-        revisionId: targetRevision,
-        document: parsedDocument,
-      },
+      record,
     };
   }
 
@@ -289,12 +292,52 @@ class PostgresProjectDocumentStore {
         };
       }
 
+      // 7b. Look Instances (R2 / GAP 1a): read the prior head row's value under
+      // the same locked transaction. An absent `record.lookInstances` carries it
+      // forward (omission is never deletion); an explicit value replaces it.
+      let priorLookInstances: LookInstancesDocument | undefined;
+      if (currentHeadRev !== '') {
+        const priorRow = await client.query<ProjectDocumentRow>(
+          'SELECT look_instances FROM project_documents WHERE project_id = $1 AND revision_id = $2',
+          [record.projectId, currentHeadRev],
+        );
+        priorLookInstances = parseJsonColumn(priorRow.rows[0]?.look_instances) as
+          LookInstancesDocument | undefined;
+      }
+      const nextLookInstances =
+        record.lookInstances !== undefined
+          ? (record.lookInstances as LookInstancesDocument)
+          : priorLookInstances;
+      const bindingDiagnostics = validateLookInstanceBindingsResolve(
+        record.lookInstances as LookInstancesDocument | undefined,
+        priorLookInstances,
+        record.document as JoyProjectV1,
+      );
+      if (bindingDiagnostics.length > 0) {
+        await client.query('ROLLBACK');
+        return {
+          kind: 'invalid-document',
+          projectId: record.projectId,
+          diagnostics: bindingDiagnostics.map((d) => ({
+            code: d.code,
+            message: d.message,
+            path: d.path,
+          })),
+        };
+      }
+
       // 8. Insert the new document revision (immutable)
       try {
         await client.query(
-          `INSERT INTO project_documents (project_id, revision_id, schema_version, document, created_at)
-           VALUES ($1, $2, $3, $4::jsonb, CURRENT_TIMESTAMP)`,
-          [record.projectId, record.revisionId, 1, JSON.stringify(record.document)],
+          `INSERT INTO project_documents (project_id, revision_id, schema_version, document, look_instances, created_at)
+           VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, CURRENT_TIMESTAMP)`,
+          [
+            record.projectId,
+            record.revisionId,
+            1,
+            JSON.stringify(record.document),
+            nextLookInstances === undefined ? null : JSON.stringify(nextLookInstances),
+          ],
         );
       } catch {
         await client.query('ROLLBACK');
@@ -349,7 +392,19 @@ interface ProjectDocumentRow {
   readonly revision_id: string;
   readonly schema_version: number;
   readonly document: unknown;
+  readonly look_instances?: unknown;
   readonly created_at: Date;
+}
+
+/** Parse a jsonb column that a driver may hand back as text or already-parsed. */
+function parseJsonColumn(value: unknown): unknown {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
 }
 
 interface WorkerRow {

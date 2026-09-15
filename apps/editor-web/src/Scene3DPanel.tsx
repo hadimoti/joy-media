@@ -17,11 +17,15 @@ export function Scene3DPanel({
 }) {
   const savedScene = readThreeDSceneStates(session.visualProject)[0];
   return (
-    <Suspense fallback={null}>
-      <JoyCode3DViewer
-        {...(savedScene === undefined ? {} : { savedScene })}
-        onAddToTimeline={onAdd3DRender}
-      />
-    </Suspense>
+    // Match the accessible-shell contract every other panel follows: a named
+    // `article` root that exists even while the lazy viewer chunk is loading.
+    <article className="joy-panel-root scene3d-panel" aria-label="3D Scene">
+      <Suspense fallback={null}>
+        <JoyCode3DViewer
+          {...(savedScene === undefined ? {} : { savedScene })}
+          onAddToTimeline={onAdd3DRender}
+        />
+      </Suspense>
+    </article>
   );
 }

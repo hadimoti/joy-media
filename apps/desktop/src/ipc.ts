@@ -5,6 +5,14 @@ export const IPC_CHANNELS = [
   'desktop.request-derivative',
   'desktop.worker-status',
   'desktop.startup-preference',
+  'desktop.job-status',
+  'desktop.cancel-job',
+  'desktop.provider-profile.save',
+  'desktop.provider-profile.list',
+  'desktop.provider-profile.delete',
+  'desktop.provider-profile.begin-session',
+  'desktop.provider-profile.test',
+  'desktop.check-for-update',
 ] as const;
 export type IpcChannel = (typeof IPC_CHANNELS)[number];
 export interface IpcRequest {

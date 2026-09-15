@@ -144,16 +144,20 @@ function bundlePolicy(): Plugin {
   };
 }
 
+const apiProxy = {
+  '/api': {
+    target: process.env.JOY_MEDIA_E2E_API_URL ?? 'http://127.0.0.1:4174',
+    rewrite: (path: string) => path.replace(/^\/api/, ''),
+  },
+};
+
 export default defineConfig({
   plugins: [react(), bundlePolicy()],
-  server: {
-    proxy: {
-      '/api': {
-        target: process.env.JOY_MEDIA_E2E_API_URL ?? 'http://127.0.0.1:4174',
-        rewrite: (path) => path.replace(/^\/api/, ''),
-      },
-    },
-  },
+  server: { proxy: apiProxy },
+  // `vite preview` serves the production `dist/` for the prod-build smoke lane;
+  // it needs the same `/api` proxy the dev server has so the shipped bundle can
+  // talk to the isolated e2e API server.
+  preview: { proxy: apiProxy },
   resolve: {
     alias: {
       'react-dom': editorDependency('react-dom'),
@@ -165,6 +169,7 @@ export default defineConfig({
       '@joy-media/audio-core/effects': pkg('audio-core/dist/effects.js'),
       '@joy-media/html-scene-runtime/browser': pkg('html-scene-runtime/src/browser-preview.ts'),
       '@joy-media/html-scene-runtime/first-party': pkg('html-scene-runtime/src/first-party.ts'),
+      '@joy-media/media-core/observation': pkg('media-core/src/observation.ts'),
     },
   },
   build: {

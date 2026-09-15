@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { CreativeBriefV1 } from '@joy-media/agent-tools';
-import { createJoyAgentContextSnapshot } from './context-snapshot.js';
+import {
+  createJoyAgentContextSnapshot,
+  createJoyAgentPagedContext,
+  JOY_AGENT_HOST_CONTEXT_MAX_RECORDS,
+} from './context-snapshot.js';
 import { briefFixture } from './creative-brief.test-fixture.js';
 
 describe('JOY Agent context snapshot', () => {
@@ -113,6 +117,57 @@ describe('JOY Agent context snapshot', () => {
     expect(snapshot.omitted).toContain('conversation');
   });
 
+  it('retains only validated fixed recent entity references for the current project', () => {
+    const safeReference = {
+      version: 1,
+      projectId: 'p1',
+      executionId: 'execution-1',
+      resultRevision: 'revision-previous',
+      entityId: 'title-1',
+      entityKind: 'visual-text',
+      label: 'Text layer',
+    } as const;
+    const snapshot = createJoyAgentContextSnapshot({
+      projectId: 'p1',
+      revision: 'r1',
+      recentEntityReferences: [
+        safeReference,
+        { ...safeReference, entityId: 'https://private.invalid/secret' },
+        { ...safeReference, label: 'Private project title' },
+        { ...safeReference, projectId: 'another-project' },
+      ] as never,
+    });
+
+    expect(snapshot.recentEntityReferences).toEqual([safeReference]);
+    expect(snapshot.omitted).toContain('recentEntityReferences');
+    expect(Object.isFrozen(snapshot.recentEntityReferences)).toBe(true);
+    expect(Object.isFrozen(snapshot.recentEntityReferences?.[0])).toBe(true);
+    expect(JSON.stringify(snapshot)).not.toContain('private.invalid');
+    expect(JSON.stringify(snapshot)).not.toContain('Private project title');
+  });
+
+  it('keeps receipt references scoped to the canonical timeline when the visual document differs', () => {
+    const safeReference = {
+      version: 1,
+      projectId: 'timeline-project-1',
+      executionId: 'execution-1',
+      resultRevision: 'revision-previous',
+      entityId: 'title-1',
+      entityKind: 'visual-text',
+      label: 'Text layer',
+    } as const;
+    const snapshot = createJoyAgentContextSnapshot({
+      projectId: 'visual-project-1',
+      entityReferenceProjectId: 'timeline-project-1',
+      revision: 'r1',
+      recentEntityReferences: [safeReference, { ...safeReference, projectId: 'other-project' }],
+    });
+
+    expect(snapshot.entityReferenceProjectId).toBe('timeline-project-1');
+    expect(snapshot.recentEntityReferences).toEqual([safeReference]);
+    expect(snapshot.omitted).toContain('recentEntityReferences');
+  });
+
   it('packs large Unicode visual projects under the byte budget and keeps selected identity first', () => {
     const snapshot = createJoyAgentContextSnapshot({
       projectId: 'persian-project',
@@ -169,5 +224,66 @@ describe('JOY Agent context snapshot', () => {
     expect(new TextEncoder().encode(JSON.stringify(snapshot)).byteLength).toBeLessThanOrEqual(
       60_000,
     );
+  });
+
+  it('retains a frozen, paged host source past the compact 128-record model boundary', () => {
+    const source = {
+      projectId: 'p1',
+      revision: 'r1',
+      clips: Array.from({ length: 300 }, (_, index) => ({
+        id: `clip-${index}`,
+        trackId: `track-${index % 3}`,
+        startUs: index,
+        durationUs: 1,
+      })),
+      assets: Array.from({ length: 300 }, (_, index) => ({
+        id: `asset-${index}`,
+        kind: 'image',
+        displayName: `Asset ${index}`,
+      })),
+      visualObjects: [
+        {
+          id: 'title-1',
+          kind: 'text',
+          text: 'Original title',
+          transform: { x: 10 },
+          animatedProperties: ['opacity'],
+        },
+      ],
+    };
+    const paged = createJoyAgentPagedContext(source);
+
+    expect(paged.snapshot.clips).toHaveLength(128);
+    expect(paged.snapshot.assets).toHaveLength(128);
+    expect(paged.snapshot.omitted).toEqual(expect.arrayContaining(['clips', 'assets']));
+    expect(paged.clips).toHaveLength(300);
+    expect(paged.assets).toHaveLength(300);
+    expect(paged.clips[299]).toMatchObject({ id: 'clip-299' });
+    expect(paged.assets[299]).toMatchObject({ id: 'asset-299' });
+
+    // The retained host facts are a clone of the input, including nested
+    // Inspector properties, so a later editor-state mutation cannot rewrite
+    // the revision the agent is reading.
+    source.visualObjects[0]!.transform.x = 999;
+    expect(paged.visualObjects[0]).toMatchObject({ transform: { x: 10 } });
+    expect(Object.isFrozen(paged.visualObjects[0])).toBe(true);
+    expect(Object.isFrozen(paged.visualObjects[0]?.transform)).toBe(true);
+  });
+
+  it('caps each frozen host collection at 4,096 records and records the omission', () => {
+    const paged = createJoyAgentPagedContext({
+      projectId: 'p1',
+      revision: 'r1',
+      assets: Array.from({ length: JOY_AGENT_HOST_CONTEXT_MAX_RECORDS + 1 }, (_, index) => ({
+        id: `asset-${index}`,
+        kind: 'image',
+        displayName: `Asset ${index}`,
+      })),
+    });
+
+    expect(paged.assets).toHaveLength(JOY_AGENT_HOST_CONTEXT_MAX_RECORDS);
+    expect(paged.assets.at(-1)).toMatchObject({ id: 'asset-4095' });
+    expect(paged.omitted).toContain('host-assets-cap');
+    expect(paged.snapshot.assets).toHaveLength(128);
   });
 });

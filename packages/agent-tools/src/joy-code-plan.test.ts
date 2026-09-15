@@ -97,6 +97,21 @@ describe('Joy Code plan contract', () => {
     if (result.valid) expect(result.value.operations).toHaveLength(4);
   });
 
+  it('rejects a known operation when it is absent from the model-visible catalog', () => {
+    const plan = validPlan({ operations: [trimOperation()] });
+
+    const restricted = validateJoyCodeModelPlan(plan, {
+      ...CATALOGS,
+      allowedOperationKinds: ['text.insertTemplate'],
+    });
+
+    expect(restricted.valid).toBe(false);
+    expect(restricted.errors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'operation-not-model-visible' })]),
+    );
+    expect(validateJoyCodeModelPlan(plan, CATALOGS).valid).toBe(true);
+  });
+
   it('accepts typed motion keyframe operations and rejects unsupported bindings', () => {
     const result = validateJoyCodeModelPlan(
       validPlan({

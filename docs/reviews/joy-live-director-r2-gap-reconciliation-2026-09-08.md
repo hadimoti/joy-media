@@ -1,0 +1,570 @@
+# JOY Live Director R2 — gap reconciliation vs. the approved plan
+
+**Written 2026-09-08 (session `joy-media-62`).** The owner reviewed candidate
+`7a509e6c` and ruled: **finish R2 to the approved plan before deploying — no
+apply-only partial release.** This document reconciles
+`docs/superpowers/plans/2026-09-05-joy-live-director-{master,r2-r3}.md` against the
+implementation on `codex/joy-live-director` and lists every remaining requirement,
+source-anchored, with an implementation approach and named tests.
+
+**Preserved decisions (not gaps):**
+
+- **English-only.** `persian-editorial` stays retired. Do not restore it. The
+  standalone `rtl-*` templates + Vazirmatn + the pre-existing RTL caption engine
+  stay untouched.
+- **No OpenAI/Codex; never self-approve; BYOK browser engine kept; Fontiran
+  redistribution gate stays CLOSED; parallel `joy-vps` work untouched.**
+
+**Plan acceptance bar (master line 34):** _"Six editable packs, manual/agent
+parity, audio-reactive timing, creator evaluation."_ Master line 38: a partial
+slice may not be called complete without explicit owner scope acceptance — the
+owner has declined that, so all of the below must close.
+
+Music Pulse re-enters scope: the owner said **fix it, don't hold it**. R2 ships
+**five** packs (editorial-clean, product-precision, kinetic-type,
+quiet-documentary, music-pulse).
+
+---
+
+## What is already DONE (keep, re-verify at the new candidate)
+
+| Layer               | Done                                                                                                                                                                                                | Source                                                       |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| L1 schema           | `LookInstance` type, `isLookBindingWritable`, `validateLookInstance(s)`; project schema **v3** additive (`LATEST_PROJECT_SCHEMA_VERSION = 3`, `lookInstances?`, `migrateV2ToV3`, `migrateToLatest`) | `packages/project-schema/src/{living-look,v3,migration}.ts`  |
+| L2 compiler         | `compileLook` → canonical ops + FNV-1a digest, fail-closed, override-aware; `mapLookControl`; `validateLookDefinition` ("no fake slider" mechanical)                                                | `packages/motion-core/src/looks/{compile,validate,types}.ts` |
+| L2 adapter (apply)  | `translateLookOperations` 1:1 → JoyCode plan; `prepareLookPlan`; `catalog` / `describe`                                                                                                             | `apps/editor-web/src/joy-agent/look-operations.ts`           |
+| L2 run host (apply) | `stageLookRun` → `createJoyAgentProposalStagingHandler` (R1 handler unchanged); `contextProjectId = session.visualProject.id`                                                                       | `apps/editor-web/src/joy-agent/look-run-host.ts`             |
+| L2 panel (apply)    | `LivingLooksPanel` + AgentPanel `runLook` → staged preview → Approve → Undo                                                                                                                         | `apps/editor-web/src/{LivingLooksPanel,AgentPanel}.tsx`      |
+| L3 packs            | 4 typed packs + goldens + `packs-render-fidelity.test.ts` (numeric)                                                                                                                                 | `packages/motion-core/src/looks/packs/`                      |
+| L4 core             | `bakeAudioReactive` (bounded keys, approximation error, silence rest line)                                                                                                                          | `packages/motion-core/src/looks/audio-reactive.ts`           |
+| L4 bridge           | `beatEnvelopeToLookEnvelope` + `bakeLookAudio`; `LookCompileInput.audioBakes`                                                                                                                       | `apps/editor-web/src/joy-agent/look-audio-bridge.ts`         |
+
+---
+
+## GAP 1 — Saved, reopenable, adjustable Look instances (L1 + L2)
+
+**Plan (r2-r3 L1):** _"Include instances in session revision, atomic journal, Undo
+and package portability."_ **(L2):** _"Implement `looks.catalog`, `looks.describe`,
+`looks.prepareApply`, `looks.prepareUpdate`, `looks.detach` and
+`looks.resetOverrides` through the R1 operation registry … Detach preserves
+authored entities as ordinary editable content … User edits on linked bindings
+mark overrides through the canonical operation path."_ **e2e:** _"prove … exact
+Undo/Redo/reload and project export/import."_
+
+**Current state:** the editor document bridge still reads `JoyProjectV1` only —
+`apps/editor-web/src/project-package.ts` (`as JoyProjectV1`, `validateJoyProjectV1`)
+and `project-document-hydration.ts` (`visualProject: JoyProjectV1`,
+`synchronizeVisualProject(next: JoyProjectV1)`). A Look apply commits its
+operations through the normal approve path (Undo works) but **no `LookInstance` is
+persisted**, so nothing is reopenable, adjustable, detachable, or portable. No
+`looks.prepareUpdate` / `looks.detach` / `looks.resetOverrides`.
+
+### 1a — editor reads/writes schema v3
+
+- **Files:** `apps/editor-web/src/project-package.ts`,
+  `project-document-hydration.ts`, `project-package.test.ts`,
+  `project-document-hydration.test.ts` (+ any `App.tsx` graph wiring for the
+  session revision / journal).
+- **Approach:** the hydration seam runs `migrateToLatest` on load so any v2 doc
+  becomes a v3 doc with `lookInstances` defaulting absent; `validateJoyProjectV3`
+  replaces `validateJoyProjectV1` at the document boundary; `synchronizeVisualProject`
+  carries `lookInstances` through. Editing surfaces that only understand v1/v2
+  fields keep working unchanged (v3 is additive). Package export/import round-trips
+  `lookInstances`; credentials / evidence bytes still excluded.
+- **Red tests:** schema-5 (v2) project with no Looks round-trips byte-identical;
+  a v3 project with one instance hydrates, survives `synchronizeVisualProject`,
+  and re-serializes equal; unknown newer schema opens read-only without stripping
+  `lookInstances`; export→import preserves the instance and its `overriddenBindingIds`.
+
+### 1b — `looks.prepareUpdate` / `looks.detach` / `looks.resetOverrides` host ops
+
+- **Files:** `apps/editor-web/src/joy-agent/look-operations.ts` (+ test),
+  `look-run-host.ts` (+ test), operation-registry wiring, `AgentPanel.tsx`.
+- **Approach:**
+  - **persist on apply** — `stageLookRun` success also stages a `LookInstance`
+    write into `lookInstances[id]` as part of the _same_ approved change-set
+    (instances live in the canonical journal, one Undo reverts both the ops and
+    the instance record).
+  - **`prepareUpdate(instanceId, nextControlValues | nextBindings)`** —
+    recompiles the pinned definition with the new inputs, diffs against the
+    instance's last compiled digest, emits only the changed keyframes/templates,
+    and **never rewrites a binding in `overriddenBindingIds`** unless
+    `resetBindingIds` names it (compiler already enforces this — the host just
+    passes `overriddenBindingIds` through).
+  - **`resetOverrides(instanceId, bindingIds)`** — clears the named ids from
+    `overriddenBindingIds` and re-applies the definition to exactly those.
+  - **`detach(instanceId)`** — removes the `LookInstance` record, leaves every
+    authored keyframe/template in place as ordinary editable content (no op
+    emission). Removal of instance-owned created entities is a separate explicit
+    intent, not part of detach.
+  - **override marking** — a manual Inspector edit (or a user-directed agent
+    edit) on a linked binding adds that `bindingId` to the instance's
+    `overriddenBindingIds` through the canonical commit path. Hook the existing
+    property-commit seam so both manual and agent edits mark identically.
+- **Red tests** (`look-operations.test.ts`, `look-run-host.test.ts`): apply then
+  reopen yields the same control values; `prepareUpdate` with a changed control
+  re-emits only the affected bindings; a hand-edited binding is untouched by
+  `prepareUpdate` and touched by `resetOverrides`; `detach` leaves ops, drops the
+  record, and one Undo restores the record; an update targeting a stale revision
+  fails closed with no partial commit.
+
+### 1c — panel: reopen + adjust + detach
+
+- **Files:** `LivingLooksPanel.tsx` (+ test), `AgentPanel.tsx`.
+- **Approach:** the panel lists applied `LookInstance`s for the active
+  composition; selecting one loads its controls; changing a control routes
+  through `prepareUpdate` → the same staged-preview + Approve + Undo path; a
+  Detach action routes through `detach`; the Inspector shows an "override" marker
+  on a hand-edited linked binding. Manual and agent both call the identical host
+  ops (parity — GAP 4).
+- **e2e** (`tests/e2e/agent-living-looks.spec.ts`, extended): apply a Look →
+  reload the project → the Look is still listed and reopenable → adjust a control
+  → Approve → Undo/Redo restore exactly → hand-edit one bound property → adjust a
+  _different_ control → the hand-edit survives → `resetOverrides` re-links it →
+  export the project, re-import into a fresh session → the instance and its
+  overrides come back.
+
+---
+
+## GAP 2 — Audio-reactive motion end to end (L4)
+
+**Plan (r2-r3 L4):** _"Compare preview/export evaluation at exact impulse/key
+times, then decode the export to verify A/V alignment. Run … `living-looks-audio-motion.spec.ts`."_
+Master line 34: _"audio-reactive timing."_
+
+**Current state:** pure core (`bakeAudioReactive`) + host bridge
+(`beatEnvelopeToLookEnvelope`, `bakeLookAudio`) + `LookCompileInput.audioBakes`
+all exist and are unit-tested. **No UI path** feeds a decoded audio track's bakes
+into `runLook`; **no `living-looks-audio-motion.spec.ts`.**
+
+- **Files:** `AgentPanel.tsx` / `LivingLooksPanel.tsx` (+ tests),
+  `apps/editor-web/src/joy-agent/look-run-host.ts`,
+  `tests/e2e/living-looks-audio-motion.spec.ts` (new),
+  `tooling/fixtures/living-looks.json` (audio fixture).
+- **Approach:** when the active composition has a decoded audio track with an R1
+  `BeatEnvelopeEstimate`, the Music Pulse panel offers "bake from audio";
+  choosing it runs `beatEnvelopeToLookEnvelope` (host owns source→composition
+  time map) → `bakeLookAudio` → passes `audioBakes` into `stageLookRun` → the
+  compiler emits the baked keyframes verbatim on the target binding, superseding
+  the slider drive (already supported). The baked keys are ordinary editable
+  keyframes; editing one marks the binding overridden (GAP 1b); silence /
+  confidence < 0.15 → a flat rest line (already enforced in the baker).
+- **Red / e2e tests:** a known-impulse fixture bakes to keyframes at the expected
+  composition times; smoothing never exceeds the declared property range; a
+  speed/remap change invalidates the derived timing; **decode the exported
+  media and assert the scale peak lands within tolerance of the beat** (the
+  A/V-alignment check the plan names); low-confidence input reports without
+  inventing a downbeat.
+
+---
+
+## GAP 3 — Music Pulse is honest (L3)
+
+**Owner:** _"Fix Music Pulse before advertising or shipping it."_ **Taste review
+findings:** (a) the "Accent cuts" boolean compiles to a permanent-on track — the
+compiler's boolean branch calls `emitKeyframes(id, value, value, …)` so the
+declared `profile` is inert (`compile.ts` ~line 491-499); (b) the pulse has no
+rate control, so `atFractions: [0, .25, .5, .75, 1]` gives exactly two swells per
+composition at any length; (c) `subject-treatment` applies a **text** template to
+a generic `visual-object` slot.
+
+- **Files:** `packages/motion-core/src/looks/{types,compile,validate}.ts`
+  (+ tests), `packages/motion-core/src/looks/packs/music-pulse.ts`,
+  `music-pulse.test.ts`, goldens; re-add `musicPulse` to `BUILT_IN_LOOK_PACKS`.
+- **3a — boolean drive gets a live rest value.** Add `LookBooleanDrive.rest?:
+number` (default 0). Boolean-on emits `emitKeyframes(id, rest, whenTrue,
+atFractions, profile, interpolation)` so the profile shapes a real
+  rest→peak→rest cut pattern. Boolean-off still emits `whenFalse` (flat) or
+  omits. `validate.ts`: a boolean drive with a non-`omit` `whenFalse` equal to
+  `rest` and `whenTrue` equal to `rest` is a fake toggle → reject.
+- **3b — a real rate control.** Add `LookEnumDrive.periodsByOption?:
+Record<string, number>`. When present for the selected option, the compiler
+  generates `2·periods + 1` evenly-spaced fractions with an alternating
+  `[0,1,0,…,0]` profile and emits `emitKeyframes(id, byOption[opt] /*rest*/,
+settled /*peak*/, generatedFractions, generatedProfile, interpolation)`.
+  Add a `rate` enum control to Music Pulse (`calm` / `steady` / `driving` →
+  periods `2` / `4` / `6`) driving `subject-scale-x/y` between rest `1` and peak
+  `1.12`. Replace the fixed-table `depth` scalar (its amplitude role folds into
+  the fixed bounded peak; L4 audio is the real dynamic path). `validate.ts`:
+  `periodsByOption` values must be integers ≥ 1; an enum drive with
+  `periodsByOption` still needs a rest/peak pair.
+- **3c — slot honesty.** Rename the `subject` slot label to make the
+  text-template expectation explicit (e.g. "Pulsing headline / logotype") **or**
+  move `subject-treatment` to a text-bearing binding. Prefer the rename — Music
+  Pulse's subject is a title-card object in every pack fixture.
+- **Tests:** boolean-on with `[0,1,0,1,0]` profile emits `0,1,0,1,0` not
+  `1,1,1,1,1`; `rate: driving` emits 13 keyframes across the composition;
+  `rate: calm` emits 5; golden snapshots re-blessed; `music-pulse.test.ts`
+  folded back into the main `packs.test.ts` loop (5 packs).
+
+---
+
+## GAP 4 — Actual rendered-frame + encoded-export acceptance (L3)
+
+**Plan (r2-r3 L3):** _"Render before/after/keyframe boundary frames and full
+short motion previews using actual JOY rendering. Establish golden expectations
+for stable geometry/timing/pixels with pinned fixture fonts … Run …
+`living-looks-render.spec.ts`. Review actual motion and legibility visually; save
+sanitized samples … A passing schema test is not art-direction approval."_
+
+**Current state:** only `packs-render-fidelity.test.ts` — numeric `sampleCurve`
+of compiled keyframes. **No `tests/e2e/living-looks-render.spec.ts`; no rendered
+frames; no encoded-export check; no sample images.**
+
+- **Files:** `tests/e2e/living-looks-render.spec.ts` (new),
+  `tooling/fixtures/living-looks.json`, sanitized sample renders under
+  `docs/reviews/assets/r2-look-samples/` (or attached to the scorecard).
+- **Approach:** drive from a test harness (not the finished panel): for each of
+  the 5 packs, portrait + landscape, on a pinned-font sanitized fixture —
+  1. apply the pack, render the first frame, a mid-motion keyframe-boundary
+     frame, and the settle frame via the real JOY renderer;
+  2. assert stable geometry/timing with an explicit rasterization tolerance
+     (numeric RGBA compare, not a broad screenshot mask);
+  3. assert legibility invariants the plan names — text inside safe margins, no
+     clipping of the headline box, contrast ratio of the resolved template pair
+     ≥ threshold;
+  4. encode a short export and decode it back — assert the keyframed property
+     value at a sampled PTS matches the preview evaluation (preview/export
+     parity), and for Music Pulse the audio-aligned case (shared with GAP 2).
+- **Sample renders:** save 2–3 sanitized frames per pack for the scorecard's
+  owner/creator visual read. These supplement — do not replace — the numeric
+  `packs-render-fidelity.test.ts`, which stays.
+
+---
+
+## GAP 5 — Manual / agent parity through the canonical boundary (L2)
+
+**Plan (r2-r3 L2):** _"Agent and manual interactions compile the same inputs to
+identical complete state. User edits on linked bindings mark overrides through the
+canonical operation path, including edits made by user-directed agent commands."_
+
+**Current state:** apply parity exists (`LivingLooksPanel` `onRun` and AgentPanel
+`runLook` both call `stageLookRun`). **Reopen / update / detach / override-marking
+do not exist yet**, so parity for those paths is unbuilt.
+
+- **Approach:** every host op from GAP 1b is called identically by the panel
+  (manual) and by an agent capability (`runLook` / a new `updateLook` /
+  `detachLook` on the composer capability). One code path, one approval boundary,
+  one Undo grouping.
+- **Tests:** a manual `prepareUpdate` and an agent-issued `updateLook` with the
+  same inputs produce byte-identical change-sets and the same instance state;
+  an agent edit on a linked binding marks the override exactly as a manual edit
+  does.
+
+---
+
+## Sequencing
+
+1. **GAP 1a** (editor v3 bridge) — foundational; everything else needs persisted instances.
+2. **GAP 1b** (host ops) + **GAP 5** (parity is the same code path).
+3. **GAP 3** (Music Pulse compiler + pack) — independent of 1/2, can interleave.
+4. **GAP 1c** (panel reopen/adjust/detach) + **GAP 2** (audio panel path).
+5. **GAP 4** (rendered-frame + export acceptance) — last; exercises the finished packs + panel.
+6. Re-cut candidate → CodeRabbit → full self-hosted gate ×2 → independent Opus
+   "Astra" `APPROVE_FOR_DEPLOY` on the exact triple → **notify owner, wait for
+   go-ahead** → guarded deploy → Gbrain/PC-receipt/Desktop-brief closeout.
+
+Each task: red test → smallest complete implementation → green → scoped commit.
+No mocking away the compiler, persistence, or renderer. Earlier green CI on
+`7a509e6c` / `93d1c082` does not carry to the new candidate.
+
+## Status ledger (updated as tasks land)
+
+| Gap                                                       | State                                        | Candidate  |
+| --------------------------------------------------------- | -------------------------------------------- | ---------- |
+| 1a Look-Instances persistence (approach B)                | **LOCAL DONE; sync = OWNER DECISION**        | `4a7a8e1b` |
+| 1b host ops (prepareUpdate/detach/resetOverrides/persist) | **MOSTLY DONE** (override-wiring pending)    | `ae28704e` |
+| 1c panel reopen/adjust/detach                             | **DONE** (e2e passing)                       | `e07f2ea8` |
+| 2 audio end-to-end + A/V test                             | NOT STARTED                                  | —          |
+| 3 Music Pulse honest (boolean rest + rate control + slot) | **DONE**                                     | `3eaa8cd7` |
+| 4 rendered-frame + export acceptance                      | NOT STARTED                                  | —          |
+| 5 manual/agent parity for update/detach                   | **STRUCTURAL** (agent-capability scope call) | `2546ce30` |
+
+**GAP 1b / 1c landed** (`0797e809` → `4f41af53` → `13dfbdd9` → `e07f2ea8` →
+`2546ce30` + e2e `72b2d680`; plan `joy-live-director-r2-gap1b-plan-2026-09-09.md`).
+`look-instance-operations.ts` pure helpers (one code path, manual == agent);
+the `LookInstance` write threaded through the approval compound and **folded into
+`operationDigest`** (byte-identical for non-Look changes); `AgentPanel.runLook`
+branches apply/update/reset/detach; `LivingLooksPanel` "Applied Looks" section
+(reopen / adjust / reset-overrides / detach / orphan marker). **Full
+`pnpm -w run check` green (530 files, 4241 tests)** + the extended
+`agent-living-looks` e2e passes on desktop-primary (apply → reload → still there
+→ adjust → detach → Undo restores). **Remaining:** call
+`markOverridesFromCommittedKeys` in `App.tsx`'s visual-object property-commit
+compound (logic done + tested, `App.tsx` seam pending); GAP 5 dedicated agent
+Look capability is a net-new-surface **owner scope call** (parity is structural —
+`runLook` is one path).
+
+**GAP 1a local persistence landed** as a canonical Look Instances document in
+its own persistence log, joined to the visual document through the compound-write
+journal (approach B — `joy-live-director-r2-gap1a-architecture-2026-09-09.md`).
+Commits `3f9efba6` → `330b342e` → `ecbc4199` → `b661f54a` → `842b4003`. Full
+`pnpm -w run check` green (529 files, 4230 tests, tsc + lint + format). Not the
+v3 project-schema widening the original text implied.
+
+**GAP 1a server sync is an OPEN OWNER SCOPE DECISION** —
+`joy-live-director-r2-look-sync-audit-2026-09-09.md` (commit `4a7a8e1b`). The
+server persists only the visual creative document (`JoyProjectV1`), unflagged and
+cross-device-by-design; Look **keyframes** ride it, Look **Instance records** do
+not, so a cross-device / storage-loss reopen silently degrades an applied Look to
+loose keyframes. The two scope options here were: **build the additive server-sync
+extension now** (additive DB migration; recommended) vs local-first + in-app
+indicator + R2.1 follow-up. The owner approved building + testing the additive
+server-sync extension (dev/test only; production apply Astra-gated). This is
+**not** a change to the session-document architecture (approach B — the dedicated
+Look Instances local log); it only adds the server round-trip for that document.
+GAP 1b/1c/5 do not depend on this and proceed.
+
+---
+
+## Verified reconciliation — 2026-09-09 (session `joy-media-62`)
+
+Re-checked the ledger against the actual tree at R2 HEAD **`3eaa8cd7`**
+(`codex/joy-live-director`, local == `github/codex/joy-live-director`, working
+tree clean). Method: read the named files / grep the named symbols /
+`git show --stat` the GAP-3 commit. **Preserve completed work — nothing here is
+to be re-implemented.**
+
+| Item                                                                                         | Prior claim                | Verified @ `3eaa8cd7`                                                                                                                                                                                                                                                                                                                                                                                    |
+| -------------------------------------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Foundation — L1 schema, L2 compiler/adapter/apply-host/apply-panel, L3 packs, L4 core+bridge | DONE, keep + re-verify     | **PRESENT.** All 10 named files exist; `validateJoyProjectV3` / `isJoyProjectV3` / `LATEST_PROJECT_SCHEMA_VERSION` exported. `BUILT_IN_LOOK_PACKS` = **5 packs** (`persian-editorial` retired `7a509e6c` — English-only, correct).                                                                                                                                                                       |
+| GAP 1a — editor reads/writes schema v3                                                       | NOT STARTED                | **NOT STARTED.** `project-package.ts` + `project-document-hydration.ts` still type/validate `JoyProjectV1` only; no `migrateToLatest` at the document boundary.                                                                                                                                                                                                                                          |
+| GAP 1b — `prepareUpdate` / `detach` / `resetOverrides` + persist-on-apply                    | NOT STARTED                | **NOT STARTED.** None of those symbols in `look-operations.ts` / `look-run-host.ts`. Apply commits ops only (Undo works); no `LookInstance` record.                                                                                                                                                                                                                                                      |
+| GAP 1c — panel reopen/adjust/detach                                                          | NOT STARTED                | **NOT STARTED** (blocked on 1b).                                                                                                                                                                                                                                                                                                                                                                         |
+| GAP 2 — audio-reactive motion end to end + A/V decode test                                   | NOT STARTED                | **NOT STARTED.** L4 core + bridge present & unit-tested; **no panel path**, **no `tests/e2e/living-looks-audio-motion.spec.ts`** (only `agent-living-looks.spec.ts`).                                                                                                                                                                                                                                    |
+| GAP 3 — Music Pulse is honest                                                                | NOT STARTED (doc predates) | **DONE @ `3eaa8cd7`.** `LookBooleanDrive.rest?`, `LookEnumDrive.periodsByOption?`, `rate` enum, subject-slot relabel, `validate.ts`/`compile.ts` rules + `compile.test.ts`(+121)/`validate.test.ts`(+65), goldens re-blessed, `packs.test.ts` 5-pack loop, `musicPulse` back in `BUILT_IN_LOOK_PACKS`. Commit records `pnpm test` 4206 pass / 0 fail + tsc/eslint/prettier clean. Matches spec 3a/3b/3c. |
+| GAP 4 — rendered-frame + encoded-export acceptance                                           | NOT STARTED                | **NOT STARTED.** No `tests/e2e/living-looks-render.spec.ts`, no sample renders. `packs-render-fidelity.test.ts` (numeric) present — **stays**, supplemented not replaced.                                                                                                                                                                                                                                |
+| GAP 5 — manual / agent parity for update / detach                                            | NOT STARTED                | **NOT STARTED.** Apply parity exists (`onRun` + `runLook` → `stageLookRun`). No `updateLook` / `detachLook`; update/detach/override paths don't exist yet to have parity.                                                                                                                                                                                                                                |
+
+**Net remaining R2 implementation: GAP 1a → 1b (+ GAP 5) → 1c → GAP 2 → GAP 4**,
+in the Sequencing order above. GAP 3 is done. Foundation is intact and needs only
+re-verification at the final candidate (full `pnpm test` + tsc + lint +
+`agent-living-looks` e2e), not rework.
+
+### Update 2026-09-09c — GAP 5 real agent Look capability landed (`e65c132a..f80e029a`)
+
+GAP 1a-local, GAP 1b, GAP 1c and the Inspector override-marking seam were
+completed earlier (see Update 2026-09-09b). **GAP 5 now has real agent
+capability**, not just a shared internal helper:
+
+- **4 model-visible host tools** — `look_apply`, `look_update`,
+  `look_reset_overrides`, `look_detach` — added to the closed
+  `JOY_AGENT_HOST_TOOL_NAMES` vocabulary; protocol validation auto-extends.
+  Pattern-bounded schemas in `bounded-tool-loop.ts`; terminal on success like
+  `validate_proposal`; opt-in only (absent from every default allow-list).
+- **One resolution path** (`joy-agent/living-look-run.ts` `resolveLivingLookRun`)
+  shared by the panel (`runLook`) and the agent host method — a manual and an
+  agent adjustment stage a byte-identical change.
+- **Same canonical operation path** — the agent tool → `look-tool-bridge.ts`
+  host method → `resolveLivingLookRun` → `stageLookRun` /
+  `stageLookInstancesOnly` → the shared `validate_proposal` staging handler
+  (leases, stale-revision, host-authority all enforced) → the same approval card
+  → `JoyCodeCompoundRunner` → atomic compound + one Undo. `look_detach` from the
+  agent STAGES for approval (a zero-visual-operation `lookInstances`-only
+  compound — new `JOY_CODE_COMPOUND_EMPTY` carve-out); the manual panel Detach
+  button still commits directly on the operator's click.
+- **Scoped loop** (`joy-agent/look-scoped-host.ts` `runScopedLookToolLoop`) reuses
+  the built-in Worker via `runScopedCreativeSkillToolLoop`; no separate route
+  around leases / stale-revision / approval.
+- **UI**: `LivingLooksPanel` "Ask JOY" affordance → `AgentPanel.runAgentLook`,
+  shown only when a structured-tool model is configured.
+- **Actual tool-loop execution tests**: `bounded-tool-loop.test.ts` (real bounded
+  loop, model emits `look_apply` → terminal prepared); `look-scoped-host.test.ts`
+  (real scoped loop against a real `EditorSession`: apply → commit → one Undo
+  reverts keyframes + instance; agent detach staged not auto-applied → approve →
+  instance gone / keyframes stay / one Undo restores; stale scope → failed,
+  nothing staged; `look_update` recompiles). Plus `living-look-run.test.ts`,
+  `look-tool-bridge.test.ts`, `LivingLooksPanel.test.tsx` "Ask JOY".
+- Full `pnpm -w run check` runs on frozen SHAs in this range:
+  - `f80e029a`: 532 files / 4263 tests pass **except** one —
+    `tooling/release/src/font-assets.test.ts` "is clean through the same scanner
+    used by release:gate" **timed out at 5 s**. Re-run in isolation on the same
+    SHA: **passes in 212 ms**. Both the failing full-check log
+    (`scratchpad/full-check-f80e029a.log`) and the passing isolated run are
+    retained.
+  - `4d3c8ce1` and `1bf0e656`: full check **fully green** (533 files / 4264 and
+    4289 tests) — the font-assets timeout did **not** recur.
+  - **Framing:** this is an **intermittent failure with suspected full-suite
+    load sensitivity** — the root cause has **not been reproduced** or fixed. It
+    is not "known/benign" and must be watched on the final R2 candidate's gate;
+    a recurrence there blocks acceptance until explained. It is not caused by
+    this work (all changes are under `apps/editor-web/src/joy-agent/`,
+    `LivingLooksPanel`, `AgentPanel`, `apps/api/src/*`, docs).
+
+**Known follow-up (not blocking GAP 5 acceptance):** the agent context
+(`read_project_context`) does not yet expose applied Look instance ids as a
+paged domain, so `look_update` / `look_reset_overrides` / `look_detach` are
+agent-reachable within a thread (the staging message names the instance ids) but
+not from a cold context. A `looks` context domain is a small, safe follow-up.
+
+### Update 2026-09-09d — GAP 1a: the additive server-sync extension landed (`4b9e580d..961eb070`)
+
+Owner-approved: developed + tested the **additive server-sync extension** — the
+additive migration and API changes that round-trip the Look Instances document
+to the server. **This is not a reversal of the session-document architecture
+(approach B — the dedicated local log); it only adds the server round-trip.**
+Earlier commit messages in this range that say "Option A" mean exactly this
+extension. **Not authorized for production apply** — the production migration /
+deploy is gated by external Astra's candidate-specific `APPROVE_FOR_DEPLOY`.
+
+- **Migration** `006-look-instances` (the next free ledger id, R7) —
+  `ALTER TABLE project_documents ADD COLUMN IF NOT EXISTS look_instances jsonb`,
+  additive + nullable. Test asserts additive / nullable / no-DROP.
+- **Store** (`project-document-store.ts`, `postgres-control-plane.ts`,
+  `control-plane.ts`): `ProjectDocumentRecord.lookInstances?` written under the
+  SAME `revisionId` as the visual document — one atomic CAS row (R1). Absent =
+  carry the previous revision's value forward (R2); explicit `{ instances: {} }`
+  replaces it (R3). Structural validation + instance-count + byte caps (R5).
+  `validateLookInstanceBindingsResolve` mirrors the editor's
+  `#assertLookInstanceReferencesResolve` — a new/retargeted binding must name an
+  object in the same write's document; an already-orphaned instance round-trips.
+- **HTTP** (`http-server.ts`, `project-document-sync-request-validation.ts`):
+  GET returns `lookInstances` only when a revision carried it (legacy clients
+  ignore the key); PUT accepts an OPTIONAL `lookInstances` field (strict
+  unknown-field rejection preserved; malformed → reject).
+- **Client** (`control-plane-client.ts`, `project-document-sync.ts`,
+  `project-document-autosync.ts`, `App.tsx`): `session.lookInstances` rides
+  every autosync PUT under the same revision; a pure detach advances the
+  revision (`:looks=N`) so its PUT fires.
+- **Hydration** (`project-document-hydration.ts`,
+  `EditorSession.synchronizeLookInstances`): the remote Look document is applied
+  only on `hydrated` (local unchanged) as a snapshot with no history entry; on
+  `local-changed` it is left untouched; an absent remote value never clears a
+  populated local document; a changed remote Look doc syncs even when the visual
+  doc is byte-identical; malformed remote → reject before any local write (R4).
+- **Rollback** (deploy runbook updated): code rollback alone reverses R2
+  behaviour; the `look_instances` column and its data are retained; a
+  `DROP COLUMN` is a separate explicit last-resort (R8).
+- 47 new/changed api + editor tests green (store R1–R6, envelope, migration 006,
+  hydration R4 ×5, sync forward/omit, editor-session snapshot/empty/malformed).
+
+**GAP 1a is now local-verified AND sync-implemented** (dev+test; production apply
+Astra-gated). GAP 5 + GAP 1a-sync done.
+
+### Update 2026-09-09e — GAP 2 + GAP 4 (`961eb070..c629acde`)
+
+- **GAP 2 (audio-reactive Looks end to end):** `resolveLookAudioBakeTargets`
+  (motion-core) + `bakeLookFromAudio` (decoded PCM → R1 beat envelope → look
+  envelope → bounded keyframe tracks) + `loadCompositionAudioForLook`
+  (resolve/fetch/decode, effects injected) + `LivingLooksRunInput.audioBakes`
+  threaded through `resolveLivingLookRun` into `LookCompileInput.audioBakes` (the
+  compiler already emits baked keys verbatim). Panel: "Bake motion from
+  composition audio" on the apply form + applied-look row, shown only with an
+  audio track present + a keyframe binding. Silence / low beat confidence → flat
+  rest line (no invented downbeat); a source speed change re-derives the timing.
+  Tests: `audio-bake-targets` (4), `living-look-audio` (5), `living-look-audio-source`
+  (6), `living-look-audio-render` (2 — via `sampleCurve`), `LivingLooksPanel`
+  bake affordance (2), e2e `living-looks-audio-motion.spec.ts` (real-browser
+  decode).
+- **GAP 4 (rendered-frame + export acceptance):**
+  `looks-render-acceptance.test.ts` — 5 packs × portrait/landscape through the
+  single `buildRenderFrameIRFromProject` boundary, Pixi-preview vs
+  headless-export pixel parity at first/mid/settle, real motion + legibility.
+  Supplements (does not replace) `packs-render-fidelity.test.ts`.
+- **Deferred (owner/CI-gated, not implementation):** the fully-exported-MP4
+  decode-and-check-the-scale-peak-and-A/V-sync step; and the sanitized
+  sample-render taste read for the scorecard.
+
+Remaining: **fold `codex/joy-live-director-ci-opt` (after CI v2 accepted) → final
+R2 candidate → full check on that SHA → Astra `APPROVE_FOR_DEPLOY`.** No R2
+implementation gaps remain.
+
+**Open R2 _acceptance_ items (not implementation):**
+
+- Per-pack owner taste verdicts re-confirmed for the **final** candidate's 5
+  shipping packs (verdicts were applied once at `770511d3` / `7a509e6c`; any pack
+  still `PENDING` in the scorecard does not ship).
+- Fresh full gate on the completed R2 candidate via the **accepted optimized
+  gate** (after CI v2 is independently accepted) — the stale `93d1c082` /
+  `7a509e6c` runs do not carry.
+- External **Astra** candidate-specific `APPROVE_FOR_DEPLOY <sha> <tree> <lock>`.
+- Owner go-ahead → guarded Sweden deploy → closeout.
+
+**Branch-integration note:** `codex/joy-live-director-ci-opt` forked from this
+exact R2 HEAD (`merge-base` = `3eaa8cd7`); its diff is CI harness + workflows +
+CI docs, plus small touches to `apps/editor-web/vite.config.ts` (preview proxy
+only), `tests/e2e/wp32-responsive-checkpoints.spec.ts`, and `package.json`
+(`test:harness`). When CI v2 is accepted, fold that branch into
+`codex/joy-live-director` before cutting the final R2 candidate.
+
+---
+
+## Pre-acceptance verification checklist (owner, 2026-09-09) — MUST be explicit before final acceptance
+
+These are gates on the **final R2 candidate**, not on any interim checkpoint SHA.
+A green `pnpm -w run check` on an interim SHA (e.g. `1bf0e656`) is checkpoint
+evidence only.
+
+### Sync atomicity (server CAS alone is not enough)
+
+- [x] **(unit-covered, commit `22406939`)** Remote hydration cannot leave the
+      visual document and the Look Instances document at **different revisions**:
+      `EditorSession.synchronizeDocuments` writes both under one prepared-journal
+      compound and `hydrateProjectDocument` uses it when both change. Tests:
+      failure injected at each half → neither moves, the combined revision string
+      is unchanged, a reopen is never a mixed state.
+
+### Conflict handling
+
+- [x] **(store CAS test)** Concurrent devices: two sessions writing from the same base revision — the
+      second gets `revision-conflict`, neither the visual doc nor the Look doc
+      half-applied.
+- [x] **(autosync conflict test + a Look-carrying conflict test)** Stale revision on read; retry after a conflict (the autosync entry is
+      marked conflicted and the local doc is left for recovery).
+- [x] **(hydration test)** A local edit made while a remote fetch is in flight →
+      `local-changed`; `synchronizeDocuments` is not called.
+
+### Compatibility
+
+- [x] **(store R2 test)** An older client that omits `lookInstances` on PUT preserves the stored value (carry-forward).
+- [x] **(store R3 test)** An explicit `{ instances: {} }` clears it.
+- [x] **(store owner-denied + malformed tests)** An unauthorized (owner-denied) or malformed write changes **neither** document.
+
+### Agent safety (not only successful apply / detach)
+
+- [x] **(look-scoped-host test)** Rejection of a staged agent Look change → nothing applied; a revoked change-set is not resurrectable.
+- [x] **(look-scoped-host test)** Cancellation (pre-aborted signal) → nothing
+      staged, run reports `failed`.
+- [x] **(look-scoped-host test)** Stale approval — a revision moved between stage
+      and apply → the runner throws (matched `/STALE/`), nothing applied.
+- [x] **(look-scoped-host test)** Duplicate approval → idempotent replay, no second Undo entry, same revisionId.
+- [ ] **Reporting accuracy:** the deterministic tool-loop tests
+      (`bounded-tool-loop`, `look-scoped-host`) prove the _plumbing_ — tool call
+      → host method → staging → approval → commit → Undo. They are **not**
+      live-model quality evidence and must not be described as such.
+
+### Audio / export (GAP 2 + GAP 4)
+
+- [~] **Partly covered — the render/evaluator side is done; the fully-exported-media
+  pixel + A/V-sync check remains an owner/CI acceptance step.**
+  - [x] GAP 2 render path: `living-look-audio-render.test.ts` + the e2e
+        `living-looks-audio-motion.spec.ts` drive synthetic beat audio →
+        `bakeLookFromAudio` → `compileLook` → `sampleCurve` (the renderer's own
+        evaluator, shared by Monitor + export). The subject scale peaks near the
+        majority of beats and rests between, inside `[1, 1.12]`; silence renders
+        flat. The e2e does the decode in a **real browser AudioContext**.
+  - [x] GAP 4 render path: `packages/visual-object-renderer/src/looks-render-acceptance.test.ts`
+        renders each of the 5 packs × portrait/landscape through
+        `buildRenderFrameIRFromProject` (the one Monitor+export project→frame
+        boundary) and asserts the **Pixi preview adapter and the headless export
+        adapter produce pixel-identical output** at first/mid/settle frames, with
+        real motion + legibility invariants.
+  - [ ] **Still owner/CI-gated:** export a Music-Pulse-with-audio-bake project to
+        an actual MP4 through the browser export pipeline, decode it with
+        `createBrowserFinalEncodedExportDecoder`, and confirm (a) a decoded video
+        frame near a beat shows the scale peak and (b) a synchronized audio
+        track is present. This needs the full export pipeline + a real workspace
+        audio asset — the same class of step as the per-pack taste reviews.
+        Numeric compiler tests (`bakeAudioReactive`, `packs-render-fidelity`) alone
+        do **not** close GAP 2/4 — the above render/evaluator/adapter-parity tests
+        do the real work; only the final encoded-media check is deferred.
+
+### Release gating
+
+- [ ] Merge `codex/joy-live-director-ci-opt` into `codex/joy-live-director`
+      **only after** CI v2 is independently accepted.
+- [ ] Run `pnpm -w run check` on the resulting **final R2 SHA** (frozen).
+- [ ] External Astra candidate-specific `APPROVE_FOR_DEPLOY <sha> <tree> <lock>`.
+- [ ] The GitHub artifact-upload blockage is a **separate release blocker**
+      (owner must fix Actions billing) — it does not pause audio/render
+      implementation.

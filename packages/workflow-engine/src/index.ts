@@ -21,6 +21,7 @@ export type {
 
 export { CanonicalJsonError, canonicalJson, computeRunKey } from './run-key.js';
 export type { RunKeyInput } from './run-key.js';
+export { sha256Hex } from './sha256.js';
 
 export {
   CHECKPOINT_VERSION,

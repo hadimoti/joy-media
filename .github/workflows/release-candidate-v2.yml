@@ -89,6 +89,11 @@ jobs:
           # shared artifact, so no job trusts another job's output.
           git clean -xdf -e node_modules -e '.pnpm-store'
           pnpm run verify:ci
+          # The self-hosted-CI harness unit tests (terminateProcessTree /
+          # removeDirWithRetry / classifyRun / retain-evidence redaction). Not
+          # matched by vitest's include glob, so run them explicitly on Linux
+          # where the POSIX-only cases actually execute.
+          pnpm run test:harness
           release_command="${JOY_MEDIA_CI_RELEASE_COMMAND:-}"
           test -x "$release_command" || { echo 'JOY_MEDIA_CI_RELEASE_COMMAND must point to the isolated Linux release harness' >&2; exit 1; }
           "$release_command" "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "${{ matrix.pass }}"
@@ -231,7 +236,28 @@ jobs:
           PLAYWRIGHT_WORKERS: 2
           PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-pw-report-primary-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
           PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-pw-results-primary-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
-        run: pnpm exec playwright test tests/e2e --project=desktop-primary --workers=2
+        run: |
+          set -euo pipefail
+          # Exclude the P3 shipping-export matrix spec from *discovery* (not just filtering).
+          # --grep-invert runs after Playwright imports the spec, which is too late: the spec's
+          # top-level imports of tests/e2e/helpers/p3-export-observer.mjs trigger a Vitest
+          # "Cannot require() ES Module ... in a cycle" error during module load. That spec
+          # only runs safely inside the dedicated JOY_MEDIA_CI_LANE_MODE=p3 lane; everywhere
+          # else we must keep it out of the loader entirely. Building an explicit positional
+          # argument list keeps every other desktop-primary test and prevents the excluded
+          # module from being imported at all.
+          desktop_specs=()
+          for spec in tests/e2e/*.spec.ts; do
+            case "$(basename "$spec")" in
+              r2-p3-shipping-export-acceptance.spec.ts) continue ;;
+            esac
+            desktop_specs+=("$spec")
+          done
+          if [ "${#desktop_specs[@]}" -eq 0 ]; then
+            echo "::error::no acceptance specs remained after excluding r2-p3-shipping-export-acceptance.spec.ts" >&2
+            exit 1
+          fi
+          pnpm exec playwright test "${desktop_specs[@]}" --project=desktop-primary --workers=2
       - name: Verify acceptance teardown
         if: always()
         shell: bash
@@ -275,12 +301,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
           test "${JOY_MEDIA_CI_ACCEPTANCE_PROFILE:-}" = 'fixture-only' || { echo 'JOY_MEDIA_CI_ACCEPTANCE_PROFILE=fixture-only is required' >&2; exit 1; }
+          node --version
           corepack enable pnpm
+          pnpm --version
+          test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}" || { echo 'OpenCLI profiles are forbidden on acceptance runners' >&2; exit 1; }
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm exec playwright install chromium
-      - name: Layout / overflow / panel-reachability at every non-primary viewport
+      - name: Layout / overflow / a11y / panel-reachability at every non-primary viewport
         shell: bash
         env:
           CI: true
@@ -289,9 +319,31 @@ jobs:
           PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-pw-results-responsive-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
+          # Per-viewport: wp32 panel-reachability + per-panel overflow;
+          # golden-path login-gate overflow + axe scan; wp35 loaded-timeline
+          # transport/workspace geometry. --grep unions the three, then
+          # assert-playwright-titles verifies each of the 3 EXACT test titles ran
+          # and passed at that viewport (identity, not just a count).
+          grep_re='(keeps project controls, workspace navigation|login gate loads without fatal|renders backend track titles, mixed elements)'
+          req_titles=(
+            'keeps project controls, workspace navigation, and keyboard menus reachable'
+            'login gate loads without fatal browser errors or horizontal overflow'
+            'renders backend track titles, mixed elements, and Quarter preview controls'
+          )
           for profile in desktop-compact desktop-minimum desktop-1280 desktop-1440 desktop-1581 desktop-1920; do
             echo "::group::responsive checkpoints @ $profile"
-            pnpm exec playwright test tests/e2e/wp32-responsive-checkpoints.spec.ts --project="$profile" --workers=1
+            # Report name unique to run/attempt/pass/profile; deleted before the
+            # run so a stale file can never satisfy the identity check.
+            rj="$RUNNER_TEMP/pw-responsive-${{ matrix.pass }}-$profile-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
+            rm -f "$rj"
+            PLAYWRIGHT_JSON_OUTPUT_NAME="$rj" pnpm exec playwright test \
+              tests/e2e/wp32-responsive-checkpoints.spec.ts \
+              tests/e2e/golden-path.spec.ts \
+              tests/e2e/wp35-universal-timeline.spec.ts \
+              --grep "$grep_re" --project="$profile" --workers=1 --reporter=json,line
+            test -s "$rj" || { echo "no Playwright JSON report produced for $profile" >&2; exit 1; }
+            node tooling/release/assert-playwright-titles.mjs "$rj" "${req_titles[@]}"
+            rm -f "$rj"
             echo "::endgroup::"
           done
       - name: Verify acceptance teardown
@@ -307,7 +359,12 @@ jobs:
               "$RUNNER_TEMP"/*) ;;
               *) echo "refusing to clean output outside RUNNER_TEMP: $output_path" >&2; exit 1 ;;
             esac
-            rm -rf -- "$output_path" 2>/dev/null || true
+            removed=0
+            for attempt in $(seq 1 15); do
+              if rm -rf -- "$output_path" 2>/dev/null && test ! -e "$output_path"; then removed=1; break; fi
+              sleep 1
+            done
+            test "$removed" -eq 1 || { echo "unable to remove run-owned output after bounded retries: $output_path" >&2; exit 1; }
           done
           test -z "$(git status --porcelain)"
 
@@ -325,36 +382,53 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm exec playwright install chromium
+      - name: Measure the shipped editor entry-bundle graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The soak's initialEditorJsBytes budget measures the DEV entry module
+          # (/src/main.tsx) in the real-service lane and does not substantiate
+          # production bundle size. Measure the real artifact here: dist/index.html
+          # entry chunk + its modulepreload graph, raw AND gzip. Budgets are
+          # generous (a real regression, not noise) and the numbers are evidence.
+          node tooling/release/measure-entry-bundle.mjs \
+            apps/editor-web/dist \
+            test-output/prod-build/entry-bundle.json
+          test -s test-output/prod-build/entry-bundle.json
       - name: Smoke the production bundle through the app's public UI
         shell: bash
         env:
           CI: true
           PLAYWRIGHT_WORKERS: 1
-          JOY_MEDIA_E2E_API_PORT: '4991'
-          JOY_MEDIA_E2E_API_URL: http://127.0.0.1:4991
-          PLAYWRIGHT_BASE_URL: http://127.0.0.1:4990
+          PW_PID_DIR: ${{ runner.temp }}/joy-media-prodsmoke-pids-${{ github.run_id }}-${{ github.run_attempt }}
           PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-pw-report-prodsmoke-${{ github.run_id }}-${{ github.run_attempt }}
           PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-pw-results-prodsmoke-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          # Serve the isolated e2e API and the *production* editor bundle
-          # (vite preview of dist/, with the mirrored /api proxy), then run the
-          # UI-journey specs that exercise import, decode/seek (preview each
-          # asset) and the encode/export Worker path against the shipped
-          # artifact. The dev-server-only white-box decoder specs
-          # (agent-observation-decode, final-encoded-export-decoder,
-          # agent-director-skills — they import('/src/*.ts') at runtime) are
-          # intentionally excluded; they still run in full against the dev
-          # server in acceptance-primary / real-service-acceptance.
-          pnpm --filter @joy-media/api exec tsx ../../tooling/e2e-server.ts &
-          api_pid=$!
-          trap 'kill $api_pid ${preview_pid:-} 2>/dev/null || true' EXIT
-          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:4991/health >/dev/null 2>&1 && break; sleep 1; done
-          curl -fsS http://127.0.0.1:4991/health >/dev/null
-          pnpm --filter @joy-media/editor-web exec vite preview --host 127.0.0.1 --port 4990 --strictPort &
-          preview_pid=$!
-          for i in $(seq 1 45); do curl -fsS http://127.0.0.1:4990/ >/dev/null 2>&1 && break; sleep 1; done
-          curl -fsS http://127.0.0.1:4990/ >/dev/null
+          mkdir -p "$PW_PID_DIR"
+          # Run-scoped ports (not fixed 4990/4991 — this lane shares the
+          # joy-media-ci label with linux-real-services, and two gate runs, or a
+          # v1 run, must not collide). --strictPort so a genuine clash fails loud.
+          api_port=$(( 21000 + (GITHUB_RUN_ID % 3000) ))
+          web_port=$(( api_port + 5000 ))
+          export JOY_MEDIA_E2E_API_PORT="$api_port"
+          export JOY_MEDIA_E2E_API_URL="http://127.0.0.1:${api_port}"
+          export PLAYWRIGHT_BASE_URL="http://127.0.0.1:${web_port}"
+          # Each server is its own process group (setsid) so teardown can signal
+          # the whole tree by pgid — no `pkill -f` sweeping other jobs.
+          setsid pnpm --filter @joy-media/api exec tsx ../../tooling/e2e-server.ts >"$PW_PID_DIR/api.log" 2>&1 &
+          echo $! > "$PW_PID_DIR/api.pid"
+          setsid pnpm --filter @joy-media/editor-web exec vite preview --host 127.0.0.1 --port "$web_port" --strictPort >"$PW_PID_DIR/web.log" 2>&1 &
+          echo $! > "$PW_PID_DIR/web.pid"
+          for i in $(seq 1 60); do curl -fsS "http://127.0.0.1:${api_port}/health" >/dev/null 2>&1 && break; sleep 1; done
+          curl -fsS "http://127.0.0.1:${api_port}/health" >/dev/null
+          for i in $(seq 1 45); do curl -fsS "http://127.0.0.1:${web_port}/" >/dev/null 2>&1 && break; sleep 1; done
+          curl -fsS "http://127.0.0.1:${web_port}/" >/dev/null
+          # Serve the *production* editor bundle (vite preview of dist/, mirrored
+          # /api proxy) + the isolated e2e API; run the UI-journey specs that
+          # exercise import, decode/seek and the encode/export Worker path
+          # against the shipped artifact. The dev-server-only white-box decoder
+          # specs stay in acceptance-primary / real-service-acceptance.
           pnpm exec playwright test \
             tests/e2e/authenticated-smoke.spec.ts \
             tests/e2e/wp32-real-project-journey.spec.ts \
@@ -365,20 +439,31 @@ jobs:
         if: always()
         shell: bash
         env:
+          PW_PID_DIR: ${{ runner.temp }}/joy-media-prodsmoke-pids-${{ github.run_id }}-${{ github.run_attempt }}
           PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-pw-report-prodsmoke-${{ github.run_id }}-${{ github.run_attempt }}
           PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-pw-results-prodsmoke-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          for output_path in "$PLAYWRIGHT_HTML_REPORT" "$PLAYWRIGHT_TEST_RESULTS_DIR"; do
+          alive() { kill -0 "$1" 2>/dev/null; }
+          for name in api web; do
+            pid_file="$PW_PID_DIR/$name.pid"
+            [ -s "$pid_file" ] || continue
+            pid=$(cat "$pid_file")
+            kill -TERM -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+            for i in $(seq 1 15); do alive "$pid" || break; sleep 1; done
+            if alive "$pid"; then kill -KILL -"$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true; sleep 2; fi
+            alive "$pid" && { echo "prod-smoke $name server $pid survived teardown" >&2; exit 1; } || true
+          done
+          for output_path in "$PLAYWRIGHT_HTML_REPORT" "$PLAYWRIGHT_TEST_RESULTS_DIR" "$PW_PID_DIR"; do
             case "$output_path" in "$RUNNER_TEMP"/*) rm -rf -- "$output_path" 2>/dev/null || true ;; esac
           done
-          pkill -f 'vite preview' 2>/dev/null || true
-          pkill -f 'tooling/e2e-server' 2>/dev/null || true
           test -z "$(git status --porcelain)"
 
   real-service-acceptance:
     name: real-service-acceptance (pass ${{ matrix.pass }})
     runs-on: [self-hosted, linux, x64, joy-media-acceptance]
+    env:
+      JOY_MEDIA_CI_LANE_MODE: full
     needs: [validate-candidate, acceptance-primary, acceptance-responsive, windows-worker-clean]
     strategy:
       fail-fast: false
@@ -398,6 +483,7 @@ jobs:
           [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
           test "${JOY_MEDIA_CI_ACCEPTANCE_PROFILE:-}" = 'real-services' || { echo 'JOY_MEDIA_CI_ACCEPTANCE_PROFILE=real-services is required' >&2; exit 1; }
           test "${JOY_MEDIA_CI_ACCEPTANCE_WORKER:-}" = 'disposable' || { echo 'JOY_MEDIA_CI_ACCEPTANCE_WORKER=disposable is required' >&2; exit 1; }
+          test "${JOY_MEDIA_CI_LANE_MODE:-}" = 'full' || { echo 'JOY_MEDIA_CI_LANE_MODE=full is required for the non-P3 lane' >&2; exit 1; }
           test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}" || { echo 'OpenCLI profiles are forbidden on acceptance runners' >&2; exit 1; }
           command -v node >/dev/null || { echo 'Node 22 is required on the acceptance runner' >&2; exit 1; }
           corepack enable pnpm
@@ -407,6 +493,16 @@ jobs:
             echo 'JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND must point to the isolated real-service acceptance harness' >&2
             exit 1
           }
+          # Durable evidence retention needs a persistent location OUTSIDE the
+          # checkout and _work/_temp (both are wiped between jobs). The runner
+          # operator sets this; e.g. /opt/actions-runner/ci-evidence.
+          evidence_root="${JOY_MEDIA_CI_EVIDENCE_ROOT:-}"
+          test -n "$evidence_root" || { echo 'JOY_MEDIA_CI_EVIDENCE_ROOT must point to a persistent evidence directory outside _work' >&2; exit 1; }
+          mkdir -p "$evidence_root"
+          test -d "$evidence_root" && test -w "$evidence_root" || { echo "JOY_MEDIA_CI_EVIDENCE_ROOT is not a writable directory: $evidence_root" >&2; exit 1; }
+          case "$evidence_root" in
+            *"$RUNNER_WORKSPACE"* | *"/_work/"* | *"/_temp/"*) echo "JOY_MEDIA_CI_EVIDENCE_ROOT must be outside the checkout / _work / _temp: $evidence_root" >&2; exit 1 ;;
+          esac
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm exec playwright install chromium
@@ -440,6 +536,7 @@ jobs:
           printf '%s' "$WINDOWS_EVIDENCE_B64" | base64 --decode > test-output/windows/acceptance.json
           test -s test-output/windows/acceptance.json
       - name: Run authenticated real-service desktop acceptance and evidence
+        id: harness
         shell: bash
         run: |
           set -euo pipefail
@@ -468,6 +565,85 @@ jobs:
         run: |
           set -euo pipefail
           pnpm run release:gate
+      - name: Retain real-service evidence (durable, redacted, checksum-verified)
+        if: always()
+        shell: bash
+        env:
+          JOY_MEDIA_EVIDENCE_PASS: ${{ matrix.pass }}
+        run: |
+          set -uo pipefail
+          # Pass 1 and pass 2 run serially on the one joy-media-acceptance
+          # runner; pass 2's checkout `git clean`s pass 1's test-output/. This
+          # copies an EXPLICIT allowlist of structured evidence, sanitizes it
+          # (literal/base64/url-encoded secrets, Bearer headers, presigned
+          # params), leak-guards it, writes MANIFEST.sha256/.json, and PERSISTS
+          # it to $JOY_MEDIA_CI_EVIDENCE_ROOT (outside _work), re-verifying every
+          # file against the manifest. Non-zero exit => the pass fails. Shared
+          # impl, exercised by evidence-retention.test.mjs.
+          bash ops/self-hosted/linux-runner/retain-evidence.sh \
+            "$PWD" \
+            "${{ runner.temp }}/real-service-evidence-p${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}" \
+            "$JOY_MEDIA_CI_EVIDENCE_ROOT"
+      - name: Verify retained evidence (required — missing evidence fails the gate)
+        if: always()
+        shell: bash
+        env:
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+        run: |
+          set -euo pipefail
+          root="$JOY_MEDIA_CI_EVIDENCE_ROOT/$CANDIDATE_SHA/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-p${{ matrix.pass }}"
+          test -d "$root" || { echo "durable evidence dir missing: $root" >&2; exit 1; }
+          test -s "$root/MANIFEST.sha256" && test -s "$root/MANIFEST.json" || { echo 'evidence manifest missing' >&2; exit 1; }
+          ( cd "$root" && sha256sum -c MANIFEST.sha256 ) || { echo 'evidence checksum verification FAILED' >&2; exit 1; }
+          test ! -s "$root/REDACTION-FAILURES.txt" || { echo 'a staged evidence file failed redaction (quarantined) — see REDACTION-FAILURES.txt' >&2; cat "$root/REDACTION-FAILURES.txt" >&2; exit 1; }
+          # teardown.json is required for EVERY pass outcome and must be clean.
+          test -s "$root/test-output/operations/teardown.json" || { echo 'teardown.json missing from retained evidence' >&2; exit 1; }
+          node -e '
+            const r = require(process.argv[1]);
+            if (r.clean !== true) { console.error("teardown not clean: " + JSON.stringify(r.residue || r)); process.exit(1); }
+            console.error("teardown verified clean: " + (r.verified || []).join(", "));
+          ' "$root/test-output/operations/teardown.json"
+          # If the harness step succeeded, the FULL required evidence set must be present.
+          if [ "$HARNESS_OUTCOME" = "success" ]; then
+            required_evidence=(
+              test-output/browser/journeys.json
+              test-output/browser/real-service-profile-matrix.json
+              test-output/release-performance/polling.json
+              test-output/release-performance/effects-soak.json
+              test-output/release-performance/timeline-integrity.json
+              test-output/release-performance/editor.json
+              test-output/delivery/result.json
+              test-output/operations/restore.json
+              test-output/windows/acceptance.json
+              test-output/ci-janitor/inventory.json
+            )
+            if [ "${JOY_MEDIA_CI_LANE_MODE:-full}" = "p3" ]; then
+              required_evidence+=(test-output/browser/p3-export-matrix.json)
+            fi
+            for rel in "${required_evidence[@]}"; do
+              test -s "$root/$rel" || { echo "required evidence missing after a successful harness run: $rel" >&2; exit 1; }
+            done
+          else
+            echo "harness outcome=$HARNESS_OUTCOME — a journey-failure.json is expected:"
+            test -s "$root/test-output/browser/journey-failure.json" && echo "  present" || echo "  (not written — pre-journey failure)"
+          fi
+          echo "retained evidence verified: $root"
+      - name: Record artifact upload policy in durable evidence store
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$JOY_MEDIA_CI_EVIDENCE_ROOT/$CANDIDATE_SHA/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-p${{ matrix.pass }}"
+          test -d "$root" || { echo "durable evidence dir missing: $root" >&2; exit 1; }
+          {
+            printf 'candidate_sha=%s\n' "$CANDIDATE_SHA"
+            printf 'run_id=%s\n' "$GITHUB_RUN_ID"
+            printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+            printf 'pass=%s\n' '${{ matrix.pass }}'
+            printf 'upload_outcome=disabled\n'
+            printf 'source=durable-evidence-store\n'
+            printf 'reason=github-artifact-upload-disabled-by-policy\n'
+          } > "$root/ARTIFACT-UPLOAD-STATUS.txt"
       - name: Verify real-service acceptance teardown
         if: always()
         shell: bash
@@ -492,6 +668,142 @@ jobs:
             console.error("teardown verified clean: " + (r.verified || []).join(", "));
           '
 
+  p3-real-services:
+    name: p3-real-services (pass ${{ matrix.pass }})
+    runs-on: [self-hosted, linux, x64, joy-media-acceptance]
+    needs: [validate-candidate]
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        pass: [1, 2]
+    # The P3 matrix is currently sequential inside one browser process. This
+    # lane has an explicit deadline plus cleanup reserve so it cannot be
+    # mistaken for the 120-minute broad lane. Re-measure before claiming a
+    # shorter target or adding shards.
+    timeout-minutes: 360
+    env:
+      JOY_MEDIA_CI_LANE_MODE: p3
+      JOY_P3_EXECUTION_DEADLINE_MS: 19800000
+      JOY_P3_CLEANUP_RESERVE_MS: 1200000
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify isolated P3 prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          test "${JOY_MEDIA_CI_LANE_MODE:-}" = 'p3' || { echo 'JOY_MEDIA_CI_LANE_MODE=p3 is required' >&2; exit 1; }
+          test "${JOY_MEDIA_CI_ACCEPTANCE_PROFILE:-}" = 'real-services' || { echo 'JOY_MEDIA_CI_ACCEPTANCE_PROFILE=real-services is required' >&2; exit 1; }
+          test "${JOY_MEDIA_CI_ACCEPTANCE_WORKER:-}" = 'disposable' || { echo 'JOY_MEDIA_CI_ACCEPTANCE_WORKER=disposable is required' >&2; exit 1; }
+          test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}" || { echo 'OpenCLI profiles are forbidden on acceptance runners' >&2; exit 1; }
+          command -v node >/dev/null || { echo 'Node is required on the P3 runner' >&2; exit 1; }
+          corepack enable pnpm
+          pnpm --version
+          acceptance_command="${JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND:-}"
+          test -n "$acceptance_command" && test -x "$acceptance_command" || { echo 'JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND must point to the isolated real-service acceptance harness' >&2; exit 1; }
+          evidence_root="${JOY_MEDIA_CI_EVIDENCE_ROOT:-}"
+          test -n "$evidence_root" || { echo 'JOY_MEDIA_CI_EVIDENCE_ROOT must point to persistent evidence outside _work' >&2; exit 1; }
+          mkdir -p "$evidence_root"
+          test -w "$evidence_root" || { echo "evidence root is not writable: $evidence_root" >&2; exit 1; }
+          case "$evidence_root" in *"$RUNNER_WORKSPACE"*|*"/_work/"*|*"/_temp/"*) echo "evidence root must be outside checkout/_work/_temp: $evidence_root" >&2; exit 1;; esac
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec playwright install chromium
+      - name: CI namespace janitor — inventory orphaned schemas/buckets
+        shell: bash
+        run: |
+          set -euo pipefail
+          node ops/self-hosted/linux-runner/ci-namespace-janitor.mjs
+          test -s test-output/ci-janitor/inventory.json
+      - name: Run bounded P3-only real-service qualification
+        id: harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND" "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "${{ matrix.pass }}"
+          test -s test-output/browser/p3-export-matrix.json
+          test -s test-output/browser/p3-lane-evidence.json
+      - name: Retain P3 evidence (durable, redacted, checksum-verified)
+        if: always()
+        shell: bash
+        env:
+          JOY_MEDIA_EVIDENCE_PASS: ${{ matrix.pass }}
+        run: |
+          set -uo pipefail
+          bash ops/self-hosted/linux-runner/retain-evidence.sh \
+            "$PWD" \
+            "${{ runner.temp }}/p3-evidence-p${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}" \
+            "$JOY_MEDIA_CI_EVIDENCE_ROOT/p3"
+      - name: Verify retained P3 evidence
+        if: always()
+        shell: bash
+        env:
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+        run: |
+          set -euo pipefail
+          root="$JOY_MEDIA_CI_EVIDENCE_ROOT/p3/$CANDIDATE_SHA/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-p${{ matrix.pass }}"
+          test -d "$root" || { echo "durable P3 evidence dir missing: $root" >&2; exit 1; }
+          test -s "$root/MANIFEST.sha256" && test -s "$root/MANIFEST.json" || { echo 'P3 evidence manifest missing' >&2; exit 1; }
+          ( cd "$root" && sha256sum -c MANIFEST.sha256 ) || { echo 'P3 evidence checksum verification failed' >&2; exit 1; }
+          test -s "$root/test-output/operations/teardown.json" || { echo 'P3 teardown.json missing' >&2; exit 1; }
+          node -e 'const r=require(process.argv[1]); if(r.clean!==true) process.exit(1)' "$root/test-output/operations/teardown.json"
+          if [ "$HARNESS_OUTCOME" = success ]; then
+            for rel in \
+              test-output/browser/p3-export-matrix.json \
+              test-output/browser/p3-lane-evidence.json \
+              test-output/browser/p3-case-evidence.json \
+              test-output/browser/p3-progress.jsonl \
+              test-output/browser/p3-child-stdout-tail.txt; do
+              test -s "$root/$rel" || { echo "required P3 evidence missing: $rel" >&2; exit 1; }
+            done
+            node --input-type=module - \
+              "$root/test-output/browser/p3-case-evidence.json" \
+              "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "${{ matrix.pass }}" <<'NODE'
+            import { readFile } from 'node:fs/promises';
+            import { validateP3CaseEvidenceForSuccess } from './ops/self-hosted/linux-runner/p3-case-evidence.mjs';
+            // Node places the stdin marker at argv[1], so workflow arguments begin at argv[2].
+            const [evidencePath, candidateSha, runId, runAttempt, pass] = process.argv.slice(2);
+            const aggregate = JSON.parse(await readFile(evidencePath, 'utf8'));
+            validateP3CaseEvidenceForSuccess(aggregate, { candidateSha, runId, runAttempt, pass });
+          NODE
+            # The successful P3 child may legitimately emit zero bytes on stderr
+            # (it is a diagnostic tail, not a required-content stream). Require
+            # existence, not non-emptiness, so a clean 0-byte tail still satisfies
+            # the required-evidence loop; checksum/teardown/provenance above
+            # already guard against the file being absent or replaced.
+            test -f "$root/test-output/browser/p3-child-stderr-tail.txt" || { echo "required P3 evidence missing: test-output/browser/p3-child-stderr-tail.txt" >&2; exit 1; }
+          fi
+      - name: Record P3 artifact upload policy in durable evidence store
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$JOY_MEDIA_CI_EVIDENCE_ROOT/p3/$CANDIDATE_SHA/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-p${{ matrix.pass }}"
+          test -d "$root"
+          {
+            printf 'candidate_sha=%s\n' "$CANDIDATE_SHA"
+            printf 'run_id=%s\n' "$GITHUB_RUN_ID"
+            printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+            printf 'pass=%s\n' '${{ matrix.pass }}'
+            printf 'upload_outcome=disabled\n'
+            printf 'source=durable-evidence-store\n'
+            printf 'reason=github-artifact-upload-disabled-by-policy\n'
+          } > "$root/ARTIFACT-UPLOAD-STATUS.txt"
+      - name: Verify P3 teardown
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}"
+          test -z "$(git status --porcelain)"
+          test -s test-output/operations/teardown.json
+          node -e 'const r=require("./test-output/operations/teardown.json"); if(r.clean!==true) process.exit(1)'
+
   gate-summary:
     name: gate-summary
     runs-on: [self-hosted, linux, x64, joy-media-ci]
@@ -503,6 +815,7 @@ jobs:
         acceptance-responsive,
         prod-build-smoke,
         real-service-acceptance,
+        p3-real-services,
       ]
     if: always()
     steps:
@@ -514,15 +827,13 @@ jobs:
       - name: Require every lane green on both isolated passes
         shell: bash
         env:
-          LANE_RESULTS: ${{ toJSON(needs.*.result) }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
           set -euo pipefail
-          # Structured evaluation (tooling/release/src/ci-gate-summary.ts,
-          # unit-tested in ci-gate-summary.test.ts — success / failure /
-          # cancelled / skipped / missing-job / malformed cases): JSON.parse the
-          # results array, require its length to equal the expected lane count (a
-          # missing required job -> short array / "skipped"), and require every
-          # entry to be exactly "success".
-          # 6 lanes: linux-real-services, windows-worker-clean, acceptance-primary,
-          # acceptance-responsive, prod-build-smoke, real-service-acceptance.
-          node --experimental-strip-types tooling/release/src/ci-gate-summary.ts "$LANE_RESULTS" 6
+          # Structured, NAME-keyed evaluation (tooling/release/src/ci-gate-summary.ts,
+          # unit-tested): JSON.parse toJSON(needs), require its key set to be
+          # EXACTLY these lane names (a lane silently dropped from `needs:`, or an
+          # unexpected extra lane, fails), and require every lane's `result` to be
+          # exactly "success" (failure / cancelled / skipped / timed_out all fail).
+          node --experimental-strip-types tooling/release/src/ci-gate-summary.ts "$NEEDS_JSON" \
+            'linux-real-services,windows-worker-clean,acceptance-primary,acceptance-responsive,prod-build-smoke,real-service-acceptance,p3-real-services'

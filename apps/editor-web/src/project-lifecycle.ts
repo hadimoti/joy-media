@@ -1,10 +1,16 @@
 import type { ArtifactStore } from '@joy-media/commands';
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import { BrowserProjectStore } from '@joy-media/project-persistence';
-import type { JoyProjectV1, SpikeProject, WorkflowGraphV2 } from '@joy-media/project-schema';
+import type {
+  JoyProjectV1,
+  LookInstancesDocument,
+  SpikeProject,
+  WorkflowGraphV2,
+} from '@joy-media/project-schema';
 import {
   CREATIVE_ARTIFACT_LOG_KEY,
   EditorSession,
+  LOOK_INSTANCES_LOG_KEY,
   WORKFLOW_GRAPH_LOG_KEY,
 } from './editor-session.js';
 import { loadAudioStateFrom, removeAudioState, saveAudioStateTo } from './audio-session.js';
@@ -36,6 +42,13 @@ export interface ProjectDocumentBundle {
   readonly visual: JoyProjectV1;
   readonly graph?: WorkflowGraphV2;
   readonly artifacts?: ArtifactStore;
+  /**
+   * The canonical Look Instances document. Always present (an empty document
+   * for a project that never applied a Look) so a bundle that carries Looks is
+   * never distinguishable from one written by an older build only by omission —
+   * an older reader that ignores the key is visibly dropping content.
+   */
+  readonly lookInstances: LookInstancesDocument;
 }
 
 export interface DuplicateLocalProjectOptions {
@@ -221,17 +234,25 @@ export function duplicateLocalProject(
     source.artifacts === undefined
       ? undefined
       : remapProject(source.artifacts, assetIdMap, derivativeIdMap);
+  // The Look Instances document is copied with the new project id. Its
+  // `entityBindings` name visual-object ids, which a duplicate keeps unchanged,
+  // so only the document id itself moves.
+  const lookInstances =
+    Object.keys(source.lookInstances.instances).length === 0
+      ? undefined
+      : remapProject({ ...source.lookInstances, id }, assetIdMap, derivativeIdMap);
 
   // Materialize one clean baseline snapshot for each enabled persistence family.
   new EditorSession(
     storage,
     timeline,
     visual,
-    graph === undefined && artifacts === undefined
+    graph === undefined && artifacts === undefined && lookInstances === undefined
       ? {}
       : {
           ...(graph === undefined ? {} : { graph }),
           ...(artifacts === undefined ? {} : { artifacts }),
+          ...(lookInstances === undefined ? {} : { lookInstances }),
         },
   );
   saveAudioStateTo(storage, id, loadAudioStateFrom(storage, entry.id));
@@ -256,6 +277,7 @@ export function readProjectBundle(
   const bundle: ProjectDocumentBundle = {
     timeline: session.timelineProject,
     visual: session.visualProject,
+    lookInstances: session.lookInstances,
   };
   if (session.graphEnabled) {
     return { ...bundle, graph: session.workflowGraph, artifacts: session.artifacts };
@@ -279,6 +301,7 @@ export function purgeLocalProject(storage: BrowserKeyValueStore, entry: ProjectC
   new BrowserProjectStore(storage, VISUAL_LOG_KEY).deleteProject(entry.visualProjectId);
   new BrowserProjectStore(storage, WORKFLOW_GRAPH_LOG_KEY).deleteProject(entry.id);
   new BrowserProjectStore(storage, CREATIVE_ARTIFACT_LOG_KEY).deleteProject(entry.id);
+  new BrowserProjectStore(storage, LOOK_INSTANCES_LOG_KEY).deleteProject(entry.timelineProjectId);
   removeAudioState(storage, entry.id);
   removeAgentIdempotencyRecords(storage, entry.id);
   new ProjectOperationLedger(storage, entry.id).removeAll();

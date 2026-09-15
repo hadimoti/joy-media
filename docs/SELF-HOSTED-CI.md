@@ -147,6 +147,60 @@ canary, and rollback.
 The workflow does not upload GitHub artifacts by default: artifact storage is separate from runner
 minutes. If a release lane later uploads evidence, it must be the minimal sanitized set above.
 
+## v2 release-candidate self-hosted CI
+
+`.github/workflows/release-candidate-v2.yml` is the proposed successor to `release-candidate.yml`,
+dispatched manually with a full 40-character candidate SHA. It runs the same lane inventory
+described above, but encodes the clean-state repeat explicitly as two in-workflow passes per
+matrix lane and restructures the browser viewport matrix so each pass stays inside its lane's
+timeout budget. It depends on the same `self-hosted` runners (`joy-media-ci`,
+`joy-media-worker`, `joy-media-acceptance`) and on the same runner-local env vars
+(`JOY_MEDIA_CI_RELEASE_COMMAND`, `JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND`,
+`JOY_MEDIA_CI_EVIDENCE_ROOT`).
+
+### Durable evidence root
+
+Both the real-service and P3 lanes write redacted, checksum-verified evidence outside the
+checkout and the runner's `_work`/`_temp` to the path supplied by `JOY_MEDIA_CI_EVIDENCE_ROOT`
+(sibling directory of `JOY_MEDIA_CI_EVIDENCE_ROOT/` for the real-service lane,
+`JOY_MEDIA_CI_EVIDENCE_ROOT/p3/` for the P3 lane). The namespace is
+`$JOY_MEDIA_CI_EVIDENCE_ROOT/$CANDIDATE_SHA/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-p<pass>`
+for the real-service lane and
+`$JOY_MEDIA_CI_EVIDENCE_ROOT/p3/$CANDIDATE_SHA/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-p<pass>`
+for the P3 lane. Each pass writes a `MANIFEST.sha256`/`MANIFEST.json` pair,
+re-verifies every file against the manifest, and is required to satisfy the
+`Verify retained evidence` step in addition to any teardown check. The durable store is
+authoritative evidence regardless of platform artifact state.
+
+### Local preservation at `H:\VPS-DATA`
+
+The v2 evidence directory is mirrored to a local Windows host at `H:\VPS-DATA` (the operator's
+preservation path on the same Windows host the runner sits on). `H:\VPS-DATA` holds the
+durable evidence across runs so the operator can inspect, hand off, or rotate evidence
+without leaving the Windows host. The mirror is a copy, not a substitute for the runner's
+authoritative `JOY_MEDIA_CI_EVIDENCE_ROOT`.
+
+### VPS Gbrain metadata
+
+A subset of Gbrain metadata (run identity, candidate SHA, pass, evidence root layout,
+upload-policy receipt, and the names of the retained evidence files) is also retained on
+the production Sweden VPS so Gbrain can correlate the v2 run with the corresponding
+orchestrator run history. The VPS Gbrain metadata is index-only; it never owns the
+authoritative evidence bytes. Operator-only buckets apply; never assume the public
+gh-pages index now reflects v2 runs.
+
+### v2 artifact upload policy
+
+v2 does not call `actions/upload-artifact` or `actions/download-artifact`. Both the
+real-service and the P3 pass instead write an `ARTIFACT-UPLOAD-STATUS.txt` receipt into
+their durable evidence directory with the fields `candidate_sha`, `run_id`, `attempt`,
+`pass`, `upload_outcome=disabled`, `source=durable-evidence-store`, and
+`reason=github-artifact-upload-disabled-by-policy`. The upload-policy unit test in
+`tooling/release/src/ci-artifact-policy.test.ts` asserts that contract directly against
+`release-candidate-v2.yml`. GitHub-hosted Actions minutes/quota is still exhausted on the
+GHA side; v2 keeps running entirely on the self-hosted runner set and does not depend on
+GitHub artifact quota being repaired.
+
 ## Re-registering a runner
 
 If the host or runner directory is replaced, create a short-lived registration token with GitHub CLI (do not save it in the repository), download the current Windows x64 runner from the official `actions/runner` release, and configure it with the labels above:

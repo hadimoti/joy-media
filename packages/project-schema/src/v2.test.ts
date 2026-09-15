@@ -3,8 +3,9 @@ import type { SpikeProject } from './model.js';
 import { rational } from './time.js';
 import { migrateV0ToV1, migrateV1ToV2, migrateToLatest } from './migration.js';
 import { validateJoyProjectV1 } from './v1.js';
-import { validateJoyProjectV2, isJoyProjectV2, LATEST_PROJECT_SCHEMA_VERSION } from './v2.js';
+import { validateJoyProjectV2, isJoyProjectV2, V2_SCHEMA_VERSION } from './v2.js';
 import type { JoyProjectV2 } from './v2.js';
+import { LATEST_PROJECT_SCHEMA_VERSION, isJoyProjectV3 } from './v3.js';
 import {
   applyDualLensFlags,
   projectWithoutDualLens,
@@ -128,13 +129,19 @@ describe('schema v2 — Dual Lens durable slices', () => {
       expect(Object.keys(project.artifacts ?? {})).toEqual([]);
     });
 
-    it('is idempotent through migrateToLatest', () => {
+    it('the v1 -> v2 step alone produces the v2 shape', () => {
+      const { project } = migrateV1ToV2(v1());
+      expect(project.schemaVersion).toBe(V2_SCHEMA_VERSION);
+      expect(isJoyProjectV2(project)).toBe(true);
+    });
+
+    it('is idempotent through migrateToLatest (now targeting v3)', () => {
       const once = migrateToLatest(v1());
       const twice = migrateToLatest(once);
 
       expect(twice).toEqual(once);
       expect(twice.schemaVersion).toBe(LATEST_PROJECT_SCHEMA_VERSION);
-      expect(isJoyProjectV2(twice)).toBe(true);
+      expect(isJoyProjectV3(twice)).toBe(true);
     });
 
     it('round trips through JSON unchanged', () => {

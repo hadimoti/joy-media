@@ -14,7 +14,8 @@
   "scripts": {
     "build": "tsc -b",
     "dev": "tsx src/server.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "release:publish": "tsx src/scripts/publish-release.ts"
   },
   "devDependencies": {
     "@types/nodemailer": "^8.0.1",
@@ -30,7 +31,7 @@
     "@joy-media/job-protocol": "workspace:*",
     "@joy-media/project-schema": "workspace:*",
     "@joy-media/provider-sdk": "workspace:*",
-    "nodemailer": "^9.0.5",
+    "nodemailer": "^9.1.1",
     "pg": "^8.22.0"
   }
 }

@@ -79,10 +79,16 @@ test.describe('built-in JOY Agent BYOK security envelope', () => {
     const composer = page.getByLabel('Message Joy Code');
     await composer.fill('Update the selected caption style');
     await composer.press('Enter');
-    await expect(page.getByText('Provider returned invalid proposal JSON')).toBeVisible({
+    await expect(page.getByText('JOY could not validate this proposal safely')).toBeVisible({
       timeout: 20_000,
     });
-    expect(provider.requests).toBeGreaterThanOrEqual(2);
+    await expect(page.getByText('Provider returned invalid proposal JSON')).toHaveCount(0);
+    expect(provider.stages.slice(0, 3)).toEqual([
+      'forced-probe',
+      'probe-continuation',
+      'plan-only-probe',
+    ]);
+    expect(provider.stages).toContain('structured-read');
     await expect(page.locator('[data-agent-preview="true"]')).toHaveCount(0);
     expect(await scanForSentinel(page, 'JOY_E2E_BYOK_SENTINEL_DO_NOT_PERSIST')).toEqual([]);
   });

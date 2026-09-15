@@ -207,6 +207,54 @@ export const TEXT_TEMPLATES: readonly TextTemplateV1[] = [
     fill: { kind: 'solid', color: '#ffffff' },
     stroke: { color: '#f6c453', widthPx: 2, opacity: 1 },
   }),
+  // Persian / RTL treatments — Vazirmatn (OFL, already bundled). The retired
+  // commercial-foundry gate stays closed: these reference the deployed
+  // Fontsource face only.
+  template(
+    'rtl-editorial-title',
+    'RTL Editorial Title',
+    'Right-to-left title with editorial hierarchy',
+    'Titles',
+    'داستان از اینجا شروع می‌شود',
+    {
+      fontFamily: 'Vazirmatn Variable',
+      fontSizePx: 96,
+      fontWeight: 700,
+      direction: 'rtl',
+      align: 'start',
+      fill: { kind: 'solid', color: '#f8f2e6' },
+    },
+  ),
+  template(
+    'rtl-name-role',
+    'RTL Name + Role',
+    'Right-to-left name and role blocks',
+    'Lower thirds',
+    'هادی متین\nکارگردان خلاق',
+    {
+      fontFamily: 'Vazirmatn Variable',
+      fontSizePx: 70,
+      fontWeight: 700,
+      direction: 'rtl',
+      align: 'start',
+    },
+    [run('هادی متین'), run('\nکارگردان خلاق', '#f6c453')],
+  ),
+  template(
+    'rtl-quote-focus',
+    'RTL Quote Focus',
+    'Right-to-left quote with a warm keyword',
+    'Social',
+    'ایده‌ها دیدنی می‌شوند',
+    {
+      fontFamily: 'Vazirmatn Variable',
+      fontSizePx: 84,
+      fontWeight: 500,
+      direction: 'rtl',
+      align: 'start',
+    },
+    [run('ایده‌ها '), run('دیدنی', '#f6c453'), run(' می‌شوند')],
+  ),
 ];
 
 export function textTemplateById(id: string): TextTemplateV1 | undefined {

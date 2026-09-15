@@ -8,6 +8,17 @@ export interface ProjectMediaSource {
   readonly source: 'opfs' | 'cloud' | 'reference';
 }
 
+/**
+ * A host-only original/proxy byte handle for local observation. It deliberately
+ * exposes neither an object URL nor a storage location, so it cannot be handed
+ * to a model as a fetch target.
+ */
+export interface ProjectMediaObservationSource {
+  readonly blob: Blob;
+  readonly mimeType: string;
+  readonly source: 'opfs' | 'cloud';
+}
+
 export interface ProjectMediaResolverOptions {
   readonly projectId: string;
   /** Project-scoped API calls wait until the authenticated owner is known. */
@@ -37,7 +48,9 @@ function mediaMimeType(asset: BrowserAsset | undefined, blob: Blob): string {
 export class ProjectMediaResolver {
   readonly #options: ProjectMediaResolverOptions;
   readonly #sources = new Map<string, ProjectMediaSource>();
+  readonly #observationSources = new Map<string, ProjectMediaObservationSource>();
   readonly #pending = new Map<string, Promise<ProjectMediaSource>>();
+  #epoch = 0;
 
   constructor(options: ProjectMediaResolverOptions) {
     this.#options = options;
@@ -48,41 +61,75 @@ export class ProjectMediaResolver {
     if (existing !== undefined) return existing;
     const pending = this.#pending.get(assetId);
     if (pending !== undefined) return pending;
-    const request = this.#resolve(assetId).finally(() => this.#pending.delete(assetId));
+    const epoch = this.#epoch;
+    const request = this.#resolve(assetId, epoch).finally(() => {
+      // An older request must not remove a new epoch's in-flight lookup.
+      if (this.#pending.get(assetId) === request) this.#pending.delete(assetId);
+      this.#assertEpoch(epoch);
+    });
     this.#pending.set(assetId, request);
     return request;
   }
 
+  /**
+   * Resolves owner-authorized bytes for the local observation Worker. This is
+   * intentionally unavailable for reference URL fallbacks: a reference clip
+   * must be represented as reference-origin evidence by an explicit adapter,
+   * never silently relabelled as a user's original.
+   */
+  async resolveObservationSource(assetId: string): Promise<ProjectMediaObservationSource> {
+    const existing = this.#observationSources.get(assetId);
+    if (existing !== undefined) return existing;
+    await this.resolve(assetId);
+    const resolved = this.#observationSources.get(assetId);
+    if (resolved !== undefined) return resolved;
+    throw new Error('This media is not available as trusted local observation bytes.');
+  }
+
   clear(): void {
+    this.#epoch += 1;
     for (const source of this.#sources.values()) {
       if (source.source !== 'reference') URL.revokeObjectURL(source.url);
     }
     this.#sources.clear();
+    this.#observationSources.clear();
     this.#pending.clear();
   }
 
-  async #resolve(assetId: string): Promise<ProjectMediaSource> {
+  async #resolve(assetId: string, epoch: number): Promise<ProjectMediaSource> {
     const descriptor = await this.#descriptor(assetId);
+    this.#assertEpoch(epoch);
     const local = await this.#options.originalCache.get(assetId);
+    this.#assertEpoch(epoch);
     if (local !== undefined && (await matchesDescriptor(local, descriptor))) {
-      const source = this.#remember(assetId, {
-        url: URL.createObjectURL(local),
-        mimeType: mediaMimeType(descriptor, local),
-        source: 'opfs',
-      });
+      const source = this.#remember(
+        assetId,
+        {
+          url: URL.createObjectURL(local),
+          mimeType: mediaMimeType(descriptor, local),
+          source: 'opfs',
+        },
+        epoch,
+      );
+      this.#rememberObservationSource(assetId, local, source, epoch);
       return source;
     }
+    this.#assertEpoch(epoch);
 
     if (this.#options.controlPlaneReady === false) {
       if (
         REFERENCE_ASSET_IDS.has(assetId) &&
         (descriptor === undefined || !/^[a-f0-9]{64}$/.test(descriptor.sha256))
       ) {
-        return this.#remember(assetId, {
-          url: `/media/reference/${encodeURIComponent(assetId)}.mp4`,
-          mimeType: 'video/mp4',
-          source: 'reference',
-        });
+        return this.#remember(
+          assetId,
+          {
+            url: `/media/reference/${encodeURIComponent(assetId)}.mp4`,
+            mimeType: 'video/mp4',
+            source: 'reference',
+          },
+          epoch,
+        );
       }
       throw new Error('Authenticated media session is not ready');
     }
@@ -92,27 +139,40 @@ export class ProjectMediaResolver {
       try {
         cloud = await this.#options.client.originalBytes(this.#options.projectId, assetId);
       } catch {
+        this.#assertEpoch(epoch);
         // User-library assets can be placed on another project's timeline.
         // They remain owner-authorized through the shared library endpoint.
         cloud = await this.#options.client.sharedCloudOriginalBytes(assetId);
       }
+      this.#assertEpoch(epoch);
       if (!(await matchesDescriptor(cloud, descriptor)))
         throw new Error(`owner media integrity check failed for ${assetId}`);
-      return this.#remember(assetId, {
-        url: URL.createObjectURL(cloud),
-        mimeType: mediaMimeType(descriptor, cloud),
-        source: 'cloud',
-      });
+      const source = this.#remember(
+        assetId,
+        {
+          url: URL.createObjectURL(cloud),
+          mimeType: mediaMimeType(descriptor, cloud),
+          source: 'cloud',
+        },
+        epoch,
+      );
+      this.#rememberObservationSource(assetId, cloud, source, epoch);
+      return source;
     } catch (error) {
+      this.#assertEpoch(epoch);
       if (
         REFERENCE_ASSET_IDS.has(assetId) &&
         (descriptor === undefined || !/^[a-f0-9]{64}$/.test(descriptor.sha256))
       ) {
-        return this.#remember(assetId, {
-          url: `/media/reference/${encodeURIComponent(assetId)}.mp4`,
-          mimeType: 'video/mp4',
-          source: 'reference',
-        });
+        return this.#remember(
+          assetId,
+          {
+            url: `/media/reference/${encodeURIComponent(assetId)}.mp4`,
+            mimeType: 'video/mp4',
+            source: 'reference',
+          },
+          epoch,
+        );
       }
       throw new Error(
         `Media ${descriptor?.displayName ?? assetId} is unavailable in local cache and owner storage`,
@@ -136,7 +196,15 @@ export class ProjectMediaResolver {
     return projectAssetDescriptor(projectAsset, this.#options.projectId);
   }
 
-  #remember(assetId: string, source: ProjectMediaSource): ProjectMediaSource {
+  #assertEpoch(epoch: number): void {
+    if (epoch !== this.#epoch) throw new Error('Media resolution was invalidated');
+  }
+
+  #remember(assetId: string, source: ProjectMediaSource, epoch: number): ProjectMediaSource {
+    if (epoch !== this.#epoch) {
+      if (source.source !== 'reference') URL.revokeObjectURL(source.url);
+      this.#assertEpoch(epoch);
+    }
     const existing = this.#sources.get(assetId);
     if (existing !== undefined) {
       if (source.source !== 'reference') URL.revokeObjectURL(source.url);
@@ -144,6 +212,26 @@ export class ProjectMediaResolver {
     }
     this.#sources.set(assetId, source);
     return source;
+  }
+
+  #rememberObservationSource(
+    assetId: string,
+    blob: Blob,
+    source: ProjectMediaSource,
+    epoch: number,
+  ): void {
+    if (epoch !== this.#epoch) {
+      // `#remember` has already revoked its owned URL before throwing. Do not
+      // retain late bytes across a clear/relink/project switch.
+      this.#assertEpoch(epoch);
+    }
+    if (source.source === 'reference') return;
+    const existing = this.#observationSources.get(assetId);
+    if (existing !== undefined) return;
+    this.#observationSources.set(
+      assetId,
+      Object.freeze({ blob, mimeType: source.mimeType, source: source.source }),
+    );
   }
 }
 

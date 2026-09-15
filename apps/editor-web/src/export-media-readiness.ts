@@ -36,6 +36,10 @@ export function isExportDurationTimelineClip(
 ): boolean {
   return (
     isExportVisualTimelineClip(elementKind, assetKind) ||
+    // Text is authored program content. It is rendered by the composition
+    // layer rather than pre-decoded as visual media, so it needs its own
+    // duration branch here instead of being treated as a controller.
+    elementKind === 'text' ||
     elementKind === 'html-scene' ||
     elementKind === 'audio' ||
     assetKind === 'audio'

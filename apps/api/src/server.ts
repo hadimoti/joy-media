@@ -27,6 +27,25 @@ import {
 import { PexelsStockVideoProvider } from './pexels-stock-video-provider.js';
 import { PixabayStockVideoProvider } from './pixabay-stock-video-provider.js';
 import { PostgresStockVideoRepository, StockVideoService } from './stock-video.js';
+import {
+  createEd25519EntitlementSigner,
+  DisabledEntitlementSigner,
+  readEntitlementSigningKeyFromCredential,
+} from './entitlement-signing.js';
+import { AccountService, DisabledAccountService } from './account-service.js';
+import {
+  DisabledReleaseMetadataService,
+  ReleaseMetadataService,
+} from './release-metadata-service.js';
+import { readHostedRouteRetirementFlags } from './hosted-route-retirement.js';
+import { readLegacyEditorRetired } from './legacy-editor-retirement.js';
+import {
+  AlchemyJsonRpcTransport,
+  readAlchemyRpcUrlFromCredential,
+  readAlchemyWebhookSigningKeyFromCredential,
+} from './alchemy-transport.js';
+import { UsdcInvoiceLedger } from './usdc-invoice-ledger.js';
+import { DisabledUsdcCheckoutService, UsdcCheckoutService } from './usdc-checkout-service.js';
 
 await start();
 
@@ -101,16 +120,98 @@ async function start(): Promise<void> {
           privateObjectStore,
         })
       : undefined;
+  // Never generated, never committed, never logged — read only from the systemd
+  // LoadCredential= file the owner/Codex provisions out-of-band (wave 4). Absent ->
+  // DisabledEntitlementSigner, same "feature reads as unconfigured, process still starts"
+  // shape as mediaAuth/mailer/telegram above.
+  const entitlementSigningKey = readEntitlementSigningKeyFromCredential((path, encoding) =>
+    readFileSync(path, encoding),
+  );
+  const entitlementSigner =
+    entitlementSigningKey === undefined
+      ? new DisabledEntitlementSigner()
+      : createEd25519EntitlementSigner(entitlementSigningKey);
+  const account =
+    pool === undefined
+      ? new DisabledAccountService()
+      : new AccountService({ pool, signer: entitlementSigner });
+  const releases =
+    pool === undefined
+      ? new DisabledReleaseMetadataService()
+      : new ReleaseMetadataService({ pool });
+  // Every flag defaults false; this deployment's actual environment does not set any of
+  // them, so this line changes nothing about today's routing (wave 4/6 - see
+  // hosted-route-retirement.ts's module doc).
+  const hostedRouteRetirement = readHostedRouteRetirementFlags(process.env);
+  // Coarser kill switch (wave 6) — false in this deployment's actual environment today.
+  const legacyEditorRetired = readLegacyEditorRetired(process.env);
+
+  // USDC checkout (wave 5). Every one of these five conditions is unset in this deployment's
+  // actual environment today, so `usdcCheckout` always resolves to the Disabled fallback here
+  // — see usdc-checkout-service.ts's module doc on the "keep checkout disabled until the
+  // live-wallet test gate is recorded" locked decision. The recipient/contract addresses are
+  // never hardcoded or defaulted: they must come from JOY_MEDIA_USDC_RECIPIENT_ADDRESS /
+  // JOY_MEDIA_USDC_CONTRACT_ADDRESS only after the owner's protected verification of deployed
+  // configuration.
+  const alchemyRpcUrl = readAlchemyRpcUrlFromCredential((path, encoding) =>
+    readFileSync(path, encoding),
+  );
+  const alchemyWebhookSigningKey = readAlchemyWebhookSigningKeyFromCredential((path, encoding) =>
+    readFileSync(path, encoding),
+  );
+  const usdcRecipientAddress = process.env.JOY_MEDIA_USDC_RECIPIENT_ADDRESS;
+  const usdcContractAddress = process.env.JOY_MEDIA_USDC_CONTRACT_ADDRESS;
+  const usdcChainId = Number(process.env.JOY_MEDIA_USDC_CHAIN_ID ?? '1');
+  const usdcCheckout =
+    pool === undefined ||
+    alchemyRpcUrl === undefined ||
+    alchemyWebhookSigningKey === undefined ||
+    usdcRecipientAddress === undefined ||
+    usdcContractAddress === undefined
+      ? new DisabledUsdcCheckoutService()
+      : new UsdcCheckoutService({
+          ledger: new UsdcInvoiceLedger({
+            pool,
+            recipientAddress: usdcRecipientAddress,
+            contractAddress: usdcContractAddress,
+            chainId: usdcChainId,
+          }),
+          account,
+          transport: new AlchemyJsonRpcTransport({ rpcUrl: alchemyRpcUrl }),
+          webhookSigningKey: alchemyWebhookSigningKey,
+          // Also gated independently: even with everything else configured, checkout stays
+          // off unless this is explicitly "true" (the live-wallet test gate).
+          checkoutEnabled: process.env.JOY_MEDIA_USDC_CHECKOUT_ENABLED === 'true',
+          policy: {
+            requiredConfirmations: Number(
+              process.env.JOY_MEDIA_USDC_REQUIRED_CONFIRMATIONS ?? '12',
+            ),
+            expectedChainId: usdcChainId,
+            expectedContractAddress: usdcContractAddress,
+            expectedRecipientAddress: usdcRecipientAddress,
+          },
+        });
+
   createControlPlaneHttpServer({
     controlPlane,
     // Public /v1 (project/job/asset routes) stays disabled unless durable state
     // is configured; /v1/auth is served by mediaAuth regardless (it owns its
     // own allow-list/session tables independently of the control plane).
+    // `legacyEditorRetired` is wave 6's coarser kill switch (see
+    // legacy-editor-retirement.ts) — false in this deployment's actual environment today, so
+    // this line changes nothing about current routing.
     authentication: {
       authenticate: (request) =>
-        durableControlPlane === undefined ? undefined : mediaAuth.authenticate(request),
+        legacyEditorRetired || durableControlPlane === undefined
+          ? undefined
+          : mediaAuth.authenticate(request),
     },
     mediaAuth,
+    account,
+    releases,
+    entitlementPublicKeyPem: entitlementSigner.publicKeyPem,
+    hostedRouteRetirement,
+    usdcCheckout,
     clientAddressResolver,
     audioDenoise: new SpectralDenoiseService(audioDenoiseLedger),
     readiness: productionReadinessOptions({

@@ -5,6 +5,7 @@ import {
   joyCodeConversationKey,
   loadJoyCodeConversation,
   saveJoyCodeConversation,
+  setJoyCodeConversationEntityReferences,
 } from './joy-code-conversation.js';
 import { joyCodeHistoryKey } from './joy-code-history.js';
 
@@ -67,5 +68,49 @@ describe('Joy Code project conversation', () => {
     });
     expect(storage.getItem(legacyKey)).toBe(JSON.stringify(legacy));
     expect(storage.getItem(joyCodeConversationKey(projectId))).toBeNull();
+  });
+
+  it('persists only closed-vocabulary entity references for a future safe follow-up', () => {
+    const storage = memoryStorage();
+    const conversation = setJoyCodeConversationEntityReferences(
+      createJoyCodeConversation('conversation-a', '2026-09-05T10:00:00.000Z'),
+      [
+        {
+          version: 1,
+          projectId: 'timeline-project-a',
+          executionId: 'execution-a',
+          resultRevision: 'revision-a',
+          entityId: 'title-a',
+          entityKind: 'visual-text',
+          label: 'Text layer',
+        },
+        {
+          version: 1,
+          projectId: 'timeline-project-a',
+          executionId: 'execution-a',
+          resultRevision: 'revision-a',
+          entityId: 'title-b',
+          entityKind: 'visual-text',
+          label: 'private title text',
+        },
+      ] as never,
+      '2026-09-05T10:01:00.000Z',
+    );
+    saveJoyCodeConversation(storage, 'project-a', conversation);
+
+    expect(loadJoyCodeConversation(storage, 'project-a')?.recentEntityReferences).toEqual([
+      {
+        version: 1,
+        projectId: 'timeline-project-a',
+        executionId: 'execution-a',
+        resultRevision: 'revision-a',
+        entityId: 'title-a',
+        entityKind: 'visual-text',
+        label: 'Text layer',
+      },
+    ]);
+    expect(storage.getItem(joyCodeConversationKey('project-a'))).not.toContain(
+      'private title text',
+    );
   });
 });

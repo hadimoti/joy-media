@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { buildReferenceSpikeProject } from '@joy-media/test-fixtures';
-import { canonicalBindingKey } from '@joy-media/project-schema';
+import {
+  canonicalBindingKey,
+  emptyLookInstancesDocument,
+  type LookInstancesDocument,
+} from '@joy-media/project-schema';
 import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
 import { compileJoyCodeCompoundDraft } from './joy-code-compound-compiler.js';
 
@@ -36,7 +40,10 @@ describe('Joy Code compound compiler', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.baseRevision).toBe('rev-1');
-    expect(result.proposalHash).toMatch(/^joy-code-proposal-[0-9a-f]+$/);
+    expect(result.proposalHash).toMatch(/^joy-code-proposal-[0-9a-f]{64}$/);
+    expect(result.operationDigest).toMatch(/^[0-9a-f]{64}$/);
+    expect(result.proposalHash).toBe(`joy-code-proposal-${result.operationDigest}`);
+    expect(result.documentChanged).toBe(true);
     expect(result.document.visualObjects['text-clean-title-compound-1-0']).toBeDefined();
     expect(result.document.captionDocuments['captions-fa']?.styleRef).toBe('joy-rtl-classic');
     expect(result.document.pluginData['joy.captions.burnIn']).toBe(true);
@@ -214,6 +221,62 @@ describe('Joy Code compound compiler', () => {
     });
   });
 
+  it('derives an inserted asset family from the canonical document, never the legacy bare-id input', () => {
+    const timeline = timelineWithAudioTrack();
+    const visualProject = {
+      ...INITIAL_EDITOR_PROJECT,
+      assets: {
+        ...INITIAL_EDITOR_PROJECT.assets,
+        'voice-over': {
+          id: 'voice-over',
+          kind: 'audio' as const,
+          displayName: 'Voice over',
+          descriptor: { mimeType: 'audio/wav', durationUs: 1_000_000 },
+        },
+      },
+    };
+    const operation = {
+      id: 'insert-voice',
+      dependsOn: [],
+      kind: 'timeline.insertExistingAsset' as const,
+      compositionId: 'root',
+      targetTrackId: 'audio-track',
+      assetId: 'voice-over',
+      startUs: 0,
+      durationUs: 1_000_000,
+    };
+    const accepted = compileJoyCodeCompoundDraft({
+      planId: 'compound-audio',
+      baseRevision: 'rev-audio',
+      timeline,
+      visualProject,
+      registeredAssetIds: ['voice-over'],
+      operations: [operation],
+    });
+    expect(accepted.ok).toBe(true);
+    if (!accepted.ok) return;
+    expect(accepted.timeline?.commands).toContainEqual(
+      expect.objectContaining({
+        type: 'timeline.insertClip',
+        payload: expect.objectContaining({ expectedFamily: 'audio' }),
+      }),
+    );
+
+    const rejectedBareId = compileJoyCodeCompoundDraft({
+      planId: 'compound-audio-missing',
+      baseRevision: 'rev-audio',
+      timeline,
+      visualProject: INITIAL_EDITOR_PROJECT,
+      // This deprecated input intentionally contains the ID. It is ignored.
+      registeredAssetIds: ['voice-over'],
+      operations: [operation],
+    });
+    expect(rejectedBareId).toMatchObject({
+      ok: false,
+      error: { code: 'JOY_CODE_TIMELINE_ASSET_UNAVAILABLE', operationId: 'insert-voice' },
+    });
+  });
+
   it('removes deleted clip presentation bindings and clip-owned animations', () => {
     const binding = {
       ownerKind: 'color-clip' as const,
@@ -270,4 +333,73 @@ describe('Joy Code compound compiler', () => {
     expect(result.document.propertyAnimations?.[canonicalBindingKey(binding)]).toBeUndefined();
     expect(result.document.universalTimeline?.items).toEqual([]);
   });
+
+  it('rejects a plan with zero operations and no Look Instances write', () => {
+    const result = compileJoyCodeCompoundDraft({
+      planId: 'compound-empty',
+      baseRevision: 'rev-empty',
+      timeline: buildReferenceSpikeProject(),
+      visualProject: INITIAL_EDITOR_PROJECT,
+      registeredAssetIds: [],
+      operations: [],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('JOY_CODE_COMPOUND_EMPTY');
+  });
+
+  it('compiles a Look-Instances-only compound (zero visual operations) for agent detach', () => {
+    const lookInstances: LookInstancesDocument = {
+      ...emptyLookInstancesDocument(INITIAL_EDITOR_PROJECT.id),
+      instances: {},
+    };
+    const input = {
+      planId: 'compound-look-only',
+      baseRevision: 'rev-look-only',
+      timeline: buildReferenceSpikeProject(),
+      visualProject: INITIAL_EDITOR_PROJECT,
+      registeredAssetIds: [],
+      operations: [],
+      lookInstances,
+    };
+    const first = compileJoyCodeCompoundDraft(input);
+    const second = compileJoyCodeCompoundDraft(input);
+    expect(first.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(first.groups).toEqual([]);
+    expect(first.timeline).toBeUndefined();
+    expect(first.documentChanged).toBe(false);
+    expect(first.document).toBe(INITIAL_EDITOR_PROJECT);
+    expect(first.lookInstances).toEqual(lookInstances);
+    expect(first.operationDigest).toMatch(/^[0-9a-f]{64}$/);
+    expect(first.proposalHash).toBe(`joy-code-proposal-${first.operationDigest}`);
+    // Byte-stable, and distinct from the same zero operations without the write.
+    expect(second.operationDigest).toBe(first.operationDigest);
+  });
 });
+
+function timelineWithAudioTrack() {
+  const base = buildReferenceSpikeProject();
+  const root = base.compositions.root!;
+  return {
+    ...base,
+    compositions: {
+      ...base.compositions,
+      root: {
+        ...root,
+        tracks: [
+          ...root.tracks.map((track) => ({ ...track, family: 'visual' as const })),
+          {
+            id: 'audio-track',
+            kind: 'video' as const,
+            family: 'audio' as const,
+            order: root.tracks.length,
+            enabled: true,
+            locked: false,
+            clips: [],
+          },
+        ],
+      },
+    },
+  };
+}

@@ -15,8 +15,13 @@ export const EMPTY_AUDIO_STATE: AudioState = {
   effects: [],
 };
 
-export function loadAudioState(projectId: string): AudioState {
-  return loadAudioStateFrom(window.localStorage, projectId);
+/**
+ * Reads the legacy project-local audio graph through the active editor
+ * persistence capability. Callers must supply the writer-gated storage
+ * surface; audio persistence must never bypass the project writer.
+ */
+export function loadAudioState(storage: BrowserKeyValueStore, projectId: string): AudioState {
+  return loadAudioStateFrom(storage, projectId);
 }
 
 export function loadAudioStateFrom(storage: BrowserKeyValueStore, projectId: string): AudioState {
@@ -56,10 +61,6 @@ export function loadAudioStateFromProject(
     };
   }
   return loadAudioStateFrom(storage, projectId);
-}
-
-export function saveAudioState(projectId: string, state: AudioState): void {
-  saveAudioStateTo(window.localStorage, projectId, state);
 }
 
 export function saveAudioStateTo(

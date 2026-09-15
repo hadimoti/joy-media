@@ -3,10 +3,13 @@ import { describe, expect, it } from 'vitest';
 
 const appSource = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8');
 const historySource = readFileSync(new URL('./export-history.ts', import.meta.url), 'utf8');
-const exportCallback = appSource.slice(
-  appSource.indexOf('const handleExport = useCallback'),
-  appSource.indexOf('const cancelExport = useCallback'),
-);
+const exportStart = appSource.indexOf('const handleExport = useCallback');
+const exportEnd = appSource.indexOf('const cancelExport = useCallback');
+if (exportStart < 0 || exportEnd <= exportStart)
+  throw new Error(
+    'App.tsx no longer contains the handleExport/cancelExport markers this test slices between.',
+  );
+const exportCallback = appSource.slice(exportStart, exportEnd);
 
 describe('App export recovery contract', () => {
   it('hydrates canonical project audio before deriving clip rows on reload', () => {
@@ -25,10 +28,10 @@ describe('App export recovery contract', () => {
     expect(historySource).toContain(
       "export const PROJECT_EXPORT_HISTORY_KEY = 'joy-media.export-history.v2'",
     );
-    expect(appSource).toContain('recoverInterruptedProjectExports(window.localStorage, projectId)');
+    expect(appSource).toContain('recoverInterruptedProjectExports(storage, projectId)');
     expect(appSource).toContain("operationLedger.recoverInterrupted('export')");
     expect(appSource).toContain('const next = upsertProjectEntry(exportHistoryRef.current, entry)');
-    expect(appSource).toContain('saveProjectExportHistory(window.localStorage, projectId, next)');
+    expect(appSource).toContain('saveProjectExportHistory(storage, projectId, next)');
 
     const runningEntry = exportCallback.indexOf("status: 'running'");
     const runningEntryStart = exportCallback.lastIndexOf('recordExportEntry({', runningEntry);
@@ -189,7 +192,7 @@ describe('App export recovery contract', () => {
     );
 
     const historyPersistence = appSource.indexOf(
-      'saveProjectExportHistory(window.localStorage, projectId, next)',
+      'saveProjectExportHistory(storage, projectId, next)',
     );
     const historyStatePublication = appSource.indexOf('setExportHistory(next)', historyPersistence);
     expect(historyPersistence).toBeGreaterThanOrEqual(0);
@@ -221,15 +224,24 @@ describe('App export recovery contract', () => {
     const inputAccepted = exportCallback.indexOf('retryInputsAccepted = true', inputGuard);
     const catchBlock = exportCallback.indexOf('} catch (error) {', inputAccepted);
     const guardedFailure = exportCallback.indexOf('retryInputsAccepted &&', catchBlock);
-    const failedEntry = exportCallback.indexOf(
-      "status: cancelled ? 'interrupted-retryable' : 'failed'",
-      guardedFailure,
+    // The guarded failure entry records a cancelled retry as interrupted-retryable,
+    // an unavailable final-export verification receipt as verification-required, and
+    // any other error as failed.
+    const failedEntry = exportCallback.indexOf('status: cancelled', guardedFailure);
+    const interruptedBranch = exportCallback.indexOf("'interrupted-retryable'", failedEntry);
+    const verificationRequiredBranch = exportCallback.indexOf(
+      "verificationGate?.receipt.status === 'unavailable'",
+      failedEntry,
     );
+    const failedBranch = exportCallback.indexOf("'failed'", verificationRequiredBranch);
 
     expect(inputGuard).toBeGreaterThanOrEqual(0);
     expect(inputAccepted).toBeGreaterThan(inputGuard);
     expect(catchBlock).toBeGreaterThan(inputAccepted);
     expect(guardedFailure).toBeGreaterThan(catchBlock);
     expect(failedEntry).toBeGreaterThan(guardedFailure);
+    expect(interruptedBranch).toBeGreaterThan(failedEntry);
+    expect(verificationRequiredBranch).toBeGreaterThan(interruptedBranch);
+    expect(failedBranch).toBeGreaterThan(verificationRequiredBranch);
   });
 });

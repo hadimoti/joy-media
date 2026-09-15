@@ -17,7 +17,12 @@ import { validateJoyProjectV1 } from './v1.js';
 import type { ArtifactVersionV2, CreativeArtifactV2, WorkflowGraphV2 } from './creative.js';
 import { validateCreativeArtifact, validateWorkflowGraph } from './creative.js';
 
-export const LATEST_PROJECT_SCHEMA_VERSION = 2;
+/**
+ * The last schema version whose top level is the v2 shape. The document's
+ * canonical "latest" lives in `v3.ts` now; this constant stays for the v2
+ * migration tests that assert the v1 -> v2 step in isolation.
+ */
+export const V2_SCHEMA_VERSION = 2;
 
 export interface JoyProjectV2 extends Omit<JoyProjectV1, 'schemaVersion'> {
   readonly schemaVersion: 2;

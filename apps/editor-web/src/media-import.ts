@@ -270,9 +270,13 @@ async function describeTimedMedia(
   } finally {
     element.onloadedmetadata = null;
     element.onerror = null;
+    // Revoke the object URL before detaching the element. revoking after
+    // removeAttribute('src') + load() races with the browser's resource
+    // fetch and surfaces as `net::ERR_FILE_NOT_FOUND (blob:...)` in the
+    // console on the reimport journey.
+    URL.revokeObjectURL(url);
     element.removeAttribute('src');
     element.load();
-    URL.revokeObjectURL(url);
   }
 }
 

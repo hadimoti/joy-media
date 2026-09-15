@@ -64,3 +64,40 @@ export type {
   AudioRenderRequest,
 } from './offline.js';
 export { renderOfflineAudio } from './offline.js';
+
+export type {
+  AudioChannelObservation,
+  AudioCompositionTimeMapping,
+  AudioObservationAnalysis,
+  AudioObservationAnalysisOptions,
+  AudioObservationSource,
+  AudioObservationWindow,
+  AudioObservationWindowRequest,
+  AudioPeakEvidence,
+  AudioRateRatio,
+  AudioResamplingDeclaration,
+} from './observation-analysis.js';
+export {
+  analyzeAudioObservationWindow,
+  assertAudioObservationWindow,
+  AudioObservationError,
+  DEFAULT_AUDIO_SILENCE_THRESHOLD_DB,
+  extractAudioObservationWindow,
+  mapSourceTimeToCompositionTime,
+  MAX_AUDIO_OBSERVATION_CHANNELS,
+  MAX_AUDIO_OBSERVATION_SAMPLES_PER_CHANNEL,
+  sourceTimeAtAudioObservationSample,
+} from './observation-analysis.js';
+
+export type {
+  AudioEnvelopePoint,
+  AudioOnsetEvidence,
+  BeatEnvelopeEstimate,
+  BeatEnvelopeOptions,
+} from './beat-envelope.js';
+export {
+  BEAT_ENVELOPE_ALGORITHM_VERSION,
+  buildBeatEnvelope,
+  MAX_AUDIO_ENVELOPE_POINTS,
+  MAX_AUDIO_ENVELOPE_SAMPLE_VISITS,
+} from './beat-envelope.js';

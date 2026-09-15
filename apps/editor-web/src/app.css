@@ -446,7 +446,10 @@ input[type='checkbox']:focus-visible {
   grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
 }
 .stock-video-grid--medium {
-  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  /* Compact previews must keep at least two columns even inside the narrow
+     asset rail, so the track has to be small enough that two fit next to the
+     sidebar before auto-fill drops to a single column. */
+  grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
   grid-auto-rows: 1fr;
   gap: 0.5rem;
 }
@@ -1429,6 +1432,10 @@ main {
 }
 .process-interrupted-retryable .process-dot {
   background: #d8a85c;
+}
+.process-verification-required .process-dot {
+  background: #c78cff;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #c78cff 18%, transparent);
 }
 .process-running .process-dot {
   background: var(--joy-accent);
@@ -7473,6 +7480,63 @@ label {
   padding-inline-start: 16px;
   border-inline-start: 1px solid var(--joy-border-subtle);
 }
+.agent-media-capability-probe {
+  display: grid;
+  gap: 8px;
+  margin-top: 3px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--joy-accent) 24%, var(--joy-border-subtle));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--joy-accent) 4%, var(--joy-bg-inset));
+}
+.agent-media-capability-probe .agent-settings-actions {
+  margin-top: 0;
+}
+.agent-media-capability-result {
+  display: grid;
+  gap: 7px;
+  padding: 8px 9px;
+  border: 1px solid var(--joy-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-inset);
+}
+.agent-media-capability-result > strong {
+  overflow: hidden;
+  color: var(--joy-text-secondary);
+  font-size: 0.67rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-media-capability-result dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+.agent-media-capability-result dl > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 5px;
+  min-width: 0;
+}
+.agent-media-capability-result dt,
+.agent-media-capability-result dd {
+  margin: 0;
+  font-size: 0.62rem;
+}
+.agent-media-capability-result dt {
+  color: var(--joy-text-faint);
+}
+.agent-media-capability-result dd {
+  font-weight: 750;
+}
+.agent-media-capability-result dd.is-supported {
+  color: var(--joy-ok);
+}
+.agent-media-capability-result dd.is-unavailable {
+  color: var(--joy-text-muted);
+}
 .agent-settings-section-heading {
   display: flex;
   align-items: start;
@@ -7656,6 +7720,9 @@ label {
     padding-block-start: 14px;
     border-inline-start: 0;
     border-block-start: 1px solid var(--joy-border-subtle);
+  }
+  .agent-media-capability-result dl {
+    grid-template-columns: 1fr;
   }
   .agent-settings-permissions {
     grid-column: auto;
@@ -7897,6 +7964,19 @@ label {
 .joy-code-composer {
   position: relative;
 }
+.joy-code-composer.is-looks:not(.is-activity-open) .joy-code-messages {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: visible;
+}
+.joy-code-composer.is-looks:not(.is-activity-open) .joy-code-messages > .joy-code-message,
+.joy-code-composer.is-looks:not(.is-activity-open) .joy-code-welcome {
+  display: none;
+}
+.joy-code-composer.is-looks.is-activity-open .joy-code-messages {
+  flex: 0 1 34%;
+  min-height: 7rem;
+}
 .joy-code-history {
   min-height: 0;
   overflow: auto;
@@ -8040,6 +8120,10 @@ label {
   left: 50%;
   width: min(calc(100% - 1.3rem), 23rem);
   transform: translate(-50%, -50%);
+  /* The empty-state welcome is decorative. When it is floated over the
+     composer it can overlap the attachment chips and their Detach buttons on
+     short viewports, so it must never intercept pointer events. */
+  pointer-events: none;
 }
 .joy-code-avatar {
   display: inline-grid;
@@ -8409,6 +8493,355 @@ label {
   border: 0;
   background: transparent;
 }
+.joy-code-recipes {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.5rem 0.35rem 0;
+  scrollbar-gutter: stable;
+}
+.joy-code-recipes[hidden],
+.living-looks[hidden],
+.joy-code-creative-brief[hidden],
+.joy-code-messages[hidden] {
+  display: none;
+}
+.joy-code-recipes-intro {
+  margin: 0;
+  font-size: 0.78rem;
+  opacity: 0.75;
+}
+.joy-code-recipes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.joy-code-recipe {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 0.5rem;
+}
+.joy-code-recipe.is-unavailable {
+  opacity: 0.55;
+}
+.joy-code-recipe-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.joy-code-recipe-copy > span {
+  font-size: 0.78rem;
+  opacity: 0.8;
+}
+.joy-code-recipe-missing {
+  font-size: 0.72rem;
+  opacity: 0.7;
+}
+.joy-code-recipe-run {
+  flex: none;
+  align-self: center;
+}
+
+/* ─── Living Looks (R2) ─── */
+.living-looks {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow: hidden;
+  padding: 0.5rem 0.35rem 0;
+}
+.living-looks-header {
+  flex: none;
+  display: grid;
+  gap: 0.45rem;
+}
+.living-looks-title-row,
+.living-looks-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.living-looks-title-row h2,
+.living-looks-section-heading h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+.living-looks-kicker {
+  display: block;
+  color: var(--joy-text-faint);
+  font-size: 0.64rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.living-looks-count {
+  min-width: 1.4rem;
+  padding: 0.15rem 0.35rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-size: 0.7rem;
+  text-align: center;
+}
+.living-looks-tabs {
+  display: flex;
+  min-width: 0;
+  gap: 0.25rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.living-looks-tabs button,
+.living-looks-activity,
+.living-look-back {
+  flex: none;
+  min-height: 1.7rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+.living-looks-tabs button[aria-selected='true'] {
+  border-color: color-mix(in srgb, currentColor 42%, transparent);
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+.living-looks-tabs button:focus-visible,
+.living-looks-activity:focus-visible,
+.living-look-back:focus-visible,
+.living-look-accordion summary:focus-visible,
+.living-look-select:focus-visible,
+.living-look-run:focus-visible {
+  outline: 2px solid var(--joy-accent, currentColor);
+  outline-offset: 2px;
+}
+.living-looks-activity {
+  font-size: 0.68rem;
+}
+.living-looks-viewport {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0 0.05rem 0.5rem;
+  scrollbar-gutter: stable;
+}
+.living-looks-tab-panel {
+  display: grid;
+  min-width: 0;
+  gap: 0.5rem;
+}
+.living-looks-section-heading {
+  margin-bottom: 0.15rem;
+}
+.living-looks-empty {
+  margin: 0.35rem 0;
+  color: var(--joy-text-faint);
+  font-size: 0.78rem;
+}
+.living-looks-intro {
+  margin: 0;
+  font-size: 0.78rem;
+  opacity: 0.75;
+}
+.living-looks-agent {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 0.5rem;
+}
+.living-looks-agent > label {
+  font-size: 0.74rem;
+  opacity: 0.8;
+}
+.living-looks-agent-prompt {
+  width: 100%;
+  min-height: 2.4rem;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+  resize: vertical;
+}
+.living-looks-agent-run {
+  align-self: flex-start;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  color: inherit;
+  cursor: pointer;
+}
+.living-looks-agent-run:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.living-look-bake-audio,
+.applied-look-bake-audio {
+  align-self: flex-start;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+.living-look-bake-audio:disabled,
+.applied-look-bake-audio:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.living-looks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.living-look.is-unavailable {
+  opacity: 0.55;
+}
+.living-look-select {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.living-look-select[aria-pressed='true'] {
+  border-color: color-mix(in srgb, currentColor 40%, transparent);
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+.living-look-select > span {
+  font-size: 0.78rem;
+  opacity: 0.8;
+}
+.living-look-missing {
+  font-size: 0.72rem;
+  opacity: 0.7;
+}
+.living-look-editor {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.living-look-configure-header {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.15rem 0 0.35rem;
+  background: var(--joy-bg-panel, var(--joy-bg));
+}
+.living-look-configure-header > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.living-look-accordion {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 0.5rem;
+}
+.living-look-accordion summary {
+  padding: 0.45rem 0.6rem;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 600;
+  list-style-position: inside;
+}
+.living-look-accordion fieldset {
+  margin: 0 0.35rem 0.35rem;
+  border: 0;
+}
+.living-look-editor-footer {
+  position: sticky;
+  z-index: 1;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0 0.15rem;
+  background: var(--joy-bg-panel, var(--joy-bg));
+}
+.living-look-editor fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 0.5rem;
+}
+.living-look-editor legend {
+  padding: 0 0.3rem;
+  font-size: 0.72rem;
+  opacity: 0.7;
+}
+.living-look-slot,
+.living-look-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+.living-look-slot > span,
+.living-look-control > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.living-look-slot select,
+.living-look-control select {
+  min-width: min(8rem, 48%);
+  max-width: 60%;
+}
+.living-look-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  opacity: 0.75;
+}
+.living-look-run {
+  align-self: flex-start;
+}
+
 .joy-code-creative-brief .creative-brief-panel {
   display: flex;
   min-width: 0;
@@ -10616,6 +11049,12 @@ label {
   white-space: nowrap;
 }
 
+/* The 3D Scene panel supplies its own toolbar and viewport chrome, so the
+   shared panel-root only contributes the accessible name — not padding. */
+.scene3d-panel.joy-panel-root {
+  gap: 0;
+  padding: 0;
+}
 .joy-code-3d {
   display: flex;
   min-height: 0;

@@ -1,5 +1,9 @@
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
-import type { JoyProjectV1, ProjectRevisionId } from '@joy-media/project-schema';
+import type {
+  JoyProjectV1,
+  LookInstancesDocument,
+  ProjectRevisionId,
+} from '@joy-media/project-schema';
 import {
   hydrateProjectDocument,
   type LoadProjectDocument,
@@ -54,6 +58,8 @@ export type ProjectDocumentAutosyncOutcome =
 interface QueuedDocument {
   readonly document: JoyProjectV1;
   readonly revisionId: ProjectRevisionId;
+  /** The canonical Look Instances document at this revision (R2 / GAP 1a). */
+  readonly lookInstances?: LookInstancesDocument;
 }
 
 interface ProjectAutosyncEntry {
@@ -130,13 +136,18 @@ export class ProjectDocumentAutosync {
     document: JoyProjectV1,
     revisionId: ProjectRevisionId,
     ownerKey: string,
+    lookInstances?: LookInstancesDocument,
   ): void {
     if (this.stopped) return;
     const entry = this.entryFor(binding, ownerKey);
     if (entry.conflicted || entry.confirmedRevisionId === revisionId) return;
     if (entry.queued?.revisionId === revisionId) return;
 
-    entry.queued = { document, revisionId };
+    entry.queued = {
+      document,
+      revisionId,
+      ...(lookInstances === undefined ? {} : { lookInstances }),
+    };
     this.arm(entry, DOCUMENT_AUTOSYNC_DEBOUNCE_MS);
   }
 
@@ -188,7 +199,10 @@ export class ProjectDocumentAutosync {
       queued.revisionId,
       this.options.storage,
       this.options.syncProjectDocument,
-      { ownerKey: entry.ownerKey },
+      {
+        ownerKey: entry.ownerKey,
+        ...(queued.lookInstances === undefined ? {} : { lookInstances: queued.lookInstances }),
+      },
     );
     if (this.stopped) return;
     this.applyResult(entry, queued, result);

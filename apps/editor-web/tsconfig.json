@@ -82,6 +82,9 @@
     },
     {
       "path": "../../packages/renderer-pixi"
+    },
+    {
+      "path": "../../packages/media-core"
     }
   ]
 }

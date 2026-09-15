@@ -105,7 +105,7 @@ describe('editor font redistribution gate', () => {
     const result = scanFontAssets(repositoryRoot);
     expect(result.errors).toEqual([]);
     expect(result.scannedFiles).toBeGreaterThan(0);
-  });
+  }, 15_000);
 
   it('contains no retired Fontiran runtime assets or aggregator', () => {
     const present = legacyTargets.filter((target) => {
@@ -159,7 +159,10 @@ describe('editor font redistribution gate', () => {
 
     const builtLicense = `${distRoot}licenses/fonts/OFL-1.1.txt`;
     const builtAttributions = `${distRoot}licenses/fonts/FONT-ATTRIBUTIONS.md`;
-    if (existsSync(distRoot)) {
+    // Only a completed Vite build (index.html emitted) is the shipped artifact;
+    // a stale or partial dist left on a persistent CI runner is not. A real
+    // build that drops the font licenses still fails this assertion.
+    if (existsSync(`${distRoot}index.html`)) {
       expect(readFileSync(builtLicense, 'utf8')).toContain('SIL OPEN FONT LICENSE Version 1.1');
       expect(readFileSync(builtAttributions, 'utf8')).toContain('OFL-1.1');
     }
@@ -172,7 +175,8 @@ describe('editor font redistribution gate', () => {
   });
 
   it('scans the final Vite artifact for ownership markers when it exists', () => {
-    if (!existsSync(distRoot)) return;
+    // Guard on a completed build, not any leftover dist on a persistent runner.
+    if (!existsSync(`${distRoot}index.html`)) return;
     const builtFiles = walkFiles(distRoot);
     const builtFontFiles = builtFiles.filter((path) =>
       shippedFontExtensions.has(extname(path).toLowerCase()),

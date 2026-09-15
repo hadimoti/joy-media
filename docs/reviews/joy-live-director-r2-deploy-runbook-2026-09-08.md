@@ -1,0 +1,372 @@
+# JOY Live Director R2 ("Living Looks") — deploy runbook
+
+> **NOT YET DEPLOYED.** This is the guarded Sweden release procedure prepared for
+> the R2 candidate. It must not be executed until every gate is satisfied:
+> the agreed CI topology green ×2 on the exact candidate; independent Sol
+> `APPROVE_FOR_DEPLOY <sha> <tree> <lock>` on file under the owner's
+> 2026-09-14 reviewer rule (CodeRabbit is optional);
+> explicit owner go-ahead; every pack's `OWNER_TASTE_REVIEW` verdict recorded in
+> the scorecard. The implementer never self-approves.
+
+Recorded: 2026-09-08. Shape follows `deploy/README.md` "Release order" and the
+proven R1 runbook (`joy-live-director-r1-deploy-runbook-2026-09-07.md`), with the
+two path corrections R1 execution found baked in: VPS repo is
+`/opt/joy-media/repo` (build worktree base `/opt/joy-media/builds/joy-media-<sha>`),
+build is root `pnpm build` (`pnpm -r --if-present build`), DB dump needs
+`sudo -u postgres pg_dump joymedia`.
+
+## Candidate
+
+| Field  | Value                                                              |
+| ------ | ------------------------------------------------------------------ |
+| commit | `56cea6eeb581845f871dc8da56b7422625116375`                         |
+| tree   | `c9407db18207fd9ec754051afe3529133c4c4313`                         |
+| lock   | `a2eedfcde29bbc619df1b3e57d9c0eb06676b50dc47735839101ff1518878cac` |
+| schema | existing schema 6; no new migration in this web-only candidate     |
+| base   | `61b70e61f3ce293770313611bc51014300abc117` (current live R2)       |
+
+**Current candidate reconciliation (2026-09-14).** The candidate is the exact
+post-R2 UI/fixture commit above; it is an ancestor of the final v2 run and is
+web-only relative to the currently live R2 release `61b70e61f3ce293770313611bc51014300abc117`.
+The release procedure below remains guarded and has not been executed.
+
+## Blast radius — editor-web bundle (API and migration already live)
+
+`git diff --name-only 61b70e61f3ce293770313611bc51014300abc117..<candidate>` (at
+the current branch tip) touches the editor-web UI/fixtures, the v2 workflow,
+`docs/SELF-HOSTED-CI.md`, `packages/agent-tools`, `tests/`, and
+`tooling/release/src/ci-artifact-policy.test.ts`. It has **no** `apps/api`,
+`packages/project-schema`, migration, or server-runtime path; the API and schema
+remain the already-live R2 surface described below. The following API/schema
+items are historical context for that live surface, not candidate changes.
+Verified at branch HEAD:
+
+- **Historical live R2 surface — the additive Postgres migration (R2 GAP 1a — Look Instances sync) is already live.**
+  `apps/api/src/postgres-migrations.ts` `POSTGRES_MIGRATIONS` gains **one** id:
+  `006-look-instances` → `ALTER TABLE project_documents ADD COLUMN IF NOT EXISTS
+look_instances jsonb`. Additive + **nullable**; never `NOT NULL`, never a
+  `DROP`. `runPostgresMigrations` applies it once inside its advisory-locked
+  transaction on API startup; the ledger checksum
+  (`sha256:look-instances-2026-09-09`) makes a later accidental edit a startup
+  failure rather than silent drift.
+  - **Forward-compatible:** an older API build simply does not read the column,
+    so a partial rollout (new web + old api, or vice versa) is safe — the
+    editor's PUT `lookInstances` field is optional and an old API ignores it;
+    an old web build never sends it and the server carries the last value
+    forward.
+  - **Rollback = code rollback only, keep the column + data.** Deploy the
+    previous API build; `006-look-instances` stays applied and the
+    `look_instances` column and its rows remain, simply unread. A destructive
+    `ALTER TABLE project_documents DROP COLUMN look_instances` is a **separate,
+    explicit, last-resort** step (it would lose any operator Look records that
+    only exist server-side after a cross-device edit) — never the default
+    rollback, and only after confirming no client still depends on server Look
+    state.
+  - It is not part of the current web-only candidate delta. The candidate is
+    tested against the in-memory + pg-mem stores; no production migration apply
+    is authorized or required for this rollout.
+- **Historical live R2 surface — `apps/api` runtime changes are limited to the Look Instances sync seam**
+  (`project-document-store.ts`, `postgres-control-plane.ts`, `control-plane.ts`,
+  `http-server.ts`, `project-document-sync-request-validation.ts`,
+  `postgres-migrations.ts`, `postgres-schema.ts`) plus
+  `resumable-original-upload.test.ts` (test-only). The document GET/PUT contract
+  gains one optional `lookInstances` field; every other route is unchanged.
+- **No new external dependency.** R2 adds no npm package. `pnpm-lock.yaml` changes
+  by a handful of lines only — internal `link:` workspace-graph entries for test
+  tooling (`@joy-media/visual-object-renderer` gains a `@joy-media/motion-core`
+  **devDependency** so `packages/visual-object-renderer/src/looks-render-acceptance.test.ts`
+  — GAP 4 — can drive `compileLook`). No runtime bundle or `apps/api` dependency
+  changes. Rollback is a pure pointer flip.
+- **Historical live R2 surface — `packages/project-schema`**: schema **v3** lands additively
+  (`living-look.ts`, `v3.ts`, `migrateV2ToV3`) plus the standalone
+  `look-instances-document.ts` (its own explicit schema + validator). The editor
+  still reads `JoyProjectV1` for the visual document; the Look Instances document
+  is a separate per-project log (`joy-media.look-instances-log.v1`), persisted
+  locally (GAP 1a-local) and — with this release — synced to the server
+  alongside the visual document under one atomic CAS revision (GAP 1a-sync, the
+  `look_instances` column).
+- **`packages/motion-core`**: the pure Look compiler + five shipping packs
+  (including the owner-directed repaired `music-pulse`; `persian-editorial` retired) + audio-reactive
+  baker. No renderer, no wall-clock, no I/O; consumed by the editor bundle.
+- The built-in JOY Agent Engine Worker still ships inside the editor-web static
+  bundle (`verify:joy-agent-worker` gate) — deploys with the web release.
+- `.github/workflows/r2-candidate.yml` is CI config only; it does not ship.
+- `nginx`: no change. joyst.ir is served from the **shared**
+  `/etc/nginx/conf.d/joy-wg-bot.conf` `root /opt/joy-media/web` — do NOT edit it;
+  the symlink swap is transparent. `nginx -t` + reload only.
+
+## Pre-flight (local)
+
+- [ ] CodeRabbit result on the R2 delta (`61b70e61..<candidate>`) if available
+      (optional under the owner's Sol reviewer rule).
+- [ ] CI green ×2 on the exact candidate (topology per the Opus infra decision —
+      hosted `r2-candidate.yml`, self-hosted `release-candidate.yml` adapted, or
+      the agreed hybrid). Record run ids.
+- [ ] `pnpm run verify:ci` locally exit 0 at the candidate. (At branch tip:
+      full `pnpm test` = **4196 passed / 38 skipped / 0 failed**, 526 files.)
+- [ ] Candidate identity re-verified in the worktree: `git rev-parse` of the
+      candidate and its tree, `sha256sum` of `git show <candidate>:pnpm-lock.yaml`,
+      base `61b70e61` is an ancestor, the candidate is an ancestor of branch HEAD,
+      and any commits HEAD carries past the candidate touch only docs.
+- [ ] Sol `APPROVE_FOR_DEPLOY <sha> <tree> <lock>` on file for this exact
+      triple (owner-approved reviewer substitute for Astra, 2026-09-14).
+- [ ] Every pack `OWNER_TASTE_REVIEW: APPROVED` (or an owner-recorded
+      ship-with-N-packs decision) in
+      `joy-live-director-r2-look-scorecard-2026-09-08.md`.
+- [ ] Owner deploy go-ahead in chat.
+- [ ] Re-read live Gbrain + Desktop `VPS-AGENT-BRIEF.md` for concurrent JOY
+      deployment ownership; coordinate, do not overwrite.
+
+## VPS steps (guarded; owner runs each block in their root session, pastes output back; Claude verifies against the candidate and calls go/no-go)
+
+Paths: repo `/opt/joy-media/repo` (remotes `origin`→GitHub, `vps-local`→`/opt/joy-media.git`);
+build worktree base `/opt/joy-media/builds/joy-media-<sha>`; web releases
+`/opt/joy-media/web-releases/*`, current link `/opt/joy-media/web`; API releases
+`/opt/joy-media/releases/*`, current link `…/releases/current-api`; env
+`/etc/joy-media/api.env`; API origin `http://127.0.0.1:8790` (`/live`, `/ready`);
+unit `joy-media@api`. `pnpm` is on PATH (11.15.0) + shim `/usr/local/bin/pnpm`.
+
+### C0 — discover (read-only)
+
+```bash
+set -e
+hostname; date -u
+readlink -f /opt/joy-media/web
+readlink -f /opt/joy-media/releases/current-api
+ls -1dt /opt/joy-media/web-releases/*/ | head -5
+git -C /opt/joy-media/repo remote -v
+git -C /opt/joy-media/repo log --oneline -1
+node -v; pnpm -v; sudo -u postgres pg_dump --version | head -1
+grep -o 'assets/[A-Za-z0-9_-]*\.js' /opt/joy-media/web/index.html | head -3
+cat /opt/joy-media/web/release-identity.env 2>/dev/null || true
+```
+
+**Checkpoint C0:** record current web + api release dirs (rollback targets),
+confirm repo remote + toolchain.
+
+### C1 — get the exact candidate onto the VPS
+
+```bash
+set -e
+cd /opt/joy-media/repo
+git fetch origin --prune --tags
+CAND=<candidate-sha>
+git worktree add --detach /opt/joy-media/builds/joy-media-$CAND $CAND
+cd /opt/joy-media/builds/joy-media-$CAND
+echo "HEAD  $(git rev-parse HEAD)"
+echo "tree  $(git rev-parse HEAD^{tree})"
+git show HEAD:pnpm-lock.yaml | sha256sum
+git diff --name-only 61b70e61..HEAD -- apps/api packages/project-schema/src/index.ts | grep -v '\.test\.' || echo "no api/schema-surface runtime change"
+```
+
+**Checkpoint C1:** `HEAD`, `tree`, `lock sha256` == the Sol-approved triple exactly.
+Any mismatch → `git worktree remove` and re-cut.
+
+### C2 — DB backup (guarded procedure; no new migration in this candidate)
+
+```bash
+set -e
+mkdir -p /opt/joy-media/data/backups
+ts=$(date -u +%Y%m%dT%H%M%SZ)
+sudo -u postgres pg_dump --format=custom joymedia \
+  > /opt/joy-media/data/backups/joymedia-r2-$CAND-predeploy-$ts.dump
+ls -lh /opt/joy-media/data/backups/joymedia-r2-$CAND-predeploy-$ts.dump
+sha256sum /opt/joy-media/data/backups/joymedia-r2-$CAND-predeploy-$ts.dump
+```
+
+**Checkpoint C2:** dump exists, non-trivial size. Keep until the deploy gate is
+accepted. The only schema change is the additive nullable `look_instances`
+column (migration `006-look-instances`); code rollback alone fully reverses R2
+behaviour and the column + data are retained (see C0/§ "additive Postgres
+migration"). The `pg_dump` is the safety net if a destructive column drop is
+ever chosen as a deliberate later step.
+
+### C3 — build from the lockfile
+
+```bash
+set -e
+cd /opt/joy-media/builds/joy-media-$CAND
+CI=true pnpm install --frozen-lockfile
+sha256sum pnpm-lock.yaml
+CI=true pnpm build
+node tooling/release/verify-agent-operation-coverage.mjs
+node tooling/release/verify-joy-agent-worker.mjs 2>/dev/null || pnpm run verify:joy-agent-worker
+test -f apps/editor-web/dist/index.html && echo "editor-web dist OK"
+```
+
+**Checkpoint C3:** `pnpm-lock.yaml` sha256 unchanged, `--frozen-lockfile` clean,
+root `pnpm build` exit 0, coverage ratchet passes (still 16 bounded ops — R2
+adds none), Worker size gate passes, `dist/index.html` present.
+
+### C4 — stage the immutable web release (no pointer moved)
+
+```bash
+set -e
+cd /opt/joy-media/builds/joy-media-$CAND
+rel="joy-media-$CAND-web"
+dst="/opt/joy-media/web-releases/$rel"
+# Never copy into or over a pre-existing release dir. A retry gets a fresh,
+# candidate-prefixed name and that exact name is carried into C5.
+if [ -e "$dst" ]; then
+  rel="${rel}-$(date -u +%Y%m%dT%H%M%SZ)"
+  dst="/opt/joy-media/web-releases/$rel"
+  test ! -e "$dst"
+fi
+cp -a apps/editor-web/dist "$dst"
+bash deploy/joy-media-release-identity.sh write "$dst/release-identity.env" \
+  $CAND <tree-sha> <lock-sha256> 6
+test -f "$dst/index.html" && test -f "$dst/release-identity.env" && echo "staged OK"
+# Artifact digest over path + content of every file (order-stable), so a rename
+# or a same-length swap changes the digest.
+( cd "$dst" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum )
+sha256sum "$dst/index.html"
+printf '%s\n' "$rel" > "/opt/joy-media/.joy-media-$CAND-web-release-name"
+```
+
+**Checkpoint C4:** record `rel` (the exact directory name — carry it into C5),
+the artifact digest, and the `index.html` sha256. A retry MUST use a new unique
+`rel` and propagate it forward, never reactivate a partial prior copy. Still
+fully reversible.
+
+### C5 — the atomic switch (first irreversible step)
+
+```bash
+set -e
+nginx -t
+REL_FILE="/opt/joy-media/.joy-media-$CAND-web-release-name"
+test -s "$REL_FILE"
+rel="$(cat "$REL_FILE")"
+case "$rel" in
+  "joy-media-$CAND"-web|"joy-media-$CAND"-web-*) ;;
+  *) echo "staged release name does not belong to candidate: $rel" >&2; exit 1 ;;
+esac
+NEW="/opt/joy-media/web-releases/$rel"
+test -f "$NEW/index.html"
+ln -sfn "$NEW" /opt/joy-media/.web.new
+mv -Tf /opt/joy-media/.web.new /opt/joy-media/web
+readlink -f /opt/joy-media/web
+systemctl reload nginx
+```
+
+**API identity bookkeeping** (only if C0 shows the VPS re-archives the API per
+release; `server.js` is unchanged so this is identity-only — merge **only**
+`JOY_MEDIA_RELEASE_*`):
+
+```bash
+set -e
+API=/opt/joy-media/releases/joy-media-$CAND-api   # if archived in C3/C4
+cp -p /etc/joy-media/api.env /etc/joy-media/api.env.before-r2-$CAND-$(date -u +%Y%m%dT%H%M%SZ).env
+bash deploy/joy-media-release-identity.sh merge \
+  /etc/joy-media/api.env "$API/release-identity.env" /etc/joy-media/.api.env.new
+ln -sfn "$API" /opt/joy-media/releases/.current-api.new
+mv -Tf /opt/joy-media/releases/.current-api.new /opt/joy-media/releases/current-api
+mv -Tf /etc/joy-media/.api.env.new /etc/joy-media/api.env
+systemctl restart joy-media@api
+ok=0
+for i in $(seq 1 45); do
+  if curl -fsS --max-time 3 http://127.0.0.1:8790/live >/dev/null &&
+     curl -fsS --max-time 3 http://127.0.0.1:8790/ready >/dev/null; then
+    ok=1; echo API_HEALTHY; break
+  fi
+  sleep 1
+done
+test "$ok" -eq 1 || { echo 'API did not become healthy — roll back' >&2; exit 1; }
+```
+
+If the API is not re-archived per release, skip the block above — R2 changes no
+API code, and R1's `JOY_MEDIA_RELEASE_*` values simply remain until the next
+API-touching release.
+
+### C6 — public health
+
+```bash
+set -e
+C4_INDEX_SHA=<sha256 from C4>        # paste the value recorded at C4
+CAND=<candidate sha from C1>
+CAND_TREE=<tree sha from C1>
+CAND_LOCK=<lock sha256 from C1>
+CAND_SCHEMA=6
+curl -k --noproxy '*' --resolve joyst.ir:443:127.0.0.1 -fsS -o /dev/null -w 'origin root %{http_code}\n' https://joyst.ir/
+curl -fsS -o /dev/null -w 'cf root %{http_code}\n' https://joyst.ir/
+curl -fsS -o /dev/null -w 'api health %{http_code}\n' https://joyst.ir/api/health
+identity=$(curl -fsS https://joyst.ir/release-identity.env)
+printf '%s\n' "$identity" | grep -q '^JOY_MEDIA_RELEASE_COMMIT_SHA='
+printf '%s\n' "$identity" | grep -q '^JOY_MEDIA_RELEASE_TREE_HASH='
+printf '%s\n' "$identity" | grep -q '^JOY_MEDIA_RELEASE_LOCKFILE_SHA256='
+printf '%s\n' "$identity" | grep -q '^JOY_MEDIA_RELEASE_SCHEMA_VERSION='
+printf '%s\n' "$identity" | grep -q "^JOY_MEDIA_RELEASE_COMMIT_SHA=${CAND}$"
+printf '%s\n' "$identity" | grep -q "^JOY_MEDIA_RELEASE_TREE_HASH=${CAND_TREE}$"
+printf '%s\n' "$identity" | grep -q "^JOY_MEDIA_RELEASE_LOCKFILE_SHA256=${CAND_LOCK}$"
+printf '%s\n' "$identity" | grep -q "^JOY_MEDIA_RELEASE_SCHEMA_VERSION=${CAND_SCHEMA}$"
+curl -fsS https://joyst.ir/ | grep -o '<title>[^<]*'
+
+# Hard-fail if the served bundle is not the C4 artifact.
+served_sha=$(curl -fsS https://joyst.ir/ | sha256sum | cut -d' ' -f1)
+test "$served_sha" = "$C4_INDEX_SHA" || { echo "served index.html $served_sha != C4 $C4_INDEX_SHA" >&2; exit 1; }
+
+# Hard-fail if the served release identity is not exactly the candidate's full
+# commit/tree/lock/schema tuple.
+echo "C6 OK — served bundle + full release identity match the candidate"
+```
+
+**Checkpoint C6:** every probe exits 0 (the `set -e` + `-f` make a non-2xx a
+hard stop); origin + CF root 200, `/api/health` `{"ok":true,…}`; the served
+index digest and all four release-identity fields (commit, tree, lock, schema)
+must match C4/C1 exactly. These are hard failures, not visual checks. Old entry
+bundle 404. On any failure → **On failure**.
+
+## Smoke test (Browser pane, joyst.ir, owner logged in)
+
+Disposable project only; never the owner's real API key or browser media for
+paid calls. Re-verify `GET /api/v1/auth/session` via the UI first (re-login if
+dropped).
+
+- [ ] New disposable project → editor loads clean, 0 JS console errors.
+- [ ] Joy Code panel → **Looks** capability → the **five** built-in packs render
+      with honest availability (any unavailable pack shows its `Needs:` labels,
+      not a broken control).
+- [ ] Pick **Editorial Clean** → bind the Headline slot to a text object →
+      **Run** → a staged JOY Agent live proposal renders
+      (`data-agent-preview-ready="true"`) → **Approve** applies it → the headline
+      has the compiled entrance keyframes → one **Undo** restores it.
+- [ ] Reject path: run again → **Reject** → the canonical project is unchanged.
+- [ ] An unavailable-by-design pack (e.g. one needing a font not bundled, if any)
+      shows disabled Run with the reason — never a partial apply.
+- [ ] Reload → no approval-capable preview revives; the project is intact; the
+      owner's real projects are untouched.
+- [ ] Served build identity matches the candidate / the C4 artifact digest.
+
+## On failure
+
+```bash
+cd /opt/joy-media/builds/joy-media-$CAND   # or any checkout with deploy/
+bash deploy/joy-media-rollback.sh --dry-run <good-api-release> <good-web-release>
+bash deploy/joy-media-rollback.sh --apply   <good-api-release> <good-web-release>
+```
+
+`<good-*-release>` = the C0-recorded pre-deploy targets. If only the web pointer
+moved (the expected R2 case — API untouched), a one-liner is enough:
+`ln -sfn <good-web-release> /opt/joy-media/.web.rb && mv -Tf /opt/joy-media/.web.rb /opt/joy-media/web && systemctl reload nginx`.
+Keep the DB backup. Report the failure honestly; never relabel a failed smoke as
+a successful deploy.
+
+## Closeout (orchestrator only)
+
+- [ ] Write the redacted R2 release result to live VPS Gbrain
+      (`ops/joy-media-live-director-r2-deploy-<date>`); read it back.
+- [ ] `Invoke-VpsGbrainExport.ps1` with **no arguments**; record the verified
+      export SHA in a redacted `gbrain-pc` receipt; `Publish-PcReceipt.ps1`.
+- [ ] Fresh-read + append the validated R2 release + limitations to Desktop
+      `VPS-AGENT-BRIEF.md` (candidate/artifact identity, scope, tests, rollback,
+      the documented follow-ups, next milestone = R3 "Linked Versions");
+      preserve concurrent `joy-vps` edits; no secrets.
+- [ ] Update `STATE.md` with an "R2 deployment" section.
+- [ ] Never edit / push the pull-only Desktop `gbrain` mirror.
+
+Then R3 "Linked Versions" begins.
+
+---
+
+## Deploy record
+
+**Current status (2026-09-14): Sol-approved for guarded deployment.** CodeRabbit is optional under the owner's rule; execute C0–C6 only with the exact Sol-approved triple and owner deploy authorization.

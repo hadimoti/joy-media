@@ -57,6 +57,26 @@ import {
   isRetiredJoyAgentRoute,
   JOY_AGENT_RETIRED_ROUTE_RESPONSE,
 } from './joy-agent-route-retirement.js';
+import {
+  ALL_HOSTED_ROUTE_RETIREMENT_DISABLED,
+  HOSTED_ROUTE_RETIRED_RESPONSE,
+  isRetiredHostedRoute,
+  type HostedRouteRetirementFlags,
+} from './hosted-route-retirement.js';
+import { AccountServiceError, DisabledAccountService, type AccountApi } from './account-service.js';
+import {
+  DisabledReleaseMetadataService,
+  ReleaseMetadataError,
+  type ReleaseChannel,
+  type ReleaseMetadataApi,
+} from './release-metadata-service.js';
+import {
+  DisabledUsdcCheckoutService,
+  UsdcCheckoutError,
+  type UsdcCheckoutApi,
+} from './usdc-checkout-service.js';
+import { CatalogError } from './usdc-catalog.js';
+import { UsdcLedgerError } from './usdc-invoice-ledger.js';
 
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
 const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 600;
@@ -90,6 +110,21 @@ export interface ControlPlaneHttpServerOptions {
   readonly controlPlane: ControlPlane;
   readonly authentication: ApiAuthentication;
   readonly mediaAuth?: MediaAuthApi;
+  /** Device registration, subscriptions, and signed entitlement issuance (wave 4). Identity
+   * here is always the mediaAuth actor id, same as /v1/auth/*. */
+  readonly account?: AccountApi;
+  /** Public read model backing GET /v1/releases/:channel; no auth required. */
+  readonly releases?: ReleaseMetadataApi;
+  /** SPKI PEM served at GET /v1/entitlements/public-key so the desktop client can pin the
+   * key it verifies signed entitlements against offline. Empty string when signing is
+   * unconfigured (matches DisabledEntitlementSigner.publicKeyPem). */
+  readonly entitlementPublicKeyPem?: string;
+  /** Flag-gated fail-closed retirement for hosted project/media/Worker-pairing routes; every
+   * flag defaults false (see hosted-route-retirement.ts). */
+  readonly hostedRouteRetirement?: HostedRouteRetirementFlags;
+  /** USDC checkout (wave 5). `DisabledUsdcCheckoutService` when unset — every route stays
+   * reachable, `createInvoice`/`handleWebhook` just report CHECKOUT_DISABLED. */
+  readonly usdcCheckout?: UsdcCheckoutApi;
   readonly privateObjectStore?: PrivateObjectStore;
   readonly resumableOriginalUploads?: ResumableOriginalUploadCoordinator;
   /** Optional authenticated Pexels/Pixabay stock-video broker. */
@@ -132,6 +167,11 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
       options.audioDenoise ??
       new SpectralDenoiseService(new MemorySpectralDenoiseInvocationLedger()),
     gpuPreview: options.gpuPreview ?? new GpuPreviewTransport(options.controlPlane),
+    account: options.account ?? new DisabledAccountService(),
+    releases: options.releases ?? new DisabledReleaseMetadataService(),
+    entitlementPublicKeyPem: options.entitlementPublicKeyPem ?? '',
+    hostedRouteRetirement: options.hostedRouteRetirement ?? ALL_HOSTED_ROUTE_RETIREMENT_DISABLED,
+    usdcCheckout: options.usdcCheckout ?? new DisabledUsdcCheckoutService(),
   };
   const rateLimitWindowMs = options.rateLimit?.windowMs ?? DEFAULT_RATE_LIMIT_WINDOW_MS;
   const rateLimitMaxRequests = options.rateLimit?.maxRequests ?? DEFAULT_RATE_LIMIT_MAX_REQUESTS;
@@ -173,6 +213,11 @@ async function route(
     readonly mediaAuth: MediaAuthApi;
     readonly audioDenoise: SpectralDenoiseService;
     readonly gpuPreview: GpuPreviewTransport;
+    readonly account: AccountApi;
+    readonly releases: ReleaseMetadataApi;
+    readonly entitlementPublicKeyPem: string;
+    readonly hostedRouteRetirement: HostedRouteRetirementFlags;
+    readonly usdcCheckout: UsdcCheckoutApi;
   },
   request: IncomingMessage,
   response: ServerResponse,
@@ -570,6 +615,163 @@ async function route(
     return;
   }
 
+  // Public — release metadata backs the installer/download page and the desktop app's own
+  // update check; it carries no credential or customer data (wave 4).
+  const releaseMatch = /^\/v1\/releases\/(stable|beta)$/.exec(url.pathname);
+  if (request.method === 'GET' && releaseMatch !== null) {
+    const channel = releaseMatch[1] as ReleaseChannel;
+    const release = await options.releases.latest(channel);
+    if (release === undefined) {
+      respondJson(response, 404, {
+        error: {
+          code: 'RELEASE_NOT_FOUND',
+          message: `no release published for channel "${channel}"`,
+        },
+      });
+      return;
+    }
+    respondJson(response, 200, { data: release });
+    return;
+  }
+
+  // Public — lets the desktop client pin the key it verifies signed entitlements against
+  // without needing a login first (wave 4).
+  if (request.method === 'GET' && url.pathname === '/v1/entitlements/public-key') {
+    respondJson(response, 200, { data: { publicKeyPem: options.entitlementPublicKeyPem } });
+    return;
+  }
+
+  // Device registration, subscriptions, and entitlement issuance are all keyed by the
+  // mediaAuth actor (OTP identity), same domain as /v1/auth/* above — not the legacy
+  // `options.authentication` actor the project/worker/job routes below use (wave 4).
+  if (request.method === 'POST' && url.pathname === '/v1/devices') {
+    const mediaActor = await options.mediaAuth.authenticate(request);
+    if (mediaActor === undefined)
+      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+    const body = await readJson(request, maxJsonBodyBytes);
+    const device = await options.account.registerDevice(
+      mediaActor.id,
+      requiredString(body, 'displayName'),
+    );
+    respondJson(response, 201, { data: device });
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/v1/devices') {
+    const mediaActor = await options.mediaAuth.authenticate(request);
+    if (mediaActor === undefined)
+      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+    respondNoStoreJson(response, 200, { data: await options.account.listDevices(mediaActor.id) });
+    return;
+  }
+
+  const revokeDeviceMatch = /^\/v1\/devices\/([^/]+)\/revoke$/.exec(url.pathname);
+  if (request.method === 'POST' && revokeDeviceMatch !== null) {
+    const mediaActor = await options.mediaAuth.authenticate(request);
+    if (mediaActor === undefined)
+      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+    await options.account.revokeDevice(mediaActor.id, decodeURIComponent(revokeDeviceMatch[1]!));
+    respondJson(response, 200, { data: { ok: true } });
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/v1/account/subscription') {
+    const mediaActor = await options.mediaAuth.authenticate(request);
+    if (mediaActor === undefined)
+      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+    respondNoStoreJson(response, 200, {
+      data: await options.account.getSubscription(mediaActor.id),
+    });
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/v1/account/subscription') {
+    const mediaActor = await options.mediaAuth.authenticate(request);
+    if (mediaActor === undefined)
+      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+    const body = await readJson(request, maxJsonBodyBytes);
+    const plan = requiredString(body, 'plan');
+    if (plan !== 'monthly' && plan !== 'yearly') {
+      throw new ControlPlaneError('REQUEST_INVALID', 'plan must be "monthly" or "yearly"');
+    }
+    respondJson(response, 200, { data: await options.account.selectPlan(mediaActor.id, plan) });
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/v1/entitlements/refresh') {
+    const mediaActor = await options.mediaAuth.authenticate(request);
+    if (mediaActor === undefined)
+      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+    const body = await readJson(request, maxJsonBodyBytes);
+    const entitlement = await options.account.issueEntitlement(
+      mediaActor.id,
+      requiredString(body, 'deviceId'),
+    );
+    respondNoStoreJson(response, 200, { data: entitlement });
+    return;
+  }
+
+  // USDC checkout (wave 5). Same mediaAuth identity domain as the routes above.
+  // `usdcCheckout.createInvoice`/`handleWebhook` report CHECKOUT_DISABLED whenever the flag
+  // is off (always, in every deployment today) or the service is unconfigured — see
+  // usdc-checkout-service.ts's module doc.
+  if (request.method === 'POST' && url.pathname === '/v1/billing/invoices') {
+    const mediaActor = await options.mediaAuth.authenticate(request);
+    if (mediaActor === undefined)
+      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+    const body = await readJson(request, maxJsonBodyBytes);
+    const plan = requiredString(body, 'plan');
+    if (plan !== 'monthly' && plan !== 'yearly') {
+      throw new ControlPlaneError('REQUEST_INVALID', 'plan must be "monthly" or "yearly"');
+    }
+    const invoice = await options.usdcCheckout.createInvoice(mediaActor.id, plan);
+    respondNoStoreJson(response, 201, { data: invoice });
+    return;
+  }
+
+  const invoiceStatusMatch = /^\/v1\/billing\/invoices\/([^/]+)$/.exec(url.pathname);
+  if (request.method === 'GET' && invoiceStatusMatch !== null) {
+    const mediaActor = await options.mediaAuth.authenticate(request);
+    if (mediaActor === undefined)
+      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+    const invoice = await options.usdcCheckout.getOwnedInvoice(
+      mediaActor.id,
+      decodeURIComponent(invoiceStatusMatch[1]!),
+    );
+    respondNoStoreJson(response, 200, { data: invoice });
+    return;
+  }
+
+  const submitTxMatch = /^\/v1\/billing\/invoices\/([^/]+)\/submit-tx$/.exec(url.pathname);
+  if (request.method === 'POST' && submitTxMatch !== null) {
+    const mediaActor = await options.mediaAuth.authenticate(request);
+    if (mediaActor === undefined)
+      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
+    const invoiceId = decodeURIComponent(submitTxMatch[1]!);
+    await options.usdcCheckout.getOwnedInvoice(mediaActor.id, invoiceId); // ownership check
+    const body = await readJson(request, maxJsonBodyBytes);
+    await options.usdcCheckout.attemptConfirmation(requiredString(body, 'txHash'));
+    const refreshed = await options.usdcCheckout.getOwnedInvoice(mediaActor.id, invoiceId);
+    respondNoStoreJson(response, 200, { data: refreshed });
+    return;
+  }
+
+  // Public — authenticated by HMAC signature (alchemy-webhook.ts), not a session: this is a
+  // machine-to-machine delivery from Alchemy, not a browser/desktop caller. The exact raw
+  // bytes are read and never re-serialized, so the signature check compares against precisely
+  // what Alchemy signed.
+  if (request.method === 'POST' && url.pathname === '/v1/billing/webhooks/alchemy') {
+    const bytes = await readBytes(request, maxJsonBodyBytes);
+    const rawBody = Buffer.from(bytes).toString('utf8');
+    const signatureHeader = request.headers['x-alchemy-signature'];
+    await options.usdcCheckout.handleWebhook(
+      rawBody,
+      typeof signatureHeader === 'string' ? signatureHeader : undefined,
+    );
+    respondJson(response, 200, { data: { ok: true } });
+    return;
+  }
+
   const actor = await options.authentication.authenticate(request);
   if (actor === undefined) throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
 
@@ -581,6 +783,14 @@ async function route(
     respondJson(response, 410, {
       error: JOY_AGENT_RETIRED_ROUTE_RESPONSE,
     });
+    return;
+  }
+
+  // Hosted project/media/Worker-pairing routes, retired only once the desktop app's local
+  // runtime covers them and Codex has explicitly enabled the matching cutover flag — every
+  // flag defaults false, so this is a no-op on every deployment today (wave 4/6).
+  if (isRetiredHostedRoute(request.method ?? 'GET', url.pathname, options.hostedRouteRetirement)) {
+    respondJson(response, 410, { error: HOSTED_ROUTE_RETIRED_RESPONSE });
     return;
   }
 
@@ -900,6 +1110,12 @@ async function route(
           projectId: result.record.projectId,
           revisionId: result.record.revisionId,
           document: result.record.document,
+          // R2 / GAP 1a: present only once a revision has carried Look info. A
+          // legacy client ignores the key; a Look-aware client treats an absent
+          // key as "no server Look info" and keeps its local Look document.
+          ...(result.record.lookInstances === undefined
+            ? {}
+            : { lookInstances: result.record.lookInstances }),
         },
       });
       return;
@@ -948,6 +1164,9 @@ async function route(
         ownerId: actor.id,
         revisionId: validation.envelope.revisionId,
         document: validation.envelope.document,
+        ...(validation.envelope.lookInstances === undefined
+          ? {}
+          : { lookInstances: validation.envelope.lookInstances }),
       },
       validation.envelope.baseRevisionId,
     );
@@ -2605,6 +2824,47 @@ function respondError(response: ServerResponse, error: unknown): void {
   if (error instanceof MediaAuthError) {
     const status =
       error.code === 'RATE_LIMITED' ? 429 : error.code === 'REQUEST_INVALID' ? 400 : 401;
+    respondJson(response, status, { error: { code: error.code, message: error.message } });
+    return;
+  }
+  if (error instanceof AccountServiceError) {
+    const status =
+      error.code === 'DEVICE_NOT_FOUND'
+        ? 404
+        : error.code === 'DEVICE_NAME_REQUIRED'
+          ? 400
+          : error.code === 'DEVICE_REVOKED' || error.code === 'SUBSCRIPTION_ALREADY_ACTIVE'
+            ? 409
+            : error.code === 'ACCOUNT_SERVICE_UNCONFIGURED'
+              ? 503
+              : 400;
+    respondJson(response, status, { error: { code: error.code, message: error.message } });
+    return;
+  }
+  if (error instanceof ReleaseMetadataError) {
+    const status = error.code === 'RELEASE_SERVICE_UNCONFIGURED' ? 503 : 400;
+    respondJson(response, status, { error: { code: error.code, message: error.message } });
+    return;
+  }
+  if (error instanceof UsdcCheckoutError) {
+    const status =
+      error.code === 'CHECKOUT_DISABLED'
+        ? 503
+        : error.code === 'INVOICE_NOT_FOUND'
+          ? 404
+          : error.code === 'WEBHOOK_SIGNATURE_INVALID'
+            ? 401
+            : 400;
+    respondJson(response, status, { error: { code: error.code, message: error.message } });
+    return;
+  }
+  if (error instanceof UsdcLedgerError || error instanceof CatalogError) {
+    const status =
+      error.code === 'INVOICE_NOT_FOUND'
+        ? 404
+        : error.code === 'INVOICE_NOT_CONFIRMABLE' || error.code === 'INVOICE_NOT_REFUNDABLE'
+          ? 409
+          : 400;
     respondJson(response, status, { error: { code: error.code, message: error.message } });
     return;
   }

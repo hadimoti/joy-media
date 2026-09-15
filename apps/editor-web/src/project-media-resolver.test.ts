@@ -1,7 +1,156 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProjectMediaResolver } from './project-media-resolver.js';
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('ProjectMediaResolver', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('invalidates a pending local read on clear without creating or caching a stale URL', async () => {
+    const local = deferred<Blob | undefined>();
+    const get = vi.fn(() => local.promise);
+    const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:stale');
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      controlPlaneReady: false,
+      client: {
+        assets: vi.fn(async () => []),
+        originalBytes: vi.fn(),
+        sharedCloudOriginalBytes: vi.fn(),
+      },
+      originalCache: { get },
+    });
+
+    const pending = resolver.resolve('media-1');
+    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+    resolver.clear();
+    const invalidated = expect(pending).rejects.toThrow('invalidated');
+    local.resolve(new Blob(['old'], { type: 'video/mp4' }));
+    await invalidated;
+    expect(create).not.toHaveBeenCalled();
+
+    const fresh = new Blob(['fresh'], { type: 'video/mp4' });
+    get.mockResolvedValue(fresh);
+    create.mockReturnValue('blob:fresh');
+    await expect(resolver.resolve('media-1')).resolves.toMatchObject({ url: 'blob:fresh' });
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(create).toHaveBeenCalledExactlyOnceWith(fresh);
+    resolver.clear();
+  });
+
+  it('preserves concurrent deduplication in the new epoch when an older request settles', async () => {
+    const oldRead = deferred<Blob | undefined>();
+    const currentRead = deferred<Blob | undefined>();
+    const get = vi.fn().mockReturnValueOnce(oldRead.promise).mockReturnValue(currentRead.promise);
+    const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:current');
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      controlPlaneReady: false,
+      client: {
+        assets: vi.fn(async () => []),
+        originalBytes: vi.fn(),
+        sharedCloudOriginalBytes: vi.fn(),
+      },
+      originalCache: { get },
+    });
+
+    const oldRequest = resolver.resolve('media-1');
+    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+    resolver.clear();
+    const currentRequest = resolver.resolve('media-1');
+    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    const invalidated = expect(oldRequest).rejects.toThrow('invalidated');
+    oldRead.resolve(new Blob(['old'], { type: 'video/mp4' }));
+    await invalidated;
+    const duplicateRequest = resolver.resolve('media-1');
+    currentRead.resolve(new Blob(['current'], { type: 'video/mp4' }));
+    const current = await currentRequest;
+    expect(await duplicateRequest).toBe(current);
+    expect(await resolver.resolve('media-1')).toBe(current);
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(revoke).not.toHaveBeenCalled();
+    resolver.clear();
+    resolver.clear();
+    expect(revoke).toHaveBeenCalledExactlyOnceWith('blob:current');
+  });
+
+  it('revokes an owned URL when clear interrupts an in-flight integrity check', async () => {
+    const digestResult = deferred<ArrayBuffer>();
+    const digest = vi.spyOn(crypto.subtle, 'digest').mockReturnValue(digestResult.promise);
+    const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:late-integrity');
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      controlPlaneReady: false,
+      project: {
+        assets: {
+          'media-1': {
+            id: 'media-1',
+            kind: 'video',
+            displayName: 'Synthetic clip',
+            sha256: '0'.repeat(64),
+          },
+        },
+      } as never,
+      client: {
+        assets: vi.fn(async () => []),
+        originalBytes: vi.fn(),
+        sharedCloudOriginalBytes: vi.fn(),
+      },
+      originalCache: { get: vi.fn(async () => new Blob(['old'], { type: 'video/mp4' })) },
+    });
+
+    const pending = resolver.resolve('media-1');
+    await vi.waitFor(() => expect(digest).toHaveBeenCalledTimes(1));
+    resolver.clear();
+    const invalidated = expect(pending).rejects.toThrow('invalidated');
+    digestResult.resolve(new ArrayBuffer(32));
+    await invalidated;
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(revoke).toHaveBeenCalledExactlyOnceWith('blob:late-integrity');
+    resolver.clear();
+    expect(revoke).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['resolve', 'reject'] as const)(
+    'does not return a late cloud %s or start a shared/reference fallback after clear',
+    async (settlement) => {
+      const cloud = deferred<Blob>();
+      const originalBytes = vi.fn(() => cloud.promise);
+      const sharedCloudOriginalBytes = vi.fn();
+      const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:stale-cloud');
+      const resolver = new ProjectMediaResolver({
+        projectId: 'project-1',
+        client: {
+          assets: vi.fn(async () => []),
+          originalBytes,
+          sharedCloudOriginalBytes,
+        },
+        originalCache: { get: vi.fn(async () => undefined) },
+      });
+
+      const pending = resolver.resolve('asset-intro');
+      await vi.waitFor(() => expect(originalBytes).toHaveBeenCalledTimes(1));
+      resolver.clear();
+      const invalidated = expect(pending).rejects.toThrow('invalidated');
+      if (settlement === 'resolve') cloud.resolve(new Blob(['old'], { type: 'video/mp4' }));
+      else cloud.reject(new Error('late owner read failure'));
+      await invalidated;
+      expect(sharedCloudOriginalBytes).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+    },
+  );
+
   it('does not query a temporary control-plane binding before authentication is ready', async () => {
     const assets = vi.fn(async () => []);
     const resolver = new ProjectMediaResolver({
@@ -154,5 +303,46 @@ describe('ProjectMediaResolver', () => {
       url: 'blob:verified',
     });
     create.mockRestore();
+  });
+
+  it('provides only owner-authorized local bytes to the observation host', async () => {
+    const blob = new Blob(['local-observation'], { type: 'video/mp4' });
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      client: {
+        assets: vi.fn(async () => []),
+        originalBytes: vi.fn(async () => {
+          throw new Error('cloud should not be requested');
+        }),
+        sharedCloudOriginalBytes: vi.fn(async () => {
+          throw new Error('shared cloud should not be requested');
+        }),
+      },
+      originalCache: { get: vi.fn(async () => blob) },
+    });
+
+    await expect(resolver.resolveObservationSource('media-1')).resolves.toEqual({
+      blob,
+      mimeType: 'video/mp4',
+      source: 'opfs',
+    });
+    resolver.clear();
+  });
+
+  it('does not reinterpret an allowlisted reference URL as local user observation bytes', async () => {
+    const resolver = new ProjectMediaResolver({
+      projectId: 'signed-out-project',
+      controlPlaneReady: false,
+      client: {
+        assets: vi.fn(async () => []),
+        originalBytes: vi.fn(),
+        sharedCloudOriginalBytes: vi.fn(),
+      },
+      originalCache: { get: vi.fn(async () => undefined) },
+    });
+
+    await expect(resolver.resolveObservationSource('asset-intro')).rejects.toThrow(
+      'trusted local observation bytes',
+    );
   });
 });

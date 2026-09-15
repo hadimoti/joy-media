@@ -194,7 +194,9 @@ export function migrateDockLayoutAliases(layout: unknown): unknown {
 
 /** Applies aliases, compact constraints, and the explicit saved-layout marker. */
 export function migrateDockLayout(layout: unknown): unknown {
-  return ensureScene3DInContextGroup(normalizeDockLayoutConstraints(migrateDockLayoutAliases(layout)));
+  return ensureScene3DInContextGroup(
+    normalizeDockLayoutConstraints(migrateDockLayoutAliases(layout)),
+  );
 }
 
 export function serializeDockLayout(layout: unknown): string {

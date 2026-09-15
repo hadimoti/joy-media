@@ -8,6 +8,7 @@ import {
   type PluginManifestV1,
   type PluginPermission,
 } from '@joy-media/plugin-sdk/browser';
+import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 
 export const DEMO_PANEL_PLUGIN_ID = 'joy.first-party.demo-panel';
 
@@ -50,19 +51,13 @@ export interface EditorPluginHost {
   setProjectData(pluginId: string, value: unknown): void;
 }
 
-export function createEditorPluginHost(
-  storage:
-    | { getItem(key: string): string | null; setItem(key: string, value: string): void }
-    | undefined = typeof window !== 'undefined' ? window.localStorage : undefined,
-): EditorPluginHost {
+/**
+ * Plugin enablement and namespaced project state must use the root writer
+ * gate's storage capability. Requiring it prevents a stale editor tab from
+ * retaining an unguarded browser-local persistence path.
+ */
+export function createEditorPluginHost(storage: BrowserKeyValueStore): EditorPluginHost {
   const persisted = (() => {
-    if (storage === undefined) {
-      return {
-        safeMode: true,
-        enabledIds: [] as string[],
-        projectData: {} as Record<string, unknown>,
-      };
-    }
     try {
       const raw = storage.getItem(STORAGE_KEY);
       if (raw === null) {
@@ -101,7 +96,6 @@ export function createEditorPluginHost(
   const sdk = createPluginSdkHost(['ui.panel']);
 
   function persist(): void {
-    if (storage === undefined) return;
     storage.setItem(
       STORAGE_KEY,
       JSON.stringify({

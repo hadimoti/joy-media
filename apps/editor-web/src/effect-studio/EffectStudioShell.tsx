@@ -20,9 +20,12 @@ import { EffectStudioStackPanel } from './EffectStudioStackPanel.js';
 import { EffectStudioPreview } from './EffectStudioPreview.js';
 import { EffectStudioInspector } from './EffectStudioInspector.js';
 import { EffectStudioTimeline } from './EffectStudioTimeline.js';
+import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 
-interface EffectStudioShellProps {
+export interface EffectStudioShellProps {
   readonly recipeId: string;
+  /** Guarded by the root project-writer capability for this browser tab. */
+  readonly storage: BrowserKeyValueStore;
   readonly canApply: boolean;
   readonly onApply: (effects: readonly EffectInstanceV1[]) => void;
   readonly onClose: () => void;
@@ -32,11 +35,11 @@ const AUTOSAVE_MS = 700;
 
 export function EffectStudioShell({
   recipeId,
+  storage,
   canApply,
   onApply,
   onClose,
 }: EffectStudioShellProps) {
-  const storage = window.localStorage;
   const [state, dispatch] = useReducer(reduceEffectRecipeEditor, undefined, () =>
     createEffectRecipeEditorState(
       loadEffectRecipe(storage, recipeId) ?? createEffectRecipeDocument(),

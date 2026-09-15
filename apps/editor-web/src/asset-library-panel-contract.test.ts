@@ -4,6 +4,12 @@ import { describe, expect, it } from 'vitest';
 const panelSource = readFileSync(new URL('./AssetLibraryPanel.tsx', import.meta.url), 'utf8');
 
 describe('AssetLibraryPanel successful import contract', () => {
+  it('uses the writer-gated panel storage rather than raw browser localStorage', () => {
+    expect(panelSource).toContain('readonly storage: AssetLibraryStorage;');
+    expect(panelSource).not.toContain('window.localStorage');
+    expect(panelSource).not.toContain('localStorage.setItem');
+  });
+
   it('keeps the import controls without the retired explainer annotation', () => {
     expect(panelSource).toContain('role="dialog" aria-label="Import media"');
     expect(panelSource).toContain('aria-label="Media file"');
@@ -41,6 +47,20 @@ describe('AssetLibraryPanel successful import contract', () => {
     expect(panelSource).toContain('rendered.map(({ asset, derivatives }) =>');
     expect(panelSource).toContain('aria-label={`Add ${asset.displayName} to timeline`}');
     expect(panelSource).not.toContain('<span>Add to timeline</span>');
+  });
+
+  it('carries verified import integrity metadata through the timeline callback', () => {
+    const callbackContract = panelSource.slice(
+      panelSource.indexOf('readonly onAddToTimeline?:'),
+      panelSource.indexOf('/** Attach image/video to the built-in JOY Agent Engine'),
+    );
+    expect(callbackContract).toContain("readonly sha256: BrowserAsset['sha256'];");
+    expect(callbackContract).toContain("readonly bytes: BrowserAsset['bytes'];");
+    const cardAction = panelSource.slice(
+      panelSource.indexOf('aria-label={`Add ${asset.displayName}'),
+    );
+    expect(cardAction).toContain('sha256: asset.sha256,');
+    expect(cardAction).toContain('bytes: asset.bytes,');
   });
 
   it('loads the account and cloud libraries without waiting for project binding readiness', () => {

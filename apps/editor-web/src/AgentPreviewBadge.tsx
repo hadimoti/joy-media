@@ -4,10 +4,13 @@ import { useAgentPresenceSnapshot } from './agent-presence.js';
 export function AgentPreviewBadge({
   surface,
   before = false,
+  beforeDisabled = false,
   onBeforeChange,
 }: {
   readonly surface: string;
   readonly before?: boolean;
+  /** A new document bundle must paint once before canonical comparison is allowed. */
+  readonly beforeDisabled?: boolean;
   readonly onBeforeChange?: (before: boolean) => void;
 }) {
   const state = useAgentPresenceSnapshot();
@@ -34,6 +37,7 @@ export function AgentPreviewBadge({
           <input
             type="checkbox"
             checked={before}
+            disabled={beforeDisabled}
             onChange={(event) => onBeforeChange(event.currentTarget.checked)}
           />
           Before

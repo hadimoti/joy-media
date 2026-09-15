@@ -25,7 +25,7 @@ vi.mock('@joy-media/visual-effects', () => {
   };
 });
 
-vi.mock('./App.js', async () => {
+vi.mock('./editor-panel-context.js', async () => {
   const { createContext } = await import('react');
   return { EditorPanelContext: createContext(undefined) };
 });
@@ -141,5 +141,37 @@ describe('EffectsPanel', () => {
     expect(card?.getAttribute('aria-disabled')).toBeNull();
     expect(reasonId).toBeTruthy();
     expect(container.querySelector(`#${reasonId}`)?.textContent).toContain('Select a video clip');
+  });
+
+  it('does not fall back to raw browser storage when no writer-gated context exists', async () => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    const showToast = vi.fn();
+
+    await act(async () => {
+      root?.render(
+        <EffectsPanel
+          project={INITIAL_EDITOR_PROJECT}
+          objectId={undefined}
+          canApplyEffects={false}
+          onDispatch={vi.fn()}
+          showToast={showToast}
+        />,
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      container!
+        .querySelector<HTMLButtonElement>('button[aria-label="Create effect recipe"]')
+        ?.click();
+    });
+
+    expect(showToast).toHaveBeenCalledWith(
+      'Effect recipes require an active editor session.',
+      'error',
+    );
+    expect(window.localStorage.length).toBe(0);
   });
 });

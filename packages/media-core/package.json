@@ -8,8 +8,16 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "browser": {
+        "types": "./dist/browser.d.ts",
+        "default": "./dist/browser.js"
+      },
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./observation": {
+      "types": "./dist/observation.d.ts",
+      "default": "./dist/observation.js"
     }
   },
   "scripts": {

@@ -214,6 +214,79 @@ describe('ordered PostgreSQL migrations', () => {
     );
   });
 
+  it('adds the additive nullable look_instances column (006, R2 / GAP 1a)', async () => {
+    const migration = POSTGRES_MIGRATIONS.find((m) => m.id === '006-look-instances');
+    expect(migration).toBeDefined();
+    const queries: string[] = [];
+    await migration!.up({
+      query: async (sql: string) => {
+        queries.push(sql);
+        return { rows: [] };
+      },
+    });
+    expect(
+      queries.some((q) =>
+        /ALTER TABLE project_documents ADD COLUMN IF NOT EXISTS look_instances jsonb/i.test(q),
+      ),
+    ).toBe(true);
+    // Additive + nullable — never NOT NULL, never a DROP.
+    expect(queries.some((q) => /NOT NULL|DROP/i.test(q))).toBe(false);
+  });
+
+  it('creates the account devices/subscriptions/release-metadata tables (007)', async () => {
+    const migration = POSTGRES_MIGRATIONS.find(
+      (m) => m.id === '007-account-devices-subscriptions-entitlements',
+    );
+    expect(migration).toBeDefined();
+    const queries: string[] = [];
+    await migration!.up({
+      query: async (sql: string) => {
+        queries.push(sql);
+        return { rows: [] };
+      },
+    });
+    const combined = queries.join('\n');
+    expect(combined).toContain('CREATE TABLE IF NOT EXISTS account_devices');
+    expect(combined).toContain('CREATE TABLE IF NOT EXISTS account_subscriptions');
+    expect(combined).toContain('CREATE TABLE IF NOT EXISTS release_metadata');
+  });
+
+  it('creates the usdc_invoices table with its uniqueness indexes (008)', async () => {
+    const migration = POSTGRES_MIGRATIONS.find((m) => m.id === '008-usdc-invoices');
+    expect(migration).toBeDefined();
+    const queries: string[] = [];
+    await migration!.up({
+      query: async (sql: string) => {
+        queries.push(sql);
+        return { rows: [] };
+      },
+    });
+    const combined = queries.join('\n');
+    expect(combined).toContain('CREATE TABLE IF NOT EXISTS usdc_invoices');
+    expect(combined).toContain('usdc_invoices_pending_amount_idx');
+    expect(combined).toContain('usdc_invoices_txhash_logindex_idx');
+  });
+
+  it.each(['007-account-devices-subscriptions-entitlements', '008-usdc-invoices'])(
+    'keeps migration %s DDL idempotent and additive',
+    async (id) => {
+      const migration = POSTGRES_MIGRATIONS.find((candidate) => candidate.id === id);
+      expect(migration).toBeDefined();
+      const queries: string[] = [];
+      await migration!.up({
+        query: async (sql: string) => {
+          queries.push(sql);
+          return { rows: [] };
+        },
+      });
+
+      const combined = queries.join('\n');
+      expect(combined).not.toMatch(/CREATE TABLE(?!\s+IF NOT EXISTS)/iu);
+      expect(combined).not.toMatch(/CREATE(?: UNIQUE)? INDEX(?!\s+IF NOT EXISTS)/iu);
+      expect(combined).not.toMatch(/\b(?:DROP|TRUNCATE|DELETE)\b/iu);
+    },
+  );
+
   it('fails closed when an applied migration checksum has drifted', async () => {
     const { pool } = createRecordingPool([
       { id: POSTGRES_MIGRATIONS[0]!.id, checksum: 'sha256:unexpected' },

@@ -12,7 +12,11 @@ import {
 } from '@joy-media/workflow-engine';
 import type { SpikeCommand } from '@joy-media/commands';
 import { createAgentCommandBus } from './agent-command-bus.js';
-import { loadWorkflow, resolveParameterizedValue } from './workflow-recorder.js';
+import {
+  loadWorkflow,
+  resolveParameterizedValue,
+  type WorkflowStorage,
+} from './workflow-recorder.js';
 import { getFirstPartyWorkflow } from './first-party-workflows.js';
 import { createStubFirstPartyLibrary } from './first-party-handlers.js';
 
@@ -64,7 +68,23 @@ export const PARKED_RUNS_STORAGE_KEY = 'joy-media.workflow-runs.v2';
 const MAX_PARKED_BYTES = 2 * 1024 * 1024;
 const MAX_PARKED_RUNS = 64;
 let restored = false;
+let restoredStorage: WorkflowStorage | undefined;
 let stubLibrary = createStubFirstPartyLibrary();
+const memoryStorageValues = new Map<string, string>();
+const inMemoryWorkflowStorage: WorkflowStorage = {
+  getItem: (key) => memoryStorageValues.get(key) ?? null,
+  setItem: (key, value) => memoryStorageValues.set(key, value),
+  removeItem: (key) => memoryStorageValues.delete(key),
+};
+
+/**
+ * Runner unit tests and non-browser callers retain only a process-local
+ * checkpoint. The mounted editor always supplies its writer-fenced adapter;
+ * this intentionally never reaches for global browser localStorage.
+ */
+function workflowStorageFor(storage: WorkflowStorage | undefined): WorkflowStorage {
+  return storage ?? inMemoryWorkflowStorage;
+}
 
 /** Recovery data is untrusted and never establishes a new workflow definition. */
 function parseParkedRun(candidate: unknown): ParkedWorkflowRun | undefined {
@@ -134,11 +154,14 @@ function parseParkedRun(candidate: unknown): ParkedWorkflowRun | undefined {
   return { ...record, workflow } as ParkedWorkflowRun;
 }
 
-function restoreParkedRuns(): void {
-  if (restored) return;
+function restoreParkedRuns(storage?: WorkflowStorage): void {
+  const workflowStorage = workflowStorageFor(storage);
+  if (restored && restoredStorage === workflowStorage) return;
+  parkedRuns.clear();
   restored = true;
+  restoredStorage = workflowStorage;
   try {
-    const raw = globalThis.localStorage?.getItem(PARKED_RUNS_STORAGE_KEY);
+    const raw = workflowStorage.getItem(PARKED_RUNS_STORAGE_KEY);
     if (
       raw === null ||
       raw === undefined ||
@@ -157,12 +180,12 @@ function restoreParkedRuns(): void {
   }
 }
 
-function persistParkedRuns(): 'saved' | 'session-only' {
+function persistParkedRuns(storage?: WorkflowStorage): 'saved' | 'session-only' {
   try {
-    const storage = globalThis.localStorage;
-    if (storage === undefined) return 'session-only';
+    const workflowStorage = workflowStorageFor(storage);
     if (parkedRuns.size === 0) {
-      storage.removeItem(PARKED_RUNS_STORAGE_KEY);
+      if (workflowStorage.removeItem === undefined) return 'session-only';
+      workflowStorage.removeItem(PARKED_RUNS_STORAGE_KEY);
       return 'saved';
     }
     const serialized = JSON.stringify([...parkedRuns.values()]);
@@ -171,7 +194,7 @@ function persistParkedRuns(): 'saved' | 'session-only' {
       new TextEncoder().encode(serialized).byteLength > MAX_PARKED_BYTES
     )
       return 'session-only';
-    storage.setItem(PARKED_RUNS_STORAGE_KEY, serialized);
+    workflowStorage.setItem(PARKED_RUNS_STORAGE_KEY, serialized);
     return 'saved';
   } catch {
     // Storage quota/private browsing failures leave the in-memory run usable.
@@ -190,28 +213,40 @@ export function resetFirstPartyLibraryForTests(): void {
   stubLibrary = createStubFirstPartyLibrary();
   parkedRuns.clear();
   restored = false;
+  const workflowStorage = restoredStorage;
+  restoredStorage = undefined;
   try {
-    globalThis.localStorage?.removeItem(PARKED_RUNS_STORAGE_KEY);
+    workflowStorage?.removeItem?.(PARKED_RUNS_STORAGE_KEY);
   } catch {
     // Test/runtime storage may be unavailable.
   }
 }
 
-export function getParkedWorkflowRun(runId: string): ParkedWorkflowRun | undefined {
-  restoreParkedRuns();
+export function getParkedWorkflowRun(
+  runId: string,
+  storage?: WorkflowStorage,
+): ParkedWorkflowRun | undefined {
+  restoreParkedRuns(storage);
   return parkedRuns.get(runId);
 }
 
-export function listParkedWorkflowRuns(session: EditorSession): readonly ParkedWorkflowRun[] {
-  restoreParkedRuns();
+export function listParkedWorkflowRuns(
+  session: EditorSession,
+  storage?: WorkflowStorage,
+): readonly ParkedWorkflowRun[] {
+  restoreParkedRuns(storage);
   return [...parkedRuns.values()].filter((run) => run.projectId === session.visualProject.id);
 }
 
-export function discardParkedWorkflowRun(session: EditorSession, runId: string): void {
-  restoreParkedRuns();
+export function discardParkedWorkflowRun(
+  session: EditorSession,
+  runId: string,
+  storage?: WorkflowStorage,
+): void {
+  restoreParkedRuns(storage);
   if (parkedRuns.get(runId)?.projectId !== session.visualProject.id) return;
   parkedRuns.delete(runId);
-  persistParkedRuns();
+  persistParkedRuns(storage);
 }
 
 function spikeCommandsFor(commands: readonly CommandLike[]): SpikeCommand[] {
@@ -283,8 +318,12 @@ function kahnTopoOrder(
   return order;
 }
 
-function resolveWorkflow(session: EditorSession, workflowId: string): JoyWorkflow {
-  const recorded = loadWorkflow(session, workflowId);
+function resolveWorkflow(
+  session: EditorSession,
+  workflowId: string,
+  storage?: WorkflowStorage,
+): JoyWorkflow {
+  const recorded = loadWorkflow(session, workflowId, storage);
   if (recorded !== undefined) {
     return recorded.workflow;
   }
@@ -420,6 +459,7 @@ function runFirstPartyWorkflow(
     readonly resumeFrom?: RunCheckpoint;
     readonly humanInputs?: Readonly<Record<string, unknown>>;
   } = {},
+  storage?: WorkflowStorage,
 ): WorkflowRunOutcome {
   const runId = options.runId ?? newRunId(workflow.id);
   const workflowInputs = normalizeFirstPartyInputs(workflow, inputs);
@@ -455,7 +495,7 @@ function runFirstPartyWorkflow(
       nodeId: pending.nodeId,
       request: pending.request,
     });
-    const recovery = persistParkedRuns();
+    const recovery = persistParkedRuns(storage);
     return {
       status: 'waiting_for_input',
       workflowId: workflow.id,
@@ -468,7 +508,7 @@ function runFirstPartyWorkflow(
   }
 
   parkedRuns.delete(runId);
-  persistParkedRuns();
+  persistParkedRuns(storage);
 
   if (checkpoint.state === 'failed' || checkpoint.state === 'waiting_for_manual_intervention') {
     const failedNode = Object.entries(checkpoint.nodes).find(([, node]) => node.state === 'failed');
@@ -493,9 +533,10 @@ export async function runWorkflow(
   session: EditorSession,
   workflowId: string,
   inputs: Readonly<Record<string, unknown>> = {},
+  storage?: WorkflowStorage,
 ): Promise<WorkflowRunOutcome> {
-  restoreParkedRuns();
-  const recorded = loadWorkflow(session, workflowId);
+  restoreParkedRuns(storage);
+  const recorded = loadWorkflow(session, workflowId, storage);
   if (recorded !== undefined) {
     return runRecordedWorkflow(session, recorded.workflow, inputs);
   }
@@ -504,15 +545,16 @@ export async function runWorkflow(
   if (system === undefined) {
     throw new Error(`Workflow not found: ${workflowId}`);
   }
-  return runFirstPartyWorkflow(session, system.workflow, inputs);
+  return runFirstPartyWorkflow(session, system.workflow, inputs, {}, storage);
 }
 
 export async function resumeWorkflow(
   session: EditorSession,
   runId: string,
   humanInputs: Readonly<Record<string, unknown>>,
+  storage?: WorkflowStorage,
 ): Promise<WorkflowRunOutcome> {
-  restoreParkedRuns();
+  restoreParkedRuns(storage);
   const parked = parkedRuns.get(runId);
   if (parked === undefined || parked.projectId !== session.visualProject.id) {
     return {
@@ -545,11 +587,17 @@ export async function resumeWorkflow(
       ? (parked.workflowInputs as Record<string, unknown>)
       : {};
 
-  return runFirstPartyWorkflow(session, parked.workflow, inputs, {
-    runId: parked.runId,
-    resumeFrom: parked.checkpoint,
-    humanInputs,
-  });
+  return runFirstPartyWorkflow(
+    session,
+    parked.workflow,
+    inputs,
+    {
+      runId: parked.runId,
+      resumeFrom: parked.checkpoint,
+      humanInputs,
+    },
+    storage,
+  );
 }
 
 export { resolveWorkflow };

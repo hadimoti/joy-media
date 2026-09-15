@@ -9,26 +9,45 @@ export function stageJoyAgentPreview(
   session: EditorSession,
   draft: JoyCodeCompoundDraft,
 ): void {
-  store?.clear(draft.planId);
-  if (draft.baseRevision !== session.projectRevisionId)
+  if (draft.baseRevision !== session.projectRevisionId) {
+    // A stale stage must not leave an older preview for this run visible.
+    store?.clear(draft.planId);
     throw new Error('The proposal is stale. Request a new preview.');
-  // Compute the timeline first so failure cannot leave half a preview staged.
-  const timeline =
-    draft.timeline === undefined
-      ? undefined
-      : applyTransaction(session.timelineProject, draft.timeline).project;
-  if (draft.document !== session.visualProject)
-    store?.setDocument({
+  }
+
+  try {
+    // Build every surface before publishing. A failure clears only this run's
+    // prior stage; a success makes exactly one atomic store publication.
+    const timeline =
+      draft.timeline === undefined
+        ? undefined
+        : applyTransaction(session.timelineProject, draft.timeline).project;
+    const timelinePreview =
+      timeline === undefined
+        ? undefined
+        : {
+            canonical: previewTimelineFromProject(session.timelineProject),
+            preview: previewTimelineFromProject(timeline),
+          };
+    // Prepared changes are intentionally cloned before they reach this surface,
+    // so reference identity no longer says whether the visual document changed.
+    const documentPreview = draft.documentChanged
+      ? { canonical: session.visualProject, preview: draft.document }
+      : undefined;
+
+    if (timelinePreview === undefined && documentPreview === undefined) {
+      store?.clear(draft.planId);
+      return;
+    }
+
+    store?.publish({
       runId: draft.planId,
       baseRevision: draft.baseRevision,
-      canonical: session.visualProject,
-      preview: draft.document,
+      ...(timelinePreview === undefined ? {} : { timeline: timelinePreview }),
+      ...(documentPreview === undefined ? {} : { document: documentPreview }),
     });
-  if (timeline !== undefined)
-    store?.setTimeline({
-      runId: draft.planId,
-      baseRevision: draft.baseRevision,
-      canonical: previewTimelineFromProject(session.timelineProject),
-      preview: previewTimelineFromProject(timeline),
-    });
+  } catch (error) {
+    store?.clear(draft.planId);
+    throw error;
+  }
 }

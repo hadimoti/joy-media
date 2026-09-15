@@ -133,13 +133,16 @@ describe('resumable original upload HTTP protocol', () => {
     store.release();
 
     let completed: Awaited<ReturnType<typeof fetchJson>> | undefined;
-    for (let attempt = 0; attempt < 100; attempt += 1) {
+    // Generous polling budget (~10s): the background commit runs on the same
+    // event loop as the whole test suite, so under full-suite CPU contention a
+    // tight 500ms window flakes even though the finalize itself is fast.
+    for (let attempt = 0; attempt < 400; attempt += 1) {
       completed = await fetchJson(`${baseUrl}/${sessionId}`, {
         method: 'GET',
         headers: identityHeaders,
       });
       if (uploadFrom(completed.body).state === 'complete') break;
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      await new Promise((resolve) => setTimeout(resolve, 25));
     }
     expect(completed?.status).toBe(200);
     expect(completed?.body).toMatchObject({

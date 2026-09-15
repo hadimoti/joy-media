@@ -1,0 +1,400 @@
+{
+  "version": 2,
+  "fixtures": [
+    {
+      "name": "small-pixel-text.ppm",
+      "path": "packages/test-fixtures/live-director-generated/small-pixel-text.ppm",
+      "sha256": "426765b5ac3dcec9cb33373ec4b3bc433ddd703509a6e00a9f095b2485716152",
+      "bytes": 43214,
+      "license": "Generated deterministic developer fixture; no third-party media.",
+      "generatedBy": "tooling/generate-director-fixtures.mjs (ffmpeg/ffprobe)",
+      "profile": "small-pixel-text-source",
+      "expectedEvents": []
+    },
+    {
+      "name": "cfr-numbered.mp4",
+      "path": "packages/test-fixtures/live-director-generated/cfr-numbered.mp4",
+      "sha256": "f0bca42bdd973af2a664034ff6f63ebae221fdba6dd4ab959513917b0c73adfe",
+      "bytes": 31093,
+      "license": "Generated deterministic developer fixture; no third-party media.",
+      "generatedBy": "tooling/generate-director-fixtures.mjs (ffmpeg/ffprobe)",
+      "profile": "cfr-numbered",
+      "expectedEvents": [],
+      "durationUs": 2000000,
+      "startUs": 0,
+      "video": {
+        "codec": "h264",
+        "timeBase": "1/15360",
+        "frameCount": 60,
+        "presentationPtsTicks": [
+          0, 512, 1024, 1536, 2048, 2560, 3072, 3584, 4096, 4608, 5120, 5632, 6144, 6656, 7168,
+          7680, 8192, 8704, 9216, 9728, 10240, 10752, 11264, 11776, 12288, 12800, 13312, 13824,
+          14336, 14848, 15360, 15872, 16384, 16896, 17408, 17920, 18432, 18944, 19456, 19968, 20480,
+          20992, 21504, 22016, 22528, 23040, 23552, 24064, 24576, 25088, 25600, 26112, 26624, 27136,
+          27648, 28160, 28672, 29184, 29696, 30208
+        ],
+        "actualPresentationPtsUs": [
+          0, 33333, 66666, 100000, 133333, 166666, 200000, 233333, 266666, 300000, 333333, 366666,
+          400000, 433333, 466666, 500000, 533333, 566666, 600000, 633333, 666666, 700000, 733333,
+          766666, 800000, 833333, 866666, 900000, 933333, 966666, 1000000, 1033333, 1066666,
+          1100000, 1133333, 1166666, 1200000, 1233333, 1266666, 1300000, 1333333, 1366666, 1400000,
+          1433333, 1466666, 1500000, 1533333, 1566666, 1600000, 1633333, 1666666, 1700000, 1733333,
+          1766666, 1800000, 1833333, 1866666, 1900000, 1933333, 1966666
+        ]
+      }
+    },
+    {
+      "name": "vfr-numbered.mp4",
+      "path": "packages/test-fixtures/live-director-generated/vfr-numbered.mp4",
+      "sha256": "cb756c5431e83480f8b58a6419429a646f51085de14f4d2893ac10f0d0129efd",
+      "bytes": 12567,
+      "license": "Generated deterministic developer fixture; no third-party media.",
+      "generatedBy": "tooling/generate-director-fixtures.mjs (ffmpeg/ffprobe)",
+      "profile": "vfr-numbered",
+      "expectedEvents": [],
+      "durationUs": 1533333,
+      "startUs": 0,
+      "video": {
+        "codec": "h264",
+        "timeBase": "1/15360",
+        "frameCount": 8,
+        "presentationPtsTicks": [0, 512, 2560, 3072, 7168, 7680, 14848, 23040],
+        "actualPresentationPtsUs": [0, 33333, 166666, 200000, 466666, 500000, 966666, 1500000]
+      }
+    },
+    {
+      "name": "b-frame-reorder.mp4",
+      "path": "packages/test-fixtures/live-director-generated/b-frame-reorder.mp4",
+      "sha256": "dadd5a1ff7e24a0784c93e556fb63a7d2259afa8d239e2ae72b719841138e63a",
+      "bytes": 33704,
+      "license": "Generated deterministic developer fixture; no third-party media.",
+      "generatedBy": "tooling/generate-director-fixtures.mjs (ffmpeg/ffprobe)",
+      "profile": "b-frame-reorder",
+      "expectedEvents": [],
+      "durationUs": 2000000,
+      "startUs": 0,
+      "video": {
+        "codec": "h264",
+        "timeBase": "1/12288",
+        "frameCount": 48,
+        "presentationPtsTicks": [
+          0, 512, 1024, 1536, 2048, 2560, 3072, 3584, 4096, 4608, 5120, 5632, 6144, 6656, 7168,
+          7680, 8192, 8704, 9216, 9728, 10240, 10752, 11264, 11776, 12288, 12800, 13312, 13824,
+          14336, 14848, 15360, 15872, 16384, 16896, 17408, 17920, 18432, 18944, 19456, 19968, 20480,
+          20992, 21504, 22016, 22528, 23040, 23552, 24064
+        ],
+        "actualPresentationPtsUs": [
+          0, 41666, 83333, 125000, 166666, 208333, 250000, 291666, 333333, 375000, 416666, 458333,
+          500000, 541666, 583333, 625000, 666666, 708333, 750000, 791666, 833333, 875000, 916666,
+          958333, 1000000, 1041666, 1083333, 1125000, 1166666, 1208333, 1250000, 1291666, 1333333,
+          1375000, 1416666, 1458333, 1500000, 1541666, 1583333, 1625000, 1666666, 1708333, 1750000,
+          1791666, 1833333, 1875000, 1916666, 1958333
+        ]
+      }
+    },
+    {
+      "name": "nonzero-pts-origin.mp4",
+      "path": "packages/test-fixtures/live-director-generated/nonzero-pts-origin.mp4",
+      "sha256": "c2fc09042d15b4236ee0466b42350518853b36831a53c68de1da0ba5806c3af2",
+      "bytes": 12710,
+      "license": "Generated deterministic developer fixture; no third-party media.",
+      "generatedBy": "tooling/generate-director-fixtures.mjs (ffmpeg/ffprobe)",
+      "profile": "nonzero-pts-origin",
+      "expectedEvents": [],
+      "durationUs": 1000000,
+      "startUs": 2000000,
+      "video": {
+        "codec": "h264",
+        "timeBase": "1/12288",
+        "frameCount": 12,
+        "presentationPtsTicks": [
+          24576, 25600, 26624, 27648, 28672, 29696, 30720, 31744, 32768, 33792, 34816, 35840
+        ],
+        "actualPresentationPtsUs": [
+          2000000, 2083333, 2166666, 2250000, 2333333, 2416666, 2500000, 2583333, 2666666, 2750000,
+          2833333, 2916666
+        ]
+      }
+    },
+    {
+      "name": "portrait-rotation-sar.mp4",
+      "path": "packages/test-fixtures/live-director-generated/portrait-rotation-sar.mp4",
+      "sha256": "60346603b83210067c5df7cc64820a0dd8e0f2f40f35fb16bfe952459d928040",
+      "bytes": 17939,
+      "license": "Generated deterministic developer fixture; no third-party media.",
+      "generatedBy": "tooling/generate-director-fixtures.mjs (ffmpeg/ffprobe)",
+      "profile": "portrait-rotation-sar",
+      "expectedEvents": [],
+      "durationUs": 1000000,
+      "startUs": 0,
+      "video": {
+        "codec": "h264",
+        "timeBase": "1/12288",
+        "frameCount": 24,
+        "presentationPtsTicks": [
+          0, 512, 1024, 1536, 2048, 2560, 3072, 3584, 4096, 4608, 5120, 5632, 6144, 6656, 7168,
+          7680, 8192, 8704, 9216, 9728, 10240, 10752, 11264, 11776
+        ],
+        "actualPresentationPtsUs": [
+          0, 41666, 83333, 125000, 166666, 208333, 250000, 291666, 333333, 375000, 416666, 458333,
+          500000, 541666, 583333, 625000, 666666, 708333, 750000, 791666, 833333, 875000, 916666,
+          958333
+        ]
+      }
+    },
+    {
+      "name": "single-frame-flash.mp4",
+      "path": "packages/test-fixtures/live-director-generated/single-frame-flash.mp4",
+      "sha256": "c652be55afa6a7896477be81c32a9405caa1545537fa4b62d502a794cd8e73d2",
+      "bytes": 2462,
+      "license": "Generated deterministic developer fixture; no third-party media.",
+      "generatedBy": "tooling/generate-director-fixtures.mjs (ffmpeg/ffprobe)",
+      "profile": "single-frame-flash",
+      "expectedEvents": [
+        {
+          "type": "flash",
+          "startUs": 500000,
+          "endUs": 533334
+        }
+      ],
+      "durationUs": 1000000,
+      "startUs": 0,
+      "video": {
+        "codec": "h264",
+        "timeBase": "1/15360",
+        "frameCount": 30,
+        "presentationPtsTicks": [
+          0, 512, 1024, 1536, 2048, 2560, 3072, 3584, 4096, 4608, 5120, 5632, 6144, 6656, 7168,
+          7680, 8192, 8704, 9216, 9728, 10240, 10752, 11264, 11776, 12288, 12800, 13312, 13824,
+          14336, 14848
+        ],
+        "actualPresentationPtsUs": [
+          0, 33333, 66666, 100000, 133333, 166666, 200000, 233333, 266666, 300000, 333333, 366666,
+          400000, 433333, 466666, 500000, 533333, 566666, 600000, 633333, 666666, 700000, 733333,
+          766666, 800000, 833333, 866666, 900000, 933333, 966666
+        ]
+      }
+    },
+    {
+      "name": "cut-fade-small-text.mp4",
+      "path": "packages/test-fixtures/live-director-generated/cut-fade-small-text.mp4",
+      "sha256": "9a5920a378e9c2cecb903cd6c9a2c9ffc8a05b58bccf639150487478819bfd9c",
+      "bytes": 4306,
+      "license": "Generated deterministic developer fixture; no third-party media.",
+      "generatedBy": "tooling/generate-director-fixtures.mjs (ffmpeg/ffprobe)",
+      "profile": "cut-fade-small-text",
+      "expectedEvents": [
+        {
+          "type": "hard-cut",
+          "atUs": 500000
+        },
+        {
+          "type": "fade-in",
+          "startUs": 1000000,
+          "endUs": 1500000
+        },
+        {
+          "type": "small-text",
+          "text": "JOY fixture"
+        }
+      ],
+      "durationUs": 2000000,
+      "startUs": 0,
+      "video": {
+        "codec": "h264",
+        "timeBase": "1/15360",
+        "frameCount": 60,
+        "presentationPtsTicks": [
+          0, 512, 1024, 1536, 2048, 2560, 3072, 3584, 4096, 4608, 5120, 5632, 6144, 6656, 7168,
+          7680, 8192, 8704, 9216, 9728, 10240, 10752, 11264, 11776, 12288, 12800, 13312, 13824,
+          14336, 14848, 15360, 15872, 16384, 16896, 17408, 17920, 18432, 18944, 19456, 19968, 20480,
+          20992, 21504, 22016, 22528, 23040, 23552, 24064, 24576, 25088, 25600, 26112, 26624, 27136,
+          27648, 28160, 28672, 29184, 29696, 30208
+        ],
+        "actualPresentationPtsUs": [
+          0, 33333, 66666, 100000, 133333, 166666, 200000, 233333, 266666, 300000, 333333, 366666,
+          400000, 433333, 466666, 500000, 533333, 566666, 600000, 633333, 666666, 700000, 733333,
+          766666, 800000, 833333, 866666, 900000, 933333, 966666, 1000000, 1033333, 1066666,
+          1100000, 1133333, 1166666, 1200000, 1233333, 1266666, 1300000, 1333333, 1366666, 1400000,
+          1433333, 1466666, 1500000, 1533333, 1566666, 1600000, 1633333, 1666666, 1700000, 1733333,
+          1766666, 1800000, 1833333, 1866666, 1900000, 1933333, 1966666
+        ]
+      }
+    },
+    {
+      "name": "long-sequence.mp4",
+      "path": "packages/test-fixtures/live-director-generated/long-sequence.mp4",
+      "sha256": "5bb9091818f3fd512f44177205632da8496c1ae455d2bcc9dbb4abd8e2fd66cc",
+      "bytes": 196145,
+      "license": "Generated deterministic developer fixture; no third-party media.",
+      "generatedBy": "tooling/generate-director-fixtures.mjs (ffmpeg/ffprobe)",
+      "profile": "long-sequence",
+      "expectedEvents": [],
+      "durationUs": 12000000,
+      "startUs": 0,
+      "video": {
+        "codec": "h264",
+        "timeBase": "1/15360",
+        "frameCount": 360,
+        "presentationPtsTicks": [
+          0, 512, 1024, 1536, 2048, 2560, 3072, 3584, 4096, 4608, 5120, 5632, 6144, 6656, 7168,
+          7680, 8192, 8704, 9216, 9728, 10240, 10752, 11264, 11776, 12288, 12800, 13312, 13824,
+          14336, 14848, 15360, 15872, 16384, 16896, 17408, 17920, 18432, 18944, 19456, 19968, 20480,
+          20992, 21504, 22016, 22528, 23040, 23552, 24064, 24576, 25088, 25600, 26112, 26624, 27136,
+          27648, 28160, 28672, 29184, 29696, 30208, 30720, 31232, 31744, 32256, 32768, 33280, 33792,
+          34304, 34816, 35328, 35840, 36352, 36864, 37376, 37888, 38400, 38912, 39424, 39936, 40448,
+          40960, 41472, 41984, 42496, 43008, 43520, 44032, 44544, 45056, 45568, 46080, 46592, 47104,
+          47616, 48128, 48640, 49152, 49664, 50176, 50688, 51200, 51712, 52224, 52736, 53248, 53760,
+          54272, 54784, 55296, 55808, 56320, 56832, 57344, 57856, 58368, 58880, 59392, 59904, 60416,
+          60928, 61440, 61952, 62464, 62976, 63488, 64000, 64512, 65024, 65536, 66048, 66560, 67072,
+          67584, 68096, 68608, 69120, 69632, 70144, 70656, 71168, 71680, 72192, 72704, 73216, 73728,
+          74240, 74752, 75264, 75776, 76288, 76800, 77312, 77824, 78336, 78848, 79360, 79872, 80384,
+          80896, 81408, 81920, 82432, 82944, 83456, 83968, 84480, 84992, 85504, 86016, 86528, 87040,
+          87552, 88064, 88576, 89088, 89600, 90112, 90624, 91136, 91648, 92160, 92672, 93184, 93696,
+          94208, 94720, 95232, 95744, 96256, 96768, 97280, 97792, 98304, 98816, 99328, 99840,
+          100352, 100864, 101376, 101888, 102400, 102912, 103424, 103936, 104448, 104960, 105472,
+          105984, 106496, 107008, 107520, 108032, 108544, 109056, 109568, 110080, 110592, 111104,
+          111616, 112128, 112640, 113152, 113664, 114176, 114688, 115200, 115712, 116224, 116736,
+          117248, 117760, 118272, 118784, 119296, 119808, 120320, 120832, 121344, 121856, 122368,
+          122880, 123392, 123904, 124416, 124928, 125440, 125952, 126464, 126976, 127488, 128000,
+          128512, 129024, 129536, 130048, 130560, 131072, 131584, 132096, 132608, 133120, 133632,
+          134144, 134656, 135168, 135680, 136192, 136704, 137216, 137728, 138240, 138752, 139264,
+          139776, 140288, 140800, 141312, 141824, 142336, 142848, 143360, 143872, 144384, 144896,
+          145408, 145920, 146432, 146944, 147456, 147968, 148480, 148992, 149504, 150016, 150528,
+          151040, 151552, 152064, 152576, 153088, 153600, 154112, 154624, 155136, 155648, 156160,
+          156672, 157184, 157696, 158208, 158720, 159232, 159744, 160256, 160768, 161280, 161792,
+          162304, 162816, 163328, 163840, 164352, 164864, 165376, 165888, 166400, 166912, 167424,
+          167936, 168448, 168960, 169472, 169984, 170496, 171008, 171520, 172032, 172544, 173056,
+          173568, 174080, 174592, 175104, 175616, 176128, 176640, 177152, 177664, 178176, 178688,
+          179200, 179712, 180224, 180736, 181248, 181760, 182272, 182784, 183296, 183808
+        ],
+        "actualPresentationPtsUs": [
+          0, 33333, 66666, 100000, 133333, 166666, 200000, 233333, 266666, 300000, 333333, 366666,
+          400000, 433333, 466666, 500000, 533333, 566666, 600000, 633333, 666666, 700000, 733333,
+          766666, 800000, 833333, 866666, 900000, 933333, 966666, 1000000, 1033333, 1066666,
+          1100000, 1133333, 1166666, 1200000, 1233333, 1266666, 1300000, 1333333, 1366666, 1400000,
+          1433333, 1466666, 1500000, 1533333, 1566666, 1600000, 1633333, 1666666, 1700000, 1733333,
+          1766666, 1800000, 1833333, 1866666, 1900000, 1933333, 1966666, 2000000, 2033333, 2066666,
+          2100000, 2133333, 2166666, 2200000, 2233333, 2266666, 2300000, 2333333, 2366666, 2400000,
+          2433333, 2466666, 2500000, 2533333, 2566666, 2600000, 2633333, 2666666, 2700000, 2733333,
+          2766666, 2800000, 2833333, 2866666, 2900000, 2933333, 2966666, 3000000, 3033333, 3066666,
+          3100000, 3133333, 3166666, 3200000, 3233333, 3266666, 3300000, 3333333, 3366666, 3400000,
+          3433333, 3466666, 3500000, 3533333, 3566666, 3600000, 3633333, 3666666, 3700000, 3733333,
+          3766666, 3800000, 3833333, 3866666, 3900000, 3933333, 3966666, 4000000, 4033333, 4066666,
+          4100000, 4133333, 4166666, 4200000, 4233333, 4266666, 4300000, 4333333, 4366666, 4400000,
+          4433333, 4466666, 4500000, 4533333, 4566666, 4600000, 4633333, 4666666, 4700000, 4733333,
+          4766666, 4800000, 4833333, 4866666, 4900000, 4933333, 4966666, 5000000, 5033333, 5066666,
+          5100000, 5133333, 5166666, 5200000, 5233333, 5266666, 5300000, 5333333, 5366666, 5400000,
+          5433333, 5466666, 5500000, 5533333, 5566666, 5600000, 5633333, 5666666, 5700000, 5733333,
+          5766666, 5800000, 5833333, 5866666, 5900000, 5933333, 5966666, 6000000, 6033333, 6066666,
+          6100000, 6133333, 6166666, 6200000, 6233333, 6266666, 6300000, 6333333, 6366666, 6400000,
+          6433333, 6466666, 6500000, 6533333, 6566666, 6600000, 6633333, 6666666, 6700000, 6733333,
+          6766666, 6800000, 6833333, 6866666, 6900000, 6933333, 6966666, 7000000, 7033333, 7066666,
+          7100000, 7133333, 7166666, 7200000, 7233333, 7266666, 7300000, 7333333, 7366666, 7400000,
+          7433333, 7466666, 7500000, 7533333, 7566666, 7600000, 7633333, 7666666, 7700000, 7733333,
+          7766666, 7800000, 7833333, 7866666, 7900000, 7933333, 7966666, 8000000, 8033333, 8066666,
+          8100000, 8133333, 8166666, 8200000, 8233333, 8266666, 8300000, 8333333, 8366666, 8400000,
+          8433333, 8466666, 8500000, 8533333, 8566666, 8600000, 8633333, 8666666, 8700000, 8733333,
+          8766666, 8800000, 8833333, 8866666, 8900000, 8933333, 8966666, 9000000, 9033333, 9066666,
+          9100000, 9133333, 9166666, 9200000, 9233333, 9266666, 9300000, 9333333, 9366666, 9400000,
+          9433333, 9466666, 9500000, 9533333, 9566666, 9600000, 9633333, 9666666, 9700000, 9733333,
+          9766666, 9800000, 9833333, 9866666, 9900000, 9933333, 9966666, 10000000, 10033333,
+          10066666, 10100000, 10133333, 10166666, 10200000, 10233333, 10266666, 10300000, 10333333,
+          10366666, 10400000, 10433333, 10466666, 10500000, 10533333, 10566666, 10600000, 10633333,
+          10666666, 10700000, 10733333, 10766666, 10800000, 10833333, 10866666, 10900000, 10933333,
+          10966666, 11000000, 11033333, 11066666, 11100000, 11133333, 11166666, 11200000, 11233333,
+          11266666, 11300000, 11333333, 11366666, 11400000, 11433333, 11466666, 11500000, 11533333,
+          11566666, 11600000, 11633333, 11666666, 11700000, 11733333, 11766666, 11800000, 11833333,
+          11866666, 11900000, 11933333, 11966666
+        ]
+      }
+    },
+    {
+      "name": "silent-audio.wav",
+      "path": "packages/test-fixtures/live-director-generated/silent-audio.wav",
+      "sha256": "1fbb398909387745d53c712005909f12b0767b16a309bd23b69b82f8c38d329d",
+      "bytes": 192078,
+      "license": "Generated deterministic developer fixture; no third-party media.",
+      "generatedBy": "tooling/generate-director-fixtures.mjs (ffmpeg/ffprobe)",
+      "profile": "silent-audio",
+      "expectedEvents": [],
+      "durationUs": 2000000,
+      "startUs": 0,
+      "audio": {
+        "codec": "pcm_s16le",
+        "sampleRate": 48000,
+        "channels": 1,
+        "packetCount": 24
+      }
+    },
+    {
+      "name": "speech-like-synthetic.wav",
+      "path": "packages/test-fixtures/live-director-generated/speech-like-synthetic.wav",
+      "sha256": "5ab1b421c8b32a00da0c362b27985defe9d90e0a924dd2f9852eda29f171e64a",
+      "bytes": 192078,
+      "license": "Generated deterministic developer fixture; no third-party media.",
+      "generatedBy": "tooling/generate-director-fixtures.mjs (ffmpeg/ffprobe)",
+      "profile": "speech-like-synthetic",
+      "expectedEvents": [],
+      "durationUs": 2000000,
+      "startUs": 0,
+      "audio": {
+        "codec": "pcm_s16le",
+        "sampleRate": 48000,
+        "channels": 1,
+        "packetCount": 24
+      }
+    },
+    {
+      "name": "music-like-synthetic.wav",
+      "path": "packages/test-fixtures/live-director-generated/music-like-synthetic.wav",
+      "sha256": "401b39f0318cc498c6a05176708d2fcade33a3c35ba79d5d19d000c8a678bd67",
+      "bytes": 192078,
+      "license": "Generated deterministic developer fixture; no third-party media.",
+      "generatedBy": "tooling/generate-director-fixtures.mjs (ffmpeg/ffprobe)",
+      "profile": "music-like-synthetic",
+      "expectedEvents": [],
+      "durationUs": 2000000,
+      "startUs": 0,
+      "audio": {
+        "codec": "pcm_s16le",
+        "sampleRate": 48000,
+        "channels": 1,
+        "packetCount": 24
+      }
+    },
+    {
+      "name": "av1-runtime-probe.webm",
+      "path": "packages/test-fixtures/live-director-generated/av1-runtime-probe.webm",
+      "sha256": "97ebf356a20d1473f8f888e9cc9d30d2696e8a0a6be7305d494e51c29eeb0022",
+      "bytes": 1350,
+      "license": "Generated deterministic developer fixture; no third-party media.",
+      "generatedBy": "tooling/generate-director-fixtures.mjs (ffmpeg/ffprobe)",
+      "profile": "runtime-codec-probe",
+      "expectedEvents": [],
+      "browserSupport": "runtime-probed-not-assumed",
+      "durationUs": 1000000,
+      "startUs": 0,
+      "video": {
+        "codec": "av1",
+        "timeBase": "1/1000",
+        "frameCount": 12,
+        "presentationPtsTicks": [0, 83, 167, 250, 333, 417, 500, 583, 667, 750, 833, 917],
+        "actualPresentationPtsUs": [
+          0, 83000, 167000, 250000, 333000, 417000, 500000, 583000, 667000, 750000, 833000, 917000
+        ]
+      }
+    },
+    {
+      "name": "corrupt-truncated.mp4",
+      "path": "packages/test-fixtures/live-director-generated/corrupt-truncated.mp4",
+      "sha256": "46f4e0f19762e5f8b9953e78978e5025e85bd47a1d0e67606d3d35d40557f56b",
+      "bytes": 20,
+      "license": "Generated deterministic developer fixture; no third-party media.",
+      "generatedBy": "tooling/generate-director-fixtures.mjs (ffmpeg/ffprobe)",
+      "profile": "corrupt-truncated",
+      "expectedEvents": [],
+      "browserSupport": "unsupported"
+    }
+  ]
+}

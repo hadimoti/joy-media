@@ -2,14 +2,48 @@ export const PACKAGE_NAME = '@joy-media/agent-tools' as const;
 
 export {
   JOY_EDITOR_OPERATION_DEFINITIONS,
+  canAdvertiseOperation,
+  createModelVisibleJoyCodeProposalParameters,
   getJoyEditorOperationDefinition,
   listJoyEditorOperations,
+  listModelVisibleJoyCodeOperationKinds,
+  listModelVisibleJoyEditorOperationDefinitions,
 } from './editor-operation-registry.js';
 export type {
+  CoverageStatus,
   JoyEditorOperationAccess,
   JoyEditorOperationDefinition,
+  JoyEditorOperationDomain,
+  JoyEditorOperationModelInputSchema,
+  JoyEditorOperationPolicy,
+  JoyEditorOperationPreview,
   JoyEditorOperationStatus,
+  JoyEditorOperationSurface,
+  OperationAccess,
+  OperationEvidence,
 } from './editor-operation-registry.js';
+export { assertJoyEditorOperationDefinitions } from './editor-operation-definition.js';
+
+export type {
+  CreativeSkillId,
+  CreativeSkillCapability,
+  CreativeEvidenceRequirement,
+  CreativeSkillPrivacyRequirement,
+  CreativeSkillProcedureCheckpoint,
+  CreativeSkillBudget,
+  CreativeSkillManifest,
+  CreativeSkillValidationResult,
+  CreativeSkillRuntime,
+  CreativeSkillAvailability,
+} from './creative-skill.js';
+export {
+  CREATIVE_SKILL_IDS,
+  CREATIVE_SKILL_CAPABILITIES,
+  CREATIVE_EVIDENCE_REQUIREMENTS,
+  validateCreativeSkillManifest,
+  resolveCreativeSkillAvailability,
+} from './creative-skill.js';
+export { CREATIVE_SKILLS, getCreativeSkill } from './creative-skills.js';
 
 export type {
   ToolDefinition,

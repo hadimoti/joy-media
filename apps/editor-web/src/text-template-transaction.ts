@@ -10,6 +10,7 @@ import type { EditorSession } from './editor-session.js';
 import { readClipObjectMap } from './sticker-bindings.js';
 import type { TextTemplateV1 } from './text-template-catalog.js';
 import { nextProfessionalTrackId } from './timeline-track-family.js';
+import { withTimelineElementKinds } from './timeline-element-kind.js';
 
 export interface InsertedTextTemplate {
   readonly clipId: string;
@@ -160,31 +161,34 @@ export function prepareTextTemplateInsertion(
     existingItems
       .filter((item) => item.compositionId === visualComposition.id && item.trackId === trackId)
       .reduce((highest, item) => Math.max(highest, item.withinTrackOrder), -1) + 1;
-  const document: JoyProjectV1 = {
-    ...visualProject,
-    visualObjects: { ...visualProject.visualObjects, [objectId]: object },
-    compositions: {
-      ...visualProject.compositions,
-      [visualProject.rootCompositionId]: { ...visualComposition, tracks: visualTracks },
+  const document = withTimelineElementKinds(
+    {
+      ...visualProject,
+      visualObjects: { ...visualProject.visualObjects, [objectId]: object },
+      compositions: {
+        ...visualProject.compositions,
+        [visualProject.rootCompositionId]: { ...visualComposition, tracks: visualTracks },
+      },
+      pluginData: { ...visualProject.pluginData, ['joy.clipObjects']: map },
+      universalTimeline: {
+        schemaVersion: UNIVERSAL_TIMELINE_SCHEMA_VERSION,
+        items: [
+          ...existingItems,
+          {
+            id: clipId,
+            compositionId: visualComposition.id,
+            trackId,
+            elementKind: 'text',
+            startUs,
+            durationUs,
+            source: { kind: 'object', id: objectId },
+            withinTrackOrder: nextOrder,
+          },
+        ],
+      },
     },
-    pluginData: { ...visualProject.pluginData, ['joy.clipObjects']: map },
-    universalTimeline: {
-      schemaVersion: UNIVERSAL_TIMELINE_SCHEMA_VERSION,
-      items: [
-        ...existingItems,
-        {
-          id: clipId,
-          compositionId: visualComposition.id,
-          trackId,
-          elementKind: 'text',
-          startUs,
-          durationUs,
-          source: { kind: 'object', id: objectId },
-          withinTrackOrder: nextOrder,
-        },
-      ],
-    },
-  };
+    { [clipId]: 'text' },
+  );
   return {
     inserted: { clipId, objectId },
     timeline: timelineTransaction,

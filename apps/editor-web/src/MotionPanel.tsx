@@ -55,12 +55,13 @@ import {
 } from './icons.js';
 import { GraphEditor } from './GraphEditor.js';
 import { focusCoverTransform, getFirstPartySceneThumbUrl } from './html-scene-thumbs.js';
-import { EditorPanelContext } from './App.js';
+import { EditorPanelContext } from './editor-panel-context.js';
 import { JOY_COLORS } from './theme.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { iconUrl } from './icon-assets.js';
 import { createMotionScene, type MotionSceneCatalogEntry } from './motion-scene-catalog.js';
+import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 
 interface MotionPanelProps {
   readonly object: VisualObjectV1 | undefined;
@@ -88,11 +89,12 @@ type LiveProgressListener = (progress: number) => void;
 const motionRegistry = new MotionRegistry();
 registerBuiltinMotions(motionRegistry);
 
-/* ─── Favorites persistence (localStorage) ─── */
+/* ─── Favorites persistence (root writer-gated storage) ─── */
 
-function loadFavorites(): Set<string> {
+function loadFavorites(storage: BrowserKeyValueStore | undefined): Set<string> {
+  if (storage === undefined) return new Set();
   try {
-    const raw = window.localStorage.getItem('joy-media.motion-favorites');
+    const raw = storage.getItem('joy-media.motion-favorites');
     if (raw === null) return new Set();
     return new Set(JSON.parse(raw) as string[]);
   } catch {
@@ -100,8 +102,9 @@ function loadFavorites(): Set<string> {
   }
 }
 
-function saveFavorites(favorites: Set<string>): void {
-  window.localStorage.setItem('joy-media.motion-favorites', JSON.stringify([...favorites]));
+function saveFavorites(storage: BrowserKeyValueStore | undefined, favorites: Set<string>): void {
+  if (storage === undefined) return;
+  storage.setItem('joy-media.motion-favorites', JSON.stringify([...favorites]));
 }
 
 /* ─── Categories ─── */
@@ -603,12 +606,19 @@ function HtmlSceneLiveThumb({
       root.dataset.liveProgress = progress.toFixed(3);
     };
 
-    void host.ready.then(() => {
-      if (cancelled) return;
-      listeners.add(onProgress);
-      onProgress(0.12);
-      setReady(true);
-    });
+    void host.ready.then(
+      () => {
+        if (cancelled) return;
+        listeners.add(onProgress);
+        onProgress(0.12);
+        setReady(true);
+      },
+      () => {
+        // The effect cleanup destroys the host, which rejects `ready`. That is
+        // an expected teardown, so swallow it here rather than let the derived
+        // promise surface as an unhandled rejection.
+      },
+    );
 
     return () => {
       cancelled = true;
@@ -1016,19 +1026,27 @@ export function MotionPanel({
   selectedClipId,
   onAddHtmlSceneToSelection,
 }: MotionPanelProps) {
+  const editorContext = useContext(EditorPanelContext);
+  const storage = editorContext?.storage;
   const [subtab, setSubtab] = useState<LibrarySubtab>('library');
   const [graphChannel, setGraphChannel] = useState<AnimatablePropertyV1 | undefined>(undefined);
   const [presetId, setPresetId] = useState<string>(JOY_MOTION_PRESETS[0]!.id);
-  const [favorites, setFavorites] = useState<Set<string>>(loadFavorites);
+  const [favorites, setFavorites] = useState<Set<string>>(() => loadFavorites(storage));
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   // Was `searchOpen` plus a ref, driving an input with no value/onChange — the
   // box rendered and filtered nothing. PanelShell owns the toggle now and this
   // is the query it feeds.
   const [query, setQuery] = useState('');
 
-  const editorContext = useContext(EditorPanelContext);
   const openMotionStudio = editorContext?.openMotionStudio;
   const animationGraphFocus = editorContext?.animationGraphFocus;
+
+  // Like other docked panels, Motion can render once before the provider is
+  // attached. Hydrate when a writer-gated adapter arrives rather than using
+  // raw browser storage during that frame.
+  useEffect(() => {
+    if (storage !== undefined) setFavorites(loadFavorites(storage));
+  }, [storage]);
 
   useEffect(() => {
     if (animationGraphFocus === undefined || object?.id !== animationGraphFocus.objectId) return;
@@ -1037,9 +1055,10 @@ export function MotionPanel({
   }, [animationGraphFocus, object?.id]);
 
   const createMotion = useCallback(() => {
-    const scene = createMotionScene(window.localStorage, 'Untitled Motion');
+    if (storage === undefined) return;
+    const scene = createMotionScene(storage, 'Untitled Motion');
     openMotionStudio?.(scene.id);
-  }, [openMotionStudio]);
+  }, [openMotionStudio, storage]);
 
   const duration = Math.max(1, compositionDurationUs);
   const timeToX = (timeUs: number) =>
@@ -1050,15 +1069,18 @@ export function MotionPanel({
       ? graphChannel
       : channels[0];
 
-  const toggleFavorite = useCallback((id: string) => {
-    setFavorites((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      saveFavorites(next);
-      return next;
-    });
-  }, []);
+  const toggleFavorite = useCallback(
+    (id: string) => {
+      setFavorites((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        saveFavorites(storage, next);
+        return next;
+      });
+    },
+    [storage],
+  );
 
   // Preset library cards ("Fade In", etc.) aren't MotionSceneDocuments, so
   // there's nothing real to load here — this opens a fresh Untitled Motion,

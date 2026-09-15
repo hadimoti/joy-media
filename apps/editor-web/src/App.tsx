@@ -1,5 +1,4 @@
 import {
-  createContext,
   lazy,
   Suspense,
   useCallback,
@@ -13,6 +12,16 @@ import {
 import { DockviewReact } from 'dockview';
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview';
 import { PanelTab } from './PanelTab.js';
+import {
+  EditorPanelContext,
+  type AnimationGraphFocusRequest,
+  type DecodedPreviewFrame,
+  type EditorPanelContextValue,
+  type EditorRuntimeState,
+  type GuardedBrowserStorage,
+} from './editor-panel-context.js';
+export { EditorPanelContext };
+export type { AnimationGraphFocusRequest };
 import { AppMenuBar } from './AppMenuBar.js';
 import { panelIdFromMenuAction, type AppMenuActionId } from './app-menu.js';
 import {
@@ -26,7 +35,6 @@ import {
   type HtmlMediaDecoder,
   type ImageDataLike,
   type MediaClock,
-  type PlaybackDiagnosticsSnapshot,
   type VideoFramePresentationMetadata,
   type VideoClipSpec,
 } from '@joy-media/playback-engine';
@@ -42,12 +50,9 @@ import type { TimelineTrackView, TimelineViewport } from '@joy-media/timeline-en
 import type {
   CommandTransaction,
   GraphTransaction,
-  ArtifactStore,
   ArtifactTransaction,
 } from '@joy-media/commands';
-import type { CreativeBriefV1, EditorContext } from '@joy-media/agent-tools';
 import { buildEditorContext } from '@joy-media/agent-tools';
-import type { HistoryEntry } from './editor-session.js';
 import type { PanelId } from './workspace.js';
 import type {
   AnimationDescriptorV1,
@@ -60,6 +65,8 @@ import type {
   VisualObjectV1,
 } from '@joy-media/project-schema';
 import { normalizePlaybackRate, sourceTimeAtVideoClipTime } from '@joy-media/project-schema';
+import { BUILT_IN_LOOK_PACKS } from '@joy-media/motion-core';
+import { markOverridesFromCommittedKeys } from './joy-agent/look-instance-operations.js';
 import { type VisualObjectTransaction } from '@joy-media/property-system';
 import {
   evaluateCameraExpressionTransform,
@@ -112,13 +119,84 @@ function invalidateAgentPreviewAfterEdit(session: EditorSession): void {
   appAgentPresenceStore.invalidatePreview(session.historyCursorSequence);
 }
 
+/** The timeline acknowledges only the immutable preview bundle it committed. */
+function acknowledgeTimelineAgentPreview(runId: string, bundleVersion: number): void {
+  appAgentPreviewStore.acknowledgeRender(runId, bundleVersion, 'timeline');
+}
+
+/**
+ * Dockview keeps inactive tab content mounted. A real renderer paint in that
+ * cache is not owner-visible evidence, so preview acknowledgement requires
+ * Dockview's selected-and-visible semantic state. `isActive` tracks the
+ * globally focused group and would incorrectly hide an on-screen Monitor
+ * whenever the owner focuses the Composer.
+ */
+function isOwnerVisibleDockviewPanel(api: IDockviewPanelProps['api']): boolean {
+  return api.isVisible;
+}
+
+function useOwnerVisibleDockviewPanel(api: IDockviewPanelProps['api']): boolean {
+  const [ownerVisible, setOwnerVisible] = useState(() => isOwnerVisibleDockviewPanel(api));
+  useEffect(() => {
+    const sync = () => setOwnerVisible(isOwnerVisibleDockviewPanel(api));
+    sync();
+    const visibilitySubscription = api.onDidVisibilityChange(sync);
+    return () => {
+      visibilitySubscription.dispose();
+    };
+  }, [api]);
+  return ownerVisible;
+}
+
 const CLIP_FRAME_CACHE_LIMIT = 120;
+/** Pinned Look definitions by id — for mapping a committed keyframe back to a Look binding. */
+const LOOK_DEFINITIONS_BY_ID = new Map(BUILT_IN_LOOK_PACKS.map((pack) => [pack.id, pack]));
 const MotionStudioShell = lazy(() =>
   import('./motion-studio/index.js').then((module) => ({ default: module.MotionStudioShell })),
 );
 const EffectStudioShell = lazy(() =>
   import('./effect-studio/index.js').then((module) => ({ default: module.EffectStudioShell })),
 );
+
+interface LoadedFinalEncodedExportVerifier {
+  readonly verifier: FinalEncodedExportVerifier;
+  readonly decoderVersion: string;
+}
+
+/**
+ * The final-file verifier uses a browser media decoder and is relevant only
+ * after the Worker returns a completed Blob. Keep it out of the editor's
+ * initial chunk; a failed lazy load is surfaced as verification-required and
+ * can be retried, never treated as a completed export.
+ */
+const LAZY_FINAL_ENCODED_EXPORT_DECODER_VERSION =
+  'joy-browser-final-encoded-export-decoder-v1' as const;
+let finalEncodedExportVerifierLoad: Promise<LoadedFinalEncodedExportVerifier> | undefined;
+
+function loadFinalEncodedExportVerifier(): Promise<LoadedFinalEncodedExportVerifier> {
+  if (finalEncodedExportVerifierLoad !== undefined) return finalEncodedExportVerifierLoad;
+  const loading = Promise.all([
+    import('./media-observation/render-verification.js'),
+    import('./media-observation/final-encoded-export-decoder.js'),
+  ]).then(([verifierModule, decoderModule]) =>
+    Object.freeze({
+      verifier: verifierModule.createFinalEncodedExportVerifier({
+        decoder: decoderModule.createBrowserFinalEncodedExportDecoder(),
+        // The immutable App manifest accepts the verifier's documented full
+        // bounded PTS ceiling. Avoid an accidental lower default cap turning
+        // an otherwise valid long-form final MP4 into an invalid request.
+        maxPresentationPts: verifierModule.MAX_FINAL_ENCODED_PRESENTATION_PTS,
+      }),
+      decoderVersion: decoderModule.FINAL_ENCODED_EXPORT_BROWSER_DECODER_VERSION,
+    }),
+  );
+  finalEncodedExportVerifierLoad = loading;
+  // Do not pin a transient chunk/network failure across a user retry.
+  void loading.catch(() => {
+    if (finalEncodedExportVerifierLoad === loading) finalEncodedExportVerifierLoad = undefined;
+  });
+  return loading;
+}
 
 import {
   createBrowserPixiRenderer,
@@ -136,6 +214,7 @@ import { HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
 import { waitForContentFonts } from './font-readiness.js';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
+import type { ProjectWriterHandle } from './project-writer.js';
 import { runReleaseObserverTimelineProbe } from './release-observer-timeline.js';
 import { prepareTimelinePresentation } from './timeline-presentation.js';
 import { TimelinePanel } from './TimelinePanel.js';
@@ -145,9 +224,9 @@ import { nextProfessionalTrackId } from './timeline-track-family.js';
 import { nextTimelineMarkerId, nextTimelineMarkerLabel } from './timeline-marker-id.js';
 import { buildTimelineDeletePlan } from './delete-timeline-elements.js';
 import { DualLensPanel } from './DualLensPanel.js';
-import { buildDualLensProjection, type DualLensProjection } from './dual-lens-model.js';
+import { buildDualLensProjection } from './dual-lens-model.js';
 import { primaryNodeIdForClip, type LensRevealRequest } from './dual-lens-reveal.js';
-import { buildDataLanes, type DataLane } from './data-lanes.js';
+import { buildDataLanes } from './data-lanes.js';
 import { SpecialistReviewPanel } from './SpecialistReviewPanel.js';
 import { ProjectLibrary } from './ProjectLibrary.js';
 import {
@@ -229,7 +308,7 @@ import {
 } from './audio-session.js';
 import type { AudioState } from '@joy-media/commands';
 import { renderOfflineAudio } from '@joy-media/audio-core/offline';
-import type { ExportPresetId, WorkflowGraphV2 } from '@joy-media/project-schema';
+import type { ExportPresetId } from '@joy-media/project-schema';
 import {
   AgentPanel,
   type AgentPanelCommand,
@@ -245,6 +324,20 @@ import type { ByokSessionStatus } from './joy-agent/protocol.js';
 import { createJoyAgentContextSnapshot } from './joy-agent/context-snapshot.js';
 import { runCreativeBriefTask } from './joy-agent/entry-points.js';
 import {
+  observationMetadataForAsset,
+  type JoyAgentObservationAdapterFactory,
+} from './joy-agent/observation-host-factory.js';
+import { createJoyAgentObservationHostBridge } from './joy-agent/observation-tool-adapter.js';
+import {
+  createJoyAgentRunController,
+  type JoyAgentRunController,
+} from './joy-agent/run-controller.js';
+import {
+  createJoyAgentRunStore,
+  joyAgentRunCheckpointStorageKey,
+  type JoyAgentRunStore,
+} from './joy-agent/run-store.js';
+import {
   loadAgentPolicy,
   saveAgentPolicy,
   type AgentPolicyPreferences,
@@ -257,12 +350,12 @@ import { buildContentTemplateTransaction } from './content-template-transaction.
 import { createEditorPluginHost } from './plugin-host.js';
 import { createAgentCommandBus } from './agent-command-bus.js';
 import { resumeWorkflow, runWorkflow } from './workflow-runner.js';
-import {
-  getOrCreateControlPlaneProjectBinding,
-  type ControlPlaneProjectBinding,
-} from './project-control-plane.js';
+import { getOrCreateControlPlaneProjectBinding } from './project-control-plane.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
 import { ProjectMediaResolver } from './project-media-resolver.js';
+import { createObservationCache } from './media-observation/observation-cache.js';
+import { createEvidenceStore } from './media-observation/evidence-store.js';
+import { ObservationWorkerClient } from './media-observation/observation-worker-client.js';
 import { CORE_WORKSPACE_PANELS } from './workspace.js';
 import type { WorkspacePresetId } from './panel-metadata.js';
 import {
@@ -322,12 +415,23 @@ import {
 import { logoutJoySession, probeJoySession, type JoySessionState } from './identity.js';
 import { getStoredMediaToken } from './media-session.js';
 import {
+  markCompletedExportCacheUnavailable,
   recoverInterruptedProjectExports,
   saveProjectExportHistory,
   upsertProjectEntry,
   type ExportRetryManifest,
   type ProjectExportProcessEntry,
 } from './export-history.js';
+import {
+  FinalExportVerificationGateError,
+  createFinalEncodedExportExpectation,
+  createFinalExportVerificationReceipt,
+  isFinalExportVerificationGateError,
+} from './export-final-verification.js';
+import type {
+  FinalEncodedExportVerificationResult,
+  FinalEncodedExportVerifier,
+} from './media-observation/render-verification.js';
 import { openOpfsExportCache } from './opfs-export-cache.js';
 import {
   formatExportClipAssetFailure,
@@ -344,6 +448,7 @@ import {
   selectExportAudioClips,
 } from './export-audio.js';
 import { PlaybackOperationGate, playMediaWhenCurrent } from './playback-operation.js';
+import { seekPreviewMedia as seekDetachedVideo } from './preview-media-seek.js';
 import { playbackStartAtOrAfter, playbackTargetAfterClip } from './timeline-playback.js';
 import { timelineEffectiveDurationUs } from './timeline-layout.js';
 import { buildSpeedRampPresentation, buildSpeedRampTransaction } from './speed-ramp.js';
@@ -667,28 +772,6 @@ function playheadForSourceTime(
   return clip.startUs + ((sourceTimeUs - clip.sourceInUs) * direction) / rate;
 }
 
-function seekDetachedVideo(video: HTMLVideoElement, timeUs: number): Promise<void> {
-  const seconds = timeUs / 1_000_000;
-  if (Math.abs(video.currentTime - seconds) < 0.001) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const cleanup = () => {
-      video.removeEventListener('seeked', onSeeked);
-      video.removeEventListener('error', onError);
-    };
-    const onSeeked = () => {
-      cleanup();
-      resolve();
-    };
-    const onError = () => {
-      cleanup();
-      reject(new Error(`Unable to seek preview media to ${seconds}s`));
-    };
-    video.addEventListener('seeked', onSeeked, { once: true });
-    video.addEventListener('error', onError, { once: true });
-    video.currentTime = seconds;
-  });
-}
-
 async function decodeStillFrame(sourceUrl: string): Promise<ImageDataLike> {
   const response = await fetch(sourceUrl);
   if (!response.ok) throw new Error(`Unable to fetch export image ${sourceUrl}`);
@@ -706,149 +789,44 @@ async function decodeStillFrame(sourceUrl: string): Promise<ImageDataLike> {
   }
 }
 
-interface EditorRuntimeState {
-  readonly selectedIds: readonly string[];
-  readonly playheadUs: number;
-  readonly playing: boolean;
+interface ProjectJoyAgentRunLifecycle {
+  readonly projectId: string;
+  readonly controller: JoyAgentRunController;
+  readonly store: JoyAgentRunStore;
 }
 
-/** A decoded browser frame kept outside the serializable RenderFrameIR. */
-interface DecodedPreviewFrame {
-  readonly node: VideoFrameNode;
-  readonly bitmap: ImageDataLike;
+function guardBrowserStorage(writer: ProjectWriterHandle): GuardedBrowserStorage {
+  const storage = writer.guardStorage(window.localStorage);
+  if (storage.removeItem === undefined)
+    throw new Error('The browser writer storage boundary does not support removal.');
+  return storage as GuardedBrowserStorage;
 }
 
-export interface AnimationGraphFocusRequest {
-  readonly objectId: string;
-  readonly channel: AnimatablePropertyV1;
-  /** Makes repeat requests to an already focused channel observable. */
-  readonly token: number;
+function createProjectJoyAgentRunLifecycle(
+  storage: GuardedBrowserStorage,
+  projectId: string,
+): ProjectJoyAgentRunLifecycle {
+  const controller = createJoyAgentRunController({ projectId, conversationId: projectId });
+  const store = createJoyAgentRunStore();
+  try {
+    const serialized = storage.getItem(joyAgentRunCheckpointStorageKey(projectId));
+    if (serialized !== null) {
+      const checkpoint = store.import(serialized);
+      if (checkpoint?.snapshot.projectId === projectId)
+        controller.restore(checkpoint.snapshot, new Date().toISOString());
+    }
+  } catch {
+    // Lifecycle recovery is optional evidence. A malformed or unavailable
+    // browser cache must never prevent this project's editor from opening.
+  }
+  return { projectId, controller, store };
 }
 
-interface EditorPanelContextValue {
-  readonly state: EditorRuntimeState;
-  readonly previewVideoFrame: DecodedPreviewFrame | undefined;
-  /** Last decoded RGBA per timeline clip id (dual-texture transitions). */
-  readonly clipFrameCache: ReadonlyMap<string, ImageDataLike>;
-  readonly clipFrameTick: number;
-  readonly timelineProject: SpikeProject;
-  readonly visualProject: JoyProjectV1;
-  readonly controlPlaneProject: ControlPlaneProjectBinding;
-  /** Owner-authenticated project APIs are safe to call only after probing the session. */
-  readonly controlPlaneReady: boolean;
-  /** Resolves an image's verified OPFS/cloud bytes for Monitor rendering. */
-  readonly loadProjectAssetBlob: (assetId: string) => Promise<Blob | undefined>;
-  readonly playback: PlaybackDiagnosticsSnapshot;
-  readonly canUndo: boolean;
-  readonly canRedo: boolean;
-  readonly historyEntries: readonly HistoryEntry[];
-  /**
-   * ADR-0022: Time and Flow are two lenses on one document, so they read one
-   * projection built here rather than each deriving its own.
-   */
-  readonly dualLensProjection: DualLensProjection;
-  /** A pending `Reveal in Flow`, consumed by the Dual Lens panel. */
-  readonly lensReveal: LensRevealRequest | undefined;
-  readonly revealInFlow: (clipId: string) => void;
-  readonly revealOnTimeline: (clipIds: readonly string[]) => void;
-  /** The authored workflow graph — undefined unless the Dual Lens flag is on. */
-  readonly workflowGraph: WorkflowGraphV2 | undefined;
-  readonly dispatchGraph: (transaction: GraphTransaction) => void;
-  /** Data lanes and their artifacts — undefined unless the flag is on. */
-  readonly dataLanes: readonly DataLane[] | undefined;
-  readonly artifacts: ArtifactStore | undefined;
-  readonly dispatchArtifacts: (transaction: ArtifactTransaction) => void;
-  readonly togglePlayback: () => void;
-  readonly seek: (timeUs: number) => void;
-  readonly toggleSelection: (id: string) => void;
-  readonly selectClips: (clipIds: readonly string[]) => void;
-  readonly clearSelection: () => void;
-  readonly dispatchTimeline: (transaction: CommandTransaction) => void;
-  /** Persists a visual/audio snapshot with a timeline transaction as one Undo step. */
-  readonly dispatchTimelineAndProjectAudio: (
-    label: string,
-    timeline: CommandTransaction,
-    visualProject: JoyProjectV1,
-    audioState: AudioState,
-  ) => void;
-  readonly updateVisualProperty: (
-    objectId: string,
-    key: 'x' | 'y' | 'scaleX' | 'scaleY' | 'rotationDeg' | 'opacity',
-    value: number,
-  ) => void;
-  readonly dispatchProject: (transaction: VisualObjectTransaction) => void;
-  readonly replaceVisualProject: (next: JoyProjectV1) => void;
-  readonly replaceVisualProjectAndAudio: (next: JoyProjectV1, audio: AudioState) => void;
-  readonly addStickerFromAsset: (asset: {
-    readonly assetId: string;
-    readonly displayName?: string;
-    readonly blob?: Blob;
-  }) => Promise<void>;
-  /** Creates a separate Adjust controller targeting one root media clip. */
-  readonly addAdjustmentLayer: (targetClipId: string) => void;
-  readonly addTreatmentLayer: (
-    kind: TreatmentLayerKind,
-    targetClipId: string,
-    effect?: TreatmentLayerEffectSeed,
-  ) => void;
-  readonly addCaptionLayer: () => void;
-  readonly addHtmlSceneToSelectedClip: (scenePackageId: string) => void;
-  readonly addJoyCode3DRender: (asset: JoyCode3DRenderAsset) => Promise<void>;
-  readonly stickerTick: number;
-  readonly audioState: AudioState;
-  readonly setAudioState: (next: AudioState, label?: string) => void;
-  readonly transcribe: (documentId: string, language: 'fa-IR' | 'en-US') => Promise<void>;
-  readonly transcriptionError: string | undefined;
-  readonly undo: () => void;
-  readonly redo: () => void;
-  readonly jumpToHistory: (sequence: number) => void;
-  /**
-   * Dockview keeps panel component instances alive, so panel-only runtime
-   * bindings live in context rather than in a renderer closure.
-   */
-  readonly session: EditorSession;
-  readonly createTool: FeatureToolId;
-  readonly enhanceTool: FeatureToolId;
-  readonly onCreateToolChange: (tool: FeatureToolId) => void;
-  readonly onEnhanceToolChange: (tool: FeatureToolId) => void;
-  readonly activatePanel: (panelId: string) => void;
-  /** Pending cross-panel request to show one selected object's animation curve. */
-  readonly animationGraphFocus: AnimationGraphFocusRequest | undefined;
-  readonly openAnimationGraph: (objectId: string, channel: AnimatablePropertyV1) => void;
-  readonly agentContext: EditorContext;
-  readonly agentPolicy: AgentPolicyPreferences;
-  readonly agentPanelCommand: AgentPanelCommand | undefined;
-  readonly creativeBriefOptedIn: boolean;
-  readonly creativeBriefRunner: (requestText: string) => Promise<CreativeBriefV1>;
-  readonly onCreativeBriefOptIn: () => Promise<void>;
-  readonly joyAgentAttachedAssets: readonly JoyAgentAttachedAsset[];
-  readonly attachJoyAgentAsset: (asset: JoyAgentAttachedAsset) => void;
-  readonly detachJoyAgentAsset: (assetId: string) => void;
-  readonly pluginHost: ReturnType<typeof createEditorPluginHost>;
-  readonly bumpProjectRevision: () => void;
-  readonly bumpPluginRevision: () => void;
-  readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
-  readonly motionStudioOpen: boolean;
-  readonly openMotionStudio: (sceneId: string) => void;
-  readonly closeMotionStudio: () => void;
-  readonly effectStudioOpen: boolean;
-  readonly openEffectStudio: (recipeId: string, objectId?: string) => void;
-  readonly closeEffectStudio: () => void;
-  /** Shared Timeline + Dual Lens zoom/scroll viewport (must live in context — dockview caches Panel). */
-  readonly timelineViewport: TimelineViewport;
-  readonly onTimelineViewportChange: (next: TimelineViewport) => void;
-  readonly timelineTrackFlags: readonly TimelineTrackView[];
-  readonly onTimelineTrackFlagsChange: (next: readonly TimelineTrackView[]) => void;
-  readonly timelineAutoFit: boolean;
-  readonly onTimelineAutoFitChange: (next: boolean) => void;
-  /** Current editable composition shown by Timeline; context survives Dockview's cached panel renderer. */
-  readonly activeTimelineCompositionId: string;
-  readonly onActiveTimelineCompositionChange: (compositionId: string) => void;
-}
-export const EditorPanelContext = createContext<EditorPanelContextValue | undefined>(undefined);
-
-export function App() {
-  const storage = window.localStorage;
+export function App({ writer }: { readonly writer: ProjectWriterHandle }) {
+  // The root gate grants this capability before App mounts. Never hand raw
+  // localStorage to a project service: after the origin lock is released the
+  // wrapper rejects any attempted durable write.
+  const storage = useMemo(() => guardBrowserStorage(writer), [writer]);
   const [projectPackageNotice, setProjectPackageNotice] = useState<string | undefined>(undefined);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(() => {
     const id = loadActiveProjectId(storage);
@@ -924,7 +902,7 @@ export function App() {
       const now = new Date().toISOString();
       const seeds = createBlankProjectDocuments(id, title, now);
       // Materialize durable empty docs via recover-or-initialize.
-      new EditorSession(storage, seeds.timeline, seeds.visual);
+      new EditorSession(storage, seeds.timeline, seeds.visual, {}, writer);
       const entry: ProjectCatalogEntry = {
         id,
         title,
@@ -937,7 +915,7 @@ export function App() {
       saveActiveProjectId(storage, id);
       setActiveProjectId(id);
     },
-    [storage],
+    [storage, writer],
   );
 
   const renameProject = useCallback(
@@ -985,6 +963,8 @@ export function App() {
     <EditorWorkspace
       key={activeProjectId}
       projectId={activeProjectId}
+      storage={storage}
+      writer={writer}
       onBackToLibrary={backToLibrary}
       onImportProjectFile={importProjectFromFile}
       projectPackageNotice={projectPackageNotice}
@@ -995,18 +975,47 @@ export function App() {
 const CONTROL_PLANE_PROJECT_ENSURE_MAX_ATTEMPTS = 8;
 const CONTROL_PLANE_PROJECT_ENSURE_RETRY_INITIAL_MS = 2_000;
 const CONTROL_PLANE_PROJECT_ENSURE_RETRY_MAX_MS = 60_000;
+/** Bounded, ephemeral derived bytes for one active local observation run. */
+const JOY_AGENT_OBSERVATION_CACHE_MAX_BYTES = 16 * 1024 * 1024;
 
 function EditorWorkspace({
   projectId,
+  storage,
+  writer,
   onBackToLibrary,
   onImportProjectFile,
   projectPackageNotice,
 }: {
   readonly projectId: string;
+  readonly storage: GuardedBrowserStorage;
+  readonly writer: ProjectWriterHandle;
   readonly onBackToLibrary: () => void;
   readonly onImportProjectFile: (file: File) => void | Promise<void>;
   readonly projectPackageNotice?: string | undefined;
 }) {
+  const joyAgentRunLifecycleRef = useRef<ProjectJoyAgentRunLifecycle | null>(null);
+  let joyAgentRunLifecycle = joyAgentRunLifecycleRef.current;
+  if (joyAgentRunLifecycle === null || joyAgentRunLifecycle.projectId !== projectId) {
+    joyAgentRunLifecycle = createProjectJoyAgentRunLifecycle(storage, projectId);
+    joyAgentRunLifecycleRef.current = joyAgentRunLifecycle;
+  }
+  const joyAgentRunController = joyAgentRunLifecycle.controller;
+  const joyAgentRunStore = joyAgentRunLifecycle.store;
+  useEffect(() => {
+    const storageKey = joyAgentRunCheckpointStorageKey(projectId);
+    const persist = () => {
+      try {
+        joyAgentRunStore.save(joyAgentRunController.getSnapshot());
+        const serialized = joyAgentRunStore.serialize(projectId);
+        if (serialized !== undefined) storage.setItem(storageKey, serialized);
+      } catch {
+        // The run remains live in memory even when optional browser recovery
+        // storage is unavailable or the project writer has been released.
+      }
+    };
+    persist();
+    return joyAgentRunController.subscribe(persist);
+  }, [joyAgentRunController, joyAgentRunStore, projectId, storage]);
   const [state, setState] = useState<EditorRuntimeState>({ ...EMPTY_EDITOR_STATE, playing: false });
   /** Shared by Timeline + Dual Lens Time View so clip widths stay one layout. */
   const [timelineViewport, setTimelineViewport] = useState<TimelineViewport>({
@@ -1022,33 +1031,38 @@ function EditorWorkspace({
   const [exportStatus, setExportStatus] = useState<string | undefined>(undefined);
   const [exportProgress, setExportProgress] = useState<number | undefined>(undefined);
   const [exportHistory, setExportHistory] = useState<readonly ProjectExportProcessEntry[]>(() =>
-    recoverInterruptedProjectExports(window.localStorage, projectId),
+    recoverInterruptedProjectExports(storage, projectId),
   );
   const exportHistoryRef = useRef(exportHistory);
   exportHistoryRef.current = exportHistory;
   const operationLedger = useMemo(
-    () => new ProjectOperationLedger(window.localStorage, projectId),
-    [projectId],
+    () => new ProjectOperationLedger(storage, projectId),
+    [projectId, storage],
   );
   useEffect(() => {
     operationLedger.recoverInterrupted('export');
     operationLedger.recoverUncertain('cloud-audio');
   }, [operationLedger]);
   useEffect(() => {
-    const interruptedIds = exportHistory
-      .filter((entry) => entry.status === 'interrupted-retryable')
+    const nonDownloadableIds = exportHistory
+      .filter(
+        (entry) =>
+          entry.status === 'interrupted-retryable' || entry.status === 'verification-required',
+      )
       .map((entry) => entry.id);
-    if (interruptedIds.length === 0) return;
+    if (nonDownloadableIds.length === 0) return;
     void exportCachePromise
-      .then((cache) => Promise.all(interruptedIds.map((id) => cache.removeVerified(id))))
+      .then((cache) => Promise.all(nonDownloadableIds.map((id) => cache.removeVerified(id))))
       .catch(() => undefined);
   }, [exportHistory]);
   const [exportPreset, setExportPreset] = useState<ExportPresetId>('reels-1080');
-  const [audioState, setAudioStateRaw] = useState<AudioState>(() => loadAudioState(projectId));
+  const [audioState, setAudioStateRaw] = useState<AudioState>(() =>
+    loadAudioState(storage, projectId),
+  );
   const [audioHydrated, setAudioHydrated] = useState(false);
   const [processesOpen, setProcessesOpen] = useState(false);
   const [processFilter, setProcessFilter] = useState<EditorUiPreferencesV2['processFilter']>(
-    () => loadEditorUiPreferences(window.localStorage).processFilter,
+    () => loadEditorUiPreferences(storage).processFilter,
   );
   const [accountOpen, setAccountOpen] = useState(false);
   const projectPackageInputRef = useRef<HTMLInputElement | null>(null);
@@ -1058,7 +1072,7 @@ function EditorWorkspace({
     readonly JoyAgentAttachedAsset[]
   >([]);
   const [agentPolicy, setAgentPolicy] = useState<AgentPolicyPreferences>(() =>
-    loadAgentPolicy(window.localStorage),
+    loadAgentPolicy(storage),
   );
   const joyAgentEngineClientRef = useRef<ReturnType<typeof createJoyAgentEngineClient> | null>(
     null,
@@ -1066,8 +1080,8 @@ function EditorWorkspace({
   if (joyAgentEngineClientRef.current === null)
     joyAgentEngineClientRef.current = createJoyAgentEngineClient();
   useEffect(() => {
-    saveAgentPolicy(window.localStorage, agentPolicy);
-  }, [agentPolicy]);
+    saveAgentPolicy(storage, agentPolicy);
+  }, [agentPolicy, storage]);
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
   const [agentPanelCommand, setAgentPanelCommand] = useState<AgentPanelCommand>();
   const [agentConnectionStatus, setAgentConnectionStatus] = useState<ByokSessionStatus | undefined>(
@@ -1085,12 +1099,12 @@ function EditorWorkspace({
   >([]);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
   const [viewMode, setViewMode] = useState<EditorViewMode>(
-    () => loadEditorUiPreferences(window.localStorage).viewMode,
+    () => loadEditorUiPreferences(storage).viewMode,
   );
   const viewModeRef = useRef(viewMode);
   viewModeRef.current = viewMode;
   const [workspacePreset, setWorkspacePreset] = useState<WorkspacePresetId>(
-    () => loadEditorUiPreferences(window.localStorage).workspacePreset,
+    () => loadEditorUiPreferences(storage).workspacePreset,
   );
   const workspacePresetRef = useRef(workspacePreset);
   workspacePresetRef.current = workspacePreset;
@@ -1158,16 +1172,11 @@ function EditorWorkspace({
             .catch(() => undefined);
           setExportHistory((current) => {
             const next = current.map((candidate): ProjectExportProcessEntry =>
-              candidate.id === entry.id
-                ? {
-                    ...candidate,
-                    status: 'failed',
-                    cacheState: 'none',
-                    error: 'durable export bytes are unavailable',
-                  }
+              candidate.id === entry.id && candidate.status === 'completed'
+                ? markCompletedExportCacheUnavailable(candidate)
                 : candidate,
             );
-            saveProjectExportHistory(window.localStorage, projectId, next);
+            saveProjectExportHistory(storage, projectId, next);
             return next;
           });
           return;
@@ -1179,19 +1188,19 @@ function EditorWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [exportHistory, projectId]);
+  }, [exportHistory, projectId, storage]);
   useEffect(() => () => joyAgentEngineClientRef.current?.dispose(), []);
   useEffect(() => {
-    updateEditorUiPreferences(window.localStorage, (current) => ({
+    updateEditorUiPreferences(storage, (current) => ({
       ...current,
       processFilter,
     }));
-  }, [processFilter]);
+  }, [processFilter, storage]);
   const [previewVideoFrame, setPreviewVideoFrame] = useState<DecodedPreviewFrame | undefined>(
     undefined,
   );
   const [, setRevision] = useState(0);
-  const [pluginHost] = useState(() => createEditorPluginHost());
+  const [pluginHost] = useState(() => createEditorPluginHost(storage));
   const [, setPluginRevision] = useState(0);
   const sessionRef = useRef<EditorSession | null>(null);
   const remoteDocumentHydrationRef = useRef<Set<string>>(new Set());
@@ -1205,7 +1214,7 @@ function EditorWorkspace({
   const remoteDocumentAutosyncRef = useRef<ProjectDocumentAutosync | null>(null);
   if (remoteDocumentAutosyncRef.current === null) {
     remoteDocumentAutosyncRef.current = new ProjectDocumentAutosync({
-      storage: window.localStorage,
+      storage,
       syncProjectDocument: (controlPlaneProjectId, params) =>
         mediaControlPlaneClient.syncProjectDocument(controlPlaneProjectId, params),
       isDocumentMissing: (error) =>
@@ -1234,6 +1243,10 @@ function EditorWorkspace({
   const replacementAudioRef = useRef<HTMLAudioElement | null>(null);
   const decoderRef = useRef<HtmlMediaDecoder | null>(null);
   const clockRef = useRef<MediaClock | null>(null);
+  // Decoder setup is declared after the playback capture effect. Bump this
+  // token whenever fresh refs are installed so an active playback effect that
+  // previously observed null refs is reattached in the following render.
+  const [mediaReadyRevision, setMediaReadyRevision] = useState(0);
   /** Last decoded RGBA per timeline clip id — feeds dual-texture transitions. */
   const clipFrameCacheRef = useRef<Map<string, ImageDataLike>>(new Map());
   const [clipFrameTick, setClipFrameTick] = useState(0);
@@ -1337,10 +1350,10 @@ function EditorWorkspace({
   }, [audioState, ensurePreviewAudioGraph]);
 
   if (sessionRef.current === null) {
-    const entry = getCatalogProject(window.localStorage, projectId);
+    const entry = getCatalogProject(storage, projectId);
     if (entry === undefined) throw new Error(`unknown project "${projectId}"`);
     const seeds = seedsForCatalogEntry(entry);
-    sessionRef.current = new EditorSession(window.localStorage, seeds.timeline, seeds.visual);
+    sessionRef.current = new EditorSession(storage, seeds.timeline, seeds.visual, {}, writer);
   }
   const session = sessionRef.current;
   useEffect(() => {
@@ -1423,30 +1436,26 @@ function EditorWorkspace({
   useEffect(() => {
     if (audioMigrationRef.current) return;
     audioMigrationRef.current = true;
-    const canonical = loadAudioStateFromProject(
-      window.localStorage,
-      projectId,
-      session.visualProject,
-    );
+    const canonical = loadAudioStateFromProject(storage, projectId, session.visualProject);
     if (session.visualProject.audio === undefined) {
       session.synchronizeVisualProject(withProjectAudio(session.visualProject, canonical));
       setAudioStateRaw(canonical);
       setRevision((revision) => revision + 1);
     } else setAudioStateRaw(canonical);
     setAudioHydrated(true);
-  }, [projectId, session]);
+  }, [projectId, session, storage]);
   const controlPlaneOwnerKey =
     joySession.kind === 'ready'
       ? (joySession.subject ?? 'signed-in')
-      : getStoredMediaToken(window.localStorage) !== undefined
+      : getStoredMediaToken(storage) !== undefined
         ? 'signed-in'
         : 'signed-out';
   const controlPlaneProject = useMemo(
     () =>
-      getOrCreateControlPlaneProjectBinding(window.localStorage, session.visualProject, {
+      getOrCreateControlPlaneProjectBinding(storage, session.visualProject, {
         ownerKey: controlPlaneOwnerKey,
       }),
-    [controlPlaneOwnerKey, session.visualProject],
+    [controlPlaneOwnerKey, session.visualProject, storage],
   );
   const [controlPlaneProjectReady, setControlPlaneProjectReady] = useState(false);
   useEffect(() => {
@@ -1567,6 +1576,10 @@ function EditorWorkspace({
       session.visualProject,
       session.projectRevisionId,
       controlPlaneOwnerKey,
+      // R2 / GAP 1a: the current Look Instances document rides the same PUT
+      // under the same revision id. The project revision already advances on a
+      // Look-only write (`:looks=N`), so this effect fires for a pure detach.
+      session.lookInstances,
     );
   }, [
     controlPlaneOwnerKey,
@@ -1576,6 +1589,7 @@ function EditorWorkspace({
     remoteDocumentBootstrapProjectId,
     session.projectRevisionId,
     session.visualProject,
+    session.lookInstances,
   ]);
   useEffect(() => {
     const autosync = remoteDocumentAutosyncRef.current;
@@ -1679,7 +1693,7 @@ function EditorWorkspace({
         // not ready" error immediately after opening a project.
         controlPlaneReady:
           controlPlaneProjectReady ||
-          (joySession.kind === 'unknown' && getStoredMediaToken(window.localStorage) !== undefined),
+          (joySession.kind === 'unknown' && getStoredMediaToken(storage) !== undefined),
         project: session.visualProject,
         client: mediaControlPlaneClient,
         originalCache: {
@@ -1691,9 +1705,82 @@ function EditorWorkspace({
       controlPlaneProjectReady,
       joySession.kind,
       session.visualProject,
+      storage,
     ],
   );
   useEffect(() => () => mediaResolver.clear(), [mediaResolver]);
+  // Dockview holds panel component identities stable, so use the current
+  // resolver through a host-only ref rather than capturing the resolver from
+  // the panel's first render. Its only exposed operation returns a local Blob
+  // to the decoder; no URL, path, or Blob crosses the model RPC seam.
+  const mediaResolverRef = useRef(mediaResolver);
+  mediaResolverRef.current = mediaResolver;
+  const observationWorkerRef = useRef<ObservationWorkerClient | undefined>(undefined);
+  const getObservationWorker = useCallback((): ObservationWorkerClient => {
+    const existing = observationWorkerRef.current;
+    if (existing !== undefined) return existing;
+    const worker = new ObservationWorkerClient();
+    observationWorkerRef.current = worker;
+    return worker;
+  }, []);
+  useEffect(() => {
+    return () => {
+      const worker = observationWorkerRef.current;
+      observationWorkerRef.current = undefined;
+      if (worker !== undefined) void worker.close();
+    };
+  }, []);
+  /**
+   * Build a fresh evidence/cache scope per model run. The factory advertises
+   * observation only when the current canonical project contains a complete,
+   * integrity-bound video descriptor. A missing or changed asset therefore
+   * leaves the Worker on its safe legacy tool catalog.
+   */
+  const observationAdapterFactory = useMemo<JoyAgentObservationAdapterFactory>(
+    () => ({
+      create({ projectId: observationProjectId, revision, currentAuthority }) {
+        const observationSession = sessionRef.current;
+        if (
+          observationSession === null ||
+          observationSession.visualProject.id !== observationProjectId ||
+          observationSession.projectRevisionId !== revision
+        )
+          return undefined;
+
+        const observationAssets = observationSession.visualProject.assets;
+        if (
+          !Object.values(observationAssets).some(
+            (asset) => observationMetadataForAsset(asset) !== undefined,
+          )
+        )
+          return undefined;
+
+        const evidenceStore = createEvidenceStore();
+        return createJoyAgentObservationHostBridge({
+          projectId: observationProjectId,
+          resolver: {
+            resolveObservationSource: (assetId) =>
+              mediaResolverRef.current.resolveObservationSource(assetId),
+          },
+          // Defer construction until an observation tool actually requests
+          // local bytes; a text-only edit never starts the decoder Worker.
+          worker: {
+            frames(request, signal) {
+              return getObservationWorker().frames(request, signal);
+            },
+          },
+          evidenceStore,
+          cache: createObservationCache({
+            maxBytes: JOY_AGENT_OBSERVATION_CACHE_MAX_BYTES,
+            assertProjectClearable: evidenceStore.assertProjectClearable,
+          }),
+          assetLookup: (assetId) => observationMetadataForAsset(observationAssets[assetId]),
+          currentAuthority,
+        });
+      },
+    }),
+    [getObservationWorker],
+  );
   /**
    * Sticker images are drawn from the local cache, but a reopened cloud
    * document may not have that browser's OPFS bytes. Reuse the authenticated,
@@ -1716,14 +1803,21 @@ function EditorWorkspace({
     },
     [mediaResolver],
   );
+  const resolveAudioAssetUrl = useCallback(
+    async (assetId: string): Promise<string> => {
+      const source = await mediaResolver.resolve(assetId);
+      return source.url;
+    },
+    [mediaResolver],
+  );
   const exportEditableProject = useCallback(async () => {
-    const entry = getCatalogProject(window.localStorage, projectId);
+    const entry = getCatalogProject(storage, projectId);
     if (entry === undefined) {
       showToast('The current project is no longer in the library.', 'error');
       return;
     }
     try {
-      const pkg = await createProjectPackage(entry, window.localStorage, {
+      const pkg = await createProjectPackage(entry, storage, {
         assetBlobLoader: loadProjectAssetBlob,
       });
       const filename = `${entry.title.replace(/[^a-z0-9._-]+/gi, '-').replace(/^-|-$/g, '') || 'joy-project'}.joyproject.json`;
@@ -1748,7 +1842,7 @@ function EditorWorkspace({
         'error',
       );
     }
-  }, [loadProjectAssetBlob, projectId, showToast]);
+  }, [loadProjectAssetBlob, projectId, showToast, storage]);
   const agentCommandBusRef = useRef<ReturnType<typeof createAgentCommandBus> | null>(null);
   if (agentCommandBusRef.current === null)
     agentCommandBusRef.current = createAgentCommandBus(session, () =>
@@ -2046,6 +2140,12 @@ function EditorWorkspace({
         video.pause();
         replacementAudio.pause();
         await seekDetachedVideo(video, sourceTimeUs);
+        if (
+          !operation.isCurrent(epoch) ||
+          videoRef.current !== video ||
+          decoderRef.current !== decoder
+        )
+          return false;
         if (decoder !== null) {
           const token = scheduler.current.requestToken();
           const frame = decoder.captureCurrentFrame(token);
@@ -2418,12 +2518,14 @@ function EditorWorkspace({
     rememberClipFrame,
     session,
     controlPlaneProject,
+    mediaReadyRevision,
     state.playing,
     syncMediaToPlayhead,
   ]);
   const handleMediaReady = useCallback((decoder: HtmlMediaDecoder, clock: MediaClock) => {
     decoderRef.current = decoder;
     clockRef.current = clock;
+    setMediaReadyRevision((revision) => revision + 1);
   }, []);
   useEffect(() => {
     const video = videoRef.current;
@@ -2439,15 +2541,28 @@ function EditorWorkspace({
     const decoderResourceToken = `${previewResourcePrefixRef.current}:primary`;
     recordPreviewResourceCreated('primary-decoder', decoderResourceToken);
     handleMediaReady(decoder, createHtmlVideoMediaClock(video));
-    const firstClip = activeVideoClipAt(session.timelineProject, 0, [], session.visualProject);
-    if (firstClip !== undefined && firstClip.kind === 'video') {
-      void mediaResolver
-        .resolve(firstClip.assetId)
-        .then((source) => {
-          if (videoRef.current === video) video.src = source.url;
-        })
-        .catch(() => undefined);
-    }
+    // A project edit replaces the media resolver and invalidates any in-flight
+    // read owned by the previous render. Rehydrate the decoder from the live
+    // playhead instead of preloading the first clip at 0s; otherwise a newly
+    // placed library asset can stay selected on the timeline while the monitor
+    // keeps the prior frame indefinitely.
+    const current = stateRef.current;
+    const shouldPlay = current.playing;
+    const epoch = playbackOperation.begin(shouldPlay);
+    setPreviewVideoFrame(undefined);
+    void syncMediaToPlayhead(current.playheadUs, shouldPlay, epoch)
+      .then((ready) => {
+        if (ready || !playbackOperation.isCurrent(epoch)) return;
+        playbackOperation.begin(false);
+        stateRef.current = { ...stateRef.current, playing: false };
+        setState((active) => ({ ...active, playing: false }));
+      })
+      .catch(() => {
+        if (!playbackOperation.isCurrent(epoch)) return;
+        playbackOperation.begin(false);
+        stateRef.current = { ...stateRef.current, playing: false };
+        setState((active) => ({ ...active, playing: false }));
+      });
     return () => {
       playbackOperation.begin(false);
       video.pause();
@@ -2462,7 +2577,7 @@ function EditorWorkspace({
       captureCanvas.height = 0;
       recordPreviewResourceReleased('primary-decoder', decoderResourceToken);
     };
-  }, [handleMediaReady, mediaResolver, session]);
+  }, [handleMediaReady, mediaResolver, session, syncMediaToPlayhead]);
   const togglePlayback = useCallback(() => {
     const current = stateRef.current;
     const operation = playbackOperationRef.current;
@@ -2605,7 +2720,27 @@ function EditorWorkspace({
 
   const replaceVisualProject = useCallback(
     (next: JoyProjectV1) => {
-      session.replaceVisualProject(next);
+      // If the edit added/changed a propertyAnimations key that a Look links,
+      // mark that binding overridden in the SAME compound so one Undo reverts
+      // both (R2 / GAP 1b — override marking, manual == user-directed agent).
+      const before = session.visualProject.propertyAnimations ?? {};
+      const after = next.propertyAnimations ?? {};
+      const changedKeys = Object.keys(after).filter(
+        (key) => JSON.stringify(after[key]) !== JSON.stringify(before[key]),
+      );
+      const nextLookInstances =
+        changedKeys.length === 0
+          ? session.lookInstances
+          : markOverridesFromCommittedKeys(
+              session.lookInstances,
+              LOOK_DEFINITIONS_BY_ID,
+              changedKeys,
+            );
+      if (nextLookInstances === session.lookInstances) {
+        session.replaceVisualProject(next);
+      } else {
+        session.replaceVisualProjectWithLookOverrides(next, nextLookInstances);
+      }
       invalidateAgentPreviewAfterEdit(session);
       setRevision((revision) => revision + 1);
     },
@@ -3086,32 +3221,26 @@ function EditorWorkspace({
   const undo = useCallback(() => {
     session.undo();
     reconcileSelection();
-    setAudioStateRaw(
-      loadAudioStateFromProject(window.localStorage, projectId, session.visualProject),
-    );
+    setAudioStateRaw(loadAudioStateFromProject(storage, projectId, session.visualProject));
     reconcileWorkerResultOperations();
     setRevision((revision) => revision + 1);
-  }, [projectId, reconcileSelection, reconcileWorkerResultOperations, session]);
+  }, [projectId, reconcileSelection, reconcileWorkerResultOperations, session, storage]);
   const redo = useCallback(() => {
     session.redo();
     reconcileSelection();
-    setAudioStateRaw(
-      loadAudioStateFromProject(window.localStorage, projectId, session.visualProject),
-    );
+    setAudioStateRaw(loadAudioStateFromProject(storage, projectId, session.visualProject));
     reconcileWorkerResultOperations();
     setRevision((revision) => revision + 1);
-  }, [projectId, reconcileSelection, reconcileWorkerResultOperations, session]);
+  }, [projectId, reconcileSelection, reconcileWorkerResultOperations, session, storage]);
   const jumpToHistory = useCallback(
     (sequence: number) => {
       session.jumpToHistory(sequence);
       reconcileSelection();
-      setAudioStateRaw(
-        loadAudioStateFromProject(window.localStorage, projectId, session.visualProject),
-      );
+      setAudioStateRaw(loadAudioStateFromProject(storage, projectId, session.visualProject));
       reconcileWorkerResultOperations();
       setRevision((revision) => revision + 1);
     },
-    [projectId, reconcileSelection, reconcileWorkerResultOperations, session],
+    [projectId, reconcileSelection, reconcileWorkerResultOperations, session, storage],
   );
   const executeAction = useCallback(
     (id: string) => {
@@ -3195,7 +3324,7 @@ function EditorWorkspace({
   );
   const refreshJoySession = useCallback(() => {
     const requestId = ++joySessionRefreshSeqRef.current;
-    void probeJoySession(window.localStorage)
+    void probeJoySession(storage)
       .then((next) => {
         if (requestId !== joySessionRefreshSeqRef.current) {
           if (next.kind === 'ready' && next.avatarObjectUrl !== undefined) {
@@ -3211,7 +3340,7 @@ function EditorWorkspace({
         });
       })
       .catch(() => undefined);
-  }, []);
+  }, [storage]);
   useEffect(() => {
     if (session.recoveryWarnings.length === 0) return;
     showToast(
@@ -3287,7 +3416,7 @@ function EditorWorkspace({
     (api: DockviewApi, mode: EditorViewMode, preset = workspacePresetRef.current) => {
       const layoutKey =
         preset === 'edit' ? dockLayoutKey(mode) : workspacePresetLayoutKey(mode, preset);
-      const saved = window.localStorage.getItem(layoutKey);
+      const saved = storage.getItem(layoutKey);
       let restored = false;
       if (saved !== null) {
         try {
@@ -3296,7 +3425,7 @@ function EditorWorkspace({
           });
           restored = true;
         } catch {
-          window.localStorage.removeItem(layoutKey);
+          storage.removeItem(layoutKey);
         }
       }
       if (!restored) {
@@ -3313,20 +3442,20 @@ function EditorWorkspace({
       }
       ensureDockPanels(api);
       api.getPanel('monitor')?.api.setActive();
-      window.localStorage.setItem(layoutKey, serializeDockLayout(api.toJSON()));
+      storage.setItem(layoutKey, serializeDockLayout(api.toJSON()));
     },
-    [ensureDockPanels],
+    [ensureDockPanels, storage],
   );
 
   const persistUiPreferences = useCallback(
     (next: Partial<{ workspacePreset: WorkspacePresetId; viewMode: EditorViewMode }>) => {
-      const current = loadEditorUiPreferences(window.localStorage);
-      saveEditorUiPreferences(window.localStorage, {
+      const current = loadEditorUiPreferences(storage);
+      saveEditorUiPreferences(storage, {
         ...current,
         ...next,
       });
     },
-    [],
+    [storage],
   );
 
   const switchWorkspacePreset = useCallback(
@@ -3336,7 +3465,7 @@ function EditorWorkspace({
       const current = workspacePresetRef.current;
       const mode = viewModeRef.current;
       if (api !== null && current !== 'custom') {
-        window.localStorage.setItem(
+        storage.setItem(
           workspacePresetLayoutKey(mode, 'custom'),
           serializeDockLayout(api.toJSON()),
         );
@@ -3346,36 +3475,36 @@ function EditorWorkspace({
       persistUiPreferences({ workspacePreset: next });
       if (api !== null) applyDockLayout(api, mode, next);
     },
-    [applyDockLayout, persistUiPreferences],
+    [applyDockLayout, persistUiPreferences, storage],
   );
 
   const resetWorkspace = useCallback(() => {
     for (const mode of ['vertical', 'widescreen'] as const) {
-      window.localStorage.removeItem(dockLayoutKey(mode));
+      storage.removeItem(dockLayoutKey(mode));
       for (const preset of ['enhance', 'audio-captions', 'automate', 'custom'] as const) {
-        window.localStorage.removeItem(workspacePresetLayoutKey(mode, preset));
+        storage.removeItem(workspacePresetLayoutKey(mode, preset));
       }
     }
-    window.localStorage.removeItem(EDITOR_UI_PREFERENCES_KEY);
+    storage.removeItem(EDITOR_UI_PREFERENCES_KEY);
     workspacePresetRef.current = DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset;
     setWorkspacePreset(DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset);
     setViewMode(DEFAULT_EDITOR_UI_PREFERENCES.viewMode);
     viewModeRef.current = DEFAULT_EDITOR_UI_PREFERENCES.viewMode;
     const api = dockviewApiRef.current;
     if (api !== null) applyDockLayout(api, 'vertical', 'edit');
-  }, [applyDockLayout]);
+  }, [applyDockLayout, storage]);
 
   const switchEditorView = useCallback(() => {
     const api = dockviewApiRef.current;
     if (api === null) return;
     const current = viewModeRef.current;
-    window.localStorage.setItem(dockLayoutKey(current), serializeDockLayout(api.toJSON()));
+    storage.setItem(dockLayoutKey(current), serializeDockLayout(api.toJSON()));
     const next: EditorViewMode = current === 'vertical' ? 'widescreen' : 'vertical';
-    saveViewMode(window.localStorage, next);
+    saveViewMode(storage, next);
     persistUiPreferences({ viewMode: next });
     setViewMode(next);
     applyDockLayout(api, next, workspacePresetRef.current);
-  }, [applyDockLayout, persistUiPreferences]);
+  }, [applyDockLayout, persistUiPreferences, storage]);
 
   useEffect(() => {
     if (!paletteOpen) return;
@@ -3408,17 +3537,17 @@ function EditorWorkspace({
     setAccountOpen(false);
     joyAgentEngineClientRef.current?.clear();
     appAgentPresenceStore.clear();
-    await logoutJoySession(window.localStorage);
+    await logoutJoySession(storage);
     refreshJoySession();
-  }, [refreshJoySession]);
+  }, [refreshJoySession, storage]);
   const recordExportEntry = useCallback(
     (entry: ProjectExportProcessEntry) => {
       const next = upsertProjectEntry(exportHistoryRef.current, entry);
-      saveProjectExportHistory(window.localStorage, projectId, next);
+      saveProjectExportHistory(storage, projectId, next);
       exportHistoryRef.current = next;
       setExportHistory(next);
     },
-    [projectId],
+    [projectId, storage],
   );
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -3772,6 +3901,13 @@ function EditorWorkspace({
           height,
           frameRate,
           durationUs,
+        });
+        // Extend the frozen Worker manifest once with the already-derived
+        // authored cadence. This immutable value is the only expectation
+        // source for the final encoded Blob; it is never learned from output.
+        const finalEncodedVerificationManifest = Object.freeze({
+          ...manifest,
+          frameCount: totalFrames,
         });
         retryManifest = manifest;
         exportFingerprint = `${sourceProjectRevisionId}:${activeExportPreset}:${width}x${height}:${durationUs}:${frameRate}`;
@@ -4412,6 +4548,52 @@ function EditorWorkspace({
           workerJob.derivative.id,
         );
         abortController.signal.throwIfAborted();
+        // The Worker already verified its own remux contract, but the browser
+        // must inspect the exact final Blob it received before it can cache,
+        // expose, or record the export as completed. This has no source/canvas
+        // fallback and deliberately carries no creative predicates until a
+        // separate runtime capture can prove them against this final artifact.
+        setExportStatus('Inspecting final encoded MP4…');
+        let finalVerifierRuntime: LoadedFinalEncodedExportVerifier;
+        try {
+          finalVerifierRuntime = await loadFinalEncodedExportVerifier();
+        } catch {
+          throw new FinalExportVerificationGateError(
+            createFinalExportVerificationReceipt(
+              { status: 'unavailable', code: 'decoder-unavailable' },
+              { decoderVersion: LAZY_FINAL_ENCODED_EXPORT_DECODER_VERSION },
+            ),
+          );
+        }
+        abortController.signal.throwIfAborted();
+        let finalEncodedVerification: FinalEncodedExportVerificationResult;
+        try {
+          finalEncodedVerification = await finalVerifierRuntime.verifier.verify({
+            artifact: {
+              artifactId: `final-export-${attemptKey}`,
+              encoded: remuxedBlob,
+            },
+            expected: createFinalEncodedExportExpectation(finalEncodedVerificationManifest),
+            signal: abortController.signal,
+          });
+        } catch (error) {
+          if (abortController.signal.aborted) throw error;
+          throw new FinalExportVerificationGateError(
+            createFinalExportVerificationReceipt(
+              { status: 'failed', code: 'decoder-failed' },
+              { decoderVersion: finalVerifierRuntime.decoderVersion },
+            ),
+          );
+        }
+        if (finalEncodedVerification.status === 'cancelled')
+          throw new DOMException('Export verification cancelled', 'AbortError');
+        const finalVerificationReceipt = createFinalExportVerificationReceipt(
+          finalEncodedVerification,
+          { decoderVersion: finalVerifierRuntime.decoderVersion },
+        );
+        if (finalVerificationReceipt.status !== 'verified')
+          throw new FinalExportVerificationGateError(finalVerificationReceipt);
+        abortController.signal.throwIfAborted();
         if (
           session.projectRevisionId !== sourceProjectRevisionId ||
           session.historyCursorSequence !== sourceRevision
@@ -4461,6 +4643,7 @@ function EditorWorkspace({
           producer: 'browser-staged-preview-export',
           workerJobId,
           derivativeId: workerJob.derivative.id,
+          verification: finalVerificationReceipt,
         });
         operationLedger.finish(entryId, 'completed', { resultRef: entryId });
         exportCompleted = true;
@@ -4494,7 +4677,12 @@ function EditorWorkspace({
           setExportProgress(undefined);
         }, 450);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const verificationGate = isFinalExportVerificationGateError(error) ? error : undefined;
+        const message = verificationGate
+          ? verificationGate.message
+          : error instanceof Error
+            ? error.message
+            : String(error);
         const cancelled =
           abortController.signal.aborted ||
           (error instanceof DOMException && error.name === 'AbortError');
@@ -4509,7 +4697,11 @@ function EditorWorkspace({
               id: entryId,
               projectId,
               filename: exportFilename,
-              status: cancelled ? 'interrupted-retryable' : 'failed',
+              status: cancelled
+                ? 'interrupted-retryable'
+                : verificationGate?.receipt.status === 'unavailable'
+                  ? 'verification-required'
+                  : 'failed',
               cacheState: 'none',
               startedAt,
               finishedAt: new Date().toISOString(),
@@ -4520,6 +4712,9 @@ function EditorWorkspace({
               presetId: activeExportPreset,
               manifest: retryManifest,
               ...(stagedExportAssetId === undefined ? {} : { stagedAssetId: stagedExportAssetId }),
+              ...(verificationGate === undefined || cancelled
+                ? {}
+                : { verification: verificationGate.receipt }),
             });
           } catch {
             // Storage quota failures must not prevent partial-output cleanup.
@@ -4693,29 +4888,29 @@ function EditorWorkspace({
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
       dockviewApiRef.current = event.api;
-      migrateLegacyDockLayout(window.localStorage);
+      migrateLegacyDockLayout(storage);
       for (const stale of SUPERSEDED_DOCK_LAYOUT_KEYS) {
-        window.localStorage.removeItem(stale);
+        storage.removeItem(stale);
       }
       // Drop the legacy single-key after migration copy.
-      window.localStorage.removeItem(DOCK_LAYOUT_KEY);
+      storage.removeItem(DOCK_LAYOUT_KEY);
 
-      const mode = loadEditorUiPreferences(window.localStorage).viewMode;
-      const preset = loadEditorUiPreferences(window.localStorage).workspacePreset;
+      const mode = loadEditorUiPreferences(storage).viewMode;
+      const preset = loadEditorUiPreferences(storage).workspacePreset;
       setViewMode(mode);
       setWorkspacePreset(preset);
       workspacePresetRef.current = preset;
       applyDockLayout(event.api, mode, preset);
 
       const persistDockLayout = () => {
-        window.localStorage.setItem(
+        storage.setItem(
           dockLayoutKey(viewModeRef.current),
           serializeDockLayout(event.api.toJSON()),
         );
       };
       event.api.onDidLayoutChange(persistDockLayout);
     },
-    [applyDockLayout],
+    [applyDockLayout, storage],
   );
 
   function Panel({ api }: IDockviewPanelProps) {
@@ -4728,6 +4923,7 @@ function EditorWorkspace({
 
   function PanelContent({ api }: Pick<IDockviewPanelProps, 'api'>) {
     const agentPreviewState = useAgentPreviewSnapshot();
+    const agentPreviewSurfaceVisible = useOwnerVisibleDockviewPanel(api);
     const context = useContext(EditorPanelContext);
     // Dockview can mount a cached panel one frame before its provider is
     // attached (notably during StrictMode/HMR and layout restoration). Keep
@@ -4988,6 +5184,8 @@ function EditorWorkspace({
       readonly assetId: string;
       readonly kind: 'video' | 'audio' | 'image';
       readonly displayName: string;
+      readonly sha256: string;
+      readonly bytes: number;
       readonly descriptor: {
         readonly mimeType: string;
         readonly durationUs?: number;
@@ -5014,6 +5212,8 @@ function EditorWorkspace({
                 id: asset.assetId,
                 kind: asset.kind,
                 displayName: asset.displayName,
+                sha256: asset.sha256,
+                bytes: asset.bytes,
                 descriptor: asset.descriptor,
               }),
               visualObjects: {
@@ -5140,11 +5340,7 @@ function EditorWorkspace({
       if (context.session.historyCursorSequence !== expectedRevision)
         throw new Error('The project changed while the Worker result was being prepared');
       const currentProject = context.session.visualProject;
-      const currentAudio = loadAudioStateFromProject(
-        window.localStorage,
-        projectId,
-        currentProject,
-      );
+      const currentAudio = loadAudioStateFromProject(storage, projectId, currentProject);
       if (
         mode === 'replace' &&
         !Object.values(context.session.timelineProject.compositions)
@@ -5910,7 +6106,7 @@ function EditorWorkspace({
                 kind: 'audio',
               });
               const currentAudioState = loadAudioStateFromProject(
-                window.localStorage,
+                storage,
                 projectId,
                 currentProject,
               );
@@ -5974,6 +6170,7 @@ function EditorWorkspace({
           project={visualProject}
           timelineProject={context.timelineProject}
           selectedClipIds={state.selectedIds}
+          storage={context.storage}
           onAddTransition={(t) =>
             context.replaceVisualProject({
               ...visualProject,
@@ -6111,6 +6308,8 @@ function EditorWorkspace({
               ? agentPreviewState.timeline
               : undefined
           }
+          agentPreviewSurfaceVisible={agentPreviewSurfaceVisible}
+          onAgentPreviewRendered={acknowledgeTimelineAgentPreview}
           viewport={context.timelineViewport}
           onViewportChange={context.onTimelineViewportChange}
           trackFlags={context.timelineTrackFlags}
@@ -6257,6 +6456,7 @@ function EditorWorkspace({
         <DualLensPanel
           projection={context.dualLensProjection}
           transitions={visualProject.transitions ?? []}
+          storage={context.storage}
           playheadUs={state.playheadUs}
           playing={state.playing}
           selectedClipIds={state.selectedIds}
@@ -6366,6 +6566,7 @@ function EditorWorkspace({
         <AssetLibraryPanel
           projectId={controlPlaneProject.controlPlaneProjectId}
           projectTitle={controlPlaneProject.title}
+          storage={context.storage}
           onAddSticker={(asset) => void context.addStickerFromAsset(asset)}
           onAddToTimeline={addAssetToTimeline}
           onEditWithAi={(asset) => {
@@ -6377,6 +6578,7 @@ function EditorWorkspace({
     if (api.id === 'agent') {
       return (
         <AgentPanel
+          storage={context.storage}
           project={context.timelineProject}
           selectedClipIds={state.selectedIds}
           playheadUs={state.playheadUs}
@@ -6395,6 +6597,9 @@ function EditorWorkspace({
           creativeBriefRunner={context.creativeBriefRunner}
           onCreativeBriefOptIn={context.onCreativeBriefOptIn}
           joyAgentEngineClient={joyAgentEngineClientRef.current!}
+          joyAgentRunController={joyAgentRunController}
+          observationAdapterFactory={observationAdapterFactory}
+          resolveAudioAssetUrl={resolveAudioAssetUrl}
           agentPresenceStore={appAgentPresenceStore}
           agentPreviewStore={appAgentPreviewStore}
         />
@@ -6428,16 +6633,23 @@ function EditorWorkspace({
           <p>Longest stall: {context.playback.maxStallUs} µs</p>
         </PanelShell>
       );
-    if (api.id === 'monitor') return <MonitorPanel />;
+    if (api.id === 'monitor')
+      return <MonitorPanel agentPreviewSurfaceVisible={agentPreviewSurfaceVisible} />;
     if (api.id === 'workflows') {
       return (
         <WorkflowsPanel
           session={context.session}
+          storage={context.storage}
           selectedClipIds={state.selectedIds}
           playheadUs={state.playheadUs}
           onRun={async (workflowId, inputs) => {
             try {
-              const outcome = await runWorkflow(context.session, workflowId, inputs);
+              const outcome = await runWorkflow(
+                context.session,
+                workflowId,
+                inputs,
+                context.storage,
+              );
               context.bumpProjectRevision();
               return outcome;
             } catch (error) {
@@ -6452,7 +6664,12 @@ function EditorWorkspace({
           }}
           onResume={async (runId, humanInputs) => {
             try {
-              const outcome = await resumeWorkflow(context.session, runId, humanInputs);
+              const outcome = await resumeWorkflow(
+                context.session,
+                runId,
+                humanInputs,
+                context.storage,
+              );
               context.bumpProjectRevision();
               return outcome;
             } catch (error) {
@@ -6474,6 +6691,7 @@ function EditorWorkspace({
     if (effectivePanelId === 'templates') {
       return withFeatureHub(
         <LibraryPanel
+          storage={context.storage}
           onApplyTemplate={(seeded) => {
             buildContentTemplateTransaction(seeded, {
               session: context.session,
@@ -6504,14 +6722,21 @@ function EditorWorkspace({
   const processCounts = {
     active: exportHistory.filter((entry) => entry.status === 'running').length,
     attention: exportHistory.filter(
-      (entry) => entry.status === 'failed' || entry.status === 'interrupted-retryable',
+      (entry) =>
+        entry.status === 'failed' ||
+        entry.status === 'interrupted-retryable' ||
+        entry.status === 'verification-required',
     ).length,
     completed: exportHistory.filter((entry) => entry.status === 'completed').length,
   };
   const visibleProcesses = exportHistory.filter((entry) => {
     if (processFilter === 'active') return entry.status === 'running';
     if (processFilter === 'attention')
-      return entry.status === 'failed' || entry.status === 'interrupted-retryable';
+      return (
+        entry.status === 'failed' ||
+        entry.status === 'interrupted-retryable' ||
+        entry.status === 'verification-required'
+      );
     if (processFilter === 'completed') return entry.status === 'completed';
     return true;
   });
@@ -6525,7 +6750,10 @@ function EditorWorkspace({
       id: 'attention',
       label: 'Needs attention',
       entries: visibleProcesses.filter(
-        (e) => e.status === 'failed' || e.status === 'interrupted-retryable',
+        (e) =>
+          e.status === 'failed' ||
+          e.status === 'interrupted-retryable' ||
+          e.status === 'verification-required',
       ),
     },
     {
@@ -6813,14 +7041,18 @@ function EditorWorkspace({
                                           {entry.status === 'running'
                                             ? 'Running'
                                             : entry.status === 'completed'
-                                              ? 'Completed'
+                                              ? entry.verification?.status === 'verified'
+                                                ? 'Completed — final MP4 verified'
+                                                : 'Completed'
                                               : entry.status === 'interrupted-retryable'
                                                 ? 'Interrupted — retry available'
-                                                : 'Failed — retry'}
+                                                : entry.status === 'verification-required'
+                                                  ? 'Verification required — retry'
+                                                  : 'Failed — retry'}
                                         </strong>{' '}
                                         {entry.status === 'completed' &&
                                         entry.totalBytes !== undefined
-                                          ? `${(entry.totalBytes / 1_048_576).toFixed(1)} MB`
+                                          ? `${(entry.totalBytes / 1_048_576).toFixed(1)} MB${entry.verification?.status === 'verified' ? ' · final MP4 verified' : ''}`
                                           : entry.status !== 'completed'
                                             ? (entry.error ?? '')
                                             : 'Ready to download'}
@@ -6837,7 +7069,8 @@ function EditorWorkspace({
                                         </a>
                                       )}
                                       {(entry.status === 'failed' ||
-                                        entry.status === 'interrupted-retryable') && (
+                                        entry.status === 'interrupted-retryable' ||
+                                        entry.status === 'verification-required') && (
                                         <button
                                           type="button"
                                           className="process-retry"
@@ -6991,6 +7224,7 @@ function EditorWorkspace({
           />
           <EditorPanelContext.Provider
             value={{
+              storage,
               state,
               previewVideoFrame,
               clipFrameCache: clipFrameCacheRef.current,
@@ -7095,6 +7329,7 @@ function EditorWorkspace({
               <MotionStudioShell
                 key={motionStudioSceneId}
                 sceneId={motionStudioSceneId}
+                storage={storage}
                 onClose={() => setMotionStudioSceneId(undefined)}
               />
             </Suspense>
@@ -7104,6 +7339,7 @@ function EditorWorkspace({
               <EffectStudioShell
                 key={effectStudioSession.recipeId}
                 recipeId={effectStudioSession.recipeId}
+                storage={storage}
                 canApply={
                   effectStudioSession.objectId !== undefined ||
                   resolveObjectIdForSelection(session.visualProject, state.selectedIds) !==
@@ -7215,7 +7451,11 @@ function EditorWorkspace({
   );
 }
 
-function MonitorPanel() {
+function MonitorPanel({
+  agentPreviewSurfaceVisible = true,
+}: {
+  readonly agentPreviewSurfaceVisible?: boolean;
+}) {
   const context = useContext(EditorPanelContext);
   if (context === undefined)
     return (
@@ -7223,10 +7463,21 @@ function MonitorPanel() {
         <p className="empty-hint">Loading monitor…</p>
       </article>
     );
-  return <MonitorPanelContent context={context} />;
+  return (
+    <MonitorPanelContent
+      context={context}
+      agentPreviewSurfaceVisible={agentPreviewSurfaceVisible}
+    />
+  );
 }
 
-function MonitorPanelContent({ context }: { readonly context: EditorPanelContextValue }) {
+function MonitorPanelContent({
+  context,
+  agentPreviewSurfaceVisible,
+}: {
+  readonly context: EditorPanelContextValue;
+  readonly agentPreviewSurfaceVisible: boolean;
+}) {
   const {
     state,
     previewVideoFrame,
@@ -7242,6 +7493,7 @@ function MonitorPanelContent({ context }: { readonly context: EditorPanelContext
     seek,
     dispatchProject,
     session,
+    storage,
     bumpProjectRevision,
     showToast,
   } = context;
@@ -7263,17 +7515,43 @@ function MonitorPanelContent({ context }: { readonly context: EditorPanelContext
   const [monitorFitView, setMonitorFitView] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [agentPreviewBefore, setAgentPreviewBefore] = useState(false);
+  const [documentPreviewAcknowledgement, setDocumentPreviewAcknowledgement] = useState<
+    string | undefined
+  >(undefined);
+  const documentPreviewAcknowledgementRef = useRef<string | undefined>(undefined);
+  const stagedDocumentPreviewKey =
+    agentPreviewState.document === undefined
+      ? undefined
+      : `${agentPreviewState.document.runId}:${agentPreviewState.document.bundleVersion}`;
+  useEffect(() => {
+    // Comparison is deliberately deferred until each immutable staged document
+    // has visibly painted once. Without this reset, a prior bundle's Before
+    // state could suppress the new bundle forever.
+    setAgentPreviewBefore(false);
+    documentPreviewAcknowledgementRef.current = undefined;
+    setDocumentPreviewAcknowledgement(undefined);
+  }, [stagedDocumentPreviewKey]);
+  const documentPreviewInitialPaintPending =
+    stagedDocumentPreviewKey !== undefined &&
+    documentPreviewAcknowledgement !== stagedDocumentPreviewKey;
   const previewVisualProject =
     !agentPreviewBefore &&
     agentPreviewState.document !== undefined &&
     agentPreviewState.document.baseRevision === session.projectRevisionId
       ? agentPreviewState.document.preview
       : visualProject;
+  const renderedAgentDocumentPreview =
+    !agentPreviewBefore &&
+    agentPreviewState.document !== undefined &&
+    agentPreviewState.document.baseRevision === session.projectRevisionId &&
+    agentPreviewState.document.preview === previewVisualProject
+      ? agentPreviewState.document
+      : undefined;
   const [zoomDrawerOpen, setZoomDrawerOpen] = useState(false);
   const panelRef = useRef<HTMLElement | null>(null);
   const transportRef = useRef<HTMLDivElement | null>(null);
   const initialPreviewPreference = useRef(
-    loadEditorUiPreferences(window.localStorage).monitorPreview ??
+    loadEditorUiPreferences(storage).monitorPreview ??
       DEFAULT_EDITOR_UI_PREFERENCES.monitorPreview!,
   );
   const [previewQuality, setPreviewQuality] = useState<PreviewQuality>(
@@ -7411,6 +7689,20 @@ function MonitorPanelContent({ context }: { readonly context: EditorPanelContext
     );
     renderer.setResolution(previewQualityResolution(previewQuality));
     renderer.render(frame, videoBitmaps);
+    // A staged document becomes review-ready only after the real program
+    // renderer has accepted it. This is not a commit/approval path.
+    if (renderedAgentDocumentPreview !== undefined && agentPreviewSurfaceVisible) {
+      appAgentPreviewStore.acknowledgeRender(
+        renderedAgentDocumentPreview.runId,
+        renderedAgentDocumentPreview.bundleVersion,
+        'document',
+      );
+      const acknowledgementKey = `${renderedAgentDocumentPreview.runId}:${renderedAgentDocumentPreview.bundleVersion}`;
+      if (documentPreviewAcknowledgementRef.current !== acknowledgementKey) {
+        documentPreviewAcknowledgementRef.current = acknowledgementKey;
+        setDocumentPreviewAcknowledgement(acknowledgementKey);
+      }
+    }
   };
 
   useEffect(() => {
@@ -7468,12 +7760,12 @@ function MonitorPanelContent({ context }: { readonly context: EditorPanelContext
   }, [previewQuality]);
 
   useEffect(() => {
-    const current = loadEditorUiPreferences(window.localStorage);
-    saveEditorUiPreferences(window.localStorage, {
+    const current = loadEditorUiPreferences(storage);
+    saveEditorUiPreferences(storage, {
       ...current,
       monitorPreview: { quality: previewQuality, renderer: previewRenderer },
     });
-  }, [previewQuality, previewRenderer]);
+  }, [previewQuality, previewRenderer, storage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -7662,6 +7954,7 @@ function MonitorPanelContent({ context }: { readonly context: EditorPanelContext
   useEffect(() => {
     paintRef.current();
   }, [
+    agentPreviewSurfaceVisible,
     clipFrameCache,
     clipFrameTick,
     previewVideoFrame,
@@ -7849,6 +8142,7 @@ function MonitorPanelContent({ context }: { readonly context: EditorPanelContext
         <AgentPreviewBadge
           surface="Program Monitor"
           before={agentPreviewBefore}
+          beforeDisabled={documentPreviewInitialPaintPending}
           onBeforeChange={setAgentPreviewBefore}
         />
       </div>

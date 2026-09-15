@@ -1,12 +1,17 @@
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   maskingAvailabilityFromEnvironment,
   readMaskDerivative,
   runMaskingJob,
 } from './local-masking.js';
+
+// Independent of `process.cwd()` (which is `apps/worker` under `pnpm --filter @joy-media/worker
+// test`, not the repo root) so this fixture resolves the same way from any invocation.
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 describe('local masking runner', () => {
   it('advertises only explicitly configured image/video runners', () => {
@@ -24,14 +29,7 @@ describe('local masking runner', () => {
 
   it('runs a private JSON request, verifies the PNG, and retains an opaque result', async () => {
     const derivativeDirectory = mkdtempSync(join(tmpdir(), 'joy-mask-result-'));
-    const sourcePath = join(
-      process.cwd(),
-      'apps',
-      'editor-web',
-      'public',
-      'assets',
-      '24_pixel.png',
-    );
+    const sourcePath = join(repoRoot, 'apps', 'editor-web', 'public', 'assets', '24_pixel.png');
     const copyRunner = [
       "const fs=require('node:fs');",
       "const i=process.argv.indexOf('--request');",

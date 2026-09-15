@@ -418,7 +418,13 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(windows).toContain("foreach ($pass in @('1', '2'))");
     expect(windows).toContain('joy-worker-clean-" + $env:CANDIDATE_SHA');
     expect(windows).toContain('Verify clean Worker teardown\n        if: always()');
-    expect(windows).toContain("Get-Process -Name 'joy-worker'");
+    expect(windows).toContain('Get-Process -ErrorAction SilentlyContinue');
+    expect(windows).toContain("$_.Name -like 'joy-worker*'");
+    expect(windows).toContain('$_.Path');
+    expect(windows).toContain('$expectedPaths');
+    expect(windows).toContain('for ($attempt = 0; $attempt -lt 15; $attempt++)');
+    expect(windows).toContain('Start-Sleep -Seconds 1');
+    expect(windows).not.toContain("Get-Process -Name 'joy-worker'");
     expect(windows).not.toContain('actions/upload-artifact');
     expect(windows).not.toContain('actions/download-artifact');
     const linux = workflow.slice(workflow.indexOf('\n  linux-real-services:'));
