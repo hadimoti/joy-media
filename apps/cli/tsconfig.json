@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts"],
+  "references": [
+    { "path": "../../packages/joy-agent-engine" },
+    { "path": "../../packages/project-schema" },
+    { "path": "../../packages/project-persistence" },
+    { "path": "../../packages/commands" },
+    { "path": "../../packages/agent-tools" }
+  ]
+}

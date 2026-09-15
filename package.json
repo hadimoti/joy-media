@@ -16,6 +16,8 @@
     "test:fixtures:media": "node tooling/generate-media-fixtures.mjs",
     "worker:exe": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-worker-exe.ps1",
     "desktop:package": "pnpm --filter @joy-media/desktop build && pnpm --filter @joy-media/desktop package:dev",
+    "cli": "node apps/cli/bin/joy-media.mjs",
+    "cli:build": "pnpm --filter @joy-media/cli build",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

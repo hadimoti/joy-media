@@ -27,7 +27,15 @@ export default defineConfig({
       '@joy-media/audio-core/analysis': pkg('./packages/audio-core/src/analysis.ts'),
       '@joy-media/audio-core/effects': pkg('./packages/audio-core/src/effects.ts'),
       '@joy-media/audio-core': pkg('./packages/audio-core/src/index.ts'),
+      '@joy-media/project-persistence/desktop': pkg(
+        './packages/project-persistence/src/desktop.ts',
+      ),
+      '@joy-media/project-persistence/browser': pkg(
+        './packages/project-persistence/src/browser.ts',
+      ),
       '@joy-media/project-persistence': pkg('./packages/project-persistence/src/index.ts'),
+      '@joy-media/joy-agent-engine': pkg('./packages/joy-agent-engine/src/index.ts'),
+      '@joy-media/cli': pkg('./apps/cli/src/index.ts'),
       '@joy-media/export-core': pkg('./packages/export-core/src/index.ts'),
       '@joy-media/api': pkg('./apps/api/src/index.ts'),
       '@joy-media/property-system': pkg('./packages/property-system/src/index.ts'),

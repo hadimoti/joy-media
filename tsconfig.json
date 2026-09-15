@@ -41,6 +41,7 @@
     { "path": "packages/visual-effects" },
     { "path": "tooling/golden-render" },
     { "path": "tooling/benchmark" },
-    { "path": "tooling/archive" }
+    { "path": "tooling/archive" },
+    { "path": "apps/cli" }
   ]
 }

@@ -1,0 +1,30 @@
+{
+  "name": "@joy-media/cli",
+  "version": "1.0.0",
+  "private": true,
+  "description": "JOY Media CLI with Full-Power Joy Agent, deterministic project management, and local worker integration",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "joy-media": "./bin/joy-media.mjs",
+    "joy": "./bin/joy-media.mjs"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@joy-media/joy-agent-engine": "workspace:*",
+    "@joy-media/project-schema": "workspace:*",
+    "@joy-media/project-persistence": "workspace:*",
+    "@joy-media/commands": "workspace:*",
+    "@joy-media/agent-tools": "workspace:*",
+    "ai": "7.0.92"
+  },
+  "devDependencies": {
+    "@types/node": "^22.16.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}
