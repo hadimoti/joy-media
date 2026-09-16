@@ -34,7 +34,7 @@ import { probeOpenAiCompatibleProvider } from '@joy-media/provider-sdk';
 import { evaluateAutoUpdate } from './auto-update-policy.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const isDev = process.env['NODE_ENV'] !== 'production';
+const isDev = !app.isPackaged && process.env['NODE_ENV'] !== 'production';
 // Automated runtime smoke check (`pnpm --filter @joy-media/desktop test:smoke`, wave 9): a real
 // `electron .` launch that proves app.whenReady, window construction, and IPC registration all
 // actually happen in this runtime, then exits on its own — closing the wave 1 gap documented in

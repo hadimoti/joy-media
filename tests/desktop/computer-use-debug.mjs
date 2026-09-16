@@ -8,7 +8,8 @@ const desktopRoot = resolve('apps/desktop');
 const localAppData = process.env.LOCALAPPDATA || join(process.env.USERPROFILE || 'C:/Users/HadiMoti', 'AppData/Local');
 const installedExe = resolve(localAppData, 'Programs/JOY Media/joy-media.exe');
 const distExe = resolve(desktopRoot, 'dist/joy-media-win32-x64/joy-media.exe');
-const standaloneExe = distExe;
+const targetExe = existsSync(installedExe) ? installedExe : distExe;
+const targetCwd = existsSync(installedExe) ? resolve(localAppData, 'Programs/JOY Media') : resolve(desktopRoot, 'dist', 'joy-media-win32-x64');
 
 const screenshotDir = resolve(
   process.env.JOY_SCREENSHOT_DIR ||
@@ -16,19 +17,20 @@ const screenshotDir = resolve(
 );
 mkdirSync(screenshotDir, { recursive: true });
 
-if (!existsSync(standaloneExe)) {
-  console.error(`Standalone executable not found at: ${standaloneExe}`);
+if (!existsSync(targetExe)) {
+  console.error(`Target executable not found at: ${targetExe}`);
   process.exit(1);
 }
 
 console.log('=== Starting JOY Media Computer-Use Visual Debugger ===');
-console.log(`Target Executable: ${standaloneExe}`);
+console.log(`Target Executable: ${targetExe}`);
+console.log(`Working Directory: ${targetCwd}`);
 console.log(`Screenshot Directory: ${screenshotDir}`);
 
 const tempUserData = mkdtempSync(join(tmpdir(), 'joy-computer-use-'));
 const report = {
   timestamp: new Date().toISOString(),
-  executable: standaloneExe,
+  executable: targetExe,
   screenshots: [],
   consoleLogs: [],
   consoleErrors: [],
@@ -40,11 +42,14 @@ let app;
 try {
   const startTime = Date.now();
   console.log('1. Launching Electron application via Playwright _electron.launch()...');
+  // Do NOT pass artificial NODE_ENV - let app.isPackaged accurately declare production
+  const cleanEnv = { ...process.env };
+  delete cleanEnv.NODE_ENV;
   app = await electron.launch({
-    executablePath: standaloneExe,
-    cwd: resolve(desktopRoot, 'dist', 'joy-media-win32-x64'),
+    executablePath: targetExe,
+    cwd: targetCwd,
     args: [`--user-data-dir=${tempUserData}`],
-    env: { ...process.env, NODE_ENV: 'production' },
+    env: cleanEnv,
   });
 
   const window = await app.firstWindow();

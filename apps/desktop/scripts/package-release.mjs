@@ -114,6 +114,26 @@ async function assembleUnpacked() {
     filter: (source) => !/\.test\.(js|d\.ts)(\.map)?$/.test(source.replaceAll('\\', '/')),
   });
 
+  // Stage internal workspace dependencies into node_modules so packaged runtime resolves them
+  // cleanly without relying on repository-root node_modules symlinks.
+  const unpackedNodeModules = resolve(unpackedDir, 'node_modules', '@joy-media');
+  await mkdir(unpackedNodeModules, { recursive: true });
+  for (const pkgName of ['provider-sdk', 'project-schema']) {
+    const pkgRoot = resolve(repoRoot, 'packages', pkgName);
+    const dest = resolve(unpackedNodeModules, pkgName);
+    await rm(dest, { recursive: true, force: true });
+    await mkdir(dest, { recursive: true });
+    await cp(resolve(pkgRoot, 'package.json'), resolve(dest, 'package.json'));
+    const distSrc = resolve(pkgRoot, 'dist');
+    if (existsSync(distSrc)) {
+      await cp(distSrc, resolve(dest, 'dist'), {
+        recursive: true,
+        filter: (source) => !/\.test\.(js|d\.ts)(\.map)?$/.test(source.replaceAll('\\', '/')),
+      });
+    }
+  }
+  process.stderr.write(`Staged workspace dependencies into ${unpackedNodeModules}\\n`);
+
   const desktopPackageJson = JSON.parse(
     await readFile(resolve(desktopRoot, 'package.json'), 'utf8'),
   );
