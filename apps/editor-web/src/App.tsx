@@ -319,6 +319,7 @@ import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
 import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
 import { Scene3DPanel } from './Scene3DPanel.js';
 import { JoyAgentSettingsDialog } from './JoyAgentSettingsDialog.js';
+import { AssetLibrarySettingsDialog } from './AssetLibrarySettingsDialog.js';
 import {
   isDesktopHost,
   listDesktopProviderProfiles,
@@ -1092,6 +1093,7 @@ function EditorWorkspace({
     saveAgentPolicy(storage, agentPolicy);
   }, [agentPolicy, storage]);
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
+  const [assetLibrarySettingsOpen, setAssetLibrarySettingsOpen] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
   useEffect(() => {
     if (!isDesktopHost()) return;
@@ -4912,6 +4914,9 @@ function EditorWorkspace({
         case 'agent.open':
           activatePanel('agent');
           break;
+        case 'edit.assetLibrarySettings':
+          setAssetLibrarySettingsOpen(true);
+          break;
         case 'agent.executionMode':
         case 'agent.settings':
           setAgentSettingsOpen(true);
@@ -6642,6 +6647,7 @@ function EditorWorkspace({
             context.attachJoyAgentAsset(asset);
             context.activatePanel('agent');
           }}
+          onOpenAssetSettings={() => setAssetLibrarySettingsOpen(true)}
         />,
       );
     if (api.id === 'agent') {
@@ -7518,6 +7524,12 @@ function EditorWorkspace({
               }}
               onNotice={showToast}
               onClose={() => setAgentSettingsOpen(false)}
+            />
+          )}
+          {assetLibrarySettingsOpen && (
+            <AssetLibrarySettingsDialog
+              open={assetLibrarySettingsOpen}
+              onClose={() => setAssetLibrarySettingsOpen(false)}
             />
           )}
           {toasts.length > 0 && (

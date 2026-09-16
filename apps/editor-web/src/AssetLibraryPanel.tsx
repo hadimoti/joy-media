@@ -50,7 +50,13 @@ import {
   GridUiIcon,
   ListIcon,
   TrashIcon,
+  FolderIcon,
 } from './icons.js';
+import {
+  isDesktopHost,
+  getDesktopAssetLibraryCatalog,
+  resolveDesktopAssetUrl,
+} from './desktop-client.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
@@ -131,6 +137,7 @@ export function AssetLibraryPanel({
   onAddSticker: _onAddSticker,
   onAddToTimeline,
   onEditWithAi,
+  onOpenAssetSettings,
 }: {
   readonly projectId: string;
   readonly projectTitle?: string;
@@ -156,6 +163,7 @@ export function AssetLibraryPanel({
     readonly kind: 'image' | 'video';
     readonly displayName: string;
   }) => void;
+  readonly onOpenAssetSettings?: () => void;
 }) {
   const client = useMemo(() => new BrowserControlPlaneClient(), []);
   const resolver = useMemo(
@@ -273,7 +281,8 @@ export function AssetLibraryPanel({
 
   const refresh = useCallback(async () => {
     const requestId = ++refreshSeqRef.current;
-    if (getStoredMediaToken(storage) === undefined) {
+    const token = getStoredMediaToken(storage);
+    if (!isDesktopHost() && token === undefined) {
       // LoginGate keeps the editor mounted under the blur; don't wipe a prior
       // catalog or treat "not signed in yet" as a hard failure.
       return;
@@ -284,9 +293,14 @@ export function AssetLibraryPanel({
       // ensure-before-register transaction, so this remains read-only while
       // the active project binding is settling.
       const ownedResultPromise = client.myAssets();
+      const sharedResultPromise = isDesktopHost()
+        ? getDesktopAssetLibraryCatalog().then(
+            (catalog) => catalog.assets as readonly BrowserAsset[],
+          )
+        : client.sharedCloudAssets();
       const [ownedResult, sharedResult] = await Promise.allSettled([
         ownedResultPromise,
-        client.sharedCloudAssets(),
+        sharedResultPromise,
       ]);
       const ownedAssets =
         ownedResult.status === 'fulfilled' ? ownedResult.value : ([] as readonly BrowserAsset[]);
@@ -488,12 +502,21 @@ export function AssetLibraryPanel({
     }
   }, [client, originalAssetCache, projectId, projectTitle, refresh, selectedFile]);
   const fetchCloudOriginal = useCallback(
-    (id: string) => {
+    async (id: string) => {
       const asset = items.find((candidate) => candidate.asset.id === id)?.asset;
       if (asset === undefined)
-        return Promise.reject(new Error('The catalog asset is no longer listed.'));
+        throw new Error('The catalog asset is no longer listed.');
+      if (isDesktopHost()) {
+        const relativePath =
+          (asset as any).relativePath ||
+          (asset.kind === 'audio' ? `audio/${asset.id}` : `images/${asset.id}`);
+        const url = resolveDesktopAssetUrl(relativePath);
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`Failed to load local asset: ${res.statusText}`);
+        return await res.blob();
+      }
       if (!asset.cloudBacked)
-        return Promise.reject(new Error('This asset has no cloud original yet.'));
+        throw new Error('This asset has no cloud original yet.');
       // My Media entries can belong to any project under this owner. They must
       // use their owning project endpoint; the shared-library endpoint is only
       // for a curated cloud entry and otherwise replies with a noisy 409.
@@ -527,37 +550,77 @@ export function AssetLibraryPanel({
             const cache = await originalAssetCache;
             let blob = await cache.get(asset.assetId);
             if (blob === undefined) {
-              try {
-                blob = await client.originalBytes(projectId, asset.assetId);
-              } catch {
-                blob = await client.sharedCloudOriginalBytes(asset.assetId);
+              if (isDesktopHost()) {
+                const catalogAsset = items.find((candidate) => candidate.asset.id === asset.assetId)?.asset;
+                const relativePath =
+                  (catalogAsset as any)?.relativePath ||
+                  (asset.kind === 'audio' ? `audio/${asset.assetId}` : `images/${asset.assetId}`);
+                try {
+                  const res = await fetch(resolveDesktopAssetUrl(relativePath));
+                  if (res.ok) {
+                    blob = await res.blob();
+                    await cache.put(asset.assetId, blob);
+                  }
+                } catch {
+                  // ignore
+                }
+              }
+              if (blob === undefined) {
+                try {
+                  blob = await client.originalBytes(projectId, asset.assetId);
+                } catch {
+                  blob = await client.sharedCloudOriginalBytes(asset.assetId);
+                }
               }
             }
-            const file = new File([blob], asset.displayName, { type: descriptor.mimeType });
-            descriptor = await describeMedia(file, asset.kind, descriptor.mimeType);
+            if (blob !== undefined) {
+              const file = new File([blob], asset.displayName, { type: descriptor.mimeType });
+              descriptor = await describeMedia(file, asset.kind, descriptor.mimeType);
+            }
           } catch {
             setStatus(
               `Could not read ${asset.displayName} duration; using the default timeline segment.`,
             );
           }
         }
+        if (isDesktopHost()) {
+          try {
+            const cache = await originalAssetCache;
+            let blob = await cache.get(asset.assetId);
+            if (blob === undefined) {
+              const catalogAsset = items.find((candidate) => candidate.asset.id === asset.assetId)?.asset;
+              const relativePath =
+                (catalogAsset as any)?.relativePath ||
+                (asset.kind === 'audio' ? `audio/${asset.assetId}` : `images/${asset.assetId}`);
+              const res = await fetch(resolveDesktopAssetUrl(relativePath));
+              if (res.ok) {
+                blob = await res.blob();
+                await cache.put(asset.assetId, blob);
+              }
+            }
+          } catch {
+            // cache put failure is non-fatal
+          }
+        }
         const catalogAsset = items.find((candidate) => candidate.asset.id === asset.assetId)?.asset;
         let scopedAsset = asset;
         if (catalogAsset !== undefined && catalogAsset.projectId !== projectId) {
-          setStatus(`Preparing ${asset.displayName} for this project…`);
-          const associated = await withAssetTimelineTimeout(
-            client.associateAsset(projectId, catalogAsset.id),
-            `Preparing ${asset.displayName}`,
-          );
-          scopedAsset = {
-            ...asset,
-            assetId: associated.id,
-            kind: associated.kind,
-            displayName: associated.displayName,
-            sha256: associated.sha256,
-            bytes: associated.bytes,
-            descriptor: associated.descriptor,
-          };
+          if (!isDesktopHost()) {
+            setStatus(`Preparing ${asset.displayName} for this project…`);
+            const associated = await withAssetTimelineTimeout(
+              client.associateAsset(projectId, catalogAsset.id),
+              `Preparing ${asset.displayName}`,
+            );
+            scopedAsset = {
+              ...asset,
+              assetId: associated.id,
+              kind: associated.kind,
+              displayName: associated.displayName,
+              sha256: associated.sha256,
+              bytes: associated.bytes,
+              descriptor: associated.descriptor,
+            };
+          }
         }
         if (onAddToTimeline === undefined)
           throw new Error('Timeline insertion is unavailable; refresh the editor and retry.');
@@ -848,12 +911,27 @@ export function AssetLibraryPanel({
             <button
               type="button"
               aria-pressed={assetSource === 'cloud'}
-              aria-label="Cloud library — Showing cloud assets; switch to user assets"
+              aria-label={
+                isDesktopHost()
+                  ? 'Library — Showing local asset library'
+                  : 'Cloud library — Showing cloud assets; switch to user assets'
+              }
               onClick={() => setAssetSource('cloud')}
             >
-              Cloud library
+              {isDesktopHost() ? 'Library' : 'Cloud library'}
             </button>
           </div>
+          {isDesktopHost() && onOpenAssetSettings && (
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Asset Library Folder Settings"
+              title="Configure asset library folder…"
+              onClick={onOpenAssetSettings}
+            >
+              <FolderIcon />
+            </button>
+          )}
           <button
             type="button"
             className="icon-button"
@@ -1308,7 +1386,9 @@ export function AssetLibraryPanel({
                 <>
                   <p>
                     {assetSource === 'cloud'
-                      ? 'No cloud assets match the current filters.'
+                      ? isDesktopHost()
+                        ? 'No library assets match the current filters.'
+                        : 'No cloud assets match the current filters.'
                       : 'No user assets match the current filters.'}
                   </p>
                   <button

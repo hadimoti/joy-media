@@ -11,8 +11,8 @@
  */
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, safeStorage, session } from 'electron';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { mkdirSync } from 'node:fs';
+import path, { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { parseProjectDeepLink } from '../deep-link.js';
 import { createFileRegistry } from './file-registry.js';
@@ -47,7 +47,11 @@ const isSmokeMode = process.argv.includes('--smoke');
 protocol.registerSchemesAsPrivileged([
   {
     scheme: PACKAGED_RENDERER_SCHEME,
-    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: false },
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
+  },
+  {
+    scheme: 'joy-asset',
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true },
   },
 ]);
 
@@ -79,10 +83,17 @@ if (!app.requestSingleInstanceLock()) {
       return { ...probe, kind: classifyMediaKind(path) };
     },
     showOpenDialog: async () => {
-      const win = BrowserWindow.getFocusedWindow();
+      const win = BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
       const result = win
         ? await dialog.showOpenDialog(win, { properties: ['openFile'] })
         : await dialog.showOpenDialog({ properties: ['openFile'] });
+      return { canceled: result.canceled, path: result.filePaths[0] };
+    },
+    showOpenDirectoryDialog: async () => {
+      const win = BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
+      const result = win
+        ? await dialog.showOpenDialog(win, { properties: ['openDirectory'] })
+        : await dialog.showOpenDialog({ properties: ['openDirectory'] });
       return { canceled: result.canceled, path: result.filePaths[0] };
     },
     secretStore,
@@ -155,6 +166,57 @@ if (!app.requestSingleInstanceLock()) {
         return net.fetch(pathToFileURL(filePath).toString());
       });
     }
+
+    protocol.handle('joy-asset', async (request) => {
+      try {
+        if (request.method === 'OPTIONS') {
+          return new Response(null, {
+            status: 204,
+            headers: {
+              'Access-Control-Allow-Origin': '*',
+              'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+              'Access-Control-Allow-Headers': '*',
+            },
+          });
+        }
+        const url = new URL(request.url);
+        let relPath = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
+        if (relPath.startsWith('library/')) {
+          relPath = relPath.slice('library/'.length);
+        }
+        const baseDir = localDatabase.getAssetLibraryDirectory();
+        const resolvedPath = path.normalize(path.join(baseDir, relPath));
+        const normalizedBase = path.normalize(baseDir);
+        if (!resolvedPath.startsWith(normalizedBase)) {
+          return new Response('Forbidden', {
+            status: 403,
+            headers: { 'Access-Control-Allow-Origin': '*' },
+          });
+        }
+        if (!existsSync(resolvedPath) || !statSync(resolvedPath).isFile()) {
+          return new Response('Not Found', {
+            status: 404,
+            headers: { 'Access-Control-Allow-Origin': '*' },
+          });
+        }
+        const response = await net.fetch(pathToFileURL(resolvedPath).toString(), {
+          headers: request.headers,
+        });
+        const headers = new Headers(response.headers);
+        headers.set('Access-Control-Allow-Origin', '*');
+        headers.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        });
+      } catch {
+        return new Response('Server Error', {
+          status: 500,
+          headers: { 'Access-Control-Allow-Origin': '*' },
+        });
+      }
+    });
 
     // Deny any permission the desktop shell has no product reason to grant (camera/mic
     // access, if ever needed for capture, is a deliberate future decision, not a default).

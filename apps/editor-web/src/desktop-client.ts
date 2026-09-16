@@ -217,3 +217,71 @@ export async function isDesktopWindowMaximized(): Promise<boolean> {
   return Boolean(isMax);
 }
 
+export interface DesktopAssetLibrarySettings {
+  readonly directory: string;
+  readonly exists: boolean;
+  readonly hasCatalog: boolean;
+  readonly isDefault: boolean;
+  readonly counts: {
+    readonly total: number;
+    readonly audio: number;
+    readonly image: number;
+  };
+}
+
+export interface DesktopAssetCatalog {
+  readonly version: number;
+  readonly generatedAt?: string;
+  readonly counts: {
+    readonly total: number;
+    readonly audio: number;
+    readonly image: number;
+  };
+  readonly assets: readonly any[];
+}
+
+/**
+ * Retrieves the currently configured local asset library folder settings and counts.
+ */
+export async function getDesktopAssetLibrarySettings(): Promise<DesktopAssetLibrarySettings> {
+  return (await requireBridge().invoke(
+    'desktop.asset-library.get-settings',
+  )) as DesktopAssetLibrarySettings;
+}
+
+/**
+ * Updates the configured local asset library directory.
+ */
+export async function setDesktopAssetLibraryDirectory(
+  directory: string,
+): Promise<DesktopAssetLibrarySettings> {
+  return (await requireBridge().invoke('desktop.asset-library.set-directory', {
+    directory,
+  })) as DesktopAssetLibrarySettings;
+}
+
+/**
+ * Prompts the user with a native folder picker dialog to select an asset library folder.
+ */
+export async function selectDesktopAssetLibraryDirectory(): Promise<DesktopAssetLibrarySettings | null> {
+  const result = await requireBridge().invoke('desktop.asset-library.select-directory');
+  return result ? (result as DesktopAssetLibrarySettings) : null;
+}
+
+/**
+ * Loads the local catalog.json from the configured local asset library folder.
+ */
+export async function getDesktopAssetLibraryCatalog(): Promise<DesktopAssetCatalog> {
+  return (await requireBridge().invoke(
+    'desktop.asset-library.get-catalog',
+  )) as DesktopAssetCatalog;
+}
+
+/**
+ * Formats a local asset relative path or ID to the joy-asset:// protocol for instant local streaming.
+ */
+export function resolveDesktopAssetUrl(relativePathOrId: string): string {
+  const clean = relativePathOrId.replace(/^joy-asset:\/\/library\/?/, '').replace(/^\/+/, '');
+  return `joy-asset://library/${clean}`;
+}
+

@@ -17,6 +17,7 @@ export type AppMenuActionId =
   | 'edit.delete'
   | 'edit.duplicate'
   | 'edit.commandPalette'
+  | 'edit.assetLibrarySettings'
   | 'clip.split'
   | 'agent.open'
   | 'agent.active'
@@ -94,6 +95,7 @@ export const APP_MENU_GROUPS: readonly AppMenuGroup[] = [
       { id: 'edit.delete', label: 'Cut / Delete Clip', shortcut: 'Del' },
       { id: 'edit.duplicate', label: 'Duplicate Clip', shortcut: 'Ctrl+D', separatorAfter: true },
       { id: 'edit.commandPalette', label: 'Command Palette…', shortcut: 'Ctrl+K' },
+      { id: 'edit.assetLibrarySettings', label: 'Asset Library Folder…', separatorAfter: true },
     ],
   },
   {

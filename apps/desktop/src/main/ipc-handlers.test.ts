@@ -495,4 +495,43 @@ describe('IPC dispatch', () => {
     expect(isMaxRes).toEqual({ ok: true, data: false });
     expect(handleWindowControl).toHaveBeenCalledWith('is-maximized');
   });
+
+  it('handles asset library settings, directory selection, and catalog reading', async () => {
+    const showOpenDirectoryDialog = vi.fn(async () => ({
+      canceled: false,
+      path: 'H:\\VPS-DATA\\joy-media-assets',
+    }));
+    const d = { ...deps(), showOpenDirectoryDialog };
+    const handlers = createIpcHandlers(d);
+
+    const getSettingsRes = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.asset-library.get-settings',
+    });
+    expect(getSettingsRes.ok).toBe(true);
+    expect((getSettingsRes.data as { directory: string }).directory).toBeDefined();
+
+    const setDirRes = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.asset-library.set-directory',
+      payload: { directory: 'D:\\my-assets' },
+    });
+    expect(setDirRes.ok).toBe(true);
+    expect((setDirRes.data as { directory: string }).directory).toBe('D:\\my-assets');
+
+    const selectDirRes = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.asset-library.select-directory',
+    });
+    expect(selectDirRes.ok).toBe(true);
+    expect((selectDirRes.data as { directory: string }).directory).toBe('H:\\VPS-DATA\\joy-media-assets');
+    expect(showOpenDirectoryDialog).toHaveBeenCalled();
+
+    const catalogRes = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.asset-library.get-catalog',
+    });
+    expect(catalogRes.ok).toBe(true);
+    expect((catalogRes.data as { assets: unknown[] }).assets).toBeDefined();
+  });
 });

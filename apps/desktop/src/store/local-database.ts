@@ -1,4 +1,19 @@
 import { DatabaseSync } from 'node:sqlite';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+
+export interface AssetLibraryInfo {
+  readonly directory: string;
+  readonly exists: boolean;
+  readonly hasCatalog: boolean;
+  readonly isDefault: boolean;
+  readonly counts: {
+    readonly total: number;
+    readonly audio: number;
+    readonly image: number;
+  };
+}
 
 export type MediaKind = 'video' | 'audio' | 'image' | 'other';
 
@@ -124,6 +139,13 @@ export class LocalDatabase {
          model_id TEXT NOT NULL,
          secret_handle_id TEXT NOT NULL,
          created_at TEXT NOT NULL,
+         updated_at TEXT NOT NULL
+       )`,
+    );
+    this.db.exec(
+      `CREATE TABLE IF NOT EXISTS app_settings (
+         key TEXT PRIMARY KEY,
+         value TEXT NOT NULL,
          updated_at TEXT NOT NULL
        )`,
     );
@@ -256,6 +278,88 @@ export class LocalDatabase {
 
   deleteProviderProfile(id: string): void {
     this.db.prepare('DELETE FROM provider_profiles WHERE id = ?').run(id);
+  }
+
+  getSetting(key: string): string | undefined {
+    const row = this.db
+      .prepare('SELECT value FROM app_settings WHERE key = ?')
+      .get(key) as { value: string } | undefined;
+    return row?.value;
+  }
+
+  setSetting(key: string, value: string): void {
+    this.db
+      .prepare(
+        'INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)',
+      )
+      .run(key, value, this.now());
+  }
+
+  deleteSetting(key: string): void {
+    this.db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
+  }
+
+  getDefaultAssetLibraryDirectory(): string {
+    const vpsDataPath =
+      process.platform === 'win32'
+        ? 'H:\\VPS-DATA\\joy-media-assets'
+        : '/var/joy-media/assets';
+    if (fs.existsSync('H:\\VPS-DATA')) {
+      return vpsDataPath;
+    }
+    return path.join(os.homedir(), 'joy-media-assets');
+  }
+
+  getAssetLibraryDirectory(): string {
+    const custom = this.getSetting('asset_library_directory');
+    if (custom !== undefined && custom.trim().length > 0) {
+      return custom.trim();
+    }
+    return this.getDefaultAssetLibraryDirectory();
+  }
+
+  setAssetLibraryDirectory(dir: string): void {
+    this.setSetting('asset_library_directory', dir);
+  }
+
+  getAssetLibraryInfo(overrideDir?: string): AssetLibraryInfo {
+    const dir = overrideDir ?? this.getAssetLibraryDirectory();
+    const defaultDir = this.getDefaultAssetLibraryDirectory();
+    const isDefault = path.normalize(dir) === path.normalize(defaultDir);
+    const exists = fs.existsSync(dir);
+    const catalogPath = path.join(dir, 'catalog.json');
+    const hasCatalog = fs.existsSync(catalogPath);
+    let counts = { total: 0, audio: 0, image: 0 };
+    if (hasCatalog) {
+      try {
+        const raw = fs.readFileSync(catalogPath, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (parsed.counts) {
+          counts = {
+            total: Number(parsed.counts.total ?? 0),
+            audio: Number(parsed.counts.audio ?? 0),
+            image: Number(parsed.counts.image ?? 0),
+          };
+        } else if (Array.isArray(parsed.assets)) {
+          let audio = 0;
+          let image = 0;
+          for (const a of parsed.assets) {
+            if (a.kind === 'audio') audio++;
+            else if (a.kind === 'image') image++;
+          }
+          counts = { total: parsed.assets.length, audio, image };
+        }
+      } catch {
+        // ignore read error
+      }
+    }
+    return {
+      directory: dir,
+      exists,
+      hasCatalog,
+      isDefault,
+      counts,
+    };
   }
 
   /** Releases the SQLite file handle. Call during crash-safe shutdown, not before. */

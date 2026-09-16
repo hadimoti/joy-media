@@ -231,4 +231,21 @@ describe('LocalDatabase provider profiles', () => {
     db.deleteProviderProfile('profile-1');
     expect(db.getProviderProfile('profile-1')).toBeUndefined();
   });
+
+  it('stores and retrieves app settings and asset library directory', () => {
+    const db = testDb();
+    expect(db.getSetting('some_key')).toBeUndefined();
+    db.setSetting('some_key', 'some_value');
+    expect(db.getSetting('some_key')).toBe('some_value');
+
+    const defaultDir = db.getDefaultAssetLibraryDirectory();
+    expect(defaultDir).toBeDefined();
+    expect(db.getAssetLibraryDirectory()).toBe(defaultDir);
+
+    db.setAssetLibraryDirectory('D:\\custom-assets');
+    expect(db.getAssetLibraryDirectory()).toBe('D:\\custom-assets');
+    const info = db.getAssetLibraryInfo();
+    expect(info.directory).toBe('D:\\custom-assets');
+    expect(info.isDefault).toBe(false);
+  });
 });

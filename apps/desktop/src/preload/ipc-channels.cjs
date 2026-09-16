@@ -24,6 +24,10 @@ const IPC_CHANNELS = Object.freeze([
   'desktop.window-maximize',
   'desktop.window-close',
   'desktop.window-is-maximized',
+  'desktop.asset-library.get-settings',
+  'desktop.asset-library.set-directory',
+  'desktop.asset-library.select-directory',
+  'desktop.asset-library.get-catalog',
 ]);
 
 module.exports = { IPC_CHANNELS };

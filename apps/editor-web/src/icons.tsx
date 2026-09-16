@@ -111,6 +111,14 @@ export function TrashIcon() {
   );
 }
 
+export function FolderIcon() {
+  return (
+    <Svg>
+      <path d="M2 3.5a1 1 0 0 1 1-1h3.5l1.5 2H13a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-9Z" />
+    </Svg>
+  );
+}
+
 export function TrimIcon() {
   return (
     <Svg>

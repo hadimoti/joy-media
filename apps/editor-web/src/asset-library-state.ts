@@ -162,8 +162,9 @@ export function filterAssetLibrary(
     .filter(({ asset }) => collection === 'browse' || assetCollectionId(asset) === collection)
     .filter(({ asset }) => {
       if (normalizedQuery.length === 0) return true;
+      const name = asset.displayName ?? asset.sortName ?? asset.id ?? '';
       const tags = (asset.tags ?? []).join(' ');
-      return `${asset.displayName} ${asset.descriptor.mimeType} ${tags}`
+      return `${name} ${asset.descriptor.mimeType} ${tags}`
         .toLocaleLowerCase()
         .includes(normalizedQuery);
     })
@@ -174,8 +175,8 @@ export function filterAssetLibrary(
     })
     .sort((left, right) => {
       if (sort === 'name') {
-        const leftName = left.asset.sortName ?? left.asset.displayName;
-        const rightName = right.asset.sortName ?? right.asset.displayName;
+        const leftName = left.asset.sortName ?? left.asset.displayName ?? left.asset.id ?? '';
+        const rightName = right.asset.sortName ?? right.asset.displayName ?? right.asset.id ?? '';
         return leftName.localeCompare(rightName);
       }
       if (sort === 'size') return right.asset.bytes - left.asset.bytes;
@@ -184,7 +185,9 @@ export function filterAssetLibrary(
         const rightTags = (right.asset.tags ?? []).join(',');
         const byTags = leftTags.localeCompare(rightTags);
         if (byTags !== 0) return byTags;
-        return left.asset.displayName.localeCompare(right.asset.displayName);
+        const leftDisplayName = left.asset.displayName ?? left.asset.sortName ?? left.asset.id ?? '';
+        const rightDisplayName = right.asset.displayName ?? right.asset.sortName ?? right.asset.id ?? '';
+        return leftDisplayName.localeCompare(rightDisplayName);
       }
       return right.asset.createdAt - left.asset.createdAt;
     });

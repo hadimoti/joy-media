@@ -17,6 +17,10 @@ export const IPC_CHANNELS = [
   'desktop.window-maximize',
   'desktop.window-close',
   'desktop.window-is-maximized',
+  'desktop.asset-library.get-settings',
+  'desktop.asset-library.set-directory',
+  'desktop.asset-library.select-directory',
+  'desktop.asset-library.get-catalog',
 ] as const;
 export type IpcChannel = (typeof IPC_CHANNELS)[number];
 export interface IpcRequest {

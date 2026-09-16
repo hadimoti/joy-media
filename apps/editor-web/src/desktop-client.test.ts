@@ -10,6 +10,11 @@ import {
   deleteDesktopProviderProfile,
   beginDesktopProviderSession,
   testDesktopProviderProfile,
+  getDesktopAssetLibrarySettings,
+  setDesktopAssetLibraryDirectory,
+  selectDesktopAssetLibraryDirectory,
+  getDesktopAssetLibraryCatalog,
+  resolveDesktopAssetUrl,
   type DesktopUpdateCheckRequest,
   type SaveDesktopProviderProfileRequest,
   type DesktopProviderProfile,
@@ -216,6 +221,56 @@ describe('testDesktopProviderProfile', () => {
 
     await expect(testDesktopProviderProfile('prof-1')).resolves.toEqual(probeReport);
     expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.test', { id: 'prof-1' });
+  });
+});
+
+describe('asset library helpers', () => {
+  it('getDesktopAssetLibrarySettings rejects outside desktop host and invokes IPC inside', async () => {
+    await expect(getDesktopAssetLibrarySettings()).rejects.toThrow('unavailable outside the desktop host');
+
+    const settings = {
+      directory: 'H:\\VPS-DATA\\joy-media-assets',
+      exists: true,
+      hasCatalog: true,
+      isDefault: true,
+      counts: { total: 3075, audio: 1805, image: 1270 },
+    };
+    const invoke = vi.fn().mockResolvedValue(settings);
+    window.joyDesktop = { channels: ['desktop.asset-library.get-settings'], invoke };
+
+    await expect(getDesktopAssetLibrarySettings()).resolves.toEqual(settings);
+    expect(invoke).toHaveBeenCalledWith('desktop.asset-library.get-settings');
+  });
+
+  it('setDesktopAssetLibraryDirectory invokes desktop.asset-library.set-directory', async () => {
+    const invoke = vi.fn().mockResolvedValue({ directory: 'D:\\custom' });
+    window.joyDesktop = { channels: ['desktop.asset-library.set-directory'], invoke };
+
+    await expect(setDesktopAssetLibraryDirectory('D:\\custom')).resolves.toEqual({ directory: 'D:\\custom' });
+    expect(invoke).toHaveBeenCalledWith('desktop.asset-library.set-directory', { directory: 'D:\\custom' });
+  });
+
+  it('selectDesktopAssetLibraryDirectory invokes desktop.asset-library.select-directory', async () => {
+    const invoke = vi.fn().mockResolvedValue({ directory: 'H:\\new-path' });
+    window.joyDesktop = { channels: ['desktop.asset-library.select-directory'], invoke };
+
+    await expect(selectDesktopAssetLibraryDirectory()).resolves.toEqual({ directory: 'H:\\new-path' });
+    expect(invoke).toHaveBeenCalledWith('desktop.asset-library.select-directory');
+  });
+
+  it('getDesktopAssetLibraryCatalog invokes desktop.asset-library.get-catalog', async () => {
+    const catalog = { version: 1, counts: { total: 1, audio: 1, image: 0 }, assets: [{ id: 'a1' }] };
+    const invoke = vi.fn().mockResolvedValue(catalog);
+    window.joyDesktop = { channels: ['desktop.asset-library.get-catalog'], invoke };
+
+    await expect(getDesktopAssetLibraryCatalog()).resolves.toEqual(catalog);
+    expect(invoke).toHaveBeenCalledWith('desktop.asset-library.get-catalog');
+  });
+
+  it('resolveDesktopAssetUrl formats joy-asset:// protocol URLs cleanly', () => {
+    expect(resolveDesktopAssetUrl('audio/test.wav')).toBe('joy-asset://library/audio/test.wav');
+    expect(resolveDesktopAssetUrl('/images/logo.png')).toBe('joy-asset://library/images/logo.png');
+    expect(resolveDesktopAssetUrl('joy-asset://library/audio/test.wav')).toBe('joy-asset://library/audio/test.wav');
   });
 });
 

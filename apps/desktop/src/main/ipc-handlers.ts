@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { isAllowedIpcRequest } from '../ipc.js';
 import type { IpcChannel, IpcRequest } from '../ipc.js';
 import type { DerivativeKind, OpaqueFileRef } from '../file-boundary.js';
@@ -54,6 +56,7 @@ export interface IpcHandlerDeps {
   readonly fileRegistry: FileRegistry;
   readonly workerSupervisor: WorkerSupervisor;
   readonly showOpenDialog: ShowOpenDialog;
+  readonly showOpenDirectoryDialog?: ShowOpenDialog;
   readonly localDatabase: LocalDatabase;
   readonly probeMedia: ProbeMedia;
   readonly secretStore: SecretStore;
@@ -253,6 +256,54 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
     'desktop.window-is-maximized': async () => {
       const isMax = await deps.handleWindowControl?.('is-maximized');
       return { ok: true, data: Boolean(isMax) };
+    },
+    'desktop.asset-library.get-settings': async () => {
+      const info = deps.localDatabase.getAssetLibraryInfo();
+      return { ok: true, data: info };
+    },
+    'desktop.asset-library.set-directory': async (payload) => {
+      if (typeof payload !== 'object' || payload === null) {
+        return { ok: false, error: 'Payload must be an object' };
+      }
+      const dir = (payload as { directory?: unknown }).directory;
+      if (typeof dir !== 'string' || dir.trim().length === 0) {
+        return { ok: false, error: 'Directory path must be a non-empty string' };
+      }
+      deps.localDatabase.setAssetLibraryDirectory(dir.trim());
+      const info = deps.localDatabase.getAssetLibraryInfo();
+      return { ok: true, data: info };
+    },
+    'desktop.asset-library.select-directory': async () => {
+      if (!deps.showOpenDirectoryDialog) {
+        return { ok: false, error: 'Directory selection is unavailable in this environment' };
+      }
+      const result = await deps.showOpenDirectoryDialog();
+      if (result.canceled || !result.path) {
+        return { ok: true, data: null };
+      }
+      deps.localDatabase.setAssetLibraryDirectory(result.path);
+      const info = deps.localDatabase.getAssetLibraryInfo();
+      return { ok: true, data: info };
+    },
+    'desktop.asset-library.get-catalog': async () => {
+      const dir = deps.localDatabase.getAssetLibraryDirectory();
+      const catalogPath = path.join(dir, 'catalog.json');
+      if (!fs.existsSync(catalogPath)) {
+        return {
+          ok: true,
+          data: { version: 1, counts: { total: 0, audio: 0, image: 0 }, assets: [] },
+        };
+      }
+      try {
+        const raw = fs.readFileSync(catalogPath, 'utf8');
+        const catalog = JSON.parse(raw);
+        return { ok: true, data: catalog };
+      } catch (err: unknown) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : 'Failed to read asset catalog',
+        };
+      }
     },
   };
 }
