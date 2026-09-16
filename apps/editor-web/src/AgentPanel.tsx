@@ -3701,7 +3701,7 @@ export function AgentPanel({
 
           {composerCapability === 'edit' && (
             <div className="joy-code-compose-dock">
-              {isDisconnected && onOpenSettings !== undefined && (
+              {isDisconnected && onOpenSettings !== undefined && Boolean(activeThread && activeThread.messages.length > 0) && (
                 <div
                   className="joy-code-disconnected-banner"
                   style={{
