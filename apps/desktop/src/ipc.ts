@@ -13,6 +13,10 @@ export const IPC_CHANNELS = [
   'desktop.provider-profile.begin-session',
   'desktop.provider-profile.test',
   'desktop.check-for-update',
+  'desktop.window-minimize',
+  'desktop.window-maximize',
+  'desktop.window-close',
+  'desktop.window-is-maximized',
 ] as const;
 export type IpcChannel = (typeof IPC_CHANNELS)[number];
 export interface IpcRequest {

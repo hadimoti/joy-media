@@ -9,7 +9,7 @@
  * Do not add business logic here. Add it to a testable sibling module and call it from
  * here instead.
  */
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, safeStorage, session } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, safeStorage, session } from 'electron';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -100,6 +100,24 @@ if (!app.requestSingleInstanceLock()) {
         ...(pinnedPublicKeyPem === undefined ? {} : { pinnedPublicKeyPem }),
       });
     },
+    handleWindowControl: (action) => {
+      const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+      if (!win) return false;
+      switch (action) {
+        case 'minimize':
+          win.minimize();
+          return true;
+        case 'maximize':
+          if (win.isMaximized()) win.unmaximize();
+          else win.maximize();
+          return win.isMaximized();
+        case 'close':
+          win.close();
+          return true;
+        case 'is-maximized':
+          return win.isMaximized();
+      }
+    },
   });
 
   ipcMain.handle('joy-desktop-ipc', (_event, request: IpcRequest) =>
@@ -121,6 +139,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
+    Menu.setApplicationMenu(null);
     app.setAsDefaultProtocolClient('joy');
 
     if (!isDev) {
@@ -146,6 +165,8 @@ if (!app.requestSingleInstanceLock()) {
       width: 1440,
       height: 900,
       show: !isSmokeMode,
+      frame: false,
+      titleBarStyle: 'hidden',
       webPreferences: buildSecureWebPreferences(join(__dirname, '..', 'preload', 'preload.cjs')),
     });
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

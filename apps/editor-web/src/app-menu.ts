@@ -24,6 +24,10 @@ export type AppMenuActionId =
   | 'agent.stop'
   | 'agent.settings'
   | 'view.commandPalette'
+  | 'view.fullscreen'
+  | 'window.minimize'
+  | 'window.maximize'
+  | 'window.close'
   | `view.panel.${PanelId}`
   | `window.panel.${PanelId}`;
 
@@ -118,13 +122,24 @@ export const APP_MENU_GROUPS: readonly AppMenuGroup[] = [
         shortcut: 'Ctrl+K',
         separatorAfter: true,
       },
+      {
+        id: 'view.fullscreen',
+        label: 'Toggle Full Screen',
+        shortcut: 'F11',
+        separatorAfter: true,
+      },
       ...panelViewItems(),
     ],
   },
   {
     id: 'window',
     label: 'Window',
-    items: windowPanelItems(),
+    items: [
+      { id: 'window.minimize', label: 'Minimize', shortcut: 'Ctrl+M' },
+      { id: 'window.maximize', label: 'Zoom / Maximize' },
+      { id: 'window.close', label: 'Close Window', shortcut: 'Alt+F4', separatorAfter: true },
+      ...windowPanelItems(),
+    ],
   },
 ];
 

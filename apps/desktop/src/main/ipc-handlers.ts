@@ -59,6 +59,9 @@ export interface IpcHandlerDeps {
   readonly secretStore: SecretStore;
   readonly probeProvider: ProbeProvider;
   readonly checkForUpdate: CheckForUpdate;
+  readonly handleWindowControl?: (
+    action: 'minimize' | 'maximize' | 'close' | 'is-maximized',
+  ) => Promise<boolean | void> | boolean | void;
   readonly now?: () => string;
   readonly newId?: () => string;
 }
@@ -234,6 +237,22 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       const request = asCheckForUpdateRequest(payload);
       if (request === undefined) return { ok: false, error: 'Invalid update check request' };
       return { ok: true, data: deps.checkForUpdate(request) };
+    },
+    'desktop.window-minimize': async () => {
+      await deps.handleWindowControl?.('minimize');
+      return { ok: true, data: undefined };
+    },
+    'desktop.window-maximize': async () => {
+      const isMax = await deps.handleWindowControl?.('maximize');
+      return { ok: true, data: isMax };
+    },
+    'desktop.window-close': async () => {
+      await deps.handleWindowControl?.('close');
+      return { ok: true, data: undefined };
+    },
+    'desktop.window-is-maximized': async () => {
+      const isMax = await deps.handleWindowControl?.('is-maximized');
+      return { ok: true, data: Boolean(isMax) };
     },
   };
 }

@@ -701,6 +701,47 @@ main {
   background: var(--joy-bg-app);
   border-bottom: 0;
   box-sizing: border-box;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.app-header button,
+.app-header a,
+.app-header input,
+.app-header select,
+.app-header .app-menubar,
+.app-header .header-menu,
+.app-header .header-group,
+.app-header .window-controls {
+  -webkit-app-region: no-drag;
+}
+.window-controls {
+  display: inline-flex;
+  align-items: stretch;
+  height: 100%;
+  margin-left: 0.5rem;
+  margin-right: -0.75rem;
+  -webkit-app-region: no-drag;
+}
+.window-control-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--joy-text-muted);
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s;
+}
+.window-control-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--joy-text);
+}
+.window-control-btn.window-control-close:hover {
+  background: #e81123;
+  color: #ffffff;
 }
 .app-header .icon-button {
   width: 1.9rem;

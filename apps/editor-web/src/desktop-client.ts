@@ -186,3 +186,34 @@ export async function testDesktopProviderProfile(id: string): Promise<any> {
   return data;
 }
 
+/**
+ * Minimizes the host application window.
+ */
+export async function minimizeDesktopWindow(): Promise<void> {
+  await requireBridge().invoke('desktop.window-minimize');
+}
+
+/**
+ * Toggles maximize / restore on the host application window.
+ * Returns whether the window is currently maximized after toggling.
+ */
+export async function toggleMaximizeDesktopWindow(): Promise<boolean> {
+  const isMax = await requireBridge().invoke('desktop.window-maximize');
+  return Boolean(isMax);
+}
+
+/**
+ * Closes the host application window.
+ */
+export async function closeDesktopWindow(): Promise<void> {
+  await requireBridge().invoke('desktop.window-close');
+}
+
+/**
+ * Checks whether the host application window is maximized.
+ */
+export async function isDesktopWindowMaximized(): Promise<boolean> {
+  const isMax = await requireBridge().invoke('desktop.window-is-maximized');
+  return Boolean(isMax);
+}
+
