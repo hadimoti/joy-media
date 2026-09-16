@@ -27,6 +27,7 @@ import {
   type MistralProviderRegistry,
 } from './mistral-provider.js';
 import type { PrivateObjectStore } from './private-object-store.js';
+import type { JoyModelGateway } from './joy-model-gateway.js';
 import { remuxBrowserMp4Bytes } from './export-remux.js';
 import { MAX_DENOISE_JSON_BYTES } from './spectral-denoise.js';
 import {
@@ -125,6 +126,7 @@ export interface ControlPlaneHttpServerOptions {
   /** USDC checkout (wave 5). `DisabledUsdcCheckoutService` when unset — every route stays
    * reachable, `createInvoice`/`handleWebhook` just report CHECKOUT_DISABLED. */
   readonly usdcCheckout?: UsdcCheckoutApi;
+  readonly joyModelGateway?: JoyModelGateway;
   readonly privateObjectStore?: PrivateObjectStore;
   readonly resumableOriginalUploads?: ResumableOriginalUploadCoordinator;
   /** Optional authenticated Pexels/Pixabay stock-video broker. */
@@ -709,6 +711,30 @@ async function route(
     );
     respondNoStoreJson(response, 200, { data: entitlement });
     return;
+  }
+
+  if (url.pathname.startsWith('/v1/agent/')) {
+    if (options.joyModelGateway === undefined) {
+      respondJson(response, 503, {
+        error: { code: 'JOY_AGENT_UNCONFIGURED', message: 'Joy Model gateway is not configured' },
+      });
+      return;
+    }
+    if (request.method === 'GET' && url.pathname === '/v1/agent/models') {
+      await options.joyModelGateway.handleGetModels(request, response);
+      return;
+    }
+    if (request.method === 'GET' && url.pathname === '/v1/agent/usage') {
+      await options.joyModelGateway.handleGetUsage(request, response);
+      return;
+    }
+    if (
+      request.method === 'POST' &&
+      (url.pathname === '/v1/agent/chat' || url.pathname === '/v1/agent/chat/completions')
+    ) {
+      await options.joyModelGateway.handleChatCompletions(request, response);
+      return;
+    }
   }
 
   // USDC checkout (wave 5). Same mediaAuth identity domain as the routes above.

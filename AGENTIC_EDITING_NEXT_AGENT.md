@@ -26,7 +26,7 @@ copied into the repository, logs, prompts, or VPS.
 
 ```sshconfig
 Host sweden sweden-vps
-    HostName            82.115.8.224
+    HostName            <JOY_VPS_IP>
     User                root
     IdentityFile        ~/.ssh/Joy-Vps-New.pem
     Port                22

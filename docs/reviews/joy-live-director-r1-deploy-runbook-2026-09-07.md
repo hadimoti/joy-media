@@ -82,7 +82,7 @@ Therefore:
 
 > **Tooling wall:** this session's Bash tool and terminal-read are both denied
 > for `ssh sweden` / VPS access by the auto-mode classifier, and it does not
-> relent on retry. The owner runs these **in their open `root@82.115.8.224`
+> relent on retry. The owner runs these **in their open `root@<JOY_VPS_IP>`
 > session** and pastes each block's output back; Claude verifies every value
 > against the candidate identity and calls go/no-go at each checkpoint. Nothing
 > here is irreversible before checkpoint C5 (the symlink switch).

@@ -1120,7 +1120,14 @@ function EditorWorkspace({
         const profile = profiles.find((p) => p.provider === 'openrouter') ?? profiles[0];
         if (!profile) return;
         try {
-          const sessionConfig = await beginDesktopProviderSession(profile.id);
+          const sessionConfig = (await beginDesktopProviderSession(profile.id)) as
+            | {
+                provider: 'joy-hosted' | 'openrouter' | 'openai-compatible';
+                baseUrl: string;
+                modelId: string;
+                apiKey: string;
+              }
+            | undefined;
           if (cancelled || !sessionConfig || !joyAgentEngineClientRef.current) return;
           const status = await joyAgentEngineClientRef.current.configure({
             provider: sessionConfig.provider,

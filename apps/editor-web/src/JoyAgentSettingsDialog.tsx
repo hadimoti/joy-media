@@ -14,8 +14,10 @@ import {
   saveDesktopProviderProfile,
   listDesktopProviderProfiles,
   beginDesktopProviderSession,
+  getRemoteApiBaseUrl,
   type DesktopProviderProfile,
 } from './desktop-client.js';
+import { getStoredMediaToken } from './media-session.js';
 
 type AgentSettingsNotice = {
   readonly kind: 'info' | 'success' | 'error';
@@ -49,13 +51,19 @@ export function JoyAgentSettingsDialog({
   const keyRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(true);
   const mediaProbeEpochRef = useRef(0);
-  const [provider, setProvider] = useState<'openrouter' | 'openai-compatible'>(
+  const [provider, setProvider] = useState<'joy-hosted' | 'openrouter' | 'openai-compatible'>(
     status?.provider ?? 'openrouter',
   );
   const [baseUrl, setBaseUrl] = useState(
-    status?.provider === 'openai-compatible' ? '' : 'https://openrouter.ai/api/v1',
+    status?.provider === 'openai-compatible'
+      ? ''
+      : status?.provider === 'joy-hosted'
+        ? 'https://joyst.ir/api/v1/agent'
+        : 'https://openrouter.ai/api/v1',
   );
-  const [modelId, setModelId] = useState(status?.modelId || 'openrouter/auto');
+  const [modelId, setModelId] = useState(
+    status?.modelId || (status?.provider === 'joy-hosted' ? 'minimax/minimax-m3' : 'openrouter/auto'),
+  );
   const [customDisclosure, setCustomDisclosure] = useState(false);
   const [working, setWorking] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState(status);
@@ -136,7 +144,7 @@ export function JoyAgentSettingsDialog({
     invalidateMediaProbe();
     onClose();
   };
-  const setProviderKind = (next: 'openrouter' | 'openai-compatible') => {
+  const setProviderKind = (next: 'joy-hosted' | 'openrouter' | 'openai-compatible') => {
     invalidateMediaProbe();
     engineClient.clear();
     setConnectionStatus(undefined);
@@ -145,16 +153,30 @@ export function JoyAgentSettingsDialog({
     if (keyRef.current) keyRef.current.value = '';
     setCustomDisclosure(false);
     setProvider(next);
-    setBaseUrl(next === 'openrouter' ? 'https://openrouter.ai/api/v1' : '');
+    if (next === 'joy-hosted') {
+      const remote = getRemoteApiBaseUrl();
+      setBaseUrl(remote.startsWith('http') ? `${remote}/v1/agent` : 'https://joyst.ir/api/v1/agent');
+      setModelId('minimax/minimax-m3');
+    } else if (next === 'openrouter') {
+      setBaseUrl('https://openrouter.ai/api/v1');
+      setModelId('openrouter/auto');
+    } else {
+      setBaseUrl('');
+      setModelId('');
+    }
     setHasSavedKey(savedProfile !== undefined && savedProfile.provider === next);
   };
   const connect = async () => {
     if (mediaProbeWorking) return;
     const enteredKey = keyRef.current?.value.trim() ?? '';
     let key = enteredKey;
-    if (!key && isDesktopHost() && hasSavedKey && savedProfile) {
+    if (provider === 'joy-hosted') {
+      key = (typeof localStorage !== 'undefined' ? getStoredMediaToken(localStorage) : undefined) || 'anonymous-token';
+    } else if (!key && isDesktopHost() && hasSavedKey && savedProfile) {
       try {
-        const sessionConfig = await beginDesktopProviderSession(savedProfile.id);
+        const sessionConfig = (await beginDesktopProviderSession(savedProfile.id)) as
+          | { apiKey?: string }
+          | undefined;
         if (sessionConfig && typeof sessionConfig.apiKey === 'string') {
           key = sessionConfig.apiKey;
         }
@@ -163,9 +185,12 @@ export function JoyAgentSettingsDialog({
       }
     }
     const normalizedModelId = modelId.trim();
-    const normalizedBaseUrl = baseUrl.trim();
+    const normalizedBaseUrl =
+      provider === 'joy-hosted'
+        ? baseUrl.trim() || 'https://joyst.ir/api/v1/agent'
+        : baseUrl.trim();
     const missing: string[] = [];
-    if (!key) missing.push('an API key');
+    if (!key && provider !== 'joy-hosted') missing.push('an API key');
     if (!normalizedModelId) missing.push('a model ID');
     if (!normalizedBaseUrl) missing.push('a base URL');
     if (provider === 'openai-compatible' && !customDisclosure)
@@ -338,70 +363,98 @@ export function JoyAgentSettingsDialog({
               <div className="agent-settings-section-heading">
                 <div>
                   <span className="agent-settings-kicker">Connection</span>
-                  <h3>Bring your own model</h3>
+                  <h3>{provider === 'joy-hosted' ? 'Built-in Joy Model' : 'Bring your own model'}</h3>
                 </div>
-                <span className="agent-settings-session-chip">Session-only BYOK</span>
+                <span className="agent-settings-session-chip">
+                  {provider === 'joy-hosted' ? 'JOY Pro Gateway' : 'Session-only BYOK'}
+                </span>
               </div>
               <p className="agent-settings-hint">
-                Connect OpenRouter or any approved HTTPS OpenAI-compatible provider. Provider
-                charges and logging policies may apply.
+                {provider === 'joy-hosted'
+                  ? 'Access our curated models with zero setup. Requests are routed through our secure VPS gateway.'
+                  : 'Connect OpenRouter or any approved HTTPS OpenAI-compatible provider. Provider charges apply.'}
               </p>
               <div className="agent-settings-form-grid">
                 <label>
-                  Provider
+                  Mode
                   <select
                     value={provider}
                     onChange={(event) => setProviderKind(event.target.value as typeof provider)}
                     disabled={working || mediaProbeWorking}
                   >
-                    <option value="openrouter">OpenRouter</option>
-                    <option value="openai-compatible">Custom OpenAI-compatible</option>
+                    <option value="joy-hosted">Joy Model (Built-in Pro AI)</option>
+                    <option value="openrouter">OpenRouter (BYOK)</option>
+                    <option value="openai-compatible">Custom OpenAI-compatible (BYOK)</option>
                   </select>
                 </label>
-                <label>
-                  Model ID
-                  <input
-                    value={modelId}
-                    onChange={(event) => setModelId(event.target.value)}
-                    placeholder="provider/model"
-                    disabled={working || mediaProbeWorking}
-                  />
-                </label>
-                <label className="agent-settings-field-wide">
-                  Base URL
-                  <input
-                    type="url"
-                    value={baseUrl}
-                    disabled={provider === 'openrouter' || working || mediaProbeWorking}
-                    onChange={(event) => setBaseUrl(event.target.value)}
-                    placeholder="https://provider.example/v1"
-                  />
-                </label>
-                {provider === 'openai-compatible' && (
-                  <label className="agent-disclosure agent-settings-field-wide">
-                    <input
-                      type="checkbox"
-                      checked={customDisclosure}
-                      onChange={(event) => setCustomDisclosure(event.target.checked)}
+                {provider === 'joy-hosted' ? (
+                  <label>
+                    Model
+                    <select
+                      value={modelId}
+                      onChange={(event) => setModelId(event.target.value)}
                       disabled={working || mediaProbeWorking}
-                    />{' '}
-                    I understand the custom provider receives the context I send
+                    >
+                      <option value="minimax/minimax-m3">Joy Pro (MiniMax M3 — Recommended)</option>
+                      <option value="anthropic/claude-3.5-sonnet">Joy Studio (Claude 3.5 Sonnet)</option>
+                      <option value="openai/gpt-4o-mini">Joy Fast (GPT-4o mini)</option>
+                      <option value="meta-llama/llama-3.3-70b-instruct">Joy Open (Llama 3.3 70B)</option>
+                    </select>
+                  </label>
+                ) : (
+                  <label>
+                    Model ID
+                    <input
+                      value={modelId}
+                      onChange={(event) => setModelId(event.target.value)}
+                      placeholder="provider/model"
+                      disabled={working || mediaProbeWorking}
+                    />
                   </label>
                 )}
-                <label className="agent-settings-field-wide">
-                  API key{hasSavedKey ? ' (Saved in desktop vault)' : ''}
-                  <input
-                    ref={keyRef}
-                    type="password"
-                    autoComplete="off"
-                    placeholder={
-                      hasSavedKey
-                        ? 'Using saved desktop key (enter to replace)'
-                        : 'Entered once for this session'
-                    }
-                    disabled={working || mediaProbeWorking}
-                  />
-                </label>
+                {provider === 'joy-hosted' ? (
+                  <div className="agent-settings-field-wide" style={{ fontSize: '0.85rem', color: '#888' }}>
+                    Included with your active JOY Pro subscription. No external API key required.
+                  </div>
+                ) : (
+                  <>
+                    <label className="agent-settings-field-wide">
+                      Base URL
+                      <input
+                        type="url"
+                        value={baseUrl}
+                        disabled={provider === 'openrouter' || working || mediaProbeWorking}
+                        onChange={(event) => setBaseUrl(event.target.value)}
+                        placeholder="https://provider.example/v1"
+                      />
+                    </label>
+                    {provider === 'openai-compatible' && (
+                      <label className="agent-disclosure agent-settings-field-wide">
+                        <input
+                          type="checkbox"
+                          checked={customDisclosure}
+                          onChange={(event) => setCustomDisclosure(event.target.checked)}
+                          disabled={working || mediaProbeWorking}
+                        />{' '}
+                        I understand the custom provider receives the context I send
+                      </label>
+                    )}
+                    <label className="agent-settings-field-wide">
+                      API key{hasSavedKey ? ' (Saved in desktop vault)' : ''}
+                      <input
+                        ref={keyRef}
+                        type="password"
+                        autoComplete="off"
+                        placeholder={
+                          hasSavedKey
+                            ? 'Using saved desktop key (enter to replace)'
+                            : 'Entered once for this session'
+                        }
+                        disabled={working || mediaProbeWorking}
+                      />
+                    </label>
+                  </>
+                )}
               </div>
               <div className="agent-settings-actions">
                 <button

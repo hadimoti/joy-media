@@ -38,6 +38,14 @@ import {
   ReleaseMetadataService,
 } from './release-metadata-service.js';
 import { readHostedRouteRetirementFlags } from './hosted-route-retirement.js';
+import {
+  JoyModelGateway,
+  readOpenRouterApiKeyFromCredential,
+} from './joy-model-gateway.js';
+import {
+  MemoryAgentUsageLedger,
+  PostgresAgentUsageLedger,
+} from './agent-usage-ledger.js';
 import { readLegacyEditorRetired } from './legacy-editor-retirement.js';
 import {
   AlchemyJsonRpcTransport,
@@ -192,6 +200,18 @@ async function start(): Promise<void> {
           },
         });
 
+  const openRouterApiKey =
+    process.env.JOY_MEDIA_OPENROUTER_API_KEY ??
+    readOpenRouterApiKeyFromCredential((path, encoding) => readFileSync(path, encoding));
+  const agentUsageLedger =
+    pool === undefined ? new MemoryAgentUsageLedger() : new PostgresAgentUsageLedger(pool);
+  const joyModelGateway = new JoyModelGateway({
+    mediaAuth,
+    account,
+    ledger: agentUsageLedger,
+    openRouterApiKey,
+  });
+
   createControlPlaneHttpServer({
     controlPlane,
     // Public /v1 (project/job/asset routes) stays disabled unless durable state
@@ -212,6 +232,7 @@ async function start(): Promise<void> {
     entitlementPublicKeyPem: entitlementSigner.publicKeyPem,
     hostedRouteRetirement,
     usdcCheckout,
+    joyModelGateway,
     clientAddressResolver,
     audioDenoise: new SpectralDenoiseService(audioDenoiseLedger),
     readiness: productionReadinessOptions({

@@ -64,3 +64,8 @@ function validate(descriptor: OriginalAssetDescriptor, file: Blob): void {
 function hex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
+
+export async function sha256Hex(blob: Blob): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+  return hex(new Uint8Array(digest));
+}

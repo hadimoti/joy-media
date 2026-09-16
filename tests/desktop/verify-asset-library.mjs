@@ -1,4 +1,4 @@
-/* global window, document, fetch */
+/* global document, fetch */
 import { _electron as electron } from '@playwright/test';
 import { resolve, join } from 'node:path';
 import { mkdirSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
@@ -155,7 +155,7 @@ try {
     await new Promise((r) => setTimeout(r, 2000));
   } else {
     // Try clicking the card's add button directly by class or selector
-    const plusIconBtn = window.locator('button:has(svg)').filter({ hasText: '' }).first();
+    const _plusIconBtn = window.locator('button:has(svg)').filter({ hasText: '' }).first();
     console.log('Attempted alternate add button search.');
   }
 
@@ -225,5 +225,7 @@ try {
   }
   try {
     rmSync(tempUserData, { recursive: true, force: true });
-  } catch {}
+  } catch {
+    /* ignore temp dir cleanup failure */
+  }
 }

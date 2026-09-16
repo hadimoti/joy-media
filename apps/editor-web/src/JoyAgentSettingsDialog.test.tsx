@@ -352,5 +352,33 @@ describe('JOY Agent Settings desktop profile persistence', () => {
       apiKey: 'sk-or-saved-vault-key',
     });
   });
+
+  it('connects to Joy Pro gateway without requiring API key input', async () => {
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+
+    const select = rendered.querySelector<HTMLSelectElement>('select');
+    if (select === null) throw new Error('Expected provider select dropdown');
+    await act(async () => {
+      select.value = 'joy-hosted';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    expect(rendered.textContent).toContain('Joy Model (Built-in Pro AI)');
+    expect(rendered.textContent).toContain('Included with your active JOY Pro subscription');
+    expect(rendered.querySelector('input[type="password"]')).toBeNull();
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    expect(engineClient.configure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'joy-hosted',
+        modelId: 'minimax/minimax-m3',
+      }),
+    );
+  });
 });
 

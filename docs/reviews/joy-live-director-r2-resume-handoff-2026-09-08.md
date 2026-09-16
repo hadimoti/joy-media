@@ -275,7 +275,7 @@ tip):
   (11.15.0). Build = root `CI=true pnpm build`. DB dump =
   `sudo -u postgres pg_dump --format=custom joymedia` (app role lacks LOCK).
   Origin check: `curl -k --noproxy '*' --resolve joyst.ir:443:127.0.0.1 https://joyst.ir/...`.
-- The owner runs each VPS block in their `root@82.115.8.224` session and pastes
+- The owner runs each VPS block in their `root@<JOY_VPS_IP>` session and pastes
   output back; you verify every value against the candidate triple and call
   go/no-go at each checkpoint. Nothing is irreversible before C5 (the symlink
   switch). Rollback = `deploy/joy-media-rollback.sh --apply <good-api> <good-web>`

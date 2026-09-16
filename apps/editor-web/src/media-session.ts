@@ -47,6 +47,8 @@ export function clearStoredMediaToken(storage: MediaSessionStorage): void {
   notifyMediaSessionChanged();
 }
 
+import { getRemoteApiBaseUrl } from './desktop-client.js';
+
 export type MediaAuthMethod = 'gmail' | 'telegram';
 
 async function requestJson(
@@ -55,7 +57,8 @@ async function requestJson(
   body: unknown,
   token?: string,
 ): Promise<unknown> {
-  const response = await fetchFn(`/api${path}`, {
+  const base = getRemoteApiBaseUrl();
+  const response = await fetchFn(`${base}${path}`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',

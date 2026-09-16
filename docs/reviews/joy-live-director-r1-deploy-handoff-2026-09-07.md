@@ -147,8 +147,8 @@ joy-media@api` + `nginx` reload + 45 s health poll; self-restores on error).
 
 ### VPS facts you will need
 
-- SSH: `ssh sweden` (alias in `~/.ssh/config` → `82.115.8.224`, user `root`,
-  key `~/.ssh/Joy-Vps-New.pem`). Fallback: `ssh -i ~/.ssh/Joy-Vps-New.pem root@82.115.8.224`.
+- SSH: `ssh sweden` (alias in `~/.ssh/config` → `<JOY_VPS_IP>`, user `root`,
+  key `~/.ssh/Joy-Vps-New.pem`). Fallback: `ssh -i ~/.ssh/Joy-Vps-New.pem root@<JOY_VPS_IP>`.
 - **`pnpm` is NOT on `PATH` in a fresh non-interactive SSH** — shim at
   **`/usr/local/bin/pnpm`**. `node` is on PATH. `corepack` may be absent.
 - Build env: `CI=true npm_config_confirm_modules_purge=false pnpm install --frozen-lockfile`.
@@ -313,7 +313,7 @@ In `C:\Users\HadiMoti\joy-media\.claude\settings.local.json` (or via
 
 ```
 "Bash(ssh sweden:*)",
-"Bash(ssh -i ~/.ssh/Joy-Vps-New.pem root@82.115.8.224:*)",
+"Bash(ssh -i ~/.ssh/Joy-Vps-New.pem root@<JOY_VPS_IP>:*)",
 "mcp__gbrain__search", "mcp__gbrain__get_page", "mcp__gbrain__put_page",
 "mcp__gbrain__add_link", "mcp__gbrain__add_timeline_entry"
 ```

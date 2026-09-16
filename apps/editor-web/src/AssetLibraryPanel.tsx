@@ -33,14 +33,13 @@ import {
 import { openOpfsDerivativeCache } from './opfs-asset-cache.js';
 import {
   openOpfsOriginalAssetCache,
+  sha256Hex,
   type OpfsOriginalAssetCache,
 } from './opfs-original-asset-cache.js';
-import { CloudPreviewQueue } from './cloud-preview-queue.js';
 import { verifyOriginalRecoveryCandidate } from './asset-original-recovery.js';
 import { resolveAssetThumb, type AssetThumbSource } from './asset-card-preview.js';
 import {
   CloseIcon,
-  CloudIcon,
   PlusIcon,
   RefreshIcon,
   AiEffectIcon,
@@ -178,7 +177,6 @@ export function AssetLibraryPanel({
     [client],
   );
   const originalAssetCache = useMemo(() => openOpfsOriginalAssetCache(), []);
-  const cloudPreviewQueue = useMemo(() => new CloudPreviewQueue(), []);
   const previewRef = useRef<Preview | undefined>(undefined);
   const timelineAddRef = useRef<Set<string>>(new Set());
   const refreshSeqRef = useRef(0);
@@ -508,22 +506,16 @@ export function AssetLibraryPanel({
         throw new Error('The catalog asset is no longer listed.');
       if (isDesktopHost()) {
         const relativePath =
-          (asset as any).relativePath ||
+          asset.relativePath ||
           (asset.kind === 'audio' ? `audio/${asset.id}` : `images/${asset.id}`);
         const url = resolveDesktopAssetUrl(relativePath);
         const res = await fetch(url);
         if (!res.ok) throw new Error(`Failed to load local asset: ${res.statusText}`);
         return await res.blob();
       }
-      if (!asset.cloudBacked)
-        throw new Error('This asset has no cloud original yet.');
-      // My Media entries can belong to any project under this owner. They must
-      // use their owning project endpoint; the shared-library endpoint is only
-      // for a curated cloud entry and otherwise replies with a noisy 409.
-      if (!cloudAssetIds.has(id)) return client.originalBytes(asset.projectId || projectId, id);
-      return cloudPreviewQueue.load(id, () => client.sharedCloudOriginalBytes(id));
+      return client.originalBytes(asset.projectId || projectId, id);
     },
-    [client, cloudAssetIds, cloudPreviewQueue, items, projectId],
+    [client, items, projectId],
   );
   const addAssetToTimeline = useCallback(
     async (asset: {
@@ -553,13 +545,26 @@ export function AssetLibraryPanel({
               if (isDesktopHost()) {
                 const catalogAsset = items.find((candidate) => candidate.asset.id === asset.assetId)?.asset;
                 const relativePath =
-                  (catalogAsset as any)?.relativePath ||
+                  catalogAsset?.relativePath ||
                   (asset.kind === 'audio' ? `audio/${asset.assetId}` : `images/${asset.assetId}`);
                 try {
                   const res = await fetch(resolveDesktopAssetUrl(relativePath));
                   if (res.ok) {
                     blob = await res.blob();
-                    await cache.put(asset.assetId, blob);
+                    const sha256 = catalogAsset?.sha256 || (await sha256Hex(blob));
+                    await cache.put(
+                      {
+                        assetId: asset.assetId,
+                        sha256,
+                        bytes: blob.size,
+                        mimeType:
+                          catalogAsset?.descriptor.mimeType ||
+                          descriptor.mimeType ||
+                          blob.type ||
+                          'application/octet-stream',
+                      },
+                      blob,
+                    );
                   }
                 } catch {
                   // ignore
@@ -586,16 +591,29 @@ export function AssetLibraryPanel({
         if (isDesktopHost()) {
           try {
             const cache = await originalAssetCache;
-            let blob = await cache.get(asset.assetId);
-            if (blob === undefined) {
+            const existing = await cache.get(asset.assetId);
+            if (existing === undefined) {
               const catalogAsset = items.find((candidate) => candidate.asset.id === asset.assetId)?.asset;
               const relativePath =
-                (catalogAsset as any)?.relativePath ||
+                catalogAsset?.relativePath ||
                 (asset.kind === 'audio' ? `audio/${asset.assetId}` : `images/${asset.assetId}`);
               const res = await fetch(resolveDesktopAssetUrl(relativePath));
               if (res.ok) {
-                blob = await res.blob();
-                await cache.put(asset.assetId, blob);
+                const fetchedBlob = await res.blob();
+                const sha256 = catalogAsset?.sha256 || (await sha256Hex(fetchedBlob));
+                await cache.put(
+                  {
+                    assetId: asset.assetId,
+                    sha256,
+                    bytes: fetchedBlob.size,
+                    mimeType:
+                      catalogAsset?.descriptor.mimeType ||
+                      descriptor.mimeType ||
+                      fetchedBlob.type ||
+                      'application/octet-stream',
+                  },
+                  fetchedBlob,
+                );
               }
             }
           } catch {
@@ -696,31 +714,6 @@ export function AssetLibraryPanel({
     });
   }, []);
 
-  const shareToCloud = useCallback(
-    async (asset: BrowserAsset) => {
-      if (asset.cloudBacked) {
-        setStatus(`${asset.displayName} is already backed up to private cloud storage.`);
-        return;
-      }
-      try {
-        const blob = await (await originalAssetCache).get(asset.id);
-        if (blob === undefined) {
-          setStatus(
-            'The OPFS original is missing in this browser. Re-import the media here first.',
-          );
-          return;
-        }
-        setStatus(`Uploading ${asset.displayName} to private cloud storage…`);
-        await client.uploadAssetOriginal(asset.projectId || projectId, asset, blob);
-        await refresh();
-        setStatus(`${asset.displayName} backed up to private cloud storage.`);
-      } catch (error) {
-        setStatus(`Cloud backup failed: ${message(error)}`);
-      }
-    },
-    [client, originalAssetCache, projectId, refresh],
-  );
-
   const recoverOriginal = useCallback(
     async (asset: BrowserAsset, file: File) => {
       if (asset.cloudBacked || asset.kind !== 'video' || !ownedAssetIds.has(asset.id)) return;
@@ -762,29 +755,6 @@ export function AssetLibraryPanel({
     },
     [client, projectId, refresh],
   );
-
-  const bulkShare = useCallback(async () => {
-    const targets = visible.filter(
-      ({ asset }) => selectedAssetIds.has(asset.id) && !asset.cloudBacked,
-    );
-    if (targets.length === 0) {
-      setStatus('No selected media needs backup; an OPFS original is required.');
-      return;
-    }
-    let shared = 0;
-    for (const { asset } of targets) {
-      try {
-        const blob = await (await originalAssetCache).get(asset.id);
-        if (blob === undefined) continue;
-        await client.uploadAssetOriginal(asset.projectId || projectId, asset, blob);
-        shared += 1;
-      } catch {
-        /* continue remaining */
-      }
-    }
-    await refresh();
-    setStatus(`Backed up ${shared} of ${targets.length} selected media item(s) to the cloud.`);
-  }, [client, originalAssetCache, projectId, refresh, selectedAssetIds, visible]);
 
   const bulkEditWithAi = useCallback(() => {
     if (onEditWithAi === undefined) {
@@ -1326,16 +1296,6 @@ export function AssetLibraryPanel({
               <button
                 type="button"
                 className="icon-button"
-                aria-label="Share selected media to cloud"
-                title="Share to cloud"
-                data-guide="Share to cloud"
-                onClick={() => void bulkShare()}
-              >
-                <CloudIcon />
-              </button>
-              <button
-                type="button"
-                className="icon-button"
                 aria-label="Edit selected with AI"
                 title="Edit with AI"
                 data-guide="Edit with AI"
@@ -1525,13 +1485,6 @@ export function AssetLibraryPanel({
                             <AiEffectIcon />
                           </button>
                         )}
-                        {!cloudBacked && (
-                          <AssetShareCloudButton
-                            asset={asset}
-                            originalCachePromise={originalAssetCache}
-                            onShare={() => void shareToCloud(asset)}
-                          />
-                        )}
                         {onAddToTimeline !== undefined && (
                           <button
                             type="button"
@@ -1617,42 +1570,6 @@ function availabilityLabel(status: AssetAvailability): string {
     default:
       return 'Unknown status';
   }
-}
-
-function AssetShareCloudButton({
-  asset,
-  originalCachePromise,
-  onShare,
-}: {
-  readonly asset: BrowserAsset;
-  readonly originalCachePromise: Promise<OpfsOriginalAssetCache>;
-  readonly onShare: () => void;
-}) {
-  const [hasLocal, setHasLocal] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    void originalCachePromise.then((cache) =>
-      cache.get(asset.id).then((blob) => {
-        if (!cancelled) setHasLocal(blob !== undefined);
-      }),
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [asset.id, originalCachePromise]);
-  if (!hasLocal) return null;
-  return (
-    <button
-      type="button"
-      className="icon-button"
-      aria-label={`Share ${asset.displayName} to cloud`}
-      title="Share to cloud"
-      data-guide="Share to cloud"
-      onClick={onShare}
-    >
-      <CloudIcon />
-    </button>
-  );
 }
 
 function AssetLocateOriginalButton({

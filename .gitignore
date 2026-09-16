@@ -29,3 +29,11 @@ apps/desktop/renderer/
 # Task scheduler scratch
 .task/
 
+# SQLite databases & temp journals
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+

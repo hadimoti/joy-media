@@ -86,10 +86,23 @@ export type DesktopUpdateDecision =
       readonly autoDownload: boolean;
     };
 
+export const DEFAULT_JOY_REMOTE_API_BASE = 'https://joyst.ir/api';
+
 /** True only inside the Electron desktop shell. Safe to call from any environment, including
  * server-side rendering, where `window` itself may not exist. */
 export function isDesktopHost(): boolean {
   return typeof window !== 'undefined' && window.joyDesktop !== undefined;
+}
+
+/** Resolves the base URL for VPS backend requests. Inside desktop host, targets https://joyst.ir/api. */
+export function getRemoteApiBaseUrl(): string {
+  if (typeof window !== 'undefined' && (window as unknown as Record<string, unknown>).__JOY_MEDIA_API_BASE__) {
+    return (window as unknown as Record<string, unknown>).__JOY_MEDIA_API_BASE__ as string;
+  }
+  if (isDesktopHost()) {
+    return DEFAULT_JOY_REMOTE_API_BASE;
+  }
+  return '/api';
 }
 
 function requireBridge(): DesktopJoyBridge {
@@ -173,7 +186,7 @@ export async function deleteDesktopProviderProfile(id: string): Promise<void> {
 /**
  * Hands back the decrypted provider session configuration for a single session.
  */
-export async function beginDesktopProviderSession(id: string): Promise<any> {
+export async function beginDesktopProviderSession(id: string): Promise<unknown> {
   const data = await requireBridge().invoke('desktop.provider-profile.begin-session', { id });
   return data;
 }
@@ -181,7 +194,7 @@ export async function beginDesktopProviderSession(id: string): Promise<any> {
 /**
  * Probes the provider profile connectivity in the desktop host without exposing the key.
  */
-export async function testDesktopProviderProfile(id: string): Promise<any> {
+export async function testDesktopProviderProfile(id: string): Promise<unknown> {
   const data = await requireBridge().invoke('desktop.provider-profile.test', { id });
   return data;
 }
@@ -237,7 +250,7 @@ export interface DesktopAssetCatalog {
     readonly audio: number;
     readonly image: number;
   };
-  readonly assets: readonly any[];
+  readonly assets: readonly unknown[];
 }
 
 /**

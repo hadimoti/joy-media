@@ -63,8 +63,9 @@ if (existsSync(defaultAppAsar)) {
   await rm(defaultAppAsar, { force: true });
 }
 
-// Copy unpacked app into resources/app
+// Clean and copy unpacked app into resources/app
 const appResourcesDir = resolve(standaloneDir, 'resources', 'app');
+await rm(appResourcesDir, { recursive: true, force: true });
 await mkdir(appResourcesDir, { recursive: true });
 await cp(unpackedDir, appResourcesDir, { recursive: true });
 

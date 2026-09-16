@@ -1,5 +1,6 @@
 import { DerivativeAuthorityRevokedError } from './asset-resolver.js';
 import { getStoredMediaToken } from './media-session.js';
+import { getRemoteApiBaseUrl } from './desktop-client.js';
 import type { GpuPreviewFrameRequest } from '@joy-media/job-protocol';
 import type {
   JoyProjectV1,
@@ -65,6 +66,7 @@ export interface BrowserAsset {
   readonly sortName?: string;
   readonly createdAt: number;
   readonly cloudBacked: boolean;
+  readonly relativePath?: string;
 }
 
 export const STOCK_VIDEO_CATEGORIES = [
@@ -296,7 +298,7 @@ export class BrowserControlPlaneClient {
    * client must not turn one refresh tick into duplicate API requests.
    */
   constructor(
-    private readonly apiUrl = '/api',
+    private readonly apiUrl = getRemoteApiBaseUrl(),
     private readonly tokenProvider: () => string | undefined = () =>
       getStoredMediaToken(window.localStorage),
   ) {}

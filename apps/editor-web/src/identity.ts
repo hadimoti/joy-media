@@ -14,7 +14,7 @@ import {
   getStoredMediaToken,
   type MediaSessionStorage,
 } from './media-session.js';
-import { isDesktopHost } from './desktop-client.js';
+import { isDesktopHost, getRemoteApiBaseUrl } from './desktop-client.js';
 
 export type JoySessionState =
   | { readonly kind: 'unknown' }
@@ -53,8 +53,9 @@ export async function probeJoySession(
     }
     return { kind: 'signed-out' };
   }
+  const base = getRemoteApiBaseUrl();
   try {
-    const response = await fetchFn('/api/v1/auth/session', {
+    const response = await fetchFn(`${base}/v1/auth/session`, {
       headers: { authorization: `Bearer ${token}` },
     });
     if (response.status === 401) {
@@ -90,7 +91,7 @@ export async function probeJoySession(
     let avatarObjectUrl: string | undefined;
     if (avatarAvailable) {
       try {
-        const avatarResponse = await fetchFn('/api/v1/auth/avatar', {
+        const avatarResponse = await fetchFn(`${base}/v1/auth/avatar`, {
           headers: { authorization: `Bearer ${token}` },
         });
         if (avatarResponse.ok) {
@@ -127,7 +128,8 @@ export async function logoutJoySession(
   clearStoredMediaToken(storage);
   if (token === undefined) return;
   try {
-    await fetchFn('/api/v1/auth/logout', {
+    const base = getRemoteApiBaseUrl();
+    await fetchFn(`${base}/v1/auth/logout`, {
       method: 'POST',
       headers: { authorization: `Bearer ${token}` },
     });

@@ -541,7 +541,7 @@ if (node.effects && node.effects.length > 0) {
 ### 8.1 VPS Environment (Sweden)
 
 ```bash
-# Server: 46.249.103.142 (joyteam.ir)
+# Server: <CONTROL_PLANE_IP> (joyteam.ir)
 # App: media.joyteam.ir → Cloudflare → nginx :80/443 → localhost:8790
 # Service: systemd joy-media@api
 # Repo: /opt/joy-media (cloned from GitHub)

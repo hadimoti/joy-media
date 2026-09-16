@@ -185,8 +185,8 @@ Next open milestone: **R2 "Living Looks"** (subplan
 
 JOY Media runs on the same Sweden VPS as the sibling `joy-vps` repo — one box, two apps.
 
-- **Host: `82.115.8.224`, user `root`, key `C:\Users\HadiMoti\.ssh\Joy-Vps-New.pem`.** SSH alias `sweden`/`sweden-vps` is configured in `~/.ssh/config` (`ssh sweden` works directly). Without the alias: `ssh -i ~/.ssh/Joy-Vps-New.pem root@82.115.8.224`.
-- The box was compromised and rebuilt from scratch on 2026-07-26 — any reference to the old host `46.249.103.142` or old key `joy-vps.pem` anywhere is dead; don't use them.
+- **Host: `<JOY_VPS_IP>`, user `root`, key `C:\Users\HadiMoti\.ssh\Joy-Vps-New.pem`.** SSH alias `sweden`/`sweden-vps` is configured in `~/.ssh/config` (`ssh sweden` works directly). Without the alias: `ssh -i ~/.ssh/Joy-Vps-New.pem root@<JOY_VPS_IP>`.
+- The box was compromised and rebuilt from scratch on 2026-07-26 — any reference to the old host `<CONTROL_PLANE_IP>` or old key `joy-vps.pem` anywhere is dead; don't use them.
 - **Public domain: `joyst.ir`** (canonical since 2026-07-30, Cloudflare-proxied, SSL/TLS mode Full, self-signed origin cert at `/etc/ssl/joyst/`). `media.joyteam.ir` still exists purely as a 301 redirect to `joyst.ir` (so joy-vps's super-app launcher link never had to change) — don't expect it to serve the app directly.
 - App layout on the VPS: `/opt/joy-media/repo` (git checkout, remotes `origin` → GitHub and `vps-local` → `/opt/joy-media.git`), `/opt/joy-media/releases/<rev>[-slug]` (immutable API releases, `current-api` symlink), `/opt/joy-media/releases/editor-web-<timestamp>-<rev>` (immutable static editor builds, `web` symlink), secrets in `/etc/joy-media/api.env` (mode 0600, never committed — see `deploy/README.md` for the env vars it holds).
 - `pnpm` isn't on `PATH` by default in a fresh non-interactive SSH session on this box (no `corepack` binary either) — a shim was installed at `/usr/local/bin/pnpm` on 2026-07-30 pointing at the cached corepack pnpm binary matching this repo's `packageManager` version; if it's ever missing again, check `~/.cache/node/corepack/v1/pnpm/*/bin/pnpm.cjs`.

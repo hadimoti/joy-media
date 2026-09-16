@@ -288,6 +288,28 @@ const USDC_INVOICES_MIGRATION: PostgresMigration = {
   },
 };
 
+const AGENT_USAGE_LEDGER_MIGRATION: PostgresMigration = {
+  id: '009-agent-usage-ledger',
+  checksum: 'sha256:agent-usage-ledger-2026-09-17',
+  up: async (database) => {
+    await database.query(`
+      CREATE TABLE IF NOT EXISTS agent_usage (
+        id text PRIMARY KEY,
+        owner_id text NOT NULL,
+        model_id text NOT NULL,
+        prompt_tokens integer NOT NULL,
+        completion_tokens integer NOT NULL,
+        upstream_cost_micros bigint NOT NULL,
+        billed_cost_micros bigint NOT NULL,
+        commission_rate_bps integer NOT NULL,
+        created_at timestamptz NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS agent_usage_owner_period
+        ON agent_usage (owner_id, created_at DESC);
+    `);
+  },
+};
+
 export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
   BASELINE_MIGRATION,
   ASSET_REVOCATION_PRIMARY_KEY_MIGRATION,
@@ -297,6 +319,7 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
   LOOK_INSTANCES_MIGRATION,
   ACCOUNT_DEVICES_SUBSCRIPTIONS_ENTITLEMENTS_MIGRATION,
   USDC_INVOICES_MIGRATION,
+  AGENT_USAGE_LEDGER_MIGRATION,
 ];
 
 export async function runPostgresMigrations(database: MigrationDatabase): Promise<void> {

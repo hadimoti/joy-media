@@ -1,7 +1,9 @@
 import type { JoyAgentCapability } from './contracts.js';
 
+export type JoyProviderMode = 'joy-hosted' | 'openrouter' | 'openai-compatible';
+
 export interface ByokSessionConfig {
-  readonly provider: 'openrouter' | 'openai-compatible';
+  readonly provider: JoyProviderMode;
   readonly baseUrl: string;
   readonly modelId: string;
   readonly apiKey: string;
@@ -23,6 +25,7 @@ export class ProviderConfigError extends Error {
 }
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+export const DEFAULT_JOY_HOSTED_BASE_URL = 'https://joyst.ir/api/v1/agent';
 const MAX_MODEL_ID_LENGTH = 256;
 const MAX_API_KEY_LENGTH = 512;
 
@@ -33,13 +36,21 @@ export function normalizeByokSessionConfig(
   const modelId = typeof input.modelId === 'string' ? input.modelId.trim() : '';
   const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
   if (
-    (provider !== 'openrouter' && provider !== 'openai-compatible') ||
+    (provider !== 'joy-hosted' && provider !== 'openrouter' && provider !== 'openai-compatible') ||
     modelId.length === 0 ||
     modelId.length > MAX_MODEL_ID_LENGTH ||
     apiKey.length === 0 ||
     apiKey.length > MAX_API_KEY_LENGTH
   ) {
     throw new ProviderConfigError();
+  }
+
+  if (provider === 'joy-hosted') {
+    const baseUrl =
+      input.baseUrl === undefined || input.baseUrl.trim().length === 0
+        ? DEFAULT_JOY_HOSTED_BASE_URL
+        : normalizeCustomBaseUrl(input.baseUrl);
+    return Object.freeze({ provider, baseUrl, modelId, apiKey });
   }
 
   if (provider === 'openrouter') {
