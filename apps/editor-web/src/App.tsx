@@ -1095,7 +1095,14 @@ function EditorWorkspace({
   const [isMaximized, setIsMaximized] = useState(false);
   useEffect(() => {
     if (!isDesktopHost()) return;
-    void isDesktopWindowMaximized().then(setIsMaximized);
+    const updateMaximized = () => {
+      void isDesktopWindowMaximized().then(setIsMaximized).catch(() => {});
+    };
+    updateMaximized();
+    window.addEventListener('resize', updateMaximized);
+    return () => {
+      window.removeEventListener('resize', updateMaximized);
+    };
   }, []);
   const [agentPanelCommand, setAgentPanelCommand] = useState<AgentPanelCommand>();
   const [agentConnectionStatus, setAgentConnectionStatus] = useState<ByokSessionStatus | undefined>(
@@ -7254,7 +7261,11 @@ function EditorWorkspace({
                 <button
                   type="button"
                   className="window-control-btn window-control-minimize"
-                  onClick={() => void minimizeDesktopWindow()}
+                  onClick={() => {
+                    minimizeDesktopWindow().catch((err) =>
+                      console.error('Failed to minimize window:', err),
+                    );
+                  }}
                   title="Minimize"
                   aria-label="Minimize window"
                 >
@@ -7265,9 +7276,12 @@ function EditorWorkspace({
                 <button
                   type="button"
                   className="window-control-btn window-control-maximize"
-                  onClick={async () => {
-                    const isMax = await toggleMaximizeDesktopWindow();
-                    setIsMaximized(isMax);
+                  onClick={() => {
+                    toggleMaximizeDesktopWindow()
+                      .then((isMax) => setIsMaximized(isMax))
+                      .catch((err) =>
+                        console.error('Failed to toggle maximize window:', err),
+                      );
                   }}
                   title={isMaximized ? 'Restore' : 'Maximize'}
                   aria-label={isMaximized ? 'Restore window' : 'Maximize window'}
@@ -7286,7 +7300,11 @@ function EditorWorkspace({
                 <button
                   type="button"
                   className="window-control-btn window-control-close"
-                  onClick={() => void closeDesktopWindow()}
+                  onClick={() => {
+                    closeDesktopWindow().catch((err) =>
+                      console.error('Failed to close window:', err),
+                    );
+                  }}
                   title="Close"
                   aria-label="Close window"
                 >

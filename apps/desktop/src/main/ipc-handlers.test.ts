@@ -457,4 +457,42 @@ describe('IPC dispatch', () => {
     expect(result.ok).toBe(false);
     expect(d.checkForUpdate).not.toHaveBeenCalled();
   });
+
+  it('handles desktop window control actions', async () => {
+    const handleWindowControl = vi.fn(async (action: string) => {
+      if (action === 'maximize') return true;
+      if (action === 'is-maximized') return false;
+      return undefined;
+    });
+    const d = { ...deps(), handleWindowControl };
+    const handlers = createIpcHandlers(d);
+
+    const minRes = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.window-minimize',
+    });
+    expect(minRes).toEqual({ ok: true, data: undefined });
+    expect(handleWindowControl).toHaveBeenCalledWith('minimize');
+
+    const maxRes = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.window-maximize',
+    });
+    expect(maxRes).toEqual({ ok: true, data: true });
+    expect(handleWindowControl).toHaveBeenCalledWith('maximize');
+
+    const closeRes = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.window-close',
+    });
+    expect(closeRes).toEqual({ ok: true, data: undefined });
+    expect(handleWindowControl).toHaveBeenCalledWith('close');
+
+    const isMaxRes = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.window-is-maximized',
+    });
+    expect(isMaxRes).toEqual({ ok: true, data: false });
+    expect(handleWindowControl).toHaveBeenCalledWith('is-maximized');
+  });
 });

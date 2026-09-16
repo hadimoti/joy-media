@@ -54,6 +54,7 @@ protocol.registerSchemesAsPrivileged([
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
+  let mainWindow: BrowserWindow | undefined;
   const paths = resolveDesktopPaths(app.getPath('userData'));
   mkdirSync(paths.mediaRoot, { recursive: true });
   const localDatabase = new LocalDatabase({ filePath: paths.databaseFile });
@@ -101,7 +102,7 @@ if (!app.requestSingleInstanceLock()) {
       });
     },
     handleWindowControl: (action) => {
-      const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+      const win = BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
       if (!win) return false;
       switch (action) {
         case 'minimize':
@@ -169,6 +170,7 @@ if (!app.requestSingleInstanceLock()) {
       titleBarStyle: 'hidden',
       webPreferences: buildSecureWebPreferences(join(__dirname, '..', 'preload', 'preload.cjs')),
     });
+    mainWindow = win;
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     void win.loadURL(resolveRendererTarget(isDev));
 

@@ -20,6 +20,10 @@ const IPC_CHANNELS = Object.freeze([
   'desktop.provider-profile.begin-session',
   'desktop.provider-profile.test',
   'desktop.check-for-update',
+  'desktop.window-minimize',
+  'desktop.window-maximize',
+  'desktop.window-close',
+  'desktop.window-is-maximized',
 ]);
 
 module.exports = { IPC_CHANNELS };

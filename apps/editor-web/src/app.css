@@ -714,6 +714,10 @@ main {
 .app-header .window-controls {
   -webkit-app-region: no-drag;
 }
+.window-controls,
+.window-controls * {
+  -webkit-app-region: no-drag;
+}
 .window-controls {
   display: inline-flex;
   align-items: stretch;
