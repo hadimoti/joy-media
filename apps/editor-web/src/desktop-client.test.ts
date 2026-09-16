@@ -5,7 +5,14 @@ import {
   getDesktopWorkerStatus,
   isDesktopHost,
   selectDesktopFile,
+  saveDesktopProviderProfile,
+  listDesktopProviderProfiles,
+  deleteDesktopProviderProfile,
+  beginDesktopProviderSession,
+  testDesktopProviderProfile,
   type DesktopUpdateCheckRequest,
+  type SaveDesktopProviderProfileRequest,
+  type DesktopProviderProfile,
 } from './desktop-client.js';
 
 afterEach(() => {
@@ -95,3 +102,120 @@ describe('checkForDesktopUpdate', () => {
     expect(invoke).toHaveBeenCalledWith('desktop.check-for-update', request);
   });
 });
+
+describe('saveDesktopProviderProfile', () => {
+  const request: SaveDesktopProviderProfileRequest = {
+    provider: 'openrouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    modelId: 'anthropic/claude-3.5-sonnet',
+    apiKey: 'sk-or-test-key-12345',
+  };
+
+  it('rejects outside the desktop host', async () => {
+    await expect(saveDesktopProviderProfile(request)).rejects.toThrow(
+      'unavailable outside the desktop host',
+    );
+  });
+
+  it('invokes desktop.provider-profile.save and returns the saved profile', async () => {
+    const profile: DesktopProviderProfile = {
+      id: 'prof-1',
+      provider: request.provider,
+      baseUrl: request.baseUrl,
+      modelId: request.modelId,
+      createdAt: '2026-09-15T00:00:00.000Z',
+      updatedAt: '2026-09-15T00:00:00.000Z',
+    };
+    const invoke = vi.fn().mockResolvedValue(profile);
+    window.joyDesktop = { channels: ['desktop.provider-profile.save'], invoke };
+
+    await expect(saveDesktopProviderProfile(request)).resolves.toEqual(profile);
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.save', request);
+  });
+});
+
+describe('listDesktopProviderProfiles', () => {
+  it('rejects outside the desktop host', async () => {
+    await expect(listDesktopProviderProfiles()).rejects.toThrow(
+      'unavailable outside the desktop host',
+    );
+  });
+
+  it('invokes desktop.provider-profile.list and returns the profiles list', async () => {
+    const profiles: readonly DesktopProviderProfile[] = [
+      {
+        id: 'prof-1',
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'anthropic/claude-3.5-sonnet',
+        createdAt: '2026-09-15T00:00:00.000Z',
+        updatedAt: '2026-09-15T00:00:00.000Z',
+      },
+    ];
+    const invoke = vi.fn().mockResolvedValue(profiles);
+    window.joyDesktop = { channels: ['desktop.provider-profile.list'], invoke };
+
+    await expect(listDesktopProviderProfiles()).resolves.toEqual(profiles);
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.list');
+  });
+});
+
+describe('deleteDesktopProviderProfile', () => {
+  it('rejects outside the desktop host', async () => {
+    await expect(deleteDesktopProviderProfile('prof-1')).rejects.toThrow(
+      'unavailable outside the desktop host',
+    );
+  });
+
+  it('invokes desktop.provider-profile.delete with the profile id', async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    window.joyDesktop = { channels: ['desktop.provider-profile.delete'], invoke };
+
+    await expect(deleteDesktopProviderProfile('prof-1')).resolves.toBeUndefined();
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.delete', { id: 'prof-1' });
+  });
+});
+
+describe('beginDesktopProviderSession', () => {
+  it('rejects outside the desktop host', async () => {
+    await expect(beginDesktopProviderSession('prof-1')).rejects.toThrow(
+      'unavailable outside the desktop host',
+    );
+  });
+
+  it('invokes desktop.provider-profile.begin-session with the profile id and returns session config', async () => {
+    const sessionData = {
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      modelId: 'anthropic/claude-3.5-sonnet',
+      apiKey: 'sk-or-session-key',
+    };
+    const invoke = vi.fn().mockResolvedValue(sessionData);
+    window.joyDesktop = { channels: ['desktop.provider-profile.begin-session'], invoke };
+
+    await expect(beginDesktopProviderSession('prof-1')).resolves.toEqual(sessionData);
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.begin-session', { id: 'prof-1' });
+  });
+});
+
+describe('testDesktopProviderProfile', () => {
+  it('rejects outside the desktop host', async () => {
+    await expect(testDesktopProviderProfile('prof-1')).rejects.toThrow(
+      'unavailable outside the desktop host',
+    );
+  });
+
+  it('invokes desktop.provider-profile.test with the profile id and returns the probe report', async () => {
+    const probeReport = {
+      modelId: 'anthropic/claude-3.5-sonnet',
+      capability: 'tool-loop',
+      status: 'ok',
+    };
+    const invoke = vi.fn().mockResolvedValue(probeReport);
+    window.joyDesktop = { channels: ['desktop.provider-profile.test'], invoke };
+
+    await expect(testDesktopProviderProfile('prof-1')).resolves.toEqual(probeReport);
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.test', { id: 'prof-1' });
+  });
+});
+

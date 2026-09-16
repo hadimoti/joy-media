@@ -35,4 +35,11 @@ describe('Joy Code capability panel contract', () => {
     expect(switchToEdit).toBeGreaterThan(availabilityCheck);
     expect(switchToEdit).toBeLessThan(launch);
   });
+
+  it('declares onOpenSettings prop and renders Configure OpenRouter / Joy Agent trigger', () => {
+    expect(panelSource).toContain('readonly onOpenSettings?: () => void;');
+    expect(panelSource).toContain('Configure OpenRouter / Joy Agent');
+    expect(panelSource).toContain('isDisconnected && onOpenSettings !== undefined');
+  });
 });
+

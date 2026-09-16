@@ -127,3 +127,62 @@ export async function selectDesktopFile(): Promise<DesktopFileSelection | undefi
   const data = await requireBridge().invoke('desktop.select-file');
   return data as DesktopFileSelection | undefined;
 }
+
+export interface DesktopProviderProfile {
+  readonly id: string;
+  readonly provider: string;
+  readonly baseUrl: string;
+  readonly modelId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface SaveDesktopProviderProfileRequest {
+  readonly id?: string;
+  readonly provider: string;
+  readonly baseUrl: string;
+  readonly modelId: string;
+  readonly apiKey: string;
+}
+
+/**
+ * Saves or updates a BYOK provider profile in the desktop host's local database and DPAPI secret store.
+ */
+export async function saveDesktopProviderProfile(
+  request: SaveDesktopProviderProfileRequest,
+): Promise<DesktopProviderProfile> {
+  const data = await requireBridge().invoke('desktop.provider-profile.save', request);
+  return data as DesktopProviderProfile;
+}
+
+/**
+ * Lists all provider profiles saved in the desktop host's local database.
+ */
+export async function listDesktopProviderProfiles(): Promise<readonly DesktopProviderProfile[]> {
+  const data = await requireBridge().invoke('desktop.provider-profile.list');
+  return (data as readonly DesktopProviderProfile[]) ?? [];
+}
+
+/**
+ * Deletes a provider profile and its associated encrypted secret key.
+ */
+export async function deleteDesktopProviderProfile(id: string): Promise<void> {
+  await requireBridge().invoke('desktop.provider-profile.delete', { id });
+}
+
+/**
+ * Hands back the decrypted provider session configuration for a single session.
+ */
+export async function beginDesktopProviderSession(id: string): Promise<any> {
+  const data = await requireBridge().invoke('desktop.provider-profile.begin-session', { id });
+  return data;
+}
+
+/**
+ * Probes the provider profile connectivity in the desktop host without exposing the key.
+ */
+export async function testDesktopProviderProfile(id: string): Promise<any> {
+  const data = await requireBridge().invoke('desktop.provider-profile.test', { id });
+  return data;
+}
+

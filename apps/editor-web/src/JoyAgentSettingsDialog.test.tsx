@@ -84,6 +84,7 @@ afterEach(async () => {
   container?.remove();
   root = undefined;
   container = undefined;
+  delete (window as { joyDesktop?: unknown }).joyDesktop;
 });
 
 describe('JOY Agent Settings media capability probe', () => {
@@ -226,3 +227,130 @@ describe('JOY Agent Settings media capability probe', () => {
     );
   });
 });
+
+describe('JOY Agent Settings desktop profile persistence', () => {
+  it('loads saved profile on mount when isDesktopHost is true', async () => {
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        return [
+          {
+            id: 'prof-or-1',
+            provider: 'openrouter',
+            baseUrl: 'https://openrouter.ai/api/v1',
+            modelId: 'anthropic/claude-3.5-sonnet',
+            createdAt: '2026-09-15T00:00:00.000Z',
+            updatedAt: '2026-09-15T00:00:00.000Z',
+          },
+        ];
+      }
+      return undefined;
+    });
+    window.joyDesktop = { channels: ['desktop.provider-profile.list'], invoke };
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.list');
+    const modelInput = rendered.querySelector<HTMLInputElement>('input[placeholder="provider/model"]');
+    expect(modelInput?.value).toBe('anthropic/claude-3.5-sonnet');
+    expect(rendered.textContent).toContain('(Saved in desktop vault)');
+  });
+
+  it('saves profile to desktop DPAPI when user connects with a key', async () => {
+    const savedProfile = {
+      id: 'prof-or-1',
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      modelId: 'anthropic/claude-3.5-sonnet',
+      createdAt: '2026-09-15T00:00:00.000Z',
+      updatedAt: '2026-09-15T00:00:00.000Z',
+    };
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') return [];
+      if (channel === 'desktop.provider-profile.save') return savedProfile;
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.save'],
+      invoke,
+    };
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    if (key === null) throw new Error('Expected API key field');
+    await act(async () => {
+      setInputValue(key, 'sk-or-new-key');
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.save', {
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      modelId: 'openrouter/auto',
+      apiKey: 'sk-or-new-key',
+    });
+  });
+
+  it('uses saved profile key when connecting with blank key field', async () => {
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        return [
+          {
+            id: 'prof-or-1',
+            provider: 'openrouter',
+            baseUrl: 'https://openrouter.ai/api/v1',
+            modelId: 'anthropic/claude-3.5-sonnet',
+            createdAt: '2026-09-15T00:00:00.000Z',
+            updatedAt: '2026-09-15T00:00:00.000Z',
+          },
+        ];
+      }
+      if (channel === 'desktop.provider-profile.begin-session') {
+        return {
+          provider: 'openrouter',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          modelId: 'anthropic/claude-3.5-sonnet',
+          apiKey: 'sk-or-saved-vault-key',
+        };
+      }
+      if (channel === 'desktop.provider-profile.save') {
+        return {
+          id: 'prof-or-1',
+          provider: 'openrouter',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          modelId: 'anthropic/claude-3.5-sonnet',
+          createdAt: '2026-09-15T00:00:00.000Z',
+          updatedAt: '2026-09-15T00:00:00.000Z',
+        };
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: [
+        'desktop.provider-profile.list',
+        'desktop.provider-profile.begin-session',
+        'desktop.provider-profile.save',
+      ],
+      invoke,
+    };
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.begin-session', {
+      id: 'prof-or-1',
+    });
+    expect(engineClient.configure).toHaveBeenCalledWith({
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      modelId: 'anthropic/claude-3.5-sonnet',
+      apiKey: 'sk-or-saved-vault-key',
+    });
+  });
+});
+

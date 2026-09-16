@@ -467,6 +467,7 @@ export function AgentPanel({
   observationAdapterFactory,
   resolveAudioAssetUrl,
   storage,
+  onOpenSettings,
 }: {
   readonly project: SpikeProject;
   readonly selectedClipIds: readonly string[];
@@ -503,6 +504,7 @@ export function AgentPanel({
   readonly resolveAudioAssetUrl?: (assetId: string) => Promise<string>;
   /** Writer-fenced browser persistence owned by the writable editor root. */
   readonly storage: ProjectWriterStorage;
+  readonly onOpenSettings?: () => void;
 }) {
   const registry = useMemo(() => createToolRegistry(), []);
   const auditRef = useRef(createAuditTrail());
@@ -523,6 +525,9 @@ export function AgentPanel({
   const [draft, setDraft] = useState('');
   const [attachError, setAttachError] = useState<string | undefined>(undefined);
   const [attaching, setAttaching] = useState(false);
+  const engineStatus = joyAgentEngineClient?.getStatus();
+  const isDisconnected =
+    engineStatus === undefined || engineStatus.capability === 'incompatible';
   const [conversation, setConversation] = useState<JoyCodeConversation>(() =>
     initialJoyCodeConversation(storage, project.id),
   );
@@ -3381,6 +3386,17 @@ export function AgentPanel({
                   <strong>Joy Code</strong> prepares controlled timeline plans. Nothing changes
                   until the plan passes policy and the execution mode permits it.
                 </p>
+                {isDisconnected && onOpenSettings !== undefined && (
+                  <div className="joy-code-connect-prompt" style={{ marginTop: '12px' }}>
+                    <button
+                      type="button"
+                      className="button-secondary joy-code-configure-agent-btn"
+                      onClick={onOpenSettings}
+                    >
+                      Configure OpenRouter / Joy Agent
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -3406,6 +3422,22 @@ export function AgentPanel({
                   >
                     {message.body}
                   </p>
+                  {message.role === 'assistant' &&
+                    isDisconnected &&
+                    onOpenSettings !== undefined &&
+                    (message.body.includes('Connect a model in Agent Settings') ||
+                      message.body.includes('The configured model is incompatible') ||
+                      message.body.includes('Connect a remote model')) && (
+                      <div style={{ marginTop: '8px' }}>
+                        <button
+                          type="button"
+                          className="button-secondary joy-code-configure-agent-btn"
+                          onClick={onOpenSettings}
+                        >
+                          Configure OpenRouter / Joy Agent
+                        </button>
+                      </div>
+                    )}
                 </div>
               </article>
             ))}
@@ -3669,6 +3701,30 @@ export function AgentPanel({
 
           {composerCapability === 'edit' && (
             <div className="joy-code-compose-dock">
+              {isDisconnected && onOpenSettings !== undefined && (
+                <div
+                  className="joy-code-disconnected-banner"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '6px 10px',
+                    marginBottom: '8px',
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                  }}
+                >
+                  <span>Model disconnected.</span>
+                  <button
+                    type="button"
+                    className="button-secondary joy-code-configure-agent-btn"
+                    onClick={onOpenSettings}
+                  >
+                    Configure OpenRouter / Joy Agent
+                  </button>
+                </div>
+              )}
               {attachedAssets.length > 0 && (
                 <ul className="joy-code-attachments" aria-label="Attached media">
                   {attachedAssets.map((asset) => (

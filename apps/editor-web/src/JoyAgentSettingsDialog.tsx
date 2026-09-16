@@ -9,6 +9,13 @@ import type {
   JoyAgentMediaCapabilityState,
 } from './joy-agent/protocol.js';
 import { CloseIcon } from './icons.js';
+import {
+  isDesktopHost,
+  saveDesktopProviderProfile,
+  listDesktopProviderProfiles,
+  beginDesktopProviderSession,
+  type DesktopProviderProfile,
+} from './desktop-client.js';
 
 type AgentSettingsNotice = {
   readonly kind: 'info' | 'success' | 'error';
@@ -58,11 +65,35 @@ export function JoyAgentSettingsDialog({
   >(() => matchingMediaCapabilityReport(engineClient.getMediaCapabilities(), status?.modelId));
   const [mediaProbeWorking, setMediaProbeWorking] = useState(false);
   const [mediaProbeNotice, setMediaProbeNotice] = useState<AgentSettingsNotice | undefined>();
+  const [savedProfile, setSavedProfile] = useState<DesktopProviderProfile | undefined>(undefined);
+  const [hasSavedKey, setHasSavedKey] = useState(false);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       mediaProbeEpochRef.current += 1;
+    };
+  }, []);
+  useEffect(() => {
+    if (!isDesktopHost()) return;
+    let cancelled = false;
+    void listDesktopProviderProfiles()
+      .then((profiles) => {
+        if (cancelled) return;
+        const openRouterProfile = profiles.find((p) => p.provider === 'openrouter');
+        if (openRouterProfile) {
+          setSavedProfile(openRouterProfile);
+          setHasSavedKey(true);
+          setModelId(openRouterProfile.modelId);
+          setBaseUrl(openRouterProfile.baseUrl);
+          setProvider('openrouter');
+        }
+      })
+      .catch(() => {
+        /* Ignore background profile read errors. */
+      });
+    return () => {
+      cancelled = true;
     };
   }, []);
   useEffect(() => {
@@ -115,10 +146,22 @@ export function JoyAgentSettingsDialog({
     setCustomDisclosure(false);
     setProvider(next);
     setBaseUrl(next === 'openrouter' ? 'https://openrouter.ai/api/v1' : '');
+    setHasSavedKey(savedProfile !== undefined && savedProfile.provider === next);
   };
   const connect = async () => {
     if (mediaProbeWorking) return;
-    const key = keyRef.current?.value.trim() ?? '';
+    const enteredKey = keyRef.current?.value.trim() ?? '';
+    let key = enteredKey;
+    if (!key && isDesktopHost() && hasSavedKey && savedProfile) {
+      try {
+        const sessionConfig = await beginDesktopProviderSession(savedProfile.id);
+        if (sessionConfig && typeof sessionConfig.apiKey === 'string') {
+          key = sessionConfig.apiKey;
+        }
+      } catch {
+        /* Failed to resolve saved key; fall through to validation. */
+      }
+    }
     const normalizedModelId = modelId.trim();
     const normalizedBaseUrl = baseUrl.trim();
     const missing: string[] = [];
@@ -136,6 +179,23 @@ export function JoyAgentSettingsDialog({
     invalidateMediaProbe();
     setWorking(true);
     try {
+      if (isDesktopHost() && key) {
+        try {
+          const profileId =
+            savedProfile && savedProfile.provider === provider ? savedProfile.id : undefined;
+          const saved = await saveDesktopProviderProfile({
+            ...(profileId !== undefined ? { id: profileId } : {}),
+            provider,
+            baseUrl: normalizedBaseUrl.replace(/\/$/, ''),
+            modelId: normalizedModelId,
+            apiKey: key,
+          });
+          setSavedProfile(saved);
+          setHasSavedKey(true);
+        } catch (err) {
+          console.warn('Failed to save desktop provider profile to DPAPI:', err);
+        }
+      }
       await engineClient.configure({
         provider,
         baseUrl: normalizedBaseUrl.replace(/\/$/, ''),
@@ -329,12 +389,16 @@ export function JoyAgentSettingsDialog({
                   </label>
                 )}
                 <label className="agent-settings-field-wide">
-                  API key
+                  API key{hasSavedKey ? ' (Saved in desktop vault)' : ''}
                   <input
                     ref={keyRef}
                     type="password"
                     autoComplete="off"
-                    placeholder="Entered once for this session"
+                    placeholder={
+                      hasSavedKey
+                        ? 'Using saved desktop key (enter to replace)'
+                        : 'Entered once for this session'
+                    }
                     disabled={working || mediaProbeWorking}
                   />
                 </label>

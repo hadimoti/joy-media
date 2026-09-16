@@ -319,6 +319,11 @@ import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
 import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
 import { Scene3DPanel } from './Scene3DPanel.js';
 import { JoyAgentSettingsDialog } from './JoyAgentSettingsDialog.js';
+import {
+  isDesktopHost,
+  listDesktopProviderProfiles,
+  beginDesktopProviderSession,
+} from './desktop-client.js';
 import { createJoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus } from './joy-agent/protocol.js';
 import { createJoyAgentContextSnapshot } from './joy-agent/context-snapshot.js';
@@ -1087,6 +1092,38 @@ function EditorWorkspace({
   const [agentConnectionStatus, setAgentConnectionStatus] = useState<ByokSessionStatus | undefined>(
     () => joyAgentEngineClientRef.current?.getStatus(),
   );
+  useEffect(() => {
+    if (!isDesktopHost()) return;
+    if (agentConnectionStatus !== undefined) return;
+    let cancelled = false;
+    void listDesktopProviderProfiles()
+      .then(async (profiles) => {
+        if (cancelled || profiles.length === 0) return;
+        const profile = profiles.find((p) => p.provider === 'openrouter') ?? profiles[0];
+        if (!profile) return;
+        try {
+          const sessionConfig = await beginDesktopProviderSession(profile.id);
+          if (cancelled || !sessionConfig || !joyAgentEngineClientRef.current) return;
+          const status = await joyAgentEngineClientRef.current.configure({
+            provider: sessionConfig.provider,
+            baseUrl: sessionConfig.baseUrl,
+            modelId: sessionConfig.modelId,
+            apiKey: sessionConfig.apiKey,
+          });
+          if (!cancelled) {
+            setAgentConnectionStatus(status);
+          }
+        } catch (err) {
+          console.warn('Failed to restore desktop provider session:', err);
+        }
+      })
+      .catch((err) => {
+        console.warn('Failed to list desktop provider profiles:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [agentConnectionStatus]);
   // Creative Brief is a read-only task on the same page-session Worker. There
   // is no second server consent or cloud-planner opt-in state.
   const creativeBriefOptedIn =
@@ -6602,6 +6639,7 @@ function EditorWorkspace({
           resolveAudioAssetUrl={resolveAudioAssetUrl}
           agentPresenceStore={appAgentPresenceStore}
           agentPreviewStore={appAgentPreviewStore}
+          onOpenSettings={() => setAgentSettingsOpen(true)}
         />
       );
     }

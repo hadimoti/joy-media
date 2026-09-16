@@ -5,8 +5,15 @@ import { mkdirSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 const desktopRoot = resolve('apps/desktop');
-const standaloneExe = resolve(desktopRoot, 'dist/joy-media-win32-x64/joy-media.exe');
-const screenshotDir = resolve('C:/Users/HadiMoti/.gemini/antigravity/brain/ebc14912-2dd9-4214-904f-0e787b8dc734/screenshots');
+const localAppData = process.env.LOCALAPPDATA || join(process.env.USERPROFILE || 'C:/Users/HadiMoti', 'AppData/Local');
+const installedExe = resolve(localAppData, 'Programs/JOY Media/joy-media.exe');
+const distExe = resolve(desktopRoot, 'dist/joy-media-win32-x64/joy-media.exe');
+const standaloneExe = distExe;
+
+const screenshotDir = resolve(
+  process.env.JOY_SCREENSHOT_DIR ||
+    'C:/Users/HadiMoti/.gemini/antigravity/brain/ac00181e-3969-48fc-a342-b10f4103c344/screenshots',
+);
 mkdirSync(screenshotDir, { recursive: true });
 
 if (!existsSync(standaloneExe)) {
@@ -35,6 +42,7 @@ try {
   console.log('1. Launching Electron application via Playwright _electron.launch()...');
   app = await electron.launch({
     executablePath: standaloneExe,
+    cwd: resolve(desktopRoot, 'dist', 'joy-media-win32-x64'),
     args: [`--user-data-dir=${tempUserData}`],
     env: { ...process.env, NODE_ENV: 'production' },
   });
@@ -225,11 +233,60 @@ try {
   console.log('Editor Structure:', JSON.stringify(editorStructure, null, 2));
   report.metrics.editorStructure = editorStructure;
 
-  // Step 7: Final Screenshot: Full App Verified State
-  const shot4 = join(screenshotDir, '04-full-app-verified.png');
-  await window.screenshot({ path: shot4, fullPage: true });
-  report.screenshots.push({ name: '04-full-app-verified.png', path: shot4 });
-  console.log(`Captured screenshot 4: ${shot4}`);
+  // Step 7: Verify Joy Agent Settings & OpenRouter BYOK Dialog
+  console.log('7. Verifying Joy Agent Settings & OpenRouter BYOK UI...');
+  const configureBtn = window.locator('button:has-text("Configure OpenRouter / Joy Agent")').first();
+  const hasConfigureBtn = await configureBtn.isVisible().catch(() => false);
+  if (hasConfigureBtn) {
+    console.log('Found "Configure OpenRouter / Joy Agent" button in AgentPanel, clicking it...');
+    await configureBtn.click({ force: true });
+  } else {
+    console.log('Opening Joy Code Settings via application menu...');
+    const joyCodeMenu = window.locator('button.menu-trigger:has-text("Joy Code"), [role="menuitem"]:has-text("Joy Code")').first();
+    if (await joyCodeMenu.isVisible()) {
+      await joyCodeMenu.click();
+      await new Promise((r) => setTimeout(r, 400));
+      const settingsItem = window.locator('button:has-text("Joy Code Settings"), [role="menuitem"]:has-text("Joy Code Settings")').first();
+      if (await settingsItem.isVisible()) {
+        await settingsItem.click();
+      }
+    }
+  }
+
+  await new Promise((r) => setTimeout(r, 1200));
+
+  // Inspect settings dialog if open
+  const settingsModal = window.locator('.agent-settings-dialog, [role="dialog"], .dialog-backdrop').first();
+  const isSettingsVisible = await settingsModal.isVisible().catch(() => false);
+  console.log(`Joy Agent Settings Dialog visible: ${isSettingsVisible}`);
+  report.metrics.isSettingsVisible = isSettingsVisible;
+
+  if (isSettingsVisible) {
+    const shotSettings = join(screenshotDir, '04-agent-openrouter-settings.png');
+    await window.screenshot({ path: shotSettings, fullPage: true });
+    report.screenshots.push({ name: '04-agent-openrouter-settings.png', path: shotSettings });
+    console.log(`Captured screenshot 4 (OpenRouter Settings): ${shotSettings}`);
+
+    // Verify OpenRouter provider options
+    const dialogText = await settingsModal.innerText().catch(() => '');
+    report.metrics.dialogHasOpenRouter = dialogText.includes('OpenRouter') || dialogText.includes('openrouter');
+    console.log(`Dialog mentions OpenRouter: ${report.metrics.dialogHasOpenRouter}`);
+
+    // Close settings dialog via close button or Escape
+    const closeBtn = window.locator('button[aria-label="Close dialog"], button:has-text("Close")').first();
+    if (await closeBtn.isVisible()) {
+      await closeBtn.click();
+    } else {
+      await window.keyboard.press('Escape');
+    }
+    await new Promise((r) => setTimeout(r, 800));
+  }
+
+  // Step 8: Final Screenshot: Full App Verified State
+  const shotFinal = join(screenshotDir, '05-full-app-verified.png');
+  await window.screenshot({ path: shotFinal, fullPage: true });
+  report.screenshots.push({ name: '05-full-app-verified.png', path: shotFinal });
+  console.log(`Captured screenshot 5 (Full App Verified): ${shotFinal}`);
 
   const fatalErrors = report.consoleErrors.filter(
     (err) => !err.includes('Failed to load resource: net::') && !err.includes('Failed to fetch')
