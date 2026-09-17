@@ -43,9 +43,11 @@ export interface JobRecord {
  * itself never lives here — only `secretHandleId`, a pointer into the `secrets` table. */
 export interface ProviderProfile {
   readonly id: string;
+  readonly name?: string | undefined;
   readonly provider: string;
   readonly baseUrl: string;
   readonly modelId: string;
+  readonly cachedModels?: readonly string[] | undefined;
   readonly secretHandleId: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -77,9 +79,11 @@ interface JobRow {
 
 interface ProviderProfileRow {
   readonly id: string;
+  readonly name?: string | null;
   readonly provider: string;
   readonly base_url: string;
   readonly model_id: string;
+  readonly cached_models?: string | null;
   readonly secret_handle_id: string;
   readonly created_at: string;
   readonly updated_at: string;
@@ -134,14 +138,26 @@ export class LocalDatabase {
     this.db.exec(
       `CREATE TABLE IF NOT EXISTS provider_profiles (
          id TEXT PRIMARY KEY,
+         name TEXT,
          provider TEXT NOT NULL,
          base_url TEXT NOT NULL,
          model_id TEXT NOT NULL,
+         cached_models TEXT,
          secret_handle_id TEXT NOT NULL,
          created_at TEXT NOT NULL,
          updated_at TEXT NOT NULL
        )`,
     );
+    try {
+      this.db.exec('ALTER TABLE provider_profiles ADD COLUMN name TEXT;');
+    } catch {
+      // Column already exists
+    }
+    try {
+      this.db.exec('ALTER TABLE provider_profiles ADD COLUMN cached_models TEXT;');
+    } catch {
+      // Column already exists
+    }
     this.db.exec(
       `CREATE TABLE IF NOT EXISTS app_settings (
          key TEXT PRIMARY KEY,
@@ -249,14 +265,16 @@ export class LocalDatabase {
     this.db
       .prepare(
         `INSERT OR REPLACE INTO provider_profiles
-           (id, provider, base_url, model_id, secret_handle_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+           (id, name, provider, base_url, model_id, cached_models, secret_handle_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         profile.id,
+        profile.name ?? null,
         profile.provider,
         profile.baseUrl,
         profile.modelId,
+        profile.cachedModels ? JSON.stringify(profile.cachedModels) : null,
         profile.secretHandleId,
         profile.createdAt,
         profile.updatedAt,
@@ -391,11 +409,21 @@ function jobFromRow(row: JobRow): JobRecord {
 }
 
 function providerProfileFromRow(row: ProviderProfileRow): ProviderProfile {
+  let cachedModels: readonly string[] | undefined;
+  if (row.cached_models) {
+    try {
+      cachedModels = JSON.parse(row.cached_models);
+    } catch {
+      cachedModels = undefined;
+    }
+  }
   return {
     id: row.id,
+    ...(row.name ? { name: row.name } : {}),
     provider: row.provider,
     baseUrl: row.base_url,
     modelId: row.model_id,
+    ...(cachedModels !== undefined ? { cachedModels } : {}),
     secretHandleId: row.secret_handle_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

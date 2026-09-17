@@ -4,16 +4,19 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 export interface CliConfig {
-  activeProvider?: string;
-  defaultModel?: string;
-  customBaseUrl?: string;
-  sqlitePath?: string;
+  activeProvider?: string | undefined;
+  defaultModel?: string | undefined;
+  customBaseUrl?: string | undefined;
+  sqlitePath?: string | undefined;
 }
 
 export interface AiProviderConfig {
-  apiKey?: string;
-  baseUrl?: string;
-  defaultModel?: string;
+  name?: string | undefined;
+  provider?: string | undefined;
+  apiKey?: string | undefined;
+  baseUrl?: string | undefined;
+  defaultModel?: string | undefined;
+  cachedModels?: string[] | undefined;
 }
 
 export function getJoyMediaDir(): string {
@@ -61,6 +64,27 @@ export function loadAiProviders(): Record<string, AiProviderConfig> {
   } catch {
     return {};
   }
+}
+
+export function saveAiProviders(providers: Record<string, AiProviderConfig>): void {
+  const path = getAiProvidersPath();
+  writeFileSync(path, JSON.stringify(providers, null, 2), 'utf8');
+}
+
+export function setAiProvider(name: string, config: AiProviderConfig): void {
+  const providers = loadAiProviders();
+  providers[name] = config;
+  saveAiProviders(providers);
+}
+
+export function deleteAiProvider(name: string): boolean {
+  const providers = loadAiProviders();
+  if (name in providers) {
+    delete providers[name];
+    saveAiProviders(providers);
+    return true;
+  }
+  return false;
 }
 
 export function getDefaultSqlitePath(): string {

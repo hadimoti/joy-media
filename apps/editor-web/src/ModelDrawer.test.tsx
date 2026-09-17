@@ -1,0 +1,253 @@
+// @vitest-environment jsdom
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ModelDrawer } from './ModelDrawer.js';
+import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
+import type { ByokSessionStatus } from './joy-agent/protocol.js';
+import * as desktopClient from './desktop-client.js';
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const initialStatus: ByokSessionStatus = {
+  provider: 'kilo',
+  modelId: 'minimax/minimax-m3',
+  capability: 'tool-loop',
+};
+
+function createMockEngineClient(overrides: Partial<JoyAgentEngineClient> = {}): JoyAgentEngineClient {
+  return {
+    configure: vi.fn().mockImplementation(async (config) => ({
+      provider: config.provider,
+      modelId: config.modelId,
+      capability: 'tool-loop',
+    })),
+    testConnection: vi.fn().mockResolvedValue(initialStatus),
+    probeMediaCapabilities: vi.fn(),
+    startRun: vi.fn(),
+    cancel: vi.fn().mockResolvedValue(undefined),
+    clear: vi.fn(),
+    dispose: vi.fn(),
+    getStatus: vi.fn(() => initialStatus),
+    getMediaCapabilities: vi.fn(() => undefined),
+    ...overrides,
+  } as unknown as JoyAgentEngineClient;
+}
+
+describe('ModelDrawer', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+
+    vi.spyOn(desktopClient, 'isDesktopHost').mockReturnValue(true);
+    vi.spyOn(desktopClient, 'listDesktopProviderProfiles').mockResolvedValue([
+      {
+        id: 'kilo-profile-1',
+        name: 'Kilo Gateway',
+        provider: 'kilo',
+        baseUrl: 'https://api.kilo.ai/api/gateway/v1',
+        modelId: 'minimax/minimax-m3',
+        cachedModels: ['minimax/minimax-m3', 'kilo-auto/efficient'],
+        createdAt: '2026-09-17T00:00:00Z',
+        updatedAt: '2026-09-17T00:00:00Z',
+      },
+      {
+        id: 'openrouter-profile-2',
+        name: 'OpenRouter Primary',
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'openrouter/free',
+        cachedModels: ['openrouter/free', 'openrouter/auto'],
+        createdAt: '2026-09-17T00:00:00Z',
+        updatedAt: '2026-09-17T00:00:00Z',
+      },
+    ]);
+    vi.spyOn(desktopClient, 'beginDesktopProviderSession').mockResolvedValue({
+      provider: 'kilo',
+      baseUrl: 'https://api.kilo.ai/api/gateway/v1',
+      modelId: 'minimax/minimax-m3',
+      apiKey: 'kilo-secret-key-123',
+    });
+    vi.spyOn(desktopClient, 'saveDesktopProviderProfile').mockImplementation(async (req) => ({
+      id: req.id ?? 'new-profile-id',
+      name: req.name ?? req.provider,
+      provider: req.provider,
+      baseUrl: req.baseUrl,
+      modelId: req.modelId,
+      cachedModels: req.cachedModels,
+      createdAt: '2026-09-17T00:00:00Z',
+      updatedAt: '2026-09-17T00:00:00Z',
+    }));
+    vi.spyOn(desktopClient, 'fetchDesktopProviderModels').mockResolvedValue([
+      { id: 'minimax/minimax-m3', name: 'minimax/minimax-m3' },
+      { id: 'kilo-auto/efficient', name: 'kilo-auto/efficient' },
+      { id: 'kilo-auto/free', name: 'kilo-auto/free' },
+    ]);
+  });
+
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    container?.remove();
+    root = undefined;
+    container = undefined;
+    vi.restoreAllMocks();
+  });
+
+  it('renders active model badge and configured profiles when open', async () => {
+    const client = createMockEngineClient();
+    await act(async () => {
+      root?.render(
+        <ModelDrawer
+          open={true}
+          onClose={vi.fn()}
+          engineClient={client}
+          status={initialStatus}
+        />,
+      );
+    });
+
+    expect(container?.textContent).toContain('Model Drawer');
+    expect(container?.textContent).toContain('kilo: minimax/minimax-m3');
+    expect(container?.textContent).toContain('Kilo Gateway');
+    expect(container?.textContent).toContain('OpenRouter Primary');
+    expect(container?.textContent).toContain('kilo-auto/efficient');
+  });
+
+  it('does not render anything when open is false', async () => {
+    const client = createMockEngineClient();
+    await act(async () => {
+      root?.render(
+        <ModelDrawer
+          open={false}
+          onClose={vi.fn()}
+          engineClient={client}
+          status={initialStatus}
+        />,
+      );
+    });
+
+    expect(container?.innerHTML).toBe('');
+  });
+
+  it('filters models in real-time when user types in search input', async () => {
+    const client = createMockEngineClient();
+    await act(async () => {
+      root?.render(
+        <ModelDrawer
+          open={true}
+          onClose={vi.fn()}
+          engineClient={client}
+          status={initialStatus}
+        />,
+      );
+    });
+
+    const searchInput = container?.querySelector('.model-drawer-search-input') as HTMLInputElement;
+    expect(searchInput).toBeTruthy();
+
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      'value',
+    )?.set;
+    await act(async () => {
+      nativeInputValueSetter?.call(searchInput, 'efficient');
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    expect(container?.textContent).toContain('kilo-auto/efficient');
+    expect(container?.textContent).not.toContain('openrouter/free');
+  });
+
+  it('switches model immediately on click, updating engine configuration', async () => {
+    const client = createMockEngineClient();
+    const onStatusChange = vi.fn();
+    const onNotice = vi.fn();
+
+    await act(async () => {
+      root?.render(
+        <ModelDrawer
+          open={true}
+          onClose={vi.fn()}
+          engineClient={client}
+          status={initialStatus}
+          onStatusChange={onStatusChange}
+          onNotice={onNotice}
+        />,
+      );
+    });
+
+    const modelItems = container?.querySelectorAll('.model-drawer-model-item');
+    const efficientItem = Array.from(modelItems ?? []).find((el) =>
+      el.textContent?.includes('kilo-auto/efficient'),
+    ) as HTMLElement;
+
+    expect(efficientItem).toBeTruthy();
+
+    await act(async () => {
+      efficientItem.click();
+    });
+
+    expect(client.configure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'kilo',
+        modelId: 'kilo-auto/efficient',
+      }),
+    );
+    expect(onStatusChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelId: 'kilo-auto/efficient',
+      }),
+    );
+    expect(onNotice).toHaveBeenCalledWith(
+      expect.stringContaining('Switched active model to kilo-auto/efficient'),
+      'success',
+    );
+  });
+
+  it('discovers models dynamically when adding a new API endpoint', async () => {
+    const client = createMockEngineClient();
+    const onNotice = vi.fn();
+
+    await act(async () => {
+      root?.render(
+        <ModelDrawer
+          open={true}
+          onClose={vi.fn()}
+          engineClient={client}
+          status={initialStatus}
+          onNotice={onNotice}
+        />,
+      );
+    });
+
+    const addBtn = container?.querySelector('.model-drawer-add-btn') as HTMLButtonElement;
+    expect(addBtn).toBeTruthy();
+
+    await act(async () => {
+      addBtn.click();
+    });
+
+    expect(container?.textContent).toContain('Connect New API Endpoint');
+
+    const discoverBtn = Array.from(container?.querySelectorAll('button') ?? []).find((btn) =>
+      btn.textContent?.includes('Discover Models Behind Link'),
+    );
+    expect(discoverBtn).toBeTruthy();
+
+    await act(async () => {
+      discoverBtn?.click();
+    });
+
+    expect(desktopClient.fetchDesktopProviderModels).toHaveBeenCalled();
+    expect(onNotice).toHaveBeenCalledWith(
+      expect.stringContaining('Discovered 3 models successfully!'),
+      'success',
+    );
+  });
+});

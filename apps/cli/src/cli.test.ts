@@ -247,4 +247,46 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       expect(v1Clips?.[0]?.id).toBe('agent-clip-1');
     });
   });
+
+  describe('Multi-API Provider & Model Configuration Commands', () => {
+    it('supports adding, listing, selecting, and removing providers via CLI', async () => {
+      // 1. Add provider
+      const addCode = await runCli([
+        'agent',
+        'provider',
+        'add',
+        'kilo-test',
+        '--url',
+        'https://api.kilo.ai/api/gateway/v1',
+        '--api-key',
+        'kilo-test-key-999',
+        '--model',
+        'minimax/minimax-m3',
+      ]);
+      expect(addCode).toBe(0);
+
+      // 2. List providers
+      const listCode = await runCli(['agent', 'provider', 'list']);
+      expect(listCode).toBe(0);
+
+      // 3. Use provider
+      const useCode = await runCli(['agent', 'provider', 'use', 'kilo-test']);
+      expect(useCode).toBe(0);
+
+      // 4. Set default model
+      const modelSetCode = await runCli(['agent', 'model', 'set', 'kilo-auto/efficient']);
+      expect(modelSetCode).toBe(0);
+
+      // 5. Verify resolution with active provider
+      const resolved = resolveByokConfig();
+      expect(resolved.provider).toBe('kilo');
+      expect(resolved.baseUrl).toBe('https://api.kilo.ai/api/gateway/v1');
+      expect(resolved.apiKey).toBe('kilo-test-key-999');
+      expect(resolved.modelId).toBe('kilo-auto/efficient');
+
+      // 6. Remove provider
+      const removeCode = await runCli(['agent', 'provider', 'remove', 'kilo-test']);
+      expect(removeCode).toBe(0);
+    });
+  });
 });

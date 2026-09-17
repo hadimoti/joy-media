@@ -1,6 +1,11 @@
 import type { JoyAgentCapability } from './contracts.js';
 
-export type JoyProviderMode = 'joy-hosted' | 'openrouter' | 'openai-compatible';
+export type JoyProviderMode =
+  | 'joy-hosted'
+  | 'openrouter'
+  | 'openai-compatible'
+  | 'kilo'
+  | 'custom';
 
 export interface ByokSessionConfig {
   readonly provider: JoyProviderMode;
@@ -36,7 +41,11 @@ export function normalizeByokSessionConfig(
   const modelId = typeof input.modelId === 'string' ? input.modelId.trim() : '';
   const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
   if (
-    (provider !== 'joy-hosted' && provider !== 'openrouter' && provider !== 'openai-compatible') ||
+    (provider !== 'joy-hosted' &&
+      provider !== 'openrouter' &&
+      provider !== 'openai-compatible' &&
+      provider !== 'kilo' &&
+      provider !== 'custom') ||
     modelId.length === 0 ||
     modelId.length > MAX_MODEL_ID_LENGTH ||
     apiKey.length === 0 ||

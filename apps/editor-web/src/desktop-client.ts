@@ -143,19 +143,28 @@ export async function selectDesktopFile(): Promise<DesktopFileSelection | undefi
 
 export interface DesktopProviderProfile {
   readonly id: string;
+  readonly name?: string | undefined;
   readonly provider: string;
   readonly baseUrl: string;
   readonly modelId: string;
+  readonly cachedModels?: readonly string[] | undefined;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
 
 export interface SaveDesktopProviderProfileRequest {
-  readonly id?: string;
+  readonly id?: string | undefined;
+  readonly name?: string | undefined;
   readonly provider: string;
   readonly baseUrl: string;
   readonly modelId: string;
-  readonly apiKey: string;
+  readonly cachedModels?: readonly string[] | undefined;
+  readonly apiKey?: string | undefined;
+}
+
+export interface DiscoveredModel {
+  readonly id: string;
+  readonly name: string;
 }
 
 /**
@@ -197,6 +206,42 @@ export async function beginDesktopProviderSession(id: string): Promise<unknown> 
 export async function testDesktopProviderProfile(id: string): Promise<unknown> {
   const data = await requireBridge().invoke('desktop.provider-profile.test', { id });
   return data;
+}
+
+/**
+ * Discovers models available behind an API endpoint (via desktop bridge if available, or direct fetch in browser).
+ */
+export async function fetchDesktopProviderModels(request: {
+  id?: string | undefined;
+  baseUrl?: string | undefined;
+  apiKey?: string | undefined;
+  provider?: string | undefined;
+}): Promise<readonly DiscoveredModel[]> {
+  if (isDesktopHost()) {
+    const data = await requireBridge().invoke('desktop.provider-profile.fetch-models', request);
+    return (data as readonly DiscoveredModel[]) ?? [];
+  }
+  if (!request.baseUrl) return [];
+  const normalizedBaseUrl = request.baseUrl.replace(/\/+$/, '');
+  const headers: Record<string, string> = {};
+  if (request.apiKey && request.apiKey !== 'not-provided') {
+    headers['Authorization'] = `Bearer ${request.apiKey}`;
+  }
+  const res = await fetch(`${normalizedBaseUrl}/models`, { headers });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = (await res.json()) as { data?: unknown };
+  const raw = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
+  return raw
+    .map((item) => {
+      if (typeof item === 'string') return { id: item, name: item };
+      if (item && typeof item === 'object') {
+        const id = (item as { id?: string }).id || '';
+        const name = (item as { name?: string }).name || id;
+        return { id, name };
+      }
+      return null;
+    })
+    .filter((m): m is DiscoveredModel => Boolean(m && m.id));
 }
 
 /**

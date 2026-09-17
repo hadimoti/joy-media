@@ -5,7 +5,7 @@
  * type match rather than a translation layer.
  */
 
-export const BYOK_PROVIDERS = ['openrouter', 'openai-compatible'] as const;
+export const BYOK_PROVIDERS = ['openrouter', 'openai-compatible', 'kilo', 'custom'] as const;
 export type ByokProvider = (typeof BYOK_PROVIDERS)[number];
 
 export interface ProviderProfileInput {

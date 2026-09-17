@@ -176,9 +176,11 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       await deps.secretStore.set(secretHandleId, request.apiKey);
       const profile: ProviderProfile = {
         id,
+        ...(request.name !== undefined ? { name: request.name } : {}),
         provider: request.provider,
         baseUrl: request.baseUrl,
         modelId: request.modelId,
+        ...(request.cachedModels !== undefined ? { cachedModels: request.cachedModels } : {}),
         secretHandleId,
         createdAt,
         updatedAt: timestamp,
@@ -235,6 +237,63 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         modelId: profile.modelId,
       });
       return { ok: true, data: report };
+    },
+    'desktop.provider-profile.fetch-models': async (payload): Promise<IpcResult> => {
+      try {
+        const p = (payload && typeof payload === 'object' ? payload : {}) as {
+          id?: string;
+          baseUrl?: string;
+          apiKey?: string;
+        };
+        let baseUrl = typeof p.baseUrl === 'string' ? p.baseUrl.trim() : '';
+        let apiKey = typeof p.apiKey === 'string' ? p.apiKey.trim() : '';
+        if (p.id) {
+          const profile = deps.localDatabase.getProviderProfile(p.id);
+          if (!profile) return { ok: false, error: 'Unknown provider profile' };
+          baseUrl = profile.baseUrl;
+          const storedKey = await deps.secretStore.get(profile.secretHandleId);
+          if (storedKey) {
+            apiKey = storedKey;
+          }
+        }
+        if (!baseUrl) return { ok: false, error: 'Base URL required' };
+        const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
+        const endpoint = `${normalizedBaseUrl}/models`;
+        const headers: Record<string, string> = {};
+        if (apiKey && apiKey !== 'not-provided') {
+          headers['Authorization'] = `Bearer ${apiKey}`;
+        }
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10000);
+        const res = await fetch(endpoint, {
+          headers,
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '');
+          return {
+            ok: false,
+            error: `Provider returned status ${res.status}: ${errText.slice(0, 100)}`,
+          };
+        }
+        const json = (await res.json()) as { data?: unknown };
+        const rawList = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
+        const models = rawList
+          .map((item) => {
+            if (typeof item === 'string') return { id: item, name: item };
+            if (item && typeof item === 'object') {
+              const id = (item as { id?: string }).id || '';
+              const name = (item as { name?: string }).name || id;
+              return { id, name };
+            }
+            return null;
+          })
+          .filter((m): m is { id: string; name: string } => Boolean(m && m.id));
+        return { ok: true, data: models };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
     },
     'desktop.check-for-update': (payload): IpcResult => {
       const request = asCheckForUpdateRequest(payload);
@@ -373,9 +432,11 @@ function asProfileId(value: unknown): string | undefined {
 
 interface SaveProviderProfileRequest {
   readonly id?: string;
+  readonly name?: string;
   readonly provider: string;
   readonly baseUrl: string;
   readonly modelId: string;
+  readonly cachedModels?: readonly string[];
   readonly apiKey: string;
 }
 
@@ -389,9 +450,17 @@ function asSaveProviderProfileRequest(value: unknown): SaveProviderProfileReques
   if (candidate['id'] !== undefined && typeof candidate['id'] !== 'string') return undefined;
   return {
     ...(candidate['id'] !== undefined ? { id: candidate['id'] as string } : {}),
+    ...(typeof candidate['name'] === 'string' ? { name: candidate['name'] } : {}),
     provider: candidate['provider'],
     baseUrl: candidate['baseUrl'],
     modelId: candidate['modelId'],
+    ...(Array.isArray(candidate['cachedModels'])
+      ? {
+          cachedModels: candidate['cachedModels'].filter(
+            (m): m is string => typeof m === 'string',
+          ),
+        }
+      : {}),
     apiKey: candidate['apiKey'],
   };
 }

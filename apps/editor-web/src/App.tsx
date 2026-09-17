@@ -319,6 +319,7 @@ import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
 import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
 import { Scene3DPanel } from './Scene3DPanel.js';
 import { JoyAgentSettingsDialog } from './JoyAgentSettingsDialog.js';
+import { ModelDrawer } from './ModelDrawer.js';
 import { AssetLibrarySettingsDialog } from './AssetLibrarySettingsDialog.js';
 import {
   isDesktopHost,
@@ -1093,6 +1094,7 @@ function EditorWorkspace({
     saveAgentPolicy(storage, agentPolicy);
   }, [agentPolicy, storage]);
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
+  const [modelDrawerOpen, setModelDrawerOpen] = useState(false);
   const [assetLibrarySettingsOpen, setAssetLibrarySettingsOpen] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
   useEffect(() => {
@@ -6685,6 +6687,12 @@ function EditorWorkspace({
           agentPresenceStore={appAgentPresenceStore}
           agentPreviewStore={appAgentPreviewStore}
           onOpenSettings={() => setAgentSettingsOpen(true)}
+          onOpenModelDrawer={() => setModelDrawerOpen(true)}
+          activeModelLabel={
+            agentConnectionStatus
+              ? `${agentConnectionStatus.provider}: ${agentConnectionStatus.modelId}`
+              : undefined
+          }
         />
       );
     }
@@ -7531,6 +7539,22 @@ function EditorWorkspace({
               }}
               onNotice={showToast}
               onClose={() => setAgentSettingsOpen(false)}
+            />
+          )}
+          {modelDrawerOpen && (
+            <ModelDrawer
+              open={modelDrawerOpen}
+              onClose={() => setModelDrawerOpen(false)}
+              engineClient={joyAgentEngineClientRef.current ?? undefined}
+              status={agentConnectionStatus}
+              onStatusChange={(next) => {
+                setAgentConnectionStatus(next);
+                if (next === undefined) {
+                  appAgentPresenceStore.clear();
+                  appAgentPreviewStore.clear();
+                }
+              }}
+              onNotice={showToast}
             />
           )}
           {assetLibrarySettingsOpen && (

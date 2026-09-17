@@ -425,6 +425,46 @@ describe('IPC dispatch', () => {
     expect(JSON.stringify(result)).not.toContain('sk-secret');
   });
 
+  it('provider-profile.fetch-models queries /models and returns parsed models list', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          { id: 'minimax/minimax-m3', name: 'MiniMax M3' },
+          { id: 'kilo-auto/efficient', name: 'Kilo Auto' },
+        ],
+      }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+    try {
+      const result = await dispatchIpcRequest(handlers, {
+        origin: 'https://joyst.ir',
+        channel: 'desktop.provider-profile.fetch-models',
+        payload: {
+          baseUrl: 'https://api.kilo.ai/v1',
+          apiKey: 'test-key',
+        },
+      });
+      expect(result).toEqual({
+        ok: true,
+        data: [
+          { id: 'minimax/minimax-m3', name: 'MiniMax M3' },
+          { id: 'kilo-auto/efficient', name: 'Kilo Auto' },
+        ],
+      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.kilo.ai/v1/models',
+        expect.objectContaining({
+          headers: { Authorization: 'Bearer test-key' },
+        }),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('check-for-update forwards a well-shaped request to the injected policy check', async () => {
     const d = deps();
     const handlers = createIpcHandlers(d);

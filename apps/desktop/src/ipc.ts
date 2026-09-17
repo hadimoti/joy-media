@@ -12,6 +12,7 @@ export const IPC_CHANNELS = [
   'desktop.provider-profile.delete',
   'desktop.provider-profile.begin-session',
   'desktop.provider-profile.test',
+  'desktop.provider-profile.fetch-models',
   'desktop.check-for-update',
   'desktop.window-minimize',
   'desktop.window-maximize',

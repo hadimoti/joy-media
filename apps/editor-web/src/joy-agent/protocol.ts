@@ -53,8 +53,15 @@ export type JoyAgentErrorCode =
   | 'JOY_AGENT_STALE_REVISION'
   | 'JOY_AGENT_PROVIDER_INCOMPATIBLE';
 
+export type JoyAgentProvider =
+  | 'joy-hosted'
+  | 'openrouter'
+  | 'openai-compatible'
+  | 'kilo'
+  | 'custom';
+
 export interface ByokSessionConfig {
-  readonly provider: 'joy-hosted' | 'openrouter' | 'openai-compatible';
+  readonly provider: JoyAgentProvider;
   readonly baseUrl: string;
   readonly modelId: string;
   /** Volatile only: never present in a Worker event or host RPC envelope. */

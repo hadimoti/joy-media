@@ -52,7 +52,9 @@ export function JoyAgentSettingsDialog({
   const mountedRef = useRef(true);
   const mediaProbeEpochRef = useRef(0);
   const [provider, setProvider] = useState<'joy-hosted' | 'openrouter' | 'openai-compatible'>(
-    status?.provider ?? 'openrouter',
+    status?.provider === 'joy-hosted' || status?.provider === 'openai-compatible'
+      ? status.provider
+      : 'openrouter',
   );
   const [baseUrl, setBaseUrl] = useState(
     status?.provider === 'openai-compatible'
@@ -107,7 +109,11 @@ export function JoyAgentSettingsDialog({
   useEffect(() => {
     setConnectionStatus(status);
     if (status === undefined) return;
-    setProvider(status.provider);
+    setProvider(
+      status.provider === 'joy-hosted' || status.provider === 'openai-compatible'
+        ? status.provider
+        : 'openrouter',
+    );
     setModelId(status.modelId || 'openrouter/auto');
   }, [status]);
   useEffect(() => {

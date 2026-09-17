@@ -1,7 +1,13 @@
 /* global console */
 import { probeAgent, runJoyAgent } from '../agent/joy-agent.js';
 import { startAgentRepl } from '../agent/repl.js';
-import { loadCliConfig, saveCliConfig } from '../utils/config.js';
+import {
+  deleteAiProvider,
+  loadAiProviders,
+  loadCliConfig,
+  saveCliConfig,
+  setAiProvider,
+} from '../utils/config.js';
 import {
   c,
   logError,
@@ -21,6 +27,7 @@ import {
 export interface AgentCommandFlags {
   project?: string | undefined;
   apply?: boolean | undefined;
+  name?: string | undefined;
   provider?: string | undefined;
   model?: string | undefined;
   apiKey?: string | undefined;
@@ -32,6 +39,230 @@ export async function handleAgentCommand(
   flags: AgentCommandFlags,
 ): Promise<number> {
   const sub = args[0] ?? 'chat';
+
+  if (sub === 'provider') {
+    const action = args[1] ?? 'list';
+
+    if (action === 'list' || action === 'ls') {
+      const providers = loadAiProviders();
+      const cfg = loadCliConfig();
+      const active = cfg.activeProvider ?? 'openrouter';
+
+      console.log(`\n  ${c('Configured AI Providers:', 'bold')}\n`);
+      const keys = Object.keys(providers);
+      if (keys.length === 0) {
+        logInfo('No custom providers configured yet. Use "joy-media agent provider add" to add one.');
+      } else {
+        for (const key of keys) {
+          const p = providers[key]!;
+          const isActive = key === active || (p.name && p.name === active);
+          const marker = isActive ? c('● [ACTIVE]', 'green') : c('○', 'dim');
+          console.log(`  ${marker} ${c(key, 'bold')} (${p.provider ?? 'custom'})`);
+          logStep('  Base URL', p.baseUrl ?? 'default');
+          logStep('  Default Model', p.defaultModel ?? 'not-set');
+          logStep('  API Key', p.apiKey ? `${p.apiKey.slice(0, 4)}...${p.apiKey.slice(-4)}` : 'none');
+          if (p.cachedModels && p.cachedModels.length > 0) {
+            logStep('  Discovered Models', `${p.cachedModels.length} models cached`);
+          }
+          console.log();
+        }
+      }
+      return 0;
+    }
+
+    if (action === 'add') {
+      const name = args[2] ?? flags.name;
+      if (!name) {
+        logError(
+          'Provider name required. Usage: joy-media agent provider add <name> --url <url> --api-key <key> [--model <model>]',
+        );
+        return 1;
+      }
+      if (!flags.baseUrl) {
+        logError('Base URL required. Specify --url <url>');
+        return 1;
+      }
+
+      let cachedModels: string[] | undefined;
+      // Try to discover models behind link
+      try {
+        const normalized = flags.baseUrl.replace(/\/+$/, '');
+        const headers: Record<string, string> = {};
+        if (flags.apiKey) headers['Authorization'] = `Bearer ${flags.apiKey}`;
+        const res = await fetch(`${normalized}/models`, { headers });
+        if (res.ok) {
+          const json = (await res.json()) as { data?: unknown };
+          const raw = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
+          cachedModels = raw
+            .map((item: { id?: string } | string) =>
+              typeof item === 'string' ? item : item.id,
+            )
+            .filter((id): id is string => typeof id === 'string' && id.length > 0);
+          if (cachedModels.length > 0) {
+            logInfo(`Discovered ${cachedModels.length} models from endpoint.`);
+          }
+        }
+      } catch {
+        // Model discovery is optional
+      }
+
+      const defaultModel =
+        flags.model ??
+        (cachedModels && cachedModels.length > 0 ? cachedModels[0] : 'minimax/minimax-m3');
+
+      setAiProvider(name, {
+        name,
+        provider:
+          flags.provider ??
+          (flags.baseUrl.includes('kilo')
+            ? 'kilo'
+            : flags.baseUrl.includes('openrouter')
+              ? 'openrouter'
+              : 'custom'),
+        baseUrl: flags.baseUrl,
+        apiKey: flags.apiKey,
+        defaultModel,
+        cachedModels,
+      });
+
+      logSuccess(`Provider "${name}" configured successfully!`);
+      logStep('Base URL', flags.baseUrl);
+      if (defaultModel) {
+        logStep('Default Model', defaultModel);
+      }
+      return 0;
+    }
+
+    if (action === 'use') {
+      const name = args[2] ?? flags.name;
+      if (!name) {
+        logError('Provider name required. Usage: joy-media agent provider use <name>');
+        return 1;
+      }
+      const providers = loadAiProviders();
+      if (!providers[name] && name !== 'openrouter' && name !== 'kilo' && name !== 'openai') {
+        logError(
+          `Unknown provider "${name}". Run "joy-media agent provider list" to see available providers.`,
+        );
+        return 1;
+      }
+      const current = loadCliConfig();
+      const updated = {
+        ...current,
+        activeProvider: name,
+        ...(providers[name]?.defaultModel ? { defaultModel: providers[name]!.defaultModel } : {}),
+      };
+      saveCliConfig(updated);
+      logSuccess(`Active provider set to "${name}".`);
+      if (providers[name]?.defaultModel) {
+        logStep('Default Model', providers[name]!.defaultModel);
+      }
+      return 0;
+    }
+
+    if (action === 'remove' || action === 'delete' || action === 'rm') {
+      const name = args[2] ?? flags.name;
+      if (!name) {
+        logError('Provider name required. Usage: joy-media agent provider remove <name>');
+        return 1;
+      }
+      if (deleteAiProvider(name)) {
+        logSuccess(`Provider "${name}" removed.`);
+        const cfg = loadCliConfig();
+        if (cfg.activeProvider === name) {
+          const { activeProvider: _, ...rest } = cfg;
+          saveCliConfig(rest);
+        }
+        return 0;
+      } else {
+        logError(`Provider "${name}" not found.`);
+        return 1;
+      }
+    }
+
+    logError(`Unknown provider action "${action}". Available actions: list, add, use, remove`);
+    return 1;
+  }
+
+  if (sub === 'models') {
+    const targetProviderName =
+      args[1] ?? flags.provider ?? loadCliConfig().activeProvider ?? 'openrouter';
+    const providers = loadAiProviders();
+    const providerConfig = providers[targetProviderName];
+
+    let baseUrl = flags.baseUrl ?? providerConfig?.baseUrl;
+    let apiKey = flags.apiKey ?? providerConfig?.apiKey;
+
+    if (!baseUrl) {
+      if (targetProviderName === 'kilo') {
+        baseUrl = 'https://api.kilo.ai/api/gateway/v1';
+        apiKey = apiKey ?? process.env.KILO_API_KEY;
+      } else if (targetProviderName === 'openrouter') {
+        baseUrl = 'https://openrouter.ai/api/v1';
+        apiKey = apiKey ?? process.env.OPENROUTER_API_KEY;
+      } else {
+        logError(`No baseUrl found for provider "${targetProviderName}". Specify --url <url>`);
+        return 1;
+      }
+    }
+
+    printBanner();
+    logInfo(`Fetching models from ${c(baseUrl, 'bold')}...`);
+
+    try {
+      const normalized = baseUrl.replace(/\/+$/, '');
+      const headers: Record<string, string> = {};
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+      const res = await fetch(`${normalized}/models`, { headers });
+      if (!res.ok) {
+        throw new Error(`Endpoint returned HTTP ${res.status}: ${res.statusText}`);
+      }
+      const json = (await res.json()) as { data?: unknown };
+      const raw = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
+      const modelIds: string[] = raw
+        .map((item: { id?: string } | string) =>
+          typeof item === 'string' ? item : item.id,
+        )
+        .filter((id): id is string => typeof id === 'string' && id.length > 0);
+
+      console.log(`\n  ${c(`Discovered ${modelIds.length} models:`, 'bold')}\n`);
+      for (const id of modelIds) {
+        console.log(`  • ${id}`);
+      }
+      console.log();
+
+      // Save to cache
+      if (providerConfig) {
+        setAiProvider(targetProviderName, {
+          ...providerConfig,
+          cachedModels: modelIds,
+        });
+      }
+
+      return 0;
+    } catch (err) {
+      logError(`Failed to fetch models: ${String(err)}`);
+      return 1;
+    }
+  }
+
+  if (sub === 'model') {
+    const action = args[1] ?? 'get';
+    if (action === 'set') {
+      const modelId = args[2] ?? flags.model;
+      if (!modelId) {
+        logError('Model ID required. Usage: joy-media agent model set <model-id>');
+        return 1;
+      }
+      const cfg = loadCliConfig();
+      saveCliConfig({ ...cfg, defaultModel: modelId });
+      logSuccess(`Default model set to "${modelId}".`);
+      return 0;
+    }
+    const cfg = loadCliConfig();
+    logInfo(`Current default model: ${cfg.defaultModel ?? 'anthropic/claude-3.7-sonnet'}`);
+    return 0;
+  }
 
   if (sub === 'probe') {
     printBanner();
