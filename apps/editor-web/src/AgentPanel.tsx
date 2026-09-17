@@ -3287,6 +3287,7 @@ export function AgentPanel({
                   color: '#ffb020',
                   cursor: 'pointer',
                   fontWeight: 500,
+                  flexShrink: 0,
                 }}
               >
                 <span>⚡</span>
@@ -3301,6 +3302,30 @@ export function AgentPanel({
                   {activeModelLabel || 'Models'}
                 </span>
                 <span style={{ fontSize: '9px', opacity: 0.8 }}>▼</span>
+              </button>
+            )}
+            {onOpenSettings !== undefined && (
+              <button
+                type="button"
+                className="joy-code-settings-trigger-btn"
+                aria-label="Joy Code Settings"
+                title="Joy Code Settings"
+                onClick={onOpenSettings}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '3px 8px',
+                  fontSize: '12px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  color: '#ccc',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                }}
+              >
+                ⚙️
               </button>
             )}
           </div>
@@ -3430,32 +3455,6 @@ export function AgentPanel({
                   <strong>Joy Code</strong> prepares controlled timeline plans. Nothing changes
                   until the plan passes policy and the execution mode permits it.
                 </p>
-                {isDisconnected && (
-                  <div
-                    className="joy-code-connect-prompt"
-                    style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}
-                  >
-                    {onOpenModelDrawer !== undefined && (
-                      <button
-                        type="button"
-                        className="button-primary joy-code-configure-agent-btn"
-                        onClick={onOpenModelDrawer}
-                        style={{ background: '#ffb020', color: '#111', fontWeight: 600 }}
-                      >
-                        ⚡ Choose or Add Model API
-                      </button>
-                    )}
-                    {onOpenSettings !== undefined && (
-                      <button
-                        type="button"
-                        className="button-secondary joy-code-configure-agent-btn"
-                        onClick={onOpenSettings}
-                      >
-                        Agent Settings
-                      </button>
-                    )}
-                  </div>
-                )}
               </div>
             )}
 
@@ -3481,35 +3480,6 @@ export function AgentPanel({
                   >
                     {message.body}
                   </p>
-                  {message.role === 'assistant' &&
-                    isDisconnected &&
-                    (message.body.includes('Connect a model in Agent Settings') ||
-                      message.body.includes('The configured model is incompatible') ||
-                      message.body.includes('Connect a remote model')) && (
-                      <div
-                        style={{ marginTop: '8px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}
-                      >
-                        {onOpenModelDrawer !== undefined && (
-                          <button
-                            type="button"
-                            className="button-primary joy-code-configure-agent-btn"
-                            onClick={onOpenModelDrawer}
-                            style={{ background: '#ffb020', color: '#111', fontWeight: 600 }}
-                          >
-                            ⚡ Open Model Drawer
-                          </button>
-                        )}
-                        {onOpenSettings !== undefined && (
-                          <button
-                            type="button"
-                            className="button-secondary joy-code-configure-agent-btn"
-                            onClick={onOpenSettings}
-                          >
-                            Agent Settings
-                          </button>
-                        )}
-                      </div>
-                    )}
                 </div>
               </article>
             ))}
