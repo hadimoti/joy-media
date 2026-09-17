@@ -318,7 +318,7 @@ import {
 import { openJoyCodeOpfsAssetCache } from './joycode-opfs-assets.js';
 import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
 import { Scene3DPanel } from './Scene3DPanel.js';
-import { JoyAgentSettingsDialog } from './JoyAgentSettingsDialog.js';
+import { JoyAgentSettingsDialog, type JoyAgentSettingsTab } from './JoyAgentSettingsDialog.js';
 import { ModelDrawer } from './ModelDrawer.js';
 import { AssetLibrarySettingsDialog } from './AssetLibrarySettingsDialog.js';
 import {
@@ -1094,6 +1094,7 @@ function EditorWorkspace({
     saveAgentPolicy(storage, agentPolicy);
   }, [agentPolicy, storage]);
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
+  const [agentSettingsTab, setAgentSettingsTab] = useState<JoyAgentSettingsTab>('models');
   const [modelDrawerOpen, setModelDrawerOpen] = useState(false);
   const [assetLibrarySettingsOpen, setAssetLibrarySettingsOpen] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
@@ -4927,7 +4928,11 @@ function EditorWorkspace({
           setAssetLibrarySettingsOpen(true);
           break;
         case 'agent.executionMode':
+          setAgentSettingsTab('execution');
+          setAgentSettingsOpen(true);
+          break;
         case 'agent.settings':
+          setAgentSettingsTab('models');
           setAgentSettingsOpen(true);
           break;
         case 'agent.stop':
@@ -6686,8 +6691,14 @@ function EditorWorkspace({
           resolveAudioAssetUrl={resolveAudioAssetUrl}
           agentPresenceStore={appAgentPresenceStore}
           agentPreviewStore={appAgentPreviewStore}
-          onOpenSettings={() => setAgentSettingsOpen(true)}
-          onOpenModelDrawer={() => setModelDrawerOpen(true)}
+          onOpenSettings={() => {
+            setAgentSettingsTab('models');
+            setAgentSettingsOpen(true);
+          }}
+          onOpenModelDrawer={() => {
+            setAgentSettingsTab('models');
+            setAgentSettingsOpen(true);
+          }}
           activeModelLabel={
             agentConnectionStatus
               ? `${agentConnectionStatus.provider}: ${agentConnectionStatus.modelId}`
@@ -7539,6 +7550,7 @@ function EditorWorkspace({
               }}
               onNotice={showToast}
               onClose={() => setAgentSettingsOpen(false)}
+              initialTab={agentSettingsTab}
             />
           )}
           {modelDrawerOpen && (

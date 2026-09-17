@@ -1,0 +1,566 @@
+/* Joy Code Settings Dialog - Professional Two-Pane Layout */
+
+.joy-agent-settings-dialog-v2 {
+  display: flex;
+  flex-direction: column;
+  width: min(1040px, calc(100vw - 40px));
+  height: min(720px, calc(100vh - 40px));
+  max-height: 760px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: #131418;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 176, 32, 0.1);
+  color: #e6e6e6;
+  font-family: inherit;
+}
+
+/* Header */
+.joy-agent-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: #18191f;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.joy-agent-settings-header-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.joy-agent-settings-header-title h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+
+.joy-agent-settings-header-title .joy-settings-badge {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(255, 176, 32, 0.15);
+  color: #ffb020;
+  border: 1px solid rgba(255, 176, 32, 0.25);
+}
+
+.joy-agent-settings-close-btn {
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.joy-agent-settings-close-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Body: Two-Pane Split */
+.joy-agent-settings-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Left Sidebar */
+.joy-agent-settings-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: #15161b;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  padding: 14px 10px;
+  gap: 4px;
+}
+
+.joy-settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  color: #9da3af;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  position: relative;
+}
+
+.joy-settings-nav-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #f3f4f6;
+}
+
+.joy-settings-nav-item.is-active {
+  background: rgba(255, 176, 32, 0.12);
+  color: #ffb020;
+  font-weight: 600;
+}
+
+.joy-settings-nav-item.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  background: #ffb020;
+  border-radius: 0 3px 3px 0;
+}
+
+.joy-settings-nav-icon {
+  font-size: 15px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+}
+
+.joy-settings-sidebar-footer {
+  margin-top: auto;
+  padding: 12px 10px 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.joy-settings-sidebar-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: #888;
+}
+
+.joy-settings-sidebar-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #555;
+  flex-shrink: 0;
+}
+
+.joy-settings-sidebar-status-dot.is-connected {
+  background: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+}
+
+/* Right Main Panel */
+.joy-agent-settings-main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  background: #131418;
+}
+
+.joy-settings-section-header {
+  margin-bottom: 4px;
+}
+
+.joy-settings-section-kicker {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #ffb020;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.joy-settings-section-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.joy-settings-section-desc {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: #8e95a5;
+  line-height: 1.4;
+}
+
+/* Cards & Containers */
+.joy-settings-card {
+  background: #191b22;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.joy-settings-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.joy-settings-card-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #eee;
+  margin: 0;
+}
+
+/* Active Status Banner */
+.joy-settings-active-banner {
+  background: linear-gradient(135deg, rgba(255, 176, 32, 0.08) 0%, rgba(20, 21, 26, 0.9) 100%);
+  border: 1px solid rgba(255, 176, 32, 0.25);
+  border-radius: 10px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.joy-settings-active-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.joy-settings-active-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: rgba(255, 176, 32, 0.15);
+  color: #ffb020;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.joy-settings-active-details strong {
+  display: block;
+  font-size: 13.5px;
+  color: #fff;
+  font-weight: 600;
+}
+
+.joy-settings-active-details span {
+  font-size: 12px;
+  color: #999;
+}
+
+/* Form Styles */
+.joy-settings-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.joy-settings-field-full {
+  grid-column: 1 / -1;
+}
+
+.joy-settings-field label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #ccc;
+}
+
+.joy-settings-field input,
+.joy-settings-field select {
+  width: 100%;
+  background: #111216;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: #fff;
+  font-size: 13px;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.joy-settings-field input:focus,
+.joy-settings-field select:focus {
+  border-color: #ffb020;
+  box-shadow: 0 0 0 2px rgba(255, 176, 32, 0.2);
+}
+
+.joy-settings-field input::placeholder {
+  color: #555;
+}
+
+/* Model Chips */
+.joy-settings-model-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 8px;
+  background: #111216;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.joy-settings-model-chip {
+  padding: 4px 10px;
+  font-size: 11.5px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #ccc;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.joy-settings-model-chip:hover {
+  background: rgba(255, 176, 32, 0.15);
+  border-color: rgba(255, 176, 32, 0.35);
+  color: #fff;
+}
+
+.joy-settings-model-chip.is-selected {
+  background: #ffb020;
+  border-color: #ffb020;
+  color: #111;
+  font-weight: 600;
+}
+
+/* Provider Cards in List */
+.joy-settings-provider-card {
+  background: #14151a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  transition: border-color 0.15s ease;
+}
+
+.joy-settings-provider-card:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.joy-settings-provider-card.is-active {
+  border-color: rgba(255, 176, 32, 0.4);
+  background: rgba(255, 176, 32, 0.04);
+}
+
+.joy-settings-provider-meta strong {
+  display: block;
+  font-size: 13px;
+  color: #fff;
+}
+
+.joy-settings-provider-meta span {
+  font-size: 11.5px;
+  color: #777;
+}
+
+/* Buttons */
+.joy-btn-primary {
+  background: #ffb020;
+  color: #111;
+  border: none;
+  font-weight: 600;
+  font-size: 12.5px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.joy-btn-primary:hover:not(:disabled) {
+  background: #ffbe3d;
+}
+
+.joy-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.joy-btn-secondary {
+  background: rgba(255, 255, 255, 0.07);
+  color: #e0e0e0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 12px;
+  padding: 7px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.joy-btn-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.joy-btn-secondary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.joy-btn-danger {
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.joy-btn-danger:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
+
+/* Execution Mode Radio Cards */
+.joy-settings-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.joy-settings-mode-card {
+  background: #14151b;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 12px 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.joy-settings-mode-card:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: #181920;
+}
+
+.joy-settings-mode-card.is-selected {
+  border-color: #ffb020;
+  background: rgba(255, 176, 32, 0.06);
+}
+
+.joy-settings-mode-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.joy-settings-mode-card-desc {
+  font-size: 11.5px;
+  color: #888;
+  line-height: 1.35;
+}
+
+/* Capabilities Grid */
+.joy-settings-capabilities-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.joy-settings-cap-item {
+  background: #14151b;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  color: #ddd;
+  cursor: pointer;
+}
+
+.joy-settings-cap-item input {
+  accent-color: #ffb020;
+  cursor: pointer;
+}
+
+/* Diagnostics Rows */
+.joy-settings-diagnostic-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  background: #14151b;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  font-size: 12.5px;
+}
+
+.joy-settings-diagnostic-status {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.joy-settings-diagnostic-status.is-supported {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.joy-settings-diagnostic-status.is-unavailable {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+/* Footer */
+.joy-agent-settings-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: #18191f;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11.5px;
+  color: #888;
+}
+
+.joy-agent-settings-footer-vault {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
