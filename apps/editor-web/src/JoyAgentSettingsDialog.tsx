@@ -19,6 +19,7 @@ import {
   type DesktopProviderProfile,
 } from './desktop-client.js';
 import { getStoredMediaToken } from './media-session.js';
+import { DesktopAccountModal } from './DesktopAccountModal.js';
 import './JoyAgentSettingsDialog.css';
 
 export type JoyAgentSettingsTab =
@@ -179,6 +180,7 @@ export function JoyAgentSettingsDialog({
   const [modelFilter, setModelFilter] = useState('');
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
+  const [accountModalOpen, setAccountModalOpen] = useState(false);
 
   // Media capability probe state
   const [mediaCapabilities, setMediaCapabilities] = useState<
@@ -775,6 +777,31 @@ export function JoyAgentSettingsDialog({
                             <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#888' }}>
                               Uses authenticated secure reverse-proxy via joyst.ir. No secret key required.
                             </p>
+                            {typeof window !== 'undefined' && !getStoredMediaToken(window.localStorage) ? (
+                              <div style={{ marginTop: '10px' }}>
+                                <button
+                                  type="button"
+                                  className="joy-settings-text-btn"
+                                  style={{
+                                    padding: '6px 12px',
+                                    background: 'linear-gradient(135deg, #00d2ff, #0077ff)',
+                                    border: 'none',
+                                    borderRadius: '6px',
+                                    color: '#ffffff',
+                                    fontSize: '12px',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                  }}
+                                  onClick={() => setAccountModalOpen(true)}
+                                >
+                                  🔑 Sign In with JOY Account to Activate
+                                </button>
+                              </div>
+                            ) : (
+                              <p style={{ margin: '6px 0 0', fontSize: '11.5px', color: '#10b981' }}>
+                                ✓ JOY Account session linked
+                              </p>
+                            )}
                           </div>
                         ) : (
                           <div className="joy-settings-field-full joy-settings-field">
@@ -1386,6 +1413,16 @@ export function JoyAgentSettingsDialog({
           </button>
         </footer>
       </section>
+      <DesktopAccountModal
+        isOpen={accountModalOpen}
+        onClose={() => setAccountModalOpen(false)}
+        onSuccess={() => {
+          setConnectionNotice({
+            kind: 'info',
+            message: 'JOY Account linked successfully! Joy Model is now ready to use.',
+          });
+        }}
+      />
     </div>
   );
 }

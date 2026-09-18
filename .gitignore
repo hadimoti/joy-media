@@ -28,6 +28,8 @@ apps/desktop/renderer/
 
 # Task scheduler scratch
 .task/
+.kilo/
+.scratchpad/
 
 # SQLite databases & temp journals
 *.db

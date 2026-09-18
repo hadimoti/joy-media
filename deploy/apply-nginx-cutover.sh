@@ -67,8 +67,8 @@ target_old_api = """    location /api/ {
     }"""
 
 replacement_api = """    # Narrowed from "proxy everything" to exactly the surfaces wave 4/5 kept:
-    # OTP auth, devices, account, entitlements, release metadata, and USDC billing.
-    location ~ ^/api/v1/(?:auth|devices|account|entitlements|releases|billing)(?:/|$) {
+    # OTP auth, devices, account, entitlements, release metadata, USDC billing, and Joy Model gateway.
+    location ~ ^/api/v1/(?:auth|devices|account|entitlements|releases|billing|agent)(?:/|$) {
         rewrite ^/api/(.*)$ /$1 break;
         proxy_pass http://127.0.0.1:8790;
         proxy_http_version 1.1;

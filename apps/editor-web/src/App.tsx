@@ -425,6 +425,7 @@ import {
 } from './icons.js';
 import { logoutJoySession, probeJoySession, type JoySessionState } from './identity.js';
 import { getStoredMediaToken } from './media-session.js';
+import { DesktopAccountModal } from './DesktopAccountModal.js';
 import {
   markCompletedExportCacheUnavailable,
   recoverInterruptedProjectExports,
@@ -1159,6 +1160,7 @@ function EditorWorkspace({
     agentConnectionStatus?.capability === 'plan-only';
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
   const joySessionRefreshSeqRef = useRef(0);
+  const [desktopAccountModalOpen, setDesktopAccountModalOpen] = useState(false);
   const [toasts, setToasts] = useState<
     readonly { id: string; message: string; kind: 'info' | 'success' | 'error' }[]
   >([]);
@@ -7257,15 +7259,30 @@ function EditorWorkspace({
                           </div>
                           <span className="account-card-dot session-ready" aria-hidden="true" />
                         </div>
-                        <button
-                          type="button"
-                          className="account-sign-out"
-                          title={`Sign out of ${JOY_STUDIO_NAME}`}
-                          onClick={() => void signOut()}
-                        >
-                          <LogoutIcon />
-                          Sign out
-                        </button>
+                        {joySession.subject === 'local-creator' ? (
+                          <button
+                            type="button"
+                            className="account-sign-out"
+                            style={{ background: 'linear-gradient(135deg, #00d2ff, #0077ff)', color: '#ffffff', fontWeight: 600 }}
+                            title="Connect your JOY account to activate Joy Model and sync subscription"
+                            onClick={() => {
+                              setAccountOpen(false);
+                              setDesktopAccountModalOpen(true);
+                            }}
+                          >
+                            🔑 Connect JOY Account
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="account-sign-out"
+                            title={`Sign out of ${JOY_STUDIO_NAME}`}
+                            onClick={() => void signOut()}
+                          >
+                            <LogoutIcon />
+                            Sign out
+                          </button>
+                        )}
                       </>
                     )}
                     {joySession.kind === 'no-access' && (
@@ -7629,6 +7646,11 @@ function EditorWorkspace({
               </div>
             </div>
           )}
+          <DesktopAccountModal
+            isOpen={desktopAccountModalOpen}
+            onClose={() => setDesktopAccountModalOpen(false)}
+            onSuccess={refreshJoySession}
+          />
         </main>
       </AgentPresenceProvider>
     </AgentPreviewProvider>

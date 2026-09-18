@@ -14,6 +14,8 @@ export default tseslint.config(
       '**/test-results*/**',
       '**/test-output/**',
       '**/.claude/worktrees/**',
+      '**/.kilo/**',
+      '**/.scratchpad/**',
       '**/web-releases/**',
       '**/releases/**',
       'apps/desktop/renderer/**',
