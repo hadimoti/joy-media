@@ -65,4 +65,3 @@ describe('resolveWorkerEntry', () => {
     expect(result).toEqual({ command: execPath, args: [tsxCli, devEntry] });
   });
 });
-

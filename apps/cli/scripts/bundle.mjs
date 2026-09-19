@@ -1,13 +1,13 @@
 import { resolve } from 'node:path';
 import { builtinModules } from 'node:module';
 
-const esbuildPath = resolve(import.meta.dirname, '../../../node_modules/.pnpm/esbuild@0.28.1/node_modules/esbuild/lib/main.js');
+const esbuildPath = resolve(
+  import.meta.dirname,
+  '../../../node_modules/.pnpm/esbuild@0.28.1/node_modules/esbuild/lib/main.js',
+);
 const { build } = await import(`file://${esbuildPath.replace(/\\/g, '/')}`);
 
-const nodeExternals = [
-  ...builtinModules,
-  ...builtinModules.map(m => `node:${m}`)
-];
+const nodeExternals = [...builtinModules, ...builtinModules.map((m) => `node:${m}`)];
 
 const cliRoot = resolve(import.meta.dirname, '..');
 
@@ -23,9 +23,9 @@ await build({
     js: `#!/usr/bin/env node
 import { createRequire as __createRequire } from "node:module";
 const require = __createRequire(import.meta.url);
-`
+`,
   },
-  external: nodeExternals
+  external: nodeExternals,
 });
 
 console.log('Successfully bundled @joy-media/cli to dist/joy-media-bundle.mjs');

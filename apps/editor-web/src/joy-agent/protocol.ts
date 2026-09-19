@@ -54,12 +54,7 @@ export type JoyAgentErrorCode =
   | 'JOY_AGENT_PROVIDER_INCOMPATIBLE';
 
 export type JoyAgentProvider =
-  | 'joy-hosted'
-  | 'openrouter'
-  | 'openai-compatible'
-  | 'kilo'
-  | 'custom'
-  | 'dual-brain';
+  'joy-hosted' | 'openrouter' | 'openai-compatible' | 'kilo' | 'custom' | 'dual-brain';
 
 export type JoyProviderMode = Exclude<JoyAgentProvider, 'dual-brain'>;
 

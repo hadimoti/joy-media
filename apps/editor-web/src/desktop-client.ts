@@ -96,7 +96,10 @@ export function isDesktopHost(): boolean {
 
 /** Resolves the base URL for VPS backend requests. Inside desktop host, targets https://joyst.ir/api. */
 export function getRemoteApiBaseUrl(): string {
-  if (typeof window !== 'undefined' && (window as unknown as Record<string, unknown>).__JOY_MEDIA_API_BASE__) {
+  if (
+    typeof window !== 'undefined' &&
+    (window as unknown as Record<string, unknown>).__JOY_MEDIA_API_BASE__
+  ) {
     return (window as unknown as Record<string, unknown>).__JOY_MEDIA_API_BASE__ as string;
   }
   if (isDesktopHost()) {
@@ -330,9 +333,7 @@ export async function selectDesktopAssetLibraryDirectory(): Promise<DesktopAsset
  * Loads the local catalog.json from the configured local asset library folder.
  */
 export async function getDesktopAssetLibraryCatalog(): Promise<DesktopAssetCatalog> {
-  return (await requireBridge().invoke(
-    'desktop.asset-library.get-catalog',
-  )) as DesktopAssetCatalog;
+  return (await requireBridge().invoke('desktop.asset-library.get-catalog')) as DesktopAssetCatalog;
 }
 
 /**
@@ -342,4 +343,3 @@ export function resolveDesktopAssetUrl(relativePathOrId: string): string {
   const clean = relativePathOrId.replace(/^joy-asset:\/\/library\/?/, '').replace(/^\/+/, '');
   return `joy-asset://library/${clean}`;
 }
-

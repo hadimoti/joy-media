@@ -2582,7 +2582,10 @@ export function TimelinePanel({
                       {trackName}
                     </span>
                     {track.family === 'audio' && (
-                      <div className="timeline-audio-dsp-pills" title="Real-time Audio DSP: DeepFilterNet & Normalization">
+                      <div
+                        className="timeline-audio-dsp-pills"
+                        title="Real-time Audio DSP: DeepFilterNet & Normalization"
+                      >
                         <span
                           className={`audio-dsp-pill dsp-dfn ${source.clips.length > 0 ? 'is-active' : 'is-ready'}`}
                           title="DeepFilterNet (DFN) Active"

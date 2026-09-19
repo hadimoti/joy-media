@@ -75,10 +75,6 @@ test.describe('WP-29 R5 batch G — bulk assets and reload recovery', () => {
     await targetCard.getByRole('checkbox', { name: `Select ${imageName}` }).check();
     const toolbar = page.getByRole('toolbar', { name: 'Bulk asset actions' });
     await expect(toolbar).toContainText('1');
-    await toolbar.getByRole('button', { name: 'Share selected media to cloud' }).click();
-    await expect(page.locator('.asset-library .joy-panel-note')).toContainText(
-      'No selected media needs backup',
-    );
     await toolbar.getByRole('button', { name: 'Edit selected with AI' }).click();
     await expect(page.locator('.joy-code-panel')).toBeVisible();
     await expect(page.getByRole('list', { name: 'Attached media' })).toContainText(imageName);
@@ -98,9 +94,9 @@ test.describe('WP-29 R5 batch G — bulk assets and reload recovery', () => {
       caseId: 24,
       functional: 'PASS',
       uiA11y: 'PASS',
-      expected: 'Bulk cloud, AI, and confirmed delete actions target only the selected asset.',
+      expected: 'Bulk AI attach and confirmed delete actions target only the selected asset.',
       actual:
-        'Cloud reported the already-backed-up state, AI attached image.png, and confirmed delete removed exactly it.',
+        'AI attached image.png to the JOY Code workspace, and confirmed delete removed exactly it.',
       fixture: 'image.png',
     });
   });

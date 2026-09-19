@@ -111,8 +111,7 @@ export async function registerDevice(
   const token = getStoredMediaToken(storage);
   if (!token) return undefined;
   const name =
-    displayName ||
-    (isDesktopHost() ? 'JOY Desktop Studio (Windows)' : 'JOY Web Studio (Browser)');
+    displayName || (isDesktopHost() ? 'JOY Desktop Studio (Windows)' : 'JOY Web Studio (Browser)');
   try {
     return await requestJson(fetchFn, '/v1/devices', { displayName: name }, token);
   } catch {

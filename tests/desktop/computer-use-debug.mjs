@@ -5,11 +5,14 @@ import { mkdirSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 const desktopRoot = resolve('apps/desktop');
-const localAppData = process.env.LOCALAPPDATA || join(process.env.USERPROFILE || 'C:/Users/HadiMoti', 'AppData/Local');
+const localAppData =
+  process.env.LOCALAPPDATA || join(process.env.USERPROFILE || 'C:/Users/HadiMoti', 'AppData/Local');
 const installedExe = resolve(localAppData, 'Programs/JOY Media/joy-media.exe');
 const distExe = resolve(desktopRoot, 'dist/joy-media-win32-x64/joy-media.exe');
 const targetExe = existsSync(installedExe) ? installedExe : distExe;
-const targetCwd = existsSync(installedExe) ? resolve(localAppData, 'Programs/JOY Media') : resolve(desktopRoot, 'dist', 'joy-media-win32-x64');
+const targetCwd = existsSync(installedExe)
+  ? resolve(localAppData, 'Programs/JOY Media')
+  : resolve(desktopRoot, 'dist', 'joy-media-win32-x64');
 
 const screenshotDir = resolve(
   process.env.JOY_SCREENSHOT_DIR ||
@@ -124,7 +127,8 @@ try {
           payload: {
             channel: 'stable',
             version: '1.0.0',
-            downloadUrl: 'https://github.com/hadimoti/joy-media/releases/download/v1.0.0-desktop/joy-media-windows-x64-v1.0.0.zip',
+            downloadUrl:
+              'https://github.com/hadimoti/joy-media/releases/download/v1.0.0-desktop/joy-media-windows-x64-v1.0.0.zip',
             sha256: '4fab742dfb598b02609fa288f4668216ab96693d1d495018f520db828771f698',
           },
         },
@@ -147,7 +151,14 @@ try {
   await window.evaluate(() => {
     const origFetch = window.fetch;
     window.fetch = async (input, init) => {
-      const u = typeof input === 'string' ? input : input instanceof URL ? input.href : (input && input.url ? input.url : '');
+      const u =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input && input.url
+              ? input.url
+              : '';
       if (u.includes('/api/v1/auth/session')) {
         return new Response(
           JSON.stringify({
@@ -158,7 +169,7 @@ try {
               avatarAvailable: false,
             },
           }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
       }
       return origFetch(input, init);
@@ -167,7 +178,10 @@ try {
 
   // Step 4: Check if login screen is present or if instant offline creator session unlocked
   console.log('4. Verifying offline desktop creator session status...');
-  const isLoginVisible = await window.locator('.login-screen').isVisible().catch(() => false);
+  const isLoginVisible = await window
+    .locator('.login-screen')
+    .isVisible()
+    .catch(() => false);
   if (isLoginVisible) {
     console.log('Login screen visible; performing Token login flow to unlock workspace...');
     const tokenTabBtn = window.locator('button.lmethod-btn:has-text("Token")');
@@ -180,7 +194,9 @@ try {
       const submitBtn = window.locator('button.login-btn');
       await submitBtn.click();
       console.log('Submitted token form, awaiting unlock transition...');
-      await window.waitForSelector('.login-screen', { state: 'detached', timeout: 10000 }).catch(() => {});
+      await window
+        .waitForSelector('.login-screen', { state: 'detached', timeout: 10000 })
+        .catch(() => {});
     }
   } else {
     console.log('✔ Instant offline creator mode unlocked automatically! No login gate shown.');
@@ -195,7 +211,9 @@ try {
 
   // Step 5: Open Project in Library
   console.log('5. Opening Timeline Elements Showcase project...');
-  const projectCard = window.locator('.project-library-card:has-text("Timeline Elements Showcase")').first();
+  const projectCard = window
+    .locator('.project-library-card:has-text("Timeline Elements Showcase")')
+    .first();
   if (await projectCard.isVisible()) {
     await projectCard.click();
     console.log('Clicked Timeline Elements Showcase card, waiting for editor workspace...');
@@ -220,7 +238,11 @@ try {
   // Step 6: Inspect Editor DOM
   console.log('6. Inspecting active Timeline & Workspace DOM elements...');
   const editorStructure = await window.evaluate(() => {
-    const panels = Array.from(document.querySelectorAll('[class*="dockview-panel"], [class*="panel"], [class*="timeline"], [class*="monitor"], [class*="inspector"]'));
+    const panels = Array.from(
+      document.querySelectorAll(
+        '[class*="dockview-panel"], [class*="panel"], [class*="timeline"], [class*="monitor"], [class*="inspector"]',
+      ),
+    );
     const buttons = Array.from(document.querySelectorAll('button, [role="button"], [role="tab"]'));
     const canvases = Array.from(document.querySelectorAll('canvas'));
     return {
@@ -240,18 +262,26 @@ try {
 
   // Step 7: Verify Joy Agent Settings & OpenRouter BYOK Dialog
   console.log('7. Verifying Joy Agent Settings & OpenRouter BYOK UI...');
-  const configureBtn = window.locator('button:has-text("Configure OpenRouter / Joy Agent")').first();
+  const configureBtn = window
+    .locator('button:has-text("Configure OpenRouter / Joy Agent")')
+    .first();
   const hasConfigureBtn = await configureBtn.isVisible().catch(() => false);
   if (hasConfigureBtn) {
     console.log('Found "Configure OpenRouter / Joy Agent" button in AgentPanel, clicking it...');
     await configureBtn.click({ force: true });
   } else {
     console.log('Opening Joy Code Settings via application menu...');
-    const joyCodeMenu = window.locator('button.menu-trigger:has-text("Joy Code"), [role="menuitem"]:has-text("Joy Code")').first();
+    const joyCodeMenu = window
+      .locator('button.menu-trigger:has-text("Joy Code"), [role="menuitem"]:has-text("Joy Code")')
+      .first();
     if (await joyCodeMenu.isVisible()) {
       await joyCodeMenu.click();
       await new Promise((r) => setTimeout(r, 400));
-      const settingsItem = window.locator('button:has-text("Joy Code Settings"), [role="menuitem"]:has-text("Joy Code Settings")').first();
+      const settingsItem = window
+        .locator(
+          'button:has-text("Joy Code Settings"), [role="menuitem"]:has-text("Joy Code Settings")',
+        )
+        .first();
       if (await settingsItem.isVisible()) {
         await settingsItem.click();
       }
@@ -261,7 +291,9 @@ try {
   await new Promise((r) => setTimeout(r, 1200));
 
   // Inspect settings dialog if open
-  const settingsModal = window.locator('.agent-settings-dialog, [role="dialog"], .dialog-backdrop').first();
+  const settingsModal = window
+    .locator('.agent-settings-dialog, [role="dialog"], .dialog-backdrop')
+    .first();
   const isSettingsVisible = await settingsModal.isVisible().catch(() => false);
   console.log(`Joy Agent Settings Dialog visible: ${isSettingsVisible}`);
   report.metrics.isSettingsVisible = isSettingsVisible;
@@ -274,11 +306,14 @@ try {
 
     // Verify OpenRouter provider options
     const dialogText = await settingsModal.innerText().catch(() => '');
-    report.metrics.dialogHasOpenRouter = dialogText.includes('OpenRouter') || dialogText.includes('openrouter');
+    report.metrics.dialogHasOpenRouter =
+      dialogText.includes('OpenRouter') || dialogText.includes('openrouter');
     console.log(`Dialog mentions OpenRouter: ${report.metrics.dialogHasOpenRouter}`);
 
     // Close settings dialog via close button or Escape
-    const closeBtn = window.locator('button[aria-label="Close dialog"], button:has-text("Close")').first();
+    const closeBtn = window
+      .locator('button[aria-label="Close dialog"], button:has-text("Close")')
+      .first();
     if (await closeBtn.isVisible()) {
       await closeBtn.click();
     } else {
@@ -294,7 +329,7 @@ try {
   console.log(`Captured screenshot 5 (Full App Verified): ${shotFinal}`);
 
   const fatalErrors = report.consoleErrors.filter(
-    (err) => !err.includes('Failed to load resource: net::') && !err.includes('Failed to fetch')
+    (err) => !err.includes('Failed to load resource: net::') && !err.includes('Failed to fetch'),
   );
 
   report.metrics.durationMs = Date.now() - startTime;
@@ -308,7 +343,9 @@ try {
   console.log(`Offline Resource Notices (benign): ${report.metrics.offlineResourceNoticeCount}`);
   console.log(`Screenshots Captured: ${report.screenshots.length}`);
   console.log(`IPC Available: ${ipcVerification.available}`);
-  console.log(`Worker Status Online: ${ipcVerification.results?.workerStatusAfterStart?.connection || 'n/a'}`);
+  console.log(
+    `Worker Status Online: ${ipcVerification.results?.workerStatusAfterStart?.connection || 'n/a'}`,
+  );
   console.log(`Update Check Result: ${ipcVerification.results?.updateCheck?.status || 'verified'}`);
   console.log(`Overall Result: ${report.passed ? 'PASSED (Clean)' : 'FAILED'}`);
 } catch (err) {

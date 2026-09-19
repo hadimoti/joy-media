@@ -16,13 +16,13 @@
 
 ## 0. Executive summary — the five things that block everything else
 
-| # | Blocker | Evidence |
-|---|---------|----------|
-| B1 | **`main` does not typecheck and does not lint.** | `pnpm typecheck` → 2 × TS2345 in `apps/editor-web/src/AssetLibraryPanel.tsx:562,598`; `pnpm lint` → 9 errors. Cannot publish a repo whose default branch fails its own `pnpm check`. |
-| B2 | **The desktop app cannot reach the VPS at all.** Every API call in the renderer is the relative path `/api/...`. Under the packaged origin `joy-media-app://renderer` that resolves to `joy-media-app://renderer/api/...`, never to `joyst.ir`. | `apps/editor-web/src/media-session.ts:58`, `identity.ts:57,93,130`, `control-plane-client.ts:299` |
-| B3 | **The local Worker never runs a job.** It only enters its daemon loop when `JOY_MEDIA_API_URL` is set and it has paired with the *remote* control plane. The desktop supervisor spawns it with no env and there is no local job channel. | `apps/worker/src/index.ts:35-80`, `apps/desktop/src/main/worker-supervisor.ts:67` |
-| B4 | **Subscription / entitlement / auto-update is dead code end-to-end.** `checkForDesktopUpdate` is exported and unit-tested but never called by any renderer code; there is no sign-in, account, or subscription UI in the desktop shell. | `apps/editor-web/src/desktop-client.ts:109` — zero non-test callers |
-| B5 | **Production VPS host, root user and SSH key paths are committed in tracked Markdown.** | `STATE.md:188` (`82.115.8.224`, root, key path), `ORCHESTRATION.md:98` (`46.249.103.142`), `AGENTIC_EDITING_NEXT_AGENT.md:41` |
+| #   | Blocker                                                                                                                                                                                                                                         | Evidence                                                                                                                                                                             |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| B1  | **`main` does not typecheck and does not lint.**                                                                                                                                                                                                | `pnpm typecheck` → 2 × TS2345 in `apps/editor-web/src/AssetLibraryPanel.tsx:562,598`; `pnpm lint` → 9 errors. Cannot publish a repo whose default branch fails its own `pnpm check`. |
+| B2  | **The desktop app cannot reach the VPS at all.** Every API call in the renderer is the relative path `/api/...`. Under the packaged origin `joy-media-app://renderer` that resolves to `joy-media-app://renderer/api/...`, never to `joyst.ir`. | `apps/editor-web/src/media-session.ts:58`, `identity.ts:57,93,130`, `control-plane-client.ts:299`                                                                                    |
+| B3  | **The local Worker never runs a job.** It only enters its daemon loop when `JOY_MEDIA_API_URL` is set and it has paired with the _remote_ control plane. The desktop supervisor spawns it with no env and there is no local job channel.        | `apps/worker/src/index.ts:35-80`, `apps/desktop/src/main/worker-supervisor.ts:67`                                                                                                    |
+| B4  | **Subscription / entitlement / auto-update is dead code end-to-end.** `checkForDesktopUpdate` is exported and unit-tested but never called by any renderer code; there is no sign-in, account, or subscription UI in the desktop shell.         | `apps/editor-web/src/desktop-client.ts:109` — zero non-test callers                                                                                                                  |
+| B5  | **Production VPS host, root user and SSH key paths are committed in tracked Markdown.**                                                                                                                                                         | `STATE.md:188` (`82.115.8.224`, root, key path), `ORCHESTRATION.md:98` (`46.249.103.142`), `AGENTIC_EDITING_NEXT_AGENT.md:41`                                                        |
 
 No plaintext credentials, `.env`, `.pem`, or API keys are tracked — verified via
 `git ls-files`. Every `apiKey`/`secret` literal found is a test fixture.
@@ -33,15 +33,15 @@ No plaintext credentials, `.env`, `.pem`, or API keys are tracked — verified v
 
 ### 1.1 ParsPack / S3 object store — remove
 
-| Path | What it is | Action |
-|---|---|---|
-| `apps/api/src/private-object-store.ts` (556 ln) | `RclonePrivateObjectStore` + `createParsPackClient` + hand-rolled SigV4 client; hardcodes `remoteName !== 'parspack'` (line 263) and reads credentials out of `rclone.conf` (line 279) | **Delete** |
-| `apps/api/src/private-object-store.test.ts` | Companion tests | Delete |
-| `apps/api/src/resumable-original-upload.ts` (559 ln) | Multipart original upload staging into the bucket | Delete |
-| `apps/api/src/import-alpha-library.ts` | Root-only importer registering rclone-verified ParsPack refs | Delete |
-| `apps/api/src/stock-video*.ts` (5 files, ~1000 ln) | Pexels/Pixabay broker that downloads into the private bucket | Delete, or re-home as a desktop-local fetcher |
-| `apps/api/src/server.ts:83-118` | Wires all of the above | Remove wiring |
-| `.agent/skills/alpha-asset-library-builder/alpha_asset_builder/cloud_import.py` | Tracked Python that imports into the bucket; ships to the public repo | Delete or untrack |
+| Path                                                                            | What it is                                                                                                                                                                             | Action                                        |
+| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `apps/api/src/private-object-store.ts` (556 ln)                                 | `RclonePrivateObjectStore` + `createParsPackClient` + hand-rolled SigV4 client; hardcodes `remoteName !== 'parspack'` (line 263) and reads credentials out of `rclone.conf` (line 279) | **Delete**                                    |
+| `apps/api/src/private-object-store.test.ts`                                     | Companion tests                                                                                                                                                                        | Delete                                        |
+| `apps/api/src/resumable-original-upload.ts` (559 ln)                            | Multipart original upload staging into the bucket                                                                                                                                      | Delete                                        |
+| `apps/api/src/import-alpha-library.ts`                                          | Root-only importer registering rclone-verified ParsPack refs                                                                                                                           | Delete                                        |
+| `apps/api/src/stock-video*.ts` (5 files, ~1000 ln)                              | Pexels/Pixabay broker that downloads into the private bucket                                                                                                                           | Delete, or re-home as a desktop-local fetcher |
+| `apps/api/src/server.ts:83-118`                                                 | Wires all of the above                                                                                                                                                                 | Remove wiring                                 |
+| `.agent/skills/alpha-asset-library-builder/alpha_asset_builder/cloud_import.py` | Tracked Python that imports into the bucket; ships to the public repo                                                                                                                  | Delete or untrack                             |
 
 ### 1.2 Hosted control plane — the largest single removal
 
@@ -106,7 +106,7 @@ is still live. Recommended order: flip flags on the VPS → observe → delete c
   `packages/ui-kit`** — several have no `src/` in the tree listing (dist-only). Audit each for
   "is this shipped or is it scaffolding" before going public.
 - **Stale packaging artifact:** `apps/desktop/dist/joy-media-win32-x64/resources/app/dist/
-  joy-media-win32-x64/resources/app/dist/...` is nested **5 levels deep**. The current
+joy-media-win32-x64/resources/app/dist/...` is nested **5 levels deep**. The current
   `package-release.mjs:98-100` correctly skips `joy-media-unpacked` and `joy-media-win32-x64`,
   so this is stale output from an older run — but `package-installer.mjs:69` copies
   `unpackedDir` wholesale into `resources/app` with no guard. Add an explicit
@@ -129,7 +129,7 @@ agent handoff notes, evidence ledgers, and worktree paths that no external contr
 
 - `STATE.md:188` — `82.115.8.224`, user `root`, key `C:\Users\HadiMoti\.ssh\Joy-Vps-New.pem`,
   plus the `ssh sweden` alias convention.
-- `ORCHESTRATION.md:98` — a *second* IP, `46.249.103.142`, with CPU/RAM/disk inventory.
+- `ORCHESTRATION.md:98` — a _second_ IP, `46.249.103.142`, with CPU/RAM/disk inventory.
 - `AGENTIC_EDITING_NEXT_AGENT.md:12,41,511` — checkout path and `.pem` path.
 - `docs/SELF-HOSTED-CI.md`, `ops/self-hosted/linux-runner/entrypoint.sh:12`,
   `ops/self-hosted/linux-runner/README.md:17` — `hadimoti/joy-media` and runner registration
@@ -137,7 +137,7 @@ agent handoff notes, evidence ledgers, and worktree paths that no external contr
 - ~40 files under `docs/reviews/`, `docs/qa/`, `plan/` with `C:\Users\HadiMoti\...` paths.
 
 **Action:** treat the VPS IPs as compromised-on-publish — rotate the SSH key and restrict by
-source before the repo flips public. Then scrub. Because these are in *git history*, scrubbing
+source before the repo flips public. Then scrub. Because these are in _git history_, scrubbing
 HEAD is insufficient: either squash to a fresh initial commit for the public repo, or run
 `git filter-repo` over the affected paths. A fresh public repo seeded from a clean tree is the
 lower-risk option and also solves §1.5.
@@ -176,7 +176,9 @@ remaining attack surface. Add a strict CSP for the `joy-media-app://` origin, an
 ```ts
 const resolvedPath = path.normalize(path.join(baseDir, relPath));
 const normalizedBase = path.normalize(baseDir);
-if (!resolvedPath.startsWith(normalizedBase)) { /* 403 */ }
+if (!resolvedPath.startsWith(normalizedBase)) {
+  /* 403 */
+}
 ```
 
 `startsWith` is a prefix test, not a path-boundary test: with `baseDir = C:\lib`, the path
@@ -212,6 +214,7 @@ host, move it to `safeStorage` behind a new IPC channel.
 attribution, but it should come from a constant shared with the gateway config, not a literal.
 
 ### S10 — `apps/api/src/media-mailer.ts:15` hardcodes `https://joyst.ir/assets/...` for the OTP
+
 email logo; `apps/desktop/src/main/auto-update-policy.ts:35` hardcodes the release-host
 allow-list `['joyst.ir','www.joyst.ir']`. Both are legitimate product constants, but in a
 public repo they should be single, documented, overridable configuration points rather than
@@ -243,7 +246,7 @@ domain, just centralize it.**
   `computePrivacyPreflight`, and explicit spend approval. This is the exact skeleton the Joy
   gateway needs.
 - Billing/entitlement plumbing exists: `account-service.ts` (`monthly|yearly`, `none|active|
-  expired`), `entitlement-signing.ts` (Ed25519 signed entitlements + pinned public key),
+expired`), `entitlement-signing.ts` (Ed25519 signed entitlements + pinned public key),
   `usdc-*.ts` (checkout, ledger, Alchemy webhook), all disabled-by-default.
 
 ### 3.2 What is missing
@@ -254,7 +257,7 @@ domain, just centralize it.**
 3. No usage/commission accounting. The Mistral ledger records invocations for idempotency, not
    tokens or cost.
 4. No model catalog surfaced to the client.
-5. The gateway cannot use the current auth boundary as-is: `/v1/providers/*` sits *after*
+5. The gateway cannot use the current auth boundary as-is: `/v1/providers/*` sits _after_
    `const actor = await options.authentication.authenticate(request)`
    (`http-server.ts:775`), which is the **legacy control-plane actor** — `undefined` whenever
    `durableControlPlane` is unset or `legacyEditorRetired` is on. The gateway must authenticate
@@ -293,7 +296,7 @@ Per-request pipeline:
    dialog.
 3. Resolve `modelId` against a **server-side allow-list** — never forward a
    client-supplied model string to OpenRouter.
-4. Enforce a quota check against the period ledger *before* the upstream call, and a
+4. Enforce a quota check against the period ledger _before_ the upstream call, and a
    concurrency cap per owner.
 5. Call OpenRouter with the server's own key, read from a systemd `LoadCredential=` file —
    follow the existing `readEntitlementSigningKeyFromCredential` /
@@ -353,9 +356,7 @@ Introduce a single resolved API origin instead of the hardcoded `/api`:
 ```ts
 // apps/editor-web/src/api-origin.ts
 export function apiOrigin(): string {
-  return isDesktopHost()
-    ? (import.meta.env.VITE_JOY_API_ORIGIN ?? 'https://joyst.ir')
-    : '/api';
+  return isDesktopHost() ? (import.meta.env.VITE_JOY_API_ORIGIN ?? 'https://joyst.ir') : '/api';
 }
 ```
 
@@ -391,14 +392,14 @@ Project state lives in the renderer's browser storage: `BrowserProjectStore` /
 `@joy-media/project-persistence/desktop` is used only by `apps/cli`, never by the desktop app —
 `electron-entry.ts:296` says so explicitly. For a desktop NLE this means: no `.joyproj` file,
 no Save As, no Open Recent from disk, no moving a project between machines, and clearing app
-data silently destroys work. This is the biggest *product* gap after B2/B3.
+data silently destroys work. This is the biggest _product_ gap after B2/B3.
 
 ### 4.4 Auto-update path is fully built and never invoked (B4)
 
 `evaluateAutoUpdate` (main process, pinned key, signature verification, downgrade protection),
 `release-signing.ts`, `release-metadata-service.ts`, `release-publish-cli.ts` and
 `GET /v1/releases/:channel` all exist and are tested. `checkForDesktopUpdate` has **zero**
-non-test callers. Also note the policy only *decides*; nothing downloads or installs. Needs:
+non-test callers. Also note the policy only _decides_; nothing downloads or installs. Needs:
 a renderer call site, a download+verify+install step, and an update UI.
 
 ### 4.5 No account / subscription / billing surface in the desktop app

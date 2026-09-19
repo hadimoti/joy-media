@@ -3,8 +3,8 @@
   "generatedBy": "tooling/generate-media-fixtures.mjs",
   "files": {
     "image.png": {
-      "sha256": "8f24a572b2b05c02eee94666f40d87134c67abd637e2e0c2b74079566d75052b",
-      "bytes": 629,
+      "sha256": "2223b9dc12a59ef4f8b2dd98d669cad9c927b3264800e10c296de8dc9006cb0e",
+      "bytes": 625,
       "name": "image.png",
       "kind": "image",
       "mimeType": "image/png",
@@ -13,7 +13,7 @@
       "height": 180
     },
     "image.jpg": {
-      "sha256": "1d12aff30b6c9ae19d3635c5ed24c2edc6ffe8122eb799bd58fe7af07e221015",
+      "sha256": "d659a9c7075d3b6c017e431323f95338547e91cc2630426fac1e3a8b3c4d2469",
       "bytes": 584,
       "name": "image.jpg",
       "kind": "image",
@@ -49,8 +49,8 @@
       }
     },
     "animated.webp": {
-      "sha256": "024a69d6f49eda04b289b9d4d3265e1408a52fd6a1f62ff8afabd17d9013d5c8",
-      "bytes": 21620,
+      "sha256": "032178a1db16523081577721595bb4b04343f218bec09edf9fb0a427e14d8692",
+      "bytes": 21554,
       "name": "animated.webp",
       "kind": "image",
       "mimeType": "image/webp",
@@ -65,8 +65,8 @@
       }
     },
     "video.mp4": {
-      "sha256": "f4879ec24ebac10f94e5e7273f146444d8b4fb26528c7fc1e22f82d1dfa0c0ee",
-      "bytes": 43912,
+      "sha256": "ca3deb99602a39bc747e89599b3e05393f404721a7c99683b83399596248f24f",
+      "bytes": 43899,
       "name": "video.mp4",
       "kind": "video",
       "mimeType": "video/mp4",
@@ -78,7 +78,7 @@
       "channels": 1
     },
     "audio.wav": {
-      "sha256": "66708fb217f7944cc68e6000a1d07d73d7fd87a8ee6786660df36a5d3c0b45af",
+      "sha256": "0e643bf633b8dd96fd7a363a6119e096a173c00e283122e724705c14a59dec62",
       "bytes": 288078,
       "name": "audio.wav",
       "kind": "audio",
@@ -89,7 +89,7 @@
       "channels": 1
     },
     "audio.mp3": {
-      "sha256": "faab26af6a2cc7740b3f360c502e881bffca7633df56c858bae8fc6d12e01b27",
+      "sha256": "3c180c635cc31ade2f10e0f3159840ec82d5657646fc2c9faa3776b2972b9525",
       "bytes": 24429,
       "name": "audio.mp3",
       "kind": "audio",

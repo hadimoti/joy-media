@@ -1,10 +1,5 @@
 import { useState, useEffect, type ReactNode } from 'react';
-import {
-  fetchUserSession,
-  fetchLatestRelease,
-  type UserSession,
-  type ReleaseInfo,
-} from './api.js';
+import { fetchUserSession, fetchLatestRelease, type UserSession, type ReleaseInfo } from './api.js';
 import { LandingHero } from './LandingHero.js';
 import { AccountLanding } from './AccountLanding.js';
 import { LoginCard } from './LoginCard.js';
@@ -53,15 +48,17 @@ export function App(): ReactNode {
 
   if (loading) {
     return (
-      <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#08090a',
-        color: '#9ca3af',
-        fontFamily: 'sans-serif'
-      }}>
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: '#08090a',
+          color: '#9ca3af',
+          fontFamily: 'sans-serif',
+        }}
+      >
         <span>Loading JOY Media...</span>
       </div>
     );
@@ -70,16 +67,9 @@ export function App(): ReactNode {
   return (
     <>
       {user ? (
-        <AccountLanding
-          user={user}
-          release={release}
-          onLogout={() => setUser(null)}
-        />
+        <AccountLanding user={user} release={release} onLogout={() => setUser(null)} />
       ) : (
-        <LandingHero
-          release={release}
-          onOpenLogin={() => setLoginOpen(true)}
-        />
+        <LandingHero release={release} onOpenLogin={() => setLoginOpen(true)} />
       )}
 
       <LoginCard

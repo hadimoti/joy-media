@@ -30,6 +30,7 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
 ### Goal 1: App Review & Windows App Preparation (Closing Gaps)
 
 #### Task 1.1: Desktop In-App Account Connection for Joy Model
+
 - **File**: `apps/editor-web/src/DesktopAccountModal.tsx` [NEW], `apps/editor-web/src/App.tsx` [MODIFY], `apps/editor-web/src/JoyAgentSettingsDialog.tsx` [MODIFY]
 - **Context**: In desktop mode, `probeJoySession` defaults to `Local Creator` if no token is saved. The user needs an easy in-app way to sign in with their Gmail OTP so their session token is stored and "Joy Model (Built-in Pro AI)" becomes usable.
 - **Action**:
@@ -41,6 +42,7 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
 - **Verification**: `pnpm --filter editor-web test src/JoyAgentSettingsDialog.test.tsx` && `pnpm --filter editor-web typecheck`
 
 #### Task 1.2: Control Plane & Joy Model Gateway VPS Deployment
+
 - **File**: `deploy/deploy-control-plane.sh` [NEW]
 - **Context**: Production VPS runs `c015ea05` (schema 8). Commits `e07e398c..6d809229` implement the Joy Model gateway and migration `009_agent_usage_ledger`.
 - **Action**:
@@ -50,6 +52,7 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
 - **Verification**: `pnpm --filter @joy-media/api test`
 
 #### Task 1.3: Windows Standalone Packaging Validation
+
 - **File**: `apps/desktop/scripts/package-installer.mjs`
 - **Context**: Verify that standalone packaging produces valid executables, installers, and checksums.
 - **Action**:
@@ -62,6 +65,7 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
 ### Goal 2: Complete Web Editor Retirement & Account Landing UI
 
 #### Task 2.1: Author Lightweight `apps/account-web` Package
+
 - **File**: `apps/account-web/package.json` [NEW], `apps/account-web/vite.config.ts` [NEW], `apps/account-web/index.html` [NEW], `apps/account-web/src/main.tsx` [NEW], `apps/account-web/src/App.tsx` [NEW]
 - **Context**: The video editor SPA should no longer be served on `joyst.ir`. A dedicated, fast landing and dashboard replaces it.
 - **Action**:
@@ -72,6 +76,7 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
 - **Verification**: `pnpm --filter @joy-media/account-web build`
 
 #### Task 2.2: Implement `LandingHero` Component
+
 - **File**: `apps/account-web/src/LandingHero.tsx` [NEW], `apps/account-web/src/landing.css` [NEW]
 - **Context**: Showcase the offline-first Windows NLE to visitors.
 - **Action**:
@@ -83,6 +88,7 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
 - **Verification**: `pnpm --filter @joy-media/account-web build`
 
 #### Task 2.3: Implement Authenticated `AccountLanding` Dashboard
+
 - **File**: `apps/account-web/src/AccountLanding.tsx` [NEW]
 - **Context**: Dashboard displayed once a user completes Gmail/Telegram OTP verification.
 - **Action**:
@@ -94,6 +100,7 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
 - **Verification**: `pnpm --filter @joy-media/account-web build`
 
 #### Task 2.4: Enable Server-Side Route Retirement & Nginx Boundary Cutover
+
 - **File**: `deploy/joy-media-account-web.nginx.conf` [NEW]
 - **Context**: Fail-closed retirement of legacy editor endpoints and edge narrowing on `joyst.ir`.
 - **Action**:
@@ -115,6 +122,7 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
 ### Goal 3: Deep Repository Clean-up
 
 #### Task 3.1: Prune Unreferenced Root Logos & Binary Media
+
 - **Target Files**:
   - `joycode-logo.png` [DELETE]
   - `joycode-logo-hoizontal.png` [DELETE]
@@ -126,12 +134,14 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
 - **Verification**: `pnpm -w run check`
 
 #### Task 3.2: Clean Up Historical QA Binary Screenshots
+
 - **Target Files**:
   - `docs/qa/evidence/20260809/*.png` [DELETE 7 files]
   - `docs/qa/wp35/*.png` [DELETE 3 files]
 - **Verification**: `git status`
 
 #### Task 3.3: Reorganize Heavy Root Markdown Documentation
+
 - **Target Files**:
   - Move legacy planning documents to `docs/archive/legacy-plans/`:
     - `JOY_MEDIA_MASTER_PLAN.md`
@@ -148,6 +158,7 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
 - **Verification**: `git status`
 
 #### Task 3.4: Lock GitHub Workflows Against Minute Quota Exhaustion
+
 - **Target Files**:
   - `.github/workflows/ci.yml` [MODIFY]
   - `.github/workflows/ci-dev.yml` [MODIFY]
@@ -163,17 +174,18 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
 ### Goal 4: World-Class GitHub Repo Front Page (README.md)
 
 #### Task 4.1: Author Premium Private-Preview `README.md`
+
 - **Target Files**: `README.md` [MODIFY]
 - **Action**:
   1. Professional badges: Windows 10/11 x64, Electron 44, React 19, SQLite WAL, NVIDIA WebGL2, Private Preview.
   2. Hero description: "JOY Media — Next-Generation Offline-First Desktop NLE & Creative AI Studio for Windows".
   3. Feature sections:
-     - *Zero-Cloud Latency*: Local SQLite storage, instant playback from local disk via `joy-asset://`.
-     - *Dual-Lens Timeline*: Professional track hierarchy (V1–V10 visual, A1–A4 audio) with magnetic snapping.
-     - *On-Device AI Engine*: Real-ESRGAN upscaler, DeepFilterNet audio denoiser, BiRefNet background matting.
-     - *Living Looks*: 6 cinematic motion & typography packs.
-     - *Dual AI Agent*: Curated Joy Model gateway or BYOK OpenRouter with DPAPI encryption.
-     - *Studio Deliver*: Social H.264, Reels 1080x1920, Shorts, YouTube 4K with cryptographic checksum verification.
+     - _Zero-Cloud Latency_: Local SQLite storage, instant playback from local disk via `joy-asset://`.
+     - _Dual-Lens Timeline_: Professional track hierarchy (V1–V10 visual, A1–A4 audio) with magnetic snapping.
+     - _On-Device AI Engine_: Real-ESRGAN upscaler, DeepFilterNet audio denoiser, BiRefNet background matting.
+     - _Living Looks_: 6 cinematic motion & typography packs.
+     - _Dual AI Agent_: Curated Joy Model gateway or BYOK OpenRouter with DPAPI encryption.
+     - _Studio Deliver_: Social H.264, Reels 1080x1920, Shorts, YouTube 4K with cryptographic checksum verification.
   4. Visual ASCII Architecture Diagram.
   5. System Requirements & Installation guide (Windows Installer + Portable Zip).
   6. Private Preview Disclaimer (remove premature "Open-Source MIT" statements).
@@ -196,13 +208,13 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
 
 ## 4. Verification & Acceptance Criteria
 
-| Phase | Target | Acceptance Check | Command |
-| --- | --- | --- | --- |
-| 1 | In-app Account Connect | Local Creator can trigger OTP login modal in desktop app | `pnpm --filter editor-web test` |
-| 1 | Joy Model Gateway | Live `/v1/agent/chat/completions` responds with 401 instead of 405 | HTTP probe to `joyst.ir` |
-| 1 | Windows Packaging | Standalone zip, installer script, and SHA256SUMS generated | `pnpm --filter @joy-media/desktop test:smoke-packaged` |
-| 2 | Account Web Build | `apps/account-web` builds cleanly into lightweight static bundle | `pnpm --filter @joy-media/account-web build` |
-| 2 | Web Retirement | `https://joyst.ir` serves landing/account web; `/v1/projects` returns 404/410 | Browser inspection & curl |
-| 3 | Repo Bloat Removal | Unreferenced logos, duplicate MP4s, and screenshots removed | `git status` clean |
-| 3 | CI Minute Protection | No workflows trigger automatically on git push | `git diff .github/workflows` |
-| 4 | README Front Page | Premium English documentation reflecting private desktop NLE | Visual inspection of `README.md` |
+| Phase | Target                 | Acceptance Check                                                              | Command                                                |
+| ----- | ---------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------ |
+| 1     | In-app Account Connect | Local Creator can trigger OTP login modal in desktop app                      | `pnpm --filter editor-web test`                        |
+| 1     | Joy Model Gateway      | Live `/v1/agent/chat/completions` responds with 401 instead of 405            | HTTP probe to `joyst.ir`                               |
+| 1     | Windows Packaging      | Standalone zip, installer script, and SHA256SUMS generated                    | `pnpm --filter @joy-media/desktop test:smoke-packaged` |
+| 2     | Account Web Build      | `apps/account-web` builds cleanly into lightweight static bundle              | `pnpm --filter @joy-media/account-web build`           |
+| 2     | Web Retirement         | `https://joyst.ir` serves landing/account web; `/v1/projects` returns 404/410 | Browser inspection & curl                              |
+| 3     | Repo Bloat Removal     | Unreferenced logos, duplicate MP4s, and screenshots removed                   | `git status` clean                                     |
+| 3     | CI Minute Protection   | No workflows trigger automatically on git push                                | `git diff .github/workflows`                           |
+| 4     | README Front Page      | Premium English documentation reflecting private desktop NLE                  | Visual inspection of `README.md`                       |

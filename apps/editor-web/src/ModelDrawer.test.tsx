@@ -15,7 +15,9 @@ const initialStatus: ByokSessionStatus = {
   capability: 'tool-loop',
 };
 
-function createMockEngineClient(overrides: Partial<JoyAgentEngineClient> = {}): JoyAgentEngineClient {
+function createMockEngineClient(
+  overrides: Partial<JoyAgentEngineClient> = {},
+): JoyAgentEngineClient {
   return {
     configure: vi.fn().mockImplementation(async (config) => ({
       provider: config.provider,
@@ -103,12 +105,7 @@ describe('ModelDrawer', () => {
     const client = createMockEngineClient();
     await act(async () => {
       root?.render(
-        <ModelDrawer
-          open={true}
-          onClose={vi.fn()}
-          engineClient={client}
-          status={initialStatus}
-        />,
+        <ModelDrawer open={true} onClose={vi.fn()} engineClient={client} status={initialStatus} />,
       );
     });
 
@@ -123,12 +120,7 @@ describe('ModelDrawer', () => {
     const client = createMockEngineClient();
     await act(async () => {
       root?.render(
-        <ModelDrawer
-          open={false}
-          onClose={vi.fn()}
-          engineClient={client}
-          status={initialStatus}
-        />,
+        <ModelDrawer open={false} onClose={vi.fn()} engineClient={client} status={initialStatus} />,
       );
     });
 
@@ -139,12 +131,7 @@ describe('ModelDrawer', () => {
     const client = createMockEngineClient();
     await act(async () => {
       root?.render(
-        <ModelDrawer
-          open={true}
-          onClose={vi.fn()}
-          engineClient={client}
-          status={initialStatus}
-        />,
+        <ModelDrawer open={true} onClose={vi.fn()} engineClient={client} status={initialStatus} />,
       );
     });
 

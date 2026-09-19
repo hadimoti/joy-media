@@ -40,7 +40,8 @@ export function LandingHero({ release, onOpenLogin }: LandingHeroProps): ReactNo
 
         <p className="landing-hero-subtitle">
           Sample-accurate multi-track video editing, living looks, and on-device GPU acceleration.
-          Built for creators who demand zero latency, total privacy, and no cloud subscription lock-in.
+          Built for creators who demand zero latency, total privacy, and no cloud subscription
+          lock-in.
         </p>
 
         <div className="landing-hero-cta-group">
@@ -49,7 +50,16 @@ export function LandingHero({ release, onOpenLogin }: LandingHeroProps): ReactNo
             className="landing-btn-primary"
             download
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
@@ -78,7 +88,9 @@ export function LandingHero({ release, onOpenLogin }: LandingHeroProps): ReactNo
               <span className="p-dot is-yellow" />
               <span className="p-dot is-green" />
             </div>
-            <div className="preview-window-title">JOY Studio — [Project: 4K_Commercial_Editorial.joy] — WebGL2 GPU Engine</div>
+            <div className="preview-window-title">
+              JOY Studio — [Project: 4K_Commercial_Editorial.joy] — WebGL2 GPU Engine
+            </div>
           </div>
           <div className="preview-window-body">
             <div className="preview-layout-grid">
@@ -163,8 +175,9 @@ export function LandingHero({ release, onOpenLogin }: LandingHeroProps): ReactNo
             <div className="feature-icon">⚡</div>
             <h3>100% Local-First Engine</h3>
             <p>
-              Projects persist instantaneously in SQLite WAL with zero-delay OPFS caching.
-              Over 3,000 sound effects and assets stream from local disk via native <code>joy-asset://</code> protocol.
+              Projects persist instantaneously in SQLite WAL with zero-delay OPFS caching. Over
+              3,000 sound effects and assets stream from local disk via native{' '}
+              <code>joy-asset://</code> protocol.
             </p>
           </div>
 
@@ -182,7 +195,8 @@ export function LandingHero({ release, onOpenLogin }: LandingHeroProps): ReactNo
             <h3>On-Device AI Acceleration</h3>
             <p>
               Embedded standalone <code>joy-worker.exe</code> executes Real-ESRGAN super-resolution,
-              DeepFilterNet real-time audio denoise, and BiRefNet matting directly on your local GPU.
+              DeepFilterNet real-time audio denoise, and BiRefNet matting directly on your local
+              GPU.
             </p>
           </div>
 
@@ -190,8 +204,9 @@ export function LandingHero({ release, onOpenLogin }: LandingHeroProps): ReactNo
             <div className="feature-icon">🎨</div>
             <h3>Living Looks Motion System</h3>
             <p>
-              6 cinematic look packs (Editorial Clean, Product Precision, Kinetic Type, Quiet Documentary,
-              Music Pulse, Persian Editorial) with dynamic typography and color palettes.
+              6 cinematic look packs (Editorial Clean, Product Precision, Kinetic Type, Quiet
+              Documentary, Music Pulse, Persian Editorial) with dynamic typography and color
+              palettes.
             </p>
           </div>
 
@@ -199,8 +214,9 @@ export function LandingHero({ release, onOpenLogin }: LandingHeroProps): ReactNo
             <div className="feature-icon">🤖</div>
             <h3>Dual AI Agent Studio</h3>
             <p>
-              Keyless curated intelligence via Joy Model Gateway, or bring your own API keys (OpenRouter,
-              OpenAI-compatible) stored securely inside the Windows DPAPI encrypted vault.
+              Keyless curated intelligence via Joy Model Gateway, or bring your own API keys
+              (OpenRouter, OpenAI-compatible) stored securely inside the Windows DPAPI encrypted
+              vault.
             </p>
           </div>
 
@@ -221,19 +237,35 @@ export function LandingHero({ release, onOpenLogin }: LandingHeroProps): ReactNo
           <div className="specs-col">
             <h3>Minimum System Requirements</h3>
             <ul>
-              <li><strong>OS:</strong> Windows 10 or 11 (64-bit)</li>
-              <li><strong>CPU:</strong> Intel Core i5 / AMD Ryzen 5 (4+ cores)</li>
-              <li><strong>RAM:</strong> 8 GB RAM</li>
-              <li><strong>Disk:</strong> 2 GB free disk space</li>
+              <li>
+                <strong>OS:</strong> Windows 10 or 11 (64-bit)
+              </li>
+              <li>
+                <strong>CPU:</strong> Intel Core i5 / AMD Ryzen 5 (4+ cores)
+              </li>
+              <li>
+                <strong>RAM:</strong> 8 GB RAM
+              </li>
+              <li>
+                <strong>Disk:</strong> 2 GB free disk space
+              </li>
             </ul>
           </div>
           <div className="specs-col">
             <h3>Recommended Workstation</h3>
             <ul>
-              <li><strong>OS:</strong> Windows 11 (64-bit)</li>
-              <li><strong>GPU:</strong> NVIDIA GeForce RTX 2060 or newer (CUDA support)</li>
-              <li><strong>RAM:</strong> 16 GB+ high-speed RAM</li>
-              <li><strong>Storage:</strong> Fast NVMe SSD for media scratch cache</li>
+              <li>
+                <strong>OS:</strong> Windows 11 (64-bit)
+              </li>
+              <li>
+                <strong>GPU:</strong> NVIDIA GeForce RTX 2060 or newer (CUDA support)
+              </li>
+              <li>
+                <strong>RAM:</strong> 16 GB+ high-speed RAM
+              </li>
+              <li>
+                <strong>Storage:</strong> Fast NVMe SSD for media scratch cache
+              </li>
             </ul>
           </div>
         </div>

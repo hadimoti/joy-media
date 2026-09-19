@@ -312,6 +312,7 @@ describe('Worker runtime', () => {
       const encrypted = protector.protect(value);
       expect(protector.unprotect(encrypted)).toBe(value);
     },
+    30_000,
   );
 
   it('keeps source paths local while advertising configured opaque IDs only', () => {

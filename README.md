@@ -1,6 +1,7 @@
 <div align="center">
 
 # JOY Media
+
 ### 100% Offline-First Professional Desktop NLE & Creative AI Studio
 
 [![Platform: Windows x64](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?style=flat-square&logo=windows)](https://joyst.ir)
@@ -92,12 +93,14 @@ joy-media/
 ## Development & Build Guide
 
 ### Prerequisites
+
 - **Operating System**: Windows 10 or Windows 11 (64-bit)
 - **Node.js**: Version 22 LTS or newer
 - **pnpm**: Version 10 or newer (`corepack enable pnpm`)
 - **FFmpeg & FFprobe**: Configured on system `PATH` for media decode tests
 
 ### 1. Workspace Initialization
+
 ```bash
 # Clone the private repository
 git clone https://github.com/hadimoti/joy-media.git
@@ -108,12 +111,14 @@ pnpm install
 ```
 
 ### 2. Launch Desktop NLE in Development
+
 ```bash
 # Run Electron desktop shell with hot-reloading editor
 pnpm --filter @joy-media/desktop dev
 ```
 
 ### 3. Run Quality & Verification Suite
+
 ```bash
 # Verify TypeScript compilation across monorepo
 pnpm typecheck
@@ -126,6 +131,7 @@ pnpm lint
 ```
 
 ### 4. Package Windows Installers & Releases
+
 ```bash
 # Produce unpacked production build
 pnpm --filter @joy-media/desktop package:unpacked
@@ -135,6 +141,7 @@ pnpm --filter @joy-media/desktop package:installer
 ```
 
 Output artifacts are generated in `apps/desktop/dist/releases/`:
+
 - `joy-media-setup.exe` — Windows Setup Installer
 - `joy-media-windows-x64-v*.zip` — Standalone Portable Release
 - `SHA256SUMS.txt` — SHA-256 Checksums for Release Verification

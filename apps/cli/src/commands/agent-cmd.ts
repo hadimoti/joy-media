@@ -51,7 +51,9 @@ export async function handleAgentCommand(
       console.log(`\n  ${c('Configured AI Providers:', 'bold')}\n`);
       const keys = Object.keys(providers);
       if (keys.length === 0) {
-        logInfo('No custom providers configured yet. Use "joy-media agent provider add" to add one.');
+        logInfo(
+          'No custom providers configured yet. Use "joy-media agent provider add" to add one.',
+        );
       } else {
         for (const key of keys) {
           const p = providers[key]!;
@@ -60,7 +62,10 @@ export async function handleAgentCommand(
           console.log(`  ${marker} ${c(key, 'bold')} (${p.provider ?? 'custom'})`);
           logStep('  Base URL', p.baseUrl ?? 'default');
           logStep('  Default Model', p.defaultModel ?? 'not-set');
-          logStep('  API Key', p.apiKey ? `${p.apiKey.slice(0, 4)}...${p.apiKey.slice(-4)}` : 'none');
+          logStep(
+            '  API Key',
+            p.apiKey ? `${p.apiKey.slice(0, 4)}...${p.apiKey.slice(-4)}` : 'none',
+          );
           if (p.cachedModels && p.cachedModels.length > 0) {
             logStep('  Discovered Models', `${p.cachedModels.length} models cached`);
           }
@@ -94,9 +99,7 @@ export async function handleAgentCommand(
           const json = (await res.json()) as { data?: unknown };
           const raw = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
           cachedModels = raw
-            .map((item: { id?: string } | string) =>
-              typeof item === 'string' ? item : item.id,
-            )
+            .map((item: { id?: string } | string) => (typeof item === 'string' ? item : item.id))
             .filter((id): id is string => typeof id === 'string' && id.length > 0);
           if (cachedModels.length > 0) {
             logInfo(`Discovered ${cachedModels.length} models from endpoint.`);
@@ -220,9 +223,7 @@ export async function handleAgentCommand(
       const json = (await res.json()) as { data?: unknown };
       const raw = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
       const modelIds: string[] = raw
-        .map((item: { id?: string } | string) =>
-          typeof item === 'string' ? item : item.id,
-        )
+        .map((item: { id?: string } | string) => (typeof item === 'string' ? item : item.id))
         .filter((id): id is string => typeof id === 'string' && id.length > 0);
 
       console.log(`\n  ${c(`Discovered ${modelIds.length} models:`, 'bold')}\n`);

@@ -1,11 +1,6 @@
 import type { JoyAgentCapability } from './contracts.js';
 
-export type JoyProviderMode =
-  | 'joy-hosted'
-  | 'openrouter'
-  | 'openai-compatible'
-  | 'kilo'
-  | 'custom';
+export type JoyProviderMode = 'joy-hosted' | 'openrouter' | 'openai-compatible' | 'kilo' | 'custom';
 
 export interface ByokSessionConfig {
   readonly provider: JoyProviderMode;

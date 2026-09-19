@@ -1,10 +1,5 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react';
-import {
-  registerDevice,
-  requestOtp,
-  verifyOtp,
-  type MediaAuthMethod,
-} from './media-session.js';
+import { registerDevice, requestOtp, verifyOtp, type MediaAuthMethod } from './media-session.js';
 import './desktop-account-modal.css';
 
 interface DesktopAccountModalProps {
@@ -49,7 +44,11 @@ export function DesktopAccountModal({
     if (e) e.preventDefault();
     const cleanContact = contact.trim();
     if (!cleanContact) {
-      setError(method === 'gmail' ? 'Please enter a valid Gmail address' : 'Please enter your Telegram handle');
+      setError(
+        method === 'gmail'
+          ? 'Please enter a valid Gmail address'
+          : 'Please enter your Telegram handle',
+      );
       return;
     }
     setBusy(true);

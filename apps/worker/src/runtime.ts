@@ -73,8 +73,10 @@ export interface WorkerSecretProtector {
  * protector from index.ts and fails closed if DPAPI cannot complete an action.
  */
 export class WindowsDpapiSecretProtector implements WorkerSecretProtector {
-  protect(value: string): string {
-    const result = spawnSync(
+  private static readonly ENCODING_TIMEOUT_MS = 15_000;
+
+  private static runPowerShell(command: string, input: string): ReturnType<typeof spawnSync> {
+    return spawnSync(
       'powershell.exe',
       [
         '-NoLogo',
@@ -83,37 +85,42 @@ export class WindowsDpapiSecretProtector implements WorkerSecretProtector {
         '-ExecutionPolicy',
         'Bypass',
         '-Command',
-        '$plain=[Console]::In.ReadToEnd(); Add-Type -AssemblyName System.Security; $bytes=[Text.Encoding]::UTF8.GetBytes($plain); $protected=[Security.Cryptography.ProtectedData]::Protect($bytes,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Out.Write([Convert]::ToBase64String($protected))',
+        command,
       ],
-      { input: value, encoding: 'utf8', timeout: 5_000, windowsHide: true },
+      {
+        input,
+        encoding: 'utf8',
+        timeout: WindowsDpapiSecretProtector.ENCODING_TIMEOUT_MS,
+        windowsHide: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
     );
-    const encrypted = result.status === 0 ? result.stdout.trim() : '';
-    if (encrypted.length === 0) throw new Error('Windows DPAPI protection failed');
+  }
+
+  protect(value: string): string {
+    const result = WindowsDpapiSecretProtector.runPowerShell(
+      "$ErrorActionPreference='Stop'; $plain=[Console]::In.ReadToEnd(); Add-Type -AssemblyName System.Security; $bytes=[Text.Encoding]::UTF8.GetBytes($plain); $protected=[Security.Cryptography.ProtectedData]::Protect($bytes,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Out.Write([Convert]::ToBase64String($protected))",
+      value,
+    );
+    if (result.signal || result.status !== 0) {
+      throw new Error(
+        `Windows DPAPI protection failed (status=${result.status ?? result.signal}: ${result.stderr ?? ''})`,
+      );
+    }
+    const encrypted = String(result.stdout).trim();
+    if (encrypted.length === 0) throw new Error('Windows DPAPI protection returned no ciphertext');
     return encrypted;
   }
 
   unprotect(value: string): string | undefined {
-    const result = spawnSync(
-      'powershell.exe',
-      [
-        '-NoLogo',
-        '-NoProfile',
-        '-NonInteractive',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-Command',
-        '$encrypted=[Convert]::FromBase64String([Console]::In.ReadToEnd().Trim()); Add-Type -AssemblyName System.Security; $plain=[Security.Cryptography.ProtectedData]::Unprotect($encrypted,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Out.Write([Convert]::ToBase64String($plain))',
-      ],
-      { input: value, encoding: 'utf8', timeout: 5_000, windowsHide: true },
+    const result = WindowsDpapiSecretProtector.runPowerShell(
+      "$ErrorActionPreference='Stop'; $encrypted=[Convert]::FromBase64String([Console]::In.ReadToEnd().Trim()); Add-Type -AssemblyName System.Security; $plain=[Security.Cryptography.ProtectedData]::Unprotect($encrypted,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser); $writer=[Console]::Out; $utf8=[Text.Encoding]::UTF8; $writer.Write($utf8.GetString($plain))",
+      value,
     );
-    if (result.status !== 0) return undefined;
-    const encoded = result.stdout;
-    if (encoded.length === 0) return undefined;
-    try {
-      return Buffer.from(encoded, 'base64').toString('utf8');
-    } catch {
-      return undefined;
-    }
+    if (result.signal || result.status !== 0) return undefined;
+    const plaintext: string = String(result.stdout);
+    if (plaintext.length === 0) return undefined;
+    return plaintext;
   }
 }
 

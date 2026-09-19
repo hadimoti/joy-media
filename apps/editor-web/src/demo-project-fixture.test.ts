@@ -8,10 +8,7 @@ import {
   validateLookInstancesDocument,
 } from '@joy-media/project-schema';
 import { EditorSession } from './editor-session.js';
-import {
-  parseProjectPackage,
-  importProjectPackage,
-} from './project-package.js';
+import { parseProjectPackage, importProjectPackage } from './project-package.js';
 
 function memoryStorage() {
   const values = new Map<string, string>();
@@ -23,7 +20,9 @@ function memoryStorage() {
 }
 
 describe('demo-project.json fixture', () => {
-  const fixturePath = fileURLToPath(new URL('../../../tests/desktop/fixtures/demo-project.json', import.meta.url));
+  const fixturePath = fileURLToPath(
+    new URL('../../../tests/desktop/fixtures/demo-project.json', import.meta.url),
+  );
   const rawText = readFileSync(fixturePath, 'utf8');
   const json = JSON.parse(rawText) as unknown;
 
@@ -126,11 +125,7 @@ describe('demo-project.json fixture', () => {
     expect(imported.missingAssetIds).toEqual([]);
     expect(Object.keys(writtenBlobs)).toHaveLength(3);
 
-    const session = new EditorSession(
-      storage,
-      pkg.documents.timeline,
-      pkg.documents.visual,
-    );
+    const session = new EditorSession(storage, pkg.documents.timeline, pkg.documents.visual);
     expect(session.visualProject.id).toBe('demo-project');
     expect(session.timelineProject.id).toBe('demo-project');
     expect(session.visualProject.title).toBe('Demo Project');

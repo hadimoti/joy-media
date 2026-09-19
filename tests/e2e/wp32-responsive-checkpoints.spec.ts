@@ -67,16 +67,25 @@ test.describe('WP-32 responsive workflow checkpoints', () => {
     await fileMenu.press('Enter');
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
-    await expect(menu.getByRole('menuitem', { name: 'Projects Library…' })).toBeVisible();
-    await expect(page.getByRole('menuitem', { name: 'Projects Library…' })).toBeFocused();
+    const firstMenuitem = menu.getByRole('menuitem').first();
+    await expect(firstMenuitem).toBeVisible();
+    await expect(firstMenuitem).toBeFocused();
     // Walk the File menu with the keyboard to the plain "Export" action. The
-    // menu order is Projects Library… / Import Editable Project… / Export
-    // Editable Project… / Export, so "Export" needs an exact-name match.
+    // menu order is Account & Workstation… / Projects Library… / Import Editable
+    // Project… / Export Editable Project… / Export, so "Export" needs an
+    // exact-name match after four ArrowDown presses.
+    await page.keyboard.press('ArrowDown');
+    await expect(
+      page.getByRole('menuitem', { name: 'Projects Library…', exact: true }),
+    ).toBeFocused();
     await page.keyboard.press('ArrowDown');
     await expect(
       page.getByRole('menuitem', { name: 'Import Editable Project…', exact: true }),
     ).toBeFocused();
     await page.keyboard.press('ArrowDown');
+    await expect(
+      page.getByRole('menuitem', { name: 'Export Editable Project…', exact: true }),
+    ).toBeFocused();
     await page.keyboard.press('ArrowDown');
     await expect(page.getByRole('menuitem', { name: 'Export', exact: true })).toBeFocused();
     await page.keyboard.press('Escape');

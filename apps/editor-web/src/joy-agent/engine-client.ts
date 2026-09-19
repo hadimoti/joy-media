@@ -1121,10 +1121,7 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
 
     async cancel(runId: string): Promise<void> {
       if (dualBrainConfig) {
-        await Promise.allSettled([
-          workhorseClient?.cancel(runId),
-          creativeClient?.cancel(runId),
-        ]);
+        await Promise.allSettled([workhorseClient?.cancel(runId), creativeClient?.cancel(runId)]);
         return;
       }
       await singleClient?.cancel(runId);

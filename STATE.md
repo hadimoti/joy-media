@@ -43,12 +43,14 @@ JOY Media has transitioned from a dual web/desktop architecture into a dedicated
 ## 2. Current Checkpoint Milestones (2026-09-19)
 
 ### Goal 1: Desktop In-App Account Connection
+
 - Authoring and integration of `DesktopAccountModal.tsx` in `apps/editor-web`.
 - Enables "Local Creator" desktop users to connect their JOY account via email/Telegram OTP directly inside the desktop app.
 - Activates keyless Joy-hosted model capabilities with automated token ledger synchronization.
 - Status: **Complete & Verified** (10/10 Vitest in `JoyAgentSettingsDialog.test.tsx`).
 
 ### Goal 2: Web Retirement & Account Web Package
+
 - Retired full editor SPA from web serving (`joyst.ir`).
 - Authored `apps/account-web` (`@joy-media/account-web`):
   - `LandingHero.tsx`: Showcase of offline-first NLE features, architecture, and installer downloads.
@@ -59,6 +61,7 @@ JOY Media has transitioned from a dual web/desktop architecture into a dedicated
 - Status: **Complete & Verified** (Production build passes in 622ms).
 
 ### Goal 3: Repository Hygiene & Monorepo Cleanup
+
 - Deleted unreferenced root logos (`joycode-logo.png`, `joycode-logo-hoizontal*.png`) and untracked artifacts (`worker_output.txt`).
 - Cleaned unreferenced heavy sample videos (`asset-outro.mp4`, `asset-product.mp4`) while strictly preserving test fixtures (`asset-intro.mp4`).
 - Purged 10 binary QA screenshots from `docs/qa/evidence/20260809/` and `docs/qa/wp35/`.
@@ -67,6 +70,7 @@ JOY Media has transitioned from a dual web/desktop architecture into a dedicated
 - Status: **Complete & Verified** (Monorepo test suite: 588 files passed, 4,819 tests passed).
 
 ### Goal 4: Documentation & Private Repository Identity
+
 - Root `README.md` re-engineered with cool English visual guides, architecture maps, and clear private evaluation status.
 - Status: **Complete & Verified**.
 
@@ -74,13 +78,13 @@ JOY Media has transitioned from a dual web/desktop architecture into a dedicated
 
 ## 3. Verification Matrix
 
-| Check | Scope | Tool / Command | Result |
-| :--- | :--- | :--- | :--- |
-| **Unit & Integration Tests** | Full Monorepo | `pnpm test` | **588 passed**, 4,819 tests green |
-| **TypeScript Types** | Full Monorepo | `pnpm typecheck` (`tsc -b`) | **Clean** (0 errors) |
-| **Account Web Build** | `@joy-media/account-web` | `pnpm --filter @joy-media/account-web build` | **Clean** (0.62s) |
-| **Desktop Editor Build** | `@joy-media/editor-web` | `pnpm --filter @joy-media/editor-web build` | **Clean** |
-| **CI Budget Guard** | `.github/workflows/` | Manual inspection | **100% `workflow_dispatch`** |
+| Check                        | Scope                    | Tool / Command                               | Result                            |
+| :--------------------------- | :----------------------- | :------------------------------------------- | :-------------------------------- |
+| **Unit & Integration Tests** | Full Monorepo            | `pnpm test`                                  | **588 passed**, 4,819 tests green |
+| **TypeScript Types**         | Full Monorepo            | `pnpm typecheck` (`tsc -b`)                  | **Clean** (0 errors)              |
+| **Account Web Build**        | `@joy-media/account-web` | `pnpm --filter @joy-media/account-web build` | **Clean** (0.62s)                 |
+| **Desktop Editor Build**     | `@joy-media/editor-web`  | `pnpm --filter @joy-media/editor-web build`  | **Clean**                         |
+| **CI Budget Guard**          | `.github/workflows/`     | Manual inspection                            | **100% `workflow_dispatch`**      |
 
 ---
 

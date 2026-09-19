@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
-import type { ByokSessionStatus, JoyAgentProvider, JoyProviderMode } from './joy-agent/protocol.js';
+import type { ByokSessionStatus, JoyProviderMode } from './joy-agent/protocol.js';
 import { CloseIcon, PlusIcon, CheckIcon } from './icons.js';
 import {
   isDesktopHost,
@@ -33,7 +33,12 @@ const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
 
 const COMMON_MODEL_PRESETS: Record<ProviderType, readonly string[]> = {
   kilo: ['minimax/minimax-m3', 'kilo-auto/efficient', 'kilo-auto/free'],
-  openrouter: ['openrouter/free', 'openrouter/auto', 'minimax/minimax-m3', 'anthropic/claude-3.5-sonnet'],
+  openrouter: [
+    'openrouter/free',
+    'openrouter/auto',
+    'minimax/minimax-m3',
+    'anthropic/claude-3.5-sonnet',
+  ],
   'openai-compatible': ['gpt-4o-mini', 'gpt-4o'],
   custom: [],
 };
@@ -127,7 +132,11 @@ export function ModelDrawer({
       if (!mountedRef.current) return;
       const modelIds = models.map((m) => m.id);
       setDiscoveredModels(modelIds);
-      if (modelIds.length > 0 && modelIds[0] !== undefined && !modelIds.includes(newSelectedModel)) {
+      if (
+        modelIds.length > 0 &&
+        modelIds[0] !== undefined &&
+        !modelIds.includes(newSelectedModel)
+      ) {
         setNewSelectedModel(modelIds[0]);
       }
       onNotice?.(`Discovered ${modelIds.length} models successfully!`, 'success');
@@ -190,8 +199,7 @@ export function ModelDrawer({
       let apiKey = '';
       if (isDesktopHost()) {
         const session = (await beginDesktopProviderSession(profile.id)) as
-          | { apiKey?: string }
-          | undefined;
+          { apiKey?: string } | undefined;
         apiKey = session?.apiKey ?? '';
       }
 
@@ -230,8 +238,7 @@ export function ModelDrawer({
       let apiKey = '';
       if (isDesktopHost()) {
         const session = (await beginDesktopProviderSession(profile.id)) as
-          | { apiKey?: string }
-          | undefined;
+          { apiKey?: string } | undefined;
         apiKey = session?.apiKey ?? '';
       }
 
@@ -252,7 +259,10 @@ export function ModelDrawer({
           cachedModels: modelIds,
         });
         await refreshProfiles();
-        onNotice?.(`Updated ${modelIds.length} models for ${profile.name ?? profile.provider}`, 'success');
+        onNotice?.(
+          `Updated ${modelIds.length} models for ${profile.name ?? profile.provider}`,
+          'success',
+        );
       } else {
         onNotice?.('No models returned from endpoint', 'info');
       }
@@ -310,11 +320,7 @@ export function ModelDrawer({
           <div className="model-drawer-title-group">
             <h2>
               <span>⚡ Model Drawer</span>
-              <span
-                className={`model-drawer-active-badge ${
-                  status ? '' : 'is-disconnected'
-                }`}
-              >
+              <span className={`model-drawer-active-badge ${status ? '' : 'is-disconnected'}`}>
                 {status ? `${status.provider}: ${status.modelId}` : 'Disconnected'}
               </span>
             </h2>
@@ -402,7 +408,9 @@ export function ModelDrawer({
                 />
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+              >
                 <button
                   type="button"
                   className="model-drawer-btn-secondary"
@@ -419,9 +427,7 @@ export function ModelDrawer({
               </div>
 
               {discoveryError && (
-                <div style={{ fontSize: '11px', color: '#f87171' }}>
-                  {discoveryError}
-                </div>
+                <div style={{ fontSize: '11px', color: '#f87171' }}>{discoveryError}</div>
               )}
 
               {/* Discovered Models Chip Palette */}
@@ -489,9 +495,10 @@ export function ModelDrawer({
                 (status?.modelId === profile.modelId ||
                   (profile.cachedModels ?? []).includes(status?.modelId ?? ''));
 
-              const modelsToShow = (profile.cachedModels && profile.cachedModels.length > 0)
-                ? profile.cachedModels
-                : [profile.modelId];
+              const modelsToShow =
+                profile.cachedModels && profile.cachedModels.length > 0
+                  ? profile.cachedModels
+                  : [profile.modelId];
 
               const filteredModels = query
                 ? modelsToShow.filter((m) => m.toLowerCase().includes(query))
@@ -546,7 +553,12 @@ export function ModelDrawer({
                           }}
                         >
                           <div className="model-drawer-model-left">
-                            <span style={{ color: isThisActive ? '#ffb020' : '#6b7280', fontSize: '11px' }}>
+                            <span
+                              style={{
+                                color: isThisActive ? '#ffb020' : '#6b7280',
+                                fontSize: '11px',
+                              }}
+                            >
                               {isThisActive ? '●' : '○'}
                             </span>
                             <span className="model-drawer-model-name" title={m}>

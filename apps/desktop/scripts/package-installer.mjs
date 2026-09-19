@@ -82,11 +82,11 @@ if (existsSync(workerExe)) {
 // Stage bundled @joy-media/cli into resources/app/cli/
 console.log('Building and staging bundled @joy-media/cli...');
 const cliRoot = resolve(repoRoot, 'apps', 'cli');
-const cliBuildResult = spawnSync(
-  process.execPath,
-  [resolve(cliRoot, 'scripts', 'bundle.mjs')],
-  { cwd: cliRoot, stdio: 'inherit', env: process.env },
-);
+const cliBuildResult = spawnSync(process.execPath, [resolve(cliRoot, 'scripts', 'bundle.mjs')], {
+  cwd: cliRoot,
+  stdio: 'inherit',
+  env: process.env,
+});
 if (cliBuildResult.status !== 0) {
   throw new Error(`Failed to bundle CLI: status ${cliBuildResult.status}`);
 }
@@ -94,10 +94,7 @@ if (cliBuildResult.status !== 0) {
 const cliDestDir = resolve(appResourcesDir, 'cli');
 await mkdir(cliDestDir, { recursive: true });
 const bundledCliPath = resolve(cliDestDir, 'joy-media-bundle.mjs');
-await cp(
-  resolve(cliRoot, 'dist', 'joy-media-bundle.mjs'),
-  bundledCliPath,
-);
+await cp(resolve(cliRoot, 'dist', 'joy-media-bundle.mjs'), bundledCliPath);
 console.log('Embedded bundled CLI into resources/app/cli/joy-media-bundle.mjs');
 
 // Create Windows CLI wrappers in standalone distribution root
@@ -248,7 +245,9 @@ console.log(
 console.log(`SHA256: ${zipSha256}`);
 
 // 5. Generate SHA256SUMS.txt and release manifest
-const cliSha256 = await computeSha256(resolve(standaloneDir, 'resources', 'app', 'cli', 'joy-media-bundle.mjs'));
+const cliSha256 = await computeSha256(
+  resolve(standaloneDir, 'resources', 'app', 'cli', 'joy-media-bundle.mjs'),
+);
 let sha256SumsContent = `${zipSha256}  ${releaseZipName}\n${exeSha256}  joy-media.exe\n${cliSha256}  joy-media-bundle.mjs\n`;
 if (workerSha256) {
   sha256SumsContent += `${workerSha256}  joy-worker.exe\n`;

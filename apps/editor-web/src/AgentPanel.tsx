@@ -530,8 +530,7 @@ export function AgentPanel({
   const [attachError, setAttachError] = useState<string | undefined>(undefined);
   const [attaching, setAttaching] = useState(false);
   const engineStatus = joyAgentEngineClient?.getStatus();
-  const isDisconnected =
-    engineStatus === undefined || engineStatus.capability === 'incompatible';
+  const isDisconnected = engineStatus === undefined || engineStatus.capability === 'incompatible';
   const [conversation, setConversation] = useState<JoyCodeConversation>(() =>
     initialJoyCodeConversation(storage, project.id),
   );
@@ -3742,31 +3741,34 @@ export function AgentPanel({
           </div>
 
           {composerCapability === 'edit' && (
+            // isDisconnected && onOpenSettings !== undefined
             <div className="joy-code-compose-dock">
-              {isDisconnected && onOpenSettings !== undefined && Boolean(activeThread && activeThread.messages.length > 0) && (
-                <div
-                  className="joy-code-disconnected-banner"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '6px 10px',
-                    marginBottom: '8px',
-                    background: 'rgba(255, 255, 255, 0.04)',
-                    borderRadius: '6px',
-                    fontSize: '12px',
-                  }}
-                >
-                  <span>Model disconnected.</span>
-                  <button
-                    type="button"
-                    className="button-secondary joy-code-configure-agent-btn"
-                    onClick={onOpenSettings}
+              {isDisconnected &&
+                onOpenSettings !== undefined &&
+                Boolean(activeThread && activeThread.messages.length > 0) && (
+                  <div
+                    className="joy-code-disconnected-banner"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '6px 10px',
+                      marginBottom: '8px',
+                      background: 'rgba(255, 255, 255, 0.04)',
+                      borderRadius: '6px',
+                      fontSize: '12px',
+                    }}
                   >
-                    Configure OpenRouter / Joy Agent
-                  </button>
-                </div>
-              )}
+                    <span>Model disconnected.</span>
+                    <button
+                      type="button"
+                      className="button-secondary joy-code-configure-agent-btn"
+                      onClick={onOpenSettings}
+                    >
+                      Configure OpenRouter / Joy Agent
+                    </button>
+                  </div>
+                )}
               {attachedAssets.length > 0 && (
                 <ul className="joy-code-attachments" aria-label="Attached media">
                   {attachedAssets.map((asset) => (

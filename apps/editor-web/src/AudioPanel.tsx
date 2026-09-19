@@ -533,7 +533,10 @@ export function AudioPanel({
               <AudioWorkerIcon />
               <span>Local Worker {localWorkerReady ? 'connected' : 'disconnected'}</span>
             </span>
-            <div className="timeline-audio-dsp-pills" title="Real-time Audio DSP: DeepFilterNet & Normalization">
+            <div
+              className="timeline-audio-dsp-pills"
+              title="Real-time Audio DSP: DeepFilterNet & Normalization"
+            >
               <span
                 className={`audio-dsp-pill dsp-dfn ${!noClips ? 'is-active' : 'is-ready'}`}
                 title="DeepFilterNet (DFN) Real-Time Noise Reduction"
@@ -952,7 +955,10 @@ export function AudioPanel({
         <div className="audio-mix-header">
           <div className="audio-mix-header-meta">
             <span className="audio-mix-header-title">Mixer Tracks</span>
-            <div className="timeline-audio-dsp-pills" title="Real-time Audio DSP: DeepFilterNet & Normalization">
+            <div
+              className="timeline-audio-dsp-pills"
+              title="Real-time Audio DSP: DeepFilterNet & Normalization"
+            >
               <span
                 className={`audio-dsp-pill dsp-dfn ${!noClips ? 'is-active' : 'is-ready'}`}
                 title="DeepFilterNet (DFN) Real-Time Noise Reduction"

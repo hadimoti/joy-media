@@ -42,4 +42,3 @@ describe('Joy Code capability panel contract', () => {
     expect(panelSource).toContain('isDisconnected && onOpenSettings !== undefined');
   });
 });
-

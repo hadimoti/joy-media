@@ -5,11 +5,14 @@ import { mkdirSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 const desktopRoot = resolve('apps/desktop');
-const localAppData = process.env.LOCALAPPDATA || join(process.env.USERPROFILE || 'C:/Users/HadiMoti', 'AppData/Local');
+const localAppData =
+  process.env.LOCALAPPDATA || join(process.env.USERPROFILE || 'C:/Users/HadiMoti', 'AppData/Local');
 const installedExe = resolve(localAppData, 'Programs/JOY Media/joy-media.exe');
 const distExe = resolve(desktopRoot, 'dist/joy-media-win32-x64/joy-media.exe');
 const targetExe = existsSync(installedExe) ? installedExe : distExe;
-const targetCwd = existsSync(installedExe) ? resolve(localAppData, 'Programs/JOY Media') : resolve(desktopRoot, 'dist', 'joy-media-win32-x64');
+const targetCwd = existsSync(installedExe)
+  ? resolve(localAppData, 'Programs/JOY Media')
+  : resolve(desktopRoot, 'dist', 'joy-media-win32-x64');
 
 const screenshotDir = resolve(
   process.env.JOY_SCREENSHOT_DIR ||
@@ -66,17 +69,25 @@ try {
   if (!assetLibInfo.exists || !assetLibInfo.hasCatalog) {
     throw new Error(`Asset library not valid or does not exist at ${assetLibInfo.directory}`);
   }
-  if (assetLibInfo.counts.total !== 3075 || assetLibInfo.counts.audio !== 1805 || assetLibInfo.counts.image !== 1270) {
+  if (
+    assetLibInfo.counts.total !== 3075 ||
+    assetLibInfo.counts.audio !== 1805 ||
+    assetLibInfo.counts.image !== 1270
+  ) {
     throw new Error(`Unexpected asset counts: ${JSON.stringify(assetLibInfo.counts)}`);
   }
-  console.log('✔ Asset Library IPC Info matched expected counts: 3075 total (1805 audio, 1270 images).');
+  console.log(
+    '✔ Asset Library IPC Info matched expected counts: 3075 total (1805 audio, 1270 images).',
+  );
 
   // Step 2: Query desktop.asset-library.get-catalog
   console.log('3. Querying desktop.asset-library.get-catalog via IPC...');
   const catalog = await window.evaluate(async () => {
     return await window.joyDesktop.invoke('desktop.asset-library.get-catalog');
   });
-  console.log(`Catalog loaded via IPC: ${catalog?.assets?.length} assets, version ${catalog?.version}`);
+  console.log(
+    `Catalog loaded via IPC: ${catalog?.assets?.length} assets, version ${catalog?.version}`,
+  );
   if (!catalog || catalog.assets?.length !== 3075) {
     throw new Error(`Catalog assets count mismatch: expected 3075, got ${catalog?.assets?.length}`);
   }
@@ -90,13 +101,17 @@ try {
     console.log('Clicked project card.');
   }
 
-  await window.waitForSelector('.dockview-theme-dark, .workspace', { timeout: 10000 }).catch(() => {});
+  await window
+    .waitForSelector('.dockview-theme-dark, .workspace', { timeout: 10000 })
+    .catch(() => {});
   await new Promise((r) => setTimeout(r, 2000));
 
   // Step 4: Open Asset Library Settings Dialog via App menu or trigger
   console.log('5. Triggering Asset Library Settings dialog...');
   const clickedBtn = await window.evaluate(() => {
-    const btn = document.querySelector('button[title*="Asset Library Folder"], button[aria-label*="Asset Library"]');
+    const btn = document.querySelector(
+      'button[title*="Asset Library Folder"], button[aria-label*="Asset Library"]',
+    );
     if (btn) {
       btn.click();
       return true;
@@ -148,7 +163,11 @@ try {
   console.log(`Captured screenshot: ${shotImages}`);
 
   // Click the "+" button on the first asset card to add to timeline
-  const addBtn = window.locator('button[title*="Add to timeline"], button[aria-label*="Add to timeline"], .library-card button:has-text("+"), button.asset-action-btn:has-text("+")').first();
+  const addBtn = window
+    .locator(
+      'button[title*="Add to timeline"], button[aria-label*="Add to timeline"], .library-card button:has-text("+"), button.asset-action-btn:has-text("+")',
+    )
+    .first();
   if (await addBtn.isVisible()) {
     await addBtn.click();
     console.log('Clicked "+" on first asset card to add to timeline.');
@@ -165,14 +184,18 @@ try {
 
   // Now switch to Audio filter chip in Library
   console.log('7. Testing audio asset addition to timeline...');
-  const audioPill = window.locator('.asset-filter-pill:has-text("Audio"), button:has-text("Audio 1805")').first();
+  const audioPill = window
+    .locator('.asset-filter-pill:has-text("Audio"), button:has-text("Audio 1805")')
+    .first();
   if (await audioPill.isVisible()) {
     await audioPill.click();
     console.log('Clicked Audio 1805 filter pill in Library.');
     await new Promise((r) => setTimeout(r, 1200));
 
     // Click "+" on first audio asset
-    const audioAddBtn = window.locator('button[title*="Add to timeline"], button[aria-label*="Add to timeline"]').first();
+    const audioAddBtn = window
+      .locator('button[title*="Add to timeline"], button[aria-label*="Add to timeline"]')
+      .first();
     if (await audioAddBtn.isVisible()) {
       await audioAddBtn.click();
       console.log('Clicked "+" on first audio asset card.');
@@ -187,8 +210,12 @@ try {
   // Step 6: Test joy-asset:// protocol directly inside renderer
   console.log('7. Testing joy-asset:// custom protocol in renderer...');
   const protocolTest = await window.evaluate(async () => {
-    const audioRes = await fetch('joy-asset://library/audio/joylib-01376f5f76ef237b6530b6306ec641d09cf6aa0268f7bac45c085004d7ffb232');
-    const imageRes = await fetch('joy-asset://library/images/joylib-045d64ee6e795d2bec9811a0eac32e0806a64a9060859fd9fc647aaa8da798e5');
+    const audioRes = await fetch(
+      'joy-asset://library/audio/joylib-01376f5f76ef237b6530b6306ec641d09cf6aa0268f7bac45c085004d7ffb232',
+    );
+    const imageRes = await fetch(
+      'joy-asset://library/images/joylib-045d64ee6e795d2bec9811a0eac32e0806a64a9060859fd9fc647aaa8da798e5',
+    );
     const audioBlob = await audioRes.blob();
     const imageBlob = await imageRes.blob();
     return {

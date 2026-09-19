@@ -9,7 +9,17 @@
  * Do not add business logic here. Add it to a testable sibling module and call it from
  * here instead.
  */
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, safeStorage, session } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  net,
+  protocol,
+  safeStorage,
+  session,
+} from 'electron';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path, { dirname, join } from 'node:path';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
@@ -51,7 +61,13 @@ protocol.registerSchemesAsPrivileged([
   },
   {
     scheme: 'joy-asset',
-    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true },
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
   },
 ]);
 
@@ -83,14 +99,16 @@ if (!app.requestSingleInstanceLock()) {
       return { ...probe, kind: classifyMediaKind(path) };
     },
     showOpenDialog: async () => {
-      const win = BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
+      const win =
+        BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
       const result = win
         ? await dialog.showOpenDialog(win, { properties: ['openFile'] })
         : await dialog.showOpenDialog({ properties: ['openFile'] });
       return { canceled: result.canceled, path: result.filePaths[0] };
     },
     showOpenDirectoryDialog: async () => {
-      const win = BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
+      const win =
+        BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
       const result = win
         ? await dialog.showOpenDialog(win, { properties: ['openDirectory'] })
         : await dialog.showOpenDialog({ properties: ['openDirectory'] });
@@ -113,7 +131,8 @@ if (!app.requestSingleInstanceLock()) {
       });
     },
     handleWindowControl: (action) => {
-      const win = BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
+      const win =
+        BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
       if (!win) return false;
       switch (action) {
         case 'minimize':

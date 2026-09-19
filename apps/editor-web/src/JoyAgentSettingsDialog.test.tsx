@@ -63,11 +63,19 @@ async function render(
 }
 
 function buttonByText(rendered: HTMLElement, text: string): HTMLButtonElement {
-  const button = [...rendered.querySelectorAll<HTMLButtonElement>('button')].find(
-    (candidate) => candidate.textContent?.trim() === text,
+  const button = [...rendered.querySelectorAll<HTMLButtonElement>('button')].find((candidate) =>
+    (candidate.textContent ?? '').includes(text),
   );
   if (button === undefined) throw new Error(`Expected button "${text}"`);
   return button;
+}
+
+async function selectCustomPreset(rendered: HTMLElement): Promise<void> {
+  const customPreset = buttonByText(rendered, 'Custom BYOK');
+  await act(async () => {
+    customPreset.click();
+    await Promise.resolve();
+  });
 }
 
 function setInputValue(input: HTMLInputElement, value: string): void {
@@ -91,6 +99,7 @@ describe('JOY Agent Settings media capability probe', () => {
   it('does not probe on mount or connection test, then explicitly sends the check and preserves the connection success notice', async () => {
     const engineClient = client();
     const rendered = await render(engineClient, undefined);
+    await selectCustomPreset(rendered);
     const probe = vi.mocked(engineClient.probeMediaCapabilities);
     const configure = vi.mocked(engineClient.configure);
     const testConnection = vi.mocked(engineClient.testConnection);
@@ -250,7 +259,9 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     const rendered = await render(engineClient, undefined);
 
     expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.list');
-    const modelInput = rendered.querySelector<HTMLInputElement>('input[placeholder="provider/model"]');
+    const modelInput = rendered.querySelector<HTMLInputElement>(
+      'input[placeholder="provider/model"]',
+    );
     expect(modelInput?.value).toBe('anthropic/claude-3.5-sonnet');
     expect(rendered.textContent).toContain('(Saved in desktop vault)');
   });
@@ -275,6 +286,7 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     };
     const engineClient = client();
     const rendered = await render(engineClient, undefined);
+    await selectCustomPreset(rendered);
 
     const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
     if (key === null) throw new Error('Expected API key field');
@@ -336,6 +348,7 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     };
     const engineClient = client();
     const rendered = await render(engineClient, undefined);
+    await selectCustomPreset(rendered);
 
     await act(async () => {
       buttonByText(rendered, 'Connect model').click();
@@ -356,6 +369,11 @@ describe('JOY Agent Settings desktop profile persistence', () => {
   it('connects to Joy Pro gateway without requiring API key input', async () => {
     const engineClient = client();
     const rendered = await render(engineClient, undefined);
+    const joyHostedPreset = buttonByText(rendered, 'Joy Hosted Pro Gateway');
+    await act(async () => {
+      joyHostedPreset.click();
+      await Promise.resolve();
+    });
 
     const select = rendered.querySelector<HTMLSelectElement>('select');
     if (select === null) throw new Error('Expected provider select dropdown');
@@ -381,4 +399,3 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     );
   });
 });
-

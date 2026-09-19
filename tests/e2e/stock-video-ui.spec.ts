@@ -125,6 +125,9 @@ test.describe('native stock video library', () => {
     let releaseCatalog: (() => void) | undefined;
     let releasePreview: (() => void) | undefined;
     let stalePreviewFulfilled: Promise<void> | undefined;
+    let _holdImportStart: (() => void) | undefined;
+    let importHoldPromise: Promise<void> | undefined;
+    let resolveImportHold: (() => void) | undefined;
     const completedAsset = {
       id: 'imported-stock-1',
       kind: 'video',
@@ -227,6 +230,9 @@ test.describe('native stock video library', () => {
           body: JSON.stringify({ error: 'fixture import failed' }),
         });
         return;
+      }
+      if (importHoldPromise) {
+        await importHoldPromise;
       }
       await route.fulfill({
         contentType: 'application/json',
@@ -562,6 +568,9 @@ test.describe('native stock video library', () => {
       page.getByRole('button', { name: /Retry import Landscape fixture to My media/ }),
     ).toBeVisible();
     importMode = 'success';
+    importHoldPromise = new Promise<void>((resolve) => {
+      resolveImportHold = resolve;
+    });
     await page
       .locator(`.stock-video-card[data-stock-video-id="${IMPORT_FIXTURE_ID}"]`)
       .getByRole('button', { name: /Retry import Landscape fixture to My media/ })
@@ -569,6 +578,8 @@ test.describe('native stock video library', () => {
     await expect(
       page.getByRole('button', { name: /Importing Landscape fixture to My media/ }),
     ).toBeVisible();
+    resolveImportHold?.();
+    importHoldPromise = undefined;
     await expect(page.getByText('Imported stock fixture.mp4 imported to My media.')).toBeVisible({
       timeout: 15_000,
     });

@@ -172,36 +172,6 @@ exports[`R2 Look pack golden compile > music-pulse > portrait first-apply operat
 ]
 `;
 
-exports[`R2 Look pack golden compile > persian-editorial > landscape first-apply operations are stable 1`] = `
-[
-  "kf byline-opacity opacity @800000 = 0.000 (eased)",
-  "kf byline-opacity opacity @2400000 = 1.000 (eased)",
-  "kf headline-opacity opacity @0 = 0.000 (eased)",
-  "kf headline-opacity opacity @1280000 = 1.000 (eased)",
-  "kf headline-x x @0 = 19.600 (eased)",
-  "kf headline-x x @1600000 = 0.000 (eased)",
-  "kf headline-x x @8000000 = 0.000 (eased)",
-  "text byline-treatment -> rtl-name-role",
-  "text headline-treatment -> rtl-editorial-title",
-  "caption caption-treatment -> joy-rtl-classic",
-]
-`;
-
-exports[`R2 Look pack golden compile > persian-editorial > portrait first-apply operations are stable 1`] = `
-[
-  "kf byline-opacity opacity @800000 = 0.000 (eased)",
-  "kf byline-opacity opacity @2400000 = 1.000 (eased)",
-  "kf headline-opacity opacity @0 = 0.000 (eased)",
-  "kf headline-opacity opacity @1280000 = 1.000 (eased)",
-  "kf headline-x x @0 = 19.600 (eased)",
-  "kf headline-x x @1600000 = 0.000 (eased)",
-  "kf headline-x x @8000000 = 0.000 (eased)",
-  "text byline-treatment -> rtl-name-role",
-  "text headline-treatment -> rtl-editorial-title",
-  "caption caption-treatment -> joy-rtl-classic",
-]
-`;
-
 exports[`R2 Look pack golden compile > product-precision > landscape first-apply operations are stable 1`] = `
 [
   "kf benefit-opacity opacity @400000 = 0.000 (hold)",

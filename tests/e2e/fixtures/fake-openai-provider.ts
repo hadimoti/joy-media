@@ -491,27 +491,32 @@ export async function configureJoyAgent(
 ): Promise<Locator> {
   await page.locator('.app-menu-trigger').filter({ hasText: 'Joy Code' }).click();
   await page.getByRole('menuitem', { name: 'Joy Code Settings…', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'JOY Agent Engine' });
+  const dialog = page.getByRole('dialog', { name: 'Joy Code Settings' });
   await expect(dialog).toBeVisible();
+  // The dialog ships in the "Dual-Brain Studio" preset by default; switch to
+  // the Custom BYOK preset so the form below feeds a single openai-compatible
+  // connection rather than the bundled dual-brain hard-coded defaults.
+  await dialog.getByRole('button', { name: /Custom BYOK/ }).click();
   // The settings dialog has several descendant labels containing the word
   // "provider" (budget and capability controls). The first select is the
   // model-connection provider selector; keep this locator tied to the UI
   // structure rather than relying on ambiguous accessible-name matching.
   await dialog.locator('select').first().selectOption('openai-compatible');
-  await dialog.getByLabel('Base URL').fill(FAKE_PROVIDER_BASE_URL);
-  await dialog.getByLabel('Model ID').fill(options.modelId ?? FAKE_PROVIDER_MODEL);
-  await dialog.getByLabel(/I understand the custom provider receives/).check();
-  await dialog.getByLabel('API key').fill(apiKey);
-  await dialog.getByRole('button', { name: /Connect model|Test & use/ }).click();
+  await dialog.getByLabel('Base URL / Endpoint').fill(FAKE_PROVIDER_BASE_URL);
+  await dialog
+    .locator('input[placeholder="provider/model"]')
+    .fill(options.modelId ?? FAKE_PROVIDER_MODEL);
+  await dialog.locator('input[placeholder="sk-..."]').fill(apiKey);
+  await dialog.getByRole('button', { name: /^Connect model$/ }).click();
   await expect(
     dialog.getByText(
       options.allowFailure
-        ? /Tool loop ready|Plan-only|authentication failed|CORS or network error|response too large|Connection timed out/
-        : /Tool loop ready|Plan-only/,
+        ? /Connected successfully|Connected in plan-only mode|authentication failed|CORS or network error|response too large|Connection timed out|provider responded/
+        : /Connected successfully|Connected in plan-only mode/,
     ),
   ).toBeVisible({ timeout: 20_000 });
   if (!options.allowFailure) await expect(dialog.getByText(/Connected successfully/)).toBeVisible();
-  await expect(dialog.getByLabel('API key')).toHaveValue('');
+  await expect(dialog.locator('input[placeholder="sk-..."]')).toHaveValue('');
   return dialog;
 }
 

@@ -181,6 +181,15 @@ export {
 } from './evaluator.js';
 export type { LayerEvaluation, EvaluatedTransform, SceneEvaluation } from './evaluator.js';
 
+/* ─── Shot matching (color) ─── */
+
+export type { FrameColorStats, RgbPixel, ShotMatchAdjustments } from './color/shot-matcher.js';
+export {
+  extractFrameColorStats,
+  solveShotMatchAdjustments,
+  solveShotMatchColorGrade,
+} from './color/shot-matcher.js';
+
 /* ─── Living Looks (R2) ─── */
 
 export {

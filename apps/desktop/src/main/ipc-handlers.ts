@@ -456,9 +456,7 @@ function asSaveProviderProfileRequest(value: unknown): SaveProviderProfileReques
     modelId: candidate['modelId'],
     ...(Array.isArray(candidate['cachedModels'])
       ? {
-          cachedModels: candidate['cachedModels'].filter(
-            (m): m is string => typeof m === 'string',
-          ),
+          cachedModels: candidate['cachedModels'].filter((m): m is string => typeof m === 'string'),
         }
       : {}),
     apiKey: candidate['apiKey'],
