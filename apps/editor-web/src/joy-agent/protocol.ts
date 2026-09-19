@@ -58,21 +58,44 @@ export type JoyAgentProvider =
   | 'openrouter'
   | 'openai-compatible'
   | 'kilo'
-  | 'custom';
+  | 'custom'
+  | 'dual-brain';
+
+export type JoyProviderMode = Exclude<JoyAgentProvider, 'dual-brain'>;
 
 export interface ByokSessionConfig {
-  readonly provider: JoyAgentProvider;
+  readonly provider: JoyProviderMode;
   readonly baseUrl: string;
   readonly modelId: string;
   /** Volatile only: never present in a Worker event or host RPC envelope. */
   readonly apiKey: string;
 }
 
+export interface DualBrainConfig {
+  readonly mode: 'dual-brain';
+  readonly workhorse: ByokSessionConfig;
+  readonly creative: ByokSessionConfig;
+}
+
+export function isDualBrainConfig(config: unknown): config is DualBrainConfig {
+  return (
+    typeof config === 'object' &&
+    config !== null &&
+    (config as Record<string, unknown>).mode === 'dual-brain' &&
+    typeof (config as Record<string, unknown>).workhorse === 'object' &&
+    typeof (config as Record<string, unknown>).creative === 'object'
+  );
+}
+
 export interface ByokSessionStatus {
-  readonly provider: ByokSessionConfig['provider'];
+  readonly provider: JoyAgentProvider;
   readonly modelId: string;
   readonly capability: 'untested' | 'tool-loop' | 'plan-only' | 'incompatible';
   readonly message?: string;
+  readonly dualBrain?: {
+    readonly workhorse: ByokSessionStatus;
+    readonly creative: ByokSessionStatus;
+  };
 }
 
 /**

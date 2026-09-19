@@ -86,4 +86,21 @@ describe('AudioPanel Enhance workspace', () => {
     expect(markup).toContain('>Mix</button>');
     expect(markup).toContain('>Runtime</button>');
   });
+
+  it('renders real-time DSP pills for DeepFilterNet and Normalization in Enhance and Mix views', () => {
+    const markup = renderToStaticMarkup(
+      <AudioPanel
+        clipIds={['voice-a']}
+        audioState={EMPTY_AUDIO_STATE}
+        onAudioChange={() => undefined}
+        onRunBrowserDsp={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('timeline-audio-dsp-pills');
+    expect(markup).toContain('audio-dsp-pill dsp-dfn');
+    expect(markup).toContain('audio-dsp-pill dsp-norm');
+    expect(markup).toContain('DFN');
+    expect(markup).toContain('NORM');
+  });
 });

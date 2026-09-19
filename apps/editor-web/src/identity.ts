@@ -12,6 +12,7 @@
 import {
   clearStoredMediaToken,
   getStoredMediaToken,
+  registerDevice,
   type MediaSessionStorage,
 } from './media-session.js';
 import { isDesktopHost, getRemoteApiBaseUrl } from './desktop-client.js';
@@ -101,6 +102,9 @@ export async function probeJoySession(
       } catch {
         /* letter fallback */
       }
+    }
+    if (subject && token) {
+      void registerDevice(undefined, storage, fetchFn);
     }
     // Production auth path must not contact localhost debug endpoints.
     return {

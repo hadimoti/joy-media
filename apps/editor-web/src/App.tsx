@@ -4889,6 +4889,9 @@ function EditorWorkspace({
         return;
       }
       switch (id) {
+        case 'file.account':
+          setDesktopAccountModalOpen(true);
+          break;
         case 'file.projects':
           onBackToLibrary();
           break;
@@ -7213,6 +7216,10 @@ function EditorWorkspace({
                             : `${JOY_STUDIO_NAME} account`
                   }
                   onClick={() => {
+                    if (joySession.kind === 'ready' && joySession.subject === 'local-creator') {
+                      setDesktopAccountModalOpen(true);
+                      return;
+                    }
                     setAccountOpen((open) => !open);
                     setProcessesOpen(false);
                     setExportPresetOpen(false);
@@ -7263,7 +7270,13 @@ function EditorWorkspace({
                           <button
                             type="button"
                             className="account-sign-out"
-                            style={{ background: 'linear-gradient(135deg, #00d2ff, #0077ff)', color: '#ffffff', fontWeight: 600 }}
+                            style={{
+                              background: 'linear-gradient(135deg, #f7f586, #f4b72f)',
+                              color: '#0c0d10',
+                              fontWeight: 700,
+                              border: 'none',
+                              boxShadow: '0 2px 10px rgba(244, 183, 47, 0.3)',
+                            }}
                             title="Connect your JOY account to activate Joy Model and sync subscription"
                             onClick={() => {
                               setAccountOpen(false);

@@ -24,20 +24,21 @@ function firstApplyInput(definition: LookDefinition): LookCompileInput {
 }
 
 describe('built-in Look packs', () => {
-  it('ships exactly five packs with unique ids', () => {
-    expect(BUILT_IN_LOOK_PACKS).toHaveLength(5);
-    expect(new Set(BUILT_IN_LOOK_PACKS.map((p) => p.id)).size).toBe(5);
+  it('ships exactly six packs with unique ids', () => {
+    expect(BUILT_IN_LOOK_PACKS).toHaveLength(6);
+    expect(new Set(BUILT_IN_LOOK_PACKS.map((p) => p.id)).size).toBe(6);
     expect(BUILT_IN_LOOK_PACKS.map((p) => p.id)).toEqual([
       'editorial-clean',
       'product-precision',
       'kinetic-type',
       'quiet-documentary',
       'music-pulse',
+      'persian-editorial',
     ]);
   });
 
-  it('retires persian-editorial (English-only app)', () => {
-    expect(BUILT_IN_LOOK_PACKS.map((p) => p.id)).not.toContain('persian-editorial');
+  it('includes persian-editorial for RTL editorial typography', () => {
+    expect(BUILT_IN_LOOK_PACKS.map((p) => p.id)).toContain('persian-editorial');
   });
 
   for (const pack of BUILT_IN_LOOK_PACKS) {

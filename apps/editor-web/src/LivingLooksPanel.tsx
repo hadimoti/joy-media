@@ -32,6 +32,7 @@ export type LivingLooksRunInput =
       readonly definitionVersion: number;
       readonly entityBindings: Readonly<Record<string, string>>;
       readonly controlValues: Readonly<Record<string, number | string | boolean>>;
+      readonly targetTrack?: string;
       /**
        * Pre-baked audio-reactive keyframe tracks (R2 / L4, GAP 2). When present
        * the baked keys supersede the slider drive on those bindings.
@@ -86,6 +87,8 @@ export interface LivingLooksPanelProps {
   readonly onBakeFromAudio?: (
     request: Extract<LivingLooksRunInput, { kind: 'apply' | 'update' }>,
   ) => void;
+  /** 1-click apply of the Look to track V2 as a magnetic adjustment clip */
+  readonly onApplyToTrackV2?: (definitionId: string, definitionVersion: number) => void;
   /** Toggle the sibling Joy Code activity history without stealing the Looks viewport. */
   readonly activityOpen?: boolean;
   readonly onToggleActivity?: () => void;
@@ -379,6 +382,44 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
                   <span className="living-look-missing">Needs: {missing.join(', ')}</span>
                 )}
               </button>
+              {entry.available && (
+                <button
+                  type="button"
+                  className="living-look-quick-v2-btn"
+                  title="Apply Look to Track V2 as magnetic adjustment clip"
+                  disabled={props.busy}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (props.onApplyToTrackV2) {
+                      props.onApplyToTrackV2(entry.definition.id, entry.definition.version);
+                      return;
+                    }
+                    props.onRun({
+                      kind: 'apply',
+                      definitionId: entry.definition.id,
+                      definitionVersion: entry.definition.version,
+                      targetTrack: 'V2',
+                      entityBindings: Object.fromEntries(
+                        entry.definition.slots
+                          .map((slot) => {
+                            const opt = entities.find((ent) =>
+                              slot.ownerKind === 'caption-clip'
+                                ? ent.kind === 'caption-clip'
+                                : ent.kind === 'visual-object',
+                            );
+                            return [slot.id, opt?.id ?? ''];
+                          })
+                          .filter(([, id]) => Boolean(id)),
+                      ),
+                      controlValues: Object.fromEntries(
+                        entry.definition.controls.map((c) => [c.id, controlDefault(c)]),
+                      ),
+                    });
+                  }}
+                >
+                  ⚡ Apply Look to Track V2
+                </button>
+              )}
             </li>
           );
         })}

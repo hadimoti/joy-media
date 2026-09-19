@@ -5,6 +5,7 @@ import type { AgentPolicyPreferences } from './agent-policy-settings.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type {
   ByokSessionStatus,
+  DualBrainConfig,
   JoyAgentMediaCapabilityReport,
   JoyAgentMediaCapabilityState,
 } from './joy-agent/protocol.js';
@@ -167,6 +168,13 @@ export function JoyAgentSettingsDialog({
   );
   const [connectionName, setConnectionName] = useState('');
   const [working, setWorking] = useState(false);
+  const [studioPreset, setStudioPreset] = useState<'dual-brain' | 'joy-hosted' | 'custom'>(
+    status?.provider === 'dual-brain'
+      ? 'dual-brain'
+      : status?.provider === 'joy-hosted'
+        ? 'joy-hosted'
+        : 'dual-brain',
+  );
   const [connectionStatus, setConnectionStatus] = useState(status);
   const [connectionNotice, setConnectionNotice] = useState<AgentSettingsNotice | undefined>();
 
@@ -312,8 +320,77 @@ export function JoyAgentSettingsDialog({
     }
   };
 
+  const connectDualBrain = async () => {
+    if (working) return;
+    invalidateMediaProbe();
+    setWorking(true);
+    setConnectionNotice(undefined);
+    setDiscoveryError(null);
+    try {
+      let key = keyRef.current?.value.trim() ?? '';
+      let openRouterKey = key;
+      let kiloKey = key;
+
+      const openRouterProf = profiles.find((p) => p.provider === 'openrouter');
+      if (!openRouterKey && openRouterProf) {
+        try {
+          const session = (await beginDesktopProviderSession(openRouterProf.id)) as { apiKey?: string } | undefined;
+          if (session?.apiKey) openRouterKey = session.apiKey;
+        } catch {
+          /* ignore */
+        }
+      }
+
+      const kiloProf = profiles.find((p) => p.provider === 'kilo');
+      if (!kiloKey && kiloProf) {
+        try {
+          const session = (await beginDesktopProviderSession(kiloProf.id)) as { apiKey?: string } | undefined;
+          if (session?.apiKey) kiloKey = session.apiKey;
+        } catch {
+          /* ignore */
+        }
+      }
+
+      const dualConfig: DualBrainConfig = {
+        mode: 'dual-brain',
+        workhorse: {
+          provider: 'openrouter',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          modelId: 'openrouter/free',
+          apiKey: openRouterKey,
+        },
+        creative: {
+          provider: 'kilo',
+          baseUrl: 'https://api.kilo.ai/v1',
+          modelId: 'kilo-auto/efficient',
+          apiKey: kiloKey,
+        },
+      };
+
+      await engineClient.configure(dualConfig);
+      const next = await engineClient.testConnection();
+      setConnectionStatus(next);
+      onStatusChange?.(next);
+
+      const message =
+        'Dual-Brain Studio connected! Model 1 Workhorse (openrouter/free) & Model 2 Creative Brain (kilo-auto/efficient) are live.';
+      setConnectionNotice({ kind: 'success', message });
+      onNotice?.(message, 'success');
+    } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : 'Unable to connect Dual-Brain Studio';
+      setConnectionNotice({ kind: 'error', message: rawMessage });
+      onNotice?.(rawMessage, 'error');
+    } finally {
+      if (mountedRef.current) setWorking(false);
+    }
+  };
+
   const connect = async () => {
     if (working) return;
+    if (studioPreset === 'dual-brain') {
+      void connectDualBrain();
+      return;
+    }
     invalidateMediaProbe();
     setWorking(true);
     setConnectionNotice(undefined);
@@ -622,6 +699,54 @@ export function JoyAgentSettingsDialog({
             {/* TAB 1: AI MODELS & APIS */}
             {activeTab === 'models' && (
               <div className="joy-accordion">
+                {/* Studio Presets Picker */}
+                <div className="joy-studio-preset-bar">
+                  <button
+                    type="button"
+                    className={`joy-preset-tab ${studioPreset === 'dual-brain' ? 'is-active' : ''}`}
+                    onClick={() => {
+                      setStudioPreset('dual-brain');
+                      setProvider('openrouter');
+                      setBaseUrl('https://openrouter.ai/api/v1');
+                      setModelId('openrouter/free');
+                    }}
+                  >
+                    <span className="joy-preset-icon">⚡</span>
+                    <div className="joy-preset-text">
+                      <strong>Dual-Brain Studio</strong>
+                      <span>Model 1 Workhorse (free) + Model 2 Creative (kilo-auto)</span>
+                    </div>
+                    <span className="joy-preset-tag">Recommended</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`joy-preset-tab ${studioPreset === 'joy-hosted' ? 'is-active' : ''}`}
+                    onClick={() => {
+                      setStudioPreset('joy-hosted');
+                      handleProviderChange('joy-hosted');
+                    }}
+                  >
+                    <span className="joy-preset-icon">💎</span>
+                    <div className="joy-preset-text">
+                      <strong>Joy Hosted Pro Gateway</strong>
+                      <span>Keyless Sweden VPS Proxy (minimax/minimax-m3)</span>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className={`joy-preset-tab ${studioPreset === 'custom' ? 'is-active' : ''}`}
+                    onClick={() => {
+                      setStudioPreset('custom');
+                    }}
+                  >
+                    <span className="joy-preset-icon">🛠️</span>
+                    <div className="joy-preset-text">
+                      <strong>Custom BYOK</strong>
+                      <span>Single provider link (OpenRouter, Kilo, OpenAI)</span>
+                    </div>
+                  </button>
+                </div>
+
                 {/* Active Connection Banner */}
                 <div className="joy-settings-active-banner">
                   <div className="joy-settings-active-info">
@@ -629,7 +754,7 @@ export function JoyAgentSettingsDialog({
                     <div className="joy-settings-active-details">
                       <strong>
                         {connectionStatus?.modelId
-                          ? `Active Model: ${connectionStatus.modelId}`
+                          ? `Active: ${connectionStatus.modelId}`
                           : 'No Active Model Connected'}
                       </strong>
                       <span>
@@ -637,8 +762,22 @@ export function JoyAgentSettingsDialog({
                           ? `Connected to ${connectionStatus.provider} (Autonomous tool execution enabled)`
                           : connectionStatus?.capability === 'plan-only'
                             ? `Connected to ${connectionStatus.provider} (Plan-only mode)`
-                            : 'Configure an API endpoint below to connect JOY Code.'}
+                            : 'Configure an AI Studio Preset above or connect a custom endpoint.'}
                       </span>
+                      {connectionStatus?.dualBrain && (
+                        <div className="joy-settings-dual-brain-banner">
+                          <div className="joy-dual-brain-chip">
+                            <span className="joy-chip-label">🧠 Model 1 (Workhorse):</span>
+                            <span className="joy-chip-val">{connectionStatus.dualBrain.workhorse.modelId}</span>
+                            <span className="joy-chip-badge">{connectionStatus.dualBrain.workhorse.capability}</span>
+                          </div>
+                          <div className="joy-dual-brain-chip">
+                            <span className="joy-chip-label">🎨 Model 2 (Creative Brain):</span>
+                            <span className="joy-chip-val">{connectionStatus.dualBrain.creative.modelId}</span>
+                            <span className="joy-chip-badge">{connectionStatus.dualBrain.creative.capability}</span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                   {connectionStatus?.modelId && (

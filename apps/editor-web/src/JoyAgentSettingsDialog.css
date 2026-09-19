@@ -914,3 +914,111 @@
   align-items: center;
   gap: 5px;
 }
+
+/* Studio Presets Bar */
+.joy-studio-preset-bar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.joy-preset-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 12px 14px;
+  background: #17181e;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s ease;
+  position: relative;
+  color: inherit;
+}
+
+.joy-preset-tab:hover {
+  background: #1e2028;
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.joy-preset-tab.is-active {
+  background: #1d1e26;
+  border-color: #f7f586;
+  box-shadow: 0 0 16px rgba(247, 245, 134, 0.12);
+}
+
+.joy-preset-tab .joy-preset-icon {
+  font-size: 18px;
+  margin-bottom: 6px;
+}
+
+.joy-preset-tab .joy-preset-text strong {
+  display: block;
+  font-size: 13px;
+  color: #fff;
+  margin-bottom: 2px;
+}
+
+.joy-preset-tab .joy-preset-text span {
+  font-size: 11px;
+  color: #8f95a3;
+  line-height: 1.35;
+}
+
+.joy-preset-tag {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(247, 245, 134, 0.16);
+  color: #f7f586;
+  border: 1px solid rgba(247, 245, 134, 0.3);
+}
+
+/* Dual Brain Chips */
+.joy-settings-dual-brain-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.joy-dual-brain-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.joy-chip-label {
+  font-weight: 600;
+  color: #a0aec0;
+}
+
+.joy-chip-val {
+  font-family: monospace;
+  color: #f7f586;
+}
+
+.joy-chip-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}

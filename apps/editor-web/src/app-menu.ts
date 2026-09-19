@@ -7,6 +7,7 @@ import {
 } from './panel-metadata.js';
 
 export type AppMenuActionId =
+  | 'file.account'
   | 'file.projects'
   | 'file.projectImport'
   | 'file.projectExport'
@@ -79,6 +80,7 @@ export const APP_MENU_GROUPS: readonly AppMenuGroup[] = [
     id: 'file',
     label: 'File',
     items: [
+      { id: 'file.account', label: 'Account & Workstation…' },
       { id: 'file.projects', label: 'Projects Library…', separatorAfter: true },
       { id: 'file.projectImport', label: 'Import Editable Project…' },
       { id: 'file.projectExport', label: 'Export Editable Project…', separatorAfter: true },

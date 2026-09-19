@@ -47,7 +47,7 @@ export function clearStoredMediaToken(storage: MediaSessionStorage): void {
   notifyMediaSessionChanged();
 }
 
-import { getRemoteApiBaseUrl } from './desktop-client.js';
+import { getRemoteApiBaseUrl, isDesktopHost } from './desktop-client.js';
 
 export type MediaAuthMethod = 'gmail' | 'telegram';
 
@@ -99,6 +99,26 @@ export async function verifyOtp(
     throw new Error('JOY Media returned an invalid login response');
   setStoredMediaToken(data.token, storage);
   return data.token;
+}
+
+export async function registerDevice(
+  displayName?: string,
+  storage: MediaSessionStorage = typeof window !== 'undefined'
+    ? window.localStorage
+    : ({} as MediaSessionStorage),
+  fetchFn: typeof fetch = fetch,
+): Promise<unknown> {
+  const token = getStoredMediaToken(storage);
+  if (!token) return undefined;
+  const name =
+    displayName ||
+    (isDesktopHost() ? 'JOY Desktop Studio (Windows)' : 'JOY Web Studio (Browser)');
+  try {
+    return await requestJson(fetchFn, '/v1/devices', { displayName: name }, token);
+  } catch {
+    // Background registration; do not interrupt interactive auth flow
+    return undefined;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
