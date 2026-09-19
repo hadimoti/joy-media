@@ -106,6 +106,25 @@ export async function handleDoctorCommand(): Promise<number> {
     );
   }
 
+  // 8. Production Edge & Control Plane Connectivity
+  try {
+    const edgeRes = await fetch('https://joyst.ir/ready', { signal: AbortSignal.timeout(3000) });
+    if (edgeRes.ok) {
+      const json = (await edgeRes.json()) as {
+        releaseIdentity?: { commitSha?: string; schemaVersion?: number };
+      };
+      const commit = json.releaseIdentity?.commitSha?.slice(0, 8) ?? 'live';
+      const schema = json.releaseIdentity?.schemaVersion ?? 9;
+      logSuccess(
+        `Production Edge (Sweden VPS): ${c('Connected', 'bold')} [release: ${c(commit, 'cyan')}, schema: v${schema}]`,
+      );
+    } else {
+      logWarn(`Production Edge (Sweden VPS): HTTP ${edgeRes.status} (offline fallback active)`);
+    }
+  } catch {
+    logWarn('Production Edge (Sweden VPS): Unreachable (100% offline-first mode active)');
+  }
+
   console.log();
   if (failures === 0) {
     logSuccess('All core system diagnostics passed! Joy Media CLI is ready for full operation.');

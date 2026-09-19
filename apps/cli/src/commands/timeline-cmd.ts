@@ -1,4 +1,6 @@
 /* global console */
+import type { CliFlags } from '../cli.js';
+import { FlagValidationError, NUMERIC_RANGES } from '../utils/flags.js';
 import { c, logError, logSuccess } from '../utils/logger.js';
 import { loadProject, saveProject } from '../utils/project-loader.js';
 
@@ -14,10 +16,11 @@ export interface TimelineCommandFlags {
   sqlitePath?: string | undefined;
 }
 
-export async function handleTimelineCommand(
-  args: string[],
-  flags: TimelineCommandFlags,
-): Promise<number> {
+export async function handleTimelineCommand(args: string[], flags: CliFlags): Promise<number> {
+  validateRange(flags.start, NUMERIC_RANGES.start, 'start');
+  validateRange(flags.duration, NUMERIC_RANGES.duration, 'duration');
+  validateRange(flags.end, NUMERIC_RANGES.end, 'end');
+  validateRange(flags.at, NUMERIC_RANGES.at, 'at');
   const sub = args[0];
 
   if (!flags.project) {
@@ -145,6 +148,13 @@ export async function handleTimelineCommand(
       return 1;
     }
 
+    if (flags.start !== undefined && flags.end !== undefined && flags.end <= flags.start) {
+      logError(
+        `Invalid trim range: --end (${flags.end}s) must be greater than --start (${flags.start}s).`,
+      );
+      return 1;
+    }
+
     let found = false;
     for (const track of tracks) {
       const clip = track.clips.find((c) => c.id === flags.clip);
@@ -214,4 +224,21 @@ export async function handleTimelineCommand(
     `Available: ${c('add-clip', 'cyan')}, ${c('split', 'cyan')}, ${c('trim', 'cyan')}, ${c('remove-clip', 'cyan')}`,
   );
   return 1;
+}
+
+function validateRange(
+  value: number | undefined,
+  range: { min: number; max: number },
+  flag: string,
+): void {
+  if (value === undefined) return;
+  if (!Number.isFinite(value)) {
+    throw new FlagValidationError(flag, 'value is not a finite number', value);
+  }
+  if (value < range.min) {
+    throw new FlagValidationError(flag, `value must be >= ${range.min}`, value);
+  }
+  if (value > range.max) {
+    throw new FlagValidationError(flag, `value must be <= ${range.max}`, value);
+  }
 }

@@ -136,7 +136,6 @@ describe('ruler ticks', () => {
     // At 5 px/s, 30s major = 150px → majors every 30s
     expect(sparseMajors[1]!.timeUs - sparseMajors[0]!.timeUs).toBe(30_000_000);
   });
-
   it('clamps ticks to duration and formats compact labels', () => {
     const ticks = buildRulerTicks({
       durationUs: 2_500_000,
@@ -148,5 +147,37 @@ describe('ruler ticks', () => {
     expect(formatRulerLabel(0)).toBe('0:00');
     expect(formatRulerLabel(65_000_000)).toBe('1:05');
     expect(formatRulerLabel(3_661_000_000)).toBe('1:01:01');
+  });
+});
+
+describe('snapTime binary search', () => {
+  const viewport = { originUs: 0, pixelsPerSecond: 1 };
+  it('returns the proposed time when candidates are empty', () => {
+    expect(snapTime(1_000_000, [], viewport)).toBe(1_000_000);
+  });
+
+  it('matches the linear scan result for unsorted small candidate sets', () => {
+    const tight = { originUs: 0, pixelsPerSecond: 100 };
+    expect(snapTime(2_049_000, [2_000_000], tight, 8)).toBe(2_000_000);
+    expect(snapTime(2_090_000, [2_000_000], tight, 8)).toBe(2_090_000);
+  });
+
+  it('locates the nearest neighbour in O(log N) over 32+ sorted candidates', () => {
+    const candidates: number[] = [];
+    for (let i = 0; i < 64; i++) candidates.push(i * 1_000_000);
+    // Exactly on a candidate
+    expect(snapTime(33_000_000, candidates, viewport)).toBe(33_000_000);
+    // Between two candidates, prefers the closer one
+    expect(snapTime(33_400_000, candidates, viewport)).toBe(33_000_000);
+    expect(snapTime(33_600_000, candidates, viewport)).toBe(34_000_000);
+    // Outside the threshold, returns the proposal unchanged
+    expect(snapTime(33_400_000, candidates, viewport, 0.1)).toBe(33_400_000);
+  });
+
+  it('accepts unsorted 32+ candidate arrays and still picks the true nearest', () => {
+    const sorted: number[] = [];
+    for (let i = 0; i < 64; i++) sorted.push(i * 1_000_000);
+    const shuffled = [...sorted].reverse();
+    expect(snapTime(40_400_000, shuffled, viewport)).toBe(40_000_000);
   });
 });

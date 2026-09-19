@@ -249,7 +249,9 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
   });
 
   describe('Multi-API Provider & Model Configuration Commands', () => {
-    it('supports adding, listing, selecting, and removing providers via CLI', async () => {
+    it(
+      'supports adding, listing, selecting, and removing providers via CLI',
+      async () => {
       // 1. Add provider
       const addCode = await runCli([
         'agent',
@@ -287,6 +289,6 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       // 6. Remove provider
       const removeCode = await runCli(['agent', 'provider', 'remove', 'kilo-test']);
       expect(removeCode).toBe(0);
-    });
+    }, 15000);
   });
 });

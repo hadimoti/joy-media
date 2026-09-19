@@ -1,5 +1,7 @@
 /* global console */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import type { CliFlags } from '../cli.js';
+import { FlagValidationError, NUMERIC_RANGES } from '../utils/flags.js';
 import {
   c,
   logError,
@@ -25,10 +27,11 @@ export interface ProjectCommandFlags {
   sqlitePath?: string | undefined;
 }
 
-export async function handleProjectCommand(
-  args: string[],
-  flags: ProjectCommandFlags,
-): Promise<number> {
+export async function handleProjectCommand(args: string[], flags: CliFlags): Promise<number> {
+  validateRange(flags.width, NUMERIC_RANGES.width, 'width');
+  validateRange(flags.height, NUMERIC_RANGES.height, 'height');
+  validateRange(flags.fps, NUMERIC_RANGES.fps, 'fps');
+
   const sub = args[0] ?? 'list';
 
   if (sub === 'list') {
@@ -190,4 +193,21 @@ export async function handleProjectCommand(
     `Available: ${c('list', 'cyan')}, ${c('create', 'cyan')}, ${c('show', 'cyan')}, ${c('export', 'cyan')}, ${c('import', 'cyan')}`,
   );
   return 1;
+}
+
+function validateRange(
+  value: number | undefined,
+  range: { min: number; max: number },
+  flag: string,
+): void {
+  if (value === undefined) return;
+  if (!Number.isFinite(value)) {
+    throw new FlagValidationError(flag, 'value is not a finite number', value);
+  }
+  if (value < range.min) {
+    throw new FlagValidationError(flag, `value must be >= ${range.min}`, value);
+  }
+  if (value > range.max) {
+    throw new FlagValidationError(flag, `value must be <= ${range.max}`, value);
+  }
 }

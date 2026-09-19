@@ -77,6 +77,89 @@ export function buildWaveform(
 }
 
 /**
+ * Zero-allocation quantised int16 peak generation. Writes directly into a
+ * caller-provided (or newly allocated) `Int16Array` using the layout
+ * `[min0, max0, min1, max1, ...]` — i.e. one min/max int16 pair per bucket.
+ *
+ * Negative values use the asymmetric `-32768` floor; positive values use the
+ * `+32767` ceiling, matching the existing PCM16 / waveform-peak encoders.
+ *
+ * When `samples.length` is shorter than `bucketCount * 2`, the trailing slots
+ * are zero-filled; this keeps the output length deterministic.
+ */
+export function buildWaveformDirect(
+  samples: Float32Array,
+  bucketCount: number,
+  outBuffer?: Int16Array,
+): Int16Array {
+  if (!Number.isSafeInteger(bucketCount) || bucketCount < 1) {
+    throw new AudioSpikeError('AUDIO_WAVEFORM_INVALID', 'bucketCount must be a positive integer');
+  }
+  const length = bucketCount * 2;
+  const out =
+    outBuffer !== undefined && outBuffer.length >= length ? outBuffer : new Int16Array(length);
+  if (samples.length === 0) {
+    out.fill(0);
+    return out;
+  }
+  for (let bucket = 0; bucket < bucketCount; bucket++) {
+    const start = Math.floor((bucket * samples.length) / bucketCount);
+    const end = Math.floor(((bucket + 1) * samples.length) / bucketCount);
+    const base = bucket * 2;
+    if (start === end) {
+      out[base] = 0;
+      out[base + 1] = 0;
+      continue;
+    }
+    let min = samples[start]!;
+    let max = min;
+    for (let index = start + 1; index < end; index++) {
+      const sample = samples[index]!;
+      if (sample < min) min = sample;
+      else if (sample > max) max = sample;
+    }
+    out[base] = toPcm16(min);
+    out[base + 1] = toPcm16(max);
+  }
+  return out;
+}
+
+/**
+ * Zero-allocation in-place audio mixer. Each source is scaled by its gain and
+ * summed into the destination buffer; the output is clamped to `[-1, 1]`.
+ *
+ * The destination length must be `>=` every source length; sources shorter
+ * than the destination contribute silence past their own end. Excess samples
+ * at the tail of `destination` are zeroed so callers can reuse a scratch
+ * buffer without leftover state.
+ */
+export function mixAudioTracks(
+  sources: readonly Float32Array[],
+  destination: Float32Array,
+  gains?: readonly number[],
+): Float32Array {
+  if (sources.length === 0) {
+    destination.fill(0);
+    return destination;
+  }
+  if (gains !== undefined && gains.length !== sources.length) {
+    throw new AudioSpikeError('AUDIO_MIX_INVALID', 'gains length must match sources length');
+  }
+  const length = destination.length;
+  destination.fill(0);
+  for (let s = 0; s < sources.length; s++) {
+    const source = sources[s]!;
+    const gain = gains !== undefined ? gains[s]! : 1;
+    const span = Math.min(source.length, length);
+    for (let index = 0; index < span; index++) {
+      const mixed = destination[index]! + source[index]! * gain;
+      destination[index] = mixed > 1 ? 1 : mixed < -1 ? -1 : mixed;
+    }
+  }
+  return destination;
+}
+
+/**
  * Preview clock driven by the timeline/audio clock. Seek and every tick map
  * from absolute microsecond time, avoiding accumulated-duration rounding drift.
  */

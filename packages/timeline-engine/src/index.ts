@@ -163,17 +163,35 @@ export function snapTime(
   viewport: TimelineViewport,
   thresholdPx = 8,
 ): TimeUs {
+  if (candidates.length === 0) return proposedUs;
   const thresholdUs = (thresholdPx / viewport.pixelsPerSecond) * 1_000_000;
-  const nearest = candidates.reduce<TimeUs | undefined>(
-    (best, candidate) =>
-      best === undefined || Math.abs(candidate - proposedUs) < Math.abs(best - proposedUs)
-        ? candidate
-        : best,
-    undefined,
-  );
-  return nearest !== undefined && Math.abs(nearest - proposedUs) <= thresholdUs
-    ? nearest
-    : proposedUs;
+  let nearest: TimeUs;
+  if (candidates.length >= 32) {
+    const sorted = [...candidates].sort((a, b) => a - b);
+    let lo = 0;
+    let hi = sorted.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (sorted[mid]! < proposedUs) lo = mid + 1;
+      else hi = mid;
+    }
+    const a = lo > 0 ? sorted[lo - 1]! : sorted[lo]!;
+    const b = sorted[lo]!;
+    const c = lo + 1 < sorted.length ? sorted[lo + 1]! : b;
+    let best = b;
+    if (Math.abs(a - proposedUs) < Math.abs(best - proposedUs)) best = a;
+    if (Math.abs(c - proposedUs) < Math.abs(best - proposedUs)) best = c;
+    nearest = best;
+  } else {
+    let best: TimeUs | undefined;
+    for (const candidate of candidates) {
+      if (best === undefined || Math.abs(candidate - proposedUs) < Math.abs(best - proposedUs)) {
+        best = candidate;
+      }
+    }
+    nearest = best!;
+  }
+  return Math.abs(nearest - proposedUs) <= thresholdUs ? nearest : proposedUs;
 }
 
 export interface DragPreview {
