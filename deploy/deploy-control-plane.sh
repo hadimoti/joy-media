@@ -38,17 +38,21 @@ mkdir -p "$BACKUP_DIR"
 TIMESTAMP="$(date +%Y%m%d%H%M%S)"
 
 log "Step 2/6: Backing up PostgreSQL before migration 009"
+PG_DB="joymedia"
+if su - postgres -c "psql -lqt" 2>/dev/null | cut -d \| -f 1 | grep -qw "joy_media"; then
+  PG_DB="joy_media"
+fi
 PG_BACKUP_FILE="$BACKUP_DIR/joy-media-pre-controlplane-${TIMESTAMP}.sql.gz"
 if command -v su >/dev/null 2>&1; then
-  su - postgres -c "pg_dump joy_media" | gzip > "$PG_BACKUP_FILE" || {
+  su - postgres -c "pg_dump $PG_DB" | gzip > "$PG_BACKUP_FILE" || {
     # Fallback to local pg_dump
-    pg_dump -U postgres joy_media | gzip > "$PG_BACKUP_FILE" || die "failed to backup postgres database"
+    pg_dump -U postgres "$PG_DB" | gzip > "$PG_BACKUP_FILE" || die "failed to backup postgres database"
   }
 fi
 log "PostgreSQL backup secured at $PG_BACKUP_FILE ($(du -h "$PG_BACKUP_FILE" | cut -f1))"
 
 log "Step 3/6: Building @joy-media/account-web"
-pnpm --filter @joy-media/account-web build || die "account-web build failed"
+CI=true pnpm --filter @joy-media/account-web build || die "account-web build failed"
 
 log "Deploying account-web build to $ACCOUNT_WEB_TARGET"
 TEMP_WEB_STAGE="$(mktemp -d "$ACCOUNT_WEB_TARGET.staging.XXXXXX")"
