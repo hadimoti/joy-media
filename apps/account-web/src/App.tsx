@@ -58,8 +58,8 @@ export function App(): ReactNode {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#0a0c10',
-        color: '#64748b',
+        backgroundColor: '#08090a',
+        color: '#9ca3af',
         fontFamily: 'sans-serif'
       }}>
         <span>Loading JOY Media...</span>

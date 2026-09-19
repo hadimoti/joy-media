@@ -49,7 +49,7 @@ export function LandingHero({ release, onOpenLogin }: LandingHeroProps): ReactNo
             className="landing-btn-primary"
             download
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
@@ -78,34 +78,70 @@ export function LandingHero({ release, onOpenLogin }: LandingHeroProps): ReactNo
               <span className="p-dot is-yellow" />
               <span className="p-dot is-green" />
             </div>
-            <div className="preview-window-title">JOY Studio — Timeline & Living Looks (Desktop NLE)</div>
+            <div className="preview-window-title">JOY Studio — [Project: 4K_Commercial_Editorial.joy] — WebGL2 GPU Engine</div>
           </div>
           <div className="preview-window-body">
             <div className="preview-layout-grid">
               <div className="preview-sidebar">
-                <div className="preview-sidebar-item is-active">Timeline</div>
-                <div className="preview-sidebar-item">Living Looks</div>
-                <div className="preview-sidebar-item">Local Assets</div>
-                <div className="preview-sidebar-item">Joy Code Agent</div>
-                <div className="preview-sidebar-item">GPU Worker</div>
+                <div className="preview-sidebar-item is-active">
+                  <span className="sidebar-icon">🎞️</span>
+                  <span>Timeline</span>
+                </div>
+                <div className="preview-sidebar-item">
+                  <span className="sidebar-icon">🎨</span>
+                  <span>Living Looks</span>
+                </div>
+                <div className="preview-sidebar-item">
+                  <span className="sidebar-icon">📁</span>
+                  <span>Local Assets</span>
+                </div>
+                <div className="preview-sidebar-item">
+                  <span className="sidebar-icon">🤖</span>
+                  <span>Joy Code Agent</span>
+                </div>
+                <div className="preview-sidebar-item">
+                  <span className="sidebar-icon">⚡</span>
+                  <span>GPU Worker</span>
+                </div>
               </div>
               <div className="preview-main-content">
                 <div className="preview-monitor-box">
                   <div className="preview-aspect-badge">16:9 4K UHD · WebGL2 Hardware GPU</div>
+                  <div className="preview-monitor-center">
+                    <div className="monitor-reticle" />
+                    <span className="monitor-look-tag">Editorial Clean 4K</span>
+                  </div>
                   <div className="preview-playhead-time">00:01:24:18</div>
                 </div>
                 <div className="preview-timeline-tracks">
+                  <div className="preview-timeline-ruler">
+                    <span>00:00:00</span>
+                    <span>00:00:30</span>
+                    <span>00:01:00</span>
+                    <span>00:01:30</span>
+                    <span>00:02:00</span>
+                    <div className="timeline-playhead-needle" />
+                  </div>
                   <div className="preview-track-row is-v">
                     <span className="track-label">V2</span>
-                    <div className="clip-box c-motion" style={{ width: '45%', left: '15%' }}>Living Look: Editorial Clean</div>
+                    <div className="clip-box c-look" style={{ width: '55%', left: '15%' }}>
+                      <span className="clip-tag">LOOK</span>
+                      <span className="clip-name">Living Look: Editorial Clean (LUT + Glow)</span>
+                    </div>
                   </div>
                   <div className="preview-track-row is-v">
                     <span className="track-label">V1</span>
-                    <div className="clip-box c-video" style={{ width: '85%', left: '0%' }}>Main_Footage_4K_Raw.mp4</div>
+                    <div className="clip-box c-video" style={{ width: '90%', left: '0%' }}>
+                      <span className="clip-tag">VIDEO</span>
+                      <span className="clip-name">Main_Footage_4K_Raw.mp4</span>
+                    </div>
                   </div>
                   <div className="preview-track-row is-a">
                     <span className="track-label">A1</span>
-                    <div className="clip-box c-audio" style={{ width: '85%', left: '0%' }}>Voiceover (DeepFilterNet Denoised)</div>
+                    <div className="clip-box c-audio" style={{ width: '90%', left: '0%' }}>
+                      <span className="clip-tag">AUDIO</span>
+                      <span className="clip-name">Voiceover (DeepFilterNet Denoised)</span>
+                    </div>
                   </div>
                 </div>
               </div>
