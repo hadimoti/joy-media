@@ -151,7 +151,7 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       // No `Write-Output … $env:RUNNER_TOKEN` or `>>` redirection of the token.
       expect(entrypoint).not.toMatch(/Write-Output\s+\$env:RUNNER_TOKEN/);
       expect(entrypoint).not.toMatch(/Set-Content[\s\S]*RUNNER_TOKEN/);
-      expect(entrypoint).not.toMatch(/\\\" >>.*RUNNER_TOKEN/);
+      expect(entrypoint).not.toMatch(/\\" >>.*RUNNER_TOKEN/);
       expect(entrypoint).not.toMatch(/RUNNER_TOKEN.*>/);
       // Long-running exec path does not pass the token into config.cmd.
       expect(entrypoint).toContain('& .\\run.cmd');
