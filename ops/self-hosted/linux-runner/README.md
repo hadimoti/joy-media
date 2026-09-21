@@ -1,5 +1,7 @@
 # JOY Media isolated Linux runner
 
+Labels: `self-hosted,linux,x64,joy-media-ci`
+
 This image is a local, low-privilege GitHub Actions runner for the release
 candidate lanes. It is deliberately separate from the production Sweden VPS
 and never receives the owner browser/OpenCLI profile.

@@ -1,21 +1,77 @@
 # JOY Media self-hosted CI
 
-JOY Media's GitHub-hosted Actions minutes are exhausted, so the repository CI uses a dedicated self-hosted Windows runner. The runner is intentionally separate from the production VPS and is labeled `joy-media-ci`.
+JOY Media's GitHub-hosted Actions minutes are exhausted and cannot be
+purchased from Iran, so the repository CI runs entirely on owner-
+controlled self-hosted runners. Every workflow job in `.github/workflows/`
+must target a self-hosted label tuple; no job may use `ubuntu-latest`,
+`windows-latest`, `macos-latest`, or any other GitHub-hosted label. The
+contract is enforced offline by
+`tooling/release/src/ci-runner-policy.test.ts` and the runner Dockerfile
+/ entrypoint / registration-token handling is locked down by
+`tooling/release/src/ci-runner-contract.test.ts`.
 
-## Current runner
+## Self-hosted runner inventory
+
+All runners are provisioned on the owner-controlled Windows PC via
+Docker Desktop (Linux containers, plus a documented Windows-container
+contract under `ops/self-hosted/windows-runner/Dockerfile.windows`):
+
+| Runner                    | Labels                                                     | Where it runs                                              | Source of truth                                  |
+| ------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------ |
+| `joy-media-ci-linux`      | `self-hosted,linux,x64,joy-media-ci`                       | PC Docker Linux container (`ops/self-hosted/linux-runner`) | `ops/self-hosted/linux-runner/{Dockerfile,entrypoint.sh,README.md}` |
+| `joy-media-ci-acceptance` | `self-hosted,linux,x64,joy-media-acceptance`               | PC Docker Linux container (separate Docker network)       | `ops/self-hosted/acceptance-runner/README.md`    |
+| `joy-media-worker`        | `self-hosted,windows,x64,joy-media-worker`                 | Owner-controlled Windows PC (host-direct, NOT a container) | `ops/self-hosted/windows-runner/{contract.md,worker-acceptance.ps1,README.md}` |
+| `joy-media-ci-windows`    | `self-hosted,windows,x64,joy-media-ci`                     | PC Docker Windows-container (`Dockerfile.windows`)         | `ops/self-hosted/windows-runner/Dockerfile.windows` |
+
+No runner registration token is committed, logged, or persisted inside
+a long-running container — both `entrypoint.sh` (Linux) and
+`windows-runner-entrypoint.ps1` (Windows) accept the token only at
+`--configure-only` time and refuse to write it anywhere.
+
+## Current runners
 
 - Repository: `hadimoti/joy-media`
-- Runner name: `joy-media-ci-windows`
-- Labels: `self-hosted`, `windows`, `x64`, `joy-media-ci`
-- Work directory: `C:\actions-runner-joy-media\_work`
-- Startup: the `JOY Media Self-Hosted CI Runner` Scheduled Task starts `run.cmd` at the interactive user's logon
-- Toolchain: Node 22, pnpm 11.15.0, ffmpeg/ffprobe, and Playwright Chromium
-
-The runner must stay on a trusted development/CI host. Never register the production VPS as a general-purpose runner: a runner can execute repository workflow code and can retain credentials or workspace data.
+- Linux container runners (`joy-media-ci-linux`, `joy-media-ci-acceptance`):
+  built from `ops/self-hosted/linux-runner/Dockerfile`, tagged with the
+  digest-pinned image `sha256:fe6a3c657e9d9c7ee0b0c823eeaa2bcecac75041ff104ecc52ab37fc36f97b61`,
+  running as uid `1001` (`joyci`), with Node `v22.14.0`, pnpm
+  `11.15.0`, FFmpeg/FFprobe, PostgreSQL client, MinIO `mc`, and the
+  system libraries required by headless Chromium; all downloaded
+  binaries are hash-verified.
+- Windows self-hosted runner (`joy-media-worker`): the owner-controlled
+  Windows PC running the GitHub Actions runner directly (no Docker
+  container). It must have Node 22, pnpm 11.15.0, ffmpeg/ffprobe, and
+  Playwright Chromium installed and reachable from the runner account.
+- Windows-container runner (`joy-media-ci-windows`): the
+  `ops/self-hosted/windows-runner/Dockerfile.windows` contract; not
+  currently registered with the repository. It exists so any future
+  Windows-only step that does NOT need scheduled tasks or host
+  `Win32_Process` enumeration can be added under an honest
+  self-hosted-only label.
 
 ## Workflow policy
 
-`.github/workflows/ci.yml` runs on `push` to `main` and on explicit `workflow_dispatch`. It does not run untrusted pull-request code on this runner. Before merging a branch, run the same checks locally:
+The runner policy is enforced by two offline test suites:
+
+- `tooling/release/src/ci-runner-policy.test.ts` scans every file under
+  `.github/workflows/` and asserts (a) no job uses `ubuntu-latest`,
+  `windows-latest`, `macos-latest`, or any other hosted label, and (b)
+  every job targets exactly one of the self-hosted Docker labels in the
+  table above. Adding a hosted label, or pointing a job at a label that
+  is not declared under `ops/self-hosted/`, fails this test before any
+  CI minute is consumed.
+- `tooling/release/src/ci-runner-contract.test.ts` locks down the
+  Dockerfile / entrypoint / registration-token handling for both the
+  Linux (`ops/self-hosted/linux-runner/`) and the Windows-container
+  (`ops/self-hosted/windows-runner/`) contracts: digest-pinned base
+  images, SHA-256-pinned runner / Node / MinIO binaries, the dedicated
+  non-login runner user, the absence of any path that would echo or
+  persist `RUNNER_TOKEN`, and the explicit
+  `--configure-only` / long-running `run.sh` split.
+
+`.github/workflows/ci.yml` runs on explicit `workflow_dispatch` (and is
+superseded by `ci-dev.yml` for the developer feedback loop). Neither
+runs untrusted pull-request code on the self-hosted runners.
 
 ```powershell
 pnpm install --frozen-lockfile
@@ -146,6 +202,41 @@ canary, and rollback.
 
 The workflow does not upload GitHub artifacts by default: artifact storage is separate from runner
 minutes. If a release lane later uploads evidence, it must be the minimal sanitized set above.
+
+## Windows-platform evidence — honest caveat
+
+JOY-Media's full release gate requires Windows-only signals (joy-worker.exe via
+Node SEA + postject, and the `worker-acceptance.ps1` fixture that schedules a
+hidden daemon against the host task scheduler and walks `Win32_Process`).
+Those signals CANNOT be produced inside a Linux Docker container, and they
+CANNOT be produced inside a Docker Desktop Windows-container either — a
+Server Core container does not see the host's task scheduler or the host's
+`Win32_Process` table. So:
+
+- The release-candidate / r2-candidate `windows-worker-clean` /
+  `worker-package` jobs target `self-hosted,windows,x64,joy-media-worker`,
+  which is the OWNER-CONTROLLED Windows runner running DIRECTLY on the PC
+  (no Docker container). It is a self-hosted label; it is NEVER
+  `windows-latest` and never consumes a GitHub-hosted Windows VM minute.
+- The `windows-worker-clean` evidence record the gate binds from
+  (`test-output/windows/acceptance.json`) is tagged in-source with
+  `runner: "self-hosted,windows,x64,joy-media-worker"` and
+  `execution: "self-hosted-windows-worker"`. The durable evidence store
+  and the source-bound release gate (`pnpm run release:gate`) bind those
+  tags before accepting the record. A Linux-container run that somehow
+  produced a `test-output/windows/acceptance.json` will fail the runner
+  label check before it can claim Windows acceptance.
+- `ops/self-hosted/windows-runner/Dockerfile.windows` documents the
+  Windows-container variant for any future Windows-only step that does
+  NOT need scheduled tasks or host `Win32_Process` enumeration. No
+  workflow currently targets the `joy-media-ci` (Windows-container)
+  label; adding one requires honoring `ops/self-hosted/windows-runner/
+  contract.md` and adding the label to the documented allowlist in
+  `tooling/release/src/ci-runner-policy.test.ts`.
+
+In short: the JOY-Media release gate's only Windows acceptance signal
+comes from the owner-controlled Windows self-hosted runner. There is no
+Linux-container evidence ever presented as Windows acceptance.
 
 ## v2 release-candidate self-hosted CI
 

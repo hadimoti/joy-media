@@ -8,6 +8,23 @@ name: release-candidate-v2
 # docs/reviews/joy-media-ci-coverage-matrix-2026-09-08.md and
 # docs/reviews/joy-media-ci-repetition-contract-2026-09-08.md.
 #
+# JOY Media self-hosted-only CI: every job runs on an owner-controlled PC
+# self-hosted runner. GitHub-hosted Actions minutes/billing are unavailable
+# from Iran, so no job may use `ubuntu-latest`, `windows-latest`,
+# `macos-latest`, or any other GitHub-hosted label. The contract is enforced
+# offline by tooling/release/src/ci-runner-policy.test.ts.
+#
+# Lane → runner mapping (matches ops/self-hosted/*/ contract docs):
+#   - validate-candidate / linux-real-services / prod-build-smoke /
+#     gate-summary: self-hosted,linux,x64,joy-media-ci (PC Docker Linux).
+#   - acceptance-primary / acceptance-responsive / real-service-acceptance /
+#     p3-real-services: self-hosted,linux,x64,joy-media-acceptance (isolated
+#     PC Docker Linux acceptance runner).
+#   - windows-worker-clean: self-hosted,windows,x64,joy-media-worker
+#     (owner-controlled Windows self-hosted runner; NOT a GitHub-hosted
+#     Windows VM). The only Windows acceptance evidence is produced here.
+#     See docs/SELF-HOSTED-CI.md §Windows-platform evidence.
+#
 # This file is added alongside release-candidate.yml (the known-good gate) and
 # does not replace it until the independent reviewer accepts the contract change.
 

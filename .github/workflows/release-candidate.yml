@@ -1,5 +1,23 @@
 name: release-candidate
 
+# JOY Media self-hosted-only release-candidate gate.
+#
+# Every job in this workflow runs on an owner-controlled self-hosted runner.
+# GitHub-hosted Actions minutes/billing are unavailable from Iran, so no job
+# may use `ubuntu-latest`, `windows-latest`, `macos-latest`, or any other
+# GitHub-hosted label. The contract is enforced offline by
+# tooling/release/src/ci-runner-policy.test.ts.
+#
+# Lane → runner mapping (matches ops/self-hosted/*/ contract docs):
+#   - validate-candidate / linux-real-services / acceptance /
+#     real-service-acceptance: self-hosted,linux,x64,joy-media-ci (or
+#     self-hosted,linux,x64,joy-media-acceptance for the isolated acceptance
+#     runner). Both are PC Docker Linux containers.
+#   - windows-worker-clean: self-hosted,windows,x64,joy-media-worker (the
+#     owner-controlled Windows self-hosted runner; NOT a GitHub-hosted
+#     Windows VM). The only Windows acceptance evidence is produced here.
+#     See docs/SELF-HOSTED-CI.md §Windows-platform evidence.
+
 on:
   workflow_dispatch:
     inputs:
