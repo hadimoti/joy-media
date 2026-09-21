@@ -153,10 +153,12 @@ must run twice on the exact candidate SHA and use repository-scoped runners with
   Any automated browser uses fixture credentials only and never receives the owner's cookies or
   OpenCLI profile `cefd9k77`.
 
-The inventory now has the Linux Docker runners, the dedicated Windows Docker Worker runner,
-and the isolated acceptance runner described above. There is no host-direct Windows fallback;
-if the Windows engine or Docker runner is unavailable, the workflow queues/fails rather than
-consuming a different runner. Do not point release jobs at the production Sweden VPS.
+The current PC inventory has the two Linux Docker runners and the isolated acceptance runner
+described above. The Windows Docker Worker is a defined contract but is not currently registered:
+Docker Desktop exposes only its Linux engine and the Windows engine is disabled. There is no
+host-direct Windows fallback; if the Windows engine or Docker runner is unavailable, the
+workflow queues/fails rather than consuming a different runner. Do not point release jobs at
+the production Sweden VPS.
 
 The manually dispatched `.github/workflows/release-candidate.yml` is the executable contract for
 those lanes. Supply the full candidate SHA; it runs two exact passes for each lane. The Linux
