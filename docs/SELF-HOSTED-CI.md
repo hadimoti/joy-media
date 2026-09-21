@@ -159,6 +159,10 @@ Docker Desktop exposes only its Linux engine and the Windows engine is disabled.
 host-direct Windows fallback; if the Windows engine or Docker runner is unavailable, the
 workflow queues/fails rather than consuming a different runner. Do not point release jobs at
 the production Sweden VPS.
+The read-only GitHub runner inventory currently shows the two online native Windows runners
+`joy-media-ci-windows` and `joy-media-ci-worker` with the retired labels `joy-media-ci` and
+`joy-media-worker`; it shows no `joy-media-worker-docker` runner. Those old runners are not
+Windows-Docker evidence and are intentionally not used by the current workflow contract.
 
 The manually dispatched `.github/workflows/release-candidate.yml` is the executable contract for
 those lanes. Supply the full candidate SHA; it runs two exact passes for each lane. The Linux
