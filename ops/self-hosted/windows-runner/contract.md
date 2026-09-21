@@ -1,41 +1,39 @@
 # JOY Media Windows self-hosted CI runner — container contract
 
-This directory documents the **Windows-container** variant of the JOY Media
-self-hosted CI runner image. It complements (and is intentionally narrower
-than) `ops/self-hosted/linux-runner/`, which is the primary PC Docker
-runner.
+This directory documents the Windows-container runner for JOY Media private
+CI. Docker Desktop on the owner-controlled PC is the execution boundary;
+GitHub is the workflow and control plane only.
 
-## Labels
+## Required labels
 
-The Windows-container image registers the runner with labels
-`self-hosted`, `windows`, `x64`, `joy-media-ci` — the same shape as the
-Linux container, so any future Windows-only step that does NOT need
-host-level access can use the same pipeline.
+The runner must register with this exact comma-separated label list:
 
-The owner-controlled Windows self-hosted runner that JOY-Media's actual
-release-candidate `windows-worker-clean` and `worker-package` jobs target
-is the PRIMARY Windows runner with labels
-`self-hosted`, `windows`, `x64`, `joy-media-worker`. That runner runs
-DIRECTLY on the PC (not inside a Windows container), because the JOY
-Media Worker acceptance fixture (`worker-acceptance.ps1`) needs
-`Register-ScheduledTask` against the host's task scheduler and
-`Win32_Process` enumeration — both of which are per-host and unavailable
-from inside a `mcr.microsoft.com/windows/servercore` container.
+`self-hosted,windows,x64,joy-media-ci`
+
+The release gate rejects host-direct Windows labels, Linux portable evidence,
+missing labels, and evidence from any other runner.
 
 ## Build
 
-The container build requires Docker Desktop on the owner's PC with the
-**Windows-container** engine enabled:
+The Docker Desktop engine must be switched to Windows containers before the
+build. Run from the repository root:
 
 ```powershell
-$env:Path = 'C:\Program Files\Docker\Docker\resources\bin;' + $env:Path
 docker build --pull `
+  --file ops/self-hosted/windows-runner/Dockerfile.windows `
   --build-arg RUNNER_VERSION=2.337.0 `
   --tag joy-media-ci-windows:2.337.0 `
   ops/self-hosted/windows-runner
 ```
 
+The image build validates Chocolatey before using it, verifies the pinned
+Node and Actions Runner SHA-256 values, and leaves Node at `C:\node\node.exe`
+with Corepack at `C:\node\corepack.cmd`.
+
 ## Register (token never persisted)
+
+Registration tokens are short-lived and are supplied only to the one-shot
+configuration container:
 
 ```powershell
 $registrationToken = gh api --method POST repos/hadimoti/joy-media/actions/runners/registration-token --jq .token
@@ -47,11 +45,10 @@ docker run --rm `
   -e RUNNER_NAME=joy-media-ci-windows `
   -e RUNNER_LABELS=self-hosted,windows,x64,joy-media-ci `
   -v joy-media-ci-windows-runner:C:\actions-runner `
-  joy-media-ci-windows:2.337.0 --configure-only
+  joy-media-ci-windows:2.337.0 -ConfigureOnly
 ```
 
-The long-running container is started **without** `RUNNER_TOKEN` so the
-expired registration token is never retained:
+The long-running container is started without `RUNNER_TOKEN`:
 
 ```powershell
 docker run -d `
@@ -61,29 +58,26 @@ docker run -d `
   joy-media-ci-windows:2.337.0
 ```
 
-## What this container CANNOT do
+The entrypoint removes the token from its process environment after
+registration and never writes it to the image, runner work directory, logs,
+or durable evidence.
 
-The Windows-container variant is intentionally not used for the JOY Media
-release-candidate `windows-worker-clean` acceptance step. Server Core
-containers cannot see the host's task scheduler or the host's
-`Win32_Process` table; the Worker acceptance fixture needs both. Steps
-that only need PowerShell + Node inside the container (for example,
-running `pwsh -File scripts/build-worker-exe.ps1` to produce
-`joy-worker.exe` without exercising the daemon loopback fixture) CAN
-target this label; the release gate today does not require that.
+## Container-local acceptance boundary
 
-## Windows-platform evidence caveat
+The Windows acceptance fixture must inspect only processes, files, and
+lifecycle events created inside this container. It must not call the host task
+scheduler or host process table. Any fixture that still requires host-only
+APIs is incomplete and keeps the release gate red until it is ported to a
+container-local contract.
 
-The ONLY Windows acceptance evidence JOY-Media's release gates currently
-consume is produced on `self-hosted,windows,x64,joy-media-worker` — the
-owner-controlled Windows runner, NOT this Windows container. The
-durable evidence emitted by that lane is tagged
-`runner: "self-hosted,windows,x64,joy-media-worker"` and
-`execution: "self-hosted-windows-worker"` so it can never be confused
-with a Linux-container run, and the gate contract (`release:gate`)
-binds those tags before it accepts `test-output/windows/acceptance.json`.
+Accepted evidence must include the exact candidate SHA, workflow run and
+attempt, exact runner label, immutable container ID and image digest,
+container-local startup/hello/lease/notification-clear/termination lifecycle,
+source provenance, and a verified Windows platform marker. The gate rejects
+missing, stale, mismatched, host-direct, portable, or legacy evidence.
 
-Any future contributor who points a job at a Windows-hosted label
-(`windows-latest`) will fail the offline runner-policy test in
-`tooling/release/src/ci-runner-policy.test.ts` before a CI minute is
-consumed.
+## Runtime blocker policy
+
+This contract does not invent runtime evidence. Until Docker Desktop Windows
+engine can build the image, register the runner, execute the container-local
+fixture, and produce exact-candidate evidence, the release gate remains red.

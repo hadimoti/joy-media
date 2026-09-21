@@ -6,51 +6,10 @@
 # the Windows-container engine enabled (Settings → "Use Windows containers
 # instead of Linux containers").
 #
-# WHY THIS IS A CONTRACT FILE AND NOT A DEFAULT IN THE WORKFLOWS
-# -----------------------------------------------------------------
-# JOY Media's full release gate requires TWO Windows-only signals that no
-# Docker Windows container can provide:
-#
-#   1. joy-worker.exe production build via Node SEA + postject — needs
-#      `node.exe` + `postject.cmd` invoked from PowerShell.
-#   2. The loopback Worker control-plane fixture used by
-#      `ops/self-hosted/windows-runner/worker-acceptance.ps1`:
-#      `Get-CimInstance Win32_Process`, scheduled tasks via
-#      `Register-ScheduledTask`, Win32 process-tree walks.
-#
-# Windows containers (Server Core / Nano Server base images) DO ship
-# PowerShell and Node, but they run in a Server Core user session and
-# cannot:
-#   - register a `Register-ScheduledTask` against the host's task
-#     scheduler (the scheduler service is not exposed inside a Windows
-#     container);
-#   - see the host's `Win32_Process` table (process enumeration is per-
-#     container, not per-host);
-#   - drive the headless Worker as a long-lived pairable daemon the way
-#     production does on the owner's PC.
-#
-# For those reasons, the JOY-Media release-candidate and r2-candidate
-# `windows-worker-clean` / `worker-package` jobs intentionally target
-# `self-hosted,windows,x64,joy-media-worker` — the OWNER-CONTROLLED
-# Windows runner that runs DIRECTLY on the PC (not inside a Windows
-# container). The evidence it emits is tagged
-# `execution = self-hosted-windows-worker` / `runner = self-hosted,
-# windows, x64, joy-media-worker` in the durable evidence store so the
-# release gate can never confuse Linux-container evidence for Windows
-# acceptance.
-#
-# The `joy-media-ci` Windows-container runner that THIS Dockerfile
-# produces is therefore a SECONDARY runner. It is the contract for any
-# future Windows-only step that DOES NOT need scheduled tasks or host
-# Win32_Process enumeration (for example, packaging a pure-MSIX
-# Windows-only utility, or running a Windows self-test that needs
-# PowerShell + Node without touching the task scheduler).
-#
-# No workflow in `.github/workflows/` currently targets the
-# `joy-media-ci` Windows-container label. Adding a job to the label
-# without honoring the constraints in `contract.md` would fail the
-# offline runner-policy test in `tooling/release/src/ci-runner-policy.
-# test.ts` if the label were not added to the documented allowlist.
+# The release gate accepts Windows evidence only from this exact
+# `self-hosted,windows,x64,joy-media-ci` runner. This image is deliberately a
+# Windows-container contract: host-direct Windows runners and Linux portable
+# evidence are not acceptance substitutes.
 
 # windows/servercore is the canonical base for non-GUI Windows
 # containers. The tag is intentionally pinned to a digest in any real
@@ -66,13 +25,20 @@ ARG NODE_SHA256=69b09dba5c8dcb05c4e4273a4340db1005abeafe3927efda2bc5b249e80437ec
 ARG RUNNER_VERSION=2.337.0
 ARG RUNNER_SHA256=70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613
 
-# ffmpeg / ffprobe / git / curl come from chocolatey; choco is pre-installed
-# in mcr.microsoft.com/windows/servercore:ltsc2022.
+# The Server Core base is expected to contain Chocolatey in the owner-managed
+# build environment. The build explicitly validates that assumption before
+# invoking it; a missing package manager is a hard build failure.
 
 ENV COREPACK_HOME="C:\\corepack" `
+    NODE_VERSION="${NODE_VERSION}" `
+    NODE_SHA256="${NODE_SHA256}" `
+    RUNNER_VERSION="${RUNNER_VERSION}" `
+    RUNNER_SHA256="${RUNNER_SHA256}" `
     PATH="C:\\actions-runner\\bin;C:\\node;${PATH}"
 
 RUN [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 ; `
+    $choco = Get-Command choco.exe -ErrorAction SilentlyContinue ; `
+    if (-not $choco) { throw 'Chocolatey is required in the Windows build image; bootstrap it in the pinned base image before building.' } ; `
     Write-Host 'Installing chocolatey packages (git, ffmpeg, curl, jq)' ; `
     choco install -y --no-progress git ffmpeg curl jq ; `
     Remove-Item -Recurse -Force C:\ProgramData\chocolatey\lib\*.install.log -ErrorAction SilentlyContinue ; `
@@ -82,11 +48,18 @@ RUN [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tl
     $expected = $env:NODE_SHA256 ; `
     $actual = (Get-FileHash -LiteralPath $nodeArchive -Algorithm SHA256).Hash.ToLowerInvariant() ; `
     if ($actual -ne $expected) { throw "Node.js hash mismatch: expected $expected, got $actual" } ; `
-    Expand-Archive -LiteralPath $nodeArchive -DestinationPath C:\node -Force ; `
+    $nodeExtract = Join-Path $env:TEMP 'joy-node-extract' ; `
+    Remove-Item -LiteralPath $nodeExtract -Recurse -Force -ErrorAction SilentlyContinue ; `
+    Expand-Archive -LiteralPath $nodeArchive -DestinationPath $nodeExtract -Force ; `
+    $nodeRoot = Get-ChildItem -LiteralPath $nodeExtract -Directory | Select-Object -First 1 ; `
+    if (-not $nodeRoot -or -not (Test-Path -LiteralPath (Join-Path $nodeRoot.FullName 'node.exe'))) { throw 'Node archive did not contain the expected node.exe layout.' } ; `
+    Remove-Item -LiteralPath C:\node -Recurse -Force -ErrorAction SilentlyContinue ; `
+    Move-Item -LiteralPath $nodeRoot.FullName -Destination C:\node ; `
+    Remove-Item -LiteralPath $nodeExtract -Recurse -Force ; `
     Remove-Item -LiteralPath $nodeArchive -Force ; `
-    & C:\node\corepack enable ; `
+    & C:\node\corepack.cmd enable ; `
     $env:COREPACK_HOME = 'C:\corepack' ; `
-    & C:\node\corepack install --global pnpm@11.15.0 ; `
+    & C:\node\corepack.cmd install --global pnpm@11.15.0 ; `
     Write-Host 'Installing GitHub Actions runner' ; `
     $runnerArchive = Join-Path $env:TEMP ("actions-runner-win-x64-$($env:RUNNER_VERSION).zip") ; `
     Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/actions/runner/releases/download/v$($env:RUNNER_VERSION)/actions-runner-win-x64-$($env:RUNNER_VERSION).zip" -OutFile $runnerArchive ; `
