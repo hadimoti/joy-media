@@ -174,7 +174,9 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(containerAcceptance).toContain('windows-docker-container');
       expect(containerAcceptance).toContain('JOY_MEDIA_WINDOWS_CONTAINER_ID');
       expect(containerAcceptance).toContain('JOY_MEDIA_WINDOWS_IMAGE_DIGEST');
-      expect(containerAcceptance).not.toMatch(/Register-ScheduledTask|Get-ScheduledTask|Win32_Process/);
+      expect(containerAcceptance).not.toMatch(
+        /Register-ScheduledTask|Get-ScheduledTask|Win32_Process/,
+      );
       expect(contract).toContain('container-local');
       expect(contract).toContain('Host-direct Windows runners are forbidden');
     });

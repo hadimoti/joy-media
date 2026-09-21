@@ -70,7 +70,10 @@ const ALLOWED_LABEL_TUPLES: ReadonlyArray<readonly string[]> = [
 ];
 
 function normalizeTuple(values: string[]): string[] {
-  return [...values].map((v) => v.trim()).filter(Boolean).sort();
+  return [...values]
+    .map((v) => v.trim())
+    .filter(Boolean)
+    .sort();
 }
 
 function tupleEquals(a: readonly string[], b: readonly string[]): boolean {
@@ -122,7 +125,10 @@ function findRunsOnEntries(workflowText: string): RunsOnEntry[] {
         lineNo: i + 1,
         jobContext: jobKey || '(workflow-level)',
         raw: remainder,
-        tuple: inner.split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean),
+        tuple: inner
+          .split(',')
+          .map((s) => s.trim().replace(/^['"]|['"]$/g, ''))
+          .filter(Boolean),
         isList: true,
       });
       continue;
@@ -244,35 +250,38 @@ describe('self-hosted-only CI architecture contract', () => {
     }
   });
 
-  it.each(workflows)('every job in %s targets an allowed self-hosted Docker label', (workflowPath) => {
-    const text = readFileSync(workflowPath, 'utf8');
-    const entries = findRunsOnEntries(text);
-    expect(entries.length).toBeGreaterThan(0);
+  it.each(workflows)(
+    'every job in %s targets an allowed self-hosted Docker label',
+    (workflowPath) => {
+      const text = readFileSync(workflowPath, 'utf8');
+      const entries = findRunsOnEntries(text);
+      expect(entries.length).toBeGreaterThan(0);
 
-    for (const entry of entries) {
-      const sorted = normalizeTuple(entry.tuple);
-      const key = sorted.join('|');
-      expect(
-        allowed.has(key),
-        [
-          `runs-on tuple ${JSON.stringify(entry.tuple)} on line ${entry.lineNo}`,
-          `(${entry.jobContext}) in ${workflowPath}`,
-          `is not in the allowed self-hosted Docker label set.`,
-          `Allowed: ${[...allowed].join(' ; ')}.`,
-          `Declare the runner contract under ops/self-hosted/<runner>/ and add the`,
-          `label tuple to tooling/release/src/ci-runner-policy.test.ts if this is intentional.`,
-        ].join(' '),
-      ).toBe(true);
-      // Every allowed tuple starts with `self-hosted` (the documented
-      // contract). Re-check this directly against the unsorted labels so a
-      // typo cannot smuggle a non-self-hosted tuple through the sorted-set
-      // membership check.
-      expect(
-        entry.tuple[0],
-        `runs-on tuple on line ${entry.lineNo} (${entry.jobContext}) in ${workflowPath} must begin with "self-hosted"; got ${JSON.stringify(entry.tuple)}`,
-      ).toBe('self-hosted');
-    }
-  });
+      for (const entry of entries) {
+        const sorted = normalizeTuple(entry.tuple);
+        const key = sorted.join('|');
+        expect(
+          allowed.has(key),
+          [
+            `runs-on tuple ${JSON.stringify(entry.tuple)} on line ${entry.lineNo}`,
+            `(${entry.jobContext}) in ${workflowPath}`,
+            `is not in the allowed self-hosted Docker label set.`,
+            `Allowed: ${[...allowed].join(' ; ')}.`,
+            `Declare the runner contract under ops/self-hosted/<runner>/ and add the`,
+            `label tuple to tooling/release/src/ci-runner-policy.test.ts if this is intentional.`,
+          ].join(' '),
+        ).toBe(true);
+        // Every allowed tuple starts with `self-hosted` (the documented
+        // contract). Re-check this directly against the unsorted labels so a
+        // typo cannot smuggle a non-self-hosted tuple through the sorted-set
+        // membership check.
+        expect(
+          entry.tuple[0],
+          `runs-on tuple on line ${entry.lineNo} (${entry.jobContext}) in ${workflowPath} must begin with "self-hosted"; got ${JSON.stringify(entry.tuple)}`,
+        ).toBe('self-hosted');
+      }
+    },
+  );
 
   it('the self-hosted Docker label allowlist matches every documented runner', () => {
     // For every tuple declared in `ops/self-hosted/*/README.md`, it must be in

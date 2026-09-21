@@ -1309,7 +1309,10 @@ describe('JOY Studio 1.0 release gate', () => {
     });
 
     it('accepts only the complete exact-candidate Windows-Docker fixture', () => {
-      const result = evaluateReleaseGate({ ...passingInput(), windowsAcceptance: windowsAcceptance() });
+      const result = evaluateReleaseGate({
+        ...passingInput(),
+        windowsAcceptance: windowsAcceptance(),
+      });
       expect(result.checks.find((c) => c.id === 'windows-acceptance')).toMatchObject({
         status: 'passed',
         critical: true,

@@ -741,7 +741,7 @@ function operationalEvidenceReady(
   const startup = record(lifecycle.startup);
   const daemon = record(startup.daemon);
   if (
-    !(['at-logon', 'explicit-spawn'].includes(startup.trigger)) ||
+    !['at-logon', 'explicit-spawn'].includes(startup.trigger) ||
     startup.triggerVerified !== true ||
     startup.action !== 'normal-daemon' ||
     startup.taskRan !== true ||
@@ -809,23 +809,13 @@ function windowsAcceptanceReady(
   if (evidence === undefined || evidence === null) return false;
   const raw = evidence as unknown as Record<string, unknown>;
   const reasons: string[] = [];
-  if (
-    typeof raw.candidateSha !== 'string' ||
-    !/^[0-9a-f]{40}$/u.test(raw.candidateSha)
-  ) {
+  if (typeof raw.candidateSha !== 'string' || !/^[0-9a-f]{40}$/u.test(raw.candidateSha)) {
     reasons.push('candidate_sha missing or malformed');
   }
-  if (
-    typeof raw.workflowRunId !== 'string' ||
-    !/^[0-9]+$/u.test(raw.workflowRunId)
-  ) {
+  if (typeof raw.workflowRunId !== 'string' || !/^[0-9]+$/u.test(raw.workflowRunId)) {
     reasons.push('workflow_run_id missing or non-numeric');
   }
-  if (
-    typeof raw.attempt !== 'number' ||
-    !Number.isInteger(raw.attempt) ||
-    raw.attempt < 1
-  ) {
+  if (typeof raw.attempt !== 'number' || !Number.isInteger(raw.attempt) || raw.attempt < 1) {
     reasons.push('run_attempt missing or non-positive');
   }
   if (raw.runner !== 'self-hosted,windows,x64,joy-media-worker-docker') {
@@ -835,9 +825,7 @@ function windowsAcceptanceReady(
   }
   const execution = raw.execution;
   if (execution !== 'windows-docker-container' && execution !== 'windows-self-hosted-docker') {
-    reasons.push(
-      `execution "${String(execution)}" is not a Windows-Docker execution label`,
-    );
+    reasons.push(`execution "${String(execution)}" is not a Windows-Docker execution label`);
   }
   if (raw.windowsPlatformVerified !== true) {
     reasons.push('windows_platform_verified must be true and is not');
@@ -910,23 +898,13 @@ function windowsAcceptanceReasons(
 ): string[] {
   const raw = evidence as unknown as Record<string, unknown>;
   const reasons: string[] = [];
-  if (
-    typeof raw.candidateSha !== 'string' ||
-    !/^[0-9a-f]{40}$/u.test(raw.candidateSha)
-  ) {
+  if (typeof raw.candidateSha !== 'string' || !/^[0-9a-f]{40}$/u.test(raw.candidateSha)) {
     reasons.push('candidate_sha missing or malformed');
   }
-  if (
-    typeof raw.workflowRunId !== 'string' ||
-    !/^[0-9]+$/u.test(raw.workflowRunId)
-  ) {
+  if (typeof raw.workflowRunId !== 'string' || !/^[0-9]+$/u.test(raw.workflowRunId)) {
     reasons.push('workflow_run_id missing or non-numeric');
   }
-  if (
-    typeof raw.attempt !== 'number' ||
-    !Number.isInteger(raw.attempt) ||
-    raw.attempt < 1
-  ) {
+  if (typeof raw.attempt !== 'number' || !Number.isInteger(raw.attempt) || raw.attempt < 1) {
     reasons.push('run_attempt missing or non-positive');
   }
   if (raw.runner !== 'self-hosted,windows,x64,joy-media-worker-docker') {
@@ -934,10 +912,11 @@ function windowsAcceptanceReasons(
       `runner label "${String(raw.runner)}" is not the trusted Windows-Docker self-hosted runner`,
     );
   }
-  if (raw.execution !== 'windows-docker-container' && raw.execution !== 'windows-self-hosted-docker') {
-    reasons.push(
-      `execution "${String(raw.execution)}" is not a Windows-Docker execution label`,
-    );
+  if (
+    raw.execution !== 'windows-docker-container' &&
+    raw.execution !== 'windows-self-hosted-docker'
+  ) {
+    reasons.push(`execution "${String(raw.execution)}" is not a Windows-Docker execution label`);
   }
   if (raw.windowsPlatformVerified !== true) {
     reasons.push('windows_platform_verified must be true and is not');
