@@ -14,7 +14,7 @@ name: r2-candidate
 #   - windows-worker-clean (joy-worker.exe build + Windows-only
 #     self-test against a loopback control-plane fixture):
 #     the dedicated Windows Worker runner
-#     (`self-hosted,windows,x64,joy-media-worker`).
+#     (`self-hosted,windows,x64,joy-media-worker-docker`).
 #
 # No job uses `ubuntu-latest`, `windows-latest`, `macos-latest`, or any
 # other GitHub-hosted label. The contract is enforced offline by
@@ -109,7 +109,7 @@ jobs:
     # The only Windows acceptance evidence in this workflow is produced here
     # on the self-hosted Windows worker — see docs/SELF-HOSTED-CI.md
     # §Windows-platform evidence for the honest Windows-platform caveat.
-    runs-on: [self-hosted, windows, x64, joy-media-worker]
+    runs-on: [self-hosted, windows, x64, joy-media-worker-docker]
     needs: [validate-candidate]
     strategy:
       fail-fast: false
@@ -157,8 +157,8 @@ jobs:
               # owner-controlled self-hosted Windows runner, NOT from a
               # GitHub-hosted Windows VM. See docs/SELF-HOSTED-CI.md
               # §Windows-platform evidence for the explicit caveat.
-              execution     = 'self-hosted-windows-worker'
-              runner        = 'self-hosted,windows,x64,joy-media-worker'
+              execution     = 'windows-docker-container'
+              runner        = 'self-hosted,windows,x64,joy-media-worker-docker'
               candidateSha  = $env:CANDIDATE_SHA
               workflowRunId = $env:GITHUB_RUN_ID
               attempt       = $env:GITHUB_RUN_ATTEMPT
@@ -308,8 +308,8 @@ jobs:
             const fs = require("node:fs");
             const path = "test-output/windows/acceptance.json";
             const r = JSON.parse(fs.readFileSync(path, "utf8"));
-            r.windowsRunner = "self-hosted,windows,x64,joy-media-worker";
-            r.hostedProvider = "self-hosted (owner-controlled PC)";
+            r.windowsRunner = "self-hosted,windows,x64,joy-media-worker-docker";
+            r.hostedProvider = "self-hosted (owner-controlled Docker Desktop)";
             fs.writeFileSync(path, JSON.stringify(r, null, 2));
           '
       - name: Authenticated real-service desktop acceptance and evidence

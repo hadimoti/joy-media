@@ -37,7 +37,7 @@ const windowsAcceptance = (
   candidateSha: commit,
   workflowRunId: '123456789',
   attempt: 1,
-  runner: 'self-hosted,windows,x64,joy-media-ci',
+  runner: 'self-hosted,windows,x64,joy-media-worker-docker',
   containerIdentity: {
     containerId: '0123456789ab',
     imageDigest: `sha256:${'d'.repeat(64)}`,
@@ -353,7 +353,7 @@ describe('JOY Studio 1.0 release gate', () => {
     );
     expect(workflow).toContain('"$RUNNER_TEMP"/*) ;;');
     expect(workflow).toContain('test -z "$(git status --porcelain)"');
-    expect(workflow).toContain('bash scripts/build-worker-portable.sh --output "$OUTPUT"');
+    expect(workflow).toContain('scripts/build-worker-exe.ps1 -OutputPath $output');
   });
 
   it('isolates and always cleans release acceptance Playwright outputs', () => {
@@ -387,7 +387,7 @@ describe('JOY Studio 1.0 release gate', () => {
     const realAcceptance = workflow.slice(workflow.indexOf('\n  real-service-acceptance:'));
     expect(realAcceptance).toContain('runs-on: [self-hosted, linux, x64, joy-media-acceptance]');
     expect(realAcceptance).toContain(
-      'needs: [validate-candidate, acceptance, worker-portable-clean]',
+      'needs: [validate-candidate, acceptance, windows-worker-clean]',
     );
     expect(realAcceptance).toContain(
       'test "${JOY_MEDIA_CI_ACCEPTANCE_PROFILE:-}" = \'real-services\'',
@@ -466,14 +466,12 @@ describe('JOY Studio 1.0 release gate', () => {
       validation.indexOf('Validate immutable candidate input'),
     );
     expect(validation).toContain('persist-credentials: false');
-    const windows = workflow.slice(workflow.indexOf('\n  worker-portable-clean:'));
+    const windows = workflow.slice(workflow.indexOf('\n  windows-worker-clean:'));
     expect(windows).toContain('needs: [validate-candidate]');
-    expect(windows).toContain('evidence1=$B1');
-    expect(windows).toContain('evidence2=$B2');
-    expect(windows).toContain('for pass in 1 2; do');
-    expect(windows).toContain('scripts/build-worker-portable.sh');
-    expect(windows).toContain('windows_platform_verified": false');
-    expect(windows).toContain('execution": "portable-container-self-hosted"');
+    expect(windows).toContain("foreach ($pass in @('1', '2'))");
+    expect(windows).toContain('worker-acceptance-container.ps1');
+    expect(windows).toContain('joy-worker-self-test');
+    expect(windows).not.toContain('worker-acceptance.ps1 `');
     expect(windows).not.toContain('actions/upload-artifact');
     expect(windows).not.toContain('actions/download-artifact');
     const linux = workflow.slice(workflow.indexOf('\n  linux-real-services:'));

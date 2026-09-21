@@ -20,7 +20,7 @@ name: release-candidate-v2
 #   - acceptance-primary / acceptance-responsive / real-service-acceptance /
 #     p3-real-services: self-hosted,linux,x64,joy-media-acceptance (isolated
 #     PC Docker Linux acceptance runner).
-#   - windows-worker-clean: self-hosted,windows,x64,joy-media-worker
+#   - windows-worker-clean: self-hosted,windows,x64,joy-media-worker-docker
 #     (owner-controlled Windows self-hosted runner; NOT a GitHub-hosted
 #     Windows VM). The only Windows acceptance evidence is produced here.
 #     See docs/SELF-HOSTED-CI.md §Windows-platform evidence.
@@ -123,7 +123,7 @@ jobs:
 
   windows-worker-clean:
     name: windows-worker-clean (two exact passes)
-    runs-on: [self-hosted, windows, x64, joy-media-worker]
+    runs-on: [self-hosted, windows, x64, joy-media-worker-docker]
     needs: [validate-candidate]
     timeout-minutes: 120
     outputs:
@@ -160,7 +160,7 @@ jobs:
             $result = & $output --joy-worker-self-test
             if ($LASTEXITCODE -ne 0 -or $result -notmatch '"ok"\s*:\s*true') { throw "Worker executable self-test failed for pass $pass." }
             $evidence = Join-Path $env:RUNNER_TEMP ("joy-media-windows-acceptance-" + $pass + ".json")
-            & powershell -NoProfile -ExecutionPolicy Bypass -File ops/self-hosted/windows-runner/worker-acceptance.ps1 `
+            & powershell -NoProfile -ExecutionPolicy Bypass -File ops/self-hosted/windows-runner/worker-acceptance-container.ps1 `
               -CandidateSha $env:CANDIDATE_SHA `
               -RunId $env:GITHUB_RUN_ID `
               -Attempt $env:GITHUB_RUN_ATTEMPT `

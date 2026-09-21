@@ -112,7 +112,7 @@ export interface ReleaseWindowsAcceptance {
   /** GitHub Actions run attempt (1-based) that produced this evidence. */
   readonly attempt: number;
   /** Windows-Docker self-hosted runner label that produced the evidence. */
-  readonly runner: 'self-hosted,windows,x64,joy-media-ci';
+  readonly runner: 'self-hosted,windows,x64,joy-media-worker-docker';
   /** Container identity (Docker container ID + image digest) the runner ran inside. */
   readonly containerIdentity: {
     readonly containerId: string;
@@ -828,7 +828,7 @@ function windowsAcceptanceReady(
   ) {
     reasons.push('run_attempt missing or non-positive');
   }
-  if (raw.runner !== 'self-hosted,windows,x64,joy-media-ci') {
+  if (raw.runner !== 'self-hosted,windows,x64,joy-media-worker-docker') {
     reasons.push(
       `runner label "${String(raw.runner)}" is not the trusted Windows-Docker self-hosted runner`,
     );
@@ -929,7 +929,7 @@ function windowsAcceptanceReasons(
   ) {
     reasons.push('run_attempt missing or non-positive');
   }
-  if (raw.runner !== 'self-hosted,windows,x64,joy-media-ci') {
+  if (raw.runner !== 'self-hosted,windows,x64,joy-media-worker-docker') {
     reasons.push(
       `runner label "${String(raw.runner)}" is not the trusted Windows-Docker self-hosted runner`,
     );

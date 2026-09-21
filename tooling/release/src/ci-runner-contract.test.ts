@@ -114,6 +114,7 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
   describe('Windows Docker-container runner (ops/self-hosted/windows-runner)', () => {
     const dockerfile = safeRead(join(WINDOWS_DIR, 'Dockerfile.windows'));
     const entrypoint = safeRead(join(WINDOWS_DIR, 'windows-runner-entrypoint.ps1'));
+    const containerAcceptance = safeRead(join(WINDOWS_DIR, 'worker-acceptance-container.ps1'));
     const readme = safeRead(join(WINDOWS_DIR, 'README.md'));
     const contract = safeRead(join(WINDOWS_DIR, 'contract.md'));
 
@@ -124,10 +125,11 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(contract.length).toBeGreaterThan(0);
     });
 
-    it('Dockerfile.windows is a Windows-container build (mcr.microsoft.com/windows/servercore base)', () => {
+    it('Dockerfile.windows is a digest-pinned Windows-container build', () => {
       // The base is captured as an ARG and resolved in FROM. Both the ARG
       // declaration and the FROM must point at a Windows-container base.
       expect(dockerfile).toMatch(/^ARG\s+WINDOWS_BASE=mcr\.microsoft\.com\/windows\/servercore/m);
+      expect(dockerfile).toMatch(/^ARG\s+WINDOWS_BASE=.*@sha256:[0-9a-f]{64}/m);
       expect(dockerfile).toMatch(/^FROM\s+\$\{WINDOWS_BASE\}/m);
     });
 
@@ -137,8 +139,11 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(dockerfile).toMatch(/Get-FileHash[\s\S]*SHA256/);
     });
 
-    it('Dockerfile.windows installs FFmpeg (Worker acceptance needs it)', () => {
+    it('Dockerfile.windows installs the portable Worker toolchain without Chocolatey', () => {
       expect(dockerfile).toMatch(/\bffmpeg\b/);
+      expect(dockerfile).toContain('MinGit');
+      expect(dockerfile).toContain('jq');
+      expect(dockerfile).not.toMatch(/Chocolatey|choco/i);
     });
 
     it('entrypoint uses the registration token ONLY at first-time configure, never persists it', () => {
@@ -150,6 +155,8 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(entrypoint).not.toMatch(/RUNNER_TOKEN.*>/);
       // Long-running exec path does not pass the token into config.cmd.
       expect(entrypoint).toContain('& .\\run.cmd');
+      expect(entrypoint).toContain('joy-media-worker-docker');
+      expect(entrypoint).toContain('JOY_MEDIA_WINDOWS_IMAGE_DIGEST');
     });
 
     it('entrypoint configures against the JOY Media repository in unattended mode with --replace', () => {
@@ -163,18 +170,19 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(entrypoint).toMatch(/&\s+\.\\run\.cmd/);
     });
 
-    it('contract.md documents what the Windows container CANNOT do (no host scheduler / Win32_Process)', () => {
-      expect(contract).toContain('Windows-platform evidence caveat');
-      // The contract must enumerate the limits that prevent the release
-      // gate from using this container for Windows acceptance.
-      expect(contract).toMatch(/Register-ScheduledTask|Win32_Process/);
-      expect(contract).toContain('joy-media-worker');
+    it('container acceptance is container-local and forbids host-only APIs', () => {
+      expect(containerAcceptance).toContain('windows-docker-container');
+      expect(containerAcceptance).toContain('JOY_MEDIA_WINDOWS_CONTAINER_ID');
+      expect(containerAcceptance).toContain('JOY_MEDIA_WINDOWS_IMAGE_DIGEST');
+      expect(containerAcceptance).not.toMatch(/Register-ScheduledTask|Get-ScheduledTask|Win32_Process/);
+      expect(contract).toContain('container-local');
+      expect(contract).toContain('Host-direct Windows runners are forbidden');
     });
 
-    it('README declares all three Windows runner labels (worker / worker-gpu / joy-media-ci)', () => {
-      expect(readme).toContain('self-hosted,windows,x64,joy-media-worker');
-      expect(readme).toContain('self-hosted,windows,x64,gpu,joy-media-worker-gpu');
-      expect(readme).toContain('self-hosted,windows,x64,joy-media-ci');
+    it('README declares only the Docker Windows runner label', () => {
+      expect(readme).toContain('self-hosted,windows,x64,joy-media-worker-docker');
+      expect(readme).not.toContain('self-hosted,windows,x64,joy-media-worker`');
+      expect(readme).not.toContain('windows-latest');
     });
   });
 });

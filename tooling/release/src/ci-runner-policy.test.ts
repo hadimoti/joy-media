@@ -62,12 +62,11 @@ const ALLOWED_LABEL_TUPLES: ReadonlyArray<readonly string[]> = [
   ['self-hosted', 'linux', 'x64', 'joy-media-ci'],
   // joy-media-acceptance (isolated acceptance Linux runner on its own Docker network)
   ['self-hosted', 'linux', 'x64', 'joy-media-acceptance'],
-  // joy-media-worker (clean-profile Windows Worker runner)
-  ['self-hosted', 'windows', 'x64', 'joy-media-worker'],
-  // joy-media-worker-gpu (clean-profile Windows Worker runner, GPU result)
-  ['self-hosted', 'windows', 'x64', 'gpu', 'joy-media-worker-gpu'],
-  // joy-media-ci-windows (PC Docker Windows-container runner, optional/contract-only)
-  ['self-hosted', 'windows', 'x64', 'joy-media-ci'],
+  // joy-media-worker-docker (Windows-container Worker/release lane)
+  ['self-hosted', 'windows', 'x64', 'joy-media-worker-docker'],
+  // A future GPU-capable Windows-container lane must remain explicitly named
+  // and must not reuse a host-direct label.
+  ['self-hosted', 'windows', 'x64', 'gpu', 'joy-media-worker-gpu-docker'],
 ];
 
 function normalizeTuple(values: string[]): string[] {

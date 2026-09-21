@@ -15,7 +15,7 @@ name: ci-dev
 #
 # RUNNER POLICY (self-hosted only — no GitHub-hosted minutes/billing):
 #   - static-and-unit / browser: joy-media-ci Linux Docker container
-#   - worker-package:            joy-media-worker Windows self-hosted runner
+#   - worker-package:            joy-media-worker-docker Windows Docker runner
 #     (Windows-only because Node SEA + postject + PowerShell are required to
 #     produce joy-worker.exe; see docs/SELF-HOSTED-CI.md §Windows-platform)
 #   - development-verification-summary: joy-media-ci Linux Docker container
@@ -67,7 +67,7 @@ jobs:
     # Windows-only by necessity (joy-worker.exe via Node SEA + postject + PowerShell).
     # Self-hosted Windows runner on the owner's PC. NOT a GitHub-hosted Windows
     # VM: see docs/SELF-HOSTED-CI.md §Windows-platform evidence.
-    runs-on: [self-hosted, windows, x64, joy-media-worker]
+    runs-on: [self-hosted, windows, x64, joy-media-worker-docker]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
