@@ -33,7 +33,13 @@ if ($env:JOY_MEDIA_WINDOWS_IMAGE_DIGEST -notmatch '^sha256:[0-9a-f]{64}$') {
 }
 
 $runnerConfigPath = Join-Path $PWD '.runner'
-if (-not (Test-Path -LiteralPath $runnerConfigPath -PathType Leaf)) {
+$runnerCredentialsPath = Join-Path $PWD '.credentials'
+$waitForRegistration = $env:JOY_MEDIA_WINDOWS_WAIT_FOR_REGISTRATION -eq '1'
+while ((-not (Test-Path -LiteralPath $runnerConfigPath -PathType Leaf) -or -not (Test-Path -LiteralPath $runnerCredentialsPath -PathType Leaf)) -and -not $env:RUNNER_TOKEN) {
+    if (-not $waitForRegistration) { throw 'RUNNER_TOKEN is required only for first-time registration, or set JOY_MEDIA_WINDOWS_WAIT_FOR_REGISTRATION=1.' }
+    Start-Sleep -Seconds 2
+}
+if (-not (Test-Path -LiteralPath $runnerConfigPath -PathType Leaf) -or -not (Test-Path -LiteralPath $runnerCredentialsPath -PathType Leaf)) {
     if (-not $env:RUNNER_TOKEN) { throw 'RUNNER_TOKEN is required only for first-time registration.' }
     if (-not $env:RUNNER_NAME)  { throw 'RUNNER_NAME is required only for first-time registration.' }
     if (-not $env:RUNNER_LABELS) { throw 'RUNNER_LABELS is required only for first-time registration.' }
