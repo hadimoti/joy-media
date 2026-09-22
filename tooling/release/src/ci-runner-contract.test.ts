@@ -186,6 +186,68 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(readme).not.toContain('self-hosted,windows,x64,joy-media-worker`');
       expect(readme).not.toContain('windows-latest');
     });
+
+    /**
+     * Producer-side determinism for the release gate contract.
+     *
+     * The release gate (tooling/release/src/gate.ts) accepts Windows acceptance
+     * evidence ONLY when:
+     *   - raw.runner === 'self-hosted,windows,x64,joy-media-worker-docker'
+     *   - raw.execution ∈ {'windows-docker-container', 'windows-self-hosted-docker'}
+     *   - raw.containerIdentity.containerId matches /^[0-9a-f]{12,64}$/
+     *   - raw.containerIdentity.imageDigest matches /^sha256:[0-9a-f]{64}$/
+     *
+     * If the producer (worker-acceptance-container.ps1) or the registration
+     * gate (windows-runner-entrypoint.ps1) ever drift those exact strings,
+     * every Windows run becomes fake-acceptable on the producer side but
+     * rejected by the gate at runtime — and the discrepancy only surfaces
+     * inside the actual Docker Windows engine, which this repository's CI
+     * cannot invoke offline. Pin them in source so a regression is caught
+     * before any CI minute is spent.
+     */
+    const DOCKER_RUNNER_LABEL = 'self-hosted,windows,x64,joy-media-worker-docker';
+    const DOCKER_EXECUTION_LABEL = 'windows-docker-container';
+
+    it('worker-acceptance-container.ps1 emits the exact Docker-only runner + execution label the gate accepts', () => {
+      // The PowerShell emitter must include the canonical literals in their
+      // assignment shape — a presence-only check would accept 'foo runner ='
+      // drift comments as well as the real producer.
+      expect(containerAcceptance).toContain(`runner = '${DOCKER_RUNNER_LABEL}'`);
+      expect(containerAcceptance).toContain(`execution = '${DOCKER_EXECUTION_LABEL}'`);
+      expect(containerAcceptance).toContain('containerIdentity = [ordered]@{');
+      expect(containerAcceptance).toContain('containerId = $containerId');
+      expect(containerAcceptance).toContain('imageDigest = $imageDigest');
+      expect(containerAcceptance).toContain('windowsPlatformVerified = $true');
+      // Defensive: the emitter must never claim a host-direct label or a
+      // portable/legacy execution enum from the gate's deny-list.
+      const labelRe = new RegExp(
+        `runner\\s*=\\s*'${DOCKER_RUNNER_LABEL.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}'`,
+      );
+      const labelNeg =
+        /runner\s*=\s*['"][^'"]*joy-media-worker(?:-direct|-host|-legacy|-portable|-vm)?['"]/;
+      expect(
+        containerAcceptance,
+        'negative drift check: worker-acceptance-container.ps1 must not emit a non-Docker runner label',
+      ).not.toMatch(labelNeg);
+      // And the literal at the gate-side must be present too — so producer
+      // and gate agree byte-for-byte.
+      expect(labelRe.test(containerAcceptance)).toBe(true);
+    });
+
+    it('windows-runner-entrypoint.ps1 requires the same Docker-only label the producer emits', () => {
+      // The registration check and the producer evidence both have to agree
+      // on the same label string, otherwise a misconfigured runner could
+      // accept jobs under one label and emit evidence under a different one.
+      expect(entrypoint).toContain(`$expectedLabels = '${DOCKER_RUNNER_LABEL}'`);
+      const labelNeg =
+        /\$expectedLabels\s*=\s*['"][^'"]*joy-media-worker(?:-direct|-host|-legacy|-portable|-vm)?['"]/;
+      expect(
+        entrypoint,
+        'entrypoint label literal must not silently drift to a non-Docker variant',
+      ).not.toMatch(labelNeg);
+      // The token-leak guard must remain in force for the long-running run.cmd.
+      expect(entrypoint).toContain('Remove-Item Env:\\RUNNER_TOKEN');
+    });
   });
 });
 
