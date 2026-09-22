@@ -3,7 +3,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 const args = parseArguments(process.argv.slice(2));
@@ -55,7 +55,36 @@ function writeSnapshot(status = 'running') {
     workerId: lastWorkerId,
     counters: { ...counters },
   };
-  writeFileSync(eventsPath, `${JSON.stringify(snapshot)}\n`, { mode: 0o600 });
+  const encoded = `${JSON.stringify(snapshot)}\n`;
+  const temporaryPath = `${eventsPath}.${process.pid}.tmp`;
+  try {
+    // PowerShell polls this file while the fixture handles requests. Publish
+    // complete snapshots so a reader never observes a partial JSON document.
+    writeFileSync(temporaryPath, encoded, { mode: 0o600 });
+    try {
+      renameSync(temporaryPath, eventsPath);
+    } catch {
+      // Windows can reject replacement while a reader briefly holds the old
+      // file. Keep the fixture alive and fall back to a best-effort write.
+      try {
+        writeFileSync(eventsPath, encoded, { mode: 0o600 });
+      } catch {
+        // The snapshot is diagnostic only; the HTTP fixture must keep serving.
+      }
+      try {
+        unlinkSync(temporaryPath);
+      } catch {
+        // Best-effort cleanup.
+      }
+    }
+  } catch {
+    // A diagnostic snapshot must never reset an active control-plane request.
+    try {
+      unlinkSync(temporaryPath);
+    } catch {
+      // Best-effort cleanup.
+    }
+  }
   try {
     chmodSync(eventsPath, 0o600);
   } catch {

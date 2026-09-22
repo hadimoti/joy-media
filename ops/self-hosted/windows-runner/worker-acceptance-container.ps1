@@ -83,6 +83,12 @@ function Invoke-Daemon([string]$Path, [string]$StatePath, [string]$PipeName) {
     $oldTestMode = $env:JOY_MEDIA_WORKER_TEST_MODE
     $oldNotification = $env:JOY_MEDIA_WORKER_PAIRING_NOTIFICATION_PATH
     $oldChildPidPath = $env:JOY_MEDIA_WORKER_CHILD_PID_PATH
+    $oldHttpProxy = $env:HTTP_PROXY
+    $oldHttpsProxy = $env:HTTPS_PROXY
+    $oldLowerHttpProxy = $env:http_proxy
+    $oldLowerHttpsProxy = $env:https_proxy
+    $oldNoProxy = $env:NO_PROXY
+    $oldLowerNoProxy = $env:no_proxy
     $process = $null
     $childPid = 0
     $childStarted = $false
@@ -99,6 +105,14 @@ function Invoke-Daemon([string]$Path, [string]$StatePath, [string]$PipeName) {
         $env:JOY_MEDIA_WORKER_TEST_MODE = '1'
         $env:JOY_MEDIA_WORKER_PAIRING_NOTIFICATION_PATH = "$StatePath.notification.json"
         $env:JOY_MEDIA_WORKER_CHILD_PID_PATH = $childPidPath
+        # The acceptance fixture is loopback-only. Do not let the runner's
+        # GitHub CONNECT proxy intercept its local HTTP requests.
+        $env:HTTP_PROXY = $null
+        $env:HTTPS_PROXY = $null
+        $env:http_proxy = $null
+        $env:https_proxy = $null
+        $env:NO_PROXY = 'localhost,127.0.0.1'
+        $env:no_proxy = 'localhost,127.0.0.1'
         $process = Start-Process -FilePath $Path -PassThru -WindowStyle Hidden
         $deadline = (Get-Date).AddSeconds(20)
         $snapshot = $null
@@ -142,6 +156,12 @@ function Invoke-Daemon([string]$Path, [string]$StatePath, [string]$PipeName) {
         $env:JOY_MEDIA_WORKER_TEST_MODE = $oldTestMode
         $env:JOY_MEDIA_WORKER_PAIRING_NOTIFICATION_PATH = $oldNotification
         $env:JOY_MEDIA_WORKER_CHILD_PID_PATH = $oldChildPidPath
+        $env:HTTP_PROXY = $oldHttpProxy
+        $env:HTTPS_PROXY = $oldHttpsProxy
+        $env:http_proxy = $oldLowerHttpProxy
+        $env:https_proxy = $oldLowerHttpsProxy
+        $env:NO_PROXY = $oldNoProxy
+        $env:no_proxy = $oldLowerNoProxy
     }
 }
 
