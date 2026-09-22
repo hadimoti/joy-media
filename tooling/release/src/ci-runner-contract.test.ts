@@ -117,7 +117,6 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
     const containerAcceptance = safeRead(join(WINDOWS_DIR, 'worker-acceptance-container.ps1'));
     const readme = safeRead(join(WINDOWS_DIR, 'README.md'));
     const contract = safeRead(join(WINDOWS_DIR, 'contract.md'));
-    const gate = safeRead(join(REPO_ROOT, 'tooling', 'release', 'src', 'gate.ts'));
 
     it('has a Dockerfile.windows, an entrypoint, a contract, and a README', () => {
       expect(dockerfile.length).toBeGreaterThan(0);
@@ -189,38 +188,32 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
     });
 
     /**
-     * Producer-side determinism for the release gate contract. The source
-     * assertions intentionally cover the producer, registration entrypoint,
-     * and gate together so a literal drift is caught before a Windows engine
-     * is available to run the real acceptance lane.
+     * Producer-side determinism for the release gate contract. The behavioral
+     * gate checks live in gate.test.ts; these assertions keep the PowerShell
+     * producer and registration entrypoint aligned with that contract.
      */
     const DOCKER_RUNNER_LABEL = 'self-hosted,windows,x64,joy-media-worker-docker';
     const DOCKER_EXECUTION_LABEL = 'windows-docker-container';
     const LEGACY_EXECUTION_LABEL = 'windows-self-hosted-docker';
 
-    it('pins the producer and gate to the same Docker-only runner contract', () => {
+    it('pins the producer to the Docker-only runner contract', () => {
       const producerRunnerAssignments = [
-        ...containerAcceptance.matchAll(/runner\s*=\s*['"]([^'"]+)['"]/g),
+        ...containerAcceptance.matchAll(/^\s*runner\s*=\s*['"]([^'"]+)['"]/gmu),
       ].map((match) => match[1]);
       expect(producerRunnerAssignments).toEqual([DOCKER_RUNNER_LABEL]);
       expect(containerAcceptance).toContain(`execution = '${DOCKER_EXECUTION_LABEL}'`);
+      // The gate accepts this legacy enum for already captured evidence, but
+      // new producer evidence must use the canonical container enum.
       expect(containerAcceptance).not.toContain(`execution = '${LEGACY_EXECUTION_LABEL}'`);
       expect(containerAcceptance).toContain('containerIdentity = [ordered]@{');
       expect(containerAcceptance).toContain('containerId = $containerId');
       expect(containerAcceptance).toContain('imageDigest = $imageDigest');
       expect(containerAcceptance).toContain('windowsPlatformVerified = $true');
-      // Pin the gate's accepted runner, both accepted execution enums, and
-      // the value-shape checks that make malformed evidence fail closed.
-      expect(gate).toContain(`raw.runner !== '${DOCKER_RUNNER_LABEL}'`);
-      expect(gate).toContain(`execution !== '${DOCKER_EXECUTION_LABEL}'`);
-      expect(gate).toContain(`execution !== '${LEGACY_EXECUTION_LABEL}'`);
-      expect(gate).toContain('!/^[0-9a-f]{12,64}$/u.test(container.containerId)');
-      expect(gate).toContain('!/^sha256:[0-9a-f]{64}$/u.test(container.imageDigest)');
     });
 
     it('windows-runner-entrypoint.ps1 requires the same Docker-only label the producer emits', () => {
       const expectedLabelAssignments = [
-        ...entrypoint.matchAll(/\$expectedLabels\s*=\s*['"]([^'"]+)['"]/g),
+        ...entrypoint.matchAll(/^\s*\$expectedLabels\s*=\s*['"]([^'"]+)['"]/gmu),
       ].map((match) => match[1]);
       expect(expectedLabelAssignments).toEqual([DOCKER_RUNNER_LABEL]);
       // The token-leak guard must remain in force for the long-running run.cmd.

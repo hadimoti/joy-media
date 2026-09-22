@@ -1308,6 +1308,43 @@ describe('JOY Studio 1.0 release gate', () => {
       }
     });
 
+    it('rejects malformed Docker identity and accepts the legacy execution enum only with the trusted runner', () => {
+      const malformedIdentityCases = [
+        {
+          ...windowsAcceptance(),
+          containerIdentity: {
+            ...windowsAcceptance().containerIdentity,
+            containerId: 'not-a-container-id',
+          },
+        },
+        {
+          ...windowsAcceptance(),
+          containerIdentity: {
+            ...windowsAcceptance().containerIdentity,
+            imageDigest: 'sha256:not-a-64-byte-digest',
+          },
+        },
+      ];
+      for (const evidence of malformedIdentityCases) {
+        const result = evaluateReleaseGate({ ...passingInput(), windowsAcceptance: evidence });
+        expect(result.checks.find((c) => c.id === 'windows-acceptance')?.status).toBe('failed');
+        expect(result.passed).toBe(false);
+      }
+
+      const legacyExecution = {
+        ...windowsAcceptance(),
+        execution: 'windows-self-hosted-docker',
+      } as const;
+      const legacyResult = evaluateReleaseGate({
+        ...passingInput(),
+        windowsAcceptance: legacyExecution,
+      });
+      expect(legacyResult.checks.find((c) => c.id === 'windows-acceptance')).toMatchObject({
+        status: 'passed',
+        critical: true,
+      });
+    });
+
     it('accepts only the complete exact-candidate Windows-Docker fixture', () => {
       const result = evaluateReleaseGate({
         ...passingInput(),
