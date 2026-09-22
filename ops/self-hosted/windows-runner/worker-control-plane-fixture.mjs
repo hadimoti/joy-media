@@ -128,6 +128,7 @@ function workerPath(pathname, suffix) {
 const server = createServer(async (request, response) => {
   try {
     const pathname = pathFrom(request);
+    console.error(`fixture request ${request.method} ${pathname}`);
     if (request.method === 'GET' && pathname === '/__joy_media_fixture/health') {
       sendJson(response, 200, { ok: true, ...JSON.parse(readSnapshot()) });
       return;
@@ -196,9 +197,16 @@ const server = createServer(async (request, response) => {
       data:
         pathname.endsWith('/leases') || pathname.endsWith('/preview/next') ? null : { ok: true },
     });
-  } catch {
+  } catch (error) {
+    console.error(
+      `fixture request error: ${error instanceof Error ? error.stack ?? error.message : String(error)}`,
+    );
     sendJson(response, 400, { error: 'invalid_fixture_request' });
   }
+});
+
+server.on('clientError', (error) => {
+  console.error(`fixture client error: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
 });
 
 function readSnapshot() {

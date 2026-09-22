@@ -246,7 +246,7 @@ try {
     $rollback = Invoke-Daemon $installedPath (Join-Path $acceptanceRoot 'rollback-state.json') "\\.\pipe\joy-media-rollback-$RunId-$Attempt-$Pass"
 
     Stop-Fixture
-    Remove-Item $acceptanceRoot -Recurse -Force
+    if (-not $KeepArtifacts) { Remove-Item $acceptanceRoot -Recurse -Force }
     $uninstalled = -not (Test-Path $acceptanceRoot)
     $verified = (Test-DaemonResult $startup) -and (Test-DaemonResult $renewal) -and (Test-DaemonResult $recovery) -and (Test-DaemonResult $recovery2) -and $protectedState -and $repairPassed -and (Test-DaemonResult $updated) -and ($updatedHash -ne $installedHash) -and (Test-DaemonResult $rollback) -and ($rollbackHash -eq $installedHash) -and $uninstalled
     $evidence = [ordered]@{
