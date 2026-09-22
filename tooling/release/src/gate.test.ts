@@ -1309,18 +1309,19 @@ describe('JOY Studio 1.0 release gate', () => {
     });
 
     it('rejects malformed Docker identity and accepts the legacy execution enum only with the trusted runner', () => {
+      const base = windowsAcceptance();
       const malformedIdentityCases = [
         {
-          ...windowsAcceptance(),
+          ...base,
           containerIdentity: {
-            ...windowsAcceptance().containerIdentity,
+            ...base.containerIdentity,
             containerId: 'not-a-container-id',
           },
         },
         {
-          ...windowsAcceptance(),
+          ...base,
           containerIdentity: {
-            ...windowsAcceptance().containerIdentity,
+            ...base.containerIdentity,
             imageDigest: 'sha256:not-a-64-byte-digest',
           },
         },
@@ -1332,7 +1333,7 @@ describe('JOY Studio 1.0 release gate', () => {
       }
 
       const legacyExecution = {
-        ...windowsAcceptance(),
+        ...base,
         execution: 'windows-self-hosted-docker',
       } as const;
       const legacyResult = evaluateReleaseGate({
@@ -1343,6 +1344,20 @@ describe('JOY Studio 1.0 release gate', () => {
         status: 'passed',
         critical: true,
       });
+
+      const untrustedLegacyExecution = {
+        ...base,
+        runner: 'self-hosted,windows,x64,joy-media-worker',
+        execution: 'windows-self-hosted-docker',
+      } as unknown as ReleaseWindowsAcceptance;
+      const untrustedLegacyResult = evaluateReleaseGate({
+        ...passingInput(),
+        windowsAcceptance: untrustedLegacyExecution,
+      });
+      expect(untrustedLegacyResult.checks.find((c) => c.id === 'windows-acceptance')?.status).toBe(
+        'failed',
+      );
+      expect(untrustedLegacyResult.passed).toBe(false);
     });
 
     it('accepts only the complete exact-candidate Windows-Docker fixture', () => {
