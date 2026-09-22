@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { waitForWorkerPairing, type WorkerPairingClient } from './pairing-loop.js';
+import {
+  waitForWorkerPairing,
+  WorkerPairingNotPersistedError,
+  type WorkerPairingClient,
+} from './pairing-loop.js';
 
 function pairingStore(pending?: { readonly code: string; readonly expiresAt: number }) {
   let active = pending;
@@ -163,6 +167,30 @@ describe('waitForWorkerPairing', () => {
     expect(published).toEqual(['second-code']);
     expect(claimed).toEqual(['first-code', 'second-code']);
     expect(store.pending()).toBeUndefined();
+  });
+
+  it('refuses to report an approved pairing whose session cannot be read back', async () => {
+    // The offer is spent once the control plane accepts it, so re-polling would
+    // hide a broken local store behind "waiting for approval" forever.
+    const store = pairingStore({ code: 'approved-code', expiresAt: 200 });
+    let claims = 0;
+    const client: WorkerPairingClient = {
+      publishPairingOffer: async () => 250,
+      claimPairing: async () => {
+        claims += 1;
+        return true;
+      },
+    };
+
+    await expect(
+      waitForWorkerPairing(client, store, {
+        createPairingCode: () => 'unused-code',
+        now: () => 100,
+        sleep: async () => undefined,
+      }),
+    ).rejects.toThrow(WorkerPairingNotPersistedError);
+    expect(claims).toBe(1);
+    expect(store.pending()).toEqual({ code: 'approved-code', expiresAt: 200 });
   });
 
   it('keeps the headless Worker alive across transient network failures', async () => {
