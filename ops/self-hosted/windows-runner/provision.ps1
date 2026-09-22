@@ -83,7 +83,7 @@ if (`$netshExitCode -ne 0) {
 foreach (`$line in `$subinterfaces) {
     if (`$line -match '^\s*\d+\s+\d+\s+\d+\s+\d+\s+(?<name>.+?)\s*$') {
         `$interfaceName = `$Matches.name.Trim()
-        if (`$interfaceName -notmatch '(?i)loopback') {
+        if (`$interfaceName -and `$interfaceName -notmatch '(?i)loopback') {
             & netsh interface ipv4 set subinterface "`$interfaceName" mtu=$MtuBytes store=active
             `$setExitCode = `$LASTEXITCODE
             if (`$setExitCode -ne 0) {
@@ -115,6 +115,10 @@ if ($dockerRunExitCode -ne 0 -or $containerId -notmatch '^[0-9a-f]{12,64}$') {
 }
 
 $configReady = $false
+# Windows PowerShell 5.1 promotes redirected native stderr to a terminating
+# error under Stop; transient docker exec failures while the container starts
+# must retry until the timeout, not abort.
+$ErrorActionPreference = 'Continue'
 for ($attempt = 0; $attempt -lt 60; $attempt++) {
     & docker exec $RunnerName powershell -NoProfile -Command "if (Test-Path -LiteralPath 'C:\actions-runner\config.cmd' -PathType Leaf) { exit 0 } else { exit 1 }" 2>$null
     $configCheckExitCode = $LASTEXITCODE
@@ -122,13 +126,11 @@ for ($attempt = 0; $attempt -lt 60; $attempt++) {
         $configReady = $true
         break
     }
-    if ($configCheckExitCode -ne 1) {
-        throw "Unable to check for C:\actions-runner\config.cmd; docker exec exited with code $configCheckExitCode."
-    }
     if ($attempt -lt 59) {
         Start-Sleep -Seconds 1
     }
 }
+$ErrorActionPreference = 'Stop'
 if (-not $configReady) {
     throw 'Timed out waiting for C:\actions-runner\config.cmd inside the container.'
 }
@@ -157,12 +159,14 @@ exit 0
 "@
     $encodedMtuVerification = ConvertTo-EncodedCommand $mtuVerification
     # The startup wrapper runs asynchronously after docker run returns.
+    $ErrorActionPreference = 'Continue'
     for ($attempt = 0; $attempt -lt 60; $attempt++) {
-        & docker exec $RunnerName powershell -NoProfile -EncodedCommand $encodedMtuVerification
+        & docker exec $RunnerName powershell -NoProfile -EncodedCommand $encodedMtuVerification 2>$null
         $mtuVerificationExitCode = $LASTEXITCODE
-        if ($mtuVerificationExitCode -ne 1) { break }
+        if ($mtuVerificationExitCode -eq 0 -or $mtuVerificationExitCode -eq 2) { break }
         Start-Sleep -Seconds 1
     }
+    $ErrorActionPreference = 'Stop'
     if ($mtuVerificationExitCode -ne 0) {
         throw "Container MTU verification failed with exit code $mtuVerificationExitCode."
     }
