@@ -1,4 +1,6 @@
 node_modules/
+__pycache__/
+*.pyc
 test-results/
 test-results-*/
 test-output/
@@ -38,4 +40,3 @@ apps/desktop/renderer/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
-
