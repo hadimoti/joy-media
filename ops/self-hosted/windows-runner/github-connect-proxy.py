@@ -22,9 +22,12 @@ ALLOWED_HOSTS = {
     "codeload.github.com",
     "actions.githubusercontent.com",
     "pipelines.actions.githubusercontent.com",
+    "broker.actions.githubusercontent.com",
     # Python CI dependencies; no general-purpose outbound proxy is allowed.
     "pypi.org",
     "files.pythonhosted.org",
+    "bootstrap.pypa.io",
+    "www.python.org",
     # Node CI dependencies; no general npm proxy is permitted.
     "registry.npmjs.org",
     # Playwright browser artifacts used by the Windows acceptance lane.
@@ -51,6 +54,7 @@ def allowed(host: str) -> bool:
 class ProxyHandler(socketserver.BaseRequestHandler):
     def handle(self) -> None:
         request = self.request.recv(8192)
+        header_end = request.find(b"\r\n\r\n")
         first_line = request.split(b"\r\n", 1)[0].decode("ascii", "replace")
         parts = first_line.split()
         if len(parts) != 3 or parts[0].upper() != "CONNECT":
@@ -74,6 +78,11 @@ class ProxyHandler(socketserver.BaseRequestHandler):
             return
         with upstream:
             self.request.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+            # A client may send the TLS ClientHello in the same TCP read as
+            # CONNECT. Preserve and forward bytes beyond the HTTP headers;
+            # dropping them leaves TLS stuck after a successful tunnel.
+            if header_end >= 0 and len(request) > header_end + 4:
+                upstream.sendall(request[header_end + 4 :])
             sockets = [self.request, upstream]
             while True:
                 readable, _, exceptional = select.select(sockets, [], sockets, 60)
