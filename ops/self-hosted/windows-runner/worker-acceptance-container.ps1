@@ -173,7 +173,11 @@ try {
         if (-not (Test-Path -LiteralPath $packageDirectory -PathType Container)) {
             throw \"Required Worker runtime package is missing: $packageDirectory\"
         }
-        Copy-Item -LiteralPath $packageDirectory -Destination (Join-Path $runtimePackages $packageName) -Recurse -Force
+        $packageDestination = Join-Path $runtimePackages $packageName
+        New-Item -ItemType Directory -Path $packageDestination -Force | Out-Null
+        Get-ChildItem -LiteralPath $packageDirectory -Force |
+            Where-Object { $_.Name -ne 'node_modules' } |
+            Copy-Item -Destination $packageDestination -Recurse -Force
     }
     $playwrightPackage = Get-ChildItem -LiteralPath (Join-Path $PWD 'node_modules\.pnpm') -Directory -Filter 'playwright-core@*' |
         Sort-Object Name -Descending | Select-Object -First 1
