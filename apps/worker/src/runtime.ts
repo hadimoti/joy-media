@@ -66,11 +66,15 @@ export interface WorkerSecretProtector {
   unprotect(value: string): string | undefined;
 }
 
-/** A cold powershell.exe plus `Add-Type System.Security` is slow on Windows
- * Server Core containers; 5s was short enough to abort routine pairings. */
+/**
+ * A cold powershell.exe plus `Add-Type System.Security` is slow on Windows
+ * Server Core containers, where 5s was short enough to abort routine pairings.
+ */
 const DPAPI_HELPER_TIMEOUT_MS = 30_000;
-/** Bounds the in-process plaintext cache for a long-lived unpaired Worker that
- * re-protects a pairing code every few minutes. */
+/**
+ * Bounds the in-process plaintext cache for a long-lived unpaired Worker that
+ * re-protects a pairing code every few minutes.
+ */
 const DPAPI_CACHE_LIMIT = 32;
 
 /**
@@ -140,11 +144,7 @@ export class WindowsDpapiSecretProtector implements WorkerSecretProtector {
     return plain;
   }
 
-  #run(
-    command: string,
-    input: string,
-    action: 'protect' | 'unprotect',
-  ): ReturnType<typeof spawnSync<string>> {
+  #run(command: string, input: string, action: 'protect' | 'unprotect'): SpawnSyncReturns<string> {
     const result = spawnSync(
       'powershell.exe',
       [
