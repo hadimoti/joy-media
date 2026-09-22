@@ -2,14 +2,20 @@
 
 const { spawn } = require('node:child_process');
 const { createHash } = require('node:crypto');
-const { createWriteStream, existsSync, mkdirSync } = require('node:fs');
+const {
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} = require('node:fs');
 const { createServer } = require('node:net');
 const { dirname, join, resolve } = require('node:path');
 
-if (process.argv.includes('--joy-worker-self-test')) {
-  process.stdout.write(JSON.stringify({ ok: true, executable: 'joy-worker.exe' }) + '\n');
-  process.exit(0);
-}
+// build-worker-exe.ps1 replaces this literal with its -BuildMarker before the
+// SEA blob is prepared, so two builds of the same source produce distinguishable
+// packages. Keep the literal spelling: the substitution is textual.
+const BUILD_MARKER = '__JOY_MEDIA_BUILD_MARKER__';
 
 function firstExisting(candidates) {
   for (const candidate of candidates) {
@@ -41,6 +47,23 @@ const localTestApi =
 if (parsedApiUrl.protocol !== 'https:' && !localTestApi)
   throw new Error('JOY_MEDIA_API_URL must use HTTPS');
 if (!existsSync(entryPoint)) throw new Error(`Worker entrypoint not found: ${entryPoint}`);
+
+// The self-test runs after the environment checks above so it also proves the
+// packaged launcher can reach a non-empty entrypoint on this machine.
+if (process.argv.includes('--joy-worker-self-test')) {
+  const entryPointBytes = readFileSync(entryPoint);
+  if (entryPointBytes.length === 0) throw new Error(`Worker entrypoint is empty: ${entryPoint}`);
+  process.stdout.write(
+    JSON.stringify({
+      ok: true,
+      executable: 'joy-worker.exe',
+      buildMarker: BUILD_MARKER,
+      entryPoint,
+      entryPointSha256: createHash('sha256').update(entryPointBytes).digest('hex'),
+    }) + '\n',
+  );
+  process.exit(0);
+}
 
 const stateDirectory = dirname(statePath);
 const pipeHash = createHash('sha256').update(workerRoot).digest('hex').slice(0, 16);
@@ -80,6 +103,20 @@ singleton.listen(singletonPipe, () => {
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
+  // Windows does not reap this child when the launcher is force-terminated, so
+  // publish the pair of PIDs. A supervisor (and the acceptance harness) can then
+  // prove the whole Worker tree started and later stopped instead of leaving an
+  // orphaned lease/heartbeat loop behind.
+  const childPidPath = process.env.JOY_MEDIA_WORKER_CHILD_PID_PATH?.trim();
+  if (childPidPath) {
+    mkdirSync(dirname(childPidPath), { recursive: true });
+    writeFileSync(
+      childPidPath,
+      JSON.stringify({ launcherPid: process.pid, childPid: child.pid, buildMarker: BUILD_MARKER }) +
+        '\n',
+      'utf8',
+    );
+  }
   const log = createWriteStream(logPath, { flags: 'a' });
   child.stdout.pipe(log, { end: false });
   child.stderr.pipe(log, { end: false });

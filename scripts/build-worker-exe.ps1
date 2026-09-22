@@ -2,7 +2,8 @@
 param(
     [string]$OutputPath = '',
     [string]$NodePath = '',
-    [string]$BuildMarker = ''
+    [ValidatePattern('^[A-Za-z0-9._-]+$')]
+    [string]$BuildMarker = 'source'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,8 +45,19 @@ New-Item -ItemType Directory -Force -Path $scratch | Out-Null
 try {
     $blobPath = Join-Path $scratch 'sea-prep.blob'
     $configPath = Join-Path $scratch 'sea-config.json'
+    # Stamp the marker into a scratch copy of the bootstrap so an update built
+    # from identical source still produces distinct package bytes. The release
+    # gate requires that distinction to prove the update really was replaced.
+    $bootstrapPath = Join-Path $scratch 'worker-sea-bootstrap.cjs'
+    $bootstrapSource = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\worker-sea-bootstrap.cjs') -Raw
+    $markerLiteral = ConvertTo-Json $BuildMarker -Compress
+    if (-not $bootstrapSource.Contains("'__JOY_MEDIA_BUILD_MARKER__'")) {
+        throw 'worker-sea-bootstrap.cjs no longer carries the build marker placeholder.'
+    }
+    $bootstrapSource = $bootstrapSource.Replace("'__JOY_MEDIA_BUILD_MARKER__'", $markerLiteral)
+    [System.IO.File]::WriteAllText($bootstrapPath, $bootstrapSource, (New-Object System.Text.UTF8Encoding($false)))
     $config = [ordered]@{
-        main = (Join-Path $repoRoot 'scripts\worker-sea-bootstrap.cjs')
+        main = $bootstrapPath
         output = $blobPath
         disableExperimentalSEAWarning = $true
         useSnapshot = $false
@@ -77,7 +89,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "SEA resource injection failed with exit code $LASTEXITCODE." }
 
     $selfTest = & $OutputPath --joy-worker-self-test
-    if ($LASTEXITCODE -ne 0 -or $selfTest -notmatch '"ok"\s*:\s*true') {
+    if ($LASTEXITCODE -ne 0 -or $selfTest -notmatch '"ok"\s*:\s*true' -or
+        $selfTest -notmatch [regex]::Escape(('"buildMarker":"' + $BuildMarker + '"'))) {
         throw 'joy-worker.exe self-test failed.'
     }
     Write-Output "Built $OutputPath"

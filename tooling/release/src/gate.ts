@@ -137,7 +137,10 @@ export interface ReleaseWindowsAcceptanceLifecycle {
     readonly trigger: 'at-logon' | 'explicit-spawn';
     readonly triggerVerified: true;
     readonly action: 'normal-daemon';
-    readonly taskRan: true;
+    /** Required for `at-logon`: the scheduled task really fired. */
+    readonly taskRan?: true;
+    /** Required for `explicit-spawn`: the container-local launch was observed. */
+    readonly launchObserved?: true;
     readonly daemon: {
       readonly started: true;
       readonly terminated: true;
@@ -964,6 +967,18 @@ function windowsAcceptanceReasons(
   return reasons;
 }
 
+/**
+ * Each startup trigger must prove its own launch. The scheduled-task harness
+ * shows `taskRan`; the container-local harness never touches Task Scheduler and
+ * shows `launchObserved` for the explicit spawn it performed instead. Requiring
+ * `taskRan` from the container would only invite a fabricated field.
+ */
+function startupLaunchProven(startup: Readonly<Record<string, unknown>>): boolean {
+  return startup.trigger === 'explicit-spawn'
+    ? startup.launchObserved === true
+    : startup.taskRan === true;
+}
+
 function windowsLifecycleReady(value: unknown): boolean {
   if (value === null || typeof value !== 'object') return false;
   const lifecycle = value as Record<string, unknown>;
@@ -973,7 +988,7 @@ function windowsLifecycleReady(value: unknown): boolean {
   if (startup.trigger !== 'at-logon' && startup.trigger !== 'explicit-spawn') return false;
   if (startup.triggerVerified !== true) return false;
   if (startup.action !== 'normal-daemon') return false;
-  if (startup.taskRan !== true) return false;
+  if (!startupLaunchProven(startup)) return false;
   const daemon = record(startup.daemon);
   if (
     daemon.started !== true ||

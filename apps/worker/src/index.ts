@@ -70,8 +70,12 @@ if (apiUrl !== undefined && client !== undefined) {
       clearPairingNotification(pairingNotificationPath);
     }
   }
-  if (store.loadWorkerSession() !== undefined) {
-    const daemon = new WorkerDaemon(client, runtime, gpuPreviewHost);
-    await daemon.run({ stopped: () => false });
-  }
+  // Pairing only returns once the control plane accepted the offer, so a
+  // missing session here is a local state fault. Exiting quietly would be
+  // indistinguishable from a Worker that never paired and leaves the operator
+  // with a daemon that produced no control-plane traffic and no reason why.
+  if (store.loadWorkerSession() === undefined)
+    throw new Error('Worker session is unavailable after pairing; refusing to run unpaired');
+  const daemon = new WorkerDaemon(client, runtime, gpuPreviewHost);
+  await daemon.run({ stopped: () => false });
 }
