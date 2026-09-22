@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$OutputPath = '',
-    [string]$NodePath = ''
+    [string]$NodePath = '',
+    [string]$BuildMarker = ''
 )
 
 $ErrorActionPreference = 'Stop'
