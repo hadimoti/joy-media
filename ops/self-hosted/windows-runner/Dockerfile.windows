@@ -55,12 +55,16 @@ ENV JOY_MEDIA_WINDOWS_ARTIFACT_BASE_URL="${ARTIFACT_BASE_URL}" `
 # the old monolithic install command on current Windows hosts; the script keeps
 # the same pinned downloads and hash checks without exceeding that limit.
 RUN & C:\install-windows-runner.ps1 ; `
-    Remove-Item -LiteralPath C:\install-windows-runner.ps1 -Force
+    Remove-Item -LiteralPath C:\install-windows-runner.ps1 -Force ; `
+    New-Item -ItemType Directory -Path C:\runner-base -Force | Out-Null ; `
+    Get-ChildItem -LiteralPath C:\actions-runner -Force | Copy-Item -Destination C:\runner-base -Recurse -Force ; `
+    Remove-Item -LiteralPath C:\actions-runner -Recurse -Force ; `
+    New-Item -ItemType Directory -Path C:\actions-runner -Force | Out-Null
 
 ENV JOY_MEDIA_WINDOWS_ARTIFACT_BASE_URL="" `
     JOY_MEDIA_WINDOWS_COREPACK_NPM_REGISTRY=""
 
-COPY windows-runner-entrypoint.ps1 C:/actions-runner/joy-media-windows-runner.ps1
+COPY windows-runner-entrypoint.ps1 C:/joy-media-windows-runner.ps1
 
 WORKDIR C:\actions-runner
-ENTRYPOINT ["powershell", "-NoProfile", "-File", "C:\\actions-runner\\joy-media-windows-runner.ps1"]
+ENTRYPOINT ["powershell", "-NoProfile", "-File", "C:\\joy-media-windows-runner.ps1"]

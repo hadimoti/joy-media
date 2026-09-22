@@ -10,7 +10,13 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-Set-Location -LiteralPath 'C:\actions-runner'
+$runnerRoot = 'C:\actions-runner'
+$runnerBase = 'C:\runner-base'
+if (-not (Test-Path -LiteralPath (Join-Path $runnerRoot 'run.cmd') -PathType Leaf)) {
+    New-Item -ItemType Directory -Path $runnerRoot -Force | Out-Null
+    Get-ChildItem -LiteralPath $runnerBase -Force | Copy-Item -Destination $runnerRoot -Recurse -Force
+}
+Set-Location -LiteralPath $runnerRoot
 
 # These values are supplied by the owner-controlled docker run command. The
 # hostname fallback is Docker's container hostname, but the image digest must

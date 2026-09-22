@@ -181,6 +181,8 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(entrypoint).toContain('& .\\run.cmd');
       expect(entrypoint).toContain('joy-media-worker-docker');
       expect(entrypoint).toContain('JOY_MEDIA_WINDOWS_IMAGE_DIGEST');
+      expect(entrypoint).toContain('C:\\runner-base');
+      expect(dockerfile).toContain('C:\\runner-base');
     });
 
     it('entrypoint configures against the JOY Media repository in unattended mode with --replace', () => {
