@@ -79,6 +79,7 @@ export default tseslint.config(
   {
     files: [
       '**/bin/**/*.{mjs,cjs,js}',
+      'ops/**/*.mjs',
       'tooling/**/*.mjs',
       'scripts/*.cjs',
       'apps/*/scripts/*.mjs',
