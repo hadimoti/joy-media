@@ -168,13 +168,12 @@ try {
         Copy-Item -Destination $runtimeDist -Recurse -Force
     $runtimePackages = Join-Path $runtimeDist 'node_modules\@joy-media'
     New-Item -ItemType Directory -Path $runtimePackages -Force | Out-Null
-    foreach ($packageDirectory in Get-ChildItem -LiteralPath (Join-Path $PWD 'packages') -Directory) {
-        $manifestPath = Join-Path $packageDirectory.FullName 'package.json'
-        if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { continue }
-        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-        if ([string]$manifest.name -notlike '@joy-media/*') { continue }
-        $packageName = ([string]$manifest.name).Split('/')[1]
-        Copy-Item -LiteralPath $packageDirectory.FullName -Destination (Join-Path $runtimePackages $packageName) -Recurse -Force
+    foreach ($packageName in @('job-protocol', 'render-ir', 'export-core')) {
+        $packageDirectory = Join-Path $PWD ('packages\\' + $packageName)
+        if (-not (Test-Path -LiteralPath $packageDirectory -PathType Container)) {
+            throw \"Required Worker runtime package is missing: $packageDirectory\"
+        }
+        Copy-Item -LiteralPath $packageDirectory -Destination (Join-Path $runtimePackages $packageName) -Recurse -Force
     }
     $playwrightPackage = Get-ChildItem -LiteralPath (Join-Path $PWD 'node_modules\.pnpm') -Directory -Filter 'playwright-core@*' |
         Sort-Object Name -Descending | Select-Object -First 1
