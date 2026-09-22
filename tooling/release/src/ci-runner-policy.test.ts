@@ -60,7 +60,7 @@ const HOSTED_LABEL_TOKENS = new Set([
 const ALLOWED_LABEL_TUPLES: ReadonlyArray<readonly string[]> = [
   // joy-media-ci (PC Docker Linux container; primary isolation lane)
   ['self-hosted', 'linux', 'x64', 'joy-media-ci'],
-  // joy-media-acceptance (isolated acceptance Linux runner on its own Docker network)
+  // joy-media-acceptance (isolated acceptance Linux runner with its own volume)
   ['self-hosted', 'linux', 'x64', 'joy-media-acceptance'],
   // joy-media-worker-docker (Windows-container Worker/release lane)
   ['self-hosted', 'windows', 'x64', 'joy-media-worker-docker'],
@@ -156,6 +156,48 @@ function findRunsOnEntries(workflowText: string): RunsOnEntry[] {
     }
   }
   return entries;
+}
+
+function findWindowsDockerJobBlocks(workflowText: string): string[] {
+  const lines = workflowText.split(/\r?\n/);
+  const blocks: string[] = [];
+  let jobStart = -1;
+
+  const flush = (end: number) => {
+    if (jobStart < 0) return;
+    const block = lines.slice(jobStart, end).join('\n');
+    if (block.includes('runs-on: [self-hosted, windows, x64, joy-media-worker-docker]')) {
+      blocks.push(block);
+    }
+  };
+
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^\s{2}[A-Za-z0-9_-]+:\s*$/.test(lines[i])) {
+      flush(i);
+      jobStart = i;
+    }
+  }
+  flush(lines.length);
+  return blocks;
+}
+
+function findRunStepBlocks(jobBlock: string): string[] {
+  const lines = jobBlock.split(/\r?\n/);
+  const blocks: string[] = [];
+  let stepStart = -1;
+
+  const flush = (end: number) => {
+    if (stepStart >= 0) blocks.push(lines.slice(stepStart, end).join('\n'));
+  };
+
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^\s{6}-\s+/.test(lines[i])) {
+      flush(i);
+      stepStart = i;
+    }
+  }
+  flush(lines.length);
+  return blocks;
 }
 
 function readSelfHostedRunnerLabels(): ReadonlyArray<readonly string[]> {
@@ -279,6 +321,31 @@ describe('self-hosted-only CI architecture contract', () => {
           entry.tuple[0],
           `runs-on tuple on line ${entry.lineNo} (${entry.jobContext}) in ${workflowPath} must begin with "self-hosted"; got ${JSON.stringify(entry.tuple)}`,
         ).toBe('self-hosted');
+      }
+    },
+  );
+
+  it.each(workflows)(
+    'Windows Docker jobs use the shell provided by the Windows runner image in %s',
+    (workflowPath) => {
+      const text = readFileSync(workflowPath, 'utf8');
+      const jobs = findWindowsDockerJobBlocks(text);
+      if (jobs.length === 0) return;
+
+      // Dockerfile.windows intentionally provides Windows PowerShell 5.1 only;
+      // `shell: pwsh` would fail before the first job command is evaluated.
+      for (const job of jobs) {
+        expect(job).not.toMatch(/^\s*shell:\s*pwsh\s*$/m);
+        const runSteps = findRunStepBlocks(job).filter((step) =>
+          /^(?:\s{6}-\s+run:|\s{8}run:)/m.test(step),
+        );
+        expect(runSteps.length).toBeGreaterThan(0);
+        for (const step of runSteps) {
+          expect(
+            step,
+            'every command step in the Windows Docker job must declare Windows PowerShell explicitly',
+          ).toMatch(/^\s{8}shell:\s*powershell\s*$/m);
+        }
       }
     },
   );

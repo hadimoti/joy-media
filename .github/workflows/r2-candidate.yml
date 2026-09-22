@@ -108,7 +108,7 @@ jobs:
     # would consume GitHub-hosted minutes and is unavailable from Iran).
     # The only Windows acceptance evidence in this workflow is produced here
     # on the self-hosted Windows worker — see docs/SELF-HOSTED-CI.md
-    # §Windows-platform evidence for the honest Windows-platform caveat.
+    # Windows-platform evidence for the honest Windows-platform caveat.
     runs-on: [self-hosted, windows, x64, joy-media-worker-docker]
     needs: [validate-candidate]
     strategy:
@@ -126,7 +126,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
       - name: Prepare toolchain
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:CANDIDATE_SHA -notmatch '^[0-9a-f]{40}$') { throw 'candidate_sha must be a full lowercase commit SHA' }
@@ -137,9 +137,10 @@ jobs:
           ffmpeg -version | Select-Object -First 1
           ffprobe -version | Select-Object -First 1
       - run: pnpm install --frozen-lockfile
+        shell: powershell
       - name: Build Worker and run two exact self-test passes
         id: build-worker
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           pnpm --filter @joy-media/worker build
@@ -156,7 +157,7 @@ jobs:
               # Explicit execution label: this is Windows evidence from the
               # owner-controlled self-hosted Windows runner, NOT from a
               # GitHub-hosted Windows VM. See docs/SELF-HOSTED-CI.md
-              # §Windows-platform evidence for the explicit caveat.
+              # Windows-platform evidence for the explicit caveat.
               execution     = 'windows-docker-container'
               runner        = 'self-hosted,windows,x64,joy-media-worker-docker'
               candidateSha  = $env:CANDIDATE_SHA
@@ -171,12 +172,12 @@ jobs:
           Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'joy-media-windows-acceptance-outputs.json') -Value ($results | ConvertTo-Json) -Encoding utf8
       - name: Publish Windows Worker acceptance outputs
         id: publish-evidence
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           $results = Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'joy-media-windows-acceptance-outputs.json') -Raw | ConvertFrom-Json
           [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "evidence1=$($results.'1')$([Environment]::NewLine)")
-          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "evidence2=$($results.'2')$([Environment]::NewLine)"
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "evidence2=$($results.'2')$([Environment]::NewLine)")
 
   acceptance:
     name: acceptance ${{ matrix.profile }} (pass ${{ matrix.pass }})
@@ -251,10 +252,6 @@ jobs:
       CI: 'true'
       JOY_MEDIA_CI_ACCEPTANCE_PROFILE: real-services
       JOY_MEDIA_CI_ACCEPTANCE_WORKER: disposable
-      JOY_MEDIA_CI_DATABASE_URL: postgresql://joy:joy@localhost:5432/joymedia_ci
-      JOY_MEDIA_CI_S3_ENDPOINT: http://joyminio:joyminio-secret@localhost:9000
-      JOY_MEDIA_CI_S3_ACCESS_KEY: joyminio
-      JOY_MEDIA_CI_S3_SECRET_KEY: joyminio-secret
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

@@ -10,10 +10,12 @@ used only by the isolated real-services acceptance lane of
 
 `self-hosted,linux,x64,joy-media-acceptance`
 
-It is intentionally separate from `joy-media-ci` so a hung acceptance
-job cannot starve the primary verify / gate-summary lanes, and so its
-disposable services (PostgreSQL/MinIO namespaces, Worker identity,
-authenticated API) cannot leak back into the source/checkout lane.
+It is intentionally separate from `joy-media-ci` by label, runner volume,
+checkout, and job contract so a hung acceptance job cannot starve the primary
+verify / gate-summary lanes. On the current PC both Linux runners use the WSL2
+host network, so network namespaces are not the isolation boundary; disposable
+PostgreSQL/MinIO namespaces, Worker identity, authenticated API state, and
+checkout paths must remain unique to the acceptance job.
 
 ## Toolchain
 

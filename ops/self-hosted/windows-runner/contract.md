@@ -88,8 +88,7 @@ host-direct, portable, or legacy evidence.
 This contract does not invent runtime evidence. Until Docker Desktop's Windows
 engine builds the image, registers this exact label, executes both acceptance
 passes, and produces exact-candidate evidence, the release gate remains red.
-On the current PC, `docker desktop engine ls` lists only `linux *` and
-`docker desktop engine use windows` returns `engine is disabled`; do not run the
-Windows registration commands against the Linux engine or substitute a native
-Windows runner. Restore/enable a Windows-container-capable Docker engine (or use
-an owner-controlled Windows Docker host) before proceeding.
+Docker Desktop's Windows-container engine is required for this runner while
+the Linux lanes use the independent Ubuntu-24.04 WSL2 Docker Engine; do not
+switch Docker Desktop to its Linux engine or substitute a native Windows
+runner. If the Windows engine is unavailable, repair it before proceeding.

@@ -72,7 +72,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Verify runner toolchain
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           node --version
@@ -81,8 +81,9 @@ jobs:
           ffmpeg -version
           ffprobe -version
       - run: pnpm install --frozen-lockfile
+        shell: powershell
       - name: Build Worker and package self-test executable
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           pnpm --filter @joy-media/worker build

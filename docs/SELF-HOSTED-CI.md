@@ -12,15 +12,23 @@ contract is enforced offline by
 
 ## Self-hosted runner inventory
 
-All runners are provisioned on the owner-controlled Windows PC via
-Docker Desktop (Linux containers, plus a documented Windows-container
-contract under `ops/self-hosted/windows-runner/Dockerfile.windows`):
+All runners are provisioned on the owner-controlled Windows PC inside Docker.
+The PC keeps two independent local Docker daemons online so the Windows and
+Linux lanes do not require switching Docker Desktop engines:
 
-| Runner                    | Labels                                            | Where it runs                                              | Source of truth                                                             |
-| ------------------------- | ------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `joy-media-ci-linux`      | `self-hosted,linux,x64,joy-media-ci`              | PC Docker Linux container (`ops/self-hosted/linux-runner`) | `ops/self-hosted/linux-runner/{Dockerfile,entrypoint.sh,README.md}`         |
-| `joy-media-ci-acceptance` | `self-hosted,linux,x64,joy-media-acceptance`      | PC Docker Linux container (separate Docker network)        | `ops/self-hosted/acceptance-runner/README.md`                               |
-| `joy-media-worker-docker` | `self-hosted,windows,x64,joy-media-worker-docker` | PC Docker Windows-container (`Dockerfile.windows`)         | `ops/self-hosted/windows-runner/{Dockerfile.windows,contract.md,README.md}` |
+- Docker Desktop's Windows-container engine owns `joy-media-worker-docker`.
+- Ubuntu-24.04 WSL2's Docker Engine owns `joy-media-ci-linux` and
+  `joy-media-ci-acceptance`.
+
+The Windows-container contract remains under
+`ops/self-hosted/windows-runner/Dockerfile.windows` and the Linux-container
+contract under `ops/self-hosted/linux-runner/`:
+
+| Runner                    | Labels                                            | Where it runs                                                   | Source of truth                                                             |
+| ------------------------- | ------------------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `joy-media-ci-linux`      | `self-hosted,linux,x64,joy-media-ci`              | PC WSL2 Docker Linux container (`ops/self-hosted/linux-runner`) | `ops/self-hosted/linux-runner/{Dockerfile,entrypoint.sh,README.md}`         |
+| `joy-media-ci-acceptance` | `self-hosted,linux,x64,joy-media-acceptance`      | PC WSL2 Docker Linux container (separate runner volume)         | `ops/self-hosted/acceptance-runner/README.md`                               |
+| `joy-media-worker-docker` | `self-hosted,windows,x64,joy-media-worker-docker` | PC Docker Windows-container (`Dockerfile.windows`)              | `ops/self-hosted/windows-runner/{Dockerfile.windows,contract.md,README.md}` |
 
 No runner registration token is committed, logged, or persisted inside
 a long-running container — both `entrypoint.sh` (Linux) and
@@ -32,7 +40,7 @@ a long-running container — both `entrypoint.sh` (Linux) and
 - Repository: `hadimoti/joy-media`
 - Linux container runners (`joy-media-ci-linux`, `joy-media-ci-acceptance`):
   built from `ops/self-hosted/linux-runner/Dockerfile`, tagged with the
-  digest-pinned image `sha256:fe6a3c657e9d9c7ee0b0c823eeaa2bcecac75041ff104ecc52ab37fc36f97b61`,
+  digest-pinned image `sha256:4012f99f4599e7bac1214da9c8c00ef6e04cb02ca673618884334d35ac4a5d53`,
   running as uid `1001` (`joyci`), with Node `v22.14.0`, pnpm
   `11.15.0`, FFmpeg/FFprobe, PostgreSQL client, MinIO `mc`, and the
   system libraries required by headless Chromium; all downloaded
@@ -100,41 +108,52 @@ The trusted push workflow also serializes superseded `main` runs with a GitHub A
 directory, and Playwright output directory derived from the GitHub run identity. This keeps reruns
 and parallel trusted runners from reusing stale ports or overwriting another matrix leg's traces.
 
-## Linux real-services runner (owner-controlled Docker Desktop)
+## Linux real-services runner (owner-controlled WSL2 Docker Engine)
 
-The Linux lane is now provisioned on the owner-controlled Docker Desktop Linux
-engine; it is not installed on the Sweden production VPS. The repository-scoped
-runner `joy-media-ci-linux` is online with labels `self-hosted`, `linux`, `x64`,
+The Linux lane is provisioned on the owner-controlled Ubuntu-24.04 WSL2 Docker
+Engine; it is not installed on the Sweden production VPS. The repository-scoped
+runner `joy-media-ci-linux` is registered with labels `self-hosted`, `linux`, `x64`,
 `joy-media-ci`, runs as uid `1001` (`joyci`), and uses the digest-pinned image
-`sha256:fe6a3c657e9d9c7ee0b0c823eeaa2bcecac75041ff104ecc52ab37fc36f97b61`.
+`sha256:4012f99f4599e7bac1214da9c8c00ef6e04cb02ca673618884334d35ac4a5d53`.
 The image contains Node `v22.14.0`, pnpm `11.15.0`, FFmpeg/FFprobe, PostgreSQL
 client tools, MinIO `mc`, and the system libraries required by headless Chromium;
 all downloaded binaries are hash-verified.
 
-The runner is attached to the private Docker network `joy-media-ci` with
-restart-safe, non-published service containers:
+The runner containers use WSL host networking because the WSL Docker bridge has
+a reproducible external TLS/API timeout on this PC. The runner image and
+service setup are restart-safe; the workflow rechecks runner registration and
+PostgreSQL/MinIO health as separate fail-closed gates before every real-services
+run. These are local-only WSL host services (not Internet-published ports):
 
 - PostgreSQL 17 image digest `sha256:00bc86618629af00d2937fdc5a5d63db3ff8450acf52f0636ec813c7f4902929`
   (`joy-media-ci-postgres`, persistent named volume).
 - MinIO image digest `sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e`
   (`joy-media-ci-minio`, persistent named volume).
 
-Database/S3 credentials are generated locally and passed only to the runner
-container; they are not repository secrets, logs, artifacts, or Gbrain data.
+The current PC uses synthetic CI-only database/S3 credentials from runner-local
+environment files; they are not production credentials and are not copied to
+logs, artifacts, or Gbrain. The workflows must consume these values from the
+runner environment rather than embedding defaults in the repository. The
+legacy `r2-candidate.yml` path now follows that rule as well.
 `JOY_MEDIA_CI_RELEASE_COMMAND` points at the checked-out
 `ops/self-hosted/linux-runner/release-real-services.sh`, which creates and
 unconditionally drops a run/schema and bucket namespace.
 
 The acceptance runner `joy-media-ci-acceptance` is a separate repository-scoped
-Linux runner on networks `joy-media-acceptance` and `joy-media-ci`, with its own
-runner volume and labels `self-hosted`, `linux`, `x64`, `joy-media-acceptance`.
+Linux runner with its own runner volume and labels `self-hosted`, `linux`, `x64`,
+`joy-media-acceptance`. On this PC it uses the same WSL host network and the
+runner-local environment points at MinIO on `localhost:9000`; it does not share
+the runner volume or checkout with `joy-media-ci-linux`.
 It is configured for the isolated real-services lane with
 `JOY_MEDIA_CI_ACCEPTANCE_PROFILE=real-services`,
 `JOY_MEDIA_CI_ACCEPTANCE_WORKER=disposable`, and the executable
 `ops/self-hosted/linux-runner/real-service-acceptance.sh` command. Its database
 and MinIO settings are runner-local only; it has no OpenCLI profile, owner
-cookies, or production credentials. Both Linux runners are currently online
-and idle; query the inventory with the health-check command below.
+cookies, or production credentials. The last local runtime check recorded both
+Linux runners online and idle alongside the Windows Docker runner; this is an
+observation, not a durable state guarantee. WSL2 may stop an idle distribution,
+so the operator must verify `wsl -l -v`, the Docker daemon, and the GitHub
+runner inventory immediately before dispatching a gate.
 
 ## Release-candidate lanes
 
@@ -153,16 +172,10 @@ must run twice on the exact candidate SHA and use repository-scoped runners with
   Any automated browser uses fixture credentials only and never receives the owner's cookies or
   OpenCLI profile `cefd9k77`.
 
-The current PC inventory has the two Linux Docker runners and the isolated acceptance runner
-described above. The Windows Docker Worker is a defined contract but is not currently registered:
-Docker Desktop exposes only its Linux engine and the Windows engine is disabled. There is no
-host-direct Windows fallback; if the Windows engine or Docker runner is unavailable, the
-workflow queues/fails rather than consuming a different runner. Do not point release jobs at
-the production Sweden VPS.
-The read-only GitHub runner inventory currently shows the two online native Windows runners
-`joy-media-ci-windows` and `joy-media-ci-worker` with the retired labels `joy-media-ci` and
-`joy-media-worker`; it shows no `joy-media-worker-docker` runner. Those old runners are not
-Windows-Docker evidence and are intentionally not used by the current workflow contract.
+The current PC inventory has the two Linux Docker runners and the Windows Docker
+runner described above. There is no host-direct fallback and no VPS runner
+fallback; if either local daemon or its labeled container is unavailable, the
+workflow queues/fails rather than consuming a different runner.
 
 The manually dispatched `.github/workflows/release-candidate.yml` is the executable contract for
 those lanes. Supply the full candidate SHA; it runs two exact passes for each lane. The Linux
