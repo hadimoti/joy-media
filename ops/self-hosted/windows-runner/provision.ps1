@@ -76,6 +76,7 @@ if ($MtuBytes -gt 0) {
 `$subinterfaces = @(& netsh interface ipv4 show subinterfaces)
 `$netshExitCode = `$LASTEXITCODE
 if (`$netshExitCode -ne 0) {
+    Write-Output 'MTU wrapper: netsh could not list subinterfaces; runner not started.'
     exit `$netshExitCode
 }
 `$setCount = 0
@@ -86,6 +87,7 @@ foreach (`$line in `$subinterfaces) {
             & netsh interface ipv4 set subinterface "`$interfaceName" mtu=$MtuBytes store=active
             `$setExitCode = `$LASTEXITCODE
             if (`$setExitCode -ne 0) {
+                Write-Output "MTU wrapper: could not set MTU on '`$interfaceName'; runner not started."
                 exit `$setExitCode
             }
             `$setCount++
@@ -93,6 +95,7 @@ foreach (`$line in `$subinterfaces) {
     }
 }
 if (`$setCount -eq 0) {
+    Write-Output 'MTU wrapper: no non-loopback subinterface found; runner not started.'
     exit 1
 }
 & C:\joy-media-windows-runner.ps1
@@ -136,14 +139,18 @@ if ($MtuBytes -gt 0) {
 if (`$LASTEXITCODE -ne 0) {
     exit 2
 }
-`$found = `$false
+# Every non-loopback subinterface must be clamped; one unclamped vNIC is
+# enough to blackhole TLS.
+`$checked = 0
 foreach (`$line in `$subinterfaces) {
-    if (`$line -match '^\s*$MtuBytes\s+\d+\s+\d+\s+\d+\s+(?<name>.+?)\s*$' -and `$Matches.name.Trim() -notmatch '(?i)loopback') {
-        `$found = `$true
-        break
+    if (`$line -match '^\s*(?<mtu>\d+)\s+\d+\s+\d+\s+\d+\s+(?<name>.+?)\s*$' -and `$Matches.name.Trim() -notmatch '(?i)loopback') {
+        if ([long]`$Matches.mtu -gt $MtuBytes) {
+            exit 1
+        }
+        `$checked++
     }
 }
-if (-not `$found) {
+if (`$checked -eq 0) {
     exit 1
 }
 exit 0

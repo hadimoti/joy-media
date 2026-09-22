@@ -280,6 +280,8 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(provision).toContain('-EncodedCommand $encodedMtuVerification');
       expect(provision).toContain('-EncodedCommand (ConvertTo-EncodedCommand $configure)');
       expect(provision).not.toMatch(/powershell -NoProfile -Command \$(startupWrapper|mtuVerification|configure)/);
+      expect(provision).toContain('[long]`$Matches.mtu -gt $MtuBytes');
+      expect(provision).toContain('runner not started');
     });
 
     it('provision.ps1 supplies the registration token only on docker exec stdin', () => {
