@@ -22,12 +22,30 @@ ALLOWED_HOSTS = {
     "codeload.github.com",
     "actions.githubusercontent.com",
     "pipelines.actions.githubusercontent.com",
+    # Python CI dependencies; no general-purpose outbound proxy is allowed.
+    "pypi.org",
+    "files.pythonhosted.org",
+    # Node CI dependencies; no general npm proxy is permitted.
+    "registry.npmjs.org",
+    # Playwright browser artifacts used by the Windows acceptance lane.
+    # Keep the list explicit because this proxy is intentionally not general
+    # outbound HTTPS. Playwright may redirect between the CDN and its Azure
+    # fallback during regional delivery.
+    "cdn.playwright.dev",
+    "playwright.download.prss.microsoft.com",
+    "playwright.azureedge.net",
+    # cdn.playwright.dev currently redirects Chrome-for-Testing archives here.
+    "storage.googleapis.com",
 }
 
 
 def allowed(host: str) -> bool:
     host = host.lower().rstrip(".")
-    return host in ALLOWED_HOSTS or host.endswith(".githubusercontent.com")
+    return (
+        host in ALLOWED_HOSTS
+        or host.endswith(".githubusercontent.com")
+        or host.endswith(".blob.core.windows.net")
+    )
 
 
 class ProxyHandler(socketserver.BaseRequestHandler):
@@ -42,9 +60,11 @@ class ProxyHandler(socketserver.BaseRequestHandler):
             host, port_text = parts[1].rsplit(":", 1)
             port = int(port_text)
         except (ValueError, TypeError):
+            print(f"DENY malformed CONNECT {first_line}", flush=True)
             self.request.sendall(b"HTTP/1.1 400 Bad Request\r\n\r\n")
             return
         if port != 443 or not allowed(host):
+            print(f"DENY CONNECT host={host.lower().rstrip('.')} port={port}", flush=True)
             self.request.sendall(b"HTTP/1.1 403 Forbidden\r\n\r\n")
             return
         try:

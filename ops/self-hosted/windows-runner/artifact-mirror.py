@@ -24,20 +24,20 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/npm/pnpm":
             self._serve_pnpm_metadata(version_only=False)
             return
-        if parsed.path == "/npm/pnpm/11.15.0":
+        if parsed.path == "/npm/pnpm/11.17.0":
             self._serve_pnpm_metadata(version_only=True)
             return
-        if parsed.path == "/npm/pnpm/-/pnpm-11.15.0.tgz":
-            self.path = "/pnpm-11.15.0.tgz"
+        if parsed.path == "/npm/pnpm/-/pnpm-11.17.0.tgz":
+            self.path = "/pnpm-11.17.0.tgz"
         super().do_GET()
 
     def _serve_pnpm_metadata(self, *, version_only: bool) -> None:
         metadata_path: Path = self.server.pnpm_metadata  # type: ignore[attr-defined]
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        version = metadata["versions"]["11.15.0"]
+        version = metadata["versions"]["11.17.0"]
         version["dist"]["tarball"] = (
             f"http://{self.headers.get('Host', 'host.docker.internal')}/"
-            "npm/pnpm/-/pnpm-11.15.0.tgz"
+            "npm/pnpm/-/pnpm-11.17.0.tgz"
         )
         payload = version if version_only else metadata
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
