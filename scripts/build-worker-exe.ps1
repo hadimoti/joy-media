@@ -59,7 +59,20 @@ try {
     if ($postjectScript -like '*.cmd') {
         & $postjectScript $OutputPath NODE_SEA_BLOB $blobPath --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
     } else {
-        & $NodePath $postjectScript $OutputPath NODE_SEA_BLOB $blobPath --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
+        $previousNodePath = $env:NODE_PATH
+        try {
+            $commanderNodeModules = Get-ChildItem -LiteralPath (Join-Path $repoRoot 'node_modules\.pnpm') -Directory -Filter 'commander@9.*' -ErrorAction SilentlyContinue |
+                ForEach-Object { Join-Path $_.FullName 'node_modules' } |
+                Where-Object { Test-Path -LiteralPath (Join-Path $_ 'commander') -PathType Container } |
+                Select-Object -First 1
+            if ($commanderNodeModules) {
+                $env:NODE_PATH = (@($commanderNodeModules, $previousNodePath) |
+                    Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join [System.IO.Path]::PathSeparator
+            }
+            & $NodePath $postjectScript $OutputPath NODE_SEA_BLOB $blobPath --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
+        } finally {
+            $env:NODE_PATH = $previousNodePath
+        }
     }
     if ($LASTEXITCODE -ne 0) { throw "SEA resource injection failed with exit code $LASTEXITCODE." }
 
