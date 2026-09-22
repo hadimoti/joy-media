@@ -31,6 +31,7 @@ $fixtureScript = Join-Path $PWD 'ops\self-hosted\windows-runner\worker-control-p
 $fixtureProcess = $null
 $nodePath = $null
 $fixtureBaseUrl = $null
+$script:workerRuntimeRoot = $null
 
 function Get-JsonFile([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
@@ -91,7 +92,7 @@ function Invoke-Daemon([string]$Path, [string]$StatePath, [string]$PipeName) {
         $before = Get-JsonFile $fixtureEventsPath
         $beforeHello = if ($null -eq $before) { 0 } else { [int]$before.counters.hello }
         $beforeLeases = if ($null -eq $before) { 0 } else { [int]$before.counters.leases }
-        $env:JOY_MEDIA_WORKER_ROOT = $PWD.Path
+        $env:JOY_MEDIA_WORKER_ROOT = $script:workerRuntimeRoot
         $env:JOY_MEDIA_API_URL = $script:fixtureBaseUrl
         $env:JOY_MEDIA_WORKER_STATE_PATH = $StatePath
         $env:JOY_MEDIA_WORKER_PIPE = $PipeName
@@ -157,8 +158,30 @@ function Get-SourceProvenance {
 try {
     $script:nodePath = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
     if ([string]::IsNullOrWhiteSpace($script:nodePath)) { throw 'Node.js is required for the container-local fixture' }
-    $env:JOY_MEDIA_WORKER_ROOT = $PWD.Path
-    $env:JOY_MEDIA_WORKER_ENTRYPOINT = Join-Path $PWD 'apps\worker\dist\index.js'
+    # The repository bind mount contains pnpm workspace junctions created on
+    # the host. Those junctions point outside the container, so stage a
+    # disposable container-local runtime layout without changing the mount.
+    $script:workerRuntimeRoot = Join-Path $acceptanceRoot 'runtime'
+    $runtimeDist = Join-Path $script:workerRuntimeRoot 'apps\worker\dist'
+    New-Item -ItemType Directory -Path $runtimeDist -Force | Out-Null
+    Get-ChildItem -LiteralPath (Join-Path $PWD 'apps\worker\dist') -Force |
+        Copy-Item -Destination $runtimeDist -Recurse -Force
+    $runtimePackages = Join-Path $runtimeDist 'node_modules\@joy-media'
+    New-Item -ItemType Directory -Path $runtimePackages -Force | Out-Null
+    foreach ($packageDirectory in Get-ChildItem -LiteralPath (Join-Path $PWD 'packages') -Directory) {
+        $manifestPath = Join-Path $packageDirectory.FullName 'package.json'
+        if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { continue }
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        if ([string]$manifest.name -notlike '@joy-media/*') { continue }
+        $packageName = ([string]$manifest.name).Split('/')[1]
+        New-Item -ItemType Junction -Path (Join-Path $runtimePackages $packageName) -Target $packageDirectory.FullName | Out-Null
+    }
+    $playwrightPackage = Get-ChildItem -LiteralPath (Join-Path $PWD 'node_modules\.pnpm') -Directory -Filter 'playwright-core@*' |
+        Sort-Object Name -Descending | Select-Object -First 1
+    if ($null -eq $playwrightPackage) { throw 'playwright-core package was not found in the container-local pnpm tree' }
+    New-Item -ItemType Junction -Path (Join-Path $runtimeDist 'node_modules\playwright-core') -Target (Join-Path $playwrightPackage.FullName 'node_modules\playwright-core') | Out-Null
+    $env:JOY_MEDIA_WORKER_ROOT = $script:workerRuntimeRoot
+    $env:JOY_MEDIA_WORKER_ENTRYPOINT = Join-Path $runtimeDist 'index.js'
     New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
     Copy-Item -LiteralPath $ExecutablePath -Destination $installedPath -Force
     $installedHash = (Get-FileHash -LiteralPath $installedPath -Algorithm SHA256).Hash.ToLowerInvariant()
