@@ -33,10 +33,11 @@ $fixtureProcess = $null
 $nodePath = $null
 $fixtureBaseUrl = $null
 $script:workerRuntimeRoot = $null
-# Pairing protects and unprotects Worker state through DPAPI, which each time
-# pays for a cold powershell.exe inside the container. A 20s budget aborted
-# healthy runs mid-pairing and reported them as "no control-plane traffic".
-$daemonReadyTimeoutSeconds = 90
+# Pairing protects Worker state through DPAPI, which each time pays for a cold
+# powershell.exe inside the container. A healthy run still reaches hello/leases
+# in a few seconds; the headroom keeps a slow container from being reported as
+# "no control-plane traffic".
+$daemonReadyTimeoutSeconds = 60
 # Diagnostics live outside $acceptanceRoot: the root must be deleted to prove
 # uninstall, and a failed run is useless without the Worker's own log.
 $diagnosticsRoot = Join-Path (Split-Path -Parent $OutputPath) ("acceptance-diagnostics-{0}-{1}-{2}" -f $RunId, $Attempt, $Pass)
@@ -147,6 +148,11 @@ function Invoke-Daemon([string]$Path, [string]$StatePath, [string]$PipeName, [st
         $daemonRoot = Split-Path -Parent $StatePath
         $daemonStdoutPath = Join-Path $daemonRoot ((Split-Path -Leaf $StatePath) + '.stdout.log')
         $daemonStderrPath = Join-Path $daemonRoot ((Split-Path -Leaf $StatePath) + '.stderr.log')
+        # Force-terminating the launcher denies it the chance to remove its own
+        # hand-off file, and successive runs reuse one state path. Clear it here
+        # so this run can never adopt the previous run's dead child PID.
+        Remove-Item -LiteralPath $childPidPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath "$childPidPath.tmp" -Force -ErrorAction SilentlyContinue
         $process = Start-Process -FilePath $Path -PassThru -WindowStyle Hidden -RedirectStandardOutput $daemonStdoutPath -RedirectStandardError $daemonStderrPath
         $deadline = (Get-Date).AddSeconds($daemonReadyTimeoutSeconds)
         $snapshot = $null
@@ -326,7 +332,7 @@ try {
         Write-Warning ("container-local acceptance diagnostics written to {0}" -f $diagnosticsRoot)
         foreach ($label in $script:daemonDiagnostics.Keys) {
             $diagnostic = $script:daemonDiagnostics[$label]
-            Write-Warning ("daemon run '{0}' failed: {1}" -f $label, ($diagnostic.result | ConvertTo-Json -Compress))
+            Write-Warning ("daemon run '{0}' failed: {1}" -f $label, ($diagnostic['result'] | ConvertTo-Json -Compress))
             foreach ($stream in @('workerLogTail', 'launcherStderrTail')) {
                 if (-not [string]::IsNullOrWhiteSpace($diagnostic[$stream])) {
                     Write-Warning ("daemon run '{0}' {1}:`n{2}" -f $label, $stream, $diagnostic[$stream])

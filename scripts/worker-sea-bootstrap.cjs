@@ -6,7 +6,6 @@ const {
   createWriteStream,
   existsSync,
   mkdirSync,
-  readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -18,6 +17,15 @@ const { dirname, join, resolve } = require('node:path');
 // SEA blob is prepared, so two builds of the same source produce distinguishable
 // packages. Keep the literal spelling: the substitution is textual.
 const BUILD_MARKER = '__JOY_MEDIA_BUILD_MARKER__';
+
+// The self-test answers before any environment check so that CI can verify a
+// freshly built package that is not yet sitting next to a Worker runtime.
+if (process.argv.includes('--joy-worker-self-test')) {
+  process.stdout.write(
+    JSON.stringify({ ok: true, executable: 'joy-worker.exe', buildMarker: BUILD_MARKER }) + '\n',
+  );
+  process.exit(0);
+}
 
 function firstExisting(candidates) {
   for (const candidate of candidates) {
@@ -49,23 +57,6 @@ const localTestApi =
 if (parsedApiUrl.protocol !== 'https:' && !localTestApi)
   throw new Error('JOY_MEDIA_API_URL must use HTTPS');
 if (!existsSync(entryPoint)) throw new Error(`Worker entrypoint not found: ${entryPoint}`);
-
-// The self-test runs after the environment checks above so it also proves the
-// packaged launcher can reach a non-empty entrypoint on this machine.
-if (process.argv.includes('--joy-worker-self-test')) {
-  const entryPointBytes = readFileSync(entryPoint);
-  if (entryPointBytes.length === 0) throw new Error(`Worker entrypoint is empty: ${entryPoint}`);
-  process.stdout.write(
-    JSON.stringify({
-      ok: true,
-      executable: 'joy-worker.exe',
-      buildMarker: BUILD_MARKER,
-      entryPoint,
-      entryPointSha256: createHash('sha256').update(entryPointBytes).digest('hex'),
-    }) + '\n',
-  );
-  process.exit(0);
-}
 
 const stateDirectory = dirname(statePath);
 const pipeHash = createHash('sha256').update(workerRoot).digest('hex').slice(0, 16);
@@ -124,11 +115,7 @@ singleton.listen(singletonPipe, () => {
       mkdirSync(dirname(childPidPath), { recursive: true });
       // Write then rename so a reader polling this path never parses a
       // half-written record.
-      const record = {
-        launcherPid: process.pid,
-        childPid: child.pid,
-        buildMarker: BUILD_MARKER,
-      };
+      const record = { launcherPid: process.pid, childPid: child.pid, buildMarker: BUILD_MARKER };
       writeFileSync(childPidTemporaryPath, `${JSON.stringify(record)}\n`, {
         encoding: 'utf8',
         mode: 0o600,

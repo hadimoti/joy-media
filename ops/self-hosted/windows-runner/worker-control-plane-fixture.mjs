@@ -98,6 +98,10 @@ function sendJson(response, status, body) {
     'content-type': 'application/json',
     'content-length': Buffer.byteLength(encoded),
     'cache-control': 'no-store',
+    // Windows Server Core intermittently resets reused loopback Undici sockets
+    // while the fixture is being polled. The fixture is a deterministic
+    // control-plane test double, so one request per connection is intentional.
+    connection: 'close',
   });
   response.end(encoded);
 }
@@ -199,14 +203,22 @@ const server = createServer(async (request, response) => {
     });
   } catch (error) {
     console.error(
-      `fixture request error: ${error instanceof Error ? error.stack ?? error.message : String(error)}`,
+      `fixture request error: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
     );
     sendJson(response, 400, { error: 'invalid_fixture_request' });
   }
 });
 
+// Do not let the fixture retain a socket between the pairing and authenticated
+// requests. This keeps the acceptance transport independent of Windows NAT and
+// HTTP keep-alive behavior while leaving the production client untouched.
+server.keepAliveTimeout = 0;
+server.headersTimeout = 5_000;
+
 server.on('clientError', (error) => {
-  console.error(`fixture client error: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+  console.error(
+    `fixture client error: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+  );
 });
 
 function readSnapshot() {
