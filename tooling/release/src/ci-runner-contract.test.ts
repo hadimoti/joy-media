@@ -113,13 +113,15 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
 
   describe('Windows Docker-container runner (ops/self-hosted/windows-runner)', () => {
     const dockerfile = safeRead(join(WINDOWS_DIR, 'Dockerfile.windows'));
+    const installScript = safeRead(join(WINDOWS_DIR, 'install-windows-runner.ps1'));
     const entrypoint = safeRead(join(WINDOWS_DIR, 'windows-runner-entrypoint.ps1'));
     const containerAcceptance = safeRead(join(WINDOWS_DIR, 'worker-acceptance-container.ps1'));
     const readme = safeRead(join(WINDOWS_DIR, 'README.md'));
     const contract = safeRead(join(WINDOWS_DIR, 'contract.md'));
 
-    it('has a Dockerfile.windows, an entrypoint, a contract, and a README', () => {
+    it('has a Dockerfile.windows, an install script, an entrypoint, a contract, and a README', () => {
       expect(dockerfile.length).toBeGreaterThan(0);
+      expect(installScript.length).toBeGreaterThan(0);
       expect(entrypoint.length).toBeGreaterThan(0);
       expect(readme.length).toBeGreaterThan(0);
       expect(contract.length).toBeGreaterThan(0);
@@ -133,17 +135,27 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(dockerfile).toMatch(/^FROM\s+\$\{WINDOWS_BASE\}/m);
     });
 
-    it('Dockerfile.windows pins the GitHub Actions runner + Node tarball to SHA-256 hashes', () => {
-      expect(dockerfile).toMatch(/ARG\s+RUNNER_SHA256=[0-9a-f]{64}/);
-      expect(dockerfile).toMatch(/ARG\s+NODE_SHA256=[0-9a-f]{64}/);
-      expect(dockerfile).toMatch(/Get-FileHash[\s\S]*SHA256/);
+    it('supports an optional host artifact mirror without persisting its URL in the image environment', () => {
+      expect(dockerfile).toContain('ARG ARTIFACT_BASE_URL=');
+      expect(dockerfile).toContain(
+        'ENV JOY_MEDIA_WINDOWS_ARTIFACT_BASE_URL="${ARTIFACT_BASE_URL}"',
+      );
+      expect(dockerfile).toContain('ENV JOY_MEDIA_WINDOWS_ARTIFACT_BASE_URL=""');
+      expect(installScript).toContain('function Save-PinnedDownload');
+      expect(installScript).toContain('$artifactBaseUrl');
     });
 
-    it('Dockerfile.windows installs the portable Worker toolchain without Chocolatey', () => {
-      expect(dockerfile).toMatch(/\bffmpeg\b/);
-      expect(dockerfile).toContain('MinGit');
-      expect(dockerfile).toContain('jq');
-      expect(dockerfile).not.toMatch(/Chocolatey|choco/i);
+    it('the Windows image pins the GitHub Actions runner + Node tarball to SHA-256 hashes', () => {
+      expect(dockerfile).toMatch(/ARG\s+RUNNER_SHA256=[0-9a-f]{64}/);
+      expect(dockerfile).toMatch(/ARG\s+NODE_SHA256=[0-9a-f]{64}/);
+      expect(installScript).toMatch(/Get-FileHash[\s\S]*SHA256/);
+    });
+
+    it('the Windows image installs the portable Worker toolchain without Chocolatey', () => {
+      expect(installScript).toMatch(/\bffmpeg\b/);
+      expect(installScript).toContain('MinGit');
+      expect(installScript).toContain('jq');
+      expect(`${dockerfile}\n${installScript}`).not.toMatch(/Chocolatey|choco/i);
     });
 
     it('entrypoint uses the registration token ONLY at first-time configure, never persists it', () => {

@@ -11,12 +11,12 @@
 ARG WINDOWS_BASE=mcr.microsoft.com/windows/servercore:ltsc2022@sha256:e10503b9a4f7faafa30aa0f5d0e8e7f7ca30a4496b3b87d61178b4d7c6815fb5
 FROM ${WINDOWS_BASE}
 
-SHELL ["powershell", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop';"]
+SHELL ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop';"]
 
 # Every downloaded executable is pinned and verified in the image build. Do
 # not replace these with a mutable package-manager feed.
 ARG NODE_VERSION=22.14.0
-ARG NODE_SHA256=69b09dba5c8dcb05c4e4273a4340db1005abeafe3927efda2bc5b249e80437ec
+ARG NODE_SHA256=55b639295920b219bb2acbcfa00f90393a2789095b7323f79475c9f34795f217
 ARG GIT_VERSION=2.55.0
 ARG GIT_RELEASE_REVISION=5
 ARG GIT_SHA256=56d7b226b7693196cfc71fef26568f536c4a021ab6c37ff2db4287bed908e96e
@@ -25,7 +25,9 @@ ARG FFMPEG_SHA256=33febe64472fe1f235892b58f1e5245761c7fb243d23fdfffa93b891dfd160
 ARG JQ_VERSION=1.8.2
 ARG JQ_SHA256=a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627
 ARG RUNNER_VERSION=2.337.0
-ARG RUNNER_SHA256=70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613
+ARG RUNNER_SHA256=1150692afa94e71f872017e254ea55b6eece1eece3fe7e3a6d4c93d0a1b85cfc
+ARG ARTIFACT_BASE_URL=
+ARG COREPACK_NPM_REGISTRY=
 
 ENV COREPACK_HOME="C:\\corepack" `
     NODE_VERSION="${NODE_VERSION}" `
@@ -39,65 +41,24 @@ ENV COREPACK_HOME="C:\\corepack" `
     JQ_SHA256="${JQ_SHA256}" `
     RUNNER_VERSION="${RUNNER_VERSION}" `
     RUNNER_SHA256="${RUNNER_SHA256}" `
-    PATH="C:\\tools;C:\\ffmpeg\\bin;C:\\git\\cmd;C:\\git\\mingw64\\bin;C:\\actions-runner\\bin;C:\\node;${PATH}"
+    PATH="C:\\tools;C:\\ffmpeg\\bin;C:\\git\\cmd;C:\\git\\mingw64\\bin;C:\\actions-runner\\bin;C:\\node;C:\\Windows\\System32;C:\\Windows;C:\\Windows\\System32\\WindowsPowerShell\\v1.0;C:\\Windows\\System32\\Wbem;C:\\Windows\\System32\\OpenSSH"
 
-RUN [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 ; `
-    New-Item -ItemType Directory -Path C:\tools -Force | Out-Null ; `
-    Write-Host 'Installing pinned MinGit' ; `
-    $gitArchive = Join-Path $env:TEMP ("MinGit-$($env:GIT_VERSION).$($env:GIT_RELEASE_REVISION)-64-bit.zip") ; `
-    Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/git-for-windows/git/releases/download/v$($env:GIT_VERSION).windows.$($env:GIT_RELEASE_REVISION)/MinGit-$($env:GIT_VERSION).$($env:GIT_RELEASE_REVISION)-64-bit.zip" -OutFile $gitArchive ; `
-    $gitActual = (Get-FileHash -LiteralPath $gitArchive -Algorithm SHA256).Hash.ToLowerInvariant() ; `
-    if ($gitActual -ne $env:GIT_SHA256) { throw "MinGit hash mismatch: expected $($env:GIT_SHA256), got $gitActual" } ; `
-    Remove-Item -LiteralPath C:\git -Recurse -Force -ErrorAction SilentlyContinue ; `
-    Expand-Archive -LiteralPath $gitArchive -DestinationPath C:\git -Force ; `
-    Remove-Item -LiteralPath $gitArchive -Force ; `
-    if (-not (Test-Path -LiteralPath C:\git\mingw64\bin\curl.exe)) { throw 'MinGit archive did not contain the required curl.exe.' } ; `
-    Write-Host 'Installing pinned FFmpeg' ; `
-    $ffmpegArchive = Join-Path $env:TEMP 'ffmpeg-win64.zip' ; `
-    Invoke-WebRequest -UseBasicParsing -Uri $env:FFMPEG_URL -OutFile $ffmpegArchive ; `
-    $ffmpegActual = (Get-FileHash -LiteralPath $ffmpegArchive -Algorithm SHA256).Hash.ToLowerInvariant() ; `
-    if ($ffmpegActual -ne $env:FFMPEG_SHA256) { throw "FFmpeg hash mismatch: expected $($env:FFMPEG_SHA256), got $ffmpegActual" } ; `
-    $ffmpegExtract = Join-Path $env:TEMP 'joy-ffmpeg-extract' ; `
-    Remove-Item -LiteralPath $ffmpegExtract -Recurse -Force -ErrorAction SilentlyContinue ; `
-    Expand-Archive -LiteralPath $ffmpegArchive -DestinationPath $ffmpegExtract -Force ; `
-    $ffmpegRoot = Get-ChildItem -LiteralPath $ffmpegExtract -Directory | Select-Object -First 1 ; `
-    if (-not $ffmpegRoot -or -not (Test-Path -LiteralPath (Join-Path $ffmpegRoot.FullName 'bin\ffmpeg.exe'))) { throw 'FFmpeg archive did not contain the expected bin layout.' } ; `
-    Remove-Item -LiteralPath C:\ffmpeg -Recurse -Force -ErrorAction SilentlyContinue ; `
-    Move-Item -LiteralPath $ffmpegRoot.FullName -Destination C:\ffmpeg ; `
-    Remove-Item -LiteralPath $ffmpegExtract -Recurse -Force ; `
-    Remove-Item -LiteralPath $ffmpegArchive -Force ; `
-    Write-Host 'Installing pinned jq' ; `
-    $jqPath = 'C:\tools\jq.exe' ; `
-    $jqDownload = Join-Path $env:TEMP ("jq-$($env:JQ_VERSION)-win64.exe") ; `
-    Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/jqlang/jq/releases/download/jq-$($env:JQ_VERSION)/jq-win64.exe" -OutFile $jqDownload ; `
-    $jqActual = (Get-FileHash -LiteralPath $jqDownload -Algorithm SHA256).Hash.ToLowerInvariant() ; `
-    if ($jqActual -ne $env:JQ_SHA256) { throw "jq hash mismatch: expected $($env:JQ_SHA256), got $jqActual" } ; `
-    Move-Item -LiteralPath $jqDownload -Destination $jqPath -Force ; `
-    Write-Host 'Installing pinned Node.js' ; `
-    $nodeArchive = Join-Path $env:TEMP ("node-v$($env:NODE_VERSION)-win-x64.zip") ; `
-    Invoke-WebRequest -UseBasicParsing -Uri "https://nodejs.org/dist/v$($env:NODE_VERSION)/node-v$($env:NODE_VERSION)-win-x64.zip" -OutFile $nodeArchive ; `
-    $nodeActual = (Get-FileHash -LiteralPath $nodeArchive -Algorithm SHA256).Hash.ToLowerInvariant() ; `
-    if ($nodeActual -ne $env:NODE_SHA256) { throw "Node.js hash mismatch: expected $($env:NODE_SHA256), got $nodeActual" } ; `
-    $nodeExtract = Join-Path $env:TEMP 'joy-node-extract' ; `
-    Remove-Item -LiteralPath $nodeExtract -Recurse -Force -ErrorAction SilentlyContinue ; `
-    Expand-Archive -LiteralPath $nodeArchive -DestinationPath $nodeExtract -Force ; `
-    $nodeRoot = Get-ChildItem -LiteralPath $nodeExtract -Directory | Select-Object -First 1 ; `
-    if (-not $nodeRoot -or -not (Test-Path -LiteralPath (Join-Path $nodeRoot.FullName 'node.exe'))) { throw 'Node archive did not contain the expected node.exe layout.' } ; `
-    Remove-Item -LiteralPath C:\node -Recurse -Force -ErrorAction SilentlyContinue ; `
-    Move-Item -LiteralPath $nodeRoot.FullName -Destination C:\node ; `
-    Remove-Item -LiteralPath $nodeExtract -Recurse -Force ; `
-    Remove-Item -LiteralPath $nodeArchive -Force ; `
-    & C:\node\corepack.cmd enable ; `
-    $env:COREPACK_HOME = 'C:\corepack' ; `
-    & C:\node\corepack.cmd install --global pnpm@11.15.0 ; `
-    Write-Host 'Installing pinned GitHub Actions runner' ; `
-    $runnerArchive = Join-Path $env:TEMP ("actions-runner-win-x64-$($env:RUNNER_VERSION).zip") ; `
-    Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/actions/runner/releases/download/v$($env:RUNNER_VERSION)/actions-runner-win-x64-$($env:RUNNER_VERSION).zip" -OutFile $runnerArchive ; `
-    $runnerActual = (Get-FileHash -LiteralPath $runnerArchive -Algorithm SHA256).Hash.ToLowerInvariant() ; `
-    if ($runnerActual -ne $env:RUNNER_SHA256) { throw "Runner hash mismatch: expected $($env:RUNNER_SHA256), got $runnerActual" } ; `
-    Expand-Archive -LiteralPath $runnerArchive -DestinationPath C:\actions-runner -Force ; `
-    Remove-Item -LiteralPath $runnerArchive -Force ; `
-    New-Item -ItemType Directory -Path C:\actions-runner\_work -Force | Out-Null
+COPY install-windows-runner.ps1 C:/install-windows-runner.ps1
+
+# The legacy Windows builder expands ARG values in ENV (but not inside RUN's
+# PowerShell text). Scope the optional mirror to this install layer only, then
+# clear it before the final image configuration is committed.
+ENV JOY_MEDIA_WINDOWS_ARTIFACT_BASE_URL="${ARTIFACT_BASE_URL}" `
+    JOY_MEDIA_WINDOWS_COREPACK_NPM_REGISTRY="${COREPACK_NPM_REGISTRY}"
+
+# Keep the Docker RUN command short. The Windows HCS process launcher rejects
+# the old monolithic install command on current Windows hosts; the script keeps
+# the same pinned downloads and hash checks without exceeding that limit.
+RUN & C:\install-windows-runner.ps1 ; `
+    Remove-Item -LiteralPath C:\install-windows-runner.ps1 -Force
+
+ENV JOY_MEDIA_WINDOWS_ARTIFACT_BASE_URL="" `
+    JOY_MEDIA_WINDOWS_COREPACK_NPM_REGISTRY=""
 
 COPY windows-runner-entrypoint.ps1 C:/actions-runner/joy-media-windows-runner.ps1
 
