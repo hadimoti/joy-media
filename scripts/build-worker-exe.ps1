@@ -23,7 +23,9 @@ if (-not (Test-Path -LiteralPath $entryPoint -PathType Leaf)) {
 }
 $postject = Join-Path $repoRoot 'node_modules\.bin\postject.cmd'
 $postjectScript = $null
-if (Test-Path -LiteralPath $postject -PathType Leaf) {
+$postjectWrapperTarget = Join-Path $repoRoot 'node_modules\postject\dist\cli.js'
+if ((Test-Path -LiteralPath $postject -PathType Leaf) -and
+    (Test-Path -LiteralPath $postjectWrapperTarget -PathType Leaf)) {
     $postjectScript = $postject
 } else {
     $postjectScript = (Get-ChildItem -LiteralPath (Join-Path $repoRoot 'node_modules\.pnpm') -Directory -Filter 'postject@*' -ErrorAction SilentlyContinue |
