@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory = $true)][string]$Attempt,
     [Parameter(Mandatory = $true)][ValidateSet('1', '2')][string]$Pass,
     [Parameter(Mandatory = $true)][string]$ExecutablePath,
-    [Parameter(Mandatory = $true)][string]$OutputPath
+    [Parameter(Mandatory = $true)][string]$OutputPath,
+    [switch]$KeepArtifacts
 )
 
 # This harness is intentionally container-local. It never calls the host task
@@ -55,7 +56,9 @@ function Test-DaemonResult($Result) {
 
 function Start-Fixture {
     New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
-    $fixtureProcess = Start-Process -FilePath $nodePath -ArgumentList @($fixtureScript, '--ready-file', $fixtureReadyPath, '--events-file', $fixtureEventsPath) -PassThru -WindowStyle Hidden
+    $fixtureStdoutPath = Join-Path $fixtureRoot 'fixture.stdout.log'
+    $fixtureStderrPath = Join-Path $fixtureRoot 'fixture.stderr.log'
+    $fixtureProcess = Start-Process -FilePath $nodePath -ArgumentList @($fixtureScript, '--ready-file', $fixtureReadyPath, '--events-file', $fixtureEventsPath) -PassThru -WindowStyle Hidden -RedirectStandardOutput $fixtureStdoutPath -RedirectStandardError $fixtureStderrPath
     $deadline = (Get-Date).AddSeconds(15)
     do {
         Start-Sleep -Milliseconds 250
@@ -113,7 +116,10 @@ function Invoke-Daemon([string]$Path, [string]$StatePath, [string]$PipeName) {
         $env:https_proxy = $null
         $env:NO_PROXY = 'localhost,127.0.0.1'
         $env:no_proxy = 'localhost,127.0.0.1'
-        $process = Start-Process -FilePath $Path -PassThru -WindowStyle Hidden
+        $daemonRoot = Split-Path -Parent $StatePath
+        $daemonStdoutPath = Join-Path $daemonRoot ((Split-Path -Leaf $StatePath) + '.stdout.log')
+        $daemonStderrPath = Join-Path $daemonRoot ((Split-Path -Leaf $StatePath) + '.stderr.log')
+        $process = Start-Process -FilePath $Path -PassThru -WindowStyle Hidden -RedirectStandardOutput $daemonStdoutPath -RedirectStandardError $daemonStderrPath
         $deadline = (Get-Date).AddSeconds(20)
         $snapshot = $null
         do {
@@ -274,5 +280,5 @@ try {
 }
 finally {
     Stop-Fixture
-    if (Test-Path $acceptanceRoot) { Remove-Item $acceptanceRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    if (-not $KeepArtifacts -and (Test-Path $acceptanceRoot)) { Remove-Item $acceptanceRoot -Recurse -Force -ErrorAction SilentlyContinue }
 }
