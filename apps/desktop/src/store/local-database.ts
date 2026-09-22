@@ -299,17 +299,14 @@ export class LocalDatabase {
   }
 
   getSetting(key: string): string | undefined {
-    const row = this.db
-      .prepare('SELECT value FROM app_settings WHERE key = ?')
-      .get(key) as { value: string } | undefined;
+    const row = this.db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key) as
+      { value: string } | undefined;
     return row?.value;
   }
 
   setSetting(key: string, value: string): void {
     this.db
-      .prepare(
-        'INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)',
-      )
+      .prepare('INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)')
       .run(key, value, this.now());
   }
 
@@ -319,9 +316,7 @@ export class LocalDatabase {
 
   getDefaultAssetLibraryDirectory(): string {
     const vpsDataPath =
-      process.platform === 'win32'
-        ? 'H:\\VPS-DATA\\joy-media-assets'
-        : '/var/joy-media/assets';
+      process.platform === 'win32' ? 'H:\\VPS-DATA\\joy-media-assets' : '/var/joy-media/assets';
     if (fs.existsSync('H:\\VPS-DATA')) {
       return vpsDataPath;
     }

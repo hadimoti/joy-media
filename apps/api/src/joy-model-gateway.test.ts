@@ -11,7 +11,8 @@ function createMockReq(options: {
   url?: string;
   body?: unknown;
 }): IncomingMessage {
-  const content = options.body !== undefined ? Buffer.from(JSON.stringify(options.body)) : Buffer.alloc(0);
+  const content =
+    options.body !== undefined ? Buffer.from(JSON.stringify(options.body)) : Buffer.alloc(0);
   const stream = Readable.from([content]) as unknown as IncomingMessage;
   (stream as any).method = options.method ?? 'POST';
   (stream as any).url = options.url ?? '/v1/agent/chat/completions';

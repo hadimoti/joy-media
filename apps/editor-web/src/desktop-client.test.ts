@@ -226,7 +226,9 @@ describe('testDesktopProviderProfile', () => {
 
 describe('asset library helpers', () => {
   it('getDesktopAssetLibrarySettings rejects outside desktop host and invokes IPC inside', async () => {
-    await expect(getDesktopAssetLibrarySettings()).rejects.toThrow('unavailable outside the desktop host');
+    await expect(getDesktopAssetLibrarySettings()).rejects.toThrow(
+      'unavailable outside the desktop host',
+    );
 
     const settings = {
       directory: 'H:\\VPS-DATA\\joy-media-assets',
@@ -246,20 +248,30 @@ describe('asset library helpers', () => {
     const invoke = vi.fn().mockResolvedValue({ directory: 'D:\\custom' });
     window.joyDesktop = { channels: ['desktop.asset-library.set-directory'], invoke };
 
-    await expect(setDesktopAssetLibraryDirectory('D:\\custom')).resolves.toEqual({ directory: 'D:\\custom' });
-    expect(invoke).toHaveBeenCalledWith('desktop.asset-library.set-directory', { directory: 'D:\\custom' });
+    await expect(setDesktopAssetLibraryDirectory('D:\\custom')).resolves.toEqual({
+      directory: 'D:\\custom',
+    });
+    expect(invoke).toHaveBeenCalledWith('desktop.asset-library.set-directory', {
+      directory: 'D:\\custom',
+    });
   });
 
   it('selectDesktopAssetLibraryDirectory invokes desktop.asset-library.select-directory', async () => {
     const invoke = vi.fn().mockResolvedValue({ directory: 'H:\\new-path' });
     window.joyDesktop = { channels: ['desktop.asset-library.select-directory'], invoke };
 
-    await expect(selectDesktopAssetLibraryDirectory()).resolves.toEqual({ directory: 'H:\\new-path' });
+    await expect(selectDesktopAssetLibraryDirectory()).resolves.toEqual({
+      directory: 'H:\\new-path',
+    });
     expect(invoke).toHaveBeenCalledWith('desktop.asset-library.select-directory');
   });
 
   it('getDesktopAssetLibraryCatalog invokes desktop.asset-library.get-catalog', async () => {
-    const catalog = { version: 1, counts: { total: 1, audio: 1, image: 0 }, assets: [{ id: 'a1' }] };
+    const catalog = {
+      version: 1,
+      counts: { total: 1, audio: 1, image: 0 },
+      assets: [{ id: 'a1' }],
+    };
     const invoke = vi.fn().mockResolvedValue(catalog);
     window.joyDesktop = { channels: ['desktop.asset-library.get-catalog'], invoke };
 
@@ -270,7 +282,8 @@ describe('asset library helpers', () => {
   it('resolveDesktopAssetUrl formats joy-asset:// protocol URLs cleanly', () => {
     expect(resolveDesktopAssetUrl('audio/test.wav')).toBe('joy-asset://library/audio/test.wav');
     expect(resolveDesktopAssetUrl('/images/logo.png')).toBe('joy-asset://library/images/logo.png');
-    expect(resolveDesktopAssetUrl('joy-asset://library/audio/test.wav')).toBe('joy-asset://library/audio/test.wav');
+    expect(resolveDesktopAssetUrl('joy-asset://library/audio/test.wav')).toBe(
+      'joy-asset://library/audio/test.wav',
+    );
   });
 });
-

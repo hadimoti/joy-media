@@ -185,8 +185,10 @@ export function filterAssetLibrary(
         const rightTags = (right.asset.tags ?? []).join(',');
         const byTags = leftTags.localeCompare(rightTags);
         if (byTags !== 0) return byTags;
-        const leftDisplayName = left.asset.displayName ?? left.asset.sortName ?? left.asset.id ?? '';
-        const rightDisplayName = right.asset.displayName ?? right.asset.sortName ?? right.asset.id ?? '';
+        const leftDisplayName =
+          left.asset.displayName ?? left.asset.sortName ?? left.asset.id ?? '';
+        const rightDisplayName =
+          right.asset.displayName ?? right.asset.sortName ?? right.asset.id ?? '';
         return leftDisplayName.localeCompare(rightDisplayName);
       }
       return right.asset.createdAt - left.asset.createdAt;

@@ -16,11 +16,11 @@ All runners are provisioned on the owner-controlled Windows PC via
 Docker Desktop (Linux containers, plus a documented Windows-container
 contract under `ops/self-hosted/windows-runner/Dockerfile.windows`):
 
-| Runner                    | Labels                                                     | Where it runs                                              | Source of truth                                  |
-| ------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------ |
-| `joy-media-ci-linux`      | `self-hosted,linux,x64,joy-media-ci`                       | PC Docker Linux container (`ops/self-hosted/linux-runner`) | `ops/self-hosted/linux-runner/{Dockerfile,entrypoint.sh,README.md}` |
-| `joy-media-ci-acceptance` | `self-hosted,linux,x64,joy-media-acceptance`               | PC Docker Linux container (separate Docker network)       | `ops/self-hosted/acceptance-runner/README.md`    |
-| `joy-media-worker-docker` | `self-hosted,windows,x64,joy-media-worker-docker`          | PC Docker Windows-container (`Dockerfile.windows`)         | `ops/self-hosted/windows-runner/{Dockerfile.windows,contract.md,README.md}` |
+| Runner                    | Labels                                            | Where it runs                                              | Source of truth                                                             |
+| ------------------------- | ------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `joy-media-ci-linux`      | `self-hosted,linux,x64,joy-media-ci`              | PC Docker Linux container (`ops/self-hosted/linux-runner`) | `ops/self-hosted/linux-runner/{Dockerfile,entrypoint.sh,README.md}`         |
+| `joy-media-ci-acceptance` | `self-hosted,linux,x64,joy-media-acceptance`      | PC Docker Linux container (separate Docker network)        | `ops/self-hosted/acceptance-runner/README.md`                               |
+| `joy-media-worker-docker` | `self-hosted,windows,x64,joy-media-worker-docker` | PC Docker Windows-container (`Dockerfile.windows`)         | `ops/self-hosted/windows-runner/{Dockerfile.windows,contract.md,README.md}` |
 
 No runner registration token is committed, logged, or persisted inside
 a long-running container — both `entrypoint.sh` (Linux) and

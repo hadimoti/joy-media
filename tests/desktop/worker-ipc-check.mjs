@@ -1,6 +1,6 @@
 /**
  * JOY Media Desktop Worker IPC & LocalDatabase Lifecycle Verification Helper
- * 
+ *
  * Verifies:
  * 1. Worker Entry Resolution (apps/worker/dist/index.js & apps/worker/bin/joy-worker.exe)
  * 2. Worker Status & Supervisor Lifecycle via desktop IPC channels
@@ -19,12 +19,24 @@ const repoRoot = resolve('.');
 const desktopDist = resolve(repoRoot, 'apps/desktop/dist');
 
 // Dynamically import compiled desktop modules
-const ipcHandlersModule = await import(pathToFileURL(resolve(desktopDist, 'main/ipc-handlers.js')).href);
-const workerSupervisorModule = await import(pathToFileURL(resolve(desktopDist, 'main/worker-supervisor.js')).href);
-const workerEntryModule = await import(pathToFileURL(resolve(desktopDist, 'main/worker-entry.js')).href);
-const fileRegistryModule = await import(pathToFileURL(resolve(desktopDist, 'main/file-registry.js')).href);
-const localDbModule = await import(pathToFileURL(resolve(desktopDist, 'store/local-database.js')).href);
-const ipcChannelsModule = await import(pathToFileURL(resolve(desktopDist, 'preload/ipc-channels.cjs')).href);
+const ipcHandlersModule = await import(
+  pathToFileURL(resolve(desktopDist, 'main/ipc-handlers.js')).href
+);
+const workerSupervisorModule = await import(
+  pathToFileURL(resolve(desktopDist, 'main/worker-supervisor.js')).href
+);
+const workerEntryModule = await import(
+  pathToFileURL(resolve(desktopDist, 'main/worker-entry.js')).href
+);
+const fileRegistryModule = await import(
+  pathToFileURL(resolve(desktopDist, 'main/file-registry.js')).href
+);
+const localDbModule = await import(
+  pathToFileURL(resolve(desktopDist, 'store/local-database.js')).href
+);
+const ipcChannelsModule = await import(
+  pathToFileURL(resolve(desktopDist, 'preload/ipc-channels.cjs')).href
+);
 
 const { createIpcHandlers, dispatchIpcRequest } = ipcHandlersModule;
 const { createWorkerSupervisor } = workerSupervisorModule;
@@ -178,7 +190,10 @@ try {
 
   // Send startup preference to trigger worker launch
   const prefResp = await invokeIpc('desktop.startup-preference', 'start-worker');
-  assert(prefResp.ok === true && prefResp.data === 'start-worker', 'desktop.startup-preference accepted start-worker');
+  assert(
+    prefResp.ok === true && prefResp.data === 'start-worker',
+    'desktop.startup-preference accepted start-worker',
+  );
   assert(childSpawned === true, 'WorkerSupervisor successfully spawned child worker process');
 
   // Verify status updated to online
@@ -202,7 +217,10 @@ try {
   // --------------------------------------------------------------------------
   console.log('\n4. Verifying Media Selection & Job Enqueue over desktop IPC Channel...');
   const selectFileResp = await invokeIpc('desktop.select-file');
-  assert(selectFileResp.ok === true && selectFileResp.data?.id, 'desktop.select-file registered file reference');
+  assert(
+    selectFileResp.ok === true && selectFileResp.data?.id,
+    'desktop.select-file registered file reference',
+  );
   const fileRef = selectFileResp.data;
 
   // Enqueue thumbnail derivative job
@@ -211,9 +229,18 @@ try {
     kind: 'thumbnail',
   });
   assert(enqueueResp.ok === true, 'desktop.request-derivative responded with ok: true');
-  assert(typeof enqueueResp.data?.jobId === 'string', `Job enqueued with jobId: ${enqueueResp.data?.jobId}`);
-  assert(enqueueResp.data?.refId === fileRef.id, `Approval returned matching refId: ${enqueueResp.data?.refId}`);
-  assert(enqueueResp.data?.kind === 'thumbnail', `Approval returned matching kind: ${enqueueResp.data?.kind}`);
+  assert(
+    typeof enqueueResp.data?.jobId === 'string',
+    `Job enqueued with jobId: ${enqueueResp.data?.jobId}`,
+  );
+  assert(
+    enqueueResp.data?.refId === fileRef.id,
+    `Approval returned matching refId: ${enqueueResp.data?.refId}`,
+  );
+  assert(
+    enqueueResp.data?.kind === 'thumbnail',
+    `Approval returned matching kind: ${enqueueResp.data?.kind}`,
+  );
   const thumbnailJobId = enqueueResp.data.jobId;
 
   // Verify initial queued state in LocalDatabase via desktop.job-status
@@ -266,8 +293,14 @@ try {
   // Cancel the queued job via IPC
   const cancelResp = await invokeIpc('desktop.cancel-job', { jobId: proxyJobId });
   assert(cancelResp.ok === true, 'desktop.cancel-job responded with ok: true');
-  assert(cancelResp.data?.status === 'cancelled', `Job status updated to 'cancelled': ${cancelResp.data?.status}`);
-  assert(cancelResp.data?.error === 'cancelled by user', `Job cancellation error set: ${cancelResp.data?.error}`);
+  assert(
+    cancelResp.data?.status === 'cancelled',
+    `Job status updated to 'cancelled': ${cancelResp.data?.status}`,
+  );
+  assert(
+    cancelResp.data?.error === 'cancelled by user',
+    `Job cancellation error set: ${cancelResp.data?.error}`,
+  );
 
   // Query status again to verify persistence
   const queriedCancelled = await invokeIpc('desktop.job-status', { jobId: proxyJobId });
@@ -276,7 +309,8 @@ try {
   // Verify that cancelling an already-finished job fails gracefully
   const cancelDoneResp = await invokeIpc('desktop.cancel-job', { jobId: thumbnailJobId });
   assert(
-    cancelDoneResp.ok === false && cancelDoneResp.error?.includes('Cannot cancel a job in status "done"'),
+    cancelDoneResp.ok === false &&
+      cancelDoneResp.error?.includes('Cannot cancel a job in status "done"'),
     `Cancelling finished job is rejected: ${cancelDoneResp.error}`,
   );
 

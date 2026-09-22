@@ -1102,7 +1102,9 @@ function EditorWorkspace({
   useEffect(() => {
     if (!isDesktopHost()) return;
     const updateMaximized = () => {
-      void isDesktopWindowMaximized().then(setIsMaximized).catch(() => {});
+      void isDesktopWindowMaximized()
+        .then(setIsMaximized)
+        .catch(() => {});
     };
     updateMaximized();
     window.addEventListener('resize', updateMaximized);
@@ -7263,7 +7265,11 @@ function EditorWorkspace({
                           <button
                             type="button"
                             className="account-sign-out"
-                            style={{ background: 'linear-gradient(135deg, #00d2ff, #0077ff)', color: '#ffffff', fontWeight: 600 }}
+                            style={{
+                              background: 'linear-gradient(135deg, #00d2ff, #0077ff)',
+                              color: '#ffffff',
+                              fontWeight: 600,
+                            }}
                             title="Connect your JOY account to activate Joy Model and sync subscription"
                             onClick={() => {
                               setAccountOpen(false);
@@ -7328,20 +7334,30 @@ function EditorWorkspace({
                   onClick={() => {
                     toggleMaximizeDesktopWindow()
                       .then((isMax) => setIsMaximized(isMax))
-                      .catch((err) =>
-                        console.error('Failed to toggle maximize window:', err),
-                      );
+                      .catch((err) => console.error('Failed to toggle maximize window:', err));
                   }}
                   title={isMaximized ? 'Restore' : 'Maximize'}
                   aria-label={isMaximized ? 'Restore window' : 'Maximize window'}
                 >
                   {isMaximized ? (
-                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor">
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 10 10"
+                      fill="none"
+                      stroke="currentColor"
+                    >
                       <rect x="2.5" y="0.5" width="7" height="7" strokeWidth="1" />
                       <polyline points="0.5,2.5 0.5,9.5 7.5,9.5 7.5,7.5" strokeWidth="1" />
                     </svg>
                   ) : (
-                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor">
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 10 10"
+                      fill="none"
+                      stroke="currentColor"
+                    >
                       <rect x="0.5" y="0.5" width="9" height="9" strokeWidth="1" />
                     </svg>
                   )}
@@ -7357,7 +7373,13 @@ function EditorWorkspace({
                   title="Close"
                   aria-label="Close window"
                 >
-                  <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" strokeWidth="1.2">
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 10 10"
+                    stroke="currentColor"
+                    strokeWidth="1.2"
+                  >
                     <line x1="0" y1="0" x2="10" y2="10" />
                     <line x1="10" y1="0" x2="0" y2="10" />
                   </svg>

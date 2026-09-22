@@ -250,7 +250,9 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     const rendered = await render(engineClient, undefined);
 
     expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.list');
-    const modelInput = rendered.querySelector<HTMLInputElement>('input[placeholder="provider/model"]');
+    const modelInput = rendered.querySelector<HTMLInputElement>(
+      'input[placeholder="provider/model"]',
+    );
     expect(modelInput?.value).toBe('anthropic/claude-3.5-sonnet');
     expect(rendered.textContent).toContain('(Saved in desktop vault)');
   });
@@ -381,4 +383,3 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     );
   });
 });
-

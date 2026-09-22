@@ -91,9 +91,7 @@ export function AccountLanding({ user, release, onLogout }: AccountLandingProps)
 
         <div className="dashboard-user-bar">
           <div className="user-profile-badge">
-            <span className="user-avatar-circle">
-              {user.contact.charAt(0).toUpperCase()}
-            </span>
+            <span className="user-avatar-circle">{user.contact.charAt(0).toUpperCase()}</span>
             <div className="user-profile-info">
               <span className="user-profile-name">{user.displayName || user.contact}</span>
               <span className="user-profile-type">
@@ -123,8 +121,9 @@ export function AccountLanding({ user, release, onLogout }: AccountLandingProps)
           </div>
 
           <p className="card-desc">
-            Download the full desktop NLE package. Includes the embedded <code>joy-worker.exe</code> local
-            GPU processing daemon, local SQLite WAL engine, and instant asset library streaming.
+            Download the full desktop NLE package. Includes the embedded <code>joy-worker.exe</code>{' '}
+            local GPU processing daemon, local SQLite WAL engine, and instant asset library
+            streaming.
           </p>
 
           <div className="download-actions-row">
@@ -133,7 +132,16 @@ export function AccountLanding({ user, release, onLogout }: AccountLandingProps)
               className="dash-btn-download"
               download
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                 <polyline points="7 10 12 15 17 10" />
                 <line x1="12" y1="15" x2="12" y2="3" />
@@ -153,9 +161,16 @@ export function AccountLanding({ user, release, onLogout }: AccountLandingProps)
           <div className="install-guide-box">
             <h4>Quick Installation:</h4>
             <ol>
-              <li>Extract the downloaded archive or run <code>Setup-JoyMedia.ps1</code>.</li>
-              <li>Launch <strong>JOY Media</strong> from your Start Menu or Desktop shortcut.</li>
-              <li>Your workstation runs completely offline. To use Joy Model AI, click the account icon in the app header and sign in with this Gmail address.</li>
+              <li>
+                Extract the downloaded archive or run <code>Setup-JoyMedia.ps1</code>.
+              </li>
+              <li>
+                Launch <strong>JOY Media</strong> from your Start Menu or Desktop shortcut.
+              </li>
+              <li>
+                Your workstation runs completely offline. To use Joy Model AI, click the account
+                icon in the app header and sign in with this Gmail address.
+              </li>
             </ol>
           </div>
         </section>
@@ -168,7 +183,11 @@ export function AccountLanding({ user, release, onLogout }: AccountLandingProps)
               <h3>Subscription Status</h3>
             </div>
             <span className={`status-pill status-${subscription?.status || 'none'}`}>
-              {subscription?.status === 'active' ? 'Active' : subscription?.status === 'expired' ? 'Expired' : 'Free / Trial'}
+              {subscription?.status === 'active'
+                ? 'Active'
+                : subscription?.status === 'expired'
+                  ? 'Expired'
+                  : 'Free / Trial'}
             </span>
           </div>
 
@@ -176,19 +195,27 @@ export function AccountLanding({ user, release, onLogout }: AccountLandingProps)
             <div className="sub-detail-item">
               <span className="sub-detail-label">Current Plan</span>
               <span className="sub-detail-value">
-                {subscription?.plan === 'monthly' ? 'JOY Pro Monthly' : subscription?.plan === 'yearly' ? 'JOY Pro Yearly' : 'Standard Creator'}
+                {subscription?.plan === 'monthly'
+                  ? 'JOY Pro Monthly'
+                  : subscription?.plan === 'yearly'
+                    ? 'JOY Pro Yearly'
+                    : 'Standard Creator'}
               </span>
             </div>
             <div className="sub-detail-item">
               <span className="sub-detail-label">Renewal / Period End</span>
               <span className="sub-detail-value">
-                {subscription?.currentPeriodEnd ? new Date(subscription.currentPeriodEnd).toLocaleDateString() : 'Lifetime Local / No Expiry'}
+                {subscription?.currentPeriodEnd
+                  ? new Date(subscription.currentPeriodEnd).toLocaleDateString()
+                  : 'Lifetime Local / No Expiry'}
               </span>
             </div>
             <div className="sub-detail-item">
               <span className="sub-detail-label">Joy Model Gateway</span>
               <span className="sub-detail-value">
-                {subscription?.status === 'active' ? 'Enabled (Curated Models)' : 'Requires Active Pro'}
+                {subscription?.status === 'active'
+                  ? 'Enabled (Curated Models)'
+                  : 'Requires Active Pro'}
               </span>
             </div>
           </div>
@@ -204,7 +231,8 @@ export function AccountLanding({ user, release, onLogout }: AccountLandingProps)
           </div>
 
           <p className="card-desc">
-            Devices registered to your JOY account. You can revoke access from any workstation at any time.
+            Devices registered to your JOY account. You can revoke access from any workstation at
+            any time.
           </p>
 
           {loading ? (
@@ -261,7 +289,9 @@ export function AccountLanding({ user, release, onLogout }: AccountLandingProps)
             </div>
             <div className="stat-box">
               <span className="stat-label">Completion Tokens</span>
-              <span className="stat-value">{(usage?.totalCompletionTokens ?? 0).toLocaleString()}</span>
+              <span className="stat-value">
+                {(usage?.totalCompletionTokens ?? 0).toLocaleString()}
+              </span>
             </div>
             <div className="stat-box">
               <span className="stat-label">Estimated Spend</span>
@@ -269,7 +299,8 @@ export function AccountLanding({ user, release, onLogout }: AccountLandingProps)
             </div>
           </div>
           <p className="usage-footnote">
-            ℹ️ Token usage is measured transparently at cost + 25% margin. BYOK calls directly to your own keys are not logged or metered.
+            ℹ️ Token usage is measured transparently at cost + 25% margin. BYOK calls directly to
+            your own keys are not logged or metered.
           </p>
         </section>
       </main>

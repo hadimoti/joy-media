@@ -10,7 +10,9 @@
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 12px;
   background: #121316;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 176, 32, 0.12);
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.75),
+    0 0 0 1px rgba(255, 176, 32, 0.12);
   color: #e6e6e6;
   font-family: inherit;
 }
@@ -493,7 +495,9 @@
   font-size: 12.5px;
   box-sizing: border-box;
   outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .joy-settings-field input:focus,

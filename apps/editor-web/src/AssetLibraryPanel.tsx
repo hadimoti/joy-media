@@ -502,8 +502,7 @@ export function AssetLibraryPanel({
   const fetchCloudOriginal = useCallback(
     async (id: string) => {
       const asset = items.find((candidate) => candidate.asset.id === id)?.asset;
-      if (asset === undefined)
-        throw new Error('The catalog asset is no longer listed.');
+      if (asset === undefined) throw new Error('The catalog asset is no longer listed.');
       if (isDesktopHost()) {
         const relativePath =
           asset.relativePath ||
@@ -543,7 +542,9 @@ export function AssetLibraryPanel({
             let blob = await cache.get(asset.assetId);
             if (blob === undefined) {
               if (isDesktopHost()) {
-                const catalogAsset = items.find((candidate) => candidate.asset.id === asset.assetId)?.asset;
+                const catalogAsset = items.find(
+                  (candidate) => candidate.asset.id === asset.assetId,
+                )?.asset;
                 const relativePath =
                   catalogAsset?.relativePath ||
                   (asset.kind === 'audio' ? `audio/${asset.assetId}` : `images/${asset.assetId}`);
@@ -593,7 +594,9 @@ export function AssetLibraryPanel({
             const cache = await originalAssetCache;
             const existing = await cache.get(asset.assetId);
             if (existing === undefined) {
-              const catalogAsset = items.find((candidate) => candidate.asset.id === asset.assetId)?.asset;
+              const catalogAsset = items.find(
+                (candidate) => candidate.asset.id === asset.assetId,
+              )?.asset;
               const relativePath =
                 catalogAsset?.relativePath ||
                 (asset.kind === 'audio' ? `audio/${asset.assetId}` : `images/${asset.assetId}`);

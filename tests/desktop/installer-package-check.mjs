@@ -42,7 +42,10 @@ const doctorResult = spawnSync(joyCmdPath, ['doctor'], {
 });
 assert.strictEqual(doctorResult.status, 0, `joy.cmd doctor failed: ${doctorResult.stderr}`);
 assert.ok(doctorResult.stdout.includes('JOY MEDIA CLI'), 'Doctor output missing banner');
-assert.ok(doctorResult.stdout.includes('All core system diagnostics passed'), 'Doctor diagnostics failed');
+assert.ok(
+  doctorResult.stdout.includes('All core system diagnostics passed'),
+  'Doctor diagnostics failed',
+);
 console.log('✔ Packaged CLI doctor passed cleanly.');
 
 console.log('3. Testing packaged CLI project list...');
@@ -79,12 +82,22 @@ try {
   // Verify installed files
   assert.ok(existsSync(join(tempInstallDir, 'joy-media.exe')), 'Installed joy-media.exe missing');
   assert.ok(existsSync(join(tempInstallDir, 'joy.cmd')), 'Installed joy.cmd missing');
-  assert.ok(existsSync(join(tempInstallDir, 'resources', 'app', 'cli', 'joy-media-bundle.mjs')), 'Installed CLI bundle missing');
-  assert.ok(existsSync(join(tempInstallDir, 'resources', 'app', 'worker', 'joy-worker.exe')), 'Installed joy-worker.exe missing');
+  assert.ok(
+    existsSync(join(tempInstallDir, 'resources', 'app', 'cli', 'joy-media-bundle.mjs')),
+    'Installed CLI bundle missing',
+  );
+  assert.ok(
+    existsSync(join(tempInstallDir, 'resources', 'app', 'worker', 'joy-worker.exe')),
+    'Installed joy-worker.exe missing',
+  );
 
   // Verify installed CLI executes from destination
   const installedJoyCmd = join(tempInstallDir, 'joy.cmd');
-  const testRun = spawnSync(installedJoyCmd, ['doctor'], { shell: true, encoding: 'utf8', timeout: 15000 });
+  const testRun = spawnSync(installedJoyCmd, ['doctor'], {
+    shell: true,
+    encoding: 'utf8',
+    timeout: 15000,
+  });
   assert.strictEqual(testRun.status, 0, `Installed joy.cmd failed: ${testRun.stderr}`);
   console.log('✔ Setup-JoyMedia.ps1 installation verified cleanly.');
 } finally {

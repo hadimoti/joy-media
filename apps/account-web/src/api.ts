@@ -94,10 +94,14 @@ async function request<T>(
 }
 
 export async function requestOtp(contact: string, method: 'gmail' | 'telegram'): Promise<string> {
-  const data = await request<{ message?: string }>('/v1/auth/request-otp', {
-    method: 'POST',
-    body: JSON.stringify({ contact, method }),
-  }, null);
+  const data = await request<{ message?: string }>(
+    '/v1/auth/request-otp',
+    {
+      method: 'POST',
+      body: JSON.stringify({ contact, method }),
+    },
+    null,
+  );
   return data?.message || 'Verification code sent.';
 }
 
@@ -106,10 +110,14 @@ export async function verifyOtp(
   method: 'gmail' | 'telegram',
   code: string,
 ): Promise<string> {
-  const data = await request<{ token: string }>('/v1/auth/verify-otp', {
-    method: 'POST',
-    body: JSON.stringify({ contact, method, code }),
-  }, null);
+  const data = await request<{ token: string }>(
+    '/v1/auth/verify-otp',
+    {
+      method: 'POST',
+      body: JSON.stringify({ contact, method, code }),
+    },
+    null,
+  );
   setSessionToken(data.token);
   return data.token;
 }
@@ -136,7 +144,9 @@ export async function logoutSession(): Promise<void> {
   }
 }
 
-export async function fetchLatestRelease(channel: 'stable' | 'beta' = 'stable'): Promise<ReleaseInfo | null> {
+export async function fetchLatestRelease(
+  channel: 'stable' | 'beta' = 'stable',
+): Promise<ReleaseInfo | null> {
   try {
     const data = await request<ReleaseInfo>(`/v1/releases/${channel}`, {}, null);
     return data;

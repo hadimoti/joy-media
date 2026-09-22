@@ -60,9 +60,7 @@ describe('App loop and Space transport contract', () => {
     expect(decoderSetupBlock).not.toContain(
       'activeVideoClipAt(session.timelineProject, 0, [], session.visualProject)',
     );
-    expect(decoderSetupBlock).toContain(
-      'setMediaReadyRevision((revision) => revision + 1);',
-    );
+    expect(decoderSetupBlock).toContain('setMediaReadyRevision((revision) => revision + 1);');
     expect(playbackCaptureBlock).toContain('mediaReadyRevision,');
     expect(appSource).toContain('decoderRef.current !== decoder');
   });

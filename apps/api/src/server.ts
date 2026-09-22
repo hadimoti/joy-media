@@ -38,14 +38,8 @@ import {
   ReleaseMetadataService,
 } from './release-metadata-service.js';
 import { readHostedRouteRetirementFlags } from './hosted-route-retirement.js';
-import {
-  JoyModelGateway,
-  readOpenRouterApiKeyFromCredential,
-} from './joy-model-gateway.js';
-import {
-  MemoryAgentUsageLedger,
-  PostgresAgentUsageLedger,
-} from './agent-usage-ledger.js';
+import { JoyModelGateway, readOpenRouterApiKeyFromCredential } from './joy-model-gateway.js';
+import { MemoryAgentUsageLedger, PostgresAgentUsageLedger } from './agent-usage-ledger.js';
 import { readLegacyEditorRetired } from './legacy-editor-retirement.js';
 import {
   AlchemyJsonRpcTransport,

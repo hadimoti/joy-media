@@ -83,7 +83,9 @@ export class JoyModelGateway {
     const actor = await this.mediaAuth.authenticate(req);
     if (actor === undefined) {
       res.writeHead(401, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } }));
+      res.end(
+        JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } }),
+      );
       return;
     }
     const summary = await this.ledger.getSummary(actor.id);
@@ -94,28 +96,40 @@ export class JoyModelGateway {
   async handleChatCompletions(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!this.isConfigured()) {
       res.writeHead(503, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({
-        error: { code: 'JOY_AGENT_UNCONFIGURED', message: 'Joy Model gateway is not configured on this server' },
-      }));
+      res.end(
+        JSON.stringify({
+          error: {
+            code: 'JOY_AGENT_UNCONFIGURED',
+            message: 'Joy Model gateway is not configured on this server',
+          },
+        }),
+      );
       return;
     }
 
     const actor = await this.mediaAuth.authenticate(req);
     if (actor === undefined) {
       res.writeHead(401, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'Valid Joy session token required' } }));
+      res.end(
+        JSON.stringify({
+          error: { code: 'UNAUTHORIZED', message: 'Valid Joy session token required' },
+        }),
+      );
       return;
     }
 
     const subscription = await this.account.getSubscription(actor.id);
     if (subscription.status !== 'active') {
       res.writeHead(402, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({
-        error: {
-          code: 'JOY_SUBSCRIPTION_REQUIRED',
-          message: 'Active JOY Pro subscription required to use the built-in Joy Model. Switch to BYOK or upgrade.',
-        },
-      }));
+      res.end(
+        JSON.stringify({
+          error: {
+            code: 'JOY_SUBSCRIPTION_REQUIRED',
+            message:
+              'Active JOY Pro subscription required to use the built-in Joy Model. Switch to BYOK or upgrade.',
+          },
+        }),
+      );
       return;
     }
 
@@ -125,7 +139,9 @@ export class JoyModelGateway {
       parsedBody = JSON.parse(bodyBuffer.toString('utf8'));
     } catch {
       res.writeHead(400, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: { code: 'INVALID_JSON', message: 'Malformed JSON payload' } }));
+      res.end(
+        JSON.stringify({ error: { code: 'INVALID_JSON', message: 'Malformed JSON payload' } }),
+      );
       return;
     }
 
@@ -133,12 +149,14 @@ export class JoyModelGateway {
     const allowed = JOY_AGENT_DEFAULT_MODELS.some((m) => m.id === requestedModel);
     if (!allowed) {
       res.writeHead(400, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({
-        error: {
-          code: 'MODEL_NOT_ALLOWED',
-          message: `Model '${requestedModel}' is not in the Joy Model catalog.`,
-        },
-      }));
+      res.end(
+        JSON.stringify({
+          error: {
+            code: 'MODEL_NOT_ALLOWED',
+            message: `Model '${requestedModel}' is not in the Joy Model catalog.`,
+          },
+        }),
+      );
       return;
     }
 
@@ -161,7 +179,11 @@ export class JoyModelGateway {
       });
     } catch {
       res.writeHead(502, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: { code: 'UPSTREAM_ERROR', message: 'Failed to connect to AI upstream' } }));
+      res.end(
+        JSON.stringify({
+          error: { code: 'UPSTREAM_ERROR', message: 'Failed to connect to AI upstream' },
+        }),
+      );
       return;
     }
 

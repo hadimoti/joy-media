@@ -281,7 +281,10 @@ describe('Worker runtime', () => {
   });
 
   it('reports an unavailable protector instead of claiming the Worker has no session', () => {
-    const path = join(mkdtempSync(join(tmpdir(), 'joy-media-worker-protector-down-')), 'state.json');
+    const path = join(
+      mkdtempSync(join(tmpdir(), 'joy-media-worker-protector-down-')),
+      'state.json',
+    );
     const protector = {
       protect: (value: string) => Buffer.from(value).toString('base64url'),
       unprotect: (value: string) => Buffer.from(value, 'base64url').toString('utf8'),

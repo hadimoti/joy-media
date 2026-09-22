@@ -110,9 +110,26 @@ export function LoginCard({ isOpen, onClose, onSuccess }: LoginCardProps): React
 
   return (
     <div className="login-modal-overlay" onClick={onClose} role="dialog" aria-modal="true">
-      <div className={`login-modal-box ${glow ? 'is-success' : ''}`} onClick={(e) => e.stopPropagation()}>
-        <button type="button" className="login-modal-close" onClick={onClose} aria-label="Close dialog">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <div
+        className={`login-modal-box ${glow ? 'is-success' : ''}`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          className="login-modal-close"
+          onClick={onClose}
+          aria-label="Close dialog"
+        >
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
@@ -121,7 +138,9 @@ export function LoginCard({ isOpen, onClose, onSuccess }: LoginCardProps): React
         <div className="login-modal-header">
           <div className="login-brand-badge">JOY Media Account</div>
           <h2>Sign In to JOY Studio</h2>
-          <p>Sign in with your Gmail or Telegram to manage your subscription, devices, and downloads.</p>
+          <p>
+            Sign in with your Gmail or Telegram to manage your subscription, devices, and downloads.
+          </p>
         </div>
 
         <div className="login-tabs">

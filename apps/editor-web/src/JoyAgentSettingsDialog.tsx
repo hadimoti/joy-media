@@ -23,11 +23,7 @@ import { DesktopAccountModal } from './DesktopAccountModal.js';
 import './JoyAgentSettingsDialog.css';
 
 export type JoyAgentSettingsTab =
-  | 'models'
-  | 'execution'
-  | 'experience'
-  | 'permissions'
-  | 'diagnostics';
+  'models' | 'execution' | 'experience' | 'permissions' | 'diagnostics';
 
 type AgentSettingsNotice = {
   readonly kind: 'info' | 'success' | 'error';
@@ -42,10 +38,14 @@ const MODES: Readonly<Record<AgentExecutionMode, string>> = {
 };
 
 const MODE_DESCRIPTIONS: Readonly<Record<AgentExecutionMode, string>> = {
-  'suggest-only': 'Joy Code suggests creative plans and edits in chat without touching the timeline.',
-  'preview-and-approve': 'Edits are previewed visually in the editor and require explicit approval before applying.',
-  'auto-apply-low-risk': 'Automatically executes non-destructive edits (cuts, trims, labeling) while gating large changes.',
-  'full-auto-limited': 'Autonomous multi-step execution within your configured cost and token budget limits.',
+  'suggest-only':
+    'Joy Code suggests creative plans and edits in chat without touching the timeline.',
+  'preview-and-approve':
+    'Edits are previewed visually in the editor and require explicit approval before applying.',
+  'auto-apply-low-risk':
+    'Automatically executes non-destructive edits (cuts, trims, labeling) while gating large changes.',
+  'full-auto-limited':
+    'Autonomous multi-step execution within your configured cost and token budget limits.',
 };
 
 const TAB_CONFIG: {
@@ -80,8 +80,7 @@ const TAB_CONFIG: {
     icon: '👁️',
     kicker: 'Real-time Interaction',
     title: 'Live Previews & Experience',
-    description:
-      'Tune real-time visual ghost overlays and editor presence during agent runs.',
+    description: 'Tune real-time visual ghost overlays and editor presence during agent runs.',
   },
   {
     id: 'permissions',
@@ -146,7 +145,9 @@ export function JoyAgentSettingsDialog({
     setOpenAccordions((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const [provider, setProvider] = useState<'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible'>(
+  const [provider, setProvider] = useState<
+    'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible'
+  >(
     status?.provider === 'joy-hosted' ||
       status?.provider === 'openai-compatible' ||
       status?.provider === 'kilo'
@@ -163,7 +164,8 @@ export function JoyAgentSettingsDialog({
           : 'https://openrouter.ai/api/v1',
   );
   const [modelId, setModelId] = useState(
-    status?.modelId || (status?.provider === 'joy-hosted' ? 'minimax/minimax-m3' : 'openrouter/auto'),
+    status?.modelId ||
+      (status?.provider === 'joy-hosted' ? 'minimax/minimax-m3' : 'openrouter/auto'),
   );
   const [connectionName, setConnectionName] = useState('');
   const [working, setWorking] = useState(false);
@@ -323,8 +325,7 @@ export function JoyAgentSettingsDialog({
     if (provider !== 'joy-hosted' && !key && hasSavedKey && savedProfile?.id) {
       try {
         const session = (await beginDesktopProviderSession(savedProfile.id)) as
-          | { apiKey?: string; baseUrl?: string; modelId?: string }
-          | undefined;
+          { apiKey?: string; baseUrl?: string; modelId?: string } | undefined;
         if (session?.apiKey) {
           key = session.apiKey;
         }
@@ -433,14 +434,11 @@ export function JoyAgentSettingsDialog({
     setWorking(true);
     try {
       const session = (await beginDesktopProviderSession(prof.id)) as
-        | { apiKey?: string; baseUrl?: string; modelId?: string; provider?: string }
-        | undefined;
+        { apiKey?: string; baseUrl?: string; modelId?: string; provider?: string } | undefined;
       const key = session?.apiKey || '';
-      const resolvedProvider = (prof.provider === 'custom' ? 'openai-compatible' : prof.provider) as
-        | 'joy-hosted'
-        | 'openrouter'
-        | 'kilo'
-        | 'openai-compatible';
+      const resolvedProvider = (
+        prof.provider === 'custom' ? 'openai-compatible' : prof.provider
+      ) as 'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible';
       setProvider(resolvedProvider);
       setBaseUrl(prof.baseUrl);
       setModelId(prof.modelId);
@@ -642,11 +640,7 @@ export function JoyAgentSettingsDialog({
                     </div>
                   </div>
                   {connectionStatus?.modelId && (
-                    <button
-                      type="button"
-                      className="joy-btn-secondary joy-btn-sm"
-                      onClick={clear}
-                    >
+                    <button type="button" className="joy-btn-secondary joy-btn-sm" onClick={clear}>
                       Disconnect
                     </button>
                   )}
@@ -730,16 +724,15 @@ export function JoyAgentSettingsDialog({
                               onChange={(e) =>
                                 handleProviderChange(
                                   e.target.value as
-                                    | 'joy-hosted'
-                                    | 'openrouter'
-                                    | 'kilo'
-                                    | 'openai-compatible',
+                                    'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible',
                                 )
                               }
                             >
                               <option value="openrouter">OpenRouter (BYOK)</option>
                               <option value="kilo">Kilo Gateway (api.kilo.ai)</option>
-                              <option value="openai-compatible">Custom S3 / OpenAI Compatible</option>
+                              <option value="openai-compatible">
+                                Custom S3 / OpenAI Compatible
+                              </option>
                               <option value="joy-hosted">Joy Model (Built-in Pro AI)</option>
                             </select>
                           </label>
@@ -775,9 +768,11 @@ export function JoyAgentSettingsDialog({
                               ⚡ Included with your active JOY Pro subscription.
                             </p>
                             <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#888' }}>
-                              Uses authenticated secure reverse-proxy via joyst.ir. No secret key required.
+                              Uses authenticated secure reverse-proxy via joyst.ir. No secret key
+                              required.
                             </p>
-                            {typeof window !== 'undefined' && !getStoredMediaToken(window.localStorage) ? (
+                            {typeof window !== 'undefined' &&
+                            !getStoredMediaToken(window.localStorage) ? (
                               <div style={{ marginTop: '10px' }}>
                                 <button
                                   type="button"
@@ -798,7 +793,9 @@ export function JoyAgentSettingsDialog({
                                 </button>
                               </div>
                             ) : (
-                              <p style={{ margin: '6px 0 0', fontSize: '11.5px', color: '#10b981' }}>
+                              <p
+                                style={{ margin: '6px 0 0', fontSize: '11.5px', color: '#10b981' }}
+                              >
                                 ✓ JOY Account session linked
                               </p>
                             )}
@@ -810,14 +807,20 @@ export function JoyAgentSettingsDialog({
                               <input
                                 ref={keyRef}
                                 type="password"
-                                placeholder={hasSavedKey ? '•••••••••••••••• (Leave blank to keep saved)' : 'sk-...'}
+                                placeholder={
+                                  hasSavedKey
+                                    ? '•••••••••••••••• (Leave blank to keep saved)'
+                                    : 'sk-...'
+                                }
                                 defaultValue=""
                                 autoComplete="off"
                                 spellCheck={false}
                               />
                             </label>
                             {hasSavedKey && (
-                              <span style={{ fontSize: '11px', color: '#10b981', marginTop: '2px' }}>
+                              <span
+                                style={{ fontSize: '11px', color: '#10b981', marginTop: '2px' }}
+                              >
                                 (Saved in desktop vault)
                               </span>
                             )}
@@ -830,7 +833,13 @@ export function JoyAgentSettingsDialog({
                         {/* Model ID Text Input with Model Drawer Trigger */}
                         <div className="joy-settings-field-full joy-settings-field">
                           <label>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                              }}
+                            >
                               <span>Model ID (User Editable)</span>
                               {provider !== 'joy-hosted' && (
                                 <button
@@ -938,7 +947,8 @@ export function JoyAgentSettingsDialog({
                       <div className="joy-accordion-content joy-model-drawer-content">
                         <div className="joy-model-drawer-header">
                           <p className="joy-model-drawer-hint">
-                            Select a discovered model chip to populate the Model ID, or filter by keyword:
+                            Select a discovered model chip to populate the Model ID, or filter by
+                            keyword:
                           </p>
                           <div style={{ display: 'flex', gap: '8px' }}>
                             <button
@@ -953,7 +963,10 @@ export function JoyAgentSettingsDialog({
                         </div>
 
                         {discoveryError && (
-                          <div className="joy-settings-notice is-error" style={{ marginBottom: '10px' }}>
+                          <div
+                            className="joy-settings-notice is-error"
+                            style={{ marginBottom: '10px' }}
+                          >
                             {discoveryError}
                           </div>
                         )}
@@ -1067,14 +1080,28 @@ export function JoyAgentSettingsDialog({
 
                   {openAccordions['models-probe'] && (
                     <div className="joy-accordion-content">
-                      <p style={{ margin: '0 0 12px', fontSize: '12px', color: '#999', lineHeight: 1.4 }}>
+                      <p
+                        style={{
+                          margin: '0 0 12px',
+                          fontSize: '12px',
+                          color: '#999',
+                          lineHeight: 1.4,
+                        }}
+                      >
                         Runs three tiny product-owned synthetic samples to verify multimodal image,
-                        audio, and video understanding. This check never sends your project, owner, or
-                        uploaded media to the provider, but your provider may charge or log these
+                        audio, and video understanding. This check never sends your project, owner,
+                        or uploaded media to the provider, but your provider may charge or log these
                         requests under its standard usage terms.
                       </p>
 
-                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '12px' }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          gap: '10px',
+                          alignItems: 'center',
+                          marginBottom: '12px',
+                        }}
+                      >
                         <button
                           type="button"
                           className="joy-btn-secondary"
@@ -1094,7 +1121,14 @@ export function JoyAgentSettingsDialog({
 
                       {mediaCapabilities !== undefined && (
                         <div className="agent-media-capability-result joy-settings-media-result">
-                          <p style={{ margin: '0 0 8px', fontSize: '12px', color: '#ccc', fontWeight: 600 }}>
+                          <p
+                            style={{
+                              margin: '0 0 8px',
+                              fontSize: '12px',
+                              color: '#ccc',
+                              fontWeight: 600,
+                            }}
+                          >
                             Configured model: {mediaCapabilities.modelId}
                           </p>
                           <dl className="agent-media-capability-list joy-settings-probe-grid">
@@ -1150,7 +1184,9 @@ export function JoyAgentSettingsDialog({
                                 onChange={() => onPolicyChange({ ...policy, executionMode: mode })}
                               />
                             </div>
-                            <div className="joy-settings-mode-card-desc">{MODE_DESCRIPTIONS[mode]}</div>
+                            <div className="joy-settings-mode-card-desc">
+                              {MODE_DESCRIPTIONS[mode]}
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -1172,7 +1208,9 @@ export function JoyAgentSettingsDialog({
                       <span>Run Budget &amp; Spend Safety</span>
                     </div>
                     <div className="joy-accordion-trigger-meta">
-                      <span className="joy-accordion-tag">Max ${policy.maxCostPerRunUsd.toFixed(2)}/run</span>
+                      <span className="joy-accordion-tag">
+                        Max ${policy.maxCostPerRunUsd.toFixed(2)}/run
+                      </span>
                       <span className="joy-accordion-chevron">▾</span>
                     </div>
                   </button>
@@ -1238,7 +1276,9 @@ export function JoyAgentSettingsDialog({
                               onPolicyChange({ ...policy, livePreview: e.target.checked })
                             }
                           />
-                          <span>Show real-time previews on the monitor canvas during agent operations</span>
+                          <span>
+                            Show real-time previews on the monitor canvas during agent operations
+                          </span>
                         </label>
                       </div>
                     </div>
@@ -1284,7 +1324,9 @@ export function JoyAgentSettingsDialog({
                                 onChange={(e) => {
                                   const nextCaps = e.target.checked
                                     ? [...policy.allowedCapabilities, cap]
-                                    : policy.allowedCapabilities.filter((c: ToolCapability) => c !== cap);
+                                    : policy.allowedCapabilities.filter(
+                                        (c: ToolCapability) => c !== cap,
+                                      );
                                   onPolicyChange({ ...policy, allowedCapabilities: nextCaps });
                                 }}
                               />
@@ -1326,11 +1368,15 @@ export function JoyAgentSettingsDialog({
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <div className="joy-settings-diagnostic-row">
                           <span>GPU Device</span>
-                          <span style={{ color: '#ffb020', fontWeight: 600 }}>NVIDIA GeForce RTX 5070 Ti</span>
+                          <span style={{ color: '#ffb020', fontWeight: 600 }}>
+                            NVIDIA GeForce RTX 5070 Ti
+                          </span>
                         </div>
                         <div className="joy-settings-diagnostic-row">
                           <span>Rendering Backend</span>
-                          <span className="joy-settings-diagnostic-status is-supported">ANGLE D3D11</span>
+                          <span className="joy-settings-diagnostic-status is-supported">
+                            ANGLE D3D11
+                          </span>
                         </div>
                         <div className="joy-settings-diagnostic-row">
                           <span>Local Asset Library</span>
@@ -1338,7 +1384,9 @@ export function JoyAgentSettingsDialog({
                         </div>
                         <div className="joy-settings-diagnostic-row">
                           <span>Local Worker SEA</span>
-                          <span className="joy-settings-diagnostic-status is-supported">joy-worker.exe</span>
+                          <span className="joy-settings-diagnostic-status is-supported">
+                            joy-worker.exe
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -1365,9 +1413,17 @@ export function JoyAgentSettingsDialog({
 
                   {openAccordions['diag-probe'] && (
                     <div className="joy-accordion-content">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: '10px',
+                        }}
+                      >
                         <span style={{ fontSize: '12px', color: '#999' }}>
-                          Tests whether the active reasoning model parses image, audio, and video inputs.
+                          Tests whether the active reasoning model parses image, audio, and video
+                          inputs.
                         </span>
                         <button
                           type="button"
@@ -1381,7 +1437,14 @@ export function JoyAgentSettingsDialog({
 
                       {mediaCapabilities !== undefined ? (
                         <div className="agent-media-capability-result joy-settings-media-result">
-                          <p style={{ margin: '0 0 8px', fontSize: '12px', color: '#ccc', fontWeight: 600 }}>
+                          <p
+                            style={{
+                              margin: '0 0 8px',
+                              fontSize: '12px',
+                              color: '#ccc',
+                              fontWeight: 600,
+                            }}
+                          >
                             Configured model: {mediaCapabilities.modelId}
                           </p>
                           <dl className="agent-media-capability-list joy-settings-probe-grid">
@@ -1406,7 +1469,9 @@ export function JoyAgentSettingsDialog({
         {/* Footer */}
         <footer className="joy-agent-settings-footer">
           <div className="joy-agent-settings-footer-vault">
-            <span>🔒 Policy saved locally in browser. Sensitive keys secured in Windows DPAPI vault.</span>
+            <span>
+              🔒 Policy saved locally in browser. Sensitive keys secured in Windows DPAPI vault.
+            </span>
           </div>
           <button type="button" className="agent-settings-done joy-btn-primary" onClick={close}>
             Done

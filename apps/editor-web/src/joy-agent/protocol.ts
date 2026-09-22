@@ -54,11 +54,7 @@ export type JoyAgentErrorCode =
   | 'JOY_AGENT_PROVIDER_INCOMPATIBLE';
 
 export type JoyAgentProvider =
-  | 'joy-hosted'
-  | 'openrouter'
-  | 'openai-compatible'
-  | 'kilo'
-  | 'custom';
+  'joy-hosted' | 'openrouter' | 'openai-compatible' | 'kilo' | 'custom';
 
 export interface ByokSessionConfig {
   readonly provider: JoyAgentProvider;

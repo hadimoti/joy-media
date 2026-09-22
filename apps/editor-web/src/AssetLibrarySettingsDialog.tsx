@@ -23,9 +23,9 @@ export function AssetLibrarySettingsDialog({
   const [customPath, setCustomPath] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [notice, setNotice] = useState<{ kind: 'info' | 'success' | 'error'; message: string } | undefined>(
-    undefined,
-  );
+  const [notice, setNotice] = useState<
+    { kind: 'info' | 'success' | 'error'; message: string } | undefined
+  >(undefined);
 
   const loadSettings = async () => {
     if (!isDesktopHost()) return;
@@ -157,7 +157,8 @@ export function AssetLibrarySettingsDialog({
           {!isDesktopHost() ? (
             <div className="agent-settings-notice is-info">
               <span>
-                Local asset storage configuration is available when running inside the JOY Media Desktop application.
+                Local asset storage configuration is available when running inside the JOY Media
+                Desktop application.
               </span>
             </div>
           ) : (
@@ -173,7 +174,9 @@ export function AssetLibrarySettingsDialog({
                   )}
                 </div>
 
-                <div style={{ display: 'flex', gap: '8px', marginTop: '8px', alignItems: 'center' }}>
+                <div
+                  style={{ display: 'flex', gap: '8px', marginTop: '8px', alignItems: 'center' }}
+                >
                   <input
                     type="text"
                     value={customPath}
@@ -336,12 +339,14 @@ export function AssetLibrarySettingsDialog({
 
                 {!settings?.exists && (
                   <p style={{ color: '#f87171', fontSize: '12px', marginTop: '12px' }}>
-                    Directory not found on this system. Please check your path or connect the external drive.
+                    Directory not found on this system. Please check your path or connect the
+                    external drive.
                   </p>
                 )}
                 {settings?.exists && !settings?.hasCatalog && (
                   <p style={{ color: '#fbbf24', fontSize: '12px', marginTop: '12px' }}>
-                    Directory exists, but no catalog.json was found. Make sure catalog.json is present.
+                    Directory exists, but no catalog.json was found. Make sure catalog.json is
+                    present.
                   </p>
                 )}
               </section>
