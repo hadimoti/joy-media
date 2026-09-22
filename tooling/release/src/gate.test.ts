@@ -342,15 +342,22 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(workflow).toContain('cancel-in-progress: true');
     expect(workflow).toContain('JOY_MEDIA_E2E_API_PORT: ${{ matrix.api_port }}');
     expect(workflow).toContain('JOY_MEDIA_E2E_WEB_PORT: ${{ matrix.web_port }}');
-    // Browser matrix outputs must live under ${{ runner.temp }} so a
-    // persistent Linux container runner cannot leak them into the
-    // checkout. Mirrors the contract in release-candidate.yml.
+    // Browser matrix outputs must live under the runner temp directory so a
+    // persistent Linux container runner cannot leak them into the checkout.
+    // The `runner` context is not available in job-level env (GitHub rejects
+    // the whole workflow), so a first step writes the paths to GITHUB_ENV.
     expect(workflow).toContain(
-      'PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/playwright-report-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}',
+      'echo "PLAYWRIGHT_HTML_REPORT=$RUNNER_TEMP/playwright-report-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_ENV"',
     );
     expect(workflow).toContain(
-      'PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/playwright-test-results-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}',
+      'echo "PLAYWRIGHT_TEST_RESULTS_DIR=$RUNNER_TEMP/playwright-test-results-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_ENV"',
     );
+    expect(workflow).not.toMatch(/^ {6}[A-Z_]+: \$\{\{ runner\./m);
+    const devWorkflow = readFileSync(
+      resolve(import.meta.dirname, '../../../.github/workflows/ci-dev.yml'),
+      'utf8',
+    );
+    expect(devWorkflow).not.toMatch(/^ {6}[A-Z_]+: \$\{\{ runner\./m);
     expect(workflow).toContain('"$RUNNER_TEMP"/*) ;;');
     expect(workflow).toContain('test -z "$(git status --porcelain)"');
     expect(workflow).toContain('scripts/build-worker-exe.ps1 -OutputPath $output');

@@ -109,9 +109,13 @@ jobs:
       JOY_MEDIA_E2E_API_PORT: ${{ matrix.api_port }}
       JOY_MEDIA_E2E_WEB_PORT: ${{ matrix.web_port }}
       JOY_MEDIA_E2E_API_URL: http://127.0.0.1:${{ matrix.api_port }}
-      PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/playwright-report-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}
-      PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/playwright-test-results-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
+      # runner.temp is not available in job-level env; set the paths here.
+      - name: Set Playwright output paths
+        shell: bash
+        run: |
+          echo "PLAYWRIGHT_HTML_REPORT=$RUNNER_TEMP/playwright-report-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_ENV"
+          echo "PLAYWRIGHT_TEST_RESULTS_DIR=$RUNNER_TEMP/playwright-test-results-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Verify runner toolchain
         shell: bash
