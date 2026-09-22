@@ -22,7 +22,16 @@ if (-not (Test-Path -LiteralPath $entryPoint -PathType Leaf)) {
     throw "Built Worker entrypoint not found: $entryPoint. Run pnpm --filter @joy-media/worker build first."
 }
 $postject = Join-Path $repoRoot 'node_modules\.bin\postject.cmd'
-if (-not (Test-Path -LiteralPath $postject -PathType Leaf)) {
+$postjectScript = $null
+if (Test-Path -LiteralPath $postject -PathType Leaf) {
+    $postjectScript = $postject
+} else {
+    $postjectScript = (Get-ChildItem -LiteralPath (Join-Path $repoRoot 'node_modules\.pnpm') -Directory -Filter 'postject@*' -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName 'node_modules\postject\dist\cli.js' } |
+        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+        Select-Object -First 1)
+}
+if ([string]::IsNullOrWhiteSpace($postjectScript)) {
     throw 'postject is not installed. Run pnpm install before building joy-worker.exe.'
 }
 
@@ -45,7 +54,11 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Node SEA preparation failed with exit code $LASTEXITCODE." }
 
     Copy-Item -LiteralPath $NodePath -Destination $OutputPath -Force
-    & $postject $OutputPath NODE_SEA_BLOB $blobPath --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
+    if ($postjectScript -like '*.cmd') {
+        & $postjectScript $OutputPath NODE_SEA_BLOB $blobPath --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
+    } else {
+        & $NodePath $postjectScript $OutputPath NODE_SEA_BLOB $blobPath --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
+    }
     if ($LASTEXITCODE -ne 0) { throw "SEA resource injection failed with exit code $LASTEXITCODE." }
 
     $selfTest = & $OutputPath --joy-worker-self-test
