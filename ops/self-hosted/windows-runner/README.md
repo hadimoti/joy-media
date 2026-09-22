@@ -21,3 +21,11 @@ service. The image still verifies every downloaded file against the pinned
 SHA-256 values; the mirror changes transport only, not artifact identity, and
 its URL is not retained in the final image environment. Leave both arguments
 unset for the normal direct-download path.
+
+The runner's GitHub control-plane traffic can use the companion
+`github-connect-proxy.py` when Windows-container NAT can establish TCP but
+cannot complete outbound TLS. Start it on the owner PC and pass the Docker
+gateway address as `HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy`, and `https_proxy`
+to the runner container. It permits CONNECT only to the GitHub host allow-list
+and never logs request headers or credentials; stop it when the runner is
+stopped.

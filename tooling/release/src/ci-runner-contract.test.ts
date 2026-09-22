@@ -114,6 +114,8 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
   describe('Windows Docker-container runner (ops/self-hosted/windows-runner)', () => {
     const dockerfile = safeRead(join(WINDOWS_DIR, 'Dockerfile.windows'));
     const installScript = safeRead(join(WINDOWS_DIR, 'install-windows-runner.ps1'));
+    const artifactMirror = safeRead(join(WINDOWS_DIR, 'artifact-mirror.py'));
+    const githubProxy = safeRead(join(WINDOWS_DIR, 'github-connect-proxy.py'));
     const entrypoint = safeRead(join(WINDOWS_DIR, 'windows-runner-entrypoint.ps1'));
     const containerAcceptance = safeRead(join(WINDOWS_DIR, 'worker-acceptance-container.ps1'));
     const readme = safeRead(join(WINDOWS_DIR, 'README.md'));
@@ -122,6 +124,8 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
     it('has a Dockerfile.windows, an install script, an entrypoint, a contract, and a README', () => {
       expect(dockerfile.length).toBeGreaterThan(0);
       expect(installScript.length).toBeGreaterThan(0);
+      expect(artifactMirror.length).toBeGreaterThan(0);
+      expect(githubProxy.length).toBeGreaterThan(0);
       expect(entrypoint.length).toBeGreaterThan(0);
       expect(readme.length).toBeGreaterThan(0);
       expect(contract.length).toBeGreaterThan(0);
@@ -143,6 +147,14 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(dockerfile).toContain('ENV JOY_MEDIA_WINDOWS_ARTIFACT_BASE_URL=""');
       expect(installScript).toContain('function Save-PinnedDownload');
       expect(installScript).toContain('$artifactBaseUrl');
+    });
+
+    it('keeps the host fallback local and restricted', () => {
+      expect(artifactMirror).toContain('pnpm/11.15.0');
+      expect(githubProxy).toContain('CONNECT');
+      expect(githubProxy).toContain('api.github.com');
+      expect(githubProxy).toContain('port != 443');
+      expect(githubProxy).not.toMatch(/RUNNER_TOKEN|GH_TOKEN|Authorization/i);
     });
 
     it('the Windows image pins the GitHub Actions runner + Node tarball to SHA-256 hashes', () => {
