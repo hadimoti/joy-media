@@ -53,7 +53,7 @@ const windowsAcceptance = (
       trigger: 'explicit-spawn',
       triggerVerified: true,
       action: 'normal-daemon',
-      taskRan: true,
+      launchObserved: true,
       daemon: {
         started: true,
         terminated: true,
@@ -1306,6 +1306,37 @@ describe('JOY Studio 1.0 release gate', () => {
         expect(result.checks.find((c) => c.id === 'windows-acceptance')?.status).toBe('failed');
         expect(result.passed).toBe(false);
       }
+    });
+
+    it('requires each startup trigger to prove its own launch', () => {
+      const base = windowsAcceptance();
+      const withStartup = (startup: Record<string, unknown>) =>
+        ({
+          ...base,
+          lifecycle: { ...base.lifecycle, startup: { ...base.lifecycle.startup, ...startup } },
+        }) as unknown as ReleaseWindowsAcceptance;
+      const rejected = [
+        // An explicit container-local spawn cannot lean on a scheduled task.
+        withStartup({ launchObserved: undefined, taskRan: true }),
+        withStartup({ launchObserved: false }),
+        // A scheduled-task startup still has to show the task fired.
+        withStartup({ trigger: 'at-logon', launchObserved: true, taskRan: undefined }),
+      ];
+      for (const evidence of rejected) {
+        const result = evaluateReleaseGate({ ...passingInput(), windowsAcceptance: evidence });
+        expect(result.checks.find((c) => c.id === 'windows-acceptance')?.status).toBe('failed');
+        expect(result.passed).toBe(false);
+      }
+
+      const scheduled = evaluateReleaseGate({
+        ...passingInput(),
+        windowsAcceptance: withStartup({
+          trigger: 'at-logon',
+          launchObserved: undefined,
+          taskRan: true,
+        }),
+      });
+      expect(scheduled.checks.find((c) => c.id === 'windows-acceptance')?.status).toBe('passed');
     });
 
     it('rejects malformed Docker identity and accepts the legacy execution enum only with the trusted runner', () => {

@@ -33,6 +33,14 @@ $fixtureProcess = $null
 $nodePath = $null
 $fixtureBaseUrl = $null
 $script:workerRuntimeRoot = $null
+# Pairing protects and unprotects Worker state through DPAPI, which each time
+# pays for a cold powershell.exe inside the container. A 20s budget aborted
+# healthy runs mid-pairing and reported them as "no control-plane traffic".
+$daemonReadyTimeoutSeconds = 90
+# Diagnostics live outside $acceptanceRoot: the root must be deleted to prove
+# uninstall, and a failed run is useless without the Worker's own log.
+$diagnosticsRoot = Join-Path (Split-Path -Parent $OutputPath) ("acceptance-diagnostics-{0}-{1}-{2}" -f $RunId, $Attempt, $Pass)
+$script:daemonDiagnostics = [ordered]@{}
 
 function Get-JsonFile([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
@@ -52,6 +60,26 @@ function Test-PidGone([int]$ProcessId) {
 
 function Test-DaemonResult($Result) {
     return $Result.started -and $Result.terminated -and $Result.childStarted -and $Result.childTerminated -and $Result.paired -and $Result.trafficObserved -and $Result.notificationCleared
+}
+
+function Get-FileTail([string]$Path, [int]$Lines = 40) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
+    try { return ((Get-Content -LiteralPath $Path -Tail $Lines -ErrorAction Stop) -join "`n") } catch { return '' }
+}
+
+# A daemon run that produced no control-plane traffic must never be reported
+# without its cause. The Worker writes its own failures to $stateDirectory\logs,
+# and the launcher's stdio is redirected per run.
+function Save-DaemonDiagnostics([string]$Label, [string]$StatePath, $Result) {
+    $daemonRoot = Split-Path -Parent $StatePath
+    $stateLeaf = Split-Path -Leaf $StatePath
+    $script:daemonDiagnostics[$Label] = [ordered]@{
+        result = $Result
+        workerLogTail = Get-FileTail (Join-Path $daemonRoot 'logs\worker.log')
+        launcherStdoutTail = Get-FileTail (Join-Path $daemonRoot ($stateLeaf + '.stdout.log'))
+        launcherStderrTail = Get-FileTail (Join-Path $daemonRoot ($stateLeaf + '.stderr.log'))
+        fixtureStderrTail = Get-FileTail (Join-Path $fixtureRoot 'fixture.stderr.log')
+    }
 }
 
 function Start-Fixture {
@@ -78,7 +106,7 @@ function Stop-Fixture {
     }
 }
 
-function Invoke-Daemon([string]$Path, [string]$StatePath, [string]$PipeName) {
+function Invoke-Daemon([string]$Path, [string]$StatePath, [string]$PipeName, [string]$Label) {
     $oldRoot = $env:JOY_MEDIA_WORKER_ROOT
     $oldApi = $env:JOY_MEDIA_API_URL
     $oldState = $env:JOY_MEDIA_WORKER_STATE_PATH
@@ -120,10 +148,19 @@ function Invoke-Daemon([string]$Path, [string]$StatePath, [string]$PipeName) {
         $daemonStdoutPath = Join-Path $daemonRoot ((Split-Path -Leaf $StatePath) + '.stdout.log')
         $daemonStderrPath = Join-Path $daemonRoot ((Split-Path -Leaf $StatePath) + '.stderr.log')
         $process = Start-Process -FilePath $Path -PassThru -WindowStyle Hidden -RedirectStandardOutput $daemonStdoutPath -RedirectStandardError $daemonStderrPath
-        $deadline = (Get-Date).AddSeconds(20)
+        $deadline = (Get-Date).AddSeconds($daemonReadyTimeoutSeconds)
         $snapshot = $null
         do {
             Start-Sleep -Milliseconds 250
+            # Read the launcher's hand-off as soon as it appears. The launcher
+            # removes it once the child exits, so reading it only after the wait
+            # would lose the PID of a child that started and then died.
+            if ($childPid -le 0) {
+                $childMetadata = Get-JsonFile $childPidPath
+                if ($null -ne $childMetadata -and [int]$childMetadata.childPid -gt 0) {
+                    $childPid = [int]$childMetadata.childPid
+                }
+            }
             if ($process.HasExited) { break }
             $snapshot = Get-JsonFile $fixtureEventsPath
         } while (($null -eq $snapshot -or [int]$snapshot.counters.hello -le $beforeHello -or [int]$snapshot.counters.leases -le $beforeLeases) -and (Get-Date) -lt $deadline)
@@ -132,9 +169,7 @@ function Invoke-Daemon([string]$Path, [string]$StatePath, [string]$PipeName) {
         $leases = if ($null -eq $snapshot) { 0 } else { [int]$snapshot.counters.leases }
         $paired = $null -ne $snapshot -and $snapshot.paired -eq $true
         $started = $null -ne $process -and -not $process.HasExited
-        $childMetadata = Get-JsonFile $childPidPath
-        if ($null -ne $childMetadata -and [int]$childMetadata.childPid -gt 0) {
-            $childPid = [int]$childMetadata.childPid
+        if ($childPid -gt 0) {
             $childStarted = $null -ne (Get-Process -Id $childPid -ErrorAction SilentlyContinue)
         }
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
@@ -151,7 +186,9 @@ function Invoke-Daemon([string]$Path, [string]$StatePath, [string]$PipeName) {
         do { Start-Sleep -Milliseconds 100 } while (-not (Test-PidGone $childPid) -and (Get-Date) -lt $childDeadline)
         $childTerminated = $childStarted -and (Test-PidGone $childPid)
         $notificationCleared = -not (Test-Path -LiteralPath "$StatePath.notification.json")
-        return [ordered]@{ started = $started; terminated = $terminated; childStarted = $childStarted; childTerminated = $childTerminated; childPid = $childPid; paired = $paired; hello = $hello; leases = $leases; trafficObserved = $hello -gt $beforeHello -and $leases -gt $beforeLeases; notificationCleared = $notificationCleared }
+        $result = [ordered]@{ started = $started; terminated = $terminated; childStarted = $childStarted; childTerminated = $childTerminated; childPid = $childPid; paired = $paired; hello = $hello; leases = $leases; trafficObserved = $hello -gt $beforeHello -and $leases -gt $beforeLeases; notificationCleared = $notificationCleared }
+        if (-not (Test-DaemonResult $result)) { Save-DaemonDiagnostics $Label $StatePath $result }
+        return $result
     } finally {
         if ($null -ne $process) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
         if ($childPid -gt 0) { Stop-Process -Id $childPid -Force -ErrorAction SilentlyContinue }
@@ -195,9 +232,9 @@ try {
     $runtimePackages = Join-Path $runtimeDist 'node_modules\@joy-media'
     New-Item -ItemType Directory -Path $runtimePackages -Force | Out-Null
     foreach ($packageName in @('job-protocol', 'render-ir', 'export-core')) {
-        $packageDirectory = Join-Path $PWD ('packages\\' + $packageName)
+        $packageDirectory = Join-Path $PWD (Join-Path 'packages' $packageName)
         if (-not (Test-Path -LiteralPath $packageDirectory -PathType Container)) {
-            throw \"Required Worker runtime package is missing: $packageDirectory\"
+            throw "Required Worker runtime package is missing: $packageDirectory"
         }
         $packageDestination = Join-Path $runtimePackages $packageName
         New-Item -ItemType Directory -Path $packageDestination -Force | Out-Null
@@ -218,20 +255,20 @@ try {
     Start-Fixture
 
     $statePath = Join-Path $acceptanceRoot 'worker-state.json'
-    $startup = Invoke-Daemon $installedPath $statePath "\\.\pipe\joy-media-start-$RunId-$Attempt-$Pass"
-    $renewal = Invoke-Daemon $installedPath $statePath "\\.\pipe\joy-media-renew-$RunId-$Attempt-$Pass"
+    $startup = Invoke-Daemon $installedPath $statePath "\\.\pipe\joy-media-start-$RunId-$Attempt-$Pass" 'startup'
+    $renewal = Invoke-Daemon $installedPath $statePath "\\.\pipe\joy-media-renew-$RunId-$Attempt-$Pass" 'renewal'
     $state = Get-JsonFile $statePath
     $stateKeys = if ($null -eq $state) { @() } else { @($state.PSObject.Properties.Name) }
     $protectedState = ($stateKeys -contains 'protectedSessionToken') -and ($stateKeys -notcontains 'sessionToken')
-    $recovery = Invoke-Daemon $installedPath (Join-Path $acceptanceRoot 'recovery-state.json') "\\.\pipe\joy-media-recovery-$RunId-$Attempt-$Pass"
-    $recovery2 = Invoke-Daemon $installedPath (Join-Path $acceptanceRoot 'recovery-state-2.json') "\\.\pipe\joy-media-recovery-2-$RunId-$Attempt-$Pass"
+    $recovery = Invoke-Daemon $installedPath (Join-Path $acceptanceRoot 'recovery-state.json') "\\.\pipe\joy-media-recovery-$RunId-$Attempt-$Pass" 'recovery'
+    $recovery2 = Invoke-Daemon $installedPath (Join-Path $acceptanceRoot 'recovery-state-2.json') "\\.\pipe\joy-media-recovery-2-$RunId-$Attempt-$Pass" 'recovery2'
 
     $repairPath = Join-Path $acceptanceRoot 'joy-worker.repair.exe'
     Copy-Item $installedPath $repairPath -Force
     Remove-Item $installedPath -Force
     Copy-Item $repairPath $installedPath -Force
     $repairHash = (Get-FileHash $installedPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $repair = Invoke-Daemon $installedPath (Join-Path $acceptanceRoot 'repair-state.json') "\\.\pipe\joy-media-repair-$RunId-$Attempt-$Pass"
+    $repair = Invoke-Daemon $installedPath (Join-Path $acceptanceRoot 'repair-state.json') "\\.\pipe\joy-media-repair-$RunId-$Attempt-$Pass" 'repair'
     $repairPassed = $repairHash -eq $installedHash -and (Test-DaemonResult $repair)
 
     $nextPath = Join-Path $acceptanceRoot 'joy-worker.next.exe'
@@ -240,13 +277,15 @@ try {
     $updatedBeforeInstall = Invoke-SelfTest $nextPath
     $updatedHash = (Get-FileHash $nextPath -Algorithm SHA256).Hash.ToLowerInvariant()
     Move-Item $nextPath $installedPath -Force
-    $updated = Invoke-Daemon $installedPath (Join-Path $acceptanceRoot 'updated-state.json') "\\.\pipe\joy-media-updated-$RunId-$Attempt-$Pass"
+    $updated = Invoke-Daemon $installedPath (Join-Path $acceptanceRoot 'updated-state.json') "\\.\pipe\joy-media-updated-$RunId-$Attempt-$Pass" 'update'
     Copy-Item $repairPath $installedPath -Force
     $rollbackHash = (Get-FileHash $installedPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $rollback = Invoke-Daemon $installedPath (Join-Path $acceptanceRoot 'rollback-state.json') "\\.\pipe\joy-media-rollback-$RunId-$Attempt-$Pass"
+    $rollback = Invoke-Daemon $installedPath (Join-Path $acceptanceRoot 'rollback-state.json') "\\.\pipe\joy-media-rollback-$RunId-$Attempt-$Pass" 'rollback'
 
     Stop-Fixture
-    if (-not $KeepArtifacts) { Remove-Item $acceptanceRoot -Recurse -Force }
+    # Uninstall is a required predicate, so the acceptance root always goes. Any
+    # diagnostics worth keeping were copied out of it by Save-DaemonDiagnostics.
+    Remove-Item $acceptanceRoot -Recurse -Force
     $uninstalled = -not (Test-Path $acceptanceRoot)
     $verified = (Test-DaemonResult $startup) -and (Test-DaemonResult $renewal) -and (Test-DaemonResult $recovery) -and (Test-DaemonResult $recovery2) -and $protectedState -and $repairPassed -and (Test-DaemonResult $updated) -and ($updatedHash -ne $installedHash) -and (Test-DaemonResult $rollback) -and ($rollbackHash -eq $installedHash) -and $uninstalled
     $evidence = [ordered]@{
@@ -276,6 +315,25 @@ try {
     New-Item -ItemType Directory -Path (Split-Path -Parent $OutputPath) -Force | Out-Null
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     [IO.File]::WriteAllText($OutputPath, ($evidence | ConvertTo-Json -Depth 12), $utf8NoBom)
+    # The gated evidence records only predicates. Publish the collected Worker
+    # logs alongside it so a failing predicate always arrives with its cause.
+    if ($script:daemonDiagnostics.Count -gt 0) {
+        New-Item -ItemType Directory -Path $diagnosticsRoot -Force | Out-Null
+        [IO.File]::WriteAllText(
+            (Join-Path $diagnosticsRoot 'daemon-runs.json'),
+            ([ordered]@{ candidateSha = $CandidateSha; pass = $Pass; runs = $script:daemonDiagnostics } | ConvertTo-Json -Depth 12),
+            $utf8NoBom)
+        Write-Warning ("container-local acceptance diagnostics written to {0}" -f $diagnosticsRoot)
+        foreach ($label in $script:daemonDiagnostics.Keys) {
+            $diagnostic = $script:daemonDiagnostics[$label]
+            Write-Warning ("daemon run '{0}' failed: {1}" -f $label, ($diagnostic.result | ConvertTo-Json -Compress))
+            foreach ($stream in @('workerLogTail', 'launcherStderrTail')) {
+                if (-not [string]::IsNullOrWhiteSpace($diagnostic[$stream])) {
+                    Write-Warning ("daemon run '{0}' {1}:`n{2}" -f $label, $stream, $diagnostic[$stream])
+                }
+            }
+        }
+    }
     if (-not $verified) { throw 'container-local Windows acceptance did not satisfy every lifecycle predicate' }
 }
 finally {

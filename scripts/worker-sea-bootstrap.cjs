@@ -7,6 +7,8 @@ const {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
+  rmSync,
   writeFileSync,
 } = require('node:fs');
 const { createServer } = require('node:net');
@@ -103,23 +105,61 @@ singleton.listen(singletonPipe, () => {
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
-  // Windows does not reap this child when the launcher is force-terminated, so
-  // publish the pair of PIDs. A supervisor (and the acceptance harness) can then
-  // prove the whole Worker tree started and later stopped instead of leaving an
-  // orphaned lease/heartbeat loop behind.
-  const childPidPath = process.env.JOY_MEDIA_WORKER_CHILD_PID_PATH?.trim();
-  if (childPidPath) {
-    mkdirSync(dirname(childPidPath), { recursive: true });
-    writeFileSync(
-      childPidPath,
-      JSON.stringify({ launcherPid: process.pid, childPid: child.pid, buildMarker: BUILD_MARKER }) +
-        '\n',
-      'utf8',
-    );
-  }
   const log = createWriteStream(logPath, { flags: 'a' });
   child.stdout.pipe(log, { end: false });
   child.stderr.pipe(log, { end: false });
+
+  // Windows does not reap this child when the launcher is force-terminated, so
+  // publish the pair of PIDs. A supervisor (and the acceptance harness) can then
+  // prove the whole Worker tree started and later stopped instead of leaving an
+  // orphaned lease/heartbeat loop behind. Like the pairing hand-off this file
+  // records only PIDs and the build marker, never the child environment or
+  // argv, which is where the pairing secret lives.
+  const childPidPath = process.env.JOY_MEDIA_WORKER_CHILD_PID_PATH?.trim();
+  const childPidTemporaryPath = childPidPath ? `${childPidPath}.tmp` : undefined;
+
+  const publishChildPid = () => {
+    if (!childPidPath || !Number.isInteger(child.pid) || child.pid <= 0) return;
+    try {
+      mkdirSync(dirname(childPidPath), { recursive: true });
+      // Write then rename so a reader polling this path never parses a
+      // half-written record.
+      const record = {
+        launcherPid: process.pid,
+        childPid: child.pid,
+        buildMarker: BUILD_MARKER,
+      };
+      writeFileSync(childPidTemporaryPath, `${JSON.stringify(record)}\n`, {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+      rmSync(childPidPath, { force: true });
+      renameSync(childPidTemporaryPath, childPidPath);
+    } catch (error) {
+      // Missing evidence must not orphan the Worker: keep supervising the child
+      // and record why the hand-off file is absent.
+      const message = error instanceof Error ? error.message : String(error);
+      log.write(`worker child pid hand-off failed: ${message}\n`);
+      try {
+        rmSync(childPidTemporaryPath, { force: true });
+      } catch {
+        // A stale temporary file is inert; the next start replaces it.
+      }
+    }
+  };
+
+  const clearChildPid = () => {
+    if (!childPidPath) return;
+    try {
+      rmSync(childPidPath, { force: true });
+      rmSync(childPidTemporaryPath, { force: true });
+    } catch {
+      // The child has already exited; a leftover file is corrected by the next
+      // start rather than by failing shutdown here.
+    }
+  };
+
+  publishChildPid();
 
   const stop = (signal) => {
     if (!child.killed) child.kill(signal);
@@ -127,11 +167,13 @@ singleton.listen(singletonPipe, () => {
   process.on('SIGINT', () => stop('SIGINT'));
   process.on('SIGTERM', () => stop('SIGTERM'));
   child.on('error', (error) => {
+    clearChildPid();
     log.write(`${error.stack || error.message}\n`);
     log.end();
     singleton.close(() => process.exit(1));
   });
   child.on('close', (code) => {
+    clearChildPid();
     log.end();
     singleton.close(() => process.exit(code === null ? 1 : code));
   });
