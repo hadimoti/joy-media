@@ -32,40 +32,30 @@ tag as acceptance evidence.
 
 ## Register (token never persisted)
 
-Registration tokens are short-lived and are supplied only to the one-shot
-configuration container:
+Run the committed provisioner from the repository root after switching Docker
+Desktop to Windows containers:
 
 ```powershell
-$registrationToken = gh api --method POST repos/hadimoti/joy-media/actions/runners/registration-token --jq .token
-$imageId = docker image inspect --format '{{.Id}}' joy-media-worker-windows:2.337.0
-
-docker volume create joy-media-worker-docker-runner
-docker run --rm `
-  --name joy-media-worker-docker-register `
-  -e RUNNER_TOKEN=$registrationToken `
-  -e RUNNER_NAME=joy-media-worker-docker `
-  -e RUNNER_LABELS=self-hosted,windows,x64,joy-media-worker-docker `
-  -e JOY_MEDIA_WINDOWS_IMAGE_DIGEST=$imageId `
-  -v joy-media-worker-docker-runner:C:\actions-runner `
-  joy-media-worker-windows:2.337.0 -ConfigureOnly
+.\ops\self-hosted\windows-runner\provision.ps1
 ```
 
-The long-running container is started without `RUNNER_TOKEN`:
+The provisioner configures the runner inside the long-running container. This
+is required because Windows runner credentials are protected with DPAPI and
+must be created in the container that will use them. The registration token is
+requested only after the container is ready, travels only on standard input to
+`docker exec -i`, and is cleared from the provisioning process afterwards; it
+is never passed as a host environment variable or command-line value.
 
-```powershell
-docker run -d `
-  --name joy-media-worker-docker `
-  --restart unless-stopped `
-  -e JOY_MEDIA_WINDOWS_IMAGE_DIGEST=$imageId `
-  -v joy-media-worker-docker-runner:C:\actions-runner `
-  joy-media-worker-windows:2.337.0
-```
+The default MTU is 1240 because the owner PC's VPN tunnel has an MTU of 1280
+and Windows containers otherwise default to 1500. The provisioner sets each
+non-loopback IPv4 subinterface to 1240 with `store=active` before starting the
+runner, then verifies the setting. Use `-MtuBytes 0` only when the container's
+network path does not require this adjustment.
 
-The entrypoint removes the token after registration and never writes it to the
-image, runner volume, logs, or evidence. If the volume already contains an
-older host-direct registration, discard only that runner volume after the
-GitHub runner is removed and register a fresh Docker-labelled runner; do not
-reuse a stale registration under the new contract.
+If a container with the exact runner name already exists, remove it explicitly
+after retiring its GitHub runner registration; the provisioner never deletes
+containers or runner volumes. You may pass a named Docker volume with
+`-Volume`, or leave it empty to use the container writable layer.
 
 ## Container-local acceptance
 

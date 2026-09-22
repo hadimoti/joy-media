@@ -117,6 +117,7 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
     const artifactMirror = safeRead(join(WINDOWS_DIR, 'artifact-mirror.py'));
     const githubProxy = safeRead(join(WINDOWS_DIR, 'github-connect-proxy.py'));
     const entrypoint = safeRead(join(WINDOWS_DIR, 'windows-runner-entrypoint.ps1'));
+    const provision = safeRead(join(WINDOWS_DIR, 'provision.ps1'));
     const containerAcceptance = safeRead(join(WINDOWS_DIR, 'worker-acceptance-container.ps1'));
     const readme = safeRead(join(WINDOWS_DIR, 'README.md'));
     const contract = safeRead(join(WINDOWS_DIR, 'contract.md'));
@@ -127,6 +128,7 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(artifactMirror.length).toBeGreaterThan(0);
       expect(githubProxy.length).toBeGreaterThan(0);
       expect(entrypoint.length).toBeGreaterThan(0);
+      expect(provision.length).toBeGreaterThan(0);
       expect(readme.length).toBeGreaterThan(0);
       expect(contract.length).toBeGreaterThan(0);
     });
@@ -250,6 +252,51 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(expectedLabelAssignments).toEqual([DOCKER_RUNNER_LABEL]);
       // The token-leak guard must remain in force for the long-running run.cmd.
       expect(entrypoint).toContain('Remove-Item Env:\\RUNNER_TOKEN');
+    });
+
+    it('provision.ps1 pins the repository, runner name, labels, and MTU contract', () => {
+      expect(provision).toContain(
+        'repos/hadimoti/joy-media/actions/runners/registration-token',
+      );
+      expect(provision).toContain("[ValidateSet('joy-media-worker-docker')]");
+      expect(provision).toContain("$RunnerName = 'joy-media-worker-docker'");
+      expect(provision).toContain(
+        "$runnerLabels = 'self-hosted,windows,x64,joy-media-worker-docker'",
+      );
+      expect(provision).toContain('[ValidateRange(0,1500)]');
+      expect(provision).toContain('[int]$MtuBytes = 1240');
+      expect(provision).toContain('MtuBytes -gt 0 -and $MtuBytes -lt 576');
+      expect(provision).toContain('--labels self-hosted,windows,x64,joy-media-worker-docker');
+    });
+
+    it('provision.ps1 applies and verifies MTU inside the container', () => {
+      expect(provision).toContain("'--entrypoint', 'powershell'");
+      expect(provision).toContain('netsh interface ipv4 show subinterfaces');
+      expect(provision).toContain('store=active');
+      expect(provision).toContain('& C:\\joy-media-windows-runner.ps1');
+      expect(provision).toMatch(/docker exec[\s\S]*mtuVerification/);
+      expect(provision).toContain('Container MTU verification failed');
+      expect(provision).toContain("'-EncodedCommand', (ConvertTo-EncodedCommand $startupWrapper)");
+      expect(provision).toContain('-EncodedCommand $encodedMtuVerification');
+      expect(provision).toContain('-EncodedCommand (ConvertTo-EncodedCommand $configure)');
+      expect(provision).not.toMatch(/powershell -NoProfile -Command \$(startupWrapper|mtuVerification|configure)/);
+    });
+
+    it('provision.ps1 supplies the registration token only on docker exec stdin', () => {
+      expect(provision).toContain('[Console]::In.ReadToEnd()');
+      expect(provision).toMatch(/\$registrationToken\s*\|\s*&\s*docker exec -i/);
+      expect(provision).not.toContain('RUNNER_TOKEN=');
+      expect(provision).not.toContain('-e RUNNER_TOKEN');
+      expect(provision).not.toMatch(/TLS_NO_VERIFY|HTTP_PROXY/i);
+      expect(provision).not.toMatch(/(^|\s)-v\s/);
+      expect(provision).toMatch(/--volume[\s\S]*\$\(\$Volume\)/);
+    });
+
+    it('contract.md no longer documents RUNNER_TOKEN registration', () => {
+      expect(contract).not.toContain('-e RUNNER_TOKEN');
+      expect(contract).toContain('provision.ps1');
+      expect(contract).toContain('DPAPI');
+      expect(contract).toContain('docker exec -i');
     });
   });
 });
