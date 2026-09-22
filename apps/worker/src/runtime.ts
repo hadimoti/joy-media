@@ -9,7 +9,7 @@ import {
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { WorkerCapability, WorkerHello, WorkerModelInventory } from '@joy-media/job-protocol';
@@ -147,7 +147,15 @@ export class WindowsDpapiSecretProtector implements WorkerSecretProtector {
   ): ReturnType<typeof spawnSync<string>> {
     const result = spawnSync(
       'powershell.exe',
-      ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command],
+      [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        command,
+      ],
       { input, encoding: 'utf8', timeout: DPAPI_HELPER_TIMEOUT_MS, windowsHide: true },
     );
     if (result.error !== undefined)

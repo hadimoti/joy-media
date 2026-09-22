@@ -87,8 +87,7 @@ export async function waitForWorkerPairing(
       // store cannot read back is a local state fault rather than a pending
       // approval. Polling the spent code would loop until it expired while the
       // Worker looked like it had simply never been approved.
-      if (store.loadWorkerSession() === undefined)
-        throw new WorkerPairingNotPersistedError();
+      if (store.loadWorkerSession() === undefined) throw new WorkerPairingNotPersistedError();
       store.clearPendingPairing();
       return;
     }
