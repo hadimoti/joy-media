@@ -215,12 +215,34 @@ function Invoke-Daemon([string]$Path, [string]$StatePath, [string]$PipeName, [st
 }
 
 function Get-SourceProvenance {
-    $dirty = git status --porcelain --untracked-files=all -- . ':(exclude)test-output/**' ':(exclude)test-results/**' ':(exclude)playwright-report/**'
+    # The release evidence must come from the exact checkout that Actions
+    # selected. A host worktree bind-mounted into the container can expose a
+    # .git file whose gitdir points outside the container; that is not a valid
+    # provenance source. Fail with an actionable error instead of allowing a
+    # null command result to become a misleading clean-worktree claim.
+    $head = (& git rev-parse HEAD 2>$null | Out-String).Trim()
+    $headExitCode = $LASTEXITCODE
+    if ($headExitCode -ne 0 -or $head -notmatch '^[0-9a-f]{40}$') {
+        throw 'Git metadata is unavailable inside the Windows acceptance container; run actions/checkout in the container before collecting evidence.'
+    }
+    if ($head -ne $CandidateSha) {
+        throw "Windows acceptance checkout HEAD $head does not match candidate SHA $CandidateSha."
+    }
+    $tree = (& git rev-parse 'HEAD^{tree}' 2>$null | Out-String).Trim()
+    $treeExitCode = $LASTEXITCODE
+    if ($treeExitCode -ne 0 -or $tree -notmatch '^[0-9a-f]{40,64}$') {
+        throw 'Git tree provenance could not be resolved inside the Windows acceptance container.'
+    }
+    $dirty = (& git status --porcelain --untracked-files=all -- . ':(exclude)test-output/**' ':(exclude)test-results/**' ':(exclude)playwright-report/**' 2>$null | Out-String).Trim()
+    $statusExitCode = $LASTEXITCODE
+    if ($statusExitCode -ne 0) {
+        throw 'Git status could not be resolved inside the Windows acceptance container; refusing to claim a clean worktree.'
+    }
     return [ordered]@{
-        commitSha = $CandidateSha
-        treeHash = (git rev-parse 'HEAD^{tree}').Trim()
+        commitSha = $head
+        treeHash = $tree
         lockfileSha256 = (Get-FileHash -LiteralPath (Join-Path $PWD 'pnpm-lock.yaml') -Algorithm SHA256).Hash.ToLowerInvariant()
-        worktreeClean = [string]::IsNullOrWhiteSpace(($dirty -join "`n"))
+        worktreeClean = [string]::IsNullOrWhiteSpace($dirty)
     }
 }
 
