@@ -174,12 +174,12 @@ try {
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
         if ([string]$manifest.name -notlike '@joy-media/*') { continue }
         $packageName = ([string]$manifest.name).Split('/')[1]
-        New-Item -ItemType Junction -Path (Join-Path $runtimePackages $packageName) -Target $packageDirectory.FullName | Out-Null
+        Copy-Item -LiteralPath $packageDirectory.FullName -Destination (Join-Path $runtimePackages $packageName) -Recurse -Force
     }
     $playwrightPackage = Get-ChildItem -LiteralPath (Join-Path $PWD 'node_modules\.pnpm') -Directory -Filter 'playwright-core@*' |
         Sort-Object Name -Descending | Select-Object -First 1
     if ($null -eq $playwrightPackage) { throw 'playwright-core package was not found in the container-local pnpm tree' }
-    New-Item -ItemType Junction -Path (Join-Path $runtimeDist 'node_modules\playwright-core') -Target (Join-Path $playwrightPackage.FullName 'node_modules\playwright-core') | Out-Null
+    Copy-Item -LiteralPath (Join-Path $playwrightPackage.FullName 'node_modules\playwright-core') -Destination (Join-Path $runtimeDist 'node_modules\playwright-core') -Recurse -Force
     $env:JOY_MEDIA_WORKER_ROOT = $script:workerRuntimeRoot
     $env:JOY_MEDIA_WORKER_ENTRYPOINT = Join-Path $runtimeDist 'index.js'
     New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
