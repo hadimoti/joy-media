@@ -255,9 +255,7 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
     });
 
     it('provision.ps1 pins the repository, runner name, labels, and MTU contract', () => {
-      expect(provision).toContain(
-        'repos/hadimoti/joy-media/actions/runners/registration-token',
-      );
+      expect(provision).toContain('repos/hadimoti/joy-media/actions/runners/registration-token');
       expect(provision).toContain("[ValidateSet('joy-media-worker-docker')]");
       expect(provision).toContain("$RunnerName = 'joy-media-worker-docker'");
       expect(provision).toContain(
@@ -279,7 +277,9 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(provision).toContain("'-EncodedCommand', (ConvertTo-EncodedCommand $startupWrapper)");
       expect(provision).toContain('-EncodedCommand $encodedMtuVerification');
       expect(provision).toContain('-EncodedCommand (ConvertTo-EncodedCommand $configure)');
-      expect(provision).not.toMatch(/powershell -NoProfile -Command \$(startupWrapper|mtuVerification|configure)/);
+      expect(provision).not.toMatch(
+        /powershell -NoProfile -Command \$(startupWrapper|mtuVerification|configure)/,
+      );
       expect(provision).toContain('[long]`$Matches.mtu -gt $MtuBytes');
       expect(provision).toContain('runner not started');
     });
