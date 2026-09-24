@@ -898,6 +898,7 @@ export function JoyAgentSettingsDialog({
                             <div className="joy-settings-input-with-action">
                               <input
                                 type="text"
+                                aria-label="Model ID"
                                 placeholder="provider/model"
                                 value={modelId}
                                 onChange={(e) => setModelId(e.target.value)}
