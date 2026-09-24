@@ -141,10 +141,15 @@ jobs:
           $ErrorActionPreference = 'Stop'
           if ($env:CANDIDATE_SHA -notmatch '^[0-9a-f]{40}$') { throw 'candidate_sha must be a full lowercase commit SHA' }
           node --version
+          if ($LASTEXITCODE -ne 0) { throw "Node version check failed with exit code $LASTEXITCODE." }
           corepack enable pnpm
+          if ($LASTEXITCODE -ne 0) { throw "Corepack failed to enable pnpm with exit code $LASTEXITCODE." }
           pnpm --version
+          if ($LASTEXITCODE -ne 0) { throw "pnpm version check failed with exit code $LASTEXITCODE." }
           ffmpeg -version
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg version check failed with exit code $LASTEXITCODE." }
           ffprobe -version
+          if ($LASTEXITCODE -ne 0) { throw "ffprobe version check failed with exit code $LASTEXITCODE." }
           if ($env:JOY_MEDIA_CI_WORKER_PROFILE -ne 'clean') { throw 'JOY_MEDIA_CI_WORKER_PROFILE=clean is required' }
       - run: pnpm install --frozen-lockfile
         shell: powershell
@@ -153,10 +158,12 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           pnpm --filter @joy-media/worker build
+          if ($LASTEXITCODE -ne 0) { throw "Worker package build failed with exit code $LASTEXITCODE." }
           $results = @{}
           foreach ($pass in @('1', '2')) {
             $output = Join-Path $env:RUNNER_TEMP ("joy-worker-clean-" + $env:CANDIDATE_SHA + "-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + "-" + $pass + ".exe")
             powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-worker-exe.ps1 -OutputPath $output
+            if ($LASTEXITCODE -ne 0) { throw "Worker executable build failed for pass $pass with exit code $LASTEXITCODE." }
             if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw "Worker executable was not produced for pass $pass." }
             $result = & $output --joy-worker-self-test
             if ($LASTEXITCODE -ne 0 -or $result -notmatch '"ok"\s*:\s*true') { throw "Worker executable self-test failed for pass $pass." }

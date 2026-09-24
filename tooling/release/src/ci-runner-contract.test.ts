@@ -10,6 +10,9 @@ const WINDOWS_DIR = join(REPO_ROOT, 'ops', 'self-hosted', 'windows-runner');
 const RELEASE_WORKFLOW = safeRead(
   join(REPO_ROOT, '.github', 'workflows', 'release-candidate-v2.yml'),
 );
+const RELEASE_WORKFLOW_V1 = safeRead(
+  join(REPO_ROOT, '.github', 'workflows', 'release-candidate.yml'),
+);
 
 function safeRead(p: string): string {
   if (!statSyncSafe(p)) return '';
@@ -294,6 +297,27 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(RELEASE_WORKFLOW).toContain('JOY_RELEASE_CANDIDATE_SHA: ${{ env.CANDIDATE_SHA }}');
       expect(containerAcceptance).toContain('schemaVersion = 2');
       expect(containerAcceptance).toContain('launchObserved = $true');
+    });
+
+    it('fails immediately when either candidate Windows Worker build command fails', () => {
+      for (const workflow of [RELEASE_WORKFLOW, RELEASE_WORKFLOW_V1]) {
+        const normalizedWorkflow = workflow.replace(/\r\n/g, '\n');
+        for (const command of [
+          'node --version',
+          'corepack enable pnpm',
+          'pnpm --version',
+          'ffmpeg -version',
+          'ffprobe -version',
+        ]) {
+          expect(normalizedWorkflow).toContain(`${command}\n          if ($LASTEXITCODE -ne 0)`);
+        }
+        expect(workflow).toMatch(
+          /pnpm --filter @joy-media\/worker build\r?\n\s+if \(\$LASTEXITCODE -ne 0\) \{ throw "Worker package build failed/m,
+        );
+        expect(workflow).toMatch(
+          /powershell -NoProfile -ExecutionPolicy Bypass -File scripts\/build-worker-exe\.ps1 -OutputPath \$output\r?\n\s+if \(\$LASTEXITCODE -ne 0\) \{ throw "Worker executable build failed/m,
+        );
+      }
     });
 
     it('windows-runner-entrypoint.ps1 requires the same Docker-only label the producer emits', () => {

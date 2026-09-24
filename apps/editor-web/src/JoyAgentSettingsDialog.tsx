@@ -25,6 +25,7 @@ import {
   acknowledgeCustomEndpoint,
   isCustomEndpointProvider,
   normalizeProviderBaseUrl,
+  requiresCustomEndpointConsent,
   requireCustomEndpointAcknowledgement,
 } from './custom-endpoint-acknowledgement.js';
 import './JoyAgentSettingsDialog.css';
@@ -302,12 +303,12 @@ export function JoyAgentSettingsDialog({
     const normalizedBaseUrl = normalizeProviderBaseUrl(baseUrl);
     const matchingSavedProfile =
       savedProfile &&
-      isCustomEndpointProvider(savedProfile.provider) &&
+      savedProfile.provider === (provider === 'openai-compatible' ? 'custom' : provider) &&
       normalizeProviderBaseUrl(savedProfile.baseUrl) === normalizedBaseUrl
         ? savedProfile
         : undefined;
     if (
-      provider === 'openai-compatible' &&
+      requiresCustomEndpointConsent(provider, normalizedBaseUrl) &&
       !requireCustomEndpointAcknowledgement({
         provider: 'custom',
         baseUrl: normalizedBaseUrl,
@@ -376,6 +377,20 @@ export function JoyAgentSettingsDialog({
       kiloKey = kiloKeyRef.current?.value.trim() ?? '';
 
       const openRouterProf = profiles.find((p) => p.provider === 'openrouter');
+      if (
+        openRouterProf &&
+        requiresCustomEndpointConsent(openRouterProf.provider, openRouterProf.baseUrl) &&
+        !requireCustomEndpointAcknowledgement({
+          provider: 'custom',
+          baseUrl: openRouterProf.baseUrl,
+          profileId: openRouterProf.id,
+        })
+      ) {
+        const message = 'Acknowledge the OpenRouter profile endpoint before connecting Dual-Brain.';
+        setConnectionNotice({ kind: 'error', message });
+        onNotice?.(message, 'error');
+        return;
+      }
       if (!openRouterKey && openRouterProf) {
         try {
           const session = (await beginDesktopProviderSession(openRouterProf.id)) as
@@ -387,6 +402,20 @@ export function JoyAgentSettingsDialog({
       }
 
       const kiloProf = profiles.find((p) => p.provider === 'kilo');
+      if (
+        kiloProf &&
+        requiresCustomEndpointConsent(kiloProf.provider, kiloProf.baseUrl) &&
+        !requireCustomEndpointAcknowledgement({
+          provider: 'custom',
+          baseUrl: kiloProf.baseUrl,
+          profileId: kiloProf.id,
+        })
+      ) {
+        const message = 'Acknowledge the Kilo profile endpoint before connecting Dual-Brain.';
+        setConnectionNotice({ kind: 'error', message });
+        onNotice?.(message, 'error');
+        return;
+      }
       if (!kiloKey && kiloProf) {
         try {
           const session = (await beginDesktopProviderSession(kiloProf.id)) as
@@ -507,7 +536,7 @@ export function JoyAgentSettingsDialog({
         ? savedProfile
         : undefined;
     if (
-      provider === 'openai-compatible' &&
+      requiresCustomEndpointConsent(provider, normalizedBaseUrl) &&
       !requireCustomEndpointAcknowledgement({
         provider: 'custom',
         baseUrl: normalizedBaseUrl,
@@ -567,6 +596,7 @@ export function JoyAgentSettingsDialog({
       if (!normalizedModelId) missing.push('a model ID');
       if (!normalizedBaseUrl) missing.push('a base URL');
       if (
+        requiresCustomEndpointConsent(provider, normalizedBaseUrl) &&
         !requireCustomEndpointAcknowledgement({
           provider: 'custom',
           baseUrl: normalizedBaseUrl,
@@ -688,14 +718,18 @@ export function JoyAgentSettingsDialog({
   const connectProfile = async (prof: DesktopProviderProfile) => {
     if (working) return;
     if (
-      isCustomEndpointProvider(prof.provider) &&
+      requiresCustomEndpointConsent(prof.provider, prof.baseUrl) &&
       !requireCustomEndpointAcknowledgement({
         provider: 'custom',
         baseUrl: prof.baseUrl,
         profileId: prof.id,
       })
     ) {
-      setProvider('openai-compatible');
+      setProvider(
+        isCustomEndpointProvider(prof.provider)
+          ? 'openai-compatible'
+          : (prof.provider as 'openrouter' | 'kilo' | 'joy-hosted'),
+      );
       setStudioPreset('custom');
       setBaseUrl(prof.baseUrl);
       setSavedProfile(prof);
@@ -707,6 +741,7 @@ export function JoyAgentSettingsDialog({
     }
     setWorking(true);
     let key = '';
+    let configurationFailed = false;
     try {
       const session = (await beginDesktopProviderSession(prof.id)) as
         { apiKey?: string; baseUrl?: string; modelId?: string; provider?: string } | undefined;
@@ -720,12 +755,14 @@ export function JoyAgentSettingsDialog({
       setSavedProfile(prof);
       setHasSavedKey(Boolean(key));
 
+      configurationFailed = true;
       await engineClient.configure({
         provider: resolvedProvider,
         baseUrl: prof.baseUrl.replace(/\/$/, ''),
         modelId: prof.modelId,
         apiKey: key,
       });
+      configurationFailed = false;
       const next = await engineClient.testConnection();
       const safeStatus =
         next.capability === 'incompatible'
@@ -745,6 +782,16 @@ export function JoyAgentSettingsDialog({
         err instanceof Error ? err.message : 'Failed to switch provider',
         key,
       );
+      if (configurationFailed) {
+        const failedStatus: ByokSessionStatus = {
+          provider: prof.provider as ByokSessionStatus['provider'],
+          modelId: prof.modelId,
+          capability: 'incompatible',
+          message,
+        };
+        setConnectionStatus(failedStatus);
+        onStatusChange?.(failedStatus);
+      }
       setConnectionNotice({ kind: 'error', message });
     } finally {
       setWorking(false);
@@ -1213,7 +1260,7 @@ export function JoyAgentSettingsDialog({
                           </div>
                         )}
 
-                        {provider === 'openai-compatible' && (
+                        {requiresCustomEndpointConsent(provider, baseUrl) && (
                           <div className="joy-settings-field-full joy-settings-field">
                             <label
                               className="agent-toggle"
@@ -1227,12 +1274,22 @@ export function JoyAgentSettingsDialog({
                                   setCustomDisclosure(checked);
                                   if (checked) {
                                     const normalized = normalizeProviderBaseUrl(baseUrl);
+                                    const providerProfile = profiles.find(
+                                      (profile) =>
+                                        profile.provider ===
+                                          (provider === 'openai-compatible'
+                                            ? 'custom'
+                                            : provider) &&
+                                        normalizeProviderBaseUrl(profile.baseUrl) === normalized,
+                                    );
                                     const exactProfile =
-                                      savedProfile &&
-                                      isCustomEndpointProvider(savedProfile.provider) &&
+                                      providerProfile ??
+                                      (savedProfile &&
+                                      savedProfile.provider ===
+                                        (provider === 'openai-compatible' ? 'custom' : provider) &&
                                       normalizeProviderBaseUrl(savedProfile.baseUrl) === normalized
                                         ? savedProfile
-                                        : undefined;
+                                        : undefined);
                                     acknowledgeCustomEndpoint({
                                       provider: 'custom',
                                       baseUrl: normalized,

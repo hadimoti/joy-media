@@ -45,6 +45,7 @@ let container: HTMLDivElement | undefined;
 async function render(
   engineClient: JoyAgentEngineClient,
   status?: ByokSessionStatus,
+  onStatusChange?: (status: ByokSessionStatus | undefined) => void,
 ): Promise<HTMLDivElement> {
   container = document.createElement('div');
   document.body.append(container);
@@ -55,6 +56,7 @@ async function render(
         policy={DEFAULT_AGENT_POLICY}
         onPolicyChange={vi.fn()}
         engineClient={engineClient}
+        {...(onStatusChange === undefined ? {} : { onStatusChange })}
         {...(status === undefined ? {} : { status })}
         onClose={vi.fn()}
       />,
@@ -149,6 +151,67 @@ describe('JOY Agent Settings connection status', () => {
     );
     expect(fields.map((field) => field.value)).toEqual(['', '']);
   });
+
+  it.each(['openrouter', 'kilo'] as const)(
+    'requires endpoint consent for a custom %s profile before Dual-Brain uses its saved key',
+    async (untrustedProvider) => {
+      const openRouterBaseUrl =
+        untrustedProvider === 'openrouter'
+          ? 'https://openrouter.ai.evil.example/api/v1'
+          : 'https://openrouter.ai/api/v1';
+      const kiloBaseUrl =
+        untrustedProvider === 'kilo' ? 'https://custom-kilo.example/v1' : 'https://api.kilo.ai/v1';
+      const invoke = vi.fn().mockImplementation(async (channel: string, args?: { id?: string }) => {
+        if (channel === 'desktop.provider-profile.list') {
+          return [
+            {
+              id: 'dual-openrouter',
+              provider: 'openrouter',
+              name: 'OpenRouter',
+              baseUrl: openRouterBaseUrl,
+              modelId: 'openrouter/free',
+              createdAt: '2026-09-15T00:00:00.000Z',
+              updatedAt: '2026-09-15T00:00:00.000Z',
+            },
+            {
+              id: 'dual-kilo',
+              provider: 'kilo',
+              name: 'Kilo',
+              baseUrl: kiloBaseUrl,
+              modelId: 'kilo-auto/efficient',
+              createdAt: '2026-09-15T00:00:00.000Z',
+              updatedAt: '2026-09-15T00:00:00.000Z',
+            },
+          ];
+        }
+        if (channel === 'desktop.provider-profile.begin-session') {
+          return { apiKey: `saved-${args?.id}-key` };
+        }
+        return undefined;
+      });
+      window.joyDesktop = {
+        channels: ['desktop.provider-profile.list', 'desktop.provider-profile.begin-session'],
+        invoke,
+      };
+      const engineClient = client();
+      const rendered = await render(engineClient, undefined);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      await act(async () => {
+        buttonByText(rendered, 'Dual-Brain Studio').click();
+      });
+      await act(async () => {
+        buttonByText(rendered, 'Connect model').click();
+        await Promise.resolve();
+      });
+      expect(engineClient.configure).not.toHaveBeenCalled();
+      expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.begin-session', {
+        id: untrustedProvider === 'openrouter' ? 'dual-openrouter' : 'dual-kilo',
+      });
+    },
+  );
 
   it('reports a partial Dual-Brain connection as an error and names the unusable brain', async () => {
     const engineClient = client({
@@ -550,6 +613,25 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
     expect(rendered.querySelector<HTMLInputElement>('input[type="checkbox"]')).not.toBeNull();
   });
 
+  it('requires consent for an OpenRouter label with a custom destination before connect', async () => {
+    const engineClient = client();
+    const rendered = await render(engineClient, readyStatus);
+    await selectCustomPreset(rendered);
+    await changeProvider(rendered, 'openrouter');
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    const baseUrl = rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]');
+    if (!key || !baseUrl) throw new Error('Expected provider connection fields');
+    setInputValue(baseUrl, 'https://openrouter.ai.evil.example/api/v1');
+    setInputValue(key, 'openrouter-label-custom-destination-key');
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('custom-provider acknowledgement');
+    expect(rendered.querySelector('input[type="checkbox"]')).not.toBeNull();
+  });
+
   it('does not reuse an OpenRouter vault key for an acknowledged custom endpoint', async () => {
     const invoke = vi.fn().mockImplementation(async (channel: string) => {
       if (channel === 'desktop.provider-profile.list')
@@ -598,7 +680,7 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
     );
   });
 
-  it('blocks custom model discovery before sending an entered key until acknowledged', async () => {
+  it('blocks OpenRouter-labeled custom model discovery before sending an entered key', async () => {
     const invoke = vi.fn().mockResolvedValue([]);
     window.joyDesktop = {
       channels: ['desktop.provider-profile.list', 'desktop.provider-profile.fetch-models'],
@@ -606,12 +688,12 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
     };
     const rendered = await render(client(), undefined);
     await selectCustomPreset(rendered);
-    await changeProvider(rendered, 'openai-compatible');
+    await changeProvider(rendered, 'openrouter');
     const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
     const baseUrl = rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]');
     if (key === null || baseUrl === null) throw new Error('Expected custom endpoint fields');
-    setInputValue(key, 'custom-discovery-secret');
-    setInputValue(baseUrl, 'https://custom.example/v1');
+    setInputValue(key, 'openrouter-custom-discovery-secret');
+    setInputValue(baseUrl, 'https://other.example/api/v1');
 
     await act(async () => {
       const drawer = [...rendered.querySelectorAll('button')].find((button) =>
@@ -644,9 +726,9 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
         return [
           {
             id: 'custom-prof-1',
-            provider: 'custom',
-            name: 'Private custom endpoint',
-            baseUrl: 'https://custom.example/v1',
+            provider: 'openrouter',
+            name: 'OpenRouter custom endpoint',
+            baseUrl: 'https://other.example/api/v1',
             modelId: 'private-model',
             createdAt: '2026-09-15T00:00:00.000Z',
             updatedAt: '2026-09-15T00:00:00.000Z',
@@ -679,6 +761,47 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
       'Enter the custom-provider acknowledgement before connecting.',
     );
     expect(rendered.querySelector<HTMLInputElement>('input[type="checkbox"]')).not.toBeNull();
+  });
+
+  it('publishes a failed status when configuring a saved profile throws', async () => {
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list')
+        return [
+          {
+            id: 'openrouter-trusted',
+            provider: 'openrouter',
+            name: 'OpenRouter',
+            baseUrl: 'https://openrouter.ai/api/v1',
+            modelId: 'openrouter/auto',
+            createdAt: '2026-09-15T00:00:00.000Z',
+            updatedAt: '2026-09-15T00:00:00.000Z',
+          },
+        ];
+      if (channel === 'desktop.provider-profile.begin-session') return { apiKey: 'saved-secret' };
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.begin-session'],
+      invoke,
+    };
+    const onStatusChange = vi.fn();
+    const engineClient = client({
+      configure: vi.fn().mockRejectedValue(new Error('configure failed')),
+    });
+    const rendered = await render(engineClient, readyStatus, onStatusChange);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      buttonByText(rendered, 'Use').click();
+      await Promise.resolve();
+    });
+    expect(onStatusChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'openrouter',
+        capability: 'incompatible',
+      }),
+    );
   });
 
   it('requires acknowledgement when a custom provider is selected from the dual-brain default', async () => {

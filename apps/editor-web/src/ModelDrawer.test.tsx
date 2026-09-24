@@ -52,7 +52,7 @@ describe('ModelDrawer', () => {
         id: 'kilo-profile-1',
         name: 'Kilo Gateway',
         provider: 'kilo',
-        baseUrl: 'https://api.kilo.ai/api/gateway/v1',
+        baseUrl: 'https://api.kilo.ai/v1',
         modelId: 'minimax/minimax-m3',
         cachedModels: ['minimax/minimax-m3', 'kilo-auto/efficient'],
         createdAt: '2026-09-17T00:00:00Z',
@@ -71,7 +71,7 @@ describe('ModelDrawer', () => {
     ]);
     vi.spyOn(desktopClient, 'beginDesktopProviderSession').mockResolvedValue({
       provider: 'kilo',
-      baseUrl: 'https://api.kilo.ai/api/gateway/v1',
+      baseUrl: 'https://api.kilo.ai/v1',
       modelId: 'minimax/minimax-m3',
       apiKey: 'kilo-secret-key-123',
     });
@@ -199,6 +199,39 @@ describe('ModelDrawer', () => {
     );
   });
 
+  it('publishes an incompatible status when a saved-profile configuration fails', async () => {
+    const client = createMockEngineClient({
+      configure: vi.fn().mockRejectedValue(new Error('profile configuration failed')),
+    });
+    const onStatusChange = vi.fn();
+    await act(async () => {
+      root?.render(
+        <ModelDrawer
+          open={true}
+          onClose={vi.fn()}
+          engineClient={client}
+          status={initialStatus}
+          onStatusChange={onStatusChange}
+        />,
+      );
+    });
+    const modelItem = [
+      ...(container?.querySelectorAll<HTMLElement>('.model-drawer-model-item') ?? []),
+    ].find((el) => el.textContent?.includes('kilo-auto/efficient'));
+    expect(modelItem).toBeTruthy();
+    await act(async () => {
+      modelItem?.click();
+      await Promise.resolve();
+    });
+    expect(onStatusChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'kilo',
+        modelId: 'kilo-auto/efficient',
+        capability: 'incompatible',
+      }),
+    );
+  });
+
   it('discovers models dynamically when adding a new API endpoint', async () => {
     const client = createMockEngineClient();
     const onNotice = vi.fn();
@@ -280,5 +313,76 @@ describe('ModelDrawer', () => {
     });
     expect(desktopClient.saveDesktopProviderProfile).not.toHaveBeenCalled();
     expect(client.configure).not.toHaveBeenCalled();
+  });
+
+  it('requires consent when the OpenRouter label points to a custom URL before discovery or connect', async () => {
+    const client = createMockEngineClient();
+    await act(async () => {
+      root?.render(<ModelDrawer open={true} onClose={vi.fn()} engineClient={client} />);
+    });
+    await act(async () => {
+      (container?.querySelector('.model-drawer-add-btn') as HTMLButtonElement).click();
+    });
+    const provider = container?.querySelector('#md-provider-type') as HTMLSelectElement;
+    await act(async () => {
+      provider.value = 'openrouter';
+      provider.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const base = container?.querySelector('#md-base-url') as HTMLInputElement;
+    const key = container?.querySelector('#md-api-key') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    await act(async () => {
+      setter?.call(base, 'https://custom.example/api/v1');
+      base.dispatchEvent(new Event('input', { bubbles: true }));
+      setter?.call(key, 'openrouter-labeled-custom-secret');
+      key.dispatchEvent(new Event('input', { bubbles: true }));
+      [...(container?.querySelectorAll('button') ?? [])]
+        .find((button) => button.textContent?.includes('Discover Models Behind Link'))
+        ?.click();
+      await Promise.resolve();
+    });
+    expect(desktopClient.fetchDesktopProviderModels).not.toHaveBeenCalled();
+    const acknowledgement = container?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    expect(acknowledgement).not.toBeNull();
+    await act(async () => {
+      [...(container?.querySelectorAll('button') ?? [])]
+        .find((button) => button.textContent?.includes('Save & Connect'))
+        ?.click();
+      await Promise.resolve();
+    });
+    expect(desktopClient.saveDesktopProviderProfile).not.toHaveBeenCalled();
+    expect(client.configure).not.toHaveBeenCalled();
+  });
+
+  it('blocks a saved OpenRouter-labeled custom profile before retrieving its key', async () => {
+    vi.mocked(desktopClient.listDesktopProviderProfiles).mockResolvedValue([
+      {
+        id: 'openrouter-custom-profile',
+        name: 'OpenRouter custom endpoint',
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai.evil.example/api/v1',
+        modelId: 'openrouter/free',
+        cachedModels: ['openrouter/free'],
+        createdAt: '2026-09-17T00:00:00Z',
+        updatedAt: '2026-09-17T00:00:00Z',
+      },
+    ]);
+    const client = createMockEngineClient();
+    await act(async () => {
+      root?.render(<ModelDrawer open={true} onClose={vi.fn()} engineClient={client} />);
+    });
+    const modelItem = [
+      ...(container?.querySelectorAll<HTMLElement>('.model-drawer-model-item') ?? []),
+    ].find((el) => el.textContent?.includes('openrouter/free'));
+    expect(modelItem).toBeTruthy();
+    await act(async () => {
+      modelItem?.click();
+      await Promise.resolve();
+    });
+    expect(desktopClient.beginDesktopProviderSession).not.toHaveBeenCalled();
+    expect(client.configure).not.toHaveBeenCalled();
+    expect(container?.textContent).toContain(
+      'I acknowledge OpenRouter custom endpoint for this session.',
+    );
   });
 });

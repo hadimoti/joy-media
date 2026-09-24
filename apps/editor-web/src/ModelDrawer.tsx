@@ -14,7 +14,7 @@ import {
 import './ModelDrawer.css';
 import {
   acknowledgeCustomEndpoint,
-  isCustomEndpointProvider,
+  requiresCustomEndpointConsent,
   requireCustomEndpointAcknowledgement,
 } from './custom-endpoint-acknowledgement.js';
 
@@ -30,7 +30,7 @@ export interface ModelDrawerProps {
 type ProviderType = 'kilo' | 'openrouter' | 'openai-compatible' | 'custom';
 
 const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
-  kilo: 'https://api.kilo.ai/api/gateway/v1',
+  kilo: 'https://api.kilo.ai/v1',
   openrouter: 'https://openrouter.ai/api/v1',
   'openai-compatible': '',
   custom: '',
@@ -47,6 +47,20 @@ const COMMON_MODEL_PRESETS: Record<ProviderType, readonly string[]> = {
   'openai-compatible': ['gpt-4o-mini', 'gpt-4o'],
   custom: [],
 };
+
+function publishConfigurationFailure(
+  onStatusChange: ModelDrawerProps['onStatusChange'],
+  profile: Pick<DesktopProviderProfile, 'provider' | 'modelId'>,
+  error: unknown,
+): void {
+  const failed: ByokSessionStatus = {
+    provider: profile.provider as JoyProviderMode,
+    modelId: profile.modelId,
+    capability: 'incompatible',
+    message: error instanceof Error ? error.message : String(error),
+  };
+  onStatusChange?.(failed);
+}
 
 export function ModelDrawer({
   open,
@@ -133,7 +147,7 @@ export function ModelDrawer({
 
   const handleDiscoverModels = async () => {
     if (
-      (newProvider === 'custom' || newProvider === 'openai-compatible') &&
+      requiresCustomEndpointConsent(newProvider, newBaseUrl) &&
       !requireCustomEndpointAcknowledgement({ provider: 'custom', baseUrl: newBaseUrl })
     ) {
       setDiscoveryError('Acknowledge this custom endpoint before discovering models.');
@@ -176,7 +190,7 @@ export function ModelDrawer({
 
   const handleSaveAndConnect = async () => {
     if (
-      (newProvider === 'custom' || newProvider === 'openai-compatible') &&
+      requiresCustomEndpointConsent(newProvider, newBaseUrl) &&
       !requireCustomEndpointAcknowledgement({ provider: 'custom', baseUrl: newBaseUrl })
     ) {
       onNotice?.('Acknowledge this custom endpoint before connecting.', 'error');
@@ -187,6 +201,7 @@ export function ModelDrawer({
       return;
     }
     setIsSaving(true);
+    let configurationFailed = false;
     try {
       const profileName = newName.trim() || `${newProvider.toUpperCase()} (${newSelectedModel})`;
       const saved = await saveDesktopProviderProfile({
@@ -199,12 +214,14 @@ export function ModelDrawer({
       });
 
       if (engineClient) {
+        configurationFailed = true;
         const nextStatus = await engineClient.configure({
           provider: newProvider,
           baseUrl: newBaseUrl.trim(),
           modelId: newSelectedModel.trim(),
           apiKey: newApiKey.trim(),
         });
+        configurationFailed = false;
         onStatusChange?.(nextStatus);
       }
 
@@ -214,6 +231,13 @@ export function ModelDrawer({
       await refreshProfiles();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      if (configurationFailed) {
+        publishConfigurationFailure(
+          onStatusChange,
+          { provider: newProvider, modelId: newSelectedModel },
+          err,
+        );
+      }
       onNotice?.(`Failed to save and connect: ${msg}`, 'error');
     } finally {
       if (mountedRef.current) {
@@ -224,7 +248,7 @@ export function ModelDrawer({
 
   const handleSelectModel = async (profile: DesktopProviderProfile, modelId: string) => {
     if (
-      isCustomEndpointProvider(profile.provider) &&
+      requiresCustomEndpointConsent(profile.provider, profile.baseUrl) &&
       !requireCustomEndpointAcknowledgement({
         provider: 'custom',
         baseUrl: profile.baseUrl,
@@ -235,6 +259,7 @@ export function ModelDrawer({
       onNotice?.('Acknowledge this exact custom endpoint before connecting it.', 'error');
       return;
     }
+    let configurationFailed = false;
     try {
       let apiKey = '';
       if (isDesktopHost()) {
@@ -244,12 +269,14 @@ export function ModelDrawer({
       }
 
       if (engineClient) {
+        configurationFailed = true;
         const nextStatus = await engineClient.configure({
           provider: profile.provider as JoyProviderMode,
           baseUrl: profile.baseUrl,
           modelId,
           apiKey,
         });
+        configurationFailed = false;
         onStatusChange?.(nextStatus);
       }
 
@@ -268,13 +295,16 @@ export function ModelDrawer({
       onNotice?.(`Switched active model to ${modelId}`, 'success');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      if (configurationFailed) {
+        publishConfigurationFailure(onStatusChange, { provider: profile.provider, modelId }, err);
+      }
       onNotice?.(`Failed to switch model: ${msg}`, 'error');
     }
   };
 
   const handleRefreshProfileModels = async (profile: DesktopProviderProfile) => {
     if (
-      isCustomEndpointProvider(profile.provider) &&
+      requiresCustomEndpointConsent(profile.provider, profile.baseUrl) &&
       !requireCustomEndpointAcknowledgement({
         provider: 'custom',
         baseUrl: profile.baseUrl,
@@ -443,7 +473,7 @@ export function ModelDrawer({
                 <input
                   id="md-base-url"
                   type="text"
-                  placeholder="https://api.kilo.ai/api/gateway/v1"
+                  placeholder="https://api.kilo.ai/v1"
                   value={newBaseUrl}
                   onChange={(e) => {
                     setNewBaseUrl(e.target.value);
@@ -452,7 +482,7 @@ export function ModelDrawer({
                 />
               </div>
 
-              {(newProvider === 'custom' || newProvider === 'openai-compatible') && (
+              {requiresCustomEndpointConsent(newProvider, newBaseUrl) && (
                 <label className="model-drawer-form-group">
                   <input
                     type="checkbox"

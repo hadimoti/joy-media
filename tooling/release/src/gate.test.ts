@@ -518,6 +518,9 @@ describe('JOY Studio 1.0 release gate', () => {
       'joy-media-windows-acceptance-outputs-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT',
     );
     expect(windows).toContain('joy-worker-self-test');
+    expect(windows).toMatch(
+      /pnpm --filter @joy-media\/worker build\r?\n\s+if \(\$LASTEXITCODE -ne 0\) \{ throw "Worker package build failed/m,
+    );
     expect(windows).not.toContain('worker-acceptance.ps1 `');
     expect(windows).not.toContain('actions/upload-artifact');
     expect(windows).not.toContain('actions/download-artifact');

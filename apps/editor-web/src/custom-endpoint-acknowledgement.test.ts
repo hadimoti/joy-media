@@ -2,12 +2,72 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   acknowledgeCustomEndpoint,
   mayRestoreProviderProfile,
+  requiresCustomEndpointConsent,
   resetCustomEndpointAcknowledgementsForTests,
 } from './custom-endpoint-acknowledgement.js';
 
 afterEach(resetCustomEndpointAcknowledgementsForTests);
 
 describe('custom endpoint acknowledgement', () => {
+  it('trusts only each provider exact HTTPS endpoint and a path beneath it', () => {
+    expect(requiresCustomEndpointConsent('openrouter', 'https://openrouter.ai/api/v1')).toBe(false);
+    expect(requiresCustomEndpointConsent('openrouter', 'https://openrouter.ai:443/api/v1')).toBe(
+      false,
+    );
+    expect(requiresCustomEndpointConsent('openrouter', 'https://openrouter.ai/api/v1/chat')).toBe(
+      false,
+    );
+    expect(requiresCustomEndpointConsent('kilo', 'https://api.kilo.ai/v1')).toBe(false);
+    expect(requiresCustomEndpointConsent('joy-hosted', 'https://joyst.ir/api/v1/agent')).toBe(
+      false,
+    );
+    expect(
+      requiresCustomEndpointConsent('openrouter', 'https://openrouter.ai.evil.example/api/v1'),
+    ).toBe(true);
+    expect(requiresCustomEndpointConsent('openrouter', 'http://openrouter.ai/api/v1')).toBe(true);
+    expect(
+      requiresCustomEndpointConsent('openrouter', 'https://user:pass@openrouter.ai/api/v1'),
+    ).toBe(true);
+    expect(requiresCustomEndpointConsent('openrouter', 'https://@openrouter.ai/api/v1')).toBe(true);
+    expect(requiresCustomEndpointConsent('openrouter', 'https://openrouter.ai:8443/api/v1')).toBe(
+      true,
+    );
+    expect(requiresCustomEndpointConsent('openrouter', 'https://openrouter.ai/api/v10')).toBe(true);
+    expect(requiresCustomEndpointConsent('openrouter', 'https://other.example/v1')).toBe(true);
+  });
+
+  it('requires acknowledgement for OpenRouter-labeled custom profiles before startup restore', () => {
+    const profile = {
+      provider: 'openrouter',
+      baseUrl: 'https://custom.example/api/v1',
+      profileId: 'p1',
+    };
+    expect(mayRestoreProviderProfile(profile)).toBe(false);
+    acknowledgeCustomEndpoint({ ...profile, provider: 'custom' });
+    expect(mayRestoreProviderProfile(profile)).toBe(true);
+    expect(mayRestoreProviderProfile({ ...profile, baseUrl: 'https://other.example/api/v1' })).toBe(
+      false,
+    );
+  });
+
+  it('allows startup restore of profiles at trusted provider endpoints', () => {
+    expect(
+      mayRestoreProviderProfile({
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+      }),
+    ).toBe(true);
+    expect(mayRestoreProviderProfile({ provider: 'kilo', baseUrl: 'https://api.kilo.ai/v1' })).toBe(
+      true,
+    );
+    expect(
+      mayRestoreProviderProfile({
+        provider: 'joy-hosted',
+        baseUrl: 'https://joyst.ir/api/v1/agent',
+      }),
+    ).toBe(true);
+  });
+
   it('blocks startup restore before consent and permits only the acknowledged exact profile', () => {
     const profile = { provider: 'custom', baseUrl: 'https://custom.example/v1/', profileId: 'p1' };
     expect(mayRestoreProviderProfile(profile)).toBe(false);
