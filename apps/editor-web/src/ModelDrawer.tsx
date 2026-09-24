@@ -214,6 +214,16 @@ export function ModelDrawer({
         cachedModels: discoveredModels.length > 0 ? discoveredModels : [newSelectedModel.trim()],
       });
 
+      // Consent may have been withdrawn while the save was pending: re-check it
+      // immediately before the key is sent anywhere.
+      if (
+        requiresCustomEndpointConsent(newProvider, newBaseUrl) &&
+        !requireCustomEndpointAcknowledgement({ provider: 'custom', baseUrl: newBaseUrl })
+      ) {
+        onNotice?.('Custom endpoint consent was withdrawn; the connection was cancelled.', 'error');
+        return;
+      }
+
       if (engineClient) {
         configurationFailed = true;
         const nextStatus = await engineClient.configure({
@@ -267,6 +277,19 @@ export function ModelDrawer({
         const session = (await beginDesktopProviderSession(profile.id)) as
           { apiKey?: string } | undefined;
         apiKey = session?.apiKey ?? '';
+      }
+
+      // Re-check consent after the vault await, before the key is sent.
+      if (
+        requiresCustomEndpointConsent(profile.provider, profile.baseUrl) &&
+        !requireCustomEndpointAcknowledgement({
+          provider: 'custom',
+          baseUrl: profile.baseUrl,
+          profileId: profile.id,
+        })
+      ) {
+        onNotice?.('Custom endpoint consent was withdrawn; the connection was cancelled.', 'error');
+        return;
       }
 
       if (engineClient) {
@@ -488,6 +511,7 @@ export function ModelDrawer({
                   <input
                     type="checkbox"
                     checked={customAcknowledged}
+                    disabled={isSaving}
                     onChange={(event) => {
                       setCustomAcknowledged(event.target.checked);
                       if (event.target.checked) acknowledge(newBaseUrl);

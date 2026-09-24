@@ -354,6 +354,64 @@ describe('ModelDrawer', () => {
     expect(client.configure).not.toHaveBeenCalled();
   });
 
+  it('cancels a pending Save & Connect when consent is withdrawn before the save resolves', async () => {
+    let resolveSave: ((value: desktopClient.DesktopProviderProfile) => void) | undefined;
+    vi.mocked(desktopClient.saveDesktopProviderProfile).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    const client = createMockEngineClient();
+    await act(async () => {
+      root?.render(<ModelDrawer open={true} onClose={vi.fn()} engineClient={client} />);
+    });
+    await act(async () => {
+      (container?.querySelector('.model-drawer-add-btn') as HTMLButtonElement).click();
+    });
+    const provider = container?.querySelector('#md-provider-type') as HTMLSelectElement;
+    const base = container?.querySelector('#md-base-url') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    await act(async () => {
+      provider.value = 'custom';
+      provider.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () => {
+      setter?.call(base, 'https://custom.example/v1');
+      base.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const consent = () =>
+      [...(container?.querySelectorAll<HTMLInputElement>('input[type="checkbox"]') ?? [])].find(
+        (input) => input.closest('label')?.textContent?.includes('custom endpoint may log'),
+      );
+    await act(async () => {
+      consent()?.click();
+    });
+    await act(async () => {
+      [...(container?.querySelectorAll('button') ?? [])]
+        .find((button) => button.textContent?.includes('Save & Connect'))
+        ?.click();
+      await Promise.resolve();
+    });
+    // The checkbox is disabled while saving; withdraw consent directly, as a
+    // second view or a stale handler could.
+    resetCustomEndpointAcknowledgementsForTests();
+    await act(async () => {
+      resolveSave?.({
+        id: 'saved',
+        name: 'custom',
+        provider: 'custom',
+        baseUrl: 'https://custom.example/v1',
+        modelId: 'm',
+        createdAt: '2026-09-17T00:00:00Z',
+        updatedAt: '2026-09-17T00:00:00Z',
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(client.configure).not.toHaveBeenCalled();
+  });
+
   it('blocks a saved OpenRouter-labeled custom profile before retrieving its key', async () => {
     vi.mocked(desktopClient.listDesktopProviderProfiles).mockResolvedValue([
       {
