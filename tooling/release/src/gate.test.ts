@@ -486,6 +486,19 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(harness).toContain("deliveryRecovery.retriedState !== 'queued'");
   });
 
+  it('wires AccountService with an ephemeral signer into real-service HTTP server', () => {
+    const harness = readFileSync(
+      resolve(
+        import.meta.dirname,
+        '../../../ops/self-hosted/linux-runner/real-service-acceptance.mjs',
+      ),
+      'utf8',
+    );
+    expect(harness).toContain("generateKeyPairSync('ed25519')");
+    expect(harness).toContain('createEd25519EntitlementSigner(');
+    expect(harness).toContain('account: new AccountService({ pool, signer })');
+  });
+
   it('validates the checked-out candidate and always checks Worker teardown', () => {
     const workflow = readFileSync(
       resolve(import.meta.dirname, '../../../.github/workflows/release-candidate.yml'),

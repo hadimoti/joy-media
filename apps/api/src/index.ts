@@ -88,3 +88,5 @@ export {
   type SpectralDenoiseServiceOptions,
   type SpectralDenoiseServiceRequest,
 } from './spectral-denoise-service.js';
+export { AccountService, type AccountServiceOptions } from './account-service.js';
+export { createEd25519EntitlementSigner } from './entitlement-signing.js';

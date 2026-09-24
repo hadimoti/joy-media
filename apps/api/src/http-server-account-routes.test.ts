@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { newDb } from 'pg-mem';
 import type { Pool } from 'pg';
 import { createControlPlaneHttpServer, type ApiAuthentication } from './http-server.js';
-import { LocalControlPlane } from './control-plane.js';
+import { LocalControlPlane, type ControlPlane } from './control-plane.js';
+import { PostgresControlPlane } from './postgres-control-plane.js';
 import type { MediaAuthApi, MediaSessionProfile } from './media-auth.js';
 import { AccountService } from './account-service.js';
 import { ReleaseMetadataService } from './release-metadata-service.js';
@@ -109,7 +110,7 @@ async function start(
     readonly entitlementPublicKeyPem: string;
     readonly hostedRouteRetirement: HostedRouteRetirementFlags;
     readonly authentication: ApiAuthentication;
-    readonly controlPlane: LocalControlPlane;
+    readonly controlPlane: ControlPlane;
   }> = {},
 ): Promise<string> {
   const { controlPlane, authentication, ...rest } = options;
@@ -180,6 +181,53 @@ describe('POST/GET /v1/devices', () => {
       'token:someone-else@example.com',
     );
     expect((otherOwner.body as { data: unknown[] }).data).toEqual([]);
+  });
+
+  it('returns 503 ACCOUNT_SERVICE_UNCONFIGURED when account service is omitted from server wiring', async () => {
+    const origin = await start();
+    const response = await request(
+      origin,
+      'POST',
+      '/v1/devices',
+      { displayName: 'PC' },
+      'token:user@example.com',
+    );
+    expect(response.status).toBe(503);
+    expect(response.body).toMatchObject({
+      error: { code: 'ACCOUNT_SERVICE_UNCONFIGURED' },
+    });
+  });
+
+  it('registers devices against the schema initialized by PostgresControlPlane', async () => {
+    const database = newDb();
+    const adapter = database.adapters.createPg();
+    const pool = new adapter.Pool() as Pool;
+    const controlPlane = new PostgresControlPlane(pool, { skipLocked: false });
+    await controlPlane.initialize();
+    const { privateKey } = generateKeyPairSync('ed25519');
+    const signer = createEd25519EntitlementSigner(
+      privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+    );
+    const account = new AccountService({ pool, signer });
+    const origin = await start({ controlPlane, account });
+    const res = await request(
+      origin,
+      'POST',
+      '/v1/devices',
+      { displayName: "Hadi's PC" },
+      'token:user@example.com',
+    );
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({
+      data: { ownerId: 'user@example.com', displayName: "Hadi's PC" },
+    });
+    await pool.end();
+  });
+
+  it('exports AccountService and createEd25519EntitlementSigner from the package root', async () => {
+    const apiModule = await import('./index.js');
+    expect(apiModule.AccountService).toBe(AccountService);
+    expect(apiModule.createEd25519EntitlementSigner).toBe(createEd25519EntitlementSigner);
   });
 });
 
