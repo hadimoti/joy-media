@@ -491,7 +491,15 @@ export function ModelDrawer({
                     onChange={(event) => {
                       setCustomAcknowledged(event.target.checked);
                       if (event.target.checked) acknowledge(newBaseUrl);
-                      else revokeCustomEndpointAcknowledgementsForUrl(newBaseUrl);
+                      else {
+                        revokeCustomEndpointAcknowledgementsForUrl(newBaseUrl);
+                        // Withdrawn consent must also stop an already configured
+                        // connection from being used.
+                        if (status) {
+                          engineClient?.clear();
+                          onStatusChange?.(undefined);
+                        }
+                      }
                     }}
                   />
                   I understand this custom endpoint may log requests and credentials.

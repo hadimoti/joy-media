@@ -153,7 +153,7 @@ describe('JOY Agent Settings connection status', () => {
   });
 
   it.each(['openrouter', 'kilo'] as const)(
-    'requires endpoint consent for a custom %s profile before Dual-Brain uses its saved key',
+    'never uses the saved key of a %s profile bound to a non-trusted URL in Dual-Brain',
     async (untrustedProvider) => {
       const openRouterBaseUrl =
         untrustedProvider === 'openrouter'
@@ -206,10 +206,15 @@ describe('JOY Agent Settings connection status', () => {
         buttonByText(rendered, 'Connect model').click();
         await Promise.resolve();
       });
-      expect(engineClient.configure).not.toHaveBeenCalled();
+      const untrustedId = untrustedProvider === 'openrouter' ? 'dual-openrouter' : 'dual-kilo';
+      // The vault is never asked for the key of a profile bound to another URL,
+      // and that key never reaches the fixed trusted Dual-Brain endpoint.
       expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.begin-session', {
-        id: untrustedProvider === 'openrouter' ? 'dual-openrouter' : 'dual-kilo',
+        id: untrustedId,
       });
+      for (const [config] of vi.mocked(engineClient.configure).mock.calls) {
+        expect(JSON.stringify(config)).not.toContain(`saved-${untrustedId}-key`);
+      }
     },
   );
 

@@ -377,21 +377,13 @@ export function JoyAgentSettingsDialog({
       openRouterKey = openRouterKeyRef.current?.value.trim() ?? '';
       kiloKey = kiloKeyRef.current?.value.trim() ?? '';
 
-      const openRouterProf = profiles.find((p) => p.provider === 'openrouter');
-      if (
-        openRouterProf &&
-        requiresCustomEndpointConsent(openRouterProf.provider, openRouterProf.baseUrl) &&
-        !requireCustomEndpointAcknowledgement({
-          provider: 'custom',
-          baseUrl: openRouterProf.baseUrl,
-          profileId: openRouterProf.id,
-        })
-      ) {
-        const message = 'Acknowledge the OpenRouter profile endpoint before connecting Dual-Brain.';
-        setConnectionNotice({ kind: 'error', message });
-        onNotice?.(message, 'error');
-        return;
-      }
+      // Dual-Brain always sends each key to the provider's fixed trusted
+      // endpoint, so a saved key may only come from a profile saved for exactly
+      // that endpoint; a profile with any other URL is never used here.
+      const openRouterProf = profiles.find(
+        (p) =>
+          p.provider === 'openrouter' && !requiresCustomEndpointConsent('openrouter', p.baseUrl),
+      );
       if (!openRouterKey && openRouterProf) {
         try {
           const session = (await beginDesktopProviderSession(openRouterProf.id)) as
@@ -402,21 +394,9 @@ export function JoyAgentSettingsDialog({
         }
       }
 
-      const kiloProf = profiles.find((p) => p.provider === 'kilo');
-      if (
-        kiloProf &&
-        requiresCustomEndpointConsent(kiloProf.provider, kiloProf.baseUrl) &&
-        !requireCustomEndpointAcknowledgement({
-          provider: 'custom',
-          baseUrl: kiloProf.baseUrl,
-          profileId: kiloProf.id,
-        })
-      ) {
-        const message = 'Acknowledge the Kilo profile endpoint before connecting Dual-Brain.';
-        setConnectionNotice({ kind: 'error', message });
-        onNotice?.(message, 'error');
-        return;
-      }
+      const kiloProf = profiles.find(
+        (p) => p.provider === 'kilo' && !requiresCustomEndpointConsent('kilo', p.baseUrl),
+      );
       if (!kiloKey && kiloProf) {
         try {
           const session = (await beginDesktopProviderSession(kiloProf.id)) as
@@ -1278,6 +1258,9 @@ export function JoyAgentSettingsDialog({
                                     // Unchecking withdraws consent for this URL, including any
                                     // saved-profile-bound acknowledgement.
                                     revokeCustomEndpointAcknowledgementsForUrl(baseUrl);
+                                    // Withdrawn consent must also stop an already configured
+                                    // connection from being used.
+                                    if (connectionStatus) clear();
                                   }
                                   if (checked) {
                                     const normalized = normalizeProviderBaseUrl(baseUrl);
