@@ -334,7 +334,11 @@ import { createJoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus } from './joy-agent/protocol.js';
 import { createJoyAgentContextSnapshot } from './joy-agent/context-snapshot.js';
 import { runCreativeBriefTask } from './joy-agent/entry-points.js';
-import { mayRestoreProviderProfile } from './custom-endpoint-acknowledgement.js';
+import {
+  assertCustomEndpointConsentHolds,
+  mayRestoreProviderProfile,
+  normalizeProviderBaseUrl,
+} from './custom-endpoint-acknowledgement.js';
 import {
   observationMetadataForAsset,
   type JoyAgentObservationAdapterFactory,
@@ -1148,6 +1152,17 @@ function EditorWorkspace({
               }
             | undefined;
           if (cancelled || !sessionConfig || !joyAgentEngineClientRef.current) return;
+          // The vault must return the endpoint of the profile it was asked for,
+          // and consent (which may have been withdrawn during the vault read)
+          // is re-checked immediately before the key is sent.
+          if (
+            normalizeProviderBaseUrl(sessionConfig.baseUrl) !==
+            normalizeProviderBaseUrl(profile.baseUrl)
+          ) {
+            console.warn('Desktop vault returned a different endpoint; restoration skipped.');
+            return;
+          }
+          assertCustomEndpointConsentHolds(profile.provider, profile.baseUrl, profile.id);
           const status = await joyAgentEngineClientRef.current.configure({
             provider: sessionConfig.provider,
             baseUrl: sessionConfig.baseUrl,
