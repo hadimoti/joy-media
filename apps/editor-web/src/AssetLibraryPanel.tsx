@@ -38,7 +38,11 @@ import {
 } from './opfs-original-asset-cache.js';
 import { verifyOriginalRecoveryCandidate } from './asset-original-recovery.js';
 import { resolveAssetThumb, type AssetThumbSource } from './asset-card-preview.js';
-import { releaseMediaObjectUrl, useReleasableObjectUrl } from './media-object-url.js';
+import {
+  releaseMediaObjectUrl,
+  usePendingObjectUrlOwner,
+  useReleasableObjectUrl,
+} from './media-object-url.js';
 import {
   CloseIcon,
   PlusIcon,
@@ -200,10 +204,13 @@ export function AssetLibraryPanel({
   const [renderLimit, setRenderLimit] = useState(ASSET_RENDER_PAGE_SIZE);
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [preview, setPreview] = useState<Preview | undefined>(undefined);
+  // Owns an async preview URL from creation until the hook adopts it on commit.
+  const pendingPreviewOwner = usePendingObjectUrlOwner();
   const previewMediaRef = useReleasableObjectUrl<HTMLMediaElement | HTMLImageElement>(
     preview?.url,
     undefined,
     preview?.revoke,
+    pendingPreviewOwner,
   );
   const [selectedFile, setSelectedFile] = useState<File | undefined>(undefined);
   const [assetSource, setAssetSource] = useState<AssetSource>(
@@ -690,6 +697,7 @@ export function AssetLibraryPanel({
           url: outcome.url,
           revoke: outcome.revoke,
         };
+        pendingPreviewOwner.track(outcome.url, () => outcome.revoke());
         setPreview(nextPreview);
         setStatus(
           outcome.source === 'derivative'
@@ -703,7 +711,14 @@ export function AssetLibraryPanel({
         setStatus(`Failed to open preview: ${message(error)}`);
       }
     },
-    [clearPreview, fetchCloudOriginal, originalAssetCache, projectId, resolver],
+    [
+      clearPreview,
+      fetchCloudOriginal,
+      originalAssetCache,
+      pendingPreviewOwner,
+      projectId,
+      resolver,
+    ],
   );
 
   const toggleSelected = useCallback((assetId: string) => {
