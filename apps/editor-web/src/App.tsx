@@ -334,6 +334,7 @@ import { createJoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus } from './joy-agent/protocol.js';
 import { createJoyAgentContextSnapshot } from './joy-agent/context-snapshot.js';
 import { runCreativeBriefTask } from './joy-agent/entry-points.js';
+import { mayRestoreProviderProfile } from './custom-endpoint-acknowledgement.js';
 import {
   observationMetadataForAsset,
   type JoyAgentObservationAdapterFactory,
@@ -1125,6 +1126,18 @@ function EditorWorkspace({
         if (cancelled || profiles.length === 0) return;
         const profile = profiles.find((p) => p.provider === 'openrouter') ?? profiles[0];
         if (!profile) return;
+        if (
+          !mayRestoreProviderProfile({
+            provider: profile.provider,
+            baseUrl: profile.baseUrl,
+            profileId: profile.id,
+          })
+        ) {
+          console.info(
+            'Custom provider restoration awaits endpoint acknowledgement in this session.',
+          );
+          return;
+        }
         try {
           const sessionConfig = (await beginDesktopProviderSession(profile.id)) as
             | {

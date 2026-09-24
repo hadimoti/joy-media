@@ -21,6 +21,12 @@ import {
 } from './desktop-client.js';
 import { getStoredMediaToken } from './media-session.js';
 import { DesktopAccountModal } from './DesktopAccountModal.js';
+import {
+  acknowledgeCustomEndpoint,
+  isCustomEndpointProvider,
+  normalizeProviderBaseUrl,
+  requireCustomEndpointAcknowledgement,
+} from './custom-endpoint-acknowledgement.js';
 import './JoyAgentSettingsDialog.css';
 
 export type JoyAgentSettingsTab =
@@ -293,12 +299,25 @@ export function JoyAgentSettingsDialog({
       setDiscoveryError('Live model discovery requires Joy Media Desktop.');
       return;
     }
-    const key = explicitKey ?? keyRef.current?.value ?? '';
-    if (provider === 'openai-compatible' && !customDisclosure) {
+    const normalizedBaseUrl = normalizeProviderBaseUrl(baseUrl);
+    const matchingSavedProfile =
+      savedProfile &&
+      isCustomEndpointProvider(savedProfile.provider) &&
+      normalizeProviderBaseUrl(savedProfile.baseUrl) === normalizedBaseUrl
+        ? savedProfile
+        : undefined;
+    if (
+      provider === 'openai-compatible' &&
+      !requireCustomEndpointAcknowledgement({
+        provider: 'custom',
+        baseUrl: normalizedBaseUrl,
+        profileId: matchingSavedProfile?.id,
+      })
+    ) {
       setDiscoveryError('Enter the custom-provider acknowledgement before discovering models.');
       return;
     }
-    const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '');
+    const key = explicitKey ?? keyRef.current?.value ?? '';
     if (!normalizedBaseUrl) {
       setDiscoveryError('Please enter a Base URL before discovering models');
       return;
@@ -459,6 +478,14 @@ export function JoyAgentSettingsDialog({
         redactProviderError(rawMessage, openRouterKey),
         kiloKey,
       );
+      const failedStatus: ByokSessionStatus = {
+        provider: 'dual-brain',
+        modelId: 'openrouter/free + kilo-auto/efficient',
+        capability: 'incompatible',
+        message: safeMessage,
+      };
+      setConnectionStatus(failedStatus);
+      onStatusChange?.(failedStatus);
       setConnectionNotice({ kind: 'error', message: safeMessage });
       onNotice?.(safeMessage, 'error');
     } finally {
@@ -470,7 +497,23 @@ export function JoyAgentSettingsDialog({
 
   const connect = async () => {
     if (working) return;
-    if (provider === 'openai-compatible' && !customDisclosure) {
+    const normalizedBaseUrl = normalizeProviderBaseUrl(baseUrl);
+    const matchingSavedProfile =
+      savedProfile &&
+      (provider === 'openai-compatible'
+        ? isCustomEndpointProvider(savedProfile.provider)
+        : savedProfile.provider === provider) &&
+      normalizeProviderBaseUrl(savedProfile.baseUrl) === normalizedBaseUrl
+        ? savedProfile
+        : undefined;
+    if (
+      provider === 'openai-compatible' &&
+      !requireCustomEndpointAcknowledgement({
+        provider: 'custom',
+        baseUrl: normalizedBaseUrl,
+        profileId: matchingSavedProfile?.id,
+      })
+    ) {
       const message = 'Enter the custom-provider acknowledgement before connecting.';
       setConnectionNotice({ kind: 'error', message });
       onNotice?.(message, 'error');
@@ -486,7 +529,22 @@ export function JoyAgentSettingsDialog({
     setDiscoveryError(null);
 
     let key = keyRef.current?.value.trim() ?? '';
-    if (provider !== 'joy-hosted' && !key && hasSavedKey && savedProfile?.id) {
+    const normalizedModelId = modelId.trim();
+    const savedProfileMatches = Boolean(
+      savedProfile &&
+      savedProfile.id &&
+      (provider === 'openai-compatible'
+        ? isCustomEndpointProvider(savedProfile.provider)
+        : savedProfile.provider === provider) &&
+      normalizeProviderBaseUrl(savedProfile.baseUrl) === normalizedBaseUrl,
+    );
+    if (
+      provider !== 'joy-hosted' &&
+      !key &&
+      hasSavedKey &&
+      savedProfile?.id &&
+      savedProfileMatches
+    ) {
       try {
         const session = (await beginDesktopProviderSession(savedProfile.id)) as
           { apiKey?: string; baseUrl?: string; modelId?: string } | undefined;
@@ -498,15 +556,24 @@ export function JoyAgentSettingsDialog({
       }
     }
 
-    const normalizedModelId = modelId.trim();
-    const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '');
-
     if (provider === 'openai-compatible') {
       const missing: string[] = [];
-      if (!key) missing.push('an API key');
+      if (!key)
+        missing.push(
+          savedProfile?.id && !savedProfileMatches
+            ? 'a new API key because the saved key belongs to a different provider or endpoint'
+            : 'an API key',
+        );
       if (!normalizedModelId) missing.push('a model ID');
       if (!normalizedBaseUrl) missing.push('a base URL');
-      if (!customDisclosure) missing.push('the custom-provider acknowledgement');
+      if (
+        !requireCustomEndpointAcknowledgement({
+          provider: 'custom',
+          baseUrl: normalizedBaseUrl,
+          profileId: matchingSavedProfile?.id,
+        })
+      )
+        missing.push('the custom-provider acknowledgement');
       if (missing.length > 0) {
         const message = `Enter ${missing.join(', ')} before connecting.`;
         setConnectionNotice({ kind: 'error', message });
@@ -517,8 +584,12 @@ export function JoyAgentSettingsDialog({
     }
 
     if (provider !== 'joy-hosted' && !key) {
-      setConnectionNotice({ kind: 'error', message: 'API key is required.' });
-      onNotice?.('API key is required.', 'error');
+      const message =
+        savedProfile?.id && !savedProfileMatches
+          ? 'The saved API key belongs to a different provider or endpoint. Enter a new API key to connect.'
+          : 'API key is required.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
       setWorking(false);
       return;
     }
@@ -616,10 +687,18 @@ export function JoyAgentSettingsDialog({
 
   const connectProfile = async (prof: DesktopProviderProfile) => {
     if (working) return;
-    if (prof.provider === 'custom' && !customDisclosure) {
+    if (
+      isCustomEndpointProvider(prof.provider) &&
+      !requireCustomEndpointAcknowledgement({
+        provider: 'custom',
+        baseUrl: prof.baseUrl,
+        profileId: prof.id,
+      })
+    ) {
       setProvider('openai-compatible');
       setStudioPreset('custom');
       setBaseUrl(prof.baseUrl);
+      setSavedProfile(prof);
       setModelId(prof.modelId);
       const message = 'Enter the custom-provider acknowledgement before connecting.';
       setConnectionNotice({ kind: 'error', message });
@@ -633,7 +712,7 @@ export function JoyAgentSettingsDialog({
         { apiKey?: string; baseUrl?: string; modelId?: string; provider?: string } | undefined;
       key = session?.apiKey || '';
       const resolvedProvider = (
-        prof.provider === 'custom' ? 'openai-compatible' : prof.provider
+        isCustomEndpointProvider(prof.provider) ? 'openai-compatible' : prof.provider
       ) as 'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible';
       setProvider(resolvedProvider);
       setBaseUrl(prof.baseUrl);
@@ -1034,7 +1113,10 @@ export function JoyAgentSettingsDialog({
                               type="text"
                               placeholder="https://..."
                               value={baseUrl}
-                              onChange={(e) => setBaseUrl(e.target.value)}
+                              onChange={(e) => {
+                                setBaseUrl(e.target.value);
+                                setCustomDisclosure(false);
+                              }}
                             />
                           </label>
                         </div>
@@ -1140,7 +1222,24 @@ export function JoyAgentSettingsDialog({
                               <input
                                 type="checkbox"
                                 checked={customDisclosure}
-                                onChange={(event) => setCustomDisclosure(event.target.checked)}
+                                onChange={(event) => {
+                                  const checked = event.target.checked;
+                                  setCustomDisclosure(checked);
+                                  if (checked) {
+                                    const normalized = normalizeProviderBaseUrl(baseUrl);
+                                    const exactProfile =
+                                      savedProfile &&
+                                      isCustomEndpointProvider(savedProfile.provider) &&
+                                      normalizeProviderBaseUrl(savedProfile.baseUrl) === normalized
+                                        ? savedProfile
+                                        : undefined;
+                                    acknowledgeCustomEndpoint({
+                                      provider: 'custom',
+                                      baseUrl: normalized,
+                                      profileId: exactProfile?.id,
+                                    });
+                                  }
+                                }}
                                 disabled={working || mediaProbeWorking}
                               />
                               I understand that custom endpoints may log requests according to their

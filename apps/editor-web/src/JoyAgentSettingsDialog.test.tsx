@@ -6,6 +6,7 @@ import { DEFAULT_AGENT_POLICY } from './agent-policy-settings.js';
 import { JoyAgentSettingsDialog } from './JoyAgentSettingsDialog.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus, JoyAgentMediaCapabilityReport } from './joy-agent/protocol.js';
+import { resetCustomEndpointAcknowledgementsForTests } from './custom-endpoint-acknowledgement.js';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -95,6 +96,7 @@ afterEach(async () => {
   root = undefined;
   container = undefined;
   vi.unstubAllGlobals();
+  resetCustomEndpointAcknowledgementsForTests();
   delete (window as { joyDesktop?: unknown }).joyDesktop;
 });
 
@@ -184,6 +186,44 @@ describe('JOY Agent Settings connection status', () => {
     );
     expect(rendered.textContent).not.toContain('are live.');
     expect(rendered.textContent).not.toContain('partial-status-key');
+  });
+
+  it('replaces the connected status when Dual-Brain configuration throws', async () => {
+    const onStatusChange = vi.fn();
+    const engineClient = client({
+      configure: vi.fn().mockRejectedValue(new Error('setup failed')),
+    });
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <JoyAgentSettingsDialog
+          policy={DEFAULT_AGENT_POLICY}
+          onPolicyChange={vi.fn()}
+          engineClient={engineClient}
+          status={readyStatus}
+          onStatusChange={onStatusChange}
+          onClose={vi.fn()}
+        />,
+      );
+    });
+    const rendered = container;
+    const fields = [...rendered.querySelectorAll<HTMLInputElement>('input[type="password"]')];
+    await act(async () => {
+      setInputValue(fields[0]!, 'or-key');
+      setInputValue(fields[1]!, 'kilo-key');
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+    expect(onStatusChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'dual-brain',
+        capability: 'incompatible',
+        message: 'setup failed',
+      }),
+    );
+    expect(rendered.querySelector('[role="status"]')?.textContent).toContain('Connection failed');
   });
 
   it('shows tool-loop readiness and the connection notice in the dialog', async () => {
@@ -508,6 +548,54 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
       'Enter the custom-provider acknowledgement before connecting.',
     );
     expect(rendered.querySelector<HTMLInputElement>('input[type="checkbox"]')).not.toBeNull();
+  });
+
+  it('does not reuse an OpenRouter vault key for an acknowledged custom endpoint', async () => {
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list')
+        return [
+          {
+            id: 'openrouter-1',
+            provider: 'openrouter',
+            name: 'Saved OpenRouter',
+            baseUrl: 'https://openrouter.ai/api/v1',
+            modelId: 'openrouter/auto',
+            createdAt: '2026-09-15T00:00:00.000Z',
+            updatedAt: '2026-09-15T00:00:00.000Z',
+          },
+        ];
+      if (channel === 'desktop.provider-profile.begin-session')
+        return { apiKey: 'vault-openrouter-secret' };
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.begin-session'],
+      invoke,
+    };
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await selectCustomPreset(rendered);
+    await changeProvider(rendered, 'openai-compatible');
+    const baseUrl = rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]');
+    if (!baseUrl) throw new Error('Expected base URL field');
+    setInputValue(baseUrl, 'https://custom.example/v1');
+    const consent = rendered.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (!consent) throw new Error('Expected endpoint acknowledgement');
+    await act(async () => {
+      consent.click();
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+    expect(engineClient.configure).not.toHaveBeenCalledWith(
+      expect.objectContaining({ apiKey: 'vault-openrouter-secret' }),
+    );
+    expect(rendered.textContent).toContain(
+      'a new API key because the saved key belongs to a different provider or endpoint',
+    );
   });
 
   it('blocks custom model discovery before sending an entered key until acknowledged', async () => {

@@ -6,6 +6,7 @@ import { ModelDrawer } from './ModelDrawer.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus } from './joy-agent/protocol.js';
 import * as desktopClient from './desktop-client.js';
+import { resetCustomEndpointAcknowledgementsForTests } from './custom-endpoint-acknowledgement.js';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -99,6 +100,7 @@ describe('ModelDrawer', () => {
     root = undefined;
     container = undefined;
     vi.restoreAllMocks();
+    resetCustomEndpointAcknowledgementsForTests();
   });
 
   it('renders active model badge and configured profiles when open', async () => {
@@ -236,5 +238,47 @@ describe('ModelDrawer', () => {
       expect.stringContaining('Discovered 3 models successfully!'),
       'success',
     );
+  });
+
+  it('blocks Model Drawer discovery and connection for custom URLs until acknowledged', async () => {
+    const client = createMockEngineClient();
+    await act(async () => {
+      root?.render(
+        <ModelDrawer open={true} onClose={vi.fn()} engineClient={client} status={initialStatus} />,
+      );
+    });
+    await act(async () => {
+      (container?.querySelector('.model-drawer-add-btn') as HTMLButtonElement).click();
+    });
+    const provider = container?.querySelector('#md-provider-type') as HTMLSelectElement | null;
+    expect(provider).not.toBeNull();
+    await act(async () => {
+      if (provider) {
+        provider.value = 'custom';
+        provider.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    const base = container?.querySelector('#md-base-url') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    await act(async () => {
+      setter?.call(base, 'https://custom.example/v1');
+      base.dispatchEvent(new Event('input', { bubbles: true }));
+      const discover = [...(container?.querySelectorAll('button') ?? [])].find((button) =>
+        button.textContent?.includes('Discover Models Behind Link'),
+      );
+      discover?.click();
+      await Promise.resolve();
+    });
+    expect(desktopClient.fetchDesktopProviderModels).not.toHaveBeenCalled();
+    expect(container?.textContent).toContain('Acknowledge this custom endpoint');
+    await act(async () => {
+      const connect = [...(container?.querySelectorAll('button') ?? [])].find((button) =>
+        button.textContent?.includes('Save & Connect'),
+      );
+      connect?.click();
+      await Promise.resolve();
+    });
+    expect(desktopClient.saveDesktopProviderProfile).not.toHaveBeenCalled();
+    expect(client.configure).not.toHaveBeenCalled();
   });
 });

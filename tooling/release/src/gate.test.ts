@@ -507,6 +507,16 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(windows).toContain('needs: [validate-candidate]');
     expect(windows).toContain("foreach ($pass in @('1', '2'))");
     expect(windows).toContain('worker-acceptance-container.ps1');
+    expect(windows).toContain(
+      'joy-media-windows-acceptance-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT',
+    );
+    expect(windows).toContain('Test-Path -LiteralPath $evidence');
+    expect(windows).toContain(
+      'if ($LASTEXITCODE -ne 0) { throw "Windows Worker acceptance harness failed',
+    );
+    expect(windows).toContain(
+      'joy-media-windows-acceptance-outputs-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT',
+    );
     expect(windows).toContain('joy-worker-self-test');
     expect(windows).not.toContain('worker-acceptance.ps1 `');
     expect(windows).not.toContain('actions/upload-artifact');
@@ -514,6 +524,10 @@ describe('JOY Studio 1.0 release gate', () => {
     const linux = workflow.slice(workflow.indexOf('\n  linux-real-services:'));
     expect(linux).toContain('needs: [validate-candidate]');
     expect(linux).toContain('Verify no untracked teardown residue\n        if: always()');
+    const acceptance = workflow.slice(workflow.indexOf('\n  real-service-acceptance:'));
+    expect(acceptance).toContain('JOY_RELEASE_WORKFLOW_RUN_ID: ${{ github.run_id }}');
+    expect(acceptance).toContain('JOY_RELEASE_WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}');
+    expect(acceptance).toContain('JOY_RELEASE_CANDIDATE_SHA: ${{ env.CANDIDATE_SHA }}');
   });
 
   it('verifies the self-hosted FFmpeg/FFprobe toolchain before CI dependencies', () => {

@@ -12,6 +12,11 @@ import {
   type DesktopProviderProfile,
 } from './desktop-client.js';
 import './ModelDrawer.css';
+import {
+  acknowledgeCustomEndpoint,
+  isCustomEndpointProvider,
+  requireCustomEndpointAcknowledgement,
+} from './custom-endpoint-acknowledgement.js';
 
 export interface ModelDrawerProps {
   readonly open: boolean;
@@ -66,6 +71,14 @@ export function ModelDrawer({
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [customAcknowledged, setCustomAcknowledged] = useState(false);
+  const [pendingCustomProfile, setPendingCustomProfile] = useState<DesktopProviderProfile>();
+
+  const acknowledge = (baseUrl: string, profileId?: string) => {
+    acknowledgeCustomEndpoint({ provider: 'custom', baseUrl, profileId });
+    setCustomAcknowledged(true);
+    setPendingCustomProfile(undefined);
+  };
 
   const mountedRef = useRef(true);
 
@@ -108,6 +121,7 @@ export function ModelDrawer({
 
   const handleProviderTypeChange = (type: ProviderType) => {
     setNewProvider(type);
+    setCustomAcknowledged(false);
     setNewBaseUrl(PROVIDER_DEFAULT_URLS[type]);
     const presets = COMMON_MODEL_PRESETS[type];
     if (presets.length > 0 && presets[0] !== undefined) {
@@ -118,6 +132,13 @@ export function ModelDrawer({
   };
 
   const handleDiscoverModels = async () => {
+    if (
+      (newProvider === 'custom' || newProvider === 'openai-compatible') &&
+      !requireCustomEndpointAcknowledgement({ provider: 'custom', baseUrl: newBaseUrl })
+    ) {
+      setDiscoveryError('Acknowledge this custom endpoint before discovering models.');
+      return;
+    }
     if (!newBaseUrl.trim()) {
       setDiscoveryError('Please provide a valid Base URL.');
       return;
@@ -154,6 +175,13 @@ export function ModelDrawer({
   };
 
   const handleSaveAndConnect = async () => {
+    if (
+      (newProvider === 'custom' || newProvider === 'openai-compatible') &&
+      !requireCustomEndpointAcknowledgement({ provider: 'custom', baseUrl: newBaseUrl })
+    ) {
+      onNotice?.('Acknowledge this custom endpoint before connecting.', 'error');
+      return;
+    }
     if (!newBaseUrl.trim() || !newSelectedModel.trim()) {
       onNotice?.('Base URL and Model ID are required.', 'error');
       return;
@@ -195,6 +223,18 @@ export function ModelDrawer({
   };
 
   const handleSelectModel = async (profile: DesktopProviderProfile, modelId: string) => {
+    if (
+      isCustomEndpointProvider(profile.provider) &&
+      !requireCustomEndpointAcknowledgement({
+        provider: 'custom',
+        baseUrl: profile.baseUrl,
+        profileId: profile.id,
+      })
+    ) {
+      setPendingCustomProfile(profile);
+      onNotice?.('Acknowledge this exact custom endpoint before connecting it.', 'error');
+      return;
+    }
     try {
       let apiKey = '';
       if (isDesktopHost()) {
@@ -233,6 +273,18 @@ export function ModelDrawer({
   };
 
   const handleRefreshProfileModels = async (profile: DesktopProviderProfile) => {
+    if (
+      isCustomEndpointProvider(profile.provider) &&
+      !requireCustomEndpointAcknowledgement({
+        provider: 'custom',
+        baseUrl: profile.baseUrl,
+        profileId: profile.id,
+      })
+    ) {
+      setPendingCustomProfile(profile);
+      onNotice?.('Acknowledge this exact custom endpoint before discovering models.', 'error');
+      return;
+    }
     setRefreshingProfileId(profile.id);
     try {
       let apiKey = '';
@@ -393,10 +445,26 @@ export function ModelDrawer({
                   type="text"
                   placeholder="https://api.kilo.ai/api/gateway/v1"
                   value={newBaseUrl}
-                  onChange={(e) => setNewBaseUrl(e.target.value)}
+                  onChange={(e) => {
+                    setNewBaseUrl(e.target.value);
+                    setCustomAcknowledged(false);
+                  }}
                 />
               </div>
 
+              {(newProvider === 'custom' || newProvider === 'openai-compatible') && (
+                <label className="model-drawer-form-group">
+                  <input
+                    type="checkbox"
+                    checked={customAcknowledged}
+                    onChange={(event) => {
+                      setCustomAcknowledged(event.target.checked);
+                      if (event.target.checked) acknowledge(newBaseUrl);
+                    }}
+                  />
+                  I understand this custom endpoint may log requests and credentials.
+                </label>
+              )}
               <div className="model-drawer-form-group">
                 <label htmlFor="md-api-key">API Key</label>
                 <input
@@ -475,6 +543,21 @@ export function ModelDrawer({
                 </button>
               </div>
             </section>
+          )}
+
+          {pendingCustomProfile && (
+            <label className="model-drawer-form-group">
+              <input
+                type="checkbox"
+                checked={false}
+                onChange={(event) => {
+                  if (event.target.checked)
+                    acknowledge(pendingCustomProfile.baseUrl, pendingCustomProfile.id);
+                }}
+              />
+              I acknowledge {pendingCustomProfile.name || pendingCustomProfile.baseUrl} for this
+              session.
+            </label>
           )}
 
           {/* Configured API Providers List */}
