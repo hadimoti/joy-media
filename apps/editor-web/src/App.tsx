@@ -1302,6 +1302,9 @@ function EditorWorkspace({
           });
           return;
         }
+        // The digest awaits; if the workspace unmounted (retention disposed) or
+        // another path published an export meanwhile, creating a URL now would leak.
+        if (cancelled || lastExportRef.current !== null) return;
         lastExportRef.current = { entryId: entry.id, url: URL.createObjectURL(blob!) };
         setExportHistory((current) => [...current]);
       })
