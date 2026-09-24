@@ -209,7 +209,12 @@ describe('POST/GET /v1/devices', () => {
       privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
     );
     const account = new AccountService({ pool, signer });
-    const origin = await start({ controlPlane, account });
+    // Same wiring as ops/self-hosted/linux-runner/real-service-acceptance.mjs.
+    const origin = await start({
+      controlPlane,
+      account,
+      entitlementPublicKeyPem: signer.publicKeyPem,
+    });
     const res = await request(
       origin,
       'POST',
@@ -221,6 +226,22 @@ describe('POST/GET /v1/devices', () => {
     expect(res.body).toMatchObject({
       data: { ownerId: 'user@example.com', displayName: "Hadi's PC" },
     });
+    const deviceId = (res.body as { readonly data: { readonly id: string } }).data.id;
+    const refreshed = await request(
+      origin,
+      'POST',
+      '/v1/entitlements/refresh',
+      { deviceId },
+      'token:user@example.com',
+    );
+    expect(refreshed.status).toBe(200);
+    const keyRoute = await request(origin, 'GET', '/v1/entitlements/public-key');
+    const servedKey = (keyRoute.body as { readonly data: { readonly publicKeyPem: string } }).data
+      .publicKeyPem;
+    expect(servedKey).toBe(signer.publicKeyPem);
+    expect(
+      verifyEntitlement((refreshed.body as { readonly data: SignedEntitlement }).data, servedKey),
+    ).toBe(true);
     await pool.end();
   });
 

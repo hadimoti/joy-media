@@ -305,6 +305,7 @@ try {
     rateLimit: { maxRequests: 100_000 },
     queryObservability: true,
     account: new AccountService({ pool, signer }),
+    entitlementPublicKeyPem: signer.publicKeyPem,
   });
   await listen(apiServer, apiPort);
 

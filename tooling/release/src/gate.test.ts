@@ -497,6 +497,7 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(harness).toContain("generateKeyPairSync('ed25519')");
     expect(harness).toContain('createEd25519EntitlementSigner(');
     expect(harness).toContain('account: new AccountService({ pool, signer })');
+    expect(harness).toContain('entitlementPublicKeyPem: signer.publicKeyPem');
   });
 
   it('validates the checked-out candidate and always checks Worker teardown', () => {
