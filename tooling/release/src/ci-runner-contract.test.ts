@@ -7,6 +7,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../..');
 const LINUX_DIR = join(REPO_ROOT, 'ops', 'self-hosted', 'linux-runner');
 const WINDOWS_DIR = join(REPO_ROOT, 'ops', 'self-hosted', 'windows-runner');
+const RELEASE_WORKFLOW = safeRead(
+  join(REPO_ROOT, '.github', 'workflows', 'release-candidate-v2.yml'),
+);
 
 function safeRead(p: string): string {
   if (!statSyncSafe(p)) return '';
@@ -274,6 +277,23 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(containerAcceptance).toContain('containerId = $containerId');
       expect(containerAcceptance).toContain('imageDigest = $imageDigest');
       expect(containerAcceptance).toContain('windowsPlatformVerified = $true');
+    });
+
+    it('scopes acceptance outputs to the current run and rejects stale or failed harness output', () => {
+      expect(RELEASE_WORKFLOW).toContain(
+        'joy-media-windows-acceptance-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + "-" + $pass',
+      );
+      expect(RELEASE_WORKFLOW).toContain('if (Test-Path -LiteralPath $evidence)');
+      expect(RELEASE_WORKFLOW).toContain(
+        'if ($LASTEXITCODE -ne 0) { throw "Windows Worker acceptance harness failed',
+      );
+      expect(RELEASE_WORKFLOW).toContain('JOY_RELEASE_WORKFLOW_RUN_ID: ${{ github.run_id }}');
+      expect(RELEASE_WORKFLOW).toContain(
+        'JOY_RELEASE_WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}',
+      );
+      expect(RELEASE_WORKFLOW).toContain('JOY_RELEASE_CANDIDATE_SHA: ${{ env.CANDIDATE_SHA }}');
+      expect(containerAcceptance).toContain('schemaVersion = 2');
+      expect(containerAcceptance).toContain('launchObserved = $true');
     });
 
     it('windows-runner-entrypoint.ps1 requires the same Docker-only label the producer emits', () => {

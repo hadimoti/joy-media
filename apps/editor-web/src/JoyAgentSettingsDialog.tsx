@@ -123,6 +123,8 @@ export function JoyAgentSettingsDialog({
   readonly initialTab?: JoyAgentSettingsTab;
 }) {
   const keyRef = useRef<HTMLInputElement>(null);
+  const openRouterKeyRef = useRef<HTMLInputElement>(null);
+  const kiloKeyRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(true);
   const mediaProbeEpochRef = useRef(0);
 
@@ -220,6 +222,7 @@ export function JoyAgentSettingsDialog({
       if (openRouterProfile) {
         setSavedProfile(openRouterProfile);
         setHasSavedKey(true);
+        setStudioPreset('custom');
         setModelId(openRouterProfile.modelId);
         setBaseUrl(openRouterProfile.baseUrl);
         setProvider('openrouter');
@@ -291,6 +294,10 @@ export function JoyAgentSettingsDialog({
       return;
     }
     const key = explicitKey ?? keyRef.current?.value ?? '';
+    if (provider === 'openai-compatible' && !customDisclosure) {
+      setDiscoveryError('Enter the custom-provider acknowledgement before discovering models.');
+      return;
+    }
     const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '');
     if (!normalizedBaseUrl) {
       setDiscoveryError('Please enter a Base URL before discovering models');
@@ -346,9 +353,8 @@ export function JoyAgentSettingsDialog({
     let openRouterKey = '';
     let kiloKey = '';
     try {
-      const key = keyRef.current?.value.trim() ?? '';
-      openRouterKey = key;
-      kiloKey = key;
+      openRouterKey = openRouterKeyRef.current?.value.trim() ?? '';
+      kiloKey = kiloKeyRef.current?.value.trim() ?? '';
 
       const openRouterProf = profiles.find((p) => p.provider === 'openrouter');
       if (!openRouterKey && openRouterProf) {
@@ -390,13 +396,62 @@ export function JoyAgentSettingsDialog({
 
       await engineClient.configure(dualConfig);
       const next = await engineClient.testConnection();
-      setConnectionStatus(next);
-      onStatusChange?.(next);
-
-      const message =
-        'Dual-Brain Studio connected! Model 1 Workhorse (openrouter/free) & Model 2 Creative Brain (kilo-auto/efficient) are live.';
-      setConnectionNotice({ kind: 'success', message });
-      onNotice?.(message, 'success');
+      const redactedStatus = next.dualBrain
+        ? {
+            ...next,
+            dualBrain: {
+              workhorse: {
+                ...next.dualBrain.workhorse,
+                ...(next.dualBrain.workhorse.message
+                  ? {
+                      message: redactProviderError(next.dualBrain.workhorse.message, openRouterKey),
+                    }
+                  : {}),
+              },
+              creative: {
+                ...next.dualBrain.creative,
+                ...(next.dualBrain.creative.message
+                  ? { message: redactProviderError(next.dualBrain.creative.message, kiloKey) }
+                  : {}),
+              },
+            },
+          }
+        : {
+            ...next,
+            capability: 'incompatible' as const,
+            message: 'Dual-Brain provider status was incomplete.',
+          };
+      const workhorse = redactedStatus.dualBrain?.workhorse;
+      const creative = redactedStatus.dualBrain?.creative;
+      const bothUsable =
+        workhorse?.capability === 'tool-loop' && creative?.capability === 'tool-loop';
+      const bothFailed =
+        workhorse?.capability === 'incompatible' && creative?.capability === 'incompatible';
+      const noProviderStatuses = !workhorse && !creative;
+      let capability: ByokSessionStatus['capability'] = 'untested';
+      if (bothUsable) capability = 'tool-loop';
+      else if (
+        bothFailed ||
+        !workhorse ||
+        !creative ||
+        workhorse.capability === 'incompatible' ||
+        creative.capability === 'incompatible'
+      ) {
+        capability = 'incompatible';
+      } else if (workhorse.capability === 'plan-only' && creative.capability === 'plan-only') {
+        capability = 'plan-only';
+      }
+      const safeStatus = { ...redactedStatus, capability };
+      setConnectionStatus(safeStatus);
+      onStatusChange?.(safeStatus);
+      const message = bothUsable
+        ? 'Dual-Brain Studio connected! Model 1 Workhorse (openrouter/free) & Model 2 Creative Brain (kilo-auto/efficient) are live.'
+        : bothFailed || noProviderStatuses
+          ? `Dual-Brain connection failed. OpenRouter: ${redactProviderError(workhorse?.message ?? 'unavailable', openRouterKey)} Kilo: ${redactProviderError(creative?.message ?? 'unavailable', kiloKey)}`
+          : `Dual-Brain partially connected. OpenRouter: ${workhorse?.capability ?? 'unavailable'}${workhorse?.message ? ` (${workhorse.message})` : ''}; Kilo: ${creative?.capability ?? 'unavailable'}${creative?.message ? ` (${creative.message})` : ''}. Tool-loop readiness requires both brains.`;
+      const kind = bothUsable ? 'success' : 'error';
+      setConnectionNotice({ kind, message });
+      onNotice?.(message, kind);
     } catch (error) {
       const rawMessage =
         error instanceof Error ? error.message : 'Unable to connect Dual-Brain Studio';
@@ -407,6 +462,8 @@ export function JoyAgentSettingsDialog({
       setConnectionNotice({ kind: 'error', message: safeMessage });
       onNotice?.(safeMessage, 'error');
     } finally {
+      if (openRouterKeyRef.current) openRouterKeyRef.current.value = '';
+      if (kiloKeyRef.current) kiloKeyRef.current.value = '';
       if (mountedRef.current) setWorking(false);
     }
   };
@@ -559,6 +616,16 @@ export function JoyAgentSettingsDialog({
 
   const connectProfile = async (prof: DesktopProviderProfile) => {
     if (working) return;
+    if (prof.provider === 'custom' && !customDisclosure) {
+      setProvider('openai-compatible');
+      setStudioPreset('custom');
+      setBaseUrl(prof.baseUrl);
+      setModelId(prof.modelId);
+      const message = 'Enter the custom-provider acknowledgement before connecting.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
+      return;
+    }
     setWorking(true);
     let key = '';
     try {
@@ -669,6 +736,8 @@ export function JoyAgentSettingsDialog({
     setConnectionNotice({ kind: 'info', message });
     onNotice?.(message, 'info');
     if (keyRef.current) keyRef.current.value = '';
+    if (openRouterKeyRef.current) openRouterKeyRef.current.value = '';
+    if (kiloKeyRef.current) kiloKeyRef.current.value = '';
   };
 
   const filteredDiscoveredModels = discoveredModels.filter((m) =>
@@ -1007,6 +1076,30 @@ export function JoyAgentSettingsDialog({
                                 ✓ JOY Account session linked
                               </p>
                             )}
+                          </div>
+                        ) : studioPreset === 'dual-brain' && provider !== 'openai-compatible' ? (
+                          <div className="joy-settings-field-full joy-settings-field">
+                            <label>
+                              <span>OpenRouter API key</span>
+                              <input
+                                ref={openRouterKeyRef}
+                                type="password"
+                                autoComplete="off"
+                                spellCheck={false}
+                              />
+                            </label>
+                            <label>
+                              <span>Kilo API key</span>
+                              <input
+                                ref={kiloKeyRef}
+                                type="password"
+                                autoComplete="off"
+                                spellCheck={false}
+                              />
+                            </label>
+                            <span style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>
+                              Each key is sent only to its matching provider.
+                            </span>
                           </div>
                         ) : (
                           <div className="joy-settings-field-full joy-settings-field">

@@ -673,7 +673,7 @@ function operationalEvidenceReady(
       (block) =>
         block === null ||
         typeof block !== 'object' ||
-        block.schemaVersion !== 1 ||
+        (block.schemaVersion !== 1 && block.schemaVersion !== 2) ||
         block.status !== 'verified' ||
         !(
           block.execution === 'real-services' ||
@@ -727,7 +727,10 @@ function operationalEvidenceReady(
   )
     return false;
   const lifecycle = record(evidence.windows.lifecycle);
-  if (
+  const schemaVersion = evidence.windows.schemaVersion;
+  if (schemaVersion === 2) {
+    if (!windowsLifecycleReady(lifecycle)) return false;
+  } else if (
     [
       'install',
       'startup',
@@ -747,7 +750,7 @@ function operationalEvidenceReady(
     !['at-logon', 'explicit-spawn'].includes(startup.trigger) ||
     startup.triggerVerified !== true ||
     startup.action !== 'normal-daemon' ||
-    startup.taskRan !== true ||
+    !startupLaunchProven(startup) ||
     daemon.started !== true ||
     daemon.terminated !== true ||
     daemon.paired !== true ||
@@ -818,8 +821,20 @@ function windowsAcceptanceReady(
   if (typeof raw.workflowRunId !== 'string' || !/^[0-9]+$/u.test(raw.workflowRunId)) {
     reasons.push('workflow_run_id missing or non-numeric');
   }
+  const expectedRunId = process.env.JOY_RELEASE_WORKFLOW_RUN_ID;
+  if (expectedRunId !== undefined && raw.workflowRunId !== expectedRunId) {
+    reasons.push('workflow_run_id does not match the current workflow run');
+  }
   if (typeof raw.attempt !== 'number' || !Number.isInteger(raw.attempt) || raw.attempt < 1) {
     reasons.push('run_attempt missing or non-positive');
+  }
+  const expectedAttempt = process.env.JOY_RELEASE_WORKFLOW_RUN_ATTEMPT;
+  if (expectedAttempt !== undefined && raw.attempt !== Number(expectedAttempt)) {
+    reasons.push('run_attempt does not match the current workflow attempt');
+  }
+  const expectedCandidateSha = process.env.JOY_RELEASE_CANDIDATE_SHA;
+  if (expectedCandidateSha !== undefined && raw.candidateSha !== expectedCandidateSha) {
+    reasons.push('candidate_sha does not match the current workflow candidate');
   }
   if (raw.runner !== 'self-hosted,windows,x64,joy-media-worker-docker') {
     reasons.push(

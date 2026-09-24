@@ -118,6 +118,74 @@ describe('JOY Agent Settings connection status', () => {
     return key;
   }
 
+  it('sends separate Dual-Brain credentials only to their matching provider', async () => {
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    const fields = [...rendered.querySelectorAll<HTMLInputElement>('input[type="password"]')];
+    expect(fields).toHaveLength(2);
+    expect(rendered.textContent).toContain('OpenRouter API key');
+    expect(rendered.textContent).toContain('Kilo API key');
+    setInputValue(fields[0]!, 'openrouter-only-key');
+    setInputValue(fields[1]!, 'kilo-only-key');
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    const config = vi.mocked(engineClient.configure).mock.calls[0]?.[0];
+    expect(config).toMatchObject({
+      mode: 'dual-brain',
+      workhorse: { provider: 'openrouter', apiKey: 'openrouter-only-key' },
+      creative: { provider: 'kilo', apiKey: 'kilo-only-key' },
+    });
+    expect(config && 'workhorse' in config ? config.workhorse.apiKey : '').not.toBe(
+      'kilo-only-key',
+    );
+    expect(config && 'creative' in config ? config.creative.apiKey : '').not.toBe(
+      'openrouter-only-key',
+    );
+    expect(fields.map((field) => field.value)).toEqual(['', '']);
+  });
+
+  it('reports a partial Dual-Brain connection as an error and names the unusable brain', async () => {
+    const engineClient = client({
+      testConnection: vi.fn().mockResolvedValue({
+        provider: 'dual-brain',
+        modelId: 'openrouter/free + kilo-auto/efficient',
+        capability: 'incompatible',
+        dualBrain: {
+          workhorse: {
+            provider: 'openrouter',
+            modelId: 'openrouter/free',
+            capability: 'tool-loop',
+          },
+          creative: {
+            provider: 'kilo',
+            modelId: 'kilo-auto/efficient',
+            capability: 'incompatible',
+            message: 'Kilo refused partial-status-key',
+          },
+        },
+      }),
+    });
+    const rendered = await render(engineClient, undefined);
+    const fields = [...rendered.querySelectorAll<HTMLInputElement>('input[type="password"]')];
+    setInputValue(fields[0]!, 'openrouter-partial-key');
+    setInputValue(fields[1]!, 'partial-status-key');
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    expect(rendered.querySelector('[role="alert"]')?.textContent).toContain(
+      'Dual-Brain partially connected. OpenRouter: tool-loop; Kilo: incompatible (Kilo refused [redacted]). Tool-loop readiness requires both brains.',
+    );
+    expect(rendered.textContent).not.toContain('are live.');
+    expect(rendered.textContent).not.toContain('partial-status-key');
+  });
+
   it('shows tool-loop readiness and the connection notice in the dialog', async () => {
     const rendered = await render(client(), undefined);
 
@@ -228,6 +296,7 @@ describe('JOY Agent Settings connection status', () => {
       invoke,
     } as unknown as NonNullable<typeof window.joyDesktop>;
     const rendered = await render(client(), undefined);
+    await selectCustomPreset(rendered);
     const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
     const openDrawer = rendered.querySelector<HTMLButtonElement>('.joy-settings-text-btn');
     if (key === null || openDrawer === null) {
@@ -438,6 +507,90 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
     expect(rendered.textContent).toContain(
       'Enter the custom-provider acknowledgement before connecting.',
     );
+    expect(rendered.querySelector<HTMLInputElement>('input[type="checkbox"]')).not.toBeNull();
+  });
+
+  it('blocks custom model discovery before sending an entered key until acknowledged', async () => {
+    const invoke = vi.fn().mockResolvedValue([]);
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.fetch-models'],
+      invoke,
+    };
+    const rendered = await render(client(), undefined);
+    await selectCustomPreset(rendered);
+    await changeProvider(rendered, 'openai-compatible');
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    const baseUrl = rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]');
+    if (key === null || baseUrl === null) throw new Error('Expected custom endpoint fields');
+    setInputValue(key, 'custom-discovery-secret');
+    setInputValue(baseUrl, 'https://custom.example/v1');
+
+    await act(async () => {
+      const drawer = [...rendered.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes('Discovered Models Drawer'),
+      );
+      drawer?.click();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      const discover = [...rendered.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes('Discover Models'),
+      );
+      discover?.click();
+      await Promise.resolve();
+    });
+
+    expect(invoke).not.toHaveBeenCalledWith(
+      'desktop.provider-profile.fetch-models',
+      expect.anything(),
+    );
+    expect(rendered.textContent).toContain(
+      'Enter the custom-provider acknowledgement before discovering models.',
+    );
+  });
+
+  it('blocks a saved custom profile before retrieving its key until acknowledged', async () => {
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        return [
+          {
+            id: 'custom-prof-1',
+            provider: 'custom',
+            name: 'Private custom endpoint',
+            baseUrl: 'https://custom.example/v1',
+            modelId: 'private-model',
+            createdAt: '2026-09-15T00:00:00.000Z',
+            updatedAt: '2026-09-15T00:00:00.000Z',
+          },
+        ];
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.begin-session'],
+      invoke,
+    };
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      buttonByText(rendered, 'Use').click();
+      await Promise.resolve();
+    });
+
+    expect(invoke).not.toHaveBeenCalledWith(
+      'desktop.provider-profile.begin-session',
+      expect.anything(),
+    );
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain(
+      'Enter the custom-provider acknowledgement before connecting.',
+    );
+    expect(rendered.querySelector<HTMLInputElement>('input[type="checkbox"]')).not.toBeNull();
   });
 
   it('requires acknowledgement when a custom provider is selected from the dual-brain default', async () => {

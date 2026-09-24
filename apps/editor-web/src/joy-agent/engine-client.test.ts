@@ -11,8 +11,12 @@ class FakeWorker {
   readonly messages: unknown[] = [];
   terminated = false;
   private modelId = '';
+  private provider: 'openrouter' | 'openai-compatible' = 'openrouter';
 
-  constructor(private readonly testResultDelayMs = 0) {}
+  constructor(
+    private readonly testResultDelayMs = 0,
+    private readonly testCapability: 'tool-loop' | 'plan-only' | 'incompatible' = 'tool-loop',
+  ) {}
 
   postMessage(message: unknown): void {
     this.messages.push(message);
@@ -23,19 +27,29 @@ class FakeWorker {
           protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
           type: 'configured',
           status: {
-            provider: message.config.provider,
+            // The Worker reports the normalized provider; Kilo is OpenAI-compatible.
+            provider:
+              message.config.provider === 'kilo' ? 'openai-compatible' : message.config.provider,
             modelId: message.config.modelId,
             capability: 'untested',
           },
         }),
       );
-    if (message.type === 'configure') this.modelId = message.config.modelId;
+    if (message.type === 'configure') {
+      this.modelId = message.config.modelId;
+      this.provider = message.config.provider === 'openrouter' ? 'openrouter' : 'openai-compatible';
+    }
     if (message.type === 'test') {
       const emitResult = () =>
         this.emit({
           protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
           type: 'test-result',
-          status: { provider: 'openrouter', modelId: 'model', capability: 'tool-loop' },
+          status: {
+            provider: this.provider,
+            modelId: this.modelId || 'model',
+            capability: this.testCapability,
+            ...(this.testCapability === 'incompatible' ? { message: 'provider unavailable' } : {}),
+          },
         });
       if (this.testResultDelayMs > 0) setTimeout(emitResult, this.testResultDelayMs);
       else queueMicrotask(emitResult);
@@ -243,6 +257,42 @@ describe('JOY Agent Engine client V2 lifecycle', () => {
         (message) => isMainMessage(message) && message.type === 'probe-media-capabilities',
       ),
     ).toHaveLength(0);
+  });
+
+  it('requires both Dual-Brain workers to pass before reporting tool-loop readiness', async () => {
+    const workers = [new FakeWorker(0, 'tool-loop'), new FakeWorker(0, 'incompatible')];
+    let index = 0;
+    const client = createJoyAgentEngineClient(() => workers[index++] as unknown as Worker);
+    const config = {
+      mode: 'dual-brain' as const,
+      workhorse: {
+        provider: 'openrouter' as const,
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'openrouter/free',
+        apiKey: 'only-openrouter-key',
+      },
+      creative: {
+        provider: 'kilo' as const,
+        baseUrl: 'https://api.kilo.ai/v1',
+        modelId: 'kilo-auto/efficient',
+        apiKey: 'only-kilo-key',
+      },
+    };
+    await client.configure(config);
+    const status = await client.testConnection();
+
+    expect(status.capability).toBe('incompatible');
+    expect(status.dualBrain?.workhorse.capability).toBe('tool-loop');
+    expect(status.dualBrain?.creative.capability).toBe('incompatible');
+    const workerConfigs = workers.map(
+      (worker) =>
+        worker.messages.find(
+          (message): message is Extract<MainToWorkerMessage, { type: 'configure' }> =>
+            isMainMessage(message) && message.type === 'configure',
+        )?.config,
+    );
+    expect(workerConfigs[0]?.apiKey).toBe('only-openrouter-key');
+    expect(workerConfigs[1]?.apiKey).toBe('only-kilo-key');
   });
 
   it('runs a media capability probe only when explicitly requested and keeps it session-only', async () => {

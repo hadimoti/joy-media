@@ -254,6 +254,36 @@ const operationalEvidence = (): ReleaseOperationalEvidence => ({
   },
 });
 
+const schema2OperationalEvidence = (): ReleaseOperationalEvidence => {
+  const evidence = operationalEvidence();
+  const lifecycle = evidence.windows.lifecycle as Record<string, Record<string, unknown>>;
+  const startup = { ...lifecycle.startup };
+  delete startup.taskRan;
+  return {
+    ...evidence,
+    windows: {
+      ...evidence.windows,
+      schemaVersion: 2,
+      lifecycle: {
+        install: { ...lifecycle.install, status: 'verified' },
+        startup: {
+          ...startup,
+          status: 'verified',
+          launchObserved: true,
+          trigger: 'explicit-spawn',
+        },
+        session: { ...lifecycle.session, status: 'verified' },
+        renewal: { ...lifecycle.renewal, status: 'verified' },
+        recovery: { ...lifecycle.recovery, status: 'verified' },
+        repair: { ...lifecycle.repair, status: 'verified' },
+        update: { ...lifecycle.update, status: 'verified' },
+        rollback: { ...lifecycle.rollback, status: 'verified' },
+        uninstall: { ...lifecycle.uninstall, status: 'verified' },
+      },
+    },
+  };
+};
+
 const passingInput = (): ReleaseGateInput => ({
   testSummary: { collected: 12, failed: 0 },
   dirtyGeneratedArtifacts: [],
@@ -1109,6 +1139,86 @@ describe('JOY Studio 1.0 release gate', () => {
     });
   });
 
+  it('accepts the container harness schema-2 lifecycle contract', () => {
+    const result = evaluateReleaseGate({
+      ...passingInput(),
+      operationalEvidence: schema2OperationalEvidence(),
+    });
+    expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
+      'passed',
+    );
+  });
+
+  it('rejects schema-2 Windows acceptance when any required verified predicate is missing or false', () => {
+    const base = schema2OperationalEvidence();
+    const windows = base.windows as Record<string, unknown>;
+    const lifecycle = windows.lifecycle as Record<string, Record<string, unknown>>;
+    const failStep =
+      (step: string, updates: Record<string, unknown>) => (next: Record<string, unknown>) => {
+        next[step] = { ...lifecycle[step], ...updates };
+      };
+    const failStartupDaemon =
+      (updates: Record<string, unknown>) => (next: Record<string, unknown>) => {
+        next.startup = {
+          ...lifecycle.startup,
+          daemon: { ...(lifecycle.startup.daemon as object), ...updates },
+        };
+      };
+    const failures: readonly ((next: Record<string, unknown>) => void)[] = [
+      (next) => {
+        delete next.install;
+      },
+      failStep('install', { status: 'failed' }),
+      failStep('startup', { status: 'failed' }),
+      failStep('startup', { trigger: 'unknown' }),
+      failStep('startup', { triggerVerified: false }),
+      failStep('startup', { action: 'fixture-daemon' }),
+      (next) => {
+        const startup = { ...lifecycle.startup };
+        delete startup.launchObserved;
+        next.startup = startup;
+      },
+      failStep('startup', { launchObserved: false }),
+      failStartupDaemon({ started: false }),
+      failStartupDaemon({ terminated: false }),
+      failStartupDaemon({ paired: false }),
+      failStartupDaemon({ notificationCleared: false }),
+      failStartupDaemon({ hello: 0 }),
+      failStartupDaemon({ leases: 0 }),
+      failStep('session', { status: 'failed' }),
+      failStep('session', { stateIsolated: false }),
+      failStep('session', { ownerSessionUsed: true }),
+      failStep('session', { fixtureSessionUsed: false }),
+      failStep('session', { persistedSession: false }),
+      failStep('session', { protectedState: false }),
+      failStep('renewal', { status: 'failed' }),
+      failStep('renewal', { restarted: false }),
+      failStep('recovery', { status: 'failed' }),
+      failStep('repair', { status: 'failed' }),
+      failStep('repair', { restored: false }),
+      failStep('update', { status: 'failed' }),
+      failStep('update', { atomicReplacement: false }),
+      failStep('update', { distinctPackageBytes: false }),
+      failStep('rollback', { status: 'failed' }),
+      failStep('uninstall', { status: 'failed' }),
+    ];
+
+    for (const fail of failures) {
+      const changedLifecycle = { ...lifecycle };
+      fail(changedLifecycle);
+      const result = evaluateReleaseGate({
+        ...passingInput(),
+        operationalEvidence: {
+          ...base,
+          windows: { ...windows, lifecycle: changedLifecycle },
+        },
+      });
+      expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
+        'failed',
+      );
+    }
+  });
+
   it('requires export bytes and hashes to match download and re-import evidence', () => {
     const evidence = operationalEvidence();
     const result = evaluateReleaseGate({
@@ -1312,6 +1422,44 @@ describe('JOY Studio 1.0 release gate', () => {
         });
         expect(result.checks.find((c) => c.id === 'windows-acceptance')?.status).toBe('failed');
         expect(result.passed).toBe(false);
+      }
+    });
+
+    it('binds Windows acceptance to the current workflow run, attempt, and candidate SHA', () => {
+      const previous = {
+        runId: process.env.JOY_RELEASE_WORKFLOW_RUN_ID,
+        attempt: process.env.JOY_RELEASE_WORKFLOW_RUN_ATTEMPT,
+        candidate: process.env.JOY_RELEASE_CANDIDATE_SHA,
+      };
+      process.env.JOY_RELEASE_WORKFLOW_RUN_ID = '123456789';
+      process.env.JOY_RELEASE_WORKFLOW_RUN_ATTEMPT = '1';
+      process.env.JOY_RELEASE_CANDIDATE_SHA = 'a'.repeat(40);
+      try {
+        expect(
+          evaluateReleaseGate({
+            ...passingInput(),
+            windowsAcceptance: windowsAcceptance(),
+          }).checks.find((check) => check.id === 'windows-acceptance')?.status,
+        ).toBe('passed');
+        const mismatches = [
+          { ...windowsAcceptance(), workflowRunId: '987654321' },
+          { ...windowsAcceptance(), attempt: 2 },
+          windowsAcceptance('f'.repeat(40)),
+        ];
+        for (const evidence of mismatches) {
+          expect(
+            evaluateReleaseGate({ ...passingInput(), windowsAcceptance: evidence }).checks.find(
+              (check) => check.id === 'windows-acceptance',
+            )?.status,
+          ).toBe('failed');
+        }
+      } finally {
+        if (previous.runId === undefined) delete process.env.JOY_RELEASE_WORKFLOW_RUN_ID;
+        else process.env.JOY_RELEASE_WORKFLOW_RUN_ID = previous.runId;
+        if (previous.attempt === undefined) delete process.env.JOY_RELEASE_WORKFLOW_RUN_ATTEMPT;
+        else process.env.JOY_RELEASE_WORKFLOW_RUN_ATTEMPT = previous.attempt;
+        if (previous.candidate === undefined) delete process.env.JOY_RELEASE_CANDIDATE_SHA;
+        else process.env.JOY_RELEASE_CANDIDATE_SHA = previous.candidate;
       }
     });
 
