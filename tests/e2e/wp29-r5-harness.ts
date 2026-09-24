@@ -123,7 +123,7 @@ export async function authenticate(page: Page): Promise<void> {
 const PROJECT_SELECTOR_READY_TIMEOUT_MS = 20_000;
 
 async function openReadyProjectSelector(page: Page): Promise<void> {
-  const response = await page.goto('/', { waitUntil: 'domcontentloaded' });
+  const response = await page.goto('/', { waitUntil: 'load' });
   expect(response, 'The project selector navigation must return an HTTP response.').not.toBeNull();
   expect(response!.ok(), `Project selector navigation returned HTTP ${response!.status()}.`).toBe(
     true,

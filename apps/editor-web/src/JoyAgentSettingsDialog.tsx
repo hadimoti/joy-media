@@ -168,6 +168,7 @@ export function JoyAgentSettingsDialog({
       (status?.provider === 'joy-hosted' ? 'minimax/minimax-m3' : 'openrouter/auto'),
   );
   const [connectionName, setConnectionName] = useState('');
+  const [customDisclosure, setCustomDisclosure] = useState(false);
   const [working, setWorking] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState(status);
   const [connectionNotice, setConnectionNotice] = useState<AgentSettingsNotice | undefined>();
@@ -212,6 +213,7 @@ export function JoyAgentSettingsDialog({
         setModelId(openRouterProfile.modelId);
         setBaseUrl(openRouterProfile.baseUrl);
         setProvider('openrouter');
+        setCustomDisclosure(false);
       }
     } catch {
       /* Ignore profile read error in background */
@@ -249,6 +251,7 @@ export function JoyAgentSettingsDialog({
     next: 'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible',
   ) => {
     setProvider(next);
+    setCustomDisclosure(false);
     setConnectionNotice(undefined);
     setDiscoveryError(null);
     if (next === 'openrouter') {
@@ -334,6 +337,24 @@ export function JoyAgentSettingsDialog({
       }
     }
 
+    const normalizedModelId = modelId.trim();
+    const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '');
+
+    if (provider === 'openai-compatible') {
+      const missing: string[] = [];
+      if (!key) missing.push('an API key');
+      if (!normalizedModelId) missing.push('a model ID');
+      if (!normalizedBaseUrl) missing.push('a base URL');
+      if (!customDisclosure) missing.push('the custom-provider acknowledgement');
+      if (missing.length > 0) {
+        const message = `Enter ${missing.join(', ')} before connecting.`;
+        setConnectionNotice({ kind: 'error', message });
+        onNotice?.(message, 'error');
+        setWorking(false);
+        return;
+      }
+    }
+
     if (provider !== 'joy-hosted' && !key) {
       setConnectionNotice({ kind: 'error', message: 'API key is required.' });
       onNotice?.('API key is required.', 'error');
@@ -341,7 +362,6 @@ export function JoyAgentSettingsDialog({
       return;
     }
 
-    const normalizedModelId = modelId.trim();
     if (!normalizedModelId) {
       setConnectionNotice({ kind: 'error', message: 'Model ID is required.' });
       onNotice?.('Model ID is required.', 'error');
@@ -349,7 +369,6 @@ export function JoyAgentSettingsDialog({
       return;
     }
 
-    const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '');
     if (!normalizedBaseUrl) {
       setConnectionNotice({ kind: 'error', message: 'Base URL is required.' });
       onNotice?.('Base URL is required.', 'error');
@@ -827,6 +846,24 @@ export function JoyAgentSettingsDialog({
                             <span style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>
                               🔒 Keys are encrypted via Windows DPAPI and never logged or proxied.
                             </span>
+                          </div>
+                        )}
+
+                        {provider === 'openai-compatible' && (
+                          <div className="joy-settings-field-full joy-settings-field">
+                            <label
+                              className="agent-toggle"
+                              style={{ fontSize: '12px', color: '#aaa' }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={customDisclosure}
+                                onChange={(event) => setCustomDisclosure(event.target.checked)}
+                                disabled={working || mediaProbeWorking}
+                              />
+                              I understand that custom endpoints may log requests according to their
+                              own policy.
+                            </label>
                           </div>
                         )}
 

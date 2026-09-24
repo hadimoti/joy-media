@@ -831,8 +831,8 @@ export function AssetLibraryPanel({
       setQuery('');
       setAvailability('all');
       setSort('recent');
-      setStatus(`${importedAsset.displayName} imported to My media.`);
       await refresh();
+      setStatus(`${importedAsset.displayName} imported to My media.`);
     },
     [client, projectId, refresh],
   );

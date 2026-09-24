@@ -228,6 +228,74 @@ describe('JOY Agent Settings media capability probe', () => {
   });
 });
 
+describe('JOY Agent Settings custom provider acknowledgement', () => {
+  const disclosureText =
+    'I understand that custom endpoints may log requests according to their own policy.';
+
+  function providerSelect(rendered: HTMLElement): HTMLSelectElement {
+    const select = rendered.querySelector<HTMLSelectElement>('select');
+    if (select === null) throw new Error('Expected provider select dropdown');
+    return select;
+  }
+
+  async function changeProvider(rendered: HTMLElement, provider: string): Promise<void> {
+    await act(async () => {
+      const select = providerSelect(rendered);
+      select.value = provider;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  it('shows the acknowledgement checkbox only for an OpenAI-compatible provider', async () => {
+    const rendered = await render(client(), readyStatus);
+
+    expect(rendered.textContent).not.toContain(disclosureText);
+    await changeProvider(rendered, 'openai-compatible');
+    expect(rendered.textContent).toContain(disclosureText);
+    expect(rendered.querySelector('input[type="checkbox"]')).not.toBeNull();
+
+    await changeProvider(rendered, 'openrouter');
+    expect(rendered.textContent).not.toContain(disclosureText);
+  });
+
+  it('blocks custom provider connection until the acknowledgement is checked', async () => {
+    const engineClient = client();
+    const rendered = await render(engineClient, readyStatus);
+    await changeProvider(rendered, 'openai-compatible');
+
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    if (key === null) throw new Error('Expected API key field');
+    const baseUrl = rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]');
+    if (baseUrl === null) throw new Error('Expected base URL field');
+    await act(async () => {
+      setInputValue(key, 'custom-provider-test-key');
+      setInputValue(baseUrl, 'https://custom.example/v1');
+      buttonByText(rendered, 'Connect model').click();
+    });
+
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain(
+      'Enter the custom-provider acknowledgement before connecting.',
+    );
+  });
+
+  it('resets the acknowledgement whenever the provider changes', async () => {
+    const rendered = await render(client(), readyStatus);
+    await changeProvider(rendered, 'openai-compatible');
+
+    const checkbox = rendered.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (checkbox === null) throw new Error('Expected custom provider acknowledgement checkbox');
+    await act(async () => {
+      checkbox.click();
+    });
+    expect(checkbox.checked).toBe(true);
+
+    await changeProvider(rendered, 'openrouter');
+    await changeProvider(rendered, 'openai-compatible');
+    expect(rendered.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(false);
+  });
+});
+
 describe('JOY Agent Settings desktop profile persistence', () => {
   it('loads saved profile on mount when isDesktopHost is true', async () => {
     const invoke = vi.fn().mockImplementation(async (channel: string) => {

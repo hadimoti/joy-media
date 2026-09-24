@@ -493,15 +493,19 @@ export async function configureJoyAgent(
   await page.getByRole('menuitem', { name: 'Joy Code Settings…', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Joy Code Settings' });
   await expect(dialog).toBeVisible();
-  // The settings dialog has several descendant labels containing the word
-  // "provider" (budget and capability controls). The first select is the
-  // model-connection provider selector; keep this locator tied to the UI
-  // structure rather than relying on ambiguous accessible-name matching.
-  await dialog.locator('select').first().selectOption('openai-compatible');
-  await dialog.getByLabel('Base URL').fill(FAKE_PROVIDER_BASE_URL);
-  await dialog.getByLabel('Model ID').fill(options.modelId ?? FAKE_PROVIDER_MODEL);
-  await dialog.getByLabel(/I understand the custom provider receives/).check();
-  await dialog.getByLabel('API key').fill(apiKey);
+  await dialog
+    .getByRole('combobox', { name: 'Provider Platform' })
+    .selectOption('openai-compatible');
+  await dialog.getByRole('textbox', { name: 'Base URL / Endpoint' }).fill(FAKE_PROVIDER_BASE_URL);
+  await dialog
+    .getByRole('textbox', { name: /Model ID/ })
+    .fill(options.modelId ?? FAKE_PROVIDER_MODEL);
+  await dialog
+    .getByRole('checkbox', {
+      name: 'I understand that custom endpoints may log requests according to their own policy.',
+    })
+    .check();
+  await dialog.getByLabel('API Secret Key').fill(apiKey);
   await dialog.getByRole('button', { name: /Connect model|Test & use/ }).click();
   await expect(
     dialog.getByText(
@@ -511,7 +515,7 @@ export async function configureJoyAgent(
     ),
   ).toBeVisible({ timeout: 20_000 });
   if (!options.allowFailure) await expect(dialog.getByText(/Connected successfully/)).toBeVisible();
-  await expect(dialog.getByLabel('API key')).toHaveValue('');
+  await expect(dialog.getByLabel('API Secret Key')).toHaveValue('');
   return dialog;
 }
 
