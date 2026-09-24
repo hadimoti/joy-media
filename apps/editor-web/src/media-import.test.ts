@@ -332,17 +332,16 @@ describe('describeMedia (timed-media blob lifecycle)', () => {
         height: 1080,
       });
 
-      // The revoke must happen BEFORE removeAttribute('src') and load();
-      // any order that revokes last surfaces a `net::ERR_FILE_NOT_FOUND`
-      // for the still-pending blob URL on Chromium during reimport.
+      // Clear and unload the media consumer before revoking its URL so a
+      // pending fetch cannot race into `net::ERR_FILE_NOT_FOUND`.
       const revokeIndex = events.indexOf(`revokeObjectURL:${url}`);
       const removeSrcIndex = events.indexOf('removeAttribute:src');
       const loadIndex = events.indexOf('load');
       expect(revokeIndex).toBeGreaterThanOrEqual(0);
       expect(removeSrcIndex).toBeGreaterThanOrEqual(0);
       expect(loadIndex).toBeGreaterThanOrEqual(0);
-      expect(revokeIndex).toBeLessThan(removeSrcIndex);
-      expect(revokeIndex).toBeLessThan(loadIndex);
+      expect(removeSrcIndex).toBeLessThan(revokeIndex);
+      expect(loadIndex).toBeLessThan(revokeIndex);
     } finally {
       createUrl.mockRestore();
       revokeUrl.mockRestore();

@@ -38,6 +38,7 @@ import {
 } from './opfs-original-asset-cache.js';
 import { verifyOriginalRecoveryCandidate } from './asset-original-recovery.js';
 import { resolveAssetThumb, type AssetThumbSource } from './asset-card-preview.js';
+import { releaseMediaObjectUrl } from './media-object-url.js';
 import {
   CloseIcon,
   PlusIcon,
@@ -178,6 +179,7 @@ export function AssetLibraryPanel({
   );
   const originalAssetCache = useMemo(() => openOpfsOriginalAssetCache(), []);
   const previewRef = useRef<Preview | undefined>(undefined);
+  const previewMediaRef = useRef<HTMLMediaElement | HTMLImageElement | null>(null);
   const timelineAddRef = useRef<Set<string>>(new Set());
   const refreshSeqRef = useRef(0);
   const previewSeqRef = useRef(0);
@@ -271,12 +273,13 @@ export function AssetLibraryPanel({
   }, [assetSource, category, collection, sort, storage, viewMode]);
 
   const clearPreview = useCallback(() => {
-    previewRef.current?.revoke();
+    const preview = previewRef.current;
+    if (preview !== undefined)
+      releaseMediaObjectUrl(previewMediaRef.current, preview.url, preview.revoke);
+    previewMediaRef.current = null;
     previewRef.current = undefined;
     setPreview(undefined);
   }, []);
-  useEffect(() => () => previewRef.current?.revoke(), []);
-
   const refresh = useCallback(async () => {
     const requestId = ++refreshSeqRef.current;
     const token = getStoredMediaToken(storage);
@@ -384,7 +387,10 @@ export function AssetLibraryPanel({
     return () => {
       refreshSeqRef.current += 1;
       previewSeqRef.current += 1;
-      previewRef.current?.revoke();
+      const previousPreview = previewRef.current;
+      if (previousPreview !== undefined)
+        releaseMediaObjectUrl(previewMediaRef.current, previousPreview.url, previousPreview.revoke);
+      previewMediaRef.current = null;
       previewRef.current = undefined;
     };
   }, []);
@@ -1282,11 +1288,30 @@ export function AssetLibraryPanel({
                 <CloseIcon />
               </button>
               {preview.mimeType.startsWith('video/') ? (
-                <video key={preview.derivativeId} src={preview.url} controls autoPlay />
+                <video
+                  ref={(element) => {
+                    previewMediaRef.current = element;
+                  }}
+                  key={preview.derivativeId}
+                  src={preview.url}
+                  controls
+                  autoPlay
+                />
               ) : preview.mimeType.startsWith('audio/') ? (
-                <audio key={preview.derivativeId} src={preview.url} controls autoPlay />
+                <audio
+                  ref={(element) => {
+                    previewMediaRef.current = element;
+                  }}
+                  key={preview.derivativeId}
+                  src={preview.url}
+                  controls
+                  autoPlay
+                />
               ) : (
                 <img
+                  ref={(element) => {
+                    previewMediaRef.current = element;
+                  }}
                   src={preview.url}
                   alt={`Verified derivative preview for ${preview.displayName}`}
                 />
@@ -1670,8 +1695,11 @@ function AssetCardMedia({
 
   useEffect(() => {
     if (!nearViewport) return;
+    // The wrapper stays mounted; the img/video inside it is looked up at cleanup.
+    const container = mediaRef.current;
     let cancelled = false;
     let revoke: () => void = () => undefined;
+    let activeUrl: string | undefined;
     setLoading(true);
     setUrl(undefined);
     setMimeType(undefined);
@@ -1691,6 +1719,7 @@ function AssetCardMedia({
         return;
       }
       revoke = result.revoke;
+      activeUrl = result.url;
       setUrl(result.url);
       setMimeType(result.mimeType);
       setSource(result.source);
@@ -1704,7 +1733,10 @@ function AssetCardMedia({
     });
     return () => {
       cancelled = true;
-      revoke();
+      const media =
+        container?.querySelector<HTMLImageElement | HTMLVideoElement>('img, video') ?? null;
+      if (activeUrl !== undefined) releaseMediaObjectUrl(media, activeUrl, revoke);
+      else revoke();
     };
   }, [
     asset,

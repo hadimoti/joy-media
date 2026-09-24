@@ -94,6 +94,7 @@ import {
   createRenderExportJobPayload,
 } from './export-job-request.js';
 import { inspectImageAnimation } from './animated-image-metadata.js';
+import { releaseMediaObjectUrl } from './media-object-url.js';
 import {
   activePreparedExportClipsAt,
   hasRenderableExportMedia,
@@ -4755,7 +4756,7 @@ function EditorWorkspace({
         pendingExportUrl = undefined;
         if (previousExport !== null && previousExport.url !== lastExportRef.current.url) {
           try {
-            URL.revokeObjectURL(previousExport.url);
+            window.setTimeout(() => URL.revokeObjectURL(previousExport.url), 0);
           } catch {
             // The committed export remains available even if releasing the old URL fails.
           }
@@ -7835,6 +7836,7 @@ function MonitorPanelContent({
   );
   const [gpuSession, setGpuSession] = useState<BrowserGpuPreviewSession | undefined>(undefined);
   const [gpuPreviewUrl, setGpuPreviewUrl] = useState<string | undefined>(undefined);
+  const gpuPreviewImageRef = useRef<HTMLImageElement | null>(null);
   const [gpuPreviewStatus, setGpuPreviewStatus] = useState<
     'local' | 'connecting' | 'hardware-gpu' | 'fallback'
   >(previewRenderer === 'local' ? 'local' : 'connecting');
@@ -8162,7 +8164,7 @@ function MonitorPanelContent({
               recordPreviewResourceCreated('gpu-frame-url', nextUrl);
               setGpuPreviewUrl((previous) => {
                 if (previous !== undefined) {
-                  URL.revokeObjectURL(previous);
+                  releaseMediaObjectUrl(gpuPreviewImageRef.current, previous);
                   recordPreviewResourceReleased('gpu-frame-url', previous);
                 }
                 return nextUrl;
@@ -8202,7 +8204,7 @@ function MonitorPanelContent({
   useEffect(
     () => () => {
       if (gpuPreviewUrl !== undefined) {
-        URL.revokeObjectURL(gpuPreviewUrl);
+        releaseMediaObjectUrl(gpuPreviewImageRef.current, gpuPreviewUrl);
         recordPreviewResourceReleased('gpu-frame-url', gpuPreviewUrl);
       }
     },
@@ -8406,6 +8408,7 @@ function MonitorPanelContent({
         />
         {gpuPreviewUrl !== undefined && !state.playing && gpuPreviewStatus === 'hardware-gpu' && (
           <img
+            ref={gpuPreviewImageRef}
             className="monitor-gpu-frame"
             src={gpuPreviewUrl}
             alt="Hardware GPU Worker preview"
