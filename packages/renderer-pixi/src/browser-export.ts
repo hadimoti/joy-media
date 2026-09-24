@@ -51,7 +51,7 @@ export interface BrowserExportResult {
 // long-running export or when the renderer is under headless CI load. Keep
 // the object URL alive long enough for the browser to claim it, while still
 // bounding its lifetime if the click is ignored.
-const BROWSER_DOWNLOAD_URL_CLEANUP_DELAY_MS = 10_000;
+export const BROWSER_DOWNLOAD_URL_RETENTION_MS = 10_000;
 
 /** Preferred native MP4 profile for Chromium's H.264/AAC MediaRecorder. */
 export const BROWSER_MP4_MIME_TYPE = 'video/mp4;codecs=avc1.42E01E,mp4a.40.2';
@@ -512,7 +512,7 @@ export function triggerBrowserDownload(blob: Blob, filename: string): void {
   const scheduleCleanup = (): void => {
     if (cleanupScheduled) return;
     cleanupScheduled = true;
-    globalThis.setTimeout(cleanup, BROWSER_DOWNLOAD_URL_CLEANUP_DELAY_MS);
+    globalThis.setTimeout(cleanup, BROWSER_DOWNLOAD_URL_RETENTION_MS);
   };
   anchor.addEventListener('click', scheduleCleanup, { once: true });
   anchor.click();

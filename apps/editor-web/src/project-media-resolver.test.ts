@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProjectMediaResolver } from './project-media-resolver.js';
+import { clearMediaSource } from './media-object-url.js';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -44,6 +45,41 @@ describe('ProjectMediaResolver', () => {
     expect(get).toHaveBeenCalledTimes(2);
     expect(create).toHaveBeenCalledExactlyOnceWith(fresh);
     resolver.clear();
+  });
+
+  it('releases a preview media element before resolver clear revokes its URL', async () => {
+    let source = '';
+    const events: string[] = [];
+    const video = {
+      pause: () => events.push('pause'),
+      removeAttribute: (name: string) => {
+        if (name === 'src') source = '';
+        events.push('remove-src');
+      },
+      load: () => events.push('load'),
+      getAttribute: (name: string) => (name === 'src' ? source : null),
+    } as unknown as HTMLVideoElement;
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:preview');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      expect(source).toBe('');
+      events.push(`revoke:${url}`);
+    });
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      controlPlaneReady: false,
+      client: {
+        assets: vi.fn(async () => []),
+        originalBytes: vi.fn(),
+        sharedCloudOriginalBytes: vi.fn(),
+      },
+      originalCache: { get: vi.fn(async () => new Blob(['preview'], { type: 'video/mp4' })) },
+    });
+
+    const resolved = await resolver.resolve('media-1');
+    source = resolved.url;
+    resolver.clear(() => clearMediaSource(video));
+
+    expect(events).toEqual(['pause', 'remove-src', 'load', 'revoke:blob:preview']);
   });
 
   it('preserves concurrent deduplication in the new epoch when an older request settles', async () => {

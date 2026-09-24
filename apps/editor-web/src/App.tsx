@@ -94,7 +94,8 @@ import {
   createRenderExportJobPayload,
 } from './export-job-request.js';
 import { inspectImageAnimation } from './animated-image-metadata.js';
-import { releaseMediaObjectUrl } from './media-object-url.js';
+import { clearMediaSource, releaseMediaObjectUrl } from './media-object-url.js';
+import { createExportUrlRetention } from './export-url-retention.js';
 import {
   activePreparedExportClipsAt,
   hasRenderableExportMedia,
@@ -205,6 +206,7 @@ import {
 } from '@joy-media/renderer-pixi/browser';
 import { applyColorGradeToPixels } from '@joy-media/renderer-pixi';
 import {
+  BROWSER_DOWNLOAD_URL_RETENTION_MS,
   downloadBrowserMp4,
   selectBrowserMp4MimeType,
   triggerBrowserDownload,
@@ -1220,6 +1222,13 @@ function EditorWorkspace({
     };
   }, []);
   const lastExportRef = useRef<{ readonly entryId: string; readonly url: string } | null>(null);
+  const exportUrlRetentionRef = useRef<ReturnType<typeof createExportUrlRetention> | null>(null);
+  if (exportUrlRetentionRef.current === null) {
+    exportUrlRetentionRef.current = createExportUrlRetention(
+      () => lastExportRef.current?.url ?? null,
+      BROWSER_DOWNLOAD_URL_RETENTION_MS,
+    );
+  }
   const exportAbortRef = useRef<AbortController | null>(null);
   const exportInFlightRef = useRef(false);
   const exportToastTimerRef = useRef<number | undefined>(undefined);
@@ -1232,7 +1241,7 @@ function EditorWorkspace({
       toastTimers.clear();
       exportAbortRef.current?.abort();
       exportAbortRef.current = null;
-      if (lastExportRef.current !== null) URL.revokeObjectURL(lastExportRef.current.url);
+      exportUrlRetentionRef.current?.dispose();
     };
   }, []);
   const showToast = useCallback((message: string, kind: 'info' | 'success' | 'error' = 'info') => {
@@ -1806,7 +1815,14 @@ function EditorWorkspace({
       storage,
     ],
   );
-  useEffect(() => () => mediaResolver.clear(), [mediaResolver]);
+  useEffect(
+    () => () =>
+      mediaResolver.clear(() => {
+        clearMediaSource(videoRef.current);
+        clearMediaSource(replacementAudioRef.current);
+      }),
+    [mediaResolver],
+  );
   // Dockview holds panel component identities stable, so use the current
   // resolver through a host-only ref rather than capturing the resolver from
   // the panel's first render. Its only exposed operation returns a local Blob
@@ -4754,13 +4770,8 @@ function EditorWorkspace({
           stagedExportAssetId = undefined;
         }
         pendingExportUrl = undefined;
-        if (previousExport !== null && previousExport.url !== lastExportRef.current.url) {
-          try {
-            window.setTimeout(() => URL.revokeObjectURL(previousExport.url), 0);
-          } catch {
-            // The committed export remains available even if releasing the old URL fails.
-          }
-        }
+        if (previousExport !== null && previousExport.url !== lastExportRef.current.url)
+          exportUrlRetentionRef.current?.schedule(previousExport.url);
         void exportCachePromise
           .then((cache) => cache.prune(undefined, [entryId]))
           .catch(() => undefined);

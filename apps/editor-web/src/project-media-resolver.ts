@@ -86,8 +86,9 @@ export class ProjectMediaResolver {
     throw new Error('This media is not available as trusted local observation bytes.');
   }
 
-  clear(): void {
+  clear(beforeRevoke?: () => void): void {
     this.#epoch += 1;
+    beforeRevoke?.();
     for (const source of this.#sources.values()) {
       if (source.source !== 'reference') URL.revokeObjectURL(source.url);
     }

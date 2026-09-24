@@ -95,7 +95,7 @@ describe('App export recovery contract', () => {
     );
     const publish = exportCallback.indexOf('lastExportRef.current = { entryId, url:', ledgerFinish);
     const revokePrevious = exportCallback.indexOf(
-      'URL.revokeObjectURL(previousExport.url)',
+      'exportUrlRetentionRef.current?.schedule(previousExport.url)',
       publish,
     );
     const prune = exportCallback.indexOf('cache.prune(undefined, [entryId])', revokePrevious);
@@ -158,7 +158,7 @@ describe('App export recovery contract', () => {
       completedLedger,
     );
     const revokePrevious = exportCallback.indexOf(
-      'URL.revokeObjectURL(previousExport.url)',
+      'exportUrlRetentionRef.current?.schedule(previousExport.url)',
       publish,
     );
     const prune = exportCallback.indexOf('cache.prune(undefined, [entryId])', publish);
@@ -180,7 +180,7 @@ describe('App export recovery contract', () => {
     expect(revokePrevious).toBeGreaterThan(publish);
     expect(prune).toBeGreaterThan(publish);
     expect(exportCallback.slice(verifiedPut, completedLedger)).not.toContain(
-      'URL.revokeObjectURL(previousExport.url)',
+      'exportUrlRetentionRef.current?.schedule(previousExport.url)',
     );
     expect(exportCallback.slice(verifiedPut, completedLedger)).not.toContain(
       'cache.prune(undefined, [entryId])',
