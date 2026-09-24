@@ -180,12 +180,39 @@ describe('JOY Agent Settings connection status', () => {
     expect(key.value).toBe('');
   });
 
-  it('redacts the API key from model discovery errors', async () => {
+  it('refuses model discovery in the browser build without sending the key', async () => {
+    const privateKey = 'browser-discovery-key';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const rendered = await render(client(), undefined);
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    const openDrawer = rendered.querySelector<HTMLButtonElement>('.joy-settings-text-btn');
+    if (key === null || openDrawer === null) {
+      throw new Error('Expected key and model drawer controls');
+    }
+    setInputValue(key, privateKey);
+
+    await act(async () => {
+      openDrawer.click();
+      await Promise.resolve();
+    });
+
+    expect(rendered.textContent).toContain('Live model discovery requires Joy Media Desktop.');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(rendered.textContent).not.toContain(privateKey);
+  });
+
+  it('redacts the API key from desktop model discovery errors', async () => {
     const privateKey = 'discovery-test-key';
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockRejectedValue(new Error(`Provider rejected key ${privateKey}`)),
+    const invoke = vi.fn((channel: string) =>
+      channel === 'desktop.provider-profile.fetch-models'
+        ? Promise.reject(new Error(`Provider rejected key ${privateKey}`))
+        : Promise.resolve([]),
     );
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.fetch-models'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
     const rendered = await render(client(), undefined);
     const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
     const openDrawer = rendered.querySelector<HTMLButtonElement>('.joy-settings-text-btn');

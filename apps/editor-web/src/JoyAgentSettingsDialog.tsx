@@ -273,6 +273,12 @@ export function JoyAgentSettingsDialog({
   };
 
   const discoverModels = async (explicitKey?: string) => {
+    // Browser builds must never send the provider key from the page; the key
+    // only reaches the provider through the Worker session or the desktop host.
+    if (!isDesktopHost()) {
+      setDiscoveryError('Live model discovery requires Joy Media Desktop.');
+      return;
+    }
     const key = explicitKey ?? keyRef.current?.value ?? '';
     const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '');
     if (!normalizedBaseUrl) {
@@ -432,11 +438,6 @@ export function JoyAgentSettingsDialog({
       const kind = next.capability === 'incompatible' ? 'error' : 'success';
       setConnectionNotice({ kind, message });
       onNotice?.(message, kind);
-
-      // Trigger automatic model discovery and resolve the drawer if we have an API key and URL
-      if (provider !== 'joy-hosted' && next.capability !== 'incompatible') {
-        void discoverModels(key);
-      }
     } catch (error) {
       const rawMessage = error instanceof Error ? error.message : 'Unable to configure connection';
       const safeMessage = redactProviderError(rawMessage, key);
@@ -498,10 +499,6 @@ export function JoyAgentSettingsDialog({
           : `Connected to ${prof.name || prof.provider}: ${prof.modelId}`;
       setConnectionNotice({ kind, message });
       onNotice?.(message, kind);
-
-      if (key) {
-        void discoverModels(key);
-      }
     } catch (err) {
       const message = redactProviderError(
         err instanceof Error ? err.message : 'Failed to switch provider',
