@@ -24,6 +24,7 @@ import { DesktopAccountModal } from './DesktopAccountModal.js';
 import {
   acknowledgeCustomEndpoint,
   revokeCustomEndpointAcknowledgementsForUrl,
+  assertCustomEndpointConsentHolds,
   isCustomEndpointProvider,
   normalizeProviderBaseUrl,
   requiresCustomEndpointConsent,
@@ -642,6 +643,7 @@ export function JoyAgentSettingsDialog({
         sessionKey = mediaToken ?? 'joy-hosted-default';
       }
 
+      assertCustomEndpointConsentHolds(provider, normalizedBaseUrl, savedProfile?.id);
       await engineClient.configure({
         provider,
         baseUrl: normalizedBaseUrl,
@@ -736,6 +738,7 @@ export function JoyAgentSettingsDialog({
       setSavedProfile(prof);
       setHasSavedKey(Boolean(key));
 
+      assertCustomEndpointConsentHolds(prof.provider, prof.baseUrl, prof.id);
       configurationFailed = true;
       await engineClient.configure({
         provider: resolvedProvider,

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   acknowledgeCustomEndpoint,
+  assertCustomEndpointConsentHolds,
   isCustomEndpointAcknowledged,
   mayRestoreProviderProfile,
   requiresCustomEndpointConsent,
@@ -81,6 +82,26 @@ describe('custom endpoint acknowledgement', () => {
     expect(isCustomEndpointAcknowledged(endpoint)).toBe(true);
     revokeCustomEndpointAcknowledgement({ ...endpoint, baseUrl: 'https://custom.example/v1/' });
     expect(isCustomEndpointAcknowledged(endpoint)).toBe(false);
+  });
+
+  it('assertCustomEndpointConsentHolds throws once consent for the URL is withdrawn', () => {
+    expect(() =>
+      assertCustomEndpointConsentHolds('openrouter', 'https://openrouter.ai/api/v1'),
+    ).not.toThrow();
+    acknowledgeCustomEndpoint({
+      provider: 'custom',
+      baseUrl: 'https://c.example/v1',
+      profileId: 'p',
+    });
+    expect(() => assertCustomEndpointConsentHolds('custom', 'https://c.example/v1')).not.toThrow();
+    expect(() =>
+      assertCustomEndpointConsentHolds('custom', 'https://c.example/v1/', 'other'),
+    ).not.toThrow();
+    revokeCustomEndpointAcknowledgementsForUrl('https://c.example/v1');
+    expect(() => assertCustomEndpointConsentHolds('custom', 'https://c.example/v1', 'p')).toThrow(
+      /consent was withdrawn/,
+    );
+    expect(() => assertCustomEndpointConsentHolds('custom', 'https://never.example/v1')).toThrow();
   });
 
   it('revokes profile-bound acknowledgements for a URL too', () => {

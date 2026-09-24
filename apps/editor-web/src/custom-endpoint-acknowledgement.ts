@@ -90,6 +90,31 @@ export function requireCustomEndpointAcknowledgement(
   return false;
 }
 
+/**
+ * Call immediately before any key-bearing request (discovery, configure),
+ * after every await: consent can be withdrawn from another view while a vault
+ * read or profile save is pending. Throws if consent no longer holds.
+ */
+export function assertCustomEndpointConsentHolds(
+  provider: string,
+  baseUrl: string,
+  profileId?: string,
+): void {
+  if (!requiresCustomEndpointConsent(provider, baseUrl)) return;
+  // Revocation is URL-wide, so any remaining acknowledgement for this URL
+  // (profile-bound or not) means consent still holds.
+  const normalized = normalizeProviderBaseUrl(baseUrl);
+  const held =
+    isCustomEndpointAcknowledged({ provider: 'custom', baseUrl, profileId }) ||
+    [...acknowledgedEndpoints].some((key) => {
+      const parsed: unknown = JSON.parse(key);
+      return Array.isArray(parsed) && parsed[1] === normalized;
+    });
+  if (!held) {
+    throw new Error('Custom endpoint consent was withdrawn; the request was cancelled.');
+  }
+}
+
 /** Startup restoration must not even ask the desktop vault for a custom key until consent exists. */
 export function mayRestoreProviderProfile(profile: CustomEndpointIdentity): boolean {
   return (

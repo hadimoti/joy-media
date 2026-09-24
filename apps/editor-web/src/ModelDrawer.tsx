@@ -15,6 +15,7 @@ import './ModelDrawer.css';
 import {
   acknowledgeCustomEndpoint,
   revokeCustomEndpointAcknowledgementsForUrl,
+  assertCustomEndpointConsentHolds,
   requiresCustomEndpointConsent,
   requireCustomEndpointAcknowledgement,
 } from './custom-endpoint-acknowledgement.js';
@@ -348,6 +349,7 @@ export function ModelDrawer({
         apiKey = session?.apiKey ?? '';
       }
 
+      assertCustomEndpointConsentHolds(profile.provider, profile.baseUrl, profile.id);
       const models = await fetchDesktopProviderModels({
         id: profile.id,
         baseUrl: profile.baseUrl,

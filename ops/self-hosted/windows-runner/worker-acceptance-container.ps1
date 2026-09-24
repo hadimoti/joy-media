@@ -103,6 +103,9 @@ function Start-Fixture {
 function Stop-Fixture {
     if ($null -ne $script:fixtureProcess) {
         Stop-Process -Id $script:fixtureProcess.Id -Force -ErrorAction SilentlyContinue
+        # Stop-Process does not wait: the fixture can still hold its log files
+        # open, which made the acceptance-root removal fail intermittently.
+        [void]$script:fixtureProcess.WaitForExit(30000)
         $script:fixtureProcess = $null
     }
 }
@@ -319,7 +322,18 @@ try {
     Stop-Fixture
     # Uninstall is a required predicate, so the acceptance root always goes. Any
     # diagnostics worth keeping were copied out of it by Save-DaemonDiagnostics.
-    Remove-Item $acceptanceRoot -Recurse -Force
+    # Bounded retry for handles the OS releases asynchronously after the
+    # fixture exits; a root that still cannot be removed fails the uninstall
+    # predicate below instead of being ignored.
+    for ($removeAttempt = 1; $removeAttempt -le 10; $removeAttempt++) {
+        try {
+            Remove-Item $acceptanceRoot -Recurse -Force -ErrorAction Stop
+            break
+        } catch {
+            if ($removeAttempt -eq 10) { throw }
+            Start-Sleep -Milliseconds 500
+        }
+    }
     $uninstalled = -not (Test-Path $acceptanceRoot)
     $verified = (Test-DaemonResult $startup) -and (Test-DaemonResult $renewal) -and (Test-DaemonResult $recovery) -and (Test-DaemonResult $recovery2) -and $protectedState -and $repairPassed -and (Test-DaemonResult $updated) -and ($updatedHash -ne $installedHash) -and (Test-DaemonResult $rollback) -and ($rollbackHash -eq $installedHash) -and $uninstalled
     $evidence = [ordered]@{
