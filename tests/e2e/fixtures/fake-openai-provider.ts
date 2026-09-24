@@ -491,7 +491,7 @@ export async function configureJoyAgent(
 ): Promise<Locator> {
   await page.locator('.app-menu-trigger').filter({ hasText: 'Joy Code' }).click();
   await page.getByRole('menuitem', { name: 'Joy Code Settings…', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'JOY Agent Engine' });
+  const dialog = page.getByRole('dialog', { name: 'Joy Code Settings' });
   await expect(dialog).toBeVisible();
   // The settings dialog has several descendant labels containing the word
   // "provider" (budget and capability controls). The first select is the

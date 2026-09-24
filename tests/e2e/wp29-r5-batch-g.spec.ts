@@ -62,12 +62,14 @@ async function pairThumbnailWorker(page: Page, assetId: string) {
 test.describe('WP-29 R5 batch G — bulk assets and reload recovery', () => {
   test.beforeEach(async ({ page }) => authenticate(page));
 
-  test('[R5 CASE-24] cloud, AI, and bulk-delete actions target only selected media', async ({
+  test('[R5 CASE-24] AI and bulk-delete actions target only selected media', async ({
     page,
   }, testInfo) => {
     await openDisposableWorkspace(page, `R5-24-${testInfo.project.name}`);
     const imageName = `wp29-case24-${testInfo.project.name}-${Date.now()}.png`;
+    const untouchedImageName = `wp29-case24-untouched-${testInfo.project.name}-${Date.now()}.png`;
     await importMediaFixture(page, 'image.png', imageName);
+    await importMediaFixture(page, 'image.png', untouchedImageName);
     const card = page.locator('.asset-card', { hasText: imageName }).first();
     const assetId = await card.getAttribute('data-asset-id');
     expect(assetId).toBeTruthy();
@@ -75,13 +77,11 @@ test.describe('WP-29 R5 batch G — bulk assets and reload recovery', () => {
     await targetCard.getByRole('checkbox', { name: `Select ${imageName}` }).check();
     const toolbar = page.getByRole('toolbar', { name: 'Bulk asset actions' });
     await expect(toolbar).toContainText('1');
-    await toolbar.getByRole('button', { name: 'Share selected media to cloud' }).click();
-    await expect(page.locator('.asset-library .joy-panel-note')).toContainText(
-      'No selected media needs backup',
-    );
     await toolbar.getByRole('button', { name: 'Edit selected with AI' }).click();
     await expect(page.locator('.joy-code-panel')).toBeVisible();
-    await expect(page.getByRole('list', { name: 'Attached media' })).toContainText(imageName);
+    const attachedMedia = page.getByRole('list', { name: 'Attached media' });
+    await expect(attachedMedia).toContainText(imageName);
+    await expect(attachedMedia).not.toContainText(untouchedImageName);
 
     await openPanel(page, 'Assets');
     await targetCard.getByRole('checkbox', { name: `Select ${imageName}` }).check();
@@ -91,6 +91,7 @@ test.describe('WP-29 R5 batch G — bulk assets and reload recovery', () => {
       .getByRole('button', { name: 'Delete selected assets' })
       .click();
     await expect(page.locator(`.asset-card[data-asset-id="${assetId}"]`)).toHaveCount(0);
+    await expect(page.locator('.asset-card', { hasText: untouchedImageName })).toHaveCount(1);
     await expect(page.locator('.asset-library .joy-panel-note')).toContainText(
       'Deleted 1 of 1 selected media items',
     );
@@ -98,10 +99,10 @@ test.describe('WP-29 R5 batch G — bulk assets and reload recovery', () => {
       caseId: 24,
       functional: 'PASS',
       uiA11y: 'PASS',
-      expected: 'Bulk cloud, AI, and confirmed delete actions target only the selected asset.',
+      expected: 'AI attachment and confirmed bulk delete target only the selected asset.',
       actual:
-        'Cloud reported the already-backed-up state, AI attached image.png, and confirmed delete removed exactly it.',
-      fixture: 'image.png',
+        'AI attached the selected image without the unselected image, and confirmed delete removed only the selected asset.',
+      fixture: 'two image.png imports',
     });
   });
 

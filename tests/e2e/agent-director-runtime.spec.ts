@@ -139,7 +139,7 @@ test.describe('JOY Live Director runtime boundary', () => {
 
     await page.locator('.app-menu-trigger').filter({ hasText: 'Joy Code' }).click();
     await page.getByRole('menuitem', { name: 'Joy Code Settings…', exact: true }).click();
-    const settings = page.getByRole('dialog', { name: 'JOY Agent Engine' });
+    const settings = page.getByRole('dialog', { name: 'Joy Code Settings' });
     await settings.getByRole('button', { name: 'Clear connection', exact: true }).click();
 
     const composerPanel = page.getByRole('region', { name: 'Joy Code composer' });

@@ -30,7 +30,7 @@ test.describe('built-in JOY Agent BYOK security envelope', () => {
     // disappear, while the editor remains usable for deterministic local edits.
     await page.locator('.app-menu-trigger').filter({ hasText: 'Joy Code' }).click();
     await page.getByRole('menuitem', { name: 'Joy Code Settings…', exact: true }).click();
-    const reopened = page.getByRole('dialog', { name: 'JOY Agent Engine' });
+    const reopened = page.getByRole('dialog', { name: 'Joy Code Settings' });
     await reopened.getByRole('button', { name: 'Clear connection' }).click();
     await expect(reopened.getByText('Not connected')).toBeVisible();
     expect(await scanForSentinel(page, SENTINEL)).toEqual([]);
