@@ -283,8 +283,10 @@ export function AssetLibraryPanel({
   }, [assetSource, category, collection, sort, storage, viewMode]);
 
   const clearPreview = useCallback(() => {
+    // A superseded or cleared request may own a URL React never committed.
+    pendingPreviewOwner.revokePending();
     setPreview(undefined);
-  }, []);
+  }, [pendingPreviewOwner]);
   const refresh = useCallback(async () => {
     const requestId = ++refreshSeqRef.current;
     const token = getStoredMediaToken(storage);
