@@ -68,6 +68,15 @@ export function revokeCustomEndpointAcknowledgement(identity: CustomEndpointIden
   acknowledgedEndpoints.delete(identityKey(identity));
 }
 
+/** Withdraw every acknowledgement for this URL, whether or not it was profile-bound. */
+export function revokeCustomEndpointAcknowledgementsForUrl(baseUrl: string): void {
+  const normalized = normalizeProviderBaseUrl(baseUrl);
+  for (const key of [...acknowledgedEndpoints]) {
+    const parsed: unknown = JSON.parse(key);
+    if (Array.isArray(parsed) && parsed[1] === normalized) acknowledgedEndpoints.delete(key);
+  }
+}
+
 export function isCustomEndpointAcknowledged(identity: CustomEndpointIdentity): boolean {
   return acknowledgedEndpoints.has(identityKey(identity));
 }

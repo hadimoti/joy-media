@@ -310,6 +310,12 @@ try {
     $rollbackHash = (Get-FileHash $installedPath -Algorithm SHA256).Hash.ToLowerInvariant()
     $rollback = Invoke-Daemon $installedPath (Join-Path $acceptanceRoot 'rollback-state.json') "\\.\pipe\joy-media-rollback-$RunId-$Attempt-$Pass" 'rollback'
 
+    # Record the real Authenticode status of the installed Worker before the
+    # acceptance root is removed. CI builds are normally unsigned; report that
+    # honestly rather than omitting the field.
+    $signature = Get-AuthenticodeSignature -LiteralPath $installedPath
+    $signingStatus = if ($signature.Status -eq 'Valid') { 'signed' } else { 'unsigned' }
+
     Stop-Fixture
     # Uninstall is a required predicate, so the acceptance root always goes. Any
     # diagnostics worth keeping were copied out of it by Save-DaemonDiagnostics.
@@ -328,6 +334,7 @@ try {
         windowsPlatformVerified = $true
         sourceProvenance = Get-SourceProvenance
         verifiedAt = (Get-Date).ToUniversalTime().ToString('o')
+        signing = [ordered]@{ status = $signingStatus; verified = ($signingStatus -eq 'signed'); signatureStatus = [string]$signature.Status }
         lifecycle = [ordered]@{
             install = [ordered]@{ status = 'verified' }
             startup = [ordered]@{ status = if ($verified) { 'verified' } else { 'failed' }; trigger = 'explicit-spawn'; triggerVerified = $true; action = 'normal-daemon'; launchObserved = $true; daemon = [ordered]@{ started = [bool]$startup.started; terminated = [bool]$startup.terminated; childStarted = [bool]$startup.childStarted; childTerminated = [bool]$startup.childTerminated; childPid = [int]$startup.childPid; paired = [bool]$startup.paired; notificationCleared = [bool]$startup.notificationCleared; hello = [int]$startup.hello; leases = [int]$startup.leases } }

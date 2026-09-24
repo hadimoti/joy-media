@@ -23,7 +23,7 @@ import { getStoredMediaToken } from './media-session.js';
 import { DesktopAccountModal } from './DesktopAccountModal.js';
 import {
   acknowledgeCustomEndpoint,
-  revokeCustomEndpointAcknowledgement,
+  revokeCustomEndpointAcknowledgementsForUrl,
   isCustomEndpointProvider,
   normalizeProviderBaseUrl,
   requiresCustomEndpointConsent,
@@ -1275,31 +1275,9 @@ export function JoyAgentSettingsDialog({
                                   const checked = event.target.checked;
                                   setCustomDisclosure(checked);
                                   if (!checked) {
-                                    // Unchecking withdraws consent for this endpoint (with or
-                                    // without a saved-profile id).
-                                    const normalized = normalizeProviderBaseUrl(baseUrl);
-                                    revokeCustomEndpointAcknowledgement({
-                                      provider: 'custom',
-                                      baseUrl: normalized,
-                                    });
-                                    for (const profile of profiles) {
-                                      if (
-                                        normalizeProviderBaseUrl(profile.baseUrl) === normalized
-                                      ) {
-                                        revokeCustomEndpointAcknowledgement({
-                                          provider: 'custom',
-                                          baseUrl: normalized,
-                                          profileId: profile.id,
-                                        });
-                                      }
-                                    }
-                                    if (savedProfile) {
-                                      revokeCustomEndpointAcknowledgement({
-                                        provider: 'custom',
-                                        baseUrl: normalized,
-                                        profileId: savedProfile.id,
-                                      });
-                                    }
+                                    // Unchecking withdraws consent for this URL, including any
+                                    // saved-profile-bound acknowledgement.
+                                    revokeCustomEndpointAcknowledgementsForUrl(baseUrl);
                                   }
                                   if (checked) {
                                     const normalized = normalizeProviderBaseUrl(baseUrl);

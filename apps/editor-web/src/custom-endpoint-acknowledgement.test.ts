@@ -6,6 +6,7 @@ import {
   requiresCustomEndpointConsent,
   resetCustomEndpointAcknowledgementsForTests,
   revokeCustomEndpointAcknowledgement,
+  revokeCustomEndpointAcknowledgementsForUrl,
 } from './custom-endpoint-acknowledgement.js';
 
 afterEach(resetCustomEndpointAcknowledgementsForTests);
@@ -80,6 +81,20 @@ describe('custom endpoint acknowledgement', () => {
     expect(isCustomEndpointAcknowledged(endpoint)).toBe(true);
     revokeCustomEndpointAcknowledgement({ ...endpoint, baseUrl: 'https://custom.example/v1/' });
     expect(isCustomEndpointAcknowledged(endpoint)).toBe(false);
+  });
+
+  it('revokes profile-bound acknowledgements for a URL too', () => {
+    const bound = { provider: 'custom', baseUrl: 'https://custom.example/v1', profileId: 'p1' };
+    const other = { provider: 'custom', baseUrl: 'https://other.example/v1', profileId: 'p2' };
+    acknowledgeCustomEndpoint(bound);
+    acknowledgeCustomEndpoint({ provider: 'custom', baseUrl: 'https://custom.example/v1' });
+    acknowledgeCustomEndpoint(other);
+    revokeCustomEndpointAcknowledgementsForUrl('https://custom.example/v1/');
+    expect(isCustomEndpointAcknowledged(bound)).toBe(false);
+    expect(
+      isCustomEndpointAcknowledged({ provider: 'custom', baseUrl: 'https://custom.example/v1' }),
+    ).toBe(false);
+    expect(isCustomEndpointAcknowledged(other)).toBe(true);
   });
 
   it('blocks startup restore before consent and permits only the acknowledged exact profile', () => {

@@ -14,7 +14,7 @@ import {
 import './ModelDrawer.css';
 import {
   acknowledgeCustomEndpoint,
-  revokeCustomEndpointAcknowledgement,
+  revokeCustomEndpointAcknowledgementsForUrl,
   requiresCustomEndpointConsent,
   requireCustomEndpointAcknowledgement,
 } from './custom-endpoint-acknowledgement.js';
@@ -491,11 +491,7 @@ export function ModelDrawer({
                     onChange={(event) => {
                       setCustomAcknowledged(event.target.checked);
                       if (event.target.checked) acknowledge(newBaseUrl);
-                      else
-                        revokeCustomEndpointAcknowledgement({
-                          provider: 'custom',
-                          baseUrl: newBaseUrl,
-                        });
+                      else revokeCustomEndpointAcknowledgementsForUrl(newBaseUrl);
                     }}
                   />
                   I understand this custom endpoint may log requests and credentials.

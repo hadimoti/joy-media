@@ -158,6 +158,14 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(contract.length).toBeGreaterThan(0);
     });
 
+    it('container acceptance evidence reports the real Worker signing status', () => {
+      // gate.ts requires windows.signing.status for every evidence schema.
+      expect(containerAcceptance).toContain(
+        'Get-AuthenticodeSignature -LiteralPath $installedPath',
+      );
+      expect(containerAcceptance).toMatch(/signing = \[ordered\]@\{ status = \$signingStatus;/);
+    });
+
     it('Dockerfile.windows is a digest-pinned Windows-container build', () => {
       // The base is captured as an ARG and resolved in FROM. Both the ARG
       // declaration and the FROM must point at a Windows-container base.
