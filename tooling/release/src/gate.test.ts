@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   buildStaticAssetInventory,
   evaluateReleaseGate,
@@ -9,6 +9,7 @@ import {
   findProductionFixtureRegistrations,
   findTrackedArtifactViolations,
   RELEASE_COMMANDS,
+  releaseChildEnv,
   REQUIRED_BUILD_IDS,
   REQUIRED_EFFECT_MOTION_PREVIEW_COUNT,
   REQUIRED_JOURNEY_ID,
@@ -317,6 +318,41 @@ const passingInput = (): ReleaseGateInput => ({
 });
 
 describe('JOY Studio 1.0 release gate', () => {
+  let priorJoyReleaseEnv: Record<string, string>;
+
+  beforeEach(() => {
+    priorJoyReleaseEnv = Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => key.startsWith('JOY_RELEASE_')),
+    );
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith('JOY_RELEASE_')) delete process.env[key];
+    }
+  });
+
+  afterEach(() => {
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith('JOY_RELEASE_')) delete process.env[key];
+    }
+    Object.assign(process.env, priorJoyReleaseEnv);
+  });
+
+  it('removes release metadata from the test child environment and keeps other variables', () => {
+    const childEnv = releaseChildEnv({
+      PATH: 'path-value',
+      CI: 'true',
+      DATABASE_URL: 'database-url',
+      JOY_RELEASE_OUTPUT: 'release-output',
+      JOY_RELEASE_EVIDENCE: 'release-evidence',
+      JOY_RELEASE_WORKFLOW_RUN_ID: '123',
+      JOY_RELEASE_WORKFLOW_RUN_ATTEMPT: '2',
+      JOY_RELEASE_CANDIDATE_SHA: 'a'.repeat(40),
+      JOY_RELEASE_CUSTOM: 'custom',
+    });
+
+    expect(childEnv).toEqual({ PATH: 'path-value', CI: 'true', DATABASE_URL: 'database-url' });
+    expect(Object.keys(childEnv).some((key) => key.startsWith('JOY_RELEASE_'))).toBe(false);
+  });
+
   it('keeps the self-hosted CI check before the browser audit', () => {
     const editorBuild = RELEASE_COMMANDS.findIndex(([id]) => id === 'editor-build');
     const tests = RELEASE_COMMANDS.findIndex(([id]) => id === 'tests');

@@ -1760,6 +1760,11 @@ export const RELEASE_COMMANDS: readonly [string, readonly string[]][] = [
   ['goldens', ['exec', 'vitest', 'run', 'tooling/golden-render/src']],
 ];
 
+/** Keep release-job metadata out of the repository test process. */
+export function releaseChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith('JOY_RELEASE_')));
+}
+
 function runReleaseCommands(root: string): readonly ReleaseCommandResult[] {
   const pnpm =
     process.platform === 'win32'
@@ -1776,6 +1781,7 @@ function runReleaseCommands(root: string): readonly ReleaseCommandResult[] {
     // exit code, masking failures as status=1).
     const result = spawnSync(pnpm.cmd, [...pnpm.prefix, ...args], {
       cwd: root,
+      ...(id === 'tests' ? { env: releaseChildEnv(process.env) } : {}),
       stdio: id === 'tests' ? 'pipe' : 'ignore',
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,
