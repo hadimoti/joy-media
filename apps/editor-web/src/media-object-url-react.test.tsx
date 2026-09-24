@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, StrictMode, useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { act, StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -374,6 +374,167 @@ describe('useReleasableObjectUrl React lifecycle', () => {
     activeConsumers.delete(exportVideo);
     expect(activeConsumers.size).toBe(0);
     expect(revoke).toHaveBeenCalledExactlyOnceWith('blob:export-1');
+  });
+
+  it('detaches transition partner video consumer element when resolver changes and on unmount before revoking URLs', async () => {
+    setupContainer();
+    const events: string[] = [];
+    const makeResolver = (id: string) =>
+      new ProjectMediaResolver({
+        projectId: id,
+        controlPlaneReady: false,
+        client: {
+          assets: vi.fn(async () => []),
+          originalBytes: vi.fn(),
+          sharedCloudOriginalBytes: vi.fn(),
+        },
+        originalCache: {
+          get: vi.fn(async () => new Blob(['partner-bytes'], { type: 'video/mp4' })),
+        },
+      });
+
+    const resolverA = makeResolver('project-a');
+    const resolverB = makeResolver('project-b');
+
+    let createCount = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      createCount += 1;
+      return `blob:partner-${createCount}`;
+    });
+
+    const retainedPartnerVideo = { current: null as HTMLVideoElement | null };
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      if (
+        retainedPartnerVideo.current !== null &&
+        retainedPartnerVideo.current.getAttribute('src') === url
+      ) {
+        expect.fail(`Partner video URL ${url} was revoked while partner video still holds it!`);
+      }
+      events.push(`revoke:${url}`);
+    });
+
+    let triggerCaptureA!: () => Promise<void>;
+    let triggerCaptureB!: () => Promise<void>;
+
+    function AppTransitionPartnerHarness({
+      resolver,
+      onReady,
+    }: {
+      readonly resolver: ProjectMediaResolver;
+      readonly onReady: (capture: () => Promise<void>) => void;
+    }) {
+      const partnerVideoRef = useRef<HTMLVideoElement | null>(null);
+      const activeMediaConsumersRef = useRef(new Set<MediaObjectUrlConsumer>());
+
+      useLayoutEffect(
+        () => () =>
+          resolver.clear(() => {
+            resolver.detachConsumerIfOwned(partnerVideoRef.current);
+            if (
+              partnerVideoRef.current !== null &&
+              !resolver.ownsConsumer(partnerVideoRef.current)
+            ) {
+              activeMediaConsumersRef.current.delete(partnerVideoRef.current);
+            }
+            for (const consumer of Array.from(activeMediaConsumersRef.current)) {
+              if (resolver.detachConsumerIfOwned(consumer)) {
+                activeMediaConsumersRef.current.delete(consumer);
+              }
+            }
+          }),
+        [resolver],
+      );
+
+      useEffect(
+        () => () => {
+          const partnerVideo = partnerVideoRef.current;
+          if (partnerVideo !== null) {
+            activeMediaConsumersRef.current.delete(partnerVideo);
+          }
+          partnerVideo?.pause();
+          partnerVideo?.removeAttribute('src');
+          partnerVideo?.load();
+          partnerVideoRef.current = null;
+        },
+        [],
+      );
+
+      const ensurePartnerVideo = useCallback((): HTMLVideoElement => {
+        if (partnerVideoRef.current === null) {
+          const video = document.createElement('video');
+          video.muted = true;
+          video.playsInline = true;
+          video.preload = 'auto';
+          partnerVideoRef.current = video;
+          retainedPartnerVideo.current = video;
+        }
+        return partnerVideoRef.current;
+      }, []);
+
+      const captureTransitionPartnerFrames = useCallback(async (): Promise<void> => {
+        const video = ensurePartnerVideo();
+        const source = await resolver.resolve('partner-clip');
+        const sourceUrl = new URL(source.url, window.location.href).href;
+        activeMediaConsumersRef.current.add(video);
+        if (video.src !== sourceUrl) {
+          video.src = sourceUrl;
+        }
+      }, [ensurePartnerVideo, resolver]);
+
+      useLayoutEffect(() => {
+        onReady(captureTransitionPartnerFrames);
+      }, [captureTransitionPartnerFrames, onReady]);
+
+      return <div />;
+    }
+
+    await act(async () =>
+      root?.render(
+        <AppTransitionPartnerHarness
+          resolver={resolverA}
+          onReady={(capture) => {
+            triggerCaptureA = capture;
+          }}
+        />,
+      ),
+    );
+
+    await act(async () => {
+      await triggerCaptureA();
+    });
+
+    const partnerVideo = retainedPartnerVideo.current!;
+    expect(partnerVideo).not.toBeNull();
+    expect(partnerVideo.getAttribute('src')).toBe('blob:partner-1');
+    expect(events).toEqual([]);
+
+    await act(async () =>
+      root?.render(
+        <AppTransitionPartnerHarness
+          resolver={resolverB}
+          onReady={(capture) => {
+            triggerCaptureB = capture;
+          }}
+        />,
+      ),
+    );
+
+    expect(events).toEqual(['revoke:blob:partner-1']);
+    expect(partnerVideo.getAttribute('src')).toBeNull();
+
+    await act(async () => {
+      await triggerCaptureB();
+    });
+
+    expect(partnerVideo.getAttribute('src')).toBe('blob:partner-2');
+
+    events.length = 0;
+    await act(async () => root?.unmount());
+    root = undefined;
+
+    expect(events).toEqual(['revoke:blob:partner-2']);
+    expect(partnerVideo.getAttribute('src')).toBeNull();
+    expect(revoke).toHaveBeenCalledTimes(2);
   });
 
   it('detaches preview media consumer before revoke even when conditionally hidden prior to release', async () => {

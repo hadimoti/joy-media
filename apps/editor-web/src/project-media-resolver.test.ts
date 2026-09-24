@@ -435,4 +435,45 @@ describe('ProjectMediaResolver', () => {
 
     resolver.clear();
   });
+
+  it('detaches a detached video element holding a resolved URL on clear', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:detached-partner');
+    const revokedUrls: string[] = [];
+    let detachedSrc: string | null = null;
+    const detachedVideo = {
+      getAttribute: (name: string) => (name === 'src' ? detachedSrc : null),
+      removeAttribute: (name: string) => {
+        if (name === 'src') detachedSrc = null;
+      },
+      pause: vi.fn(),
+      load: vi.fn(),
+    } as unknown as HTMLVideoElement;
+
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      expect(detachedSrc).toBeNull();
+      revokedUrls.push(url);
+    });
+
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      controlPlaneReady: false,
+      client: {
+        assets: vi.fn(async () => []),
+        originalBytes: vi.fn(),
+        sharedCloudOriginalBytes: vi.fn(),
+      },
+      originalCache: { get: vi.fn(async () => new Blob(['data'], { type: 'video/mp4' })) },
+    });
+
+    const resolved = await resolver.resolve('media-1');
+    detachedSrc = resolved.url;
+    expect(resolver.ownsConsumer(detachedVideo)).toBe(true);
+
+    resolver.clear(() => {
+      expect(resolver.detachConsumerIfOwned(detachedVideo)).toBe(true);
+      expect(detachedSrc).toBeNull();
+    });
+
+    expect(revokedUrls).toEqual(['blob:detached-partner']);
+  });
 });

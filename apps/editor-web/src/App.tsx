@@ -96,6 +96,7 @@ import {
 } from './export-job-request.js';
 import { inspectImageAnimation } from './animated-image-metadata.js';
 import {
+  clearMediaSource,
   revokeDetachedObjectUrl,
   useReleasableObjectUrl,
   type MediaObjectUrlConsumer,
@@ -1846,8 +1847,17 @@ function EditorWorkspace({
         mediaResolver.detachConsumerIfOwned(
           replacementAudioRef.current ?? lastReplacementAudioRef.current,
         );
-        for (const consumer of activeMediaConsumersRef.current) {
-          mediaResolver.detachConsumerIfOwned(consumer);
+        mediaResolver.detachConsumerIfOwned(partnerVideoRef.current);
+        if (
+          partnerVideoRef.current !== null &&
+          !mediaResolver.ownsConsumer(partnerVideoRef.current)
+        ) {
+          activeMediaConsumersRef.current.delete(partnerVideoRef.current);
+        }
+        for (const consumer of Array.from(activeMediaConsumersRef.current)) {
+          if (mediaResolver.detachConsumerIfOwned(consumer)) {
+            activeMediaConsumersRef.current.delete(consumer);
+          }
         }
       }),
     [mediaResolver],
@@ -2071,6 +2081,9 @@ function EditorWorkspace({
   useEffect(
     () => () => {
       const partnerVideo = partnerVideoRef.current;
+      if (partnerVideo !== null) {
+        activeMediaConsumersRef.current.delete(partnerVideo);
+      }
       partnerVideo?.pause();
       partnerVideo?.removeAttribute('src');
       partnerVideo?.load();
@@ -2100,6 +2113,7 @@ function EditorWorkspace({
         if (clip === undefined) continue;
         const source = await mediaResolver.resolve(playbackAssetId(session.visualProject, clip));
         const sourceUrl = new URL(source.url, window.location.href).href;
+        activeMediaConsumersRef.current.add(video);
         if (video.src !== sourceUrl) {
           video.src = sourceUrl;
           await new Promise<void>((resolve, reject) => {
@@ -2113,6 +2127,8 @@ function EditorWorkspace({
             };
             const onError = () => {
               cleanup();
+              activeMediaConsumersRef.current.delete(video);
+              clearMediaSource(video);
               reject(new Error(`Unable to load transition partner ${clip.assetId}`));
             };
             video.addEventListener('loadeddata', onLoaded, { once: true });
