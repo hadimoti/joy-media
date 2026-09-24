@@ -7,7 +7,11 @@ import {
 } from './control-plane-client.js';
 import type { AssetViewMode } from './asset-library-state.js';
 import { ExportIcon, UploadIcon } from './icons.js';
-import { revokeDetachedObjectUrl, useReleasableObjectUrl } from './media-object-url.js';
+import {
+  revokeDetachedObjectUrl,
+  usePendingObjectUrlOwner,
+  useReleasableObjectUrl,
+} from './media-object-url.js';
 
 const STOCK_VIDEO_PAGE_SIZE = 6;
 const IMPORT_POLL_INTERVAL_MS = 750;
@@ -51,9 +55,12 @@ export function StockVideoDiscovery({
   const previewRequestSequence = useRef(0);
   const previewOpenerRef = useRef<HTMLButtonElement | null>(null);
   const previewCloseRef = useRef<HTMLButtonElement | null>(null);
+  const pendingModalPreviewOwner = usePendingObjectUrlOwner();
   const previewVideoRef = useReleasableObjectUrl<HTMLVideoElement>(
     preview?.url,
     preview?.posterUrl,
+    revokeDetachedObjectUrl,
+    pendingModalPreviewOwner,
   );
   const previewVideoElementRef = useRef<HTMLVideoElement | null>(null);
   const previewVideoConsumerRef = useCallback(
@@ -70,8 +77,9 @@ export function StockVideoDiscovery({
     return () => {
       mountedRef.current = false;
       previewRequestSequence.current += 1;
+      pendingModalPreviewOwner.revokePending();
     };
-  }, []);
+  }, [pendingModalPreviewOwner]);
 
   useEffect(() => {
     const sequence = ++requestSequence.current;
@@ -100,18 +108,13 @@ export function StockVideoDiscovery({
     };
   }, [category, client, onCategoryCountsChange, onStatus, query, reloadToken]);
 
-  const revokePreview = useCallback((value: typeof preview): void => {
-    if (value === undefined) return;
-    revokeDetachedObjectUrl(value.url);
-    if (value.posterUrl !== undefined) revokeDetachedObjectUrl(value.posterUrl);
-  }, []);
-
   const closePreview = useCallback((): void => {
     previewRequestSequence.current += 1;
+    pendingModalPreviewOwner.revokePending();
     const opener = previewOpenerRef.current;
     setPreview(undefined);
     window.setTimeout(() => opener?.focus(), 0);
-  }, []);
+  }, [pendingModalPreviewOwner]);
 
   useEffect(() => {
     if (preview === undefined) return;
@@ -144,6 +147,7 @@ export function StockVideoDiscovery({
   ): Promise<void> => {
     previewOpenerRef.current = opener;
     const sequence = ++previewRequestSequence.current;
+    pendingModalPreviewOwner.revokePending();
     setPreview(undefined);
     onStatus(`Loading preview for ${video.title}…`);
     try {
@@ -151,15 +155,15 @@ export function StockVideoDiscovery({
         client.stockVideoPreview(video.id),
         client.stockVideoPoster(video.id).catch(() => undefined),
       ]);
+      if (!mountedRef.current || sequence !== previewRequestSequence.current) return;
+      const previewUrl = URL.createObjectURL(previewBlob);
+      const posterUrl = posterBlob === undefined ? undefined : URL.createObjectURL(posterBlob);
+      pendingModalPreviewOwner.track(previewUrl, posterUrl);
       const next = {
         video,
-        url: URL.createObjectURL(previewBlob),
-        ...(posterBlob === undefined ? {} : { posterUrl: URL.createObjectURL(posterBlob) }),
+        url: previewUrl,
+        ...(posterUrl === undefined ? {} : { posterUrl }),
       };
-      if (!mountedRef.current || sequence !== previewRequestSequence.current) {
-        revokePreview(next);
-        return;
-      }
       setPreview(next);
       onStatus(`Preview ready for ${video.title}.`);
     } catch (reason: unknown) {
@@ -319,7 +323,13 @@ function StockVideoCard({
 }) {
   const posterTargetRef = useRef<HTMLButtonElement>(null);
   const [posterUrl, setPosterUrl] = useState<string | undefined>();
-  const posterRef = useReleasableObjectUrl<HTMLImageElement>(posterUrl);
+  const pendingPosterOwner = usePendingObjectUrlOwner();
+  const posterRef = useReleasableObjectUrl<HTMLImageElement>(
+    posterUrl,
+    undefined,
+    revokeDetachedObjectUrl,
+    pendingPosterOwner,
+  );
   const [posterFailed, setPosterFailed] = useState(false);
   useEffect(() => {
     let cancelled = false;
@@ -327,11 +337,8 @@ function StockVideoCard({
       void client
         .stockVideoPoster(video.id)
         .then((blob) => {
-          const url = URL.createObjectURL(blob);
-          if (cancelled) {
-            revokeDetachedObjectUrl(url);
-            return;
-          }
+          if (cancelled) return;
+          const url = pendingPosterOwner.track(URL.createObjectURL(blob));
           setPosterUrl(url);
         })
         .catch(() => {
@@ -353,8 +360,9 @@ function StockVideoCard({
     return () => {
       cancelled = true;
       observer?.disconnect();
+      pendingPosterOwner.revokePending();
     };
-  }, [client, video.id]);
+  }, [client, pendingPosterOwner, video.id]);
   return (
     <li
       className="stock-video-card"

@@ -98,6 +98,7 @@ import { inspectImageAnimation } from './animated-image-metadata.js';
 import {
   clearMediaSource,
   revokeDetachedObjectUrl,
+  usePendingObjectUrlOwner,
   useReleasableObjectUrl,
   type MediaObjectUrlConsumer,
 } from './media-object-url.js';
@@ -1199,13 +1200,20 @@ function EditorWorkspace({
     agentConnectionStatus?.capability === 'plan-only';
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
   const avatarObjectUrl = joySession.kind === 'ready' ? joySession.avatarObjectUrl : undefined;
-  const avatarObjectUrlRef = useReleasableObjectUrl<HTMLImageElement>(avatarObjectUrl);
+  const pendingAvatarOwner = usePendingObjectUrlOwner();
+  const avatarObjectUrlRef = useReleasableObjectUrl<HTMLImageElement>(
+    avatarObjectUrl,
+    undefined,
+    revokeDetachedObjectUrl,
+    pendingAvatarOwner,
+  );
   const joySessionRefreshSeqRef = useRef(0);
   useLayoutEffect(
     () => () => {
       joySessionRefreshSeqRef.current += 1;
+      pendingAvatarOwner.revokePending();
     },
-    [],
+    [pendingAvatarOwner],
   );
   const [desktopAccountModalOpen, setDesktopAccountModalOpen] = useState(false);
   const [toasts, setToasts] = useState<
@@ -3494,10 +3502,13 @@ function EditorWorkspace({
           }
           return;
         }
+        if (next.kind === 'ready' && next.avatarObjectUrl !== undefined) {
+          pendingAvatarOwner.track(next.avatarObjectUrl);
+        }
         setJoySession(next);
       })
       .catch(() => undefined);
-  }, [storage]);
+  }, [pendingAvatarOwner, storage]);
   useEffect(() => {
     if (session.recoveryWarnings.length === 0) return;
     showToast(
@@ -7897,10 +7908,12 @@ function MonitorPanelContent({
     revokeDetachedObjectUrl(url);
     recordPreviewResourceReleased('gpu-frame-url', url);
   }, []);
+  const pendingGpuPreviewOwner = usePendingObjectUrlOwner(releaseGpuPreviewUrl);
   const gpuPreviewImageRef = useReleasableObjectUrl<HTMLImageElement>(
     gpuPreviewUrl,
     undefined,
     releaseGpuPreviewUrl,
+    pendingGpuPreviewOwner,
   );
   const [gpuPreviewStatus, setGpuPreviewStatus] = useState<
     'local' | 'connecting' | 'hardware-gpu' | 'fallback'
@@ -8225,7 +8238,10 @@ function MonitorPanelContent({
             );
             if (result !== undefined) {
               if (cancelled || requestId !== gpuRequestIdRef.current) return;
-              const nextUrl = URL.createObjectURL(result.blob);
+              const nextUrl = pendingGpuPreviewOwner.track(
+                URL.createObjectURL(result.blob),
+                releaseGpuPreviewUrl,
+              );
               recordPreviewResourceCreated('gpu-frame-url', nextUrl);
               setGpuPreviewUrl(nextUrl);
               setGpuPreviewStatus('hardware-gpu');
@@ -8244,15 +8260,18 @@ function MonitorPanelContent({
       cancelled = true;
       controller.abort();
       window.clearTimeout(timer);
+      pendingGpuPreviewOwner.revokePending();
     };
   }, [
     clipFrameTick,
     clipFrameCache,
     controlPlaneProject.controlPlaneProjectId,
     gpuSession,
+    pendingGpuPreviewOwner,
     previewQuality,
     previewRenderer,
     previewVideoFrame,
+    releaseGpuPreviewUrl,
     sceneTick,
     session,
     state.playheadUs,

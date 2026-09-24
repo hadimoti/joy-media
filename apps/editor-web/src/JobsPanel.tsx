@@ -12,7 +12,11 @@ import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import type { ProjectOperationLedger, ProjectOperationStatus } from './project-operation-ledger.js';
 import { verifyWorkerAudioDerivative, type VerifiedWorkerAudioResult } from './worker-result.js';
-import { useReleasableObjectUrl } from './media-object-url.js';
+import {
+  revokeDetachedObjectUrl,
+  usePendingObjectUrlOwner,
+  useReleasableObjectUrl,
+} from './media-object-url.js';
 
 const PRESENCE_ORDER = { connected: 0, disconnected: 1, revoked: 2 } as const;
 
@@ -107,7 +111,13 @@ export function JobsPanel({
   const [tab, setTab] = useState('workers');
   const [review, setReview] = useState<VerifiedWorkerAudioResult | undefined>();
   const [reviewUrl, setReviewUrl] = useState<string | undefined>();
-  const reviewAudioRef = useReleasableObjectUrl<HTMLAudioElement>(reviewUrl);
+  const pendingReviewOwner = usePendingObjectUrlOwner();
+  const reviewAudioRef = useReleasableObjectUrl<HTMLAudioElement>(
+    reviewUrl,
+    undefined,
+    revokeDetachedObjectUrl,
+    pendingReviewOwner,
+  );
   const [reviewBusy, setReviewBusy] = useState(false);
   const reviewBusyRef = useRef(false);
   const [pairBusy, setPairBusy] = useState(false);
@@ -119,13 +129,19 @@ export function JobsPanel({
   const projectInitialized = initializedProjectId === projectId;
 
   useEffect(() => {
+    let cancelled = false;
     if (review === undefined) {
       setReviewUrl(undefined);
       return;
     }
-    const url = URL.createObjectURL(review.blob);
+    if (cancelled) return;
+    const url = pendingReviewOwner.track(URL.createObjectURL(review.blob));
     setReviewUrl(url);
-  }, [review]);
+    return () => {
+      cancelled = true;
+      pendingReviewOwner.revokePending();
+    };
+  }, [pendingReviewOwner, review]);
 
   const load = useCallback(async () => {
     const requestId = ++refreshSeqRef.current;

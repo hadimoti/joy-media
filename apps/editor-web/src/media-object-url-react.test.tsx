@@ -4,10 +4,18 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   clearMediaSource,
+  createPendingObjectUrlOwner,
+  revokeDetachedObjectUrl,
+  usePendingObjectUrlOwner,
   useReleasableObjectUrl as useMediaObjectUrl,
   type MediaObjectUrlConsumer,
 } from './media-object-url.js';
 import { ProjectMediaResolver } from './project-media-resolver.js';
+import {
+  previewResourceAuditSnapshot,
+  recordPreviewResourceCreated,
+  recordPreviewResourceReleased,
+} from './preview-resource-audit.js';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -594,5 +602,405 @@ describe('useReleasableObjectUrl React lifecycle', () => {
     );
     expect(retained.element?.getAttribute('src')).toBeNull();
     expect(events).toEqual(['revoke:blob:asset-preview']);
+  });
+});
+
+describe('pending object URL ownership handoff', () => {
+  it('revokes pending URL when component unmounts before state update commits', async () => {
+    setupContainer();
+    const revoked: string[] = [];
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      revoked.push(url);
+    });
+
+    let resolveBlob!: (blob: Blob) => void;
+    const blobPromise = new Promise<Blob>((resolve) => {
+      resolveBlob = resolve;
+    });
+
+    function AsyncPosterHarness() {
+      const [url, setUrl] = useState<string | undefined>();
+      const pendingOwner = usePendingObjectUrlOwner();
+      const imgRef = useMediaObjectUrl<HTMLImageElement>(
+        url,
+        undefined,
+        revokeDetachedObjectUrl,
+        pendingOwner,
+      );
+
+      useEffect(() => {
+        let cancelled = false;
+        void blobPromise.then((blob) => {
+          if (cancelled) return;
+          const objectUrl = pendingOwner.track(URL.createObjectURL(blob));
+          setUrl(objectUrl);
+        });
+        return () => {
+          cancelled = true;
+          pendingOwner.revokePending();
+        };
+      }, [pendingOwner]);
+
+      return url ? <img ref={imgRef} src={url} alt="poster" /> : <div>empty</div>;
+    }
+
+    await act(async () => {
+      root?.render(<AsyncPosterHarness />);
+    });
+    expect(revoked).toEqual([]);
+
+    // Resolve the async blob, let the microtask run to create and track the URL,
+    // but unmount within the same act before React commits the state update
+    await act(async () => {
+      resolveBlob(new Blob(['poster'], { type: 'image/png' }));
+      await Promise.resolve();
+      root?.unmount();
+      root = undefined;
+    });
+
+    expect(revoked).toEqual(['blob:test']);
+  });
+
+  it('normal flow: adopts on commit, revokes on replace and unmount exactly once with no double revoke', async () => {
+    setupContainer();
+    const revoked: string[] = [];
+    let count = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      count += 1;
+      return `blob:url-${count}`;
+    });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      revoked.push(url);
+    });
+
+    let resolveBlob!: (blob: Blob) => void;
+
+    function AsyncPosterHarness() {
+      const [url, setUrl] = useState<string | undefined>();
+      const pendingOwner = usePendingObjectUrlOwner();
+      const imgRef = useMediaObjectUrl<HTMLImageElement>(
+        url,
+        undefined,
+        revokeDetachedObjectUrl,
+        pendingOwner,
+      );
+
+      const load = useCallback(() => {
+        const promise = new Promise<Blob>((resolve) => {
+          resolveBlob = resolve;
+        });
+        void promise.then((blob) => {
+          const objectUrl = pendingOwner.track(URL.createObjectURL(blob));
+          setUrl(objectUrl);
+        });
+      }, [pendingOwner]);
+
+      return (
+        <div>
+          {url ? <img ref={imgRef} src={url} alt="poster" /> : <div>empty</div>}
+          <button onClick={load}>load</button>
+        </div>
+      );
+    }
+
+    await act(async () => {
+      root?.render(<AsyncPosterHarness />);
+    });
+
+    // Load first URL
+    await act(async () => {
+      container?.querySelector('button')?.click();
+    });
+    await act(async () => {
+      resolveBlob(new Blob(['one']));
+    });
+    // First URL committed and adopted
+    expect(revoked).toEqual([]);
+    expect(container?.querySelector('img')?.getAttribute('src')).toBe('blob:url-1');
+
+    // Replace with second URL
+    await act(async () => {
+      container?.querySelector('button')?.click();
+    });
+    await act(async () => {
+      resolveBlob(new Blob(['two']));
+    });
+    // First URL revoked exactly once on replace, second URL committed
+    expect(revoked).toEqual(['blob:url-1']);
+    expect(container?.querySelector('img')?.getAttribute('src')).toBe('blob:url-2');
+
+    // Unmount
+    await act(async () => {
+      root?.unmount();
+      root = undefined;
+    });
+    // Second URL revoked exactly once on unmount
+    expect(revoked).toEqual(['blob:url-1', 'blob:url-2']);
+  });
+
+  it('revokes older pending URL when superseded before commit', () => {
+    const revoked: string[] = [];
+    let count = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      count += 1;
+      return `blob:frame-${count}`;
+    });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      revoked.push(url);
+    });
+
+    const owner = createPendingObjectUrlOwner();
+    const url1 = owner.track(URL.createObjectURL(new Blob()));
+    expect(owner.pendingCount).toBe(1);
+    expect(revoked).toEqual([]);
+
+    // url2 arrives before url1 commits
+    const url2 = owner.track(URL.createObjectURL(new Blob()));
+    expect(owner.pendingCount).toBe(1);
+    expect(revoked).toEqual([url1]);
+
+    // url2 commits and is adopted
+    owner.adopt(url2);
+    expect(owner.pendingCount).toBe(0);
+
+    // Unmount cleanup
+    owner.revokePending();
+    // url2 was already adopted, so no double revoke
+    expect(revoked).toEqual([url1]);
+  });
+
+  it('multi-URL batch: revokes all unadopted URLs on unmount before commit', async () => {
+    setupContainer();
+    const revoked: string[] = [];
+    let count = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      count += 1;
+      return `blob:media-${count}`;
+    });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      revoked.push(url);
+    });
+
+    let resolveMedia!: () => void;
+    const mediaPromise = new Promise<void>((resolve) => {
+      resolveMedia = resolve;
+    });
+
+    function ModalPreviewHarness() {
+      const [preview, setPreview] = useState<{ url: string; posterUrl?: string } | undefined>();
+      const pendingOwner = usePendingObjectUrlOwner();
+      const videoRef = useMediaObjectUrl<HTMLVideoElement>(
+        preview?.url,
+        preview?.posterUrl,
+        revokeDetachedObjectUrl,
+        pendingOwner,
+      );
+
+      useEffect(() => {
+        let cancelled = false;
+        void mediaPromise.then(() => {
+          if (cancelled) return;
+          const url = URL.createObjectURL(new Blob());
+          const posterUrl = URL.createObjectURL(new Blob());
+          pendingOwner.track(url, posterUrl);
+          setPreview({ url, posterUrl });
+        });
+        return () => {
+          cancelled = true;
+          pendingOwner.revokePending();
+        };
+      }, [pendingOwner]);
+
+      return preview ? <video ref={videoRef} src={preview.url} poster={preview.posterUrl} /> : null;
+    }
+
+    await act(async () => {
+      root?.render(<ModalPreviewHarness />);
+    });
+    expect(revoked).toEqual([]);
+
+    // Resolve media, let microtask create and track URLs, then unmount inside same act before commit
+    await act(async () => {
+      resolveMedia();
+      await Promise.resolve();
+      root?.unmount();
+      root = undefined;
+    });
+
+    expect(revoked).toEqual(['blob:media-1', 'blob:media-2']);
+  });
+
+  it('StockVideoItem integration: unmount after poster blob resolves before state commit revokes poster URL exactly once', async () => {
+    setupContainer();
+    const revoked: string[] = [];
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:poster-item');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      revoked.push(url);
+    });
+
+    let resolvePoster!: (blob: Blob) => void;
+    const posterPromise = new Promise<Blob>((resolve) => {
+      resolvePoster = resolve;
+    });
+
+    function StockItemHarness() {
+      const [posterUrl, setPosterUrl] = useState<string | undefined>();
+      const pendingPosterOwner = usePendingObjectUrlOwner();
+      const posterRef = useMediaObjectUrl<HTMLImageElement>(
+        posterUrl,
+        undefined,
+        revokeDetachedObjectUrl,
+        pendingPosterOwner,
+      );
+
+      useEffect(() => {
+        let cancelled = false;
+        void posterPromise
+          .then((blob) => {
+            if (cancelled) return;
+            const url = pendingPosterOwner.track(URL.createObjectURL(blob));
+            setPosterUrl(url);
+          })
+          .catch(() => undefined);
+        return () => {
+          cancelled = true;
+          pendingPosterOwner.revokePending();
+        };
+      }, [pendingPosterOwner]);
+
+      return posterUrl ? <img ref={posterRef} src={posterUrl} alt="test" /> : <div>empty</div>;
+    }
+
+    await act(async () => {
+      root?.render(<StockItemHarness />);
+    });
+    expect(revoked).toEqual([]);
+
+    await act(async () => {
+      resolvePoster(new Blob(['poster']));
+      await Promise.resolve();
+      root?.unmount();
+      root = undefined;
+    });
+
+    expect(revoked).toEqual(['blob:poster-item']);
+  });
+
+  it('JobsPanel integration: unmount after review blob provided before commit revokes review URL exactly once', async () => {
+    setupContainer();
+    const revoked: string[] = [];
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:review-audio');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      revoked.push(url);
+    });
+
+    let resolveReview!: (review: { blob: Blob }) => void;
+    const reviewPromise = new Promise<{ blob: Blob }>((resolve) => {
+      resolveReview = resolve;
+    });
+
+    function JobsPanelReviewHarness() {
+      const [reviewUrl, setReviewUrl] = useState<string | undefined>();
+      const pendingReviewOwner = usePendingObjectUrlOwner();
+      const reviewAudioRef = useMediaObjectUrl<HTMLAudioElement>(
+        reviewUrl,
+        undefined,
+        revokeDetachedObjectUrl,
+        pendingReviewOwner,
+      );
+
+      useEffect(() => {
+        let cancelled = false;
+        void reviewPromise.then((review) => {
+          if (cancelled) return;
+          const url = pendingReviewOwner.track(URL.createObjectURL(review.blob));
+          setReviewUrl(url);
+        });
+        return () => {
+          cancelled = true;
+          pendingReviewOwner.revokePending();
+        };
+      }, [pendingReviewOwner]);
+
+      return reviewUrl ? <audio ref={reviewAudioRef} src={reviewUrl} /> : <div>empty</div>;
+    }
+
+    await act(async () => {
+      root?.render(<JobsPanelReviewHarness />);
+    });
+    expect(revoked).toEqual([]);
+
+    await act(async () => {
+      resolveReview({ blob: new Blob(['audio']) });
+      await Promise.resolve();
+      root?.unmount();
+      root = undefined;
+    });
+
+    expect(revoked).toEqual(['blob:review-audio']);
+  });
+
+  it('App GPU preview integration: unmount after frame resolves before commit revokes frame URL and releases audit resource', async () => {
+    setupContainer();
+    const revoked: string[] = [];
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:gpu-frame-1');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      revoked.push(url);
+    });
+
+    let resolveFrame!: (blob: Blob) => void;
+    const framePromise = new Promise<Blob>((resolve) => {
+      resolveFrame = resolve;
+    });
+
+    function GpuPreviewHarness() {
+      const [gpuPreviewUrl, setGpuPreviewUrl] = useState<string | undefined>();
+      const releaseGpuPreviewUrl = useCallback((url: string) => {
+        revokeDetachedObjectUrl(url);
+        recordPreviewResourceReleased('gpu-frame-url', url);
+      }, []);
+      const pendingGpuPreviewOwner = usePendingObjectUrlOwner(releaseGpuPreviewUrl);
+      const gpuPreviewImageRef = useMediaObjectUrl<HTMLImageElement>(
+        gpuPreviewUrl,
+        undefined,
+        releaseGpuPreviewUrl,
+        pendingGpuPreviewOwner,
+      );
+
+      useEffect(() => {
+        let cancelled = false;
+        void framePromise.then((blob) => {
+          if (cancelled) return;
+          const nextUrl = pendingGpuPreviewOwner.track(
+            URL.createObjectURL(blob),
+            releaseGpuPreviewUrl,
+          );
+          recordPreviewResourceCreated('gpu-frame-url', nextUrl);
+          setGpuPreviewUrl(nextUrl);
+        });
+        return () => {
+          cancelled = true;
+          pendingGpuPreviewOwner.revokePending();
+        };
+      }, [pendingGpuPreviewOwner, releaseGpuPreviewUrl]);
+
+      return gpuPreviewUrl ? <img ref={gpuPreviewImageRef} src={gpuPreviewUrl} alt="gpu" /> : null;
+    }
+
+    await act(async () => {
+      root?.render(<GpuPreviewHarness />);
+    });
+    expect(revoked).toEqual([]);
+    expect(previewResourceAuditSnapshot().active['gpu-frame-url']).toBe(0);
+
+    await act(async () => {
+      resolveFrame(new Blob(['frame']));
+      await Promise.resolve();
+      root?.unmount();
+      root = undefined;
+    });
+
+    expect(revoked).toEqual(['blob:gpu-frame-1']);
+    expect(previewResourceAuditSnapshot().active['gpu-frame-url']).toBe(0);
   });
 });

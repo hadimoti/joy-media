@@ -152,4 +152,126 @@ describe('StockVideoDiscovery object URL lifecycle', () => {
     root = undefined;
     expect(revoked).toEqual(expect.arrayContaining([replacement.src, replacement.poster]));
   });
+
+  it('revokes pending poster URL if component unmounts before state update commits', async () => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    const revoked: string[] = [];
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:pending-poster');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      revoked.push(url);
+    });
+
+    let resolvePoster!: (blob: Blob) => void;
+    const client = {
+      stockVideos: vi.fn(async () => ({ items: [videos[0]!], counts: { technology: 1 } })),
+      stockVideoPoster: vi.fn(
+        () =>
+          new Promise<Blob>((resolve) => {
+            resolvePoster = resolve;
+          }),
+      ),
+      stockVideoPreview: vi.fn(async () => new Blob(['preview'])),
+    } as unknown as BrowserControlPlaneClient;
+
+    const props = {
+      client,
+      projectId: 'project-test',
+      query: '',
+      category: 'technology' as const,
+      categoryCounts: { technology: 1 } as Record<BrowserStockVideoCategory, number>,
+      onCategoryCountsChange: () => undefined,
+      viewMode: 'large' as const,
+      onImport: async () => undefined,
+      onStatus: () => undefined,
+    };
+
+    await act(async () => {
+      root?.render(<StockVideoDiscovery {...props} />);
+    });
+    expect(revoked).toEqual([]);
+
+    await act(async () => {
+      resolvePoster(new Blob(['poster']));
+      await Promise.resolve();
+      root?.unmount();
+      root = undefined;
+    });
+
+    expect(revoked).toEqual(['blob:pending-poster']);
+  });
+
+  it('revokes pending modal preview URLs if component unmounts before preview state commits', async () => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    const rendered = container;
+    const revoked: string[] = [];
+    let count = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      count += 1;
+      return `blob:preview-modal-${count}`;
+    });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      revoked.push(url);
+    });
+
+    let resolvePreview!: (blob: Blob) => void;
+    let resolvePoster!: (blob: Blob) => void;
+    const client = {
+      stockVideos: vi.fn(async () => ({ items: [videos[0]!], counts: { technology: 1 } })),
+      stockVideoPoster: vi.fn(
+        () =>
+          new Promise<Blob>((resolve) => {
+            resolvePoster = resolve;
+          }),
+      ),
+      stockVideoPreview: vi.fn(
+        () =>
+          new Promise<Blob>((resolve) => {
+            resolvePreview = resolve;
+          }),
+      ),
+    } as unknown as BrowserControlPlaneClient;
+
+    const props = {
+      client,
+      projectId: 'project-test',
+      query: '',
+      category: 'technology' as const,
+      categoryCounts: { technology: 1 } as Record<BrowserStockVideoCategory, number>,
+      onCategoryCountsChange: () => undefined,
+      viewMode: 'large' as const,
+      onImport: async () => undefined,
+      onStatus: () => undefined,
+    };
+
+    await act(async () => {
+      root?.render(<StockVideoDiscovery {...props} />);
+    });
+
+    // Click preview button
+    await act(async () => {
+      rendered
+        .querySelector<HTMLButtonElement>('button[aria-label="Preview First video"]')
+        ?.click();
+    });
+
+    // Resolve both preview and poster blobs
+    await act(async () => {
+      resolvePreview(new Blob(['preview'], { type: 'video/mp4' }));
+      resolvePoster(new Blob(['poster'], { type: 'image/png' }));
+      // Promise.all takes multiple microtasks to settle
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      root?.unmount();
+      root = undefined;
+    });
+
+    expect(revoked).toEqual(
+      expect.arrayContaining(['blob:preview-modal-1', 'blob:preview-modal-2']),
+    );
+  });
 });
