@@ -10,6 +10,7 @@ const playwrightOutputDirectory =
 
 export default defineConfig({
   testDir: './tests/e2e',
+  testMatch: '**/*.spec.ts',
   timeout: 30_000,
   expect: { timeout: 5_000 },
   fullyParallel: true,

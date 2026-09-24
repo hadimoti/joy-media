@@ -68,8 +68,6 @@ jobs:
           node --version
           corepack enable pnpm
           pnpm --version
-          ffmpeg -version
-          ffprobe -version
       - run: pnpm install --frozen-lockfile
         shell: powershell
       - name: Build Worker and package self-test executable
