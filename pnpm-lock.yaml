@@ -133,6 +133,9 @@ importers:
       '@joy-media/joy-agent-engine':
         specifier: workspace:*
         version: link:../../packages/joy-agent-engine
+      '@joy-media/motion-core':
+        specifier: workspace:*
+        version: link:../../packages/motion-core
       '@joy-media/project-persistence':
         specifier: workspace:*
         version: link:../../packages/project-persistence

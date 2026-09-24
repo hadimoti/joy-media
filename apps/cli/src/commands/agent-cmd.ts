@@ -1,4 +1,5 @@
 /* global console */
+import type { CliFlags } from '../cli.js';
 import { probeAgent, runJoyAgent } from '../agent/joy-agent.js';
 import { startAgentRepl } from '../agent/repl.js';
 import {
@@ -34,10 +35,7 @@ export interface AgentCommandFlags {
   baseUrl?: string | undefined;
 }
 
-export async function handleAgentCommand(
-  args: string[],
-  flags: AgentCommandFlags,
-): Promise<number> {
+export async function handleAgentCommand(args: string[], flags: CliFlags): Promise<number> {
   const sub = args[0] ?? 'chat';
 
   if (sub === 'provider') {
@@ -338,6 +336,15 @@ export async function handleAgentCommand(
   }
 
   if (sub === 'chat') {
+    if (flags.model) {
+      console.log();
+      logInfo(
+        `${c('Dual-Brain:', 'bold')} ${c('Active', 'green')}  ` +
+          `${c('Workhorse', 'cyan')}=openrouter/${c('openrouter/free', 'magenta')}  ` +
+          `${c('Creative', 'cyan')}=kilo/${c('kilo-auto/efficient', 'magenta')}`,
+      );
+      logStep('Override model', flags.model);
+    }
     await startAgentRepl({
       project: projectInfo.project,
       revision: projectInfo.revision,

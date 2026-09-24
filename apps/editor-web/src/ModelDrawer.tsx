@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
-import type { ByokSessionStatus, JoyAgentProvider } from './joy-agent/protocol.js';
+import type { ByokSessionStatus, JoyProviderMode } from './joy-agent/protocol.js';
 import { CloseIcon, PlusIcon, CheckIcon } from './icons.js';
 import {
   isDesktopHost,
@@ -205,7 +205,7 @@ export function ModelDrawer({
 
       if (engineClient) {
         const nextStatus = await engineClient.configure({
-          provider: profile.provider as JoyAgentProvider,
+          provider: profile.provider as JoyProviderMode,
           baseUrl: profile.baseUrl,
           modelId,
           apiKey,

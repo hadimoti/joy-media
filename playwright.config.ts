@@ -8,6 +8,9 @@ const playwrightReportDirectory = process.env.PLAYWRIGHT_HTML_REPORT ?? 'playwri
 const playwrightOutputDirectory =
   process.env.PLAYWRIGHT_TEST_RESULTS_DIR ?? 'test-results/playwright';
 
+const systemChromeUse =
+  process.env.PLAYWRIGHT_USE_SYSTEM_CHROME?.trim() === '1' ? { channel: 'chrome' as const } : {};
+
 export default defineConfig({
   testDir: './tests/e2e',
   testMatch: '**/*.spec.ts',
@@ -28,7 +31,7 @@ export default defineConfig({
   outputDir: playwrightOutputDirectory,
   use: {
     baseURL: e2eBaseUrl,
-    ...(process.env.PLAYWRIGHT_USE_SYSTEM_CHROME === '1' ? { channel: 'chrome' as const } : {}),
+    ...systemChromeUse,
     trace: 'retain-on-failure',
     video: 'retain-on-failure',
     screenshot: 'only-on-failure',
@@ -37,31 +40,59 @@ export default defineConfig({
   projects: [
     {
       name: 'desktop-primary',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1639, height: 1066 } },
+      use: {
+        ...devices['Desktop Chrome'],
+        ...systemChromeUse,
+        viewport: { width: 1639, height: 1066 },
+      },
     },
     {
       name: 'desktop-compact',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1366, height: 768 } },
+      use: {
+        ...devices['Desktop Chrome'],
+        ...systemChromeUse,
+        viewport: { width: 1366, height: 768 },
+      },
     },
     {
       name: 'desktop-minimum',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1024, height: 768 } },
+      use: {
+        ...devices['Desktop Chrome'],
+        ...systemChromeUse,
+        viewport: { width: 1024, height: 768 },
+      },
     },
     {
       name: 'desktop-1280',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } },
+      use: {
+        ...devices['Desktop Chrome'],
+        ...systemChromeUse,
+        viewport: { width: 1280, height: 800 },
+      },
     },
     {
       name: 'desktop-1440',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } },
+      use: {
+        ...devices['Desktop Chrome'],
+        ...systemChromeUse,
+        viewport: { width: 1440, height: 900 },
+      },
     },
     {
       name: 'desktop-1581',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1581, height: 1066 } },
+      use: {
+        ...devices['Desktop Chrome'],
+        ...systemChromeUse,
+        viewport: { width: 1581, height: 1066 },
+      },
     },
     {
       name: 'desktop-1920',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1920, height: 1080 } },
+      use: {
+        ...devices['Desktop Chrome'],
+        ...systemChromeUse,
+        viewport: { width: 1920, height: 1080 },
+      },
     },
   ],
   webServer:

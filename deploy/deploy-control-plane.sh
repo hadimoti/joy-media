@@ -52,6 +52,7 @@ fi
 log "PostgreSQL backup secured at $PG_BACKUP_FILE ($(du -h "$PG_BACKUP_FILE" | cut -f1))"
 
 log "Step 3/6: Building @joy-media/account-web"
+CI=true npm_config_confirm_modules_purge=false pnpm install --frozen-lockfile
 CI=true pnpm --filter @joy-media/account-web build || die "account-web build failed"
 
 log "Deploying account-web build to $ACCOUNT_WEB_TARGET"

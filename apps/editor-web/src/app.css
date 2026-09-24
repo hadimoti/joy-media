@@ -3580,6 +3580,33 @@ label {
   color: var(--joy-text-muted);
   direction: ltr;
 }
+.timeline-audio-dsp-pills {
+  display: inline-flex;
+  gap: 3px;
+  margin-inline-start: 6px;
+  vertical-align: middle;
+}
+.audio-dsp-pill {
+  font-size: 0.56rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: #a0aec0;
+  line-height: 1;
+}
+.audio-dsp-pill.is-active {
+  background: rgba(247, 245, 134, 0.15);
+  color: #f7f586;
+  border-color: rgba(244, 183, 47, 0.4);
+}
+.audio-dsp-pill.is-ready {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  border-color: rgba(16, 185, 129, 0.3);
+}
 /* Keep the track identity readable at rest. Controls are an interaction
    layer: they reveal over the left-side badge area on hover or keyboard focus
    instead of permanently consuming the label's narrow gutter. */
@@ -8815,6 +8842,32 @@ label {
   font-size: 0.72rem;
   opacity: 0.7;
 }
+.living-look-quick-v2-btn {
+  margin-top: 0.4rem;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(244, 183, 47, 0.4);
+  background: rgba(247, 245, 134, 0.1);
+  color: #f7f586;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  align-self: flex-start;
+}
+.living-look-quick-v2-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #f7f586, #f4b72f);
+  color: #0c0d10;
+  box-shadow: 0 2px 8px rgba(244, 183, 47, 0.25);
+  border-color: #f4b72f;
+}
+.living-look-quick-v2-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 .living-look-editor {
   display: flex;
   min-width: 0;
@@ -10755,6 +10808,28 @@ label {
   white-space: nowrap;
   font-size: 0.72rem;
   color: #9d9da1;
+}
+.audio-mix-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.35rem 0.25rem 0.25rem;
+  border-bottom: 1px solid var(--joy-border);
+  margin-bottom: 0.25rem;
+}
+.audio-mix-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  justify-content: space-between;
+}
+.audio-mix-header-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--joy-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 .audio-strip-flags {
   display: flex;

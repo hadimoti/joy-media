@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react';
-import { requestOtp, verifyOtp, type MediaAuthMethod } from './media-session.js';
+import { registerDevice, requestOtp, verifyOtp, type MediaAuthMethod } from './media-session.js';
 import './desktop-account-modal.css';
 
 interface DesktopAccountModalProps {
@@ -108,8 +108,9 @@ export function DesktopAccountModal({
     setError(undefined);
     try {
       await verifyOtp(contact.trim(), method, code, window.localStorage);
+      void registerDevice(undefined, window.localStorage);
       setSuccessGlow(true);
-      setHint('Connected successfully!');
+      setHint('Connected successfully! Workstation registered.');
       setTimeout(() => {
         onSuccess?.();
         onClose();

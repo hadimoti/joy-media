@@ -493,6 +493,9 @@ export async function configureJoyAgent(
   await page.getByRole('menuitem', { name: 'Joy Code Settings…', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Joy Code Settings' });
   await expect(dialog).toBeVisible();
+  // The dialog defaults to the Dual-Brain Studio preset; explicitly select Custom BYOK
+  // so this fixture configures one custom provider with deterministic values.
+  await dialog.getByRole('button', { name: /Custom BYOK/ }).click();
   await dialog
     .getByRole('combobox', { name: 'Provider Platform' })
     .selectOption('openai-compatible');
@@ -507,13 +510,19 @@ export async function configureJoyAgent(
     .check();
   await dialog.getByLabel('API Secret Key').fill(apiKey);
   await dialog.getByRole('button', { name: /Connect model|Test & use/ }).click();
-  await expect(
-    dialog.getByText(
-      options.allowFailure
-        ? /Tool loop ready|Plan-only|authentication failed|CORS or network error|response too large|Connection timed out/
-        : /Tool loop ready|Plan-only/,
-    ),
-  ).toBeVisible({ timeout: 20_000 });
+  const expectedConnectionNotice = options.allowFailure
+    ? [
+        'Tool loop ready',
+        'Plan-only ready',
+        'authentication failed',
+        'CORS or network error',
+        'response too large',
+        'Connection timed out',
+      ]
+    : ['Tool loop ready', 'Plan-only ready'];
+  await expect(dialog.getByText(new RegExp(expectedConnectionNotice.join('|')))).toBeVisible({
+    timeout: 20_000,
+  });
   if (!options.allowFailure) await expect(dialog.getByText(/Connected successfully/)).toBeVisible();
   await expect(dialog.getByLabel('API Secret Key')).toHaveValue('');
   return dialog;

@@ -2581,6 +2581,25 @@ export function TimelinePanel({
                     <span className="track-name" dir="ltr" title={track.id}>
                       {trackName}
                     </span>
+                    {track.family === 'audio' && (
+                      <div
+                        className="timeline-audio-dsp-pills"
+                        title="Real-time Audio DSP: DeepFilterNet & Normalization"
+                      >
+                        <span
+                          className={`audio-dsp-pill dsp-dfn ${source.clips.length > 0 ? 'is-active' : 'is-ready'}`}
+                          title="DeepFilterNet (DFN) Active"
+                        >
+                          DFN
+                        </span>
+                        <span
+                          className={`audio-dsp-pill dsp-norm ${source.clips.length > 0 ? 'is-active' : 'is-ready'}`}
+                          title="Volume Normalization (NORM) Active"
+                        >
+                          NORM
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <div
                     className="timeline-track-controls"

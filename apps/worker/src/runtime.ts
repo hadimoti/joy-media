@@ -107,45 +107,10 @@ export class WindowsDpapiSecretProtector implements WorkerSecretProtector {
    */
   readonly #decrypted = new Map<string, string>();
 
-  protect(value: string): string {
-    const result = this.#run(
-      '$plain=[Console]::In.ReadToEnd(); Add-Type -AssemblyName System.Security; $bytes=[Text.Encoding]::UTF8.GetBytes($plain); $protected=[Security.Cryptography.ProtectedData]::Protect($bytes,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Out.Write([Convert]::ToBase64String($protected))',
-      value,
-      'protect',
-    );
-    const encrypted = result.status === 0 ? result.stdout.trim() : '';
-    if (encrypted.length === 0) throw new Error('Windows DPAPI protection failed');
-    this.#remember(encrypted, value);
-    return encrypted;
-  }
+  private static readonly ENCODING_TIMEOUT_MS = DPAPI_HELPER_TIMEOUT_MS;
 
-  unprotect(value: string): string | undefined {
-    const cached = this.#decrypted.get(value);
-    if (cached !== undefined) return cached;
-    const result = this.#run(
-      '$encrypted=[Convert]::FromBase64String([Console]::In.ReadToEnd().Trim()); Add-Type -AssemblyName System.Security; $plain=[Security.Cryptography.ProtectedData]::Unprotect($encrypted,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Out.Write([Convert]::ToBase64String($plain))',
-      value,
-      'unprotect',
-    );
-    // A non-zero exit means PowerShell ran and DPAPI refused the ciphertext
-    // (foreign user or migrated profile), which must fail closed into a fresh
-    // pairing. A helper that never ran is reported by #run instead, because
-    // treating it as "undecryptable" silently downgrades a paired Worker.
-    if (result.status !== 0) return undefined;
-    const encoded = result.stdout;
-    if (encoded.length === 0) return undefined;
-    let plain: string;
-    try {
-      plain = Buffer.from(encoded, 'base64').toString('utf8');
-    } catch {
-      return undefined;
-    }
-    this.#remember(value, plain);
-    return plain;
-  }
-
-  #run(command: string, input: string, action: 'protect' | 'unprotect'): SpawnSyncReturns<string> {
-    const result = spawnSync(
+  private static runPowerShell(command: string, input: string): SpawnSyncReturns<string> {
+    return spawnSync(
       'powershell.exe',
       [
         '-NoLogo',
@@ -156,13 +121,60 @@ export class WindowsDpapiSecretProtector implements WorkerSecretProtector {
         '-Command',
         command,
       ],
-      { input, encoding: 'utf8', timeout: DPAPI_HELPER_TIMEOUT_MS, windowsHide: true },
+      {
+        input,
+        encoding: 'utf8',
+        timeout: WindowsDpapiSecretProtector.ENCODING_TIMEOUT_MS,
+        windowsHide: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
     );
+  }
+
+  protect(value: string): string {
+    const result = this.#run(
+      "$ErrorActionPreference='Stop'; $plain=[Console]::In.ReadToEnd(); Add-Type -AssemblyName System.Security; $bytes=[Text.Encoding]::UTF8.GetBytes($plain); $protected=[Security.Cryptography.ProtectedData]::Protect($bytes,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Out.Write([Convert]::ToBase64String($protected))",
+      value,
+      'protect',
+    );
+    if (result.status !== 0) {
+      throw new Error(
+        `Windows DPAPI protection failed (status=${result.status}: ${result.stderr ?? ''})`,
+      );
+    }
+    const encrypted = result.stdout.trim();
+    if (encrypted.length === 0) throw new Error('Windows DPAPI protection returned no ciphertext');
+    this.#remember(encrypted, value);
+    return encrypted;
+  }
+
+  unprotect(value: string): string | undefined {
+    const cached = this.#decrypted.get(value);
+    if (cached !== undefined) return cached;
+    const result = this.#run(
+      "$ErrorActionPreference='Stop'; $encrypted=[Convert]::FromBase64String([Console]::In.ReadToEnd().Trim()); Add-Type -AssemblyName System.Security; $plain=[Security.Cryptography.ProtectedData]::Unprotect($encrypted,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser); $writer=[Console]::Out; $utf8=[Text.Encoding]::UTF8; $writer.Write($utf8.GetString($plain))",
+      value,
+      'unprotect',
+    );
+    // A non-zero exit means PowerShell ran and DPAPI refused the ciphertext
+    // (foreign user or migrated profile), which must fail closed into a fresh
+    // pairing. A helper that never ran is reported by #run instead, because
+    // treating it as "undecryptable" silently downgrades a paired Worker.
+    if (result.status !== 0) return undefined;
+    const encoded = result.stdout;
+    if (encoded.length === 0) return undefined;
+    const plain = encoded;
+    this.#remember(value, plain);
+    return plain;
+  }
+
+  #run(command: string, input: string, action: 'protect' | 'unprotect'): SpawnSyncReturns<string> {
+    const result = WindowsDpapiSecretProtector.runPowerShell(command, input);
     if (result.error !== undefined)
       throw new WorkerSecretProtectorUnavailableError(action, result.error.message);
     // spawnSync reports a timeout or an external kill as a signal with no exit
     // status; neither says anything about the secret it was handed.
-    if (result.status === null)
+    if (result.status === null || result.signal !== null)
       throw new WorkerSecretProtectorUnavailableError(
         action,
         `powershell.exe exited on ${result.signal ?? 'an unknown signal'} after ${DPAPI_HELPER_TIMEOUT_MS}ms`,

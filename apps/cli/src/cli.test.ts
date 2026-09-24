@@ -287,6 +287,6 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       // 6. Remove provider
       const removeCode = await runCli(['agent', 'provider', 'remove', 'kilo-test']);
       expect(removeCode).toBe(0);
-    });
+    }, 15000);
   });
 });

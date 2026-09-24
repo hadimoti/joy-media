@@ -47,11 +47,12 @@ test.describe('built-in JOY Agent BYOK security envelope', () => {
     for (const mode of ['auth', 'redirect', 'network', 'oversize'] as const) {
       const provider = await installFakeOpenAIProvider(page, { mode });
       const dialog = await configureJoyAgent(page, `${SENTINEL}-${mode}`, { allowFailure: true });
-      await expect(
-        dialog.getByText(/authentication failed|CORS or network error|response too large/),
-      ).toBeVisible({
-        timeout: 20_000,
-      });
+      const failureNotice = dialog.getByRole('alert');
+      await expect(failureNotice).toHaveCount(1);
+      await expect(failureNotice).toContainText(
+        /Connection failed:.*(authentication failed|CORS or network error|response too large)/i,
+        { timeout: 20_000 },
+      );
       expect(provider.authorizationSeen).toBe(true);
       expect(await scanForSentinel(page, `${SENTINEL}-${mode}`)).toEqual([]);
       await dialog.getByRole('button', { name: 'Done' }).click();
@@ -66,7 +67,11 @@ test.describe('built-in JOY Agent BYOK security envelope', () => {
     await page.unroute('https://joy-agent-fixture.example/**');
     const provider = await installFakeOpenAIProvider(page, { mode: 'slow', delayMs: 16_000 });
     const dialog = await configureJoyAgent(page, `${SENTINEL}-timeout`, { allowFailure: true });
-    await expect(dialog.getByText('Connection timed out')).toBeVisible({ timeout: 20_000 });
+    const failureNotice = dialog.getByRole('alert');
+    await expect(failureNotice).toHaveCount(1);
+    await expect(failureNotice).toContainText(/Connection failed:.*Connection timed out/, {
+      timeout: 20_000,
+    });
     expect(provider.authorizationSeen).toBe(true);
     expect(await scanForSentinel(page, `${SENTINEL}-timeout`)).toEqual([]);
     await dialog.getByRole('button', { name: 'Done' }).click();

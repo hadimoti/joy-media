@@ -64,10 +64,20 @@ async function render(
 
 function buttonByText(rendered: HTMLElement, text: string): HTMLButtonElement {
   const button = [...rendered.querySelectorAll<HTMLButtonElement>('button')].find(
-    (candidate) => candidate.textContent?.trim() === text,
+    (candidate) =>
+      candidate.textContent?.trim() === text ||
+      candidate.querySelector('strong')?.textContent?.trim() === text,
   );
   if (button === undefined) throw new Error(`Expected button "${text}"`);
   return button;
+}
+
+async function selectCustomPreset(rendered: HTMLElement): Promise<void> {
+  const customPreset = buttonByText(rendered, 'Custom BYOK');
+  await act(async () => {
+    customPreset.click();
+    await Promise.resolve();
+  });
 }
 
 function setInputValue(input: HTMLInputElement, value: string): void {
@@ -111,6 +121,7 @@ describe('JOY Agent Settings connection status', () => {
   it('shows tool-loop readiness and the connection notice in the dialog', async () => {
     const rendered = await render(client(), undefined);
 
+    await selectCustomPreset(rendered);
     await connectWithKey(rendered);
 
     expect(rendered.querySelector('[role="status"]')?.textContent).toContain('Tool loop ready');
@@ -131,6 +142,7 @@ describe('JOY Agent Settings connection status', () => {
       undefined,
     );
 
+    await selectCustomPreset(rendered);
     await connectWithKey(rendered);
 
     expect(rendered.querySelector('[role="status"]')?.textContent).toContain('Plan-only ready');
@@ -151,6 +163,7 @@ describe('JOY Agent Settings connection status', () => {
       undefined,
     );
 
+    await selectCustomPreset(rendered);
     const key = await connectWithKey(rendered);
     const dialog = rendered.querySelector('[role="dialog"]');
     if (dialog === null) throw new Error('Expected settings dialog');
@@ -171,6 +184,7 @@ describe('JOY Agent Settings connection status', () => {
       undefined,
     );
 
+    await selectCustomPreset(rendered);
     const key = await connectWithKey(rendered);
 
     expect(rendered.querySelector('[role="alert"]')?.textContent).toContain(
@@ -235,6 +249,7 @@ describe('JOY Agent Settings media capability probe', () => {
   it('does not probe on mount or connection test, then explicitly sends the check and preserves the connection success notice', async () => {
     const engineClient = client();
     const rendered = await render(engineClient, undefined);
+    await selectCustomPreset(rendered);
     const probe = vi.mocked(engineClient.probeMediaCapabilities);
     const configure = vi.mocked(engineClient.configure);
     const testConnection = vi.mocked(engineClient.testConnection);
@@ -393,6 +408,7 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
   it('shows the acknowledgement checkbox only for an OpenAI-compatible provider', async () => {
     const rendered = await render(client(), readyStatus);
 
+    await selectCustomPreset(rendered);
     expect(rendered.textContent).not.toContain(disclosureText);
     await changeProvider(rendered, 'openai-compatible');
     expect(rendered.textContent).toContain(disclosureText);
@@ -405,7 +421,33 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
   it('blocks custom provider connection until the acknowledgement is checked', async () => {
     const engineClient = client();
     const rendered = await render(engineClient, readyStatus);
+    await selectCustomPreset(rendered);
     await changeProvider(rendered, 'openai-compatible');
+
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    if (key === null) throw new Error('Expected API key field');
+    const baseUrl = rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]');
+    if (baseUrl === null) throw new Error('Expected base URL field');
+    await act(async () => {
+      setInputValue(key, 'custom-provider-test-key');
+      setInputValue(baseUrl, 'https://custom.example/v1');
+      buttonByText(rendered, 'Connect model').click();
+    });
+
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain(
+      'Enter the custom-provider acknowledgement before connecting.',
+    );
+  });
+
+  it('requires acknowledgement when a custom provider is selected from the dual-brain default', async () => {
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    const dualBrainPreset = buttonByText(rendered, 'Dual-Brain Studio');
+    expect(dualBrainPreset.className).toContain('is-active');
+
+    await changeProvider(rendered, 'openai-compatible');
+    expect(buttonByText(rendered, 'Custom BYOK').className).toContain('is-active');
 
     const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
     if (key === null) throw new Error('Expected API key field');
@@ -425,6 +467,7 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
 
   it('resets the acknowledgement whenever the provider changes', async () => {
     const rendered = await render(client(), readyStatus);
+    await selectCustomPreset(rendered);
     await changeProvider(rendered, 'openai-compatible');
 
     const checkbox = rendered.querySelector<HTMLInputElement>('input[type="checkbox"]');
@@ -489,6 +532,7 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     };
     const engineClient = client();
     const rendered = await render(engineClient, undefined);
+    await selectCustomPreset(rendered);
 
     const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
     if (key === null) throw new Error('Expected API key field');
@@ -550,6 +594,7 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     };
     const engineClient = client();
     const rendered = await render(engineClient, undefined);
+    await selectCustomPreset(rendered);
 
     await act(async () => {
       buttonByText(rendered, 'Connect model').click();
@@ -570,6 +615,11 @@ describe('JOY Agent Settings desktop profile persistence', () => {
   it('connects to Joy Pro gateway without requiring API key input', async () => {
     const engineClient = client();
     const rendered = await render(engineClient, undefined);
+    const joyHostedPreset = buttonByText(rendered, 'Joy Hosted Pro Gateway');
+    await act(async () => {
+      joyHostedPreset.click();
+      await Promise.resolve();
+    });
 
     const select = rendered.querySelector<HTMLSelectElement>('select');
     if (select === null) throw new Error('Expected provider select dropdown');

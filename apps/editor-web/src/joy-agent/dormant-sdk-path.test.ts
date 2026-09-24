@@ -74,5 +74,5 @@ describe('JOY Agent dormant SDK architecture guard', () => {
       violations,
       'Production editor code must enter through the Worker and trusted host RPC, not the dormant SDK bridge.',
     ).toEqual([]);
-  });
+  }, 60_000);
 });

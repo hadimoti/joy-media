@@ -10,6 +10,7 @@
     { "path": "../../packages/project-schema" },
     { "path": "../../packages/project-persistence" },
     { "path": "../../packages/commands" },
-    { "path": "../../packages/agent-tools" }
+    { "path": "../../packages/agent-tools" },
+    { "path": "../../packages/motion-core" }
   ]
 }

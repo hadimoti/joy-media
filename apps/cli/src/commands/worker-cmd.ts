@@ -3,6 +3,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import type { CliFlags } from '../cli.js';
+import { FlagValidationError, NUMERIC_RANGES } from '../utils/flags.js';
 import {
   c,
   logError,
@@ -18,10 +20,8 @@ export interface WorkerCommandFlags {
   output?: string | undefined;
 }
 
-export async function handleWorkerCommand(
-  args: string[],
-  flags: WorkerCommandFlags,
-): Promise<number> {
+export async function handleWorkerCommand(args: string[], flags: CliFlags): Promise<number> {
+  validateScale(flags.scale);
   const sub = args[0] ?? 'status';
 
   const modelsDir = process.env.JOY_MODELS_DIR ?? join(homedir(), 'JOY', 'models');
@@ -156,4 +156,19 @@ export async function handleWorkerCommand(
     `Available: ${c('status', 'cyan')}, ${c('upscale', 'cyan')}, ${c('denoise', 'cyan')}`,
   );
   return 1;
+}
+
+function validateScale(value: number | undefined): void {
+  if (value === undefined) return;
+  const range = NUMERIC_RANGES.scale;
+  if (!Number.isFinite(value)) {
+    throw new FlagValidationError('scale', 'value is not a finite number', value);
+  }
+  if (value < range.min || value > range.max) {
+    throw new FlagValidationError(
+      'scale',
+      `value must be between ${range.min} and ${range.max}`,
+      value,
+    );
+  }
 }

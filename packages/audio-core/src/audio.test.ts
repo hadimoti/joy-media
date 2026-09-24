@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   AudioPreviewClock,
+  AudioSpikeError,
   buildWaveform,
+  buildWaveformDirect,
   exportPcm16Wav,
   measureAudioClockDrift,
+  mixAudioTracks,
   sampleIndexAtUs,
   sampleStartUs,
 } from './audio.js';
@@ -57,5 +60,94 @@ describe('audio sync spike', () => {
     const measurement = measureAudioClockDrift(hourUs, RATE, [0, 1, 33_333, 123_456_789, hourUs]);
     expect(measurement.maxAbsoluteDriftUs).toBeLessThanOrEqual(21); // ceil(1e6 / 48000) µs
     expect(sampleStartUs(sampleIndexAtUs(hourUs, RATE), RATE)).toBe(hourUs);
+  });
+});
+
+describe('buildWaveformDirect', () => {
+  it('writes quantised int16 min/max pairs into a contiguous buffer', () => {
+    const samples = new Float32Array([-1, -0.5, 0.25, 1, 0.1, -0.2, 0.9, 0.4]);
+    const out = buildWaveformDirect(samples, 4);
+    expect(out).toBeInstanceOf(Int16Array);
+    expect(out.length).toBe(8);
+    expect(out[0]).toBe(-32768); // -1 floor
+    expect(out[1]).toBe(-16384); // -0.5
+    expect(out[2]).toBe(8192); // 0.25
+    expect(out[3]).toBe(32767); // +1 ceiling
+  });
+
+  it('reuses a caller-provided buffer when large enough and zeroes trailing slots', () => {
+    const reuse = new Int16Array(8);
+    // 2 samples, 4 buckets → only bucket 1 ([0,1)) and bucket 3 ([1,2)) have samples.
+    const out = buildWaveformDirect(new Float32Array([0.5, -0.25]), 4, reuse);
+    expect(out).toBe(reuse);
+    // Empty buckets must be zeroed in the reused buffer.
+    expect(out[0]).toBe(0);
+    expect(out[1]).toBe(0);
+    // Bucket 1: min 0.5, max 0.5
+    expect(out[2]).toBe(16384);
+    expect(out[3]).toBe(16384);
+    // Bucket 3: min -0.25, max -0.25
+    expect(out[6]).toBe(-8192);
+    expect(out[7]).toBe(-8192);
+  });
+
+  it('returns a zeroed buffer for empty samples', () => {
+    const out = buildWaveformDirect(new Float32Array(0), 3);
+    expect(Array.from(out)).toEqual([0, 0, 0, 0, 0, 0]);
+  });
+
+  it('rejects invalid bucketCount', () => {
+    expect(() => buildWaveformDirect(new Float32Array([0]), 0)).toThrow(AudioSpikeError);
+    expect(() => buildWaveformDirect(new Float32Array([0]), -1)).toThrow(AudioSpikeError);
+    expect(() => buildWaveformDirect(new Float32Array([0]), 1.5)).toThrow(AudioSpikeError);
+  });
+});
+
+describe('mixAudioTracks', () => {
+  it('sums scaled sources into the destination with no extra allocation', () => {
+    const dest = new Float32Array(4);
+    const result = mixAudioTracks([new Float32Array([0.2, 0.2, 0.2, 0.2])], dest, [0.5]);
+    expect(result).toBe(dest);
+    expect(dest[0]).toBeCloseTo(0.1, 6);
+    expect(dest[1]).toBeCloseTo(0.1, 6);
+    expect(dest[2]).toBeCloseTo(0.1, 6);
+    expect(dest[3]).toBeCloseTo(0.1, 6);
+  });
+
+  it('mixes multiple sources with per-track gains and clamps to [-1, 1]', () => {
+    const dest = new Float32Array(3);
+    mixAudioTracks(
+      [new Float32Array([0.8, -0.9, 0.5]), new Float32Array([0.7, 0.5, -1.0])],
+      dest,
+      [1, 1],
+    );
+    // 1.5 -> clamp 1, -0.4 stays, -0.5 stays
+    expect(dest[0]).toBe(1);
+    expect(dest[1]).toBeCloseTo(-0.4, 6);
+    expect(dest[2]).toBeCloseTo(-0.5, 6);
+  });
+
+  it('assumes unity gain when no gains array is supplied', () => {
+    const dest = new Float32Array(2);
+    mixAudioTracks([new Float32Array([0.3, 0.4]), new Float32Array([0.1, -0.2])], dest);
+    expect(dest[0]).toBeCloseTo(0.4, 6);
+    expect(dest[1]).toBeCloseTo(0.2, 6);
+  });
+
+  it('only mixes the shorter source into the longer destination and zeroes the tail', () => {
+    const dest = new Float32Array(5).fill(0.99);
+    mixAudioTracks([new Float32Array([-1, -1])], dest);
+    expect(Array.from(dest)).toEqual([-1, -1, 0, 0, 0]);
+  });
+
+  it('rejects mismatched gains length', () => {
+    expect(() => mixAudioTracks([new Float32Array([1])], new Float32Array(1), [])).toThrow(
+      AudioSpikeError,
+    );
+  });
+
+  it('returns the zeroed destination when no sources are supplied', () => {
+    const dest = new Float32Array([0.5, 0.5, 0.5]);
+    expect(Array.from(mixAudioTracks([], dest))).toEqual([0, 0, 0]);
   });
 });

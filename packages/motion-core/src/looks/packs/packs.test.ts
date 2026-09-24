@@ -36,7 +36,7 @@ describe('built-in Look packs', () => {
     ]);
   });
 
-  it('retires persian-editorial (English-only app)', () => {
+  it('does not ship the retired persian-editorial pack', () => {
     expect(BUILT_IN_LOOK_PACKS.map((p) => p.id)).not.toContain('persian-editorial');
   });
 
