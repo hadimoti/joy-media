@@ -109,6 +109,25 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(readme).not.toMatch(/[A-Za-z0-9]{20,}/); // 20+ char string that is not a docker image tag
       expect(readme).not.toMatch(/gh[pousr]_[A-Za-z0-9]{20,}/);
     });
+
+    it('README documents the service env names and persistent evidence mount safely', () => {
+      for (const name of [
+        'JOY_MEDIA_CI_DATABASE_URL',
+        'JOY_MEDIA_CI_S3_ENDPOINT',
+        'JOY_MEDIA_CI_S3_ACCESS_KEY',
+        'JOY_MEDIA_CI_S3_SECRET_KEY',
+        'JOY_MEDIA_CI_S3_HEALTHCHECK_URL',
+        'JOY_MEDIA_CI_RELEASE_COMMAND',
+        'JOY_MEDIA_CI_EVIDENCE_ROOT=/opt/joy-media-evidence',
+      ]) {
+        expect(readme).toContain(name);
+      }
+      expect(readme).toContain('--env-file /etc/joy-media/ci-runner.env');
+      expect(readme).toContain('--add-host joyminio:127.0.0.1');
+      expect(readme).toContain('joy-media-ci-linux-evidence');
+      expect(readme).toContain('owned by runner uid 1001');
+      expect(readme).toMatch(/no embedded\s+\n?\s*userinfo/);
+    });
   });
 
   describe('Windows Docker-container runner (ops/self-hosted/windows-runner)', () => {
@@ -136,9 +155,20 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
     it('Dockerfile.windows is a digest-pinned Windows-container build', () => {
       // The base is captured as an ARG and resolved in FROM. Both the ARG
       // declaration and the FROM must point at a Windows-container base.
-      expect(dockerfile).toMatch(/^ARG\s+WINDOWS_BASE=mcr\.microsoft\.com\/windows\/servercore/m);
+      expect(dockerfile).toMatch(
+        /^ARG\s+WINDOWS_BASE=mcr\.microsoft\.com\/windows\/server:ltsc2022@/m,
+      );
       expect(dockerfile).toMatch(/^ARG\s+WINDOWS_BASE=.*@sha256:[0-9a-f]{64}/m);
       expect(dockerfile).toMatch(/^FROM\s+\$\{WINDOWS_BASE\}/m);
+      expect(dockerfile).toContain('ffmpeg-n8.1.3-win64-gpl-8.1.zip');
+      expect(dockerfile).toContain('autobuild-2026-09-22-13-18');
+      expect(dockerfile).toContain(
+        'ed885833e406f0f7a1ea0304dd170779117799b2fba8096abc3e2e4dd679cc20',
+      );
+      expect(dockerfile).not.toContain('releases/download/latest/');
+      expect(dockerfile).toContain('ffmpeg.exe -version');
+      expect(dockerfile).toContain('ffprobe.exe -version');
+      expect(dockerfile).toContain('PATH="C:\\tools;C:\\ffmpeg\\bin;');
     });
 
     it('supports an optional host artifact mirror without persisting its URL in the image environment', () => {
@@ -219,6 +249,7 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(readme).toContain('self-hosted,windows,x64,joy-media-worker-docker');
       expect(readme).not.toContain('self-hosted,windows,x64,joy-media-worker`');
       expect(readme).not.toContain('windows-latest');
+      expect(readme).toContain('joy-media-worker-windows:2.337.0-mediafoundation');
     });
 
     /**
@@ -258,6 +289,8 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(provision).toContain('repos/hadimoti/joy-media/actions/runners/registration-token');
       expect(provision).toContain("[ValidateSet('joy-media-worker-docker')]");
       expect(provision).toContain("$RunnerName = 'joy-media-worker-docker'");
+      expect(provision).toContain("$Image = 'joy-media-worker-windows:2.337.0-mediafoundation'");
+      expect(provision).toContain('JOY_MEDIA_CI_WORKER_PROFILE=clean');
       expect(provision).toContain(
         "$runnerLabels = 'self-hosted,windows,x64,joy-media-worker-docker'",
       );

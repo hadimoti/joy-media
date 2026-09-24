@@ -12,6 +12,11 @@ Windows acceptance record before `release:gate` can pass. See
 [contract.md](contract.md) for the build, registration, token, container
 identity, and container-local acceptance contract.
 
+The image uses the Windows Server LTSC 2022 base with Media Foundation and
+pins the FFmpeg archive by release URL and SHA-256. The default provisioned
+image tag is `joy-media-worker-windows:2.337.0-mediafoundation`; rebuild and
+provision this tag after changing the image contract.
+
 If Windows-container NAT cannot reach the public download hosts, the same
 build can use an owner-controlled temporary HTTP artifact mirror by adding
 `--build-arg ARTIFACT_BASE_URL=http://host.docker.internal:<port>` and

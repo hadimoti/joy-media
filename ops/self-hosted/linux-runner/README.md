@@ -70,3 +70,54 @@ The release workflow still requires the isolated PostgreSQL/S3 service
 environment and an executable `JOY_MEDIA_CI_RELEASE_COMMAND`. Do not mark the
 release gate green merely because this runner is online; provision and verify
 those prerequisites before dispatching `release-candidate.yml`.
+
+## Runner service environment
+
+Keep service configuration in a root-owned file on the WSL host, outside the
+repository, with mode `0600` (for example,
+`/etc/joy-media/ci-runner.env`). Do not put values in this README or commit the
+file. The primary `joy-media-ci` runner uses these names:
+
+- `JOY_MEDIA_CI_DATABASE_URL`
+- `JOY_MEDIA_CI_S3_ENDPOINT` — `scheme://host:port` only, with no embedded
+  userinfo. Put credentials in `JOY_MEDIA_CI_S3_ACCESS_KEY` and
+  `JOY_MEDIA_CI_S3_SECRET_KEY`.
+- `JOY_MEDIA_CI_S3_HEALTHCHECK_URL`
+- `JOY_MEDIA_CI_RELEASE_COMMAND` — absolute path to the isolated real-services
+  release harness.
+- `JOY_MEDIA_CI_EVIDENCE_ROOT=/opt/joy-media-evidence` — mount this path from
+  a named volume called `<container>-evidence`, owned by runner uid 1001.
+
+Create and assign the evidence volume once for this runner (replace the
+placeholder with the container name):
+
+```sh
+docker volume create joy-media-ci-linux-evidence
+docker run --rm --user 0 \
+  --mount source=joy-media-ci-linux-evidence,target=/opt/joy-media-evidence \
+  --entrypoint sh joy-media-ci-linux:2.337.0 \
+  -c 'chown 1001:1001 /opt/joy-media-evidence'
+```
+
+The release harness expects the MinIO service hostname `joyminio`; with the
+current host-network topology, map it to the host loopback address. Start the
+long-running service with the root-only env file and persistent evidence
+volume (the existing runner volume can be added as shown):
+
+```sh
+docker run -d \
+  --name joy-media-ci-linux \
+  --restart unless-stopped \
+  --network host \
+  --add-host joyminio:127.0.0.1 \
+  --env-file /etc/joy-media/ci-runner.env \
+  --mount source=joy-media-ci-linux-runner,target=/opt/actions-runner \
+  --mount source=joy-media-ci-linux-evidence,target=/opt/joy-media-evidence \
+  joy-media-ci-linux:2.337.0
+```
+
+Keep the S3 endpoint in `JOY_MEDIA_CI_S3_ENDPOINT` free of credentials because
+the MinIO client rejects endpoint URLs containing userinfo. Both Linux runner
+containers need their own environment file and evidence volume; see
+`../acceptance-runner/README.md` for the acceptance runner's additional
+profile and command variables.

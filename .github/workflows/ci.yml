@@ -66,6 +66,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           node --version
+          ffmpeg -version
+          ffprobe -version
           corepack enable pnpm
           pnpm --version
       - run: pnpm install --frozen-lockfile

@@ -43,7 +43,18 @@ The runner-local operator MUST provision:
   disposable Worker identity, and unconditionally tears them down.
 - `JOY_MEDIA_CI_EVIDENCE_ROOT` — a persistent, writable directory
   OUTSIDE the runner's `_work` / `_temp`, where durable redacted
-  evidence is retained. Never a repository secret or a committed path.
+  evidence is retained. For the container, use `/opt/joy-media-evidence`
+  backed by a named volume `<container>-evidence` owned by runner uid 1001.
+  Never a repository secret or a committed path.
+
+Keep these settings in a root-owned, mode-`0600` env file outside the
+repository and pass it with Docker `--env-file`. The service environment also
+needs `JOY_MEDIA_CI_DATABASE_URL`, `JOY_MEDIA_CI_S3_ENDPOINT` (scheme, host,
+and port only, no userinfo), `JOY_MEDIA_CI_S3_ACCESS_KEY`,
+`JOY_MEDIA_CI_S3_SECRET_KEY`, and `JOY_MEDIA_CI_S3_HEALTHCHECK_URL`. Map
+`joyminio` to `127.0.0.1` with `--add-host joyminio:127.0.0.1` on the
+host-network runner. Do not include environment values in repository files;
+the primary Linux runner README documents the Docker invocation pattern.
 
 The acceptance runner MUST NOT have `JOY_MEDIA_OPENCLI_PROFILE`, owner
 cookies, production credentials, or a production bucket. The gate

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Image = 'joy-media-worker-windows:2.337.0',
+    [string]$Image = 'joy-media-worker-windows:2.337.0-mediafoundation',
     [ValidateSet('joy-media-worker-docker')]
     [string]$RunnerName = 'joy-media-worker-docker',
     [string]$Volume = '',
@@ -63,6 +63,8 @@ $dockerRunArgs = @(
     'unless-stopped'
     '--env'
     "JOY_MEDIA_WINDOWS_IMAGE_DIGEST=$imageId"
+    '--env'
+    'JOY_MEDIA_CI_WORKER_PROFILE=clean'
     '--env'
     'JOY_MEDIA_WINDOWS_WAIT_FOR_REGISTRATION=1'
 )

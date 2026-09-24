@@ -6,10 +6,12 @@ Every Windows workflow job uses this exact tuple:
 
 `self-hosted,windows,x64,joy-media-worker-docker`
 
-The image is a Windows Server Core container. It uses a digest-pinned base and
+The image uses a digest-pinned Windows Server LTSC 2022 base with Media
+Foundation, which FFmpeg requires for `mf.dll` / `mfplat.dll`. It includes
 portable, SHA-256-verified MinGit, FFmpeg, jq, Node.js, pnpm, and Actions
-Runner binaries. Chocolatey and any host-installed package are deliberately
-not part of the build contract.
+Runner binaries. The pinned FFmpeg archive is checked and both `ffmpeg -version`
+and `ffprobe -version` must succeed during the image build. Chocolatey and any
+host-installed package are deliberately not part of the build contract.
 
 ## Build
 
@@ -20,10 +22,10 @@ containers** before building. From the repository root:
 docker build --pull `
   --file ops/self-hosted/windows-runner/Dockerfile.windows `
   --build-arg RUNNER_VERSION=2.337.0 `
-  --tag joy-media-worker-windows:2.337.0 `
+  --tag joy-media-worker-windows:2.337.0-mediafoundation `
   ops/self-hosted/windows-runner
 
-docker image inspect --format '{{.Id}}' joy-media-worker-windows:2.337.0
+docker image inspect --format '{{.Id}}' joy-media-worker-windows:2.337.0-mediafoundation
 ```
 
 The second command supplies the immutable `sha256:<64 hex>` value required by
