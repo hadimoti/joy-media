@@ -52,13 +52,31 @@ export function useReleasableObjectUrl<T extends MediaObjectUrlConsumer>(
   revoke: (url: string) => void = revokeDetachedObjectUrl,
 ): RefCallback<T> {
   const elementRef = useRef<T | null>(null);
-  const ownedUrlsRef = useRef({ url, relatedUrl });
-  const releasedUrlsRef = useRef(new Set<string>());
-  const release = useCallback(
+  const currentUrlsRef = useRef({ url, relatedUrl, revoke });
+  currentUrlsRef.current = { url, relatedUrl, revoke };
+  const revokedUrlsRef = useRef(new Set<string>());
+  const revokeMapRef = useRef(new Map<string, (url: string) => void>());
+  const pendingReleaseSeqRef = useRef(0);
+
+  if (url !== undefined) revokeMapRef.current.set(url, revoke);
+  if (relatedUrl !== undefined) revokeMapRef.current.set(relatedUrl, revoke);
+
+  const releaseImmediate = useCallback(
     (element: T | null, targetUrl: string | undefined): void => {
-      if (targetUrl === undefined || releasedUrlsRef.current.has(targetUrl)) return;
-      releaseMediaObjectUrl(element, targetUrl, revoke);
-      releasedUrlsRef.current.add(targetUrl);
+      if (targetUrl === undefined) return;
+      if (
+        element?.getAttribute('src') === targetUrl ||
+        (typeof HTMLVideoElement !== 'undefined' &&
+          element instanceof HTMLVideoElement &&
+          element.getAttribute('poster') === targetUrl)
+      ) {
+        clearMediaSource(element);
+      }
+      if (!revokedUrlsRef.current.has(targetUrl)) {
+        revokedUrlsRef.current.add(targetUrl);
+        const doRevoke = revokeMapRef.current.get(targetUrl) ?? revoke;
+        doRevoke(targetUrl);
+      }
     },
     [revoke],
   );
@@ -69,15 +87,38 @@ export function useReleasableObjectUrl<T extends MediaObjectUrlConsumer>(
   }, []);
 
   useLayoutEffect(() => {
-    ownedUrlsRef.current = { url, relatedUrl };
-    if (url !== undefined) releasedUrlsRef.current.delete(url);
-    if (relatedUrl !== undefined) releasedUrlsRef.current.delete(relatedUrl);
+    pendingReleaseSeqRef.current += 1;
     return () => {
       const element = elementRef.current;
-      release(element, url);
-      if (relatedUrl !== url) release(element, relatedUrl);
+      const next = currentUrlsRef.current;
+
+      const shouldDeferUrl = url !== undefined && next.url === url;
+      const shouldDeferRelated =
+        relatedUrl !== undefined && relatedUrl !== url && next.relatedUrl === relatedUrl;
+
+      if (url !== undefined && !shouldDeferUrl) {
+        releaseImmediate(element, url);
+      }
+      if (relatedUrl !== undefined && relatedUrl !== url && !shouldDeferRelated) {
+        releaseImmediate(element, relatedUrl);
+      }
+
+      if (!shouldDeferUrl && !shouldDeferRelated) return;
+
+      const releaseId = ++pendingReleaseSeqRef.current;
+      queueMicrotask(() => {
+        if (pendingReleaseSeqRef.current === releaseId) {
+          const consumer = elementRef.current;
+          if (shouldDeferUrl) {
+            releaseImmediate(consumer, url);
+          }
+          if (shouldDeferRelated) {
+            releaseImmediate(consumer, relatedUrl);
+          }
+        }
+      });
     };
-  }, [relatedUrl, release, url]);
+  }, [relatedUrl, releaseImmediate, url]);
 
   return callbackRef;
 }

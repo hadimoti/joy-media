@@ -1361,6 +1361,16 @@ function EditorWorkspace({
   const playbackDiagnostics = useRef(new PlaybackDiagnosticsSession());
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const replacementAudioRef = useRef<HTMLAudioElement | null>(null);
+  const lastVideoRef = useRef<HTMLVideoElement | null>(null);
+  const lastReplacementAudioRef = useRef<HTMLAudioElement | null>(null);
+  const playbackVideoRef = useCallback((element: HTMLVideoElement | null): void => {
+    videoRef.current = element;
+    if (element !== null) lastVideoRef.current = element;
+  }, []);
+  const playbackAudioRef = useCallback((element: HTMLAudioElement | null): void => {
+    replacementAudioRef.current = element;
+    if (element !== null) lastReplacementAudioRef.current = element;
+  }, []);
   const decoderRef = useRef<HtmlMediaDecoder | null>(null);
   const clockRef = useRef<MediaClock | null>(null);
   // Decoder setup is declared after the playback capture effect. Bump this
@@ -1828,11 +1838,13 @@ function EditorWorkspace({
       storage,
     ],
   );
-  useEffect(
+  useLayoutEffect(
     () => () =>
       mediaResolver.clear(() => {
-        clearMediaSource(videoRef.current);
-        clearMediaSource(replacementAudioRef.current);
+        clearMediaSource(videoRef.current ?? lastVideoRef.current);
+        clearMediaSource(replacementAudioRef.current ?? lastReplacementAudioRef.current);
+        lastVideoRef.current = null;
+        lastReplacementAudioRef.current = null;
       }),
     [mediaResolver],
   );
@@ -7470,7 +7482,7 @@ function EditorWorkspace({
               ))}
             </section>
           )}
-          <video ref={videoRef} className="playback-media" playsInline muted={false} />
+          <video ref={playbackVideoRef} className="playback-media" playsInline muted={false} />
           <input
             ref={projectPackageInputRef}
             type="file"
@@ -7483,7 +7495,7 @@ function EditorWorkspace({
             }}
           />
           <audio
-            ref={replacementAudioRef}
+            ref={playbackAudioRef}
             className="playback-media"
             aria-hidden="true"
             preload="auto"

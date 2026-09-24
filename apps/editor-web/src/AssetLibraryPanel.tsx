@@ -38,7 +38,7 @@ import {
 } from './opfs-original-asset-cache.js';
 import { verifyOriginalRecoveryCandidate } from './asset-original-recovery.js';
 import { resolveAssetThumb, type AssetThumbSource } from './asset-card-preview.js';
-import { releaseMediaObjectUrl } from './media-object-url.js';
+import { releaseMediaObjectUrl, useReleasableObjectUrl } from './media-object-url.js';
 import {
   CloseIcon,
   PlusIcon,
@@ -178,8 +178,6 @@ export function AssetLibraryPanel({
     [client],
   );
   const originalAssetCache = useMemo(() => openOpfsOriginalAssetCache(), []);
-  const previewRef = useRef<Preview | undefined>(undefined);
-  const previewMediaRef = useRef<HTMLMediaElement | HTMLImageElement | null>(null);
   const timelineAddRef = useRef<Set<string>>(new Set());
   const refreshSeqRef = useRef(0);
   const previewSeqRef = useRef(0);
@@ -202,6 +200,11 @@ export function AssetLibraryPanel({
   const [renderLimit, setRenderLimit] = useState(ASSET_RENDER_PAGE_SIZE);
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [preview, setPreview] = useState<Preview | undefined>(undefined);
+  const previewMediaRef = useReleasableObjectUrl<HTMLMediaElement | HTMLImageElement>(
+    preview?.url,
+    undefined,
+    preview?.revoke,
+  );
   const [selectedFile, setSelectedFile] = useState<File | undefined>(undefined);
   const [assetSource, setAssetSource] = useState<AssetSource>(
     initialUiPreferences.current.assetLibrary.source,
@@ -273,11 +276,6 @@ export function AssetLibraryPanel({
   }, [assetSource, category, collection, sort, storage, viewMode]);
 
   const clearPreview = useCallback(() => {
-    const preview = previewRef.current;
-    if (preview !== undefined)
-      releaseMediaObjectUrl(previewMediaRef.current, preview.url, preview.revoke);
-    previewMediaRef.current = null;
-    previewRef.current = undefined;
     setPreview(undefined);
   }, []);
   const refresh = useCallback(async () => {
@@ -387,11 +385,6 @@ export function AssetLibraryPanel({
     return () => {
       refreshSeqRef.current += 1;
       previewSeqRef.current += 1;
-      const previousPreview = previewRef.current;
-      if (previousPreview !== undefined)
-        releaseMediaObjectUrl(previewMediaRef.current, previousPreview.url, previousPreview.revoke);
-      previewMediaRef.current = null;
-      previewRef.current = undefined;
     };
   }, []);
 
@@ -697,7 +690,6 @@ export function AssetLibraryPanel({
           url: outcome.url,
           revoke: outcome.revoke,
         };
-        previewRef.current = nextPreview;
         setPreview(nextPreview);
         setStatus(
           outcome.source === 'derivative'
@@ -1289,9 +1281,7 @@ export function AssetLibraryPanel({
               </button>
               {preview.mimeType.startsWith('video/') ? (
                 <video
-                  ref={(element) => {
-                    previewMediaRef.current = element;
-                  }}
+                  ref={previewMediaRef}
                   key={preview.derivativeId}
                   src={preview.url}
                   controls
@@ -1299,9 +1289,7 @@ export function AssetLibraryPanel({
                 />
               ) : preview.mimeType.startsWith('audio/') ? (
                 <audio
-                  ref={(element) => {
-                    previewMediaRef.current = element;
-                  }}
+                  ref={previewMediaRef}
                   key={preview.derivativeId}
                   src={preview.url}
                   controls
@@ -1309,9 +1297,7 @@ export function AssetLibraryPanel({
                 />
               ) : (
                 <img
-                  ref={(element) => {
-                    previewMediaRef.current = element;
-                  }}
+                  ref={previewMediaRef}
                   src={preview.url}
                   alt={`Verified derivative preview for ${preview.displayName}`}
                 />
