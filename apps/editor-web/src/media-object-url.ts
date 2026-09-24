@@ -45,46 +45,50 @@ export function revokeDetachedObjectUrl(url: string): void {
   URL.revokeObjectURL(url);
 }
 
+export interface ReleasableObjectUrlRefCallback<
+  T extends MediaObjectUrlConsumer,
+> extends RefCallback<T> {
+  /** Test-only accessor for the number of URLs currently tracked by internal bookkeeping. */
+  testOnlyGetRetainedUrlCount?: () => number;
+}
+
 /** Own a DOM-backed URL and detach its consumer before releasing it on replace or unmount. */
 export function useReleasableObjectUrl<T extends MediaObjectUrlConsumer>(
   url: string | undefined,
   relatedUrl?: string,
   revoke: (url: string) => void = revokeDetachedObjectUrl,
-): RefCallback<T> {
+): ReleasableObjectUrlRefCallback<T> {
   const elementRef = useRef<T | null>(null);
   const currentUrlsRef = useRef({ url, relatedUrl, revoke });
   currentUrlsRef.current = { url, relatedUrl, revoke };
-  const revokedUrlsRef = useRef(new Set<string>());
   const revokeMapRef = useRef(new Map<string, (url: string) => void>());
   const pendingReleaseSeqRef = useRef(0);
 
   if (url !== undefined) revokeMapRef.current.set(url, revoke);
   if (relatedUrl !== undefined) revokeMapRef.current.set(relatedUrl, revoke);
 
-  const releaseImmediate = useCallback(
-    (element: T | null, targetUrl: string | undefined): void => {
-      if (targetUrl === undefined) return;
-      if (
-        element?.getAttribute('src') === targetUrl ||
-        (typeof HTMLVideoElement !== 'undefined' &&
-          element instanceof HTMLVideoElement &&
-          element.getAttribute('poster') === targetUrl)
-      ) {
-        clearMediaSource(element);
-      }
-      if (!revokedUrlsRef.current.has(targetUrl)) {
-        revokedUrlsRef.current.add(targetUrl);
-        const doRevoke = revokeMapRef.current.get(targetUrl) ?? revoke;
-        doRevoke(targetUrl);
-      }
-    },
-    [revoke],
-  );
+  const releaseImmediate = useCallback((element: T | null, targetUrl: string | undefined): void => {
+    if (targetUrl === undefined) return;
+    if (
+      element?.getAttribute('src') === targetUrl ||
+      (typeof HTMLVideoElement !== 'undefined' &&
+        element instanceof HTMLVideoElement &&
+        element.getAttribute('poster') === targetUrl)
+    ) {
+      clearMediaSource(element);
+    }
+    const doRevoke = revokeMapRef.current.get(targetUrl);
+    if (doRevoke !== undefined) {
+      revokeMapRef.current.delete(targetUrl);
+      doRevoke(targetUrl);
+    }
+  }, []);
   const callbackRef = useCallback((element: T | null): void => {
     // Keep the last node when React temporarily removes a conditional consumer.
     // The URL remains owned until it changes or the hook's owner unmounts.
     if (element !== null) elementRef.current = element;
-  }, []);
+  }, []) as ReleasableObjectUrlRefCallback<T>;
+  callbackRef.testOnlyGetRetainedUrlCount = () => revokeMapRef.current.size;
 
   useLayoutEffect(() => {
     pendingReleaseSeqRef.current += 1;

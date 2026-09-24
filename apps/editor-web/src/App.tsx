@@ -96,9 +96,9 @@ import {
 } from './export-job-request.js';
 import { inspectImageAnimation } from './animated-image-metadata.js';
 import {
-  clearMediaSource,
   revokeDetachedObjectUrl,
   useReleasableObjectUrl,
+  type MediaObjectUrlConsumer,
 } from './media-object-url.js';
 import { createExportUrlRetention } from './export-url-retention.js';
 import {
@@ -1363,6 +1363,7 @@ function EditorWorkspace({
   const replacementAudioRef = useRef<HTMLAudioElement | null>(null);
   const lastVideoRef = useRef<HTMLVideoElement | null>(null);
   const lastReplacementAudioRef = useRef<HTMLAudioElement | null>(null);
+  const activeMediaConsumersRef = useRef(new Set<MediaObjectUrlConsumer>());
   const playbackVideoRef = useCallback((element: HTMLVideoElement | null): void => {
     videoRef.current = element;
     if (element !== null) lastVideoRef.current = element;
@@ -1841,10 +1842,13 @@ function EditorWorkspace({
   useLayoutEffect(
     () => () =>
       mediaResolver.clear(() => {
-        clearMediaSource(videoRef.current ?? lastVideoRef.current);
-        clearMediaSource(replacementAudioRef.current ?? lastReplacementAudioRef.current);
-        lastVideoRef.current = null;
-        lastReplacementAudioRef.current = null;
+        mediaResolver.detachConsumerIfOwned(videoRef.current ?? lastVideoRef.current);
+        mediaResolver.detachConsumerIfOwned(
+          replacementAudioRef.current ?? lastReplacementAudioRef.current,
+        );
+        for (const consumer of activeMediaConsumersRef.current) {
+          mediaResolver.detachConsumerIfOwned(consumer);
+        }
       }),
     [mediaResolver],
   );
@@ -4245,6 +4249,7 @@ function EditorWorkspace({
                 abortController.signal.throwIfAborted();
               } else {
                 video = document.createElement('video');
+                activeMediaConsumersRef.current.add(video);
                 exportMediaCleanup.push({ video });
                 setExportStatus('Loading detached video…');
                 await loadDetachedVideo(video, source.url, abortController.signal);
@@ -4870,6 +4875,7 @@ function EditorWorkspace({
             // The owning AudioContext is closed below even if the source already ended.
           }
         for (const media of exportMediaCleanup) {
+          if (media.video !== undefined) activeMediaConsumersRef.current.delete(media.video);
           try {
             media.video?.pause();
             media.video?.removeAttribute('src');

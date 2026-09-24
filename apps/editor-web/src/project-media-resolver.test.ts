@@ -381,4 +381,58 @@ describe('ProjectMediaResolver', () => {
       'trusted local observation bytes',
     );
   });
+
+  it('correctly reports owned URLs and consumer elements, detaching only when owned', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:owned-url');
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      controlPlaneReady: false,
+      client: {
+        assets: vi.fn(async () => []),
+        originalBytes: vi.fn(),
+        sharedCloudOriginalBytes: vi.fn(),
+      },
+      originalCache: { get: vi.fn(async () => new Blob(['data'], { type: 'video/mp4' })) },
+    });
+
+    expect(resolver.ownsUrl(null)).toBe(false);
+    expect(resolver.ownsUrl('blob:unresolved')).toBe(false);
+
+    const resolved = await resolver.resolve('media-1');
+    expect(resolved.url).toBe('blob:owned-url');
+    expect(resolver.ownsUrl('blob:owned-url')).toBe(true);
+    expect(resolver.ownsUrl('blob:other-url')).toBe(false);
+
+    let ownedSrc: string | null = 'blob:owned-url';
+    const ownedElement = {
+      getAttribute: (name: string) => (name === 'src' ? ownedSrc : null),
+      removeAttribute: (name: string) => {
+        if (name === 'src') ownedSrc = null;
+      },
+      pause: vi.fn(),
+      load: vi.fn(),
+    } as unknown as HTMLVideoElement;
+
+    let otherSrc: string | null = 'blob:other-url';
+    const otherElement = {
+      getAttribute: (name: string) => (name === 'src' ? otherSrc : null),
+      removeAttribute: (name: string) => {
+        if (name === 'src') otherSrc = null;
+      },
+      pause: vi.fn(),
+      load: vi.fn(),
+    } as unknown as HTMLVideoElement;
+
+    expect(resolver.ownsConsumer(null)).toBe(false);
+    expect(resolver.ownsConsumer(ownedElement)).toBe(true);
+    expect(resolver.ownsConsumer(otherElement)).toBe(false);
+
+    expect(resolver.detachConsumerIfOwned(otherElement)).toBe(false);
+    expect(otherSrc).toBe('blob:other-url');
+
+    expect(resolver.detachConsumerIfOwned(ownedElement)).toBe(true);
+    expect(ownedSrc).toBeNull();
+
+    resolver.clear();
+  });
 });

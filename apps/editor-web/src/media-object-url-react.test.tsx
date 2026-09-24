@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   clearMediaSource,
   useReleasableObjectUrl as useMediaObjectUrl,
+  type MediaObjectUrlConsumer,
 } from './media-object-url.js';
 import { ProjectMediaResolver } from './project-media-resolver.js';
 
@@ -170,64 +171,98 @@ describe('useReleasableObjectUrl React lifecycle', () => {
     expect(events).toEqual(['pause', 'load', 'revoke:blob:second']);
   });
 
-  it('handles a same-value return (A -> B -> A) without revoking while displayed and revoking each URL at most once overall', async () => {
+  it('models real usage (A -> B -> A2): revokes each URL exactly once, never revokes while displayed, and keeps bookkeeping bounded', async () => {
     const target = setupContainer();
     const revoked: string[] = [];
+    let currentDisplayedUrl = '';
     const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      expect(url).not.toBe(currentDisplayedUrl);
       revoked.push(url);
     });
 
+    let lastRefCallback: ReturnType<typeof useMediaObjectUrl<HTMLVideoElement>> | undefined;
+
     function ReturnHarness({ url }: { readonly url: string }) {
+      currentDisplayedUrl = url;
       const videoRef = useMediaObjectUrl<HTMLVideoElement>(url);
+      lastRefCallback = videoRef;
       return <video ref={videoRef} src={url} />;
     }
 
     await act(async () => root?.render(<ReturnHarness url="blob:A" />));
     expect(target.querySelector('video')?.getAttribute('src')).toBe('blob:A');
     expect(revoked).toEqual([]);
+    expect(lastRefCallback?.testOnlyGetRetainedUrlCount?.()).toBe(1);
 
     await act(async () => root?.render(<ReturnHarness url="blob:B" />));
     expect(target.querySelector('video')?.getAttribute('src')).toBe('blob:B');
     expect(revoked).toEqual(['blob:A']);
+    expect(lastRefCallback?.testOnlyGetRetainedUrlCount?.()).toBe(1);
 
-    await act(async () => root?.render(<ReturnHarness url="blob:A" />));
-    expect(target.querySelector('video')?.getAttribute('src')).toBe('blob:A');
+    await act(async () => root?.render(<ReturnHarness url="blob:A2" />));
+    expect(target.querySelector('video')?.getAttribute('src')).toBe('blob:A2');
     expect(revoked).toEqual(['blob:A', 'blob:B']);
+    expect(lastRefCallback?.testOnlyGetRetainedUrlCount?.()).toBe(1);
 
+    for (let i = 0; i < 1000; i++) {
+      const nextUrl = `blob:swap-${i}`;
+      await act(async () => root?.render(<ReturnHarness url={nextUrl} />));
+      expect(lastRefCallback?.testOnlyGetRetainedUrlCount?.()).toBe(1);
+    }
+    expect(revoke).toHaveBeenCalledTimes(1002);
+    expect(revoked).not.toContain('blob:swap-999');
+
+    currentDisplayedUrl = '';
     await act(async () => root?.unmount());
     root = undefined;
-    expect(revoked).toEqual(['blob:A', 'blob:B']);
-    expect(revoke).toHaveBeenCalledTimes(2);
+    expect(revoked).toContain('blob:swap-999');
+    expect(revoke).toHaveBeenCalledTimes(1003);
+    expect(lastRefCallback?.testOnlyGetRetainedUrlCount?.()).toBe(0);
   });
 
-  it('detaches video and audio elements before ProjectMediaResolver.clear revokes URLs during unmount with retained refs', async () => {
+  it('detaches video and audio elements before ProjectMediaResolver.clear revokes URLs across resolver replacement and unmount with retained refs', async () => {
     const target = setupContainer();
     const events: string[] = [];
-    const resolver = new ProjectMediaResolver({
-      projectId: 'project-test',
-      controlPlaneReady: false,
-      client: {
-        assets: vi.fn(async () => []),
-        originalBytes: vi.fn(),
-        sharedCloudOriginalBytes: vi.fn(),
-      },
-      originalCache: {
-        get: vi.fn(async () => new Blob(['video-bytes'], { type: 'video/mp4' })),
-      },
-    });
+    const makeResolver = (id: string) =>
+      new ProjectMediaResolver({
+        projectId: id,
+        controlPlaneReady: false,
+        client: {
+          assets: vi.fn(async () => []),
+          originalBytes: vi.fn(),
+          sharedCloudOriginalBytes: vi.fn(),
+        },
+        originalCache: {
+          get: vi.fn(async () => new Blob(['video-bytes'], { type: 'video/mp4' })),
+        },
+      });
+
+    const resolverA = makeResolver('project-a');
+    const resolverB = makeResolver('project-b');
 
     const retained = { video: null as HTMLVideoElement | null };
-    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:project-video');
-    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
-      if (retained.video !== null) {
-        expect(retained.video.getAttribute('src')).toBeNull();
+    let createCount = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      createCount += 1;
+      return `blob:project-video-${createCount}`;
+    });
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      if (retained.video !== null && retained.video.getAttribute('src') === url) {
+        expect.fail(`URL ${url} was revoked while still attached to video element!`);
       }
       events.push(`revoke:${url}`);
     });
 
-    const resolved = await resolver.resolve('asset-1');
+    const resolvedA = await resolverA.resolve('asset-1');
+    const resolvedB = await resolverB.resolve('asset-2');
 
-    function AppMediaConsumerHarness() {
+    function AppMediaConsumerHarness({
+      resolver,
+      url,
+    }: {
+      readonly resolver: ProjectMediaResolver;
+      readonly url: string;
+    }) {
       const videoRef = useRef<HTMLVideoElement | null>(null);
       const lastVideoRef = useRef<HTMLVideoElement | null>(null);
       const playbackVideoRef = useCallback((element: HTMLVideoElement | null): void => {
@@ -241,24 +276,104 @@ describe('useReleasableObjectUrl React lifecycle', () => {
       useLayoutEffect(
         () => () =>
           resolver.clear(() => {
-            clearMediaSource(videoRef.current ?? lastVideoRef.current);
-            lastVideoRef.current = null;
+            resolver.detachConsumerIfOwned(videoRef.current ?? lastVideoRef.current);
           }),
-        [],
+        [resolver],
       );
 
-      return <video ref={playbackVideoRef} src={resolved.url} />;
+      return <video ref={playbackVideoRef} src={url} />;
     }
 
-    await act(async () => root?.render(<AppMediaConsumerHarness />));
+    await act(async () =>
+      root?.render(<AppMediaConsumerHarness resolver={resolverA} url={resolvedA.url} />),
+    );
     const video = target.querySelector('video')!;
-    expect(video.getAttribute('src')).toBe('blob:project-video');
+    expect(video.getAttribute('src')).toBe('blob:project-video-1');
+    expect(events).toEqual([]);
+
+    await act(async () =>
+      root?.render(<AppMediaConsumerHarness resolver={resolverB} url={resolvedB.url} />),
+    );
+    expect(events).toEqual(['revoke:blob:project-video-1']);
+    expect(video.getAttribute('src')).toBe('blob:project-video-2');
 
     await act(async () => root?.unmount());
     root = undefined;
 
-    expect(events).toEqual(['revoke:blob:project-video']);
+    expect(events).toEqual(['revoke:blob:project-video-1', 'revoke:blob:project-video-2']);
     expect(retained.video?.getAttribute('src')).toBeNull();
+    expect(revoke).toHaveBeenCalledTimes(2);
+  });
+
+  it('detaches active export consumer elements when resolver changes mid-export before revoking export URLs', async () => {
+    setupContainer();
+    const events: string[] = [];
+    const makeResolver = (id: string) =>
+      new ProjectMediaResolver({
+        projectId: id,
+        controlPlaneReady: false,
+        client: {
+          assets: vi.fn(async () => []),
+          originalBytes: vi.fn(),
+          sharedCloudOriginalBytes: vi.fn(),
+        },
+        originalCache: {
+          get: vi.fn(async () => new Blob(['video-bytes'], { type: 'video/mp4' })),
+        },
+      });
+
+    const resolverA = makeResolver('project-a');
+    const resolverB = makeResolver('project-b');
+
+    let createCount = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      createCount += 1;
+      return `blob:export-${createCount}`;
+    });
+
+    const retainedExportVideo = { current: null as HTMLVideoElement | null };
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      if (
+        retainedExportVideo.current !== null &&
+        retainedExportVideo.current.getAttribute('src') === url
+      ) {
+        expect.fail(`Export URL ${url} was revoked while export element still holds it!`);
+      }
+      events.push(`revoke:${url}`);
+    });
+
+    const exportSource = await resolverA.resolve('export-clip-1');
+    const activeConsumers = new Set<MediaObjectUrlConsumer>();
+
+    function AppExportHarness({ resolver }: { readonly resolver: ProjectMediaResolver }) {
+      useLayoutEffect(
+        () => () =>
+          resolver.clear(() => {
+            for (const consumer of activeConsumers) {
+              resolver.detachConsumerIfOwned(consumer);
+            }
+          }),
+        [resolver],
+      );
+      return <div />;
+    }
+
+    await act(async () => root?.render(<AppExportHarness resolver={resolverA} />));
+
+    const exportVideo = document.createElement('video');
+    retainedExportVideo.current = exportVideo;
+    activeConsumers.add(exportVideo);
+    exportVideo.setAttribute('src', exportSource.url);
+    expect(exportVideo.getAttribute('src')).toBe('blob:export-1');
+
+    await act(async () => root?.render(<AppExportHarness resolver={resolverB} />));
+
+    expect(events).toEqual(['revoke:blob:export-1']);
+    expect(exportVideo.getAttribute('src')).toBeNull();
+
+    activeConsumers.delete(exportVideo);
+    expect(activeConsumers.size).toBe(0);
+    expect(revoke).toHaveBeenCalledExactlyOnceWith('blob:export-1');
   });
 
   it('detaches preview media consumer before revoke even when conditionally hidden prior to release', async () => {
