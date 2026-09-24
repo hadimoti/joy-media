@@ -23,6 +23,7 @@ import { getStoredMediaToken } from './media-session.js';
 import { DesktopAccountModal } from './DesktopAccountModal.js';
 import {
   acknowledgeCustomEndpoint,
+  revokeCustomEndpointAcknowledgement,
   isCustomEndpointProvider,
   normalizeProviderBaseUrl,
   requiresCustomEndpointConsent,
@@ -762,7 +763,8 @@ export function JoyAgentSettingsDialog({
         modelId: prof.modelId,
         apiKey: key,
       });
-      configurationFailed = false;
+      // configure() has already replaced the previous client, so a later
+      // testConnection() rejection must also publish a failed status.
       const next = await engineClient.testConnection();
       const safeStatus =
         next.capability === 'incompatible'
@@ -1272,6 +1274,33 @@ export function JoyAgentSettingsDialog({
                                 onChange={(event) => {
                                   const checked = event.target.checked;
                                   setCustomDisclosure(checked);
+                                  if (!checked) {
+                                    // Unchecking withdraws consent for this endpoint (with or
+                                    // without a saved-profile id).
+                                    const normalized = normalizeProviderBaseUrl(baseUrl);
+                                    revokeCustomEndpointAcknowledgement({
+                                      provider: 'custom',
+                                      baseUrl: normalized,
+                                    });
+                                    for (const profile of profiles) {
+                                      if (
+                                        normalizeProviderBaseUrl(profile.baseUrl) === normalized
+                                      ) {
+                                        revokeCustomEndpointAcknowledgement({
+                                          provider: 'custom',
+                                          baseUrl: normalized,
+                                          profileId: profile.id,
+                                        });
+                                      }
+                                    }
+                                    if (savedProfile) {
+                                      revokeCustomEndpointAcknowledgement({
+                                        provider: 'custom',
+                                        baseUrl: normalized,
+                                        profileId: savedProfile.id,
+                                      });
+                                    }
+                                  }
                                   if (checked) {
                                     const normalized = normalizeProviderBaseUrl(baseUrl);
                                     const providerProfile = profiles.find(

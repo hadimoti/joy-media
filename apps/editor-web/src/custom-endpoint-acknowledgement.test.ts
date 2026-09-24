@@ -1,21 +1,27 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   acknowledgeCustomEndpoint,
+  isCustomEndpointAcknowledged,
   mayRestoreProviderProfile,
   requiresCustomEndpointConsent,
   resetCustomEndpointAcknowledgementsForTests,
+  revokeCustomEndpointAcknowledgement,
 } from './custom-endpoint-acknowledgement.js';
 
 afterEach(resetCustomEndpointAcknowledgementsForTests);
 
 describe('custom endpoint acknowledgement', () => {
-  it('trusts only each provider exact HTTPS endpoint and a path beneath it', () => {
+  it('trusts only each provider exact HTTPS endpoint', () => {
     expect(requiresCustomEndpointConsent('openrouter', 'https://openrouter.ai/api/v1')).toBe(false);
+    expect(requiresCustomEndpointConsent('openrouter', 'https://openrouter.ai/api/v1/')).toBe(
+      false,
+    );
     expect(requiresCustomEndpointConsent('openrouter', 'https://openrouter.ai:443/api/v1')).toBe(
       false,
     );
+    // A sub-path is a different configured endpoint and needs consent.
     expect(requiresCustomEndpointConsent('openrouter', 'https://openrouter.ai/api/v1/chat')).toBe(
-      false,
+      true,
     );
     expect(requiresCustomEndpointConsent('kilo', 'https://api.kilo.ai/v1')).toBe(false);
     expect(requiresCustomEndpointConsent('joy-hosted', 'https://joyst.ir/api/v1/agent')).toBe(
@@ -66,6 +72,14 @@ describe('custom endpoint acknowledgement', () => {
         baseUrl: 'https://joyst.ir/api/v1/agent',
       }),
     ).toBe(true);
+  });
+
+  it('withdraws consent when the acknowledgement is revoked', () => {
+    const endpoint = { provider: 'custom', baseUrl: 'https://custom.example/v1' };
+    acknowledgeCustomEndpoint(endpoint);
+    expect(isCustomEndpointAcknowledged(endpoint)).toBe(true);
+    revokeCustomEndpointAcknowledgement({ ...endpoint, baseUrl: 'https://custom.example/v1/' });
+    expect(isCustomEndpointAcknowledged(endpoint)).toBe(false);
   });
 
   it('blocks startup restore before consent and permits only the acknowledged exact profile', () => {

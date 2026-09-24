@@ -43,10 +43,9 @@ export function requiresCustomEndpointConsent(provider: string, baseUrl: string)
     ) {
       return true;
     }
-    return (
-      candidate.pathname !== trusted.pathname &&
-      !candidate.pathname.startsWith(`${trusted.pathname.replace(/\/$/, '')}/`)
-    );
+    // Exact trusted path only: a sub-path such as /api/v1/chat is a different
+    // configured endpoint and needs consent.
+    return candidate.pathname !== trusted.pathname;
   } catch {
     return true;
   }
@@ -62,6 +61,11 @@ function identityKey(identity: CustomEndpointIdentity): string {
 
 export function acknowledgeCustomEndpoint(identity: CustomEndpointIdentity): void {
   acknowledgedEndpoints.add(identityKey(identity));
+}
+
+/** Unchecking the acknowledgement withdraws consent for that exact endpoint. */
+export function revokeCustomEndpointAcknowledgement(identity: CustomEndpointIdentity): void {
+  acknowledgedEndpoints.delete(identityKey(identity));
 }
 
 export function isCustomEndpointAcknowledged(identity: CustomEndpointIdentity): boolean {
