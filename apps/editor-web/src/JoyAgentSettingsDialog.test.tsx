@@ -84,7 +84,124 @@ afterEach(async () => {
   container?.remove();
   root = undefined;
   container = undefined;
+  vi.unstubAllGlobals();
   delete (window as { joyDesktop?: unknown }).joyDesktop;
+});
+
+function countLeafTextMatches(rendered: HTMLElement, expression: RegExp): number {
+  return [...rendered.querySelectorAll<HTMLElement>('*')].filter(
+    (element) =>
+      expression.test(element.textContent ?? '') &&
+      ![...element.children].some((child) => expression.test(child.textContent ?? '')),
+  ).length;
+}
+
+describe('JOY Agent Settings connection status', () => {
+  async function connectWithKey(rendered: HTMLElement): Promise<HTMLInputElement> {
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    if (key === null) throw new Error('Expected API key field');
+    await act(async () => {
+      setInputValue(key, 'connection-test-key');
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+    return key;
+  }
+
+  it('shows tool-loop readiness and the connection notice in the dialog', async () => {
+    const rendered = await render(client(), undefined);
+
+    await connectWithKey(rendered);
+
+    expect(rendered.querySelector('[role="status"]')?.textContent).toContain('Tool loop ready');
+    expect(countLeafTextMatches(rendered, /Tool loop ready/)).toBe(1);
+    expect(rendered.textContent).toContain(
+      'Connected successfully. JOY is ready to edit in this session.',
+    );
+  });
+
+  it('shows plan-only readiness in the dialog', async () => {
+    const planOnlyStatus: ByokSessionStatus = {
+      provider: 'openrouter',
+      modelId: 'openrouter/verified-model',
+      capability: 'plan-only',
+    };
+    const rendered = await render(
+      client({ testConnection: vi.fn().mockResolvedValue(planOnlyStatus) }),
+      undefined,
+    );
+
+    await connectWithKey(rendered);
+
+    expect(rendered.querySelector('[role="status"]')?.textContent).toContain('Plan-only ready');
+    expect(countLeafTextMatches(rendered, /Plan-only/)).toBe(1);
+    expect(rendered.textContent).toContain('Connected successfully in plan-only mode.');
+  });
+
+  it('shows a resolved provider failure with one redacted error in the dialog', async () => {
+    const privateKey = 'connection-test-key';
+    const incompatibleStatus: ByokSessionStatus = {
+      provider: 'openrouter',
+      modelId: 'openrouter/verified-model',
+      capability: 'incompatible',
+      message: `Provider authentication failed for ${privateKey}`,
+    };
+    const rendered = await render(
+      client({ testConnection: vi.fn().mockResolvedValue(incompatibleStatus) }),
+      undefined,
+    );
+
+    const key = await connectWithKey(rendered);
+    const dialog = rendered.querySelector('[role="dialog"]');
+    if (dialog === null) throw new Error('Expected settings dialog');
+
+    expect(dialog.querySelectorAll('[role="alert"]')).toHaveLength(1);
+    expect(countLeafTextMatches(dialog as HTMLElement, /authentication failed/i)).toBe(1);
+    expect(dialog.textContent).not.toContain(privateKey);
+    expect(key.value).toBe('');
+  });
+
+  it('shows the provider failure message in the dialog without rendering the API key', async () => {
+    const rendered = await render(
+      client({
+        testConnection: vi
+          .fn()
+          .mockRejectedValue(new Error('authentication failed for connection-test-key')),
+      }),
+      undefined,
+    );
+
+    const key = await connectWithKey(rendered);
+
+    expect(rendered.querySelector('[role="alert"]')?.textContent).toContain(
+      'authentication failed',
+    );
+    expect(rendered.textContent).not.toContain('connection-test-key');
+    expect(key.value).toBe('');
+  });
+
+  it('redacts the API key from model discovery errors', async () => {
+    const privateKey = 'discovery-test-key';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new Error(`Provider rejected key ${privateKey}`)),
+    );
+    const rendered = await render(client(), undefined);
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    const openDrawer = rendered.querySelector<HTMLButtonElement>('.joy-settings-text-btn');
+    if (key === null || openDrawer === null) {
+      throw new Error('Expected key and model drawer controls');
+    }
+    setInputValue(key, privateKey);
+
+    await act(async () => {
+      openDrawer.click();
+      await Promise.resolve();
+    });
+
+    expect(rendered.textContent).toContain('Provider rejected key [redacted]');
+    expect(rendered.textContent).not.toContain(privateKey);
+  });
 });
 
 describe('JOY Agent Settings media capability probe', () => {

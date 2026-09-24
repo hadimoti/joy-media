@@ -310,7 +310,10 @@ export function JoyAgentSettingsDialog({
     } catch (err) {
       if (!mountedRef.current) return;
       setDiscoveryError(
-        err instanceof Error ? err.message : 'Failed to discover models behind endpoint',
+        redactProviderError(
+          err instanceof Error ? err.message : 'Failed to discover models behind endpoint',
+          key,
+        ),
       );
     } finally {
       if (mountedRef.current) setIsDiscovering(false);
@@ -407,15 +410,25 @@ export function JoyAgentSettingsDialog({
       });
 
       const next = await engineClient.testConnection();
-      setConnectionStatus(next);
-      onStatusChange?.(next);
+      const safeStatus =
+        next.capability === 'incompatible'
+          ? {
+              ...next,
+              message: redactProviderError(
+                next.message ?? 'The provider responded, but JOY could not use its tool loop.',
+                key,
+              ),
+            }
+          : next;
+      setConnectionStatus(safeStatus);
+      onStatusChange?.(safeStatus);
 
       const message =
         next.capability === 'tool-loop'
           ? 'Connected successfully. JOY is ready to edit in this session.'
           : next.capability === 'plan-only'
-            ? 'Connected in plan-only mode. Timeline execution is restricted.'
-            : 'The provider responded, but JOY could not use its tool loop.';
+            ? 'Connected successfully in plan-only mode. Creative Brief is ready in this session.'
+            : `Connection failed: ${safeStatus.message}`;
       const kind = next.capability === 'incompatible' ? 'error' : 'success';
       setConnectionNotice({ kind, message });
       onNotice?.(message, kind);
@@ -426,7 +439,7 @@ export function JoyAgentSettingsDialog({
       }
     } catch (error) {
       const rawMessage = error instanceof Error ? error.message : 'Unable to configure connection';
-      const safeMessage = rawMessage.replaceAll(key, '[redacted]').slice(0, 180);
+      const safeMessage = redactProviderError(rawMessage, key);
       const message = `Connection failed: ${safeMessage}`;
       setConnectionStatus({
         provider,
@@ -451,10 +464,11 @@ export function JoyAgentSettingsDialog({
   const connectProfile = async (prof: DesktopProviderProfile) => {
     if (working) return;
     setWorking(true);
+    let key = '';
     try {
       const session = (await beginDesktopProviderSession(prof.id)) as
         { apiKey?: string; baseUrl?: string; modelId?: string; provider?: string } | undefined;
-      const key = session?.apiKey || '';
+      key = session?.apiKey || '';
       const resolvedProvider = (
         prof.provider === 'custom' ? 'openai-compatible' : prof.provider
       ) as 'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible';
@@ -471,17 +485,28 @@ export function JoyAgentSettingsDialog({
         apiKey: key,
       });
       const next = await engineClient.testConnection();
-      setConnectionStatus(next);
-      onStatusChange?.(next);
-      const message = `Connected to ${prof.name || prof.provider}: ${prof.modelId}`;
-      setConnectionNotice({ kind: 'success', message });
-      onNotice?.(message, 'success');
+      const safeStatus =
+        next.capability === 'incompatible'
+          ? { ...next, message: redactProviderError(next.message ?? 'Connection failed', key) }
+          : next;
+      setConnectionStatus(safeStatus);
+      onStatusChange?.(safeStatus);
+      const kind = next.capability === 'incompatible' ? 'error' : 'success';
+      const message =
+        next.capability === 'incompatible'
+          ? `Connection failed: ${safeStatus.message}`
+          : `Connected to ${prof.name || prof.provider}: ${prof.modelId}`;
+      setConnectionNotice({ kind, message });
+      onNotice?.(message, kind);
 
       if (key) {
         void discoverModels(key);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to switch provider';
+      const message = redactProviderError(
+        err instanceof Error ? err.message : 'Failed to switch provider',
+        key,
+      );
       setConnectionNotice({ kind: 'error', message });
     } finally {
       setWorking(false);
@@ -620,7 +645,7 @@ export function JoyAgentSettingsDialog({
                   <div className="joy-settings-sidebar-status-sub">
                     {connectionStatus?.capability
                       ? `${connectionStatus.provider}: ${displayModelId(connectionStatus.modelId)}`
-                      : 'No provider connected'}
+                      : 'Not connected'}
                   </div>
                 </div>
               </div>
@@ -649,12 +674,14 @@ export function JoyAgentSettingsDialog({
                           ? `Active Model: ${connectionStatus.modelId}`
                           : 'No Active Model Connected'}
                       </strong>
-                      <span>
+                      <span role="status">
                         {connectionStatus?.capability === 'tool-loop'
-                          ? `Connected to ${connectionStatus.provider} (Autonomous tool execution enabled)`
+                          ? 'Tool loop ready · High capabilities'
                           : connectionStatus?.capability === 'plan-only'
-                            ? `Connected to ${connectionStatus.provider} (Plan-only mode)`
-                            : 'Configure an API endpoint below to connect JOY Code.'}
+                            ? 'Plan-only ready · Creative brief available'
+                            : connectionStatus?.capability === 'incompatible'
+                              ? 'Connection failed. See the details below.'
+                              : 'Configure an API endpoint below to connect JOY Code.'}
                       </span>
                     </div>
                   </div>
@@ -945,6 +972,7 @@ export function JoyAgentSettingsDialog({
                         {connectionNotice && (
                           <div
                             className={`joy-settings-notice ${connectionNotice.kind === 'error' ? 'is-error' : connectionNotice.kind === 'success' ? 'is-success' : 'is-info'}`}
+                            role={connectionNotice.kind === 'error' ? 'alert' : 'status'}
                           >
                             {connectionNotice.message}
                           </div>
@@ -1610,4 +1638,9 @@ function isCapabilityState(value: unknown): value is JoyAgentMediaCapabilityStat
 
 function displayModelId(modelId: string): string {
   return modelId.length <= 96 ? modelId : `${modelId.slice(0, 93)}…`;
+}
+
+function redactProviderError(raw: string, key: string): string {
+  const safeMessage = key ? raw.replaceAll(key, '[redacted]') : raw;
+  return safeMessage.slice(0, 180);
 }
