@@ -1,6 +1,7 @@
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import type { BrowserAsset, BrowserControlPlaneClient } from './control-plane-client.js';
 import type { OpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
+import { revokeDetachedObjectUrl } from './media-object-url.js';
 
 export interface ProjectMediaSource {
   readonly url: string;
@@ -90,7 +91,7 @@ export class ProjectMediaResolver {
     this.#epoch += 1;
     beforeRevoke?.();
     for (const source of this.#sources.values()) {
-      if (source.source !== 'reference') URL.revokeObjectURL(source.url);
+      if (source.source !== 'reference') revokeDetachedObjectUrl(source.url);
     }
     this.#sources.clear();
     this.#observationSources.clear();
@@ -203,12 +204,12 @@ export class ProjectMediaResolver {
 
   #remember(assetId: string, source: ProjectMediaSource, epoch: number): ProjectMediaSource {
     if (epoch !== this.#epoch) {
-      if (source.source !== 'reference') URL.revokeObjectURL(source.url);
+      if (source.source !== 'reference') revokeDetachedObjectUrl(source.url);
       this.#assertEpoch(epoch);
     }
     const existing = this.#sources.get(assetId);
     if (existing !== undefined) {
-      if (source.source !== 'reference') URL.revokeObjectURL(source.url);
+      if (source.source !== 'reference') revokeDetachedObjectUrl(source.url);
       return existing;
     }
     this.#sources.set(assetId, source);

@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -94,7 +95,11 @@ import {
   createRenderExportJobPayload,
 } from './export-job-request.js';
 import { inspectImageAnimation } from './animated-image-metadata.js';
-import { clearMediaSource, releaseMediaObjectUrl } from './media-object-url.js';
+import {
+  clearMediaSource,
+  revokeDetachedObjectUrl,
+  useReleasableObjectUrl,
+} from './media-object-url.js';
 import { createExportUrlRetention } from './export-url-retention.js';
 import {
   activePreparedExportClipsAt,
@@ -1192,7 +1197,15 @@ function EditorWorkspace({
     agentConnectionStatus?.capability === 'tool-loop' ||
     agentConnectionStatus?.capability === 'plan-only';
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
+  const avatarObjectUrl = joySession.kind === 'ready' ? joySession.avatarObjectUrl : undefined;
+  const avatarObjectUrlRef = useReleasableObjectUrl<HTMLImageElement>(avatarObjectUrl);
   const joySessionRefreshSeqRef = useRef(0);
+  useLayoutEffect(
+    () => () => {
+      joySessionRefreshSeqRef.current += 1;
+    },
+    [],
+  );
   const [desktopAccountModalOpen, setDesktopAccountModalOpen] = useState(false);
   const [toasts, setToasts] = useState<
     readonly { id: string; message: string; kind: 'info' | 'success' | 'error' }[]
@@ -3442,16 +3455,11 @@ function EditorWorkspace({
       .then((next) => {
         if (requestId !== joySessionRefreshSeqRef.current) {
           if (next.kind === 'ready' && next.avatarObjectUrl !== undefined) {
-            URL.revokeObjectURL(next.avatarObjectUrl);
+            revokeDetachedObjectUrl(next.avatarObjectUrl);
           }
           return;
         }
-        setJoySession((prev) => {
-          if (prev.kind === 'ready' && prev.avatarObjectUrl !== undefined) {
-            URL.revokeObjectURL(prev.avatarObjectUrl);
-          }
-          return next;
-        });
+        setJoySession(next);
       })
       .catch(() => undefined);
   }, [storage]);
@@ -4883,7 +4891,7 @@ function EditorWorkspace({
           }
           if (pendingExportUrl !== undefined) {
             try {
-              URL.revokeObjectURL(pendingExportUrl);
+              revokeDetachedObjectUrl(pendingExportUrl);
             } catch {
               // The new partial URL is never published as a re-download.
             }
@@ -7294,6 +7302,7 @@ function EditorWorkspace({
                             {joySession.avatarObjectUrl !== undefined ? (
                               <img
                                 className="account-card-avatar-img"
+                                ref={avatarObjectUrlRef}
                                 src={joySession.avatarObjectUrl}
                                 alt=""
                               />
@@ -7847,7 +7856,15 @@ function MonitorPanelContent({
   );
   const [gpuSession, setGpuSession] = useState<BrowserGpuPreviewSession | undefined>(undefined);
   const [gpuPreviewUrl, setGpuPreviewUrl] = useState<string | undefined>(undefined);
-  const gpuPreviewImageRef = useRef<HTMLImageElement | null>(null);
+  const releaseGpuPreviewUrl = useCallback((url: string) => {
+    revokeDetachedObjectUrl(url);
+    recordPreviewResourceReleased('gpu-frame-url', url);
+  }, []);
+  const gpuPreviewImageRef = useReleasableObjectUrl<HTMLImageElement>(
+    gpuPreviewUrl,
+    undefined,
+    releaseGpuPreviewUrl,
+  );
   const [gpuPreviewStatus, setGpuPreviewStatus] = useState<
     'local' | 'connecting' | 'hardware-gpu' | 'fallback'
   >(previewRenderer === 'local' ? 'local' : 'connecting');
@@ -8173,13 +8190,7 @@ function MonitorPanelContent({
               if (cancelled || requestId !== gpuRequestIdRef.current) return;
               const nextUrl = URL.createObjectURL(result.blob);
               recordPreviewResourceCreated('gpu-frame-url', nextUrl);
-              setGpuPreviewUrl((previous) => {
-                if (previous !== undefined) {
-                  releaseMediaObjectUrl(gpuPreviewImageRef.current, previous);
-                  recordPreviewResourceReleased('gpu-frame-url', previous);
-                }
-                return nextUrl;
-              });
+              setGpuPreviewUrl(nextUrl);
               setGpuPreviewStatus('hardware-gpu');
               return;
             }
@@ -8211,16 +8222,6 @@ function MonitorPanelContent({
     state.playing,
     visualProject,
   ]);
-
-  useEffect(
-    () => () => {
-      if (gpuPreviewUrl !== undefined) {
-        releaseMediaObjectUrl(gpuPreviewImageRef.current, gpuPreviewUrl);
-        recordPreviewResourceReleased('gpu-frame-url', gpuPreviewUrl);
-      }
-    },
-    [gpuPreviewUrl],
-  );
 
   useEffect(() => {
     let cancelled = false;

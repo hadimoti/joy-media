@@ -9,6 +9,7 @@ import {
   type OpfsOriginalAssetCache,
 } from './opfs-original-asset-cache.js';
 import { inspectImageAnimation, validateImageAnimationBudget } from './animated-image-metadata.js';
+import { revokeDetachedObjectUrl } from './media-object-url.js';
 
 export interface MediaImportProgress {
   readonly ratio: number;
@@ -275,7 +276,7 @@ async function describeTimedMedia(
     // surface `net::ERR_FILE_NOT_FOUND (blob:...)` during reimport.
     element.removeAttribute('src');
     element.load();
-    URL.revokeObjectURL(url);
+    revokeDetachedObjectUrl(url);
   }
 }
 

@@ -25,7 +25,7 @@ describe('media object URL lifecycle', () => {
 
     releaseMediaObjectUrl(video, 'blob:video', (url) => events.push(`revoke:${url}`));
 
-    expect(events).toEqual(['pause', 'remove:src', 'load', 'revoke:blob:video']);
+    expect(events).toEqual(['pause', 'remove:src', 'remove:poster', 'load', 'revoke:blob:video']);
   });
 
   it('does nothing for an absent element and clears media sources on demand', () => {

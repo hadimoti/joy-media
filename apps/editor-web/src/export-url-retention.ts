@@ -1,8 +1,10 @@
+import { revokeDetachedObjectUrl } from './media-object-url.js';
+
 /** Keeps replaced export links alive while a browser download can still claim them. */
 export function createExportUrlRetention(
   getCurrentUrl: () => string | null,
   retentionMs: number,
-  revoke: (url: string) => void = (url) => URL.revokeObjectURL(url),
+  revoke: (url: string) => void = revokeDetachedObjectUrl,
 ) {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
 

@@ -12,6 +12,7 @@ import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import type { ProjectOperationLedger, ProjectOperationStatus } from './project-operation-ledger.js';
 import { verifyWorkerAudioDerivative, type VerifiedWorkerAudioResult } from './worker-result.js';
+import { useReleasableObjectUrl } from './media-object-url.js';
 
 const PRESENCE_ORDER = { connected: 0, disconnected: 1, revoked: 2 } as const;
 
@@ -106,6 +107,7 @@ export function JobsPanel({
   const [tab, setTab] = useState('workers');
   const [review, setReview] = useState<VerifiedWorkerAudioResult | undefined>();
   const [reviewUrl, setReviewUrl] = useState<string | undefined>();
+  const reviewAudioRef = useReleasableObjectUrl<HTMLAudioElement>(reviewUrl);
   const [reviewBusy, setReviewBusy] = useState(false);
   const reviewBusyRef = useRef(false);
   const [pairBusy, setPairBusy] = useState(false);
@@ -123,7 +125,6 @@ export function JobsPanel({
     }
     const url = URL.createObjectURL(review.blob);
     setReviewUrl(url);
-    return () => URL.revokeObjectURL(url);
   }, [review]);
 
   const load = useCallback(async () => {
@@ -698,7 +699,9 @@ export function JobsPanel({
                 Verified {review.bytes} bytes · {review.descriptor.mimeType} · source{' '}
                 {shortId(review.sourceAssetId)}
               </p>
-              {reviewUrl !== undefined && <audio controls src={reviewUrl} preload="metadata" />}
+              {reviewUrl !== undefined && (
+                <audio ref={reviewAudioRef} controls src={reviewUrl} preload="metadata" />
+              )}
               <div className="jobs-inline-actions">
                 <button
                   type="button"

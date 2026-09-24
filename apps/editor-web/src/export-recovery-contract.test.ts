@@ -164,7 +164,7 @@ describe('App export recovery contract', () => {
     const prune = exportCallback.indexOf('cache.prune(undefined, [entryId])', publish);
     const catchBlock = exportCallback.indexOf('} catch (error) {', completedLedger);
     const partialUrlCleanup = exportCallback.indexOf(
-      'URL.revokeObjectURL(pendingExportUrl)',
+      'revokeDetachedObjectUrl(pendingExportUrl)',
       catchBlock,
     );
     const partialCacheCleanup = exportCallback.indexOf(

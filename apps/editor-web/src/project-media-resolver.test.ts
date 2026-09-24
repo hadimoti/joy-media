@@ -54,7 +54,7 @@ describe('ProjectMediaResolver', () => {
       pause: () => events.push('pause'),
       removeAttribute: (name: string) => {
         if (name === 'src') source = '';
-        events.push('remove-src');
+        events.push(name === 'src' ? 'remove-src' : 'remove-poster');
       },
       load: () => events.push('load'),
       getAttribute: (name: string) => (name === 'src' ? source : null),
@@ -79,7 +79,7 @@ describe('ProjectMediaResolver', () => {
     source = resolved.url;
     resolver.clear(() => clearMediaSource(video));
 
-    expect(events).toEqual(['pause', 'remove-src', 'load', 'revoke:blob:preview']);
+    expect(events).toEqual(['pause', 'remove-src', 'remove-poster', 'load', 'revoke:blob:preview']);
   });
 
   it('preserves concurrent deduplication in the new epoch when an older request settles', async () => {

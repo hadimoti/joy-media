@@ -7,6 +7,7 @@ import {
 } from './control-plane-client.js';
 import type { AssetViewMode } from './asset-library-state.js';
 import { ExportIcon, UploadIcon } from './icons.js';
+import { revokeDetachedObjectUrl, useReleasableObjectUrl } from './media-object-url.js';
 
 const STOCK_VIDEO_PAGE_SIZE = 6;
 const IMPORT_POLL_INTERVAL_MS = 750;
@@ -46,28 +47,29 @@ export function StockVideoDiscovery({
     readonly url: string;
     readonly posterUrl?: string;
   }>();
-  const previewStateRef = useRef<typeof preview>(undefined);
   const requestSequence = useRef(0);
   const previewRequestSequence = useRef(0);
   const previewOpenerRef = useRef<HTMLButtonElement | null>(null);
   const previewCloseRef = useRef<HTMLButtonElement | null>(null);
-  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const previewVideoRef = useReleasableObjectUrl<HTMLVideoElement>(
+    preview?.url,
+    preview?.posterUrl,
+  );
+  const previewVideoElementRef = useRef<HTMLVideoElement | null>(null);
+  const previewVideoConsumerRef = useCallback(
+    (element: HTMLVideoElement | null): void => {
+      previewVideoRef(element);
+      previewVideoElementRef.current = element;
+    },
+    [previewVideoRef],
+  );
   const mountedRef = useRef(true);
-
-  useEffect(() => {
-    previewStateRef.current = preview;
-  }, [preview]);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       previewRequestSequence.current += 1;
-      const current = previewStateRef.current;
-      if (current !== undefined) {
-        URL.revokeObjectURL(current.url);
-        if (current.posterUrl !== undefined) URL.revokeObjectURL(current.posterUrl);
-      }
     };
   }, []);
 
@@ -100,17 +102,16 @@ export function StockVideoDiscovery({
 
   const revokePreview = useCallback((value: typeof preview): void => {
     if (value === undefined) return;
-    URL.revokeObjectURL(value.url);
-    if (value.posterUrl !== undefined) URL.revokeObjectURL(value.posterUrl);
+    revokeDetachedObjectUrl(value.url);
+    if (value.posterUrl !== undefined) revokeDetachedObjectUrl(value.posterUrl);
   }, []);
 
   const closePreview = useCallback((): void => {
     previewRequestSequence.current += 1;
     const opener = previewOpenerRef.current;
-    revokePreview(preview);
     setPreview(undefined);
     window.setTimeout(() => opener?.focus(), 0);
-  }, [preview, revokePreview]);
+  }, []);
 
   useEffect(() => {
     if (preview === undefined) return;
@@ -123,7 +124,7 @@ export function StockVideoDiscovery({
       }
       if (event.key !== 'Tab') return;
       const first = previewCloseRef.current;
-      const last = previewVideoRef.current;
+      const last = previewVideoElementRef.current;
       if (first === null || last === null) return;
       if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
@@ -143,7 +144,6 @@ export function StockVideoDiscovery({
   ): Promise<void> => {
     previewOpenerRef.current = opener;
     const sequence = ++previewRequestSequence.current;
-    revokePreview(preview);
     setPreview(undefined);
     onStatus(`Loading preview for ${video.title}…`);
     try {
@@ -289,7 +289,7 @@ export function StockVideoDiscovery({
             </button>
           </div>
           <video
-            ref={previewVideoRef}
+            ref={previewVideoConsumerRef}
             src={preview.url}
             poster={preview.posterUrl}
             controls
@@ -319,7 +319,7 @@ function StockVideoCard({
 }) {
   const posterTargetRef = useRef<HTMLButtonElement>(null);
   const [posterUrl, setPosterUrl] = useState<string | undefined>();
-  const posterUrlRef = useRef<string | undefined>(undefined);
+  const posterRef = useReleasableObjectUrl<HTMLImageElement>(posterUrl);
   const [posterFailed, setPosterFailed] = useState(false);
   useEffect(() => {
     let cancelled = false;
@@ -329,10 +329,9 @@ function StockVideoCard({
         .then((blob) => {
           const url = URL.createObjectURL(blob);
           if (cancelled) {
-            URL.revokeObjectURL(url);
+            revokeDetachedObjectUrl(url);
             return;
           }
-          posterUrlRef.current = url;
           setPosterUrl(url);
         })
         .catch(() => {
@@ -354,10 +353,6 @@ function StockVideoCard({
     return () => {
       cancelled = true;
       observer?.disconnect();
-      if (posterUrlRef.current !== undefined) {
-        URL.revokeObjectURL(posterUrlRef.current);
-        posterUrlRef.current = undefined;
-      }
     };
   }, [client, video.id]);
   return (
@@ -374,7 +369,7 @@ function StockVideoCard({
         aria-label={`Preview ${video.title}`}
       >
         {posterUrl !== undefined ? (
-          <img src={posterUrl} alt="" loading="lazy" />
+          <img ref={posterRef} src={posterUrl} alt="" loading="lazy" />
         ) : (
           <span aria-hidden="true">{posterFailed ? 'Poster unavailable' : 'Loading poster…'}</span>
         )}
