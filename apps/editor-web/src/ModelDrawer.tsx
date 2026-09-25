@@ -12,6 +12,13 @@ import {
   type DesktopProviderProfile,
 } from './desktop-client.js';
 import './ModelDrawer.css';
+import {
+  acknowledgeCustomEndpoint,
+  revokeCustomEndpointAcknowledgementsForUrl,
+  assertCustomEndpointConsentHolds,
+  requiresCustomEndpointConsent,
+  requireCustomEndpointAcknowledgement,
+} from './custom-endpoint-acknowledgement.js';
 
 export interface ModelDrawerProps {
   readonly open: boolean;
@@ -25,7 +32,7 @@ export interface ModelDrawerProps {
 type ProviderType = 'kilo' | 'openrouter' | 'openai-compatible' | 'custom';
 
 const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
-  kilo: 'https://api.kilo.ai/api/gateway/v1',
+  kilo: 'https://api.kilo.ai/v1',
   openrouter: 'https://openrouter.ai/api/v1',
   'openai-compatible': '',
   custom: '',
@@ -42,6 +49,20 @@ const COMMON_MODEL_PRESETS: Record<ProviderType, readonly string[]> = {
   'openai-compatible': ['gpt-4o-mini', 'gpt-4o'],
   custom: [],
 };
+
+function publishConfigurationFailure(
+  onStatusChange: ModelDrawerProps['onStatusChange'],
+  profile: Pick<DesktopProviderProfile, 'provider' | 'modelId'>,
+  error: unknown,
+): void {
+  const failed: ByokSessionStatus = {
+    provider: profile.provider as JoyProviderMode,
+    modelId: profile.modelId,
+    capability: 'incompatible',
+    message: error instanceof Error ? error.message : String(error),
+  };
+  onStatusChange?.(failed);
+}
 
 export function ModelDrawer({
   open,
@@ -66,6 +87,14 @@ export function ModelDrawer({
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [customAcknowledged, setCustomAcknowledged] = useState(false);
+  const [pendingCustomProfile, setPendingCustomProfile] = useState<DesktopProviderProfile>();
+
+  const acknowledge = (baseUrl: string, profileId?: string) => {
+    acknowledgeCustomEndpoint({ provider: 'custom', baseUrl, profileId });
+    setCustomAcknowledged(true);
+    setPendingCustomProfile(undefined);
+  };
 
   const mountedRef = useRef(true);
 
@@ -108,6 +137,7 @@ export function ModelDrawer({
 
   const handleProviderTypeChange = (type: ProviderType) => {
     setNewProvider(type);
+    setCustomAcknowledged(false);
     setNewBaseUrl(PROVIDER_DEFAULT_URLS[type]);
     const presets = COMMON_MODEL_PRESETS[type];
     if (presets.length > 0 && presets[0] !== undefined) {
@@ -118,6 +148,13 @@ export function ModelDrawer({
   };
 
   const handleDiscoverModels = async () => {
+    if (
+      requiresCustomEndpointConsent(newProvider, newBaseUrl) &&
+      !requireCustomEndpointAcknowledgement({ provider: 'custom', baseUrl: newBaseUrl })
+    ) {
+      setDiscoveryError('Acknowledge this custom endpoint before discovering models.');
+      return;
+    }
     if (!newBaseUrl.trim()) {
       setDiscoveryError('Please provide a valid Base URL.');
       return;
@@ -154,11 +191,19 @@ export function ModelDrawer({
   };
 
   const handleSaveAndConnect = async () => {
+    if (
+      requiresCustomEndpointConsent(newProvider, newBaseUrl) &&
+      !requireCustomEndpointAcknowledgement({ provider: 'custom', baseUrl: newBaseUrl })
+    ) {
+      onNotice?.('Acknowledge this custom endpoint before connecting.', 'error');
+      return;
+    }
     if (!newBaseUrl.trim() || !newSelectedModel.trim()) {
       onNotice?.('Base URL and Model ID are required.', 'error');
       return;
     }
     setIsSaving(true);
+    let configurationFailed = false;
     try {
       const profileName = newName.trim() || `${newProvider.toUpperCase()} (${newSelectedModel})`;
       const saved = await saveDesktopProviderProfile({
@@ -170,13 +215,25 @@ export function ModelDrawer({
         cachedModels: discoveredModels.length > 0 ? discoveredModels : [newSelectedModel.trim()],
       });
 
+      // Consent may have been withdrawn while the save was pending: re-check it
+      // immediately before the key is sent anywhere.
+      if (
+        requiresCustomEndpointConsent(newProvider, newBaseUrl) &&
+        !requireCustomEndpointAcknowledgement({ provider: 'custom', baseUrl: newBaseUrl })
+      ) {
+        onNotice?.('Custom endpoint consent was withdrawn; the connection was cancelled.', 'error');
+        return;
+      }
+
       if (engineClient) {
+        configurationFailed = true;
         const nextStatus = await engineClient.configure({
           provider: newProvider,
           baseUrl: newBaseUrl.trim(),
           modelId: newSelectedModel.trim(),
           apiKey: newApiKey.trim(),
         });
+        configurationFailed = false;
         onStatusChange?.(nextStatus);
       }
 
@@ -186,6 +243,13 @@ export function ModelDrawer({
       await refreshProfiles();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      if (configurationFailed) {
+        publishConfigurationFailure(
+          onStatusChange,
+          { provider: newProvider, modelId: newSelectedModel },
+          err,
+        );
+      }
       onNotice?.(`Failed to save and connect: ${msg}`, 'error');
     } finally {
       if (mountedRef.current) {
@@ -195,6 +259,19 @@ export function ModelDrawer({
   };
 
   const handleSelectModel = async (profile: DesktopProviderProfile, modelId: string) => {
+    if (
+      requiresCustomEndpointConsent(profile.provider, profile.baseUrl) &&
+      !requireCustomEndpointAcknowledgement({
+        provider: 'custom',
+        baseUrl: profile.baseUrl,
+        profileId: profile.id,
+      })
+    ) {
+      setPendingCustomProfile(profile);
+      onNotice?.('Acknowledge this exact custom endpoint before connecting it.', 'error');
+      return;
+    }
+    let configurationFailed = false;
     try {
       let apiKey = '';
       if (isDesktopHost()) {
@@ -203,13 +280,28 @@ export function ModelDrawer({
         apiKey = session?.apiKey ?? '';
       }
 
+      // Re-check consent after the vault await, before the key is sent.
+      if (
+        requiresCustomEndpointConsent(profile.provider, profile.baseUrl) &&
+        !requireCustomEndpointAcknowledgement({
+          provider: 'custom',
+          baseUrl: profile.baseUrl,
+          profileId: profile.id,
+        })
+      ) {
+        onNotice?.('Custom endpoint consent was withdrawn; the connection was cancelled.', 'error');
+        return;
+      }
+
       if (engineClient) {
+        configurationFailed = true;
         const nextStatus = await engineClient.configure({
           provider: profile.provider as JoyProviderMode,
           baseUrl: profile.baseUrl,
           modelId,
           apiKey,
         });
+        configurationFailed = false;
         onStatusChange?.(nextStatus);
       }
 
@@ -228,11 +320,26 @@ export function ModelDrawer({
       onNotice?.(`Switched active model to ${modelId}`, 'success');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      if (configurationFailed) {
+        publishConfigurationFailure(onStatusChange, { provider: profile.provider, modelId }, err);
+      }
       onNotice?.(`Failed to switch model: ${msg}`, 'error');
     }
   };
 
   const handleRefreshProfileModels = async (profile: DesktopProviderProfile) => {
+    if (
+      requiresCustomEndpointConsent(profile.provider, profile.baseUrl) &&
+      !requireCustomEndpointAcknowledgement({
+        provider: 'custom',
+        baseUrl: profile.baseUrl,
+        profileId: profile.id,
+      })
+    ) {
+      setPendingCustomProfile(profile);
+      onNotice?.('Acknowledge this exact custom endpoint before discovering models.', 'error');
+      return;
+    }
     setRefreshingProfileId(profile.id);
     try {
       let apiKey = '';
@@ -242,6 +349,7 @@ export function ModelDrawer({
         apiKey = session?.apiKey ?? '';
       }
 
+      assertCustomEndpointConsentHolds(profile.provider, profile.baseUrl, profile.id);
       const models = await fetchDesktopProviderModels({
         id: profile.id,
         baseUrl: profile.baseUrl,
@@ -391,12 +499,38 @@ export function ModelDrawer({
                 <input
                   id="md-base-url"
                   type="text"
-                  placeholder="https://api.kilo.ai/api/gateway/v1"
+                  placeholder="https://api.kilo.ai/v1"
                   value={newBaseUrl}
-                  onChange={(e) => setNewBaseUrl(e.target.value)}
+                  onChange={(e) => {
+                    setNewBaseUrl(e.target.value);
+                    setCustomAcknowledged(false);
+                  }}
                 />
               </div>
 
+              {requiresCustomEndpointConsent(newProvider, newBaseUrl) && (
+                <label className="model-drawer-form-group">
+                  <input
+                    type="checkbox"
+                    checked={customAcknowledged}
+                    disabled={isSaving}
+                    onChange={(event) => {
+                      setCustomAcknowledged(event.target.checked);
+                      if (event.target.checked) acknowledge(newBaseUrl);
+                      else {
+                        revokeCustomEndpointAcknowledgementsForUrl(newBaseUrl);
+                        // Withdrawn consent must also stop an already configured
+                        // connection from being used.
+                        if (status) {
+                          engineClient?.clear();
+                          onStatusChange?.(undefined);
+                        }
+                      }
+                    }}
+                  />
+                  I understand this custom endpoint may log requests and credentials.
+                </label>
+              )}
               <div className="model-drawer-form-group">
                 <label htmlFor="md-api-key">API Key</label>
                 <input
@@ -475,6 +609,21 @@ export function ModelDrawer({
                 </button>
               </div>
             </section>
+          )}
+
+          {pendingCustomProfile && (
+            <label className="model-drawer-form-group">
+              <input
+                type="checkbox"
+                checked={false}
+                onChange={(event) => {
+                  if (event.target.checked)
+                    acknowledge(pendingCustomProfile.baseUrl, pendingCustomProfile.id);
+                }}
+              />
+              I acknowledge {pendingCustomProfile.name || pendingCustomProfile.baseUrl} for this
+              session.
+            </label>
           )}
 
           {/* Configured API Providers List */}

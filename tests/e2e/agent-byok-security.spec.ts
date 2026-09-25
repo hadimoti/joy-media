@@ -32,7 +32,7 @@ test.describe('built-in JOY Agent BYOK security envelope', () => {
     await page.getByRole('menuitem', { name: 'Joy Code Settings…', exact: true }).click();
     const reopened = page.getByRole('dialog', { name: 'Joy Code Settings' });
     await reopened.getByRole('button', { name: 'Clear connection' }).click();
-    await expect(reopened.getByText('No provider connected')).toBeVisible();
+    await expect(reopened.getByText('Not connected')).toBeVisible();
     expect(await scanForSentinel(page, SENTINEL)).toEqual([]);
     await reopened.getByRole('button', { name: 'Done' }).click();
 
@@ -47,17 +47,12 @@ test.describe('built-in JOY Agent BYOK security envelope', () => {
     for (const mode of ['auth', 'redirect', 'network', 'oversize'] as const) {
       const provider = await installFakeOpenAIProvider(page, { mode });
       const dialog = await configureJoyAgent(page, `${SENTINEL}-${mode}`, { allowFailure: true });
-      // The new settings dialog surfaces an incompatible capability as a
-      // generic notice; the underlying failure (auth, redirect, network, or
-      // oversize) is preserved on the session status message visible in the
-      // sidebar status text and on the active connection banner.
-      await expect(
-        dialog.getByText(
-          /authentication failed|CORS or network error|response too large|provider responded/,
-        ),
-      ).toBeVisible({
-        timeout: 20_000,
-      });
+      const failureNotice = dialog.getByRole('alert');
+      await expect(failureNotice).toHaveCount(1);
+      await expect(failureNotice).toContainText(
+        /Connection failed:.*(authentication failed|CORS or network error|response too large)/i,
+        { timeout: 20_000 },
+      );
       expect(provider.authorizationSeen).toBe(true);
       expect(await scanForSentinel(page, `${SENTINEL}-${mode}`)).toEqual([]);
       await dialog.getByRole('button', { name: 'Done' }).click();
@@ -68,15 +63,14 @@ test.describe('built-in JOY Agent BYOK security envelope', () => {
   });
 
   test('reports a bounded provider timeout without retaining the key', async ({ page }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(40_000);
     await page.unroute('https://joy-agent-fixture.example/**');
     const provider = await installFakeOpenAIProvider(page, { mode: 'slow', delayMs: 16_000 });
     const dialog = await configureJoyAgent(page, `${SENTINEL}-timeout`, { allowFailure: true });
-    // The new settings dialog renders the failure as an incompatible notice;
-    // the underlying "Connection timed out" detail still lives on the session
-    // status that the dialog displays in the active connection banner.
-    await expect(dialog.getByText(/Connection timed out|provider responded/)).toBeVisible({
-      timeout: 30_000,
+    const failureNotice = dialog.getByRole('alert');
+    await expect(failureNotice).toHaveCount(1);
+    await expect(failureNotice).toContainText(/Connection failed:.*Connection timed out/, {
+      timeout: 20_000,
     });
     expect(provider.authorizationSeen).toBe(true);
     expect(await scanForSentinel(page, `${SENTINEL}-timeout`)).toEqual([]);

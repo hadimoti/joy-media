@@ -23,7 +23,7 @@ import {
   logWarn,
   printBanner,
 } from '../utils/logger.js';
-import { listProjects, loadProject } from '../utils/project-loader.js';
+import { listProjects, loadProject, type createDefaultProject } from '../utils/project-loader.js';
 
 export interface RenderCommandFlags {
   project?: string | undefined;

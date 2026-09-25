@@ -531,6 +531,7 @@ export function AgentPanel({
   const [attaching, setAttaching] = useState(false);
   const engineStatus = joyAgentEngineClient?.getStatus();
   const isDisconnected = engineStatus === undefined || engineStatus.capability === 'incompatible';
+  const canConfigureDisconnectedAgent = isDisconnected && onOpenSettings !== undefined;
   const [conversation, setConversation] = useState<JoyCodeConversation>(() =>
     initialJoyCodeConversation(storage, project.id),
   );
@@ -3741,10 +3742,8 @@ export function AgentPanel({
           </div>
 
           {composerCapability === 'edit' && (
-            // isDisconnected && onOpenSettings !== undefined
             <div className="joy-code-compose-dock">
-              {isDisconnected &&
-                onOpenSettings !== undefined &&
+              {canConfigureDisconnectedAgent &&
                 Boolean(activeThread && activeThread.messages.length > 0) && (
                   <div
                     className="joy-code-disconnected-banner"

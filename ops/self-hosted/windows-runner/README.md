@@ -1,0 +1,36 @@
+# JOY Media Windows Docker self-hosted runner
+
+Required labels: `self-hosted,windows,x64,joy-media-worker-docker`
+
+This is the only accepted Windows CI lane for JOY Media private repositories.
+It runs inside a Windows Docker Desktop container on the owner-controlled PC.
+Host-direct Windows runners, GitHub-hosted runners, and Linux containers are
+not substitutes for this lane.
+
+The release workflow must pass the exact candidate SHA and write the complete
+Windows acceptance record before `release:gate` can pass. See
+[contract.md](contract.md) for the build, registration, token, container
+identity, and container-local acceptance contract.
+
+The image uses the Windows Server LTSC 2022 base with Media Foundation and
+pins the FFmpeg archive by release URL and SHA-256. The default provisioned
+image tag is `joy-media-worker-windows:2.337.0-mediafoundation`; rebuild and
+provision this tag after changing the image contract.
+
+If Windows-container NAT cannot reach the public download hosts, the same
+build can use an owner-controlled temporary HTTP artifact mirror by adding
+`--build-arg ARTIFACT_BASE_URL=http://host.docker.internal:<port>` and
+`--build-arg COREPACK_NPM_REGISTRY=http://host.docker.internal:<port>/npm`.
+The repository includes `artifact-mirror.py` for this temporary host-local
+service. The image still verifies every downloaded file against the pinned
+SHA-256 values; the mirror changes transport only, not artifact identity, and
+its URL is not retained in the final image environment. Leave both arguments
+unset for the normal direct-download path.
+
+The runner's GitHub control-plane traffic can use the companion
+`github-connect-proxy.py` when Windows-container NAT can establish TCP but
+cannot complete outbound TLS. Start it on the owner PC and pass the Docker
+gateway address as `HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy`, and `https_proxy`
+to the runner container. It permits CONNECT only to the GitHub host allow-list
+and never logs request headers or credentials; stop it when the runner is
+stopped.

@@ -6,6 +6,7 @@ import { DEFAULT_AGENT_POLICY } from './agent-policy-settings.js';
 import { JoyAgentSettingsDialog } from './JoyAgentSettingsDialog.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus, JoyAgentMediaCapabilityReport } from './joy-agent/protocol.js';
+import { resetCustomEndpointAcknowledgementsForTests } from './custom-endpoint-acknowledgement.js';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -44,6 +45,7 @@ let container: HTMLDivElement | undefined;
 async function render(
   engineClient: JoyAgentEngineClient,
   status?: ByokSessionStatus,
+  onStatusChange?: (status: ByokSessionStatus | undefined) => void,
 ): Promise<HTMLDivElement> {
   container = document.createElement('div');
   document.body.append(container);
@@ -54,6 +56,7 @@ async function render(
         policy={DEFAULT_AGENT_POLICY}
         onPolicyChange={vi.fn()}
         engineClient={engineClient}
+        {...(onStatusChange === undefined ? {} : { onStatusChange })}
         {...(status === undefined ? {} : { status })}
         onClose={vi.fn()}
       />,
@@ -63,8 +66,10 @@ async function render(
 }
 
 function buttonByText(rendered: HTMLElement, text: string): HTMLButtonElement {
-  const button = [...rendered.querySelectorAll<HTMLButtonElement>('button')].find((candidate) =>
-    (candidate.textContent ?? '').includes(text),
+  const button = [...rendered.querySelectorAll<HTMLButtonElement>('button')].find(
+    (candidate) =>
+      candidate.textContent?.trim() === text ||
+      candidate.querySelector('strong')?.textContent?.trim() === text,
   );
   if (button === undefined) throw new Error(`Expected button "${text}"`);
   return button;
@@ -92,7 +97,329 @@ afterEach(async () => {
   container?.remove();
   root = undefined;
   container = undefined;
+  vi.unstubAllGlobals();
+  resetCustomEndpointAcknowledgementsForTests();
   delete (window as { joyDesktop?: unknown }).joyDesktop;
+});
+
+function countLeafTextMatches(rendered: HTMLElement, expression: RegExp): number {
+  return [...rendered.querySelectorAll<HTMLElement>('*')].filter(
+    (element) =>
+      expression.test(element.textContent ?? '') &&
+      ![...element.children].some((child) => expression.test(child.textContent ?? '')),
+  ).length;
+}
+
+describe('JOY Agent Settings connection status', () => {
+  async function connectWithKey(rendered: HTMLElement): Promise<HTMLInputElement> {
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    if (key === null) throw new Error('Expected API key field');
+    await act(async () => {
+      setInputValue(key, 'connection-test-key');
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+    return key;
+  }
+
+  it('sends separate Dual-Brain credentials only to their matching provider', async () => {
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    const fields = [...rendered.querySelectorAll<HTMLInputElement>('input[type="password"]')];
+    expect(fields).toHaveLength(2);
+    expect(rendered.textContent).toContain('OpenRouter API key');
+    expect(rendered.textContent).toContain('Kilo API key');
+    setInputValue(fields[0]!, 'openrouter-only-key');
+    setInputValue(fields[1]!, 'kilo-only-key');
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    const config = vi.mocked(engineClient.configure).mock.calls[0]?.[0];
+    expect(config).toMatchObject({
+      mode: 'dual-brain',
+      workhorse: { provider: 'openrouter', apiKey: 'openrouter-only-key' },
+      creative: { provider: 'kilo', apiKey: 'kilo-only-key' },
+    });
+    expect(config && 'workhorse' in config ? config.workhorse.apiKey : '').not.toBe(
+      'kilo-only-key',
+    );
+    expect(config && 'creative' in config ? config.creative.apiKey : '').not.toBe(
+      'openrouter-only-key',
+    );
+    expect(fields.map((field) => field.value)).toEqual(['', '']);
+  });
+
+  it.each(['openrouter', 'kilo'] as const)(
+    'never uses the saved key of a %s profile bound to a non-trusted URL in Dual-Brain',
+    async (untrustedProvider) => {
+      const openRouterBaseUrl =
+        untrustedProvider === 'openrouter'
+          ? 'https://openrouter.ai.evil.example/api/v1'
+          : 'https://openrouter.ai/api/v1';
+      const kiloBaseUrl =
+        untrustedProvider === 'kilo' ? 'https://custom-kilo.example/v1' : 'https://api.kilo.ai/v1';
+      const invoke = vi.fn().mockImplementation(async (channel: string, args?: { id?: string }) => {
+        if (channel === 'desktop.provider-profile.list') {
+          return [
+            {
+              id: 'dual-openrouter',
+              provider: 'openrouter',
+              name: 'OpenRouter',
+              baseUrl: openRouterBaseUrl,
+              modelId: 'openrouter/free',
+              createdAt: '2026-09-15T00:00:00.000Z',
+              updatedAt: '2026-09-15T00:00:00.000Z',
+            },
+            {
+              id: 'dual-kilo',
+              provider: 'kilo',
+              name: 'Kilo',
+              baseUrl: kiloBaseUrl,
+              modelId: 'kilo-auto/efficient',
+              createdAt: '2026-09-15T00:00:00.000Z',
+              updatedAt: '2026-09-15T00:00:00.000Z',
+            },
+          ];
+        }
+        if (channel === 'desktop.provider-profile.begin-session') {
+          return { apiKey: `saved-${args?.id}-key` };
+        }
+        return undefined;
+      });
+      window.joyDesktop = {
+        channels: ['desktop.provider-profile.list', 'desktop.provider-profile.begin-session'],
+        invoke,
+      };
+      const engineClient = client();
+      const rendered = await render(engineClient, undefined);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      await act(async () => {
+        buttonByText(rendered, 'Dual-Brain Studio').click();
+      });
+      await act(async () => {
+        buttonByText(rendered, 'Connect model').click();
+        await Promise.resolve();
+      });
+      const untrustedId = untrustedProvider === 'openrouter' ? 'dual-openrouter' : 'dual-kilo';
+      // The vault is never asked for the key of a profile bound to another URL,
+      // and that key never reaches the fixed trusted Dual-Brain endpoint.
+      expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.begin-session', {
+        id: untrustedId,
+      });
+      for (const [config] of vi.mocked(engineClient.configure).mock.calls) {
+        expect(JSON.stringify(config)).not.toContain(`saved-${untrustedId}-key`);
+      }
+    },
+  );
+
+  it('reports a partial Dual-Brain connection as an error and names the unusable brain', async () => {
+    const engineClient = client({
+      testConnection: vi.fn().mockResolvedValue({
+        provider: 'dual-brain',
+        modelId: 'openrouter/free + kilo-auto/efficient',
+        capability: 'incompatible',
+        dualBrain: {
+          workhorse: {
+            provider: 'openrouter',
+            modelId: 'openrouter/free',
+            capability: 'tool-loop',
+          },
+          creative: {
+            provider: 'kilo',
+            modelId: 'kilo-auto/efficient',
+            capability: 'incompatible',
+            message: 'Kilo refused partial-status-key',
+          },
+        },
+      }),
+    });
+    const rendered = await render(engineClient, undefined);
+    const fields = [...rendered.querySelectorAll<HTMLInputElement>('input[type="password"]')];
+    setInputValue(fields[0]!, 'openrouter-partial-key');
+    setInputValue(fields[1]!, 'partial-status-key');
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    expect(rendered.querySelector('[role="alert"]')?.textContent).toContain(
+      'Dual-Brain partially connected. OpenRouter: tool-loop; Kilo: incompatible (Kilo refused [redacted]). Tool-loop readiness requires both brains.',
+    );
+    expect(rendered.textContent).not.toContain('are live.');
+    expect(rendered.textContent).not.toContain('partial-status-key');
+  });
+
+  it('replaces the connected status when Dual-Brain configuration throws', async () => {
+    const onStatusChange = vi.fn();
+    const engineClient = client({
+      configure: vi.fn().mockRejectedValue(new Error('setup failed')),
+    });
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <JoyAgentSettingsDialog
+          policy={DEFAULT_AGENT_POLICY}
+          onPolicyChange={vi.fn()}
+          engineClient={engineClient}
+          status={readyStatus}
+          onStatusChange={onStatusChange}
+          onClose={vi.fn()}
+        />,
+      );
+    });
+    const rendered = container;
+    const fields = [...rendered.querySelectorAll<HTMLInputElement>('input[type="password"]')];
+    await act(async () => {
+      setInputValue(fields[0]!, 'or-key');
+      setInputValue(fields[1]!, 'kilo-key');
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+    expect(onStatusChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'dual-brain',
+        capability: 'incompatible',
+        message: 'setup failed',
+      }),
+    );
+    expect(rendered.querySelector('[role="status"]')?.textContent).toContain('Connection failed');
+  });
+
+  it('shows tool-loop readiness and the connection notice in the dialog', async () => {
+    const rendered = await render(client(), undefined);
+
+    await selectCustomPreset(rendered);
+    await connectWithKey(rendered);
+
+    expect(rendered.querySelector('[role="status"]')?.textContent).toContain('Tool loop ready');
+    expect(countLeafTextMatches(rendered, /Tool loop ready/)).toBe(1);
+    expect(rendered.textContent).toContain(
+      'Connected successfully. JOY is ready to edit in this session.',
+    );
+  });
+
+  it('shows plan-only readiness in the dialog', async () => {
+    const planOnlyStatus: ByokSessionStatus = {
+      provider: 'openrouter',
+      modelId: 'openrouter/verified-model',
+      capability: 'plan-only',
+    };
+    const rendered = await render(
+      client({ testConnection: vi.fn().mockResolvedValue(planOnlyStatus) }),
+      undefined,
+    );
+
+    await selectCustomPreset(rendered);
+    await connectWithKey(rendered);
+
+    expect(rendered.querySelector('[role="status"]')?.textContent).toContain('Plan-only ready');
+    expect(countLeafTextMatches(rendered, /Plan-only/)).toBe(1);
+    expect(rendered.textContent).toContain('Connected successfully in plan-only mode.');
+  });
+
+  it('shows a resolved provider failure with one redacted error in the dialog', async () => {
+    const privateKey = 'connection-test-key';
+    const incompatibleStatus: ByokSessionStatus = {
+      provider: 'openrouter',
+      modelId: 'openrouter/verified-model',
+      capability: 'incompatible',
+      message: `Provider authentication failed for ${privateKey}`,
+    };
+    const rendered = await render(
+      client({ testConnection: vi.fn().mockResolvedValue(incompatibleStatus) }),
+      undefined,
+    );
+
+    await selectCustomPreset(rendered);
+    const key = await connectWithKey(rendered);
+    const dialog = rendered.querySelector('[role="dialog"]');
+    if (dialog === null) throw new Error('Expected settings dialog');
+
+    expect(dialog.querySelectorAll('[role="alert"]')).toHaveLength(1);
+    expect(countLeafTextMatches(dialog as HTMLElement, /authentication failed/i)).toBe(1);
+    expect(dialog.textContent).not.toContain(privateKey);
+    expect(key.value).toBe('');
+  });
+
+  it('shows the provider failure message in the dialog without rendering the API key', async () => {
+    const rendered = await render(
+      client({
+        testConnection: vi
+          .fn()
+          .mockRejectedValue(new Error('authentication failed for connection-test-key')),
+      }),
+      undefined,
+    );
+
+    await selectCustomPreset(rendered);
+    const key = await connectWithKey(rendered);
+
+    expect(rendered.querySelector('[role="alert"]')?.textContent).toContain(
+      'authentication failed',
+    );
+    expect(rendered.textContent).not.toContain('connection-test-key');
+    expect(key.value).toBe('');
+  });
+
+  it('refuses model discovery in the browser build without sending the key', async () => {
+    const privateKey = 'browser-discovery-key';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const rendered = await render(client(), undefined);
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    const openDrawer = rendered.querySelector<HTMLButtonElement>('.joy-settings-text-btn');
+    if (key === null || openDrawer === null) {
+      throw new Error('Expected key and model drawer controls');
+    }
+    setInputValue(key, privateKey);
+
+    await act(async () => {
+      openDrawer.click();
+      await Promise.resolve();
+    });
+
+    expect(rendered.textContent).toContain('Live model discovery requires Joy Media Desktop.');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(rendered.textContent).not.toContain(privateKey);
+  });
+
+  it('redacts the API key from desktop model discovery errors', async () => {
+    const privateKey = 'discovery-test-key';
+    const invoke = vi.fn((channel: string) =>
+      channel === 'desktop.provider-profile.fetch-models'
+        ? Promise.reject(new Error(`Provider rejected key ${privateKey}`))
+        : Promise.resolve([]),
+    );
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.fetch-models'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const rendered = await render(client(), undefined);
+    await selectCustomPreset(rendered);
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    const openDrawer = rendered.querySelector<HTMLButtonElement>('.joy-settings-text-btn');
+    if (key === null || openDrawer === null) {
+      throw new Error('Expected key and model drawer controls');
+    }
+    setInputValue(key, privateKey);
+
+    await act(async () => {
+      openDrawer.click();
+      await Promise.resolve();
+    });
+
+    expect(rendered.textContent).toContain('Provider rejected key [redacted]');
+    expect(rendered.textContent).not.toContain(privateKey);
+  });
 });
 
 describe('JOY Agent Settings media capability probe', () => {
@@ -234,6 +561,294 @@ describe('JOY Agent Settings media capability probe', () => {
     expect(rendered.textContent).toContain(
       'Connection cleared. Your API key was removed from this page session.',
     );
+  });
+});
+
+describe('JOY Agent Settings custom provider acknowledgement', () => {
+  const disclosureText =
+    'I understand that custom endpoints may log requests according to their own policy.';
+
+  function providerSelect(rendered: HTMLElement): HTMLSelectElement {
+    const select = rendered.querySelector<HTMLSelectElement>('select');
+    if (select === null) throw new Error('Expected provider select dropdown');
+    return select;
+  }
+
+  async function changeProvider(rendered: HTMLElement, provider: string): Promise<void> {
+    await act(async () => {
+      const select = providerSelect(rendered);
+      select.value = provider;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  it('shows the acknowledgement checkbox only for an OpenAI-compatible provider', async () => {
+    const rendered = await render(client(), readyStatus);
+
+    await selectCustomPreset(rendered);
+    expect(rendered.textContent).not.toContain(disclosureText);
+    await changeProvider(rendered, 'openai-compatible');
+    expect(rendered.textContent).toContain(disclosureText);
+    expect(rendered.querySelector('input[type="checkbox"]')).not.toBeNull();
+
+    await changeProvider(rendered, 'openrouter');
+    expect(rendered.textContent).not.toContain(disclosureText);
+  });
+
+  it('blocks custom provider connection until the acknowledgement is checked', async () => {
+    const engineClient = client();
+    const rendered = await render(engineClient, readyStatus);
+    await selectCustomPreset(rendered);
+    await changeProvider(rendered, 'openai-compatible');
+
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    if (key === null) throw new Error('Expected API key field');
+    const baseUrl = rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]');
+    if (baseUrl === null) throw new Error('Expected base URL field');
+    await act(async () => {
+      setInputValue(key, 'custom-provider-test-key');
+      setInputValue(baseUrl, 'https://custom.example/v1');
+      buttonByText(rendered, 'Connect model').click();
+    });
+
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain(
+      'Enter the custom-provider acknowledgement before connecting.',
+    );
+    expect(rendered.querySelector<HTMLInputElement>('input[type="checkbox"]')).not.toBeNull();
+  });
+
+  it('requires consent for an OpenRouter label with a custom destination before connect', async () => {
+    const engineClient = client();
+    const rendered = await render(engineClient, readyStatus);
+    await selectCustomPreset(rendered);
+    await changeProvider(rendered, 'openrouter');
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    const baseUrl = rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]');
+    if (!key || !baseUrl) throw new Error('Expected provider connection fields');
+    setInputValue(baseUrl, 'https://openrouter.ai.evil.example/api/v1');
+    setInputValue(key, 'openrouter-label-custom-destination-key');
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('custom-provider acknowledgement');
+    expect(rendered.querySelector('input[type="checkbox"]')).not.toBeNull();
+  });
+
+  it('does not reuse an OpenRouter vault key for an acknowledged custom endpoint', async () => {
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list')
+        return [
+          {
+            id: 'openrouter-1',
+            provider: 'openrouter',
+            name: 'Saved OpenRouter',
+            baseUrl: 'https://openrouter.ai/api/v1',
+            modelId: 'openrouter/auto',
+            createdAt: '2026-09-15T00:00:00.000Z',
+            updatedAt: '2026-09-15T00:00:00.000Z',
+          },
+        ];
+      if (channel === 'desktop.provider-profile.begin-session')
+        return { apiKey: 'vault-openrouter-secret' };
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.begin-session'],
+      invoke,
+    };
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await selectCustomPreset(rendered);
+    await changeProvider(rendered, 'openai-compatible');
+    const baseUrl = rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]');
+    if (!baseUrl) throw new Error('Expected base URL field');
+    setInputValue(baseUrl, 'https://custom.example/v1');
+    const consent = rendered.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (!consent) throw new Error('Expected endpoint acknowledgement');
+    await act(async () => {
+      consent.click();
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+    expect(engineClient.configure).not.toHaveBeenCalledWith(
+      expect.objectContaining({ apiKey: 'vault-openrouter-secret' }),
+    );
+    expect(rendered.textContent).toContain(
+      'a new API key because the saved key belongs to a different provider or endpoint',
+    );
+  });
+
+  it('blocks OpenRouter-labeled custom model discovery before sending an entered key', async () => {
+    const invoke = vi.fn().mockResolvedValue([]);
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.fetch-models'],
+      invoke,
+    };
+    const rendered = await render(client(), undefined);
+    await selectCustomPreset(rendered);
+    await changeProvider(rendered, 'openrouter');
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    const baseUrl = rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]');
+    if (key === null || baseUrl === null) throw new Error('Expected custom endpoint fields');
+    setInputValue(key, 'openrouter-custom-discovery-secret');
+    setInputValue(baseUrl, 'https://other.example/api/v1');
+
+    await act(async () => {
+      const drawer = [...rendered.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes('Discovered Models Drawer'),
+      );
+      drawer?.click();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      const discover = [...rendered.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes('Discover Models'),
+      );
+      discover?.click();
+      await Promise.resolve();
+    });
+
+    expect(invoke).not.toHaveBeenCalledWith(
+      'desktop.provider-profile.fetch-models',
+      expect.anything(),
+    );
+    expect(rendered.textContent).toContain(
+      'Enter the custom-provider acknowledgement before discovering models.',
+    );
+  });
+
+  it('blocks a saved custom profile before retrieving its key until acknowledged', async () => {
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        return [
+          {
+            id: 'custom-prof-1',
+            provider: 'openrouter',
+            name: 'OpenRouter custom endpoint',
+            baseUrl: 'https://other.example/api/v1',
+            modelId: 'private-model',
+            createdAt: '2026-09-15T00:00:00.000Z',
+            updatedAt: '2026-09-15T00:00:00.000Z',
+          },
+        ];
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.begin-session'],
+      invoke,
+    };
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      buttonByText(rendered, 'Use').click();
+      await Promise.resolve();
+    });
+
+    expect(invoke).not.toHaveBeenCalledWith(
+      'desktop.provider-profile.begin-session',
+      expect.anything(),
+    );
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain(
+      'Enter the custom-provider acknowledgement before connecting.',
+    );
+    expect(rendered.querySelector<HTMLInputElement>('input[type="checkbox"]')).not.toBeNull();
+  });
+
+  it('publishes a failed status when configuring a saved profile throws', async () => {
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list')
+        return [
+          {
+            id: 'openrouter-trusted',
+            provider: 'openrouter',
+            name: 'OpenRouter',
+            baseUrl: 'https://openrouter.ai/api/v1',
+            modelId: 'openrouter/auto',
+            createdAt: '2026-09-15T00:00:00.000Z',
+            updatedAt: '2026-09-15T00:00:00.000Z',
+          },
+        ];
+      if (channel === 'desktop.provider-profile.begin-session') return { apiKey: 'saved-secret' };
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.begin-session'],
+      invoke,
+    };
+    const onStatusChange = vi.fn();
+    const engineClient = client({
+      configure: vi.fn().mockRejectedValue(new Error('configure failed')),
+    });
+    const rendered = await render(engineClient, readyStatus, onStatusChange);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      buttonByText(rendered, 'Use').click();
+      await Promise.resolve();
+    });
+    expect(onStatusChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'openrouter',
+        capability: 'incompatible',
+      }),
+    );
+  });
+
+  it('requires acknowledgement when a custom provider is selected from the dual-brain default', async () => {
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    const dualBrainPreset = buttonByText(rendered, 'Dual-Brain Studio');
+    expect(dualBrainPreset.className).toContain('is-active');
+
+    await changeProvider(rendered, 'openai-compatible');
+    expect(buttonByText(rendered, 'Custom BYOK').className).toContain('is-active');
+
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    if (key === null) throw new Error('Expected API key field');
+    const baseUrl = rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]');
+    if (baseUrl === null) throw new Error('Expected base URL field');
+    await act(async () => {
+      setInputValue(key, 'custom-provider-test-key');
+      setInputValue(baseUrl, 'https://custom.example/v1');
+      buttonByText(rendered, 'Connect model').click();
+    });
+
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain(
+      'Enter the custom-provider acknowledgement before connecting.',
+    );
+  });
+
+  it('resets the acknowledgement whenever the provider changes', async () => {
+    const rendered = await render(client(), readyStatus);
+    await selectCustomPreset(rendered);
+    await changeProvider(rendered, 'openai-compatible');
+
+    const checkbox = rendered.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (checkbox === null) throw new Error('Expected custom provider acknowledgement checkbox');
+    await act(async () => {
+      checkbox.click();
+    });
+    expect(checkbox.checked).toBe(true);
+
+    await changeProvider(rendered, 'openrouter');
+    await changeProvider(rendered, 'openai-compatible');
+    expect(rendered.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(false);
   });
 });
 

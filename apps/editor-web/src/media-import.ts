@@ -9,6 +9,7 @@ import {
   type OpfsOriginalAssetCache,
 } from './opfs-original-asset-cache.js';
 import { inspectImageAnimation, validateImageAnimationBudget } from './animated-image-metadata.js';
+import { revokeDetachedObjectUrl } from './media-object-url.js';
 
 export interface MediaImportProgress {
   readonly ratio: number;
@@ -270,13 +271,12 @@ async function describeTimedMedia(
   } finally {
     element.onloadedmetadata = null;
     element.onerror = null;
-    // Revoke the object URL before detaching the element. revoking after
-    // removeAttribute('src') + load() races with the browser's resource
-    // fetch and surfaces as `net::ERR_FILE_NOT_FOUND (blob:...)` in the
-    // console on the reimport journey.
-    URL.revokeObjectURL(url);
+    // Detach and unload the media consumer before revoking. Revoking while
+    // the element still has this URL in `src` can race its pending fetch and
+    // surface `net::ERR_FILE_NOT_FOUND (blob:...)` during reimport.
     element.removeAttribute('src');
     element.load();
+    revokeDetachedObjectUrl(url);
   }
 }
 

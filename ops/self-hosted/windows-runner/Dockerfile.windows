@@ -1,0 +1,73 @@
+# escape=`
+# JOY Media Windows Docker self-hosted CI runner.
+#
+# This image is the only Windows runner contract accepted by the release gate:
+# self-hosted,windows,x64,joy-media-worker-docker. It must run with Docker
+# Desktop's Windows-container engine on the owner-controlled PC. Host-direct
+# Windows runners and Linux containers are not substitutes for this lane.
+
+# Pin the Windows/amd64 child digest. A mutable tag is not an acceptance
+# boundary because a later base-image refresh could change the toolchain.
+# FFmpeg needs Media Foundation (mf.dll / mfplat.dll), which Server Core omits.
+ARG WINDOWS_BASE=mcr.microsoft.com/windows/server:ltsc2022@sha256:bb8e33b6e5781ff58947339bc1813a5a83cbb91422763f33e045e8932c685e1d
+FROM ${WINDOWS_BASE}
+
+SHELL ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop';"]
+
+# Every downloaded executable is pinned and verified in the image build. Do
+# not replace these with a mutable package-manager feed.
+ARG NODE_VERSION=22.14.0
+ARG NODE_SHA256=55b639295920b219bb2acbcfa00f90393a2789095b7323f79475c9f34795f217
+ARG GIT_VERSION=2.55.0
+ARG GIT_RELEASE_REVISION=5
+ARG GIT_SHA256=56d7b226b7693196cfc71fef26568f536c4a021ab6c37ff2db4287bed908e96e
+ARG FFMPEG_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-22-13-18/ffmpeg-n8.1.3-win64-gpl-8.1.zip
+ARG FFMPEG_SHA256=ed885833e406f0f7a1ea0304dd170779117799b2fba8096abc3e2e4dd679cc20
+ARG JQ_VERSION=1.8.2
+ARG JQ_SHA256=a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627
+ARG RUNNER_VERSION=2.337.0
+ARG RUNNER_SHA256=1150692afa94e71f872017e254ea55b6eece1eece3fe7e3a6d4c93d0a1b85cfc
+ARG ARTIFACT_BASE_URL=
+ARG COREPACK_NPM_REGISTRY=
+
+ENV COREPACK_HOME="C:\\corepack" `
+    NODE_VERSION="${NODE_VERSION}" `
+    NODE_SHA256="${NODE_SHA256}" `
+    GIT_VERSION="${GIT_VERSION}" `
+    GIT_RELEASE_REVISION="${GIT_RELEASE_REVISION}" `
+    GIT_SHA256="${GIT_SHA256}" `
+    FFMPEG_URL="${FFMPEG_URL}" `
+    FFMPEG_SHA256="${FFMPEG_SHA256}" `
+    JQ_VERSION="${JQ_VERSION}" `
+    JQ_SHA256="${JQ_SHA256}" `
+    RUNNER_VERSION="${RUNNER_VERSION}" `
+    RUNNER_SHA256="${RUNNER_SHA256}" `
+    PATH="C:\tools;C:\ffmpeg\bin;C:\git\cmd;C:\git\mingw64\bin;C:\actions-runner\bin;C:\node;C:\Windows\System32;C:\Windows;C:\Windows\System32\WindowsPowerShell\v1.0;C:\Windows\System32\Wbem;C:\Windows\System32\OpenSSH"
+
+COPY install-windows-runner.ps1 C:/install-windows-runner.ps1
+
+# The legacy Windows builder expands ARG values in ENV (but not inside RUN's
+# PowerShell text). Scope the optional mirror to this install layer only, then
+# clear it before the final image configuration is committed.
+ENV JOY_MEDIA_WINDOWS_ARTIFACT_BASE_URL="${ARTIFACT_BASE_URL}" `
+    JOY_MEDIA_WINDOWS_COREPACK_NPM_REGISTRY="${COREPACK_NPM_REGISTRY}"
+
+# Keep the Docker RUN command short. The Windows HCS process launcher rejects
+# the old monolithic install command on current Windows hosts; the script keeps
+# the same pinned downloads and hash checks without exceeding that limit.
+RUN & C:\install-windows-runner.ps1 ; `
+    & C:\ffmpeg\bin\ffmpeg.exe -version ; if ($LASTEXITCODE -ne 0) { throw "ffmpeg -version failed with exit code $LASTEXITCODE." } ; `
+    & C:\ffmpeg\bin\ffprobe.exe -version ; if ($LASTEXITCODE -ne 0) { throw "ffprobe -version failed with exit code $LASTEXITCODE." } ; `
+    Remove-Item -LiteralPath C:\install-windows-runner.ps1 -Force ; `
+    New-Item -ItemType Directory -Path C:\runner-base -Force | Out-Null ; `
+    Get-ChildItem -LiteralPath C:\actions-runner -Force | Copy-Item -Destination C:\runner-base -Recurse -Force ; `
+    Remove-Item -LiteralPath C:\actions-runner -Recurse -Force ; `
+    New-Item -ItemType Directory -Path C:\actions-runner -Force | Out-Null
+
+ENV JOY_MEDIA_WINDOWS_ARTIFACT_BASE_URL="" `
+    JOY_MEDIA_WINDOWS_COREPACK_NPM_REGISTRY=""
+
+COPY windows-runner-entrypoint.ps1 C:/joy-media-windows-runner.ps1
+
+WORKDIR C:\actions-runner
+ENTRYPOINT ["powershell", "-NoProfile", "-File", "C:\\joy-media-windows-runner.ps1"]

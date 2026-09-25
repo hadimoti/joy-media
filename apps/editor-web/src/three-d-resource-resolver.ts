@@ -1,3 +1,5 @@
+import { revokeDetachedObjectUrl } from './media-object-url.js';
+
 /**
  * Resolves the relative resources referenced by a .gltf file to files selected
  * in the same file picker operation. A .gltf is a JSON manifest and commonly
@@ -16,7 +18,7 @@ type RevokeObjectUrl = (url: string) => void;
 export function createThreeDResourceResolver(
   files: readonly File[],
   createObjectUrl: CreateObjectUrl = (file) => URL.createObjectURL(file),
-  revokeObjectUrl: RevokeObjectUrl = (url) => URL.revokeObjectURL(url),
+  revokeObjectUrl: RevokeObjectUrl = revokeDetachedObjectUrl,
 ): ThreeDResourceResolver {
   const byPath = new Map<string, File>();
   const byBasename = new Map<string, File | null>();

@@ -1025,10 +1025,7 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
           creativeClient.configure(config.creative),
         ]);
 
-        const capability =
-          wStatus.capability === 'tool-loop' || cStatus.capability === 'tool-loop'
-            ? 'tool-loop'
-            : wStatus.capability;
+        const capability = dualBrainCapability(wStatus.capability, cStatus.capability);
 
         currentStatus = {
           provider: 'dual-brain',
@@ -1049,22 +1046,30 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
     },
 
     async testConnection(): Promise<ByokSessionStatus> {
-      if (dualBrainConfig && workhorseClient && creativeClient) {
+      const brains = dualBrainConfig;
+      if (brains && workhorseClient && creativeClient) {
         const [wStatus, cStatus] = await Promise.all([
-          workhorseClient.testConnection(),
-          creativeClient.testConnection(),
+          workhorseClient.testConnection().catch((error: unknown) => ({
+            provider: brains.workhorse.provider,
+            modelId: brains.workhorse.modelId,
+            capability: 'incompatible' as const,
+            message: error instanceof Error ? error.message : 'Workhorse connection test failed',
+          })),
+          creativeClient.testConnection().catch((error: unknown) => ({
+            provider: brains.creative.provider,
+            modelId: brains.creative.modelId,
+            capability: 'incompatible' as const,
+            message: error instanceof Error ? error.message : 'Creative connection test failed',
+          })),
         ]);
 
-        const capability =
-          wStatus.capability === 'tool-loop' || cStatus.capability === 'tool-loop'
-            ? 'tool-loop'
-            : wStatus.capability;
+        const capability = dualBrainCapability(wStatus.capability, cStatus.capability);
 
         currentStatus = {
           provider: 'dual-brain',
-          modelId: `${dualBrainConfig.workhorse.modelId} + ${dualBrainConfig.creative.modelId}`,
+          modelId: `${brains.workhorse.modelId} + ${brains.creative.modelId}`,
           capability,
-          message: `Workhorse (${dualBrainConfig.workhorse.modelId}): ${wStatus.capability} | Creative (${dualBrainConfig.creative.modelId}): ${cStatus.capability}`,
+          message: `Workhorse (${brains.workhorse.modelId}): ${wStatus.capability} | Creative (${brains.creative.modelId}): ${cStatus.capability}`,
           dualBrain: {
             workhorse: wStatus,
             creative: cStatus,
@@ -1172,4 +1177,14 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
       return dualBrainConfig;
     },
   };
+}
+
+function dualBrainCapability(
+  workhorse: ByokSessionStatus['capability'],
+  creative: ByokSessionStatus['capability'],
+): ByokSessionStatus['capability'] {
+  if (workhorse === 'tool-loop' && creative === 'tool-loop') return 'tool-loop';
+  if (workhorse === 'incompatible' || creative === 'incompatible') return 'incompatible';
+  if (workhorse === 'plan-only' && creative === 'plan-only') return 'plan-only';
+  return 'untested';
 }

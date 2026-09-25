@@ -121,6 +121,7 @@ test.describe('native stock video library', () => {
     let catalogMode: 'normal' | 'loading' | 'zero' | 'error' = 'normal';
     let stockMode: 'normal' | 'poster-failure' = 'normal';
     let importMode: 'success' | 'failure' = 'success';
+    let importStatusPolls = 0;
     let stalePreviewId: string | undefined;
     let releaseCatalog: (() => void) | undefined;
     let releasePreview: (() => void) | undefined;
@@ -240,10 +241,14 @@ test.describe('native stock video library', () => {
       });
     });
     await page.route('**/api/v1/projects/*/stock-video-imports/stock-import-1', async (route) => {
+      importStatusPolls += 1;
       await route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
-          data: { importId: 'stock-import-1', state: 'completed', assetId: 'imported-stock-1' },
+          data:
+            importStatusPolls === 1
+              ? { importId: 'stock-import-1', state: 'downloading' }
+              : { importId: 'stock-import-1', state: 'completed', assetId: 'imported-stock-1' },
         }),
       });
     });

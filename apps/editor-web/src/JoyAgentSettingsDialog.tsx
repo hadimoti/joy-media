@@ -21,6 +21,15 @@ import {
 } from './desktop-client.js';
 import { getStoredMediaToken } from './media-session.js';
 import { DesktopAccountModal } from './DesktopAccountModal.js';
+import {
+  acknowledgeCustomEndpoint,
+  revokeCustomEndpointAcknowledgementsForUrl,
+  assertCustomEndpointConsentHolds,
+  isCustomEndpointProvider,
+  normalizeProviderBaseUrl,
+  requiresCustomEndpointConsent,
+  requireCustomEndpointAcknowledgement,
+} from './custom-endpoint-acknowledgement.js';
 import './JoyAgentSettingsDialog.css';
 
 export type JoyAgentSettingsTab =
@@ -123,6 +132,8 @@ export function JoyAgentSettingsDialog({
   readonly initialTab?: JoyAgentSettingsTab;
 }) {
   const keyRef = useRef<HTMLInputElement>(null);
+  const openRouterKeyRef = useRef<HTMLInputElement>(null);
+  const kiloKeyRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(true);
   const mediaProbeEpochRef = useRef(0);
 
@@ -169,13 +180,16 @@ export function JoyAgentSettingsDialog({
       (status?.provider === 'joy-hosted' ? 'minimax/minimax-m3' : 'openrouter/auto'),
   );
   const [connectionName, setConnectionName] = useState('');
+  const [customDisclosure, setCustomDisclosure] = useState(false);
   const [working, setWorking] = useState(false);
   const [studioPreset, setStudioPreset] = useState<'dual-brain' | 'joy-hosted' | 'custom'>(
     status?.provider === 'dual-brain'
       ? 'dual-brain'
       : status?.provider === 'joy-hosted'
         ? 'joy-hosted'
-        : 'dual-brain',
+        : status?.provider === 'openai-compatible'
+          ? 'custom'
+          : 'dual-brain',
   );
   const [connectionStatus, setConnectionStatus] = useState(status);
   const [connectionNotice, setConnectionNotice] = useState<AgentSettingsNotice | undefined>();
@@ -217,9 +231,11 @@ export function JoyAgentSettingsDialog({
       if (openRouterProfile) {
         setSavedProfile(openRouterProfile);
         setHasSavedKey(true);
+        setStudioPreset('custom');
         setModelId(openRouterProfile.modelId);
         setBaseUrl(openRouterProfile.baseUrl);
         setProvider('openrouter');
+        setCustomDisclosure(false);
       }
     } catch {
       /* Ignore profile read error in background */
@@ -257,6 +273,8 @@ export function JoyAgentSettingsDialog({
     next: 'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible',
   ) => {
     setProvider(next);
+    if (next === 'openai-compatible') setStudioPreset('custom');
+    setCustomDisclosure(false);
     setConnectionNotice(undefined);
     setDiscoveryError(null);
     if (next === 'openrouter') {
@@ -278,8 +296,31 @@ export function JoyAgentSettingsDialog({
   };
 
   const discoverModels = async (explicitKey?: string) => {
+    // Browser builds must never send the provider key from the page; the key
+    // only reaches the provider through the Worker session or the desktop host.
+    if (!isDesktopHost()) {
+      setDiscoveryError('Live model discovery requires Joy Media Desktop.');
+      return;
+    }
+    const normalizedBaseUrl = normalizeProviderBaseUrl(baseUrl);
+    const matchingSavedProfile =
+      savedProfile &&
+      savedProfile.provider === (provider === 'openai-compatible' ? 'custom' : provider) &&
+      normalizeProviderBaseUrl(savedProfile.baseUrl) === normalizedBaseUrl
+        ? savedProfile
+        : undefined;
+    if (
+      requiresCustomEndpointConsent(provider, normalizedBaseUrl) &&
+      !requireCustomEndpointAcknowledgement({
+        provider: 'custom',
+        baseUrl: normalizedBaseUrl,
+        profileId: matchingSavedProfile?.id,
+      })
+    ) {
+      setDiscoveryError('Enter the custom-provider acknowledgement before discovering models.');
+      return;
+    }
     const key = explicitKey ?? keyRef.current?.value ?? '';
-    const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '');
     if (!normalizedBaseUrl) {
       setDiscoveryError('Please enter a Base URL before discovering models');
       return;
@@ -315,7 +356,10 @@ export function JoyAgentSettingsDialog({
     } catch (err) {
       if (!mountedRef.current) return;
       setDiscoveryError(
-        err instanceof Error ? err.message : 'Failed to discover models behind endpoint',
+        redactProviderError(
+          err instanceof Error ? err.message : 'Failed to discover models behind endpoint',
+          key,
+        ),
       );
     } finally {
       if (mountedRef.current) setIsDiscovering(false);
@@ -328,12 +372,19 @@ export function JoyAgentSettingsDialog({
     setWorking(true);
     setConnectionNotice(undefined);
     setDiscoveryError(null);
+    let openRouterKey = '';
+    let kiloKey = '';
     try {
-      const key = keyRef.current?.value.trim() ?? '';
-      let openRouterKey = key;
-      let kiloKey = key;
+      openRouterKey = openRouterKeyRef.current?.value.trim() ?? '';
+      kiloKey = kiloKeyRef.current?.value.trim() ?? '';
 
-      const openRouterProf = profiles.find((p) => p.provider === 'openrouter');
+      // Dual-Brain always sends each key to the provider's fixed trusted
+      // endpoint, so a saved key may only come from a profile saved for exactly
+      // that endpoint; a profile with any other URL is never used here.
+      const openRouterProf = profiles.find(
+        (p) =>
+          p.provider === 'openrouter' && !requiresCustomEndpointConsent('openrouter', p.baseUrl),
+      );
       if (!openRouterKey && openRouterProf) {
         try {
           const session = (await beginDesktopProviderSession(openRouterProf.id)) as
@@ -344,7 +395,9 @@ export function JoyAgentSettingsDialog({
         }
       }
 
-      const kiloProf = profiles.find((p) => p.provider === 'kilo');
+      const kiloProf = profiles.find(
+        (p) => p.provider === 'kilo' && !requiresCustomEndpointConsent('kilo', p.baseUrl),
+      );
       if (!kiloKey && kiloProf) {
         try {
           const session = (await beginDesktopProviderSession(kiloProf.id)) as
@@ -373,26 +426,111 @@ export function JoyAgentSettingsDialog({
 
       await engineClient.configure(dualConfig);
       const next = await engineClient.testConnection();
-      setConnectionStatus(next);
-      onStatusChange?.(next);
-
-      const message =
-        'Dual-Brain Studio connected! Model 1 Workhorse (openrouter/free) & Model 2 Creative Brain (kilo-auto/efficient) are live.';
-      setConnectionNotice({ kind: 'success', message });
-      onNotice?.(message, 'success');
+      const redactedStatus = next.dualBrain
+        ? {
+            ...next,
+            dualBrain: {
+              workhorse: {
+                ...next.dualBrain.workhorse,
+                ...(next.dualBrain.workhorse.message
+                  ? {
+                      message: redactProviderError(next.dualBrain.workhorse.message, openRouterKey),
+                    }
+                  : {}),
+              },
+              creative: {
+                ...next.dualBrain.creative,
+                ...(next.dualBrain.creative.message
+                  ? { message: redactProviderError(next.dualBrain.creative.message, kiloKey) }
+                  : {}),
+              },
+            },
+          }
+        : {
+            ...next,
+            capability: 'incompatible' as const,
+            message: 'Dual-Brain provider status was incomplete.',
+          };
+      const workhorse = redactedStatus.dualBrain?.workhorse;
+      const creative = redactedStatus.dualBrain?.creative;
+      const bothUsable =
+        workhorse?.capability === 'tool-loop' && creative?.capability === 'tool-loop';
+      const bothFailed =
+        workhorse?.capability === 'incompatible' && creative?.capability === 'incompatible';
+      const noProviderStatuses = !workhorse && !creative;
+      let capability: ByokSessionStatus['capability'] = 'untested';
+      if (bothUsable) capability = 'tool-loop';
+      else if (
+        bothFailed ||
+        !workhorse ||
+        !creative ||
+        workhorse.capability === 'incompatible' ||
+        creative.capability === 'incompatible'
+      ) {
+        capability = 'incompatible';
+      } else if (workhorse.capability === 'plan-only' && creative.capability === 'plan-only') {
+        capability = 'plan-only';
+      }
+      const safeStatus = { ...redactedStatus, capability };
+      setConnectionStatus(safeStatus);
+      onStatusChange?.(safeStatus);
+      const message = bothUsable
+        ? 'Dual-Brain Studio connected! Model 1 Workhorse (openrouter/free) & Model 2 Creative Brain (kilo-auto/efficient) are live.'
+        : bothFailed || noProviderStatuses
+          ? `Dual-Brain connection failed. OpenRouter: ${redactProviderError(workhorse?.message ?? 'unavailable', openRouterKey)} Kilo: ${redactProviderError(creative?.message ?? 'unavailable', kiloKey)}`
+          : `Dual-Brain partially connected. OpenRouter: ${workhorse?.capability ?? 'unavailable'}${workhorse?.message ? ` (${workhorse.message})` : ''}; Kilo: ${creative?.capability ?? 'unavailable'}${creative?.message ? ` (${creative.message})` : ''}. Tool-loop readiness requires both brains.`;
+      const kind = bothUsable ? 'success' : 'error';
+      setConnectionNotice({ kind, message });
+      onNotice?.(message, kind);
     } catch (error) {
       const rawMessage =
         error instanceof Error ? error.message : 'Unable to connect Dual-Brain Studio';
-      setConnectionNotice({ kind: 'error', message: rawMessage });
-      onNotice?.(rawMessage, 'error');
+      const safeMessage = redactProviderError(
+        redactProviderError(rawMessage, openRouterKey),
+        kiloKey,
+      );
+      const failedStatus: ByokSessionStatus = {
+        provider: 'dual-brain',
+        modelId: 'openrouter/free + kilo-auto/efficient',
+        capability: 'incompatible',
+        message: safeMessage,
+      };
+      setConnectionStatus(failedStatus);
+      onStatusChange?.(failedStatus);
+      setConnectionNotice({ kind: 'error', message: safeMessage });
+      onNotice?.(safeMessage, 'error');
     } finally {
+      if (openRouterKeyRef.current) openRouterKeyRef.current.value = '';
+      if (kiloKeyRef.current) kiloKeyRef.current.value = '';
       if (mountedRef.current) setWorking(false);
     }
   };
 
   const connect = async () => {
     if (working) return;
-    if (studioPreset === 'dual-brain') {
+    const normalizedBaseUrl = normalizeProviderBaseUrl(baseUrl);
+    const matchingSavedProfile =
+      savedProfile &&
+      (provider === 'openai-compatible'
+        ? isCustomEndpointProvider(savedProfile.provider)
+        : savedProfile.provider === provider) &&
+      normalizeProviderBaseUrl(savedProfile.baseUrl) === normalizedBaseUrl
+        ? savedProfile
+        : undefined;
+    if (
+      requiresCustomEndpointConsent(provider, normalizedBaseUrl) &&
+      !requireCustomEndpointAcknowledgement({
+        provider: 'custom',
+        baseUrl: normalizedBaseUrl,
+        profileId: matchingSavedProfile?.id,
+      })
+    ) {
+      const message = 'Enter the custom-provider acknowledgement before connecting.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
+      return;
+    }
+    if (studioPreset === 'dual-brain' && provider !== 'openai-compatible') {
       void connectDualBrain();
       return;
     }
@@ -402,7 +540,22 @@ export function JoyAgentSettingsDialog({
     setDiscoveryError(null);
 
     let key = keyRef.current?.value.trim() ?? '';
-    if (provider !== 'joy-hosted' && !key && hasSavedKey && savedProfile?.id) {
+    const normalizedModelId = modelId.trim();
+    const savedProfileMatches = Boolean(
+      savedProfile &&
+      savedProfile.id &&
+      (provider === 'openai-compatible'
+        ? isCustomEndpointProvider(savedProfile.provider)
+        : savedProfile.provider === provider) &&
+      normalizeProviderBaseUrl(savedProfile.baseUrl) === normalizedBaseUrl,
+    );
+    if (
+      provider !== 'joy-hosted' &&
+      !key &&
+      hasSavedKey &&
+      savedProfile?.id &&
+      savedProfileMatches
+    ) {
       try {
         const session = (await beginDesktopProviderSession(savedProfile.id)) as
           { apiKey?: string; baseUrl?: string; modelId?: string } | undefined;
@@ -414,14 +567,45 @@ export function JoyAgentSettingsDialog({
       }
     }
 
+    if (provider === 'openai-compatible') {
+      const missing: string[] = [];
+      if (!key)
+        missing.push(
+          savedProfile?.id && !savedProfileMatches
+            ? 'a new API key because the saved key belongs to a different provider or endpoint'
+            : 'an API key',
+        );
+      if (!normalizedModelId) missing.push('a model ID');
+      if (!normalizedBaseUrl) missing.push('a base URL');
+      if (
+        requiresCustomEndpointConsent(provider, normalizedBaseUrl) &&
+        !requireCustomEndpointAcknowledgement({
+          provider: 'custom',
+          baseUrl: normalizedBaseUrl,
+          profileId: matchingSavedProfile?.id,
+        })
+      )
+        missing.push('the custom-provider acknowledgement');
+      if (missing.length > 0) {
+        const message = `Enter ${missing.join(', ')} before connecting.`;
+        setConnectionNotice({ kind: 'error', message });
+        onNotice?.(message, 'error');
+        setWorking(false);
+        return;
+      }
+    }
+
     if (provider !== 'joy-hosted' && !key) {
-      setConnectionNotice({ kind: 'error', message: 'API key is required.' });
-      onNotice?.('API key is required.', 'error');
+      const message =
+        savedProfile?.id && !savedProfileMatches
+          ? 'The saved API key belongs to a different provider or endpoint. Enter a new API key to connect.'
+          : 'API key is required.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
       setWorking(false);
       return;
     }
 
-    const normalizedModelId = modelId.trim();
     if (!normalizedModelId) {
       setConnectionNotice({ kind: 'error', message: 'Model ID is required.' });
       onNotice?.('Model ID is required.', 'error');
@@ -429,7 +613,6 @@ export function JoyAgentSettingsDialog({
       return;
     }
 
-    const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '');
     if (!normalizedBaseUrl) {
       setConnectionNotice({ kind: 'error', message: 'Base URL is required.' });
       onNotice?.('Base URL is required.', 'error');
@@ -460,6 +643,7 @@ export function JoyAgentSettingsDialog({
         sessionKey = mediaToken ?? 'joy-hosted-default';
       }
 
+      assertCustomEndpointConsentHolds(provider, normalizedBaseUrl, savedProfile?.id);
       await engineClient.configure({
         provider,
         baseUrl: normalizedBaseUrl,
@@ -468,26 +652,31 @@ export function JoyAgentSettingsDialog({
       });
 
       const next = await engineClient.testConnection();
-      setConnectionStatus(next);
-      onStatusChange?.(next);
+      const safeStatus =
+        next.capability === 'incompatible'
+          ? {
+              ...next,
+              message: redactProviderError(
+                next.message ?? 'The provider responded, but JOY could not use its tool loop.',
+                key,
+              ),
+            }
+          : next;
+      setConnectionStatus(safeStatus);
+      onStatusChange?.(safeStatus);
 
       const message =
         next.capability === 'tool-loop'
           ? 'Connected successfully. JOY is ready to edit in this session.'
           : next.capability === 'plan-only'
-            ? 'Connected in plan-only mode. Timeline execution is restricted.'
-            : 'The provider responded, but JOY could not use its tool loop.';
+            ? 'Connected successfully in plan-only mode. Creative Brief is ready in this session.'
+            : `Connection failed: ${safeStatus.message}`;
       const kind = next.capability === 'incompatible' ? 'error' : 'success';
       setConnectionNotice({ kind, message });
       onNotice?.(message, kind);
-
-      // Trigger automatic model discovery and resolve the drawer if we have an API key and URL
-      if (provider !== 'joy-hosted' && next.capability !== 'incompatible') {
-        void discoverModels(key);
-      }
     } catch (error) {
       const rawMessage = error instanceof Error ? error.message : 'Unable to configure connection';
-      const safeMessage = rawMessage.replaceAll(key, '[redacted]').slice(0, 180);
+      const safeMessage = redactProviderError(rawMessage, key);
       const message = `Connection failed: ${safeMessage}`;
       setConnectionStatus({
         provider,
@@ -511,13 +700,37 @@ export function JoyAgentSettingsDialog({
 
   const connectProfile = async (prof: DesktopProviderProfile) => {
     if (working) return;
+    if (
+      requiresCustomEndpointConsent(prof.provider, prof.baseUrl) &&
+      !requireCustomEndpointAcknowledgement({
+        provider: 'custom',
+        baseUrl: prof.baseUrl,
+        profileId: prof.id,
+      })
+    ) {
+      setProvider(
+        isCustomEndpointProvider(prof.provider)
+          ? 'openai-compatible'
+          : (prof.provider as 'openrouter' | 'kilo' | 'joy-hosted'),
+      );
+      setStudioPreset('custom');
+      setBaseUrl(prof.baseUrl);
+      setSavedProfile(prof);
+      setModelId(prof.modelId);
+      const message = 'Enter the custom-provider acknowledgement before connecting.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
+      return;
+    }
     setWorking(true);
+    let key = '';
+    let configurationFailed = false;
     try {
       const session = (await beginDesktopProviderSession(prof.id)) as
         { apiKey?: string; baseUrl?: string; modelId?: string; provider?: string } | undefined;
-      const key = session?.apiKey || '';
+      key = session?.apiKey || '';
       const resolvedProvider = (
-        prof.provider === 'custom' ? 'openai-compatible' : prof.provider
+        isCustomEndpointProvider(prof.provider) ? 'openai-compatible' : prof.provider
       ) as 'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible';
       setProvider(resolvedProvider);
       setBaseUrl(prof.baseUrl);
@@ -525,24 +738,45 @@ export function JoyAgentSettingsDialog({
       setSavedProfile(prof);
       setHasSavedKey(Boolean(key));
 
+      assertCustomEndpointConsentHolds(prof.provider, prof.baseUrl, prof.id);
+      configurationFailed = true;
       await engineClient.configure({
         provider: resolvedProvider,
         baseUrl: prof.baseUrl.replace(/\/$/, ''),
         modelId: prof.modelId,
         apiKey: key,
       });
+      // configure() has already replaced the previous client, so a later
+      // testConnection() rejection must also publish a failed status.
       const next = await engineClient.testConnection();
-      setConnectionStatus(next);
-      onStatusChange?.(next);
-      const message = `Connected to ${prof.name || prof.provider}: ${prof.modelId}`;
-      setConnectionNotice({ kind: 'success', message });
-      onNotice?.(message, 'success');
-
-      if (key) {
-        void discoverModels(key);
-      }
+      const safeStatus =
+        next.capability === 'incompatible'
+          ? { ...next, message: redactProviderError(next.message ?? 'Connection failed', key) }
+          : next;
+      setConnectionStatus(safeStatus);
+      onStatusChange?.(safeStatus);
+      const kind = next.capability === 'incompatible' ? 'error' : 'success';
+      const message =
+        next.capability === 'incompatible'
+          ? `Connection failed: ${safeStatus.message}`
+          : `Connected to ${prof.name || prof.provider}: ${prof.modelId}`;
+      setConnectionNotice({ kind, message });
+      onNotice?.(message, kind);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to switch provider';
+      const message = redactProviderError(
+        err instanceof Error ? err.message : 'Failed to switch provider',
+        key,
+      );
+      if (configurationFailed) {
+        const failedStatus: ByokSessionStatus = {
+          provider: prof.provider as ByokSessionStatus['provider'],
+          modelId: prof.modelId,
+          capability: 'incompatible',
+          message,
+        };
+        setConnectionStatus(failedStatus);
+        onStatusChange?.(failedStatus);
+      }
       setConnectionNotice({ kind: 'error', message });
     } finally {
       setWorking(false);
@@ -613,6 +847,8 @@ export function JoyAgentSettingsDialog({
     setConnectionNotice({ kind: 'info', message });
     onNotice?.(message, 'info');
     if (keyRef.current) keyRef.current.value = '';
+    if (openRouterKeyRef.current) openRouterKeyRef.current.value = '';
+    if (kiloKeyRef.current) kiloKeyRef.current.value = '';
   };
 
   const filteredDiscoveredModels = discoveredModels.filter((m) =>
@@ -681,7 +917,7 @@ export function JoyAgentSettingsDialog({
                   <div className="joy-settings-sidebar-status-sub">
                     {connectionStatus?.capability
                       ? `${connectionStatus.provider}: ${displayModelId(connectionStatus.modelId)}`
-                      : 'No provider connected'}
+                      : 'Not connected'}
                   </div>
                 </div>
               </div>
@@ -758,12 +994,14 @@ export function JoyAgentSettingsDialog({
                           ? `Active: ${connectionStatus.modelId}`
                           : 'No Active Model Connected'}
                       </strong>
-                      <span>
+                      <span role="status">
                         {connectionStatus?.capability === 'tool-loop'
-                          ? `Connected to ${connectionStatus.provider} (Autonomous tool execution enabled)`
+                          ? 'Tool loop ready · High capabilities'
                           : connectionStatus?.capability === 'plan-only'
-                            ? `Connected to ${connectionStatus.provider} (Plan-only mode)`
-                            : 'Configure an AI Studio Preset above or connect a custom endpoint.'}
+                            ? 'Plan-only ready · Creative brief available'
+                            : connectionStatus?.capability === 'incompatible'
+                              ? 'Connection failed. See the details below.'
+                              : 'Configure an API endpoint below to connect JOY Code.'}
                       </span>
                       {connectionStatus?.dualBrain && (
                         <div className="joy-settings-dual-brain-banner">
@@ -907,7 +1145,10 @@ export function JoyAgentSettingsDialog({
                               type="text"
                               placeholder="https://..."
                               value={baseUrl}
-                              onChange={(e) => setBaseUrl(e.target.value)}
+                              onChange={(e) => {
+                                setBaseUrl(e.target.value);
+                                setCustomDisclosure(false);
+                              }}
                             />
                           </label>
                         </div>
@@ -950,6 +1191,30 @@ export function JoyAgentSettingsDialog({
                               </p>
                             )}
                           </div>
+                        ) : studioPreset === 'dual-brain' && provider !== 'openai-compatible' ? (
+                          <div className="joy-settings-field-full joy-settings-field">
+                            <label>
+                              <span>OpenRouter API key</span>
+                              <input
+                                ref={openRouterKeyRef}
+                                type="password"
+                                autoComplete="off"
+                                spellCheck={false}
+                              />
+                            </label>
+                            <label>
+                              <span>Kilo API key</span>
+                              <input
+                                ref={kiloKeyRef}
+                                type="password"
+                                autoComplete="off"
+                                spellCheck={false}
+                              />
+                            </label>
+                            <span style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>
+                              Each key is sent only to its matching provider.
+                            </span>
+                          </div>
                         ) : (
                           <div className="joy-settings-field-full joy-settings-field">
                             <label>
@@ -977,6 +1242,59 @@ export function JoyAgentSettingsDialog({
                             <span style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>
                               🔒 Keys are encrypted via Windows DPAPI and never logged or proxied.
                             </span>
+                          </div>
+                        )}
+
+                        {requiresCustomEndpointConsent(provider, baseUrl) && (
+                          <div className="joy-settings-field-full joy-settings-field">
+                            <label
+                              className="agent-toggle"
+                              style={{ fontSize: '12px', color: '#aaa' }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={customDisclosure}
+                                onChange={(event) => {
+                                  const checked = event.target.checked;
+                                  setCustomDisclosure(checked);
+                                  if (!checked) {
+                                    // Unchecking withdraws consent for this URL, including any
+                                    // saved-profile-bound acknowledgement.
+                                    revokeCustomEndpointAcknowledgementsForUrl(baseUrl);
+                                    // Withdrawn consent must also stop an already configured
+                                    // connection from being used.
+                                    if (connectionStatus) clear();
+                                  }
+                                  if (checked) {
+                                    const normalized = normalizeProviderBaseUrl(baseUrl);
+                                    const providerProfile = profiles.find(
+                                      (profile) =>
+                                        profile.provider ===
+                                          (provider === 'openai-compatible'
+                                            ? 'custom'
+                                            : provider) &&
+                                        normalizeProviderBaseUrl(profile.baseUrl) === normalized,
+                                    );
+                                    const exactProfile =
+                                      providerProfile ??
+                                      (savedProfile &&
+                                      savedProfile.provider ===
+                                        (provider === 'openai-compatible' ? 'custom' : provider) &&
+                                      normalizeProviderBaseUrl(savedProfile.baseUrl) === normalized
+                                        ? savedProfile
+                                        : undefined);
+                                    acknowledgeCustomEndpoint({
+                                      provider: 'custom',
+                                      baseUrl: normalized,
+                                      profileId: exactProfile?.id,
+                                    });
+                                  }
+                                }}
+                                disabled={working || mediaProbeWorking}
+                              />
+                              I understand that custom endpoints may log requests according to their
+                              own policy.
+                            </label>
                           </div>
                         )}
 
@@ -1011,6 +1329,7 @@ export function JoyAgentSettingsDialog({
                             <div className="joy-settings-input-with-action">
                               <input
                                 type="text"
+                                aria-label="Model ID"
                                 placeholder="provider/model"
                                 value={modelId}
                                 onChange={(e) => setModelId(e.target.value)}
@@ -1057,6 +1376,7 @@ export function JoyAgentSettingsDialog({
                         {connectionNotice && (
                           <div
                             className={`joy-settings-notice ${connectionNotice.kind === 'error' ? 'is-error' : connectionNotice.kind === 'success' ? 'is-success' : 'is-info'}`}
+                            role={connectionNotice.kind === 'error' ? 'alert' : 'status'}
                           >
                             {connectionNotice.message}
                           </div>
@@ -1722,4 +2042,9 @@ function isCapabilityState(value: unknown): value is JoyAgentMediaCapabilityStat
 
 function displayModelId(modelId: string): string {
   return modelId.length <= 96 ? modelId : `${modelId.slice(0, 93)}…`;
+}
+
+function redactProviderError(raw: string, key: string): string {
+  const safeMessage = key ? raw.replaceAll(key, '[redacted]') : raw;
+  return safeMessage.slice(0, 180);
 }

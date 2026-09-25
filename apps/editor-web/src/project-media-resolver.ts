@@ -1,6 +1,11 @@
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import type { BrowserAsset, BrowserControlPlaneClient } from './control-plane-client.js';
 import type { OpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
+import {
+  clearMediaSource,
+  revokeDetachedObjectUrl,
+  type MediaObjectUrlConsumer,
+} from './media-object-url.js';
 
 export interface ProjectMediaSource {
   readonly url: string;
@@ -86,10 +91,45 @@ export class ProjectMediaResolver {
     throw new Error('This media is not available as trusted local observation bytes.');
   }
 
-  clear(): void {
-    this.#epoch += 1;
+  ownsUrl(url: string | null | undefined): boolean {
+    if (url === null || url === undefined || url === '') return false;
     for (const source of this.#sources.values()) {
-      if (source.source !== 'reference') URL.revokeObjectURL(source.url);
+      if (source.url === url) return true;
+      if (source.url.startsWith('/') && url.endsWith(source.url)) return true;
+    }
+    return false;
+  }
+
+  ownsConsumer(
+    element: MediaObjectUrlConsumer | null | undefined,
+  ): element is MediaObjectUrlConsumer {
+    if (element === null || element === undefined) return false;
+    const src = element.getAttribute('src');
+    if (this.ownsUrl(src)) return true;
+    if ('src' in element && typeof element.src === 'string' && this.ownsUrl(element.src)) {
+      return true;
+    }
+    if (typeof HTMLVideoElement !== 'undefined' && element instanceof HTMLVideoElement) {
+      const poster = element.getAttribute('poster');
+      if (this.ownsUrl(poster)) return true;
+      if (typeof element.poster === 'string' && this.ownsUrl(element.poster)) return true;
+    }
+    return false;
+  }
+
+  detachConsumerIfOwned(element: MediaObjectUrlConsumer | null | undefined): boolean {
+    if (this.ownsConsumer(element)) {
+      clearMediaSource(element);
+      return true;
+    }
+    return false;
+  }
+
+  clear(beforeRevoke?: () => void): void {
+    this.#epoch += 1;
+    beforeRevoke?.();
+    for (const source of this.#sources.values()) {
+      if (source.source !== 'reference') revokeDetachedObjectUrl(source.url);
     }
     this.#sources.clear();
     this.#observationSources.clear();
@@ -202,12 +242,12 @@ export class ProjectMediaResolver {
 
   #remember(assetId: string, source: ProjectMediaSource, epoch: number): ProjectMediaSource {
     if (epoch !== this.#epoch) {
-      if (source.source !== 'reference') URL.revokeObjectURL(source.url);
+      if (source.source !== 'reference') revokeDetachedObjectUrl(source.url);
       this.#assertEpoch(epoch);
     }
     const existing = this.#sources.get(assetId);
     if (existing !== undefined) {
-      if (source.source !== 'reference') URL.revokeObjectURL(source.url);
+      if (source.source !== 'reference') revokeDetachedObjectUrl(source.url);
       return existing;
     }
     this.#sources.set(assetId, source);

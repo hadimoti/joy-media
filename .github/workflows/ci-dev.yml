@@ -13,6 +13,15 @@ name: ci-dev
 # Affected-test selection is deliberately NOT used: any change to shared
 # runtime / controller / schema / render / CI config runs the whole set below.
 #
+# RUNNER POLICY (self-hosted only — no GitHub-hosted minutes/billing):
+#   - static-and-unit / browser: joy-media-ci Linux Docker container
+#   - worker-package:            joy-media-worker-docker Windows Docker runner
+#     (Windows-only because Node SEA + postject + PowerShell are required to
+#     produce joy-worker.exe; see docs/SELF-HOSTED-CI.md §Windows-platform)
+#   - development-verification-summary: joy-media-ci Linux Docker container
+# No job uses ubuntu-latest / windows-latest / macos-latest. The contract is
+# enforced offline by tooling/release/src/ci-runner-policy.test.ts.
+#
 # TRIGGERS: workflow_dispatch only for now. The push / pull_request triggers
 # (commented below) are enabled only after the independent reviewer accepts this
 # workflow as the development-verification gate and it replaces ci.yml.
@@ -33,14 +42,14 @@ permissions:
 jobs:
   static-and-unit:
     name: static + unit/integration (development verification)
-    runs-on: [self-hosted, windows, x64, joy-media-ci]
+    runs-on: [self-hosted, linux, x64, joy-media-ci]
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Verify runner toolchain
-        shell: pwsh
+        shell: bash
         run: |
-          $ErrorActionPreference = 'Stop'
+          set -euo pipefail
           node --version
           corepack enable pnpm
           pnpm --version
@@ -55,12 +64,15 @@ jobs:
   worker-package:
     name: Worker package build + self-test (development verification)
     needs: static-and-unit
-    runs-on: [self-hosted, windows, x64, joy-media-ci]
+    # Windows-only by necessity (joy-worker.exe via Node SEA + postject + PowerShell).
+    # Self-hosted Windows runner on the owner's PC. NOT a GitHub-hosted Windows
+    # VM: see docs/SELF-HOSTED-CI.md §Windows-platform evidence.
+    runs-on: [self-hosted, windows, x64, joy-media-worker-docker]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Verify runner toolchain
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           node --version
@@ -69,8 +81,9 @@ jobs:
           ffmpeg -version
           ffprobe -version
       - run: pnpm install --frozen-lockfile
+        shell: powershell
       - name: Build Worker and package self-test executable
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           pnpm --filter @joy-media/worker build
@@ -105,7 +118,7 @@ jobs:
             workers: '1'
             api_port: 4374
             web_port: 4373
-    runs-on: [self-hosted, windows, x64, joy-media-ci]
+    runs-on: [self-hosted, linux, x64, joy-media-ci]
     timeout-minutes: 45
     env:
       CI: true
@@ -115,14 +128,18 @@ jobs:
       JOY_MEDIA_E2E_API_URL: http://127.0.0.1:${{ matrix.api_port }}
       # RUNNER_TEMP, not the checkout — the release lanes' pattern. A relative
       # path here would be an unignored, uncleaned dir on a persistent runner.
-      PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/playwright-report-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}
-      PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/playwright-test-results-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
+      # runner.temp is not available in job-level env; set the paths here.
+      - name: Set Playwright output paths
+        shell: bash
+        run: |
+          echo "PLAYWRIGHT_HTML_REPORT=$RUNNER_TEMP/playwright-report-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_ENV"
+          echo "PLAYWRIGHT_TEST_RESULTS_DIR=$RUNNER_TEMP/playwright-test-results-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Verify runner toolchain
-        shell: pwsh
+        shell: bash
         run: |
-          $ErrorActionPreference = 'Stop'
+          set -euo pipefail
           node --version
           corepack enable pnpm
           pnpm --version
@@ -135,17 +152,23 @@ jobs:
         run: pnpm exec playwright test ${{ matrix.spec }} --project=${{ matrix.project }} --workers=${{ matrix.workers }}
       - name: Verify no checkout residue
         if: always()
-        shell: pwsh
+        shell: bash
         run: |
-          $ErrorActionPreference = 'Stop'
-          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $env:PLAYWRIGHT_HTML_REPORT, $env:PLAYWRIGHT_TEST_RESULTS_DIR
-          if ((git status --porcelain).Length -ne 0) { git status --porcelain; throw 'browser audit left residue in the checkout' }
+          set -euo pipefail
+          for output_path in "$PLAYWRIGHT_HTML_REPORT" "$PLAYWRIGHT_TEST_RESULTS_DIR"; do
+            case "$output_path" in
+              "$RUNNER_TEMP"/*) ;;
+              *) echo "refusing to clean output outside RUNNER_TEMP: $output_path" >&2; exit 1 ;;
+            esac
+            rm -rf -- "$output_path" 2>/dev/null || true
+          done
+          if (( $(git status --porcelain | wc -l) != 0 )); then git status --porcelain; throw 'browser audit left residue in the checkout'; fi
 
   development-verification-summary:
     name: development verification summary (NOT release approval)
     needs: [static-and-unit, worker-package, browser]
     if: always()
-    runs-on: [self-hosted, windows, x64, joy-media-ci]
+    runs-on: [self-hosted, linux, x64, joy-media-ci]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Require every development lane green

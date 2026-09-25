@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProjectMediaResolver } from './project-media-resolver.js';
+import { clearMediaSource } from './media-object-url.js';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -44,6 +45,41 @@ describe('ProjectMediaResolver', () => {
     expect(get).toHaveBeenCalledTimes(2);
     expect(create).toHaveBeenCalledExactlyOnceWith(fresh);
     resolver.clear();
+  });
+
+  it('releases a preview media element before resolver clear revokes its URL', async () => {
+    let source = '';
+    const events: string[] = [];
+    const video = {
+      pause: () => events.push('pause'),
+      removeAttribute: (name: string) => {
+        if (name === 'src') source = '';
+        events.push(name === 'src' ? 'remove-src' : 'remove-poster');
+      },
+      load: () => events.push('load'),
+      getAttribute: (name: string) => (name === 'src' ? source : null),
+    } as unknown as HTMLVideoElement;
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:preview');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      expect(source).toBe('');
+      events.push(`revoke:${url}`);
+    });
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      controlPlaneReady: false,
+      client: {
+        assets: vi.fn(async () => []),
+        originalBytes: vi.fn(),
+        sharedCloudOriginalBytes: vi.fn(),
+      },
+      originalCache: { get: vi.fn(async () => new Blob(['preview'], { type: 'video/mp4' })) },
+    });
+
+    const resolved = await resolver.resolve('media-1');
+    source = resolved.url;
+    resolver.clear(() => clearMediaSource(video));
+
+    expect(events).toEqual(['pause', 'remove-src', 'remove-poster', 'load', 'revoke:blob:preview']);
   });
 
   it('preserves concurrent deduplication in the new epoch when an older request settles', async () => {
@@ -344,5 +380,100 @@ describe('ProjectMediaResolver', () => {
     await expect(resolver.resolveObservationSource('asset-intro')).rejects.toThrow(
       'trusted local observation bytes',
     );
+  });
+
+  it('correctly reports owned URLs and consumer elements, detaching only when owned', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:owned-url');
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      controlPlaneReady: false,
+      client: {
+        assets: vi.fn(async () => []),
+        originalBytes: vi.fn(),
+        sharedCloudOriginalBytes: vi.fn(),
+      },
+      originalCache: { get: vi.fn(async () => new Blob(['data'], { type: 'video/mp4' })) },
+    });
+
+    expect(resolver.ownsUrl(null)).toBe(false);
+    expect(resolver.ownsUrl('blob:unresolved')).toBe(false);
+
+    const resolved = await resolver.resolve('media-1');
+    expect(resolved.url).toBe('blob:owned-url');
+    expect(resolver.ownsUrl('blob:owned-url')).toBe(true);
+    expect(resolver.ownsUrl('blob:other-url')).toBe(false);
+
+    let ownedSrc: string | null = 'blob:owned-url';
+    const ownedElement = {
+      getAttribute: (name: string) => (name === 'src' ? ownedSrc : null),
+      removeAttribute: (name: string) => {
+        if (name === 'src') ownedSrc = null;
+      },
+      pause: vi.fn(),
+      load: vi.fn(),
+    } as unknown as HTMLVideoElement;
+
+    let otherSrc: string | null = 'blob:other-url';
+    const otherElement = {
+      getAttribute: (name: string) => (name === 'src' ? otherSrc : null),
+      removeAttribute: (name: string) => {
+        if (name === 'src') otherSrc = null;
+      },
+      pause: vi.fn(),
+      load: vi.fn(),
+    } as unknown as HTMLVideoElement;
+
+    expect(resolver.ownsConsumer(null)).toBe(false);
+    expect(resolver.ownsConsumer(ownedElement)).toBe(true);
+    expect(resolver.ownsConsumer(otherElement)).toBe(false);
+
+    expect(resolver.detachConsumerIfOwned(otherElement)).toBe(false);
+    expect(otherSrc).toBe('blob:other-url');
+
+    expect(resolver.detachConsumerIfOwned(ownedElement)).toBe(true);
+    expect(ownedSrc).toBeNull();
+
+    resolver.clear();
+  });
+
+  it('detaches a detached video element holding a resolved URL on clear', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:detached-partner');
+    const revokedUrls: string[] = [];
+    let detachedSrc: string | null = null;
+    const detachedVideo = {
+      getAttribute: (name: string) => (name === 'src' ? detachedSrc : null),
+      removeAttribute: (name: string) => {
+        if (name === 'src') detachedSrc = null;
+      },
+      pause: vi.fn(),
+      load: vi.fn(),
+    } as unknown as HTMLVideoElement;
+
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      expect(detachedSrc).toBeNull();
+      revokedUrls.push(url);
+    });
+
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      controlPlaneReady: false,
+      client: {
+        assets: vi.fn(async () => []),
+        originalBytes: vi.fn(),
+        sharedCloudOriginalBytes: vi.fn(),
+      },
+      originalCache: { get: vi.fn(async () => new Blob(['data'], { type: 'video/mp4' })) },
+    });
+
+    const resolved = await resolver.resolve('media-1');
+    detachedSrc = resolved.url;
+    expect(resolver.ownsConsumer(detachedVideo)).toBe(true);
+
+    resolver.clear(() => {
+      expect(resolver.detachConsumerIfOwned(detachedVideo)).toBe(true);
+      expect(detachedSrc).toBeNull();
+    });
+
+    expect(revokedUrls).toEqual(['blob:detached-partner']);
   });
 });

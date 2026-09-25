@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -94,6 +95,14 @@ import {
   createRenderExportJobPayload,
 } from './export-job-request.js';
 import { inspectImageAnimation } from './animated-image-metadata.js';
+import {
+  clearMediaSource,
+  revokeDetachedObjectUrl,
+  usePendingObjectUrlOwner,
+  useReleasableObjectUrl,
+  type MediaObjectUrlConsumer,
+} from './media-object-url.js';
+import { createExportUrlRetention } from './export-url-retention.js';
 import {
   activePreparedExportClipsAt,
   hasRenderableExportMedia,
@@ -204,6 +213,7 @@ import {
 } from '@joy-media/renderer-pixi/browser';
 import { applyColorGradeToPixels } from '@joy-media/renderer-pixi';
 import {
+  BROWSER_DOWNLOAD_URL_RETENTION_MS,
   downloadBrowserMp4,
   selectBrowserMp4MimeType,
   triggerBrowserDownload,
@@ -334,6 +344,11 @@ import { createJoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus } from './joy-agent/protocol.js';
 import { createJoyAgentContextSnapshot } from './joy-agent/context-snapshot.js';
 import { runCreativeBriefTask } from './joy-agent/entry-points.js';
+import {
+  assertCustomEndpointConsentHolds,
+  mayRestoreProviderProfile,
+  normalizeProviderBaseUrl,
+} from './custom-endpoint-acknowledgement.js';
 import {
   observationMetadataForAsset,
   type JoyAgentObservationAdapterFactory,
@@ -1125,6 +1140,18 @@ function EditorWorkspace({
         if (cancelled || profiles.length === 0) return;
         const profile = profiles.find((p) => p.provider === 'openrouter') ?? profiles[0];
         if (!profile) return;
+        if (
+          !mayRestoreProviderProfile({
+            provider: profile.provider,
+            baseUrl: profile.baseUrl,
+            profileId: profile.id,
+          })
+        ) {
+          console.info(
+            'Custom provider restoration awaits endpoint acknowledgement in this session.',
+          );
+          return;
+        }
         try {
           const sessionConfig = (await beginDesktopProviderSession(profile.id)) as
             | {
@@ -1135,6 +1162,17 @@ function EditorWorkspace({
               }
             | undefined;
           if (cancelled || !sessionConfig || !joyAgentEngineClientRef.current) return;
+          // The vault must return the endpoint of the profile it was asked for,
+          // and consent (which may have been withdrawn during the vault read)
+          // is re-checked immediately before the key is sent.
+          if (
+            normalizeProviderBaseUrl(sessionConfig.baseUrl) !==
+            normalizeProviderBaseUrl(profile.baseUrl)
+          ) {
+            console.warn('Desktop vault returned a different endpoint; restoration skipped.');
+            return;
+          }
+          assertCustomEndpointConsentHolds(profile.provider, profile.baseUrl, profile.id);
           const status = await joyAgentEngineClientRef.current.configure({
             provider: sessionConfig.provider,
             baseUrl: sessionConfig.baseUrl,
@@ -1161,7 +1199,22 @@ function EditorWorkspace({
     agentConnectionStatus?.capability === 'tool-loop' ||
     agentConnectionStatus?.capability === 'plan-only';
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
+  const avatarObjectUrl = joySession.kind === 'ready' ? joySession.avatarObjectUrl : undefined;
+  const pendingAvatarOwner = usePendingObjectUrlOwner();
+  const avatarObjectUrlRef = useReleasableObjectUrl<HTMLImageElement>(
+    avatarObjectUrl,
+    undefined,
+    revokeDetachedObjectUrl,
+    pendingAvatarOwner,
+  );
   const joySessionRefreshSeqRef = useRef(0);
+  useLayoutEffect(
+    () => () => {
+      joySessionRefreshSeqRef.current += 1;
+      pendingAvatarOwner.revokePending();
+    },
+    [pendingAvatarOwner],
+  );
   const [desktopAccountModalOpen, setDesktopAccountModalOpen] = useState(false);
   const [toasts, setToasts] = useState<
     readonly { id: string; message: string; kind: 'info' | 'success' | 'error' }[]
@@ -1191,6 +1244,13 @@ function EditorWorkspace({
     };
   }, []);
   const lastExportRef = useRef<{ readonly entryId: string; readonly url: string } | null>(null);
+  const exportUrlRetentionRef = useRef<ReturnType<typeof createExportUrlRetention> | null>(null);
+  if (exportUrlRetentionRef.current === null) {
+    exportUrlRetentionRef.current = createExportUrlRetention(
+      () => lastExportRef.current?.url ?? null,
+      BROWSER_DOWNLOAD_URL_RETENTION_MS,
+    );
+  }
   const exportAbortRef = useRef<AbortController | null>(null);
   const exportInFlightRef = useRef(false);
   const exportToastTimerRef = useRef<number | undefined>(undefined);
@@ -1203,7 +1263,7 @@ function EditorWorkspace({
       toastTimers.clear();
       exportAbortRef.current?.abort();
       exportAbortRef.current = null;
-      if (lastExportRef.current !== null) URL.revokeObjectURL(lastExportRef.current.url);
+      exportUrlRetentionRef.current?.dispose();
     };
   }, []);
   const showToast = useCallback((message: string, kind: 'info' | 'success' | 'error' = 'info') => {
@@ -1250,6 +1310,9 @@ function EditorWorkspace({
           });
           return;
         }
+        // The digest awaits; if the workspace unmounted (retention disposed) or
+        // another path published an export meanwhile, creating a URL now would leak.
+        if (cancelled || lastExportRef.current !== null) return;
         lastExportRef.current = { entryId: entry.id, url: URL.createObjectURL(blob!) };
         setExportHistory((current) => [...current]);
       })
@@ -1310,6 +1373,17 @@ function EditorWorkspace({
   const playbackDiagnostics = useRef(new PlaybackDiagnosticsSession());
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const replacementAudioRef = useRef<HTMLAudioElement | null>(null);
+  const lastVideoRef = useRef<HTMLVideoElement | null>(null);
+  const lastReplacementAudioRef = useRef<HTMLAudioElement | null>(null);
+  const activeMediaConsumersRef = useRef(new Set<MediaObjectUrlConsumer>());
+  const playbackVideoRef = useCallback((element: HTMLVideoElement | null): void => {
+    videoRef.current = element;
+    if (element !== null) lastVideoRef.current = element;
+  }, []);
+  const playbackAudioRef = useCallback((element: HTMLAudioElement | null): void => {
+    replacementAudioRef.current = element;
+    if (element !== null) lastReplacementAudioRef.current = element;
+  }, []);
   const decoderRef = useRef<HtmlMediaDecoder | null>(null);
   const clockRef = useRef<MediaClock | null>(null);
   // Decoder setup is declared after the playback capture effect. Bump this
@@ -1777,7 +1851,28 @@ function EditorWorkspace({
       storage,
     ],
   );
-  useEffect(() => () => mediaResolver.clear(), [mediaResolver]);
+  useLayoutEffect(
+    () => () =>
+      mediaResolver.clear(() => {
+        mediaResolver.detachConsumerIfOwned(videoRef.current ?? lastVideoRef.current);
+        mediaResolver.detachConsumerIfOwned(
+          replacementAudioRef.current ?? lastReplacementAudioRef.current,
+        );
+        mediaResolver.detachConsumerIfOwned(partnerVideoRef.current);
+        if (
+          partnerVideoRef.current !== null &&
+          !mediaResolver.ownsConsumer(partnerVideoRef.current)
+        ) {
+          activeMediaConsumersRef.current.delete(partnerVideoRef.current);
+        }
+        for (const consumer of Array.from(activeMediaConsumersRef.current)) {
+          if (mediaResolver.detachConsumerIfOwned(consumer)) {
+            activeMediaConsumersRef.current.delete(consumer);
+          }
+        }
+      }),
+    [mediaResolver],
+  );
   // Dockview holds panel component identities stable, so use the current
   // resolver through a host-only ref rather than capturing the resolver from
   // the panel's first render. Its only exposed operation returns a local Blob
@@ -1997,6 +2092,9 @@ function EditorWorkspace({
   useEffect(
     () => () => {
       const partnerVideo = partnerVideoRef.current;
+      if (partnerVideo !== null) {
+        activeMediaConsumersRef.current.delete(partnerVideo);
+      }
       partnerVideo?.pause();
       partnerVideo?.removeAttribute('src');
       partnerVideo?.load();
@@ -2026,6 +2124,7 @@ function EditorWorkspace({
         if (clip === undefined) continue;
         const source = await mediaResolver.resolve(playbackAssetId(session.visualProject, clip));
         const sourceUrl = new URL(source.url, window.location.href).href;
+        activeMediaConsumersRef.current.add(video);
         if (video.src !== sourceUrl) {
           video.src = sourceUrl;
           await new Promise<void>((resolve, reject) => {
@@ -2039,6 +2138,8 @@ function EditorWorkspace({
             };
             const onError = () => {
               cleanup();
+              activeMediaConsumersRef.current.delete(video);
+              clearMediaSource(video);
               reject(new Error(`Unable to load transition partner ${clip.assetId}`));
             };
             video.addEventListener('loadeddata', onLoaded, { once: true });
@@ -3397,19 +3498,17 @@ function EditorWorkspace({
       .then((next) => {
         if (requestId !== joySessionRefreshSeqRef.current) {
           if (next.kind === 'ready' && next.avatarObjectUrl !== undefined) {
-            URL.revokeObjectURL(next.avatarObjectUrl);
+            revokeDetachedObjectUrl(next.avatarObjectUrl);
           }
           return;
         }
-        setJoySession((prev) => {
-          if (prev.kind === 'ready' && prev.avatarObjectUrl !== undefined) {
-            URL.revokeObjectURL(prev.avatarObjectUrl);
-          }
-          return next;
-        });
+        if (next.kind === 'ready' && next.avatarObjectUrl !== undefined) {
+          pendingAvatarOwner.track(next.avatarObjectUrl);
+        }
+        setJoySession(next);
       })
       .catch(() => undefined);
-  }, [storage]);
+  }, [pendingAvatarOwner, storage]);
   useEffect(() => {
     if (session.recoveryWarnings.length === 0) return;
     showToast(
@@ -4180,6 +4279,7 @@ function EditorWorkspace({
                 abortController.signal.throwIfAborted();
               } else {
                 video = document.createElement('video');
+                activeMediaConsumersRef.current.add(video);
                 exportMediaCleanup.push({ video });
                 setExportStatus('Loading detached video…');
                 await loadDetachedVideo(video, source.url, abortController.signal);
@@ -4725,13 +4825,8 @@ function EditorWorkspace({
           stagedExportAssetId = undefined;
         }
         pendingExportUrl = undefined;
-        if (previousExport !== null && previousExport.url !== lastExportRef.current.url) {
-          try {
-            URL.revokeObjectURL(previousExport.url);
-          } catch {
-            // The committed export remains available even if releasing the old URL fails.
-          }
-        }
+        if (previousExport !== null && previousExport.url !== lastExportRef.current.url)
+          exportUrlRetentionRef.current?.schedule(previousExport.url);
         void exportCachePromise
           .then((cache) => cache.prune(undefined, [entryId]))
           .catch(() => undefined);
@@ -4810,6 +4905,7 @@ function EditorWorkspace({
             // The owning AudioContext is closed below even if the source already ended.
           }
         for (const media of exportMediaCleanup) {
+          if (media.video !== undefined) activeMediaConsumersRef.current.delete(media.video);
           try {
             media.video?.pause();
             media.video?.removeAttribute('src');
@@ -4843,7 +4939,7 @@ function EditorWorkspace({
           }
           if (pendingExportUrl !== undefined) {
             try {
-              URL.revokeObjectURL(pendingExportUrl);
+              revokeDetachedObjectUrl(pendingExportUrl);
             } catch {
               // The new partial URL is never published as a re-download.
             }
@@ -7254,6 +7350,7 @@ function EditorWorkspace({
                             {joySession.avatarObjectUrl !== undefined ? (
                               <img
                                 className="account-card-avatar-img"
+                                ref={avatarObjectUrlRef}
                                 src={joySession.avatarObjectUrl}
                                 alt=""
                               />
@@ -7421,7 +7518,7 @@ function EditorWorkspace({
               ))}
             </section>
           )}
-          <video ref={videoRef} className="playback-media" playsInline muted={false} />
+          <video ref={playbackVideoRef} className="playback-media" playsInline muted={false} />
           <input
             ref={projectPackageInputRef}
             type="file"
@@ -7434,7 +7531,7 @@ function EditorWorkspace({
             }}
           />
           <audio
-            ref={replacementAudioRef}
+            ref={playbackAudioRef}
             className="playback-media"
             aria-hidden="true"
             preload="auto"
@@ -7807,6 +7904,17 @@ function MonitorPanelContent({
   );
   const [gpuSession, setGpuSession] = useState<BrowserGpuPreviewSession | undefined>(undefined);
   const [gpuPreviewUrl, setGpuPreviewUrl] = useState<string | undefined>(undefined);
+  const releaseGpuPreviewUrl = useCallback((url: string) => {
+    revokeDetachedObjectUrl(url);
+    recordPreviewResourceReleased('gpu-frame-url', url);
+  }, []);
+  const pendingGpuPreviewOwner = usePendingObjectUrlOwner(releaseGpuPreviewUrl);
+  const gpuPreviewImageRef = useReleasableObjectUrl<HTMLImageElement>(
+    gpuPreviewUrl,
+    undefined,
+    releaseGpuPreviewUrl,
+    pendingGpuPreviewOwner,
+  );
   const [gpuPreviewStatus, setGpuPreviewStatus] = useState<
     'local' | 'connecting' | 'hardware-gpu' | 'fallback'
   >(previewRenderer === 'local' ? 'local' : 'connecting');
@@ -8130,15 +8238,12 @@ function MonitorPanelContent({
             );
             if (result !== undefined) {
               if (cancelled || requestId !== gpuRequestIdRef.current) return;
-              const nextUrl = URL.createObjectURL(result.blob);
+              const nextUrl = pendingGpuPreviewOwner.track(
+                URL.createObjectURL(result.blob),
+                releaseGpuPreviewUrl,
+              );
               recordPreviewResourceCreated('gpu-frame-url', nextUrl);
-              setGpuPreviewUrl((previous) => {
-                if (previous !== undefined) {
-                  URL.revokeObjectURL(previous);
-                  recordPreviewResourceReleased('gpu-frame-url', previous);
-                }
-                return nextUrl;
-              });
+              setGpuPreviewUrl(nextUrl);
               setGpuPreviewStatus('hardware-gpu');
               return;
             }
@@ -8155,31 +8260,24 @@ function MonitorPanelContent({
       cancelled = true;
       controller.abort();
       window.clearTimeout(timer);
+      pendingGpuPreviewOwner.revokePending();
     };
   }, [
     clipFrameTick,
     clipFrameCache,
     controlPlaneProject.controlPlaneProjectId,
     gpuSession,
+    pendingGpuPreviewOwner,
     previewQuality,
     previewRenderer,
     previewVideoFrame,
+    releaseGpuPreviewUrl,
     sceneTick,
     session,
     state.playheadUs,
     state.playing,
     visualProject,
   ]);
-
-  useEffect(
-    () => () => {
-      if (gpuPreviewUrl !== undefined) {
-        URL.revokeObjectURL(gpuPreviewUrl);
-        recordPreviewResourceReleased('gpu-frame-url', gpuPreviewUrl);
-      }
-    },
-    [gpuPreviewUrl],
-  );
 
   useEffect(() => {
     let cancelled = false;
@@ -8378,6 +8476,7 @@ function MonitorPanelContent({
         />
         {gpuPreviewUrl !== undefined && !state.playing && gpuPreviewStatus === 'hardware-gpu' && (
           <img
+            ref={gpuPreviewImageRef}
             className="monitor-gpu-frame"
             src={gpuPreviewUrl}
             alt="Hardware GPU Worker preview"

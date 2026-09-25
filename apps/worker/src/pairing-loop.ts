@@ -14,6 +14,14 @@ export interface WorkerPairingLoopOptions {
   readonly notify?: (offer: { readonly code: string; readonly expiresAt: number }) => void;
 }
 
+/** An approved pairing whose session the local store cannot read back. */
+export class WorkerPairingNotPersistedError extends Error {
+  constructor() {
+    super('Worker pairing was approved but the session could not be read back from local state');
+    this.name = 'WorkerPairingNotPersistedError';
+  }
+}
+
 /**
  * Publishes and claims a Worker pairing offer without ever polling a stale code.
  *
@@ -64,17 +72,24 @@ export async function waitForWorkerPairing(
     }
     if (pending.expiresAt > now()) announce(pending);
 
+    let claimed = false;
     try {
-      if (await client.claimPairing(pending.code)) {
-        store.clearPendingPairing();
-        return;
-      }
+      claimed = await client.claimPairing(pending.code);
     } catch (error) {
       log(
         `Unable to check Worker pairing approval; retrying: ${
           error instanceof Error ? error.message.slice(0, 160) : 'unknown error'
         }`,
       );
+    }
+    if (claimed) {
+      // The offer has been consumed by the control plane, so a session the
+      // store cannot read back is a local state fault rather than a pending
+      // approval. Polling the spent code would loop until it expired while the
+      // Worker looked like it had simply never been approved.
+      if (store.loadWorkerSession() === undefined) throw new WorkerPairingNotPersistedError();
+      store.clearPendingPairing();
+      return;
     }
 
     if (now() >= pending.expiresAt) {

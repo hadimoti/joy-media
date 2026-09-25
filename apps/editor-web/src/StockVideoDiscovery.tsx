@@ -7,6 +7,11 @@ import {
 } from './control-plane-client.js';
 import type { AssetViewMode } from './asset-library-state.js';
 import { ExportIcon, UploadIcon } from './icons.js';
+import {
+  revokeDetachedObjectUrl,
+  usePendingObjectUrlOwner,
+  useReleasableObjectUrl,
+} from './media-object-url.js';
 
 const STOCK_VIDEO_PAGE_SIZE = 6;
 const IMPORT_POLL_INTERVAL_MS = 750;
@@ -46,30 +51,35 @@ export function StockVideoDiscovery({
     readonly url: string;
     readonly posterUrl?: string;
   }>();
-  const previewStateRef = useRef<typeof preview>(undefined);
   const requestSequence = useRef(0);
   const previewRequestSequence = useRef(0);
   const previewOpenerRef = useRef<HTMLButtonElement | null>(null);
   const previewCloseRef = useRef<HTMLButtonElement | null>(null);
-  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const pendingModalPreviewOwner = usePendingObjectUrlOwner();
+  const previewVideoRef = useReleasableObjectUrl<HTMLVideoElement>(
+    preview?.url,
+    preview?.posterUrl,
+    revokeDetachedObjectUrl,
+    pendingModalPreviewOwner,
+  );
+  const previewVideoElementRef = useRef<HTMLVideoElement | null>(null);
+  const previewVideoConsumerRef = useCallback(
+    (element: HTMLVideoElement | null): void => {
+      previewVideoRef(element);
+      previewVideoElementRef.current = element;
+    },
+    [previewVideoRef],
+  );
   const mountedRef = useRef(true);
-
-  useEffect(() => {
-    previewStateRef.current = preview;
-  }, [preview]);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       previewRequestSequence.current += 1;
-      const current = previewStateRef.current;
-      if (current !== undefined) {
-        URL.revokeObjectURL(current.url);
-        if (current.posterUrl !== undefined) URL.revokeObjectURL(current.posterUrl);
-      }
+      pendingModalPreviewOwner.revokePending();
     };
-  }, []);
+  }, [pendingModalPreviewOwner]);
 
   useEffect(() => {
     const sequence = ++requestSequence.current;
@@ -98,19 +108,13 @@ export function StockVideoDiscovery({
     };
   }, [category, client, onCategoryCountsChange, onStatus, query, reloadToken]);
 
-  const revokePreview = useCallback((value: typeof preview): void => {
-    if (value === undefined) return;
-    URL.revokeObjectURL(value.url);
-    if (value.posterUrl !== undefined) URL.revokeObjectURL(value.posterUrl);
-  }, []);
-
   const closePreview = useCallback((): void => {
     previewRequestSequence.current += 1;
+    pendingModalPreviewOwner.revokePending();
     const opener = previewOpenerRef.current;
-    revokePreview(preview);
     setPreview(undefined);
     window.setTimeout(() => opener?.focus(), 0);
-  }, [preview, revokePreview]);
+  }, [pendingModalPreviewOwner]);
 
   useEffect(() => {
     if (preview === undefined) return;
@@ -123,7 +127,7 @@ export function StockVideoDiscovery({
       }
       if (event.key !== 'Tab') return;
       const first = previewCloseRef.current;
-      const last = previewVideoRef.current;
+      const last = previewVideoElementRef.current;
       if (first === null || last === null) return;
       if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
@@ -143,7 +147,7 @@ export function StockVideoDiscovery({
   ): Promise<void> => {
     previewOpenerRef.current = opener;
     const sequence = ++previewRequestSequence.current;
-    revokePreview(preview);
+    pendingModalPreviewOwner.revokePending();
     setPreview(undefined);
     onStatus(`Loading preview for ${video.title}…`);
     try {
@@ -151,15 +155,15 @@ export function StockVideoDiscovery({
         client.stockVideoPreview(video.id),
         client.stockVideoPoster(video.id).catch(() => undefined),
       ]);
+      if (!mountedRef.current || sequence !== previewRequestSequence.current) return;
+      const previewUrl = URL.createObjectURL(previewBlob);
+      const posterUrl = posterBlob === undefined ? undefined : URL.createObjectURL(posterBlob);
+      pendingModalPreviewOwner.track(previewUrl, posterUrl);
       const next = {
         video,
-        url: URL.createObjectURL(previewBlob),
-        ...(posterBlob === undefined ? {} : { posterUrl: URL.createObjectURL(posterBlob) }),
+        url: previewUrl,
+        ...(posterUrl === undefined ? {} : { posterUrl }),
       };
-      if (!mountedRef.current || sequence !== previewRequestSequence.current) {
-        revokePreview(next);
-        return;
-      }
       setPreview(next);
       onStatus(`Preview ready for ${video.title}.`);
     } catch (reason: unknown) {
@@ -289,7 +293,7 @@ export function StockVideoDiscovery({
             </button>
           </div>
           <video
-            ref={previewVideoRef}
+            ref={previewVideoConsumerRef}
             src={preview.url}
             poster={preview.posterUrl}
             controls
@@ -319,7 +323,13 @@ function StockVideoCard({
 }) {
   const posterTargetRef = useRef<HTMLButtonElement>(null);
   const [posterUrl, setPosterUrl] = useState<string | undefined>();
-  const posterUrlRef = useRef<string | undefined>(undefined);
+  const pendingPosterOwner = usePendingObjectUrlOwner();
+  const posterRef = useReleasableObjectUrl<HTMLImageElement>(
+    posterUrl,
+    undefined,
+    revokeDetachedObjectUrl,
+    pendingPosterOwner,
+  );
   const [posterFailed, setPosterFailed] = useState(false);
   useEffect(() => {
     let cancelled = false;
@@ -327,12 +337,8 @@ function StockVideoCard({
       void client
         .stockVideoPoster(video.id)
         .then((blob) => {
-          const url = URL.createObjectURL(blob);
-          if (cancelled) {
-            URL.revokeObjectURL(url);
-            return;
-          }
-          posterUrlRef.current = url;
+          if (cancelled) return;
+          const url = pendingPosterOwner.track(URL.createObjectURL(blob));
           setPosterUrl(url);
         })
         .catch(() => {
@@ -354,12 +360,9 @@ function StockVideoCard({
     return () => {
       cancelled = true;
       observer?.disconnect();
-      if (posterUrlRef.current !== undefined) {
-        URL.revokeObjectURL(posterUrlRef.current);
-        posterUrlRef.current = undefined;
-      }
+      pendingPosterOwner.revokePending();
     };
-  }, [client, video.id]);
+  }, [client, pendingPosterOwner, video.id]);
   return (
     <li
       className="stock-video-card"
@@ -374,7 +377,7 @@ function StockVideoCard({
         aria-label={`Preview ${video.title}`}
       >
         {posterUrl !== undefined ? (
-          <img src={posterUrl} alt="" loading="lazy" />
+          <img ref={posterRef} src={posterUrl} alt="" loading="lazy" />
         ) : (
           <span aria-hidden="true">{posterFailed ? 'Poster unavailable' : 'Loading poster…'}</span>
         )}

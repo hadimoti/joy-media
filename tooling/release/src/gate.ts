@@ -87,6 +87,87 @@ export interface ReleaseGateInput {
   readonly operationalEvidence?: ReleaseOperationalEvidence | null;
   /** Present for real workspace evidence; omitted by the pure evaluator. */
   readonly sourceProvenance?: ReleaseSourceProvenance;
+  /**
+   * Provenance-bound Windows-Docker acceptance evidence. The release gate is
+   * FAIL-CLOSED for Windows-platform acceptance: this field is required for
+   * a passing gate, and it MUST carry a consistent Windows-Docker identity
+   * (runner label + container identity), bind to the exact candidate SHA, the
+   * GitHub run/attempt, and a verified Windows-specific lifecycle. Portable
+   * Linux-Docker evidence and host-direct labels are NEVER substitutes.
+   */
+  readonly windowsAcceptance?: ReleaseWindowsAcceptance | null;
+}
+
+/**
+ * Structured Windows-Docker acceptance evidence. Every field is required and
+ * is independently validated by the gate. A bare boolean claim, a legacy
+ * `execution` enum, or a runner label alone is never sufficient — the gate
+ * requires all of these to be present and mutually consistent.
+ */
+export interface ReleaseWindowsAcceptance {
+  /** Exact candidate commit SHA the Windows-Docker runner accepted. */
+  readonly candidateSha: string;
+  /** GitHub Actions run id that produced this evidence. */
+  readonly workflowRunId: string;
+  /** GitHub Actions run attempt (1-based) that produced this evidence. */
+  readonly attempt: number;
+  /** Windows-Docker self-hosted runner label that produced the evidence. */
+  readonly runner: 'self-hosted,windows,x64,joy-media-worker-docker';
+  /** Container identity (Docker container ID + image digest) the runner ran inside. */
+  readonly containerIdentity: {
+    readonly containerId: string;
+    readonly imageDigest: string;
+  };
+  /** Canonical execution label. Only Windows-Docker labels are accepted. */
+  readonly execution: 'windows-docker-container' | 'windows-self-hosted-docker';
+  /** Lifecycle status from the Windows-Docker runner (every step must be `verified`). */
+  readonly lifecycle: ReleaseWindowsAcceptanceLifecycle;
+  /** Source provenance bound to the candidate SHA at acceptance time. */
+  readonly sourceProvenance: ReleaseSourceProvenance;
+  /** When this evidence was produced (ISO timestamp, freshness-checked). */
+  readonly verifiedAt: string;
+  /** Always `true` for Windows-Docker acceptance; the gate rejects the field otherwise. */
+  readonly windowsPlatformVerified: true;
+}
+
+export interface ReleaseWindowsAcceptanceLifecycle {
+  readonly install: { readonly status: 'verified' };
+  readonly startup: {
+    readonly status: 'verified';
+    readonly trigger: 'at-logon' | 'explicit-spawn';
+    readonly triggerVerified: true;
+    readonly action: 'normal-daemon';
+    /** Required for `at-logon`: the scheduled task really fired. */
+    readonly taskRan?: true;
+    /** Required for `explicit-spawn`: the container-local launch was observed. */
+    readonly launchObserved?: true;
+    readonly daemon: {
+      readonly started: true;
+      readonly terminated: true;
+      readonly paired: true;
+      readonly notificationCleared: true;
+      readonly hello: number;
+      readonly leases: number;
+    };
+  };
+  readonly session: {
+    readonly status: 'verified';
+    readonly stateIsolated: true;
+    readonly ownerSessionUsed: false;
+    readonly fixtureSessionUsed: true;
+    readonly persistedSession: true;
+    readonly protectedState: true;
+  };
+  readonly renewal: { readonly status: 'verified'; readonly restarted: true };
+  readonly recovery: { readonly status: 'verified' };
+  readonly repair: { readonly status: 'verified'; readonly restored: true };
+  readonly update: {
+    readonly status: 'verified';
+    readonly atomicReplacement: true;
+    readonly distinctPackageBytes: true;
+  };
+  readonly rollback: { readonly status: 'verified' };
+  readonly uninstall: { readonly status: 'verified' };
 }
 
 export interface ReleaseOperationalEvidence {
@@ -300,6 +381,12 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
         (input.operationalEvidence !== null &&
           operationalEvidenceReady(input.operationalEvidence, input.sourceProvenance)),
       operationalEvidenceMessage(input.operationalEvidence, input.sourceProvenance),
+    ),
+    check(
+      'windows-acceptance',
+      windowsAcceptanceReady(input.windowsAcceptance, input.sourceProvenance, now),
+      windowsAcceptanceMessage(input.windowsAcceptance, input.sourceProvenance, now),
+      true,
     ),
     check(
       'feature-status',
@@ -586,9 +673,15 @@ function operationalEvidenceReady(
       (block) =>
         block === null ||
         typeof block !== 'object' ||
-        block.schemaVersion !== 1 ||
+        (block.schemaVersion !== 1 && block.schemaVersion !== 2) ||
         block.status !== 'verified' ||
-        (block.execution !== 'real-services' && block.execution !== 'windows-clean-worker'),
+        !(
+          block.execution === 'real-services' ||
+          block.execution === 'windows-clean-worker' ||
+          block.execution === 'portable-container-self-hosted' ||
+          block.execution === 'windows-self-hosted-docker' ||
+          block.execution === 'windows-docker-container'
+        ),
     )
   )
     return false;
@@ -634,7 +727,10 @@ function operationalEvidenceReady(
   )
     return false;
   const lifecycle = record(evidence.windows.lifecycle);
-  if (
+  const schemaVersion = evidence.windows.schemaVersion;
+  if (schemaVersion === 2) {
+    if (!windowsLifecycleReady(lifecycle)) return false;
+  } else if (
     [
       'install',
       'startup',
@@ -651,10 +747,10 @@ function operationalEvidenceReady(
   const startup = record(lifecycle.startup);
   const daemon = record(startup.daemon);
   if (
-    startup.trigger !== 'at-logon' ||
+    !['at-logon', 'explicit-spawn'].includes(startup.trigger) ||
     startup.triggerVerified !== true ||
     startup.action !== 'normal-daemon' ||
-    startup.taskRan !== true ||
+    !startupLaunchProven(startup) ||
     daemon.started !== true ||
     daemon.terminated !== true ||
     daemon.paired !== true ||
@@ -701,6 +797,253 @@ function operationalEvidenceMessage(
   return operationalEvidenceReady(evidence, expectedSource)
     ? 'delivery, Worker lifecycle, and N/N-1 restore evidence passed'
     : 'delivery, Worker lifecycle, or N/N-1 restore evidence is incomplete or unbound';
+}
+
+/**
+ * Windows-platform acceptance is FAIL-CLOSED by default. The gate requires a
+ * fully populated `ReleaseWindowsAcceptance` record with consistent provenance
+ * (candidate SHA, run/attempt, Windows-Docker runner + container identity,
+ * Windows-specific lifecycle). Portable Linux-Docker evidence, host-direct
+ * labels, forged or wrong-SHA evidence, and contradictory identity claims
+ * are all rejected. The check is critical; waivers do not bypass it.
+ */
+function windowsAcceptanceReady(
+  evidence: ReleaseWindowsAcceptance | null | undefined,
+  expectedSource: ReleaseSourceProvenance | undefined,
+  now: Date,
+): boolean {
+  if (evidence === undefined || evidence === null) return false;
+  const raw = evidence as unknown as Record<string, unknown>;
+  const reasons: string[] = [];
+  if (typeof raw.candidateSha !== 'string' || !/^[0-9a-f]{40}$/u.test(raw.candidateSha)) {
+    reasons.push('candidate_sha missing or malformed');
+  }
+  if (typeof raw.workflowRunId !== 'string' || !/^[0-9]+$/u.test(raw.workflowRunId)) {
+    reasons.push('workflow_run_id missing or non-numeric');
+  }
+  const expectedRunId = process.env.JOY_RELEASE_WORKFLOW_RUN_ID;
+  if (expectedRunId !== undefined && raw.workflowRunId !== expectedRunId) {
+    reasons.push('workflow_run_id does not match the current workflow run');
+  }
+  if (typeof raw.attempt !== 'number' || !Number.isInteger(raw.attempt) || raw.attempt < 1) {
+    reasons.push('run_attempt missing or non-positive');
+  }
+  const expectedAttempt = process.env.JOY_RELEASE_WORKFLOW_RUN_ATTEMPT;
+  if (expectedAttempt !== undefined && raw.attempt !== Number(expectedAttempt)) {
+    reasons.push('run_attempt does not match the current workflow attempt');
+  }
+  const expectedCandidateSha = process.env.JOY_RELEASE_CANDIDATE_SHA;
+  if (expectedCandidateSha !== undefined && raw.candidateSha !== expectedCandidateSha) {
+    reasons.push('candidate_sha does not match the current workflow candidate');
+  }
+  if (raw.runner !== 'self-hosted,windows,x64,joy-media-worker-docker') {
+    reasons.push(
+      `runner label "${String(raw.runner)}" is not the trusted Windows-Docker self-hosted runner`,
+    );
+  }
+  const execution = raw.execution;
+  if (execution !== 'windows-docker-container' && execution !== 'windows-self-hosted-docker') {
+    reasons.push(`execution "${String(execution)}" is not a Windows-Docker execution label`);
+  }
+  if (raw.windowsPlatformVerified !== true) {
+    reasons.push('windows_platform_verified must be true and is not');
+  }
+  const container = record(raw.containerIdentity);
+  if (
+    typeof container.containerId !== 'string' ||
+    !/^[0-9a-f]{12,64}$/u.test(container.containerId)
+  ) {
+    reasons.push('container_identity.container_id missing or malformed');
+  }
+  if (
+    typeof container.imageDigest !== 'string' ||
+    !/^sha256:[0-9a-f]{64}$/u.test(container.imageDigest)
+  ) {
+    reasons.push('container_identity.image_digest must be a sha256 digest');
+  }
+  if (!windowsLifecycleReady(raw.lifecycle)) {
+    reasons.push('lifecycle is incomplete or not fully verified');
+  }
+  const source = parseSourceProvenance(raw.sourceProvenance);
+  if (source === undefined) {
+    reasons.push('source_provenance is malformed');
+  } else if (
+    typeof raw.candidateSha === 'string' &&
+    /^[0-9a-f]{40}$/u.test(raw.candidateSha) &&
+    source.commitSha !== raw.candidateSha
+  ) {
+    reasons.push('source_provenance.commit_sha disagrees with candidate_sha');
+  } else if (!source.worktreeClean) {
+    reasons.push('source_provenance.worktree_clean is false');
+  } else if (expectedSource !== undefined && !sameSource(source, expectedSource)) {
+    reasons.push('source_provenance does not match the candidate SHA under evaluation');
+  }
+  if (typeof raw.verifiedAt !== 'string' || !Number.isFinite(Date.parse(raw.verifiedAt))) {
+    reasons.push('verified_at is missing or unparseable');
+  } else {
+    const ageMs = now.getTime() - Date.parse(raw.verifiedAt);
+    if (ageMs < 0 || ageMs > RELEASE_EVIDENCE_MAX_AGE_HOURS * 60 * 60 * 1000) {
+      reasons.push(
+        `verified_at is older than ${RELEASE_EVIDENCE_MAX_AGE_HOURS} hours or in the future`,
+      );
+    }
+  }
+  return reasons.length === 0;
+}
+
+function windowsAcceptanceMessage(
+  evidence: ReleaseWindowsAcceptance | null | undefined,
+  expectedSource: ReleaseSourceProvenance | undefined,
+  now: Date,
+): string {
+  if (evidence === undefined) {
+    return 'windows-acceptance evidence not supplied to pure evaluator';
+  }
+  if (evidence === null) {
+    return 'windows-acceptance evidence is missing — JOY Media releases MUST remain blocked until a Windows-Docker runner (ops/self-hosted/windows-runner/Dockerfile.windows) supplies genuine Windows-platform acceptance evidence bound to the exact candidate SHA';
+  }
+  if (windowsAcceptanceReady(evidence, expectedSource, now)) {
+    return 'windows-acceptance evidence is bound to the exact candidate SHA, GitHub run/attempt, the trusted Windows-Docker self-hosted runner + container identity, and a fully verified Windows-specific lifecycle';
+  }
+  const reasons = windowsAcceptanceReasons(evidence, expectedSource, now);
+  return `windows-acceptance evidence is rejected: ${reasons.join('; ')}. The portable Linux-Docker contract (execution: 'portable-container-self-hosted', runner: 'self-hosted,linux,x64,joy-media-ci', windows_platform_verified: false) is a separately useful non-Windows evidence stream and is NEVER a substitute for Windows-Docker acceptance.`;
+}
+
+function windowsAcceptanceReasons(
+  evidence: ReleaseWindowsAcceptance,
+  expectedSource: ReleaseSourceProvenance | undefined,
+  now: Date,
+): string[] {
+  const raw = evidence as unknown as Record<string, unknown>;
+  const reasons: string[] = [];
+  if (typeof raw.candidateSha !== 'string' || !/^[0-9a-f]{40}$/u.test(raw.candidateSha)) {
+    reasons.push('candidate_sha missing or malformed');
+  }
+  if (typeof raw.workflowRunId !== 'string' || !/^[0-9]+$/u.test(raw.workflowRunId)) {
+    reasons.push('workflow_run_id missing or non-numeric');
+  }
+  if (typeof raw.attempt !== 'number' || !Number.isInteger(raw.attempt) || raw.attempt < 1) {
+    reasons.push('run_attempt missing or non-positive');
+  }
+  if (raw.runner !== 'self-hosted,windows,x64,joy-media-worker-docker') {
+    reasons.push(
+      `runner label "${String(raw.runner)}" is not the trusted Windows-Docker self-hosted runner`,
+    );
+  }
+  if (
+    raw.execution !== 'windows-docker-container' &&
+    raw.execution !== 'windows-self-hosted-docker'
+  ) {
+    reasons.push(`execution "${String(raw.execution)}" is not a Windows-Docker execution label`);
+  }
+  if (raw.windowsPlatformVerified !== true) {
+    reasons.push('windows_platform_verified must be true and is not');
+  }
+  const container = record(raw.containerIdentity);
+  if (
+    typeof container.containerId !== 'string' ||
+    !/^[0-9a-f]{12,64}$/u.test(container.containerId)
+  ) {
+    reasons.push('container_identity.container_id missing or malformed');
+  }
+  if (
+    typeof container.imageDigest !== 'string' ||
+    !/^sha256:[0-9a-f]{64}$/u.test(container.imageDigest)
+  ) {
+    reasons.push('container_identity.image_digest must be a sha256 digest');
+  }
+  if (!windowsLifecycleReady(raw.lifecycle)) {
+    reasons.push('lifecycle is incomplete or not fully verified');
+  }
+  const source = parseSourceProvenance(raw.sourceProvenance);
+  if (source === undefined) {
+    reasons.push('source_provenance is malformed');
+  } else if (
+    typeof raw.candidateSha === 'string' &&
+    /^[0-9a-f]{40}$/u.test(raw.candidateSha) &&
+    source.commitSha !== raw.candidateSha
+  ) {
+    reasons.push('source_provenance.commit_sha disagrees with candidate_sha');
+  } else if (!source.worktreeClean) {
+    reasons.push('source_provenance.worktree_clean is false');
+  } else if (expectedSource !== undefined && !sameSource(source, expectedSource)) {
+    reasons.push('source_provenance does not match the candidate SHA under evaluation');
+  }
+  if (typeof raw.verifiedAt !== 'string' || !Number.isFinite(Date.parse(raw.verifiedAt))) {
+    reasons.push('verified_at is missing or unparseable');
+  } else {
+    const ageMs = now.getTime() - Date.parse(raw.verifiedAt);
+    if (ageMs < 0 || ageMs > RELEASE_EVIDENCE_MAX_AGE_HOURS * 60 * 60 * 1000) {
+      reasons.push(
+        `verified_at is older than ${RELEASE_EVIDENCE_MAX_AGE_HOURS} hours or in the future`,
+      );
+    }
+  }
+  return reasons;
+}
+
+/**
+ * Each startup trigger must prove its own launch. The scheduled-task harness
+ * shows `taskRan`; the container-local harness never touches Task Scheduler and
+ * shows `launchObserved` for the explicit spawn it performed instead. Requiring
+ * `taskRan` from the container would only invite a fabricated field.
+ */
+function startupLaunchProven(startup: Readonly<Record<string, unknown>>): boolean {
+  return startup.trigger === 'explicit-spawn'
+    ? startup.launchObserved === true
+    : startup.taskRan === true;
+}
+
+function windowsLifecycleReady(value: unknown): boolean {
+  if (value === null || typeof value !== 'object') return false;
+  const lifecycle = value as Record<string, unknown>;
+  if (record(lifecycle.install).status !== 'verified') return false;
+  const startup = record(lifecycle.startup);
+  if (startup.status !== 'verified') return false;
+  if (startup.trigger !== 'at-logon' && startup.trigger !== 'explicit-spawn') return false;
+  if (startup.triggerVerified !== true) return false;
+  if (startup.action !== 'normal-daemon') return false;
+  if (!startupLaunchProven(startup)) return false;
+  const daemon = record(startup.daemon);
+  if (
+    daemon.started !== true ||
+    daemon.terminated !== true ||
+    daemon.paired !== true ||
+    daemon.notificationCleared !== true ||
+    typeof daemon.hello !== 'number' ||
+    daemon.hello < 1 ||
+    typeof daemon.leases !== 'number' ||
+    daemon.leases < 1
+  ) {
+    return false;
+  }
+  const session = record(lifecycle.session);
+  if (
+    session.status !== 'verified' ||
+    session.stateIsolated !== true ||
+    session.ownerSessionUsed !== false ||
+    session.fixtureSessionUsed !== true ||
+    session.persistedSession !== true ||
+    session.protectedState !== true
+  ) {
+    return false;
+  }
+  const renewal = record(lifecycle.renewal);
+  if (renewal.status !== 'verified' || renewal.restarted !== true) return false;
+  if (record(lifecycle.recovery).status !== 'verified') return false;
+  const repair = record(lifecycle.repair);
+  if (repair.status !== 'verified' || repair.restored !== true) return false;
+  const update = record(lifecycle.update);
+  if (
+    update.status !== 'verified' ||
+    update.atomicReplacement !== true ||
+    update.distinctPackageBytes !== true
+  ) {
+    return false;
+  }
+  if (record(lifecycle.rollback).status !== 'verified') return false;
+  if (record(lifecycle.uninstall).status !== 'verified') return false;
+  return true;
 }
 
 function positiveNumber(value: unknown): value is number {
@@ -1122,18 +1465,6 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
       ];
     }),
   );
-  // The `pnpm test` runner (vitest 3.2.x) occasionally exits with status 1
-  // after a clean run because its worker pool times out while streaming the
-  // final `onTaskUpdate` RPC; the suite itself still reports every test as
-  // passed. Surface that as a successful build/test entry so the gate does
-  // not fail on a runner teardown race that has no effect on the evidence.
-  const testsResult = commandResults.find((result) => result.id === 'tests');
-  if (testsResult !== undefined && testsResult.exitCode !== 0) {
-    const summary = parseTestSummary(testsResult.output ?? '', testsResult.exitCode);
-    if (summary.collected > 0 && summary.failed === 0) {
-      testsResult.exitCode = 0;
-    }
-  }
   const artifactHashes: Record<string, string> = {};
   for (const directory of artifacts) {
     for (const path of collectFiles(root, directory))
@@ -1173,6 +1504,7 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     sbomGenerated: true,
     browserJourneys,
     operationalEvidence: readOperationalEvidence(root),
+    windowsAcceptance: readWindowsAcceptance(root),
     featureStatus: {
       auditedOn,
       statuses,
@@ -1186,6 +1518,18 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     performanceEvidence,
     sourceProvenance,
   };
+}
+
+function readWindowsAcceptance(root: string): ReleaseWindowsAcceptance | null {
+  const path = join(root, 'test-output/windows/acceptance.json');
+  if (!existsSync(path)) return null;
+  try {
+    const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+    return value as ReleaseWindowsAcceptance;
+  } catch {
+    return null;
+  }
 }
 
 function readOperationalEvidence(root: string): ReleaseOperationalEvidence | null {
@@ -1416,6 +1760,11 @@ export const RELEASE_COMMANDS: readonly [string, readonly string[]][] = [
   ['goldens', ['exec', 'vitest', 'run', 'tooling/golden-render/src']],
 ];
 
+/** Keep release-job metadata out of the repository test process. */
+export function releaseChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith('JOY_RELEASE_')));
+}
+
 function runReleaseCommands(root: string): readonly ReleaseCommandResult[] {
   const pnpm =
     process.platform === 'win32'
@@ -1432,6 +1781,7 @@ function runReleaseCommands(root: string): readonly ReleaseCommandResult[] {
     // exit code, masking failures as status=1).
     const result = spawnSync(pnpm.cmd, [...pnpm.prefix, ...args], {
       cwd: root,
+      ...(id === 'tests' ? { env: releaseChildEnv(process.env) } : {}),
       stdio: id === 'tests' ? 'pipe' : 'ignore',
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,

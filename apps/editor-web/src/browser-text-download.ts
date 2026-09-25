@@ -1,3 +1,6 @@
+import { BROWSER_DOWNLOAD_URL_RETENTION_MS } from '../../../packages/renderer-pixi/src/browser-export.js';
+import { revokeDetachedObjectUrl } from './media-object-url.js';
+
 export interface BrowserTextDownloadEnvironment {
   readonly createObjectUrl: (blob: Blob) => string;
   readonly revokeObjectUrl: (url: string) => void;
@@ -12,15 +15,15 @@ export interface BrowserTextDownloadEnvironment {
 function defaultEnvironment(): BrowserTextDownloadEnvironment {
   return {
     createObjectUrl: (blob) => URL.createObjectURL(blob),
-    revokeObjectUrl: (url) => URL.revokeObjectURL(url),
+    revokeObjectUrl: revokeDetachedObjectUrl,
     createAnchor: () => window.document.createElement('a'),
-    defer: (callback) => window.setTimeout(callback, 0),
+    defer: (callback) => window.setTimeout(callback, BROWSER_DOWNLOAD_URL_RETENTION_MS),
   };
 }
 
 /**
- * Starts a browser text download and keeps the object URL alive until the
- * browser has had a task boundary in which to consume the anchor click.
+ * Starts a browser text download and retains its object URL for the shared
+ * browser download handoff window.
  */
 export function downloadBrowserTextFile(
   fileName: string,

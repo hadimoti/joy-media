@@ -32,11 +32,12 @@ async function openRecipes(page: Page): Promise<void> {
 }
 
 async function openImportedVideoWorkspace(page: Page, title: string): Promise<string> {
-  await openDisposableWorkspace(page, title);
+  const uniqueTitle = `${title} ${Date.now()}`;
+  await openDisposableWorkspace(page, uniqueTitle);
   await openPanel(page, 'Assets');
   await page.getByRole('button', { name: 'Import media' }).first().click();
   const drawer = page.getByRole('dialog', { name: 'Import media' });
-  const mediaName = `${title}.mp4`;
+  const mediaName = `${uniqueTitle}.mp4`;
   await drawer.locator('input[type="file"][aria-label="Media file"]').setInputFiles({
     name: mediaName,
     mimeType: 'video/mp4',

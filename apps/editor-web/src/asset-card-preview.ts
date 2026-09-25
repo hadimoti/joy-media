@@ -2,6 +2,7 @@ import type { BrowserAsset, BrowserDerivative } from './control-plane-client.js'
 import type { AuthorizedDerivativeResolver } from './asset-resolver.js';
 import type { OpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
 import { preferredDerivative } from './asset-library-state.js';
+import { revokeDetachedObjectUrl } from './media-object-url.js';
 
 export type AssetThumbSource = 'derivative' | 'opfs' | 'cloud' | 'none';
 
@@ -79,7 +80,7 @@ export async function resolveAssetThumb(options: {
         url,
         mimeType: previewMimeType(asset, local),
         source: 'opfs',
-        revoke: () => URL.revokeObjectURL(url),
+        revoke: () => revokeDetachedObjectUrl(url),
         hasOpfsOriginal,
       };
     }
@@ -96,7 +97,7 @@ export async function resolveAssetThumb(options: {
       url,
       mimeType: previewMimeType(asset, cloud),
       source: 'cloud',
-      revoke: () => URL.revokeObjectURL(url),
+      revoke: () => revokeDetachedObjectUrl(url),
       hasOpfsOriginal,
     };
   } catch {

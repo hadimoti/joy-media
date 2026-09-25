@@ -3,7 +3,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 const args = parseArguments(process.argv.slice(2));
@@ -55,7 +55,36 @@ function writeSnapshot(status = 'running') {
     workerId: lastWorkerId,
     counters: { ...counters },
   };
-  writeFileSync(eventsPath, `${JSON.stringify(snapshot)}\n`, { mode: 0o600 });
+  const encoded = `${JSON.stringify(snapshot)}\n`;
+  const temporaryPath = `${eventsPath}.${process.pid}.tmp`;
+  try {
+    // PowerShell polls this file while the fixture handles requests. Publish
+    // complete snapshots so a reader never observes a partial JSON document.
+    writeFileSync(temporaryPath, encoded, { mode: 0o600 });
+    try {
+      renameSync(temporaryPath, eventsPath);
+    } catch {
+      // Windows can reject replacement while a reader briefly holds the old
+      // file. Keep the fixture alive and fall back to a best-effort write.
+      try {
+        writeFileSync(eventsPath, encoded, { mode: 0o600 });
+      } catch {
+        // The snapshot is diagnostic only; the HTTP fixture must keep serving.
+      }
+      try {
+        unlinkSync(temporaryPath);
+      } catch {
+        // Best-effort cleanup.
+      }
+    }
+  } catch {
+    // A diagnostic snapshot must never reset an active control-plane request.
+    try {
+      unlinkSync(temporaryPath);
+    } catch {
+      // Best-effort cleanup.
+    }
+  }
   try {
     chmodSync(eventsPath, 0o600);
   } catch {
@@ -69,6 +98,10 @@ function sendJson(response, status, body) {
     'content-type': 'application/json',
     'content-length': Buffer.byteLength(encoded),
     'cache-control': 'no-store',
+    // Windows Server Core intermittently resets reused loopback Undici sockets
+    // while the fixture is being polled. The fixture is a deterministic
+    // control-plane test double, so one request per connection is intentional.
+    connection: 'close',
   });
   response.end(encoded);
 }
@@ -99,6 +132,7 @@ function workerPath(pathname, suffix) {
 const server = createServer(async (request, response) => {
   try {
     const pathname = pathFrom(request);
+    console.error(`fixture request ${request.method} ${pathname}`);
     if (request.method === 'GET' && pathname === '/__joy_media_fixture/health') {
       sendJson(response, 200, { ok: true, ...JSON.parse(readSnapshot()) });
       return;
@@ -167,9 +201,24 @@ const server = createServer(async (request, response) => {
       data:
         pathname.endsWith('/leases') || pathname.endsWith('/preview/next') ? null : { ok: true },
     });
-  } catch {
+  } catch (error) {
+    console.error(
+      `fixture request error: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+    );
     sendJson(response, 400, { error: 'invalid_fixture_request' });
   }
+});
+
+// Do not let the fixture retain a socket between the pairing and authenticated
+// requests. This keeps the acceptance transport independent of Windows NAT and
+// HTTP keep-alive behavior while leaving the production client untouched.
+server.keepAliveTimeout = 0;
+server.headersTimeout = 5_000;
+
+server.on('clientError', (error) => {
+  console.error(
+    `fixture client error: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+  );
 });
 
 function readSnapshot() {

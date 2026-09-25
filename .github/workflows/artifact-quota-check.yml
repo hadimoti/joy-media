@@ -5,6 +5,9 @@ name: artifact-quota-check
 # actually refreshed after a cleanup. Deletion succeeding does NOT mean the
 # quota accounting has caught up (GitHub recalculates every 6–12 h).
 # workflow_dispatch only; runs on a self-hosted runner (no billed minutes).
+#
+# JOY Media self-hosted-only CI: this workflow runs on the
+# joy-media-ci PC Docker Linux runner. No GitHub-hosted minutes are used.
 
 on:
   workflow_dispatch: {}

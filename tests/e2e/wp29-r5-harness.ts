@@ -1,4 +1,12 @@
-import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
+import {
+  expect,
+  test,
+  type Locator,
+  type Page,
+  type Request,
+  type Response,
+  type TestInfo,
+} from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
@@ -123,16 +131,95 @@ export async function authenticate(page: Page): Promise<void> {
 const PROJECT_SELECTOR_READY_TIMEOUT_MS = 20_000;
 
 async function openReadyProjectSelector(page: Page): Promise<void> {
-  const response = await page.goto('/', { waitUntil: 'domcontentloaded' });
+  // Keep startup failures actionable in CI. The library sits behind both the
+  // session probe and the origin writer gate, so a successful document load
+  // alone does not say which gate kept React from mounting the project list.
+  // Record only the auth response status (never request headers or response
+  // bodies) and a small, allow-listed set of visible UI diagnostics.
+  let sessionProbe: number | 'not-requested' | 'pending' | 'failed' = 'not-requested';
+  const isSessionProbe = (url: string): boolean => {
+    const pathname = new URL(url).pathname;
+    return pathname === '/v1/auth/session' || pathname === '/api/v1/auth/session';
+  };
+  const onRequest = (request: Request): void => {
+    if (isSessionProbe(request.url())) sessionProbe = 'pending';
+  };
+  const onResponse = (response: Response): void => {
+    if (isSessionProbe(response.url())) sessionProbe = response.status();
+  };
+  const onRequestFailed = (request: Request): void => {
+    if (isSessionProbe(request.url())) sessionProbe = 'failed';
+  };
+  page.on('request', onRequest);
+  page.on('response', onResponse);
+  page.on('requestfailed', onRequestFailed);
+  const response = await page.goto('/', { waitUntil: 'load' });
   expect(response, 'The project selector navigation must return an HTTP response.').not.toBeNull();
   expect(response!.ok(), `Project selector navigation returned HTTP ${response!.status()}.`).toBe(
     true,
   );
 
-  await expect(
-    page.getByRole('heading', { name: 'Projects' }),
-    'The authenticated project selector must finish rendering after a cold application load.',
-  ).toBeVisible({ timeout: PROJECT_SELECTOR_READY_TIMEOUT_MS });
+  try {
+    await expect(
+      page.getByRole('heading', { name: 'Projects' }),
+      'The authenticated project selector must finish rendering after a cold application load.',
+    ).toBeVisible({ timeout: PROJECT_SELECTOR_READY_TIMEOUT_MS });
+  } catch (error) {
+    const diagnostics = await page
+      .evaluate(() => {
+        const visible = (element: Element): boolean => {
+          const style = getComputedStyle(element);
+          const rect = element.getBoundingClientRect();
+          return (
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            Number(style.opacity) !== 0 &&
+            rect.width > 0 &&
+            rect.height > 0
+          );
+        };
+        const text = (element: Element): string =>
+          (element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 240);
+        return {
+          url: `${location.origin}${location.pathname}`,
+          headings: Array.from(document.querySelectorAll('h1,h2,[role="heading"]'))
+            .filter(visible)
+            .slice(0, 8)
+            .map(text),
+          startupStates: Array.from(
+            document.querySelectorAll(
+              '.project-writer-gate, [role="alert"], [role="status"], [aria-busy="true"]',
+            ),
+          )
+            .filter(visible)
+            .slice(0, 8)
+            .map((element) => ({
+              role: element.getAttribute('role'),
+              busy: element.getAttribute('aria-busy'),
+              text: text(element),
+            })),
+          serviceWorkerControlled: navigator.serviceWorker?.controller !== null,
+        };
+      })
+      .catch(() => ({
+        url: page.url(),
+        headings: [],
+        startupStates: [],
+        serviceWorkerControlled: false,
+      }));
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `${message}\nProject selector startup diagnostics: ${JSON.stringify({
+        ...diagnostics,
+        authSessionProbe: sessionProbe,
+      })}`,
+      { cause: error },
+    );
+  } finally {
+    page.off('response', onResponse);
+    page.off('request', onRequest);
+    page.off('requestfailed', onRequestFailed);
+  }
   await expect(
     page.getByRole('button', { name: 'New project' }),
     'The rendered project selector must be interactive before a scenario continues.',

@@ -39,6 +39,11 @@ import {
 import { verifyOriginalRecoveryCandidate } from './asset-original-recovery.js';
 import { resolveAssetThumb, type AssetThumbSource } from './asset-card-preview.js';
 import {
+  releaseMediaObjectUrl,
+  usePendingObjectUrlOwner,
+  useReleasableObjectUrl,
+} from './media-object-url.js';
+import {
   CloseIcon,
   PlusIcon,
   RefreshIcon,
@@ -177,7 +182,6 @@ export function AssetLibraryPanel({
     [client],
   );
   const originalAssetCache = useMemo(() => openOpfsOriginalAssetCache(), []);
-  const previewRef = useRef<Preview | undefined>(undefined);
   const timelineAddRef = useRef<Set<string>>(new Set());
   const refreshSeqRef = useRef(0);
   const previewSeqRef = useRef(0);
@@ -200,6 +204,14 @@ export function AssetLibraryPanel({
   const [renderLimit, setRenderLimit] = useState(ASSET_RENDER_PAGE_SIZE);
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [preview, setPreview] = useState<Preview | undefined>(undefined);
+  // Owns an async preview URL from creation until the hook adopts it on commit.
+  const pendingPreviewOwner = usePendingObjectUrlOwner();
+  const previewMediaRef = useReleasableObjectUrl<HTMLMediaElement | HTMLImageElement>(
+    preview?.url,
+    undefined,
+    preview?.revoke,
+    pendingPreviewOwner,
+  );
   const [selectedFile, setSelectedFile] = useState<File | undefined>(undefined);
   const [assetSource, setAssetSource] = useState<AssetSource>(
     initialUiPreferences.current.assetLibrary.source,
@@ -271,12 +283,10 @@ export function AssetLibraryPanel({
   }, [assetSource, category, collection, sort, storage, viewMode]);
 
   const clearPreview = useCallback(() => {
-    previewRef.current?.revoke();
-    previewRef.current = undefined;
+    // A superseded or cleared request may own a URL React never committed.
+    pendingPreviewOwner.revokePending();
     setPreview(undefined);
-  }, []);
-  useEffect(() => () => previewRef.current?.revoke(), []);
-
+  }, [pendingPreviewOwner]);
   const refresh = useCallback(async () => {
     const requestId = ++refreshSeqRef.current;
     const token = getStoredMediaToken(storage);
@@ -384,8 +394,6 @@ export function AssetLibraryPanel({
     return () => {
       refreshSeqRef.current += 1;
       previewSeqRef.current += 1;
-      previewRef.current?.revoke();
-      previewRef.current = undefined;
     };
   }, []);
 
@@ -691,7 +699,7 @@ export function AssetLibraryPanel({
           url: outcome.url,
           revoke: outcome.revoke,
         };
-        previewRef.current = nextPreview;
+        pendingPreviewOwner.track(outcome.url, () => outcome.revoke());
         setPreview(nextPreview);
         setStatus(
           outcome.source === 'derivative'
@@ -705,7 +713,14 @@ export function AssetLibraryPanel({
         setStatus(`Failed to open preview: ${message(error)}`);
       }
     },
-    [clearPreview, fetchCloudOriginal, originalAssetCache, projectId, resolver],
+    [
+      clearPreview,
+      fetchCloudOriginal,
+      originalAssetCache,
+      pendingPreviewOwner,
+      projectId,
+      resolver,
+    ],
   );
 
   const toggleSelected = useCallback((assetId: string) => {
@@ -831,8 +846,8 @@ export function AssetLibraryPanel({
       setQuery('');
       setAvailability('all');
       setSort('recent');
-      setStatus(`${importedAsset.displayName} imported to My media.`);
       await refresh();
+      setStatus(`${importedAsset.displayName} imported to My media.`);
     },
     [client, projectId, refresh],
   );
@@ -1282,11 +1297,24 @@ export function AssetLibraryPanel({
                 <CloseIcon />
               </button>
               {preview.mimeType.startsWith('video/') ? (
-                <video key={preview.derivativeId} src={preview.url} controls autoPlay />
+                <video
+                  ref={previewMediaRef}
+                  key={preview.derivativeId}
+                  src={preview.url}
+                  controls
+                  autoPlay
+                />
               ) : preview.mimeType.startsWith('audio/') ? (
-                <audio key={preview.derivativeId} src={preview.url} controls autoPlay />
+                <audio
+                  ref={previewMediaRef}
+                  key={preview.derivativeId}
+                  src={preview.url}
+                  controls
+                  autoPlay
+                />
               ) : (
                 <img
+                  ref={previewMediaRef}
                   src={preview.url}
                   alt={`Verified derivative preview for ${preview.displayName}`}
                 />
@@ -1670,8 +1698,11 @@ function AssetCardMedia({
 
   useEffect(() => {
     if (!nearViewport) return;
+    // The wrapper stays mounted; the img/video inside it is looked up at cleanup.
+    const container = mediaRef.current;
     let cancelled = false;
     let revoke: () => void = () => undefined;
+    let activeUrl: string | undefined;
     setLoading(true);
     setUrl(undefined);
     setMimeType(undefined);
@@ -1691,6 +1722,7 @@ function AssetCardMedia({
         return;
       }
       revoke = result.revoke;
+      activeUrl = result.url;
       setUrl(result.url);
       setMimeType(result.mimeType);
       setSource(result.source);
@@ -1704,7 +1736,10 @@ function AssetCardMedia({
     });
     return () => {
       cancelled = true;
-      revoke();
+      const media =
+        container?.querySelector<HTMLImageElement | HTMLVideoElement>('img, video') ?? null;
+      if (activeUrl !== undefined) releaseMediaObjectUrl(media, activeUrl, revoke);
+      else revoke();
     };
   }, [
     asset,

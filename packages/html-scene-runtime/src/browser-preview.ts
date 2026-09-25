@@ -243,6 +243,8 @@ export function createScenePreviewHost(options: {
       }
       pending.clear();
       iframe.remove();
+      // This bundle URL is detached from the preview iframe before release.
+      // eslint-disable-next-line no-restricted-properties -- the iframe has already released this detached bundle URL.
       if (bundleUrl.startsWith('blob:')) URL.revokeObjectURL(bundleUrl);
     },
   };

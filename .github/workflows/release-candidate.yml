@@ -1,5 +1,23 @@
 name: release-candidate
 
+# JOY Media self-hosted-only release-candidate gate.
+#
+# Every job in this workflow runs on an owner-controlled self-hosted runner.
+# GitHub-hosted Actions minutes/billing are unavailable from Iran, so no job
+# may use `ubuntu-latest`, `windows-latest`, `macos-latest`, or any other
+# GitHub-hosted label. The contract is enforced offline by
+# tooling/release/src/ci-runner-policy.test.ts.
+#
+# Lane → runner mapping (matches ops/self-hosted/*/ contract docs):
+#   - validate-candidate / linux-real-services / acceptance /
+#     real-service-acceptance: self-hosted,linux,x64,joy-media-ci (or
+#     self-hosted,linux,x64,joy-media-acceptance for the isolated acceptance
+#     runner). Both are PC Docker Linux containers.
+#   - windows-worker-clean: self-hosted,windows,x64,joy-media-worker-docker
+#     (the owner-controlled Windows Docker runner; NOT a GitHub-hosted
+#     Windows VM). The only Windows acceptance evidence is produced here.
+#     See docs/SELF-HOSTED-CI.md §Windows-platform evidence.
+
 on:
   workflow_dispatch:
     inputs:
@@ -89,7 +107,7 @@ jobs:
 
   windows-worker-clean:
     name: windows-worker-clean (two exact passes)
-    runs-on: [self-hosted, windows, x64, joy-media-worker]
+    runs-on: [self-hosted, windows, x64, joy-media-worker-docker]
     needs: [validate-candidate]
     timeout-minutes: 120
     outputs:
@@ -102,52 +120,65 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
       - name: Verify clean Worker host
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:CANDIDATE_SHA -notmatch '^[0-9a-f]{40}$') { throw 'candidate_sha must be a full lowercase commit SHA' }
           node --version
+          if ($LASTEXITCODE -ne 0) { throw "Node version check failed with exit code $LASTEXITCODE." }
           corepack enable pnpm
+          if ($LASTEXITCODE -ne 0) { throw "Corepack failed to enable pnpm with exit code $LASTEXITCODE." }
           pnpm --version
+          if ($LASTEXITCODE -ne 0) { throw "pnpm version check failed with exit code $LASTEXITCODE." }
           ffmpeg -version
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg version check failed with exit code $LASTEXITCODE." }
           ffprobe -version
+          if ($LASTEXITCODE -ne 0) { throw "ffprobe version check failed with exit code $LASTEXITCODE." }
           if ($env:JOY_MEDIA_CI_WORKER_PROFILE -ne 'clean') { throw 'JOY_MEDIA_CI_WORKER_PROFILE=clean is required' }
       - run: pnpm install --frozen-lockfile
+        shell: powershell
       - name: Build and self-test Worker package
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           pnpm --filter @joy-media/worker build
+          if ($LASTEXITCODE -ne 0) { throw "Worker package build failed with exit code $LASTEXITCODE." }
           $results = @{}
           foreach ($pass in @('1', '2')) {
             $output = Join-Path $env:RUNNER_TEMP ("joy-worker-clean-" + $env:CANDIDATE_SHA + "-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + "-" + $pass + ".exe")
             powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-worker-exe.ps1 -OutputPath $output
+            if ($LASTEXITCODE -ne 0) { throw "Worker executable build failed for pass $pass with exit code $LASTEXITCODE." }
             if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw "Worker executable was not produced for pass $pass." }
             $result = & $output --joy-worker-self-test
             if ($LASTEXITCODE -ne 0 -or $result -notmatch '"ok"\s*:\s*true') { throw "Worker executable self-test failed for pass $pass." }
-            $evidence = Join-Path $env:RUNNER_TEMP ("joy-media-windows-acceptance-" + $pass + ".json")
-            & powershell -NoProfile -ExecutionPolicy Bypass -File ops/self-hosted/windows-runner/worker-acceptance.ps1 `
+            $evidence = Join-Path $env:RUNNER_TEMP ("joy-media-windows-acceptance-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + "-" + $pass + ".json")
+            if (Test-Path -LiteralPath $evidence) { throw "Windows Worker acceptance output already exists for this run/pass: $evidence" }
+            & powershell -NoProfile -ExecutionPolicy Bypass -File ops/self-hosted/windows-runner/worker-acceptance-container.ps1 `
               -CandidateSha $env:CANDIDATE_SHA `
               -RunId $env:GITHUB_RUN_ID `
               -Attempt $env:GITHUB_RUN_ATTEMPT `
               -Pass $pass `
               -ExecutablePath $output `
               -OutputPath $evidence
+            if ($LASTEXITCODE -ne 0) { throw "Windows Worker acceptance harness failed for pass $pass with exit code $LASTEXITCODE." }
             if (-not (Test-Path -LiteralPath $evidence -PathType Leaf)) { throw "Windows Worker acceptance evidence was not produced for pass $pass." }
             $results[$pass] = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Content -LiteralPath $evidence -Raw)))
           }
-          Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'joy-media-windows-acceptance-outputs.json') -Value ($results | ConvertTo-Json) -Encoding utf8
+          $outputs = Join-Path $env:RUNNER_TEMP ("joy-media-windows-acceptance-outputs-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + ".json")
+          if (Test-Path -LiteralPath $outputs) { throw "Windows Worker acceptance outputs already exist for this run: $outputs" }
+          Set-Content -LiteralPath $outputs -Value ($results | ConvertTo-Json) -Encoding utf8
       - name: Publish Windows Worker acceptance outputs
         id: publish-evidence
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $results = Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'joy-media-windows-acceptance-outputs.json') -Raw | ConvertFrom-Json
+          $resultsPath = Join-Path $env:RUNNER_TEMP ("joy-media-windows-acceptance-outputs-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + ".json")
+          $results = Get-Content -LiteralPath $resultsPath -Raw | ConvertFrom-Json
           [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "evidence1=$($results.'1')$([Environment]::NewLine)")
           [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "evidence2=$($results.'2')$([Environment]::NewLine)")
       - name: Verify clean Worker teardown
         if: always()
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           $statePath = Join-Path $env:RUNNER_TEMP 'joy-media-release-state'
@@ -327,6 +358,9 @@ jobs:
         shell: bash
         env:
           JOY_RELEASE_OUTPUT: ${{ runner.temp }}/joy-media-release-gate-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
+          JOY_RELEASE_WORKFLOW_RUN_ID: ${{ github.run_id }}
+          JOY_RELEASE_WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
+          JOY_RELEASE_CANDIDATE_SHA: ${{ env.CANDIDATE_SHA }}
         run: |
           set -euo pipefail
           pnpm run release:gate

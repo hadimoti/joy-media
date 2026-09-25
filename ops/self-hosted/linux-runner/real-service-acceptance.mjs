@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* global clearInterval, process, setInterval, setTimeout, URL, Buffer, window, fetch, atob, btoa, crypto, localStorage */
 
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID, createHash, generateKeyPairSync } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -15,8 +15,10 @@ import { Worker } from 'node:worker_threads';
 import { chromium } from '@playwright/test';
 import { verifyExport } from '../../../packages/export-core/dist/index.js';
 import {
+  AccountService,
   PostgresControlPlane,
   createControlPlaneHttpServer,
+  createEd25519EntitlementSigner,
 } from '../../../apps/api/dist/index.js';
 import {
   assertJourneyTelemetryClean,
@@ -291,6 +293,10 @@ try {
     realWorkerDirectory,
     realWorkerLifecycle,
   );
+  const { privateKey } = generateKeyPairSync('ed25519');
+  const signer = createEd25519EntitlementSigner(
+    privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+  );
   apiServer = createControlPlaneHttpServer({
     controlPlane,
     authentication: { authenticate: (request) => authenticate(request, token, owner) },
@@ -298,6 +304,8 @@ try {
     privateObjectStore: objectStore,
     rateLimit: { maxRequests: 100_000 },
     queryObservability: true,
+    account: new AccountService({ pool, signer }),
+    entitlementPublicKeyPem: signer.publicKeyPem,
   });
   await listen(apiServer, apiPort);
 

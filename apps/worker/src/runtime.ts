@@ -9,7 +9,7 @@ import {
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { WorkerCapability, WorkerHello, WorkerModelInventory } from '@joy-media/job-protocol';
@@ -67,15 +67,49 @@ export interface WorkerSecretProtector {
 }
 
 /**
+ * A cold powershell.exe plus `Add-Type System.Security` is slow on Windows
+ * Server Core containers, where 5s was short enough to abort routine pairings.
+ */
+const DPAPI_HELPER_TIMEOUT_MS = 30_000;
+/**
+ * Bounds the in-process plaintext cache for a long-lived unpaired Worker that
+ * re-protects a pairing code every few minutes.
+ */
+const DPAPI_CACHE_LIMIT = 32;
+
+/**
+ * The protector itself could not run, so the ciphertext is still unjudged.
+ *
+ * This is deliberately distinct from `unprotect` returning `undefined`: that
+ * answer means "this machine/user cannot decrypt these bytes" and correctly
+ * fails closed into a fresh pairing, while this error means the Worker learned
+ * nothing and must not present itself as unpaired.
+ */
+export class WorkerSecretProtectorUnavailableError extends Error {
+  constructor(action: 'protect' | 'unprotect', detail: string) {
+    super(`Worker secret protector could not ${action}: ${detail}`);
+    this.name = 'WorkerSecretProtectorUnavailableError';
+  }
+}
+
+/**
  * Uses the Windows user DPAPI through PowerShell without placing a secret in
  * command-line arguments or logs. The portable JSON store remains injectable
  * for non-Windows/test environments; the packaged Windows Worker selects this
  * protector from index.ts and fails closed if DPAPI cannot complete an action.
  */
 export class WindowsDpapiSecretProtector implements WorkerSecretProtector {
-  private static readonly ENCODING_TIMEOUT_MS = 15_000;
+  /**
+   * Ciphertext to plaintext for this process only. Pairing reads and writes the
+   * state file several times, and every uncached read cost another cold
+   * powershell.exe. The process already holds these secrets in memory, and the
+   * map is never serialized.
+   */
+  readonly #decrypted = new Map<string, string>();
 
-  private static runPowerShell(command: string, input: string): ReturnType<typeof spawnSync> {
+  private static readonly ENCODING_TIMEOUT_MS = DPAPI_HELPER_TIMEOUT_MS;
+
+  private static runPowerShell(command: string, input: string): SpawnSyncReturns<string> {
     return spawnSync(
       'powershell.exe',
       [
@@ -98,29 +132,62 @@ export class WindowsDpapiSecretProtector implements WorkerSecretProtector {
   }
 
   protect(value: string): string {
-    const result = WindowsDpapiSecretProtector.runPowerShell(
+    const result = this.#run(
       "$ErrorActionPreference='Stop'; $plain=[Console]::In.ReadToEnd(); Add-Type -AssemblyName System.Security; $bytes=[Text.Encoding]::UTF8.GetBytes($plain); $protected=[Security.Cryptography.ProtectedData]::Protect($bytes,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Out.Write([Convert]::ToBase64String($protected))",
       value,
+      'protect',
     );
-    if (result.signal || result.status !== 0) {
+    if (result.status !== 0) {
       throw new Error(
-        `Windows DPAPI protection failed (status=${result.status ?? result.signal}: ${result.stderr ?? ''})`,
+        `Windows DPAPI protection failed (status=${result.status}: ${result.stderr ?? ''})`,
       );
     }
-    const encrypted = String(result.stdout).trim();
+    const encrypted = result.stdout.trim();
     if (encrypted.length === 0) throw new Error('Windows DPAPI protection returned no ciphertext');
+    this.#remember(encrypted, value);
     return encrypted;
   }
 
   unprotect(value: string): string | undefined {
-    const result = WindowsDpapiSecretProtector.runPowerShell(
+    const cached = this.#decrypted.get(value);
+    if (cached !== undefined) return cached;
+    const result = this.#run(
       "$ErrorActionPreference='Stop'; $encrypted=[Convert]::FromBase64String([Console]::In.ReadToEnd().Trim()); Add-Type -AssemblyName System.Security; $plain=[Security.Cryptography.ProtectedData]::Unprotect($encrypted,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser); $writer=[Console]::Out; $utf8=[Text.Encoding]::UTF8; $writer.Write($utf8.GetString($plain))",
       value,
+      'unprotect',
     );
-    if (result.signal || result.status !== 0) return undefined;
-    const plaintext: string = String(result.stdout);
-    if (plaintext.length === 0) return undefined;
-    return plaintext;
+    // A non-zero exit means PowerShell ran and DPAPI refused the ciphertext
+    // (foreign user or migrated profile), which must fail closed into a fresh
+    // pairing. A helper that never ran is reported by #run instead, because
+    // treating it as "undecryptable" silently downgrades a paired Worker.
+    if (result.status !== 0) return undefined;
+    const encoded = result.stdout;
+    if (encoded.length === 0) return undefined;
+    const plain = encoded;
+    this.#remember(value, plain);
+    return plain;
+  }
+
+  #run(command: string, input: string, action: 'protect' | 'unprotect'): SpawnSyncReturns<string> {
+    const result = WindowsDpapiSecretProtector.runPowerShell(command, input);
+    if (result.error !== undefined)
+      throw new WorkerSecretProtectorUnavailableError(action, result.error.message);
+    // spawnSync reports a timeout or an external kill as a signal with no exit
+    // status; neither says anything about the secret it was handed.
+    if (result.status === null || result.signal !== null)
+      throw new WorkerSecretProtectorUnavailableError(
+        action,
+        `powershell.exe exited on ${result.signal ?? 'an unknown signal'} after ${DPAPI_HELPER_TIMEOUT_MS}ms`,
+      );
+    return result;
+  }
+
+  #remember(ciphertext: string, plain: string): void {
+    if (this.#decrypted.size >= DPAPI_CACHE_LIMIT) {
+      const oldest = this.#decrypted.keys().next();
+      if (!oldest.done) this.#decrypted.delete(oldest.value);
+    }
+    this.#decrypted.set(ciphertext, plain);
   }
 }
 
@@ -242,7 +309,11 @@ export class JsonFileWorkerStore implements PersistentWorkerStore {
             ? { pendingPairing: raw.pendingPairing }
             : {}),
       };
-    } catch {
+    } catch (error) {
+      // Missing, locked, or malformed state legitimately reads as "no state".
+      // A protector that could not run does not: swallowing it here is what
+      // makes a paired Worker look like it never paired at all.
+      if (error instanceof WorkerSecretProtectorUnavailableError) throw error;
       return {};
     }
   }

@@ -43,6 +43,14 @@ export default tseslint.config(
   },
   {
     rules: {
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'URL',
+          property: 'revokeObjectURL',
+          message: 'Use media-object-url lifecycle helpers for object URL release.',
+        },
+      ],
       '@typescript-eslint/consistent-type-imports': 'error',
       '@typescript-eslint/no-unused-vars': [
         'error',
@@ -58,6 +66,16 @@ export default tseslint.config(
     rules: {
       '@typescript-eslint/no-unused-vars': 'off',
       '@typescript-eslint/no-explicit-any': 'off',
+      'no-restricted-properties': 'off',
+    },
+  },
+  {
+    files: [
+      'apps/editor-web/src/media-object-url.ts',
+      'packages/renderer-pixi/src/browser-export.ts',
+    ],
+    rules: {
+      'no-restricted-properties': 'off',
     },
   },
   {
@@ -77,8 +95,15 @@ export default tseslint.config(
     },
   },
   {
+    files: ['**/*.{spec,test}.{js,jsx,ts,tsx,mjs,cjs}'],
+    rules: {
+      'no-restricted-properties': 'off',
+    },
+  },
+  {
     files: [
       '**/bin/**/*.{mjs,cjs,js}',
+      'ops/**/*.mjs',
       'tooling/**/*.mjs',
       'scripts/*.cjs',
       'apps/*/scripts/*.mjs',
