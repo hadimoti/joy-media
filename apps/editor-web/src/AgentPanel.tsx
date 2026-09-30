@@ -100,6 +100,7 @@ import {
   type JoyAgentActiveRunState,
   type JoyAgentRunArtifactReference,
   type JoyAgentRunErrorCode,
+  type JoyAgentRunState,
 } from './joy-agent/run-events.js';
 import {
   EMPTY_AGENT_PRESENCE,
@@ -273,6 +274,33 @@ export function legacyRecipeExecutionEnabled(): false {
 export function noEditsAppliedFailureMessage(error: unknown, fallback: string): string {
   const base = error instanceof Error ? error.message : fallback;
   return `${base} No edits were applied.`;
+}
+
+export function selectActiveJoyAgentRunId(
+  agentRunId: string | undefined,
+  presenceState: Pick<AgentPresenceState, 'runId' | 'status'>,
+  lifecycleRun:
+    { readonly scope: { readonly runId: string }; readonly state: JoyAgentRunState } | undefined,
+): string | undefined {
+  if (presenceState.status === 'active' && presenceState.runId !== undefined)
+    return presenceState.runId;
+
+  const lifecycleIsActive =
+    lifecycleRun !== undefined && !isTerminalJoyAgentRunState(lifecycleRun.state);
+  if (lifecycleIsActive) return lifecycleRun.scope.runId;
+
+  const lifecycleIsTerminalForAgentRun =
+    lifecycleRun?.scope.runId === agentRunId &&
+    lifecycleRun !== undefined &&
+    isTerminalJoyAgentRunState(lifecycleRun.state);
+  if (
+    agentRunId !== undefined &&
+    presenceState.status === 'idle' &&
+    presenceState.runId === agentRunId &&
+    !lifecycleIsTerminalForAgentRun
+  )
+    return agentRunId;
+  return undefined;
 }
 
 interface PendingPlan {
@@ -1572,9 +1600,10 @@ export function AgentPanel({
       setAgentPhase('cancelled');
       return;
     }
-    const commandRunId = agentRunId ?? presenceState.runId ?? runLifecycle.run?.scope.runId;
+    const commandRunId = selectActiveJoyAgentRunId(agentRunId, presenceState, runLifecycle.run);
     if (command.type === 'stop') {
       const recipeCancelled = cancelRecipeInvocation(commandRunId);
+      if (!recipeCancelled && commandRunId === undefined) return;
       if (!recipeCancelled && commandRunId !== undefined) {
         cancelRunLifecycle(commandRunId);
         if (joyAgentEngineClient !== undefined) void joyAgentEngineClient.cancel(commandRunId);
@@ -1603,7 +1632,7 @@ export function AgentPanel({
     discardPreparedModelChange,
     joyAgentEngineClient,
     pending,
-    presenceState.runId,
+    presenceState,
     runLifecycle.run,
   ]);
 
@@ -3207,7 +3236,7 @@ export function AgentPanel({
     liveAgentPhase !== 'completed' &&
     liveAgentPhase !== 'failed' &&
     liveAgentPhase !== 'cancelled';
-  const activeRunId = agentRunId ?? presenceState.runId ?? runLifecycle.run?.scope.runId;
+  const activeRunId = selectActiveJoyAgentRunId(agentRunId, presenceState, runLifecycle.run);
 
   const uploadJoyCodeFiles = async (fileList: FileList | null) => {
     if (fileList === null || fileList.length === 0 || onAttachAsset === undefined) return;
