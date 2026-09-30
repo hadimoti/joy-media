@@ -1,6 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 import { authenticate, openPanel, openReferenceWorkspace } from './wp29-r5-harness.js';
 import { configureJoyAgent, installFakeOpenAIProvider } from './fixtures/fake-openai-provider.js';
+import {
+  allowExpectedAssetFixtureMisses,
+  assertBrowserAudit,
+  setupBrowserAudit,
+} from './helpers/browser-console-audit.js';
 
 const INVALID_CANONICAL_PROPOSAL = {
   summary: 'Apply a caption style to a missing clip',
@@ -45,6 +50,24 @@ async function requestPreview(page: Page, prompt: string): Promise<void> {
 }
 
 test.describe('JOY Live Director runtime boundary', () => {
+  const DIRECTOR_ASSET_MISS_MAP: Record<string, number> = {
+    'cancellation rejects a delayed provider reply before it can stage a preview': 2,
+    'proves the provider handshake, repairs only through the canonical host, and requires approval': 9,
+    'invalidates a real Worker preview when its revision becomes stale': 5,
+    'clearing a model connection terminalizes an in-flight run without reviving a preview': 2,
+    'reports a provider adapter failure without suggesting an edit was applied': 2,
+  };
+
+  test.beforeEach(({ page }, testInfo) => {
+    setupBrowserAudit(page);
+    const count = DIRECTOR_ASSET_MISS_MAP[testInfo.title];
+    if (count != null) allowExpectedAssetFixtureMisses(page, count);
+  });
+
+  test.afterEach(async ({ page }, testInfo) => {
+    await assertBrowserAudit(page, testInfo);
+  });
+
   test('proves the provider handshake, repairs only through the canonical host, and requires approval', async ({
     page,
   }) => {
@@ -118,7 +141,51 @@ test.describe('JOY Live Director runtime boundary', () => {
       'data-agent-phase',
       'cancelled',
     );
+    const cancellationMessage = page.getByText('JOY run cancelled. No edits were applied.', {
+      exact: true,
+    });
+    await expect(cancellationMessage).toHaveCount(1);
+    await expect(cancellationMessage).toBeVisible();
     await page.waitForTimeout(1_000);
+    await expect(page.locator('[data-agent-preview="true"]')).toHaveCount(0);
+    expect(await page.locator('.timeline-clip').count()).toBe(canonicalClipCount);
+  });
+
+  test('reports a provider adapter failure without suggesting an edit was applied', async ({
+    page,
+  }) => {
+    await openJoyCode(page);
+    await installFakeOpenAIProvider(page);
+    const dialog = await configureJoyAgent(page, 'JOY_E2E_DIRECTOR_ADAPTER_FAILURE_KEY');
+    await dialog.getByRole('button', { name: 'Done' }).click();
+
+    await page.unroute('https://joy-agent-fixture.example/**');
+    await page.route('https://joy-agent-fixture.example/**', async (route) => {
+      if (route.request().method() === 'OPTIONS') {
+        await route.fulfill({
+          status: 204,
+          headers: {
+            'access-control-allow-origin': '*',
+            'access-control-allow-headers': 'authorization, content-type',
+            'access-control-allow-methods': 'POST, OPTIONS',
+          },
+        });
+      } else {
+        await route.abort('failed');
+      }
+    });
+
+    const canonicalClipCount = await page.locator('.timeline-clip').count();
+    const composer = page.getByLabel('Message Joy Code');
+    await composer.fill('Try an edit while the provider is unavailable.');
+    await composer.press('Enter');
+
+    await expect(page.getByRole('region', { name: 'Joy Code composer' })).toHaveAttribute(
+      'data-agent-phase',
+      'failed',
+      { timeout: 20_000 },
+    );
+    await expect(page.getByText(/No edits were applied\./)).toBeVisible();
     await expect(page.locator('[data-agent-preview="true"]')).toHaveCount(0);
     expect(await page.locator('.timeline-clip').count()).toBe(canonicalClipCount);
   });

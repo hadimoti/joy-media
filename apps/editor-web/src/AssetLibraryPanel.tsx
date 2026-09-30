@@ -867,8 +867,11 @@ export function AssetLibraryPanel({
         : sourceItems.filter(({ asset }) => asset.kind === entry.id).length;
     return {
       id: entry.id,
-      label: `${entry.label} ${count}`,
+      label: entry.label,
+      count,
       iconUrl: ASSET_CATEGORY_ICONS[entry.id],
+      ariaLabel: `${entry.label}, ${count} ${count === 1 ? 'asset' : 'assets'}`,
+      tooltip: `${entry.label}: ${count} ${count === 1 ? 'asset' : 'assets'}`,
     };
   });
 

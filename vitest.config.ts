@@ -64,7 +64,10 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['{apps,packages,tooling}/**/src/**/*.test.{ts,tsx}'],
+    include: [
+      '{apps,packages,tooling}/**/src/**/*.test.{ts,tsx}',
+      'tests/e2e/helpers/browser-console-audit.unit.ts',
+    ],
     environment: 'node',
   },
 });

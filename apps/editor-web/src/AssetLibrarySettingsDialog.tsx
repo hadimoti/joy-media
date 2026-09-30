@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CloseIcon, RefreshIcon } from './icons.js';
 import {
   isDesktopHost,
   getDesktopAssetLibrarySettings,
   setDesktopAssetLibraryDirectory,
   selectDesktopAssetLibraryDirectory,
+  resetDesktopAssetLibraryDirectory,
   type DesktopAssetLibrarySettings,
 } from './desktop-client.js';
 
@@ -26,6 +27,8 @@ export function AssetLibrarySettingsDialog({
   const [notice, setNotice] = useState<
     { kind: 'info' | 'success' | 'error'; message: string } | undefined
   >(undefined);
+  const pickerButtonRef = useRef<HTMLButtonElement>(null);
+  const restorePickerFocus = useRef(false);
 
   const loadSettings = async () => {
     if (!isDesktopHost()) return;
@@ -51,9 +54,16 @@ export function AssetLibrarySettingsDialog({
     }
   }, [open]);
 
+  useEffect(() => {
+    if (saving || !restorePickerFocus.current) return;
+    restorePickerFocus.current = false;
+    pickerButtonRef.current?.focus();
+  }, [saving]);
+
   if (!open) return null;
 
   const handleSelectFolder = async () => {
+    restorePickerFocus.current = true;
     setSaving(true);
     setNotice(undefined);
     try {
@@ -104,8 +114,7 @@ export function AssetLibrarySettingsDialog({
     setSaving(true);
     setNotice(undefined);
     try {
-      const defaultPath = 'H:\\VPS-DATA\\joy-media-assets';
-      const updated = await setDesktopAssetLibraryDirectory(defaultPath);
+      const updated = await resetDesktopAssetLibraryDirectory();
       setSettings(updated);
       setCustomPath(updated.directory);
       setNotice({
@@ -126,12 +135,11 @@ export function AssetLibrarySettingsDialog({
   return (
     <div className="agent-settings-backdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className="agent-settings-dialog joy-agent-settings-dialog"
+        className="agent-settings-dialog joy-agent-settings-dialog asset-library-storage-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="asset-library-settings-title"
         onMouseDown={(event) => event.stopPropagation()}
-        style={{ maxWidth: '640px' }}
       >
         <header className="agent-settings-header">
           <div>
@@ -149,7 +157,7 @@ export function AssetLibrarySettingsDialog({
         </header>
 
         <div className="agent-settings-body">
-          <p className="agent-settings-hint" style={{ marginTop: 0 }}>
+          <p className="agent-settings-hint asset-library-storage-hint">
             Configure the local folder where your audio, SFX, and graphic library assets are stored.
             You can change this path or point to an external drive at any time.
           </p>
@@ -174,28 +182,26 @@ export function AssetLibrarySettingsDialog({
                   )}
                 </div>
 
-                <div
-                  style={{ display: 'flex', gap: '8px', marginTop: '8px', alignItems: 'center' }}
-                >
+                <div className="asset-library-storage-path-row">
                   <input
                     type="text"
                     value={customPath}
                     onChange={(e) => setCustomPath(e.target.value)}
-                    placeholder="e.g. H:\VPS-DATA\joy-media-assets"
-                    style={{ flex: 1, fontFamily: 'monospace', fontSize: '12px' }}
+                    placeholder="/path/to/asset/library"
+                    className="asset-library-storage-path-input"
                   />
                   <button
                     type="button"
-                    className="button-primary"
+                    className="button-primary asset-library-storage-picker-btn"
+                    ref={pickerButtonRef}
                     onClick={() => void handleSelectFolder()}
                     disabled={saving || loading}
-                    style={{ whiteSpace: 'nowrap' }}
                   >
                     Change Folder…
                   </button>
                 </div>
 
-                <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                <div className="asset-library-storage-actions">
                   <button
                     type="button"
                     className="button-secondary"
@@ -226,10 +232,9 @@ export function AssetLibrarySettingsDialog({
 
               {notice && (
                 <div
-                  className={`agent-settings-notice is-${notice.kind}`}
+                  className={`agent-settings-notice is-${notice.kind} asset-library-storage-notice`}
                   role="status"
                   aria-live="polite"
-                  style={{ marginTop: '12px' }}
                 >
                   <span className="agent-settings-notice-icon" aria-hidden="true">
                     {notice.kind === 'success' ? '✓' : notice.kind === 'error' ? '!' : 'i'}
@@ -238,115 +243,59 @@ export function AssetLibrarySettingsDialog({
                 </div>
               )}
 
-              <section
-                className="agent-settings-section"
-                style={{
-                  marginTop: '16px',
-                  background: 'rgba(255, 255, 255, 0.03)',
-                  padding: '12px 16px',
-                  borderRadius: '6px',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                }}
-              >
+              <section className="agent-settings-section asset-library-storage-inspection">
                 <div className="agent-settings-section-heading">
                   <div>
                     <span className="agent-settings-kicker">Current Status</span>
                     <h3>Library Inspection</h3>
                   </div>
                   {settings?.exists && settings?.hasCatalog ? (
-                    <span
-                      style={{
-                        color: '#4ade80',
-                        fontSize: '12px',
-                        fontWeight: 600,
-                        background: 'rgba(74, 222, 128, 0.12)',
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                      }}
-                    >
+                    <span className="asset-library-storage-chip is-ready">
                       ● Connected &amp; Ready
                     </span>
                   ) : (
-                    <span
-                      style={{
-                        color: '#f87171',
-                        fontSize: '12px',
-                        fontWeight: 600,
-                        background: 'rgba(248, 113, 113, 0.12)',
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                      }}
-                    >
-                      ● Incomplete
-                    </span>
+                    <span className="asset-library-storage-chip is-incomplete">● Incomplete</span>
                   )}
                 </div>
 
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(3, 1fr)',
-                    gap: '12px',
-                    marginTop: '12px',
-                  }}
-                >
-                  <div
-                    style={{
-                      background: 'rgba(0,0,0,0.2)',
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      textAlign: 'center',
-                    }}
-                  >
-                    <div style={{ fontSize: '20px', fontWeight: 'bold' }}>
+                <div className="asset-library-storage-count-grid">
+                  <div className="asset-library-storage-count-card">
+                    <div className="asset-library-storage-count-value">
                       {settings?.counts.total ?? 0}
                     </div>
-                    <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>
-                      Total Assets
-                    </div>
+                    <div className="asset-library-storage-count-label">Total Assets</div>
                   </div>
-                  <div
-                    style={{
-                      background: 'rgba(0,0,0,0.2)',
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      textAlign: 'center',
-                    }}
-                  >
-                    <div style={{ fontSize: '20px', fontWeight: 'bold' }}>
+                  <div className="asset-library-storage-count-card">
+                    <div className="asset-library-storage-count-value">
                       {settings?.counts.audio ?? 0}
                     </div>
-                    <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>
-                      Audio &amp; SFX
-                    </div>
+                    <div className="asset-library-storage-count-label">Audio &amp; SFX</div>
                   </div>
-                  <div
-                    style={{
-                      background: 'rgba(0,0,0,0.2)',
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      textAlign: 'center',
-                    }}
-                  >
-                    <div style={{ fontSize: '20px', fontWeight: 'bold' }}>
+                  <div className="asset-library-storage-count-card">
+                    <div className="asset-library-storage-count-value">
                       {settings?.counts.image ?? 0}
                     </div>
-                    <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>
-                      Graphic Images
-                    </div>
+                    <div className="asset-library-storage-count-label">Graphic Images</div>
                   </div>
                 </div>
 
                 {!settings?.exists && (
-                  <p style={{ color: '#f87171', fontSize: '12px', marginTop: '12px' }}>
+                  <p className="asset-library-storage-warning">
                     Directory not found on this system. Please check your path or connect the
                     external drive.
                   </p>
                 )}
                 {settings?.exists && !settings?.hasCatalog && (
-                  <p style={{ color: '#fbbf24', fontSize: '12px', marginTop: '12px' }}>
+                  <p className="asset-library-storage-warning is-warning">
                     Directory exists, but no catalog.json was found. Make sure catalog.json is
                     present.
+                  </p>
+                )}
+                {settings?.isDefault && !settings.hasCatalog && (
+                  <p className="asset-library-storage-warning is-warning" role="note">
+                    If you upgraded and your previous Asset Library is missing, use Change Folder…
+                    to reconnect its existing folder. Changing this setting only points JOY Media to
+                    that folder; files are not moved or deleted.
                   </p>
                 )}
               </section>

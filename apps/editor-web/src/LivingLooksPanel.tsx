@@ -9,6 +9,7 @@
  */
 
 import { useMemo, useState, type ReactElement } from 'react';
+import { PlayIcon } from './icons.js';
 import type { LookCatalogEntry } from './joy-agent/look-operations.js';
 import type { LookAudioBakeInput, LookControl } from '@joy-media/motion-core';
 
@@ -328,7 +329,7 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
 
       {props.onAgentRun !== undefined && (
         <form
-          className="living-looks-agent"
+          className="living-looks-agent joy-code-compose-dock"
           aria-label="Ask the agent to work with Looks"
           onSubmit={(event) => {
             event.preventDefault();
@@ -339,22 +340,32 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
           }}
         >
           <label htmlFor="living-looks-agent-prompt">Ask JOY to work with a Look</label>
-          <textarea
-            id="living-looks-agent-prompt"
-            className="living-looks-agent-prompt"
-            rows={2}
-            placeholder="e.g. apply Editorial Clean to the headline, then soften the entrance"
-            value={agentPrompt}
-            disabled={props.agentBusy === true || props.busy}
-            onChange={(event) => setAgentPrompt(event.target.value)}
-          />
-          <button
-            type="submit"
-            className="living-looks-agent-run"
-            disabled={agentPrompt.trim().length === 0 || props.agentBusy === true || props.busy}
-          >
-            {props.agentBusy === true ? 'JOY is working…' : 'Ask JOY'}
-          </button>
+          <div className="joy-code-input living-looks-agent-input">
+            <textarea
+              id="living-looks-agent-prompt"
+              className="living-looks-agent-prompt"
+              rows={2}
+              placeholder="e.g. apply Editorial Clean to the headline, then soften the entrance"
+              value={agentPrompt}
+              disabled={props.agentBusy === true || props.busy}
+              onChange={(event) => setAgentPrompt(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
+            />
+            <button
+              type="submit"
+              className="joy-code-send living-looks-agent-run"
+              disabled={agentPrompt.trim().length === 0 || props.agentBusy === true || props.busy}
+              aria-label={props.agentBusy === true ? 'JOY is working' : 'Ask JOY'}
+              title={props.agentBusy === true ? 'JOY is working…' : 'Ask JOY'}
+            >
+              <PlayIcon />
+            </button>
+          </div>
         </form>
       )}
 

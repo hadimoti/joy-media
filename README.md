@@ -151,4 +151,4 @@ Output artifacts are generated in `apps/desktop/dist/releases/`:
 ## Private Repository Status
 
 > **Notice:** JOY Media is currently in **Private Preview & Evaluation** for repository owner testing.
-> All rights reserved. Unauthorized reproduction, distribution, or public deployment of this software is strictly prohibited.
+> Licensed under the MIT License. See [LICENSE](LICENSE) for the full license text.

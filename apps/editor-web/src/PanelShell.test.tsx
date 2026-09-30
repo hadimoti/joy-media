@@ -71,3 +71,55 @@ describe('PanelShell header actions', () => {
     expect(markup).not.toContain('aria-live=');
   });
 });
+
+describe('PanelShell tab API extension', () => {
+  it('keeps the original label markup when a tab has no count or tooltip', () => {
+    const markup = renderToStaticMarkup(
+      <PanelShell
+        title="Audio"
+        tabs={[
+          { id: 'enhance', label: 'Enhance' },
+          { id: 'mix', label: 'Mix' },
+        ]}
+        activeTab="enhance"
+      >
+        <p>Body</p>
+      </PanelShell>,
+    );
+
+    expect(markup).toContain('>Enhance</button>');
+    expect(markup).toContain('>Mix</button>');
+    expect(markup).not.toContain('joy-panel-tab-label');
+  });
+
+  it('renders a selected tab with id, label, count, iconUrl, ariaLabel, and tooltip', () => {
+    const markup = renderToStaticMarkup(
+      <PanelShell
+        title="Effects"
+        tabs={[
+          {
+            id: 'fx',
+            label: 'Effects',
+            count: 12,
+            iconUrl: '/icons/fx.svg',
+            ariaLabel: 'Effects tab',
+            tooltip: 'Effects panel',
+          },
+        ]}
+        activeTab="fx"
+      >
+        <p>Body</p>
+      </PanelShell>,
+    );
+
+    expect(markup).toContain('role="tab"');
+    expect(markup).toContain('aria-selected="true"');
+    expect(markup).toContain('aria-label="Effects tab"');
+    expect(markup).toContain('title="Effects panel"');
+    expect(markup).toContain('data-panel-tab-id="fx"');
+    expect(markup).toContain('joy-panel-tab-icon');
+    expect(markup).toContain('joy-panel-tab-label');
+    expect(markup).toContain('joy-panel-tab-count');
+    expect(markup).toContain('>12<');
+  });
+});

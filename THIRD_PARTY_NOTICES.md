@@ -77,3 +77,13 @@ defined by ADR-0033.
 - [danielgatis/rembg](https://github.com/danielgatis/rembg) — used by the
   included image runner adapter; MIT. The package/model is installed and
   cached only on the Local Worker.
+
+## Production runtime dependencies (current candidate)
+
+- `mediabunny` 1.55.7 — MPL-2.0; used by the browser editor decoders under
+  `apps/editor-web/src/media-observation/`. The full MPL-2.0 license text is
+  shipped at `apps/editor-web/public/licenses/third-party/MPL-2.0.txt`. See
+  `docs/reviews/joy-observation-decoder-selection.md` for the package-selection
+  and source record.
+- `nodemailer` 10.0.12 — MIT-0; API production dependency. This package is not
+  bundled in the browser application.

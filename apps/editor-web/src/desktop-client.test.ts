@@ -13,6 +13,7 @@ import {
   getDesktopAssetLibrarySettings,
   setDesktopAssetLibraryDirectory,
   selectDesktopAssetLibraryDirectory,
+  resetDesktopAssetLibraryDirectory,
   getDesktopAssetLibraryCatalog,
   resolveDesktopAssetUrl,
   type DesktopUpdateCheckRequest,
@@ -231,7 +232,7 @@ describe('asset library helpers', () => {
     );
 
     const settings = {
-      directory: 'H:\\VPS-DATA\\joy-media-assets',
+      directory: '/test-assets/custom-dir',
       exists: true,
       hasCatalog: true,
       isDefault: true,
@@ -245,25 +246,44 @@ describe('asset library helpers', () => {
   });
 
   it('setDesktopAssetLibraryDirectory invokes desktop.asset-library.set-directory', async () => {
-    const invoke = vi.fn().mockResolvedValue({ directory: 'D:\\custom' });
+    const invoke = vi.fn().mockResolvedValue({ directory: '/test-assets/custom' });
     window.joyDesktop = { channels: ['desktop.asset-library.set-directory'], invoke };
 
-    await expect(setDesktopAssetLibraryDirectory('D:\\custom')).resolves.toEqual({
-      directory: 'D:\\custom',
+    await expect(setDesktopAssetLibraryDirectory('/test-assets/custom')).resolves.toEqual({
+      directory: '/test-assets/custom',
     });
     expect(invoke).toHaveBeenCalledWith('desktop.asset-library.set-directory', {
-      directory: 'D:\\custom',
+      directory: '/test-assets/custom',
     });
   });
 
   it('selectDesktopAssetLibraryDirectory invokes desktop.asset-library.select-directory', async () => {
-    const invoke = vi.fn().mockResolvedValue({ directory: 'H:\\new-path' });
+    const invoke = vi.fn().mockResolvedValue({ directory: '/test-assets/new-path' });
     window.joyDesktop = { channels: ['desktop.asset-library.select-directory'], invoke };
 
     await expect(selectDesktopAssetLibraryDirectory()).resolves.toEqual({
-      directory: 'H:\\new-path',
+      directory: '/test-assets/new-path',
     });
     expect(invoke).toHaveBeenCalledWith('desktop.asset-library.select-directory');
+  });
+
+  it('resetDesktopAssetLibraryDirectory invokes the reset channel with no path argument', async () => {
+    const defaultSettings = {
+      directory: '/test-assets/default-dir',
+      exists: true,
+      hasCatalog: true,
+      isDefault: true,
+      counts: { total: 0, audio: 0, image: 0 },
+    };
+    const invoke = vi.fn().mockResolvedValue(defaultSettings);
+    window.joyDesktop = {
+      channels: ['desktop.asset-library.reset-directory'],
+      invoke,
+    };
+
+    await expect(resetDesktopAssetLibraryDirectory()).resolves.toEqual(defaultSettings);
+    expect(invoke).toHaveBeenCalledWith('desktop.asset-library.reset-directory');
+    expect(invoke).toHaveBeenCalledTimes(1);
   });
 
   it('getDesktopAssetLibraryCatalog invokes desktop.asset-library.get-catalog', async () => {

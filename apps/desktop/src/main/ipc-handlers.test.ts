@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createIpcHandlers, dispatchIpcRequest } from './ipc-handlers.js';
 import { createFileRegistry } from './file-registry.js';
@@ -539,7 +542,7 @@ describe('IPC dispatch', () => {
   it('handles asset library settings, directory selection, and catalog reading', async () => {
     const showOpenDirectoryDialog = vi.fn(async () => ({
       canceled: false,
-      path: 'H:\\VPS-DATA\\joy-media-assets',
+      path: '/test-assets/selected-dir',
     }));
     const d = { ...deps(), showOpenDirectoryDialog };
     const handlers = createIpcHandlers(d);
@@ -554,10 +557,10 @@ describe('IPC dispatch', () => {
     const setDirRes = await dispatchIpcRequest(handlers, {
       origin: 'https://joyst.ir',
       channel: 'desktop.asset-library.set-directory',
-      payload: { directory: 'D:\\my-assets' },
+      payload: { directory: '/test-assets/my-assets' },
     });
     expect(setDirRes.ok).toBe(true);
-    expect((setDirRes.data as { directory: string }).directory).toBe('D:\\my-assets');
+    expect((setDirRes.data as { directory: string }).directory).toBe('/test-assets/my-assets');
 
     const selectDirRes = await dispatchIpcRequest(handlers, {
       origin: 'https://joyst.ir',
@@ -565,7 +568,7 @@ describe('IPC dispatch', () => {
     });
     expect(selectDirRes.ok).toBe(true);
     expect((selectDirRes.data as { directory: string }).directory).toBe(
-      'H:\\VPS-DATA\\joy-media-assets',
+      '/test-assets/selected-dir',
     );
     expect(showOpenDirectoryDialog).toHaveBeenCalled();
 
@@ -575,5 +578,106 @@ describe('IPC dispatch', () => {
     });
     expect(catalogRes.ok).toBe(true);
     expect((catalogRes.data as { assets: unknown[] }).assets).toBeDefined();
+  });
+
+  it('reselects a prior library for an unconfigured install without moving or deleting files', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'joy-media-library-upgrade-'));
+    try {
+      const previousLibrary = path.join(tempRoot, 'previous-library');
+      const nextDefault = path.join(tempRoot, 'new-default');
+      const audioPath = path.join(previousLibrary, 'audio', 'ambience.wav');
+      const imagePath = path.join(previousLibrary, 'images', 'cover.png');
+      fs.mkdirSync(path.dirname(audioPath), { recursive: true });
+      fs.mkdirSync(path.dirname(imagePath), { recursive: true });
+      fs.writeFileSync(audioPath, 'fixture audio bytes');
+      fs.writeFileSync(imagePath, 'fixture image bytes');
+      const catalog = {
+        version: 1,
+        counts: { total: 2, audio: 1, image: 1 },
+        assets: [
+          { id: 'fixture-audio', kind: 'audio', path: 'audio/ambience.wav' },
+          { id: 'fixture-image', kind: 'image', path: 'images/cover.png' },
+        ],
+      };
+      fs.writeFileSync(path.join(previousLibrary, 'catalog.json'), JSON.stringify(catalog));
+
+      const d = deps();
+      d.localDatabase.getDefaultAssetLibraryDirectory = () => nextDefault;
+      const showOpenDirectoryDialog = vi.fn(async () => ({
+        canceled: false,
+        path: previousLibrary,
+      }));
+      const handlers = createIpcHandlers({ ...d, showOpenDirectoryDialog });
+      const snapshot = (root: string) => {
+        const entries: [string, string][] = [];
+        const visit = (directory: string) => {
+          for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+            const absolutePath = path.join(directory, entry.name);
+            if (entry.isDirectory()) visit(absolutePath);
+            else
+              entries.push([
+                path.relative(root, absolutePath),
+                fs.readFileSync(absolutePath, 'base64'),
+              ]);
+          }
+        };
+        visit(root);
+        return entries.sort(([left], [right]) => left.localeCompare(right));
+      };
+      const filesBeforeReselect = snapshot(previousLibrary);
+
+      const initial = await dispatchIpcRequest(handlers, {
+        origin: 'https://joyst.ir',
+        channel: 'desktop.asset-library.get-settings',
+      });
+      expect(initial.ok).toBe(true);
+      expect(initial.data).toMatchObject({
+        directory: nextDefault,
+        isDefault: true,
+        hasCatalog: false,
+        counts: { total: 0, audio: 0, image: 0 },
+      });
+      expect(d.localDatabase.getSetting('asset_library_directory')).toBeUndefined();
+
+      const selected = await dispatchIpcRequest(handlers, {
+        origin: 'https://joyst.ir',
+        channel: 'desktop.asset-library.select-directory',
+      });
+      expect(selected.ok).toBe(true);
+      expect(selected.data).toMatchObject({
+        directory: previousLibrary,
+        isDefault: false,
+        hasCatalog: true,
+        counts: { total: 2, audio: 1, image: 1 },
+      });
+      expect(d.localDatabase.getSetting('asset_library_directory')).toBe(previousLibrary);
+      expect(showOpenDirectoryDialog).toHaveBeenCalledTimes(1);
+
+      const catalogResult = await dispatchIpcRequest(handlers, {
+        origin: 'https://joyst.ir',
+        channel: 'desktop.asset-library.get-catalog',
+      });
+      expect(catalogResult).toEqual({ ok: true, data: catalog });
+      expect(snapshot(previousLibrary)).toEqual(filesBeforeReselect);
+      expect(fs.existsSync(nextDefault)).toBe(false);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('asset-library.reset-directory clears the override and returns the default settings', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+
+    d.localDatabase.setAssetLibraryDirectory('/custom/path');
+
+    const resetRes = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.asset-library.reset-directory',
+    });
+    expect(resetRes.ok).toBe(true);
+    const info = resetRes.data as { directory: string; isDefault: boolean };
+    expect(info.directory).toBe(d.localDatabase.getDefaultAssetLibraryDirectory());
+    expect(info.isDefault).toBe(true);
   });
 });

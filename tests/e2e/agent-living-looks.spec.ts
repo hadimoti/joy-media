@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test';
 import { authenticate, openPanel, openReferenceWorkspace } from './wp29-r5-harness.js';
+import { configureJoyAgent, installFakeOpenAIProvider } from './fixtures/fake-openai-provider.js';
+import {
+  allowExpectedAssetFixtureMisses,
+  assertBrowserAudit,
+  setupBrowserAudit,
+} from './helpers/browser-console-audit.js';
 
 /**
  * R2 L2 browser coverage: the Living Looks capability in Joy Code renders the
@@ -8,6 +14,36 @@ import { authenticate, openPanel, openReferenceWorkspace } from './wp29-r5-harne
  * Approve applies it, one Undo restores it.
  */
 test.describe('JOY Living Looks', () => {
+  const LOOKS_ASSET_MISS_MAP: Record<
+    string,
+    {
+      original: number | { min: number; max: number };
+      cloud?: number | { min: number; max: number };
+    }
+  > = {
+    'keeps the Looks setup in one owned viewport': { original: 2 },
+    'renders the five shipping packs and runs one through approve + Undo': { original: 7 },
+    'matches the Edit composer while keeping Looks controls reachable without overflow': {
+      original: { min: 1, max: 2 },
+      cloud: 2,
+    },
+    'shows an unavailable pack honestly when the editor lacks a capability': { original: 2 },
+    'a saved Look survives reload and can be reopened, adjusted, and detached (GAP 1b/1c)': {
+      original: { min: 11, max: 12 },
+      cloud: 11,
+    },
+  };
+
+  test.beforeEach(({ page }, testInfo) => {
+    setupBrowserAudit(page);
+    const config = LOOKS_ASSET_MISS_MAP[testInfo.title];
+    if (config != null) allowExpectedAssetFixtureMisses(page, config.original, config.cloud);
+  });
+
+  test.afterEach(async ({ page }, testInfo) => {
+    await assertBrowserAudit(page, testInfo);
+  });
+
   test('renders the five shipping packs and runs one through approve + Undo', async ({ page }) => {
     await authenticate(page);
     await openReferenceWorkspace(page);
@@ -158,5 +194,104 @@ test.describe('JOY Living Looks', () => {
     expect(metrics.viewportClientHeight).toBeGreaterThan(0);
     expect(metrics.viewportScrollHeight).toBeGreaterThanOrEqual(metrics.viewportClientHeight);
     expect(metrics.messagesDisplay).not.toBe('none');
+  });
+
+  test('matches the Edit composer while keeping Looks controls reachable without overflow', async ({
+    page,
+  }) => {
+    await authenticate(page);
+    await openReferenceWorkspace(page);
+    await openPanel(page, 'Joy Code');
+    await installFakeOpenAIProvider(page);
+    const settings = await configureJoyAgent(page, 'JOY_E2E_LOOKS_COMPOSER_KEY');
+    await settings.getByRole('button', { name: 'Done' }).click();
+
+    const readComposerStyle = async (selector: string) =>
+      page.locator(selector).evaluate((element) => {
+        const textarea = element as HTMLTextAreaElement;
+        const row = textarea.closest('.joy-code-input');
+        const send = row?.querySelector('.joy-code-send');
+        const dock = textarea.closest('.joy-code-compose-dock');
+        if (row === null || send === undefined || dock === null)
+          throw new Error('Composer must use the shared Edit layout primitives');
+        const outline = (style: CSSStyleDeclaration) => ({
+          outlineColor: style.outlineColor,
+          outlineOffset: style.outlineOffset,
+          outlineStyle: style.outlineStyle,
+          outlineWidth: style.outlineWidth,
+        });
+        textarea.focus();
+        const focusedTextarea = outline(getComputedStyle(textarea));
+        const textareaStyle = getComputedStyle(textarea);
+        send.focus();
+        const focusedSend = outline(getComputedStyle(send));
+        const sendStyle = getComputedStyle(send);
+        const dockStyle = getComputedStyle(dock);
+        return {
+          focus: {
+            textarea: focusedTextarea,
+            send: focusedSend,
+          },
+          textarea: {
+            backgroundColor: textareaStyle.backgroundColor,
+            borderRadius: textareaStyle.borderRadius,
+            color: textareaStyle.color,
+            fontFamily: textareaStyle.fontFamily,
+            fontSize: textareaStyle.fontSize,
+            lineHeight: textareaStyle.lineHeight,
+            minHeight: textareaStyle.minHeight,
+            padding: textareaStyle.padding,
+          },
+          send: {
+            backgroundColor: sendStyle.backgroundColor,
+            borderColor: sendStyle.borderColor,
+            borderRadius: sendStyle.borderRadius,
+            color: sendStyle.color,
+            height: sendStyle.height,
+            width: sendStyle.width,
+          },
+          dock: {
+            backgroundColor: dockStyle.backgroundColor,
+            borderColor: dockStyle.borderColor,
+            borderRadius: dockStyle.borderRadius,
+            padding: dockStyle.padding,
+          },
+        };
+      });
+
+    await page
+      .getByLabel('Composer capabilities')
+      .getByRole('button', { name: 'Edit', exact: true })
+      .click();
+    const editStyle = await readComposerStyle('[aria-label="Message Joy Code"]');
+    await page.getByRole('button', { name: 'Looks', exact: true }).click();
+    const panel = page.getByRole('region', { name: 'Living Looks' });
+    const looksPrompt = panel.getByRole('textbox', { name: 'Ask JOY to work with a Look' });
+    await expect(looksPrompt).toBeVisible();
+    expect(await readComposerStyle('#living-looks-agent-prompt')).toEqual(editStyle);
+
+    const tabs = ['Browse', 'Configure', 'Applied'] as const;
+    for (const tabName of tabs)
+      await expect(panel.getByRole('tab', { name: tabName, exact: true })).toBeVisible();
+    const selectedLook = panel.locator('.living-look-select[aria-pressed="true"]');
+    await expect(selectedLook).toHaveCount(1);
+    await selectedLook.scrollIntoViewIfNeeded();
+    await expect(selectedLook).toBeVisible();
+    await panel.getByRole('tab', { name: 'Configure', exact: true }).click();
+    await expect(panel.getByRole('form', { name: /Editorial Clean controls/ })).toBeVisible();
+    await panel.getByRole('tab', { name: 'Applied', exact: true }).click();
+    await expect(panel.getByRole('region', { name: 'Applied Looks' })).toBeVisible();
+
+    const overflow = await panel.evaluate((element) => {
+      const viewport = element.querySelector<HTMLElement>('.living-looks-viewport');
+      const composer = element.closest<HTMLElement>('.joy-code-panel');
+      return {
+        document: document.documentElement.scrollWidth > window.innerWidth,
+        panel: element.scrollWidth > element.clientWidth,
+        composer: composer !== null && composer.scrollWidth > composer.clientWidth,
+        viewport: viewport !== null && viewport.scrollWidth > viewport.clientWidth,
+      };
+    });
+    expect(overflow).toEqual({ document: false, panel: false, composer: false, viewport: false });
   });
 });

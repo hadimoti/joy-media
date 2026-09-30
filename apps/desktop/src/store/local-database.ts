@@ -315,11 +315,6 @@ export class LocalDatabase {
   }
 
   getDefaultAssetLibraryDirectory(): string {
-    const vpsDataPath =
-      process.platform === 'win32' ? 'H:\\VPS-DATA\\joy-media-assets' : '/var/joy-media/assets';
-    if (fs.existsSync('H:\\VPS-DATA')) {
-      return vpsDataPath;
-    }
     return path.join(os.homedir(), 'joy-media-assets');
   }
 
@@ -333,6 +328,10 @@ export class LocalDatabase {
 
   setAssetLibraryDirectory(dir: string): void {
     this.setSetting('asset_library_directory', dir);
+  }
+
+  resetAssetLibraryDirectory(): void {
+    this.deleteSetting('asset_library_directory');
   }
 
   getAssetLibraryInfo(overrideDir?: string): AssetLibraryInfo {

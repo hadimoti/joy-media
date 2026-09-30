@@ -106,6 +106,23 @@ async function assembleUnpacked() {
 
   await cp(rendererStagingDir, resolve(unpackedDir, 'renderer'), { recursive: true });
 
+  // Include the gl-transitions license alongside the files in the staged artifact.
+  const glTransitionsLicenseSrc = resolve(
+    repoRoot,
+    'packages',
+    'transition-shaders',
+    'GL-TRANSITIONS-LICENSE',
+  );
+  const glTransitionsLicenseDest = resolve(
+    unpackedDir,
+    'renderer',
+    'licenses',
+    'third-party',
+    'GL-TRANSITIONS-LICENSE',
+  );
+  await mkdir(dirname(glTransitionsLicenseDest), { recursive: true });
+  await cp(glTransitionsLicenseSrc, glTransitionsLicenseDest);
+
   // Compiled worker package, staged as a sibling of dist/ and renderer/ so
   // `worker-entry.ts`'s `resolveWorkerEntry` finds it at `<mainDirname>/../../worker/index.js`.
   // Test output is excluded the same way the desktop dist copy above is.
@@ -133,6 +150,13 @@ async function assembleUnpacked() {
     }
   }
   process.stderr.write(`Staged workspace dependencies into ${unpackedNodeModules}\\n`);
+
+  // Preserve the project license and desktop-specific dependency notices in the unpacked package.
+  await cp(resolve(repoRoot, 'LICENSE'), resolve(unpackedDir, 'LICENSE'));
+  await cp(
+    resolve(desktopRoot, 'THIRD_PARTY_NOTICES.md'),
+    resolve(unpackedDir, 'THIRD_PARTY_NOTICES.md'),
+  );
 
   const desktopPackageJson = JSON.parse(
     await readFile(resolve(desktopRoot, 'package.json'), 'utf8'),

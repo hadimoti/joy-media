@@ -119,6 +119,7 @@ export function JoyAgentSettingsDialog({
   status,
   onStatusChange,
   onNotice,
+  onOpenModelDrawer,
   onClose,
   initialTab = 'models',
 }: {
@@ -128,6 +129,7 @@ export function JoyAgentSettingsDialog({
   readonly status?: ByokSessionStatus;
   readonly onStatusChange?: (status: ByokSessionStatus | undefined) => void;
   readonly onNotice?: (message: string, kind: AgentSettingsNotice['kind']) => void;
+  readonly onOpenModelDrawer?: () => void;
   readonly onClose: () => void;
   readonly initialTab?: JoyAgentSettingsTab;
 }) {
@@ -936,6 +938,15 @@ export function JoyAgentSettingsDialog({
             {/* TAB 1: AI MODELS & APIS */}
             {activeTab === 'models' && (
               <div className="joy-accordion">
+                {onOpenModelDrawer && (
+                  <button
+                    className="joy-btn-secondary"
+                    onClick={onOpenModelDrawer}
+                    aria-label="Browse models & API connections"
+                  >
+                    Browse models &amp; API connections
+                  </button>
+                )}
                 {/* Studio Presets Picker */}
                 <div className="joy-studio-preset-bar">
                   <button
@@ -1850,7 +1861,7 @@ export function JoyAgentSettingsDialog({
                         </div>
                         <div className="joy-settings-diagnostic-row">
                           <span>Local Asset Library</span>
-                          <span style={{ color: '#ccc' }}>H:\VPS-DATA\joy-media-assets</span>
+                          <span style={{ color: '#ccc' }}>See Asset Library settings</span>
                         </div>
                         <div className="joy-settings-diagnostic-row">
                           <span>Local Worker SEA</span>

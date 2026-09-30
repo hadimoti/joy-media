@@ -243,6 +243,14 @@ describe('LivingLooksPanel', () => {
 
     const onAgentRun = vi.fn();
     mount({ onAgentRun });
+    const form = q<HTMLFormElement>('.living-looks-agent');
+    expect(form.className.split(' ')).toContain('joy-code-compose-dock');
+    expect(
+      q<HTMLTextAreaElement>('.living-looks-agent-prompt').parentElement?.className.split(' '),
+    ).toContain('joy-code-input');
+    expect(q<HTMLButtonElement>('.living-looks-agent-run').className.split(' ')).toContain(
+      'joy-code-send',
+    );
     const textarea = q<HTMLTextAreaElement>('.living-looks-agent-prompt');
     act(() => {
       const setter = Object.getOwnPropertyDescriptor(
@@ -258,6 +266,48 @@ describe('LivingLooksPanel', () => {
       );
     });
     expect(onAgentRun).toHaveBeenCalledWith('apply editorial clean to the headline');
+  });
+
+  it('submits Ask JOY with Enter and keeps Shift+Enter for multiline prompts', () => {
+    const onAgentRun = vi.fn();
+    mount({ onAgentRun });
+    const textarea = q<HTMLTextAreaElement>('.living-looks-agent-prompt');
+    const setPrompt = (value: string): void => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        'value',
+      )!.set!;
+      setter.call(textarea, value);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+
+    act(() => setPrompt('apply editorial clean'));
+    act(() => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(onAgentRun).toHaveBeenCalledWith('apply editorial clean');
+
+    act(() => setPrompt('keep writing'));
+    act(() => {
+      const shiftEnter = new KeyboardEvent('keydown', {
+        key: 'Enter',
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      textarea.dispatchEvent(shiftEnter);
+      expect(shiftEnter.defaultPrevented).toBe(false);
+    });
+    expect(onAgentRun).toHaveBeenCalledTimes(1);
+    expect(textarea.value).toBe('keep writing');
+  });
+
+  it('disables the Ask JOY composer and announces its busy state', () => {
+    mount({ onAgentRun: vi.fn(), agentBusy: true });
+    expect(q<HTMLTextAreaElement>('.living-looks-agent-prompt').disabled).toBe(true);
+    const send = q<HTMLButtonElement>('.living-looks-agent-run');
+    expect(send.disabled).toBe(true);
+    expect(send.getAttribute('aria-label')).toBe('JOY is working');
   });
 
   it('offers "bake from audio" only when onBakeFromAudio is set and the pack has a keyframe binding', () => {

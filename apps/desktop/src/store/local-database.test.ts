@@ -1,3 +1,5 @@
+import path from 'node:path';
+import os from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { LocalDatabase } from './local-database.js';
 import type { ProviderProfile } from './local-database.js';
@@ -239,13 +241,25 @@ describe('LocalDatabase provider profiles', () => {
     expect(db.getSetting('some_key')).toBe('some_value');
 
     const defaultDir = db.getDefaultAssetLibraryDirectory();
-    expect(defaultDir).toBeDefined();
+    expect(defaultDir).toBe(path.join(os.homedir(), 'joy-media-assets'));
     expect(db.getAssetLibraryDirectory()).toBe(defaultDir);
 
-    db.setAssetLibraryDirectory('D:\\custom-assets');
-    expect(db.getAssetLibraryDirectory()).toBe('D:\\custom-assets');
+    db.setAssetLibraryDirectory('/custom/assets');
+    expect(db.getAssetLibraryDirectory()).toBe('/custom/assets');
     const info = db.getAssetLibraryInfo();
-    expect(info.directory).toBe('D:\\custom-assets');
+    expect(info.directory).toBe('/custom/assets');
     expect(info.isDefault).toBe(false);
+  });
+
+  it('resets a custom asset library directory by clearing the override, returning the runtime default', () => {
+    const db = testDb();
+    const defaultDir = db.getDefaultAssetLibraryDirectory();
+
+    db.setAssetLibraryDirectory('/custom/assets');
+    expect(db.getAssetLibraryDirectory()).toBe('/custom/assets');
+
+    db.resetAssetLibraryDirectory();
+    expect(db.getAssetLibraryDirectory()).toBe(defaultDir);
+    expect(db.getAssetLibraryInfo().isDefault).toBe(true);
   });
 });
