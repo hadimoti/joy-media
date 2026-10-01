@@ -262,7 +262,14 @@ function createMailer(): MediaMailer | undefined {
     from === undefined
   )
     return undefined;
-  return new MediaMailer({ host, port: Number(port), user, pass, from });
+  return new MediaMailer({
+    host,
+    port: Number(port),
+    user,
+    pass,
+    from,
+    onOtpDeliveryFailure: (metadata) => console.error('JOY Media OTP delivery failed', metadata),
+  });
 }
 
 function createTelegramSender(): MediaTelegramSender | undefined {
