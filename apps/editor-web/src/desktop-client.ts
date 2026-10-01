@@ -330,6 +330,15 @@ export async function selectDesktopAssetLibraryDirectory(): Promise<DesktopAsset
 }
 
 /**
+ * Resets the configured local asset library directory to its default.
+ */
+export async function resetDesktopAssetLibraryDirectory(): Promise<DesktopAssetLibrarySettings> {
+  return (await requireBridge().invoke(
+    'desktop.asset-library.reset-directory',
+  )) as DesktopAssetLibrarySettings;
+}
+
+/**
  * Loads the local catalog.json from the configured local asset library folder.
  */
 export async function getDesktopAssetLibraryCatalog(): Promise<DesktopAssetCatalog> {

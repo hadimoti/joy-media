@@ -2,6 +2,11 @@ import { expect, test } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { authenticate, openDisposableWorkspace, openPanel } from './wp29-r5-harness.js';
+import {
+  allowExpectedHttpResponse,
+  assertBrowserAudit,
+  setupBrowserAudit,
+} from './helpers/browser-console-audit.js';
 
 const STOCK_CATEGORIES = [
   'business-work',
@@ -48,9 +53,51 @@ function stockItems(category: (typeof STOCK_CATEGORIES)[number]) {
 }
 
 test.describe('native stock video library', () => {
+  test.beforeEach(({ page }) => {
+    setupBrowserAudit(page);
+  });
+
+  test.afterEach(async ({ page }, testInfo) => {
+    await assertBrowserAudit(page, testInfo);
+  });
+
   test('uses the shared rail, fixed cards, accessible preview, and project-scoped import', async ({
     page,
   }) => {
+    const myAssetProjectIds: string[] = [];
+    const myAssetResponsePromises: Promise<void>[] = [];
+    page.on('response', async (response) => {
+      const url = new URL(response.url());
+      if (
+        url.pathname === '/api/v1/library/my-assets' &&
+        response.ok() &&
+        response.request().method() === 'GET'
+      ) {
+        const promise = (async () => {
+          const body: unknown = await response.json();
+          if (
+            typeof body === 'object' &&
+            body !== null &&
+            'data' in body &&
+            Array.isArray((body as Record<string, unknown>).data)
+          ) {
+            for (const item of (body as { data: unknown[] }).data) {
+              if (
+                typeof item === 'object' &&
+                item !== null &&
+                'projectId' in item &&
+                typeof (item as Record<string, unknown>).projectId === 'string' &&
+                (item as { projectId: string }).projectId.trim().length > 0
+              ) {
+                myAssetProjectIds.push((item as { projectId: string }).projectId);
+              }
+            }
+          }
+        })();
+        myAssetResponsePromises.push(promise);
+      }
+    });
+
     await authenticate(page);
     await openDisposableWorkspace(page, `Stock UI ${Date.now()}`);
 
@@ -68,7 +115,7 @@ test.describe('native stock video library', () => {
         throw new Error('malformed active project binding');
       return (value as { projectId: string }).projectId;
     });
-    const controlPlaneProjectIds = await page.evaluate((editorProjectId) => {
+    const { activeControlPlaneProjectIds } = await page.evaluate((activeEditorProjectId) => {
       const raw = window.localStorage.getItem('joy-media.control-plane-project-bindings.v1');
       if (raw === null) throw new Error('missing control-plane project bindings');
       const value: unknown = JSON.parse(raw);
@@ -81,31 +128,37 @@ test.describe('native stock video library', () => {
         Array.isArray(bindingsByOwner)
       )
         throw new Error('malformed control-plane owner bindings');
-      const projectIds: string[] = [];
-      for (const ownerBindings of Object.values(bindingsByOwner)) {
-        if (
-          typeof ownerBindings !== 'object' ||
-          ownerBindings === null ||
-          Array.isArray(ownerBindings)
-        )
-          continue;
-        const binding = (ownerBindings as Record<string, unknown>)[editorProjectId];
+      const activeProjectIds: string[] = [];
+      // The project selector/startup may issue project requests before the
+      // disposable project becomes active, so this audit permits bindings for
+      // this authenticated E2E owner only and excludes all other owners.
+      const ownerBindings = bindingsByOwner['e2e-owner@example.test'];
+      if (
+        typeof ownerBindings !== 'object' ||
+        ownerBindings === null ||
+        Array.isArray(ownerBindings)
+      )
+        throw new Error('missing or malformed bindings for e2e-owner@example.test');
+      for (const [editorProjectId, binding] of Object.entries(ownerBindings)) {
         if (typeof binding !== 'object' || binding === null || Array.isArray(binding)) continue;
         const projectId = (binding as { controlPlaneProjectId?: unknown }).controlPlaneProjectId;
-        if (typeof projectId === 'string' && projectId.length > 0) projectIds.push(projectId);
+        if (typeof projectId !== 'string' || projectId.length === 0) continue;
+        if (editorProjectId === activeEditorProjectId) activeProjectIds.push(projectId);
       }
-      if (projectIds.length === 0)
-        throw new Error(`missing control-plane binding for ${editorProjectId}`);
-      return [...new Set(projectIds)];
+      if (activeProjectIds.length === 0)
+        throw new Error(`missing control-plane binding for active editor project`);
+      return {
+        activeControlPlaneProjectIds: [...new Set(activeProjectIds)],
+      };
     }, activeProject);
-    const projectRequestErrors: string[] = [];
+    const projectRequestIds: string[] = [];
     const stockRequestErrors: string[] = [];
     page.on('request', (request) => {
       const pathname = new URL(request.url()).pathname;
       const match = pathname.match(/^\/api\/v1\/projects\/([^/]+)\//);
       if (match === null) return;
       const projectId = decodeURIComponent(match[1]!);
-      if (!controlPlaneProjectIds.includes(projectId)) projectRequestErrors.push(projectId);
+      projectRequestIds.push(projectId);
     });
     page.on('request', (request) => {
       const pathname = new URL(request.url()).pathname;
@@ -144,13 +197,13 @@ test.describe('native stock video library', () => {
       const url = new URL(route.request().url());
       expect(url.pathname).toBe('/api/v1/library/my-assets');
       const projectId = url.searchParams.get('projectId');
-      if (projectId !== null && !controlPlaneProjectIds.includes(projectId))
+      if (projectId !== null && !activeControlPlaneProjectIds.includes(projectId))
         throw new Error(`unexpected my-assets project ${projectId}`);
       await route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
           data:
-            projectId === null || !controlPlaneProjectIds.includes(projectId)
+            projectId === null || !activeControlPlaneProjectIds.includes(projectId)
               ? []
               : [{ ...completedAsset, projectId }],
         }),
@@ -220,7 +273,7 @@ test.describe('native stock video library', () => {
     await page.route('**/api/v1/projects/*/stock-video-import', async (route) => {
       expect(route.request().method()).toBe('POST');
       const projectId = decodeURIComponent(new URL(route.request().url()).pathname.split('/')[4]!);
-      expect(controlPlaneProjectIds).toContain(projectId);
+      expect(activeControlPlaneProjectIds).toContain(projectId);
       expect(route.request().postDataJSON()).toEqual({
         catalogId: IMPORT_FIXTURE_ID,
       });
@@ -311,6 +364,44 @@ test.describe('native stock video library', () => {
         .poll(() => content.evaluate((element) => element.getBoundingClientRect().width))
         .toBeLessThan(contentWidth + 1);
     };
+    const mediaTabList = page.getByRole('tablist', { name: 'Assets sections' });
+    const videoMediaTab = page.getByRole('tab', { name: /^Video, \d+ assets?$/ });
+    const imageMediaTab = page.getByRole('tab', { name: /^Images, \d+ assets?$/ });
+    await expect(mediaTabList.getByRole('tab')).toHaveCount(4);
+    await expect(videoMediaTab).toHaveAttribute('aria-selected', 'true');
+    await expect(videoMediaTab).toHaveAttribute('title', /^Video: \d+ assets?$/);
+    await expect(videoMediaTab.locator('.joy-panel-tab-label')).toHaveCSS('display', 'none');
+    await expect(videoMediaTab.locator('.joy-panel-tab-icon')).toBeVisible();
+    await setContentWidth(300);
+    await expect
+      .poll(() =>
+        page.locator('.asset-library').evaluate((element) => element.getBoundingClientRect().width),
+      )
+      .toBeGreaterThan(288);
+    await expect(videoMediaTab.locator('.joy-panel-tab-count')).toBeVisible();
+    await setContentWidth(260);
+    await expect
+      .poll(() =>
+        page.locator('.asset-library').evaluate((element) => element.getBoundingClientRect().width),
+      )
+      .toBeLessThanOrEqual(288);
+    await expect(videoMediaTab.locator('.joy-panel-tab-count')).toBeHidden();
+    await expect(videoMediaTab).toBeVisible();
+    await expect(imageMediaTab).toBeVisible();
+    await expect(page.getByPlaceholder('Search media…')).toBeVisible();
+    await imageMediaTab.click();
+    await expect(imageMediaTab).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#stock-video-panel')).toBeHidden();
+    await imageMediaTab.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(videoMediaTab).toHaveAttribute('aria-selected', 'true');
+    await expect(videoMediaTab).toBeFocused();
+    await expect(videoMediaTab).toHaveCSS('outline-style', 'solid');
+    await expect(
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).resolves.toBe(true);
     await setContentWidth(300);
     await expect
       .poll(() => content.evaluate((element) => element.getBoundingClientRect().width))
@@ -485,6 +576,10 @@ test.describe('native stock video library', () => {
     await page.getByRole('tab', { name: /Business & Work/ }).click();
     await expect(page.locator('.stock-video-card[data-orientation="portrait"]')).toHaveCount(2);
 
+    allowExpectedHttpResponse(page, {
+      status: 503,
+      pathname: '/api/v1/library/stock-videos',
+    });
     catalogMode = 'error';
     await page.getByRole('tab', { name: /Nature/ }).click();
     await expect(page.getByRole('alert')).toContainText('fixture catalog unavailable');
@@ -517,6 +612,10 @@ test.describe('native stock video library', () => {
     });
     expect(rtlMarker).not.toBe('');
 
+    allowExpectedHttpResponse(page, {
+      status: 503,
+      pathname: /^\/api\/v1\/library\/stock-videos\/[^/]+\/poster$/,
+    });
     stockMode = 'poster-failure';
     await page.getByRole('tab', { name: /Nature/ }).click();
     const failedPoster = page.locator(
@@ -564,6 +663,10 @@ test.describe('native stock video library', () => {
     await expect(opener).toBeFocused();
 
     await page.getByRole('tab', { name: /Business & Work/ }).click();
+    allowExpectedHttpResponse(page, {
+      status: 502,
+      pathname: /^\/api\/v1\/projects\/[^/]+\/stock-video-import$/,
+    });
     importMode = 'failure';
     const importButton = page
       .locator(`.stock-video-card[data-stock-video-id="${IMPORT_FIXTURE_ID}"]`)
@@ -588,6 +691,10 @@ test.describe('native stock video library', () => {
     await expect(page.getByText('Imported stock fixture.mp4 imported to My media.')).toBeVisible({
       timeout: 15_000,
     });
+    await Promise.all(myAssetResponsePromises);
+    const projectRequestErrors = projectRequestIds
+      .filter((id) => !activeControlPlaneProjectIds.includes(id) && !myAssetProjectIds.includes(id))
+      .map(() => '/api/v1/projects/:projectId');
     expect(projectRequestErrors).toEqual([]);
     expect(stockRequestErrors).toEqual([]);
   });

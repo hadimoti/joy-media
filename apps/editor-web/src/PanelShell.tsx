@@ -29,6 +29,10 @@ export interface PanelTabSpec {
   readonly disabled?: boolean;
   /** Optional migration/accessibility alias for a renamed tab. */
   readonly ariaLabel?: string;
+  /** Optional numeric count shown after the tab label. */
+  readonly count?: number;
+  /** Optional native tooltip for compact icon-only tabs. */
+  readonly tooltip?: string;
 }
 
 export interface PanelShellProps {
@@ -97,6 +101,7 @@ function PanelSectionTab({
       role="tab"
       className={`joy-panel-tab${panelId !== undefined && presence.active ? ' is-agent-active' : ''}`}
       data-panel-tab-id={tab.id}
+      title={tab.tooltip}
       data-agent-active={panelId !== undefined && presence.active ? 'true' : undefined}
       data-agent-phase={panelId !== undefined && presence.active ? presence.phase : undefined}
       aria-selected={selected}
@@ -136,7 +141,16 @@ function PanelSectionTab({
           aria-hidden="true"
         />
       )}
-      {tab.label}
+      {tab.count !== undefined || tab.tooltip !== undefined ? (
+        <span className="joy-panel-tab-label">{tab.label}</span>
+      ) : (
+        tab.label
+      )}
+      {tab.count !== undefined && (
+        <span className="joy-panel-tab-count" aria-hidden="true">
+          {tab.count}
+        </span>
+      )}
       {panelId !== undefined && presence.active && (
         <span
           className="joy-panel-tab-agent-marker"

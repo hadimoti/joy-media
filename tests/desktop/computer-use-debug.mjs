@@ -2,11 +2,11 @@
 import { _electron as electron } from '@playwright/test';
 import { resolve, join } from 'node:path';
 import { mkdirSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 
 const desktopRoot = resolve('apps/desktop');
 const localAppData =
-  process.env.LOCALAPPDATA || join(process.env.USERPROFILE || 'C:/Users/HadiMoti', 'AppData/Local');
+  process.env.LOCALAPPDATA || join(process.env.USERPROFILE || homedir(), 'AppData/Local');
 const installedExe = resolve(localAppData, 'Programs/JOY Media/joy-media.exe');
 const distExe = resolve(desktopRoot, 'dist/joy-media-win32-x64/joy-media.exe');
 const targetExe = existsSync(installedExe) ? installedExe : distExe;
@@ -15,8 +15,7 @@ const targetCwd = existsSync(installedExe)
   : resolve(desktopRoot, 'dist', 'joy-media-win32-x64');
 
 const screenshotDir = resolve(
-  process.env.JOY_SCREENSHOT_DIR ||
-    'C:/Users/HadiMoti/.gemini/antigravity/brain/ac00181e-3969-48fc-a342-b10f4103c344/screenshots',
+  process.env.JOY_SCREENSHOT_DIR || join(tmpdir(), 'joy-media-screenshots'),
 );
 mkdirSync(screenshotDir, { recursive: true });
 

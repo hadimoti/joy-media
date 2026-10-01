@@ -2,10 +2,52 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join, resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { observe, isLoopbackUrl } from '../release-performance-observer.mjs';
 
 describe('release performance observer safety contract', () => {
+  it('measures elapsed time monotonically when the system wall clock moves backward', async () => {
+    const module = await import('../release-performance-observer.mjs');
+    const createElapsedTimer = (
+      module as unknown as {
+        createElapsedTimer?: (now?: () => number) => () => number;
+      }
+    ).createElapsedTimer;
+    expect(createElapsedTimer).toBeTypeOf('function');
+
+    let monotonicNow = 10;
+    const timer = (createElapsedTimer as (now?: () => number) => () => number)(() => monotonicNow);
+    const wallClock = vi.spyOn(Date, 'now').mockReturnValue(2_000_000);
+    const startWallTime = Date.now();
+    try {
+      monotonicNow += 1_800_000;
+      wallClock.mockReturnValue(1_000_000);
+      expect(Date.now() - startWallTime).toBe(-1_000_000);
+      expect(timer()).toBe(1_800_000);
+    } finally {
+      wallClock.mockRestore();
+    }
+  });
+
+  it('uses a monotonic default clock independent of backward wall-clock changes', async () => {
+    const module = await import('../release-performance-observer.mjs');
+    const createElapsedTimer = (
+      module as unknown as {
+        createElapsedTimer?: (now?: () => number) => () => number;
+      }
+    ).createElapsedTimer;
+    expect(createElapsedTimer).toBeTypeOf('function');
+
+    const wallClock = vi.spyOn(Date, 'now').mockReturnValue(2_000_000);
+    try {
+      const timer = (createElapsedTimer as () => () => number)();
+      wallClock.mockReturnValue(1_000_000);
+      expect(timer()).toBeGreaterThanOrEqual(0);
+    } finally {
+      wallClock.mockRestore();
+    }
+  });
+
   it('accepts only local loopback URLs', () => {
     expect(isLoopbackUrl('http://127.0.0.1:4173')).toBe(true);
     expect(isLoopbackUrl('http://localhost:8790/ready')).toBe(true);

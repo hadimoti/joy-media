@@ -344,6 +344,11 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       const info = deps.localDatabase.getAssetLibraryInfo();
       return { ok: true, data: info };
     },
+    'desktop.asset-library.reset-directory': async () => {
+      deps.localDatabase.resetAssetLibraryDirectory();
+      const info = deps.localDatabase.getAssetLibraryInfo();
+      return { ok: true, data: info };
+    },
     'desktop.asset-library.get-catalog': async () => {
       const dir = deps.localDatabase.getAssetLibraryDirectory();
       const catalogPath = path.join(dir, 'catalog.json');

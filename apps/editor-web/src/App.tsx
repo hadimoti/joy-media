@@ -6806,15 +6806,6 @@ function EditorWorkspace({
             setAgentSettingsTab('models');
             setAgentSettingsOpen(true);
           }}
-          onOpenModelDrawer={() => {
-            setAgentSettingsTab('models');
-            setAgentSettingsOpen(true);
-          }}
-          activeModelLabel={
-            agentConnectionStatus
-              ? `${agentConnectionStatus.provider}: ${agentConnectionStatus.modelId}`
-              : undefined
-          }
         />
       );
     }
@@ -7702,6 +7693,11 @@ function EditorWorkspace({
                 }
               }}
               onNotice={showToast}
+              onOpenModelDrawer={() => {
+                setAgentSettingsOpen(false);
+                setAgentSettingsTab('models');
+                setModelDrawerOpen(true);
+              }}
               onClose={() => setAgentSettingsOpen(false)}
               initialTab={agentSettingsTab}
             />
@@ -7709,7 +7705,11 @@ function EditorWorkspace({
           {modelDrawerOpen && (
             <ModelDrawer
               open={modelDrawerOpen}
-              onClose={() => setModelDrawerOpen(false)}
+              onClose={() => {
+                setModelDrawerOpen(false);
+                setAgentSettingsOpen(true);
+                setAgentSettingsTab('models');
+              }}
               engineClient={joyAgentEngineClientRef.current ?? undefined}
               status={agentConnectionStatus}
               onStatusChange={(next) => {

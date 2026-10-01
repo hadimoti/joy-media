@@ -29,6 +29,11 @@ export const MAX_EFFECTS_DURATION_MS = EFFECTS_DURATION_MS;
 const DEFAULT_OUTPUT = 'test-output/release-performance';
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
 
+export function createElapsedTimer(now = () => performance.now()) {
+  const startedAt = now();
+  return () => now() - startedAt;
+}
+
 export function isLoopbackUrl(value) {
   try {
     const url = new URL(value);
@@ -350,8 +355,8 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
   const page = await context.newPage();
   let hiddenPage = null;
   let hiddenContext = null;
-  const startedAt = Date.now();
-  const pollStartedAt = { value: 0 };
+  const editorElapsed = createElapsedTimer();
+  const pollElapsed = { value: null };
   const endpointCounts = new Map();
   const hiddenEndpointCounts = new Map();
   const inflight = new Map();
@@ -367,7 +372,7 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
   let queryCount = 0;
   let pollResponses = 0;
   let queryHeaderResponses = 0;
-  let hiddenStartedAt = 0;
+  let hiddenElapsed = null;
   let hiddenVisibilityObserved = false;
   let initialEditorJsBytes = null;
   let longTaskDurations = null;
@@ -424,7 +429,7 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
   });
   page.on('request', (request) => {
     if (!requestIsPollable(request)) return;
-    if (pollStartedAt.value <= 0) return;
+    if (pollElapsed.value === null) return;
     const key = endpointKey(request);
     requestKeys.set(request, key);
     const active = inflight.get(key) ?? 0;
@@ -474,7 +479,7 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
       else hiddenInflight.set(key, active - 1);
     });
     target.on('request', (request) => {
-      if (!requestIsPollable(request) || hiddenStartedAt <= 0) return;
+      if (!requestIsPollable(request) || hiddenElapsed === null) return;
       const key = endpointKey(request);
       hiddenRequestKeys.set(request, key);
       const active = hiddenInflight.get(key) ?? 0;
@@ -592,9 +597,9 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
     queryCount = 0;
     pollResponses = 0;
     queryHeaderResponses = 0;
-    pollStartedAt.value = Date.now();
-    hiddenStartedAt = hiddenVisibilityObserved ? pollStartedAt.value : 0;
-    const soakStartedAt = Date.now();
+    pollElapsed.value = createElapsedTimer();
+    hiddenElapsed = hiddenVisibilityObserved ? createElapsedTimer() : null;
+    const soakElapsed = createElapsedTimer();
     const longTaskBaselineDuration = await page.evaluate(() => {
       if (!Array.isArray(window.__JOY_RELEASE_LONG_TASKS__)) return null;
       return window.__JOY_RELEASE_LONG_TASKS__.reduce((sum, duration) => sum + duration, 0);
@@ -617,8 +622,7 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
         maxMountedPreviews === null ? value.mounted : Math.max(maxMountedPreviews, value.mounted);
       maxPlayingPreviews =
         maxPlayingPreviews === null ? value.playing : Math.max(maxPlayingPreviews, value.playing);
-      if (value.memory !== null)
-        heapSamples.push({ at: Date.now() - soakStartedAt, bytes: value.memory });
+      if (value.memory !== null) heapSamples.push({ at: soakElapsed(), bytes: value.memory });
       if (value.longTasks !== null) longTaskDurations = value.longTasks;
     };
     await sample();
@@ -713,12 +717,12 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
     clearInterval(interval);
     clearInterval(actionInterval);
     await sample();
-    const pollingDurationMs = Date.now() - pollStartedAt.value;
+    const pollingDurationMs = pollElapsed.value();
     const endpointRates = [...endpointCounts.values()].map(
       (count) => count / (pollingDurationMs / 60_000),
     );
     const visibleRequestsPerMinute = endpointRates.length ? Math.max(...endpointRates) : 0;
-    const hiddenDurationMs = hiddenStartedAt > 0 ? Date.now() - hiddenStartedAt : 0;
+    const hiddenDurationMs = hiddenElapsed === null ? 0 : hiddenElapsed();
     const hiddenEndpointRates = [...hiddenEndpointCounts.values()].map(
       (count) => count / (hiddenDurationMs / 60_000),
     );
@@ -776,7 +780,7 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
     };
     metrics.effectsSoak = {
       artifactPath: 'test-output/release-performance/effects-soak.json',
-      durationMs: Date.now() - soakStartedAt,
+      durationMs: soakElapsed(),
       categoriesVisited,
       searchIterations,
       favoriteIterations,
@@ -789,7 +793,7 @@ async function runBrowser(url, options, metrics, unmeasured, notes) {
     metrics.timelineIntegrity = await probeTimeline(page, unmeasured);
     metrics.editor = {
       artifactPath: 'test-output/release-performance/editor.json',
-      measuredWallTimeMs: Date.now() - startedAt,
+      measuredWallTimeMs: editorElapsed(),
       longTaskPercent,
       initialEditorJsBytes,
     };

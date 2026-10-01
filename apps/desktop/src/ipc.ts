@@ -22,6 +22,7 @@ export const IPC_CHANNELS = [
   'desktop.asset-library.set-directory',
   'desktop.asset-library.select-directory',
   'desktop.asset-library.get-catalog',
+  'desktop.asset-library.reset-directory',
 ] as const;
 export type IpcChannel = (typeof IPC_CHANNELS)[number];
 export interface IpcRequest {

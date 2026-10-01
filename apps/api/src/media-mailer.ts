@@ -6,6 +6,51 @@ export interface MediaMailerOptions {
   readonly user: string;
   readonly pass: string;
   readonly from: string;
+  readonly onOtpDeliveryFailure?: (metadata: OtpDeliveryErrorMetadata) => void;
+}
+
+export interface OtpDeliveryErrorMetadata {
+  readonly code:
+    'EAUTH' | 'ECONNECTION' | 'ETIMEDOUT' | 'ESOCKET' | 'EMESSAGE' | 'EENVELOPE' | 'OTHER';
+  readonly responseCode?: number;
+  readonly command: 'AUTH' | 'CONN' | 'MAIL' | 'RCPT' | 'DATA' | 'UNKNOWN';
+}
+
+/** Extract only fixed, non-sensitive SMTP fields from a provider error. */
+export function sanitizeOtpDeliveryError(error: unknown): OtpDeliveryErrorMetadata {
+  const value =
+    typeof error === 'object' && error !== null ? (error as Record<string, unknown>) : {};
+  const code = value.code;
+  const knownCodes = [
+    'EAUTH',
+    'ECONNECTION',
+    'ETIMEDOUT',
+    'ESOCKET',
+    'EMESSAGE',
+    'EENVELOPE',
+  ] as const;
+  const safeCode =
+    typeof code === 'string' && (knownCodes as readonly string[]).includes(code)
+      ? (code as OtpDeliveryErrorMetadata['code'])
+      : 'OTHER';
+  const responseCode = value.responseCode;
+  const safeResponseCode =
+    typeof responseCode === 'number' &&
+    Number.isInteger(responseCode) &&
+    responseCode >= 400 &&
+    responseCode <= 599
+      ? responseCode
+      : undefined;
+  const commandToken =
+    typeof value.command === 'string' ? (value.command.split(/[\s:]/, 1)[0] ?? '') : '';
+  const safeCommand = ['AUTH', 'CONN', 'MAIL', 'RCPT', 'DATA'].includes(commandToken)
+    ? (commandToken as OtpDeliveryErrorMetadata['command'])
+    : 'UNKNOWN';
+  return {
+    code: safeCode,
+    ...(safeResponseCode === undefined ? {} : { responseCode: safeResponseCode }),
+    command: safeCommand,
+  };
 }
 
 export interface MediaMailerLike {
@@ -51,6 +96,7 @@ export function joyStudioOtpHtml(code: string): string {
 export class MediaMailer implements MediaMailerLike {
   private readonly transporter: Transporter;
   private readonly from: string;
+  private readonly onOtpDeliveryFailure: MediaMailerOptions['onOtpDeliveryFailure'];
 
   constructor(options: MediaMailerOptions) {
     this.transporter = nodemailer.createTransport({
@@ -62,20 +108,30 @@ export class MediaMailer implements MediaMailerLike {
       disableUrlAccess: true,
     });
     this.from = options.from;
+    this.onOtpDeliveryFailure = options.onOtpDeliveryFailure;
   }
 
   async sendOtp(gmail: string, code: string): Promise<void> {
-    await this.transporter.sendMail({
-      from: this.from,
-      to: gmail,
-      subject: 'Joy Studio — Login Code',
-      text:
-        `Your Joy Studio login code is ${code}.\n\n` +
-        `Expires in 5 minutes.\n\n` +
-        `Do not share this code with anyone.`,
-      html: joyStudioOtpHtml(code),
-      disableFileAccess: true,
-      disableUrlAccess: true,
-    });
+    try {
+      await this.transporter.sendMail({
+        from: this.from,
+        to: gmail,
+        subject: 'Joy Studio — Login Code',
+        text:
+          `Your Joy Studio login code is ${code}.\n\n` +
+          `Expires in 5 minutes.\n\n` +
+          `Do not share this code with anyone.`,
+        html: joyStudioOtpHtml(code),
+        disableFileAccess: true,
+        disableUrlAccess: true,
+      });
+    } catch (error) {
+      try {
+        this.onOtpDeliveryFailure?.(sanitizeOtpDeliveryError(error));
+      } catch {
+        // Diagnostics must never replace the delivery failure or expose its details.
+      }
+      throw error;
+    }
   }
 }

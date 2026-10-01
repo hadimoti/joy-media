@@ -100,6 +100,7 @@ import {
   type JoyAgentActiveRunState,
   type JoyAgentRunArtifactReference,
   type JoyAgentRunErrorCode,
+  type JoyAgentRunState,
 } from './joy-agent/run-events.js';
 import {
   EMPTY_AGENT_PRESENCE,
@@ -268,6 +269,38 @@ function boundedAgentResultText(value: unknown): string | undefined {
  */
 export function legacyRecipeExecutionEnabled(): false {
   return false;
+}
+
+export function noEditsAppliedFailureMessage(error: unknown, fallback: string): string {
+  const base = error instanceof Error ? error.message : fallback;
+  return `${base} No edits were applied.`;
+}
+
+export function selectActiveJoyAgentRunId(
+  agentRunId: string | undefined,
+  presenceState: Pick<AgentPresenceState, 'runId' | 'status'>,
+  lifecycleRun:
+    { readonly scope: { readonly runId: string }; readonly state: JoyAgentRunState } | undefined,
+): string | undefined {
+  if (presenceState.status === 'active' && presenceState.runId !== undefined)
+    return presenceState.runId;
+
+  const lifecycleIsActive =
+    lifecycleRun !== undefined && !isTerminalJoyAgentRunState(lifecycleRun.state);
+  if (lifecycleIsActive) return lifecycleRun.scope.runId;
+
+  const lifecycleIsTerminalForAgentRun =
+    lifecycleRun?.scope.runId === agentRunId &&
+    lifecycleRun !== undefined &&
+    isTerminalJoyAgentRunState(lifecycleRun.state);
+  if (
+    agentRunId !== undefined &&
+    presenceState.status === 'idle' &&
+    presenceState.runId === agentRunId &&
+    !lifecycleIsTerminalForAgentRun
+  )
+    return agentRunId;
+  return undefined;
 }
 
 interface PendingPlan {
@@ -468,8 +501,6 @@ export function AgentPanel({
   resolveAudioAssetUrl,
   storage,
   onOpenSettings,
-  onOpenModelDrawer,
-  activeModelLabel,
 }: {
   readonly project: SpikeProject;
   readonly selectedClipIds: readonly string[];
@@ -507,8 +538,6 @@ export function AgentPanel({
   /** Writer-fenced browser persistence owned by the writable editor root. */
   readonly storage: ProjectWriterStorage;
   readonly onOpenSettings?: () => void;
-  readonly onOpenModelDrawer?: () => void;
-  readonly activeModelLabel?: string | undefined;
 }) {
   const registry = useMemo(() => createToolRegistry(), []);
   const auditRef = useRef(createAuditTrail());
@@ -530,8 +559,30 @@ export function AgentPanel({
   const [attachError, setAttachError] = useState<string | undefined>(undefined);
   const [attaching, setAttaching] = useState(false);
   const engineStatus = joyAgentEngineClient?.getStatus();
-  const isDisconnected = engineStatus === undefined || engineStatus.capability === 'incompatible';
+  const capability = engineStatus?.capability;
+  const privacyMode = settings.privacyMode;
+  const isEditReady = capability === 'tool-loop' && privacyMode !== 'local-only';
+  const isDisconnected = !isEditReady;
   const canConfigureDisconnectedAgent = isDisconnected && onOpenSettings !== undefined;
+  let readinessText = '';
+  if (capability === undefined) {
+    readinessText =
+      'Connect a model with JOY edit tools in Agent Settings to run natural-language JOY edits. No fallback provider was selected.';
+  } else if (capability === 'untested') {
+    readinessText = 'The model capability is untested. Test a model in Agent Settings.';
+  } else if (capability === 'incompatible') {
+    readinessText =
+      'The configured model is incompatible. Test another model in Agent Settings; no fallback provider was selected.';
+  } else if (capability === 'plan-only') {
+    readinessText =
+      'This model supports Creative Brief only. Connect a model with JOY edit tools in Agent Settings to run natural-language edits.';
+  } else if (capability === 'tool-loop' && privacyMode === 'local-only') {
+    readinessText =
+      'Local-only privacy mode prevents natural-language edits. Change privacy in Agent Settings.';
+  } else {
+    readinessText =
+      'Edit readiness requires a tool-loop capable model. Configure a model in Agent Settings.';
+  }
   const [conversation, setConversation] = useState<JoyCodeConversation>(() =>
     initialJoyCodeConversation(storage, project.id),
   );
@@ -1448,6 +1499,56 @@ export function AgentPanel({
     waitForObservationReview,
   ]);
 
+  const isRecipeRunnerReady = isEditReady && creativeSkillDeps !== undefined;
+  let recipeReadinessText = '';
+  if (creativeSkillDeps === undefined) {
+    recipeReadinessText =
+      'The JOY recipe runner is unavailable in this editor session. Open JOY Agent Settings to check the connection.';
+  } else if (capability === undefined) {
+    recipeReadinessText =
+      'Connect a model with JOY edit tools in Agent Settings to run recipes. No fallback provider was selected.';
+  } else if (capability === 'untested') {
+    recipeReadinessText =
+      'The model capability is untested. Test a model in Agent Settings before running recipes.';
+  } else if (capability === 'incompatible') {
+    recipeReadinessText =
+      'The configured model is incompatible. Test another model in Agent Settings; no fallback provider was selected.';
+  } else if (capability === 'plan-only') {
+    recipeReadinessText =
+      'This model supports Creative Brief only. Connect a model with JOY edit tools in Agent Settings to run recipes.';
+  } else if (capability === 'tool-loop' && privacyMode === 'local-only') {
+    recipeReadinessText =
+      'Local-only privacy mode prevents recipe model runs. Change privacy in Agent Settings.';
+  } else {
+    recipeReadinessText =
+      'Recipes require a tool-loop capable model. Configure one in Agent Settings.';
+  }
+
+  const isAgentLookRunnerReady = isEditReady && creativeSkillDeps !== undefined;
+  let lookReadinessText = '';
+  if (creativeSkillDeps === undefined) {
+    lookReadinessText =
+      'The JOY Looks runner is unavailable in this editor session. Open JOY Agent Settings to check the connection.';
+  } else if (capability === undefined) {
+    lookReadinessText =
+      'Ask JOY for Looks needs a model with JOY edit tools. Connect one in Agent Settings. No fallback provider was selected.';
+  } else if (capability === 'untested') {
+    lookReadinessText =
+      'The model capability is untested. Test a model in Agent Settings before asking JOY to work with Looks.';
+  } else if (capability === 'incompatible') {
+    lookReadinessText =
+      'The configured model is incompatible. Test another model in Agent Settings; no fallback provider was selected.';
+  } else if (capability === 'plan-only') {
+    lookReadinessText =
+      'This model supports Creative Brief only. Ask JOY for Looks needs a model with JOY edit tools.';
+  } else if (capability === 'tool-loop' && privacyMode === 'local-only') {
+    lookReadinessText =
+      'Local-only privacy mode prevents Ask JOY for Looks. Change privacy in Agent Settings.';
+  } else {
+    lookReadinessText =
+      'Ask JOY for Looks requires a tool-loop capable model. Configure one in Agent Settings.';
+  }
+
   useEffect(() => {
     // Do not save the prior project's conversation under a newly selected
     // project key during React's state-transition render. The next render
@@ -1493,13 +1594,24 @@ export function AgentPanel({
       });
       appendMessage(pending.threadId, 'assistant', 'Stopped. The proposed edit was not applied.');
       updateThreadStatus(pending.threadId, 'draft');
+      setPending(undefined);
+      clearAgentPreviewForSourceRun(pending.runId);
+      agentPresenceStore?.clear();
+      setAgentPhase('cancelled');
+      return;
     }
-    const commandRunId = agentRunId ?? presenceState.runId ?? runLifecycle.run?.scope.runId;
+    const commandRunId = selectActiveJoyAgentRunId(agentRunId, presenceState, runLifecycle.run);
     if (command.type === 'stop') {
       const recipeCancelled = cancelRecipeInvocation(commandRunId);
+      if (!recipeCancelled && commandRunId === undefined) return;
       if (!recipeCancelled && commandRunId !== undefined) {
         cancelRunLifecycle(commandRunId);
         if (joyAgentEngineClient !== undefined) void joyAgentEngineClient.cancel(commandRunId);
+      }
+      // Stop revokes activeModelRunIdRef before the async engine iterator can
+      // deliver its terminal event, so keep the confirmation on the action.
+      if (recipeCancelled || commandRunId !== undefined) {
+        appendMessage(activeThread.id, 'assistant', 'JOY run cancelled. No edits were applied.');
       }
       activeModelRunIdRef.current = undefined;
       discardPreparedModelChange(commandRunId);
@@ -1509,6 +1621,7 @@ export function AgentPanel({
     }
     setPending(undefined);
   }, [
+    activeThread.id,
     agentPresenceStore,
     agentPreviewStore,
     agentRunId,
@@ -1519,7 +1632,7 @@ export function AgentPanel({
     discardPreparedModelChange,
     joyAgentEngineClient,
     pending,
-    presenceState.runId,
+    presenceState,
     runLifecycle.run,
   ]);
 
@@ -1718,14 +1831,26 @@ export function AgentPanel({
     }
     if (intent === undefined && joyAgentEngineClient !== undefined) {
       const connectionStatus = joyAgentEngineClient.getStatus();
-      if (connectionStatus === undefined || connectionStatus.capability === 'incompatible') {
-        appendMessage(
-          threadId,
-          'assistant',
-          connectionStatus?.capability === 'incompatible'
-            ? 'The configured model is incompatible. Test another model in Agent Settings; no fallback provider was selected.'
-            : 'Connect a model in Agent Settings to run natural-language JOY edits. No fallback provider was selected.',
-        );
+      if (
+        connectionStatus === undefined ||
+        connectionStatus.capability === 'incompatible' ||
+        connectionStatus.capability === 'untested' ||
+        connectionStatus.capability === 'plan-only'
+      ) {
+        let message: string;
+        if (connectionStatus?.capability === 'incompatible') {
+          message =
+            'The configured model is incompatible. Test another model in Agent Settings; no fallback provider was selected.';
+        } else if (connectionStatus?.capability === 'untested') {
+          message = 'The model capability is untested. Test a model in Agent Settings.';
+        } else if (connectionStatus?.capability === 'plan-only') {
+          message =
+            'This model supports Creative Brief only. Connect a model with JOY edit tools in Agent Settings to run natural-language edits.';
+        } else {
+          message =
+            'Connect a model with JOY edit tools in Agent Settings to run natural-language JOY edits. No fallback provider was selected.';
+        }
+        appendMessage(threadId, 'assistant', message);
         return;
       }
       const entityReferenceSource = {
@@ -2167,12 +2292,15 @@ export function AgentPanel({
                     : 'The model response was received. JOY keeps edits in preview until you approve them.'),
               );
             }
-            if (event.phase === 'failed')
-              appendMessage(
-                threadId,
-                'assistant',
-                event.message ?? 'JOY could not complete this run. No edits were applied.',
-              );
+            if (event.phase === 'failed') {
+              const failureMessage = event.message?.trim() || 'JOY could not complete this run.';
+              const failureWithNoEditNotice = /\bno edits?\s+(?:were\s+)?applied\b/i.test(
+                failureMessage,
+              )
+                ? failureMessage
+                : failureMessage.replace(/[.!?\s]+$/, '') + '. No edits were applied.';
+              appendMessage(threadId, 'assistant', failureWithNoEditNotice);
+            }
             if (event.phase === 'cancelled')
               appendMessage(threadId, 'assistant', 'JOY run cancelled. No edits were applied.');
             if (event.phase === 'failed' || event.phase === 'cancelled') {
@@ -2213,7 +2341,7 @@ export function AgentPanel({
           appendMessage(
             threadId,
             'assistant',
-            error instanceof Error ? error.message : 'JOY run failed safely.',
+            noEditsAppliedFailureMessage(error, 'JOY run failed safely.'),
           );
           setAgentPhase('failed');
         } finally {
@@ -2280,8 +2408,7 @@ export function AgentPanel({
       thinkingThreadId !== undefined ||
       modelView !== undefined ||
       pending !== undefined ||
-      creativeSkillDeps === undefined ||
-      joyAgentEngineClient === undefined
+      !isRecipeRunnerReady
     )
       return;
     const entry = creativeSkills.find((candidate) => candidate.skill.id === skillId);
@@ -2396,7 +2523,7 @@ export function AgentPanel({
       appendMessage(
         threadId,
         'assistant',
-        error instanceof Error ? error.message : 'The recipe run failed safely.',
+        noEditsAppliedFailureMessage(error, 'The recipe run failed safely.'),
       );
       cancelRunLifecycle(scope.runId, 'Recipe run failed.');
       setAgentPhase('failed');
@@ -2559,7 +2686,7 @@ export function AgentPanel({
       appendMessage(
         threadId,
         'assistant',
-        error instanceof Error ? error.message : 'The Look run failed safely.',
+        noEditsAppliedFailureMessage(error, 'The Look run failed safely.'),
       );
       cancelRecipeInvocation(scope.runId, 'Look run failed.');
       setAgentPhase('failed');
@@ -2657,6 +2784,7 @@ export function AgentPanel({
   async function runAgentLook(prompt: string): Promise<void> {
     if (
       joyAgentEngineClient === undefined ||
+      !isAgentLookRunnerReady ||
       lookRunningId !== undefined ||
       recipeRunningId !== undefined ||
       thinkingThreadId !== undefined ||
@@ -2791,7 +2919,7 @@ export function AgentPanel({
       appendMessage(
         threadId,
         'assistant',
-        error instanceof Error ? error.message : 'The Look run failed safely.',
+        noEditsAppliedFailureMessage(error, 'The Look run failed safely.'),
       );
       cancelRecipeInvocation(scope.runId, 'Look run failed.');
       setAgentPhase('failed');
@@ -3108,7 +3236,7 @@ export function AgentPanel({
     liveAgentPhase !== 'completed' &&
     liveAgentPhase !== 'failed' &&
     liveAgentPhase !== 'cancelled';
-  const activeRunId = agentRunId ?? presenceState.runId ?? runLifecycle.run?.scope.runId;
+  const activeRunId = selectActiveJoyAgentRunId(agentRunId, presenceState, runLifecycle.run);
 
   const uploadJoyCodeFiles = async (fileList: FileList | null) => {
     if (fileList === null || fileList.length === 0 || onAttachAsset === undefined) return;
@@ -3181,10 +3309,11 @@ export function AgentPanel({
                 ? 'Previewing changes in the editor'
                 : 'Live engine activity'}
             </span>
-            {(liveAgentPhase === 'thinking' ||
-              liveAgentPhase === 'connecting' ||
-              liveAgentPhase === 'planning' ||
-              liveAgentPhase === 'previewing') &&
+            {pending === undefined &&
+              (liveAgentPhase === 'thinking' ||
+                liveAgentPhase === 'connecting' ||
+                liveAgentPhase === 'planning' ||
+                liveAgentPhase === 'previewing') &&
               joyAgentEngineClient !== undefined && (
                 <button
                   type="button"
@@ -3193,6 +3322,15 @@ export function AgentPanel({
                     if (!recipeCancelled && activeRunId !== undefined) {
                       cancelRunLifecycle(activeRunId);
                       void joyAgentEngineClient.cancel(activeRunId);
+                    }
+                    // Stop revokes activeModelRunIdRef before the async engine iterator can
+                    // deliver its terminal event, so keep the confirmation on the action.
+                    if (recipeCancelled || activeRunId !== undefined) {
+                      appendMessage(
+                        activeThread.id,
+                        'assistant',
+                        'JOY run cancelled. No edits were applied.',
+                      );
                     }
                     activeModelRunIdRef.current = undefined;
                     discardPreparedModelChange(activeRunId);
@@ -3215,7 +3353,6 @@ export function AgentPanel({
           data-agent-phase={liveAgentPhase}
         >
           <div className="joy-code-capabilities" role="toolbar" aria-label="Composer capabilities">
-            <span className="joy-code-capabilities-label">Create with JOY</span>
             <button
               type="button"
               className={`joy-code-capability ${composerCapability === 'edit' ? 'is-active' : ''}`}
@@ -3263,47 +3400,7 @@ export function AgentPanel({
               </span>
               Looks
             </button>
-            {onOpenModelDrawer !== undefined && (
-              <button
-                type="button"
-                className="joy-code-model-trigger-btn"
-                aria-label="Select AI Model"
-                title={
-                  activeModelLabel
-                    ? `Current Model: ${activeModelLabel}. Click to change model or add API.`
-                    : 'Select or Add AI Model'
-                }
-                onClick={onOpenModelDrawer}
-                style={{
-                  marginLeft: 'auto',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '3px 9px',
-                  fontSize: '11.5px',
-                  borderRadius: '6px',
-                  border: '1px solid rgba(255, 176, 32, 0.35)',
-                  background: 'rgba(255, 176, 32, 0.1)',
-                  color: '#ffb020',
-                  cursor: 'pointer',
-                  fontWeight: 500,
-                  flexShrink: 0,
-                }}
-              >
-                <span>⚡</span>
-                <span
-                  style={{
-                    maxWidth: '130px',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {activeModelLabel || 'Models'}
-                </span>
-                <span style={{ fontSize: '9px', opacity: 0.8 }}>▼</span>
-              </button>
-            )}
+
             {onOpenSettings !== undefined && (
               <button
                 type="button"
@@ -3311,19 +3408,6 @@ export function AgentPanel({
                 aria-label="Joy Code Settings"
                 title="Joy Code Settings"
                 onClick={onOpenSettings}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '3px 8px',
-                  fontSize: '12px',
-                  borderRadius: '6px',
-                  border: '1px solid rgba(255, 255, 255, 0.15)',
-                  background: 'rgba(255, 255, 255, 0.06)',
-                  color: '#ccc',
-                  cursor: 'pointer',
-                  flexShrink: 0,
-                }}
               >
                 ⚙️
               </button>
@@ -3367,6 +3451,24 @@ export function AgentPanel({
               Guided multi-step edits. Each runs through the same single JOY engine, staged preview,
               and approval as a direct edit.
             </p>
+            {!isRecipeRunnerReady && (
+              <div
+                className="joy-code-disconnected-banner"
+                role="status"
+                aria-label="Recipes readiness"
+              >
+                <span>{recipeReadinessText}</span>
+                {onOpenSettings !== undefined && (
+                  <button
+                    type="button"
+                    className="button-secondary joy-code-configure-agent-btn"
+                    onClick={onOpenSettings}
+                  >
+                    Open JOY Agent Settings
+                  </button>
+                )}
+              </div>
+            )}
             <ul className="joy-code-recipes-list">
               {creativeSkills.map((entry) => {
                 const missing = [...entry.missingCapabilities, ...entry.missingOperations];
@@ -3388,9 +3490,9 @@ export function AgentPanel({
                       className="joy-code-recipe-run"
                       disabled={
                         !entry.available ||
+                        !isRecipeRunnerReady ||
                         recipeRunningId !== undefined ||
-                        liveAgentBusy ||
-                        creativeSkillDeps === undefined
+                        liveAgentBusy
                       }
                       aria-label={`Run ${entry.skill.title}`}
                       onClick={() => void runRecipe(entry.skill.id)}
@@ -3402,6 +3504,24 @@ export function AgentPanel({
               })}
             </ul>
           </div>
+          {composerCapability === 'looks' && !isAgentLookRunnerReady && (
+            <div
+              className="joy-code-disconnected-banner"
+              role="status"
+              aria-label="Looks readiness"
+            >
+              <span>{lookReadinessText}</span>
+              {onOpenSettings !== undefined && (
+                <button
+                  type="button"
+                  className="button-secondary joy-code-configure-agent-btn"
+                  onClick={onOpenSettings}
+                >
+                  Open JOY Agent Settings
+                </button>
+              )}
+            </div>
+          )}
           <LivingLooksPanel
             hidden={composerCapability !== 'looks'}
             catalog={lookCatalog}
@@ -3410,12 +3530,12 @@ export function AgentPanel({
             runningLookId={lookRunningId}
             busy={liveAgentBusy || recipeRunningId !== undefined}
             onRun={(request) => void runLook(request)}
-            {...(creativeSkillDeps === undefined
-              ? {}
-              : {
+            {...(isAgentLookRunnerReady
+              ? {
                   onAgentRun: (prompt: string) => void runAgentLook(prompt),
                   agentBusy: lookRunningId === AGENT_LOOK_RUN_ID,
-                })}
+                }
+              : {})}
             {...(resolveAudioAssetUrl === undefined || compositionAudioClip === undefined
               ? {}
               : {
@@ -3743,31 +3863,22 @@ export function AgentPanel({
 
           {composerCapability === 'edit' && (
             <div className="joy-code-compose-dock">
-              {canConfigureDisconnectedAgent &&
-                Boolean(activeThread && activeThread.messages.length > 0) && (
-                  <div
-                    className="joy-code-disconnected-banner"
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '6px 10px',
-                      marginBottom: '8px',
-                      background: 'rgba(255, 255, 255, 0.04)',
-                      borderRadius: '6px',
-                      fontSize: '12px',
-                    }}
+              {canConfigureDisconnectedAgent && (
+                <div
+                  className="joy-code-disconnected-banner"
+                  role="status"
+                  aria-label="Edit readiness"
+                >
+                  <span>{readinessText}</span>
+                  <button
+                    type="button"
+                    className="button-secondary joy-code-configure-agent-btn"
+                    onClick={onOpenSettings}
                   >
-                    <span>Model disconnected.</span>
-                    <button
-                      type="button"
-                      className="button-secondary joy-code-configure-agent-btn"
-                      onClick={onOpenSettings}
-                    >
-                      Configure OpenRouter / Joy Agent
-                    </button>
-                  </div>
-                )}
+                    Open JOY Agent Settings
+                  </button>
+                </div>
+              )}
               {attachedAssets.length > 0 && (
                 <ul className="joy-code-attachments" aria-label="Attached media">
                   {attachedAssets.map((asset) => (

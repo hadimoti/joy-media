@@ -37,14 +37,16 @@ test.describe('WP-29 R5 batch A — file bridge', () => {
     const pngBaseline = await pngCards.count();
     const jpegBaseline = await jpegCards.count();
     const imageCountBefore = Number(
-      (await page.getByRole('tab', { name: /Images \d+/ }).textContent())?.match(/\d+/)?.[0] ?? 0,
+      (await page.getByRole('tab', { name: /Images, \d+ assets?/ }).textContent())?.match(
+        /\d+/,
+      )?.[0] ?? 0,
     );
     await importMediaFixture(page, 'image.png', pngName);
     await importMediaFixture(page, 'image.jpg', jpegName);
 
     await expect(pngCards).toHaveCount(pngBaseline + 1);
     await expect(jpegCards).toHaveCount(jpegBaseline + 1);
-    const imageTab = page.getByRole('tab', { name: /Images \d+/ });
+    const imageTab = page.getByRole('tab', { name: /Images, \d+ assets?/ });
     await expect(imageTab).toHaveAttribute('aria-selected', 'true');
     await expect
       .poll(async () => Number((await imageTab.textContent())?.match(/\d+/)?.[0] ?? 0))
@@ -65,7 +67,9 @@ test.describe('WP-29 R5 batch A — file bridge', () => {
     const mediaName = `wp29-case16-${testInfo.project.name}-${Date.now()}.mp4`;
     const videoCards = page.locator('.asset-card', { hasText: mediaName });
     const videoCountBefore = Number(
-      (await page.getByRole('tab', { name: /Video \d+/ }).textContent())?.match(/\d+/)?.[0] ?? 0,
+      (await page.getByRole('tab', { name: /Video, \d+ assets?/ }).textContent())?.match(
+        /\d+/,
+      )?.[0] ?? 0,
     );
 
     await page.getByRole('button', { name: 'Import media' }).first().click();
@@ -78,7 +82,7 @@ test.describe('WP-29 R5 batch A — file bridge', () => {
     await drawer.getByRole('button', { name: 'Confirm import' }).click();
 
     await expect(videoCards).toHaveCount(1);
-    const videoTab = page.getByRole('tab', { name: /Video \d+/ });
+    const videoTab = page.getByRole('tab', { name: /Video, \d+ assets?/ });
     await expect(videoTab).toHaveAttribute('aria-selected', 'true');
     await expect
       .poll(async () => Number((await videoTab.textContent())?.match(/\d+/)?.[0] ?? 0))
@@ -121,7 +125,7 @@ test.describe('WP-29 R5 batch A — file bridge', () => {
     await expect(
       page.getByRole('button', { name: 'Showing user assets; switch to cloud bucket assets' }),
     ).toBeVisible();
-    await page.getByRole('tab', { name: /Audio \d+/ }).click();
+    await page.getByRole('tab', { name: /Audio, \d+ assets?/ }).click();
     const fixturePrefix = `wp29-case17-${testInfo.project.name}-${Date.now()}`;
     const wavName = `${fixturePrefix}.wav`;
     const mp3Name = `${fixturePrefix}.mp3`;
@@ -130,14 +134,16 @@ test.describe('WP-29 R5 batch A — file bridge', () => {
     const wavBaseline = await wavCards.count();
     const mp3Baseline = await mp3Cards.count();
     const audioCountBefore = Number(
-      (await page.getByRole('tab', { name: /Audio \d+/ }).textContent())?.match(/\d+/)?.[0] ?? 0,
+      (await page.getByRole('tab', { name: /Audio, \d+ assets?/ }).textContent())?.match(
+        /\d+/,
+      )?.[0] ?? 0,
     );
     await importMediaFixture(page, 'audio.wav', wavName);
     await importMediaFixture(page, 'audio.mp3', mp3Name);
 
     await expect(wavCards).toHaveCount(wavBaseline + 1);
     await expect(mp3Cards).toHaveCount(mp3Baseline + 1);
-    const audioTab = page.getByRole('tab', { name: /Audio \d+/ });
+    const audioTab = page.getByRole('tab', { name: /Audio, \d+ assets?/ });
     await expect(audioTab).toHaveAttribute('aria-selected', 'true');
     await expect
       .poll(async () => Number((await audioTab.textContent())?.match(/\d+/)?.[0] ?? 0))

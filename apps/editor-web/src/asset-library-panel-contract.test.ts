@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const panelSource = readFileSync(new URL('./AssetLibraryPanel.tsx', import.meta.url), 'utf8');
+const iconSource = readFileSync(new URL('./asset-library-icons.ts', import.meta.url), 'utf8');
 
 describe('AssetLibraryPanel successful import contract', () => {
   it('uses the writer-gated panel storage rather than raw browser localStorage', () => {
@@ -98,5 +99,28 @@ describe('AssetLibraryPanel successful import contract', () => {
       'Timeline insertion is unavailable; refresh the editor and retry.',
     );
     expect(panelSource).toContain('timelineAddRef.current.delete(asset.assetId);');
+  });
+
+  it('defines all four media categories with icons and wires tab selection', () => {
+    expect(panelSource).toContain("{ id: 'all', label: 'All' }");
+    expect(panelSource).toContain("{ id: 'image', label: 'Images' }");
+    expect(panelSource).toContain("{ id: 'video', label: 'Video' }");
+    expect(panelSource).toContain("{ id: 'audio', label: 'Audio' }");
+    expect(iconSource).toContain("all: iconUrl('asset/24_Browse.png')");
+    expect(iconSource).toContain("image: iconUrl('asset/24_Images.png')");
+    expect(iconSource).toContain("video: iconUrl('asset/24_video.png')");
+    expect(iconSource).toContain("audio: iconUrl('asset/24_Audio.png')");
+    expect(panelSource).toContain('label: entry.label');
+    expect(panelSource).toContain('count,');
+    expect(panelSource).toContain('iconUrl: ASSET_CATEGORY_ICONS[entry.id]');
+    expect(panelSource).toContain('ariaLabel:');
+    expect(panelSource).toContain('tooltip:');
+    expect(panelSource).toMatch(/entry\.id === 'all'\s*\?\s*sourceItems\.length/);
+    expect(panelSource).toContain(
+      'sourceItems.filter(({ asset }) => asset.kind === entry.id).length',
+    );
+    expect(panelSource).toContain('activeTab={category}');
+    expect(panelSource).toContain('setCategory(id as AssetCategory)');
+    expect(panelSource).toContain("setCollection('browse')");
   });
 });
