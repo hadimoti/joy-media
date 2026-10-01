@@ -5,7 +5,7 @@
 
 ## SSH access
 
-`ssh sweden` → `<CONTROL_PLANE_IP>`, user `root`, key `C:\Users\HadiMoti\.ssh\joy-vps.pem` (same as joy-vps project; `~/.ssh/config` alias `sweden`/`sweden-vps`).
+`ssh sweden` → `<CONTROL_PLANE_IP>`, user `root`, key `~/.ssh/<CONTROL_PLANE_KEY>.pem` (same as joy-vps project; `~/.ssh/config` alias `sweden`/`sweden-vps`).
 
 ## Measured baseline (2026-07-19, `ssh sweden`)
 

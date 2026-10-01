@@ -95,7 +95,7 @@ Recorded here so no session re-litigates them:
 
 ## 5. Standing facts (measured 2026-07-19)
 
-- **VPS:** `ssh sweden` → `<CONTROL_PLANE_IP>`, root, key `C:\Users\HadiMoti\.ssh\joy-vps.pem` (same as joy-vps project) · QEMU Virtual CPU 2.5+ with avx/avx2/sse4_2 · 8 GB RAM · 99 GB disk (43 free) · Node v22.23.1 · PostgreSQL 17 installed · Docker/containerd present.
+- **VPS:** `ssh sweden` → `<CONTROL_PLANE_IP>`, root, key `~/.ssh/<CONTROL_PLANE_KEY>.pem` (same as joy-vps project) · QEMU Virtual CPU 2.5+ with avx/avx2/sse4_2 · 8 GB RAM · 99 GB disk (43 free) · Node v22.23.1 · PostgreSQL 17 installed · Docker/containerd present.
 - **Ports in use on VPS:** 22, 53, 80, 443, 5355, 8008, 8080–8083, 8766–8767, 9090, 9222, 10001–10005, 19825. **Reserved for JOY Media: 8790 (API/WS), 8791 (object gateway, optional).** Recorded in X01; re-verify before first bind.
 - **VPS skeleton:** `/opt/joy-media/` — live web + API at tip in STATE handoff (`media.joyteam.ir`, API `:8790`). Deploy via immutable `web-releases/<sha>` and `releases/<shortsha>` (see STATE).
 - **Current tip (2026-07-24 measured):** git `9fd9301`; live web symlink `residuals-piper-gpu-pixi`. Working tree may include uncommitted editor library/timeline polish — see STATE handoff. API `:8790` was **down** at last measurement (restart before provider smoke). Owner entitlement `joymedia_allowed` for `68238523` is confirmed.

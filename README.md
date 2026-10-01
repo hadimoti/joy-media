@@ -8,7 +8,7 @@
 [![Architecture: Offline--First NLE](https://img.shields.io/badge/Architecture-Offline--First%20NLE-00d2ff?style=flat-square)](https://joyst.ir)
 [![Engine: React 19 + Electron](https://img.shields.io/badge/Engine-React%2019%20%2B%20Electron-9d4edd?style=flat-square)](https://joyst.ir)
 [![Database: SQLite WAL + OPFS](https://img.shields.io/badge/Database-SQLite%20WAL%20%2B%20OPFS-10b981?style=flat-square)](https://joyst.ir)
-[![Status: Private Evaluation](https://img.shields.io/badge/Status-Private%20Evaluation-amber?style=flat-square)](https://joyst.ir)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
 <p align="center">
   <b>JOY Media</b> is a high-performance desktop non-linear video editor engineered for creators who demand <b>zero cloud latency</b>, <b>total media privacy</b>, <b>sample-accurate playback</b>, and <b>on-device AI intelligence</b>.
@@ -148,7 +148,6 @@ Output artifacts are generated in `apps/desktop/dist/releases/`:
 
 ---
 
-## Private Repository Status
+## Open Source Status
 
-> **Notice:** JOY Media is currently in **Private Preview & Evaluation** for repository owner testing.
-> Licensed under the MIT License. See [LICENSE](LICENSE) for the full license text.
+> **Notice:** JOY Media is free and open-source software licensed under the [MIT License](LICENSE).
