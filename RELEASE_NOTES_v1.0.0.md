@@ -42,6 +42,6 @@ JOY Media is a modern, 100% offline-first desktop non-linear video editor (NLE) 
 #### SHA256 Checksums
 
 ```
-4910dffe9da225b5c41cc618760912e27098d71a3d1f58e92136743a063c9580  joy-media-setup.exe
-cfe44ef5a79514bf1fad4e861b291059525a1aeaf578e36900bb959f6d7e3295  joy-media-windows-x64-v1.0.0.zip
+18269119ddeae8bed559b8c2305f28d229c290d66f4029c9fc4c476fda82ed6e  joy-media-setup.exe
+73e3271a1e8073a2b99389071007565b1f72806115826a50b93a88847ed52ea5  joy-media-windows-x64-v1.0.0.zip
 ```
