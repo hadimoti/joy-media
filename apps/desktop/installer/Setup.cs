@@ -71,8 +71,22 @@ namespace JoyMedia.Setup
                     int i = 0;
                     foreach (ZipArchiveEntry entry in archive.Entries)
                     {
-                        string destPath = Path.Combine(installPath, entry.FullName);
-                        if (string.IsNullOrEmpty(entry.Name))
+                        string rel = entry.FullName;
+                        if (rel.StartsWith("joy-media-win32-x64/", StringComparison.OrdinalIgnoreCase))
+                        {
+                            rel = rel.Substring("joy-media-win32-x64/".Length);
+                        }
+                        else if (rel.StartsWith("joy-media-win32-x64\\", StringComparison.OrdinalIgnoreCase))
+                        {
+                            rel = rel.Substring("joy-media-win32-x64\\".Length);
+                        }
+                        if (string.IsNullOrEmpty(rel))
+                        {
+                            continue;
+                        }
+
+                        string destPath = Path.Combine(installPath, rel);
+                        if (string.IsNullOrEmpty(entry.Name) || rel.EndsWith("/") || rel.EndsWith("\\"))
                         {
                             Directory.CreateDirectory(destPath);
                         }
