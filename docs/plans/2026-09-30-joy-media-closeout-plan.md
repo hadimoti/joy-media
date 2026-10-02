@@ -253,4 +253,3 @@ The owner specified that the editor UI must remain off production. This update r
 - **Sanitization Complete:** Removed hardcoded user paths and session directories from test scripts (`tests/desktop/computer-use-debug.mjs`, `tests/desktop/verify-asset-library.mjs`); sanitized private key paths in `ORCHESTRATION.md` and `plan/X01-vps-control-plane.md`.
 - **Public Open-Source Metadata Aligned:** `README.md` status badge updated to `License: MIT`; repository status section updated to Open Source Status under MIT; `docs/OPEN_SOURCE_RELEASE.md` updated with Gate A clearance.
 - **Release Status:** Repository is clean, tested, documented, and fully ready for public release.
-
