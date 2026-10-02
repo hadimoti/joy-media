@@ -176,7 +176,7 @@ export async function runCli(argv: string[]): Promise<number> {
   const { values, positionals } = parsedArgs;
 
   if (values.version) {
-    console.log('JOY Media CLI v1.0.0');
+    console.log('JOY Media CLI v1.0.1');
     return 0;
   }
 

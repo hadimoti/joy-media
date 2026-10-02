@@ -30,7 +30,7 @@ export function printBanner(): void {
   console.log(
     `${c('  ██████╗  ██████╗ ██╗   ██╗', 'magenta')}` +
       `  ${c('JOY MEDIA CLI', 'bold')}` +
-      ` ${c('v1.0.0', 'dim')}`,
+      ` ${c('v1.0.1', 'dim')}`,
   );
   console.log(
     `${c('  ╚══████╗██╔═══██╗╚██╗ ██╔╝', 'magenta')}` +

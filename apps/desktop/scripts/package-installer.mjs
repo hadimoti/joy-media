@@ -167,7 +167,7 @@ if ($pathParts -notcontains $InstallPath) {
 $uninstallKey = "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\JoyMedia"
 New-Item -Path $uninstallKey -Force | Out-Null
 Set-ItemProperty -Path $uninstallKey -Name "DisplayName" -Value "JOY Media" -Force
-Set-ItemProperty -Path $uninstallKey -Name "DisplayVersion" -Value "1.0.0" -Force
+Set-ItemProperty -Path $uninstallKey -Name "DisplayVersion" -Value "1.0.1" -Force
 Set-ItemProperty -Path $uninstallKey -Name "Publisher" -Value "JOY Team" -Force
 Set-ItemProperty -Path $uninstallKey -Name "DisplayIcon" -Value $exePath -Force
 Set-ItemProperty -Path $uninstallKey -Name "InstallLocation" -Value $InstallPath -Force
@@ -204,7 +204,7 @@ await writeFile(resolve(standaloneDir, 'uninstall.cmd'), uninstallCmd, 'utf8');
 console.log('4. Creating distributable zip release...');
 await mkdir(releasesDir, { recursive: true });
 
-const version = '1.0.0';
+const version = '1.0.1';
 const releaseZipName = `joy-media-windows-x64-v${version}.zip`;
 const releaseZipPath = resolve(releasesDir, releaseZipName);
 

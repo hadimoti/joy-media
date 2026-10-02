@@ -1,7 +1,7 @@
 # Build script for joy-media-setup.exe using Microsoft .NET Framework C# compiler (csc.exe)
 # Usage: build-installer.ps1 [-Version 1.0.1]
 param(
-    [string]$Version = "1.0.0"
+    [string]$Version = "1.0.1"
 )
 $ErrorActionPreference = "Stop"
 
