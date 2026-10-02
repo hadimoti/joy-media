@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -58,11 +58,178 @@ assert.strictEqual(projectResult.status, 0, `joy.cmd project list failed: ${proj
 assert.ok(projectResult.stdout.includes('Local Projects'), 'Project list output unexpected');
 console.log('✔ Packaged CLI project list passed cleanly.');
 
-// 4. Test Mock Installation with Setup-JoyMedia.ps1
-console.log('4. Testing Setup-JoyMedia.ps1 non-elevated installation to temporary path...');
-const tempInstallDir = mkdtempSync(join(tmpdir(), 'joy-install-test-'));
+// 4. Test Standalone Uninstall Sandbox Isolation
+console.log('4. Testing standalone uninstall.cmd cleanup in an isolated sandbox...');
+const uninstallSource = readFileSync(resolve(standaloneDir, 'uninstall.cmd'), 'utf8');
+const uninstallLines = uninstallSource.split(/\r?\n/);
+const cleanupBanner = 'echo Cleaning application files...';
+const cleanupBannerIndexes = uninstallLines.flatMap((line, index) =>
+  line.trim() === cleanupBanner ? [index] : [],
+);
+assert.strictEqual(cleanupBannerIndexes.length, 1, 'Uninstaller cleanup boundary must occur once');
+const cleanupBannerIndex = cleanupBannerIndexes[0];
+const integrationStartIndex = uninstallLines.findIndex((line) => line.startsWith('del "%APPDATA%'));
+assert.ok(
+  integrationStartIndex > 0 && integrationStartIndex < cleanupBannerIndex,
+  'Uninstaller host-integration block was not found before file cleanup',
+);
+const safetyPreflightIndex = uninstallLines.findIndex(
+  (line) =>
+    line.startsWith('powershell.exe') &&
+    line.includes('GetPathRoot') &&
+    line.includes('joy-media.exe'),
+);
+assert.ok(
+  safetyPreflightIndex > 0 && safetyPreflightIndex < integrationStartIndex,
+  'Install-directory safety preflight must run before host integrations',
+);
+const pathCleanupCommand = uninstallLines.find((line) =>
+  line.includes("[Environment]::GetEnvironmentVariable('Path', 'User')"),
+);
+assert.ok(pathCleanupCommand, 'User PATH cleanup command was not found');
+assert.ok(
+  pathCleanupCommand.includes('$target = $env:JOY_MEDIA_INSTALL_DIR.TrimEnd') &&
+    pathCleanupCommand.includes('-ine $target') &&
+    !pathCleanupCommand.includes('%INSTALL_DIR%'),
+  'User PATH cleanup must compare the normalized runtime install path without a literal batch variable',
+);
+const hostIntegrationBlock = uninstallLines
+  .slice(integrationStartIndex, cleanupBannerIndex)
+  .join('\n');
+assert.match(
+  hostIntegrationBlock,
+  /del "%APPDATA%/i,
+  'Start Menu shortcut operation was not found',
+);
+assert.match(
+  hostIntegrationBlock,
+  /del "%USERPROFILE%/i,
+  'Desktop shortcut operation was not found',
+);
+assert.match(hostIntegrationBlock, /reg\s+delete/i, 'Registry operation was not found');
+assert.match(hostIntegrationBlock, /powershell\.exe/i, 'User PATH operation was not found');
+
+// The test copy preserves the generated file-cleanup logic while removing all
+// commands that could modify the host profile, registry, shortcuts, or PATH.
+const sandboxUninstaller = [
+  ...uninstallLines.slice(0, integrationStartIndex),
+  'rem Host integration is intentionally disabled by this isolated test.',
+  ...uninstallLines.slice(cleanupBannerIndex),
+].join('\r\n');
+assert.doesNotMatch(sandboxUninstaller, /\breg(?:\.exe)?\s+(?:delete|add)\b/i);
+assert.doesNotMatch(sandboxUninstaller, /Environment\]::(?:Get|Set)EnvironmentVariable/i);
+assert.doesNotMatch(sandboxUninstaller, /%APPDATA%|%USERPROFILE%/i);
+
+const uninstallSandboxRoot = mkdtempSync(join(tmpdir(), 'joy-uninstall-sandbox-'));
 try {
-  const installPs1 = resolve(standaloneDir, 'Setup-JoyMedia.ps1');
+  const sandboxLocalAppData = join(uninstallSandboxRoot, 'LocalAppData');
+  const sandboxAppData = join(uninstallSandboxRoot, 'AppData');
+  const sandboxUserProfile = join(uninstallSandboxRoot, 'UserProfile');
+  const sandboxInstallDir = join(sandboxLocalAppData, 'Programs', 'JOY Media');
+  mkdirSync(sandboxInstallDir, { recursive: true });
+  mkdirSync(sandboxAppData, { recursive: true });
+  mkdirSync(sandboxUserProfile, { recursive: true });
+  writeFileSync(join(sandboxInstallDir, 'uninstall.cmd'), sandboxUninstaller, 'utf8');
+  writeFileSync(join(sandboxInstallDir, 'marker.txt'), 'sandbox-only');
+  writeFileSync(join(sandboxInstallDir, 'joy-media.exe'), 'sandbox-only');
+
+  const originalPath = process.env.PATH;
+  const uninstallResult = spawnSync('cmd.exe', ['/d', '/c', 'uninstall.cmd'], {
+    cwd: sandboxInstallDir,
+    env: {
+      ...process.env,
+      LOCALAPPDATA: sandboxLocalAppData,
+      APPDATA: sandboxAppData,
+      USERPROFILE: sandboxUserProfile,
+      TEMP: tmpdir(),
+      TMP: tmpdir(),
+    },
+    encoding: 'utf8',
+    timeout: 30000,
+    windowsHide: true,
+  });
+  assert.strictEqual(
+    uninstallResult.status,
+    0,
+    `uninstall.cmd failed: ${uninstallResult.stderr || uninstallResult.stdout}`,
+  );
+
+  let removed = false;
+  for (let attempt = 0; attempt < 60; attempt++) {
+    if (!existsSync(sandboxInstallDir)) {
+      removed = true;
+      break;
+    }
+    spawnSync('powershell.exe', ['-NoProfile', '-Command', 'Start-Sleep -Milliseconds 250'], {
+      encoding: 'utf8',
+      timeout: 5000,
+      windowsHide: true,
+    });
+  }
+  assert.ok(removed, 'Temporary install directory was not removed by uninstall.cmd');
+  assert.strictEqual(process.env.PATH, originalPath, 'The test changed the parent process PATH');
+  console.log('✔ Standalone uninstall.cmd isolated cleanup passed.');
+} finally {
+  rmSync(uninstallSandboxRoot, { recursive: true, force: true });
+}
+
+// 5. Test Setup-JoyMedia.ps1 copy logic with an isolated source fixture
+console.log('5. Testing Setup-JoyMedia.ps1 file copying with an isolated fixture...');
+const setupSandboxRoot = mkdtempSync(join(tmpdir(), 'joy-install-sandbox-'));
+try {
+  const fixtureSourceDir = join(setupSandboxRoot, 'source');
+  const fixtureInstallDir = join(setupSandboxRoot, 'install');
+  const setupSource = readFileSync(resolve(standaloneDir, 'Setup-JoyMedia.ps1'), 'utf8');
+  const integrationStart = setupSource.indexOf('# Create Shortcuts');
+  const integrationEnd = setupSource.indexOf(
+    'Write-Host "JOY Media successfully installed!"',
+    integrationStart,
+  );
+  assert.ok(
+    integrationStart >= 0 && integrationEnd > integrationStart,
+    'Setup integration block boundaries are invalid',
+  );
+  const setupIntegrationBlock = setupSource.slice(integrationStart, integrationEnd);
+  assert.match(
+    setupIntegrationBlock,
+    /New-Object -ComObject/i,
+    'Shortcut integration block was not found',
+  );
+  assert.match(
+    setupIntegrationBlock,
+    /SetEnvironmentVariable/i,
+    'User PATH integration was not found',
+  );
+  assert.match(
+    setupIntegrationBlock,
+    /Set-ItemProperty/i,
+    'Registry integration block was not found',
+  );
+  const isolatedSetup =
+    setupSource.slice(0, integrationStart) +
+    '# Host shortcut, User PATH, and registry integration is excluded by this test.\r\n' +
+    setupSource.slice(integrationEnd);
+  assert.doesNotMatch(
+    isolatedSetup,
+    /WScript\.Shell|SetEnvironmentVariable|GetEnvironmentVariable\("Path"|Set-ItemProperty/i,
+  );
+
+  mkdirSync(fixtureSourceDir, { recursive: true });
+  const fixtureFiles = [
+    'joy-media.exe',
+    'joy.cmd',
+    'resources/app/cli/joy-media-bundle.mjs',
+    'resources/app/worker/joy-worker.exe',
+  ];
+  for (const relativePath of fixtureFiles) {
+    const fixturePath = join(fixtureSourceDir, relativePath);
+    mkdirSync(resolve(fixturePath, '..'), { recursive: true });
+    writeFileSync(fixturePath, `fixture: ${relativePath}`);
+  }
+  writeFileSync(join(fixtureSourceDir, 'Setup-JoyMedia.ps1'), isolatedSetup, 'utf8');
+  writeFileSync(join(fixtureSourceDir, 'install.cmd'), '@echo off\r\n');
+  writeFileSync(join(fixtureSourceDir, 'uninstall.cmd'), '@echo off\r\n');
+
   const installResult = spawnSync(
     'powershell.exe',
     [
@@ -70,46 +237,53 @@ try {
       '-ExecutionPolicy',
       'Bypass',
       '-File',
-      installPs1,
+      join(fixtureSourceDir, 'Setup-JoyMedia.ps1'),
       '-InstallPath',
-      tempInstallDir,
+      fixtureInstallDir,
       '-Silent',
     ],
-    { encoding: 'utf8', timeout: 30000 },
+    {
+      env: {
+        ...process.env,
+        LOCALAPPDATA: join(setupSandboxRoot, 'LocalAppData'),
+        APPDATA: join(setupSandboxRoot, 'AppData'),
+        USERPROFILE: join(setupSandboxRoot, 'UserProfile'),
+      },
+      encoding: 'utf8',
+      timeout: 30000,
+      windowsHide: true,
+    },
   );
-  assert.strictEqual(installResult.status, 0, `Setup-JoyMedia.ps1 failed: ${installResult.stderr}`);
-
-  // Verify installed files
-  assert.ok(existsSync(join(tempInstallDir, 'joy-media.exe')), 'Installed joy-media.exe missing');
-  assert.ok(existsSync(join(tempInstallDir, 'joy.cmd')), 'Installed joy.cmd missing');
-  assert.ok(
-    existsSync(join(tempInstallDir, 'resources', 'app', 'cli', 'joy-media-bundle.mjs')),
-    'Installed CLI bundle missing',
+  assert.strictEqual(
+    installResult.status,
+    0,
+    `Isolated Setup-JoyMedia.ps1 failed: ${installResult.stderr || installResult.stdout}`,
   );
-  assert.ok(
-    existsSync(join(tempInstallDir, 'resources', 'app', 'worker', 'joy-worker.exe')),
-    'Installed joy-worker.exe missing',
-  );
-
-  // Verify installed CLI executes from destination
-  const installedJoyCmd = join(tempInstallDir, 'joy.cmd');
-  const testRun = spawnSync(installedJoyCmd, ['doctor'], {
-    shell: true,
-    encoding: 'utf8',
-    timeout: 15000,
-  });
-  assert.strictEqual(testRun.status, 0, `Installed joy.cmd failed: ${testRun.stderr}`);
-  console.log('✔ Setup-JoyMedia.ps1 installation verified cleanly.');
-} finally {
-  try {
-    rmSync(tempInstallDir, { recursive: true, force: true });
-  } catch {
-    // Non-fatal cleanup
+  for (const relativePath of fixtureFiles) {
+    assert.ok(
+      existsSync(join(fixtureInstallDir, relativePath)),
+      `Fixture file was not copied: ${relativePath}`,
+    );
   }
+  assert.ok(
+    !existsSync(join(fixtureInstallDir, 'Setup-JoyMedia.ps1')),
+    'Setup script should be excluded from install',
+  );
+  assert.ok(
+    !existsSync(join(fixtureInstallDir, 'install.cmd')),
+    'install.cmd should be excluded from install',
+  );
+  assert.ok(
+    !existsSync(join(fixtureInstallDir, 'uninstall.cmd')),
+    'uninstall.cmd should be excluded from install',
+  );
+  console.log('✔ Isolated Setup-JoyMedia.ps1 file copying passed.');
+} finally {
+  rmSync(setupSandboxRoot, { recursive: true, force: true });
 }
 
-// 5. Verify Release Artifacts & Manifest Parity
-console.log('5. Verifying release manifest & SHA256 checksums...');
+// 6. Verify Release Artifacts & Manifest Parity
+console.log('6. Verifying release manifest & SHA256 checksums...');
 const manifestPath = resolve(releasesDir, 'joy-media-release-manifest.json');
 const shaSumsPath = resolve(releasesDir, 'SHA256SUMS.txt');
 
