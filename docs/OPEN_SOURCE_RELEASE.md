@@ -45,6 +45,8 @@ Release evidence must include the Worker size/import gate, production
 dependency audit, third-party notices, repository license decision, and asset
 redistribution review.
 
+Before tagging a release, you must dispatch the `release-candidate-v2` workflow against the exact `main` SHA you intend to tag, and attach the successful run URL to the release notes.
+
 ## 2026-09-30 closeout status
 
 The closeout review worktree is based on GitHub `main` at
