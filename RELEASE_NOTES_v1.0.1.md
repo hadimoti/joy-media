@@ -47,4 +47,4 @@ This is a maintenance release of **JOY Media**. It hardens the Windows installer
 2db6aaba0ed2a4edc15a81e34be4b2216be7b36e2acbef0390b3404fe89946b5  joy-media-windows-x64-v1.0.1.zip
 ```
 
-CI evidence: [successful CI run on candidate commit 966de08617f89c060ac53b3366f68aec5e2d0d5f](https://github.com/hadimoti/joy-media/actions/runs/37003659437) and [successful release-candidate-v2 run](https://github.com/hadimoti/joy-media/actions/runs/37004833043).
+CI evidence: [successful CI run on the release-notes revision 8ea69b52a239eb1ce54a5c1a003990984797fdfa](https://github.com/hadimoti/joy-media/actions/runs/37017718826) and [successful release-candidate-v2 run](https://github.com/hadimoti/joy-media/actions/runs/37004833043).
