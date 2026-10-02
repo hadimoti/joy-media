@@ -43,8 +43,8 @@ This is a maintenance release of **JOY Media**. It hardens the Windows installer
 #### SHA256 Checksums
 
 ```
-<fill after build>  joy-media-setup.exe
-<fill after build>  joy-media-windows-x64-v1.0.1.zip
+1713995bb92446de36f0214202d2de9f7a9b8800605930b34786d76d60bad96  joy-media-setup.exe
+2db6aaba0ed2a4edc15a81e34be4b2216be7b36e2acbef0390b3404fe89946b5  joy-media-windows-x64-v1.0.1.zip
 ```
 
-CI evidence: <release-candidate-v2 run URL>
+CI evidence: [successful CI run on candidate commit 966de08617f89c060ac53b3366f68aec5e2d0d5f](https://github.com/hadimoti/joy-media/actions/runs/37003659437) and [successful release-candidate-v2 run](https://github.com/hadimoti/joy-media/actions/runs/37004833043).
