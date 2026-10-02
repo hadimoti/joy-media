@@ -40,6 +40,10 @@ namespace JoyMedia.Setup
 
     public static class InstallerEngine
     {
+        /// <summary>Single source of truth for the installer's product version. Keep in sync with
+        /// the payload archive name passed to build-installer.ps1 (-Version).</summary>
+        public const string ProductVersion = "1.0.0";
+
         public static string GetInstallPath()
         {
             string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -67,6 +71,9 @@ namespace JoyMedia.Setup
 
                 using (ZipArchive archive = new ZipArchive(resourceStream, ZipArchiveMode.Read))
                 {
+                    string installRoot = Path.GetFullPath(installPath)
+                        .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                        + Path.DirectorySeparatorChar;
                     int count = archive.Entries.Count;
                     int i = 0;
                     foreach (ZipArchiveEntry entry in archive.Entries)
@@ -85,7 +92,12 @@ namespace JoyMedia.Setup
                             continue;
                         }
 
-                        string destPath = Path.Combine(installPath, rel);
+                        string destPath = Path.GetFullPath(Path.Combine(installPath, rel));
+                        if (!destPath.StartsWith(installRoot, StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new InvalidOperationException(
+                                "Installer payload entry escapes the install directory: " + entry.FullName);
+                        }
                         if (string.IsNullOrEmpty(entry.Name) || rel.EndsWith("/") || rel.EndsWith("\\"))
                         {
                             Directory.CreateDirectory(destPath);
@@ -189,7 +201,7 @@ namespace JoyMedia.Setup
                         string exePath = Path.Combine(installPath, "joy-media.exe");
                         string uninstallCmd = Path.Combine(installPath, "uninstall.cmd");
                         key.SetValue("DisplayName", "JOY Media", RegistryValueKind.String);
-                        key.SetValue("DisplayVersion", "1.0.0", RegistryValueKind.String);
+                        key.SetValue("DisplayVersion", InstallerEngine.ProductVersion, RegistryValueKind.String);
                         key.SetValue("Publisher", "JOY Team", RegistryValueKind.String);
                         key.SetValue("DisplayIcon", exePath, RegistryValueKind.String);
                         key.SetValue("InstallLocation", installPath, RegistryValueKind.String);
@@ -228,7 +240,7 @@ namespace JoyMedia.Setup
 
             titleLabel = new Label
             {
-                Text = "JOY Media v1.0.0",
+                Text = "JOY Media v" + InstallerEngine.ProductVersion,
                 Font = new Font("Segoe UI", 16, FontStyle.Bold),
                 ForeColor = Color.FromArgb(0, 210, 255),
                 Location = new Point(24, 20),
