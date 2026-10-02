@@ -306,4 +306,30 @@ for (const artifact of manifest.artifacts) {
 }
 console.log('✔ Release manifest & SHA256 checksums match perfectly.');
 
+// 7. Verify build-installer.ps1 parsing
+console.log('7. Verifying build-installer.ps1 parses successfully...');
+const buildInstallerPath = resolve('apps/desktop/installer/build-installer.ps1');
+const psParseCommand = `
+  $errors = $null
+  [System.Management.Automation.Language.Parser]::ParseFile('${buildInstallerPath.replace(/'/g, "''")}', [ref]$null, [ref]$errors)
+  if ($errors.Count -gt 0) {
+    Write-Error ($errors | Out-String)
+    exit 1
+  }
+`;
+const parseResult = spawnSync(
+  'powershell.exe',
+  ['-NoProfile', '-NonInteractive', '-Command', psParseCommand],
+  {
+    encoding: 'utf8',
+    timeout: 15000,
+  },
+);
+assert.strictEqual(
+  parseResult.status,
+  0,
+  `build-installer.ps1 syntax parsing failed:\n${parseResult.stderr || parseResult.stdout}`,
+);
+console.log('✔ build-installer.ps1 syntax parse check passed.');
+
 console.log('\n=== All Installer & Packaging Checks PASSED! ===');

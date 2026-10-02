@@ -24,7 +24,12 @@ if (-not (Test-Path $zipPath)) {
 
 $csc = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 if (-not (Test-Path $csc)) {
-    $csc = (Get-Command csc.exe -ErrorAction SilentlyContinue)?.Source
+    $cscCommand = Get-Command csc.exe -ErrorAction SilentlyContinue
+    if ($cscCommand) {
+        $csc = $cscCommand.Source
+    } else {
+        $csc = $null
+    }
 }
 if (-not $csc -or -not (Test-Path $csc)) {
     throw "csc.exe compiler not found."
