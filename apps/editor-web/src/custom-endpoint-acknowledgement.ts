@@ -1,3 +1,5 @@
+import { KILO_GATEWAY_BASE_URL } from '@joy-media/joy-agent-engine';
+
 /** Session-scoped consent for sending credentials or requests to custom URLs. */
 export type CustomEndpointIdentity = {
   readonly provider: string;
@@ -17,7 +19,7 @@ export function normalizeProviderBaseUrl(baseUrl: string): string {
 
 const TRUSTED_PROVIDER_ENDPOINTS: Readonly<Record<string, string>> = {
   openrouter: 'https://openrouter.ai/api/v1',
-  kilo: 'https://api.kilo.ai/v1',
+  kilo: KILO_GATEWAY_BASE_URL,
   'joy-hosted': 'https://joyst.ir/api/v1/agent',
 };
 
@@ -42,6 +44,12 @@ export function requiresCustomEndpointConsent(provider: string, baseUrl: string)
       candidate.hash !== ''
     ) {
       return true;
+    }
+    if (provider === 'kilo') {
+      return (
+        candidate.hostname !== 'api.kilo.ai' ||
+        (candidate.pathname !== '/api/gateway' && candidate.pathname !== '/api/gateway/v1')
+      );
     }
     // Exact trusted path only: a sub-path such as /api/v1/chat is a different
     // configured endpoint and needs consent.

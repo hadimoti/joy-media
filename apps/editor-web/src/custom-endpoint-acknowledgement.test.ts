@@ -25,7 +25,12 @@ describe('custom endpoint acknowledgement', () => {
     expect(requiresCustomEndpointConsent('openrouter', 'https://openrouter.ai/api/v1/chat')).toBe(
       true,
     );
-    expect(requiresCustomEndpointConsent('kilo', 'https://api.kilo.ai/v1')).toBe(false);
+    expect(requiresCustomEndpointConsent('kilo', 'https://api.kilo.ai/api/gateway')).toBe(false);
+    expect(requiresCustomEndpointConsent('kilo', 'https://api.kilo.ai/api/gateway/v1')).toBe(false);
+    expect(requiresCustomEndpointConsent('kilo', 'https://api.kilo.ai/v1')).toBe(true);
+    expect(requiresCustomEndpointConsent('kilo', 'https://api.kilo.ai.evil.com/api/gateway')).toBe(
+      true,
+    );
     expect(requiresCustomEndpointConsent('joy-hosted', 'https://joyst.ir/api/v1/agent')).toBe(
       false,
     );
@@ -65,9 +70,9 @@ describe('custom endpoint acknowledgement', () => {
         baseUrl: 'https://openrouter.ai/api/v1',
       }),
     ).toBe(true);
-    expect(mayRestoreProviderProfile({ provider: 'kilo', baseUrl: 'https://api.kilo.ai/v1' })).toBe(
-      true,
-    );
+    expect(
+      mayRestoreProviderProfile({ provider: 'kilo', baseUrl: 'https://api.kilo.ai/api/gateway' }),
+    ).toBe(true);
     expect(
       mayRestoreProviderProfile({
         provider: 'joy-hosted',

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,6 +13,25 @@ import {
 } from './utils/project-loader.js';
 
 describe('JOY Media CLI (@joy-media/cli)', () => {
+  let isolatedHome: string;
+  beforeEach(() => {
+    isolatedHome = mkdtempSync(join(tmpdir(), 'joy-cli-home-'));
+    vi.stubEnv('USERPROFILE', isolatedHome);
+    vi.stubEnv('HOME', isolatedHome);
+    for (const key of [
+      'KILO_API_KEY',
+      'OPENROUTER_API_KEY',
+      'OPENAI_API_KEY',
+      'ANTHROPIC_API_KEY',
+    ]) {
+      vi.stubEnv(key, '');
+    }
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(isolatedHome, { recursive: true, force: true });
+  });
+
   it('prints help guide on help command and exits 0', async () => {
     const code = await runCli(['help']);
     expect(code).toBe(0);
@@ -249,44 +268,131 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
   });
 
   describe('Multi-API Provider & Model Configuration Commands', () => {
+    it('prints the effective default provider and model', async () => {
+      const providerHome = mkdtempSync(join(tmpdir(), 'joy-cli-config-test-'));
+      vi.stubEnv('USERPROFILE', providerHome);
+      vi.stubEnv('HOME', providerHome);
+      for (const key of [
+        'KILO_API_KEY',
+        'OPENROUTER_API_KEY',
+        'OPENAI_API_KEY',
+        'ANTHROPIC_API_KEY',
+      ]) {
+        vi.stubEnv(key, '');
+      }
+      const output: string[] = [];
+      const log = vi.spyOn(console, 'log').mockImplementation((...args) => {
+        output.push(args.join(' '));
+      });
+      try {
+        expect(await runCli(['agent', 'config'])).toBe(0);
+        expect(output.join('\n')).toContain('openrouter/free');
+        expect(output.join('\n')).not.toContain('claude-3.7-sonnet');
+        expect(output.join('\n')).toContain('source: default');
+        output.length = 0;
+        expect(await runCli(['agent', 'model', 'get'])).toBe(0);
+        expect(output.join('\n')).toContain('openrouter/free');
+        expect(output.join('\n')).toContain('source: default');
+      } finally {
+        log.mockRestore();
+        vi.stubEnv('USERPROFILE', isolatedHome);
+        vi.stubEnv('HOME', isolatedHome);
+        for (const key of [
+          'KILO_API_KEY',
+          'OPENROUTER_API_KEY',
+          'OPENAI_API_KEY',
+          'ANTHROPIC_API_KEY',
+        ]) {
+          vi.stubEnv(key, '');
+        }
+        rmSync(providerHome, { recursive: true, force: true });
+      }
+    });
+
     it('supports adding, listing, selecting, and removing providers via CLI', async () => {
-      // 1. Add provider
-      const addCode = await runCli([
-        'agent',
-        'provider',
-        'add',
-        'kilo-test',
-        '--url',
-        'https://api.kilo.ai/api/gateway/v1',
-        '--api-key',
-        'kilo-test-key-999',
-        '--model',
-        'minimax/minimax-m3',
-      ]);
-      expect(addCode).toBe(0);
+      const providerHome = mkdtempSync(join(tmpdir(), 'joy-cli-provider-test-'));
+      vi.stubEnv('USERPROFILE', providerHome);
+      vi.stubEnv('HOME', providerHome);
+      for (const key of [
+        'KILO_API_KEY',
+        'OPENROUTER_API_KEY',
+        'OPENAI_API_KEY',
+        'ANTHROPIC_API_KEY',
+      ]) {
+        vi.stubEnv(key, '');
+      }
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              data: [
+                { id: 'byteplus-coding/dola-seed-2.0-pro' },
+                { id: 'byteplus-coding/dola-seed-2.0-lite' },
+                { id: 'byteplus-coding/deepseek-v4-flash' },
+              ],
+            }),
+            { status: 200 },
+          ),
+        ),
+      );
+      try {
+        // 1. Add provider; discovery is served by the local mock.
+        const addCode = await runCli([
+          'agent',
+          'provider',
+          'add',
+          'kilo-test',
+          '--url',
+          'https://api.kilo.ai/api/gateway/v1',
+          '--api-key',
+          'sk-test-REDACTED-0000',
+          '--model',
+          'byteplus-coding/dola-seed-2.0-pro',
+        ]);
+        expect(addCode).toBe(0);
 
-      // 2. List providers
-      const listCode = await runCli(['agent', 'provider', 'list']);
-      expect(listCode).toBe(0);
+        // 2. List providers
+        const listCode = await runCli(['agent', 'provider', 'list']);
+        expect(listCode).toBe(0);
 
-      // 3. Use provider
-      const useCode = await runCli(['agent', 'provider', 'use', 'kilo-test']);
-      expect(useCode).toBe(0);
+        // 3. Use provider
+        const useCode = await runCli(['agent', 'provider', 'use', 'kilo-test']);
+        expect(useCode).toBe(0);
 
-      // 4. Set default model
-      const modelSetCode = await runCli(['agent', 'model', 'set', 'kilo-auto/efficient']);
-      expect(modelSetCode).toBe(0);
+        // 4. Set default model
+        const modelSetCode = await runCli([
+          'agent',
+          'model',
+          'set',
+          'byteplus-coding/dola-seed-2.0-lite',
+        ]);
+        expect(modelSetCode).toBe(0);
 
-      // 5. Verify resolution with active provider
-      const resolved = resolveByokConfig();
-      expect(resolved.provider).toBe('kilo');
-      expect(resolved.baseUrl).toBe('https://api.kilo.ai/api/gateway/v1');
-      expect(resolved.apiKey).toBe('kilo-test-key-999');
-      expect(resolved.modelId).toBe('kilo-auto/efficient');
+        // 5. Verify resolution with active provider
+        const resolved = resolveByokConfig();
+        expect(resolved.provider).toBe('kilo');
+        expect(resolved.baseUrl).toBe('https://api.kilo.ai/api/gateway');
+        expect(resolved.apiKey).toBe('sk-test-REDACTED-0000');
+        expect(resolved.modelId).toBe('byteplus-coding/dola-seed-2.0-lite');
 
-      // 6. Remove provider
-      const removeCode = await runCli(['agent', 'provider', 'remove', 'kilo-test']);
-      expect(removeCode).toBe(0);
+        // 6. Remove provider
+        const removeCode = await runCli(['agent', 'provider', 'remove', 'kilo-test']);
+        expect(removeCode).toBe(0);
+      } finally {
+        vi.unstubAllGlobals();
+        vi.stubEnv('USERPROFILE', isolatedHome);
+        vi.stubEnv('HOME', isolatedHome);
+        for (const key of [
+          'KILO_API_KEY',
+          'OPENROUTER_API_KEY',
+          'OPENAI_API_KEY',
+          'ANTHROPIC_API_KEY',
+        ]) {
+          vi.stubEnv(key, '');
+        }
+        rmSync(providerHome, { recursive: true, force: true });
+      }
     }, 15000);
   });
 });

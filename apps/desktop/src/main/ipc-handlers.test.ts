@@ -435,8 +435,8 @@ describe('IPC dispatch', () => {
       ok: true,
       json: async () => ({
         data: [
-          { id: 'minimax/minimax-m3', name: 'MiniMax M3' },
-          { id: 'kilo-auto/efficient', name: 'Kilo Auto' },
+          { id: 'byteplus-coding/dola-seed-2.0-pro', name: 'Dola Seed 2.0 Pro' },
+          { id: 'byteplus-coding/deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
         ],
       }),
     });
@@ -446,19 +446,19 @@ describe('IPC dispatch', () => {
         origin: 'https://joyst.ir',
         channel: 'desktop.provider-profile.fetch-models',
         payload: {
-          baseUrl: 'https://api.kilo.ai/v1',
+          baseUrl: 'https://api.kilo.ai/api/gateway',
           apiKey: 'test-key',
         },
       });
       expect(result).toEqual({
         ok: true,
         data: [
-          { id: 'minimax/minimax-m3', name: 'MiniMax M3' },
-          { id: 'kilo-auto/efficient', name: 'Kilo Auto' },
+          { id: 'byteplus-coding/dola-seed-2.0-pro', name: 'Dola Seed 2.0 Pro' },
+          { id: 'byteplus-coding/deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
         ],
       });
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://api.kilo.ai/v1/models',
+        'https://api.kilo.ai/api/gateway/models',
         expect.objectContaining({
           headers: { Authorization: 'Bearer test-key' },
         }),

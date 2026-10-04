@@ -140,8 +140,18 @@ describe('JOY Agent Settings connection status', () => {
     const config = vi.mocked(engineClient.configure).mock.calls[0]?.[0];
     expect(config).toMatchObject({
       mode: 'dual-brain',
-      workhorse: { provider: 'openrouter', apiKey: 'openrouter-only-key' },
-      creative: { provider: 'kilo', apiKey: 'kilo-only-key' },
+      workhorse: {
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'openrouter/free',
+        apiKey: 'openrouter-only-key',
+      },
+      creative: {
+        provider: 'kilo',
+        baseUrl: 'https://api.kilo.ai/api/gateway',
+        modelId: 'byteplus-coding/dola-seed-2.0-pro',
+        apiKey: 'kilo-only-key',
+      },
     });
     expect(config && 'workhorse' in config ? config.workhorse.apiKey : '').not.toBe(
       'kilo-only-key',
@@ -152,6 +162,56 @@ describe('JOY Agent Settings connection status', () => {
     expect(fields.map((field) => field.value)).toEqual(['', '']);
   });
 
+  it('uses a saved Kilo profile with a legacy URL after canonicalizing it', async () => {
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        return [
+          {
+            id: 'legacy-kilo',
+            provider: 'kilo',
+            name: 'Kilo legacy URL',
+            baseUrl: 'https://api.kilo.ai/v1',
+            modelId: 'byteplus-coding/dola-seed-2.0-lite',
+            createdAt: '2026-09-15T00:00:00.000Z',
+            updatedAt: '2026-09-15T00:00:00.000Z',
+          },
+        ];
+      }
+      if (channel === 'desktop.provider-profile.begin-session') {
+        return { apiKey: 'sk-test-REDACTED-0000' };
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.begin-session'],
+      invoke,
+    };
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      buttonByText(rendered, 'Dual-Brain Studio').click();
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.begin-session', {
+      id: 'legacy-kilo',
+    });
+    expect(engineClient.configure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        creative: {
+          provider: 'kilo',
+          baseUrl: 'https://api.kilo.ai/api/gateway',
+          modelId: 'byteplus-coding/dola-seed-2.0-lite',
+          apiKey: 'sk-test-REDACTED-0000',
+        },
+      }),
+    );
+  });
+
   it.each(['openrouter', 'kilo'] as const)(
     'never uses the saved key of a %s profile bound to a non-trusted URL in Dual-Brain',
     async (untrustedProvider) => {
@@ -160,7 +220,9 @@ describe('JOY Agent Settings connection status', () => {
           ? 'https://openrouter.ai.evil.example/api/v1'
           : 'https://openrouter.ai/api/v1';
       const kiloBaseUrl =
-        untrustedProvider === 'kilo' ? 'https://custom-kilo.example/v1' : 'https://api.kilo.ai/v1';
+        untrustedProvider === 'kilo'
+          ? 'https://custom-kilo.example/v1'
+          : 'https://api.kilo.ai/api/gateway';
       const invoke = vi.fn().mockImplementation(async (channel: string, args?: { id?: string }) => {
         if (channel === 'desktop.provider-profile.list') {
           return [
@@ -178,7 +240,7 @@ describe('JOY Agent Settings connection status', () => {
               provider: 'kilo',
               name: 'Kilo',
               baseUrl: kiloBaseUrl,
-              modelId: 'kilo-auto/efficient',
+              modelId: 'byteplus-coding/dola-seed-2.0-pro',
               createdAt: '2026-09-15T00:00:00.000Z',
               updatedAt: '2026-09-15T00:00:00.000Z',
             },
@@ -222,7 +284,7 @@ describe('JOY Agent Settings connection status', () => {
     const engineClient = client({
       testConnection: vi.fn().mockResolvedValue({
         provider: 'dual-brain',
-        modelId: 'openrouter/free + kilo-auto/efficient',
+        modelId: 'openrouter/free + byteplus-coding/dola-seed-2.0-pro',
         capability: 'incompatible',
         dualBrain: {
           workhorse: {
@@ -232,7 +294,7 @@ describe('JOY Agent Settings connection status', () => {
           },
           creative: {
             provider: 'kilo',
-            modelId: 'kilo-auto/efficient',
+            modelId: 'byteplus-coding/dola-seed-2.0-pro',
             capability: 'incompatible',
             message: 'Kilo refused partial-status-key',
           },
@@ -582,6 +644,18 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
     });
   }
 
+  it('selects the canonical Kilo URL and BytePlus default model', async () => {
+    const rendered = await render(client(), readyStatus);
+    await selectCustomPreset(rendered);
+    await changeProvider(rendered, 'kilo');
+    expect(
+      rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]')?.value,
+    ).toBe('https://api.kilo.ai/api/gateway');
+    expect(rendered.querySelector<HTMLInputElement>('input[aria-label="Model ID"]')?.value).toBe(
+      'byteplus-coding/dola-seed-2.0-pro',
+    );
+  });
+
   it('shows the acknowledgement checkbox only for an OpenAI-compatible provider', async () => {
     const rendered = await render(client(), readyStatus);
 
@@ -906,7 +980,7 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
     if (key === null) throw new Error('Expected API key field');
     await act(async () => {
-      setInputValue(key, 'sk-or-new-key');
+      setInputValue(key, 'sk-test-REDACTED-0000');
       buttonByText(rendered, 'Connect model').click();
       await Promise.resolve();
     });
@@ -914,8 +988,8 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.save', {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api/v1',
-      modelId: 'openrouter/auto',
-      apiKey: 'sk-or-new-key',
+      modelId: 'openrouter/free',
+      apiKey: 'sk-test-REDACTED-0000',
     });
   });
 
@@ -938,7 +1012,7 @@ describe('JOY Agent Settings desktop profile persistence', () => {
           provider: 'openrouter',
           baseUrl: 'https://openrouter.ai/api/v1',
           modelId: 'anthropic/claude-3.5-sonnet',
-          apiKey: 'sk-or-saved-vault-key',
+          apiKey: 'sk-test-REDACTED-0000',
         };
       }
       if (channel === 'desktop.provider-profile.save') {
@@ -977,7 +1051,7 @@ describe('JOY Agent Settings desktop profile persistence', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api/v1',
       modelId: 'anthropic/claude-3.5-sonnet',
-      apiKey: 'sk-or-saved-vault-key',
+      apiKey: 'sk-test-REDACTED-0000',
     });
   });
 
@@ -1001,6 +1075,10 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     expect(rendered.textContent).toContain('Included with your active JOY Pro subscription');
     expect(rendered.querySelector('input[type="password"]')).toBeNull();
 
+    const modelInput = rendered.querySelector<HTMLInputElement>('input[aria-label="Model ID"]');
+    if (modelInput === null) throw new Error('Expected editable model field');
+    setInputValue(modelInput, 'catalog-model-for-test');
+
     await act(async () => {
       buttonByText(rendered, 'Connect model').click();
       await Promise.resolve();
@@ -1009,7 +1087,7 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     expect(engineClient.configure).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: 'joy-hosted',
-        modelId: 'minimax/minimax-m3',
+        modelId: 'catalog-model-for-test',
       }),
     );
   });

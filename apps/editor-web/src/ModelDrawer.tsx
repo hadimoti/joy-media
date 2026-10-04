@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus, JoyProviderMode } from './joy-agent/protocol.js';
+import {
+  DEFAULT_KILO_MODEL,
+  DEFAULT_OPENROUTER_MODEL,
+  KILO_GATEWAY_BASE_URL,
+  KILO_MODEL_PRESETS,
+  canonicalKiloBaseUrl,
+  defaultModelFor,
+  isRetiredModelId,
+} from '@joy-media/joy-agent-engine';
 import { CloseIcon, PlusIcon, CheckIcon } from './icons.js';
 import {
   isDesktopHost,
@@ -32,20 +41,15 @@ export interface ModelDrawerProps {
 type ProviderType = 'kilo' | 'openrouter' | 'openai-compatible' | 'custom';
 
 const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
-  kilo: 'https://api.kilo.ai/v1',
+  kilo: KILO_GATEWAY_BASE_URL,
   openrouter: 'https://openrouter.ai/api/v1',
   'openai-compatible': '',
   custom: '',
 };
 
 const COMMON_MODEL_PRESETS: Record<ProviderType, readonly string[]> = {
-  kilo: ['minimax/minimax-m3', 'kilo-auto/efficient', 'kilo-auto/free'],
-  openrouter: [
-    'openrouter/free',
-    'openrouter/auto',
-    'minimax/minimax-m3',
-    'anthropic/claude-3.5-sonnet',
-  ],
+  kilo: KILO_MODEL_PRESETS.map(({ id }) => id),
+  openrouter: ['openrouter/free', 'openrouter/auto', 'anthropic/claude-3.5-sonnet'],
   'openai-compatible': ['gpt-4o-mini', 'gpt-4o'],
   custom: [],
 };
@@ -82,13 +86,24 @@ export function ModelDrawer({
   const [newProvider, setNewProvider] = useState<ProviderType>('kilo');
   const [newBaseUrl, setNewBaseUrl] = useState(PROVIDER_DEFAULT_URLS.kilo);
   const [newApiKey, setNewApiKey] = useState('');
-  const [newSelectedModel, setNewSelectedModel] = useState('minimax/minimax-m3');
+  const [newSelectedModel, setNewSelectedModel] = useState(DEFAULT_KILO_MODEL);
   const [discoveredModels, setDiscoveredModels] = useState<readonly string[]>([]);
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [customAcknowledged, setCustomAcknowledged] = useState(false);
   const [pendingCustomProfile, setPendingCustomProfile] = useState<DesktopProviderProfile>();
+  const [retiredProfileDetected, setRetiredProfileDetected] = useState(false);
+  const effectiveStatus =
+    status && isRetiredModelId(status.modelId)
+      ? {
+          ...status,
+          modelId: defaultModelFor(status.provider) ?? DEFAULT_OPENROUTER_MODEL,
+        }
+      : status;
+  const hasRetiredModel = Boolean(
+    (status && isRetiredModelId(status.modelId)) || retiredProfileDetected,
+  );
 
   const acknowledge = (baseUrl: string, profileId?: string) => {
     acknowledgeCustomEndpoint({ provider: 'custom', baseUrl, profileId });
@@ -110,7 +125,27 @@ export function ModelDrawer({
     try {
       const list = await listDesktopProviderProfiles();
       if (mountedRef.current) {
-        setProfiles(list);
+        setRetiredProfileDetected(list.some((profile) => isRetiredModelId(profile.modelId)));
+        setProfiles(
+          list.map((profile) => {
+            const retired = isRetiredModelId(profile.modelId);
+            const replacement = defaultModelFor(profile.provider) ?? DEFAULT_OPENROUTER_MODEL;
+            return {
+              ...profile,
+              ...(profile.provider === 'kilo'
+                ? { baseUrl: canonicalKiloBaseUrl(profile.baseUrl) }
+                : {}),
+              ...(profile.cachedModels || retired
+                ? {
+                    cachedModels: [
+                      ...(profile.cachedModels ?? []).filter((id) => !isRetiredModelId(id)),
+                      ...(retired ? [replacement] : []),
+                    ],
+                  }
+                : {}),
+            };
+          }),
+        );
       }
     } catch (err) {
       console.warn('Failed to list provider profiles:', err);
@@ -163,7 +198,7 @@ export function ModelDrawer({
     setDiscoveryError(null);
     try {
       const models = await fetchDesktopProviderModels({
-        baseUrl: newBaseUrl.trim(),
+        baseUrl: newProvider === 'kilo' ? canonicalKiloBaseUrl(newBaseUrl) : newBaseUrl.trim(),
         apiKey: newApiKey.trim() || undefined,
       });
       if (!mountedRef.current) return;
@@ -285,7 +320,8 @@ export function ModelDrawer({
         requiresCustomEndpointConsent(profile.provider, profile.baseUrl) &&
         !requireCustomEndpointAcknowledgement({
           provider: 'custom',
-          baseUrl: profile.baseUrl,
+          baseUrl:
+            profile.provider === 'kilo' ? canonicalKiloBaseUrl(profile.baseUrl) : profile.baseUrl,
           profileId: profile.id,
         })
       ) {
@@ -297,7 +333,8 @@ export function ModelDrawer({
         configurationFailed = true;
         const nextStatus = await engineClient.configure({
           provider: profile.provider as JoyProviderMode,
-          baseUrl: profile.baseUrl,
+          baseUrl:
+            profile.provider === 'kilo' ? canonicalKiloBaseUrl(profile.baseUrl) : profile.baseUrl,
           modelId,
           apiKey,
         });
@@ -429,7 +466,9 @@ export function ModelDrawer({
             <h2>
               <span>⚡ Model Drawer</span>
               <span className={`model-drawer-active-badge ${status ? '' : 'is-disconnected'}`}>
-                {status ? `${status.provider}: ${status.modelId}` : 'Disconnected'}
+                {effectiveStatus
+                  ? `${effectiveStatus.provider}: ${effectiveStatus.modelId}`
+                  : 'Disconnected'}
               </span>
             </h2>
           </div>
@@ -499,7 +538,7 @@ export function ModelDrawer({
                 <input
                   id="md-base-url"
                   type="text"
-                  placeholder="https://api.kilo.ai/v1"
+                  placeholder={KILO_GATEWAY_BASE_URL}
                   value={newBaseUrl}
                   onChange={(e) => {
                     setNewBaseUrl(e.target.value);
@@ -585,7 +624,7 @@ export function ModelDrawer({
                 <input
                   id="md-selected-model"
                   type="text"
-                  placeholder="e.g. minimax/minimax-m3, kilo-auto/efficient"
+                  placeholder="e.g. byteplus-coding/dola-seed-2.0-pro"
                   value={newSelectedModel}
                   onChange={(e) => setNewSelectedModel(e.target.value)}
                 />
@@ -628,6 +667,12 @@ export function ModelDrawer({
 
           {/* Configured API Providers List */}
           <div className="model-drawer-section-title">Configured API Providers & Models</div>
+          {hasRetiredModel && (
+            <div role="status" className="model-drawer-empty-hint">
+              A saved model has been retired. Pick a replacement; the default Kilo model is
+              preselected.
+            </div>
+          )}
 
           <div className="model-drawer-providers-list">
             {filteredProfiles.length === 0 && (
@@ -640,9 +685,9 @@ export function ModelDrawer({
 
             {filteredProfiles.map((profile) => {
               const isActiveProvider =
-                status?.provider === profile.provider &&
-                (status?.modelId === profile.modelId ||
-                  (profile.cachedModels ?? []).includes(status?.modelId ?? ''));
+                effectiveStatus?.provider === profile.provider &&
+                (effectiveStatus?.modelId === profile.modelId ||
+                  (profile.cachedModels ?? []).includes(effectiveStatus?.modelId ?? ''));
 
               const modelsToShow =
                 profile.cachedModels && profile.cachedModels.length > 0
@@ -687,7 +732,8 @@ export function ModelDrawer({
                   <div className="model-drawer-models-list">
                     {filteredModels.map((m) => {
                       const isThisActive =
-                        status?.provider === profile.provider && status?.modelId === m;
+                        effectiveStatus?.provider === profile.provider &&
+                        effectiveStatus?.modelId === m;
                       return (
                         <div
                           key={m}

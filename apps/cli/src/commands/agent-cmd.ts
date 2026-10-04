@@ -1,4 +1,13 @@
 /* global console */
+import {
+  DEFAULT_KILO_MODEL,
+  KILO_GATEWAY_BASE_URL,
+  KILO_MODEL_PRESETS,
+  OPENROUTER_BASE_URL,
+  canonicalKiloBaseUrl,
+  defaultModelFor,
+} from '@joy-media/joy-agent-engine';
+import { describeEffectiveConfig } from '../agent/provider.js';
 import type { CliFlags } from '../cli.js';
 import { probeAgent, runJoyAgent } from '../agent/joy-agent.js';
 import { startAgentRepl } from '../agent/repl.js';
@@ -107,27 +116,34 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         // Model discovery is optional
       }
 
+      const providerType =
+        flags.provider ??
+        (flags.baseUrl.includes('kilo')
+          ? 'kilo'
+          : flags.baseUrl.includes('openrouter')
+            ? 'openrouter'
+            : 'custom');
       const defaultModel =
         flags.model ??
-        (cachedModels && cachedModels.length > 0 ? cachedModels[0] : 'minimax/minimax-m3');
+        (providerType === 'kilo'
+          ? (cachedModels?.find((id) => KILO_MODEL_PRESETS.some((preset) => preset.id === id)) ??
+            DEFAULT_KILO_MODEL)
+          : (defaultModelFor(providerType) ?? cachedModels?.[0]));
 
       setAiProvider(name, {
         name,
-        provider:
-          flags.provider ??
-          (flags.baseUrl.includes('kilo')
-            ? 'kilo'
-            : flags.baseUrl.includes('openrouter')
-              ? 'openrouter'
-              : 'custom'),
-        baseUrl: flags.baseUrl,
+        provider: providerType,
+        baseUrl: providerType === 'kilo' ? canonicalKiloBaseUrl(flags.baseUrl) : flags.baseUrl,
         apiKey: flags.apiKey,
         defaultModel,
         cachedModels,
       });
 
       logSuccess(`Provider "${name}" configured successfully!`);
-      logStep('Base URL', flags.baseUrl);
+      logStep(
+        'Base URL',
+        providerType === 'kilo' ? canonicalKiloBaseUrl(flags.baseUrl) : flags.baseUrl,
+      );
       if (defaultModel) {
         logStep('Default Model', defaultModel);
       }
@@ -196,10 +212,10 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
 
     if (!baseUrl) {
       if (targetProviderName === 'kilo') {
-        baseUrl = 'https://api.kilo.ai/api/gateway/v1';
+        baseUrl = KILO_GATEWAY_BASE_URL;
         apiKey = apiKey ?? process.env.KILO_API_KEY;
       } else if (targetProviderName === 'openrouter') {
-        baseUrl = 'https://openrouter.ai/api/v1';
+        baseUrl = OPENROUTER_BASE_URL;
         apiKey = apiKey ?? process.env.OPENROUTER_API_KEY;
       } else {
         logError(`No baseUrl found for provider "${targetProviderName}". Specify --url <url>`);
@@ -258,8 +274,13 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
       logSuccess(`Default model set to "${modelId}".`);
       return 0;
     }
-    const cfg = loadCliConfig();
-    logInfo(`Current default model: ${cfg.defaultModel ?? 'anthropic/claude-3.7-sonnet'}`);
+    const effective = describeEffectiveConfig({
+      provider: flags.provider,
+      model: flags.model,
+      baseUrl: flags.baseUrl,
+    });
+    logInfo(`Effective model: ${effective.modelId} (source: ${effective.source})`);
+    logStep('Provider', `${effective.provider} (source: ${effective.source})`);
     return 0;
   }
 
@@ -297,11 +318,11 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
       saveCliConfig(updated);
       logSuccess('Updated CLI configuration.');
     }
-    const finalCfg = loadCliConfig();
+    const effective = describeEffectiveConfig();
     console.log(`\n  ${c('Current Joy Agent Configuration:', 'bold')}`);
-    logStep('Active Provider', finalCfg.activeProvider ?? 'openrouter (default)');
-    logStep('Default Model', finalCfg.defaultModel ?? 'anthropic/claude-3.7-sonnet');
-    logStep('Custom Base URL', finalCfg.customBaseUrl ?? 'none');
+    logStep('Active Provider', `${effective.provider} (source: ${effective.source})`);
+    logStep('Default Model', `${effective.modelId} (source: ${effective.source})`);
+    logStep('Effective Base URL', effective.baseUrl);
     return 0;
   }
 
@@ -341,7 +362,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
       logInfo(
         `${c('Dual-Brain:', 'bold')} ${c('Active', 'green')}  ` +
           `${c('Workhorse', 'cyan')}=openrouter/${c('openrouter/free', 'magenta')}  ` +
-          `${c('Creative', 'cyan')}=kilo/${c('kilo-auto/efficient', 'magenta')}`,
+          `${c('Creative', 'cyan')}=kilo/${c(DEFAULT_KILO_MODEL, 'magenta')}`,
       );
       logStep('Override model', flags.model);
     }

@@ -52,9 +52,13 @@ describe('ModelDrawer', () => {
         id: 'kilo-profile-1',
         name: 'Kilo Gateway',
         provider: 'kilo',
-        baseUrl: 'https://api.kilo.ai/v1',
-        modelId: 'minimax/minimax-m3',
-        cachedModels: ['minimax/minimax-m3', 'kilo-auto/efficient'],
+        baseUrl: 'https://api.kilo.ai/api/gateway',
+        modelId: 'byteplus-coding/dola-seed-2.0-pro',
+        cachedModels: [
+          'byteplus-coding/dola-seed-2.0-pro',
+          'byteplus-coding/dola-seed-2.0-lite',
+          'byteplus-coding/deepseek-v4-flash',
+        ],
         createdAt: '2026-09-17T00:00:00Z',
         updatedAt: '2026-09-17T00:00:00Z',
       },
@@ -71,8 +75,8 @@ describe('ModelDrawer', () => {
     ]);
     vi.spyOn(desktopClient, 'beginDesktopProviderSession').mockResolvedValue({
       provider: 'kilo',
-      baseUrl: 'https://api.kilo.ai/v1',
-      modelId: 'minimax/minimax-m3',
+      baseUrl: 'https://api.kilo.ai/api/gateway',
+      modelId: 'byteplus-coding/dola-seed-2.0-pro',
       apiKey: 'kilo-secret-key-123',
     });
     vi.spyOn(desktopClient, 'saveDesktopProviderProfile').mockImplementation(async (req) => ({
@@ -86,9 +90,9 @@ describe('ModelDrawer', () => {
       updatedAt: '2026-09-17T00:00:00Z',
     }));
     vi.spyOn(desktopClient, 'fetchDesktopProviderModels').mockResolvedValue([
-      { id: 'minimax/minimax-m3', name: 'minimax/minimax-m3' },
-      { id: 'kilo-auto/efficient', name: 'kilo-auto/efficient' },
-      { id: 'kilo-auto/free', name: 'kilo-auto/free' },
+      { id: 'byteplus-coding/dola-seed-2.0-pro', name: 'Dola Seed Pro' },
+      { id: 'byteplus-coding/dola-seed-2.0-lite', name: 'Dola Seed Lite' },
+      { id: 'byteplus-coding/deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
     ]);
   });
 
@@ -112,10 +116,50 @@ describe('ModelDrawer', () => {
     });
 
     expect(container?.textContent).toContain('Model Drawer');
-    expect(container?.textContent).toContain('kilo: minimax/minimax-m3');
+    expect(container?.textContent).toContain('kilo: byteplus-coding/dola-seed-2.0-pro');
+    expect(container?.textContent).toContain('A saved model has been retired');
     expect(container?.textContent).toContain('Kilo Gateway');
     expect(container?.textContent).toContain('OpenRouter Primary');
-    expect(container?.textContent).toContain('kilo-auto/efficient');
+    expect(container?.textContent).toContain('byteplus-coding/dola-seed-2.0-lite');
+    expect(container?.textContent).toContain('byteplus-coding/deepseek-v4-flash');
+    expect(container?.textContent).not.toContain('minimax/minimax-m3');
+    expect(container?.textContent).not.toContain('kilo-auto/');
+  });
+
+  it('saves a corrected Kilo URL when a legacy profile is next updated', async () => {
+    vi.mocked(desktopClient.listDesktopProviderProfiles).mockResolvedValue([
+      {
+        id: 'legacy-kilo-profile',
+        name: 'Legacy Kilo',
+        provider: 'kilo',
+        baseUrl: 'https://api.kilo.ai/v1',
+        modelId: 'byteplus-coding/dola-seed-2.0-pro',
+        cachedModels: ['byteplus-coding/dola-seed-2.0-pro', 'byteplus-coding/deepseek-v4-flash'],
+        createdAt: '2026-09-17T00:00:00Z',
+        updatedAt: '2026-09-17T00:00:00Z',
+      },
+    ]);
+    const client = createMockEngineClient();
+    await act(async () => {
+      root?.render(
+        <ModelDrawer open={true} onClose={vi.fn()} engineClient={client} status={initialStatus} />,
+      );
+    });
+    const deepseekItem = [
+      ...(container?.querySelectorAll<HTMLElement>('.model-drawer-model-item') ?? []),
+    ].find((item) => item.textContent?.includes('byteplus-coding/deepseek-v4-flash'));
+    expect(deepseekItem).toBeTruthy();
+    await act(async () => {
+      deepseekItem?.click();
+      await Promise.resolve();
+    });
+    expect(desktopClient.saveDesktopProviderProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'legacy-kilo-profile',
+        baseUrl: 'https://api.kilo.ai/api/gateway',
+        modelId: 'byteplus-coding/deepseek-v4-flash',
+      }),
+    );
   });
 
   it('does not render anything when open is false', async () => {
@@ -145,11 +189,11 @@ describe('ModelDrawer', () => {
       'value',
     )?.set;
     await act(async () => {
-      nativeInputValueSetter?.call(searchInput, 'efficient');
+      nativeInputValueSetter?.call(searchInput, 'deepseek');
       searchInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
-    expect(container?.textContent).toContain('kilo-auto/efficient');
+    expect(container?.textContent).toContain('byteplus-coding/deepseek-v4-flash');
     expect(container?.textContent).not.toContain('openrouter/free');
   });
 
@@ -173,7 +217,7 @@ describe('ModelDrawer', () => {
 
     const modelItems = container?.querySelectorAll('.model-drawer-model-item');
     const efficientItem = Array.from(modelItems ?? []).find((el) =>
-      el.textContent?.includes('kilo-auto/efficient'),
+      el.textContent?.includes('byteplus-coding/deepseek-v4-flash'),
     ) as HTMLElement;
 
     expect(efficientItem).toBeTruthy();
@@ -185,16 +229,16 @@ describe('ModelDrawer', () => {
     expect(client.configure).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: 'kilo',
-        modelId: 'kilo-auto/efficient',
+        modelId: 'byteplus-coding/deepseek-v4-flash',
       }),
     );
     expect(onStatusChange).toHaveBeenCalledWith(
       expect.objectContaining({
-        modelId: 'kilo-auto/efficient',
+        modelId: 'byteplus-coding/deepseek-v4-flash',
       }),
     );
     expect(onNotice).toHaveBeenCalledWith(
-      expect.stringContaining('Switched active model to kilo-auto/efficient'),
+      expect.stringContaining('Switched active model to byteplus-coding/deepseek-v4-flash'),
       'success',
     );
   });
@@ -217,7 +261,7 @@ describe('ModelDrawer', () => {
     });
     const modelItem = [
       ...(container?.querySelectorAll<HTMLElement>('.model-drawer-model-item') ?? []),
-    ].find((el) => el.textContent?.includes('kilo-auto/efficient'));
+    ].find((el) => el.textContent?.includes('byteplus-coding/deepseek-v4-flash'));
     expect(modelItem).toBeTruthy();
     await act(async () => {
       modelItem?.click();
@@ -226,7 +270,7 @@ describe('ModelDrawer', () => {
     expect(onStatusChange).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: 'kilo',
-        modelId: 'kilo-auto/efficient',
+        modelId: 'byteplus-coding/deepseek-v4-flash',
         capability: 'incompatible',
       }),
     );

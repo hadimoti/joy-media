@@ -341,6 +341,7 @@ import {
   closeDesktopWindow,
 } from './desktop-client.js';
 import { createJoyAgentEngineClient } from './joy-agent/engine-client.js';
+import { canonicalKiloBaseUrl } from '@joy-media/joy-agent-engine';
 import type { ByokSessionStatus } from './joy-agent/protocol.js';
 import { createJoyAgentContextSnapshot } from './joy-agent/context-snapshot.js';
 import { runCreativeBriefTask } from './joy-agent/entry-points.js';
@@ -1140,10 +1141,12 @@ function EditorWorkspace({
         if (cancelled || profiles.length === 0) return;
         const profile = profiles.find((p) => p.provider === 'openrouter') ?? profiles[0];
         if (!profile) return;
+        const profileBaseUrl =
+          profile.provider === 'kilo' ? canonicalKiloBaseUrl(profile.baseUrl) : profile.baseUrl;
         if (
           !mayRestoreProviderProfile({
             provider: profile.provider,
-            baseUrl: profile.baseUrl,
+            baseUrl: profileBaseUrl,
             profileId: profile.id,
           })
         ) {
@@ -1155,7 +1158,7 @@ function EditorWorkspace({
         try {
           const sessionConfig = (await beginDesktopProviderSession(profile.id)) as
             | {
-                provider: 'joy-hosted' | 'openrouter' | 'openai-compatible';
+                provider: 'joy-hosted' | 'openrouter' | 'openai-compatible' | 'kilo';
                 baseUrl: string;
                 modelId: string;
                 apiKey: string;
@@ -1166,16 +1169,22 @@ function EditorWorkspace({
           // and consent (which may have been withdrawn during the vault read)
           // is re-checked immediately before the key is sent.
           if (
-            normalizeProviderBaseUrl(sessionConfig.baseUrl) !==
-            normalizeProviderBaseUrl(profile.baseUrl)
+            normalizeProviderBaseUrl(
+              profile.provider === 'kilo'
+                ? canonicalKiloBaseUrl(sessionConfig.baseUrl)
+                : sessionConfig.baseUrl,
+            ) !== normalizeProviderBaseUrl(profileBaseUrl)
           ) {
             console.warn('Desktop vault returned a different endpoint; restoration skipped.');
             return;
           }
-          assertCustomEndpointConsentHolds(profile.provider, profile.baseUrl, profile.id);
+          assertCustomEndpointConsentHolds(profile.provider, profileBaseUrl, profile.id);
           const status = await joyAgentEngineClientRef.current.configure({
             provider: sessionConfig.provider,
-            baseUrl: sessionConfig.baseUrl,
+            baseUrl:
+              sessionConfig.provider === 'kilo'
+                ? canonicalKiloBaseUrl(sessionConfig.baseUrl)
+                : sessionConfig.baseUrl,
             modelId: sessionConfig.modelId,
             apiKey: sessionConfig.apiKey,
           });

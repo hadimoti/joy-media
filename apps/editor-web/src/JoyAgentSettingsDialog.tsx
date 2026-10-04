@@ -1,4 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
+import {
+  DEFAULT_KILO_MODEL,
+  DEFAULT_OPENROUTER_MODEL,
+  KILO_GATEWAY_BASE_URL,
+  KILO_MODEL_PRESETS,
+  JOY_HOSTED_BASE_URL,
+  canonicalKiloBaseUrl,
+  defaultModelFor,
+  isRetiredModelId,
+} from '@joy-media/joy-agent-engine';
 import type { AgentExecutionMode, ToolCapability } from '@joy-media/agent-tools';
 import { ALL_TOOL_CAPABILITIES } from '@joy-media/agent-tools';
 import type { AgentPolicyPreferences } from './agent-policy-settings.js';
@@ -172,14 +182,15 @@ export function JoyAgentSettingsDialog({
     status?.provider === 'openai-compatible'
       ? ''
       : status?.provider === 'joy-hosted'
-        ? 'https://joyst.ir/api/v1/agent'
+        ? JOY_HOSTED_BASE_URL
         : status?.provider === 'kilo'
-          ? 'https://api.kilo.ai/v1'
+          ? KILO_GATEWAY_BASE_URL
           : 'https://openrouter.ai/api/v1',
   );
   const [modelId, setModelId] = useState(
-    status?.modelId ||
-      (status?.provider === 'joy-hosted' ? 'minimax/minimax-m3' : 'openrouter/auto'),
+    status?.modelId && !isRetiredModelId(status.modelId)
+      ? status.modelId
+      : (defaultModelFor(status?.provider ?? 'openrouter') ?? ''),
   );
   const [connectionName, setConnectionName] = useState('');
   const [customDisclosure, setCustomDisclosure] = useState(false);
@@ -199,6 +210,11 @@ export function JoyAgentSettingsDialog({
   // Multi-profile state
   const [profiles, setProfiles] = useState<readonly DesktopProviderProfile[]>([]);
   const [savedProfile, setSavedProfile] = useState<DesktopProviderProfile | undefined>(undefined);
+  const [retiredModelNotice, setRetiredModelNotice] = useState(
+    status?.modelId && isRetiredModelId(status.modelId)
+      ? 'This model is retired. Pick a replacement before connecting.'
+      : '',
+  );
   const [hasSavedKey, setHasSavedKey] = useState(false);
 
   // Dynamic model discovery & Drawer state
@@ -228,13 +244,38 @@ export function JoyAgentSettingsDialog({
     try {
       const list = await listDesktopProviderProfiles();
       if (!mountedRef.current) return;
-      setProfiles(list);
+      const canonicalProfiles = list.map((profile) => {
+        const wasRetired = isRetiredModelId(profile.modelId);
+        if (wasRetired) {
+          setRetiredModelNotice('This model is retired. Pick a replacement before connecting.');
+        }
+        const replacement = defaultModelFor(profile.provider) ?? DEFAULT_OPENROUTER_MODEL;
+        return {
+          ...profile,
+          ...(profile.provider === 'kilo'
+            ? { baseUrl: canonicalKiloBaseUrl(profile.baseUrl) }
+            : {}),
+          ...(profile.cachedModels || wasRetired
+            ? {
+                cachedModels: [
+                  ...(profile.cachedModels ?? []).filter((id) => !isRetiredModelId(id)),
+                  ...(wasRetired ? [replacement] : []),
+                ],
+              }
+            : {}),
+        };
+      });
+      setProfiles(canonicalProfiles);
       const openRouterProfile = list.find((p) => p.provider === 'openrouter');
       if (openRouterProfile) {
         setSavedProfile(openRouterProfile);
         setHasSavedKey(true);
         setStudioPreset('custom');
-        setModelId(openRouterProfile.modelId);
+        setModelId(
+          isRetiredModelId(openRouterProfile.modelId)
+            ? (defaultModelFor(openRouterProfile.provider) ?? DEFAULT_OPENROUTER_MODEL)
+            : openRouterProfile.modelId,
+        );
         setBaseUrl(openRouterProfile.baseUrl);
         setProvider('openrouter');
         setCustomDisclosure(false);
@@ -281,17 +322,17 @@ export function JoyAgentSettingsDialog({
     setDiscoveryError(null);
     if (next === 'openrouter') {
       setBaseUrl('https://openrouter.ai/api/v1');
-      if (!modelId || modelId === 'minimax/minimax-m3' || modelId === 'kilo-auto/efficient') {
-        setModelId('openrouter/auto');
+      if (!modelId || isRetiredModelId(modelId) || modelId === 'openrouter/auto') {
+        setModelId(DEFAULT_OPENROUTER_MODEL);
       }
     } else if (next === 'kilo') {
-      setBaseUrl('https://api.kilo.ai/v1');
-      if (!modelId || modelId === 'openrouter/auto') {
-        setModelId('kilo-auto/efficient');
+      setBaseUrl(KILO_GATEWAY_BASE_URL);
+      if (!KILO_MODEL_PRESETS.some(({ id }) => id === modelId)) {
+        setModelId(DEFAULT_KILO_MODEL);
       }
     } else if (next === 'joy-hosted') {
-      setBaseUrl('https://joyst.ir/api/v1/agent');
-      setModelId('minimax/minimax-m3');
+      setBaseUrl(JOY_HOSTED_BASE_URL);
+      setModelId('');
     } else {
       setBaseUrl('');
     }
@@ -342,14 +383,12 @@ export function JoyAgentSettingsDialog({
         // Auto-resolve and reveal the Model Drawer
         setOpenAccordions((prev) => ({ ...prev, 'models-drawer': true }));
         if (!modelIds.includes(modelId)) {
-          const prefer =
-            modelIds.find(
-              (m) =>
-                m.includes('minimax') ||
-                m.includes('efficient') ||
-                m.includes('auto') ||
-                m.includes('claude'),
-            ) || modelIds[0];
+          const preferredIds = [
+            DEFAULT_KILO_MODEL,
+            ...KILO_MODEL_PRESETS.map(({ id }) => id),
+            DEFAULT_OPENROUTER_MODEL,
+          ];
+          const prefer = preferredIds.find((id) => modelIds.includes(id)) || modelIds[0];
           if (prefer) {
             setModelId(prefer);
           }
@@ -398,7 +437,7 @@ export function JoyAgentSettingsDialog({
       }
 
       const kiloProf = profiles.find(
-        (p) => p.provider === 'kilo' && !requiresCustomEndpointConsent('kilo', p.baseUrl),
+        (p) => p.provider === 'kilo' && canonicalKiloBaseUrl(p.baseUrl) === KILO_GATEWAY_BASE_URL,
       );
       if (!kiloKey && kiloProf) {
         try {
@@ -415,13 +454,16 @@ export function JoyAgentSettingsDialog({
         workhorse: {
           provider: 'openrouter',
           baseUrl: 'https://openrouter.ai/api/v1',
-          modelId: 'openrouter/free',
+          modelId: DEFAULT_OPENROUTER_MODEL,
           apiKey: openRouterKey,
         },
         creative: {
           provider: 'kilo',
-          baseUrl: 'https://api.kilo.ai/v1',
-          modelId: 'kilo-auto/efficient',
+          baseUrl: KILO_GATEWAY_BASE_URL,
+          modelId:
+            kiloProf && KILO_MODEL_PRESETS.some(({ id }) => id === kiloProf.modelId)
+              ? kiloProf.modelId
+              : DEFAULT_KILO_MODEL,
           apiKey: kiloKey,
         },
       };
@@ -477,7 +519,7 @@ export function JoyAgentSettingsDialog({
       setConnectionStatus(safeStatus);
       onStatusChange?.(safeStatus);
       const message = bothUsable
-        ? 'Dual-Brain Studio connected! Model 1 Workhorse (openrouter/free) & Model 2 Creative Brain (kilo-auto/efficient) are live.'
+        ? `Dual-Brain Studio connected! Model 1 Workhorse (${dualConfig.workhorse.modelId}) & Model 2 Creative Brain (${dualConfig.creative.modelId}) are live.`
         : bothFailed || noProviderStatuses
           ? `Dual-Brain connection failed. OpenRouter: ${redactProviderError(workhorse?.message ?? 'unavailable', openRouterKey)} Kilo: ${redactProviderError(creative?.message ?? 'unavailable', kiloKey)}`
           : `Dual-Brain partially connected. OpenRouter: ${workhorse?.capability ?? 'unavailable'}${workhorse?.message ? ` (${workhorse.message})` : ''}; Kilo: ${creative?.capability ?? 'unavailable'}${creative?.message ? ` (${creative.message})` : ''}. Tool-loop readiness requires both brains.`;
@@ -493,7 +535,7 @@ export function JoyAgentSettingsDialog({
       );
       const failedStatus: ByokSessionStatus = {
         provider: 'dual-brain',
-        modelId: 'openrouter/free + kilo-auto/efficient',
+        modelId: `${DEFAULT_OPENROUTER_MODEL} + ${DEFAULT_KILO_MODEL}`,
         capability: 'incompatible',
         message: safeMessage,
       };
@@ -853,9 +895,13 @@ export function JoyAgentSettingsDialog({
     if (kiloKeyRef.current) kiloKeyRef.current.value = '';
   };
 
-  const filteredDiscoveredModels = discoveredModels.filter((m) =>
-    modelFilter ? m.toLowerCase().includes(modelFilter.toLowerCase()) : true,
-  );
+  const filteredDiscoveredModels = discoveredModels.filter((model) => {
+    if (modelFilter === 'vision') {
+      return KILO_MODEL_PRESETS.some((preset) => preset.vision && preset.id === model);
+    }
+    if (modelFilter === 'byteplus') return model.startsWith('byteplus-coding/');
+    return modelFilter ? model.toLowerCase().includes(modelFilter.toLowerCase()) : true;
+  });
 
   const activeTabMeta = TAB_CONFIG.find((t) => t.id === activeTab) ?? TAB_CONFIG[0];
 
@@ -956,13 +1002,15 @@ export function JoyAgentSettingsDialog({
                       setStudioPreset('dual-brain');
                       setProvider('openrouter');
                       setBaseUrl('https://openrouter.ai/api/v1');
-                      setModelId('openrouter/free');
+                      setModelId(DEFAULT_OPENROUTER_MODEL);
                     }}
                   >
                     <span className="joy-preset-icon">⚡</span>
                     <div className="joy-preset-text">
                       <strong>Dual-Brain Studio</strong>
-                      <span>Model 1 Workhorse (free) + Model 2 Creative (kilo-auto)</span>
+                      <span>
+                        Workhorse (openrouter/free) + Creative (Dola Seed 2.0 Pro, vision)
+                      </span>
                     </div>
                     <span className="joy-preset-tag">Recommended</span>
                   </button>
@@ -977,7 +1025,7 @@ export function JoyAgentSettingsDialog({
                     <span className="joy-preset-icon">💎</span>
                     <div className="joy-preset-text">
                       <strong>Joy Hosted Pro Gateway</strong>
-                      <span>Keyless Sweden VPS Proxy (minimax/minimax-m3)</span>
+                      <span>Hosted model catalog</span>
                     </div>
                   </button>
                   <button
@@ -1392,6 +1440,11 @@ export function JoyAgentSettingsDialog({
                             {connectionNotice.message}
                           </div>
                         )}
+                        {retiredModelNotice && (
+                          <div className="joy-settings-notice is-info" role="status">
+                            {retiredModelNotice}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1455,7 +1508,7 @@ export function JoyAgentSettingsDialog({
                         <div className="joy-model-drawer-search">
                           <input
                             type="text"
-                            placeholder="Filter models (e.g. minimax, efficient, free, sonnet, 4o)..."
+                            placeholder="Filter models (e.g. byteplus, vision, free, sonnet, 4o)..."
                             value={modelFilter}
                             onChange={(e) => setModelFilter(e.target.value)}
                           />
@@ -1472,10 +1525,17 @@ export function JoyAgentSettingsDialog({
                           </button>
                           <button
                             type="button"
-                            className={`joy-model-tag ${modelFilter === 'minimax' ? 'is-active' : ''}`}
-                            onClick={() => setModelFilter('minimax')}
+                            className={`joy-model-tag ${modelFilter === 'byteplus' ? 'is-active' : ''}`}
+                            onClick={() => setModelFilter('byteplus')}
                           >
-                            MiniMax / M3
+                            BytePlus
+                          </button>
+                          <button
+                            type="button"
+                            className={`joy-model-tag ${modelFilter === 'vision' ? 'is-active' : ''}`}
+                            onClick={() => setModelFilter('vision')}
+                          >
+                            Vision
                           </button>
                           <button
                             type="button"
