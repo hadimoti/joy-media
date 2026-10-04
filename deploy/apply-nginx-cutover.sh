@@ -89,8 +89,8 @@ replacement = '''    location ~ ^/api/v1/agent(?:/|$) {
         proxy_buffering off;
         proxy_cache off;
         gzip off;
-        proxy_read_timeout 90s;
-        proxy_send_timeout 90s;
+        proxy_read_timeout 90;
+        proxy_send_timeout 90;
     }'''
 
 try:
