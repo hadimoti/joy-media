@@ -48,6 +48,7 @@ import {
 } from './alchemy-transport.js';
 import { UsdcInvoiceLedger } from './usdc-invoice-ledger.js';
 import { DisabledUsdcCheckoutService, UsdcCheckoutService } from './usdc-checkout-service.js';
+import { installApiShutdownHandlers } from './server-shutdown.js';
 
 await start();
 
@@ -221,7 +222,7 @@ async function start(): Promise<void> {
     openRouterApiKey,
   });
 
-  createControlPlaneHttpServer({
+  const server = createControlPlaneHttpServer({
     controlPlane,
     // Public /v1 (project/job/asset routes) stays disabled unless durable state
     // is configured; /v1/auth is served by mediaAuth regardless (it owns its
@@ -259,7 +260,9 @@ async function start(): Promise<void> {
     ...(privateObjectStore === undefined ? {} : { privateObjectStore }),
     ...(resumableOriginalUploads === undefined ? {} : { resumableOriginalUploads }),
     ...(stockVideo === undefined ? {} : { stockVideo }),
-  }).listen(port, host);
+  });
+  installApiShutdownHandlers(server);
+  server.listen(port, host);
   console.log(`JOY Media API listening on ${host}:${port}`);
 }
 
