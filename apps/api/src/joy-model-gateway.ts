@@ -268,8 +268,11 @@ export class JoyModelGateway {
         : JOY_MODEL_MAX_OUTPUT_TOKENS;
     const maximumRawCost = BigInt(
       Math.ceil(
-        estimateCostUsd(modelId, estimatePromptTokens(parsedBody.messages), reservedOutputTokens) *
-          1_000_000,
+        estimateCostUsd(
+          modelId,
+          estimatePromptTokens(parsedBody.messages, parsedBody.tools),
+          reservedOutputTokens,
+        ) * 1_000_000,
       ),
     );
     const maximumRequestCost = (maximumRawCost * BigInt(10000 + this.commissionRateBps)) / 10000n;
@@ -427,6 +430,12 @@ export class JoyModelGateway {
             for (const choice of data.choices ?? []) {
               if (typeof choice?.delta?.content === 'string')
                 streamedOutputText += choice.delta.content;
+              for (const toolCall of choice?.delta?.tool_calls ?? []) {
+                if (typeof toolCall?.function?.name === 'string')
+                  streamedOutputText += toolCall.function.name;
+                if (typeof toolCall?.function?.arguments === 'string')
+                  streamedOutputText += toolCall.function.arguments;
+              }
             }
             if (data.usage) {
               usageReported = true;
@@ -486,7 +495,7 @@ export class JoyModelGateway {
       // Record in ledger
       const estimated = !usageReported || rawCostUsd === 0;
       if (!usageReported) {
-        promptTokens = estimatePromptTokens(parsedBody.messages);
+        promptTokens = estimatePromptTokens(parsedBody.messages, parsedBody.tools);
         completionTokens = estimateTextTokens(streamedOutputText);
       }
       if (estimated) {
@@ -543,7 +552,7 @@ export class JoyModelGateway {
     const costReported = usage.cost !== undefined || usage.total_cost !== undefined;
     const promptTokens = Number.isFinite(Number(usage.prompt_tokens))
       ? Number(usage.prompt_tokens)
-      : estimatePromptTokens(parsedBody.messages);
+      : estimatePromptTokens(parsedBody.messages, parsedBody.tools);
     const completionTokens = Number.isFinite(Number(usage.completion_tokens))
       ? Number(usage.completion_tokens)
       : estimateCompletionTokens(jsonResponse.choices);
@@ -700,27 +709,29 @@ function positiveEnvNumber(name: string, fallback: number): number {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-function estimatePromptTokens(messages: unknown): number {
-  const text = Array.isArray(messages)
-    ? messages
-        .map((message) => {
-          if (message === null || typeof message !== 'object') return '';
-          const content = (message as { content?: unknown }).content;
-          if (typeof content === 'string') return content;
-          if (!Array.isArray(content)) return '';
-          return content
-            .flatMap((part) =>
+function estimatePromptTokens(messages: unknown, tools?: unknown): number {
+  const textParts = Array.isArray(messages)
+    ? messages.flatMap((message) => {
+        if (message === null || typeof message !== 'object') return [];
+        const item = message as { content?: unknown; tool_calls?: unknown };
+        const parts: string[] = [];
+        if (typeof item.content === 'string') parts.push(item.content);
+        else if (Array.isArray(item.content))
+          parts.push(
+            ...item.content.flatMap((part) =>
               part !== null &&
               typeof part === 'object' &&
               typeof (part as { text?: unknown }).text === 'string'
                 ? [(part as { text: string }).text]
                 : [],
-            )
-            .join(' ');
-        })
-        .join(' ')
-    : '';
-  return estimateTextTokens(text);
+            ),
+          );
+        parts.push(...toolCallsAsText(item.tool_calls));
+        return parts;
+      })
+    : [];
+  if (tools !== undefined) textParts.push(JSON.stringify(tools));
+  return estimateTextTokens(textParts.join(' '));
 }
 
 function estimateCompletionTokens(choices: unknown): number {
@@ -729,15 +740,27 @@ function estimateCompletionTokens(choices: unknown): number {
         .flatMap((choice) => {
           if (choice === null || typeof choice !== 'object') return [];
           const message = (choice as { message?: unknown }).message;
-          return message !== null &&
-            typeof message === 'object' &&
-            typeof (message as { content?: unknown }).content === 'string'
-            ? [(message as { content: string }).content]
-            : [];
+          if (message === null || typeof message !== 'object') return [];
+          const item = message as { content?: unknown; tool_calls?: unknown };
+          const parts: string[] = [];
+          if (typeof item.content === 'string') parts.push(item.content);
+          parts.push(...toolCallsAsText(item.tool_calls));
+          return parts;
         })
         .join(' ')
     : '';
   return estimateTextTokens(text);
+}
+
+function toolCallsAsText(toolCalls: unknown): string[] {
+  if (!Array.isArray(toolCalls)) return [];
+  return toolCalls.flatMap((toolCall) => {
+    if (toolCall === null || typeof toolCall !== 'object') return [];
+    const fn = (toolCall as { function?: unknown }).function;
+    if (fn === null || typeof fn !== 'object') return [];
+    const { name, arguments: args } = fn as { name?: unknown; arguments?: unknown };
+    return [name, args].filter((part): part is string => typeof part === 'string');
+  });
 }
 
 function estimateTextTokens(text: string): number {

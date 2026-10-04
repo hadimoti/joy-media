@@ -1177,6 +1177,144 @@ describe('JoyModelGateway', () => {
     error.mockRestore();
   });
 
+  it('estimates streamed tool-call names and arguments as completion text', async () => {
+    const toolCallText = 'update_timeline{"clipId":"clip-1","startUs":1250000}';
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ function: { name: 'update_timeline', arguments: '{"clipId":"clip-1","startUs":1250000}' } }] } }] })}\n\n`,
+          ),
+        );
+        controller.close();
+      },
+    });
+    const ledger = new MemoryAgentUsageLedger();
+    const gateway = new JoyModelGateway({
+      mediaAuth: {
+        authenticate: async () => ({ id: 'stream-tool-estimate' }),
+      } as unknown as MediaAuthService,
+      account: {
+        getSubscription: async () => ({
+          ownerId: 'stream-tool-estimate',
+          plan: 'monthly',
+          status: 'active',
+          updatedAt: 0,
+        }),
+      } as unknown as AccountService,
+      ledger,
+      openRouterApiKey: 'test-key',
+      fetchImpl: async () => new Response(stream, { status: 200 }),
+    });
+    await gateway.handleChatCompletions(
+      createMockReq({
+        body: { model: 'bytedance-seed/seed-2.0-lite', stream: true, messages: [] },
+      }),
+      createMockRes().res,
+    );
+    expect((await ledger.getSummary('stream-tool-estimate')).totalCompletionTokens).toBe(
+      Math.ceil(toolCallText.length / 4),
+    );
+  });
+
+  it('estimates non-streamed tool-call names and arguments as completion text', async () => {
+    const toolCallText = 'update_timeline {"clipId":"clip-1","startUs":1250000}';
+    const ledger = new MemoryAgentUsageLedger();
+    const gateway = new JoyModelGateway({
+      mediaAuth: {
+        authenticate: async () => ({ id: 'completion-tool-estimate' }),
+      } as unknown as MediaAuthService,
+      account: {
+        getSubscription: async () => ({
+          ownerId: 'completion-tool-estimate',
+          plan: 'monthly',
+          status: 'active',
+          updatedAt: 0,
+        }),
+      } as unknown as AccountService,
+      ledger,
+      openRouterApiKey: 'test-key',
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: 'assistant',
+                  tool_calls: [
+                    {
+                      function: {
+                        name: 'update_timeline',
+                        arguments: '{"clipId":"clip-1","startUs":1250000}',
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+    });
+    await gateway.handleChatCompletions(
+      createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } }),
+      createMockRes().res,
+    );
+    expect((await ledger.getSummary('completion-tool-estimate')).totalCompletionTokens).toBe(
+      Math.ceil(toolCallText.length / 4),
+    );
+  });
+
+  it('estimates assistant tool calls, tool replies, and tool definitions as prompt text', async () => {
+    const toolCallText = 'lookup_asset {"assetId":"asset-1"}';
+    const toolReply = 'asset metadata';
+    const messages = [
+      { role: 'user', content: 'go' },
+      {
+        role: 'assistant',
+        tool_calls: [{ function: { name: 'lookup_asset', arguments: '{"assetId":"asset-1"}' } }],
+      },
+      { role: 'tool', content: toolReply },
+    ];
+    const tools = [
+      {
+        type: 'function',
+        function: {
+          name: 'lookup_asset',
+          description: 'Find a project asset by id',
+          parameters: { type: 'object', properties: { assetId: { type: 'string' } } },
+        },
+      },
+    ];
+    const ledger = new MemoryAgentUsageLedger();
+    const gateway = new JoyModelGateway({
+      mediaAuth: {
+        authenticate: async () => ({ id: 'prompt-tool-estimate' }),
+      } as unknown as MediaAuthService,
+      account: {
+        getSubscription: async () => ({
+          ownerId: 'prompt-tool-estimate',
+          plan: 'monthly',
+          status: 'active',
+          updatedAt: 0,
+        }),
+      } as unknown as AccountService,
+      ledger,
+      openRouterApiKey: 'test-key',
+      fetchImpl: async () => new Response(JSON.stringify({ choices: [] }), { status: 200 }),
+    });
+    await gateway.handleChatCompletions(
+      createMockReq({
+        body: { model: 'bytedance-seed/seed-2.0-lite', messages, tools },
+      }),
+      createMockRes().res,
+    );
+    const expectedPrompt = `go ${toolCallText} ${toolReply} ${JSON.stringify(tools)}`;
+    expect((await ledger.getSummary('prompt-tool-estimate')).totalPromptTokens).toBe(
+      Math.ceil(expectedPrompt.length / 4),
+    );
+  });
+
   it('returns 413 for a request body larger than 2 MiB', async () => {
     const gateway = new JoyModelGateway({
       mediaAuth: { authenticate: async () => ({ id: 'u' }) } as unknown as MediaAuthService,
