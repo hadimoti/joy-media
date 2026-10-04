@@ -64,6 +64,7 @@ export default defineConfig({
     },
   },
   test: {
+    setupFiles: ['./tooling/testing/live-provider-guard.ts'],
     include: [
       '{apps,packages,tooling}/**/src/**/*.test.{ts,tsx}',
       'tests/e2e/helpers/browser-console-audit.unit.ts',
