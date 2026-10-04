@@ -77,7 +77,8 @@ Commands:
   Options: --project <id|file> --apply --allow-frames --vision --provider <name> --model <id>
          --api-key-env <VAR> --base-url <url> --debug --json
 
-On Linux/macOS, --api-key stores the key in a mode 0600 file; prefer --api-key-env <VAR>.`);
+On Linux/macOS, --api-key uses the system keyring. If unavailable, use --api-key-env <VAR>,
+or explicitly opt in to plaintext with --insecure-file-store (mode 0600).`);
 }
 
 export async function handleAgentCommand(args: string[], flags: CliFlags): Promise<number> {
@@ -108,7 +109,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
           const apiKeyLabel = p.apiKeyEnv
             ? `from env $${p.apiKeyEnv}`
             : p.apiKeyProtected
-              ? `stored (${p.apiKeyProtected.scheme === 'dpapi-user' ? 'DPAPI' : 'file-0600'})`
+              ? `stored (${p.apiKeyProtected.scheme === 'dpapi-user' ? 'DPAPI' : p.apiKeyProtected.scheme})`
               : p.apiKey
                 ? 'stored (legacy; will migrate on load)'
                 : 'none';
@@ -138,6 +139,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
       let cachedModels: string[] | undefined;
       // Try to discover models behind link
       try {
+        if (flags.apiKey) throw new Error('Skip network model discovery when a key is supplied.');
         const normalized = flags.baseUrl.replace(/\/+$/, '');
         const headers: Record<string, string> = {};
         const discoveryKey =
@@ -172,19 +174,32 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
             DEFAULT_KILO_MODEL)
           : (defaultModelFor(providerType) ?? cachedModels?.[0]));
 
-      setAiProvider(name, {
-        name,
-        provider: providerType,
-        baseUrl: providerType === 'kilo' ? canonicalKiloBaseUrl(flags.baseUrl) : flags.baseUrl,
-        apiKeyEnv: flags.apiKeyEnv,
-        ...(flags.apiKey ? { apiKeyProtected: protectSecret(flags.apiKey) } : {}),
-        defaultModel,
-        cachedModels,
-      });
+      try {
+        setAiProvider(name, {
+          name,
+          provider: providerType,
+          baseUrl: providerType === 'kilo' ? canonicalKiloBaseUrl(flags.baseUrl) : flags.baseUrl,
+          apiKeyEnv: flags.apiKeyEnv,
+          ...(flags.apiKey
+            ? {
+                apiKeyProtected: protectSecret(flags.apiKey, name, {
+                  insecureFileStore: flags.insecureFileStore,
+                }),
+              }
+            : {}),
+          defaultModel,
+          cachedModels,
+        });
+      } catch (error) {
+        logError(error instanceof Error ? error.message : 'Unable to store API key safely.');
+        return 1;
+      }
 
       logSuccess(`Provider "${name}" configured successfully!`);
-      if (flags.apiKey && process.platform !== 'win32') {
-        logWarn('API key stored in a mode 0600 file. Prefer --api-key-env <VAR> for key storage.');
+      if (flags.apiKey && flags.insecureFileStore && process.platform !== 'win32') {
+        const warning = 'API key stored in a plaintext mode 0600 file by explicit opt-in.';
+        if (flags.json) console.log(JSON.stringify({ type: 'warning', warning }));
+        else console.error(`Warning: ${warning}`);
       }
       logStep(
         'Base URL',
@@ -229,7 +244,14 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         logError('Provider name required. Usage: joy-media agent provider remove <name>');
         return 1;
       }
-      if (deleteAiProvider(name)) {
+      let deleted: boolean;
+      try {
+        deleted = deleteAiProvider(name);
+      } catch (error) {
+        logError(error instanceof Error ? error.message : 'Unable to remove provider safely.');
+        return 1;
+      }
+      if (deleted) {
         logSuccess(`Provider "${name}" removed.`);
         const cfg = loadCliConfig();
         if (cfg.activeProvider === name) {

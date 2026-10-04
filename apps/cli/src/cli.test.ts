@@ -6,7 +6,7 @@ import { runCli } from './cli.js';
 import { CliJoyAgentToolBridge } from './agent/bridge.js';
 import { resolveByokConfig } from './agent/provider.js';
 import { formatAgentRunFailure } from './commands/agent-cmd.js';
-import { protectSecret } from './utils/secret-store.js';
+import { configureSecretStoreRuntimeForTests, protectSecret } from './utils/secret-store.js';
 import { setAiProvider } from './utils/config.js';
 import { resolveTextFont } from './render/text-font.js';
 import * as joyAgentRuntime from './agent/joy-agent.js';
@@ -165,7 +165,9 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     setAiProvider('safe-provider', {
       name: 'safe-provider',
       provider: 'custom',
-      apiKeyProtected: protectSecret(key),
+      apiKeyProtected: protectSecret(key, 'safe-provider', {
+        insecureFileStore: process.platform !== 'win32',
+      }),
     });
     const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     try {
@@ -676,6 +678,35 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
   });
 
   describe('Multi-API Provider & Model Configuration Commands', () => {
+    it('refuses API-key storage when the system keyring is unavailable', async () => {
+      const restoreRuntime = configureSecretStoreRuntimeForTests({
+        platform: 'linux',
+        runner: () => ({ status: 1, stdout: '' }),
+      });
+      const errors: string[] = [];
+      const errorSpy = vi
+        .spyOn(console, 'error')
+        .mockImplementation((...args) => errors.push(args.join(' ')));
+      try {
+        const code = await runCli([
+          'agent',
+          'provider',
+          'add',
+          'no-keyring',
+          '--url',
+          'https://example.test/v1',
+          '--api-key',
+          'sk-test-REDACTED-0000',
+        ]);
+        expect(code).toBe(1);
+        expect(errors.join('\n')).toContain('--api-key-env <VAR>');
+        expect(errors.join('\n')).toContain('--insecure-file-store');
+      } finally {
+        errorSpy.mockRestore();
+        restoreRuntime();
+      }
+    });
+
     it('prints the effective default provider and model', async () => {
       const providerHome = mkdtempSync(join(tmpdir(), 'joy-cli-config-test-'));
       vi.stubEnv('USERPROFILE', providerHome);
@@ -748,6 +779,10 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
         ),
       );
       const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      const warnings: string[] = [];
+      const warningSpy = vi
+        .spyOn(console, 'error')
+        .mockImplementation((...args) => warnings.push(args.join(' ')));
       try {
         // 1. Add provider; discovery is served by the local mock.
         const addCode = await runCli([
@@ -759,16 +794,30 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
           'https://api.kilo.ai/api/gateway/v1',
           '--api-key',
           'sk-test-REDACTED-0000',
+          '--insecure-file-store',
+          '--json',
           '--model',
           'byteplus-coding/dola-seed-2.0-pro',
         ]);
         expect(addCode).toBe(0);
         const addOutput = output.mock.calls.flat().join('\n');
-        if (process.platform === 'win32') {
-          expect(addOutput).not.toContain('mode 0600');
-        } else {
-          expect(addOutput).toContain('stored in a mode 0600 file');
-          expect(addOutput).toContain('--api-key-env <VAR>');
+        if (process.platform !== 'win32') {
+          expect(addOutput).not.toContain('plaintext mode 0600 file by explicit opt-in');
+          expect(addOutput).toContain('"type":"warning"');
+          expect(
+            await runCli([
+              'agent',
+              'provider',
+              'add',
+              'insecure-no-json',
+              '--url',
+              'https://example.test/v1',
+              '--api-key',
+              'sk-test-REDACTED-0000',
+              '--insecure-file-store',
+            ]),
+          ).toBe(0);
+          expect(warnings.join('\n')).toContain('plaintext mode 0600 file by explicit opt-in');
         }
 
         // 2. List providers
@@ -800,6 +849,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
         expect(removeCode).toBe(0);
       } finally {
         output.mockRestore();
+        warningSpy.mockRestore();
         vi.unstubAllGlobals();
         vi.stubEnv('USERPROFILE', isolatedHome);
         vi.stubEnv('HOME', isolatedHome);

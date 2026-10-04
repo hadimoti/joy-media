@@ -2,7 +2,13 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { chmodPrivate, protectSecret, type ProtectedSecret } from './secret-store.js';
+import {
+  chmodPrivate,
+  deleteProtectedSecret,
+  protectSecret,
+  unprotectSecret,
+  type ProtectedSecret,
+} from './secret-store.js';
 
 export interface CliConfig {
   activeProvider?: string | undefined;
@@ -66,11 +72,27 @@ export function loadAiProviders(): Record<string, AiProviderConfig> {
     const raw = readFileSync(path, 'utf8');
     const providers = JSON.parse(raw) as Record<string, AiProviderConfig>;
     let migrated = false;
-    for (const provider of Object.values(providers)) {
-      if (provider.apiKey && !provider.apiKeyProtected && !provider.apiKeyEnv) {
-        provider.apiKeyProtected = protectSecret(provider.apiKey);
+    for (const [name, provider] of Object.entries(providers)) {
+      if (
+        provider.apiKeyEnv &&
+        (provider.apiKey || provider.apiKeyProtected?.scheme === 'file-0600')
+      ) {
         delete provider.apiKey;
+        if (provider.apiKeyProtected?.scheme === 'file-0600') delete provider.apiKeyProtected;
         migrated = true;
+      } else if (provider.apiKey || provider.apiKeyProtected?.scheme === 'file-0600') {
+        const oldSecret = provider.apiKey ?? provider.apiKeyProtected?.data;
+        if (!oldSecret) continue;
+        try {
+          const protectedKey = protectSecret(oldSecret, name);
+          if (protectedKey.scheme === 'file-0600' || unprotectSecret(protectedKey) !== oldSecret)
+            continue;
+          provider.apiKeyProtected = protectedKey;
+          delete provider.apiKey;
+          migrated = true;
+        } catch {
+          // Keep the legacy value intact until a keyring can verify a safe migration.
+        }
       }
     }
     if (migrated) {
@@ -98,6 +120,16 @@ export function setAiProvider(name: string, config: AiProviderConfig): void {
 export function deleteAiProvider(name: string): boolean {
   const providers = loadAiProviders();
   if (name in providers) {
+    const savedSecret = providers[name]?.apiKeyProtected;
+    if (
+      savedSecret &&
+      (savedSecret.scheme === 'keychain' || savedSecret.scheme === 'libsecret') &&
+      !deleteProtectedSecret(savedSecret)
+    ) {
+      throw new Error(
+        'Unable to remove the API key from the system keyring; provider was not deleted.',
+      );
+    }
     delete providers[name];
     saveAiProviders(providers);
     return true;
