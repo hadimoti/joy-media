@@ -81,6 +81,7 @@ import { UsdcLedgerError } from './usdc-invoice-ledger.js';
 
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
 const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 600;
+export const DEFAULT_RATE_LIMIT_MAX_BUCKETS = 10_000;
 /**
  * Bound ordinary JSON requests before parsing them. Routes carrying media or
  * project documents opt into their larger, explicit limits below.
@@ -141,6 +142,7 @@ export interface ControlPlaneHttpServerOptions {
   readonly rateLimit?: {
     readonly windowMs?: number;
     readonly maxRequests?: number;
+    readonly maxBuckets?: number;
   };
   /** Maximum size for ordinary JSON request bodies. Media/document routes have explicit limits. */
   readonly maxJsonBodyBytes?: number;
@@ -177,6 +179,9 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
   };
   const rateLimitWindowMs = options.rateLimit?.windowMs ?? DEFAULT_RATE_LIMIT_WINDOW_MS;
   const rateLimitMaxRequests = options.rateLimit?.maxRequests ?? DEFAULT_RATE_LIMIT_MAX_REQUESTS;
+  const rateLimitMaxBuckets = options.rateLimit?.maxBuckets ?? DEFAULT_RATE_LIMIT_MAX_BUCKETS;
+  if (!Number.isSafeInteger(rateLimitMaxBuckets) || rateLimitMaxBuckets < 1)
+    throw new RangeError('rateLimit.maxBuckets must be a positive safe integer');
   const maxJsonBodyBytes = options.maxJsonBodyBytes ?? DEFAULT_MAX_JSON_BODY_BYTES;
   if (!Number.isSafeInteger(maxJsonBodyBytes) || maxJsonBodyBytes < 1)
     throw new RangeError('maxJsonBodyBytes must be a positive safe integer');
@@ -194,6 +199,7 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
           rateLimitWindowMs,
           rateLimitMaxRequests,
           clientAddressResolver,
+          rateLimitMaxBuckets,
         )
       ) {
         response.setHeader('retry-after', String(Math.ceil(rateLimitWindowMs / 1000)));
@@ -2802,22 +2808,37 @@ function respondNoStoreJson(response: ServerResponse, status: number, payload: u
   response.end(JSON.stringify(payload));
 }
 
-function consumeRateLimit(
+export function consumeRateLimit(
   request: IncomingMessage,
   buckets: Map<string, { windowStart: number; count: number }>,
   windowMs: number,
   maxRequests: number,
   clientAddressResolver: ClientAddressResolver,
+  maxBuckets = DEFAULT_RATE_LIMIT_MAX_BUCKETS,
 ): boolean {
   const key = clientAddressResolver(request);
   const now = Date.now();
   const existing = buckets.get(key);
   if (existing === undefined || now - existing.windowStart >= windowMs) {
+    while (buckets.size >= maxBuckets && buckets.size > 0) {
+      const oldest = buckets.entries().next().value as
+        [string, { windowStart: number; count: number }] | undefined;
+      if (oldest === undefined) break;
+      if (now - oldest[1].windowStart < windowMs) break;
+      buckets.delete(oldest[0]);
+    }
+    if (!buckets.has(key) && buckets.size >= maxBuckets) {
+      // Eviction only forgets that IP's recent request history.
+      const oldestKey = buckets.keys().next().value;
+      if (oldestKey !== undefined) buckets.delete(oldestKey);
+    }
     buckets.set(key, { windowStart: now, count: 1 });
     return true;
   }
   if (existing.count >= maxRequests) return false;
   existing.count += 1;
+  buckets.delete(key);
+  buckets.set(key, existing);
   return true;
 }
 

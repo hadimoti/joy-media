@@ -18,6 +18,8 @@ import {
 } from './control-plane.js';
 import {
   createControlPlaneHttpServer,
+  consumeRateLimit,
+  DEFAULT_RATE_LIMIT_MAX_BUCKETS,
   DEFAULT_MAX_JSON_BODY_BYTES,
   type ApiAuthentication,
   type ApiReadinessOptions,
@@ -56,6 +58,21 @@ afterEach(async () => {
 });
 
 describe('control-plane HTTP transport', () => {
+  it('evicts an old IP bucket instead of growing without bound or rejecting a new IP', () => {
+    const buckets = new Map<string, { windowStart: number; count: number }>();
+    const now = Date.now();
+    for (let i = 0; i < DEFAULT_RATE_LIMIT_MAX_BUCKETS; i += 1)
+      buckets.set(`ip-${i}`, { windowStart: now, count: 1 });
+    const request = { headers: { 'x-test-ip': 'legitimate-ip' } } as unknown as IncomingMessage;
+    const resolveAddress = (incoming: IncomingMessage) =>
+      String(incoming.headers['x-test-ip'] ?? 'unknown');
+
+    expect(consumeRateLimit(request, buckets, 60_000, 600, resolveAddress)).toBe(true);
+    expect(buckets.size).toBe(DEFAULT_RATE_LIMIT_MAX_BUCKETS);
+    expect(buckets.has('legitimate-ip')).toBe(true);
+    expect(buckets.has('ip-0')).toBe(false);
+  });
+
   it('starts a bounded OTP send drain when the HTTP server closes', async () => {
     const mediaAuth = new DisabledMediaAuth();
     const drain = vi.spyOn(mediaAuth, 'drainPendingOtpSends');

@@ -183,20 +183,73 @@ describe('MediaAuthService', () => {
     await auth.drainPendingOtpSends();
   });
 
-  it('times out a hung OTP delivery and deletes its code row', async () => {
-    const { auth, db, mailer } = await service({
-      otpDeliveryTimeoutMs: 10,
-      mailer: { sendOtp: vi.fn(() => new Promise<void>(() => {})) },
-    });
-    await auth.addAllowed({ gmail: 'hung@example.com', addedBy: 'admin' });
-    await auth.requestOtp('hung@example.com', 'gmail');
-    await auth.drainPendingOtpSends(250);
+  it('keeps a timed-out send code valid when delivery eventually succeeds', async () => {
+    let release!: () => void;
+    let deliveredCode = '';
+    const mailer = {
+      sendOtp: vi.fn(async (_contact: string, code: string) => {
+        deliveredCode = code;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }),
+    };
+    const { auth, db } = await service({ otpDeliveryTimeoutMs: 10, mailer });
+    await auth.addAllowed({ gmail: 'slow@example.com', addedBy: 'admin' });
+    await auth.requestOtp('slow@example.com', 'gmail');
+    await new Promise((resolve) => setTimeout(resolve, 20));
 
     const rows = await db.query('SELECT id FROM media_otp_codes WHERE contact = $1', [
-      'hung@example.com',
+      'slow@example.com',
+    ]);
+    expect(rows.rows).toHaveLength(1);
+    release();
+    await auth.drainPendingOtpSends();
+    await expect(auth.verifyOtp('slow@example.com', 'gmail', deliveredCode)).resolves.toEqual(
+      expect.any(String),
+    );
+  });
+
+  it('holds OTP send concurrency slots until the underlying slow sends settle', async () => {
+    let active = 0;
+    let maximumActive = 0;
+    const mailer = {
+      sendOtp: vi.fn(async () => {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        active -= 1;
+      }),
+    };
+    const { auth } = await service({ otpSendConcurrency: 2, otpDeliveryTimeoutMs: 5, mailer });
+    for (let i = 0; i < 6; i += 1) {
+      const gmail = `slow-${i}@example.com`;
+      await auth.addAllowed({ gmail, addedBy: 'admin' });
+      await auth.requestOtp(gmail, 'gmail');
+    }
+
+    await auth.drainPendingOtpSends();
+
+    expect(mailer.sendOtp).toHaveBeenCalledTimes(6);
+    expect(maximumActive).toBe(2);
+  });
+
+  it('deletes the code only after a send that timed out later rejects', async () => {
+    const mailer = {
+      sendOtp: vi.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        throw new Error('smtp failure');
+      }),
+    };
+    const { auth, db } = await service({ otpDeliveryTimeoutMs: 5, mailer });
+    await auth.addAllowed({ gmail: 'late-failure@example.com', addedBy: 'admin' });
+    await auth.requestOtp('late-failure@example.com', 'gmail');
+    await auth.drainPendingOtpSends();
+
+    const rows = await db.query('SELECT id FROM media_otp_codes WHERE contact = $1', [
+      'late-failure@example.com',
     ]);
     expect(rows.rows).toEqual([]);
-    expect(mailer.sendOtp).toHaveBeenCalledOnce();
   });
 
   it('deletes failed delivery rows by id so repeated failures leave no active OTPs', async () => {
@@ -294,6 +347,29 @@ describe('MediaAuthService', () => {
     expect(buckets.has('gmail:new@example.com')).toBe(true);
   });
 
+  it('serves a new IP when the request OTP IP limiter is full of active keys', () => {
+    const buckets = new BoundedOtpRateLimitMap(10_000);
+    const timestamp = Date.now();
+    for (let i = 0; i < 10_000; i += 1) buckets.consume(`ip-${i}`, 3, timestamp);
+
+    expect(buckets.consume('legitimate-ip', 3, timestamp)).toBe(true);
+    expect(buckets.size).toBe(10_000);
+  });
+
+  it('serves a new account when the account request limiter is full of active keys', async () => {
+    const { auth } = await service();
+    const buckets = (auth as unknown as { accountOtpRateLimit: Map<string, number[]> })
+      .accountOtpRateLimit;
+    const timestamp = Date.now();
+    for (let i = 0; i < 10_000; i += 1) buckets.set(`gmail:active-${i}`, [timestamp]);
+
+    await expect(auth.requestOtp('legitimate@example.com', 'gmail')).resolves.toMatchObject({
+      message: expect.any(String),
+    });
+    expect(buckets.size).toBe(10_000);
+    expect(buckets.has('gmail:legitimate@example.com')).toBe(true);
+  });
+
   it('rate limits normalized contacts even when they are unknown', async () => {
     const { auth } = await service({ accountRateLimitMax: 2 });
     await auth.requestOtp('Unknown@example.com', 'gmail');
@@ -343,6 +419,92 @@ describe('MediaAuthService', () => {
       ['guess@example.com'],
     );
     expect(rows.rows).toEqual([{ used: true }]);
+  });
+
+  it('evicts junk verify buckets at capacity so a legitimate correct code can log in', async () => {
+    const { auth, mailer } = await service();
+    await auth.addAllowed({ gmail: 'legitimate@example.com', addedBy: 'admin' });
+    await auth.requestOtp('legitimate@example.com', 'gmail');
+    await auth.drainPendingOtpSends();
+    const code = sentCode(mailer);
+    for (let i = 0; i < 10_000; i += 1)
+      await auth.verifyOtp(`junk-${i}@example.invalid`, 'gmail', '000000').catch(() => undefined);
+
+    await expect(auth.verifyOtp('legitimate@example.com', 'gmail', code)).resolves.toEqual(
+      expect.any(String),
+    );
+  });
+
+  it('preserves blocked verify entries while evicting junk buckets', async () => {
+    const { auth, mailer } = await service();
+    await auth.addAllowed({ gmail: 'legitimate@example.com', addedBy: 'admin' });
+    await auth.requestOtp('legitimate@example.com', 'gmail');
+    await auth.drainPendingOtpSends();
+    const failures = (
+      auth as unknown as {
+        verifyFailures: Map<
+          string,
+          { timestamps: number[]; blockedUntil: number; inFlight: number }
+        >;
+      }
+    ).verifyFailures;
+    const now = Date.now();
+    failures.set('gmail:blocked-victim@example.com', {
+      timestamps: [now, now, now, now, now],
+      blockedUntil: now + 60_000,
+      inFlight: 0,
+    });
+    for (let i = 0; i < 9_999; i += 1)
+      failures.set(`gmail:junk-${i}`, { timestamps: [now], blockedUntil: 0, inFlight: 0 });
+
+    await auth.verifyOtp('legitimate@example.com', 'gmail', sentCode(mailer));
+
+    expect(failures.get('gmail:blocked-victim@example.com')?.blockedUntil).toBeGreaterThan(now);
+    await expect(
+      auth.verifyOtp('blocked-victim@example.com', 'gmail', '000000'),
+    ).rejects.toMatchObject({ code: 'TOO_MANY_ATTEMPTS' });
+  });
+
+  it('does not evict verify entries with in-flight reservations', async () => {
+    const { auth, mailer } = await service();
+    await auth.addAllowed({ gmail: 'legitimate@example.com', addedBy: 'admin' });
+    await auth.requestOtp('legitimate@example.com', 'gmail');
+    await auth.drainPendingOtpSends();
+    const failures = (
+      auth as unknown as {
+        verifyFailures: Map<
+          string,
+          { timestamps: number[]; blockedUntil: number; inFlight: number }
+        >;
+      }
+    ).verifyFailures;
+    const now = Date.now();
+    failures.set('gmail:in-flight@example.com', { timestamps: [], blockedUntil: 0, inFlight: 1 });
+    for (let i = 0; i < 9_999; i += 1)
+      failures.set(`gmail:junk-${i}`, { timestamps: [now], blockedUntil: 0, inFlight: 0 });
+
+    await auth.verifyOtp('legitimate@example.com', 'gmail', sentCode(mailer));
+
+    expect(failures.get('gmail:in-flight@example.com')?.inFlight).toBe(1);
+  });
+
+  it('rejects a verify key only when every bucket is blocked or in flight', async () => {
+    const { auth } = await service();
+    const failures = (
+      auth as unknown as {
+        verifyFailures: Map<
+          string,
+          { timestamps: number[]; blockedUntil: number; inFlight: number }
+        >;
+      }
+    ).verifyFailures;
+    for (let i = 0; i < 10_000; i += 1)
+      failures.set(`gmail:protected-${i}`, { timestamps: [], blockedUntil: 0, inFlight: 1 });
+
+    await expect(auth.verifyOtp('new@example.com', 'gmail', '000000')).rejects.toMatchObject({
+      code: 'TOO_MANY_ATTEMPTS',
+    });
+    expect(failures.size).toBe(10_000);
   });
 
   it('returns the same verify error sequence for unknown contacts', async () => {
