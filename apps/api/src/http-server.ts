@@ -182,7 +182,7 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
     throw new RangeError('maxJsonBodyBytes must be a positive safe integer');
   const rateLimitBuckets = new Map<string, { windowStart: number; count: number }>();
   const clientAddressResolver = options.clientAddressResolver ?? createClientAddressResolver();
-  return createServer(async (request, response) => {
+  const server = createServer(async (request, response) => {
     if (options.queryObservability === true) attachDbQueryCountHeader(response);
     await withDbQueryContext(async () => {
       const path = request.url?.split('?', 1)[0] ?? '/';
@@ -197,7 +197,9 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
         )
       ) {
         response.setHeader('retry-after', String(Math.ceil(rateLimitWindowMs / 1000)));
-        respondJson(response, 429, { error: { code: 'RATE_LIMITED' } });
+        respondJson(response, 429, {
+          error: { code: 'RATE_LIMITED', message: 'Too many requests. Try again later.' },
+        });
         return;
       }
       try {
@@ -207,6 +209,14 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
       }
     });
   });
+  const closeServer = server.close.bind(server);
+  server.close = ((callback?: (error?: Error) => void) =>
+    closeServer((error) => {
+      void (resolvedOptions.mediaAuth.drainPendingOtpSends?.(5_000) ?? Promise.resolve()).finally(
+        () => callback?.(error),
+      );
+    })) as Server['close'];
+  return server;
 }
 
 async function route(
@@ -2868,7 +2878,11 @@ function respondError(response: ServerResponse, error: unknown): void {
   }
   if (error instanceof MediaAuthError) {
     const status =
-      error.code === 'RATE_LIMITED' ? 429 : error.code === 'REQUEST_INVALID' ? 400 : 401;
+      error.code === 'RATE_LIMITED' || error.code === 'TOO_MANY_ATTEMPTS'
+        ? 429
+        : error.code === 'REQUEST_INVALID' || error.code === 'INVALID_OR_EXPIRED_CODE'
+          ? 400
+          : 401;
     respondJson(response, status, { error: { code: error.code, message: error.message } });
     return;
   }

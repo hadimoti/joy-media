@@ -56,6 +56,29 @@ afterEach(async () => {
 });
 
 describe('control-plane HTTP transport', () => {
+  it('starts a bounded OTP send drain when the HTTP server closes', async () => {
+    const mediaAuth = new DisabledMediaAuth();
+    const drain = vi.spyOn(mediaAuth, 'drainPendingOtpSends');
+    await start(
+      { authenticate: () => undefined },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      mediaAuth,
+    );
+    const server = servers.pop();
+    if (!server) throw new Error('test API server was not registered');
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error === undefined ? resolve() : reject(error))),
+    );
+    expect(drain).toHaveBeenCalledWith(5_000);
+  });
+
   it('returns identical 200 OTP response bodies for registered and unknown contacts', async () => {
     const adapter = newDb().adapters.createPg();
     const db = new adapter.Pool();
@@ -91,6 +114,55 @@ describe('control-plane HTTP transport', () => {
     expect(registered).toEqual(unknown);
     expect(registered.status).toBe(200);
     expect(JSON.stringify(warnings.mock.calls)).not.toContain('known@example.invalid');
+    await db.end();
+  });
+
+  it('returns identical verify error codes and HTTP statuses for known and unknown contacts', async () => {
+    const adapter = newDb().adapters.createPg();
+    const db = new adapter.Pool();
+    await db.query(`
+      CREATE TABLE media_allowed_users (id bigserial primary key, gmail text, telegram_id text, telegram_username text, added_by text not null, added_at timestamptz not null, enabled boolean not null default true);
+      CREATE TABLE media_otp_codes (id bigserial primary key, contact text not null, method text not null, code_hash text not null, created_at timestamptz not null, expires_at timestamptz not null, used boolean not null default false);
+      CREATE TABLE media_sessions (id bigserial primary key, token_hash text not null, contact text not null, method text not null, created_at timestamptz not null, expires_at timestamptz not null, revoked_at timestamptz);
+    `);
+    const mediaAuth = new MediaAuthService({ pool: db as never });
+    await mediaAuth.addAllowed({ gmail: 'known-codes@example.invalid', addedBy: 'test' });
+    const origin = await start(
+      { authenticate: () => undefined },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      mediaAuth,
+    );
+    const sequences: Array<Array<{ status: number; code: string }>> = [];
+    for (const contact of ['known-codes@example.invalid', 'unknown-codes@example.invalid']) {
+      const results = [];
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const response = await request(origin, 'POST', '/v1/auth/verify-otp', {
+          contact,
+          method: 'gmail',
+          code: '000000',
+        });
+        results.push({
+          status: response.status,
+          code: (response.body as { error: { code: string } }).error.code,
+        });
+      }
+      sequences.push(results);
+    }
+    expect(sequences[0]).toEqual([
+      { status: 400, code: 'INVALID_OR_EXPIRED_CODE' },
+      { status: 400, code: 'INVALID_OR_EXPIRED_CODE' },
+      { status: 400, code: 'INVALID_OR_EXPIRED_CODE' },
+      { status: 400, code: 'INVALID_OR_EXPIRED_CODE' },
+      { status: 429, code: 'TOO_MANY_ATTEMPTS' },
+    ]);
+    expect(sequences[1]).toEqual(sequences[0]);
     await db.end();
   });
 
