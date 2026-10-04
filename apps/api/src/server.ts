@@ -261,7 +261,7 @@ async function start(): Promise<void> {
     ...(resumableOriginalUploads === undefined ? {} : { resumableOriginalUploads }),
     ...(stockVideo === undefined ? {} : { stockVideo }),
   });
-  installApiShutdownHandlers(server);
+  installApiShutdownHandlers(server, process, 5_000, () => mediaAuth.pendingOtpSendCount ?? 0);
   server.listen(port, host);
   console.log(`JOY Media API listening on ${host}:${port}`);
 }

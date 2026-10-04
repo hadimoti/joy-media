@@ -24,6 +24,11 @@ OTP requests use the same generic response for known and unknown contacts.
 Email delivery runs after the response, and delivery errors are logged with a
 short SHA-256 contact digest rather than the email address.
 
+On `SIGTERM` or `SIGINT`, the API closes its HTTP server and drains pending OTP
+sends for up to five seconds. A graceful shutdown that reaches that deadline
+logs the number of abandoned OTP sends and exits with status 0 so systemd records
+the stop as successful. A second signal forces an immediate exit with status 1.
+
 **Must not:** Heavy inference, frame rendering, large-media relay; one microservice per module.
 
 Dependency rule (§9.1): the graph points inward — apps depend on packages, packages depend on schema/primitives, never the reverse, and core packages never import from `apps/*`.

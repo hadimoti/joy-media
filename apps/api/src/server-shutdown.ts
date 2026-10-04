@@ -12,6 +12,7 @@ export function installApiShutdownHandlers(
   server: Pick<Server, 'close'>,
   processLike: ApiShutdownProcess = process,
   timeoutMs = 5_000,
+  getAbandonedCount: () => number = () => 0,
 ): () => void {
   let shuttingDown = false;
   let finished = false;
@@ -28,11 +29,18 @@ export function installApiShutdownHandlers(
 
   const onSignal = () => {
     if (shuttingDown) {
+      // A second signal is an explicit force-stop and remains unsuccessful.
       finish(1);
       return;
     }
     shuttingDown = true;
-    timeout = setTimeout(() => finish(1), timeoutMs);
+    timeout = setTimeout(() => {
+      console.warn('JOY Media API graceful shutdown timed out', {
+        abandonedCount: Math.max(0, getAbandonedCount()),
+      });
+      // The process is stopping intentionally; systemd should record a successful stop.
+      finish(0);
+    }, timeoutMs);
     timeout.unref();
     try {
       server.close((error) => finish(error === undefined ? 0 : 1));

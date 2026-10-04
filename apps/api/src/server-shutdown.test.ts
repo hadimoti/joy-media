@@ -36,7 +36,7 @@ describe('installApiShutdownHandlers', () => {
     expect(processLike.exit).toHaveBeenCalledWith(0);
   });
 
-  it('exits unsuccessfully when close fails or the shutdown deadline expires', async () => {
+  it('exits unsuccessfully when close fails and successfully when graceful shutdown times out', async () => {
     const failedProcess = fakeProcess();
     const failedServer = {
       close: vi.fn((callback: (error?: Error) => void) => callback(new Error())),
@@ -47,10 +47,15 @@ describe('installApiShutdownHandlers', () => {
 
     const timedOutProcess = fakeProcess();
     const hungServer = { close: vi.fn() };
-    installApiShutdownHandlers(hungServer as never, timedOutProcess, 10);
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    installApiShutdownHandlers(hungServer as never, timedOutProcess, 10, () => 3);
     timedOutProcess.signal('SIGTERM');
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(timedOutProcess.exit).toHaveBeenCalledWith(1);
+    expect(timedOutProcess.exit).toHaveBeenCalledWith(0);
+    expect(warning).toHaveBeenCalledWith('JOY Media API graceful shutdown timed out', {
+      abandonedCount: 3,
+    });
+    warning.mockRestore();
   });
 
   it('forces exit when a second signal arrives during shutdown', () => {
