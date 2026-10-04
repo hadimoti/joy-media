@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import type {
   JoyAgentToolBridge,
   JoyDocumentOperation,
+  JoyPlanChecklistItem,
   JoyTimelineOperation,
 } from '@joy-media/joy-agent-engine';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
@@ -57,7 +58,9 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
   private playheadUs: number = 0;
   private lastApplyResult: ApplyStagedResult | undefined;
   private submittedPlan = false;
-  private reportedIssues: string[] = [];
+  private timelineProposalIssues: string[] = [];
+  private documentProposalIssues: string[] = [];
+  private finalChecklist: JoyPlanChecklistItem[] = [];
 
   constructor(
     private project: JoyProjectV1,
@@ -83,7 +86,11 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
   }
 
   getReportedIssues(): string[] {
-    return [...this.reportedIssues];
+    return [...this.timelineProposalIssues, ...this.documentProposalIssues];
+  }
+
+  getPlanChecklist(): readonly JoyPlanChecklistItem[] {
+    return [...this.finalChecklist];
   }
 
   clearStaged(): void {
@@ -278,9 +285,10 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
   }): Promise<unknown> {
     const errors = this.validateTimelineProposal(input.operations);
     if (errors.length > 0) {
-      this.reportedIssues.push(...errors);
+      this.timelineProposalIssues = [...errors];
       return { accepted: false, errors };
     }
+    this.timelineProposalIssues = [];
     this.stagedTimeline.push(...input.operations);
     this.lastApplyResult = undefined;
     this.notify();
@@ -298,9 +306,10 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
   }): Promise<unknown> {
     const errors = this.validateDocumentProposal(input.operations);
     if (errors.length > 0) {
-      this.reportedIssues.push(...errors);
+      this.documentProposalIssues = [...errors];
       return { accepted: false, errors };
     }
+    this.documentProposalIssues = [];
     this.stagedDocument.push(...input.operations);
     this.lastApplyResult = undefined;
     this.notify();
@@ -362,10 +371,10 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
             `Track ${operation.trackId} cannot host ${found?.clip.kind ?? 'this'} clips.`,
           );
       }
-      if (operation.kind === 'trim' && operation.endUs <= operation.startUs)
-        errors.push(`Operation ${operation.id} endUs must be after startUs.`);
-      if (operation.kind === 'trim' && operation.endUs - operation.startUs < minimumFrame)
-        errors.push(`Operation ${operation.id} duration is shorter than one project frame.`);
+      if (operation.kind === 'trim' && operation.sourceOutUs <= operation.sourceInUs)
+        errors.push(`Operation ${operation.id} sourceOutUs must be after sourceInUs.`);
+      if (operation.kind === 'trim' && operation.sourceOutUs - operation.sourceInUs < minimumFrame)
+        errors.push(`Operation ${operation.id} source range is shorter than one project frame.`);
     }
     if (errors.length > 0) return errors;
     const preview = new CliJoyAgentToolBridge(structuredClone(this.project), this.revision);
@@ -434,8 +443,11 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
     return preview.applyStaged().errors;
   }
 
-  async submitPlan(): Promise<unknown> {
+  async submitPlan(
+    input: { readonly checklist: readonly JoyPlanChecklistItem[] } = { checklist: [] },
+  ): Promise<unknown> {
     this.submittedPlan = true;
+    this.finalChecklist = [...input.checklist];
     if (this.autoApply) {
       const preview = new CliJoyAgentToolBridge(structuredClone(this.project), this.revision);
       preview.stagedTimeline = [...this.stagedTimeline];
@@ -448,6 +460,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
         applied: false,
         validationErrors: result.errors,
         placementSummary: result.placementSummary,
+        checklist: this.finalChecklist,
         timelineOperations: this.stagedTimeline.length,
         documentOperations: this.stagedDocument.length,
         revision: this.revision,
@@ -459,6 +472,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
       timelineOperations: this.stagedTimeline.length,
       documentOperations: this.stagedDocument.length,
       revision: this.revision,
+      checklist: this.finalChecklist,
     };
   }
 
@@ -596,39 +610,44 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
           targetTrack.clips.sort((a, b) => a.startUs - b.startUs);
           recordApplied(op.id);
         } else if (op.kind === 'trim') {
-          if (op.endUs <= op.startUs) {
-            errors.push(`Invalid trim range for ${op.clipId}: end must be greater than start`);
+          if (op.sourceOutUs <= op.sourceInUs) {
+            errors.push(
+              `Invalid trim range for ${op.clipId}: sourceOutUs must be after sourceInUs`,
+            );
             continue;
           }
           let found = false;
           for (const track of tracks) {
             const clip = track.clips.find((c) => c.id === op.clipId);
             if (clip) {
+              const rate =
+                typeof clip.playbackRate === 'number' && clip.playbackRate > 0
+                  ? clip.playbackRate
+                  : 1;
+              const nextStartUs = op.timelineStartUs ?? clip.startUs;
+              const nextDurationUs = Math.round((op.sourceOutUs - op.sourceInUs) / rate);
               const overlapping = track.clips.some(
                 (other) =>
                   other.id !== clip.id &&
-                  op.startUs < other.startUs + other.durationUs &&
-                  op.endUs > other.startUs,
+                  nextStartUs < other.startUs + other.durationUs &&
+                  nextStartUs + nextDurationUs > other.startUs,
               );
               if (overlapping) {
                 errors.push(`Trim of ${op.clipId} overlaps another clip on track ${track.id}`);
                 found = true;
                 break;
               }
-              const previousStartUs = clip.startUs;
               if (clip.kind === 'video') {
-                const sourceInUs = sourceTimeAtVideoClipTime(clip as never, op.startUs);
-                if (sourceInUs < 0) {
-                  errors.push(`Trim of ${op.clipId} would use a negative source time`);
-                  found = true;
-                  break;
-                }
-                clip.sourceInUs = sourceInUs;
+                clip.sourceInUs = op.sourceInUs;
               } else if (clip.kind === 'composition') {
-                clip.childOffsetUs = (clip.childOffsetUs ?? 0) + op.startUs - previousStartUs;
+                errors.push(
+                  `Trim of ${op.clipId} requires source media and cannot trim a composition clip.`,
+                );
+                found = true;
+                break;
               }
-              clip.startUs = op.startUs;
-              clip.durationUs = op.endUs - op.startUs;
+              clip.startUs = nextStartUs;
+              clip.durationUs = nextDurationUs;
               found = true;
               if (!errors.some((error) => error.includes(`Trim of ${op.clipId}`)))
                 recordApplied(op.id);

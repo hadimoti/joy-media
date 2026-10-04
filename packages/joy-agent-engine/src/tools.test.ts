@@ -4,6 +4,7 @@ import {
   JOY_AGENT_TOOL_METADATA,
   createJoyAgentTools,
   parseJoyTimelineOperations,
+  parseJoyTimelineOperationsDetailed,
   parseJoyDocumentOperations,
   validateOperationDependencies,
   type JoyAgentToolBridge,
@@ -150,15 +151,66 @@ describe('JOY Agent tool catalog', () => {
       inputSchema.parse({ operations: [{ ...insert('op-1'), headers: {} }] }),
     ).not.toThrow();
     expect((tools.propose_timeline_operations as { description: string }).description).toContain(
-      'does not move the clip on the timeline',
+      'sourceInUs: 7000000, sourceOutUs: 17000000',
     );
     expect((tools.propose_timeline_operations as { description: string }).description).toContain(
-      'separate move operation',
+      'use move to change timeline position',
     );
     const textDescription = (tools.propose_document_operations as { description: string })
       .description;
     expect(textDescription).toContain('x and y are editor-normalized frame fractions');
     expect(textDescription).toContain('10 seconds = 10000000');
+  });
+
+  it('passes the requested outcomes checklist through submit_plan', async () => {
+    const submitPlan = vi.fn(async (input?: { checklist: readonly unknown[] }) => ({
+      checklist: input?.checklist ?? [],
+    }));
+    const tools = createJoyAgentTools(bridge({ submitPlan }));
+    const execute = (tools.submit_plan as { execute: (input: unknown) => Promise<unknown> })
+      .execute;
+    const checklist = [
+      { kind: 'trim', clipId: 'clip-a', sourceInUs: 7_000_000, sourceOutUs: 17_000_000 },
+    ];
+    await expect(execute({ checklist })).resolves.toMatchObject({ checklist });
+    expect(submitPlan).toHaveBeenCalledWith({ checklist });
+  });
+
+  it('normalizes trim aliases and rejects unknown trim fields helpfully', () => {
+    const parsed = parseJoyTimelineOperationsDetailed([
+      {
+        kind: 'trim',
+        id: 'trim-1',
+        clipId: 'clip-1',
+        startUs: 7_000_000,
+        endUs: 17_000_000,
+      },
+    ]);
+    expect(parsed.operations[0]).toMatchObject({ sourceInUs: 7_000_000, sourceOutUs: 17_000_000 });
+    expect(parsed.deprecationNote).toContain('use sourceInUs/sourceOutUs');
+    expect(
+      parseJoyTimelineOperations([
+        {
+          kind: 'trim',
+          id: 'trim-2',
+          clipId: 'clip-1',
+          inUs: 7_000_000,
+          outUs: 17_000_000,
+        },
+      ])[0],
+    ).toMatchObject({ sourceInUs: 7_000_000, sourceOutUs: 17_000_000 });
+    expect(() =>
+      parseJoyTimelineOperations([
+        {
+          kind: 'trim',
+          id: 'trim-3',
+          clipId: 'clip-1',
+          sourceInUs: 0,
+          sourceOutUs: 1,
+          srcIn: 4,
+        },
+      ]),
+    ).toThrow(/Unknown trim field.*srcIn.*Valid fields.*timelineStartUs/);
   });
 
   it('exposes bounded domain tools without granting them a default executor', async () => {

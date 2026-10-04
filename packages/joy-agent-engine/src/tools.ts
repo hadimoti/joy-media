@@ -43,8 +43,9 @@ const timelineOperation = z.discriminatedUnion('kind', [
       kind: z.literal('trim'),
       id,
       clipId: id,
-      startUs: z.number().int().nonnegative(),
-      endUs: z.number().int().positive(),
+      sourceInUs: z.number().int().nonnegative(),
+      sourceOutUs: z.number().int().positive(),
+      timelineStartUs: z.number().int().nonnegative().optional(),
       dependsOn: z.array(id).max(32).default([]),
     })
     .strict(),
@@ -113,6 +114,19 @@ const documentOperation = z.discriminatedUnion('kind', [
 
 export type JoyTimelineOperation = z.infer<typeof timelineOperation>;
 export type JoyDocumentOperation = z.infer<typeof documentOperation>;
+export type JoyPlanChecklistItem =
+  | {
+      readonly kind: 'trim';
+      readonly clipId: string;
+      readonly sourceInUs: number;
+      readonly sourceOutUs: number;
+    }
+  | { readonly kind: 'text'; readonly text: string; readonly position?: 'center' | undefined }
+  | {
+      readonly kind: 'look';
+      readonly clipId: string;
+      readonly look: 'crt' | 'bw' | 'warm' | 'cool';
+    };
 
 export interface JoyAgentToolBridge {
   readonly readProjectSummary: () => Promise<unknown>;
@@ -129,7 +143,9 @@ export interface JoyAgentToolBridge {
   readonly proposeDocumentOperations: (input: {
     readonly operations: readonly JoyDocumentOperation[];
   }) => Promise<unknown>;
-  readonly submitPlan: () => Promise<unknown>;
+  readonly submitPlan: (input?: {
+    readonly checklist: readonly JoyPlanChecklistItem[];
+  }) => Promise<unknown>;
   /** Optional domain readers/proposers keep media surfaces on the same bridge. */
   readonly readBrief?: () => Promise<unknown>;
   readonly readScene3d?: () => Promise<unknown>;
@@ -266,7 +282,80 @@ export const JOY_AGENT_TOOL_METADATA: Readonly<Record<string, JoyAgentToolMetada
 export type JoyAgentToolName = keyof typeof JOY_AGENT_TOOL_METADATA;
 
 export function parseJoyTimelineOperations(value: unknown): readonly JoyTimelineOperation[] {
-  return parseOperations(timelineOperation, value);
+  return parseJoyTimelineOperationsDetailed(value).operations;
+}
+
+export function parseJoyTimelineOperationsDetailed(value: unknown): {
+  readonly operations: readonly JoyTimelineOperation[];
+  readonly deprecationNote?: string;
+} {
+  if (!Array.isArray(value)) return { operations: parseOperations(timelineOperation, value) };
+  const aliases = new Set<string>();
+  const acceptedFields = [
+    'kind',
+    'id',
+    'clipId',
+    'sourceInUs',
+    'sourceOutUs',
+    'timelineStartUs',
+    'startUs',
+    'endUs',
+    'trimStartUs',
+    'trimEndUs',
+    'inUs',
+    'outUs',
+    'trimLeftUs',
+    'trimRightUs',
+    'dependsOn',
+  ];
+  const normalized = value.map((candidate) => {
+    if (
+      candidate === null ||
+      typeof candidate !== 'object' ||
+      Array.isArray(candidate) ||
+      (candidate as { kind?: unknown }).kind !== 'trim'
+    )
+      return candidate;
+    const record = candidate as Record<string, unknown>;
+    const unknown = Object.keys(record).filter((key) => !acceptedFields.includes(key));
+    if (unknown.length)
+      throw new Error(
+        `Unknown trim field(s): ${unknown.join(', ')}. Valid fields: sourceInUs, sourceOutUs, timelineStartUs (aliases: startUs/endUs, trimStartUs/trimEndUs, inUs/outUs, trimLeftUs/trimRightUs).`,
+      );
+    const choose = (primary: string, choices: string[]) => {
+      if (record[primary] !== undefined) return record[primary];
+      for (const alias of choices)
+        if (record[alias] !== undefined) {
+          aliases.add(alias);
+          return record[alias];
+        }
+      return undefined;
+    };
+    const {
+      startUs: _start,
+      endUs: _end,
+      trimStartUs: _trimStart,
+      trimEndUs: _trimEnd,
+      inUs: _in,
+      outUs: _out,
+      trimLeftUs: _left,
+      trimRightUs: _right,
+      ...rest
+    } = record;
+    return {
+      ...rest,
+      sourceInUs: choose('sourceInUs', ['startUs', 'trimStartUs', 'inUs', 'trimLeftUs']),
+      sourceOutUs: choose('sourceOutUs', ['endUs', 'trimEndUs', 'outUs', 'trimRightUs']),
+    };
+  });
+  return {
+    operations: parseOperations(timelineOperation, normalized),
+    ...(aliases.size
+      ? {
+          deprecationNote: `Deprecated trim aliases used (${[...aliases].join(', ')}); use sourceInUs/sourceOutUs and optional timelineStartUs.`,
+        }
+      : {}),
+  };
 }
 
 const proposalInput = (operationLimit: number) =>
@@ -293,6 +382,12 @@ function proposalValidationErrors(result: unknown): string[] {
   if (record.accepted !== false) return [];
   if (Array.isArray(record.errors)) return record.errors.map(String).slice(0, 32);
   return ['Proposal was rejected by project validation.'];
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 export function parseJoyDocumentOperations(value: unknown): readonly JoyDocumentOperation[] {
@@ -420,12 +515,15 @@ export function createJoyAgentTools(
     }),
     propose_timeline_operations: tool({
       description:
-        'Propose timeline operations. Each operation needs a unique id and schema-valid fields; the tool returns validation errors for repair and retry (up to three invalid proposals). startUs, endUs, atUs, and durationUs use integer microseconds (for example, 10 seconds is 10000000). Trimming changes a clip’s source in/out and visible duration; it does not move the clip on the timeline. Use a separate move operation to change its timeline position.',
+        'Propose timeline operations. Each operation needs a unique id and schema-valid fields; the tool returns validation errors for repair and retry (up to three invalid proposals). Time values use integer microseconds. For trim, sourceInUs/sourceOutUs are positions into the SOURCE media, and timelineStartUs is optional. Example: keep source 7 s to 17 s => sourceInUs: 7000000, sourceOutUs: 17000000. Trimming changes the visible duration; use move to change timeline position.',
       inputSchema: proposalInput(operationLimit),
       execute: async (input) => {
         let operations: readonly JoyTimelineOperation[];
+        let deprecationNote: string | undefined;
         try {
-          operations = parseJoyTimelineOperations(input.operations);
+          const parsed = parseJoyTimelineOperationsDetailed(input.operations);
+          operations = parsed.operations;
+          deprecationNote = parsed.deprecationNote;
           validateOperationDependencies(operations);
         } catch (error) {
           const attempts = ++invalidTimelineProposals;
@@ -438,9 +536,13 @@ export function createJoyAgentTools(
         const invalid = proposalValidationErrors(result);
         if (invalid.length > 0) {
           const attempts = ++invalidTimelineProposals;
-          return proposalErrorResult(invalid, attempts);
+          const rejected = proposalErrorResult(invalid, attempts);
+          return deprecationNote ? { ...rejected, note: deprecationNote } : rejected;
         }
-        return boundedResult(result, maxPayloadBytes);
+        return boundedResult(
+          deprecationNote ? { ...asRecord(result), note: deprecationNote } : result,
+          maxPayloadBytes,
+        );
       },
     }),
     propose_document_operations: tool({
@@ -509,9 +611,42 @@ export function createJoyAgentTools(
       },
     }),
     submit_plan: tool({
-      description: 'Finalize the staged plan for JOY approval.',
-      inputSchema: z.object({}).strict(),
-      execute: async () => boundedResult(await bridge.submitPlan(), maxPayloadBytes),
+      description:
+        'Finalize the staged plan for JOY approval. Include a short checklist of requested outcomes so the CLI can verify each against the final timeline.',
+      inputSchema: z
+        .object({
+          checklist: z
+            .array(
+              z.discriminatedUnion('kind', [
+                z
+                  .object({
+                    kind: z.literal('trim'),
+                    clipId: id,
+                    sourceInUs: z.number().int().nonnegative(),
+                    sourceOutUs: z.number().int().positive(),
+                  })
+                  .strict(),
+                z
+                  .object({
+                    kind: z.literal('text'),
+                    text: boundedText,
+                    position: z.literal('center').optional(),
+                  })
+                  .strict(),
+                z
+                  .object({
+                    kind: z.literal('look'),
+                    clipId: id,
+                    look: z.enum(['crt', 'bw', 'warm', 'cool']),
+                  })
+                  .strict(),
+              ]),
+            )
+            .max(12)
+            .default([]),
+        })
+        .strict(),
+      execute: async (input) => boundedResult(await bridge.submitPlan(input), maxPayloadBytes),
     }),
   };
   let invalidTimelineProposals = 0;

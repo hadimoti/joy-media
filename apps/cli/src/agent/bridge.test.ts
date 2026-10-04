@@ -81,6 +81,66 @@ function projectWithTracks(): JoyProjectV1 {
 }
 
 describe('CLI Joy Agent bridge timeline operations', () => {
+  it('discards rejected proposal issues when a corrected proposal validates', async () => {
+    const bridge = new CliJoyAgentToolBridge(projectWithTracks(), 1, undefined, true);
+    const rejected = await bridge.proposeTimelineOperations({
+      operations: [{ kind: 'remove', id: 'bad-remove', clipId: 'missing', dependsOn: [] }],
+    });
+    expect(rejected).toMatchObject({ accepted: false });
+    expect(bridge.getReportedIssues()).toContain('Clip missing not found.');
+
+    const corrected = await bridge.proposeTimelineOperations({
+      operations: [
+        {
+          kind: 'move',
+          id: 'move-ok',
+          clipId: 'moving',
+          trackId: 'video-2',
+          startUs: 5_000_000,
+          dependsOn: [],
+        },
+      ],
+    });
+    expect(corrected).toMatchObject({ accepted: true });
+    expect(bridge.getReportedIssues()).toEqual([]);
+    const result = bridge.applyStaged();
+    expect(result.errors).toEqual([]);
+    expect(result.appliedOperationIds).toContain('move-ok');
+  });
+
+  it('keeps issues until the same proposal type is corrected', async () => {
+    const bridge = new CliJoyAgentToolBridge(projectWithTracks(), 1);
+    await bridge.proposeTimelineOperations({
+      operations: [{ kind: 'remove', id: 'bad-remove', clipId: 'missing', dependsOn: [] }],
+    });
+    await bridge.proposeDocumentOperations({
+      operations: [
+        {
+          kind: 'create-text',
+          id: 'title',
+          text: 'Title',
+          startUs: 0,
+          durationUs: 1_000_000,
+          dependsOn: [],
+        },
+      ],
+    });
+    expect(bridge.getReportedIssues()).toContain('Clip missing not found.');
+    await bridge.proposeTimelineOperations({
+      operations: [
+        {
+          kind: 'move',
+          id: 'move-ok',
+          clipId: 'moving',
+          trackId: 'video-2',
+          startUs: 5_000_000,
+          dependsOn: [],
+        },
+      ],
+    });
+    expect(bridge.getReportedIssues()).toEqual([]);
+  });
+
   it('counts spans covered only by captions as black in the placement summary', async () => {
     const baseProject = projectWithTracks();
     const root = baseProject.compositions.root!;
@@ -308,8 +368,9 @@ describe('CLI Joy Agent bridge timeline operations', () => {
           kind: 'trim',
           id: 'trim-op',
           clipId: 'moving',
-          startUs: 3_000_000,
-          endUs: 5_000_000,
+          sourceInUs: 3_000_000,
+          sourceOutUs: 7_000_000,
+          timelineStartUs: 3_000_000,
           dependsOn: [],
         },
       ],

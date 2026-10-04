@@ -71,6 +71,7 @@ export type {
   JoyAgentToolMetadata,
   JoyAgentToolName,
   JoyDocumentOperation,
+  JoyPlanChecklistItem,
   JoyTimelineOperation,
 } from './tools.js';
 export {
