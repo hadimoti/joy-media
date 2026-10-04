@@ -94,6 +94,91 @@ describe('buildFfmpegRenderPlan', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it('renders validated clip looks into the video chain and skips unknown effects', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-ffmpeg-look-plan-'));
+    const mediaPath = join(dir, 'clip.mp4');
+    writeFileSync(mediaPath, 'plan-only placeholder');
+    try {
+      const project = createDefaultProject('looks');
+      (project.assets as Record<string, unknown>)['asset-look'] = {
+        id: 'asset-look',
+        kind: 'video',
+        displayName: 'clip.mp4',
+        localSource: { path: mediaPath },
+      };
+      const clips = project.compositions.root!.tracks[0]!.clips as unknown as Array<
+        Record<string, unknown>
+      >;
+      clips.push({
+        id: 'crt',
+        kind: 'video',
+        assetId: 'asset-look',
+        startUs: 0,
+        durationUs: 1_000_000,
+        sourceInUs: 0,
+        look: { preset: 'crt', intensity: 0.7 },
+      });
+      clips.push({
+        id: 'bw',
+        kind: 'video',
+        assetId: 'asset-look',
+        startUs: 1_000_000,
+        durationUs: 1_000_000,
+        sourceInUs: 0,
+        look: { preset: 'bw', intensity: 0.6 },
+      });
+      clips.push({
+        id: 'warm',
+        kind: 'video',
+        assetId: 'asset-look',
+        startUs: 2_000_000,
+        durationUs: 1_000_000,
+        sourceInUs: 0,
+        look: { preset: 'warm' },
+      });
+      clips.push({
+        id: 'cool',
+        kind: 'video',
+        assetId: 'asset-look',
+        startUs: 3_000_000,
+        durationUs: 1_000_000,
+        sourceInUs: 0,
+        look: { preset: 'cool' },
+      });
+      clips.push({
+        id: 'unknown',
+        kind: 'video',
+        assetId: 'asset-look',
+        startUs: 4_000_000,
+        durationUs: 1_000_000,
+        sourceInUs: 0,
+        look: { preset: 'bad-look' },
+      });
+      clips.push({
+        id: 'unsupported-effect',
+        kind: 'video',
+        assetId: 'asset-look',
+        startUs: 5_000_000,
+        durationUs: 1_000_000,
+        sourceInUs: 0,
+        effects: [{ effectId: 'made-up' }],
+      });
+      const plan = buildFfmpegRenderPlan(project, 'mp4');
+      const graph = plan.args[plan.args.indexOf('-filter_complex') + 1]!;
+      expect(graph).toContain('rgbashift');
+      expect(graph).toContain('vignette');
+      expect(graph).toContain('noise');
+      expect(graph).toContain('hue=s=0');
+      expect(graph.match(/colorbalance=/g)).toHaveLength(2);
+      expect(plan.skipped).toContainEqual(expect.objectContaining({ clipId: 'unknown' }));
+      expect(plan.skipped).toContainEqual(
+        expect.objectContaining({ clipId: 'unsupported-effect' }),
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('keeps caption text out of the filtergraph and returns it as a text file', () => {
     const dir = mkdtempSync(join(tmpdir(), 'joy-ffmpeg-caption-plan-'));
     try {

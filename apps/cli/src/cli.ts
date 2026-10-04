@@ -58,6 +58,11 @@ export interface CliFlags {
   debug: boolean;
   system: boolean;
   'media-engine': boolean;
+  look: string | undefined;
+  intensity: number | undefined;
+  scanlineStrength: number | undefined;
+  noiseAmount: number | undefined;
+  insecureFileStore: boolean;
 }
 
 export function printHelp(): void {
@@ -71,7 +76,7 @@ export function printHelp(): void {
     `    ${c('project', 'cyan')} [list|create|show|export]  Local SQLite project management`,
   );
   console.log(
-    `    ${c('timeline', 'cyan')} [add-clip|split|trim]     Direct scriptable timeline operations`,
+    `    ${c('timeline', 'cyan')} [add-clip|add-effect|split|trim]  Direct scriptable timeline operations`,
   );
   console.log(
     `    ${c('asset', 'cyan')} [import|list]             Import and inspect local media assets`,
@@ -157,6 +162,14 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     debug: Boolean(v.debug),
     system: Boolean(v.system),
     'media-engine': Boolean(v['media-engine']),
+    look: typeof v.look === 'string' ? v.look : undefined,
+    intensity: parseFloatFlag('intensity', v.intensity, { min: 0, max: 1 }),
+    scanlineStrength: parseFloatFlag('scanline-strength', v['scanline-strength'], {
+      min: 0,
+      max: 1,
+    }),
+    noiseAmount: parseFloatFlag('noise-amount', v['noise-amount'], { min: 0, max: 1 }),
+    insecureFileStore: Boolean(v['insecure-file-store']),
   };
 }
 
@@ -207,6 +220,11 @@ export async function runCli(argv: string[]): Promise<number> {
         debug: { type: 'boolean', default: false },
         system: { type: 'boolean', default: false },
         'media-engine': { type: 'boolean', default: false },
+        look: { type: 'string' },
+        intensity: { type: 'string' },
+        'scanline-strength': { type: 'string' },
+        'noise-amount': { type: 'string' },
+        'insecure-file-store': { type: 'boolean', default: false },
       },
       allowPositionals: true,
       strict: false,

@@ -61,6 +61,7 @@ export type {
   TrackV1,
   ClipV1,
   VideoClipV1,
+  ClipLookV1,
   CompositionClipV1,
   CaptionClipV1,
   CaptionWordV1,

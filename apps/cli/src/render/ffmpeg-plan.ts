@@ -238,6 +238,12 @@ export function buildFfmpegRenderPlan(
           clipId: clip.id,
           reason: 'clip effects are not supported by the v1 renderer',
         });
+        continue;
+      }
+      const lookFilter = clip.kind === 'video' ? clipLookFilter(clip.look) : undefined;
+      if (clip.kind === 'video' && clip.look !== undefined && !lookFilter) {
+        skipped.push({ clipId: clip.id, reason: 'unknown or invalid clip look is not supported' });
+        continue;
       }
       if (extendedClip.timeRemap !== undefined) {
         skipped.push({ clipId: clip.id, reason: 'timeRemap is not supported by the v1 renderer' });
@@ -294,7 +300,7 @@ export function buildFfmpegRenderPlan(
       const label = `v_${overlayIndex}`;
       const reverse = clip.reversed ? ',reverse' : '';
       filters.push(
-        `[${inputIndex}:v]trim=start=${seconds(clip.sourceInUs)}:duration=${seconds(sourceDurationUs)}${reverse},setpts=(PTS-STARTPTS)/${rate || 1}+${seconds(clip.startUs)}/TB,scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black@0,format=yuva420p[${label}]`,
+        `[${inputIndex}:v]trim=start=${seconds(clip.sourceInUs)}:duration=${seconds(sourceDurationUs)}${reverse},setpts=(PTS-STARTPTS)/${rate || 1}+${seconds(clip.startUs)}/TB${lookFilter ? `,${lookFilter}` : ''},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black@0,format=yuva420p[${label}]`,
       );
       const next = `o_${overlayIndex}`;
       filters.push(
@@ -438,6 +444,42 @@ export function buildFfmpegRenderPlan(
       'pcm_s24le',
     );
   return { args, inputs, skipped, width, height, fpsExpr, durationUs, textFiles };
+}
+
+function clipLookFilter(look: unknown): string | undefined {
+  if (look === undefined) return undefined;
+  if (!look || typeof look !== 'object' || Array.isArray(look)) return undefined;
+  const value = look as Record<string, unknown>;
+  const bounded = (key: string, fallback: number): number | undefined => {
+    const raw = value[key] ?? fallback;
+    return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 && raw <= 1
+      ? raw
+      : undefined;
+  };
+  const intensity = bounded('intensity', 1);
+  if (intensity === undefined) return undefined;
+  const amount = (n: number): string => n.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+  switch (value.preset) {
+    case 'crt': {
+      const scanlines = bounded('scanlineStrength', 0.35);
+      const noise = bounded('noiseAmount', 0.08);
+      if (scanlines === undefined || noise === undefined) return undefined;
+      return [
+        `rgbashift=rh=${amount(2 * intensity)}:bh=${amount(-2 * intensity)}`,
+        `noise=alls=${amount(12 * noise * intensity)}:allf=t+u`,
+        `vignette=PI/${amount(4 / Math.max(0.1, intensity))}`,
+        `drawgrid=width=iw:height=4:thickness=1:color=black@${amount(0.55 * scanlines * intensity)}`,
+      ].join(',');
+    }
+    case 'bw':
+      return `hue=s=${amount(1 - intensity)},eq=contrast=${amount(1 + 0.12 * intensity)}`;
+    case 'warm':
+      return `colorbalance=rs=${amount(0.18 * intensity)}:gs=${amount(0.02 * intensity)}:bs=${amount(-0.18 * intensity)}`;
+    case 'cool':
+      return `colorbalance=rs=${amount(-0.16 * intensity)}:gs=${amount(0.02 * intensity)}:bs=${amount(0.16 * intensity)}`;
+    default:
+      return undefined;
+  }
 }
 
 function drawtextCoordinate(value: number | undefined, fallback: string): string {

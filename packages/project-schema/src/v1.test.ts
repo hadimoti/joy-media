@@ -78,6 +78,20 @@ describe('v1 project schema and migration harness', () => {
     );
   });
 
+  it('rejects clip looks with unknown presets and out-of-range values', () => {
+    const project = migrateV0ToV1(v0Fixture()).project;
+    const clip = project.compositions.root!.tracks[0]!.clips[0] as { look?: unknown };
+    clip.look = { preset: 'crt', intensity: Number.NaN, noiseAmount: 1.1 };
+    const diagnostics = validateJoyProjectV1(project);
+    expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      'PROJECT_SCHEMA_V1_CLIP_LOOK',
+    );
+    clip.look = { preset: 'untrusted', intensity: 0.5 };
+    expect(validateJoyProjectV1(project).map((diagnostic) => diagnostic.code)).toContain(
+      'PROJECT_SCHEMA_V1_CLIP_LOOK',
+    );
+  });
+
   it('accepts a valid caption document and caption clip on a caption track', () => {
     const project = {
       ...migrateV0ToV1(v0Fixture()).project,

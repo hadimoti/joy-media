@@ -23,15 +23,23 @@ export interface TimelineCommandFlags {
   end?: number | undefined;
   at?: number | undefined;
   sqlitePath?: string | undefined;
+  look?: string | undefined;
+  intensity?: number | undefined;
+  scanlineStrength?: number | undefined;
+  noiseAmount?: number | undefined;
 }
 
 export function printTimelineHelp(): void {
-  console.log(`Usage: joy-media timeline <add-clip|add-text|split|trim|remove-clip> --project <id|file>
+  console.log(`Usage: joy-media timeline <add-clip|add-text|add-effect|clear-effect|split|trim|remove-clip> --project <id|file>
   add-clip --asset <id> [--track <id>] [--start <seconds>] [--duration <seconds>]
   add-text --text <text> [--track <id>] [--start <seconds>] --duration <seconds> [--x <px> --y <px> --size <px> --color <#RRGGBB>]
   split --clip <id> --at <seconds>
   trim --clip <id> [--start <seconds>] [--end <seconds>] [--duration <seconds>]
   remove-clip --clip <id>`);
+  console.log(
+    '  add-effect <clipId> --look <crt|bw|warm|cool> [--intensity 0..1] [--scanline-strength 0..1] [--noise-amount 0..1]',
+  );
+  console.log('  clear-effect <clipId>');
 }
 
 export async function handleTimelineCommand(args: string[], flags: CliFlags): Promise<number> {
@@ -59,6 +67,56 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
   if (!root) {
     logError('Project has no root composition.');
     return 1;
+  }
+
+  if (sub === 'add-effect' || sub === 'clear-effect') {
+    const clipId = args[1] ?? flags.clip;
+    if (!clipId) {
+      logError(
+        `Usage: joy-media timeline ${sub} <clipId> --project <id|file>${sub === 'add-effect' ? ' --look <crt|bw|warm|cool>' : ''}`,
+      );
+      return 1;
+    }
+    if (sub === 'add-effect' && !['crt', 'bw', 'warm', 'cool'].includes(flags.look ?? '')) {
+      logError('Look must be one of: crt, bw, warm, cool.');
+      return 1;
+    }
+    const clip = (root.tracks as unknown as Array<{ clips: Array<Record<string, unknown>> }>)
+      .flatMap((track) => track.clips)
+      .find((item) => item.id === clipId);
+    if (!clip) {
+      logError(`Clip "${clipId}" not found.`);
+      return 1;
+    }
+    if (clip.kind !== 'video') {
+      logError('Clip looks can only be applied to video clips.');
+      return 1;
+    }
+    if (sub === 'clear-effect') delete clip.look;
+    else {
+      clip.look = {
+        preset: flags.look as 'crt' | 'bw' | 'warm' | 'cool',
+        ...(flags.intensity === undefined ? {} : { intensity: flags.intensity }),
+        ...(flags.scanlineStrength === undefined
+          ? {}
+          : { scanlineStrength: flags.scanlineStrength }),
+        ...(flags.noiseAmount === undefined ? {} : { noiseAmount: flags.noiseAmount }),
+      };
+    }
+    const diagnostics = validateJoyProjectV1(project);
+    if (diagnostics.length) {
+      logError(`Invalid clip look: ${diagnostics[0]!.message}`);
+      return 1;
+    }
+    const nextRev = saveProject(project, {
+      source: projectInfo.source,
+      path: projectInfo.path,
+      revision: projectInfo.revision,
+    });
+    logSuccess(
+      `${sub === 'add-effect' ? `Applied ${flags.look} look to` : 'Cleared look from'} ${c(clipId, 'bold')} (saved rev ${nextRev}).`,
+    );
+    return 0;
   }
 
   const tracks = root.tracks as unknown as Array<{

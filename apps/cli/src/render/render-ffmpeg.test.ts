@@ -20,6 +20,115 @@ const hasFfmpeg = spawnSync('ffmpeg', ['-version'], { shell: false }).status ===
 const hasFfprobe = spawnSync('ffprobe', ['-version'], { shell: false }).status === 0;
 
 describe('CLI ffmpeg render', () => {
+  it.skipIf(!hasFfmpeg || !hasFfprobe)(
+    'renders CRT and black-and-white clip looks with pixels changed by the filters',
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'joy-render-look-'));
+      try {
+        const input = join(dir, 'source.mp4');
+        const generated = spawnSync(
+          'ffmpeg',
+          [
+            '-hide_banner',
+            '-loglevel',
+            'error',
+            '-f',
+            'lavfi',
+            '-i',
+            'testsrc2=size=160x120:rate=10:duration=1',
+            '-c:v',
+            'libx264',
+            '-pix_fmt',
+            'yuv420p',
+            '-y',
+            input,
+          ],
+          { shell: false },
+        );
+        expect(generated.status).toBe(0);
+        const baseProject = createDefaultProject('clip looks', {
+          width: 160,
+          height: 120,
+          fps: 10,
+        });
+        const root = baseProject.compositions.root!;
+        (root as { durationUs: number }).durationUs = 1_000_000;
+        (baseProject.assets as Record<string, unknown>)['look-asset'] = {
+          id: 'look-asset',
+          kind: 'video',
+          displayName: 'source.mp4',
+          localSource: { path: input },
+        };
+        for (const look of [
+          undefined,
+          { preset: 'crt', intensity: 0.8, scanlineStrength: 0.7, noiseAmount: 0.1 },
+          { preset: 'bw', intensity: 1 },
+        ]) {
+          const project = structuredClone(baseProject);
+          (project.compositions.root!.tracks[0]!.clips as unknown[]).push({
+            id: look ? String(look.preset) : 'plain',
+            kind: 'video',
+            assetId: 'look-asset',
+            startUs: 0,
+            durationUs: 1_000_000,
+            sourceInUs: 0,
+            ...(look ? { look } : {}),
+          });
+          const projectPath = join(dir, `${look ? String(look.preset) : 'plain'}.json`);
+          writeFileSync(projectPath, JSON.stringify(project));
+          const status = await runCli([
+            'render',
+            '--project',
+            projectPath,
+            '--preset',
+            'mp4',
+            '--out',
+            join(dir, look ? String(look.preset) : 'plain'),
+          ]);
+          expect(status).toBe(0);
+        }
+        const readFrame = (preset: string): Buffer => {
+          const result = spawnSync(
+            'ffmpeg',
+            [
+              '-hide_banner',
+              '-loglevel',
+              'error',
+              '-i',
+              join(dir, preset, `${baseProject.id}.mp4`),
+              '-frames:v',
+              '1',
+              '-f',
+              'rawvideo',
+              '-pix_fmt',
+              'rgb24',
+              'pipe:1',
+            ],
+            { shell: false, maxBuffer: 2_000_000 },
+          );
+          expect(result.status).toBe(0);
+          return result.stdout;
+        };
+        const plain = readFrame('plain');
+        const crt = readFrame('crt');
+        const bw = readFrame('bw');
+        expect(crt.equals(plain)).toBe(false);
+        expect(bw.equals(plain)).toBe(false);
+        const channelSpread = (pixels: Buffer): number => {
+          let spread = 0;
+          const count = pixels.length / 3;
+          for (let i = 0; i < pixels.length; i += 3)
+            spread +=
+              Math.max(pixels[i]!, pixels[i + 1]!, pixels[i + 2]!) -
+              Math.min(pixels[i]!, pixels[i + 1]!, pixels[i + 2]!);
+          return spread / count;
+        };
+        expect(channelSpread(bw)).toBeLessThan(4);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
   it.skipIf(!resolveTextFont())(
     'removes private text files when ffmpeg fails to start',
     async () => {

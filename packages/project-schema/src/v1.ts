@@ -263,6 +263,14 @@ export interface VideoClipV1 extends ClipV1Base {
   readonly playbackRate?: number;
   /** Source time runs backward from `sourceInUs` while rate remains positive. */
   readonly reversed?: boolean;
+  readonly look?: ClipLookV1;
+}
+
+export interface ClipLookV1 {
+  readonly preset: 'crt' | 'bw' | 'warm' | 'cool';
+  readonly intensity?: number;
+  readonly scanlineStrength?: number;
+  readonly noiseAmount?: number;
 }
 
 export interface CompositionClipV1 extends ClipV1Base {
@@ -1413,6 +1421,31 @@ function validateTrack(
           `${path}.${value.id}.clips.${clip.id}`,
         ),
       );
+    }
+    if (clip.kind === 'video' && clip.look !== undefined) {
+      const look = clip.look;
+      const lookPath = `${path}.${value.id}.clips.${clip.id}.look`;
+      if (!isRecord(look) || !['crt', 'bw', 'warm', 'cool'].includes(String(look.preset))) {
+        diagnostics.push(
+          diagnostic('PROJECT_SCHEMA_V1_CLIP_LOOK', 'look preset is unsupported', lookPath),
+        );
+      } else {
+        for (const key of ['intensity', 'scanlineStrength', 'noiseAmount'] as const) {
+          const number = look[key];
+          if (
+            number !== undefined &&
+            (typeof number !== 'number' || !Number.isFinite(number) || number < 0 || number > 1)
+          ) {
+            diagnostics.push(
+              diagnostic(
+                'PROJECT_SCHEMA_V1_CLIP_LOOK',
+                `${key} must be a finite number in [0, 1]`,
+                `${lookPath}.${key}`,
+              ),
+            );
+          }
+        }
+      }
     }
   }
 }
