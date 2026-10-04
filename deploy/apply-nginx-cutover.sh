@@ -93,6 +93,33 @@ replacement = '''    location ~ ^/api/v1/agent(?:/|$) {
         proxy_send_timeout 90;
     }'''
 
+def location_blocks(server):
+    for match in re.finditer(r"(?m)^\s*location\s+([^\n{]+)\{", server):
+        opening = server.find("{", match.start())
+        end = matching_brace(server, opening)
+        if end < 0: raise ValueError("Unclosed joyst.ir location")
+        yield match.start(), end, match.group(1).strip(), server[match.start():end]
+
+def drop_agent_alternation(line):
+    match = re.search(r"\(\?:([^)]*)\)(\?:/\|\$)", line)
+    if not match: return line
+    members = match.group(1).split("|")
+    if "agent" not in members: return line
+    remaining = [member for member in members if member != "agent"]
+    if not remaining: raise ValueError("Combined API regex contains only agent")
+    return line[:match.start(1)] + "|".join(remaining) + line[match.end(1):]
+
+def normalized_target(server):
+    blocks = list(location_blocks(server))
+    result = server
+    for start, end, header, block in reversed(blocks):
+        if re.match(r"~\s+\^/api/v1/agent\(\?:/\|\$\)", header):
+            if end < len(server) and server[end] == "\n": end += 1
+            result = result[:start] + result[end:]
+    result = re.sub(r"(?m)^([ \t]*location[ \t]+~[ \t]+\^/api/v1/[^\n]*)(?=\n)",
+                    lambda match: drop_agent_alternation(match.group(1)), result)
+    return re.sub(r"\n[ \t]*\n+", "\n", result)
+
 try:
     before = server_blocks(text)
     target_index = None
@@ -107,17 +134,28 @@ try:
     if target_index is None: raise ValueError("Could not find joyst.ir TLS server block")
 
     block_start, block_end, target = before[target_index]
-    agent = re.search(r"(?m)^\s*location\s+~\s+\^/api/v1/agent[^\n]*\{", target)
-    if agent:
-        opening = target.find("{", agent.start())
-        end = matching_brace(target, opening)
-        if end < 0: raise ValueError("Unclosed joyst.ir agent location")
-        changed_target = target[:agent.start()] + replacement + target[end:]
+    changed_target = target
+    for start, end, header, block in reversed(list(location_blocks(changed_target))):
+        if re.match(r"~\s+\^/api/v1/agent\(\?:/\|\$\)", header):
+            if end < len(changed_target) and changed_target[end] == "\n": end += 1
+            changed_target = changed_target[:start] + changed_target[end:]
+
+    lines = changed_target.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        if re.match(r"\s*location\s+~\s+\^/api/v1/", line):
+            lines[index] = drop_agent_alternation(line)
+    changed_target = "".join(lines)
+
+    # Nginx selects the first matching regex in file order. Put the dedicated
+    # agent rule before every regex location, including unrelated broad ones.
+    regex_location = re.search(r"(?m)^\s*location\s+~\*?\s+", changed_target)
+    if regex_location:
+        insertion = regex_location.start()
     else:
-        generic = re.search(r"(?m)^\s*location\s+(?:\^~\s+)?/api/[^\n]*\{", target)
-        insertion = generic.start() if generic else target.rfind("}")
-        if insertion < 0: raise ValueError("Unclosed joyst.ir server block")
-        changed_target = target[:insertion] + replacement + "\n" + target[insertion:]
+        generic = re.search(r"(?m)^\s*location\s+(?:\^~\s+)?/api/[^\n]*\{", changed_target)
+        insertion = generic.start() if generic else changed_target.rfind("}")
+    if insertion < 0: raise ValueError("Unclosed joyst.ir server block")
+    changed_target = changed_target[:insertion] + replacement + "\n" + changed_target[insertion:]
 
     patched = text[:block_start] + changed_target + text[block_end:]
     after = server_blocks(patched)
@@ -128,6 +166,8 @@ try:
     protected = re.compile(r"(?m)^\s*(?:listen|server_name|ssl_certificate(?:_key)?)\s+[^;\n]*;")
     if protected.findall(target) != protected.findall(after[target_index][2]):
         raise ValueError("joyst.ir listen/server_name/ssl_certificate directives changed")
+    if normalized_target(target) != normalized_target(after[target_index][2]):
+        raise ValueError("joyst.ir changes exceed the agent location and combined regex edit")
     with open(path, "w", encoding="utf-8", newline="") as destination:
         destination.write(patched)
 except (ValueError, StopIteration) as error:
