@@ -289,6 +289,48 @@ describe('JoyModelGateway', () => {
     expect(forwardedBody).not.toHaveProperty('arbitrary');
   });
 
+  it('rejects non-function tool types before forwarding a chat completion', async () => {
+    let forwarded = false;
+    const ledger = new MemoryAgentUsageLedger();
+    const gateway = new JoyModelGateway({
+      mediaAuth: { authenticate: async () => ({ id: 'u' }) } as unknown as MediaAuthService,
+      account: {
+        getSubscription: async () => ({
+          ownerId: 'u',
+          plan: 'monthly',
+          status: 'active',
+          updatedAt: 0,
+        }),
+      } as unknown as AccountService,
+      ledger,
+      openRouterApiKey: 'test-key',
+      fetchImpl: async () => {
+        forwarded = true;
+        return new Response('{}', { status: 200 });
+      },
+    });
+    const { res, getStatus, getBody } = createMockRes();
+
+    await gateway.handleChatCompletions(
+      createMockReq({
+        body: {
+          model: 'bytedance-seed/seed-2.0-lite',
+          messages: [],
+          tools: [{ type: 'computer', name: 'browser' }],
+        },
+      }),
+      res,
+    );
+
+    expect(getStatus()).toBe(400);
+    expect(JSON.parse(getBody()).error).toMatchObject({
+      code: 'UNSUPPORTED_TOOL_TYPE',
+      message: expect.stringContaining('function'),
+    });
+    expect(forwarded).toBe(false);
+    expect((await ledger.getSummary('u')).totalRequests).toBe(0);
+  });
+
   it('defaults absent or invalid output limits to 8192 tokens', async () => {
     const forwarded: Array<Record<string, unknown>> = [];
     const gateway = new JoyModelGateway({

@@ -187,6 +187,28 @@ export class JoyModelGateway {
       return;
     }
 
+    if (
+      parsedBody.tools !== undefined &&
+      (!Array.isArray(parsedBody.tools) ||
+        parsedBody.tools.some(
+          (tool) =>
+            tool === null ||
+            typeof tool !== 'object' ||
+            (tool as { type?: unknown }).type !== 'function',
+        ))
+    ) {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          error: {
+            code: 'UNSUPPORTED_TOOL_TYPE',
+            message: 'Only tools with type "function" are supported.',
+          },
+        }),
+      );
+      return;
+    }
+
     const requestedModel = typeof parsedBody.model === 'string' ? parsedBody.model : '';
     const modelId = LEGACY_MODEL_ALIASES[requestedModel] ?? requestedModel;
     const allowed = JOY_AGENT_DEFAULT_MODELS.some((m) => m.id === modelId);
