@@ -39,12 +39,25 @@ export {
 } from './redaction.js';
 export type { ByokSessionConfig, ByokSessionStatus } from './provider-config.js';
 export {
-  OPENROUTER_BASE_URL,
   ProviderConfigError,
   normalizeByokSessionConfig,
   normalizeCustomBaseUrl,
   safeByokSessionStatus,
 } from './provider-config.js';
+export {
+  DEFAULT_KILO_MODEL,
+  DEFAULT_OPENROUTER_MODEL,
+  JOY_HOSTED_BASE_URL,
+  KILO_GATEWAY_BASE_URL,
+  KILO_MODEL_PRESETS,
+  LEGACY_KILO_BASE_URLS,
+  OPENROUTER_BASE_URL,
+  RETIRED_MODEL_IDS,
+  canonicalKiloBaseUrl,
+  defaultModelFor,
+  isRetiredModelId,
+} from './provider-presets.js';
+export type { ProviderModelPreset } from './provider-presets.js';
 export type { JoyFetch } from './provider.js';
 export {
   DEFAULT_PROVIDER_RESPONSE_BYTES,

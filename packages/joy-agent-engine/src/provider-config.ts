@@ -1,4 +1,7 @@
 import type { JoyAgentCapability } from './contracts.js';
+import { DEFAULT_JOY_HOSTED_BASE_URL, OPENROUTER_BASE_URL } from './provider-defaults.js';
+
+export { DEFAULT_JOY_HOSTED_BASE_URL, OPENROUTER_BASE_URL };
 
 export type JoyProviderMode = 'joy-hosted' | 'openrouter' | 'openai-compatible' | 'kilo' | 'custom';
 
@@ -24,8 +27,6 @@ export class ProviderConfigError extends Error {
   }
 }
 
-const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
-export const DEFAULT_JOY_HOSTED_BASE_URL = 'https://joyst.ir/api/v1/agent';
 const MAX_MODEL_ID_LENGTH = 256;
 const MAX_API_KEY_LENGTH = 512;
 
@@ -157,5 +158,3 @@ function isMappedPrivateIpv4(host: string): boolean {
     return false;
   return isPrivateIpv4(`${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`);
 }
-
-export { OPENROUTER_BASE_URL };
