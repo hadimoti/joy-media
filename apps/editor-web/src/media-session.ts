@@ -1,53 +1,188 @@
 /**
- * JOY Media's own independent login session (ADR-0017). Replaces the retired
- * joyteam.ir JWT-assertion bridge: the session token below comes from this
- * app's own /v1/auth/request-otp + /v1/auth/verify-otp, is issued against
- * JOY Media's own allow-list, and is sent as a Bearer token on every API call.
+ * JOY Media's independent login session (ADR-0017).
+ *
+ * Desktop tokens live in Electron safeStorage. Browser and test contexts use memory only.
+ * The sole localStorage access is the one-time migration from the historical key below.
  */
+import {
+  clearDesktopSessionToken,
+  getDesktopSessionToken,
+  isDesktopHost,
+  setDesktopSessionToken,
+} from './desktop-client.js';
 
-const STORAGE_KEY = 'joy-media-session-token';
+const LEGACY_STORAGE_KEY = 'joy-media-session-token';
+const MAX_SESSION_TOKEN_LENGTH = 8192;
 
-/** Dispatched on `window` whenever the local session token is set or cleared. */
+/** Dispatched whenever the in-memory or secure session token changes. */
 export const MEDIA_SESSION_CHANGED_EVENT = 'joy-media-session-changed';
 
-export interface MediaSessionStorage {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-  removeItem(key: string): void;
+export interface MediaSessionTokenBackend {
+  get(): Promise<string | undefined>;
+  set(token: string): Promise<void>;
+  clear(): Promise<void>;
 }
 
-function notifyMediaSessionChanged(): void {
-  if (typeof window === 'undefined') return;
-  window.dispatchEvent(new Event(MEDIA_SESSION_CHANGED_EVENT));
+const memoryBackend = (() => {
+  let token: string | undefined;
+  return {
+    async get() {
+      return token;
+    },
+    async set(value: string) {
+      token = value;
+    },
+    async clear() {
+      token = undefined;
+    },
+  } satisfies MediaSessionTokenBackend;
+})();
+
+const defaultBackend: MediaSessionTokenBackend = {
+  get: () => (isDesktopHost() ? getDesktopSessionToken() : memoryBackend.get()),
+  set: (token) => (isDesktopHost() ? setDesktopSessionToken(token) : memoryBackend.set(token)),
+  clear: () => (isDesktopHost() ? clearDesktopSessionToken() : memoryBackend.clear()),
+};
+
+let backend = defaultBackend;
+let cachedToken: string | undefined;
+let cacheLoaded = false;
+let initialization: Promise<void> | undefined;
+
+/** Injects an in-memory backend for deterministic auth tests. */
+export function setMediaSessionTokenBackendForTests(next?: MediaSessionTokenBackend): void {
+  backend = next ?? defaultBackend;
+  cachedToken = undefined;
+  cacheLoaded = false;
+  initialization = undefined;
 }
 
-export function getStoredMediaToken(storage: MediaSessionStorage): string | undefined {
+export function createMemoryMediaSessionTokenBackend(): MediaSessionTokenBackend {
+  let token: string | undefined;
+  return {
+    async get() {
+      return token;
+    },
+    async set(value) {
+      token = value;
+    },
+    async clear() {
+      token = undefined;
+    },
+  };
+}
+
+function removeLegacyTokenAfterMigration(): void {
   try {
-    return storage.getItem(STORAGE_KEY) ?? undefined;
+    window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+  } catch {
+    // Storage may be disabled; secure-store behavior remains available.
+  }
+}
+
+/** Migrate once, verifying the secure-store read before deleting the old renderer value. */
+export function initializeMediaSessionToken(): Promise<void> {
+  if (initialization !== undefined) return initialization;
+  initialization = (async () => {
+    // Only Electron has a protected destination for the legacy value. Browser and test
+    // contexts stay memory-only and must never consume or delete localStorage data.
+    if (!isDesktopHost()) {
+      try {
+        cachedToken = await backend.get();
+        cacheLoaded = true;
+      } catch {
+        cachedToken = undefined;
+        cacheLoaded = false;
+      }
+      return;
+    }
+
+    let secureToken: string | undefined;
+    try {
+      secureToken = await backend.get();
+    } catch {
+      // Keep the legacy value so a transient IPC failure can be retried next startup.
+      return;
+    }
+
+    let legacyToken: string | null = null;
+    try {
+      if (typeof window !== 'undefined')
+        legacyToken = window.localStorage.getItem(LEGACY_STORAGE_KEY);
+    } catch {
+      // Browser storage can be disabled; no persistence fallback is used.
+    }
+
+    if (secureToken !== undefined) {
+      cachedToken = secureToken;
+      cacheLoaded = true;
+      if (legacyToken !== null) removeLegacyTokenAfterMigration();
+      return;
+    }
+
+    if (
+      legacyToken === null ||
+      legacyToken.length === 0 ||
+      legacyToken.length > MAX_SESSION_TOKEN_LENGTH
+    ) {
+      cachedToken = undefined;
+      cacheLoaded = true;
+      if (legacyToken !== null) removeLegacyTokenAfterMigration();
+      return;
+    }
+
+    try {
+      await backend.set(legacyToken);
+      secureToken = await backend.get();
+      if (secureToken === legacyToken) {
+        cachedToken = secureToken;
+        cacheLoaded = true;
+        removeLegacyTokenAfterMigration();
+        return;
+      }
+    } catch {
+      // Do not discard the old copy unless the destination can read it back.
+    }
+    cachedToken = secureToken;
+    cacheLoaded = secureToken !== undefined;
+  })();
+  return initialization;
+}
+
+export async function getStoredMediaToken(): Promise<string | undefined> {
+  await initializeMediaSessionToken();
+  if (cacheLoaded) return cachedToken;
+  try {
+    cachedToken = await backend.get();
+    cacheLoaded = true;
+    return cachedToken;
   } catch {
     return undefined;
   }
 }
 
-export function setStoredMediaToken(token: string, storage: MediaSessionStorage): void {
-  try {
-    storage.setItem(STORAGE_KEY, token);
-  } catch {
-    /* storage may be unavailable (private browsing); session just won't persist */
+export async function setStoredMediaToken(token: string): Promise<void> {
+  if (token.length === 0 || token.length > MAX_SESSION_TOKEN_LENGTH) {
+    throw new Error('Invalid session token');
   }
-  notifyMediaSessionChanged();
+  await initializeMediaSessionToken();
+  await backend.set(token);
+  cachedToken = token;
+  cacheLoaded = true;
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(MEDIA_SESSION_CHANGED_EVENT));
 }
 
-export function clearStoredMediaToken(storage: MediaSessionStorage): void {
-  try {
-    storage.removeItem(STORAGE_KEY);
-  } catch {
-    /* nothing to clear */
-  }
-  notifyMediaSessionChanged();
+export async function clearStoredMediaToken(): Promise<void> {
+  await initializeMediaSessionToken();
+  // Logout must also remove a legacy copy if initialization could not reach IPC.
+  if (isDesktopHost()) removeLegacyTokenAfterMigration();
+  await backend.clear();
+  cachedToken = undefined;
+  cacheLoaded = true;
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(MEDIA_SESSION_CHANGED_EVENT));
 }
 
-import { getRemoteApiBaseUrl, isDesktopHost } from './desktop-client.js';
+import { getRemoteApiBaseUrl, isDesktopHost as isDesktop } from './desktop-client.js';
 
 export type MediaAuthMethod = 'gmail' | 'telegram';
 
@@ -91,31 +226,27 @@ export async function verifyOtp(
   contact: string,
   method: MediaAuthMethod,
   code: string,
-  storage: MediaSessionStorage,
   fetchFn: typeof fetch = fetch,
 ): Promise<string> {
   const data = await requestJson(fetchFn, '/v1/auth/verify-otp', { contact, method, code });
   if (!isRecord(data) || typeof data.token !== 'string')
     throw new Error('JOY Media returned an invalid login response');
-  setStoredMediaToken(data.token, storage);
+  await setStoredMediaToken(data.token);
   return data.token;
 }
 
 export async function registerDevice(
   displayName?: string,
-  storage: MediaSessionStorage = typeof window !== 'undefined'
-    ? window.localStorage
-    : ({} as MediaSessionStorage),
   fetchFn: typeof fetch = fetch,
 ): Promise<unknown> {
-  const token = getStoredMediaToken(storage);
+  const token = await getStoredMediaToken();
   if (!token) return undefined;
   const name =
-    displayName || (isDesktopHost() ? 'JOY Desktop Studio (Windows)' : 'JOY Web Studio (Browser)');
+    displayName || (isDesktop() ? 'JOY Desktop Studio (Windows)' : 'JOY Web Studio (Browser)');
   try {
     return await requestJson(fetchFn, '/v1/devices', { displayName: name }, token);
   } catch {
-    // Background registration; do not interrupt interactive auth flow
+    // Background registration; do not interrupt interactive auth flow.
     return undefined;
   }
 }
