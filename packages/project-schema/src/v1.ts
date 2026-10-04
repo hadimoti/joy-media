@@ -346,6 +346,8 @@ export interface AssetRecordV1 {
   readonly sha256?: string;
   readonly bytes?: number;
   readonly descriptor?: AssetDescriptorV1;
+  /** Local-only source location for CLI rendering; editor and Worker ignore it. */
+  readonly localSource?: { readonly path: string; readonly mtimeMs?: number };
   /** Reproducibility record for provider/Worker-generated media. */
   readonly generationProvenance?: GenerationProvenanceV1;
 }
@@ -624,6 +626,30 @@ function validateAsset(
           'PROJECT_SCHEMA_V1_ASSET_METADATA',
           'asset descriptor metadata is invalid',
           `${path}.descriptor`,
+        ),
+      );
+    }
+  }
+  if (value.localSource !== undefined) {
+    const localSource = isRecord(value.localSource) ? value.localSource : undefined;
+    const sourcePath = localSource?.path;
+    const absolutePath =
+      typeof sourcePath === 'string' &&
+      (sourcePath.startsWith('/') ||
+        sourcePath.startsWith('\\\\') ||
+        /^[A-Za-z]:[\\/]/.test(sourcePath));
+    if (
+      !absolutePath ||
+      sourcePath.length > 4096 ||
+      sourcePath.includes('\0') ||
+      (localSource?.mtimeMs !== undefined &&
+        (typeof localSource.mtimeMs !== 'number' || !Number.isFinite(localSource.mtimeMs)))
+    ) {
+      diagnostics.push(
+        diagnostic(
+          'PROJECT_SCHEMA_V1_ASSET_LOCAL_SOURCE',
+          'asset localSource requires an absolute path up to 4096 characters without NUL and an optional finite mtimeMs',
+          `${path}.localSource.path`,
         ),
       );
     }

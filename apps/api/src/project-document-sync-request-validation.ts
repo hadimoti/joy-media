@@ -390,11 +390,24 @@ export function validateProjectDocumentSyncRequest(
     envelope: {
       baseRevisionId: baseRevisionIdValue as ProjectRevisionId,
       revisionId: revisionIdValue as ProjectRevisionId,
-      document: documentValue as JoyProjectV1,
+      document: stripLocalAssetSources(documentValue as JoyProjectV1),
       ...(hasLookInstances ? { lookInstances: env.lookInstances as LookInstancesDocument } : {}),
     },
     errors: Object.freeze([] as const),
   };
+}
+
+/** Local filesystem paths are CLI-only and must never enter a server document. */
+function stripLocalAssetSources(document: JoyProjectV1): JoyProjectV1 {
+  const assets = Object.fromEntries(
+    Object.entries(document.assets).map(([id, asset]) => {
+      const serverAsset = Object.fromEntries(
+        Object.entries(asset).filter(([key]) => key !== 'localSource'),
+      ) as typeof asset;
+      return [id, serverAsset];
+    }),
+  );
+  return { ...document, assets };
 }
 
 // ============================================================================

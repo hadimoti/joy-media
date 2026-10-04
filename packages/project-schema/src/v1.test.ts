@@ -725,4 +725,29 @@ describe('v1 project schema and migration harness', () => {
       'propertyAnimations must be an object',
     );
   });
+
+  it('validates local asset source paths as absolute, bounded, and NUL-free', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const project = {
+      ...base,
+      assets: {
+        'asset-1': {
+          id: 'asset-1',
+          kind: 'video' as const,
+          displayName: 'clip.mp4',
+          localSource: { path: 'C:\\media\\clip.mp4', mtimeMs: 123 },
+        },
+      },
+    };
+    expect(validateJoyProjectV1(project)).toEqual([]);
+    for (const path of ['media/clip.mp4', `C:\\media\\bad\0.mp4`, `C:\\${'a'.repeat(4100)}`]) {
+      const invalid = {
+        ...project,
+        assets: { 'asset-1': { ...project.assets['asset-1'], localSource: { path } } },
+      };
+      expect(validateJoyProjectV1(invalid).map((item) => item.path)).toContain(
+        'assets.asset-1.localSource.path',
+      );
+    }
+  });
 });

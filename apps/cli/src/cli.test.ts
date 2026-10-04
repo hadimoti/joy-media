@@ -402,6 +402,46 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       );
     });
 
+    it('validates an asset id and defaults the new clip duration from asset metadata', async () => {
+      const project = createDefaultProject('asset-backed timeline', {
+        id: 'asset-backed-timeline',
+      });
+      (project.assets as Record<string, unknown>)['clip-asset'] = {
+        id: 'clip-asset',
+        kind: 'video',
+        displayName: 'clip.mp4',
+        descriptor: { mimeType: 'video/mp4', durationUs: 2_500_000 },
+        localSource: { path: 'C:\\media\\clip.mp4' },
+      };
+      saveProject(project, { source: 'sqlite', path: testDbPath, revision: 0 });
+      expect(
+        await runCli([
+          'timeline',
+          'add-clip',
+          '--project',
+          project.id,
+          '--asset',
+          'missing',
+          '--sqlite-path',
+          testDbPath,
+        ]),
+      ).toBe(1);
+      expect(
+        await runCli([
+          'timeline',
+          'add-clip',
+          '--project',
+          project.id,
+          '--asset',
+          'clip-asset',
+          '--sqlite-path',
+          testDbPath,
+        ]),
+      ).toBe(0);
+      const loaded = loadProject(project.id, testDbPath);
+      expect(loaded.project.compositions.root!.tracks[0]!.clips[0]!.durationUs).toBe(2_500_000);
+    });
+
     it('cleans up timeline test database', () => {
       try {
         rmSync(tempDir, { recursive: true, force: true });

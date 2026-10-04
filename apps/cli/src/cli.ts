@@ -1,6 +1,7 @@
 /* global console, process */
 import { parseArgs } from 'node:util';
 import { handleAgentCommand } from './commands/agent-cmd.js';
+import { handleAssetCommand } from './commands/asset-cmd.js';
 import { handleBenchmarkCommand } from './commands/benchmark-cmd.js';
 import { handleDoctorCommand } from './commands/doctor-cmd.js';
 import { handleProjectCommand } from './commands/project-cmd.js';
@@ -34,6 +35,9 @@ export interface CliFlags {
   track: string | undefined;
   clip: string | undefined;
   asset: string | undefined;
+  id: string | undefined;
+  strict: boolean;
+  manifestOnly: boolean;
   start: number | undefined;
   duration: number | undefined;
   end: number | undefined;
@@ -61,6 +65,9 @@ export function printHelp(): void {
   );
   console.log(
     `    ${c('timeline', 'cyan')} [add-clip|split|trim]     Direct scriptable timeline operations`,
+  );
+  console.log(
+    `    ${c('asset', 'cyan')} [import|list]             Import and inspect local media assets`,
   );
   console.log(
     `    ${c('worker', 'cyan')} [status|upscale|denoise]    Local AI worker & GPU inference`,
@@ -116,6 +123,9 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     track: typeof v.track === 'string' ? v.track : undefined,
     clip: typeof v.clip === 'string' ? v.clip : undefined,
     asset: typeof v.asset === 'string' ? v.asset : undefined,
+    id: typeof v.id === 'string' ? v.id : undefined,
+    strict: Boolean(v.strict),
+    manifestOnly: Boolean(v['manifest-only']),
     start: parseFloatFlag('start', v.start, NUMERIC_RANGES.start),
     duration: parseFloatFlag('duration', v.duration, NUMERIC_RANGES.duration),
     end: parseFloatFlag('end', v.end, NUMERIC_RANGES.end),
@@ -160,6 +170,9 @@ export async function runCli(argv: string[]): Promise<number> {
         track: { type: 'string' },
         clip: { type: 'string' },
         asset: { type: 'string' },
+        id: { type: 'string' },
+        strict: { type: 'boolean', default: false },
+        'manifest-only': { type: 'boolean', default: false },
         start: { type: 'string' },
         duration: { type: 'string' },
         end: { type: 'string' },
@@ -195,7 +208,7 @@ export async function runCli(argv: string[]): Promise<number> {
     else if (helpCommand === 'timeline') printTimelineHelp();
     else if (helpCommand === 'render') printRenderHelp();
     else if (helpCommand === 'asset')
-      console.log('Asset commands are not available in this CLI build.');
+      console.log('Usage: joy-media asset <import|list> --project <id|file>');
     else printHelp();
     return 0;
   }
@@ -229,6 +242,8 @@ export async function runCli(argv: string[]): Promise<number> {
         return await handleProjectCommand(subArgs, flags);
       case 'timeline':
         return await handleTimelineCommand(subArgs, flags);
+      case 'asset':
+        return await handleAssetCommand(subArgs, flags);
       case 'worker':
         return await handleWorkerCommand(subArgs, flags);
       case 'render':

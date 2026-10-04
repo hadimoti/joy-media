@@ -70,6 +70,16 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
   }>;
 
   if (sub === 'add-clip') {
+    const selectedAssetId = flags.asset;
+    const selectedAsset = selectedAssetId ? project.assets[selectedAssetId] : undefined;
+    if (selectedAssetId && !selectedAsset) {
+      logError(`Asset "${selectedAssetId}" not found in project.`);
+      return 1;
+    }
+    if (selectedAssetId && flags.duration === undefined && !selectedAsset?.descriptor?.durationUs) {
+      logError(`Asset "${selectedAssetId}" has no duration; specify --duration.`);
+      return 1;
+    }
     const trackId = flags.track ?? tracks[0]?.id;
     if (!trackId) {
       logError('No tracks available in project.');
@@ -82,9 +92,12 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
     }
 
     const startUs = Math.round((flags.start ?? 0) * 1_000_000);
-    const durationUs = Math.round((flags.duration ?? 3) * 1_000_000);
+    const durationUs =
+      flags.duration !== undefined
+        ? Math.round(flags.duration * 1_000_000)
+        : (selectedAsset?.descriptor?.durationUs ?? 3_000_000);
     const clipId = `clip-${Date.now().toString(36)}`;
-    const assetId = flags.asset ?? 'asset-default';
+    const assetId = selectedAssetId ?? 'asset-default';
 
     track.clips.push({
       id: clipId,

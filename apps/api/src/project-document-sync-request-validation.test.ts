@@ -115,6 +115,27 @@ describe('validateProjectDocumentSyncRequest - lookInstances (GAP 1a)', () => {
 // ============================================================================
 
 describe('validateProjectDocumentSyncRequest - valid requests', () => {
+  it('strips CLI-only local asset paths from the server envelope', () => {
+    const document = {
+      ...VALID_DOCUMENT,
+      assets: {
+        local: {
+          id: 'local',
+          kind: 'video' as const,
+          displayName: 'clip.mp4',
+          localSource: { path: 'C:\\private\\clip.mp4', mtimeMs: 1 },
+        },
+      },
+    };
+    const result = validateProjectDocumentSyncRequest(
+      validEnvelope(INITIAL_REVISION, VALID_REVISION_ID, document),
+      EXPECTED_PROJECT_ID,
+    );
+    expect(result.valid).toBe(true);
+    if (result.valid)
+      expect(result.envelope.document.assets.local).not.toHaveProperty('localSource');
+  });
+
   it('should accept valid first write with INITIAL_REVISION', () => {
     const envelope = validEnvelope(INITIAL_REVISION, VALID_REVISION_ID, VALID_DOCUMENT);
     const originalEnvelope = JSON.parse(JSON.stringify(envelope));
