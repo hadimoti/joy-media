@@ -14,6 +14,8 @@ async function service(
   overrides: {
     mailer?: { sendOtp: ReturnType<typeof vi.fn> } | undefined;
     accountRateLimitMax?: number;
+    otpSendConcurrency?: number;
+    otpDeliveryTimeoutMs?: number;
   } = {},
 ) {
   const db = pool();
@@ -29,6 +31,12 @@ async function service(
     ...(overrides.accountRateLimitMax === undefined
       ? {}
       : { accountRateLimitMax: overrides.accountRateLimitMax }),
+    ...(overrides.otpSendConcurrency === undefined
+      ? {}
+      : { otpSendConcurrency: overrides.otpSendConcurrency }),
+    ...(overrides.otpDeliveryTimeoutMs === undefined
+      ? {}
+      : { otpDeliveryTimeoutMs: overrides.otpDeliveryTimeoutMs }),
   });
   await db.query(`
     CREATE TABLE IF NOT EXISTS media_allowed_users (id bigserial primary key, gmail text, telegram_id text, telegram_username text, added_by text not null, added_at timestamptz not null, enabled boolean not null default true);
@@ -141,6 +149,54 @@ describe('MediaAuthService', () => {
     });
     releaseMail();
     await auth.drainPendingOtpSends();
+  });
+
+  it('sends OTPs for different users without waiting for a slow delivery', async () => {
+    let releaseFirst!: () => void;
+    let markSecondStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      releaseFirst = () => resolve();
+    });
+    const secondStarted = new Promise<void>((resolve) => {
+      markSecondStarted = resolve;
+    });
+    const mailer = {
+      sendOtp: vi.fn(async (contact: string) => {
+        if (contact === 'slow@example.com') await firstStarted;
+        else markSecondStarted();
+      }),
+    };
+    const { auth } = await service({ mailer });
+    await auth.addAllowed({ gmail: 'slow@example.com', addedBy: 'admin' });
+    await auth.addAllowed({ gmail: 'fast@example.com', addedBy: 'admin' });
+
+    await auth.requestOtp('slow@example.com', 'gmail');
+    await auth.requestOtp('fast@example.com', 'gmail');
+    await Promise.race([
+      secondStarted,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('second send blocked')), 250),
+      ),
+    ]);
+    expect(mailer.sendOtp).toHaveBeenCalledTimes(2);
+    releaseFirst();
+    await auth.drainPendingOtpSends();
+  });
+
+  it('times out a hung OTP delivery and deletes its code row', async () => {
+    const { auth, db, mailer } = await service({
+      otpDeliveryTimeoutMs: 10,
+      mailer: { sendOtp: vi.fn(() => new Promise<void>(() => {})) },
+    });
+    await auth.addAllowed({ gmail: 'hung@example.com', addedBy: 'admin' });
+    await auth.requestOtp('hung@example.com', 'gmail');
+    await auth.drainPendingOtpSends(250);
+
+    const rows = await db.query('SELECT id FROM media_otp_codes WHERE contact = $1', [
+      'hung@example.com',
+    ]);
+    expect(rows.rows).toEqual([]);
+    expect(mailer.sendOtp).toHaveBeenCalledOnce();
   });
 
   it('deletes failed delivery rows by id so repeated failures leave no active OTPs', async () => {
@@ -313,6 +369,111 @@ describe('MediaAuthService', () => {
     expect(sequences[1]).toEqual(sequences[0]);
   });
 
+  it('reserves verify attempts before database work so parallel guesses cannot bypass five strikes', async () => {
+    const { auth, mailer, db } = await service();
+    await auth.addAllowed({ gmail: 'parallel@example.com', addedBy: 'admin' });
+    await auth.requestOtp('parallel@example.com', 'gmail');
+    await auth.drainPendingOtpSends();
+    const code = sentCode(mailer);
+    const originalQuery = db.query.bind(db);
+    let codeChecks = 0;
+    vi.spyOn(db, 'query').mockImplementation(async (...args: Parameters<Pool['query']>) => {
+      const sql = String(args[0]);
+      if (sql.includes('SELECT id FROM media_otp_codes')) codeChecks += 1;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      return originalQuery(...args);
+    });
+
+    const attempts = Array.from({ length: 24 }, (_, index) =>
+      auth.verifyOtp('parallel@example.com', 'gmail', index === 23 ? code : '000000'),
+    );
+    const results = await Promise.allSettled(attempts);
+    expect(codeChecks).toBeLessThanOrEqual(5);
+    expect(results.every((result) => result.status === 'rejected')).toBe(true);
+    expect(results.at(-1)).toMatchObject({
+      status: 'rejected',
+      reason: { code: 'TOO_MANY_ATTEMPTS' },
+    });
+    const rows = await originalQuery<{ used: boolean }>(
+      'SELECT used FROM media_otp_codes WHERE contact = $1',
+      ['parallel@example.com'],
+    );
+    expect(rows.rows).toEqual([{ used: true }]);
+  });
+
+  it('reserves parallel verify attempts for unknown contacts before the allow-list query', async () => {
+    const { auth, db } = await service();
+    const originalQuery = db.query.bind(db);
+    let lookups = 0;
+    vi.spyOn(db, 'query').mockImplementation(async (...args: Parameters<Pool['query']>) => {
+      if (String(args[0]).includes('FROM media_allowed_users WHERE gmail')) lookups += 1;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      return originalQuery(...args);
+    });
+
+    const results = await Promise.allSettled(
+      Array.from({ length: 24 }, () =>
+        auth.verifyOtp('unknown-parallel@example.com', 'gmail', '000000'),
+      ),
+    );
+    expect(lookups).toBeLessThanOrEqual(5);
+    expect(results.every((result) => result.status === 'rejected')).toBe(true);
+    expect(
+      results
+        .slice(5)
+        .every(
+          (result) => result.status === 'rejected' && result.reason.code === 'TOO_MANY_ATTEMPTS',
+        ),
+    ).toBe(true);
+  });
+
+  it('allows a correct code among the first five concurrent verify attempts', async () => {
+    const { auth, mailer, db } = await service();
+    await auth.addAllowed({ gmail: 'first-five@example.com', addedBy: 'admin' });
+    await auth.requestOtp('first-five@example.com', 'gmail');
+    await auth.drainPendingOtpSends();
+    const code = sentCode(mailer);
+    const originalQuery = db.query.bind(db);
+    vi.spyOn(db, 'query').mockImplementation(async (...args: Parameters<Pool['query']>) => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      return originalQuery(...args);
+    });
+
+    const results = await Promise.allSettled([
+      auth.verifyOtp('first-five@example.com', 'gmail', '000000'),
+      auth.verifyOtp('first-five@example.com', 'gmail', '000000'),
+      auth.verifyOtp('first-five@example.com', 'gmail', '000000'),
+      auth.verifyOtp('first-five@example.com', 'gmail', '000000'),
+      auth.verifyOtp('first-five@example.com', 'gmail', code),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+  });
+
+  it('releases a verify reservation after a database error', async () => {
+    const { auth, mailer, db } = await service();
+    await auth.addAllowed({ gmail: 'db-error@example.com', addedBy: 'admin' });
+    await auth.requestOtp('db-error@example.com', 'gmail');
+    await auth.drainPendingOtpSends();
+    const code = sentCode(mailer);
+    const originalQuery = db.query.bind(db);
+    let failedLookups = 0;
+    vi.spyOn(db, 'query').mockImplementation(async (...args: Parameters<Pool['query']>) => {
+      if (failedLookups < 5 && String(args[0]).includes('FROM media_allowed_users WHERE gmail')) {
+        failedLookups += 1;
+        throw new Error('synthetic database failure');
+      }
+      return originalQuery(...args);
+    });
+
+    for (let attempt = 0; attempt < 5; attempt += 1)
+      await expect(auth.verifyOtp('db-error@example.com', 'gmail', code)).rejects.toThrow(
+        'synthetic database failure',
+      );
+    await expect(auth.verifyOtp('db-error@example.com', 'gmail', code)).resolves.toEqual(
+      expect.any(String),
+    );
+  });
+
   it('rejects a disabled allow-listed user even for their own valid code', async () => {
     const { auth, mailer } = await service();
     const user = await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
@@ -427,6 +588,29 @@ describe('MediaAuthService', () => {
     await expect(auth.verifyOtp('987654321', 'telegram', code2)).resolves.toEqual(
       expect.any(String),
     );
+  });
+
+  it('keeps Telegram username and numeric-id verify failures in one canonical bucket', async () => {
+    const { auth, telegram } = await service();
+    await auth.addAllowed({
+      telegramId: '987654321',
+      telegramUsername: 'JoyUser',
+      addedBy: 'admin',
+    });
+    await auth.requestOtp('@joyuser', 'telegram');
+    await auth.drainPendingOtpSends();
+    const code = (telegram.sendOtp.mock.calls.at(-1) as unknown as [string, string])[1];
+
+    for (let attempt = 0; attempt < 4; attempt += 1)
+      await expect(auth.verifyOtp('@joyuser', 'telegram', '000000')).rejects.toMatchObject({
+        code: 'INVALID_OR_EXPIRED_CODE',
+      });
+    await expect(auth.verifyOtp('987654321', 'telegram', '000000')).rejects.toMatchObject({
+      code: 'TOO_MANY_ATTEMPTS',
+    });
+    await expect(auth.verifyOtp('987654321', 'telegram', code)).rejects.toMatchObject({
+      code: 'TOO_MANY_ATTEMPTS',
+    });
   });
 
   it('does not deliver for an unknown Telegram username', async () => {
