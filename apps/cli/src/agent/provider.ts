@@ -106,7 +106,7 @@ export function describeEffectiveConfig(
     source = envProvider ? 'env' : 'default';
   }
 
-  const configuredModel = cliConfig.defaultModel;
+  const configuredModel = cliConfig.defaultModels?.[provider];
   if (configuredModel && isRetiredModelId(configuredModel)) {
     console.warn(`Configured model "${configuredModel}" is retired; using the provider default.`);
   }
@@ -147,12 +147,13 @@ export async function resolveByokConfig(
 ): Promise<ByokSessionConfig> {
   let effective = describeEffectiveConfig(options);
   const aiProviders = loadAiProviders();
+  const keyProvider = aiProviders[effective.provider]?.provider ?? effective.provider;
   let apiKey = options.apiKey;
   if (!apiKey) {
     const keyEnv =
       options.apiKeyEnv ??
       aiProviders[effective.provider]?.apiKeyEnv ??
-      ENV_PROVIDER_PRIORITY.find(([, name]) => name === effective.provider)?.[0];
+      ENV_PROVIDER_PRIORITY.find(([, name]) => name === keyProvider)?.[0];
     if (keyEnv && process.env[keyEnv]) apiKey = process.env[keyEnv];
     else {
       const saved = aiProviders[effective.provider];
@@ -161,13 +162,23 @@ export async function resolveByokConfig(
         (saved?.apiKeyProtected ? unprotectSecret(saved.apiKeyProtected) : undefined);
     }
   }
-  if (effective.provider === 'joy-hosted' && !apiKey) {
+  if ((effective.provider === 'joy-hosted' || keyProvider === 'joy-hosted') && !apiKey) {
     throw new Error('JOY hosted provider needs a session token; set JOY_MEDIA_SESSION_TOKEN');
+  }
+  if (!apiKey) {
+    const envName =
+      options.apiKeyEnv ??
+      aiProviders[effective.provider]?.apiKeyEnv ??
+      ENV_PROVIDER_PRIORITY.find(([, name]) => name === keyProvider)?.[0];
+    const hint = envName
+      ? `set ${envName} or run \`joy-media agent provider add ${effective.provider} --api-key-env ${envName}\``
+      : `configure a key with \`joy-media agent provider add ${effective.provider} --api-key-env <VAR>\``;
+    throw new Error(`No API key for ${effective.provider}: ${hint}`);
   }
   if (
     effective.provider === 'joy-hosted' &&
     !options.model &&
-    !loadCliConfig().defaultModel &&
+    !loadCliConfig().defaultModels?.[effective.provider] &&
     !aiProviders[effective.provider]?.defaultModel
   ) {
     effective = {

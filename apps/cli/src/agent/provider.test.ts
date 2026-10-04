@@ -5,7 +5,11 @@ import {
   DEFAULT_OPENROUTER_MODEL,
 } from '@joy-media/joy-agent-engine';
 import { resolveByokConfig, describeEffectiveConfig } from './provider.js';
-import { mkdtempSync, rmSync } from 'node:fs';
+import * as providerModule from './provider.js';
+import { runJoyAgent } from './joy-agent.js';
+import { createDefaultProject } from '../utils/project-loader.js';
+import { getCliConfigPath } from '../utils/config.js';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -62,13 +66,19 @@ describe('effective BYOK provider configuration', () => {
       isolateConfig();
       for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
       const description = describeEffectiveConfig();
-      const resolved = await resolveByokConfig();
       expect(description).toMatchObject({ provider, source });
-      expect(description.modelId).toBe(resolved.modelId);
-      expect(description.baseUrl).toBe(resolved.baseUrl);
-      expect(resolved.modelId).toBe(
-        provider === 'kilo' ? DEFAULT_KILO_MODEL : DEFAULT_OPENROUTER_MODEL,
-      );
+      if (Object.keys(env).length === 0) {
+        await expect(resolveByokConfig()).rejects.toThrow(
+          'No API key for openrouter: set OPENROUTER_API_KEY',
+        );
+      } else {
+        const resolved = await resolveByokConfig();
+        expect(description.modelId).toBe(resolved.modelId);
+        expect(description.baseUrl).toBe(resolved.baseUrl);
+        expect(resolved.modelId).toBe(
+          provider === 'kilo' ? DEFAULT_KILO_MODEL : DEFAULT_OPENROUTER_MODEL,
+        );
+      }
     },
   );
 
@@ -79,6 +89,40 @@ describe('effective BYOK provider configuration', () => {
       baseUrl: KILO_GATEWAY_BASE_URL,
       modelId: 'byteplus-coding/dola-seed-2.0-pro',
     });
+  });
+
+  it('does not call a provider when its API key is missing', async () => {
+    isolateConfig();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const modelSpy = vi.spyOn(providerModule, 'createModelFromConfig');
+    try {
+      const error =
+        'No API key for kilo: set KILO_API_KEY or run `joy-media agent provider add kilo --api-key-env KILO_API_KEY`';
+      await expect(resolveByokConfig({ provider: 'kilo' })).rejects.toThrow(error);
+      await expect(
+        runJoyAgent({
+          project: createDefaultProject('No key project'),
+          revision: 0,
+          prompt: 'Inspect the project',
+          providerOptions: { provider: 'kilo' },
+        }),
+      ).rejects.toThrow(error);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(modelSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+      modelSpy.mockRestore();
+    }
+  });
+
+  it('migrates the legacy model default only to its saved provider', () => {
+    isolateConfig();
+    writeFileSync(
+      getCliConfigPath(),
+      JSON.stringify({ activeProvider: 'openrouter', defaultModel: 'openai/gpt-4o-mini' }),
+    );
+    expect(describeEffectiveConfig({ provider: 'kilo' }).modelId).toBe(DEFAULT_KILO_MODEL);
+    expect(describeEffectiveConfig({ provider: 'openrouter' }).modelId).toBe('openai/gpt-4o-mini');
   });
 
   it('uses the Anthropic endpoint and model default', () => {

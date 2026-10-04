@@ -12,6 +12,8 @@ import {
 
 export interface CliConfig {
   activeProvider?: string | undefined;
+  defaultModels?: Record<string, string> | undefined;
+  /** Legacy single-provider value, migrated by loadCliConfig. */
   defaultModel?: string | undefined;
   customBaseUrl?: string | undefined;
   sqlitePath?: string | undefined;
@@ -53,7 +55,19 @@ export function loadCliConfig(): CliConfig {
   if (!existsSync(path)) return {};
   try {
     const raw = readFileSync(path, 'utf8');
-    return JSON.parse(raw) as CliConfig;
+    const config = JSON.parse(raw) as CliConfig;
+    if (!config.defaultModel) return config;
+    const provider = config.activeProvider ?? 'openai';
+    const migrated: CliConfig = {
+      ...config,
+      defaultModels: {
+        ...(config.defaultModels ?? {}),
+        [provider]: config.defaultModels?.[provider] ?? config.defaultModel,
+      },
+    };
+    delete migrated.defaultModel;
+    saveCliConfig(migrated);
+    return migrated;
   } catch {
     return {};
   }

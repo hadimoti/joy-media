@@ -10,7 +10,12 @@ import {
 import { JoyAgentRunError } from '@joy-media/joy-agent-engine';
 import { describeEffectiveConfig } from '../agent/provider.js';
 import type { CliFlags } from '../cli.js';
-import { probeAgent, runJoyAgent, type RunAgentOutput } from '../agent/joy-agent.js';
+import {
+  probeAgent,
+  runJoyAgent,
+  truthfulAgentSummary,
+  type RunAgentOutput,
+} from '../agent/joy-agent.js';
 import { startAgentRepl } from '../agent/repl.js';
 import {
   deleteAiProvider,
@@ -71,6 +76,7 @@ Commands:
   probe                        Check provider tool-calling capability
   config                       Show or set provider/model defaults
   provider <list|add|use|remove>
+    provider add <name> --base-url|--url <url> [--api-key|--api-key-env <VAR>]
   models                       Fetch available models
   model <get|set>              Show or change the model
 
@@ -83,6 +89,11 @@ or explicitly opt in to plaintext with --insecure-file-store (mode 0600).`);
 
 export async function handleAgentCommand(args: string[], flags: CliFlags): Promise<number> {
   const sub = args[0] ?? 'chat';
+
+  if (sub === 'help') {
+    printAgentHelp();
+    return 0;
+  }
 
   if (sub === 'provider') {
     const action = args[1] ?? 'list';
@@ -127,12 +138,12 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
       const name = args[2] ?? flags.name;
       if (!name) {
         logError(
-          'Provider name required. Usage: joy-media agent provider add <name> --url <url> --api-key <key> [--model <model>]',
+          'Provider name required. Usage: joy-media agent provider add <name> --base-url|--url <url> [--api-key <key>] [--model <model>]',
         );
         return 1;
       }
       if (!flags.baseUrl) {
-        logError('Base URL required. Specify --url <url>');
+        logError('Base URL required. Specify --base-url <url> (alias: --url <url>).');
         return 1;
       }
 
@@ -225,11 +236,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         return 1;
       }
       const current = loadCliConfig();
-      const updated = {
-        ...current,
-        activeProvider: name,
-        ...(providers[name]?.defaultModel ? { defaultModel: providers[name]!.defaultModel } : {}),
-      };
+      const updated = { ...current, activeProvider: name };
       saveCliConfig(updated);
       logSuccess(`Active provider set to "${name}".`);
       if (providers[name]?.defaultModel) {
@@ -338,7 +345,11 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         return 1;
       }
       const cfg = loadCliConfig();
-      saveCliConfig({ ...cfg, defaultModel: modelId });
+      const provider = flags.provider ?? cfg.activeProvider ?? 'openrouter';
+      saveCliConfig({
+        ...cfg,
+        defaultModels: { ...(cfg.defaultModels ?? {}), [provider]: modelId },
+      });
       logSuccess(`Default model set to "${modelId}".`);
       return 0;
     }
@@ -396,11 +407,20 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
 
   if (sub === 'config') {
     const current = loadCliConfig();
+    if (flags.apiKey) {
+      logError(
+        'agent config does not store API keys. Use `joy-media agent provider add <name> --api-key <key>` or --api-key-env <VAR>.',
+      );
+      return 1;
+    }
     if (flags.provider || flags.model || flags.baseUrl) {
+      const provider = flags.provider ?? current.activeProvider ?? 'openrouter';
       const updated = {
         ...current,
         ...(flags.provider ? { activeProvider: flags.provider } : {}),
-        ...(flags.model ? { defaultModel: flags.model } : {}),
+        ...(flags.model
+          ? { defaultModels: { ...(current.defaultModels ?? {}), [provider]: flags.model } }
+          : {}),
         ...(flags.baseUrl ? { customBaseUrl: flags.baseUrl } : {}),
       };
       saveCliConfig(updated);
@@ -518,9 +538,27 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         logSuccess(`Applied ${output.appliedCount} operation(s) (--apply)`);
       } else {
         logInfo(
-          `Staged ${output.staged.timelineOps.length + output.staged.documentOps.length} operation(s), NOT applied. Re-run with --apply to commit.`,
+          truthfulAgentSummary({
+            applyRequested: flags.apply,
+            applied: output.applied,
+            appliedCount: output.appliedCount,
+            errors: output.errors,
+            notes: output.notes,
+            staged: output.staged,
+          }),
         );
       }
+      if (output.applied)
+        logInfo(
+          truthfulAgentSummary({
+            applyRequested: flags.apply,
+            applied: output.applied,
+            appliedCount: output.appliedCount,
+            errors: output.errors,
+            notes: output.notes,
+            staged: output.staged,
+          }),
+        );
       if (output.applied) printPlacementSummary(output.placementSummary);
 
       return 0;
