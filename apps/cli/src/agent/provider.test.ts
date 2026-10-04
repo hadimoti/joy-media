@@ -147,7 +147,7 @@ describe('effective BYOK provider configuration', () => {
   it('reports a clear missing JOY hosted session token error', async () => {
     isolateConfig();
     await expect(resolveByokConfig({ provider: 'joy-hosted' })).rejects.toThrow(
-      'run joy-media login or set JOY_MEDIA_SESSION_TOKEN',
+      'set JOY_MEDIA_SESSION_TOKEN',
     );
   });
 

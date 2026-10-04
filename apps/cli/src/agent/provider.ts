@@ -162,9 +162,7 @@ export async function resolveByokConfig(
     }
   }
   if (effective.provider === 'joy-hosted' && !apiKey) {
-    throw new Error(
-      'JOY hosted provider needs a session token; run joy-media login or set JOY_MEDIA_SESSION_TOKEN',
-    );
+    throw new Error('JOY hosted provider needs a session token; set JOY_MEDIA_SESSION_TOKEN');
   }
   if (
     effective.provider === 'joy-hosted' &&
