@@ -14,6 +14,7 @@ export interface AuthCommandOptions {
 
 interface AuthRequestError extends Error {
   readonly status?: number;
+  readonly code?: string;
 }
 
 const DEFAULT_JOY_API_BASE = 'https://joyst.ir/api';
@@ -31,7 +32,15 @@ export async function handleAuthCommand(
     return 2;
   } catch (error) {
     const message = error instanceof Error ? error.message : '';
-    if (message.startsWith('No usable system keyring is available.')) logError(message);
+    const code = errorCodeOf(error);
+    if (
+      message.startsWith('No usable system keyring is available.') ||
+      message.startsWith('saved login is for ')
+    )
+      logError(message);
+    else if (code === 'TOO_MANY_ATTEMPTS')
+      logError('Too many incorrect login codes. Request a new code later.');
+    else if (code === 'RATE_LIMITED') logError('Too many login requests. Try again later.');
     else
       logError(
         command === 'login'
@@ -60,8 +69,12 @@ async function login(options: AuthCommandOptions): Promise<number> {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ contact: email, method: 'gmail', code }),
     });
-  } catch {
-    logError('The login code was invalid or expired.');
+  } catch (error) {
+    const code = errorCodeOf(error);
+    if (code === 'TOO_MANY_ATTEMPTS')
+      logError('Too many incorrect login codes. Request a new code later.');
+    else if (code === 'RATE_LIMITED') logError('Too many login requests. Try again later.');
+    else logError('The login code was invalid or expired.');
     return 1;
   }
   const token =
@@ -69,7 +82,10 @@ async function login(options: AuthCommandOptions): Promise<number> {
       ? verification.token
       : undefined;
   if (!token) throw new Error('Invalid login response');
-  saveJoySession({ token, email }, Boolean(options.insecureFileStore));
+  saveJoySession(
+    { token, email, apiOrigin: new URL(apiBase).origin },
+    Boolean(options.insecureFileStore),
+  );
   logSuccess(`Logged in as ${email}.`);
   return 0;
 }
@@ -78,6 +94,7 @@ async function whoami(options: AuthCommandOptions): Promise<number> {
   const session = loadJoySession();
   if (!session) return signedOut(options.json);
   const apiBase = resolveApiBase(options.apiBase);
+  assertSessionOrigin(session.apiOrigin ?? 'https://joyst.ir', apiBase);
   let identity: unknown;
   try {
     identity = await requestJson(`${apiBase}/v1/auth/session`, {
@@ -123,12 +140,22 @@ async function logout(options: AuthCommandOptions): Promise<number> {
     return 0;
   }
   try {
-    await fetch(`${resolveApiBase(options.apiBase)}/v1/auth/logout`, {
+    const apiBase = resolveApiBase(options.apiBase);
+    assertSessionOrigin(session.apiOrigin ?? 'https://joyst.ir', apiBase);
+    const response = await fetch(`${apiBase}/v1/auth/logout`, {
       method: 'POST',
       headers: { authorization: `Bearer ${session.token}` },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(10_000),
     });
-  } catch {
-    // Match the desktop: local logout remains complete when revocation is unreachable.
+    if (!response.ok) throw new Error('Server logout was not confirmed');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    logError(
+      message.startsWith('saved login is for ')
+        ? message
+        : 'Server logout could not be confirmed; the local session was removed.',
+    );
   } finally {
     clearJoySession();
   }
@@ -143,7 +170,7 @@ function signedOut(json = false): number {
 }
 
 async function requestJson(url: string, init: RequestInit): Promise<unknown> {
-  const response = await fetch(url, init);
+  const response = await fetch(url, { ...init, redirect: 'manual' });
   let body: unknown;
   try {
     body = await response.json();
@@ -151,11 +178,22 @@ async function requestJson(url: string, init: RequestInit): Promise<unknown> {
     body = undefined;
   }
   if (!response.ok) {
+    const code = isRecord(body) && isRecord(body.error) ? body.error.code : undefined;
     const error = new Error('JOY account request failed') as AuthRequestError;
     Object.defineProperty(error, 'status', { value: response.status });
+    if (typeof code === 'string') Object.defineProperty(error, 'code', { value: code });
     throw error;
   }
   return isRecord(body) ? body.data : undefined;
+}
+
+function assertSessionOrigin(savedOrigin: string, apiBase: string): void {
+  const normalizedSavedOrigin = new URL(savedOrigin).origin;
+  if (new URL(apiBase).origin !== normalizedSavedOrigin) {
+    throw new Error(
+      `saved login is for ${normalizedSavedOrigin}; run joy-media login --api-base <url> for this host`,
+    );
+  }
 }
 
 function resolveApiBase(flag?: string): string {
@@ -178,6 +216,10 @@ function resolveApiBase(flag?: string): string {
 
 function statusOf(error: unknown): number | undefined {
   return isRecord(error) && typeof error.status === 'number' ? error.status : undefined;
+}
+
+function errorCodeOf(error: unknown): string | undefined {
+  return isRecord(error) && typeof error.code === 'string' ? error.code : undefined;
 }
 
 async function promptEmail(): Promise<string> {

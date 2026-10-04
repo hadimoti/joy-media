@@ -60,13 +60,14 @@ describe('CLI JOY session commands', () => {
       '--code',
       '123456',
       '--api-base',
-      'https://api.example.invalid/api',
+      'https://api.example.invalid:8443/api',
     ]);
 
     expect(result).toBe(0);
+    expect(loadJoySession()?.apiOrigin).toBe('https://api.example.invalid:8443');
     expect(calls.map((call) => call.url)).toEqual([
-      'https://api.example.invalid/api/v1/auth/request-otp',
-      'https://api.example.invalid/api/v1/auth/verify-otp',
+      'https://api.example.invalid:8443/api/v1/auth/request-otp',
+      'https://api.example.invalid:8443/api/v1/auth/verify-otp',
     ]);
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
       contact: 'person@example.invalid',
@@ -94,6 +95,7 @@ describe('CLI JOY session commands', () => {
     const result = await runCli(['login', '--email', 'person@example.invalid', '--code', '123456']);
 
     expect(result).not.toBe(0);
+    expect(JSON.stringify(errors.mock.calls)).toContain('The login code was invalid or expired.');
     expect(JSON.stringify(output.mock.calls)).not.toContain('123456');
     expect(JSON.stringify(errors.mock.calls)).not.toContain('123456');
     expect(keyring.has('joy-media-session')).toBe(false);
@@ -126,7 +128,11 @@ describe('CLI JOY session commands', () => {
   });
 
   it('shows identity and subscription details from the desktop identity endpoints as JSON', async () => {
-    saveJoySession({ token: 'tok-fake-1', email: 'person@example.invalid' });
+    saveJoySession({
+      token: 'tok-fake-1',
+      email: 'person@example.invalid',
+      apiOrigin: 'https://api.example.invalid',
+    });
     expect(loadJoySession()?.token).toBe('tok-fake-1');
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
@@ -202,9 +208,92 @@ describe('CLI JOY session commands', () => {
         headers: { authorization: 'Bearer tok-fake-1' },
       }),
     );
+    expect(fetchSpy.mock.calls[0]?.[1]).toMatchObject({ redirect: 'manual' });
     expect(keyring.has('joy-media-session')).toBe(false);
     fetchSpy.mockClear();
     expect(await runCli(['logout'])).toBe(0);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('refuses authenticated calls when the saved login origin does not match', async () => {
+    saveJoySession({ token: 'tok-fake-1', apiOrigin: 'https://joyst.ir' });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await runCli(['whoami', '--api-base', 'https://evil.example.invalid/api']);
+
+    expect(result).not.toBe(0);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(JSON.stringify(errors.mock.calls)).toContain('saved login is for https://joyst.ir');
+  });
+
+  it('does not follow a cross-origin redirect for an authenticated request', async () => {
+    saveJoySession({ token: 'tok-fake-1', apiOrigin: 'https://joyst.ir' });
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(null, { status: 302, headers: { location: 'https://evil.example.invalid/' } }),
+      );
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await runCli(['whoami']);
+
+    expect(result).not.toBe(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0]?.[1]).toMatchObject({ redirect: 'manual' });
+    expect(fetchSpy.mock.calls[0]?.[1]?.headers).toEqual({ authorization: 'Bearer tok-fake-1' });
+    expect(JSON.stringify(errors.mock.calls)).not.toContain('https://evil.example.invalid');
+  });
+
+  it('times out server logout, clears the local token, and reports that revocation was not confirmed', async () => {
+    saveJoySession({ token: 'tok-fake-1', apiOrigin: 'https://joyst.ir' });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+      throw new DOMException('The operation was aborted', 'TimeoutError');
+    });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runCli(['logout'])).toBe(0);
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(keyring.has('joy-media-session')).toBe(false);
+    expect(JSON.stringify(errors.mock.calls)).toContain('Server logout could not be confirmed');
+  });
+
+  it('shows the stable too-many-attempts login message', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) =>
+      String(input).endsWith('/v1/auth/request-otp')
+        ? new Response(JSON.stringify({ data: { message: 'Code requested.' } }), { status: 200 })
+        : new Response(
+            JSON.stringify({ error: { code: 'TOO_MANY_ATTEMPTS', message: 'private detail' } }),
+            { status: 429 },
+          ),
+    );
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(
+      await runCli(['login', '--email', 'person@example.invalid', '--code', '123456']),
+    ).not.toBe(0);
+
+    expect(JSON.stringify(errors.mock.calls)).toContain('Too many incorrect login codes');
+    expect(JSON.stringify(errors.mock.calls)).not.toContain('private detail');
+  });
+
+  it('shows the stable rate-limited login message', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: 'RATE_LIMITED', message: 'private detail' } }), {
+        status: 429,
+      }),
+    );
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(
+      await runCli(['login', '--email', 'person@example.invalid', '--code', '123456']),
+    ).not.toBe(0);
+
+    expect(JSON.stringify(errors.mock.calls)).toContain(
+      'Too many login requests. Try again later.',
+    );
+    expect(JSON.stringify(errors.mock.calls)).not.toContain('private detail');
   });
 });
