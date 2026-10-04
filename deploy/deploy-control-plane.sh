@@ -16,6 +16,7 @@ ACCOUNT_WEB_TARGET="${JOY_MEDIA_ACCOUNT_WEB_TARGET:-/opt/joy-media/account-web}"
 EDGE_ADDR="${JOY_MEDIA_EDGE_ADDR:-}"
 CA_FILE="${JOY_MEDIA_CA_FILE:-${NODE_EXTRA_CA_CERTS:-/etc/ssl/joyst/origincertificate.pem}}"
 EDGE_RESOLVE=""
+API_ORIGIN="${JOY_MEDIA_API_LOCAL_ORIGIN:-http://127.0.0.1:8790}"
 NGINX_CONF="${JOY_MEDIA_NGINX_CONF:-/etc/nginx/conf.d/joy-wg-bot.conf}"
 RELEASE_ROOT="${JOY_MEDIA_API_RELEASE_ROOT:-/opt/joy-media/releases}"
 CURRENT_API_LINK="${JOY_MEDIA_CURRENT_API_LINK:-$RELEASE_ROOT/current-api}"
@@ -214,5 +215,9 @@ check_endpoint "https://joyst.ir/api/v1/jobs" "404"
 log "Post-deploy Joy Model gateway smoke"
 node "$REPO_DIR/tooling/ops/smoke-gateway.mjs" --edge-addr "$EDGE_ADDR" --ca "$CA_FILE" ||
   edge_failure "Joy Model gateway smoke failed"
+
+log "Loopback client-key smoke"
+node "$REPO_DIR/tooling/ops/smoke-client-key.mjs" --origin "$API_ORIGIN" ||
+  edge_failure "loopback client-key smoke failed"
 
 log "JOY Media Control Plane and Account Web deployment completed successfully!"

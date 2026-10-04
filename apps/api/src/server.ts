@@ -49,6 +49,7 @@ import {
 import { UsdcInvoiceLedger } from './usdc-invoice-ledger.js';
 import { DisabledUsdcCheckoutService, UsdcCheckoutService } from './usdc-checkout-service.js';
 import { installApiShutdownHandlers } from './server-shutdown.js';
+import { warnIfLoopbackProxyIsUnconfigured } from './proxy-startup-warning.js';
 
 await start();
 
@@ -74,9 +75,9 @@ async function start(): Promise<void> {
   if (mailer === undefined)
     console.warn('JOY Media OTP email is unavailable: SMTP is not configured.');
   const telegram = createTelegramSender();
-  const clientAddressResolver = createClientAddressResolver({
-    trustedProxyAddresses: trustedProxyAddressesFromEnv(),
-  });
+  const trustedProxyAddresses = trustedProxyAddressesFromEnv();
+  warnIfLoopbackProxyIsUnconfigured(host, trustedProxyAddresses);
+  const clientAddressResolver = createClientAddressResolver({ trustedProxyAddresses });
   const mediaAuth =
     pool === undefined
       ? new DisabledMediaAuth()

@@ -58,6 +58,149 @@ afterEach(async () => {
 });
 
 describe('control-plane HTTP transport', () => {
+  it('does not trust forged forwarding headers from an untrusted peer when keying API limits', async () => {
+    const origin = await start(
+      { authenticate: () => undefined },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { maxRequests: 1 },
+      createClientAddressResolver(),
+    );
+
+    await expect(
+      request(origin, 'GET', '/v1/not-found', undefined, undefined, {
+        'x-forwarded-for': '198.51.100.11',
+        'x-real-ip': '198.51.100.11',
+      }),
+    ).resolves.toMatchObject({ status: 401 });
+    await expect(
+      request(origin, 'GET', '/v1/not-found', undefined, undefined, {
+        'x-forwarded-for': '198.51.100.12',
+        'x-real-ip': '198.51.100.12',
+      }),
+    ).resolves.toMatchObject({ status: 429 });
+  });
+
+  it('gives distinct API limit buckets to clients behind a trusted proxy', async () => {
+    const origin = await start(
+      { authenticate: () => undefined },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { maxRequests: 1 },
+      createClientAddressResolver({ trustedProxyAddresses: ['127.0.0.1'] }),
+    );
+
+    for (const address of ['198.51.100.21', '198.51.100.22']) {
+      await expect(
+        request(origin, 'GET', '/v1/not-found', undefined, undefined, {
+          'x-forwarded-for': address,
+          'x-real-ip': address,
+        }),
+      ).resolves.toMatchObject({ status: 401 });
+    }
+    await expect(
+      request(origin, 'GET', '/v1/not-found', undefined, undefined, {
+        'x-forwarded-for': '198.51.100.21',
+      }),
+    ).resolves.toMatchObject({ status: 429 });
+  });
+
+  it('keeps verify-failure limits separate for distinct clients behind a trusted proxy', async () => {
+    const adapter = newDb().adapters.createPg();
+    const db = new adapter.Pool();
+    await db.query(`
+      CREATE TABLE media_allowed_users (id bigserial primary key, gmail text, telegram_id text, telegram_username text, added_by text not null, added_at timestamptz not null, enabled boolean not null default true);
+      CREATE TABLE media_otp_codes (id bigserial primary key, contact text not null, method text not null, code_hash text not null, created_at timestamptz not null, expires_at timestamptz not null, used boolean not null default false);
+      CREATE TABLE media_sessions (id bigserial primary key, token_hash text not null, contact text not null, method text not null, created_at timestamptz not null, expires_at timestamptz not null, revoked_at timestamptz);
+    `);
+    const clientAddressResolver = createClientAddressResolver({
+      trustedProxyAddresses: ['127.0.0.1'],
+    });
+    const mediaAuth = new MediaAuthService({
+      pool: db as never,
+      verifyClientFailureMax: 1,
+      clientAddressResolver,
+    });
+    const origin = await start(
+      { authenticate: () => undefined },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      clientAddressResolver,
+      undefined,
+      undefined,
+      mediaAuth,
+    );
+
+    const verify = (contact: string, address: string) =>
+      request(
+        origin,
+        'POST',
+        '/v1/auth/verify-otp',
+        {
+          contact,
+          method: 'gmail',
+          code: '000000',
+        },
+        undefined,
+        {
+          'x-forwarded-for': address,
+          'x-real-ip': address,
+        },
+      );
+
+    await expect(verify('first-client@example.invalid', '198.51.100.41')).resolves.toMatchObject({
+      status: 400,
+    });
+    await expect(verify('first-client@example.invalid', '198.51.100.41')).resolves.toMatchObject({
+      status: 429,
+      body: { error: { code: 'TOO_MANY_ATTEMPTS' } },
+    });
+    await expect(verify('second-client@example.invalid', '198.51.100.42')).resolves.toMatchObject({
+      status: 400,
+    });
+    await db.end();
+  });
+
+  it('exposes only a process-HMAC client key on the loopback diagnostic route', async () => {
+    const origin = await start(
+      { authenticate: () => undefined },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      createClientAddressResolver({ trustedProxyAddresses: ['127.0.0.1'] }),
+    );
+    const first = await request(origin, 'GET', '/internal/client-key', undefined, undefined, {
+      'x-forwarded-for': '198.51.100.31',
+      'x-real-ip': '198.51.100.31',
+    });
+    const second = await request(origin, 'GET', '/internal/client-key', undefined, undefined, {
+      'x-forwarded-for': '198.51.100.32',
+      'x-real-ip': '198.51.100.32',
+    });
+    const loopback = await request(origin, 'GET', '/internal/client-key');
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(loopback.status).toBe(200);
+    const firstKey = (first.body as { clientKey: string }).clientKey;
+    const secondKey = (second.body as { clientKey: string }).clientKey;
+    expect(firstKey).toMatch(/^[a-f0-9]{64}$/u);
+    expect(secondKey).toMatch(/^[a-f0-9]{64}$/u);
+    expect(firstKey).not.toBe(secondKey);
+    expect(JSON.stringify([first.body, second.body, loopback.body])).not.toMatch(
+      /198\.51\.100\.|127\.0\.0\.1|::1/u,
+    );
+  });
+
   it('evicts an old IP bucket instead of growing without bound or rejecting a new IP', () => {
     const buckets = new Map<string, { windowStart: number; count: number }>();
     const now = Date.now();

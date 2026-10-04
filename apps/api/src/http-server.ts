@@ -50,6 +50,7 @@ import {
   createClientAddressResolver,
   type ClientAddressResolver,
 } from './client-address.js';
+import { createClientKeyDiagnosticResponse } from './client-key-diagnostic.js';
 import { attachDbQueryCountHeader, withDbQueryContext } from './db-query-observability.js';
 import {
   ORIGINAL_UPLOAD_PART_BYTES,
@@ -85,6 +86,7 @@ import { UsdcLedgerError } from './usdc-invoice-ledger.js';
 
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
 const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 600;
+const CLIENT_KEY_DIAGNOSTIC_SECRET = randomBytes(32);
 export const DEFAULT_RATE_LIMIT_MAX_BUCKETS = 10_000;
 /**
  * Bound ordinary JSON requests before parsing them. Routes carrying media or
@@ -213,7 +215,7 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
         return;
       }
       try {
-        await route(resolvedOptions, request, response, maxJsonBodyBytes);
+        await route(resolvedOptions, request, response, maxJsonBodyBytes, clientAddressResolver);
       } catch (error) {
         respondError(response, error);
       }
@@ -244,8 +246,19 @@ async function route(
   request: IncomingMessage,
   response: ServerResponse,
   maxJsonBodyBytes: number,
+  clientAddressResolver: ClientAddressResolver,
 ): Promise<void> {
   const url = new URL(request.url ?? '/', 'http://joy-media.invalid');
+  if (request.method === 'GET' && url.pathname === '/internal/client-key') {
+    const key = clientAddressKey(clientAddressResolver(request));
+    const diagnostic = createClientKeyDiagnosticResponse(
+      request.socket.remoteAddress,
+      key,
+      CLIENT_KEY_DIAGNOSTIC_SECRET,
+    );
+    respondJson(response, diagnostic.status, diagnostic.body);
+    return;
+  }
   if (request.method === 'GET' && (url.pathname === '/live' || url.pathname === '/health/live')) {
     respondJson(response, 200, { ok: true, service: 'joy-media-api', liveness: true });
     return;
