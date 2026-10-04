@@ -104,7 +104,7 @@ describe('CLI ffmpeg render', () => {
           fps: 10,
         });
         const root = baseProject.compositions.root!;
-        (root as { durationUs: number }).durationUs = 1_000_000;
+        (root as { durationUs: number }).durationUs = 2_000_000;
         (baseProject.assets as Record<string, unknown>)['look-asset'] = {
           id: 'look-asset',
           kind: 'video',
@@ -345,7 +345,9 @@ describe('CLI ffmpeg render', () => {
           order: 3,
           enabled: true,
           locked: false,
-          clips: texts.map((text) => text.clip),
+          clips: texts.map((text, index) =>
+            index === 1 ? { ...text.clip, startUs: 1_000_000 } : text.clip,
+          ),
         });
         writeFileSync(projectPath, JSON.stringify(project));
         const ffmpegExecutable = resolveFfmpegExecutable();
@@ -384,36 +386,48 @@ describe('CLI ffmpeg render', () => {
             readFileSync(join(outDir, `${project.id}.mp4.manifest.json`), 'utf8'),
           ) as { skipped: unknown[] };
           expect(manifest.skipped).toHaveLength(0);
-          const frame = spawnSync(
-            ffmpegExecutable,
-            [
-              '-v',
-              'error',
-              '-ss',
-              '0.5',
-              '-i',
-              join(outDir, `${project.id}.mp4`),
-              '-frames:v',
-              '1',
-              '-f',
-              'rawvideo',
-              '-pix_fmt',
-              'rgb24',
-              'pipe:1',
-            ],
-            { shell: false, encoding: 'buffer' },
-          );
-          expect(frame.status).toBe(0);
-          const pixels = frame.stdout as Buffer;
-          let brightTextAreaPixels = 0;
-          for (let y = 130; y < 240; y += 1) {
-            for (let x = 0; x < 320; x += 1) {
-              const offset = (y * 320 + x) * 3;
-              if (pixels[offset]! > 100 && pixels[offset + 1]! > 100 && pixels[offset + 2]! > 100)
-                brightTextAreaPixels += 1;
+          for (const timestamp of ['0.5', '1.5']) {
+            const frame = spawnSync(
+              ffmpegExecutable,
+              [
+                '-v',
+                'error',
+                '-ss',
+                timestamp,
+                '-i',
+                join(outDir, `${project.id}.mp4`),
+                '-frames:v',
+                '1',
+                '-f',
+                'rawvideo',
+                '-pix_fmt',
+                'rgb24',
+                'pipe:1',
+              ],
+              { shell: false, encoding: 'buffer' },
+            );
+            expect(frame.status).toBe(0);
+            const pixels = frame.stdout as Buffer;
+            let brightTextAreaPixels = 0;
+            let minX = 320;
+            let maxX = -1;
+            for (let y = 0; y < 240; y += 1) {
+              for (let x = 0; x < 320; x += 1) {
+                const offset = (y * 320 + x) * 3;
+                if (
+                  pixels[offset]! > 100 &&
+                  pixels[offset + 1]! > 100 &&
+                  pixels[offset + 2]! > 100
+                ) {
+                  brightTextAreaPixels += 1;
+                  minX = Math.min(minX, x);
+                  maxX = Math.max(maxX, x);
+                }
+              }
             }
+            expect(brightTextAreaPixels).toBeGreaterThan(10);
+            expect(Math.abs((minX + maxX) / 2 - 160)).toBeLessThanOrEqual(16);
           }
-          expect(brightTextAreaPixels).toBeGreaterThan(10);
         }
       } finally {
         if (previousArabicFont === undefined) delete process.env.JOY_FONT_ARABIC;

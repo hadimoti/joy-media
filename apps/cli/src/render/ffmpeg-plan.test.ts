@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDefaultProject } from '../utils/project-loader.js';
 import { buildFfmpegFramePlan, buildFfmpegRenderPlan } from './ffmpeg-plan.js';
-import { createTextClip } from './text-clip.js';
+import { createTextClip, wrapDrawtextDirection } from './text-clip.js';
 import { resolveTextFont } from './text-font.js';
 import { latinOnlySyntheticFont } from './font-cmap-test-util.js';
 import {
@@ -232,7 +232,9 @@ describe('buildFfmpegRenderPlan', () => {
       expect(graph).not.toContain(content);
       expect(graph).not.toContain('secret.txt');
       expect(graph).toContain('expansion=none');
-      expect(plan.textFiles).toEqual([{ path: join(dir, 'joy-text-0.txt'), content }]);
+      expect(plan.textFiles).toEqual([
+        { path: join(dir, 'joy-text-0.txt'), content: wrapDrawtextDirection(content, 'ltr') },
+      ]);
       expect(plan.skipped).not.toContainEqual(
         expect.objectContaining({ clipId: 'text-caption-1' }),
       );
@@ -285,7 +287,7 @@ describe('buildFfmpegRenderPlan', () => {
           );
           const graph = plan.args[plan.args.indexOf('-filter_complex') + 1]!;
           expect(graph).toContain(
-            `:x=${ffmpegCaptionX(layout)}:y=${ffmpegCaptionY(layout)}:fontsize=${ffmpegCaptionFontSize(layout)}:`,
+            `:x=${ffmpegCaptionX(layout)}:y=${ffmpegCaptionY(layout, example.height)}:fontsize=${ffmpegCaptionFontSize(layout)}:`,
           );
         } finally {
           rmSync(dir, { recursive: true, force: true });
@@ -379,7 +381,7 @@ describe('buildFfmpegRenderPlan', () => {
         );
         const graph = plan.args[plan.args.indexOf('-filter_complex') + 1]!;
         expect(graph).toContain('text_shaping=1');
-        expect(plan.textFiles[0]?.content).toBe('سلام دنیا ۱۲۳');
+        expect(plan.textFiles[0]?.content).toBe(wrapDrawtextDirection('سلام دنیا ۱۲۳', 'rtl'));
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

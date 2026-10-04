@@ -68,6 +68,36 @@ describe('FFmpeg caption layout', () => {
       fontSize: 1,
       align: 'center',
     });
+    const nodes = layoutFfmpegCaption({
+      clipId: text.clip.id,
+      document: text.document,
+      segment: text.document.segments[0]!,
+      style: text.clip.style,
+      width: 1080,
+      height: 1920,
+    });
+    expect(nodes[0]?.align).toBe('center');
+    expect(nodes[0] && ffmpegCaptionX(nodes[0])).toBe(`${nodes[0]?.transform.translateX}-text_w/2`);
+  });
+
+  it('clamps a bottom anchored title line into the frame while preserving editor layout in bounds', () => {
+    const text = createTextClip({
+      id: 'clamp',
+      text: 'Title',
+      startUs: 0,
+      durationUs: 1_000_000,
+      y: 0.4,
+    });
+    const node = layoutFfmpegCaption({
+      clipId: text.clip.id,
+      document: text.document,
+      segment: text.document.segments[0]!,
+      style: text.clip.style,
+      width: 640,
+      height: 360,
+    })[0]!;
+    expect(ffmpegCaptionY(node, 360)).toBeLessThanOrEqual(360 - ffmpegCaptionFontSize(node));
+    expect(ffmpegCaptionY(node, 360)).toBeGreaterThanOrEqual(0);
   });
 
   it('keeps every wrapped line from the editor layout', () => {

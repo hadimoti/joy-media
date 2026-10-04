@@ -79,7 +79,7 @@ export function createTextClip(input: CreateTextClipInput): {
     plateColor: '#000000',
     plateOpacity: 0,
     highlightColor: color,
-    align: direction === 'rtl' ? 'end' : 'center',
+    align: 'center',
   };
   const clip: CaptionClipV1 = {
     id: `text-${input.id}`,
@@ -90,4 +90,12 @@ export function createTextClip(input: CreateTextClipInput): {
     style,
   };
   return { document, clip };
+}
+
+export function wrapDrawtextDirection(text: string, direction: 'rtl' | 'ltr'): string {
+  const start = direction === 'rtl' ? '\u202b' : '\u202a';
+  return text
+    .split(/\r?\n/)
+    .map((line) => `${start}${line}\u202c`)
+    .join('\n');
 }

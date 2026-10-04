@@ -40,8 +40,12 @@ export function ffmpegCaptionX(node: TextNode): string {
   return String(x);
 }
 
-export function ffmpegCaptionY(node: TextNode): number {
-  return finite(node.transform.translateY, 'caption y');
+export function ffmpegCaptionY(node: TextNode, frameHeight?: number): number {
+  const y = finite(node.transform.translateY, 'caption y');
+  if (frameHeight === undefined) return y;
+  const height = finite(frameHeight, 'frame height');
+  const maxY = Math.max(0, height - ffmpegCaptionFontSize(node));
+  return Math.min(maxY, Math.max(0, y));
 }
 
 export function ffmpegCaptionFontSize(node: TextNode): number {

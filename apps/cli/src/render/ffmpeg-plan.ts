@@ -12,6 +12,8 @@ import {
 import { missingFontCodePoints } from './font-cmap.js';
 import { probeFfmpegTextCapabilities, type FfmpegTextCapabilities } from './text-capabilities.js';
 import { containsRtlOrComplexScript } from './text-scripts.js';
+import { resolveCaptionDirection } from '@joy-media/captions-core';
+import { wrapDrawtextDirection } from './text-clip.js';
 
 export interface FfmpegRenderOverrides {
   readonly width?: number;
@@ -296,10 +298,13 @@ export function buildFfmpegRenderPlan(
           const enabled = `between(t\\,${seconds(start)}\\,${seconds(end)})`;
           for (const line of layout) {
             const x = ffmpegCaptionX(line);
-            const y = ffmpegCaptionY(line);
+            const y = ffmpegCaptionY(line, height);
             const size = ffmpegCaptionFontSize(line);
             const textFilePath = join(textFileDirectory, `joy-text-${textFiles.length}.txt`);
-            textFiles.push({ path: textFilePath, content: line.text });
+            textFiles.push({
+              path: textFilePath,
+              content: wrapDrawtextDirection(line.text, resolveCaptionDirection(document)),
+            });
             const next = `txt_${overlayIndex++}`;
             filters.push(
               `[${videoLabel}]drawtext=fontfile=${escapeFilterPath(fontPath)}:textfile=${escapeFilterPath(textFilePath)}:expansion=none${textCapabilities.textShapingOption ? ':text_shaping=1' : ''}:x=${x}:y=${y}:fontsize=${size}:fontcolor=${color}:enable='${enabled}'[${next}]`,
