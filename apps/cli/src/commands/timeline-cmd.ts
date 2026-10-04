@@ -40,7 +40,10 @@ export function printTimelineHelp(): void {
   trim --clip <id> [--start <seconds>] [--end <seconds>] [--duration <seconds>]
   remove-clip --clip <id>`);
   console.log(
-    '  Text placement: x/y are editor frame fractions; captions anchor to the bottom title line, then clamp into frame bounds.',
+    '  Text placement: x is horizontal frame offset (0 = center, -0.4 = near left, 0.4 = near right).',
+  );
+  console.log(
+    '  y offsets the template bottom title line (0 = default position, negative = up, positive = down); rendering clamps y to the frame, and add-text warns if text may clip.',
   );
   console.log(
     '  add-effect <clipId> --look <crt|bw|warm|cool> [--intensity 0..1] [--scanline-strength 0..1] [--noise-amount 0..1]',

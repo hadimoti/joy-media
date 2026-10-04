@@ -27,7 +27,16 @@ describe('timeline list', () => {
   it('prints timeline help without requiring a project', async () => {
     const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     expect(await runCli(['timeline', 'help'])).toBe(0);
-    expect(output.mock.calls.flat().join('\n')).toContain('0 = center');
+    expect(await runCli(['timeline', 'add-text', '--help'])).toBe(0);
+    const help = output.mock.calls.flat().join('\n');
+    expect(help).toContain(
+      'x is horizontal frame offset (0 = center, -0.4 = near left, 0.4 = near right)',
+    );
+    expect(help).toContain(
+      'y offsets the template bottom title line (0 = default position, negative = up, positive = down)',
+    );
+    expect(help).toContain('rendering clamps y to the frame');
+    expect(help).toContain('add-text warns if text may clip');
     output.mockRestore();
   });
 
