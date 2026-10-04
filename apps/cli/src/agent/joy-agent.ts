@@ -40,6 +40,7 @@ export interface RunAgentOutput {
   readonly applied: boolean;
   readonly updatedProject: JoyProjectV1;
   readonly appliedCount: number;
+  readonly appliedOperationIds?: readonly string[] | undefined;
   readonly errors: string[];
   readonly notes: string[];
   readonly placementSummary?: AppliedTimelineSummary;
@@ -165,6 +166,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
 
   let updatedProject = options.project;
   let appliedCount = 0;
+  let appliedOperationIds: readonly string[] = [];
   let errors: string[] = [];
   let notes: string[] = [];
   let applied = false;
@@ -175,6 +177,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     const applyRes = bridge.applyStaged();
     updatedProject = applyRes.updatedProject;
     appliedCount = applyRes.appliedCount;
+    appliedOperationIds = applyRes.appliedOperationIds;
     errors = applyRes.errors;
     notes = applyRes.notes;
     placementSummary = applyRes.placementSummary;
@@ -194,6 +197,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
       applyRequested: options.apply === true,
       applied,
       appliedCount,
+      appliedOperationIds,
       errors,
       notes,
       staged,
@@ -204,6 +208,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     applied,
     updatedProject,
     appliedCount,
+    appliedOperationIds,
     errors,
     notes,
     ...(placementSummary === undefined ? {} : { placementSummary }),
@@ -215,6 +220,7 @@ export function truthfulAgentSummary(input: {
   readonly applyRequested: boolean;
   readonly applied: boolean;
   readonly appliedCount: number;
+  readonly appliedOperationIds?: readonly string[] | undefined;
   readonly errors: readonly string[];
   readonly notes: readonly string[];
   readonly staged: StagedOperationsSummary;
@@ -223,10 +229,13 @@ export function truthfulAgentSummary(input: {
   const descriptions = operations.map((operation) => `${operation.kind} (${operation.id})`);
   if (input.applyRequested && input.applied) {
     if (input.appliedCount === 0) return 'No changes were applied.';
-    const applied = descriptions.slice(0, input.appliedCount);
-    return [`Applied ${input.appliedCount} change(s): ${applied.join(', ')}.`, ...input.notes].join(
-      ' ',
-    );
+    const operationById = new Map(operations.map((operation) => [operation.id, operation]));
+    const applied = (input.appliedOperationIds ?? [])
+      .map((id) => operationById.get(id))
+      .filter((operation) => operation !== undefined)
+      .map((operation) => `${operation.kind} (${operation.id})`);
+    const detail = applied.length > 0 ? `: ${applied.join(', ')}` : '';
+    return [`Applied ${input.appliedCount} change(s)${detail}.`, ...input.notes].join(' ');
   }
   if (input.applyRequested && input.errors.length > 0)
     return `No changes were applied. The apply was rejected: ${input.errors.join('; ')}`;

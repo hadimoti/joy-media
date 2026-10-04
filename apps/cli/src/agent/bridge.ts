@@ -44,6 +44,7 @@ export interface AppliedTimelineSummary {
 export interface ApplyStagedResult {
   readonly updatedProject: JoyProjectV1;
   readonly appliedCount: number;
+  readonly appliedOperationIds: readonly string[];
   readonly errors: string[];
   readonly notes: string[];
   readonly placementSummary: AppliedTimelineSummary;
@@ -447,12 +448,18 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
     const errors: string[] = [];
     const notes: string[] = [];
     let appliedCount = 0;
+    const appliedOperationIds: string[] = [];
+    const recordApplied = (operationId: string) => {
+      appliedCount++;
+      appliedOperationIds.push(operationId);
+    };
 
     const root = current.compositions[current.rootCompositionId];
     if (!root) {
       return {
         updatedProject: current,
         appliedCount: 0,
+        appliedOperationIds: [],
         errors: ['Missing root composition'],
         notes,
         placementSummary: summarizePlacements(current),
@@ -507,7 +514,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
             durationUs: op.durationUs,
             sourceInUs: 0,
           });
-          appliedCount++;
+          recordApplied(op.id);
         } else if (op.kind === 'remove') {
           let found = false;
           for (const track of tracks) {
@@ -515,7 +522,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
             if (index !== -1) {
               track.clips.splice(index, 1);
               found = true;
-              appliedCount++;
+              recordApplied(op.id);
               break;
             }
           }
@@ -559,7 +566,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
           sourceTrack.clips.splice(sourceIndex, 1);
           targetTrack.clips.push(updated);
           targetTrack.clips.sort((a, b) => a.startUs - b.startUs);
-          appliedCount++;
+          recordApplied(op.id);
         } else if (op.kind === 'trim') {
           if (op.endUs <= op.startUs) {
             errors.push(`Invalid trim range for ${op.clipId}: end must be greater than start`);
@@ -595,7 +602,8 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
               clip.startUs = op.startUs;
               clip.durationUs = op.endUs - op.startUs;
               found = true;
-              if (!errors.some((error) => error.includes(`Trim of ${op.clipId}`))) appliedCount++;
+              if (!errors.some((error) => error.includes(`Trim of ${op.clipId}`)))
+                recordApplied(op.id);
               track.clips.sort((a, b) => a.startUs - b.startUs);
               break;
             }
@@ -626,7 +634,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
                 }
                 track.clips.splice(index + 1, 0, secondPart);
                 found = true;
-                appliedCount++;
+                recordApplied(op.id);
               }
               break;
             }
@@ -697,7 +705,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
           (current.captionDocuments as Record<string, unknown>)[created.document.id] =
             created.document;
           track.clips.push(created.clip as unknown as (typeof track.clips)[number]);
-          appliedCount++;
+          recordApplied(op.id);
         } else if (op.kind === 'set-text') {
           errors.push(`unsupported: set-text for ${op.objectId} is not rendered by ffmpeg.`);
         } else if (op.kind === 'set-property') {
@@ -741,7 +749,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
                 errors.push(`Property ${op.property} is not supported for ${object.kind} objects`);
                 continue;
               }
-              appliedCount++;
+              recordApplied(op.id);
             }
           }
         } else if (op.kind === 'add-effect') {
@@ -762,6 +770,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
       return {
         updatedProject: this.project,
         appliedCount: 0,
+        appliedOperationIds: [],
         errors,
         notes,
         placementSummary: summarizePlacements(this.project),
@@ -773,6 +782,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
     this.lastApplyResult = {
       updatedProject: current,
       appliedCount,
+      appliedOperationIds,
       errors,
       notes,
       placementSummary: summarizePlacements(current),

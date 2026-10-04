@@ -252,10 +252,11 @@ describe('CLI Joy Agent bridge timeline operations', () => {
       ],
     });
 
-    const { updatedProject, appliedCount, errors } = bridge.applyStaged();
+    const { updatedProject, appliedCount, appliedOperationIds, errors } = bridge.applyStaged();
     const tracks = updatedProject.compositions.root!.tracks;
     expect(errors).toEqual([]);
     expect(appliedCount).toBe(1);
+    expect(appliedOperationIds).toEqual(['move-op']);
     expect(tracks[0]!.clips.map((clip) => clip.id)).toEqual(['early']);
     expect(tracks[1]!.clips.map((clip) => [clip.id, clip.startUs])).toEqual([
       ['moving', 5_000_000],
