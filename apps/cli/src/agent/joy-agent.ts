@@ -3,6 +3,7 @@ import {
   JoyAgentEngine,
   type JoyAgentSafeEvent,
   type JoyAgentTaskKind,
+  type JoyAgentProbeResult,
 } from '@joy-media/joy-agent-engine';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { c, logInfo, logStep, logSuccess, logWarn } from '../utils/logger.js';
@@ -33,12 +34,17 @@ export interface RunAgentOutput {
   readonly updatedProject: JoyProjectV1;
   readonly appliedCount: number;
   readonly errors: string[];
+  readonly resolvedModelId?: string;
 }
 
-export async function probeAgent(
-  providerOptions?: ResolveProviderOptions,
-): Promise<{ capability: string; provider: string; modelId: string }> {
-  const config = resolveByokConfig(providerOptions);
+export async function probeAgent(providerOptions?: ResolveProviderOptions): Promise<{
+  capability: string;
+  provider: string;
+  modelId: string;
+  resolvedModelId?: string;
+  failure?: JoyAgentProbeResult['failure'];
+}> {
+  const config = await resolveByokConfig(providerOptions);
   const model = createModelFromConfig(config);
   const bridge = new CliJoyAgentToolBridge(
     {
@@ -72,23 +78,26 @@ export async function probeAgent(
     1,
   );
 
-  const engine = new JoyAgentEngine({ model, bridge });
+  const engine = new JoyAgentEngine({ model, bridge, apiKeyForRedaction: config.apiKey });
   const probeResult = await engine.probe();
   return {
     capability: probeResult.capability,
     provider: config.provider,
     modelId: config.modelId,
+    ...(probeResult.resolvedModelId ? { resolvedModelId: probeResult.resolvedModelId } : {}),
+    ...(probeResult.failure ? { failure: probeResult.failure } : {}),
   };
 }
 
 export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOutput> {
-  const config = resolveByokConfig(options.providerOptions);
+  const config = await resolveByokConfig(options.providerOptions);
   const model = createModelFromConfig(config);
 
   const bridge = new CliJoyAgentToolBridge(
     options.project,
     options.revision,
     options.onStagedChange,
+    options.apply ?? false,
   );
 
   const eventLogger = (event: JoyAgentSafeEvent): void => {
@@ -133,6 +142,9 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
 
   console.log(); // newline after text-deltas
   logSuccess(`Joy Agent finished in ${runResult.steps} step(s).`);
+  if (runResult.resolvedModelId && runResult.resolvedModelId !== config.modelId) {
+    logInfo(`Model: ${config.modelId} → ${runResult.resolvedModelId}`);
+  }
 
   const staged = bridge.getStagedOperations();
 
@@ -151,8 +163,6 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     if (errors.length > 0) {
       logWarn(`Applied with ${errors.length} warning(s):`);
       for (const err of errors) console.log(`  ${c('!', 'yellow')} ${err}`);
-    } else {
-      logSuccess(`Successfully applied ${appliedCount} operation(s).`);
     }
   }
 
@@ -165,5 +175,6 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     updatedProject,
     appliedCount,
     errors,
+    ...(runResult.resolvedModelId ? { resolvedModelId: runResult.resolvedModelId } : {}),
   };
 }

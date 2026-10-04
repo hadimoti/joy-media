@@ -14,6 +14,7 @@ import {
   type JoyAgentCapability,
   type JoyAgentErrorDetail,
   type JoyAgentErrorCode,
+  type JoyAgentSafeError,
   type JoyAgentSafeEvent,
   type JoyAgentRunRequest,
 } from './contracts.js';
@@ -63,10 +64,13 @@ export interface JoyAgentRunResult {
   readonly capability: JoyAgentCapability;
   readonly text: string;
   readonly steps: number;
+  readonly resolvedModelId?: string;
 }
 
 export interface JoyAgentProbeResult {
   readonly capability: JoyAgentCapability;
+  readonly failure?: JoyAgentSafeError & { readonly detail?: JoyAgentErrorDetail };
+  readonly resolvedModelId?: string;
 }
 
 type JoyAgentEventPayload = JoyAgentSafeEvent extends infer Event
@@ -78,39 +82,47 @@ type JoyAgentEventPayload = JoyAgentSafeEvent extends infer Event
 export async function probeJoyAgentModel(
   model: LanguageModel,
   abortSignal?: AbortSignal,
+  maxOutputTokens = DEFAULT_JOY_AGENT_LIMITS.probeMaxOutputTokens,
+  apiKeyForRedaction?: string,
 ): Promise<JoyAgentProbeResult> {
   const probeTool = tool({
     description: 'A harmless capability probe.',
     inputSchema: z.object({ value: z.literal('JOY_PROBE') }).strict(),
     execute: async () => ({ ok: true as const }),
   });
+  let resolvedModelId: string | undefined;
   try {
-    await generateText({
+    const result = await generateText({
       model,
       prompt: 'Call the JOY_PROBE tool exactly once, then stop.',
       tools: { joy_probe: probeTool },
       toolChoice: { type: 'tool', toolName: 'joy_probe' },
       stopWhen: stepCountIs(1),
-      maxOutputTokens: 32,
+      maxOutputTokens,
       maxRetries: 0,
       telemetry: { isEnabled: false },
       ...(abortSignal === undefined ? {} : { abortSignal }),
     });
-    return { capability: 'tool-loop' };
+    resolvedModelId = result.response.modelId;
+    return { capability: 'tool-loop', resolvedModelId };
   } catch {
     try {
-      await generateObject({
+      const result = await generateObject({
         model,
         schema: planOnlyOutput,
         prompt: 'Return a minimal valid JOY plan with goal, summary, and no operations.',
-        maxOutputTokens: 128,
+        maxOutputTokens: Math.min(1024, maxOutputTokens * 2),
         maxRetries: 0,
         telemetry: { isEnabled: false },
         ...(abortSignal === undefined ? {} : { abortSignal }),
       });
-      return { capability: 'plan-only' };
-    } catch {
-      return { capability: 'incompatible' };
+      return { capability: 'plan-only', resolvedModelId: result.response.modelId };
+    } catch (planFailure) {
+      const safe = toSafeJoyAgentError(planFailure);
+      return {
+        capability: 'incompatible',
+        failure: { ...safe, detail: safeErrorDetail(planFailure, apiKeyForRedaction) },
+      };
     }
   }
 }
@@ -138,7 +150,13 @@ export class JoyAgentEngine {
 
   async probe(abortSignal?: AbortSignal): Promise<JoyAgentProbeResult> {
     const result = await withTimeout(
-      (signal) => probeJoyAgentModel(this.options.model, signal),
+      (signal) =>
+        probeJoyAgentModel(
+          this.options.model,
+          signal,
+          this.limits.probeMaxOutputTokens,
+          this.options.apiKeyForRedaction,
+        ),
       this.limits.probeTimeMs,
       abortSignal,
     );
@@ -223,7 +241,12 @@ export class JoyAgentEngine {
         operationCount: result.object.operations.length,
         baseRevision: request.baseRevision,
       });
-      return { capability: 'plan-only', text: result.object.summary, steps: 1 };
+      return {
+        capability: 'plan-only',
+        text: result.object.summary,
+        steps: 1,
+        resolvedModelId: result.response.modelId,
+      };
     }
 
     emit({
@@ -264,7 +287,12 @@ export class JoyAgentEngine {
       outputTokens: result.usage?.outputTokens ?? 0,
       totalTokens,
     });
-    return { capability: 'tool-loop', text: result.text, steps: result.steps.length };
+    return {
+      capability: 'tool-loop',
+      text: result.text,
+      steps: result.steps.length,
+      resolvedModelId: result.response.modelId,
+    };
   }
 }
 

@@ -5,6 +5,7 @@ export interface JoyAgentLimits {
   readonly maxOperations: number;
   readonly wallTimeMs: number;
   readonly probeTimeMs: number;
+  readonly probeMaxOutputTokens: number;
   readonly contextBytes: number;
   readonly toolPayloadBytes: number;
   readonly providerResponseBytes: number;
@@ -18,6 +19,7 @@ export const DEFAULT_JOY_AGENT_LIMITS: JoyAgentLimits = Object.freeze({
   maxOperations: 32,
   wallTimeMs: 180_000,
   probeTimeMs: 15_000,
+  probeMaxOutputTokens: 512,
   contextBytes: 524_288,
   toolPayloadBytes: 65_536,
   providerResponseBytes: 2_097_152,

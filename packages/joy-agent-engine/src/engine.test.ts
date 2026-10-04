@@ -24,8 +24,9 @@ const bridge: JoyAgentToolBridge = {
   submitPlan: async () => ({ pendingApproval: true }),
 };
 
-function textModel(text = 'Done.') {
+function textModel(text = 'Done.', modelId?: string, resolvedModelId?: string) {
   return new MockLanguageModelV3({
+    ...(modelId === undefined ? {} : { modelId }),
     doGenerate: {
       content: [{ type: 'text', text }],
       finishReason: { unified: 'stop', raw: 'stop' },
@@ -34,6 +35,7 @@ function textModel(text = 'Done.') {
         outputTokens: { total: 1, text: 1, reasoning: undefined },
       },
       warnings: [],
+      ...(resolvedModelId === undefined ? {} : { response: { modelId: resolvedModelId } }),
     },
   });
 }
@@ -42,6 +44,67 @@ describe('JOY Agent bounded model loop', () => {
   it('uses an explicit capability result and no fallback provider', async () => {
     const result = await probeJoyAgentModel(textModel());
     expect(['tool-loop', 'plan-only', 'incompatible']).toContain(result.capability);
+  });
+
+  it('probes with enough output budget for a small tool call', async () => {
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        if ((options.maxOutputTokens ?? 0) < 256) throw new Error('budget too small');
+        return {
+          content: [
+            {
+              type: 'tool-call',
+              toolCallId: 'probe-call',
+              toolName: 'joy_probe',
+              input: JSON.stringify({ value: 'JOY_PROBE' }),
+            },
+          ],
+          finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+          usage: {
+            inputTokens: { total: 2, noCache: 2, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 1, text: 1, reasoning: undefined },
+          },
+          warnings: [],
+          response: { modelId: 'actual-tool-model' },
+        };
+      },
+    });
+    const result = await probeJoyAgentModel(model);
+    expect(result.capability).toBe('tool-loop');
+    expect(model.doGenerateCalls[0]?.maxOutputTokens).toBe(512);
+    expect(result.resolvedModelId).toBe('actual-tool-model');
+  });
+
+  it('returns redacted failure detail when neither probe stage works', async () => {
+    const secret = 'sk-test-REDACTED-0000';
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        throw new APICallError({
+          message: `probe failed ${secret}`,
+          url: 'https://provider.invalid/v1/chat/completions',
+          requestBodyValues: {},
+          statusCode: 503,
+          responseBody: `Bearer ${secret}`,
+        });
+      },
+    });
+    const engine = new JoyAgentEngine({ model, bridge, apiKeyForRedaction: secret });
+    const result = await engine.probe();
+    expect(result).toMatchObject({
+      capability: 'incompatible',
+      failure: { code: 'JOY_AGENT_UPSTREAM_UNAVAILABLE', detail: { statusCode: 503 } },
+    });
+    expect(JSON.stringify(result)).not.toContain(secret);
+  });
+
+  it('returns the model ID reported by the final run response', async () => {
+    const engine = new JoyAgentEngine({
+      model: textModel('Done.', 'configured-model', 'upstream-resolved-model'),
+      bridge,
+    });
+    await expect(engine.run(request)).resolves.toMatchObject({
+      resolvedModelId: 'upstream-resolved-model',
+    });
   });
 
   it('fails closed for an explicitly incompatible model', async () => {
@@ -65,6 +128,7 @@ describe('JOY Agent bounded model loop', () => {
     expect(engine.getLimits().maxSteps).toBe(DEFAULT_LIMITS.maxSteps);
     expect(engine.getLimits().maxToolCalls).toBe(4);
     expect(engine.getLimits().maxOutputTokens).toBe(128);
+    expect(engine.getLimits().probeMaxOutputTokens).toBe(512);
   });
 
   it('preserves a classified failure with redacted diagnostic detail and cause', async () => {

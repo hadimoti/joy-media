@@ -19,6 +19,7 @@ import {
   saveCliConfig,
   setAiProvider,
 } from '../utils/config.js';
+import { protectSecret } from '../utils/secret-store.js';
 import {
   c,
   logError,
@@ -47,7 +48,33 @@ export interface AgentCommandFlags {
 
 export function formatAgentRunFailure(error: unknown, debug: boolean): string {
   if (!(error instanceof JoyAgentRunError)) return 'Joy Agent execution failed: JOY_AGENT_UNKNOWN';
+  const gatewayCode = /"code"\s*:\s*"([A-Z0-9_]+)"/.exec(error.detail.responseBodySnippet)?.[1];
+  if (error.detail.statusCode === 402 && gatewayCode === 'JOY_SUBSCRIPTION_REQUIRED') {
+    return 'Joy Agent execution failed: JOY_SUBSCRIPTION_REQUIRED (an active JOY Pro subscription is required)';
+  }
+  if (
+    gatewayCode === 'JOY_AGENT_UPSTREAM_AUTH_FAILED' ||
+    gatewayCode === 'JOY_AGENT_UNCONFIGURED'
+  ) {
+    return 'Joy Agent execution failed: JOY_AGENT_UPSTREAM_UNAVAILABLE (the JOY hosted service is unavailable)';
+  }
   return `Joy Agent execution failed: ${error.code}${debug ? `\nDebug detail: ${JSON.stringify(error.detail)}` : ''}`;
+}
+
+export function printAgentHelp(): void {
+  console.log(`Usage: joy-media agent <chat|run|probe|config|provider|models|model> [options]
+
+Commands:
+  chat                         Start the interactive assistant
+  run <instruction>            Run an edit request (add --apply to save)
+  probe                        Check provider tool-calling capability
+  config                       Show or set provider/model defaults
+  provider <list|add|use|remove>
+  models                       Fetch available models
+  model <get|set>              Show or change the model
+
+Options: --project <id|file> --apply --provider <name> --model <id>
+         --api-key-env <VAR> --base-url <url> --debug --json`);
 }
 
 export async function handleAgentCommand(args: string[], flags: CliFlags): Promise<number> {
@@ -75,10 +102,14 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
           console.log(`  ${marker} ${c(key, 'bold')} (${p.provider ?? 'custom'})`);
           logStep('  Base URL', p.baseUrl ?? 'default');
           logStep('  Default Model', p.defaultModel ?? 'not-set');
-          logStep(
-            '  API Key',
-            p.apiKey ? `${p.apiKey.slice(0, 4)}...${p.apiKey.slice(-4)}` : 'none',
-          );
+          const apiKeyLabel = p.apiKeyEnv
+            ? `from env $${p.apiKeyEnv}`
+            : p.apiKeyProtected
+              ? `stored (${p.apiKeyProtected.scheme === 'dpapi-user' ? 'DPAPI' : 'file-0600'})`
+              : p.apiKey
+                ? 'stored (legacy; will migrate on load)'
+                : 'none';
+          logStep('  API Key', apiKeyLabel);
           if (p.cachedModels && p.cachedModels.length > 0) {
             logStep('  Discovered Models', `${p.cachedModels.length} models cached`);
           }
@@ -106,7 +137,9 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
       try {
         const normalized = flags.baseUrl.replace(/\/+$/, '');
         const headers: Record<string, string> = {};
-        if (flags.apiKey) headers['Authorization'] = `Bearer ${flags.apiKey}`;
+        const discoveryKey =
+          flags.apiKey ?? (flags.apiKeyEnv ? process.env[flags.apiKeyEnv] : undefined);
+        if (discoveryKey) headers['Authorization'] = `Bearer ${discoveryKey}`;
         const res = await fetch(`${normalized}/models`, { headers });
         if (res.ok) {
           const json = (await res.json()) as { data?: unknown };
@@ -140,7 +173,8 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         name,
         provider: providerType,
         baseUrl: providerType === 'kilo' ? canonicalKiloBaseUrl(flags.baseUrl) : flags.baseUrl,
-        apiKey: flags.apiKey,
+        apiKeyEnv: flags.apiKeyEnv,
+        ...(flags.apiKey ? { apiKeyProtected: protectSecret(flags.apiKey) } : {}),
         defaultModel,
         cachedModels,
       });
@@ -298,13 +332,25 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         provider: flags.provider,
         model: flags.model,
         apiKey: flags.apiKey,
+        apiKeyEnv: flags.apiKeyEnv,
         baseUrl: flags.baseUrl,
       });
       console.log();
-      logSuccess(`Probe Successful!`);
       logStep('Provider', res.provider);
       logStep('Model ID', res.modelId);
+      if (res.resolvedModelId && res.resolvedModelId !== res.modelId) {
+        logStep('Resolved model', res.resolvedModelId);
+      }
       logStep('Capability', c(res.capability, res.capability === 'tool-loop' ? 'green' : 'yellow'));
+      if (res.capability === 'incompatible') {
+        const debug = flags.debug || process.env.JOY_DEBUG === '1';
+        logError(
+          `Probe failed: model is incompatible${debug && res.failure ? `\nDebug detail: ${JSON.stringify(res.failure.detail)}` : ''}`,
+        );
+        return 1;
+      }
+      if (res.capability === 'plan-only') logWarn('Probe OK: plan-only (no tool calling)');
+      else logSuccess('Probe Successful!');
       return 0;
     } catch (err) {
       logError(`Probe failed: ${String(err)}`);
@@ -381,6 +427,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         provider: flags.provider,
         model: flags.model,
         apiKey: flags.apiKey,
+        apiKeyEnv: flags.apiKeyEnv,
         baseUrl: flags.baseUrl,
       },
     });
@@ -408,17 +455,26 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
           provider: flags.provider,
           model: flags.model,
           apiKey: flags.apiKey,
+          apiKeyEnv: flags.apiKeyEnv,
           baseUrl: flags.baseUrl,
         },
       });
 
-      if (output.applied && projectInfo.source === 'sqlite') {
+      if (output.applied && projectInfo.path === 'in-memory') {
+        logSuccess(`Applied ${output.appliedCount} operation(s) (--apply)`);
+        logWarn('Changes were applied in memory; nothing was saved.');
+      } else if (output.applied) {
         const nextRev = saveProject(output.updatedProject, {
           source: projectInfo.source,
           path: projectInfo.path,
           revision: projectInfo.revision,
         });
         logSuccess(`Committed changes at project revision ${nextRev}.`);
+        logSuccess(`Applied ${output.appliedCount} operation(s) (--apply)`);
+      } else {
+        logInfo(
+          `Staged ${output.staged.timelineOps.length + output.staged.documentOps.length} operation(s), NOT applied. Re-run with --apply to commit.`,
+        );
       }
 
       return 0;
