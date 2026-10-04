@@ -146,6 +146,7 @@ export function buildFfmpegRenderPlan(
       (track) => track.enabled !== false && track.kind === 'video' && track.family !== 'audio',
     )
     .sort((a, b) => a.order - b.order);
+  const audioInputs: string[] = [];
   for (const track of tracks) {
     for (const clip of [...track.clips].sort((a, b) => a.startUs - b.startUs)) {
       if (clip.kind === 'caption') {
@@ -212,6 +213,14 @@ export function buildFfmpegRenderPlan(
         });
         continue;
       }
+      if (asset.hasAudio === true && !isTrackMuted(track)) {
+        const label = `a_${audioInputs.length}`;
+        const atempo = atempoChain(rate);
+        filters.push(
+          `[${inputIndex}:a]atrim=start=${seconds(clip.sourceInUs)}:duration=${seconds(clip.durationUs * rate)},asetpts=PTS-STARTPTS,${atempo},adelay=${Math.round(clip.startUs / 1000)}|${Math.round(clip.startUs / 1000)}[${label}]`,
+        );
+        audioInputs.push(label);
+      }
       const sourceDurationUs = clip.durationUs * (rate || 1);
       const label = `v_${overlayIndex}`;
       const reverse = clip.reversed ? ',reverse' : '';
@@ -226,11 +235,12 @@ export function buildFfmpegRenderPlan(
       overlayIndex += 1;
     }
   }
-  const audioInputs: string[] = [];
   for (const track of root.tracks
     .filter(
       (candidate) =>
-        candidate.enabled !== false && (candidate.kind === 'audio' || candidate.family === 'audio'),
+        candidate.enabled !== false &&
+        !isTrackMuted(candidate) &&
+        (candidate.kind === 'audio' || candidate.family === 'audio'),
     )
     .sort((a, b) => a.order - b.order)) {
     for (const clip of [...track.clips].sort((a, b) => a.startUs - b.startUs)) {
@@ -407,4 +417,12 @@ function atempoChain(rate: number): string {
   }
   parts.push(remaining);
   return parts.map((part) => `atempo=${part}`).join(',');
+}
+
+function isTrackMuted(track: {
+  readonly id: string;
+  readonly mute?: boolean;
+  readonly muted?: boolean;
+}): boolean {
+  return track.mute === true || track.muted === true;
 }

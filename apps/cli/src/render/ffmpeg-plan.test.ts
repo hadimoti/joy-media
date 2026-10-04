@@ -110,4 +110,36 @@ describe('buildFfmpegRenderPlan', () => {
       reason: 'caption clips are not supported by the v1 renderer',
     });
   });
+
+  it('mixes embedded audio from unmuted video-track clips', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-ffmpeg-video-audio-plan-'));
+    try {
+      const mediaPath = join(dir, 'clip-with-audio.mp4');
+      writeFileSync(mediaPath, 'plan-only placeholder');
+      const project = createDefaultProject('video clip with audio');
+      (project.assets as Record<string, unknown>)['asset-1'] = {
+        id: 'asset-1',
+        kind: 'video',
+        displayName: 'clip-with-audio.mp4',
+        hasAudio: true,
+        localSource: { path: mediaPath },
+      };
+      (project.compositions.root!.tracks[0]!.clips as unknown[]).push({
+        id: 'video-with-audio',
+        kind: 'video',
+        assetId: 'asset-1',
+        startUs: 500_000,
+        durationUs: 2_000_000,
+        sourceInUs: 250_000,
+        playbackRate: 1.5,
+      });
+      const plan = buildFfmpegRenderPlan(project, 'mp4');
+      const graph = plan.args.join(' ');
+      expect(graph).toContain('[1:a]atrim=start=0.25:duration=3');
+      expect(graph).toContain('asetpts=PTS-STARTPTS,atempo=1.5,adelay=500|500[a_0]');
+      expect(graph).toContain('[a_0]amix=inputs=1');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

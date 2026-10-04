@@ -27,11 +27,21 @@ describe('CLI ffmpeg render', () => {
             'lavfi',
             '-i',
             'testsrc=size=320x240:rate=25:duration=1',
+            '-f',
+            'lavfi',
+            '-i',
+            'sine=frequency=440:duration=1',
+            '-map',
+            '0:v:0',
+            '-map',
+            '1:a:0',
             '-pix_fmt',
             'yuv420p',
             '-c:v',
             'libx264',
-            '-an',
+            '-c:a',
+            'aac',
+            '-shortest',
             first,
           ],
           [
@@ -65,6 +75,8 @@ describe('CLI ffmpeg render', () => {
             await runCli(['asset', 'import', path, '--project', projectPath, '--id', id]),
           ).toBe(0);
         }
+        const importedProject = JSON.parse(readFileSync(projectPath, 'utf8')).project;
+        expect(importedProject.assets.first.hasAudio).toBe(true);
         expect(
           await runCli([
             'timeline',
@@ -131,6 +143,14 @@ describe('CLI ffmpeg render', () => {
         expect(video).toMatchObject({ width: 640, height: 360, codec_name: 'h264' });
         expect(sound!.codec_name).toBe('aac');
         expect(Number(metadata.format.duration)).toBeCloseTo(2, 1);
+        const volume = spawnSync(
+          'ffmpeg',
+          ['-i', output, '-af', 'volumedetect', '-f', 'null', '-'],
+          { shell: false, encoding: 'utf8' },
+        );
+        expect(volume.status).toBe(0);
+        const meanVolume = /mean_volume: ([-0-9.]+) dB/.exec(volume.stderr)?.[1];
+        expect(Number(meanVolume)).toBeGreaterThan(-60);
         const frame = spawnSync(
           'ffmpeg',
           [

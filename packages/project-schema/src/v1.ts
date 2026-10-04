@@ -348,6 +348,8 @@ export interface AssetRecordV1 {
   readonly descriptor?: AssetDescriptorV1;
   /** Local-only source location for CLI rendering; editor and Worker ignore it. */
   readonly localSource?: { readonly path: string; readonly mtimeMs?: number };
+  /** Whether ffprobe found an audio stream in a locally imported video asset. */
+  readonly hasAudio?: boolean;
   /** Reproducibility record for provider/Worker-generated media. */
   readonly generationProvenance?: GenerationProvenanceV1;
 }
@@ -653,6 +655,15 @@ function validateAsset(
         ),
       );
     }
+  }
+  if (value.hasAudio !== undefined && typeof value.hasAudio !== 'boolean') {
+    diagnostics.push(
+      diagnostic(
+        'PROJECT_SCHEMA_V1_ASSET_AUDIO',
+        'asset hasAudio must be a boolean',
+        `${path}.hasAudio`,
+      ),
+    );
   }
   if (value.generationProvenance === undefined) return;
   const provenance = value.generationProvenance;

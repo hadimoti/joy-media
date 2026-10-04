@@ -735,11 +735,19 @@ describe('v1 project schema and migration harness', () => {
           id: 'asset-1',
           kind: 'video' as const,
           displayName: 'clip.mp4',
+          hasAudio: true,
           localSource: { path: 'C:\\media\\clip.mp4', mtimeMs: 123 },
         },
       },
     };
     expect(validateJoyProjectV1(project)).toEqual([]);
+    const invalidAudioFlag = {
+      ...project,
+      assets: { 'asset-1': { ...project.assets['asset-1'], hasAudio: 'yes' } },
+    };
+    expect(validateJoyProjectV1(invalidAudioFlag).map((item) => item.path)).toContain(
+      'assets.asset-1.hasAudio',
+    );
     for (const path of ['media/clip.mp4', `C:\\media\\bad\0.mp4`, `C:\\${'a'.repeat(4100)}`]) {
       const invalid = {
         ...project,

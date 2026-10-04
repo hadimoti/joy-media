@@ -122,6 +122,7 @@ export async function handleAssetCommand(args: string[], flags: CliFlags): Promi
       ...(video?.height ? { height: video.height } : {}),
     },
     localSource: { path: filePath, mtimeMs: stat.mtimeMs },
+    ...(kind === 'video' ? { hasAudio: audio !== undefined } : {}),
   };
   assets[id] = asset;
   try {
