@@ -163,7 +163,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
           cachedModels = raw
             .map((item: { id?: string } | string) => (typeof item === 'string' ? item : item.id))
             .filter((id): id is string => typeof id === 'string' && id.length > 0);
-          if (cachedModels.length > 0) {
+          if (cachedModels.length > 0 && !flags.json) {
             logInfo(`Discovered ${cachedModels.length} models from endpoint.`);
           }
         }
@@ -206,18 +206,37 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         return 1;
       }
 
-      logSuccess(`Provider "${name}" configured successfully!`);
-      if (flags.apiKey && flags.insecureFileStore && process.platform !== 'win32') {
-        const warning = 'API key stored in a plaintext mode 0600 file by explicit opt-in.';
-        if (flags.json) console.log(JSON.stringify({ type: 'warning', warning }));
-        else console.error(`Warning: ${warning}`);
+      const warning =
+        flags.apiKey && flags.insecureFileStore && process.platform !== 'win32'
+          ? 'API key stored in a plaintext mode 0600 file by explicit opt-in.'
+          : undefined;
+      if (flags.json) {
+        console.log(
+          JSON.stringify({
+            type: 'provider',
+            name,
+            provider: providerType,
+            baseUrl: providerType === 'kilo' ? canonicalKiloBaseUrl(flags.baseUrl) : flags.baseUrl,
+            ...(defaultModel === undefined ? {} : { defaultModel }),
+            cachedModels: cachedModels ?? [],
+          }),
+        );
+      } else {
+        logSuccess(`Provider "${name}" configured successfully!`);
       }
-      logStep(
-        'Base URL',
-        providerType === 'kilo' ? canonicalKiloBaseUrl(flags.baseUrl) : flags.baseUrl,
-      );
-      if (defaultModel) {
-        logStep('Default Model', defaultModel);
+      if (warning && flags.json) {
+        console.log(JSON.stringify({ type: 'warning', warning }));
+      } else if (warning) {
+        console.error(`Warning: ${warning}`);
+      }
+      if (!flags.json) {
+        logStep(
+          'Base URL',
+          providerType === 'kilo' ? canonicalKiloBaseUrl(flags.baseUrl) : flags.baseUrl,
+        );
+        if (defaultModel) {
+          logStep('Default Model', defaultModel);
+        }
       }
       return 0;
     }
@@ -542,6 +561,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
             applyRequested: flags.apply,
             applied: output.applied,
             appliedCount: output.appliedCount,
+            appliedOperationIds: output.appliedOperationIds,
             errors: output.errors,
             notes: output.notes,
             staged: output.staged,
@@ -554,6 +574,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
             applyRequested: flags.apply,
             applied: output.applied,
             appliedCount: output.appliedCount,
+            appliedOperationIds: output.appliedOperationIds,
             errors: output.errors,
             notes: output.notes,
             staged: output.staged,
