@@ -310,6 +310,16 @@ const AGENT_USAGE_LEDGER_MIGRATION: PostgresMigration = {
   },
 };
 
+const AGENT_USAGE_METADATA_MIGRATION: PostgresMigration = {
+  id: '010-agent-usage-metadata',
+  checksum: 'sha256:agent-usage-metadata-2026-10-04',
+  up: async (database) => {
+    await database.query(`
+      ALTER TABLE agent_usage ADD COLUMN IF NOT EXISTS metadata jsonb NOT NULL DEFAULT '{}'::jsonb;
+    `);
+  },
+};
+
 export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
   BASELINE_MIGRATION,
   ASSET_REVOCATION_PRIMARY_KEY_MIGRATION,
@@ -320,6 +330,7 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
   ACCOUNT_DEVICES_SUBSCRIPTIONS_ENTITLEMENTS_MIGRATION,
   USDC_INVOICES_MIGRATION,
   AGENT_USAGE_LEDGER_MIGRATION,
+  AGENT_USAGE_METADATA_MIGRATION,
 ];
 
 export async function runPostgresMigrations(database: MigrationDatabase): Promise<void> {

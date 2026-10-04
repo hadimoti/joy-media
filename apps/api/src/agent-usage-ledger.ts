@@ -9,6 +9,8 @@ export interface RecordAgentUsageInput {
   readonly upstreamCostMicros: bigint;
   readonly billedCostMicros: bigint;
   readonly commissionRateBps: number;
+  readonly estimated?: boolean;
+  readonly generationId?: string;
 }
 
 export interface AgentUsageSummary {
@@ -23,6 +25,14 @@ export interface AgentUsageSummary {
 export interface AgentUsageLedger {
   record(input: RecordAgentUsageInput): Promise<string>;
   getSummary(ownerId: string): Promise<AgentUsageSummary>;
+  getDailyBilledCostMicros(ownerId: string, dayStart: Date): Promise<bigint>;
+  replaceEstimate?(
+    id: string,
+    input: Pick<
+      RecordAgentUsageInput,
+      'promptTokens' | 'completionTokens' | 'upstreamCostMicros' | 'billedCostMicros'
+    >,
+  ): Promise<void>;
 }
 
 export class PostgresAgentUsageLedger implements AgentUsageLedger {
@@ -33,8 +43,8 @@ export class PostgresAgentUsageLedger implements AgentUsageLedger {
     await this.pool.query(
       `INSERT INTO agent_usage (
         id, owner_id, model_id, prompt_tokens, completion_tokens,
-        upstream_cost_micros, billed_cost_micros, commission_rate_bps, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)`,
+        upstream_cost_micros, billed_cost_micros, commission_rate_bps, created_at, metadata
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, $9::jsonb)`,
       [
         id,
         input.ownerId,
@@ -44,9 +54,42 @@ export class PostgresAgentUsageLedger implements AgentUsageLedger {
         input.upstreamCostMicros.toString(),
         input.billedCostMicros.toString(),
         input.commissionRateBps,
+        JSON.stringify({
+          estimated: input.estimated === true,
+          ...(input.generationId ? { generationId: input.generationId } : {}),
+        }),
       ],
     );
     return id;
+  }
+
+  async getDailyBilledCostMicros(ownerId: string, dayStart: Date): Promise<bigint> {
+    const result = await this.pool.query<{ total: string | null }>(
+      'SELECT COALESCE(SUM(billed_cost_micros), 0)::text AS total FROM agent_usage WHERE owner_id = $1 AND created_at >= $2',
+      [ownerId, dayStart],
+    );
+    return BigInt(result.rows[0]?.total ?? '0');
+  }
+
+  async replaceEstimate(
+    id: string,
+    input: Pick<
+      RecordAgentUsageInput,
+      'promptTokens' | 'completionTokens' | 'upstreamCostMicros' | 'billedCostMicros'
+    >,
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE agent_usage SET prompt_tokens = $2, completion_tokens = $3,
+       upstream_cost_micros = $4, billed_cost_micros = $5,
+       metadata = metadata || '{"estimated":false}'::jsonb WHERE id = $1 AND metadata->>'estimated' = 'true'`,
+      [
+        id,
+        input.promptTokens,
+        input.completionTokens,
+        input.upstreamCostMicros.toString(),
+        input.billedCostMicros.toString(),
+      ],
+    );
   }
 
   async getSummary(ownerId: string): Promise<AgentUsageSummary> {
@@ -108,5 +151,22 @@ export class MemoryAgentUsageLedger implements AgentUsageLedger {
       totalBilledCostMicros: billed.toString(),
       totalRequests: owned.length,
     };
+  }
+
+  async getDailyBilledCostMicros(ownerId: string, dayStart: Date): Promise<bigint> {
+    return this.records
+      .filter((record) => record.ownerId === ownerId && record.createdAt >= dayStart)
+      .reduce((total, record) => total + record.billedCostMicros, 0n);
+  }
+
+  async replaceEstimate(
+    id: string,
+    input: Pick<
+      RecordAgentUsageInput,
+      'promptTokens' | 'completionTokens' | 'upstreamCostMicros' | 'billedCostMicros'
+    >,
+  ): Promise<void> {
+    const index = this.records.findIndex((record) => record.id === id && record.estimated === true);
+    if (index >= 0) this.records[index] = { ...this.records[index]!, ...input, estimated: false };
   }
 }

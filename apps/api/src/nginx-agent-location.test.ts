@@ -17,6 +17,8 @@ describe('agent SSE nginx locations', () => {
     expect(agentIndex).toBeGreaterThanOrEqual(0);
     expect(agentIndex).toBeLessThan(genericIndex);
     expect(accountWeb.slice(agentIndex, genericIndex)).toContain('proxy_buffering off;');
+    expect(accountWeb.slice(agentIndex, genericIndex)).toContain('proxy_read_timeout 90;');
+    expect(accountWeb.slice(agentIndex, genericIndex)).toContain('proxy_send_timeout 90;');
     expect(accountWeb.slice(genericIndex)).not.toMatch(/(?:auth\|devices\|account[^\n]*\|agent)/);
   });
 
@@ -26,5 +28,7 @@ describe('agent SSE nginx locations', () => {
     expect(agentIndex).toBeGreaterThanOrEqual(0);
     expect(agentIndex).toBeLessThan(genericIndex);
     expect(joyMedia.slice(agentIndex, genericIndex)).toContain('proxy_buffering off;');
+    expect(joyMedia.slice(agentIndex, genericIndex)).toContain('proxy_read_timeout 90;');
+    expect(joyMedia.slice(agentIndex, genericIndex)).toContain('proxy_send_timeout 90;');
   });
 });

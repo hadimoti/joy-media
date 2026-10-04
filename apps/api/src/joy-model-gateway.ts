@@ -10,6 +10,8 @@ export interface JoyModelCatalogEntry {
   readonly contextLength: number;
   readonly vision: boolean;
   readonly isDefault?: boolean;
+  readonly inputUsdPerMillion: number;
+  readonly outputUsdPerMillion: number;
 }
 
 export const JOY_AGENT_DEFAULT_MODELS: readonly JoyModelCatalogEntry[] = Object.freeze([
@@ -20,6 +22,8 @@ export const JOY_AGENT_DEFAULT_MODELS: readonly JoyModelCatalogEntry[] = Object.
     contextLength: 262144,
     vision: true,
     isDefault: true,
+    inputUsdPerMillion: 0.25,
+    outputUsdPerMillion: 2,
   },
   {
     id: 'deepseek/deepseek-v4-flash',
@@ -27,6 +31,8 @@ export const JOY_AGENT_DEFAULT_MODELS: readonly JoyModelCatalogEntry[] = Object.
     description: 'Fast text model for tool and metadata edits',
     contextLength: 131072,
     vision: false,
+    inputUsdPerMillion: 0.0679,
+    outputUsdPerMillion: 0.168,
   },
   {
     id: 'anthropic/claude-sonnet-4.6',
@@ -34,6 +40,8 @@ export const JOY_AGENT_DEFAULT_MODELS: readonly JoyModelCatalogEntry[] = Object.
     description: 'Advanced multimodal and deep video script orchestration',
     contextLength: 200000,
     vision: true,
+    inputUsdPerMillion: 3,
+    outputUsdPerMillion: 15,
   },
   {
     id: 'openai/gpt-4o-mini',
@@ -41,18 +49,22 @@ export const JOY_AGENT_DEFAULT_MODELS: readonly JoyModelCatalogEntry[] = Object.
     description: 'Ultra-fast low-latency tool and metadata edits',
     contextLength: 128000,
     vision: true,
+    inputUsdPerMillion: 0.15,
+    outputUsdPerMillion: 0.6,
   },
 ]);
 
 export const LEGACY_MODEL_ALIASES: Readonly<Record<string, string>> = Object.freeze({
   'minimax/minimax-m3': 'bytedance-seed/seed-2.0-lite',
   'anthropic/claude-3.5-sonnet': 'anthropic/claude-sonnet-4.6',
+  'meta-llama/llama-3.3-70b-instruct': 'deepseek/deepseek-v4-flash',
 });
 
 export const DEFAULT_COMMISSION_RATE_BPS = 2500; // 25% gross margin
 export const JOY_MODEL_MAX_OUTPUT_TOKENS = 8192;
-const UPSTREAM_HEADER_TIMEOUT_MS = 120_000;
+const UPSTREAM_HEADER_TIMEOUT_MS = 90_000;
 const UPSTREAM_STREAM_IDLE_TIMEOUT_MS = 60_000;
+const ESTIMATED_CHARS_PER_TOKEN = 4; // Conservative text-only estimate: 4 UTF-16 chars per token.
 
 const FORWARDED_COMPLETION_FIELDS = [
   'messages',
@@ -85,6 +97,7 @@ export class JoyModelGateway {
   private readonly openRouterApiKey: string | undefined;
   private readonly commissionRateBps: number;
   private readonly fetchImpl: typeof fetch;
+  private readonly requestTimesByUser = new Map<string, number[]>();
 
   constructor(options: JoyModelGatewayOptions) {
     this.mediaAuth = options.mediaAuth;
@@ -99,7 +112,15 @@ export class JoyModelGateway {
     return typeof this.openRouterApiKey === 'string' && this.openRouterApiKey.trim().length > 0;
   }
 
-  async handleGetModels(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+  async handleGetModels(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const actor = await this.mediaAuth.authenticate(req);
+    if (actor === undefined) {
+      res.writeHead(401, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } }),
+      );
+      return;
+    }
     res.writeHead(200, {
       'content-type': 'application/json',
       'cache-control': 'public, max-age=3600',
@@ -161,6 +182,24 @@ export class JoyModelGateway {
       return;
     }
 
+    const now = Date.now();
+    const rateWindowStart = now - 60_000;
+    const recentRequests = (this.requestTimesByUser.get(actor.id) ?? []).filter(
+      (at) => at > rateWindowStart,
+    );
+    const rateLimit = positiveEnvInteger('JOY_GATEWAY_RATE_LIMIT_PER_MIN', 30);
+    if (recentRequests.length >= rateLimit) {
+      const retryAfter = Math.max(1, Math.ceil((recentRequests[0]! + 60_000 - now) / 1000));
+      res.writeHead(429, { 'content-type': 'application/json', 'retry-after': String(retryAfter) });
+      res.end(
+        JSON.stringify({
+          error: { code: 'RATE_LIMITED', message: 'Per-user request limit reached; retry later.' },
+        }),
+      );
+      return;
+    }
+    recentRequests.push(now);
+    this.requestTimesByUser.set(actor.id, recentRequests);
     let bodyBuffer: Buffer;
     try {
       bodyBuffer = await readRequestBody(req);
@@ -219,6 +258,36 @@ export class JoyModelGateway {
           error: {
             code: 'MODEL_NOT_ALLOWED',
             message: `Model '${requestedModel}' is not in the Joy Model catalog.`,
+          },
+        }),
+      );
+      return;
+    }
+
+    const dailyCapMicros = BigInt(
+      Math.round(positiveEnvNumber('JOY_GATEWAY_DAILY_SPEND_CAP_USD', 5) * 1_000_000),
+    );
+    const dailySpend = this.ledger.getDailyBilledCostMicros
+      ? await this.ledger.getDailyBilledCostMicros(actor.id, new Date(now - (now % 86_400_000)))
+      : 0n;
+    const requestedOutputLimit = Number(parsedBody.max_tokens ?? parsedBody.max_completion_tokens);
+    const reservedOutputTokens =
+      Number.isSafeInteger(requestedOutputLimit) && requestedOutputLimit > 0
+        ? Math.min(requestedOutputLimit, JOY_MODEL_MAX_OUTPUT_TOKENS)
+        : JOY_MODEL_MAX_OUTPUT_TOKENS;
+    const maximumRequestCost = BigInt(
+      Math.ceil(
+        estimateCostUsd(modelId, estimatePromptTokens(parsedBody.messages), reservedOutputTokens) *
+          1_000_000,
+      ),
+    );
+    if (dailySpend >= dailyCapMicros || dailySpend + maximumRequestCost > dailyCapMicros) {
+      res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '3600' });
+      res.end(
+        JSON.stringify({
+          error: {
+            code: 'DAILY_SPEND_CAP_REACHED',
+            message: 'Daily JOY Agent spend cap would be exceeded; retry after the daily reset.',
           },
         }),
       );
@@ -323,6 +392,8 @@ export class JoyModelGateway {
       let completionTokens = 0;
       let rawCostUsd = 0;
       let usageReported = false;
+      let streamedOutputChars = 0;
+      let generationId: string | undefined;
       let pending = '';
       let streamComplete = false;
       const onClose = () => {
@@ -337,6 +408,11 @@ export class JoyModelGateway {
           if (!line.startsWith('data: ') || line.includes('[DONE]')) continue;
           try {
             const data = JSON.parse(line.slice(6));
+            if (typeof data.id === 'string') generationId = data.id;
+            for (const choice of data.choices ?? []) {
+              if (typeof choice?.delta?.content === 'string')
+                streamedOutputChars += choice.delta.content.length;
+            }
             if (data.usage) {
               usageReported = true;
               promptTokens = Number(data.usage.prompt_tokens ?? promptTokens);
@@ -349,6 +425,10 @@ export class JoyModelGateway {
           }
         }
       };
+
+      const keepAlive = setInterval(() => {
+        if (!res.destroyed && !res.writableEnded) res.write(': keep-alive\n\n');
+      }, 15_000);
 
       try {
         while (true) {
@@ -375,6 +455,7 @@ export class JoyModelGateway {
           }
         }
       } finally {
+        clearInterval(keepAlive);
         res.off('close', onClose);
         res.end();
       }
@@ -388,9 +469,15 @@ export class JoyModelGateway {
       }
 
       // Record in ledger
+      const estimated = !usageReported || rawCostUsd === 0;
+      if (estimated) {
+        promptTokens = estimatePromptTokens(parsedBody.messages);
+        completionTokens = Math.ceil(streamedOutputChars / ESTIMATED_CHARS_PER_TOKEN);
+        rawCostUsd = estimateCostUsd(modelId, promptTokens, completionTokens);
+      }
       const upstreamMicros = BigInt(Math.round(rawCostUsd * 1_000_000));
       const billedMicros = (upstreamMicros * BigInt(10000 + this.commissionRateBps)) / 10000n;
-      await this.safeRecord({
+      const recordId = await this.safeRecord({
         ownerId: actor.id,
         modelId,
         promptTokens,
@@ -398,7 +485,11 @@ export class JoyModelGateway {
         upstreamCostMicros: upstreamMicros,
         billedCostMicros: billedMicros,
         commissionRateBps: this.commissionRateBps,
+        estimated,
+        ...(generationId ? { generationId } : {}),
       });
+      if (estimated && generationId && recordId)
+        void this.reconcileGenerationUsage(recordId, generationId);
       return;
     }
 
@@ -432,13 +523,22 @@ export class JoyModelGateway {
       return;
     }
     const usage = (jsonResponse.usage ?? {}) as Record<string, unknown>;
-    const promptTokens = Number(usage.prompt_tokens ?? 0);
-    const completionTokens = Number(usage.completion_tokens ?? 0);
-    const rawCostUsd = Number(usage.cost ?? usage.total_cost ?? 0);
+    const costReported = usage.cost !== undefined || usage.total_cost !== undefined;
+    const promptTokens = Number.isFinite(Number(usage.prompt_tokens))
+      ? Number(usage.prompt_tokens)
+      : estimatePromptTokens(parsedBody.messages);
+    const completionTokens = Number.isFinite(Number(usage.completion_tokens))
+      ? Number(usage.completion_tokens)
+      : estimateCompletionTokens(jsonResponse.choices);
+    const generationId = typeof jsonResponse.id === 'string' ? jsonResponse.id : undefined;
+    const rawCostUsd =
+      usage.cost !== undefined || usage.total_cost !== undefined
+        ? Number(usage.cost ?? usage.total_cost ?? 0)
+        : estimateCostUsd(modelId, promptTokens, completionTokens);
 
     const upstreamMicros = BigInt(Math.round(rawCostUsd * 1_000_000));
     const billedMicros = (upstreamMicros * BigInt(10000 + this.commissionRateBps)) / 10000n;
-    await this.safeRecord({
+    const recordId = await this.safeRecord({
       ownerId: actor.id,
       modelId,
       promptTokens,
@@ -446,21 +546,59 @@ export class JoyModelGateway {
       upstreamCostMicros: upstreamMicros,
       billedCostMicros: billedMicros,
       commissionRateBps: this.commissionRateBps,
+      estimated: !costReported,
+      ...(generationId ? { generationId } : {}),
     });
+    if (!costReported && generationId && recordId)
+      void this.reconcileGenerationUsage(recordId, generationId);
 
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(jsonResponse));
   }
 
-  private async safeRecord(input: Parameters<AgentUsageLedger['record']>[0]): Promise<void> {
+  private async safeRecord(
+    input: Parameters<AgentUsageLedger['record']>[0],
+  ): Promise<string | undefined> {
     try {
-      await this.ledger.record(input);
+      return await this.ledger.record(input);
     } catch {
       console.error('joy-model-gateway: ledger write failed', {
         code: 'LEDGER_WRITE_FAILED',
         ownerId: input.ownerId,
         modelId: input.modelId,
       });
+      return undefined;
+    }
+  }
+
+  private async reconcileGenerationUsage(recordId: string, generationId: string): Promise<void> {
+    if (!this.ledger.replaceEstimate) return;
+    try {
+      const response = await this.fetchImpl(
+        `https://openrouter.ai/api/v1/generation?id=${encodeURIComponent(generationId)}`,
+        {
+          headers: { authorization: `Bearer ${this.openRouterApiKey}` },
+          signal: AbortSignal.timeout(5_000),
+        },
+      );
+      if (!response.ok) return;
+      const payload = (await response.json()) as { data?: Record<string, unknown> };
+      const data = payload.data ?? {};
+      const promptTokens = Number(data.tokens_prompt ?? data.prompt_tokens);
+      const completionTokens = Number(data.tokens_completion ?? data.completion_tokens);
+      const cost = Number(data.total_cost ?? data.cost);
+      if (![promptTokens, completionTokens, cost].every(Number.isFinite) || cost < 0) return;
+      const upstreamCostMicros = BigInt(Math.round(cost * 1_000_000));
+      const billedCostMicros =
+        (upstreamCostMicros * BigInt(10000 + this.commissionRateBps)) / 10000n;
+      await this.ledger.replaceEstimate(recordId, {
+        promptTokens,
+        completionTokens,
+        upstreamCostMicros,
+        billedCostMicros,
+      });
+    } catch {
+      // Reconciliation is best effort and never delays an already-sent response.
     }
   }
 }
@@ -505,6 +643,34 @@ function buildUpstreamBody(
   return body;
 }
 
+function positiveEnvInteger(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
+
+function positiveEnvNumber(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function estimatePromptTokens(messages: unknown): number {
+  return Math.ceil(JSON.stringify(messages ?? []).length / ESTIMATED_CHARS_PER_TOKEN);
+}
+
+function estimateCompletionTokens(choices: unknown): number {
+  const text = JSON.stringify(choices ?? []);
+  return Math.ceil(text.length / ESTIMATED_CHARS_PER_TOKEN);
+}
+
+function estimateCostUsd(modelId: string, promptTokens: number, completionTokens: number): number {
+  const model = JOY_AGENT_DEFAULT_MODELS.find((entry) => entry.id === modelId);
+  if (!model) return 0;
+  return (
+    (promptTokens * model.inputUsdPerMillion + completionTokens * model.outputUsdPerMillion) /
+    1_000_000
+  );
+}
+
 async function readStreamChunk(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   timeoutMs: number,
@@ -526,7 +692,7 @@ async function readStreamChunk(
   }
 }
 
-/** @deprecated Use OPENROUTER_SYSTEMD_CREDENTIAL_IDS. */
+/** Legacy credential ID retained for compatibility; prefer OPENROUTER_SYSTEMD_CREDENTIAL_IDS. */
 export const OPENROUTER_SYSTEMD_CREDENTIAL_ID = 'joy-media-openrouter-api-key' as const;
 export const OPENROUTER_SYSTEMD_CREDENTIAL_IDS = [
   'openrouter-api-key',
