@@ -714,6 +714,28 @@ async function route(
   }
 
   if (url.pathname.startsWith('/v1/agent/')) {
+    const knownRoute =
+      url.pathname === '/v1/agent/models' ||
+      url.pathname === '/v1/agent/usage' ||
+      url.pathname === '/v1/agent/chat' ||
+      url.pathname === '/v1/agent/chat/completions';
+    if (!knownRoute) {
+      respondJson(response, 404, {
+        error: { code: 'NOT_FOUND', message: 'Unknown agent route' },
+      });
+      return;
+    }
+    const methodAllowed =
+      (request.method === 'GET' &&
+        (url.pathname === '/v1/agent/models' || url.pathname === '/v1/agent/usage')) ||
+      (request.method === 'POST' &&
+        (url.pathname === '/v1/agent/chat' || url.pathname === '/v1/agent/chat/completions'));
+    if (!methodAllowed) {
+      respondJson(response, 405, {
+        error: { code: 'METHOD_NOT_ALLOWED', message: 'Method not allowed for agent route' },
+      });
+      return;
+    }
     if (options.joyModelGateway === undefined) {
       respondJson(response, 503, {
         error: { code: 'JOY_AGENT_UNCONFIGURED', message: 'Joy Model gateway is not configured' },
@@ -728,10 +750,7 @@ async function route(
       await options.joyModelGateway.handleGetUsage(request, response);
       return;
     }
-    if (
-      request.method === 'POST' &&
-      (url.pathname === '/v1/agent/chat' || url.pathname === '/v1/agent/chat/completions')
-    ) {
+    if (request.method === 'POST') {
       await options.joyModelGateway.handleChatCompletions(request, response);
       return;
     }

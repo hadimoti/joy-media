@@ -194,9 +194,22 @@ async function start(): Promise<void> {
           },
         });
 
-  const openRouterApiKey =
-    process.env.JOY_MEDIA_OPENROUTER_API_KEY ??
-    readOpenRouterApiKeyFromCredential((path, encoding) => readFileSync(path, encoding));
+  const envOpenRouterApiKey = process.env.JOY_MEDIA_OPENROUTER_API_KEY?.trim() || undefined;
+  let credentialId: string | undefined;
+  const credentialOpenRouterApiKey = readOpenRouterApiKeyFromCredential((path, encoding) => {
+    credentialId = path.slice(path.lastIndexOf('/') + 1);
+    return readFileSync(path, encoding);
+  });
+  const openRouterApiKey = envOpenRouterApiKey ?? credentialOpenRouterApiKey;
+  const credentialSource =
+    envOpenRouterApiKey !== undefined
+      ? 'env'
+      : credentialOpenRouterApiKey !== undefined && credentialId !== undefined
+        ? `credential:${credentialId}`
+        : 'none';
+  console.info(
+    `joy-model-gateway: configured=${openRouterApiKey !== undefined} source=${credentialSource}`,
+  );
   const agentUsageLedger =
     pool === undefined ? new MemoryAgentUsageLedger() : new PostgresAgentUsageLedger(pool);
   const joyModelGateway = new JoyModelGateway({

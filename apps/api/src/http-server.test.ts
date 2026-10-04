@@ -22,6 +22,7 @@ import {
   type ApiReadinessOptions,
 } from './http-server.js';
 import { DisabledMediaAuth } from './media-auth.js';
+import type { JoyModelGateway } from './joy-model-gateway.js';
 import { createClientAddressResolver, type ClientAddressResolver } from './client-address.js';
 import { renderFixture, verifyExport } from '@joy-media/export-core';
 import { MemoryMistralInvocationLedger, MistralProviderRegistry } from './mistral-provider.js';
@@ -54,6 +55,34 @@ afterEach(async () => {
 });
 
 describe('control-plane HTTP transport', () => {
+  it('returns route-specific 404 and 405 errors for unmatched Joy Agent paths', async () => {
+    const gateway = {
+      handleGetModels: vi.fn(),
+      handleGetUsage: vi.fn(),
+      handleChatCompletions: vi.fn(),
+    } as unknown as JoyModelGateway;
+    const origin = await start(
+      { authenticate: () => undefined },
+      undefined,
+      undefined,
+      new LocalControlPlane(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      gateway,
+    );
+    expect(await request(origin, 'GET', '/v1/agent/nope')).toMatchObject({
+      status: 404,
+      body: { error: { code: 'NOT_FOUND' } },
+    });
+    expect(await request(origin, 'GET', '/v1/agent/chat/completions')).toMatchObject({
+      status: 405,
+      body: { error: { code: 'METHOD_NOT_ALLOWED' } },
+    });
+    expect(gateway.handleChatCompletions).not.toHaveBeenCalled();
+  });
+
   it('separates liveness from fail-closed dependency readiness', async () => {
     const origin = await start(
       { authenticate: () => undefined },
@@ -1800,6 +1829,7 @@ async function start(
   rateLimit?: { readonly windowMs?: number; readonly maxRequests?: number },
   clientAddressResolver?: ClientAddressResolver,
   readiness?: ApiReadinessOptions,
+  joyModelGateway?: JoyModelGateway,
 ): Promise<string> {
   const server = createControlPlaneHttpServer({
     controlPlane,
@@ -1811,6 +1841,7 @@ async function start(
     ...(rateLimit === undefined ? {} : { rateLimit }),
     ...(clientAddressResolver === undefined ? {} : { clientAddressResolver }),
     ...(readiness === undefined ? {} : { readiness }),
+    ...(joyModelGateway === undefined ? {} : { joyModelGateway }),
   });
   servers.push(server);
   server.listen(0, '127.0.0.1');

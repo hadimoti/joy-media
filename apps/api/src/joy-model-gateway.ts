@@ -8,36 +8,46 @@ export interface JoyModelCatalogEntry {
   readonly displayName: string;
   readonly description: string;
   readonly contextLength: number;
+  readonly vision: boolean;
   readonly isDefault?: boolean;
 }
 
 export const JOY_AGENT_DEFAULT_MODELS: readonly JoyModelCatalogEntry[] = Object.freeze([
   {
-    id: 'minimax/minimax-m3',
-    displayName: 'Joy Pro (MiniMax M3)',
-    description: 'High-precision video planning, timeline analysis, and creative reasoning',
-    contextLength: 1000000,
+    id: 'bytedance-seed/seed-2.0-lite',
+    displayName: 'Joy Vision',
+    description: 'Vision-capable model for visual analysis and creative reasoning',
+    contextLength: 262144,
+    vision: true,
     isDefault: true,
   },
   {
-    id: 'anthropic/claude-3.5-sonnet',
-    displayName: 'Joy Studio (Claude 3.5 Sonnet)',
+    id: 'deepseek/deepseek-v4-flash',
+    displayName: 'Joy Fast',
+    description: 'Fast text model for tool and metadata edits',
+    contextLength: 131072,
+    vision: false,
+  },
+  {
+    id: 'anthropic/claude-sonnet-4.6',
+    displayName: 'Joy Studio',
     description: 'Advanced multimodal and deep video script orchestration',
     contextLength: 200000,
+    vision: true,
   },
   {
     id: 'openai/gpt-4o-mini',
-    displayName: 'Joy Fast (GPT-4o mini)',
+    displayName: 'Joy Compact',
     description: 'Ultra-fast low-latency tool and metadata edits',
     contextLength: 128000,
-  },
-  {
-    id: 'meta-llama/llama-3.3-70b-instruct',
-    displayName: 'Joy Open (Llama 3.3 70B)',
-    description: 'High-performance open weights model',
-    contextLength: 128000,
+    vision: true,
   },
 ]);
+
+export const LEGACY_MODEL_ALIASES: Readonly<Record<string, string>> = Object.freeze({
+  'minimax/minimax-m3': 'bytedance-seed/seed-2.0-lite',
+  'anthropic/claude-3.5-sonnet': 'anthropic/claude-sonnet-4.6',
+});
 
 export const DEFAULT_COMMISSION_RATE_BPS = 2500; // 25% gross margin
 
@@ -133,7 +143,21 @@ export class JoyModelGateway {
       return;
     }
 
-    const bodyBuffer = await readRequestBody(req);
+    let bodyBuffer: Buffer;
+    try {
+      bodyBuffer = await readRequestBody(req);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'PAYLOAD_TOO_LARGE') {
+        res.writeHead(413, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            error: { code: 'PAYLOAD_TOO_LARGE', message: 'Request body is too large' },
+          }),
+        );
+        return;
+      }
+      throw error;
+    }
     let parsedBody: Record<string, unknown>;
     try {
       parsedBody = JSON.parse(bodyBuffer.toString('utf8'));
@@ -146,7 +170,8 @@ export class JoyModelGateway {
     }
 
     const requestedModel = typeof parsedBody.model === 'string' ? parsedBody.model : '';
-    const allowed = JOY_AGENT_DEFAULT_MODELS.some((m) => m.id === requestedModel);
+    const modelId = LEGACY_MODEL_ALIASES[requestedModel] ?? requestedModel;
+    const allowed = JOY_AGENT_DEFAULT_MODELS.some((m) => m.id === modelId);
     if (!allowed) {
       res.writeHead(400, { 'content-type': 'application/json' });
       res.end(
@@ -174,23 +199,68 @@ export class JoyModelGateway {
         },
         body: JSON.stringify({
           ...parsedBody,
+          model: modelId,
           usage: { include: true },
         }),
+        signal: AbortSignal.timeout(120_000),
       });
-    } catch {
-      res.writeHead(502, { 'content-type': 'application/json' });
+    } catch (error) {
+      const timedOut =
+        error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+      res.writeHead(timedOut ? 504 : 502, { 'content-type': 'application/json' });
       res.end(
         JSON.stringify({
-          error: { code: 'UPSTREAM_ERROR', message: 'Failed to connect to AI upstream' },
+          error: {
+            code: timedOut ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNREACHABLE',
+            message: timedOut ? 'AI upstream timed out' : 'Failed to connect to AI upstream',
+          },
         }),
       );
       return;
     }
 
     if (!upstreamRes.ok) {
-      const errText = await upstreamRes.text();
-      res.writeHead(upstreamRes.status, { 'content-type': 'application/json' });
-      res.end(errText);
+      const status = upstreamRes.status;
+      if (status === 401 || status === 403) {
+        res.writeHead(503, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            error: {
+              code: 'JOY_AGENT_UPSTREAM_AUTH_FAILED',
+              message: 'Server provider credential rejected',
+            },
+          }),
+        );
+      } else if (status === 404) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            error: { code: 'MODEL_UNAVAILABLE', message: 'The selected model is unavailable' },
+          }),
+        );
+      } else if (status === 429) {
+        const retryAfter = upstreamRes.headers.get('retry-after');
+        res.writeHead(429, {
+          'content-type': 'application/json',
+          ...(retryAfter === null ? {} : { 'retry-after': retryAfter }),
+        });
+        res.end(
+          JSON.stringify({
+            error: { code: 'RATE_LIMITED', message: 'AI upstream rate limit reached' },
+          }),
+        );
+      } else {
+        res.writeHead(502, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            error: {
+              code: 'UPSTREAM_ERROR',
+              message: 'AI upstream request failed',
+              upstreamStatus: status,
+            },
+          }),
+        );
+      }
       return;
     }
 
@@ -199,6 +269,7 @@ export class JoyModelGateway {
         'content-type': 'text/event-stream',
         'cache-control': 'no-cache',
         connection: 'keep-alive',
+        'x-accel-buffering': 'no',
       });
 
       const reader = upstreamRes.body.getReader();
@@ -206,46 +277,68 @@ export class JoyModelGateway {
       let promptTokens = 0;
       let completionTokens = 0;
       let rawCostUsd = 0;
+      let usageReported = false;
+      let pending = '';
+      let streamComplete = false;
+      const onClose = () => {
+        if (!streamComplete) void reader.cancel().catch(() => {});
+      };
+      res.on('close', onClose);
+      const processLines = (text: string) => {
+        pending += text;
+        const lines = pending.split(/\r?\n/);
+        pending = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ') || line.includes('[DONE]')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.usage) {
+              usageReported = true;
+              promptTokens = Number(data.usage.prompt_tokens ?? promptTokens);
+              completionTokens = Number(data.usage.completion_tokens ?? completionTokens);
+              if (typeof data.usage.total_cost === 'number') rawCostUsd = data.usage.total_cost;
+            }
+          } catch {
+            // Ignore non-JSON SSE frames.
+          }
+        }
+      };
 
       try {
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (done) {
+            processLines(decoder.decode());
+            if (pending.length > 0) processLines('\n');
+            streamComplete = true;
+            break;
+          }
           if (value) {
             res.write(value);
-            const chunkText = decoder.decode(value, { stream: true });
-            // Inspect SSE lines for usage stats
-            const lines = chunkText.split('\n');
-            for (const line of lines) {
-              if (line.startsWith('data: ') && !line.includes('[DONE]')) {
-                try {
-                  const data = JSON.parse(line.slice(6));
-                  if (data.usage) {
-                    promptTokens = data.usage.prompt_tokens ?? promptTokens;
-                    completionTokens = data.usage.completion_tokens ?? completionTokens;
-                    if (typeof data.usage.total_cost === 'number') {
-                      rawCostUsd = data.usage.total_cost;
-                    }
-                  }
-                } catch {
-                  // ignore non-json SSE frames
-                }
-              }
-            }
+            processLines(decoder.decode(value, { stream: true }));
           }
         }
       } finally {
+        res.off('close', onClose);
         res.end();
+      }
+
+      if (!usageReported) {
+        console.warn('joy-model-gateway: stream usage unavailable', {
+          ownerId: actor.id,
+          modelId,
+          usageReported: false,
+        });
       }
 
       // Record in ledger
       const upstreamMicros = BigInt(Math.round(rawCostUsd * 1_000_000));
       const billedMicros = (upstreamMicros * BigInt(10000 + this.commissionRateBps)) / 10000n;
-      void this.ledger.record({
+      await this.safeRecord({
         ownerId: actor.id,
-        modelId: requestedModel,
-        promptTokens: promptTokens || 1,
-        completionTokens: completionTokens || 1,
+        modelId,
+        promptTokens,
+        completionTokens,
         upstreamCostMicros: upstreamMicros,
         billedCostMicros: billedMicros,
         commissionRateBps: this.commissionRateBps,
@@ -262,9 +355,9 @@ export class JoyModelGateway {
 
     const upstreamMicros = BigInt(Math.round(rawCostUsd * 1_000_000));
     const billedMicros = (upstreamMicros * BigInt(10000 + this.commissionRateBps)) / 10000n;
-    void this.ledger.record({
+    await this.safeRecord({
       ownerId: actor.id,
-      modelId: requestedModel,
+      modelId,
       promptTokens,
       completionTokens,
       upstreamCostMicros: upstreamMicros,
@@ -274,6 +367,18 @@ export class JoyModelGateway {
 
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(jsonResponse));
+  }
+
+  private async safeRecord(input: Parameters<AgentUsageLedger['record']>[0]): Promise<void> {
+    try {
+      await this.ledger.record(input);
+    } catch {
+      console.error('joy-model-gateway: ledger write failed', {
+        code: 'LEDGER_WRITE_FAILED',
+        ownerId: input.ownerId,
+        modelId: input.modelId,
+      });
+    }
   }
 }
 
@@ -291,17 +396,25 @@ async function readRequestBody(req: IncomingMessage, maxBytes = 2 * 1024 * 1024)
   return Buffer.concat(chunks);
 }
 
+/** @deprecated Use OPENROUTER_SYSTEMD_CREDENTIAL_IDS. */
 export const OPENROUTER_SYSTEMD_CREDENTIAL_ID = 'joy-media-openrouter-api-key' as const;
+export const OPENROUTER_SYSTEMD_CREDENTIAL_IDS = [
+  'openrouter-api-key',
+  OPENROUTER_SYSTEMD_CREDENTIAL_ID,
+] as const;
 export const DEFAULT_OPENROUTER_CREDENTIAL_DIRECTORY = '/run/credentials/joy-media@api.service';
 
 export function readOpenRouterApiKeyFromCredential(
   readFile: (path: string, encoding: 'utf8') => string,
-  directory = DEFAULT_OPENROUTER_CREDENTIAL_DIRECTORY,
+  directory = process.env.CREDENTIALS_DIRECTORY ?? DEFAULT_OPENROUTER_CREDENTIAL_DIRECTORY,
 ): string | undefined {
-  try {
-    const value = readFile(`${directory}/${OPENROUTER_SYSTEMD_CREDENTIAL_ID}`, 'utf8');
-    return value.trim() === '' ? undefined : value;
-  } catch {
-    return undefined;
+  for (const id of OPENROUTER_SYSTEMD_CREDENTIAL_IDS) {
+    try {
+      const value = readFile(`${directory}/${id}`, 'utf8').trim();
+      if (value !== '') return value;
+    } catch {
+      // Try the next compatible credential id.
+    }
   }
+  return undefined;
 }
