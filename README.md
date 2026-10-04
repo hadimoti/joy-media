@@ -24,7 +24,7 @@
 - **Local Asset Streaming (`joy-asset://`)**: Custom protocol streaming video frames, waveforms, and catalog media straight from your NVMe drive with sub-millisecond seek times.
 - **Dual AI Agent Integration**:
   - **Free / Open BYOK**: Plug in any OpenRouter or OpenAI-compatible endpoint with your own API key, securely encrypted via Windows DPAPI.
-  - **Joy Pro Gateway**: Access to the JOY catalog requires a signed-in JOY account with an active Pro subscription. The hosted catalog defaults to `openrouter/free`; paid catalog models are disabled until explicitly allow-listed by the server operator.
+  - **Joy Pro Gateway**: Access to the JOY catalog requires a signed-in JOY account with an active Pro subscription. The hosted catalog defaults to `openrouter/free` only. Paid catalog models are disabled by default and accepted only when their exact IDs are listed in the server-side, comma-separated `JOY_GATEWAY_PAID_MODEL_ALLOWLIST` environment variable.
 - **Kilo / BytePlus Coding**: Use the gateway at `https://api.kilo.ai/api/gateway`. The CLI default is `kilo/kilo-auto/free`; BytePlus models remain selectable, including `byteplus-coding/dola-seed-2.0-pro` and `byteplus-coding/dola-seed-2.0-lite` (vision) and `byteplus-coding/deepseek-v4-flash` (text).
 - **Living Looks GPU Color Science**: Cinematic real-time color grading, dynamic film grain, and LUT emulation running at 60 FPS on your GPU.
 - **Pixel-Perfect Preview / Export Parity**: What you see in the timeline monitor matches the final encoded MP4 byte-for-byte.
