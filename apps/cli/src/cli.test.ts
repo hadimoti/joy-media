@@ -1027,6 +1027,39 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
           'byteplus-coding/dola-seed-2.0-pro',
         ]);
         expect(addCode).toBe(0);
+        const jsonOutput = output.mock.calls.flat().join('\n');
+        const insecureFileStoreWarning =
+          'API key stored in a plaintext mode 0600 file by explicit opt-in.';
+        if (process.platform !== 'win32') {
+          const jsonWarningEvents = jsonOutput
+            .split(/\r?\n/)
+            .flatMap((line) => {
+              try {
+                return [JSON.parse(line) as { type?: string; warning?: string }];
+              } catch {
+                return [];
+              }
+            })
+            .filter(
+              (event) => event.type === 'warning' && event.warning === insecureFileStoreWarning,
+            );
+          expect(jsonWarningEvents).toEqual([
+            { type: 'warning', warning: insecureFileStoreWarning },
+          ]);
+          const humanOutput = jsonOutput
+            .split(/\r?\n/)
+            .filter((line) => {
+              try {
+                JSON.parse(line);
+                return false;
+              } catch {
+                return true;
+              }
+            })
+            .join('\n');
+          expect(humanOutput).not.toContain(insecureFileStoreWarning);
+          expect(warnings).toEqual([]);
+        }
         expect(
           await runCli([
             'agent',
@@ -1037,10 +1070,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
             'https://custom-base.invalid/v1',
           ]),
         ).toBe(0);
-        const addOutput = output.mock.calls.flat().join('\n');
         if (process.platform !== 'win32') {
-          expect(addOutput).not.toContain('plaintext mode 0600 file by explicit opt-in');
-          expect(addOutput).toContain('"type":"warning"');
           expect(
             await runCli([
               'agent',
@@ -1054,7 +1084,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
               '--insecure-file-store',
             ]),
           ).toBe(0);
-          expect(warnings.join('\n')).toContain('plaintext mode 0600 file by explicit opt-in');
+          expect(warnings).toEqual([`Warning: ${insecureFileStoreWarning}`]);
         }
 
         // 2. List providers
