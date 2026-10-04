@@ -67,6 +67,18 @@ export interface MediaMailerLike {
   sendOtp(gmail: string, code: string): Promise<void>;
 }
 
+/** Only a server's explicit SMTP refusal proves that no message was accepted. */
+export function isDefiniteSmtpRejection(error: unknown): boolean {
+  const value =
+    typeof error === 'object' && error !== null ? (error as Record<string, unknown>) : {};
+  return (
+    value.code === 'EAUTH' ||
+    (typeof value.responseCode === 'number' &&
+      value.responseCode >= 400 &&
+      value.responseCode <= 599)
+  );
+}
+
 export function isValidSmtpHostname(value: string): boolean {
   return (
     value.length <= 253 &&

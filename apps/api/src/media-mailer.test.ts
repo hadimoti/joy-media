@@ -1,10 +1,67 @@
+import { createServer, type Socket } from 'node:net';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  isDefiniteSmtpRejection,
   isValidSmtpHostname,
   joyStudioOtpHtml,
   MediaMailer,
   sanitizeOtpDeliveryError,
 } from './media-mailer.js';
+
+async function smtpServer(
+  options: {
+    rcptCode?: 451 | 550;
+    dataDelayMs?: number;
+    hangGreeting?: boolean;
+  } = {},
+) {
+  let accepted = false;
+  const sockets = new Set<Socket>();
+  const server = createServer((socket) => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+    if (!options.hangGreeting) socket.write('220 local.test ESMTP\r\n');
+    let buffer = '';
+    let readingData = false;
+    socket.on('data', (chunk) => {
+      buffer += chunk.toString();
+      const lines = buffer.split('\r\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (readingData) {
+          if (line === '.') {
+            readingData = false;
+            setTimeout(() => {
+              accepted = true;
+              socket.write('250 2.0.0 queued\r\n');
+            }, options.dataDelayMs ?? 0);
+          }
+        } else if (/^EHLO /i.test(line)) socket.write('250-local.test\r\n250 AUTH PLAIN\r\n');
+        else if (/^AUTH /i.test(line)) socket.write('235 2.7.0 authenticated\r\n');
+        else if (/^MAIL FROM:/i.test(line)) socket.write('250 2.1.0 sender ok\r\n');
+        else if (/^RCPT TO:/i.test(line))
+          socket.write(
+            `${options.rcptCode ?? 250} recipient ${options.rcptCode ? 'rejected' : 'ok'}\r\n`,
+          );
+        else if (/^DATA$/i.test(line)) {
+          readingData = true;
+          socket.write('354 end with dot\r\n');
+        } else if (/^QUIT$/i.test(line)) socket.end('221 bye\r\n');
+      }
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as { port: number }).port;
+  return {
+    port,
+    accepted: () => accepted,
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        for (const socket of sockets) socket.destroy();
+      }),
+  };
+}
 
 describe('JOY Studio OTP email', () => {
   it('uses a neutral email-safe stack without retired font families', () => {
@@ -36,6 +93,16 @@ describe('sanitizeOtpDeliveryError', () => {
     expect(JSON.stringify(metadata)).not.toMatch(
       /alice@example\.com|123456|provider-secret|authorization/i,
     );
+  });
+});
+
+describe('SMTP rejection classification', () => {
+  it('treats only authentication and explicit SMTP 4xx/5xx replies as definite', () => {
+    expect(isDefiniteSmtpRejection({ code: 'EAUTH' })).toBe(true);
+    expect(isDefiniteSmtpRejection({ responseCode: 451 })).toBe(true);
+    expect(isDefiniteSmtpRejection({ responseCode: 550 })).toBe(true);
+    expect(isDefiniteSmtpRejection({ code: 'ETIMEDOUT' })).toBe(false);
+    expect(isDefiniteSmtpRejection({ code: 'ECONNECTION' })).toBe(false);
   });
 });
 
@@ -181,6 +248,76 @@ describe('MediaMailer address selection', () => {
     expect(created[0]?.connectionTimeout).toBeLessThanOrEqual(40);
     expect(created[1]?.connectionTimeout).toBeLessThanOrEqual(40);
     expect(close).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a late SMTP acceptance distinguishable from a definite rejection', async () => {
+    const smtp = await smtpServer({ dataDelayMs: 320 });
+    try {
+      const startedAt = Date.now();
+      await expect(
+        new MediaMailer({
+          ...options(),
+          host: '127.0.0.1',
+          port: smtp.port,
+          sendDeadlineMs: 180,
+          lookup: async () => [{ address: '127.0.0.1', family: 4 as const }],
+        }).sendOtp('person@example.invalid', '123456'),
+      ).rejects.toMatchObject({ code: 'ETIMEDOUT' });
+      expect(Date.now() - startedAt).toBeLessThan(300);
+      await new Promise((resolve) => setTimeout(resolve, 190));
+      expect(smtp.accepted()).toBe(true);
+    } finally {
+      await smtp.close();
+    }
+  });
+
+  it.each([451, 550] as const)(
+    'returns a definite rejection for SMTP RCPT %s',
+    async (rcptCode) => {
+      const smtp = await smtpServer({ rcptCode });
+      try {
+        await expect(
+          new MediaMailer({
+            ...options(),
+            host: '127.0.0.1',
+            port: smtp.port,
+            lookup: async () => [{ address: '127.0.0.1', family: 4 as const }],
+          }).sendOtp('person@example.invalid', '123456'),
+        ).rejects.toMatchObject({ responseCode: rcptCode });
+        expect(smtp.accepted()).toBe(false);
+      } finally {
+        await smtp.close();
+      }
+    },
+  );
+
+  it('treats a connection failure as an ambiguous delivery outcome', async () => {
+    const closed = await smtpServer();
+    const port = closed.port;
+    await closed.close();
+    await expect(
+      new MediaMailer({ ...options(), host: '127.0.0.1', port, sendDeadlineMs: 100 }).sendOtp(
+        'person@example.invalid',
+        '123456',
+      ),
+    ).rejects.toBeTruthy();
+  });
+
+  it('times out a server that accepts the connection but never sends its greeting', async () => {
+    const smtp = await smtpServer({ hangGreeting: true });
+    try {
+      await expect(
+        new MediaMailer({
+          ...options(),
+          host: '127.0.0.1',
+          port: smtp.port,
+          sendDeadlineMs: 100,
+          lookup: async () => [{ address: '127.0.0.1', family: 4 as const }],
+        }).sendOtp('person@example.invalid', '123456'),
+      ).rejects.toMatchObject({ code: 'ETIMEDOUT' });
+    } finally {
+      await smtp.close();
+    }
   });
 
   it('applies the same overall deadline to a hung DNS lookup', async () => {
