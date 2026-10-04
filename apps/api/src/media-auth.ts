@@ -13,21 +13,48 @@ const OTP_MAX_ACTIVE = 3;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
 const OTP_RATE_LIMIT_WINDOW_MS = 10 * 60_000; // 10 minutes
 const OTP_RATE_LIMIT_MAX = 3; // max 3 OTP requests per window per IP
-const OTP_ACCOUNT_RATE_LIMIT_MAX = 3;
+const OTP_ACCOUNT_RATE_LIMIT_MAX = 5;
 const OTP_ACCOUNT_RATE_LIMIT_MAX_BUCKETS = 10_000;
+const OTP_VERIFY_FAILURE_MAX = 5;
 const OTP_CONTACT_LOG_HMAC_KEY = randomBytes(32);
 
-const otpRateLimitWindow = new Map<string, number[]>();
+export class BoundedOtpRateLimitMap {
+  private readonly buckets = new Map<string, number[]>();
+
+  constructor(private readonly maxBuckets = OTP_ACCOUNT_RATE_LIMIT_MAX_BUCKETS) {}
+
+  get size(): number {
+    return this.buckets.size;
+  }
+
+  consume(key: string, limit: number, now = Date.now()): boolean {
+    if (this.buckets.size >= this.maxBuckets) {
+      for (const [bucketKey, timestamps] of this.buckets) {
+        const recent = timestamps.filter((timestamp) => now - timestamp < OTP_RATE_LIMIT_WINDOW_MS);
+        if (recent.length === 0) this.buckets.delete(bucketKey);
+        else this.buckets.set(bucketKey, recent);
+      }
+    }
+    if (!this.buckets.has(key) && this.buckets.size >= this.maxBuckets) {
+      const oldestKey = this.buckets.keys().next().value;
+      if (oldestKey !== undefined) this.buckets.delete(oldestKey);
+    }
+    const recent = (this.buckets.get(key) ?? []).filter(
+      (timestamp) => now - timestamp < OTP_RATE_LIMIT_WINDOW_MS,
+    );
+    if (recent.length >= limit) return false;
+    recent.push(now);
+    this.buckets.set(key, recent);
+    return true;
+  }
+}
+
+const otpRateLimitWindow = new BoundedOtpRateLimitMap();
 
 function checkOtpRateLimit(key: string): void {
-  const now = Date.now();
-  const timestamps = otpRateLimitWindow.get(key) ?? [];
-  const recent = timestamps.filter((ts) => now - ts < OTP_RATE_LIMIT_WINDOW_MS);
-  if (recent.length >= OTP_RATE_LIMIT_MAX) {
+  if (!otpRateLimitWindow.consume(key, OTP_RATE_LIMIT_MAX)) {
     throw new MediaAuthError('RATE_LIMITED', 'Too many login requests. Try again later.');
   }
-  recent.push(now);
-  otpRateLimitWindow.set(key, recent);
 }
 
 /** Generic response text for both known and unknown contacts (no enumeration). */
@@ -94,6 +121,7 @@ export interface MediaAuthApi {
   avatarBytes(
     request: IncomingMessage,
   ): Promise<{ readonly mimeType: string; readonly bytes: Buffer } | undefined>;
+  drainPendingOtpSends?(timeoutMs?: number): Promise<void>;
 }
 
 /**
@@ -108,6 +136,12 @@ export class MediaAuthService implements MediaAuthApi {
   private readonly clientAddressResolver: ClientAddressResolver;
   private readonly accountRateLimitMax: number;
   private readonly accountOtpRateLimit = new Map<string, number[]>();
+  private readonly verifyFailures = new Map<
+    string,
+    { readonly timestamps: number[]; blockedUntil: number }
+  >();
+  private readonly pendingOtpSends = new Set<Promise<void>>();
+  private otpRequestTail: Promise<void> = Promise.resolve();
 
   constructor(options: MediaAuthServiceOptions) {
     this.pool = options.pool;
@@ -175,11 +209,44 @@ export class MediaAuthService implements MediaAuthApi {
       `${method}:${contact}`,
       this.accountRateLimitMax,
     );
+    this.scheduleOtpSend(contact, method);
+    return { message: OTP_REQUESTED_MESSAGE };
+  }
+
+  private scheduleOtpSend(contact: string, method: MediaAuthMethod): void {
+    const previous = this.otpRequestTail;
+    const task = new Promise<void>((resolve) => setImmediate(resolve))
+      .then(() => previous)
+      .then(() => this.deliverRequestedOtp(contact, method))
+      .catch(() => warnOtpDeliveryFailure(contact))
+      .finally(() => this.pendingOtpSends.delete(task));
+    this.pendingOtpSends.add(task);
+    this.otpRequestTail = task;
+  }
+
+  async drainPendingOtpSends(timeoutMs = 5_000): Promise<void> {
+    if (this.pendingOtpSends.size === 0) return;
+    const pending = [...this.pendingOtpSends];
+    let timeout: NodeJS.Timeout | undefined;
+    const completed = await Promise.race([
+      Promise.allSettled(pending).then(() => true),
+      new Promise<false>((resolve) => {
+        timeout = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+    if (timeout !== undefined) clearTimeout(timeout);
+    if (!completed && this.pendingOtpSends.size > 0)
+      console.warn('JOY Media OTP sends abandoned during shutdown', {
+        count: this.pendingOtpSends.size,
+      });
+  }
+
+  private async deliverRequestedOtp(contact: string, method: MediaAuthMethod): Promise<void> {
     const allowed = await this.findAllowed(contact, method);
     if (allowed !== undefined && allowed.enabled) {
       if (!this.hasDeliveryConfigured(allowed, method)) {
         warnOtpDeliveryFailure(contact);
-        return { message: OTP_REQUESTED_MESSAGE };
+        return;
       }
       const otpContact = canonicalOtpContact(contact, method, allowed);
       const active = await this.pool.query<{ count: string }>(
@@ -203,7 +270,7 @@ export class MediaAuthService implements MediaAuthApi {
         );
         const otpId = inserted.rows[0]?.id;
         if (otpId !== undefined) {
-          void this.deliver(allowed, method, code).catch(async () => {
+          await this.deliver(allowed, method, code).catch(async () => {
             try {
               await this.pool.query('DELETE FROM media_otp_codes WHERE id = $1', [otpId]);
             } catch {
@@ -214,16 +281,18 @@ export class MediaAuthService implements MediaAuthApi {
         }
       }
     }
-    return { message: OTP_REQUESTED_MESSAGE };
   }
 
   async verifyOtp(rawContact: string, method: MediaAuthMethod, code: string): Promise<string> {
     const contact = normalizeContact(rawContact, method);
     const allowed = await this.findAllowed(contact, method);
+    const otpContact = allowed ? canonicalOtpContact(contact, method, allowed) : contact;
+    const failureKey = `${method}:${otpContact}`;
+    if (this.isVerifyBlocked(failureKey)) throw tooManyVerifyAttemptsError();
     if (allowed === undefined || !allowed.enabled) {
-      throw new MediaAuthError('OTP_INVALID', 'code is invalid or expired');
+      await this.recordVerifyFailure(failureKey, otpContact, method);
+      throw this.isVerifyBlocked(failureKey) ? tooManyVerifyAttemptsError() : invalidOtpError();
     }
-    const otpContact = canonicalOtpContact(contact, method, allowed);
     const hash = codeHash(otpContact, method, code);
     const result = await this.pool.query<{ id: string }>(
       `UPDATE media_otp_codes SET used = true
@@ -235,8 +304,10 @@ export class MediaAuthService implements MediaAuthApi {
        RETURNING id`,
       [otpContact, method, hash, new Date()],
     );
-    if (result.rows.length === 0)
-      throw new MediaAuthError('OTP_INVALID', 'code is invalid or expired');
+    if (result.rows.length === 0) {
+      await this.recordVerifyFailure(failureKey, otpContact, method);
+      throw this.isVerifyBlocked(failureKey) ? tooManyVerifyAttemptsError() : invalidOtpError();
+    }
     const token = randomBytes(32).toString('base64url');
     const now = new Date();
     await this.pool.query(
@@ -244,7 +315,64 @@ export class MediaAuthService implements MediaAuthApi {
        VALUES ($1, $2, $3, $4, $5)`,
       [sessionHash(token), otpContact, method, now, new Date(now.getTime() + SESSION_TTL_MS)],
     );
+    this.verifyFailures.delete(failureKey);
+    this.accountOtpRateLimit.delete(failureKey);
     return token;
+  }
+
+  private isVerifyBlocked(key: string): boolean {
+    const now = Date.now();
+    const bucket = this.verifyFailures.get(key);
+    if (!bucket) return false;
+    if (bucket.blockedUntil > now) return true;
+    if (bucket.blockedUntil > 0) {
+      bucket.timestamps.length = 0;
+      bucket.blockedUntil = 0;
+      return false;
+    }
+    const recent = bucket.timestamps.filter(
+      (timestamp) => now - timestamp < OTP_RATE_LIMIT_WINDOW_MS,
+    );
+    if (recent.length === 0) {
+      this.verifyFailures.delete(key);
+      return false;
+    }
+    bucket.timestamps.splice(0, bucket.timestamps.length, ...recent);
+    bucket.blockedUntil = 0;
+    return false;
+  }
+
+  private async recordVerifyFailure(
+    key: string,
+    contact: string,
+    method: MediaAuthMethod,
+  ): Promise<void> {
+    const now = Date.now();
+    if (
+      this.verifyFailures.size >= OTP_ACCOUNT_RATE_LIMIT_MAX_BUCKETS &&
+      !this.verifyFailures.has(key)
+    ) {
+      for (const [bucketKey, bucket] of this.verifyFailures) {
+        if (bucket.timestamps.every((timestamp) => now - timestamp >= OTP_RATE_LIMIT_WINDOW_MS))
+          this.verifyFailures.delete(bucketKey);
+      }
+      if (this.verifyFailures.size >= OTP_ACCOUNT_RATE_LIMIT_MAX_BUCKETS) {
+        const oldestKey = this.verifyFailures.keys().next().value;
+        if (oldestKey !== undefined) this.verifyFailures.delete(oldestKey);
+      }
+    }
+    const bucket = this.verifyFailures.get(key) ?? { timestamps: [], blockedUntil: 0 };
+    bucket.timestamps.push(now);
+    if (bucket.timestamps.length >= OTP_VERIFY_FAILURE_MAX) {
+      // Policy: five failures burn every live code and block verification for ten minutes.
+      // A new OTP can be requested once that block window expires.
+      bucket.blockedUntil = now + OTP_RATE_LIMIT_WINDOW_MS;
+      await this.pool.query(
+        `UPDATE media_otp_codes SET used = true WHERE contact = $1 AND method = $2 AND used = false`,
+        [contact, method],
+      );
+    }
+    this.verifyFailures.set(key, bucket);
   }
 
   async logout(token: string): Promise<void> {
@@ -404,14 +532,26 @@ function checkAccountOtpRateLimit(
   buckets.set(key, recent);
 }
 
+function invalidOtpError(): MediaAuthError {
+  return new MediaAuthError('INVALID_OR_EXPIRED_CODE', 'The login code is invalid or expired.');
+}
+
+function tooManyVerifyAttemptsError(): MediaAuthError {
+  return new MediaAuthError(
+    'TOO_MANY_ATTEMPTS',
+    'Too many incorrect login codes. Request a new code later.',
+  );
+}
+
 /** Used when JOY_MEDIA_DATABASE_URL is unset — /v1/auth stays disabled, same spirit as LocalControlPlane. */
 export class DisabledMediaAuth implements MediaAuthApi {
   async requestOtp(): Promise<{ readonly message: string }> {
     return { message: OTP_REQUESTED_MESSAGE };
   }
   async verifyOtp(): Promise<string> {
-    throw new MediaAuthError('OTP_INVALID', 'code is invalid or expired');
+    throw invalidOtpError();
   }
+  async drainPendingOtpSends(): Promise<void> {}
   async logout(): Promise<void> {}
   async authenticate(): Promise<Actor | undefined> {
     return undefined;

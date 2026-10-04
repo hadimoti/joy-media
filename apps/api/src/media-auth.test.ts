@@ -2,7 +2,7 @@ import type { Pool } from 'pg';
 import { createHash } from 'node:crypto';
 import { newDb } from 'pg-mem';
 import { describe, expect, it, vi } from 'vitest';
-import { MediaAuthError, MediaAuthService } from './media-auth.js';
+import { BoundedOtpRateLimitMap, MediaAuthError, MediaAuthService } from './media-auth.js';
 
 function pool(): Pool {
   const database = newDb();
@@ -45,11 +45,24 @@ function sentCode(mailer: { sendOtp: ReturnType<typeof vi.fn> }): string {
 }
 
 describe('MediaAuthService', () => {
+  it('prunes expired IP buckets and never exceeds its configured cap', () => {
+    const buckets = new BoundedOtpRateLimitMap(2);
+    buckets.consume('old-a', 3, 0);
+    buckets.consume('old-b', 3, 0);
+
+    expect(buckets.consume('new', 3, 11 * 60_000)).toBe(true);
+    expect(buckets.size).toBe(1);
+    buckets.consume('active-b', 3, 11 * 60_000);
+    buckets.consume('active-c', 3, 11 * 60_000);
+    expect(buckets.size).toBe(2);
+  });
+
   it('sends and verifies an OTP for an allow-listed gmail, then authenticates the session', async () => {
     const { auth, mailer } = await service();
     await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
 
     await auth.requestOtp('user@example.com', 'gmail');
+    await auth.drainPendingOtpSends();
     expect(mailer.sendOtp).toHaveBeenCalledTimes(1);
     const code = sentCode(mailer);
 
@@ -67,18 +80,23 @@ describe('MediaAuthService', () => {
     expect(mailer.sendOtp).not.toHaveBeenCalled();
   });
 
-  it('returns the same fast response for registered and unknown addresses while mail delivery is slow', async () => {
+  it('keeps registered and unknown request timing uniform despite slow database and mailer work', async () => {
+    let releaseMail!: () => void;
     const slowMailer = {
       sendOtp: vi.fn(
         () =>
           new Promise<void>((resolve) => {
-            const timer = setTimeout(resolve, 5_000);
-            timer.unref();
+            releaseMail = resolve;
           }),
       ),
     };
-    const { auth } = await service({ mailer: slowMailer });
+    const { auth, db } = await service({ mailer: slowMailer });
     await auth.addAllowed({ gmail: 'known@example.com', addedBy: 'admin' });
+    const originalQuery = db.query.bind(db);
+    vi.spyOn(db, 'query').mockImplementation(async (...args: Parameters<Pool['query']>) => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return originalQuery(...args);
+    });
     const startedRegistered = Date.now();
     const registered = await auth.requestOtp('known@example.com', 'gmail');
     const registeredMs = Date.now() - startedRegistered;
@@ -87,9 +105,42 @@ describe('MediaAuthService', () => {
     const unknownMs = Date.now() - startedUnknown;
     expect(registered).toEqual(unknown);
     expect(registered.message).toBe('If that account is registered, a login code was sent.');
-    expect(registeredMs).toBeLessThan(200);
-    expect(unknownMs).toBeLessThan(200);
+    expect(Math.abs(registeredMs - unknownMs)).toBeLessThan(20);
+    expect(registeredMs).toBeLessThan(100);
+    expect(unknownMs).toBeLessThan(100);
+    await new Promise((resolve) => setTimeout(resolve, 250));
     expect(slowMailer.sendOtp).toHaveBeenCalledTimes(1);
+    releaseMail();
+    await auth.drainPendingOtpSends();
+  });
+
+  it('drains pending sends during shutdown and reports only the abandoned count on timeout', async () => {
+    let releaseMail!: () => void;
+    let markMailStarted!: () => void;
+    const mailStarted = new Promise<void>((resolve) => {
+      markMailStarted = resolve;
+    });
+    const slowMailer = {
+      sendOtp: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseMail = resolve;
+            markMailStarted();
+          }),
+      ),
+    };
+    const { auth } = await service({ mailer: slowMailer });
+    await auth.addAllowed({ gmail: 'drain@example.com', addedBy: 'admin' });
+    await auth.requestOtp('drain@example.com', 'gmail');
+    await mailStarted;
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await auth.drainPendingOtpSends(10);
+    expect(slowMailer.sendOtp).toHaveBeenCalledOnce();
+    expect(warning).toHaveBeenCalledWith('JOY Media OTP sends abandoned during shutdown', {
+      count: 1,
+    });
+    releaseMail();
+    await auth.drainPendingOtpSends();
   });
 
   it('deletes failed delivery rows by id so repeated failures leave no active OTPs', async () => {
@@ -104,7 +155,7 @@ describe('MediaAuthService', () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
     for (let i = 0; i < 5; i += 1) {
       await auth.requestOtp('failure@example.com', 'gmail');
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await auth.drainPendingOtpSends();
     }
     const rows = await db.query<{ count: string }>(
       'SELECT count(*)::text AS count FROM media_otp_codes WHERE contact = $1',
@@ -140,6 +191,7 @@ describe('MediaAuthService', () => {
     const querySpy = vi.spyOn(db, 'query');
 
     const registered = await auth.requestOtp('known@example.com', 'gmail');
+    await auth.drainPendingOtpSends();
     const unknown = await auth.requestOtp('unknown@example.com', 'gmail');
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -199,6 +251,7 @@ describe('MediaAuthService', () => {
     const { auth, mailer } = await service();
     await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
     await auth.requestOtp('user@example.com', 'gmail');
+    await auth.drainPendingOtpSends();
     const code = sentCode(mailer);
 
     await expect(auth.verifyOtp('user@example.com', 'gmail', '000000')).rejects.toBeInstanceOf(
@@ -207,8 +260,57 @@ describe('MediaAuthService', () => {
 
     await auth.verifyOtp('user@example.com', 'gmail', code);
     await expect(auth.verifyOtp('user@example.com', 'gmail', code)).rejects.toMatchObject({
-      code: 'OTP_INVALID',
+      code: 'INVALID_OR_EXPIRED_CODE',
     });
+  });
+
+  it('burns all active codes after five wrong guesses and blocks the correct code', async () => {
+    const { auth, mailer, db } = await service();
+    await auth.addAllowed({ gmail: 'guess@example.com', addedBy: 'admin' });
+    await auth.requestOtp('guess@example.com', 'gmail');
+    await auth.drainPendingOtpSends();
+    const code = sentCode(mailer);
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await expect(auth.verifyOtp('guess@example.com', 'gmail', '000000')).rejects.toMatchObject({
+        code: 'INVALID_OR_EXPIRED_CODE',
+      });
+    }
+    await expect(auth.verifyOtp('guess@example.com', 'gmail', '000000')).rejects.toMatchObject({
+      code: 'TOO_MANY_ATTEMPTS',
+    });
+    await expect(auth.verifyOtp('guess@example.com', 'gmail', code)).rejects.toMatchObject({
+      code: 'TOO_MANY_ATTEMPTS',
+    });
+    const rows = await db.query<{ used: boolean }>(
+      'SELECT used FROM media_otp_codes WHERE contact = $1',
+      ['guess@example.com'],
+    );
+    expect(rows.rows).toEqual([{ used: true }]);
+  });
+
+  it('returns the same verify error sequence for unknown contacts', async () => {
+    const { auth } = await service();
+    const sequences: string[][] = [];
+    for (const contact of ['known-sequence@example.com', 'unknown-sequence@example.com']) {
+      const errors: string[] = [];
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+          await auth.verifyOtp(contact, 'gmail', '000000');
+        } catch (error) {
+          errors.push((error as MediaAuthError).code);
+        }
+      }
+      sequences.push(errors);
+    }
+    expect(sequences[0]).toEqual([
+      'INVALID_OR_EXPIRED_CODE',
+      'INVALID_OR_EXPIRED_CODE',
+      'INVALID_OR_EXPIRED_CODE',
+      'INVALID_OR_EXPIRED_CODE',
+      'TOO_MANY_ATTEMPTS',
+    ]);
+    expect(sequences[1]).toEqual(sequences[0]);
   });
 
   it('rejects a disabled allow-listed user even for their own valid code', async () => {
@@ -216,6 +318,7 @@ describe('MediaAuthService', () => {
     const user = await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
     await auth.setEnabled(user.id, false);
     await auth.requestOtp('user@example.com', 'gmail');
+    await auth.drainPendingOtpSends();
     expect(mailer.sendOtp).not.toHaveBeenCalled();
   });
 
@@ -223,6 +326,7 @@ describe('MediaAuthService', () => {
     const { auth, mailer, db } = await service();
     const user = await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
     await auth.requestOtp('user@example.com', 'gmail');
+    await auth.drainPendingOtpSends();
     const token = await auth.verifyOtp('user@example.com', 'gmail', sentCode(mailer));
     const request = { headers: { authorization: `Bearer ${token}` } } as never;
 
@@ -237,14 +341,19 @@ describe('MediaAuthService', () => {
     await db.end();
   });
 
-  it('caps OTP requests per contact at 3 within the rate window', async () => {
+  it('caps OTP requests per contact at 5 within the rate window and resets after verify', async () => {
     const { auth, mailer } = await service();
     await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
-    for (let i = 0; i < 3; i += 1) await auth.requestOtp('user@example.com', 'gmail');
+    for (let i = 0; i < 5; i += 1) await auth.requestOtp('user@example.com', 'gmail');
     await expect(auth.requestOtp('user@example.com', 'gmail')).rejects.toMatchObject({
       code: 'RATE_LIMITED',
     });
+    await auth.drainPendingOtpSends();
     expect(mailer.sendOtp).toHaveBeenCalledTimes(3);
+    await auth.verifyOtp('user@example.com', 'gmail', sentCode(mailer));
+    await expect(auth.requestOtp('user@example.com', 'gmail')).resolves.toMatchObject({
+      message: expect.any(String),
+    });
   });
 
   it('rejects more than 3 OTP requests from the same IP within 10 minutes', async () => {
@@ -257,6 +366,7 @@ describe('MediaAuthService', () => {
     await expect(auth.requestOtp('user@example.com', 'gmail', request)).rejects.toMatchObject({
       code: 'RATE_LIMITED',
     });
+    await auth.drainPendingOtpSends();
     expect(mailer.sendOtp).toHaveBeenCalledTimes(3);
   });
 
@@ -274,6 +384,7 @@ describe('MediaAuthService', () => {
     await expect(
       auth.requestOtp('user@example.com', 'gmail', request('198.51.100.4')),
     ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+    await auth.drainPendingOtpSends();
     expect(mailer.sendOtp).toHaveBeenCalledTimes(3);
   });
 
@@ -281,6 +392,7 @@ describe('MediaAuthService', () => {
     const { auth, telegram, mailer } = await service();
     await auth.addAllowed({ telegramId: '123456', addedBy: 'admin' });
     await auth.requestOtp('123456', 'telegram');
+    await auth.drainPendingOtpSends();
     expect(telegram.sendOtp).toHaveBeenCalledTimes(1);
     await auth.requestOtp('123456', 'gmail');
     expect(mailer.sendOtp).not.toHaveBeenCalled();
@@ -295,10 +407,12 @@ describe('MediaAuthService', () => {
     });
 
     await auth.requestOtp('joyuser', 'telegram');
+    await auth.drainPendingOtpSends();
     expect(telegram.sendOtp).toHaveBeenCalledWith('987654321', expect.any(String));
 
     telegram.sendOtp.mockClear();
     await auth.requestOtp('@JoyUser', 'telegram');
+    await auth.drainPendingOtpSends();
     expect(telegram.sendOtp).toHaveBeenCalledWith('987654321', expect.any(String));
 
     const code = (telegram.sendOtp.mock.calls.at(-1) as unknown as [string, string])[1];
@@ -308,6 +422,7 @@ describe('MediaAuthService', () => {
     // Username request + numeric-id verify (same canonical otp contact)
     telegram.sendOtp.mockClear();
     await auth.requestOtp('@joyuser', 'telegram');
+    await auth.drainPendingOtpSends();
     const code2 = (telegram.sendOtp.mock.calls.at(-1) as unknown as [string, string])[1];
     await expect(auth.verifyOtp('987654321', 'telegram', code2)).resolves.toEqual(
       expect.any(String),
@@ -325,10 +440,11 @@ describe('MediaAuthService', () => {
     const { auth, mailer } = await service();
     const user = await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
     await auth.requestOtp('user@example.com', 'gmail');
+    await auth.drainPendingOtpSends();
     const code = sentCode(mailer);
     await auth.removeAllowed(user.id);
     await expect(auth.verifyOtp('user@example.com', 'gmail', code)).rejects.toMatchObject({
-      code: 'OTP_INVALID',
+      code: 'INVALID_OR_EXPIRED_CODE',
     });
   });
 });
