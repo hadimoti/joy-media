@@ -1,4 +1,4 @@
-/* global console, process */
+/* global console */
 import {
   JoyAgentEngine,
   type JoyAgentSafeEvent,
@@ -41,6 +41,7 @@ export interface RunAgentOutput {
   readonly updatedProject: JoyProjectV1;
   readonly appliedCount: number;
   readonly errors: string[];
+  readonly notes: string[];
   readonly placementSummary?: AppliedTimelineSummary;
   readonly resolvedModelId?: string;
 }
@@ -113,7 +114,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     if (event.type === 'activity') {
       logStep('Agent Phase', `${event.phase} (${event.activityCode})`);
     } else if (event.type === 'text-delta') {
-      process.stdout.write(c(event.text, 'dim'));
+      // The model's prose is not authoritative about what was applied.
     } else if (event.type === 'proposal') {
       console.log();
       logInfo(`Staged proposal: ${event.operationCount} operations (hash: ${event.proposalHash})`);
@@ -165,6 +166,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
   let updatedProject = options.project;
   let appliedCount = 0;
   let errors: string[] = [];
+  let notes: string[] = [];
   let applied = false;
   let placementSummary: AppliedTimelineSummary | undefined;
 
@@ -174,8 +176,9 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     updatedProject = applyRes.updatedProject;
     appliedCount = applyRes.appliedCount;
     errors = applyRes.errors;
+    notes = applyRes.notes;
     placementSummary = applyRes.placementSummary;
-    applied = applyRes.errors.length === 0;
+    applied = applyRes.errors.length === 0 && applyRes.appliedCount > 0;
     if (errors.length > 0) {
       logWarn(
         applied
@@ -187,7 +190,14 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
   }
 
   return {
-    resultText: runResult.text,
+    resultText: truthfulAgentSummary({
+      applyRequested: options.apply === true,
+      applied,
+      appliedCount,
+      errors,
+      notes,
+      staged,
+    }),
     capability: runResult.capability,
     steps: runResult.steps,
     staged,
@@ -195,7 +205,32 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     updatedProject,
     appliedCount,
     errors,
+    notes,
     ...(placementSummary === undefined ? {} : { placementSummary }),
     ...(runResult.resolvedModelId ? { resolvedModelId: runResult.resolvedModelId } : {}),
   };
+}
+
+export function truthfulAgentSummary(input: {
+  readonly applyRequested: boolean;
+  readonly applied: boolean;
+  readonly appliedCount: number;
+  readonly errors: readonly string[];
+  readonly notes: readonly string[];
+  readonly staged: StagedOperationsSummary;
+}): string {
+  const operations = [...input.staged.timelineOps, ...input.staged.documentOps];
+  const descriptions = operations.map((operation) => `${operation.kind} (${operation.id})`);
+  if (input.applyRequested && input.applied) {
+    if (input.appliedCount === 0) return 'No changes were applied.';
+    const applied = descriptions.slice(0, input.appliedCount);
+    return [`Applied ${input.appliedCount} change(s): ${applied.join(', ')}.`, ...input.notes].join(
+      ' ',
+    );
+  }
+  if (input.applyRequested && input.errors.length > 0)
+    return `No changes were applied. The apply was rejected: ${input.errors.join('; ')}`;
+  if (operations.length > 0)
+    return `Prepared ${operations.length} change(s) for review: ${descriptions.join(', ')}. Nothing was applied.`;
+  return 'No project changes were made.';
 }

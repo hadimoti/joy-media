@@ -70,7 +70,7 @@ const documentOperation = z.discriminatedUnion('kind', [
       durationUs: z.number().int().positive().max(86_400_000_000),
       x: z.number().finite().optional(),
       y: z.number().finite().optional(),
-      size: z.number().int().min(1).max(512).optional(),
+      size: z.number().finite().min(0.1).max(8).optional(),
       color: z
         .string()
         .regex(/^#[0-9a-f]{6}$/i)
@@ -266,6 +266,32 @@ export function parseJoyTimelineOperations(value: unknown): readonly JoyTimeline
   return parseOperations(timelineOperation, value);
 }
 
+const proposalInput = (operationLimit: number) =>
+  z.object({ operations: z.array(z.unknown()).max(operationLimit) }).strict();
+
+function proposalErrorResult(
+  errors: readonly string[],
+  attempts: number,
+): {
+  accepted: false;
+  retryable: boolean;
+  validationErrors: readonly string[];
+} {
+  return {
+    accepted: false,
+    retryable: attempts < 3,
+    validationErrors: errors.slice(0, 32),
+  };
+}
+
+function proposalValidationErrors(result: unknown): string[] {
+  if (result === null || typeof result !== 'object') return [];
+  const record = result as { accepted?: unknown; errors?: unknown };
+  if (record.accepted !== false) return [];
+  if (Array.isArray(record.errors)) return record.errors.map(String).slice(0, 32);
+  return ['Proposal was rejected by project validation.'];
+}
+
 export function parseJoyDocumentOperations(value: unknown): readonly JoyDocumentOperation[] {
   return parseOperations(documentOperation, value);
 }
@@ -391,23 +417,52 @@ export function createJoyAgentTools(
     }),
     propose_timeline_operations: tool({
       description:
-        'Stage validated timeline operations for preview. Trimming changes a clip’s source in/out and visible duration; it does not move the clip on the timeline. Use a separate move operation to change its timeline position.',
-      inputSchema: z
-        .object({ operations: z.array(timelineOperation).max(operationLimit) })
-        .strict(),
+        'Propose timeline operations. Each operation needs a unique id and schema-valid fields; the tool returns validation errors for repair and retry (up to three invalid proposals). startUs, endUs, atUs, and durationUs use integer microseconds (for example, 10 seconds is 10000000). Trimming changes a clip’s source in/out and visible duration; it does not move the clip on the timeline. Use a separate move operation to change its timeline position.',
+      inputSchema: proposalInput(operationLimit),
       execute: async (input) => {
-        validateOperationDependencies(input.operations);
-        return boundedResult(await bridge.proposeTimelineOperations(input), maxPayloadBytes);
+        let operations: readonly JoyTimelineOperation[];
+        try {
+          operations = parseJoyTimelineOperations(input.operations);
+          validateOperationDependencies(operations);
+        } catch (error) {
+          const attempts = ++invalidTimelineProposals;
+          return proposalErrorResult(
+            [error instanceof Error ? error.message : String(error)],
+            attempts,
+          );
+        }
+        const result = await bridge.proposeTimelineOperations({ operations });
+        const invalid = proposalValidationErrors(result);
+        if (invalid.length > 0) {
+          const attempts = ++invalidTimelineProposals;
+          return proposalErrorResult(invalid, attempts);
+        }
+        return boundedResult(result, maxPayloadBytes);
       },
     }),
     propose_document_operations: tool({
-      description: 'Stage validated document operations for preview.',
-      inputSchema: z
-        .object({ operations: z.array(documentOperation).max(operationLimit) })
-        .strict(),
+      description:
+        'Propose document operations. For create-text, x and y are editor-normalized frame fractions in [-0.4, 0.4]; 0 is centered and omitted values default to center. size is a template multiplier from 0.1 to 8. durationUs is an integer number of microseconds (10 seconds = 10000000) and must be at least one frame at project fps. Schema and project validation errors are returned so you can repair and retry (up to three invalid proposals).',
+      inputSchema: proposalInput(operationLimit),
       execute: async (input) => {
-        validateOperationDependencies(input.operations);
-        return boundedResult(await bridge.proposeDocumentOperations(input), maxPayloadBytes);
+        let operations: readonly JoyDocumentOperation[];
+        try {
+          operations = parseJoyDocumentOperations(input.operations);
+          validateOperationDependencies(operations);
+        } catch (error) {
+          const attempts = ++invalidDocumentProposals;
+          return proposalErrorResult(
+            [error instanceof Error ? error.message : String(error)],
+            attempts,
+          );
+        }
+        const result = await bridge.proposeDocumentOperations({ operations });
+        const invalid = proposalValidationErrors(result);
+        if (invalid.length > 0) {
+          const attempts = ++invalidDocumentProposals;
+          return proposalErrorResult(invalid, attempts);
+        }
+        return boundedResult(result, maxPayloadBytes);
       },
     }),
     read_brief: tool({
@@ -456,6 +511,8 @@ export function createJoyAgentTools(
       execute: async () => boundedResult(await bridge.submitPlan(), maxPayloadBytes),
     }),
   };
+  let invalidTimelineProposals = 0;
+  let invalidDocumentProposals = 0;
   const visionCapable =
     options.vision === true ||
     KILO_MODEL_PRESETS.some((preset) => preset.id === options.modelId && preset.vision);

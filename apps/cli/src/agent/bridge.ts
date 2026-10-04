@@ -45,6 +45,7 @@ export interface ApplyStagedResult {
   readonly updatedProject: JoyProjectV1;
   readonly appliedCount: number;
   readonly errors: string[];
+  readonly notes: string[];
   readonly placementSummary: AppliedTimelineSummary;
 }
 
@@ -107,7 +108,13 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
         width: root?.width ?? 1080,
         height: root?.height ?? 1920,
       },
-      durationUs: root?.durationUs ?? 0,
+      durationUs: root
+        ? root.tracks.reduce(
+            (maximum, track) =>
+              Math.max(maximum, ...track.clips.map((clip) => clip.startUs + clip.durationUs)),
+            0,
+          )
+        : 0,
       clipCount,
       tracks: tracksSummary,
       assetCount: Object.keys(this.project.assets ?? {}).length,
@@ -257,10 +264,13 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
   async proposeTimelineOperations(input: {
     readonly operations: readonly JoyTimelineOperation[];
   }): Promise<unknown> {
+    const errors = this.validateTimelineProposal(input.operations);
+    if (errors.length > 0) return { accepted: false, errors };
     this.stagedTimeline.push(...input.operations);
     this.lastApplyResult = undefined;
     this.notify();
     return {
+      accepted: true,
       staged: true,
       addedCount: input.operations.length,
       totalStaged: this.stagedTimeline.length,
@@ -271,15 +281,134 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
   async proposeDocumentOperations(input: {
     readonly operations: readonly JoyDocumentOperation[];
   }): Promise<unknown> {
+    const errors = this.validateDocumentProposal(input.operations);
+    if (errors.length > 0) return { accepted: false, errors };
     this.stagedDocument.push(...input.operations);
     this.lastApplyResult = undefined;
     this.notify();
     return {
+      accepted: true,
       staged: true,
       addedCount: input.operations.length,
       totalStaged: this.stagedDocument.length,
       revision: this.revision,
+      notes: input.operations.flatMap((operation) => {
+        if (operation.kind !== 'create-text' || !operation.trackId) return [];
+        const requested = this.project.compositions[this.project.rootCompositionId]?.tracks.find(
+          (track) => track.id === operation.trackId,
+        );
+        if (requested?.kind !== 'video') return [];
+        const destination = this.project.compositions[this.project.rootCompositionId]?.tracks.find(
+          (track) => track.kind === 'caption',
+        );
+        return [
+          `Text operation ${operation.id} will be routed from video track ${requested.id} to ${destination?.id ?? 'a new caption track'}.`,
+        ];
+      }),
     };
+  }
+
+  private validateTimelineProposal(operations: readonly JoyTimelineOperation[]): string[] {
+    const root = this.project.compositions[this.project.rootCompositionId];
+    if (!root) return ['Project has no root composition.'];
+    const tracks = root.tracks;
+    const clips = tracks.flatMap((track) => track.clips.map((clip) => ({ track, clip })));
+    const knownIds = new Set([
+      ...this.stagedTimeline.map((operation) => operation.id),
+      ...this.stagedDocument.map((operation) => operation.id),
+      ...clips.map(({ clip }) => clip.id),
+    ]);
+    const minimumFrame = oneFrameUs(root.frameRate.num, root.frameRate.den);
+    const errors: string[] = [];
+    for (const operation of operations) {
+      if (knownIds.has(operation.id)) errors.push(`Operation id ${operation.id} already exists.`);
+      knownIds.add(operation.id);
+      if (operation.kind === 'insert') {
+        const track = tracks.find((candidate) => candidate.id === operation.trackId);
+        if (!track) errors.push(`Track ${operation.trackId} not found.`);
+        else if (track.kind !== 'video')
+          errors.push(`Track ${operation.trackId} cannot host video clips.`);
+        if (!this.project.assets?.[operation.assetId])
+          errors.push(`Asset ${operation.assetId} not found.`);
+        if (operation.durationUs < minimumFrame)
+          errors.push(`Operation ${operation.id} duration is shorter than one project frame.`);
+        continue;
+      }
+      const found = clips.find(({ clip }) => clip.id === operation.clipId);
+      if (!found) errors.push(`Clip ${operation.clipId} not found.`);
+      if (operation.kind === 'move') {
+        const target = tracks.find((candidate) => candidate.id === operation.trackId);
+        if (!target) errors.push(`Track ${operation.trackId} not found.`);
+        else if (target.kind !== found?.track.kind)
+          errors.push(
+            `Track ${operation.trackId} cannot host ${found?.clip.kind ?? 'this'} clips.`,
+          );
+      }
+      if (operation.kind === 'trim' && operation.endUs <= operation.startUs)
+        errors.push(`Operation ${operation.id} endUs must be after startUs.`);
+      if (operation.kind === 'trim' && operation.endUs - operation.startUs < minimumFrame)
+        errors.push(`Operation ${operation.id} duration is shorter than one project frame.`);
+    }
+    if (errors.length > 0) return errors;
+    const preview = new CliJoyAgentToolBridge(structuredClone(this.project), this.revision);
+    preview.stagedTimeline = [...this.stagedTimeline, ...operations];
+    preview.stagedDocument = [...this.stagedDocument];
+    return preview.applyStaged().errors;
+  }
+
+  private validateDocumentProposal(operations: readonly JoyDocumentOperation[]): string[] {
+    const root = this.project.compositions[this.project.rootCompositionId];
+    if (!root) return ['Project has no root composition.'];
+    const tracks = root.tracks;
+    const knownIds = new Set([
+      ...this.stagedTimeline.map((operation) => operation.id),
+      ...this.stagedDocument.map((operation) => operation.id),
+      ...Object.keys(this.project.captionDocuments ?? {}),
+    ]);
+    const errors: string[] = [];
+    const minimumFrame = oneFrameUs(root.frameRate.num, root.frameRate.den);
+    for (const operation of operations) {
+      if (knownIds.has(operation.id))
+        errors.push(`Operation or document id ${operation.id} already exists.`);
+      knownIds.add(operation.id);
+      if (operation.kind === 'create-text') {
+        if (operation.durationUs < minimumFrame)
+          errors.push(`Text ${operation.id} duration is shorter than one project frame.`);
+        if (operation.x !== undefined && Math.abs(operation.x) > 0.4)
+          errors.push(`Text ${operation.id} x must be in editor units from -0.4 to 0.4.`);
+        if (operation.y !== undefined && Math.abs(operation.y) > 0.4)
+          errors.push(`Text ${operation.id} y must be in editor units from -0.4 to 0.4.`);
+        if (operation.trackId) {
+          const track = tracks.find((candidate) => candidate.id === operation.trackId);
+          if (!track) errors.push(`Track ${operation.trackId} not found.`);
+          else if (track.kind !== 'video' && track.kind !== 'caption')
+            errors.push(`Track ${operation.trackId} cannot host caption text.`);
+        }
+      } else if (
+        operation.kind === 'set-text' &&
+        !this.project.visualObjects?.[operation.objectId]
+      ) {
+        errors.push(`Object ${operation.objectId} not found.`);
+      } else if (operation.kind === 'set-text') {
+        errors.push(`set-text for ${operation.objectId} is not rendered by the CLI.`);
+      } else if (operation.kind === 'set-property') {
+        const object = this.project.visualObjects?.[operation.objectId];
+        if (!object) errors.push(`Object ${operation.objectId} not found.`);
+        else if (object.kind === 'text')
+          errors.push(`Text property ${operation.property} is not rendered by the CLI.`);
+        else if (!['opacity', 'x', 'y', 'scale', 'rotation'].includes(operation.property))
+          errors.push(`Property ${operation.property} is not writable for ${object.kind}.`);
+        else if (typeof operation.value !== 'number' || !Number.isFinite(operation.value))
+          errors.push(`Property ${operation.property} requires a finite numeric value.`);
+      } else if (operation.kind === 'add-effect') {
+        errors.push('add-effect is not supported by the CLI renderer yet.');
+      }
+    }
+    if (errors.length > 0) return errors;
+    const preview = new CliJoyAgentToolBridge(structuredClone(this.project), this.revision);
+    preview.stagedTimeline = [...this.stagedTimeline];
+    preview.stagedDocument = [...this.stagedDocument, ...operations];
+    return preview.applyStaged().errors;
   }
 
   async submitPlan(): Promise<unknown> {
@@ -291,6 +420,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
         applied: result.errors.length === 0,
         appliedCount: result.appliedCount,
         errors: result.errors,
+        notes: result.notes,
         placementSummary: result.placementSummary,
       };
     }
@@ -315,6 +445,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
       return this.lastApplyResult;
     const current = structuredClone(this.project);
     const errors: string[] = [];
+    const notes: string[] = [];
     let appliedCount = 0;
 
     const root = current.compositions[current.rootCompositionId];
@@ -323,6 +454,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
         updatedProject: current,
         appliedCount: 0,
         errors: ['Missing root composition'],
+        notes,
         placementSummary: summarizePlacements(current),
       };
     }
@@ -510,15 +642,19 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
     for (const op of this.stagedDocument) {
       try {
         if (op.kind === 'create-text') {
-          let track = op.trackId
+          const requestedTrack = op.trackId
             ? tracks.find((candidate) => candidate.id === op.trackId)
-            : tracks.find((candidate) => candidate.kind === 'caption');
-          if (track && track.kind !== 'caption') {
-            errors.push(`unsupported: text needs a caption track (${op.trackId}).`);
-            continue;
-          }
+            : undefined;
+          let track =
+            requestedTrack?.kind === 'video'
+              ? tracks.find((candidate) => candidate.kind === 'caption')
+              : (requestedTrack ?? tracks.find((candidate) => candidate.kind === 'caption'));
+          if (requestedTrack?.kind === 'video')
+            notes.push(
+              `Text operation ${op.id} rerouted from video track ${requestedTrack.id} to a caption track.`,
+            );
           if (!track) {
-            if (op.trackId) {
+            if (op.trackId && requestedTrack === undefined) {
               errors.push(`unsupported: caption track ${op.trackId} was not found.`);
               continue;
             }
@@ -540,6 +676,9 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
             };
             tracks.push(captionTrack);
             track = captionTrack;
+            if (requestedTrack?.kind === 'video')
+              notes[notes.length - 1] =
+                `Text operation ${op.id} rerouted from video track ${requestedTrack.id} to new caption track ${captionTrack.id}.`;
           }
           if (!resolveTextFont()) {
             errors.push('unsupported: no usable font found; set JOY_FONT or install DejaVu Sans.');
@@ -624,6 +763,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
         updatedProject: this.project,
         appliedCount: 0,
         errors,
+        notes,
         placementSummary: summarizePlacements(this.project),
       };
     }
@@ -634,6 +774,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
       updatedProject: current,
       appliedCount,
       errors,
+      notes,
       placementSummary: summarizePlacements(current),
     };
     return this.lastApplyResult;
@@ -647,7 +788,8 @@ function summarizePlacements(project: JoyProjectV1): AppliedTimelineSummary {
     (track) =>
       track.enabled !== false &&
       track.family !== 'audio' &&
-      (track.kind === 'video' || track.kind === 'caption'),
+      (track.kind === 'video' || track.kind === 'caption') &&
+      track.clips.length > 0,
   );
   const clips: AppliedTimelineSummary['clips'][number][] = [];
   const gaps: AppliedTimelineSummary['gaps'][number][] = [];
@@ -703,4 +845,10 @@ function summarizePlacements(project: JoyProjectV1): AppliedTimelineSummary {
   if (coveredUntil < root.durationUs)
     blackRegions.push({ startUs: coveredUntil, endUs: root.durationUs });
   return { clips, gaps, blackRegions };
+}
+
+function oneFrameUs(frameRateNumerator: number, frameRateDenominator: number): number {
+  if (frameRateNumerator <= 0 || frameRateDenominator <= 0)
+    throw new RangeError('Project frame rate must be positive.');
+  return Math.ceil((1_000_000 * frameRateDenominator) / frameRateNumerator);
 }

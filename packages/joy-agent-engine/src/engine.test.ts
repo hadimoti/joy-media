@@ -141,6 +141,69 @@ describe('JOY Agent bounded model loop', () => {
     });
   });
 
+  it('returns a proposal validation error to the model and accepts its retry', async () => {
+    const createText = {
+      kind: 'create-text',
+      id: 'retry-text',
+      text: 'Retry this caption',
+      startUs: 0,
+      durationUs: 1_000_000,
+      dependsOn: [],
+    };
+    const promptSnapshots: string[] = [];
+    let modelStep = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        modelStep += 1;
+        promptSnapshots.push(JSON.stringify(options.prompt));
+        const responseContent =
+          modelStep <= 2
+            ? {
+                type: 'tool-call' as const,
+                toolCallId: `proposal-${modelStep}`,
+                toolName: 'propose_document_operations',
+                input: JSON.stringify({ operations: [createText] }),
+              }
+            : modelStep === 3
+              ? {
+                  type: 'tool-call' as const,
+                  toolCallId: 'submit-plan',
+                  toolName: 'submit_plan',
+                  input: '{}',
+                }
+              : { type: 'text' as const, text: 'The model can say anything here.' };
+        return {
+          content: [responseContent],
+          finishReason: {
+            unified: responseContent.type === 'tool-call' ? 'tool-calls' : 'stop',
+            raw: responseContent.type === 'tool-call' ? 'tool_calls' : 'stop',
+          },
+          usage: {
+            inputTokens: { total: 2, noCache: 2, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 1, text: 1, reasoning: undefined },
+          },
+          warnings: [],
+        };
+      },
+    });
+    let proposals = 0;
+    const retryBridge: JoyAgentToolBridge = {
+      ...bridge,
+      proposeDocumentOperations: async () => {
+        proposals += 1;
+        return proposals === 1
+          ? { accepted: false, errors: ['Text duration must be at least one frame.'] }
+          : { accepted: true, staged: true };
+      },
+    };
+    const engine = new JoyAgentEngine({ model, bridge: retryBridge });
+
+    await engine.run(request);
+
+    expect(proposals).toBe(2);
+    expect(promptSnapshots[1]).toContain('Text duration must be at least one frame.');
+  });
+
   it('sends read_frame output as an image_url user part after its tool result', async () => {
     const requests: Array<Record<string, unknown>> = [];
     const fetchStub = async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {

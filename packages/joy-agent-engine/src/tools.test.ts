@@ -102,18 +102,29 @@ describe('JOY Agent tool catalog', () => {
     const execute = (
       tools.propose_timeline_operations as { execute: (input: unknown) => Promise<unknown> }
     ).execute;
+    const rejected = await execute({
+      operations: [{ ...insert('bad-op'), headers: {} }],
+    });
+    expect(rejected).toMatchObject({ accepted: false, retryable: true });
+    expect(propose).not.toHaveBeenCalled();
     await execute({ operations: [insert('op-1')] });
     expect(propose).toHaveBeenCalledWith({ operations: [insert('op-1')] });
     const inputSchema = (
       tools.propose_timeline_operations as { inputSchema: { parse: (input: unknown) => unknown } }
     ).inputSchema;
-    expect(() => inputSchema.parse({ operations: [{ ...insert('op-1'), headers: {} }] })).toThrow();
+    expect(() =>
+      inputSchema.parse({ operations: [{ ...insert('op-1'), headers: {} }] }),
+    ).not.toThrow();
     expect((tools.propose_timeline_operations as { description: string }).description).toContain(
       'does not move the clip on the timeline',
     );
     expect((tools.propose_timeline_operations as { description: string }).description).toContain(
       'separate move operation',
     );
+    const textDescription = (tools.propose_document_operations as { description: string })
+      .description;
+    expect(textDescription).toContain('x and y are editor-normalized frame fractions');
+    expect(textDescription).toContain('10 seconds = 10000000');
   });
 
   it('exposes bounded domain tools without granting them a default executor', async () => {
