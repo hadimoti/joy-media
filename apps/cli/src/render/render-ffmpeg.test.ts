@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   copyFileSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -23,6 +24,8 @@ describe('CLI ffmpeg render', () => {
     'removes private text files when ffmpeg fails to start',
     async () => {
       const dir = mkdtempSync(join(tmpdir(), 'joy-render-text-failure-'));
+      const textTempRoot = join(dir, 'text-temp');
+      mkdirSync(textTempRoot);
       const projectPath = join(dir, 'text-project.json');
       const outDir = join(dir, 'out');
       const project = createDefaultProject('Text render failure', { width: 320, height: 240 });
@@ -47,17 +50,30 @@ describe('CLI ffmpeg render', () => {
       });
       writeFileSync(projectPath, JSON.stringify(project));
       const previousFfmpeg = process.env.JOY_FFMPEG;
-      const before = readdirSync(tmpdir()).filter((name) => name.startsWith('joy-media-text-'));
+      const previousTempEnvironment = {
+        TMPDIR: process.env.TMPDIR,
+        TMP: process.env.TMP,
+        TEMP: process.env.TEMP,
+      };
       process.env.JOY_FFMPEG = join(dir, 'missing ffmpeg executable');
+      process.env.TMPDIR = textTempRoot;
+      process.env.TMP = textTempRoot;
+      process.env.TEMP = textTempRoot;
       try {
+        expect(tmpdir()).toBe(textTempRoot);
         expect(
           await runCli(['render', '--project', projectPath, '--preset', 'mp4', '--out', outDir]),
         ).toBe(1);
       } finally {
         if (previousFfmpeg === undefined) delete process.env.JOY_FFMPEG;
         else process.env.JOY_FFMPEG = previousFfmpeg;
-        const after = readdirSync(tmpdir()).filter((name) => name.startsWith('joy-media-text-'));
-        expect(after).toEqual(before);
+        for (const [key, value] of Object.entries(previousTempEnvironment)) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+        expect(
+          readdirSync(textTempRoot).filter((name) => name.startsWith('joy-media-text-')),
+        ).toEqual([]);
         rmSync(dir, { recursive: true, force: true });
       }
     },
