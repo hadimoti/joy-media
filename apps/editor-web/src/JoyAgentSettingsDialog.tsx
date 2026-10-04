@@ -14,6 +14,7 @@ import { ALL_TOOL_CAPABILITIES } from '@joy-media/agent-tools';
 import type { AgentPolicyPreferences } from './agent-policy-settings.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type {
+  ByokSessionConfig,
   ByokSessionStatus,
   DualBrainConfig,
   JoyAgentMediaCapabilityReport,
@@ -418,6 +419,8 @@ export function JoyAgentSettingsDialog({
     try {
       openRouterKey = openRouterKeyRef.current?.value.trim() ?? '';
       kiloKey = kiloKeyRef.current?.value.trim() ?? '';
+      const typedOpenRouterKey = openRouterKey;
+      const typedKiloKey = kiloKey;
 
       // Dual-Brain always sends each key to the provider's fixed trusted
       // endpoint, so a saved key may only come from a profile saved for exactly
@@ -447,6 +450,52 @@ export function JoyAgentSettingsDialog({
         } catch {
           /* ignore */
         }
+      }
+
+      if (!openRouterKey && !kiloKey) {
+        const message = 'Enter at least one provider key to connect JOY Agent.';
+        setConnectionNotice({ kind: 'error', message });
+        onNotice?.(message, 'error');
+        return;
+      }
+
+      if (!openRouterKey || !kiloKey) {
+        const provider = openRouterKey ? 'openrouter' : 'kilo';
+        const other = openRouterKey ? 'Kilo' : 'OpenRouter';
+        const key = openRouterKey || kiloKey;
+        const singleConfig: ByokSessionConfig =
+          provider === 'openrouter'
+            ? {
+                provider,
+                baseUrl: 'https://openrouter.ai/api/v1',
+                modelId: DEFAULT_OPENROUTER_MODEL,
+                apiKey: key,
+              }
+            : {
+                provider,
+                baseUrl: KILO_GATEWAY_BASE_URL,
+                modelId:
+                  kiloProf && KILO_MODEL_PRESETS.some(({ id }) => id === kiloProf.modelId)
+                    ? kiloProf.modelId
+                    : DEFAULT_KILO_MODEL,
+                apiKey: key,
+              };
+        await engineClient.configure(singleConfig);
+        const tested = await engineClient.testConnection();
+        const singleStatus: ByokSessionStatus = {
+          ...tested,
+          provider,
+          modelId: singleConfig.modelId,
+        };
+        setConnectionStatus(singleStatus);
+        onStatusChange?.(singleStatus);
+        const message = `Dual-Brain needs both keys; running single-brain on ${provider}. Add a ${other} key to enable Dual-Brain.`;
+        setConnectionNotice({
+          kind: tested.capability === 'incompatible' ? 'error' : 'success',
+          message,
+        });
+        onNotice?.(message, tested.capability === 'incompatible' ? 'error' : 'success');
+        return;
       }
 
       const dualConfig: DualBrainConfig = {
@@ -526,6 +575,43 @@ export function JoyAgentSettingsDialog({
       const kind = bothUsable ? 'success' : 'error';
       setConnectionNotice({ kind, message });
       onNotice?.(message, kind);
+
+      if (isDesktopHost() && redactedStatus.dualBrain) {
+        const workhorseReady = redactedStatus.dualBrain.workhorse.capability !== 'incompatible';
+        const creativeReady = redactedStatus.dualBrain.creative.capability !== 'incompatible';
+        if ((typedOpenRouterKey && workhorseReady) || (typedKiloKey && creativeReady)) {
+          const savedOpenRouter = profiles.find(
+            (profile) =>
+              profile.provider === 'openrouter' && profile.baseUrl === dualConfig.workhorse.baseUrl,
+          );
+          const savedKilo = profiles.find(
+            (profile) =>
+              profile.provider === 'kilo' &&
+              canonicalKiloBaseUrl(profile.baseUrl) === KILO_GATEWAY_BASE_URL,
+          );
+          if (typedOpenRouterKey && workhorseReady) {
+            await saveDesktopProviderProfile({
+              ...(savedOpenRouter ? { id: savedOpenRouter.id } : {}),
+              name: 'Dual-Brain Workhorse',
+              provider: 'openrouter',
+              baseUrl: dualConfig.workhorse.baseUrl,
+              modelId: dualConfig.workhorse.modelId,
+              apiKey: typedOpenRouterKey,
+            });
+          }
+          if (typedKiloKey && creativeReady) {
+            await saveDesktopProviderProfile({
+              ...(savedKilo ? { id: savedKilo.id } : {}),
+              name: 'Dual-Brain Creative',
+              provider: 'kilo',
+              baseUrl: dualConfig.creative.baseUrl,
+              modelId: dualConfig.creative.modelId,
+              apiKey: typedKiloKey,
+            });
+          }
+          await loadProfiles();
+        }
+      }
     } catch (error) {
       const rawMessage =
         error instanceof Error ? error.message : 'Unable to connect Dual-Brain Studio';

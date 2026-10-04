@@ -18,6 +18,7 @@ import {
 } from './protocol.js';
 import type { JoyAgentHostToolName } from './host-tool-contract.js';
 import type { ObservationTransferEvidenceResolver } from './observation-transfer-service.js';
+import { createFallbackRunIterator } from './dual-brain-fallback.js';
 import {
   createPrivateObservationPortBind,
   isPrivateObservationWorkerToMainMessage,
@@ -1020,10 +1021,28 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
         workhorseClient = createSingleWorkerEngineClient(workerFactory);
         creativeClient = createSingleWorkerEngineClient(workerFactory);
 
-        const [wStatus, cStatus] = await Promise.all([
+        const [workhorseResult, creativeResult] = await Promise.allSettled([
           workhorseClient.configure(config.workhorse),
           creativeClient.configure(config.creative),
         ]);
+        const wStatus =
+          workhorseResult.status === 'fulfilled'
+            ? workhorseResult.value
+            : {
+                provider: config.workhorse.provider,
+                modelId: config.workhorse.modelId,
+                capability: 'incompatible' as const,
+                message: safeConfigureError(workhorseResult.reason, config.workhorse.apiKey),
+              };
+        const cStatus =
+          creativeResult.status === 'fulfilled'
+            ? creativeResult.value
+            : {
+                provider: config.creative.provider,
+                modelId: config.creative.modelId,
+                capability: 'incompatible' as const,
+                message: safeConfigureError(creativeResult.reason, config.creative.apiKey),
+              };
 
         const capability = dualBrainCapability(wStatus.capability, cStatus.capability);
 
@@ -1110,14 +1129,32 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
             request.prompt,
           );
 
-        const primary = isCreativeTask ? creativeClient : workhorseClient;
-        const fallback = isCreativeTask ? workhorseClient : creativeClient;
-
+        const preferred = isCreativeTask ? creativeClient : workhorseClient;
+        const alternate = isCreativeTask ? workhorseClient : creativeClient;
+        const preferredRole = isCreativeTask ? 'creative' : 'workhorse';
+        const alternateRole = isCreativeTask ? 'workhorse' : 'creative';
+        const brainStatus = currentStatus?.dualBrain;
+        const preferredIncompatible = brainStatus?.[preferredRole].capability === 'incompatible';
+        const alternateIncompatible = brainStatus?.[alternateRole].capability === 'incompatible';
+        const primary = preferredIncompatible && !alternateIncompatible ? alternate : preferred;
+        const fallback = primary === preferred ? alternate : preferred;
+        const primaryClient = primary;
+        const fallbackIsIncompatible =
+          primary === preferred ? alternateIncompatible : preferredIncompatible;
+        let primaryIterator: JoyAgentRunIterator;
         try {
-          return primary.startRun(request, runHost, lifecycleHooks);
+          primaryIterator = primary.startRun(request, runHost, lifecycleHooks);
         } catch {
+          if (fallbackIsIncompatible)
+            throw new Error('Configured provider could not start the run');
           return fallback.startRun(request, runHost, lifecycleHooks);
         }
+        if (fallbackIsIncompatible) return primaryIterator;
+        return createFallbackRunIterator(
+          primaryIterator,
+          () => fallback.startRun(request, runHost, lifecycleHooks),
+          () => primaryClient.cancel(request.runId),
+        );
       }
 
       if (!singleClient) throw new Error('Configure a model connection first');
@@ -1187,4 +1224,13 @@ function dualBrainCapability(
   if (workhorse === 'incompatible' || creative === 'incompatible') return 'incompatible';
   if (workhorse === 'plan-only' && creative === 'plan-only') return 'plan-only';
   return 'untested';
+}
+
+function safeConfigureError(error: unknown, apiKey: string): string {
+  const message = error instanceof Error ? error.message : 'Provider setup failed';
+  let safe = message
+    .replace(/Bearer\s+\S+/gi, 'Bearer [Redacted]')
+    .replace(/sk-[A-Za-z0-9_-]{8,}/g, '[Redacted]');
+  if (apiKey) safe = safe.split(apiKey).join('[Redacted]');
+  return safe.slice(0, 300);
 }

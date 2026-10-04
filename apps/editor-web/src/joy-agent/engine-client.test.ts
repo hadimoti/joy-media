@@ -124,6 +124,58 @@ async function configuredClient(): Promise<{
 }
 
 describe('JOY Agent Engine client V2 lifecycle', () => {
+  it('keeps the healthy brain configured when the other brain rejects setup', async () => {
+    let created = 0;
+    const workers: FakeWorker[] = [];
+    const factory = () => {
+      const worker = new FakeWorker();
+      workers.push(worker);
+      created += 1;
+      if (created === 2) {
+        const post = worker.postMessage.bind(worker);
+        worker.postMessage = (message: unknown) => {
+          if (isMainMessage(message) && message.type === 'configure')
+            throw new Error('sk-test-REDACTED-0000 setup failed');
+          post(message);
+        };
+      }
+      return worker as unknown as Worker;
+    };
+    const engineClient = createJoyAgentEngineClient(factory);
+    const status = await engineClient.configure({
+      mode: 'dual-brain',
+      workhorse: {
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'openrouter/free',
+        apiKey: 'sk-test-REDACTED-0000',
+      },
+      creative: {
+        provider: 'kilo',
+        baseUrl: 'https://api.kilo.ai/api/gateway',
+        modelId: 'byteplus-coding/dola-seed-2.0-pro',
+        apiKey: 'sk-test-REDACTED-0000',
+      },
+    });
+
+    expect(status.dualBrain?.workhorse.capability).toBe('untested');
+    expect(status.dualBrain?.creative.capability).toBe('incompatible');
+    expect(status.dualBrain?.creative.message).not.toContain('sk-test-REDACTED-0000');
+    engineClient.startRun(
+      {
+        runId: 'healthy-workhorse',
+        taskKind: 'joy-code',
+        prompt: 'summarize project',
+        baseRevision: 'r1',
+        mode: 'tool-loop',
+        context: {},
+      },
+      { methods: hostMethods },
+    );
+    expect(workers[0]?.messages).toContainEqual(expect.objectContaining({ type: 'run' }));
+    expect(workers[1]?.messages).not.toContainEqual(expect.objectContaining({ type: 'run' }));
+  });
+
   it('mints an epoch, strips structured context, and routes only matching host RPC', async () => {
     const { worker, client } = await configuredClient();
     const cancelled = vi.fn();
