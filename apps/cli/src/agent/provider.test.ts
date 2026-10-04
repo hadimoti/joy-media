@@ -15,7 +15,13 @@ function isolateConfig(): void {
   tempHome = mkdtempSync(join(tmpdir(), 'joy-provider-test-'));
   vi.stubEnv('USERPROFILE', tempHome);
   vi.stubEnv('HOME', tempHome);
-  for (const key of ['KILO_API_KEY', 'OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY']) {
+  for (const key of [
+    'KILO_API_KEY',
+    'OPENROUTER_API_KEY',
+    'OPENAI_API_KEY',
+    'ANTHROPIC_API_KEY',
+    'JOY_MEDIA_SESSION_TOKEN',
+  ]) {
     vi.stubEnv(key, '');
   }
 }
@@ -52,11 +58,11 @@ describe('effective BYOK provider configuration', () => {
     },
   ])(
     'resolves $name consistently for display and provider creation',
-    ({ env, provider, source }) => {
+    async ({ env, provider, source }) => {
       isolateConfig();
       for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
       const description = describeEffectiveConfig();
-      const resolved = resolveByokConfig();
+      const resolved = await resolveByokConfig();
       expect(description).toMatchObject({ provider, source });
       expect(description.modelId).toBe(resolved.modelId);
       expect(description.baseUrl).toBe(resolved.baseUrl);
@@ -66,12 +72,70 @@ describe('effective BYOK provider configuration', () => {
     },
   );
 
-  it('uses the BytePlus creative preset for a Kilo provider', () => {
+  it('uses the BytePlus creative preset for a Kilo provider', async () => {
     isolateConfig();
-    const resolved = resolveByokConfig({ provider: 'kilo', apiKey: 'k' });
+    const resolved = await resolveByokConfig({ provider: 'kilo', apiKey: 'k' });
     expect(resolved).toMatchObject({
       baseUrl: KILO_GATEWAY_BASE_URL,
       modelId: 'byteplus-coding/dola-seed-2.0-pro',
     });
+  });
+
+  it('uses the Anthropic endpoint and model default', () => {
+    isolateConfig();
+    expect(describeEffectiveConfig({ provider: 'anthropic' })).toMatchObject({
+      baseUrl: 'https://api.anthropic.com/v1/',
+      modelId: 'claude-sonnet-4-5',
+    });
+  });
+
+  it('requires explicit base URLs for unknown providers', () => {
+    isolateConfig();
+    expect(() => describeEffectiveConfig({ provider: 'foo' })).toThrow(
+      'Provider "foo" needs --base-url',
+    );
+  });
+
+  it('resolves JOY hosted from a stubbed default catalog and env token', async () => {
+    isolateConfig();
+    vi.stubEnv('JOY_MEDIA_SESSION_TOKEN', 'session-test-REDACTED');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          models: [{ id: 'joy-model-test', isDefault: true }],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    try {
+      const resolved = await resolveByokConfig({ provider: 'joy-hosted' });
+      expect(resolved).toMatchObject({
+        provider: 'joy-hosted',
+        baseUrl: 'https://joyst.ir/api/v1/agent',
+        modelId: 'joy-model-test',
+        apiKey: 'session-test-REDACTED',
+      });
+      await resolveByokConfig({ provider: 'joy-hosted' });
+      expect(fetchSpy).toHaveBeenCalledOnce();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('reports a clear missing JOY hosted session token error', async () => {
+    isolateConfig();
+    await expect(resolveByokConfig({ provider: 'joy-hosted' })).rejects.toThrow(
+      'run joy-media login or set JOY_MEDIA_SESSION_TOKEN',
+    );
+  });
+
+  it('does not route Anthropic or Kilo to api.openai.com', () => {
+    isolateConfig();
+    expect(() =>
+      describeEffectiveConfig({ provider: 'anthropic', baseUrl: 'https://api.openai.com/v1' }),
+    ).toThrow();
+    expect(() =>
+      describeEffectiveConfig({ provider: 'kilo', baseUrl: 'https://api.openai.com/v1' }),
+    ).toThrow();
   });
 });

@@ -7,6 +7,9 @@ import { handleProjectCommand } from './commands/project-cmd.js';
 import { handleRenderCommand } from './commands/render-cmd.js';
 import { handleTimelineCommand } from './commands/timeline-cmd.js';
 import { handleWorkerCommand } from './commands/worker-cmd.js';
+import { printAgentHelp } from './commands/agent-cmd.js';
+import { printTimelineHelp } from './commands/timeline-cmd.js';
+import { printRenderHelp } from './commands/render-cmd.js';
 import {
   FlagValidationError,
   NUMERIC_RANGES,
@@ -22,6 +25,7 @@ export interface CliFlags {
   provider: string | undefined;
   model: string | undefined;
   apiKey: string | undefined;
+  apiKeyEnv: string | undefined;
   baseUrl: string | undefined;
   output: string | undefined;
   width: number | undefined;
@@ -98,6 +102,7 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     provider: typeof v.provider === 'string' ? v.provider : undefined,
     model: typeof v.model === 'string' ? v.model : undefined,
     apiKey: typeof v['api-key'] === 'string' ? v['api-key'] : undefined,
+    apiKeyEnv: typeof v['api-key-env'] === 'string' ? v['api-key-env'] : undefined,
     baseUrl:
       typeof v['base-url'] === 'string'
         ? v['base-url']
@@ -145,6 +150,7 @@ export async function runCli(argv: string[]): Promise<number> {
         provider: { type: 'string' },
         model: { type: 'string', short: 'm' },
         'api-key': { type: 'string' },
+        'api-key-env': { type: 'string' },
         'base-url': { type: 'string' },
         url: { type: 'string', short: 'u' },
         output: { type: 'string', short: 'o' },
@@ -183,7 +189,18 @@ export async function runCli(argv: string[]): Promise<number> {
     return 0;
   }
 
-  if (values.help || positionals.length === 0) {
+  if (values.help) {
+    const helpCommand = positionals[0];
+    if (helpCommand === 'agent') printAgentHelp();
+    else if (helpCommand === 'timeline') printTimelineHelp();
+    else if (helpCommand === 'render') printRenderHelp();
+    else if (helpCommand === 'asset')
+      console.log('Asset commands are not available in this CLI build.');
+    else printHelp();
+    return 0;
+  }
+
+  if (positionals.length === 0) {
     printHelp();
     return 0;
   }
@@ -220,6 +237,11 @@ export async function runCli(argv: string[]): Promise<number> {
         return await handleBenchmarkCommand(subArgs, flags);
       case 'doctor':
         return await handleDoctorCommand();
+      case 'login':
+        logWarn(
+          'Interactive JOY login is not implemented yet. Set JOY_MEDIA_SESSION_TOKEN to use the hosted provider.',
+        );
+        return 1;
       case 'help':
         printHelp();
         return 0;

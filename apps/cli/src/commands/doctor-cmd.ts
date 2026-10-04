@@ -95,14 +95,14 @@ export async function handleDoctorCommand(): Promise<number> {
   }
 
   // 7. Joy Agent BYOK Configuration
-  const byok = resolveByokConfig();
-  if (byok.apiKey && byok.apiKey !== 'not-provided') {
+  const byok = await resolveByokConfig().catch(() => undefined);
+  if (byok?.apiKey && byok.apiKey !== 'not-provided') {
     logSuccess(
       `Joy Agent Provider: ${c(byok.provider, 'bold')} (${c(byok.modelId, 'cyan')}) [API Key Configured]`,
     );
   } else {
     logWarn(
-      `Joy Agent Provider: ${byok.provider} (${byok.modelId}) [No API Key configured - set OPENROUTER_API_KEY]`,
+      `Joy Agent Provider: ${byok?.provider ?? 'openrouter'} (${byok?.modelId ?? 'openrouter/free'}) [No API Key configured - set OPENROUTER_API_KEY]`,
     );
   }
 

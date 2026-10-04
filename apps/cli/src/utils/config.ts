@@ -2,6 +2,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { chmodPrivate, protectSecret, type ProtectedSecret } from './secret-store.js';
 
 export interface CliConfig {
   activeProvider?: string | undefined;
@@ -14,6 +15,8 @@ export interface AiProviderConfig {
   name?: string | undefined;
   provider?: string | undefined;
   apiKey?: string | undefined;
+  apiKeyEnv?: string | undefined;
+  apiKeyProtected?: ProtectedSecret | undefined;
   baseUrl?: string | undefined;
   defaultModel?: string | undefined;
   cachedModels?: string[] | undefined;
@@ -52,7 +55,8 @@ export function loadCliConfig(): CliConfig {
 
 export function saveCliConfig(config: CliConfig): void {
   const path = getCliConfigPath();
-  writeFileSync(path, JSON.stringify(config, null, 2), 'utf8');
+  writeFileSync(path, JSON.stringify(config, null, 2), { encoding: 'utf8', mode: 0o600 });
+  chmodPrivate(path);
 }
 
 export function loadAiProviders(): Record<string, AiProviderConfig> {
@@ -60,7 +64,20 @@ export function loadAiProviders(): Record<string, AiProviderConfig> {
   if (!existsSync(path)) return {};
   try {
     const raw = readFileSync(path, 'utf8');
-    return JSON.parse(raw) as Record<string, AiProviderConfig>;
+    const providers = JSON.parse(raw) as Record<string, AiProviderConfig>;
+    let migrated = false;
+    for (const provider of Object.values(providers)) {
+      if (provider.apiKey && !provider.apiKeyProtected && !provider.apiKeyEnv) {
+        provider.apiKeyProtected = protectSecret(provider.apiKey);
+        delete provider.apiKey;
+        migrated = true;
+      }
+    }
+    if (migrated) {
+      console.info('Migrated saved provider credentials to protected storage.');
+      saveAiProviders(providers);
+    }
+    return providers;
   } catch {
     return {};
   }
@@ -68,7 +85,8 @@ export function loadAiProviders(): Record<string, AiProviderConfig> {
 
 export function saveAiProviders(providers: Record<string, AiProviderConfig>): void {
   const path = getAiProvidersPath();
-  writeFileSync(path, JSON.stringify(providers, null, 2), 'utf8');
+  writeFileSync(path, JSON.stringify(providers, null, 2), { encoding: 'utf8', mode: 0o600 });
+  chmodPrivate(path);
 }
 
 export function setAiProvider(name: string, config: AiProviderConfig): void {

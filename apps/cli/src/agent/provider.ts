@@ -7,15 +7,18 @@ import {
   isRetiredModelId,
   KILO_GATEWAY_BASE_URL,
   OPENROUTER_BASE_URL,
+  JOY_HOSTED_BASE_URL as DEFAULT_JOY_HOSTED_BASE_URL,
   type ByokSessionConfig,
 } from '@joy-media/joy-agent-engine';
 import type { LanguageModel } from 'ai';
 import { loadAiProviders, loadCliConfig } from '../utils/config.js';
+import { unprotectSecret } from '../utils/secret-store.js';
 
 export interface ResolveProviderOptions {
   readonly provider?: string | undefined;
   readonly model?: string | undefined;
   readonly apiKey?: string | undefined;
+  readonly apiKeyEnv?: string | undefined;
   readonly baseUrl?: string | undefined;
 }
 
@@ -31,7 +34,38 @@ const ENV_PROVIDER_PRIORITY = [
   ['OPENROUTER_API_KEY', 'openrouter'],
   ['OPENAI_API_KEY', 'openai'],
   ['ANTHROPIC_API_KEY', 'anthropic'],
+  ['JOY_MEDIA_SESSION_TOKEN', 'joy-hosted'],
 ] as const;
+
+let joyHostedModelCache:
+  { readonly baseUrl: string; readonly expiresAt: number; readonly modelId: string } | undefined;
+
+export async function getJoyHostedDefaultModel(
+  baseUrl = DEFAULT_JOY_HOSTED_BASE_URL,
+  apiKey?: string,
+): Promise<string> {
+  if (
+    joyHostedModelCache &&
+    joyHostedModelCache.baseUrl === baseUrl &&
+    joyHostedModelCache.expiresAt > Date.now()
+  ) {
+    return joyHostedModelCache.modelId;
+  }
+  const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/models`, {
+    headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+  });
+  if (!response.ok) throw new Error(`JOY hosted model catalog returned HTTP ${response.status}`);
+  const payload = (await response.json()) as {
+    models?: Array<{ id?: unknown; isDefault?: unknown }>;
+  };
+  const modelId = payload.models?.find(
+    (model) => model.isDefault === true && typeof model.id === 'string',
+  )?.id;
+  if (typeof modelId !== 'string' || !modelId)
+    throw new Error('JOY hosted catalog has no default model');
+  joyHostedModelCache = { baseUrl, modelId, expiresAt: Date.now() + 60 * 60 * 1000 };
+  return modelId;
+}
 
 export function describeEffectiveConfig(
   options: ResolveProviderOptions = {},
@@ -64,7 +98,7 @@ export function describeEffectiveConfig(
     (configuredModel && !isRetiredModelId(configuredModel) ? configuredModel : undefined) ??
     safeProviderModel ??
     defaultModelFor(provider) ??
-    (provider === 'anthropic' ? 'claude-3-7-sonnet-20250219' : 'gpt-4o');
+    (provider === 'anthropic' ? 'claude-sonnet-4-5' : 'gpt-4o');
 
   let baseUrl =
     options.baseUrl ?? cliConfig.customBaseUrl ?? aiProviders[provider]?.baseUrl ?? undefined;
@@ -72,21 +106,56 @@ export function describeEffectiveConfig(
     if (provider === 'kilo') baseUrl = KILO_GATEWAY_BASE_URL;
     else if (provider === 'openrouter') baseUrl = OPENROUTER_BASE_URL;
     else if (provider === 'lm-studio') baseUrl = 'http://127.0.0.1:1234/v1';
-    else baseUrl = 'https://api.openai.com/v1';
+    else if (provider === 'openai') baseUrl = 'https://api.openai.com/v1';
+    else if (provider === 'anthropic') baseUrl = 'https://api.anthropic.com/v1/';
+    else if (provider === 'joy-hosted') baseUrl = DEFAULT_JOY_HOSTED_BASE_URL;
+    else throw new Error(`Provider "${provider}" needs --base-url`);
   }
   if (provider === 'kilo') baseUrl = canonicalKiloBaseUrl(baseUrl);
+  if (
+    (provider === 'anthropic' || provider === 'kilo') &&
+    new URL(baseUrl).origin === 'https://api.openai.com'
+  ) {
+    throw new Error(`Provider "${provider}" cannot use the OpenAI API origin`);
+  }
 
   return { provider, modelId, baseUrl, source };
 }
 
-export function resolveByokConfig(options: ResolveProviderOptions = {}): ByokSessionConfig {
-  const effective = describeEffectiveConfig(options);
+export async function resolveByokConfig(
+  options: ResolveProviderOptions = {},
+): Promise<ByokSessionConfig> {
+  let effective = describeEffectiveConfig(options);
   const aiProviders = loadAiProviders();
   let apiKey = options.apiKey;
   if (!apiKey) {
-    const keyEnv = ENV_PROVIDER_PRIORITY.find(([, name]) => name === effective.provider)?.[0];
+    const keyEnv =
+      options.apiKeyEnv ??
+      aiProviders[effective.provider]?.apiKeyEnv ??
+      ENV_PROVIDER_PRIORITY.find(([, name]) => name === effective.provider)?.[0];
     if (keyEnv && process.env[keyEnv]) apiKey = process.env[keyEnv];
-    else apiKey = aiProviders[effective.provider]?.apiKey;
+    else {
+      const saved = aiProviders[effective.provider];
+      apiKey =
+        saved?.apiKey ??
+        (saved?.apiKeyProtected ? unprotectSecret(saved.apiKeyProtected) : undefined);
+    }
+  }
+  if (effective.provider === 'joy-hosted' && !apiKey) {
+    throw new Error(
+      'JOY hosted provider needs a session token; run joy-media login or set JOY_MEDIA_SESSION_TOKEN',
+    );
+  }
+  if (
+    effective.provider === 'joy-hosted' &&
+    !options.model &&
+    !loadCliConfig().defaultModel &&
+    !aiProviders[effective.provider]?.defaultModel
+  ) {
+    effective = {
+      ...effective,
+      modelId: await getJoyHostedDefaultModel(effective.baseUrl, apiKey),
+    };
   }
 
   const actualProviderType =
@@ -96,14 +165,16 @@ export function resolveByokConfig(options: ResolveProviderOptions = {}): ByokSes
       : effective.provider === 'openrouter'
         ? 'openrouter'
         : effective.provider);
-  const normalizedProvider: 'openrouter' | 'openai-compatible' | 'kilo' | 'custom' =
+  const normalizedProvider: 'joy-hosted' | 'openrouter' | 'openai-compatible' | 'kilo' | 'custom' =
     actualProviderType === 'openrouter'
       ? 'openrouter'
       : actualProviderType === 'kilo'
         ? 'kilo'
-        : actualProviderType === 'custom'
-          ? 'custom'
-          : 'openai-compatible';
+        : actualProviderType === 'joy-hosted'
+          ? 'joy-hosted'
+          : actualProviderType === 'custom'
+            ? 'custom'
+            : 'openai-compatible';
 
   return normalizeByokSessionConfig({
     provider: normalizedProvider,
