@@ -68,6 +68,8 @@ mv "$TEMP_WEB_STAGE" "$ACCOUNT_WEB_TARGET"
 log "Account Web SPA successfully deployed to $ACCOUNT_WEB_TARGET"
 
 log "Step 4/6: Building and deploying API release via deploy-cutover.sh"
+node "$REPO_DIR/tooling/ops/smoke-gateway.mjs" --pre-cutover ||
+  die "Pre-cutover Joy Model gateway smoke failed"
 bash "$SCRIPT_DIR/deploy-cutover.sh" || die "deploy-cutover.sh failed"
 
 log "Step 5/6: Applying Nginx lean boundary"
