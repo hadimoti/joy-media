@@ -341,7 +341,9 @@ import {
   closeDesktopWindow,
 } from './desktop-client.js';
 import { createJoyAgentEngineClient } from './joy-agent/engine-client.js';
-import { canonicalKiloBaseUrl } from '@joy-media/joy-agent-engine';
+import { canonicalKiloBaseUrl, JOY_HOSTED_BASE_URL } from '@joy-media/joy-agent-engine';
+import { chooseJoyAgentRestoreTarget } from './joy-agent/restore-target.js';
+import { fetchJoyHostedDefaultModel } from './joy-hosted.js';
 import type { ByokSessionStatus } from './joy-agent/protocol.js';
 import { createJoyAgentContextSnapshot } from './joy-agent/context-snapshot.js';
 import { runCreativeBriefTask } from './joy-agent/entry-points.js';
@@ -440,7 +442,7 @@ import {
   ZoomInIcon,
 } from './icons.js';
 import { logoutJoySession, probeJoySession, type JoySessionState } from './identity.js';
-import { getStoredMediaToken } from './media-session.js';
+import { getStoredMediaToken, MEDIA_SESSION_CHANGED_EVENT } from './media-session.js';
 import { DesktopAccountModal } from './DesktopAccountModal.js';
 import {
   markCompletedExportCacheUnavailable,
@@ -1138,9 +1140,39 @@ function EditorWorkspace({
     let cancelled = false;
     void listDesktopProviderProfiles()
       .then(async (profiles) => {
-        if (cancelled || profiles.length === 0) return;
-        const profile = profiles.find((p) => p.provider === 'openrouter') ?? profiles[0];
-        if (!profile) return;
+        if (cancelled) return;
+        const token = getStoredMediaToken(window.localStorage);
+        let lastPreset: 'dual-brain' | 'joy-hosted' | 'custom' | undefined;
+        try {
+          const storedPreset = window.localStorage.getItem('joy-agent-last-preset');
+          if (
+            storedPreset === 'dual-brain' ||
+            storedPreset === 'joy-hosted' ||
+            storedPreset === 'custom'
+          )
+            lastPreset = storedPreset;
+        } catch {
+          // Treat unavailable local storage as no explicit preset.
+        }
+        const target = chooseJoyAgentRestoreTarget({
+          profiles,
+          ...(token === undefined ? {} : { token }),
+          ...(lastPreset === undefined ? {} : { lastPreset }),
+        });
+        if (target.kind === 'joy-hosted') {
+          const modelId = await fetchJoyHostedDefaultModel();
+          if (cancelled || !joyAgentEngineClientRef.current) return;
+          const restoredStatus = await joyAgentEngineClientRef.current.configure({
+            provider: 'joy-hosted',
+            baseUrl: JOY_HOSTED_BASE_URL,
+            modelId,
+            apiKey: target.token,
+          });
+          if (!cancelled) setAgentConnectionStatus(restoredStatus);
+          return;
+        }
+        if (target.kind !== 'profile') return;
+        const profile = target.profile;
         const profileBaseUrl =
           profile.provider === 'kilo' ? canonicalKiloBaseUrl(profile.baseUrl) : profile.baseUrl;
         if (
@@ -1201,6 +1233,51 @@ function EditorWorkspace({
     return () => {
       cancelled = true;
     };
+  }, [agentConnectionStatus]);
+  useEffect(() => {
+    if (!isDesktopHost()) return;
+    const handleMediaSessionChange = () => {
+      const engineClient = joyAgentEngineClientRef.current;
+      const token = getStoredMediaToken(window.localStorage);
+      if (!token) {
+        if (
+          agentConnectionStatus?.provider === 'joy-hosted' ||
+          engineClient?.getStatus()?.provider === 'joy-hosted'
+        ) {
+          engineClient?.clear();
+          setAgentConnectionStatus(undefined);
+        }
+        return;
+      }
+      if (
+        agentConnectionStatus !== undefined ||
+        engineClient?.getStatus()?.provider === 'joy-hosted'
+      )
+        return;
+      let lastPreset: string | null = null;
+      try {
+        lastPreset = window.localStorage.getItem('joy-agent-last-preset');
+      } catch {
+        // An unavailable preference store has no explicit BYOK choice.
+      }
+      if (lastPreset !== null && lastPreset !== 'joy-hosted') return;
+      void fetchJoyHostedDefaultModel()
+        .then(async (modelId) => {
+          if (engineClient === null || getStoredMediaToken(window.localStorage) !== token) return;
+          const status = await engineClient.configure({
+            provider: 'joy-hosted',
+            baseUrl: JOY_HOSTED_BASE_URL,
+            modelId,
+            apiKey: token,
+          });
+          setAgentConnectionStatus(status);
+        })
+        .catch((error) => {
+          console.warn('Failed to restore Joy Model session:', error);
+        });
+    };
+    window.addEventListener(MEDIA_SESSION_CHANGED_EVENT, handleMediaSessionChange);
+    return () => window.removeEventListener(MEDIA_SESSION_CHANGED_EVENT, handleMediaSessionChange);
   }, [agentConnectionStatus]);
   // Creative Brief is a read-only task on the same page-session Worker. There
   // is no second server consent or cloud-planner opt-in state.

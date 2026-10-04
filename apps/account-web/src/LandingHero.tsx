@@ -214,9 +214,9 @@ export function LandingHero({ release, onOpenLogin }: LandingHeroProps): ReactNo
             <div className="feature-icon">🤖</div>
             <h3>Dual AI Agent Studio</h3>
             <p>
-              Keyless curated intelligence via Joy Model Gateway, or bring your own API keys
-              (OpenRouter, OpenAI-compatible) stored securely inside the Windows DPAPI encrypted
-              vault.
+              Sign in with a JOY account and active Pro subscription to use Joy Model, or bring your
+              own API keys (OpenRouter, OpenAI-compatible) stored securely inside the Windows DPAPI
+              encrypted vault.
             </p>
           </div>
 

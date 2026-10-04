@@ -30,7 +30,13 @@ import {
   beginDesktopProviderSession,
   type DesktopProviderProfile,
 } from './desktop-client.js';
-import { getStoredMediaToken } from './media-session.js';
+import { getStoredMediaToken, MEDIA_SESSION_CHANGED_EVENT } from './media-session.js';
+import {
+  fetchJoyHostedDefaultModel,
+  fetchJoyHostedSubscriptionState,
+  joyHostedGatewayErrorMessage,
+  type JoyHostedSubscriptionState,
+} from './joy-hosted.js';
 import { DesktopAccountModal } from './DesktopAccountModal.js';
 import {
   acknowledgeCustomEndpoint,
@@ -50,6 +56,28 @@ type AgentSettingsNotice = {
   readonly kind: 'info' | 'success' | 'error';
   readonly message: string;
 };
+
+type StudioPreset = 'dual-brain' | 'joy-hosted' | 'custom';
+
+function readLastStudioPreset(): StudioPreset | undefined {
+  if (typeof window === 'undefined') return undefined;
+  try {
+    const value = window.localStorage.getItem('joy-agent-last-preset');
+    return value === 'dual-brain' || value === 'joy-hosted' || value === 'custom'
+      ? value
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function persistLastStudioPreset(preset: StudioPreset): void {
+  try {
+    if (typeof window !== 'undefined') window.localStorage.setItem('joy-agent-last-preset', preset);
+  } catch {
+    // Preset persistence is a convenience and may be unavailable in private browsing.
+  }
+}
 
 const MODES: Readonly<Record<AgentExecutionMode, string>> = {
   'suggest-only': 'Suggest only',
@@ -177,33 +205,39 @@ export function JoyAgentSettingsDialog({
       status?.provider === 'openai-compatible' ||
       status?.provider === 'kilo'
       ? status.provider
-      : 'openrouter',
+      : readLastStudioPreset() === 'joy-hosted'
+        ? 'joy-hosted'
+        : 'openrouter',
   );
   const [baseUrl, setBaseUrl] = useState(
     status?.provider === 'openai-compatible'
       ? ''
       : status?.provider === 'joy-hosted'
         ? JOY_HOSTED_BASE_URL
-        : status?.provider === 'kilo'
-          ? KILO_GATEWAY_BASE_URL
-          : 'https://openrouter.ai/api/v1',
+        : readLastStudioPreset() === 'joy-hosted'
+          ? JOY_HOSTED_BASE_URL
+          : status?.provider === 'kilo'
+            ? KILO_GATEWAY_BASE_URL
+            : 'https://openrouter.ai/api/v1',
   );
   const [modelId, setModelId] = useState(
     status?.modelId && !isRetiredModelId(status.modelId)
       ? status.modelId
-      : (defaultModelFor(status?.provider ?? 'openrouter') ?? ''),
+      : readLastStudioPreset() === 'joy-hosted'
+        ? ''
+        : (defaultModelFor(status?.provider ?? 'openrouter') ?? ''),
   );
   const [connectionName, setConnectionName] = useState('');
   const [customDisclosure, setCustomDisclosure] = useState(false);
   const [working, setWorking] = useState(false);
-  const [studioPreset, setStudioPreset] = useState<'dual-brain' | 'joy-hosted' | 'custom'>(
+  const [studioPreset, setStudioPreset] = useState<StudioPreset>(
     status?.provider === 'dual-brain'
       ? 'dual-brain'
       : status?.provider === 'joy-hosted'
         ? 'joy-hosted'
         : status?.provider === 'openai-compatible'
           ? 'custom'
-          : 'dual-brain',
+          : (readLastStudioPreset() ?? 'dual-brain'),
   );
   const [connectionStatus, setConnectionStatus] = useState(status);
   const [connectionNotice, setConnectionNotice] = useState<AgentSettingsNotice | undefined>();
@@ -224,6 +258,37 @@ export function JoyAgentSettingsDialog({
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
+  const [joyHostedDefaultModel, setJoyHostedDefaultModel] = useState('');
+  const [joyHostedSubscriptionState, setJoyHostedSubscriptionState] =
+    useState<JoyHostedSubscriptionState>('signed-out');
+
+  useEffect(() => {
+    let current = true;
+    void fetchJoyHostedDefaultModel()
+      .then((model) => {
+        if (current) {
+          setJoyHostedDefaultModel(model);
+          setModelId((existing) => (provider === 'joy-hosted' && !existing ? model : existing));
+        }
+      })
+      .catch(() => {});
+    const refreshSubscription = () => {
+      const token =
+        typeof window === 'undefined' ? undefined : getStoredMediaToken(window.localStorage);
+      setJoyHostedSubscriptionState(token ? 'unavailable' : 'signed-out');
+      void fetchJoyHostedSubscriptionState(token).then((state) => {
+        if (current) setJoyHostedSubscriptionState(state);
+      });
+    };
+    refreshSubscription();
+    if (typeof window !== 'undefined')
+      window.addEventListener(MEDIA_SESSION_CHANGED_EVENT, refreshSubscription);
+    return () => {
+      current = false;
+      if (typeof window !== 'undefined')
+        window.removeEventListener(MEDIA_SESSION_CHANGED_EVENT, refreshSubscription);
+    };
+  }, [provider]);
 
   // Media capability probe state
   const [mediaCapabilities, setMediaCapabilities] = useState<
@@ -271,15 +336,27 @@ export function JoyAgentSettingsDialog({
       if (openRouterProfile) {
         setSavedProfile(openRouterProfile);
         setHasSavedKey(true);
-        setStudioPreset('custom');
-        setModelId(
-          isRetiredModelId(openRouterProfile.modelId)
-            ? (defaultModelFor(openRouterProfile.provider) ?? DEFAULT_OPENROUTER_MODEL)
-            : openRouterProfile.modelId,
-        );
-        setBaseUrl(openRouterProfile.baseUrl);
-        setProvider('openrouter');
-        setCustomDisclosure(false);
+        const lastPreset = readLastStudioPreset();
+        const mediaToken = getStoredMediaToken(window.localStorage);
+        if (!lastPreset && !mediaToken) {
+          setStudioPreset('custom');
+          setModelId(
+            isRetiredModelId(openRouterProfile.modelId)
+              ? (defaultModelFor(openRouterProfile.provider) ?? DEFAULT_OPENROUTER_MODEL)
+              : openRouterProfile.modelId,
+          );
+          setBaseUrl(openRouterProfile.baseUrl);
+          setProvider('openrouter');
+          setCustomDisclosure(false);
+        } else if (lastPreset === 'custom') {
+          setModelId(
+            isRetiredModelId(openRouterProfile.modelId)
+              ? (defaultModelFor(openRouterProfile.provider) ?? DEFAULT_OPENROUTER_MODEL)
+              : openRouterProfile.modelId,
+          );
+          setBaseUrl(openRouterProfile.baseUrl);
+          setProvider('openrouter');
+        }
       }
     } catch {
       /* Ignore profile read error in background */
@@ -333,7 +410,7 @@ export function JoyAgentSettingsDialog({
       }
     } else if (next === 'joy-hosted') {
       setBaseUrl(JOY_HOSTED_BASE_URL);
-      setModelId('');
+      setModelId(joyHostedDefaultModel);
     } else {
       setBaseUrl('');
     }
@@ -636,19 +713,47 @@ export function JoyAgentSettingsDialog({
     }
   };
 
-  const connect = async () => {
+  const connect = async (override?: {
+    readonly provider?: 'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible';
+    readonly token?: string;
+    readonly baseUrl?: string;
+    readonly modelId?: string;
+  }) => {
     if (working) return;
-    const normalizedBaseUrl = normalizeProviderBaseUrl(baseUrl);
+    const connectionProvider = override?.provider ?? provider;
+    const mediaToken =
+      override?.token ??
+      (typeof window !== 'undefined' ? getStoredMediaToken(window.localStorage) : undefined);
+    if (connectionProvider === 'joy-hosted' && !mediaToken) {
+      const message = 'Sign in to your JOY account to use Joy Model.';
+      setConnectionNotice({ kind: 'info', message });
+      onNotice?.(message, 'info');
+      return;
+    }
+    const connectionBaseUrl = override?.baseUrl ?? baseUrl;
+    const normalizedBaseUrl = normalizeProviderBaseUrl(connectionBaseUrl);
+    let connectionModelId = override?.modelId ?? modelId;
+    if (connectionProvider === 'joy-hosted' && !override?.modelId && !connectionModelId) {
+      try {
+        connectionModelId = joyHostedDefaultModel || (await fetchJoyHostedDefaultModel());
+        setJoyHostedDefaultModel(connectionModelId);
+      } catch {
+        const message = 'Joy Model catalog is temporarily unavailable. Try again shortly.';
+        setConnectionNotice({ kind: 'error', message });
+        onNotice?.(message, 'error');
+        return;
+      }
+    }
     const matchingSavedProfile =
       savedProfile &&
-      (provider === 'openai-compatible'
+      (connectionProvider === 'openai-compatible'
         ? isCustomEndpointProvider(savedProfile.provider)
-        : savedProfile.provider === provider) &&
+        : savedProfile.provider === connectionProvider) &&
       normalizeProviderBaseUrl(savedProfile.baseUrl) === normalizedBaseUrl
         ? savedProfile
         : undefined;
     if (
-      requiresCustomEndpointConsent(provider, normalizedBaseUrl) &&
+      requiresCustomEndpointConsent(connectionProvider, normalizedBaseUrl) &&
       !requireCustomEndpointAcknowledgement({
         provider: 'custom',
         baseUrl: normalizedBaseUrl,
@@ -660,7 +765,7 @@ export function JoyAgentSettingsDialog({
       onNotice?.(message, 'error');
       return;
     }
-    if (studioPreset === 'dual-brain' && provider !== 'openai-compatible') {
+    if (!override && studioPreset === 'dual-brain' && connectionProvider !== 'openai-compatible') {
       void connectDualBrain();
       return;
     }
@@ -670,17 +775,17 @@ export function JoyAgentSettingsDialog({
     setDiscoveryError(null);
 
     let key = keyRef.current?.value.trim() ?? '';
-    const normalizedModelId = modelId.trim();
+    const normalizedModelId = connectionModelId.trim();
     const savedProfileMatches = Boolean(
       savedProfile &&
       savedProfile.id &&
-      (provider === 'openai-compatible'
+      (connectionProvider === 'openai-compatible'
         ? isCustomEndpointProvider(savedProfile.provider)
-        : savedProfile.provider === provider) &&
+        : savedProfile.provider === connectionProvider) &&
       normalizeProviderBaseUrl(savedProfile.baseUrl) === normalizedBaseUrl,
     );
     if (
-      provider !== 'joy-hosted' &&
+      connectionProvider !== 'joy-hosted' &&
       !key &&
       hasSavedKey &&
       savedProfile?.id &&
@@ -697,7 +802,7 @@ export function JoyAgentSettingsDialog({
       }
     }
 
-    if (provider === 'openai-compatible') {
+    if (connectionProvider === 'openai-compatible') {
       const missing: string[] = [];
       if (!key)
         missing.push(
@@ -708,7 +813,7 @@ export function JoyAgentSettingsDialog({
       if (!normalizedModelId) missing.push('a model ID');
       if (!normalizedBaseUrl) missing.push('a base URL');
       if (
-        requiresCustomEndpointConsent(provider, normalizedBaseUrl) &&
+        requiresCustomEndpointConsent(connectionProvider, normalizedBaseUrl) &&
         !requireCustomEndpointAcknowledgement({
           provider: 'custom',
           baseUrl: normalizedBaseUrl,
@@ -725,7 +830,7 @@ export function JoyAgentSettingsDialog({
       }
     }
 
-    if (provider !== 'joy-hosted' && !key) {
+    if (connectionProvider !== 'joy-hosted' && !key) {
       const message =
         savedProfile?.id && !savedProfileMatches
           ? 'The saved API key belongs to a different provider or endpoint. Enter a new API key to connect.'
@@ -751,9 +856,9 @@ export function JoyAgentSettingsDialog({
     }
 
     try {
-      if (isDesktopHost() && provider !== 'joy-hosted' && key) {
+      if (isDesktopHost() && connectionProvider !== 'joy-hosted' && key) {
         const saved = await saveDesktopProviderProfile({
-          provider: provider === 'openai-compatible' ? 'custom' : provider,
+          provider: connectionProvider === 'openai-compatible' ? 'custom' : connectionProvider,
           name: connectionName.trim() || undefined,
           baseUrl: normalizedBaseUrl,
           modelId: normalizedModelId,
@@ -766,37 +871,39 @@ export function JoyAgentSettingsDialog({
         }
       }
 
-      let sessionKey = key;
-      if (provider === 'joy-hosted') {
-        const mediaToken =
-          typeof window !== 'undefined' ? getStoredMediaToken(window.localStorage) : undefined;
-        sessionKey = mediaToken ?? 'joy-hosted-default';
-      }
+      const sessionKey = connectionProvider === 'joy-hosted' ? mediaToken! : key;
 
-      assertCustomEndpointConsentHolds(provider, normalizedBaseUrl, savedProfile?.id);
+      assertCustomEndpointConsentHolds(connectionProvider, normalizedBaseUrl, savedProfile?.id);
       await engineClient.configure({
-        provider,
+        provider: connectionProvider,
         baseUrl: normalizedBaseUrl,
         modelId: normalizedModelId,
         apiKey: sessionKey,
       });
 
       const next = await engineClient.testConnection();
+      const mappedGatewayError =
+        connectionProvider === 'joy-hosted'
+          ? joyHostedGatewayErrorMessage(next.message ?? '')
+          : undefined;
       const safeStatus =
         next.capability === 'incompatible'
           ? {
               ...next,
-              message: redactProviderError(
-                next.message ?? 'The provider responded, but JOY could not use its tool loop.',
-                key,
-              ),
+              message:
+                mappedGatewayError ??
+                redactProviderError(
+                  next.message ?? 'The provider responded, but JOY could not use its tool loop.',
+                  key,
+                ),
             }
           : next;
       setConnectionStatus(safeStatus);
       onStatusChange?.(safeStatus);
 
-      const message =
-        next.capability === 'tool-loop'
+      const message = mappedGatewayError
+        ? mappedGatewayError
+        : next.capability === 'tool-loop'
           ? 'Connected successfully. JOY is ready to edit in this session.'
           : next.capability === 'plan-only'
             ? 'Connected successfully in plan-only mode. Creative Brief is ready in this session.'
@@ -806,16 +913,19 @@ export function JoyAgentSettingsDialog({
       onNotice?.(message, kind);
     } catch (error) {
       const rawMessage = error instanceof Error ? error.message : 'Unable to configure connection';
-      const safeMessage = redactProviderError(rawMessage, key);
+      const safeMessage =
+        (connectionProvider === 'joy-hosted'
+          ? joyHostedGatewayErrorMessage(rawMessage)
+          : undefined) ?? redactProviderError(rawMessage, key);
       const message = `Connection failed: ${safeMessage}`;
       setConnectionStatus({
-        provider,
+        provider: connectionProvider,
         modelId: normalizedModelId,
         capability: 'incompatible',
         message: safeMessage,
       });
       onStatusChange?.({
-        provider,
+        provider: connectionProvider,
         modelId: normalizedModelId,
         capability: 'incompatible',
         message: safeMessage,
@@ -1086,6 +1196,7 @@ export function JoyAgentSettingsDialog({
                     className={`joy-preset-tab ${studioPreset === 'dual-brain' ? 'is-active' : ''}`}
                     onClick={() => {
                       setStudioPreset('dual-brain');
+                      persistLastStudioPreset('dual-brain');
                       setProvider('openrouter');
                       setBaseUrl('https://openrouter.ai/api/v1');
                       setModelId(DEFAULT_OPENROUTER_MODEL);
@@ -1105,6 +1216,7 @@ export function JoyAgentSettingsDialog({
                     className={`joy-preset-tab ${studioPreset === 'joy-hosted' ? 'is-active' : ''}`}
                     onClick={() => {
                       setStudioPreset('joy-hosted');
+                      persistLastStudioPreset('joy-hosted');
                       handleProviderChange('joy-hosted');
                     }}
                   >
@@ -1119,6 +1231,7 @@ export function JoyAgentSettingsDialog({
                     className={`joy-preset-tab ${studioPreset === 'custom' ? 'is-active' : ''}`}
                     onClick={() => {
                       setStudioPreset('custom');
+                      persistLastStudioPreset('custom');
                     }}
                   >
                     <span className="joy-preset-icon">🛠️</span>
@@ -1301,11 +1414,16 @@ export function JoyAgentSettingsDialog({
                         {provider === 'joy-hosted' ? (
                           <div className="joy-settings-field-full joy-settings-pro-card">
                             <p style={{ margin: 0, fontSize: '13px', color: '#ffb020' }}>
-                              ⚡ Included with your active JOY Pro subscription.
+                              {joyHostedSubscriptionState === 'active'
+                                ? 'Active JOY Pro subscription'
+                                : joyHostedSubscriptionState === 'not-subscribed'
+                                  ? 'Not subscribed — Upgrade or use BYOK'
+                                  : joyHostedSubscriptionState === 'signed-out'
+                                    ? 'Signed out'
+                                    : 'Checking JOY Pro subscription…'}
                             </p>
                             <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#888' }}>
-                              Uses authenticated secure reverse-proxy via joyst.ir. No secret key
-                              required.
+                              Joy Model uses your signed-in JOY account and active Pro subscription.
                             </p>
                             {typeof window !== 'undefined' &&
                             !getStoredMediaToken(window.localStorage) ? (
@@ -2109,10 +2227,30 @@ export function JoyAgentSettingsDialog({
         isOpen={accountModalOpen}
         onClose={() => setAccountModalOpen(false)}
         onSuccess={() => {
-          setConnectionNotice({
-            kind: 'info',
-            message: 'JOY Account linked successfully! Joy Model is now ready to use.',
-          });
+          setStudioPreset('joy-hosted');
+          persistLastStudioPreset('joy-hosted');
+          handleProviderChange('joy-hosted');
+          const token = getStoredMediaToken(window.localStorage);
+          void (async () => {
+            try {
+              if (engineClient.getStatus()?.provider === 'joy-hosted') return;
+              const modelId = joyHostedDefaultModel || (await fetchJoyHostedDefaultModel());
+              setJoyHostedDefaultModel(modelId);
+              if (token) {
+                await connect({
+                  provider: 'joy-hosted',
+                  token,
+                  baseUrl: JOY_HOSTED_BASE_URL,
+                  modelId,
+                });
+              }
+            } catch {
+              setConnectionNotice({
+                kind: 'error',
+                message: 'Joy Model catalog is temporarily unavailable. Try again shortly.',
+              });
+            }
+          })();
         }}
       />
     </div>

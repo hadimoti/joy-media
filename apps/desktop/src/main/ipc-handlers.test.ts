@@ -434,9 +434,9 @@ describe('IPC dispatch', () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
-        data: [
-          { id: 'byteplus-coding/dola-seed-2.0-pro', name: 'Dola Seed 2.0 Pro' },
-          { id: 'byteplus-coding/deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
+        models: [
+          { id: 'bytedance-seed/seed-2.0-lite', displayName: 'Joy Vision' },
+          { id: 'deepseek/deepseek-v4-flash', displayName: 'Joy Fast' },
         ],
       }),
     });
@@ -453,8 +453,8 @@ describe('IPC dispatch', () => {
       expect(result).toEqual({
         ok: true,
         data: [
-          { id: 'byteplus-coding/dola-seed-2.0-pro', name: 'Dola Seed 2.0 Pro' },
-          { id: 'byteplus-coding/deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
+          { id: 'bytedance-seed/seed-2.0-lite', name: 'Joy Vision' },
+          { id: 'deepseek/deepseek-v4-flash', name: 'Joy Fast' },
         ],
       });
       expect(mockFetch).toHaveBeenCalledWith(

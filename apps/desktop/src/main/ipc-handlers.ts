@@ -277,14 +277,21 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
             error: `Provider returned status ${res.status}: ${errText.slice(0, 100)}`,
           };
         }
-        const json = (await res.json()) as { data?: unknown };
-        const rawList = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
+        const json = (await res.json()) as { data?: unknown; models?: unknown };
+        const rawList = Array.isArray(json.data)
+          ? json.data
+          : Array.isArray(json.models)
+            ? json.models
+            : Array.isArray(json)
+              ? json
+              : [];
         const models = rawList
           .map((item) => {
             if (typeof item === 'string') return { id: item, name: item };
             if (item && typeof item === 'object') {
               const id = (item as { id?: string }).id || '';
-              const name = (item as { name?: string }).name || id;
+              const model = item as { name?: string; displayName?: string };
+              const name = model.name || model.displayName || id;
               return { id, name };
             }
             return null;

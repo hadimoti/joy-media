@@ -97,6 +97,7 @@ afterEach(async () => {
   container?.remove();
   root = undefined;
   container = undefined;
+  window.localStorage.clear();
   vi.unstubAllGlobals();
   resetCustomEndpointAcknowledgementsForTests();
   delete (window as { joyDesktop?: unknown }).joyDesktop;
@@ -520,8 +521,8 @@ describe('JOY Agent Settings connection status', () => {
 
     await selectCustomPreset(rendered);
     const key = await connectWithKey(rendered);
-    const dialog = rendered.querySelector('[role="dialog"]');
-    if (dialog === null) throw new Error('Expected settings dialog');
+    const dialog = [...rendered.querySelectorAll('[role="dialog"]')].at(-1);
+    if (!dialog) throw new Error('Expected settings dialog');
 
     expect(dialog.querySelectorAll('[role="alert"]')).toHaveLength(1);
     expect(countLeafTextMatches(dialog as HTMLElement, /authentication failed/i)).toBe(1);
@@ -567,7 +568,8 @@ describe('JOY Agent Settings connection status', () => {
     });
 
     expect(rendered.textContent).toContain('Live model discovery requires Joy Media Desktop.');
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/agent/models');
     expect(rendered.textContent).not.toContain(privateKey);
   });
 
@@ -1044,6 +1046,182 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
 });
 
 describe('JOY Agent Settings desktop profile persistence', () => {
+  it('keeps the explicit Joy Hosted preset when an OpenRouter profile is present', async () => {
+    window.localStorage.setItem('joy-agent-last-preset', 'joy-hosted');
+    window.localStorage.setItem('joy-media-session-token', 'session-test');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (input: string) => {
+        if (input.endsWith('/v1/agent/models'))
+          return new Response(
+            JSON.stringify({ models: [{ id: 'bytedance-seed/seed-2.0-lite', isDefault: true }] }),
+            { status: 200 },
+          );
+        return new Response(JSON.stringify({ data: { status: 'active' } }), { status: 200 });
+      }),
+    );
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list'],
+      invoke: vi.fn().mockResolvedValue([
+        {
+          id: 'prof-or-1',
+          provider: 'openrouter',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          modelId: 'openrouter/free',
+          createdAt: '2026-09-15T00:00:00.000Z',
+          updatedAt: '2026-09-15T00:00:00.000Z',
+        },
+      ]),
+    };
+    const rendered = await render(client());
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(rendered.querySelector<HTMLSelectElement>('select')?.value).toBe('joy-hosted');
+    expect(rendered.textContent).toContain('Active JOY Pro subscription');
+  });
+
+  it('shows the live unsubscribed state returned by the JOY account API', async () => {
+    window.localStorage.setItem('joy-media-session-token', 'session-test');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (input: string) => {
+        if (input.endsWith('/v1/agent/models'))
+          return new Response(
+            JSON.stringify({ models: [{ id: 'bytedance-seed/seed-2.0-lite', isDefault: true }] }),
+            { status: 200 },
+          );
+        return new Response(JSON.stringify({ data: { status: 'none' } }), { status: 200 });
+      }),
+    );
+    const rendered = await render(client());
+    await act(async () => {
+      buttonByText(rendered, 'Joy Hosted Pro Gateway').click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(rendered.textContent).toContain('Not subscribed — Upgrade or use BYOK');
+  });
+
+  it('maps hosted gateway error codes to actionable notices', async () => {
+    window.localStorage.setItem('joy-media-session-token', 'session-test');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (input: string) => {
+        if (input.endsWith('/v1/agent/models'))
+          return new Response(
+            JSON.stringify({ models: [{ id: 'bytedance-seed/seed-2.0-lite', isDefault: true }] }),
+            { status: 200 },
+          );
+        return new Response(JSON.stringify({ data: { status: 'active' } }), { status: 200 });
+      }),
+    );
+    const engineClient = client({
+      configure: vi.fn().mockRejectedValue(new Error('JOY_SUBSCRIPTION_REQUIRED')),
+    });
+    const rendered = await render(engineClient);
+    await act(async () => {
+      buttonByText(rendered, 'Joy Hosted Pro Gateway').click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+    expect(rendered.textContent).toContain(
+      'Joy Model needs an active JOY Pro subscription. Switch to Dual-Brain/BYOK.',
+    );
+    expect(engineClient.configure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'joy-hosted',
+        modelId: 'bytedance-seed/seed-2.0-lite',
+        apiKey: 'session-test',
+      }),
+    );
+  });
+
+  it('shows the server configuration notice when Joy Model is not configured', async () => {
+    window.localStorage.setItem('joy-media-session-token', 'session-test');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (input: string) => {
+        if (input.endsWith('/v1/agent/models'))
+          return new Response(
+            JSON.stringify({
+              models: [{ id: 'bytedance-seed/seed-2.0-lite', isDefault: true }],
+            }),
+            { status: 200 },
+          );
+        return new Response(JSON.stringify({ data: { status: 'active' } }), { status: 200 });
+      }),
+    );
+    const rendered = await render(
+      client({ configure: vi.fn().mockRejectedValue(new Error('JOY_AGENT_UNCONFIGURED')) }),
+    );
+    await act(async () => {
+      buttonByText(rendered, 'Joy Hosted Pro Gateway').click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+    expect(rendered.textContent).toContain(
+      'Joy Model is temporarily unavailable on the server (not configured).',
+    );
+  });
+
+  it('configures the catalog default model after successful JOY account sign-in', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (input: string) => {
+        if (input.endsWith('/v1/agent/models'))
+          return new Response(
+            JSON.stringify({ models: [{ id: 'bytedance-seed/seed-2.0-lite', isDefault: true }] }),
+            { status: 200 },
+          );
+        if (input.endsWith('/v1/auth/request-otp'))
+          return new Response(JSON.stringify({ data: { message: 'Code sent' } }), { status: 200 });
+        if (input.endsWith('/v1/auth/verify-otp'))
+          return new Response(JSON.stringify({ data: { token: 'session-after-login' } }), {
+            status: 200,
+          });
+        if (input.endsWith('/v1/account/subscription'))
+          return new Response(JSON.stringify({ data: { status: 'active' } }), { status: 200 });
+        return new Response(JSON.stringify({ data: {} }), { status: 200 });
+      }),
+    );
+    const engineClient = client();
+    const rendered = await render(engineClient);
+    await act(async () => {
+      buttonByText(rendered, 'Joy Hosted Pro Gateway').click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      buttonByText(rendered, '🔑 Sign In with JOY Account to Activate').click();
+    });
+    const dialog = [...rendered.querySelectorAll('[role="dialog"]')].at(-1);
+    if (!dialog) throw new Error('Expected JOY account dialog');
+    const contact = dialog.querySelector<HTMLInputElement>('.desktop-auth-input');
+    if (contact === null) throw new Error('Expected account email input');
+    await act(async () => {
+      setInputValue(contact, 'studio@example.test');
+      contact
+        .closest('form')
+        ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+    const otpInputs = [...dialog.querySelectorAll<HTMLInputElement>('.desktop-auth-otp-box')];
+    expect(otpInputs).toHaveLength(6);
+    await act(async () => {
+      for (const [index, input] of otpInputs.entries()) setInputValue(input, String(index + 1));
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    });
+    expect(engineClient.configure).toHaveBeenCalledWith({
+      provider: 'joy-hosted',
+      baseUrl: 'https://joyst.ir/api/v1/agent',
+      modelId: 'bytedance-seed/seed-2.0-lite',
+      apiKey: 'session-after-login',
+    });
+  });
+
   it('loads saved profile on mount when isDesktopHost is true', async () => {
     const invoke = vi.fn().mockImplementation(async (channel: string) => {
       if (channel === 'desktop.provider-profile.list') {
@@ -1172,7 +1350,7 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     });
   });
 
-  it('connects to Joy Pro gateway without requiring API key input', async () => {
+  it('does not configure Joy Model without a JOY session and offers sign-in', async () => {
     const engineClient = client();
     const rendered = await render(engineClient, undefined);
     const joyHostedPreset = buttonByText(rendered, 'Joy Hosted Pro Gateway');
@@ -1189,23 +1367,21 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     });
 
     expect(rendered.textContent).toContain('Joy Model (Built-in Pro AI)');
-    expect(rendered.textContent).toContain('Included with your active JOY Pro subscription');
+    expect(rendered.textContent).toContain('Signed out');
     expect(rendered.querySelector('input[type="password"]')).toBeNull();
-
-    const modelInput = rendered.querySelector<HTMLInputElement>('input[aria-label="Model ID"]');
-    if (modelInput === null) throw new Error('Expected editable model field');
-    setInputValue(modelInput, 'catalog-model-for-test');
 
     await act(async () => {
       buttonByText(rendered, 'Connect model').click();
       await Promise.resolve();
     });
 
-    expect(engineClient.configure).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: 'joy-hosted',
-        modelId: 'catalog-model-for-test',
-      }),
-    );
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('Sign in to your JOY account to use Joy Model');
+    expect(window.localStorage.getItem('joy-agent-last-preset')).toBe('joy-hosted');
+    await act(async () => {
+      buttonByText(rendered, '🔑 Sign In with JOY Account to Activate').click();
+      await Promise.resolve();
+    });
+    expect(rendered.textContent).toContain('Connect JOY Account');
   });
 });
