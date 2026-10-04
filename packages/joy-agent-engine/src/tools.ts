@@ -660,9 +660,13 @@ export function createJoyAgentTools(
   };
   let invalidTimelineProposals = 0;
   let invalidDocumentProposals = 0;
+  const knownTextOnlyModel =
+    options.modelId === 'openrouter/free' ||
+    KILO_MODEL_PRESETS.some((preset) => preset.id === options.modelId && !preset.vision);
   const visionCapable =
-    options.vision === true ||
-    KILO_MODEL_PRESETS.some((preset) => preset.id === options.modelId && preset.vision);
+    !knownTextOnlyModel &&
+    (options.vision === true ||
+      KILO_MODEL_PRESETS.some((preset) => preset.id === options.modelId && preset.vision));
   if (bridge.readFrame && visionCapable && options.allowFrames) {
     let frameReads = 0;
     tools.read_frame = tool({

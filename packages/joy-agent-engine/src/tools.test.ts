@@ -298,6 +298,17 @@ describe('JOY Agent tool catalog', () => {
     ).toHaveProperty('read_frame');
   });
 
+  it('does not expose frame inspection for openrouter/free even when vision is overridden', () => {
+    for (const modelId of ['openrouter/free', 'byteplus-coding/deepseek-v4-flash']) {
+      const tools = createJoyAgentTools(
+        bridge({ readFrame: async () => ({ unavailable: 'missing' }) }),
+        DEFAULT_JOY_AGENT_LIMITS,
+        { modelId, vision: true, allowFrames: true },
+      );
+      expect(tools).not.toHaveProperty('read_frame');
+    }
+  });
+
   it('caps frame reads at three and returns an unavailable result on the fourth call', async () => {
     const readFrame = vi.fn(async () => ({
       mediaType: 'image/jpeg' as const,

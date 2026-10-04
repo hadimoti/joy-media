@@ -125,6 +125,104 @@ describe('timeline clip looks', () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it('accepts add-effect flag aliases and documents how to move a trimmed clip to zero', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-timeline-aliases-'));
+    const logs: string[] = [];
+    const originalLog = console.log;
+    try {
+      const project = createDefaultProject('trim and move', { id: 'trim-move-project' });
+      (project.assets as Record<string, unknown>)['asset-default'] = {
+        id: 'asset-default',
+        kind: 'video',
+        displayName: 'asset.mp4',
+        descriptor: { durationUs: 30_000_000, mimeType: 'video/mp4', width: 1920, height: 1080 },
+      };
+      const track = project.compositions.root!.tracks[0]!;
+      (track.clips as unknown[]).push({
+        id: 'alias-clip',
+        kind: 'video',
+        assetId: 'asset-default',
+        startUs: 0,
+        durationUs: 20_000_000,
+        sourceInUs: 0,
+      });
+      const projectPath = join(directory, 'project.json');
+      writeFileSync(
+        projectPath,
+        JSON.stringify({ format: 'joy-media-project', revision: 1, project }),
+      );
+      expect(
+        await runCli([
+          'timeline',
+          'add-effect',
+          '--project',
+          projectPath,
+          '--clipId',
+          'alias-clip',
+          '--type',
+          'warm',
+        ]),
+      ).toBe(0);
+      expect(
+        await runCli([
+          'timeline',
+          'add-effect',
+          '--project',
+          projectPath,
+          '--clip-id',
+          'alias-clip',
+          '--kind',
+          'crt',
+        ]),
+      ).toBe(0);
+      expect(
+        await runCli([
+          'timeline',
+          'trim',
+          '--project',
+          projectPath,
+          '--clip',
+          'alias-clip',
+          '--start',
+          '7',
+          '--end',
+          '17',
+        ]),
+      ).toBe(0);
+      let saved = JSON.parse(readFileSync(projectPath, 'utf8')).project;
+      expect(saved.compositions.root.tracks[0].clips[0]).toMatchObject({
+        startUs: 7_000_000,
+        durationUs: 10_000_000,
+        sourceInUs: 7_000_000,
+        look: { preset: 'crt' },
+      });
+      expect(
+        await runCli([
+          'timeline',
+          'move-clip',
+          '--project',
+          projectPath,
+          '--clip',
+          'alias-clip',
+          '--start',
+          '0',
+        ]),
+      ).toBe(0);
+      saved = JSON.parse(readFileSync(projectPath, 'utf8')).project;
+      expect(saved.compositions.root.tracks[0].clips[0]).toMatchObject({
+        startUs: 0,
+        durationUs: 10_000_000,
+        sourceInUs: 7_000_000,
+      });
+      console.log = (...values: unknown[]) => logs.push(values.map(String).join(' '));
+      await runCli(['timeline', 'help']);
+      expect(logs.join('\n')).toContain('Use move-clip --start 0');
+    } finally {
+      console.log = originalLog;
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('timeline add-text layout bounds', () => {

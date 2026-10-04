@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { CaptionClipV1, TrackV1 } from '@joy-media/project-schema';
 import { createDefaultProject } from '../utils/project-loader.js';
 import { createTextClip } from '../render/text-clip.js';
-import { missingOperationCoverage, verifyPlanChecklist, verifyRequestIntent } from './joy-agent.js';
+import {
+  frameInspectionSkipNote,
+  missingOperationCoverage,
+  verifyPlanChecklist,
+  verifyRequestIntent,
+} from './joy-agent.js';
 import { truthfulAgentSummary } from './joy-agent.js';
 
 function addCaptionTrack(project: ReturnType<typeof createDefaultProject>, clips: CaptionClipV1[]) {
@@ -19,6 +24,18 @@ function addCaptionTrack(project: ReturnType<typeof createDefaultProject>, clips
   };
   (root.tracks as unknown as TrackV1[]).push(track);
 }
+
+describe('frame inspection notes', () => {
+  it('explains when frame inspection is skipped for text-only models', () => {
+    expect(frameInspectionSkipNote('openrouter/free', false)).toBe(
+      'frame inspection skipped: model has no vision',
+    );
+    expect(frameInspectionSkipNote('byteplus-coding/deepseek-v4-flash', false)).toBe(
+      'frame inspection skipped: model has no vision',
+    );
+    expect(frameInspectionSkipNote('byteplus-coding/dola-seed-2.0-pro', true)).toBeUndefined();
+  });
+});
 
 describe('truthfulAgentSummary', () => {
   it('verifies trim, centered text and look outcomes against the final project', () => {

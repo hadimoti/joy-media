@@ -66,6 +66,15 @@ export interface RunAgentOutput {
   readonly resolvedModelId?: string;
 }
 
+export function frameInspectionSkipNote(
+  modelId: string,
+  vision: boolean | undefined,
+): string | undefined {
+  return vision === false || modelId === 'openrouter/free'
+    ? 'frame inspection skipped: model has no vision'
+    : undefined;
+}
+
 export async function probeAgent(providerOptions?: ResolveProviderOptions): Promise<{
   capability: string;
   provider: string;
@@ -121,6 +130,8 @@ export async function probeAgent(providerOptions?: ResolveProviderOptions): Prom
 export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOutput> {
   const config = await resolveByokConfig(options.providerOptions);
   const model = createModelFromConfig(config);
+  const frameNote = frameInspectionSkipNote(config.modelId, config.vision);
+  const frameInspectionSkipped = frameNote !== undefined;
 
   const bridge = new CliJoyAgentToolBridge(
     options.project,
@@ -160,9 +171,10 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     modelId: config.modelId,
     allowFrames: options.allowFrames === true,
     vision:
-      options.vision === true ||
-      config.vision === true ||
-      KILO_MODEL_PRESETS.some((preset) => preset.id === config.modelId && preset.vision),
+      !frameInspectionSkipped &&
+      (options.vision === true ||
+        config.vision === true ||
+        KILO_MODEL_PRESETS.some((preset) => preset.id === config.modelId && preset.vision)),
     onEvent: eventLogger,
     ...(options.onTrace === undefined ? {} : { onTrace: options.onTrace }),
     apiKeyForRedaction: config.apiKey,
@@ -173,6 +185,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     logInfo(
       `Connecting to Joy Agent with model ${c(config.modelId, 'bold')} (${config.provider})...`,
     );
+  if (frameNote && !options.json) logInfo(`Model notes: ${frameNote}.`);
 
   const runResult = await engine.run({
     taskKind: options.taskKind ?? 'joy-code-edit',
@@ -196,7 +209,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
   let appliedCount = 0;
   let appliedOperationIds: readonly string[] = [];
   let errors: string[] = bridge.getReportedIssues();
-  let notes: string[] = [];
+  let notes: string[] = frameNote ? [frameNote] : [];
   let applied = false;
   let placementSummary: AppliedTimelineSummary | undefined;
   const checklist = bridge.getPlanChecklist();
@@ -207,7 +220,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     const applyRes = bridge.applyStaged();
     const candidateProject = applyRes.updatedProject;
     errors = [...errors, ...applyRes.errors];
-    notes = applyRes.notes;
+    notes = [...notes, ...applyRes.notes];
     placementSummary = applyRes.placementSummary;
     const requestVerification = verifyRequestIntent(candidateProject, options.prompt);
     const verification = verifyPlanChecklist(candidateProject, checklist);

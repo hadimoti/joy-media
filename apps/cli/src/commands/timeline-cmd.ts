@@ -38,7 +38,11 @@ export function printTimelineHelp(): void {
   add-text --text <text> [--track <id>] [--start <seconds>] --duration <seconds> [--x <frame-fraction> --y <frame-fraction> --direction <rtl|ltr|auto> --size <template-multiplier> --color <#RRGGBB>]
   split --clip <id> --at <seconds>
   trim --clip <id> [--start <seconds>] [--end <seconds>] [--duration <seconds>]
+  move-clip --clip <id> --start <timeline-seconds>
   remove-clip --clip <id>`);
+  console.log(
+    '  trim --start changes the clip timeline position as well as its source in-point; --start 7 --end 17 leaves it at timeline 7–17s. Use move-clip --start 0 to place it at 0 while keeping the trimmed source range.',
+  );
   console.log(
     '  Text placement: x is horizontal frame offset (0 = center, -0.4 = near left, 0.4 = near right).',
   );
@@ -46,7 +50,7 @@ export function printTimelineHelp(): void {
     '  y offsets the template bottom title line (0 = default position, negative = up, positive = down); rendering clamps y to the frame, and add-text warns if text may clip.',
   );
   console.log(
-    '  add-effect <clipId> --look <crt|bw|warm|cool> [--intensity 0..1] [--scanline-strength 0..1] [--noise-amount 0..1]',
+    '  add-effect <clipId> --look <crt|bw|warm|cool> (also --clipId/--clip-id and --type/--kind) [--intensity 0..1] [--scanline-strength 0..1] [--noise-amount 0..1]',
   );
   console.log('  clear-effect <clipId>');
 }
@@ -119,14 +123,15 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
   }
 
   if (sub === 'add-effect' || sub === 'clear-effect') {
-    const clipId = args[1] ?? flags.clip;
+    const clipId = args[1] ?? flags.clip ?? flags.clipId ?? flags.clipIdDash;
+    const look = flags.look ?? flags.kind ?? flags.type;
     if (!clipId) {
       logError(
         `Usage: joy-media timeline ${sub} <clipId> --project <id|file>${sub === 'add-effect' ? ' --look <crt|bw|warm|cool>' : ''}`,
       );
       return 1;
     }
-    if (sub === 'add-effect' && !['crt', 'bw', 'warm', 'cool'].includes(flags.look ?? '')) {
+    if (sub === 'add-effect' && !['crt', 'bw', 'warm', 'cool'].includes(look ?? '')) {
       logError('Look must be one of: crt, bw, warm, cool.');
       return 1;
     }
@@ -144,7 +149,7 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
     if (sub === 'clear-effect') delete clip.look;
     else {
       clip.look = {
-        preset: flags.look as 'crt' | 'bw' | 'warm' | 'cool',
+        preset: look as 'crt' | 'bw' | 'warm' | 'cool',
         ...(flags.intensity === undefined ? {} : { intensity: flags.intensity }),
         ...(flags.scanlineStrength === undefined
           ? {}
@@ -163,7 +168,7 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
       revision: projectInfo.revision,
     });
     logSuccess(
-      `${sub === 'add-effect' ? `Applied ${flags.look} look to` : 'Cleared look from'} ${c(clipId, 'bold')} (saved rev ${nextRev}).`,
+      `${sub === 'add-effect' ? `Applied ${look} look to` : 'Cleared look from'} ${c(clipId, 'bold')} (saved rev ${nextRev}).`,
     );
     return 0;
   }
@@ -493,6 +498,30 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
     });
 
     logSuccess(`Trimmed clip ${c(flags.clip, 'bold')} (saved rev ${nextRev}).`);
+    return 0;
+  }
+
+  if (sub === 'move-clip') {
+    if (!flags.clip || flags.start === undefined) {
+      logError(
+        'Usage: joy-media timeline move-clip --project <id> --clip <clipId> --start <seconds>',
+      );
+      return 1;
+    }
+    const clip = tracks.flatMap((track) => track.clips).find((item) => item.id === flags.clip);
+    if (!clip) {
+      logError(`Clip "${flags.clip}" not found.`);
+      return 1;
+    }
+    clip.startUs = Math.round(flags.start * 1_000_000);
+    for (const track of tracks) track.clips.sort((a, b) => a.startUs - b.startUs);
+    recomputeRootDuration(project);
+    const nextRev = saveProject(project, {
+      source: projectInfo.source,
+      path: projectInfo.path,
+      revision: projectInfo.revision,
+    });
+    logSuccess(`Moved clip ${c(flags.clip, 'bold')} to ${flags.start}s (saved rev ${nextRev}).`);
     return 0;
   }
 
