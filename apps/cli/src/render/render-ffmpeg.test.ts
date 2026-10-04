@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -15,9 +16,16 @@ import { runCli } from '../cli.js';
 import { createDefaultProject } from '../utils/project-loader.js';
 import { createTextClip } from './text-clip.js';
 import { resolveTextFont } from './text-font.js';
+import { probeFfmpegTextCapabilities } from './text-capabilities.js';
+import { resolveFfmpegExecutable } from './ffmpeg-run.js';
 
-const hasFfmpeg = spawnSync('ffmpeg', ['-version'], { shell: false }).status === 0;
+const hasFfmpeg = spawnSync(resolveFfmpegExecutable(), ['-version'], { shell: false }).status === 0;
 const hasFfprobe = spawnSync('ffprobe', ['-version'], { shell: false }).status === 0;
+const arabicFontCandidates =
+  process.platform === 'win32'
+    ? ['C:\\Windows\\Fonts\\tahoma.ttf', 'C:\\Windows\\Fonts\\arial.ttf']
+    : ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'];
+const hasArabicTestFont = arabicFontCandidates.some((font) => existsSync(font));
 
 describe('CLI ffmpeg render', () => {
   it.skipIf(!hasFfmpeg || !hasFfprobe)(
@@ -205,7 +213,7 @@ describe('CLI ffmpeg render', () => {
           text: "it's 50%: a,b;[c] x'\\:textfile=/tmp/dt/secret.txt\\:y='5",
           startUs: 0,
           durationUs: 1_000_000,
-          size: 48,
+          size: 1.5,
           color: '#ffffff',
         });
         (project.captionDocuments as Record<string, unknown>)[text.document.id] = text.document;
@@ -255,6 +263,117 @@ describe('CLI ffmpeg render', () => {
         const distinct = new Set(pixels).size;
         expect(distinct).toBeGreaterThan(2);
       } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(!hasFfmpeg || !hasFfprobe || !hasArabicTestFont)(
+    'renders Persian when ffmpeg supports shaping and reports degradation otherwise',
+    async () => {
+      const arabicFont = arabicFontCandidates.find((font) => existsSync(font))!;
+      const dir = mkdtempSync(join(tmpdir(), 'joy-render-persian-'));
+      const previousArabicFont = process.env.JOY_FONT_ARABIC;
+      process.env.JOY_FONT_ARABIC = arabicFont;
+      try {
+        const projectPath = join(dir, 'persian-project.json');
+        const outDir = join(dir, 'out');
+        const project = createDefaultProject('Persian text', { width: 320, height: 240, fps: 25 });
+        const root = project.compositions.root!;
+        (root as { durationUs: number }).durationUs = 1_000_000;
+        const texts = [
+          createTextClip({
+            id: 'persian',
+            text: 'سلام دنیا ۱۲۳',
+            startUs: 0,
+            durationUs: 1_000_000,
+          }),
+          createTextClip({ id: 'mixed', text: 'Joy مدیا 2026', startUs: 0, durationUs: 1_000_000 }),
+        ];
+        for (const text of texts) {
+          (project.captionDocuments as Record<string, unknown>)[text.document.id] = text.document;
+        }
+        (root.tracks as unknown as Array<Record<string, unknown>>).push({
+          id: 'persian-captions',
+          kind: 'caption',
+          family: 'visual',
+          name: 'Persian captions',
+          order: 3,
+          enabled: true,
+          locked: false,
+          clips: texts.map((text) => text.clip),
+        });
+        writeFileSync(projectPath, JSON.stringify(project));
+        const ffmpegExecutable = resolveFfmpegExecutable();
+        const capabilities = probeFfmpegTextCapabilities(ffmpegExecutable);
+        const result = await runCli([
+          'render',
+          '--project',
+          projectPath,
+          '--preset',
+          'mp4',
+          '--out',
+          outDir,
+        ]);
+        if (!capabilities.textShaping) {
+          expect(result).toBe(0);
+          const manifest = JSON.parse(
+            readFileSync(join(outDir, `${project.id}.mp4.manifest.json`), 'utf8'),
+          ) as { skipped: Array<{ reason: string }> };
+          expect(manifest.skipped.length).toBeGreaterThan(0);
+          expect(manifest.skipped[0]!.reason).toContain('lacks libfribidi/libharfbuzz');
+          expect(
+            await runCli([
+              'render',
+              '--project',
+              projectPath,
+              '--preset',
+              'mp4',
+              '--out',
+              join(dir, 'strict'),
+              '--strict',
+            ]),
+          ).toBe(3);
+        } else {
+          expect(result).toBe(0);
+          const manifest = JSON.parse(
+            readFileSync(join(outDir, `${project.id}.mp4.manifest.json`), 'utf8'),
+          ) as { skipped: unknown[] };
+          expect(manifest.skipped).toHaveLength(0);
+          const frame = spawnSync(
+            ffmpegExecutable,
+            [
+              '-v',
+              'error',
+              '-ss',
+              '0.5',
+              '-i',
+              join(outDir, `${project.id}.mp4`),
+              '-frames:v',
+              '1',
+              '-f',
+              'rawvideo',
+              '-pix_fmt',
+              'rgb24',
+              'pipe:1',
+            ],
+            { shell: false, encoding: 'buffer' },
+          );
+          expect(frame.status).toBe(0);
+          const pixels = frame.stdout as Buffer;
+          let brightTextAreaPixels = 0;
+          for (let y = 130; y < 240; y += 1) {
+            for (let x = 0; x < 320; x += 1) {
+              const offset = (y * 320 + x) * 3;
+              if (pixels[offset]! > 100 && pixels[offset + 1]! > 100 && pixels[offset + 2]! > 100)
+                brightTextAreaPixels += 1;
+            }
+          }
+          expect(brightTextAreaPixels).toBeGreaterThan(10);
+        }
+      } finally {
+        if (previousArabicFont === undefined) delete process.env.JOY_FONT_ARABIC;
+        else process.env.JOY_FONT_ARABIC = previousArabicFont;
         rmSync(dir, { recursive: true, force: true });
       }
     },
