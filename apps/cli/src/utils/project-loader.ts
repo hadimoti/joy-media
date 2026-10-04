@@ -23,6 +23,15 @@ export interface ProjectSummary {
   readonly durationSeconds: number;
 }
 
+export function projectContentDurationUs(project: JoyProjectV1): number {
+  const root = project.compositions[project.rootCompositionId];
+  return (root?.tracks ?? []).reduce(
+    (maximum, track) =>
+      Math.max(maximum, ...track.clips.map((clip) => clip.startUs + clip.durationUs)),
+    0,
+  );
+}
+
 export function createDefaultProject(
   title: string,
   options?:
@@ -230,10 +239,10 @@ export function listProjects(sqlitePath?: string): ProjectSummary[] {
 
         if (root) {
           trackCount = root.tracks?.length ?? 0;
-          durationUs = root.durationUs ?? 0;
           for (const track of root.tracks ?? []) {
             clipCount += track.clips?.length ?? 0;
           }
+          durationUs = projectContentDurationUs(project);
         }
 
         result.push({

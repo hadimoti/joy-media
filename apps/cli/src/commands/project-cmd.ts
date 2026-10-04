@@ -18,6 +18,7 @@ import {
   listProjects,
   loadProject,
   saveProject,
+  projectContentDurationUs,
 } from '../utils/project-loader.js';
 
 export interface ProjectCommandFlags {
@@ -63,9 +64,10 @@ export async function handleProjectCommand(args: string[], flags: CliFlags): Pro
 
   if (sub === 'create') {
     const title = args.slice(1).join(' ').trim() || 'Untitled Project';
+    const { width, height } = resolveProjectDimensions(flags);
     const project = createDefaultProject(title, {
-      width: flags.width,
-      height: flags.height,
+      width,
+      height,
       fps: flags.fps,
     });
 
@@ -79,6 +81,7 @@ export async function handleProjectCommand(args: string[], flags: CliFlags): Pro
     logSuccess(
       `Created project: ${c(project.title, 'bold')} (${c(project.id, 'cyan')}) at revision ${rev}.`,
     );
+    logStep('Resolution', `${width}x${height}`);
     return 0;
   }
 
@@ -99,7 +102,7 @@ export async function handleProjectCommand(args: string[], flags: CliFlags): Pro
       logStep('Title', res.project.title);
       logStep('Revision', String(res.revision));
       logStep('Resolution', `${root?.width ?? 1080}×${root?.height ?? 1920}`);
-      logStep('Duration', `${Math.round((root?.durationUs ?? 0) / 1_000_000)}s`);
+      logStep('Duration', `${Math.round(projectContentDurationUs(res.project) / 1_000_000)}s`);
       logStep('Assets', String(Object.keys(res.project.assets ?? {}).length));
 
       console.log(`\n  ${c('Tracks & Clips:', 'bold')}`);
@@ -194,6 +197,57 @@ export async function handleProjectCommand(args: string[], flags: CliFlags): Pro
     `Available: ${c('list', 'cyan')}, ${c('create', 'cyan')}, ${c('show', 'cyan')}, ${c('export', 'cyan')}, ${c('import', 'cyan')}`,
   );
   return 1;
+}
+
+function resolveProjectDimensions(flags: CliFlags): { width: number; height: number } {
+  const aspectSizes: Record<string, { width: number; height: number }> = {
+    '9:16': { width: 1080, height: 1920 },
+    '16:9': { width: 1920, height: 1080 },
+    '1:1': { width: 1080, height: 1080 },
+    '4:5': { width: 1080, height: 1350 },
+  };
+  let dimensions: { width: number; height: number } = {
+    width: flags.width ?? 1080,
+    height: flags.height ?? 1920,
+  };
+  if (flags.resolution) {
+    const match = /^(\d{2,5})[xX](\d{2,5})$/.exec(flags.resolution.trim());
+    if (!match)
+      throw new FlagValidationError(
+        'resolution',
+        'expected WxH, such as 1080x1920',
+        flags.resolution,
+      );
+    const resolved = { width: Number(match[1]), height: Number(match[2]) };
+    validateRange(resolved.width, NUMERIC_RANGES.width, 'resolution');
+    validateRange(resolved.height, NUMERIC_RANGES.height, 'resolution');
+    if (
+      (flags.width !== undefined && flags.width !== resolved.width) ||
+      (flags.height !== undefined && flags.height !== resolved.height)
+    )
+      throw new FlagValidationError(
+        'resolution',
+        'conflicts with --width/--height',
+        flags.resolution,
+      );
+    dimensions = resolved;
+  } else if (flags.width !== undefined || flags.height !== undefined) {
+    dimensions = { width: flags.width ?? 1080, height: flags.height ?? 1920 };
+  }
+  if (flags.aspect) {
+    const expected = aspectSizes[flags.aspect];
+    if (!expected)
+      throw new FlagValidationError('aspect', 'expected 9:16, 16:9, 1:1, or 4:5', flags.aspect);
+    if (!flags.resolution && flags.width === undefined && flags.height === undefined)
+      dimensions = expected;
+    else if (dimensions.width * expected.height !== dimensions.height * expected.width)
+      throw new FlagValidationError(
+        'aspect',
+        `does not match resolution ${dimensions.width}x${dimensions.height}`,
+        flags.aspect,
+      );
+  }
+  return dimensions;
 }
 
 function validateRange(

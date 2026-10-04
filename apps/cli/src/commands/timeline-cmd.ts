@@ -30,7 +30,8 @@ export interface TimelineCommandFlags {
 }
 
 export function printTimelineHelp(): void {
-  console.log(`Usage: joy-media timeline <add-clip|add-text|add-effect|clear-effect|split|trim|remove-clip> --project <id|file>
+  console.log(`Usage: joy-media timeline <list|add-clip|add-text|add-effect|clear-effect|split|trim|remove-clip> --project <id|file>
+  list [--json]
   add-clip --asset <id> [--track <id>] [--start <seconds>] [--duration <seconds>]
   add-text --text <text> [--track <id>] [--start <seconds>] --duration <seconds> [--x <frame-fraction> --y <frame-fraction> --size <template-multiplier> --color <#RRGGBB>]
   split --clip <id> --at <seconds>
@@ -67,6 +68,33 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
   if (!root) {
     logError('Project has no root composition.');
     return 1;
+  }
+
+  if (sub === 'list') {
+    const tracks = root.tracks.map((track) => ({
+      id: track.id,
+      kind: track.kind,
+      clips: track.clips.map((clip) => ({
+        id: clip.id,
+        kind: clip.kind,
+        startUs: clip.startUs,
+        durationUs: clip.durationUs,
+      })),
+    }));
+    if (flags.json) {
+      console.log(JSON.stringify({ projectId: project.id, tracks }, null, 2));
+      return 0;
+    }
+    console.log(`Timeline: ${project.title} (${project.id})`);
+    for (const track of tracks) {
+      console.log(`${track.id} [${track.kind}]`);
+      for (const clip of track.clips) {
+        console.log(
+          `  ${clip.id} [${clip.kind}] start=${(clip.startUs / 1_000_000).toFixed(3)}s duration=${(clip.durationUs / 1_000_000).toFixed(3)}s`,
+        );
+      }
+    }
+    return 0;
   }
 
   if (sub === 'add-effect' || sub === 'clear-effect') {

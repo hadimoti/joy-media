@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { runCli } from './cli.js';
 import { CliJoyAgentToolBridge } from './agent/bridge.js';
 import { resolveByokConfig } from './agent/provider.js';
@@ -37,6 +38,34 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     rmSync(isolatedHome, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['an unknown command', ['bogus-cmd']],
+    ['a failing command', ['project', 'show', 'missing-project-id']],
+  ])('preserves a non-zero process exit for %s', (_label, args) => {
+    const tsxPackage = readdirSync(join(process.cwd(), 'node_modules/.pnpm')).find((name) =>
+      name.startsWith('tsx@'),
+    );
+    expect(tsxPackage).toBeDefined();
+    const tsxCli = join(
+      process.cwd(),
+      'node_modules/.pnpm',
+      tsxPackage!,
+      'node_modules/tsx/dist/cli.mjs',
+    );
+    const result = spawnSync(
+      process.execPath,
+      [tsxCli, join(process.cwd(), 'apps/cli/src/bin.ts'), ...args],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        env: { ...process.env, HOME: isolatedHome, USERPROFILE: isolatedHome },
+      },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.status).not.toBe(0);
+    expect(result.status).not.toBeNull();
   });
 
   it('prints safe provider detail only when agent debug is enabled', () => {
@@ -81,6 +110,17 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       expect(output.mock.calls.flat().join('\n')).toContain('--apply');
       expect(output.mock.calls.flat().join('\n')).toContain('--allow-frames');
       expect(output.mock.calls.flat().join('\n')).toContain('--vision');
+      expect(output.mock.calls.flat().join('\n')).toContain('--base-url|--url');
+    } finally {
+      output.mockRestore();
+    }
+  });
+
+  it('supports agent help as a subcommand', async () => {
+    const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(await runCli(['agent', 'help'])).toBe(0);
+      expect(output.mock.calls.flat().join('\n')).toContain('provider add');
     } finally {
       output.mockRestore();
     }
@@ -192,14 +232,20 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     );
     const updatedProject = { ...project, title: 'Updated by agent' };
     const runSpy = vi.spyOn(joyAgentRuntime, 'runJoyAgent').mockResolvedValue({
-      resultText: 'done',
+      resultText: 'I also applied an unrelated change.',
       capability: 'tool-loop',
       steps: 1,
-      staged: { timelineOps: [], documentOps: [] },
+      staged: {
+        timelineOps: [
+          { kind: 'remove', id: 'applied-remove', clipId: 'agent-clip-1', dependsOn: [] },
+        ],
+        documentOps: [],
+      },
       applied: true,
       updatedProject,
       appliedCount: 1,
       errors: [],
+      notes: [],
       placementSummary: {
         clips: [
           {
@@ -237,6 +283,8 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       expect(saved.project.title).toBe('Updated by agent');
       const outputText = output.mock.calls.flat().join('\n');
       expect(outputText).toContain('Applied 1 operation(s) (--apply)');
+      expect(outputText).toContain('Applied 1 change(s): remove (applied-remove).');
+      expect(outputText).not.toContain('unrelated change');
       expect(outputText).toContain('Verified timeline placement');
       expect(outputText).toContain('agent-clip-1');
       expect(outputText).toContain('Black region');
@@ -256,7 +304,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       'utf8',
     );
     const runSpy = vi.spyOn(joyAgentRuntime, 'runJoyAgent').mockResolvedValue({
-      resultText: 'refused',
+      resultText: 'I successfully applied the edit.',
       capability: 'tool-loop',
       steps: 1,
       staged: { timelineOps: [], documentOps: [] },
@@ -264,8 +312,10 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       updatedProject: project,
       appliedCount: 0,
       errors: ['visualObjects.title.transform.opacity is invalid'],
+      notes: [],
     });
     const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const stdout = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     try {
       expect(
         await runCli(['agent', 'run', 'set invalid opacity', '--project', projectFile, '--apply']),
@@ -273,9 +323,13 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       const saved = JSON.parse(readFileSync(projectFile, 'utf8')) as { revision: number };
       expect(saved.revision).toBe(4);
       expect(stderr.mock.calls.flat().join('\n')).toContain('Apply refused');
+      const outputText = stdout.mock.calls.flat().join('\n');
+      expect(outputText).not.toContain('successfully applied');
+      expect(outputText).not.toContain('Staged 0 operation(s)');
     } finally {
       runSpy.mockRestore();
       stderr.mockRestore();
+      stdout.mockRestore();
     }
   });
 
@@ -295,6 +349,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       updatedProject: project,
       appliedCount: 0,
       errors: [],
+      notes: [],
     });
     const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     try {
@@ -320,6 +375,30 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
   it('runs doctor command successfully', async () => {
     const code = await runCli(['doctor']);
     expect(code).toBe(0);
+  });
+
+  it('refuses agent config --api-key with an actionable storage command', async () => {
+    const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(await runCli(['agent', 'config', '--api-key', 'sk-test-REDACTED-0000'])).toBe(1);
+      expect(stderr.mock.calls.flat().join('\n')).toContain('agent config does not store API keys');
+      expect(stderr.mock.calls.flat().join('\n')).toContain('agent provider add');
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it('does not report staged changes when the model proposed none', () => {
+    expect(
+      joyAgentRuntime.truthfulAgentSummary({
+        applyRequested: false,
+        applied: false,
+        appliedCount: 0,
+        errors: [],
+        notes: [],
+        staged: { timelineOps: [], documentOps: [] },
+      }),
+    ).toBe('No project changes were made.');
   });
 
   it('normalizes BYOK provider configuration', async () => {
@@ -353,10 +432,68 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       expect(list.length).toBe(1);
       expect(list[0]?.id).toBe(project.id);
       expect(list[0]?.title).toBe('Automated Test Project');
+      expect(list[0]?.durationSeconds).toBe(0);
 
       const loaded = loadProject(project.id, testDbPath);
       expect(loaded.project.id).toBe(project.id);
       expect(loaded.revision).toBe(1);
+    });
+
+    it('creates projects with the default portrait size or a validated selected aspect', async () => {
+      const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      try {
+        expect(
+          await runCli(['project', 'create', 'Default size', '--sqlite-path', testDbPath]),
+        ).toBe(0);
+        const defaultProject = listProjects(testDbPath).find(
+          (project) => project.title === 'Default size',
+        )!;
+        expect(loadProject(defaultProject.id, testDbPath).project.compositions.root).toMatchObject({
+          width: 1080,
+          height: 1920,
+        });
+
+        expect(
+          await runCli([
+            'project',
+            'create',
+            'Landscape size',
+            '--resolution',
+            '1920x1080',
+            '--aspect',
+            '16:9',
+            '--sqlite-path',
+            testDbPath,
+          ]),
+        ).toBe(0);
+        const landscape = listProjects(testDbPath).find(
+          (project) => project.title === 'Landscape size',
+        )!;
+        expect(loadProject(landscape.id, testDbPath).project.compositions.root).toMatchObject({
+          width: 1920,
+          height: 1080,
+        });
+        expect(output.mock.calls.flat().join('\n')).toContain('Resolution: 1920x1080');
+
+        expect(
+          await runCli([
+            'project',
+            'create',
+            'Mismatched size',
+            '--resolution',
+            '1080x1920',
+            '--aspect',
+            '16:9',
+            '--sqlite-path',
+            testDbPath,
+          ]),
+        ).not.toBe(0);
+        expect(
+          listProjects(testDbPath).some((project) => project.title === 'Mismatched size'),
+        ).toBe(false);
+      } finally {
+        output.mockRestore();
+      }
     });
 
     it('executes project CLI subcommands (list, show, export, import)', async () => {
@@ -502,6 +639,8 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
           '1',
           '--duration',
           '2',
+          '--y',
+          '-0.2',
           '--size',
           '1.2',
           '--color',
@@ -520,7 +659,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       expect(captionClip).toMatchObject({ startUs: 1_000_000, durationUs: 2_000_000 });
       expect(captionClip.style).toMatchObject({
         positionX: 0,
-        positionY: 0,
+        positionY: -0.2,
         fontSize: 1.2,
         align: 'center',
       });
@@ -582,6 +721,77 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       );
     });
 
+    it('lists timeline tracks and clip ids, kinds, starts, and durations as JSON', async () => {
+      const base = createDefaultProject('Timeline list project', { id: 'timeline-list-project' });
+      const root = base.compositions.root!;
+      const project = {
+        ...base,
+        assets: {
+          'list-asset': {
+            id: 'list-asset',
+            kind: 'video' as const,
+            displayName: 'List video',
+            descriptor: { mimeType: 'video/mp4', durationUs: 2_000_000 },
+          },
+        },
+        compositions: {
+          ...base.compositions,
+          root: {
+            ...root,
+            tracks: root.tracks.map((track, index) =>
+              index === 0
+                ? {
+                    ...track,
+                    clips: [
+                      {
+                        id: 'list-clip',
+                        kind: 'video' as const,
+                        assetId: 'list-asset',
+                        startUs: 1_250_000,
+                        durationUs: 2_000_000,
+                        sourceInUs: 0,
+                      },
+                    ],
+                  }
+                : track,
+            ),
+          },
+        },
+      };
+      saveProject(project, { source: 'sqlite', path: testDbPath, revision: 0 });
+      const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      try {
+        expect(
+          await runCli([
+            'timeline',
+            'list',
+            '--project',
+            project.id,
+            '--json',
+            '--sqlite-path',
+            testDbPath,
+          ]),
+        ).toBe(0);
+        const payload = JSON.parse(output.mock.calls.at(-1)![0] as string) as {
+          tracks: Array<{ id: string; kind: string; clips: Array<Record<string, unknown>> }>;
+        };
+        expect(payload.tracks[0]).toMatchObject({
+          id: 'track-v1',
+          kind: 'video',
+          clips: [
+            {
+              id: 'list-clip',
+              kind: 'video',
+              startUs: 1_250_000,
+              durationUs: 2_000_000,
+            },
+          ],
+        });
+      } finally {
+        output.mockRestore();
+      }
+    });
+
     it('validates an asset id and defaults the new clip duration from asset metadata', async () => {
       const project = createDefaultProject('asset-backed timeline', {
         id: 'asset-backed-timeline',
@@ -639,9 +849,11 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       const summary = (await bridge.readProjectSummary()) as {
         projectId: string;
         clipCount: number;
+        durationUs: number;
         tracks: Array<{ id: string }>;
       };
       expect(summary.projectId).toBe(project.id);
+      expect(summary.durationUs).toBe(0);
       expect(summary.tracks.length).toBe(3);
 
       const window = (await bridge.readTimelineWindow({ startUs: 0, endUs: 5_000_000 })) as {
@@ -651,7 +863,16 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     });
 
     it('stages and applies proposed timeline operations with rollback safety', async () => {
-      const project = createDefaultProject('Staged Mutation Test');
+      const project = {
+        ...createDefaultProject('Staged Mutation Test'),
+        assets: {
+          'asset-video-1': {
+            id: 'asset-video-1',
+            kind: 'video' as const,
+            displayName: 'Test video',
+          },
+        },
+      };
       const bridge = new CliJoyAgentToolBridge(project, 1);
 
       // Propose insert operation
@@ -806,6 +1027,16 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
           'byteplus-coding/dola-seed-2.0-pro',
         ]);
         expect(addCode).toBe(0);
+        expect(
+          await runCli([
+            'agent',
+            'provider',
+            'add',
+            'custom-base-url-test',
+            '--base-url',
+            'https://custom-base.invalid/v1',
+          ]),
+        ).toBe(0);
         const addOutput = output.mock.calls.flat().join('\n');
         if (process.platform !== 'win32') {
           expect(addOutput).not.toContain('plaintext mode 0600 file by explicit opt-in');

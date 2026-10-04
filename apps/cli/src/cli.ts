@@ -64,6 +64,8 @@ export interface CliFlags {
   scanlineStrength: number | undefined;
   noiseAmount: number | undefined;
   insecureFileStore: boolean;
+  resolution: string | undefined;
+  aspect: string | undefined;
 }
 
 export function printHelp(): void {
@@ -140,8 +142,8 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     clip: typeof v.clip === 'string' ? v.clip : undefined,
     asset: typeof v.asset === 'string' ? v.asset : undefined,
     text: typeof v.text === 'string' ? v.text : undefined,
-    x: parseFloatFlag('x', v.x, { min: -0.4, max: 0.4 }),
-    y: parseFloatFlag('y', v.y, { min: -0.4, max: 0.4 }),
+    x: parseFloatFlag('x', v.x, { min: -0.4, max: 0.4, allowNegative: true }),
+    y: parseFloatFlag('y', v.y, { min: -0.4, max: 0.4, allowNegative: true }),
     size: parseFloatFlag('size', v.size, { min: 0.1, max: 8 }),
     color: typeof v.color === 'string' ? v.color : undefined,
     id: typeof v.id === 'string' ? v.id : undefined,
@@ -172,6 +174,8 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     }),
     noiseAmount: parseFloatFlag('noise-amount', v['noise-amount'], { min: 0, max: 1 }),
     insecureFileStore: Boolean(v['insecure-file-store']),
+    resolution: typeof v.resolution === 'string' ? v.resolution : undefined,
+    aspect: typeof v.aspect === 'string' ? v.aspect : undefined,
   };
 }
 
@@ -228,6 +232,8 @@ export async function runCli(argv: string[]): Promise<number> {
         'scanline-strength': { type: 'string' },
         'noise-amount': { type: 'string' },
         'insecure-file-store': { type: 'boolean', default: false },
+        resolution: { type: 'string' },
+        aspect: { type: 'string' },
       },
       allowPositionals: true,
       strict: false,
