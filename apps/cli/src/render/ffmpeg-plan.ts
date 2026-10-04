@@ -1,13 +1,24 @@
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import type { FfmpegTextFile } from './text-files.js';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { escapeFilterPath, resolveTextFont } from './text-font.js';
+import {
+  ffmpegCaptionFontSize,
+  ffmpegCaptionX,
+  ffmpegCaptionY,
+  layoutFfmpegCaption,
+} from './caption-layout.js';
+import { missingFontCodePoints } from './font-cmap.js';
+import { probeFfmpegTextCapabilities, type FfmpegTextCapabilities } from './text-capabilities.js';
+import { containsRtlOrComplexScript } from './text-scripts.js';
 
 export interface FfmpegRenderOverrides {
   readonly width?: number;
   readonly height?: number;
   readonly fps?: number;
+  readonly font?: string;
+  readonly textCapabilities?: FfmpegTextCapabilities;
 }
 
 export interface FfmpegRenderPlan {
@@ -130,7 +141,7 @@ export function buildFfmpegRenderPlan(
   ];
   const inputs: { assetId: string; path: string }[] = [];
   const skipped: { clipId: string; reason: string }[] = [];
-  const filters: string[] = [];
+  const filters: string[] = ['[0:v]null[vout]'];
   for (const transition of project.transitions ?? []) {
     skipped.push({
       clipId: transition.id,
@@ -164,7 +175,7 @@ export function buildFfmpegRenderPlan(
       reason: 'project audio graph clips are not supported by the v1 renderer',
     });
   }
-  let videoLabel = '0:v';
+  let videoLabel = 'vout';
   let overlayIndex = 0;
   const tracks = [...root.tracks]
     .filter(
@@ -176,17 +187,16 @@ export function buildFfmpegRenderPlan(
     .sort((a, b) => a.order - b.order);
   const audioInputs: string[] = [];
   const textFiles: FfmpegTextFile[] = [];
+  const fontBuffers = new Map<string, Uint8Array>();
+  let textCapabilities: FfmpegTextCapabilities | undefined = overrides.textCapabilities;
   for (const track of tracks) {
     for (const clip of [...track.clips].sort((a, b) => a.startUs - b.startUs)) {
       if (clip.kind === 'caption') {
         const document = project.captionDocuments?.[clip.captionDocumentId];
-        const fontPath = resolveTextFont();
-        if (!document || !fontPath) {
+        if (!document) {
           skipped.push({
             clipId: clip.id,
-            reason: !fontPath
-              ? 'unsupported: no usable font found; set JOY_FONT or install DejaVu Sans'
-              : 'unsupported: caption document is missing',
+            reason: 'unsupported: caption document is missing',
           });
           continue;
         }
@@ -205,23 +215,97 @@ export function buildFfmpegRenderPlan(
             skipped.push({ clipId: clip.id, reason: 'text rendering needs a temporary workspace' });
             continue;
           }
-          const x = drawtextCoordinate(style?.positionX, '(w-text_w)/2');
-          const y = drawtextCoordinate(style?.positionY, '(h-text_h)/2');
-          const fontSize = style?.fontSize ?? 64;
+          for (const coordinate of [style?.positionX, style?.positionY]) {
+            if (coordinate !== undefined && !Number.isFinite(coordinate))
+              throw new RangeError('Caption position must be a finite number.');
+          }
+          const fontMultiplier = style?.fontSize ?? 1;
           const scale = style?.scale ?? 1;
-          if (!Number.isFinite(fontSize) || !Number.isFinite(scale) || fontSize <= 0 || scale <= 0)
+          if (
+            !Number.isFinite(fontMultiplier) ||
+            !Number.isFinite(scale) ||
+            fontMultiplier <= 0 ||
+            scale <= 0
+          )
             throw new RangeError('Caption font size and scale must be finite positive numbers.');
-          const size = Math.max(1, Math.round(fontSize * scale));
-          if (!Number.isFinite(size)) throw new RangeError('Caption font size is invalid.');
+          if (
+            Math.abs(style?.positionX ?? 0) > 2 ||
+            Math.abs(style?.positionY ?? 0) > 2 ||
+            (style?.fontSize ?? 1) > 8
+          ) {
+            skipped.push({
+              clipId: clip.id,
+              reason:
+                'legacy CLI pixel-unit caption style detected; recreate this text with timeline add-text editor units (--x/--y frame fractions and --size template multiplier)',
+            });
+            continue;
+          }
+          const fontPath = resolveTextFont(text, overrides.font);
+          if (!fontPath) {
+            skipped.push({
+              clipId: clip.id,
+              reason: 'unsupported: no usable font found; set JOY_FONT or install DejaVu Sans',
+            });
+            continue;
+          }
+          const fontBuffer = fontBuffers.get(fontPath) ?? readFileSync(fontPath);
+          fontBuffers.set(fontPath, fontBuffer);
+          let missing: readonly number[];
+          try {
+            missing = missingFontCodePoints(fontBuffer, text);
+          } catch (error) {
+            skipped.push({
+              clipId: clip.id,
+              reason: `font coverage could not be verified for clip ${clip.id} using ${fontPath}: ${error instanceof Error ? error.message : String(error)}`,
+            });
+            continue;
+          }
+          if (missing.length > 0) {
+            skipped.push({
+              clipId: clip.id,
+              reason: `font ${fontPath} is missing glyphs for clip ${clip.id}: ${missing.map((codePoint) => `U+${codePoint.toString(16).toUpperCase().padStart(4, '0')}`).join(', ')}`,
+            });
+            continue;
+          }
+          textCapabilities ??= probeFfmpegTextCapabilities();
+          const requiresShaping = containsRtlOrComplexScript(text);
+          if (requiresShaping && !textCapabilities.textShaping) {
+            skipped.push({
+              clipId: clip.id,
+              reason:
+                'this ffmpeg lacks libfribidi/libharfbuzz; Persian/RTL text would render in the wrong order — install an ffmpeg build with fribidi+harfbuzz or set JOY_FFMPEG',
+            });
+            continue;
+          }
+          const layout = layoutFfmpegCaption({
+            clipId: clip.id,
+            document,
+            segment,
+            style,
+            width,
+            height,
+          });
+          if (layout.length === 0) {
+            skipped.push({
+              clipId: clip.id,
+              reason: 'caption layout produced no visible text line',
+            });
+            continue;
+          }
           const color = drawtextColor(style?.textColor ?? '#ffffff');
-          const textFilePath = join(textFileDirectory, `joy-text-${textFiles.length}.txt`);
-          textFiles.push({ path: textFilePath, content: text });
-          const next = `txt_${overlayIndex++}`;
           const enabled = `between(t\\,${seconds(start)}\\,${seconds(end)})`;
-          filters.push(
-            `[${videoLabel}]drawtext=fontfile=${escapeFilterPath(fontPath)}:textfile=${escapeFilterPath(textFilePath)}:expansion=none:x=${x}:y=${y}:fontsize=${size}:fontcolor=${color}:enable='${enabled}'[${next}]`,
-          );
-          videoLabel = next;
+          for (const line of layout) {
+            const x = ffmpegCaptionX(line);
+            const y = ffmpegCaptionY(line);
+            const size = ffmpegCaptionFontSize(line);
+            const textFilePath = join(textFileDirectory, `joy-text-${textFiles.length}.txt`);
+            textFiles.push({ path: textFilePath, content: line.text });
+            const next = `txt_${overlayIndex++}`;
+            filters.push(
+              `[${videoLabel}]drawtext=fontfile=${escapeFilterPath(fontPath)}:textfile=${escapeFilterPath(textFilePath)}:expansion=none${textCapabilities.textShapingOption ? ':text_shaping=1' : ''}:x=${x}:y=${y}:fontsize=${size}:fontcolor=${color}:enable='${enabled}'[${next}]`,
+            );
+            videoLabel = next;
+          }
         }
         continue;
       }
@@ -480,12 +564,6 @@ function clipLookFilter(look: unknown): string | undefined {
     default:
       return undefined;
   }
-}
-
-function drawtextCoordinate(value: number | undefined, fallback: string): string {
-  if (value === undefined) return fallback;
-  if (!Number.isFinite(value)) throw new RangeError('Caption position must be a finite number.');
-  return String(value);
 }
 
 function drawtextColor(value: string): string {

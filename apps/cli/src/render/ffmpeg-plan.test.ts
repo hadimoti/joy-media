@@ -6,6 +6,13 @@ import { createDefaultProject } from '../utils/project-loader.js';
 import { buildFfmpegFramePlan, buildFfmpegRenderPlan } from './ffmpeg-plan.js';
 import { createTextClip } from './text-clip.js';
 import { resolveTextFont } from './text-font.js';
+import { latinOnlySyntheticFont } from './font-cmap-test-util.js';
+import {
+  ffmpegCaptionFontSize,
+  ffmpegCaptionX,
+  ffmpegCaptionY,
+  layoutFfmpegCaption,
+} from './caption-layout.js';
 
 describe('buildFfmpegRenderPlan', () => {
   it('builds a bounded still-image output from the render composition graph', () => {
@@ -92,6 +99,25 @@ describe('buildFfmpegRenderPlan', () => {
     });
     expect(plan.args.join(' ')).toContain('trim=start=0.25');
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('maps the base video through the filtergraph when every visual clip is skipped', () => {
+    const project = createDefaultProject('all visual clips skipped');
+    (project.compositions.root!.tracks[0]!.clips as unknown[]).push({
+      id: 'unimported-video',
+      kind: 'video',
+      assetId: 'missing',
+      startUs: 0,
+      durationUs: 1_000_000,
+      sourceInUs: 0,
+    });
+
+    const plan = buildFfmpegRenderPlan(project, 'mp4');
+    const graph = plan.args[plan.args.indexOf('-filter_complex') + 1]!;
+    const mapIndex = plan.args.indexOf('-map');
+
+    expect(graph).toContain('[0:v]null[vout]');
+    expect(plan.args[mapIndex + 1]).toBe('[vout]');
   });
 
   it('renders validated clip looks into the video chain and skips unknown effects', () => {
@@ -214,6 +240,151 @@ describe('buildFfmpegRenderPlan', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(!resolveTextFont())(
+    'uses captions-core pixel geometry in the generated FFmpeg drawtext filter',
+    () => {
+      for (const example of [
+        { width: 1920, height: 1080, x: 0, y: 0, size: 1 },
+        { width: 1280, height: 720, x: -0.25, y: 0.2, size: 1.5 },
+        { width: 640, height: 360, x: 0.4, y: -0.4, size: 0.75 },
+      ]) {
+        const dir = mkdtempSync(join(tmpdir(), 'joy-ffmpeg-caption-parity-'));
+        try {
+          const project = createDefaultProject('caption renderer parity', {
+            width: example.width,
+            height: example.height,
+          });
+          const text = createTextClip({
+            id: 'caption-parity',
+            text: 'Joy title',
+            startUs: 0,
+            durationUs: 1_000_000,
+            x: example.x,
+            y: example.y,
+            size: example.size,
+          });
+          (project.captionDocuments as Record<string, unknown>)[text.document.id] = text.document;
+          (project.compositions.root!.tracks[0]!.clips as unknown[]).push(text.clip);
+          const layout = layoutFfmpegCaption({
+            clipId: text.clip.id,
+            document: text.document,
+            segment: text.document.segments[0]!,
+            style: text.clip.style,
+            width: example.width,
+            height: example.height,
+          })[0]!;
+          const plan = buildFfmpegRenderPlan(
+            project,
+            'mp4',
+            {
+              font: resolveTextFont()!,
+              textCapabilities: { textShaping: false, textShapingOption: false },
+            },
+            dir,
+          );
+          const graph = plan.args[plan.args.indexOf('-filter_complex') + 1]!;
+          expect(graph).toContain(
+            `:x=${ffmpegCaptionX(layout)}:y=${ffmpegCaptionY(layout)}:fontsize=${ffmpegCaptionFontSize(layout)}:`,
+          );
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    },
+  );
+
+  it('skips text with uncovered glyphs and reports the clip, code point, and font', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-ffmpeg-font-coverage-'));
+    const fontPath = join(dir, 'latin-only.ttf');
+    const oldFont = process.env.JOY_FONT;
+    try {
+      writeFileSync(fontPath, latinOnlySyntheticFont());
+      process.env.JOY_FONT = fontPath;
+      const project = createDefaultProject('Persian font coverage');
+      const text = createTextClip({
+        id: 'persian-coverage',
+        text: 'سلام دنیا ۱۲۳',
+        startUs: 0,
+        durationUs: 1_000_000,
+      });
+      (project.captionDocuments as Record<string, unknown>)[text.document.id] = text.document;
+      (project.compositions.root!.tracks[0]!.clips as unknown[]).push(text.clip);
+      const plan = buildFfmpegRenderPlan(project, 'mp4', {}, dir);
+      expect(plan.skipped).toEqual([
+        expect.objectContaining({
+          clipId: text.clip.id,
+          reason: expect.stringContaining('U+0633'),
+        }),
+      ]);
+      expect(plan.skipped[0]!.reason).toContain(fontPath);
+    } finally {
+      if (oldFont === undefined) delete process.env.JOY_FONT;
+      else process.env.JOY_FONT = oldFont;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('warns and degrades rendering of legacy CLI pixel-unit captions', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-ffmpeg-legacy-text-'));
+    try {
+      const project = createDefaultProject('legacy text');
+      const text = createTextClip({
+        id: 'legacy-text',
+        text: 'Old pixel text',
+        startUs: 0,
+        durationUs: 1_000_000,
+      });
+      (project.captionDocuments as Record<string, unknown>)[text.document.id] = text.document;
+      (project.compositions.root!.tracks[0]!.clips as unknown[]).push({
+        ...text.clip,
+        style: { ...text.clip.style, fontSize: 64, positionX: 100, positionY: 80 },
+      });
+
+      const plan = buildFfmpegRenderPlan(project, 'mp4', {}, dir);
+
+      expect(plan.skipped).toEqual([
+        expect.objectContaining({
+          clipId: text.clip.id,
+          reason: expect.stringContaining('legacy CLI pixel-unit caption style detected'),
+        }),
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!resolveTextFont('سلام'))(
+    'passes text_shaping when the ffmpeg probe reports its drawtext option',
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), 'joy-ffmpeg-shaping-plan-'));
+      try {
+        const project = createDefaultProject('shaping plan');
+        const text = createTextClip({
+          id: 'shaping-text',
+          text: 'سلام دنیا ۱۲۳',
+          startUs: 0,
+          durationUs: 1_000_000,
+        });
+        (project.captionDocuments as Record<string, unknown>)[text.document.id] = text.document;
+        (project.compositions.root!.tracks[0]!.clips as unknown[]).push(text.clip);
+        const plan = buildFfmpegRenderPlan(
+          project,
+          'mp4',
+          {
+            font: resolveTextFont()!,
+            textCapabilities: { textShaping: true, textShapingOption: true },
+          },
+          dir,
+        );
+        const graph = plan.args[plan.args.indexOf('-filter_complex') + 1]!;
+        expect(graph).toContain('text_shaping=1');
+        expect(plan.textFiles[0]?.content).toBe('سلام دنیا ۱۲۳');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it.skipIf(!resolveTextFont())(
     'rejects non-finite caption positions and unvalidated colors',
