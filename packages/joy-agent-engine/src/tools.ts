@@ -102,7 +102,10 @@ const documentOperation = z.discriminatedUnion('kind', [
       kind: z.literal('add-effect'),
       id,
       objectId: id,
-      effectId: id,
+      effectId: z.enum(['crt', 'bw', 'warm', 'cool']),
+      intensity: z.number().finite().min(0).max(1).optional(),
+      scanlineStrength: z.number().finite().min(0).max(1).optional(),
+      noiseAmount: z.number().finite().min(0).max(1).optional(),
       dependsOn: z.array(id).max(32).default([]),
     })
     .strict(),
@@ -442,7 +445,7 @@ export function createJoyAgentTools(
     }),
     propose_document_operations: tool({
       description:
-        'Propose document operations. For create-text, x and y are editor-normalized frame fractions in [-0.4, 0.4]; 0 is centered and omitted values default to center. size is a template multiplier from 0.1 to 8. durationUs is an integer number of microseconds (10 seconds = 10000000) and must be at least one frame at project fps. Schema and project validation errors are returned so you can repair and retry (up to three invalid proposals).',
+        'Propose document operations. Batch all requested changes in one call, then submit_plan once. add-effect applies one of the supported looks (crt, bw, warm, cool) to a video clip; optional intensity, scanlineStrength, and noiseAmount are each 0..1. For create-text, x and y are editor-normalized frame fractions in [-0.4, 0.4]; 0 is centered and omitted values default to center. size is a template multiplier from 0.1 to 8. durationUs is an integer number of microseconds (10 seconds = 10000000) and must be at least one frame at project fps. Schema and project validation errors are returned so you can repair and retry (up to three invalid proposals).',
       inputSchema: proposalInput(operationLimit),
       execute: async (input) => {
         let operations: readonly JoyDocumentOperation[];

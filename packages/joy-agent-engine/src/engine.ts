@@ -29,6 +29,8 @@ export const JOY_AGENT_INSTRUCTIONS = [
   'Inspect bounded context and propose bounded operations only.',
   'Never claim an edit is applied until submit_plan returns a committed result.',
   'When applying a timeline change, call submit_plan and use its verified placement summary in your final response.',
+  'Batch every requested change into one plan and one submit_plan call whenever possible.',
+  'Do not split a requested edit across multiple partial plans. Unsupported requests must be called out explicitly.',
   'Do not request credentials, DOM selectors, endpoints, arbitrary headers, or hidden reasoning.',
 ].join(' ');
 
@@ -49,6 +51,11 @@ export interface JoyAgentEngineOptions {
   readonly limits?: Partial<JoyAgentLimits>;
   readonly capability?: JoyAgentCapability;
   readonly onEvent?: (event: JoyAgentSafeEvent) => void;
+  readonly onTrace?: (record: {
+    readonly type: 'tool_call' | 'observation';
+    readonly name: string;
+    readonly value: unknown;
+  }) => void;
   readonly now?: () => Date;
   readonly apiKeyForRedaction?: string;
 }
@@ -70,6 +77,8 @@ export interface JoyAgentRunResult {
   readonly capability: JoyAgentCapability;
   readonly text: string;
   readonly steps: number;
+  readonly status: 'completed' | 'partial';
+  readonly partialReason?: 'step-limit' | 'tool-call-limit';
   readonly resolvedModelId?: string;
 }
 
@@ -269,6 +278,7 @@ export class JoyAgentEngine {
         capability: 'plan-only',
         text: result.object.summary,
         steps: 1,
+        status: 'completed',
         resolvedModelId: result.response.modelId,
       };
     }
@@ -291,13 +301,15 @@ export class JoyAgentEngine {
       ...(this.options.vision === undefined ? {} : { vision: this.options.vision }),
       onFrameRead: (frame) => pendingFrames.push(frame),
     });
+    const requestedOperations = estimateRequestedOperations(request.request);
+    const maxSteps = Math.min(30, this.limits.maxSteps + requestedOperations * 2);
     const toolCallLimit: StopCondition<typeof tools> = ({ steps }) =>
       steps.reduce((count, step) => count + step.toolCalls.length, 0) >= this.limits.maxToolCalls;
     const agent = new ToolLoopAgent({
       model: this.options.model,
       instructions: JOY_AGENT_INSTRUCTIONS,
       tools,
-      stopWhen: [stepCountIs(this.limits.maxSteps), toolCallLimit],
+      stopWhen: [stepCountIs(maxSteps), toolCallLimit],
       maxOutputTokens: this.limits.maxOutputTokens,
       maxRetries: 0,
       telemetry: { isEnabled: false },
@@ -322,6 +334,21 @@ export class JoyAgentEngine {
       prompt: request.request,
       ...(abortSignal === undefined ? {} : { abortSignal }),
     });
+    for (const step of result.steps) {
+      for (const call of step.toolCalls)
+        this.options.onTrace?.({ type: 'tool_call', name: call.toolName, value: call.input });
+      for (const observation of step.toolResults)
+        this.options.onTrace?.({
+          type: 'observation',
+          name: observation.toolName,
+          value: observation.output,
+        });
+    }
+    const toolCalls = result.steps.reduce((count, step) => count + step.toolCalls.length, 0);
+    const stepLimitHit =
+      result.steps.length >= maxSteps && result.steps.at(-1)?.finishReason === 'tool-calls';
+    const toolCallLimitHit =
+      toolCalls >= this.limits.maxToolCalls && result.steps.at(-1)?.finishReason === 'tool-calls';
     if (result.text.length > this.limits.toolPayloadBytes)
       throw new Error('JOY_AGENT_INVALID_TOOL');
     emit({ type: 'text-delta', text: result.text });
@@ -342,9 +369,23 @@ export class JoyAgentEngine {
       capability: 'tool-loop',
       text: result.text,
       steps: result.steps.length,
+      status: stepLimitHit || toolCallLimitHit ? 'partial' : 'completed',
+      ...(stepLimitHit ? { partialReason: 'step-limit' as const } : {}),
+      ...(!stepLimitHit && toolCallLimitHit ? { partialReason: 'tool-call-limit' as const } : {}),
       resolvedModelId: result.response.modelId,
     };
   }
+}
+
+function estimateRequestedOperations(request: string): number {
+  const distinctIntentCount = [
+    /\b(trim|shorten|cut)\b/i,
+    /\b(title|text|caption|subtitle)\b/i,
+    /\b(look|effect|crt|warm|cool|black\s*and\s*white)\b/i,
+    /\b(split|move|remove|delete|add|insert)\b/i,
+  ].filter((pattern) => pattern.test(request)).length;
+  const explicitListItems = request.match(/(?:^|\n)\s*(?:[-*]|\d+[.)])\s+\S/g)?.length ?? 0;
+  return Math.max(1, distinctIntentCount, explicitListItems);
 }
 
 async function withTimeout<T>(

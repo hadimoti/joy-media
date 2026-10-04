@@ -397,7 +397,13 @@ describe('CLI Joy Agent bridge timeline operations', () => {
           value: 1,
           dependsOn: [],
         },
-        { kind: 'add-effect', id: 'effect-op', objectId: 'title', effectId: 'blur', dependsOn: [] },
+        {
+          kind: 'add-effect',
+          id: 'effect-op',
+          objectId: 'missing-video',
+          effectId: 'crt',
+          dependsOn: [],
+        },
         { kind: 'set-text', id: 'missing-op', objectId: 'missing', text: 'ignored', dependsOn: [] },
       ],
     })) as { accepted: boolean; errors: string[] };
@@ -407,12 +413,47 @@ describe('CLI Joy Agent bridge timeline operations', () => {
     expect(proposal.errors).toContain('set-text for title is not rendered by the CLI.');
     expect(proposal.errors).toContain('Text property opacity is not rendered by the CLI.');
     expect(proposal.errors).toContain('Text property unlisted is not rendered by the CLI.');
-    expect(proposal.errors).toContain('add-effect is not supported by the CLI renderer yet.');
+    expect(proposal.errors).toContain('Clip missing-video not found.');
     expect(proposal.errors).toContain('Object missing not found.');
     expect(result.errors).toEqual([]);
     expect(result.updatedProject.visualObjects.title).toMatchObject({
       text: 'Old',
       transform: { opacity: 1 },
+    });
+  });
+
+  it('applies validated CLI looks through the agent operation path', async () => {
+    const project = projectWithTracks();
+    (project.compositions.root!.tracks[0]!.clips as unknown as unknown[]).push({
+      id: 'look-target',
+      kind: 'video',
+      assetId: 'asset-default',
+      startUs: 0,
+      durationUs: 1_000_000,
+      sourceInUs: 0,
+    });
+    const bridge = new CliJoyAgentToolBridge(project, 1);
+    const proposal = await bridge.proposeDocumentOperations({
+      operations: [
+        {
+          kind: 'add-effect',
+          id: 'look-op',
+          objectId: 'look-target',
+          effectId: 'warm',
+          intensity: 1,
+          dependsOn: [],
+        },
+      ],
+    });
+    expect(proposal).toMatchObject({ accepted: true });
+    const result = bridge.applyStaged();
+    expect(result.appliedOperationIds).toEqual(['look-op']);
+    expect(
+      result.updatedProject.compositions.root!.tracks[0]!.clips.find(
+        (clip) => clip.id === 'look-target',
+      ),
+    ).toMatchObject({
+      look: { preset: 'warm', intensity: 1 },
     });
   });
 
@@ -533,7 +574,10 @@ describe('CLI Joy Agent bridge timeline operations', () => {
       applied: boolean;
       placementSummary: { clips: Array<{ clipId: string; startUs: number; endUs: number }> };
     };
-    expect(submitted.applied).toBe(true);
+    expect(submitted.applied).toBe(false);
+    expect(submitted.placementSummary.clips.find((clip) => clip.clipId === 'moving')?.startUs).toBe(
+      4_000_000,
+    );
     expect(submitted.placementSummary.clips.find((clip) => clip.clipId === 'moving')).toMatchObject(
       {
         startUs: 4_000_000,

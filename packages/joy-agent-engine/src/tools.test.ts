@@ -4,6 +4,7 @@ import {
   JOY_AGENT_TOOL_METADATA,
   createJoyAgentTools,
   parseJoyTimelineOperations,
+  parseJoyDocumentOperations,
   validateOperationDependencies,
   type JoyAgentToolBridge,
 } from './tools.js';
@@ -33,6 +34,39 @@ function bridge(overrides: Partial<JoyAgentToolBridge> = {}): JoyAgentToolBridge
 }
 
 describe('JOY Agent tool catalog', () => {
+  it('accepts supported CLI looks with bounded numeric parameters and rejects invalid values', () => {
+    expect(
+      parseJoyDocumentOperations([
+        {
+          kind: 'add-effect',
+          id: 'look-1',
+          objectId: 'clip-1',
+          effectId: 'crt',
+          intensity: 1,
+          scanlineStrength: 0,
+          noiseAmount: 0.5,
+          dependsOn: [],
+        },
+      ]),
+    ).toMatchObject([{ effectId: 'crt', intensity: 1, scanlineStrength: 0, noiseAmount: 0.5 }]);
+    expect(() =>
+      parseJoyDocumentOperations([
+        {
+          kind: 'add-effect',
+          id: 'look-2',
+          objectId: 'clip-1',
+          effectId: 'warm',
+          intensity: 1.1,
+          dependsOn: [],
+        },
+      ]),
+    ).toThrow();
+    expect(() =>
+      parseJoyDocumentOperations([
+        { kind: 'add-effect', id: 'look-3', objectId: 'clip-1', effectId: 'blur', dependsOn: [] },
+      ]),
+    ).toThrow();
+  });
   it('strictly rejects unknown keys and model-owned UI/network fields', () => {
     expect(() =>
       parseJoyTimelineOperations([{ ...insert('op-1'), panelId: 'timeline' }]),

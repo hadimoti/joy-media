@@ -22,4 +22,17 @@ describe('truthfulAgentSummary', () => {
 
     expect(summary).toBe('Applied 1 change(s): remove (third-op).');
   });
+
+  it('does not print an empty operation list when the applied ids are absent', () => {
+    const summary = truthfulAgentSummary({
+      applyRequested: true,
+      applied: true,
+      appliedCount: 1,
+      appliedOperationIds: [],
+      errors: [],
+      notes: [],
+      staged: { timelineOps: [], documentOps: [] },
+    });
+    expect(summary).toBe('Applied 1 change(s).');
+  });
 });

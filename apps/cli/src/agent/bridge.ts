@@ -56,6 +56,8 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
   private selectedClipIds: string[] = [];
   private playheadUs: number = 0;
   private lastApplyResult: ApplyStagedResult | undefined;
+  private submittedPlan = false;
+  private reportedIssues: string[] = [];
 
   constructor(
     private project: JoyProjectV1,
@@ -74,6 +76,14 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
       timelineOps: [...this.stagedTimeline],
       documentOps: [...this.stagedDocument],
     };
+  }
+
+  hasSubmittedPlan(): boolean {
+    return this.submittedPlan;
+  }
+
+  getReportedIssues(): string[] {
+    return [...this.reportedIssues];
   }
 
   clearStaged(): void {
@@ -257,6 +267,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
   async readStyleCatalog(): Promise<unknown> {
     return {
       textStyles: ['headline', 'subheadline', 'caption-glow', 'callout'],
+      looks: ['crt', 'bw', 'warm', 'cool'],
       transitions: ['crossfade', 'slide-left', 'wipe-up', 'zoom-in'],
       aspectRatios: ['9:16 (Reels/TikTok)', '16:9 (YouTube)', '1:1 (Square)'],
     };
@@ -266,7 +277,10 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
     readonly operations: readonly JoyTimelineOperation[];
   }): Promise<unknown> {
     const errors = this.validateTimelineProposal(input.operations);
-    if (errors.length > 0) return { accepted: false, errors };
+    if (errors.length > 0) {
+      this.reportedIssues.push(...errors);
+      return { accepted: false, errors };
+    }
     this.stagedTimeline.push(...input.operations);
     this.lastApplyResult = undefined;
     this.notify();
@@ -283,7 +297,10 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
     readonly operations: readonly JoyDocumentOperation[];
   }): Promise<unknown> {
     const errors = this.validateDocumentProposal(input.operations);
-    if (errors.length > 0) return { accepted: false, errors };
+    if (errors.length > 0) {
+      this.reportedIssues.push(...errors);
+      return { accepted: false, errors };
+    }
     this.stagedDocument.push(...input.operations);
     this.lastApplyResult = undefined;
     this.notify();
@@ -402,7 +419,12 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
         else if (typeof operation.value !== 'number' || !Number.isFinite(operation.value))
           errors.push(`Property ${operation.property} requires a finite numeric value.`);
       } else if (operation.kind === 'add-effect') {
-        errors.push('add-effect is not supported by the CLI renderer yet.');
+        const clip = this.project.compositions[this.project.rootCompositionId]?.tracks
+          .flatMap((track) => track.clips)
+          .find((candidate) => candidate.id === operation.objectId);
+        if (!clip) errors.push(`Clip ${operation.objectId} not found.`);
+        else if (clip.kind !== 'video')
+          errors.push(`Look ${operation.effectId} requires a video clip.`);
       }
     }
     if (errors.length > 0) return errors;
@@ -413,16 +435,22 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
   }
 
   async submitPlan(): Promise<unknown> {
+    this.submittedPlan = true;
     if (this.autoApply) {
-      const result = this.applyStaged();
+      const preview = new CliJoyAgentToolBridge(structuredClone(this.project), this.revision);
+      preview.stagedTimeline = [...this.stagedTimeline];
+      preview.stagedDocument = [...this.stagedDocument];
+      const result = preview.applyStaged();
       return {
         awaitingApproval: false,
         willApplyOnFinish: true,
-        applied: result.errors.length === 0,
-        appliedCount: result.appliedCount,
-        errors: result.errors,
-        notes: result.notes,
+        staged: true,
+        applied: false,
+        validationErrors: result.errors,
         placementSummary: result.placementSummary,
+        timelineOperations: this.stagedTimeline.length,
+        documentOperations: this.stagedDocument.length,
+        revision: this.revision,
       };
     }
     return {
@@ -753,7 +781,22 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
             }
           }
         } else if (op.kind === 'add-effect') {
-          errors.push(`unsupported: effect ${op.effectId} is not rendered by ffmpeg.`);
+          const clip = tracks
+            .flatMap((track) => track.clips)
+            .find((candidate) => candidate.id === op.objectId);
+          if (!clip || clip.kind !== 'video') {
+            errors.push(`Look target ${op.objectId} is not a video clip.`);
+          } else {
+            (clip as unknown as { look?: Record<string, unknown> }).look = {
+              preset: op.effectId,
+              ...(op.intensity === undefined ? {} : { intensity: op.intensity }),
+              ...(op.scanlineStrength === undefined
+                ? {}
+                : { scanlineStrength: op.scanlineStrength }),
+              ...(op.noiseAmount === undefined ? {} : { noiseAmount: op.noiseAmount }),
+            };
+            recordApplied(op.id);
+          }
         }
       } catch (err) {
         errors.push(`Error applying ${op.kind}: ${String(err)}`);

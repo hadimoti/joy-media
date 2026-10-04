@@ -141,6 +141,37 @@ describe('JOY Agent bounded model loop', () => {
     });
   });
 
+  it('returns partial when a mocked model keeps using tools through the adaptive step budget', async () => {
+    let callIndex = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        callIndex += 1;
+        return {
+          content: [
+            {
+              type: 'tool-call' as const,
+              toolCallId: `loop-${callIndex}`,
+              toolName: 'read_project_summary',
+              input: '{}',
+            },
+          ],
+          finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+          usage: {
+            inputTokens: { total: 2, noCache: 2, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 1, text: 1, reasoning: undefined },
+          },
+          warnings: [],
+        };
+      },
+    });
+    const engine = new JoyAgentEngine({ model, bridge });
+    const result = await engine.run({ ...request, request: 'trim the title and add a CRT look' });
+    expect(result.status).toBe('partial');
+    expect(result.partialReason).toBe('step-limit');
+    expect(result.steps).toBeGreaterThan(12);
+    expect(result.steps).toBeLessThanOrEqual(30);
+  });
+
   it('returns a proposal validation error to the model and accepts its retry', async () => {
     const createText = {
       kind: 'create-text',

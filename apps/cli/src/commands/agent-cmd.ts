@@ -53,7 +53,12 @@ export interface AgentCommandFlags {
 }
 
 export function formatAgentRunFailure(error: unknown, debug: boolean): string {
-  if (!(error instanceof JoyAgentRunError)) return 'Joy Agent execution failed: JOY_AGENT_UNKNOWN';
+  if (!(error instanceof JoyAgentRunError)) {
+    const message = error instanceof Error ? error.message : '';
+    if (/^No API key for [^:]+:/.test(message))
+      return `Joy Agent execution failed: JOY_AGENT_NO_API_KEY (${message})`;
+    return 'Joy Agent execution failed: JOY_AGENT_UNKNOWN';
+  }
   const gatewayCode = /"code"\s*:\s*"([A-Z0-9_]+)"/.exec(error.detail.responseBodySnippet)?.[1];
   if (error.detail.statusCode === 402 && gatewayCode === 'JOY_SUBSCRIPTION_REQUIRED') {
     return 'Joy Agent execution failed: JOY_SUBSCRIPTION_REQUIRED (an active JOY Pro subscription is required)';
@@ -468,11 +473,13 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
     if (available.length > 0) {
       const newest = available[0]!;
       projectInfo = loadProject(newest.id);
-      logInfo(
-        `Using active project: ${c(projectInfo.project.title, 'bold')} (${projectInfo.project.id})`,
-      );
+      if (!flags.json)
+        logInfo(
+          `Using active project: ${c(projectInfo.project.title, 'bold')} (${projectInfo.project.id})`,
+        );
     } else {
-      logWarn('No existing projects found in database. Initializing default project...');
+      if (!flags.json)
+        logWarn('No existing projects found in database. Initializing default project...');
       const scratch = createDefaultProject('Default Project');
       projectInfo = {
         project: scratch,
@@ -518,9 +525,11 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
       return 1;
     }
 
-    printBanner();
-    logInfo(`Running Joy Agent on project: ${c(projectInfo.project.title, 'bold')}`);
-    logStep('Prompt', prompt);
+    if (!flags.json) {
+      printBanner();
+      logInfo(`Running Joy Agent on project: ${c(projectInfo.project.title, 'bold')}`);
+      logStep('Prompt', prompt);
+    }
 
     try {
       const output = await runJoyAgent({
@@ -528,6 +537,14 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         revision: projectInfo.revision,
         prompt,
         apply: flags.apply,
+        json: flags.json,
+        onTrace: (record) => {
+          if (flags.json) console.log(JSON.stringify(record));
+          else
+            console.log(
+              `${record.type === 'tool_call' ? 'Tool call' : 'Observation'}: ${record.name} ${JSON.stringify(record.value)}`,
+            );
+        },
         allowFrames: flags.allowFrames,
         vision: flags.vision,
         providerOptions: {
@@ -539,36 +556,56 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         },
       });
 
-      if (flags.apply && !output.applied && output.errors.length > 0) {
+      if (flags.json) {
+        if (output.applied && projectInfo.path !== 'in-memory') {
+          saveProject(output.updatedProject, {
+            source: projectInfo.source,
+            path: projectInfo.path,
+            revision: projectInfo.revision,
+          });
+        }
+        console.log(JSON.stringify({ type: 'model_text', text: output.modelText }));
+        console.log(
+          JSON.stringify({
+            type: 'apply_result',
+            applied: output.applied,
+            appliedCount: output.appliedCount,
+            operationIds: output.appliedOperationIds,
+            errors: output.errors,
+            summary: output.resultText,
+          }),
+        );
+        console.log(JSON.stringify({ type: 'status', status: output.status, steps: output.steps }));
+      } else if (flags.apply && !output.applied && output.errors.length > 0) {
         logError(`Apply refused: ${output.errors.join('; ')}`);
         return 1;
-      }
-
-      if (output.applied && projectInfo.path === 'in-memory') {
-        logSuccess(`Applied ${output.appliedCount} operation(s) (--apply)`);
-        logWarn('Changes were applied in memory; nothing was saved.');
-      } else if (output.applied) {
-        const nextRev = saveProject(output.updatedProject, {
-          source: projectInfo.source,
-          path: projectInfo.path,
-          revision: projectInfo.revision,
-        });
-        logSuccess(`Committed changes at project revision ${nextRev}.`);
-        logSuccess(`Applied ${output.appliedCount} operation(s) (--apply)`);
       } else {
-        logInfo(
-          truthfulAgentSummary({
-            applyRequested: flags.apply,
-            applied: output.applied,
-            appliedCount: output.appliedCount,
-            appliedOperationIds: output.appliedOperationIds,
-            errors: output.errors,
-            notes: output.notes,
-            staged: output.staged,
-          }),
-        );
+        if (output.applied && projectInfo.path === 'in-memory') {
+          logSuccess(`Applied ${output.appliedCount} operation(s) (--apply)`);
+          logWarn('Changes were applied in memory; nothing was saved.');
+        } else if (output.applied) {
+          const nextRev = saveProject(output.updatedProject, {
+            source: projectInfo.source,
+            path: projectInfo.path,
+            revision: projectInfo.revision,
+          });
+          logSuccess(`Committed changes at project revision ${nextRev}.`);
+          logSuccess(`Applied ${output.appliedCount} operation(s) (--apply)`);
+        } else {
+          logInfo(
+            truthfulAgentSummary({
+              applyRequested: flags.apply,
+              applied: output.applied,
+              appliedCount: output.appliedCount,
+              appliedOperationIds: output.appliedOperationIds,
+              errors: output.errors,
+              notes: output.notes,
+              staged: output.staged,
+            }),
+          );
+        }
       }
-      if (output.applied)
+      if (output.applied && !flags.json)
         logInfo(
           truthfulAgentSummary({
             applyRequested: flags.apply,
@@ -580,11 +617,14 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
             staged: output.staged,
           }),
         );
-      if (output.applied) printPlacementSummary(output.placementSummary);
+      if (output.applied && !flags.json) printPlacementSummary(output.placementSummary);
 
-      return 0;
+      return output.status === 'partial' ? 1 : 0;
     } catch (err) {
-      logError(formatAgentRunFailure(err, flags.debug || process.env.JOY_DEBUG === '1'));
+      const failure = formatAgentRunFailure(err, flags.debug || process.env.JOY_DEBUG === '1');
+      if (flags.json)
+        console.log(JSON.stringify({ type: 'status', status: 'failed', error: failure }));
+      else logError(failure);
       return 1;
     }
   }

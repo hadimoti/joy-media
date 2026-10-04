@@ -7,6 +7,7 @@ import { runCli } from './cli.js';
 import { CliJoyAgentToolBridge } from './agent/bridge.js';
 import { resolveByokConfig } from './agent/provider.js';
 import { formatAgentRunFailure } from './commands/agent-cmd.js';
+import { createTextClip, detectTextDirection } from './render/text-clip.js';
 import { configureSecretStoreRuntimeForTests } from './utils/secret-store.js';
 import { setAiProvider } from './utils/config.js';
 import { resolveTextFont } from './render/text-font.js';
@@ -38,6 +39,38 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     rmSync(isolatedHome, { recursive: true, force: true });
+  });
+
+  it('preserves the missing-key code and actionable hint through CLI formatting', () => {
+    const formatted = formatAgentRunFailure(
+      new Error('No API key for openrouter: set OPENROUTER_API_KEY or run provider add'),
+      false,
+    );
+    expect(formatted).toContain('JOY_AGENT_NO_API_KEY');
+    expect(formatted).toContain('set OPENROUTER_API_KEY');
+  });
+
+  it.each([
+    ['JOY subtitle فارسی', 'ltr'],
+    ['فارسی JOY title', 'rtl'],
+    ['123 English', 'ltr'],
+  ] as const)(
+    'detects auto text direction from first strong character in %s',
+    (text, direction) => {
+      expect(detectTextDirection(text)).toBe(direction);
+    },
+  );
+
+  it('right-aligns auto RTL paragraphs while preserving mixed-script logical text', () => {
+    const text = createTextClip({
+      id: 'rtl-title',
+      text: 'فارسی JOY Media',
+      startUs: 0,
+      durationUs: 1_000_000,
+    });
+    expect(text.document.direction).toBe('rtl');
+    expect(text.document.words['rtl-title-word']?.text).toBe('فارسی JOY Media');
+    expect(text.clip.style?.align).toBe('end');
   });
 
   it.each([
@@ -234,8 +267,10 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     const updatedProject = { ...project, title: 'Updated by agent' };
     const runSpy = vi.spyOn(joyAgentRuntime, 'runJoyAgent').mockResolvedValue({
       resultText: 'I also applied an unrelated change.',
+      modelText: 'I also applied an unrelated change.',
       capability: 'tool-loop',
       steps: 1,
+      status: 'completed',
       staged: {
         timelineOps: [
           { kind: 'remove', id: 'applied-remove', clipId: 'agent-clip-1', dependsOn: [] },
@@ -296,6 +331,70 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     }
   });
 
+  it('streams model notes, tool calls, observations, apply result and status as JSON records', async () => {
+    const project = createDefaultProject('JSON agent', { id: 'agent-json-test' });
+    const projectFile = join(isolatedHome, 'agent-json.json');
+    writeFileSync(
+      projectFile,
+      JSON.stringify({ format: 'joy-media-project', revision: 1, project }),
+    );
+    const runSpy = vi.spyOn(joyAgentRuntime, 'runJoyAgent').mockImplementation(async (options) => {
+      options.onEvent?.({
+        protocolVersion: 1,
+        runId: 'json-run',
+        seq: 0,
+        at: new Date().toISOString(),
+        type: 'text-delta',
+        text: 'Model observed a centered title.',
+      });
+      options.onTrace?.({ type: 'tool_call', name: 'read_frame', value: { atUs: 0 } });
+      options.onTrace?.({
+        type: 'observation',
+        name: 'read_frame',
+        value: { acknowledgement: 'Frame attached.' },
+      });
+      return {
+        modelText: 'Model observed a centered title.',
+        resultText: 'No project changes were made.',
+        capability: 'tool-loop',
+        steps: 2,
+        status: 'completed',
+        staged: { timelineOps: [], documentOps: [] },
+        applied: false,
+        updatedProject: project,
+        appliedCount: 0,
+        errors: [],
+        notes: [],
+      };
+    });
+    const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(
+        await runCli(['agent', 'run', '--project', projectFile, '--json', 'inspect frame']),
+      ).toBe(0);
+      expect(runSpy.mock.calls[0]?.[0].project.id).toBe('agent-json-test');
+      const records = output.mock.calls.map(
+        (call) => JSON.parse(String(call[0])) as Record<string, unknown>,
+      );
+      expect(records.map((record) => record.type)).toEqual([
+        'tool_call',
+        'observation',
+        'model_text',
+        'apply_result',
+        'status',
+      ]);
+      expect(records[2]).toMatchObject({ text: 'Model observed a centered title.' });
+      expect(records[3]).toMatchObject({
+        applied: false,
+        summary: 'No project changes were made.',
+      });
+      expect(records[4]).toMatchObject({ status: 'completed' });
+    } finally {
+      runSpy.mockRestore();
+      output.mockRestore();
+    }
+  });
+
   it('refuses invalid --apply results without saving the project', async () => {
     const project = createDefaultProject('Invalid apply project', { id: 'invalid-apply-test' });
     const projectFile = join(isolatedHome, 'invalid-apply.json');
@@ -306,8 +405,10 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     );
     const runSpy = vi.spyOn(joyAgentRuntime, 'runJoyAgent').mockResolvedValue({
       resultText: 'I successfully applied the edit.',
+      modelText: 'I successfully applied the edit.',
       capability: 'tool-loop',
       steps: 1,
+      status: 'completed',
       staged: { timelineOps: [], documentOps: [] },
       applied: false,
       updatedProject: project,
@@ -343,8 +444,10 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     );
     const runSpy = vi.spyOn(joyAgentRuntime, 'runJoyAgent').mockResolvedValue({
       resultText: 'done',
+      modelText: 'done',
       capability: 'tool-loop',
       steps: 1,
+      status: 'completed',
       staged: { timelineOps: [], documentOps: [] },
       applied: false,
       updatedProject: project,
@@ -440,7 +543,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       expect(loaded.revision).toBe(1);
     });
 
-    it('creates projects with the default portrait size or a validated selected aspect', async () => {
+    it('creates projects with the default landscape size or a validated selected aspect', async () => {
       const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
       try {
         expect(
@@ -450,8 +553,8 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
           (project) => project.title === 'Default size',
         )!;
         expect(loadProject(defaultProject.id, testDbPath).project.compositions.root).toMatchObject({
-          width: 1080,
-          height: 1920,
+          width: 1920,
+          height: 1080,
         });
 
         expect(
@@ -640,8 +743,10 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
           '1',
           '--duration',
           '2',
+          '--x',
+          '0',
           '--y',
-          '-0.2',
+          '0',
           '--size',
           '1.2',
           '--color',
@@ -660,7 +765,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       expect(captionClip).toMatchObject({ startUs: 1_000_000, durationUs: 2_000_000 });
       expect(captionClip.style).toMatchObject({
         positionX: 0,
-        positionY: -0.2,
+        positionY: 0,
         fontSize: 1.2,
         align: 'center',
       });
