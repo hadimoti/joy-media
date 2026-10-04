@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_AGENT_POLICY } from './agent-policy-settings.js';
 import { JoyAgentSettingsDialog } from './JoyAgentSettingsDialog.js';
+import {
+  createMemoryMediaSessionTokenBackend,
+  setMediaSessionTokenBackendForTests,
+  setStoredMediaToken,
+} from './media-session.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus, JoyAgentMediaCapabilityReport } from './joy-agent/protocol.js';
 import { resetCustomEndpointAcknowledgementsForTests } from './custom-endpoint-acknowledgement.js';
@@ -41,6 +46,8 @@ function client(overrides: Partial<JoyAgentEngineClient> = {}): JoyAgentEngineCl
 
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
+
+beforeEach(() => setMediaSessionTokenBackendForTests(createMemoryMediaSessionTokenBackend()));
 
 async function render(
   engineClient: JoyAgentEngineClient,
@@ -99,6 +106,7 @@ afterEach(async () => {
   container = undefined;
   window.localStorage.clear();
   vi.unstubAllGlobals();
+  setMediaSessionTokenBackendForTests();
   resetCustomEndpointAcknowledgementsForTests();
   delete (window as { joyDesktop?: unknown }).joyDesktop;
 });
@@ -109,6 +117,11 @@ function countLeafTextMatches(rendered: HTMLElement, expression: RegExp): number
       expression.test(element.textContent ?? '') &&
       ![...element.children].some((child) => expression.test(child.textContent ?? '')),
   ).length;
+}
+
+async function installSessionTokenForTest(token: string): Promise<void> {
+  setMediaSessionTokenBackendForTests(createMemoryMediaSessionTokenBackend());
+  await setStoredMediaToken(token);
 }
 
 describe('JOY Agent Settings connection status', () => {
@@ -1052,7 +1065,7 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
 describe('JOY Agent Settings desktop profile persistence', () => {
   it('keeps the explicit Joy Hosted preset when an OpenRouter profile is present', async () => {
     window.localStorage.setItem('joy-agent-last-preset', 'joy-hosted');
-    window.localStorage.setItem('joy-media-session-token', 'session-test');
+    await installSessionTokenForTest('session-test');
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation(async (input: string) => {
@@ -1084,7 +1097,7 @@ describe('JOY Agent Settings desktop profile persistence', () => {
   });
 
   it('shows the live unsubscribed state returned by the JOY account API', async () => {
-    window.localStorage.setItem('joy-media-session-token', 'session-test');
+    await installSessionTokenForTest('session-test');
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation(async (input: string) => {
@@ -1105,7 +1118,7 @@ describe('JOY Agent Settings desktop profile persistence', () => {
   });
 
   it('maps hosted gateway error codes to actionable notices', async () => {
-    window.localStorage.setItem('joy-media-session-token', 'session-test');
+    await installSessionTokenForTest('session-test');
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation(async (input: string) => {
@@ -1142,7 +1155,7 @@ describe('JOY Agent Settings desktop profile persistence', () => {
   });
 
   it('shows the server configuration notice when Joy Model is not configured', async () => {
-    window.localStorage.setItem('joy-media-session-token', 'session-test');
+    await installSessionTokenForTest('session-test');
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation(async (input: string) => {
@@ -1357,6 +1370,7 @@ describe('JOY Agent Settings desktop profile persistence', () => {
   it('does not configure Joy Model without a JOY session and offers sign-in', async () => {
     const engineClient = client();
     const rendered = await render(engineClient, undefined);
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
     const joyHostedPreset = buttonByText(rendered, 'Joy Hosted Pro Gateway');
     await act(async () => {
       joyHostedPreset.click();
@@ -1369,9 +1383,11 @@ describe('JOY Agent Settings desktop profile persistence', () => {
       select.value = 'joy-hosted';
       select.dispatchEvent(new Event('change', { bubbles: true }));
     });
+    await act(async () => {
+      await vi.waitFor(() => expect(rendered.textContent).toContain('Signed out'));
+    });
 
     expect(rendered.textContent).toContain('Joy Model (Built-in Pro AI)');
-    expect(rendered.textContent).toContain('Signed out');
     expect(rendered.querySelector('input[type="password"]')).toBeNull();
 
     await act(async () => {

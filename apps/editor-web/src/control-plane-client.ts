@@ -299,8 +299,8 @@ export class BrowserControlPlaneClient {
    */
   constructor(
     private readonly apiUrl = getRemoteApiBaseUrl(),
-    private readonly tokenProvider: () => string | undefined = () =>
-      getStoredMediaToken(window.localStorage),
+    private readonly tokenProvider: () => string | undefined | Promise<string | undefined> = () =>
+      getStoredMediaToken(),
   ) {}
 
   async workers(): Promise<readonly BrowserWorker[]> {
@@ -533,7 +533,7 @@ export class BrowserControlPlaneClient {
     file: Blob,
     onProgress?: (ratio: number) => void,
   ): Promise<BrowserAsset> {
-    const token = this.assertion();
+    const token = await this.assertion();
     if (file.size !== asset.bytes) {
       throw new Error('selected media bytes no longer match the registered asset');
     }
@@ -1006,7 +1006,7 @@ export class BrowserControlPlaneClient {
     return this.request<T>(path, { method: 'GET' });
   }
   private async coalescedGet<T>(path: string, cacheTtlMs = 0): Promise<T> {
-    const token = this.assertion();
+    const token = await this.assertion();
     const key = `${this.apiUrl.replace(/\/$/, '')}\u0000${path}\u0000${token}\u0000${fetchInstanceId()}`;
     const existing = sharedInFlightReads.get(key);
     if (existing !== undefined) return (await existing) as T;
@@ -1041,7 +1041,7 @@ export class BrowserControlPlaneClient {
     });
   }
   private async request<T>(path: string, init: RequestInit): Promise<T> {
-    return this.requestWithToken(path, init, this.assertion());
+    return this.requestWithToken(path, init, await this.assertion());
   }
   private async requestWithToken<T>(path: string, init: RequestInit, token: string): Promise<T> {
     const response = await fetch(`${this.apiUrl.replace(/\/$/, '')}${path}`, {
@@ -1054,8 +1054,8 @@ export class BrowserControlPlaneClient {
       throw new Error('JOY Media API returned an invalid response');
     return body.data as T;
   }
-  private assertion(): string {
-    const token = this.tokenProvider();
+  private async assertion(): Promise<string> {
+    const token = await this.tokenProvider();
     if (token === undefined) throw new Error('JOY Media session required');
     return token;
   }

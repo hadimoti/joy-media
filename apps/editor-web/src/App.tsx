@@ -1141,7 +1141,7 @@ function EditorWorkspace({
     void listDesktopProviderProfiles()
       .then(async (profiles) => {
         if (cancelled) return;
-        const token = getStoredMediaToken(window.localStorage);
+        const token = await getStoredMediaToken();
         let lastPreset: 'dual-brain' | 'joy-hosted' | 'custom' | undefined;
         try {
           const storedPreset = window.localStorage.getItem('joy-agent-last-preset');
@@ -1236,9 +1236,9 @@ function EditorWorkspace({
   }, [agentConnectionStatus]);
   useEffect(() => {
     if (!isDesktopHost()) return;
-    const handleMediaSessionChange = () => {
+    const handleMediaSessionChange = async () => {
       const engineClient = joyAgentEngineClientRef.current;
-      const token = getStoredMediaToken(window.localStorage);
+      const token = await getStoredMediaToken();
       if (!token) {
         if (
           agentConnectionStatus?.provider === 'joy-hosted' ||
@@ -1263,7 +1263,7 @@ function EditorWorkspace({
       if (lastPreset !== null && lastPreset !== 'joy-hosted') return;
       void fetchJoyHostedDefaultModel()
         .then(async (modelId) => {
-          if (engineClient === null || getStoredMediaToken(window.localStorage) !== token) return;
+          if (engineClient === null || (await getStoredMediaToken()) !== token) return;
           const status = await engineClient.configure({
             provider: 'joy-hosted',
             baseUrl: JOY_HOSTED_BASE_URL,
@@ -1285,6 +1285,7 @@ function EditorWorkspace({
     agentConnectionStatus?.capability === 'tool-loop' ||
     agentConnectionStatus?.capability === 'plan-only';
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
+  const [mediaSessionTokenPresent, setMediaSessionTokenPresent] = useState(false);
   const avatarObjectUrl = joySession.kind === 'ready' ? joySession.avatarObjectUrl : undefined;
   const pendingAvatarOwner = usePendingObjectUrlOwner();
   const avatarObjectUrlRef = useReleasableObjectUrl<HTMLImageElement>(
@@ -1676,7 +1677,7 @@ function EditorWorkspace({
   const controlPlaneOwnerKey =
     joySession.kind === 'ready'
       ? (joySession.subject ?? 'signed-in')
-      : getStoredMediaToken(storage) !== undefined
+      : joySession.kind === 'unknown'
         ? 'signed-in'
         : 'signed-out';
   const controlPlaneProject = useMemo(
@@ -1921,8 +1922,7 @@ function EditorWorkspace({
         // race where Cloud/Worker actions fail with a misleading "session is
         // not ready" error immediately after opening a project.
         controlPlaneReady:
-          controlPlaneProjectReady ||
-          (joySession.kind === 'unknown' && getStoredMediaToken(storage) !== undefined),
+          controlPlaneProjectReady || (joySession.kind === 'unknown' && mediaSessionTokenPresent),
         project: session.visualProject,
         client: mediaControlPlaneClient,
         originalCache: {
@@ -1933,8 +1933,8 @@ function EditorWorkspace({
       controlPlaneProject.controlPlaneProjectId,
       controlPlaneProjectReady,
       joySession.kind,
+      mediaSessionTokenPresent,
       session.visualProject,
-      storage,
     ],
   );
   useLayoutEffect(
@@ -3580,7 +3580,12 @@ function EditorWorkspace({
   );
   const refreshJoySession = useCallback(() => {
     const requestId = ++joySessionRefreshSeqRef.current;
-    void probeJoySession(storage)
+    void getStoredMediaToken()
+      .then((token) => {
+        if (requestId === joySessionRefreshSeqRef.current)
+          setMediaSessionTokenPresent(token !== undefined);
+        return probeJoySession();
+      })
       .then((next) => {
         if (requestId !== joySessionRefreshSeqRef.current) {
           if (next.kind === 'ready' && next.avatarObjectUrl !== undefined) {
@@ -3594,7 +3599,7 @@ function EditorWorkspace({
         setJoySession(next);
       })
       .catch(() => undefined);
-  }, [pendingAvatarOwner, storage]);
+  }, [pendingAvatarOwner]);
   useEffect(() => {
     if (session.recoveryWarnings.length === 0) return;
     showToast(
@@ -3791,9 +3796,9 @@ function EditorWorkspace({
     setAccountOpen(false);
     joyAgentEngineClientRef.current?.clear();
     appAgentPresenceStore.clear();
-    await logoutJoySession(storage);
+    await logoutJoySession();
     refreshJoySession();
-  }, [refreshJoySession, storage]);
+  }, [refreshJoySession]);
   const recordExportEntry = useCallback(
     (entry: ProjectExportProcessEntry) => {
       const next = upsertProjectEntry(exportHistoryRef.current, entry);

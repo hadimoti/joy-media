@@ -9,12 +9,7 @@
  * shape so the rest of App.tsx didn't need to change.
  */
 
-import {
-  clearStoredMediaToken,
-  getStoredMediaToken,
-  registerDevice,
-  type MediaSessionStorage,
-} from './media-session.js';
+import { clearStoredMediaToken, getStoredMediaToken, registerDevice } from './media-session.js';
 import { isDesktopHost, getRemoteApiBaseUrl } from './desktop-client.js';
 
 export type JoySessionState =
@@ -43,11 +38,8 @@ const DESKTOP_CREATOR_SESSION: JoySessionState = {
   avatarObjectUrl: undefined,
 };
 
-export async function probeJoySession(
-  storage: MediaSessionStorage,
-  fetchFn: typeof fetch = fetch,
-): Promise<JoySessionState> {
-  const token = getStoredMediaToken(storage);
+export async function probeJoySession(fetchFn: typeof fetch = fetch): Promise<JoySessionState> {
+  const token = await getStoredMediaToken();
   if (token === undefined) {
     if (isDesktopHost()) {
       return DESKTOP_CREATOR_SESSION;
@@ -60,7 +52,7 @@ export async function probeJoySession(
       headers: { authorization: `Bearer ${token}` },
     });
     if (response.status === 401) {
-      clearStoredMediaToken(storage);
+      await clearStoredMediaToken();
       if (isDesktopHost()) {
         return DESKTOP_CREATOR_SESSION;
       }
@@ -104,7 +96,7 @@ export async function probeJoySession(
       }
     }
     if (subject && token) {
-      void registerDevice(undefined, storage, fetchFn);
+      void registerDevice(undefined, fetchFn);
     }
     // Production auth path must not contact localhost debug endpoints.
     return {
@@ -124,12 +116,9 @@ export async function probeJoySession(
   }
 }
 
-export async function logoutJoySession(
-  storage: MediaSessionStorage,
-  fetchFn: typeof fetch = fetch,
-): Promise<void> {
-  const token = getStoredMediaToken(storage);
-  clearStoredMediaToken(storage);
+export async function logoutJoySession(fetchFn: typeof fetch = fetch): Promise<void> {
+  const token = await getStoredMediaToken();
+  await clearStoredMediaToken();
   if (token === undefined) return;
   try {
     const base = getRemoteApiBaseUrl();

@@ -261,6 +261,7 @@ export function JoyAgentSettingsDialog({
   const [joyHostedDefaultModel, setJoyHostedDefaultModel] = useState('');
   const [joyHostedSubscriptionState, setJoyHostedSubscriptionState] =
     useState<JoyHostedSubscriptionState>('signed-out');
+  const [hasMediaSessionToken, setHasMediaSessionToken] = useState(false);
 
   useEffect(() => {
     let current = true;
@@ -272,9 +273,9 @@ export function JoyAgentSettingsDialog({
         }
       })
       .catch(() => {});
-    const refreshSubscription = () => {
-      const token =
-        typeof window === 'undefined' ? undefined : getStoredMediaToken(window.localStorage);
+    const refreshSubscription = async () => {
+      const token = typeof window === 'undefined' ? undefined : await getStoredMediaToken();
+      if (current) setHasMediaSessionToken(token !== undefined);
       setJoyHostedSubscriptionState(token ? 'unavailable' : 'signed-out');
       void fetchJoyHostedSubscriptionState(token).then((state) => {
         if (current) setJoyHostedSubscriptionState(state);
@@ -337,7 +338,7 @@ export function JoyAgentSettingsDialog({
         setSavedProfile(openRouterProfile);
         setHasSavedKey(true);
         const lastPreset = readLastStudioPreset();
-        const mediaToken = getStoredMediaToken(window.localStorage);
+        const mediaToken = await getStoredMediaToken();
         if (!lastPreset && !mediaToken) {
           setStudioPreset('custom');
           setModelId(
@@ -722,8 +723,7 @@ export function JoyAgentSettingsDialog({
     if (working) return;
     const connectionProvider = override?.provider ?? provider;
     const mediaToken =
-      override?.token ??
-      (typeof window !== 'undefined' ? getStoredMediaToken(window.localStorage) : undefined);
+      override?.token ?? (typeof window !== 'undefined' ? await getStoredMediaToken() : undefined);
     if (connectionProvider === 'joy-hosted' && !mediaToken) {
       const message = 'Sign in to your JOY account to use Joy Model.';
       setConnectionNotice({ kind: 'info', message });
@@ -1425,8 +1425,7 @@ export function JoyAgentSettingsDialog({
                             <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#888' }}>
                               Joy Model uses your signed-in JOY account and active Pro subscription.
                             </p>
-                            {typeof window !== 'undefined' &&
-                            !getStoredMediaToken(window.localStorage) ? (
+                            {typeof window !== 'undefined' && !hasMediaSessionToken ? (
                               <div style={{ marginTop: '10px' }}>
                                 <button
                                   type="button"
@@ -2230,9 +2229,9 @@ export function JoyAgentSettingsDialog({
           setStudioPreset('joy-hosted');
           persistLastStudioPreset('joy-hosted');
           handleProviderChange('joy-hosted');
-          const token = getStoredMediaToken(window.localStorage);
           void (async () => {
             try {
+              const token = await getStoredMediaToken();
               if (engineClient.getStatus()?.provider === 'joy-hosted') return;
               const modelId = joyHostedDefaultModel || (await fetchJoyHostedDefaultModel());
               setJoyHostedDefaultModel(modelId);
