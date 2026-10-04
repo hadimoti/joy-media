@@ -62,6 +62,17 @@ export function logStep(label: string, detail: string): void {
   console.log(`  ${c('•', 'dim')} ${c(label, 'bold')}: ${detail}`);
 }
 
+export function formatLocalTime(isoUtc: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  }).format(new Date(isoUtc));
+}
+
 export function printTable(headers: string[], rows: string[][]): void {
   const colWidths = headers.map((h, i) => {
     let max = h.length;

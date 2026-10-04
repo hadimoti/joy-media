@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from './cli.js';
 import { CliJoyAgentToolBridge } from './agent/bridge.js';
 import { resolveByokConfig } from './agent/provider.js';
 import { formatAgentRunFailure } from './commands/agent-cmd.js';
+import { protectSecret } from './utils/secret-store.js';
+import { setAiProvider } from './utils/config.js';
+import * as joyAgentRuntime from './agent/joy-agent.js';
 import { JoyAgentRunError } from '@joy-media/joy-agent-engine';
 import {
   createDefaultProject,
@@ -25,6 +28,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       'OPENROUTER_API_KEY',
       'OPENAI_API_KEY',
       'ANTHROPIC_API_KEY',
+      'JOY_MEDIA_SESSION_TOKEN',
     ]) {
       vi.stubEnv(key, '');
     }
@@ -50,9 +54,131 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     expect(formatAgentRunFailure(error, true)).toContain('"statusCode":429');
   });
 
+  it('maps the JOY hosted subscription gateway response to its actionable code', () => {
+    const error = new JoyAgentRunError('JOY_AGENT_UNKNOWN', {
+      detail: {
+        name: 'APICallError',
+        statusCode: 402,
+        urlOrigin: 'https://joyst.ir',
+        message: 'Subscription required',
+        responseBodySnippet: '{"error":{"code":"JOY_SUBSCRIPTION_REQUIRED"}}',
+      },
+    });
+    expect(formatAgentRunFailure(error, false)).toContain('JOY_SUBSCRIPTION_REQUIRED');
+  });
+
   it('prints help guide on help command and exits 0', async () => {
     const code = await runCli(['help']);
     expect(code).toBe(0);
+  });
+
+  it('prints command-specific agent help', async () => {
+    const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(await runCli(['agent', '--help'])).toBe(0);
+      expect(output.mock.calls.flat().join('\n')).toContain('probe');
+      expect(output.mock.calls.flat().join('\n')).toContain('--apply');
+    } finally {
+      output.mockRestore();
+    }
+  });
+
+  it('returns failure for an incompatible probe without claiming success', async () => {
+    const probeSpy = vi.spyOn(joyAgentRuntime, 'probeAgent').mockResolvedValue({
+      capability: 'incompatible',
+      provider: 'openrouter',
+      modelId: 'openrouter/free',
+      failure: {
+        code: 'JOY_AGENT_UNKNOWN',
+        retryable: false,
+        detail: { name: 'Error', message: 'incompatible', responseBodySnippet: '' },
+      },
+    });
+    const stdout = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(await runCli(['agent', 'probe'])).toBe(1);
+      expect(stdout.mock.calls.flat().join('\n')).not.toContain('Probe Successful!');
+      expect(stderr.mock.calls.flat().join('\n')).toContain('Probe failed: model is incompatible');
+    } finally {
+      probeSpy.mockRestore();
+      stdout.mockRestore();
+      stderr.mockRestore();
+    }
+  });
+
+  it('treats a plan-only probe as a warning and exits successfully', async () => {
+    const probeSpy = vi.spyOn(joyAgentRuntime, 'probeAgent').mockResolvedValue({
+      capability: 'plan-only',
+      provider: 'openrouter',
+      modelId: 'openrouter/free',
+    });
+    const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(await runCli(['agent', 'probe'])).toBe(0);
+      expect(output.mock.calls.flat().join('\n')).toContain(
+        'Probe OK: plan-only (no tool calling)',
+      );
+      expect(output.mock.calls.flat().join('\n')).not.toContain('Probe Successful!');
+    } finally {
+      probeSpy.mockRestore();
+      output.mockRestore();
+    }
+  });
+
+  it('provider list never prints any part of a saved API key', async () => {
+    const key = 'sk-test-REDACTED-0000';
+    setAiProvider('safe-provider', {
+      name: 'safe-provider',
+      provider: 'custom',
+      apiKeyProtected: protectSecret(key),
+    });
+    const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(await runCli(['agent', 'provider', 'list'])).toBe(0);
+      const text = output.mock.calls.flat().join('\n');
+      expect(text).toContain('stored (DPAPI)');
+      for (let i = 0; i <= key.length - 4; i++) expect(text).not.toContain(key.slice(i, i + 4));
+    } finally {
+      output.mockRestore();
+    }
+  });
+
+  it('agent --apply saves file projects and bumps their revision', async () => {
+    const project = createDefaultProject('File project', { id: 'agent-file-test' });
+    const projectFile = join(isolatedHome, 'agent-file.json');
+    writeFileSync(
+      projectFile,
+      JSON.stringify({ format: 'joy-media-project', revision: 7, project }),
+      'utf8',
+    );
+    const updatedProject = { ...project, title: 'Updated by agent' };
+    const runSpy = vi.spyOn(joyAgentRuntime, 'runJoyAgent').mockResolvedValue({
+      resultText: 'done',
+      capability: 'tool-loop',
+      steps: 1,
+      staged: { timelineOps: [], documentOps: [] },
+      applied: true,
+      updatedProject,
+      appliedCount: 1,
+      errors: [],
+    });
+    const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(
+        await runCli(['agent', 'run', 'change title', '--project', projectFile, '--apply']),
+      ).toBe(0);
+      const saved = JSON.parse(readFileSync(projectFile, 'utf8')) as {
+        revision: number;
+        project: { title: string };
+      };
+      expect(saved.revision).toBe(8);
+      expect(saved.project.title).toBe('Updated by agent');
+      expect(output.mock.calls.flat().join('\n')).toContain('Applied 1 operation(s) (--apply)');
+    } finally {
+      runSpy.mockRestore();
+      output.mockRestore();
+    }
   });
 
   it('runs doctor command successfully', async () => {
@@ -60,8 +186,8 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     expect(code).toBe(0);
   });
 
-  it('normalizes BYOK provider configuration', () => {
-    const config = resolveByokConfig({
+  it('normalizes BYOK provider configuration', async () => {
+    const config = await resolveByokConfig({
       provider: 'openrouter',
       model: 'anthropic/claude-3.7-sonnet',
       apiKey: 'test-key',
@@ -156,7 +282,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
         '--track',
         'track-v1',
         '--start',
-        '1',
+        '0',
         '--duration',
         '4',
         '--sqlite-path',
@@ -167,6 +293,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       const loadedAfterAdd = loadProject(project.id, testDbPath);
       const rootTrack = loadedAfterAdd.project.compositions['root']?.tracks[0];
       expect(rootTrack?.clips.length).toBe(1);
+      expect(loadedAfterAdd.project.compositions.root?.durationUs).toBe(4_000_000);
       const clipId = rootTrack!.clips[0]!.id;
 
       // 2. Split clip at 3 seconds
@@ -222,6 +349,57 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       const loadedFinal = loadProject(project.id, testDbPath);
       const finalClips = loadedFinal.project.compositions['root']?.tracks[0]?.clips;
       expect(finalClips?.length).toBe(1);
+    });
+
+    it('fits root duration to content with a one-second minimum', async () => {
+      const project = createDefaultProject('Fit extent project', { id: 'fit-extent-test' });
+      (
+        project.compositions.root!.tracks[0]!.clips as unknown as Array<Record<string, unknown>>
+      ).push({
+        id: 'base-clip',
+        kind: 'video',
+        assetId: 'asset-default',
+        startUs: 0,
+        durationUs: 10_000_000,
+        sourceInUs: 0,
+      });
+      saveProject(project, { source: 'sqlite', path: testDbPath, revision: 0 });
+      expect(
+        await runCli([
+          'timeline',
+          'add-clip',
+          '--project',
+          project.id,
+          '--track',
+          'track-v1',
+          '--start',
+          '10',
+          '--duration',
+          '5',
+          '--sqlite-path',
+          testDbPath,
+        ]),
+      ).toBe(0);
+      const extended = loadProject(project.id, testDbPath);
+      expect(extended.project.compositions.root?.durationUs).toBe(15_000_000);
+      const addedClip = extended.project.compositions.root!.tracks[0]!.clips.find(
+        (clip) => clip.id !== 'base-clip',
+      )!;
+      expect(
+        await runCli([
+          'timeline',
+          'remove-clip',
+          '--project',
+          project.id,
+          '--clip',
+          addedClip.id,
+          '--sqlite-path',
+          testDbPath,
+        ]),
+      ).toBe(0);
+      expect(loadProject(project.id, testDbPath).project.compositions.root?.durationUs).toBe(
+        10_000_000,
+      );
     });
 
     it('cleans up timeline test database', () => {
@@ -295,6 +473,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
         'OPENROUTER_API_KEY',
         'OPENAI_API_KEY',
         'ANTHROPIC_API_KEY',
+        'JOY_MEDIA_SESSION_TOKEN',
       ]) {
         vi.stubEnv(key, '');
       }
@@ -320,6 +499,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
           'OPENROUTER_API_KEY',
           'OPENAI_API_KEY',
           'ANTHROPIC_API_KEY',
+          'JOY_MEDIA_SESSION_TOKEN',
         ]) {
           vi.stubEnv(key, '');
         }
@@ -336,6 +516,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
         'OPENROUTER_API_KEY',
         'OPENAI_API_KEY',
         'ANTHROPIC_API_KEY',
+        'JOY_MEDIA_SESSION_TOKEN',
       ]) {
         vi.stubEnv(key, '');
       }
@@ -388,7 +569,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
         expect(modelSetCode).toBe(0);
 
         // 5. Verify resolution with active provider
-        const resolved = resolveByokConfig();
+        const resolved = await resolveByokConfig();
         expect(resolved.provider).toBe('kilo');
         expect(resolved.baseUrl).toBe('https://api.kilo.ai/api/gateway');
         expect(resolved.apiKey).toBe('sk-test-REDACTED-0000');
@@ -406,6 +587,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
           'OPENROUTER_API_KEY',
           'OPENAI_API_KEY',
           'ANTHROPIC_API_KEY',
+          'JOY_MEDIA_SESSION_TOKEN',
         ]) {
           vi.stubEnv(key, '');
         }

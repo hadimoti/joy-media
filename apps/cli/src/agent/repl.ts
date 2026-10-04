@@ -20,6 +20,22 @@ export interface DualBrainStatus {
   readonly creative: { readonly name: string; readonly provider: string; readonly model: string };
 }
 
+export function saveReplProject(
+  project: JoyProjectV1,
+  options: ReplOptions,
+  revision: number,
+): number {
+  if (options.path === 'in-memory') {
+    logWarn('Changes exist only in this scratch session; nothing was saved.');
+    return revision;
+  }
+  return saveProject(project, {
+    source: options.source,
+    path: options.path,
+    revision,
+  });
+}
+
 export const DUAL_BRAIN_STATUS: DualBrainStatus = {
   workhorse: {
     name: 'Workhorse',
@@ -97,12 +113,10 @@ export async function startAgentRepl(options: ReplOptions): Promise<void> {
         const updated = splitClipInProject(currentProject, clipId, atSec);
         if (updated) {
           currentProject = updated;
-          currentRev = saveProject(currentProject, {
-            source: options.source,
-            path: options.path,
-            revision: currentRev,
-          });
-          logSuccess(`Split ${c(clipId, 'bold')} at ${atSec}s. Saved revision ${currentRev}.`);
+          currentRev = saveReplProject(currentProject, options, currentRev);
+          if (options.path !== 'in-memory') {
+            logSuccess(`Split ${c(clipId, 'bold')} at ${atSec}s. Saved revision ${currentRev}.`);
+          }
         } else {
           logWarn(`Clip "${clipId}" not found or split point out of range.`);
         }
@@ -122,24 +136,18 @@ export async function startAgentRepl(options: ReplOptions): Promise<void> {
           continue;
         }
         currentProject = result.project;
-        currentRev = saveProject(currentProject, {
-          source: options.source,
-          path: options.path,
-          revision: currentRev,
-        });
-        logSuccess(
-          `Compiled/Applied Look "${pack}" (${result.operationCount} ops). Saved revision ${currentRev}.`,
-        );
+        currentRev = saveReplProject(currentProject, options, currentRev);
+        if (options.path !== 'in-memory') {
+          logSuccess(
+            `Compiled/Applied Look "${pack}" (${result.operationCount} ops). Saved revision ${currentRev}.`,
+          );
+        }
         continue;
       }
 
       if (trimmed === '/save') {
-        currentRev = saveProject(currentProject, {
-          source: options.source,
-          path: options.path,
-          revision: currentRev,
-        });
-        logSuccess(`Project saved at revision ${currentRev}.`);
+        currentRev = saveReplProject(currentProject, options, currentRev);
+        if (options.path !== 'in-memory') logSuccess(`Project saved at revision ${currentRev}.`);
         continue;
       }
 
@@ -185,12 +193,10 @@ export async function startAgentRepl(options: ReplOptions): Promise<void> {
               providerOptions: options.providerOptions,
             });
             currentProject = applied.updatedProject;
-            currentRev = saveProject(currentProject, {
-              source: options.source,
-              path: options.path,
-              revision: currentRev,
-            });
-            logSuccess(`Saved updated project revision ${currentRev}.`);
+            currentRev = saveReplProject(currentProject, options, currentRev);
+            if (options.path !== 'in-memory') {
+              logSuccess(`Saved updated project revision ${currentRev}.`);
+            }
           } else {
             logInfo('Changes discarded.');
           }

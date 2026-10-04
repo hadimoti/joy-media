@@ -34,6 +34,11 @@ export interface RenderCommandFlags {
   sqlitePath?: string | undefined;
 }
 
+export function printRenderHelp(): void {
+  console.log(`Usage: joy-media render --project <id|file.json> --preset <mp4|webm|prores> --out <directory>
+Options: --concurrency <1-32> --json`);
+}
+
 export interface RenderPresetSpec {
   readonly id: 'mp4' | 'webm' | 'prores';
   readonly container: string;

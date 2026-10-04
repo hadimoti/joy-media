@@ -10,6 +10,7 @@ import {
   logWarn,
   printBanner,
   printTable,
+  formatLocalTime,
 } from '../utils/logger.js';
 import {
   createDefaultProject,
@@ -53,7 +54,7 @@ export async function handleProjectCommand(args: string[], flags: CliFlags): Pro
       String(p.trackCount),
       String(p.clipCount),
       `${p.durationSeconds}s`,
-      p.updatedAt.slice(0, 16).replace('T', ' '),
+      formatLocalTime(p.updatedAt),
     ]);
 
     printTable(headers, rows);
