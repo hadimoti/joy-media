@@ -1,5 +1,10 @@
 # WP-12 deployment manifests
 
+Deployment shell tests use isolated temporary paths and command stubs. Their
+root-check override is test-only and is honored only when both
+`JOY_DEPLOY_TEST_MODE=1` and `JOY_DEPLOY_TEST_ROOT_OK=1` are set; do not set
+either variable for a real deployment.
+
 `joy-media.nginx.conf` serves the editor and maps public `/api/v1/*` to the
 Node server's `/v1/*` route. `joy-media-api.override.conf` starts an immutable
 `pnpm deploy --prod` API release and reads only `/etc/joy-media/api.env`.

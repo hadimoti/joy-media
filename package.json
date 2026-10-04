@@ -22,7 +22,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "audit:prod": "pnpm audit --prod --audit-level=moderate",
-    "test:harness": "node --test ops/self-hosted/linux-runner/ci-namespace-classify.test.mjs ops/self-hosted/linux-runner/evidence-retention.test.mjs ops/self-hosted/linux-runner/real-service-evidence.test.mjs ops/self-hosted/linux-runner/real-service-teardown.test.mjs",
+    "test:harness": "node --test ops/self-hosted/linux-runner/ci-namespace-classify.test.mjs ops/self-hosted/linux-runner/evidence-retention.test.mjs ops/self-hosted/linux-runner/real-service-evidence.test.mjs ops/self-hosted/linux-runner/real-service-teardown.test.mjs tooling/ops/smoke-gateway.test.mjs deploy/deploy-scripts.test.mjs",
     "release:performance": "node tooling/release/release-performance-observer.mjs",
     "release:gate": "node --experimental-strip-types tooling/release/src/gate.ts",
     "verify:joy-agent-worker": "node tooling/release/verify-joy-agent-worker.mjs",
