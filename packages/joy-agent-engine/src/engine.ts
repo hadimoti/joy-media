@@ -42,6 +42,7 @@ export interface JoyAgentEngineOptions {
   readonly bridge: JoyAgentToolBridge;
   readonly modelId?: string;
   readonly allowFrames?: boolean;
+  readonly vision?: boolean;
   readonly limits?: Partial<JoyAgentLimits>;
   readonly capability?: JoyAgentCapability;
   readonly onEvent?: (event: JoyAgentSafeEvent) => void;
@@ -260,6 +261,7 @@ export class JoyAgentEngine {
     const tools = createJoyAgentTools(this.options.bridge, this.limits, {
       ...(this.options.modelId === undefined ? {} : { modelId: this.options.modelId }),
       ...(this.options.allowFrames === undefined ? {} : { allowFrames: this.options.allowFrames }),
+      ...(this.options.vision === undefined ? {} : { vision: this.options.vision }),
     });
     const toolCallLimit: StopCondition<typeof tools> = ({ steps }) =>
       steps.reduce((count, step) => count + step.toolCalls.length, 0) >= this.limits.maxToolCalls;

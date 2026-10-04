@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { CliJoyAgentToolBridge } from './bridge.js';
+import { resolveFfmpegExecutable } from '../render/ffmpeg-run.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version'], { shell: false }).status === 0;
 
@@ -78,6 +79,17 @@ function projectWithTracks(): JoyProjectV1 {
 }
 
 describe('CLI Joy Agent bridge timeline operations', () => {
+  it('uses the renderer ffmpeg resolver configured by JOY_FFMPEG', () => {
+    const previous = process.env.JOY_FFMPEG;
+    process.env.JOY_FFMPEG = 'custom-ffmpeg-test';
+    try {
+      expect(resolveFfmpegExecutable()).toBe('custom-ffmpeg-test');
+    } finally {
+      if (previous === undefined) delete process.env.JOY_FFMPEG;
+      else process.env.JOY_FFMPEG = previous;
+    }
+  });
+
   it.skipIf(!hasFfmpeg)(
     'reads a bounded JPEG frame from the composited local timeline',
     async () => {
@@ -321,6 +333,46 @@ describe('CLI Joy Agent bridge timeline operations', () => {
     await expect(automatic.submitPlan()).resolves.toMatchObject({
       awaitingApproval: false,
       willApplyOnFinish: true,
+    });
+  });
+
+  it('keeps the previous project when applying operations makes it invalid', async () => {
+    const project = {
+      ...projectWithTracks(),
+      visualObjects: {
+        title: {
+          id: 'title',
+          kind: 'text',
+          text: 'Title',
+          transform: {
+            x: 0,
+            y: 0,
+            scaleX: 1,
+            scaleY: 1,
+            rotationDeg: 0,
+            opacity: 1,
+            crop: { left: 0, top: 0, right: 0, bottom: 0 },
+          },
+        },
+      },
+    } as JoyProjectV1;
+    const bridge = new CliJoyAgentToolBridge(project, 1);
+    await bridge.proposeDocumentOperations({
+      operations: [
+        {
+          kind: 'set-property',
+          id: 'invalid-opacity',
+          objectId: 'title',
+          property: 'opacity',
+          value: -1,
+          dependsOn: [],
+        },
+      ],
+    });
+    const result = bridge.applyStaged();
+    expect(result.errors.some((error) => error.includes('opacity'))).toBe(true);
+    expect(result.updatedProject.visualObjects.title).toMatchObject({
+      transform: { opacity: 1 },
     });
   });
 });

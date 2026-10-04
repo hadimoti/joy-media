@@ -79,6 +79,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       expect(output.mock.calls.flat().join('\n')).toContain('probe');
       expect(output.mock.calls.flat().join('\n')).toContain('--apply');
       expect(output.mock.calls.flat().join('\n')).toContain('--allow-frames');
+      expect(output.mock.calls.flat().join('\n')).toContain('--vision');
     } finally {
       output.mockRestore();
     }
@@ -138,7 +139,9 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     try {
       expect(await runCli(['agent', 'provider', 'list'])).toBe(0);
       const text = output.mock.calls.flat().join('\n');
-      expect(text).toContain('stored (DPAPI)');
+      expect(text).toContain(
+        process.platform === 'win32' ? 'stored (DPAPI)' : 'stored (file-0600)',
+      );
       for (let i = 0; i <= key.length - 4; i++) expect(text).not.toContain(key.slice(i, i + 4));
     } finally {
       output.mockRestore();
@@ -183,6 +186,38 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     }
   });
 
+  it('refuses invalid --apply results without saving the project', async () => {
+    const project = createDefaultProject('Invalid apply project', { id: 'invalid-apply-test' });
+    const projectFile = join(isolatedHome, 'invalid-apply.json');
+    writeFileSync(
+      projectFile,
+      JSON.stringify({ format: 'joy-media-project', revision: 4, project }),
+      'utf8',
+    );
+    const runSpy = vi.spyOn(joyAgentRuntime, 'runJoyAgent').mockResolvedValue({
+      resultText: 'refused',
+      capability: 'tool-loop',
+      steps: 1,
+      staged: { timelineOps: [], documentOps: [] },
+      applied: false,
+      updatedProject: project,
+      appliedCount: 0,
+      errors: ['visualObjects.title.transform.opacity is invalid'],
+    });
+    const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(
+        await runCli(['agent', 'run', 'set invalid opacity', '--project', projectFile, '--apply']),
+      ).toBe(1);
+      const saved = JSON.parse(readFileSync(projectFile, 'utf8')) as { revision: number };
+      expect(saved.revision).toBe(4);
+      expect(stderr.mock.calls.flat().join('\n')).toContain('Apply refused');
+    } finally {
+      runSpy.mockRestore();
+      stderr.mockRestore();
+    }
+  });
+
   it('passes explicit frame consent to the agent run', async () => {
     const project = createDefaultProject('Frame consent project', { id: 'frame-consent-test' });
     const projectFile = join(isolatedHome, 'frame-consent.json');
@@ -203,9 +238,18 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     try {
       expect(
-        await runCli(['agent', 'run', 'inspect', '--project', projectFile, '--allow-frames']),
+        await runCli([
+          'agent',
+          'run',
+          'inspect',
+          '--project',
+          projectFile,
+          '--allow-frames',
+          '--vision',
+        ]),
       ).toBe(0);
       expect(runSpy.mock.calls[0]?.[0].allowFrames).toBe(true);
+      expect(runSpy.mock.calls[0]?.[0].vision).toBe(true);
     } finally {
       runSpy.mockRestore();
       output.mockRestore();

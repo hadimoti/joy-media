@@ -319,7 +319,11 @@ function boundedResult(value: unknown, maxBytes: number): unknown {
 export function createJoyAgentTools(
   bridge: JoyAgentToolBridge,
   limits: JoyAgentLimits = DEFAULT_JOY_AGENT_LIMITS,
-  options: { readonly modelId?: string; readonly allowFrames?: boolean } = {},
+  options: {
+    readonly modelId?: string;
+    readonly allowFrames?: boolean;
+    readonly vision?: boolean;
+  } = {},
 ): ToolSet {
   const reads = new ReadConcurrencyGate(
     Math.min(limits.maxConcurrentReads, DEFAULT_JOY_AGENT_LIMITS.maxConcurrentReads),
@@ -427,9 +431,9 @@ export function createJoyAgentTools(
       execute: async () => boundedResult(await bridge.submitPlan(), maxPayloadBytes),
     }),
   };
-  const visionCapable = KILO_MODEL_PRESETS.some(
-    (preset) => preset.id === options.modelId && preset.vision,
-  );
+  const visionCapable =
+    options.vision ??
+    KILO_MODEL_PRESETS.some((preset) => preset.id === options.modelId && preset.vision);
   if (bridge.readFrame && visionCapable && options.allowFrames) {
     let frameReads = 0;
     tools.read_frame = tool({

@@ -10,6 +10,7 @@ export interface ByokSessionConfig {
   readonly baseUrl: string;
   readonly modelId: string;
   readonly apiKey: string;
+  readonly vision?: boolean;
 }
 
 export interface ByokSessionStatus {
@@ -55,7 +56,13 @@ export function normalizeByokSessionConfig(
       input.baseUrl === undefined || input.baseUrl.trim().length === 0
         ? DEFAULT_JOY_HOSTED_BASE_URL
         : normalizeCustomBaseUrl(input.baseUrl);
-    return Object.freeze({ provider, baseUrl, modelId, apiKey });
+    return Object.freeze({
+      provider,
+      baseUrl,
+      modelId,
+      apiKey,
+      ...(input.vision === undefined ? {} : { vision: input.vision }),
+    });
   }
 
   if (provider === 'openrouter') {
@@ -66,11 +73,23 @@ export function normalizeByokSessionConfig(
     ) {
       throw new ProviderConfigError();
     }
-    return Object.freeze({ provider, baseUrl: OPENROUTER_BASE_URL, modelId, apiKey });
+    return Object.freeze({
+      provider,
+      baseUrl: OPENROUTER_BASE_URL,
+      modelId,
+      apiKey,
+      ...(input.vision === undefined ? {} : { vision: input.vision }),
+    });
   }
 
   const baseUrl = normalizeCustomBaseUrl(input.baseUrl);
-  return Object.freeze({ provider, baseUrl, modelId, apiKey });
+  return Object.freeze({
+    provider,
+    baseUrl,
+    modelId,
+    apiKey,
+    ...(input.vision === undefined ? {} : { vision: input.vision }),
+  });
 }
 
 export function safeByokSessionStatus(

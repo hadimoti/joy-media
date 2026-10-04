@@ -8,6 +8,7 @@ import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { sourceTimeAtVideoClipTime, validateJoyProjectV1 } from '@joy-media/project-schema';
 import { recomputeRootDuration } from '../utils/timeline-math.js';
 import { buildFfmpegFramePlan } from '../render/ffmpeg-plan.js';
+import { resolveFfmpegExecutable } from '../render/ffmpeg-run.js';
 import { DEFAULT_JOY_AGENT_LIMITS } from '@joy-media/joy-agent-engine';
 
 export interface StagedOperationsSummary {
@@ -113,7 +114,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
       let settled = false;
       let outputBytes = 0;
       const chunks: Buffer[] = [];
-      const child = spawn('ffmpeg', plan.args, {
+      const child = spawn(resolveFfmpegExecutable(), plan.args, {
         shell: false,
         stdio: ['ignore', 'pipe', 'ignore'],
       });
@@ -527,8 +528,12 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
 
     for (const track of tracks) track.clips.sort((a, b) => a.startUs - b.startUs);
     recomputeRootDuration(current);
-    for (const diagnostic of validateJoyProjectV1(current)) {
+    const diagnostics = validateJoyProjectV1(current);
+    for (const diagnostic of diagnostics) {
       errors.push(`${diagnostic.path}: ${diagnostic.message}`);
+    }
+    if (diagnostics.length > 0) {
+      return { updatedProject: this.project, appliedCount: 0, errors };
     }
     this.project = current;
     this.clearStaged();

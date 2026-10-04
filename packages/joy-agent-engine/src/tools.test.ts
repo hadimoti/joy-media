@@ -156,6 +156,26 @@ describe('JOY Agent tool catalog', () => {
         { modelId: visionModel, allowFrames: true },
       ),
     ).toHaveProperty('read_frame');
+    for (const modelId of [
+      'bytedance-seed/seed-2.0-lite',
+      'anthropic/claude-sonnet-4.6',
+      'openai/gpt-4o-mini',
+    ]) {
+      expect(
+        createJoyAgentTools(
+          bridge({ readFrame: async () => ({ unavailable: 'missing' }) }),
+          DEFAULT_JOY_AGENT_LIMITS,
+          { modelId, allowFrames: true, vision: true },
+        ),
+      ).toHaveProperty('read_frame');
+    }
+    expect(
+      createJoyAgentTools(
+        bridge({ readFrame: async () => ({ unavailable: 'missing' }) }),
+        DEFAULT_JOY_AGENT_LIMITS,
+        { modelId: 'custom/vision-model', allowFrames: true, vision: true },
+      ),
+    ).toHaveProperty('read_frame');
   });
 
   it('caps frame reads at three and returns an unavailable result on the fourth call', async () => {

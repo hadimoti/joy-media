@@ -74,7 +74,7 @@ Commands:
   models                       Fetch available models
   model <get|set>              Show or change the model
 
-Options: --project <id|file> --apply --allow-frames --provider <name> --model <id>
+  Options: --project <id|file> --apply --allow-frames --vision --provider <name> --model <id>
          --api-key-env <VAR> --base-url <url> --debug --json`);
 }
 
@@ -432,6 +432,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         baseUrl: flags.baseUrl,
       },
       allowFrames: flags.allowFrames,
+      vision: flags.vision,
     });
     return 0;
   }
@@ -454,6 +455,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         prompt,
         apply: flags.apply,
         allowFrames: flags.allowFrames,
+        vision: flags.vision,
         providerOptions: {
           provider: flags.provider,
           model: flags.model,
@@ -462,6 +464,11 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
           baseUrl: flags.baseUrl,
         },
       });
+
+      if (flags.apply && !output.applied && output.errors.length > 0) {
+        logError(`Apply refused: ${output.errors.join('; ')}`);
+        return 1;
+      }
 
       if (output.applied && projectInfo.path === 'in-memory') {
         logSuccess(`Applied ${output.appliedCount} operation(s) (--apply)`);

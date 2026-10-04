@@ -37,33 +37,53 @@ const ENV_PROVIDER_PRIORITY = [
   ['JOY_MEDIA_SESSION_TOKEN', 'joy-hosted'],
 ] as const;
 
+interface JoyHostedCatalogModel {
+  readonly id: string;
+  readonly isDefault?: boolean;
+  readonly vision?: boolean;
+}
+
 let joyHostedModelCache:
-  { readonly baseUrl: string; readonly expiresAt: number; readonly modelId: string } | undefined;
+  | {
+      readonly baseUrl: string;
+      readonly expiresAt: number;
+      readonly models: readonly JoyHostedCatalogModel[];
+    }
+  | undefined;
+
+async function getJoyHostedModelCatalog(
+  baseUrl: string,
+  apiKey?: string,
+): Promise<readonly JoyHostedCatalogModel[]> {
+  if (joyHostedModelCache?.baseUrl === baseUrl && joyHostedModelCache.expiresAt > Date.now())
+    return joyHostedModelCache.models;
+  const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/models`, {
+    headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+  });
+  if (!response.ok) throw new Error(`JOY hosted model catalog returned HTTP ${response.status}`);
+  const payload = (await response.json()) as { models?: Array<Record<string, unknown>> };
+  const models = (payload.models ?? []).flatMap((model) =>
+    typeof model.id === 'string'
+      ? [
+          {
+            id: model.id,
+            ...(model.isDefault === true ? { isDefault: true } : {}),
+            ...(model.vision === true ? { vision: true } : {}),
+          },
+        ]
+      : [],
+  );
+  joyHostedModelCache = { baseUrl, models, expiresAt: Date.now() + 60 * 60 * 1000 };
+  return models;
+}
 
 export async function getJoyHostedDefaultModel(
   baseUrl = DEFAULT_JOY_HOSTED_BASE_URL,
   apiKey?: string,
 ): Promise<string> {
-  if (
-    joyHostedModelCache &&
-    joyHostedModelCache.baseUrl === baseUrl &&
-    joyHostedModelCache.expiresAt > Date.now()
-  ) {
-    return joyHostedModelCache.modelId;
-  }
-  const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/models`, {
-    headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-  });
-  if (!response.ok) throw new Error(`JOY hosted model catalog returned HTTP ${response.status}`);
-  const payload = (await response.json()) as {
-    models?: Array<{ id?: unknown; isDefault?: unknown }>;
-  };
-  const modelId = payload.models?.find(
-    (model) => model.isDefault === true && typeof model.id === 'string',
-  )?.id;
-  if (typeof modelId !== 'string' || !modelId)
-    throw new Error('JOY hosted catalog has no default model');
-  joyHostedModelCache = { baseUrl, modelId, expiresAt: Date.now() + 60 * 60 * 1000 };
+  const models = await getJoyHostedModelCatalog(baseUrl, apiKey);
+  const modelId = models.find((model) => model.isDefault)?.id;
+  if (!modelId) throw new Error('JOY hosted catalog has no default model');
   return modelId;
 }
 
@@ -157,6 +177,11 @@ export async function resolveByokConfig(
       modelId: await getJoyHostedDefaultModel(effective.baseUrl, apiKey),
     };
   }
+  let hostedVision: boolean | undefined;
+  if (effective.provider === 'joy-hosted') {
+    const catalog = await getJoyHostedModelCatalog(effective.baseUrl, apiKey);
+    hostedVision = catalog.find((model) => model.id === effective.modelId)?.vision === true;
+  }
 
   const actualProviderType =
     aiProviders[effective.provider]?.provider ??
@@ -181,6 +206,7 @@ export async function resolveByokConfig(
     baseUrl: effective.baseUrl,
     modelId: effective.modelId,
     apiKey: apiKey ?? 'not-provided',
+    ...(hostedVision === undefined ? {} : { vision: hostedVision }),
   });
 }
 

@@ -102,7 +102,7 @@ describe('effective BYOK provider configuration', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
-          models: [{ id: 'joy-model-test', isDefault: true }],
+          models: [{ id: 'joy-model-test', isDefault: true, vision: true }],
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       ),
@@ -114,11 +114,33 @@ describe('effective BYOK provider configuration', () => {
         baseUrl: 'https://joyst.ir/api/v1/agent',
         modelId: 'joy-model-test',
         apiKey: 'session-test-REDACTED',
+        vision: true,
       });
       await resolveByokConfig({ provider: 'joy-hosted' });
       expect(fetchSpy).toHaveBeenCalledOnce();
     } finally {
       fetchSpy.mockRestore();
+    }
+  });
+
+  it('uses the hosted catalog vision flag for an explicitly selected model', async () => {
+    isolateConfig();
+    vi.stubEnv('JOY_MEDIA_SESSION_TOKEN', 'session-test-REDACTED');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({ models: [{ id: 'anthropic/claude-sonnet-4.6', vision: true }] }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    try {
+      const resolved = await resolveByokConfig({
+        provider: 'joy-hosted',
+        model: 'anthropic/claude-sonnet-4.6',
+        baseUrl: 'https://joy-hosted-vision-test.invalid/api/v1/agent',
+      });
+      expect(resolved).toMatchObject({ modelId: 'anthropic/claude-sonnet-4.6', vision: true });
+    } finally {
+      vi.restoreAllMocks();
     }
   });
 

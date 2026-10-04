@@ -22,6 +22,7 @@ export interface RunAgentOptions {
   readonly taskKind?: JoyAgentTaskKind | undefined;
   readonly apply?: boolean | undefined;
   readonly allowFrames?: boolean | undefined;
+  readonly vision?: boolean | undefined;
   readonly providerOptions?: ResolveProviderOptions | undefined;
   readonly onEvent?: ((event: JoyAgentSafeEvent) => void) | undefined;
   readonly onStagedChange?: ((summary: StagedOperationsSummary) => void) | undefined;
@@ -122,11 +123,13 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
   const engine = new JoyAgentEngine({
     model,
     bridge,
-    ...(config.provider === 'kilo' ? { modelId: config.modelId } : {}),
-    allowFrames:
-      options.allowFrames === true &&
-      config.provider === 'kilo' &&
-      KILO_MODEL_PRESETS.some((preset) => preset.id === config.modelId && preset.vision),
+    modelId: config.modelId,
+    allowFrames: options.allowFrames === true,
+    vision:
+      options.vision === true ||
+      config.vision === true ||
+      (config.provider === 'kilo' &&
+        KILO_MODEL_PRESETS.some((preset) => preset.id === config.modelId && preset.vision)),
     onEvent: eventLogger,
     apiKeyForRedaction: config.apiKey,
   });
@@ -166,9 +169,13 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     updatedProject = applyRes.updatedProject;
     appliedCount = applyRes.appliedCount;
     errors = applyRes.errors;
-    applied = true;
+    applied = applyRes.errors.length === 0;
     if (errors.length > 0) {
-      logWarn(`Applied with ${errors.length} warning(s):`);
+      logWarn(
+        applied
+          ? `Applied with ${errors.length} warning(s):`
+          : `Apply refused with ${errors.length} error(s):`,
+      );
       for (const err of errors) console.log(`  ${c('!', 'yellow')} ${err}`);
     }
   }
