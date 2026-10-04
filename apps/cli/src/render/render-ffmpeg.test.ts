@@ -18,6 +18,7 @@ import { createTextClip } from './text-clip.js';
 import { resolveTextFont } from './text-font.js';
 import { probeFfmpegTextCapabilities } from './text-capabilities.js';
 import { resolveFfmpegExecutable } from './ffmpeg-run.js';
+import { clipLookFilter } from './ffmpeg-plan.js';
 
 const hasFfmpeg = spawnSync(resolveFfmpegExecutable(), ['-version'], { shell: false }).status === 0;
 const hasFfprobe = spawnSync('ffprobe', ['-version'], { shell: false }).status === 0;
@@ -28,6 +29,49 @@ const arabicFontCandidates =
 const hasArabicTestFont = arabicFontCandidates.some((font) => existsSync(font));
 
 describe('CLI ffmpeg render', () => {
+  it.skipIf(!hasFfmpeg)(
+    'makes warm and cool looks shift grey-source channel means by at least 15',
+    () => {
+      const channelMeans = (preset: 'warm' | 'cool') => {
+        const output = spawnSync(
+          resolveFfmpegExecutable(),
+          [
+            '-hide_banner',
+            '-loglevel',
+            'error',
+            '-f',
+            'lavfi',
+            '-i',
+            'color=c=gray:s=64x64:d=0.1',
+            '-vf',
+            clipLookFilter({ preset, intensity: 1 })!,
+            '-frames:v',
+            '1',
+            '-pix_fmt',
+            'rgb24',
+            '-f',
+            'rawvideo',
+            'pipe:1',
+          ],
+          { shell: false, encoding: 'buffer' },
+        );
+        expect(output.status).toBe(0);
+        const sums = [0, 0, 0];
+        for (let index = 0; index + 2 < output.stdout.length; index += 3) {
+          sums[0]! += output.stdout[index]!;
+          sums[1]! += output.stdout[index + 1]!;
+          sums[2]! += output.stdout[index + 2]!;
+        }
+        const pixels = output.stdout.length / 3;
+        return sums.map((sum) => sum / pixels);
+      };
+      const warm = channelMeans('warm');
+      const cool = channelMeans('cool');
+      expect(warm[0]! - warm[2]!).toBeGreaterThanOrEqual(15);
+      expect(cool[2]! - cool[0]!).toBeGreaterThanOrEqual(15);
+    },
+  );
+
   it.skipIf(!hasFfmpeg || !hasFfprobe)(
     'renders CRT and black-and-white clip looks with pixels changed by the filters',
     async () => {

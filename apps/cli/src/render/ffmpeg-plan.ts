@@ -530,7 +530,7 @@ export function buildFfmpegRenderPlan(
   return { args, inputs, skipped, width, height, fpsExpr, durationUs, textFiles };
 }
 
-function clipLookFilter(look: unknown): string | undefined {
+export function clipLookFilter(look: unknown): string | undefined {
   if (look === undefined) return undefined;
   if (!look || typeof look !== 'object' || Array.isArray(look)) return undefined;
   const value = look as Record<string, unknown>;
@@ -558,9 +558,9 @@ function clipLookFilter(look: unknown): string | undefined {
     case 'bw':
       return `hue=s=${amount(1 - intensity)},eq=contrast=${amount(1 + 0.12 * intensity)}`;
     case 'warm':
-      return `colorbalance=rs=${amount(0.18 * intensity)}:gs=${amount(0.02 * intensity)}:bs=${amount(-0.18 * intensity)}`;
+      return `colorbalance=rs=${amount(0.3 * intensity)}:rm=${amount(0.22 * intensity)}:rh=${amount(0.12 * intensity)}:gs=${amount(0.02 * intensity)}:bs=${amount(-0.3 * intensity)}:bm=${amount(-0.22 * intensity)}:bh=${amount(-0.12 * intensity)}`;
     case 'cool':
-      return `colorbalance=rs=${amount(-0.16 * intensity)}:gs=${amount(0.02 * intensity)}:bs=${amount(0.16 * intensity)}`;
+      return `colorbalance=rs=${amount(-0.3 * intensity)}:rm=${amount(-0.22 * intensity)}:rh=${amount(-0.12 * intensity)}:gs=${amount(0.02 * intensity)}:bs=${amount(0.3 * intensity)}:bm=${amount(0.22 * intensity)}:bh=${amount(0.12 * intensity)}`;
     default:
       return undefined;
   }
