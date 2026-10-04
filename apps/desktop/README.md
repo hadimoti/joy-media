@@ -75,6 +75,11 @@ Instead, this wave adds the desktop-host-side substrate that engine can be wired
   Windows, Keychain on macOS, libsecret on Linux — plus `LocalDatabase`'s new `secrets` table
   for ciphertext persistence. The table only ever holds ciphertext; `set`/`get` refuse to run
   if `safeStorage.isEncryptionAvailable()` is false rather than falling back to plaintext.
+- **Desktop session token:** the renderer accesses its login token only through
+  `desktop.media-session.*` IPC. The main process stores `safeStorage` ciphertext in
+  `userData/session-token.enc` with an atomic write and restrictive POSIX permissions. If
+  encryption is unavailable, including Linux's `basic_text` backend, the token stays in
+  process memory for that run and a warning is logged; it is never written as plaintext.
 - **Provider profiles:** `LocalDatabase`'s new `provider_profiles` table stores non-secret
   metadata only (`provider`, `baseUrl`, `modelId`, a `secretHandleId` pointer — never the key
   itself). Field names deliberately mirror

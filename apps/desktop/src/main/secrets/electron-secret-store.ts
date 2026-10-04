@@ -11,6 +11,7 @@ import type { LocalDatabase } from '../../store/local-database.js';
  */
 export interface SafeStorageLike {
   isEncryptionAvailable(): boolean;
+  getSelectedStorageBackend?(): string;
   encryptString(plainText: string): Buffer;
   decryptString(encrypted: Buffer): string;
 }

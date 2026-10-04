@@ -30,6 +30,9 @@ const IPC_CHANNELS = Object.freeze([
   'desktop.asset-library.select-directory',
   'desktop.asset-library.get-catalog',
   'desktop.asset-library.reset-directory',
+  'desktop.media-session.get',
+  'desktop.media-session.set',
+  'desktop.media-session.clear',
 ]);
 
 module.exports = { IPC_CHANNELS };
