@@ -126,6 +126,26 @@ describe('ModelDrawer', () => {
     expect(container?.textContent).not.toContain('kilo-auto/');
   });
 
+  it('offers the current Claude Sonnet model in OpenRouter presets', async () => {
+    const client = createMockEngineClient();
+    await act(async () => {
+      root?.render(
+        <ModelDrawer open={true} onClose={vi.fn()} engineClient={client} status={initialStatus} />,
+      );
+    });
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('.model-drawer-add-btn')?.click();
+    });
+    const providerSelect = container?.querySelector<HTMLSelectElement>('select');
+    expect(providerSelect).toBeTruthy();
+    await act(async () => {
+      providerSelect!.value = 'openrouter';
+      providerSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(container?.textContent).toContain('anthropic/claude-sonnet-4.6');
+    expect(container?.textContent).not.toContain('anthropic/claude-3.5-sonnet');
+  });
+
   it('saves a corrected Kilo URL when a legacy profile is next updated', async () => {
     vi.mocked(desktopClient.listDesktopProviderProfiles).mockResolvedValue([
       {

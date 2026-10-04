@@ -49,7 +49,7 @@ const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
 
 const COMMON_MODEL_PRESETS: Record<ProviderType, readonly string[]> = {
   kilo: KILO_MODEL_PRESETS.map(({ id }) => id),
-  openrouter: ['openrouter/free', 'openrouter/auto', 'anthropic/claude-3.5-sonnet'],
+  openrouter: ['openrouter/free', 'openrouter/auto', 'anthropic/claude-sonnet-4.6'],
   'openai-compatible': ['gpt-4o-mini', 'gpt-4o'],
   custom: [],
 };
@@ -621,6 +621,18 @@ export function ModelDrawer({
 
               <div className="model-drawer-form-group">
                 <label htmlFor="md-selected-model">Selected Model ID</label>
+                <div className="model-drawer-discovered-box">
+                  {COMMON_MODEL_PRESETS[newProvider].map((modelId) => (
+                    <button
+                      key={modelId}
+                      type="button"
+                      className={`model-drawer-model-chip ${newSelectedModel === modelId ? 'is-selected' : ''}`}
+                      onClick={() => setNewSelectedModel(modelId)}
+                    >
+                      {modelId}
+                    </button>
+                  ))}
+                </div>
                 <input
                   id="md-selected-model"
                   type="text"

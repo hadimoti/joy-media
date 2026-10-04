@@ -6,6 +6,7 @@ import { c, logInfo, logSuccess, logWarn, printBanner, printTable } from '../uti
 import { saveProject } from '../utils/project-loader.js';
 import { runJoyAgent } from './joy-agent.js';
 import type { ResolveProviderOptions } from './provider.js';
+import { DEFAULT_KILO_MODEL } from '@joy-media/joy-agent-engine';
 
 export interface ReplOptions {
   project: JoyProjectV1;
@@ -14,6 +15,7 @@ export interface ReplOptions {
   path: string;
   providerOptions?: ResolveProviderOptions;
   allowFrames?: boolean;
+  vision?: boolean;
 }
 
 export interface DualBrainStatus {
@@ -46,7 +48,7 @@ export const DUAL_BRAIN_STATUS: DualBrainStatus = {
   creative: {
     name: 'Creative Brain',
     provider: 'kilo',
-    model: 'kilo-auto/efficient',
+    model: DEFAULT_KILO_MODEL,
   },
 };
 
@@ -166,6 +168,7 @@ export async function startAgentRepl(options: ReplOptions): Promise<void> {
           apply: false,
           providerOptions: options.providerOptions,
           allowFrames: options.allowFrames,
+          vision: options.vision,
         });
 
         const totalStaged = result.staged.timelineOps.length + result.staged.documentOps.length;
@@ -194,7 +197,12 @@ export async function startAgentRepl(options: ReplOptions): Promise<void> {
               apply: true,
               providerOptions: options.providerOptions,
               allowFrames: options.allowFrames,
+              vision: options.vision,
             });
+            if (!applied.applied) {
+              logWarn(`Apply refused: ${applied.errors.join('; ') || 'project validation failed'}`);
+              continue;
+            }
             currentProject = applied.updatedProject;
             currentRev = saveReplProject(currentProject, options, currentRev);
             if (options.path !== 'in-memory') {
