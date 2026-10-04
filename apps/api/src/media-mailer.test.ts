@@ -98,9 +98,10 @@ describe('MediaMailer address selection', () => {
       secure: false,
       name: 'joyst.ir',
       tls: { servername: 'smtp.example.invalid', rejectUnauthorized: true },
-      connectionTimeout: 8000,
-      greetingTimeout: 8000,
     });
+    expect(created[1]?.connectionTimeout).toBeLessThanOrEqual(12_000);
+    expect(created[1]?.greetingTimeout).toBeLessThanOrEqual(12_000);
+    expect(created[1]?.socketTimeout).toBeLessThanOrEqual(12_000);
   });
 
   it('uses verified implicit TLS for port 465 and does not retry authentication failures', async () => {
@@ -146,6 +147,52 @@ describe('MediaMailer address selection', () => {
       host: '192.0.2.25',
       tls: { servername: 'smtp.example.invalid' },
     });
+  });
+
+  it('aborts a hung later address attempt within one overall send deadline', async () => {
+    const created: Record<string, unknown>[] = [];
+    const close = vi.fn();
+    const createTransport = vi.fn((config: Record<string, unknown>) => {
+      created.push(config);
+      return {
+        sendMail:
+          created.length === 1
+            ? async () => {
+                throw Object.assign(new Error('connection failed'), {
+                  code: 'ESOCKET',
+                  command: 'CONN',
+                });
+              }
+            : () => new Promise<never>(() => {}),
+        close,
+      } as never;
+    });
+    const startedAt = Date.now();
+
+    await expect(
+      new MediaMailer({ ...options('auto'), sendDeadlineMs: 40, createTransport }).sendOtp(
+        'person@example.invalid',
+        '123456',
+      ),
+    ).rejects.toMatchObject({ code: 'ETIMEDOUT' });
+
+    expect(Date.now() - startedAt).toBeLessThan(250);
+    expect(created).toHaveLength(2);
+    expect(created[0]?.connectionTimeout).toBeLessThanOrEqual(40);
+    expect(created[1]?.connectionTimeout).toBeLessThanOrEqual(40);
+    expect(close).toHaveBeenCalledTimes(2);
+  });
+
+  it('applies the same overall deadline to a hung DNS lookup', async () => {
+    const startedAt = Date.now();
+    await expect(
+      new MediaMailer({
+        ...options(),
+        sendDeadlineMs: 20,
+        lookup: () => new Promise<never>(() => {}),
+      }).sendOtp('person@example.invalid', '123456'),
+    ).rejects.toMatchObject({ code: 'ETIMEDOUT' });
+    expect(Date.now() - startedAt).toBeLessThan(250);
   });
 
   it('validates configured EHLO names as hostnames', () => {

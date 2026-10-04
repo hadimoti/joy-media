@@ -12,6 +12,8 @@ export interface MediaMailerOptions {
   readonly from: string;
   readonly family?: SmtpAddressFamily;
   readonly ehloName?: string;
+  /** Test-tunable deadline; production sends are capped at 12 seconds. */
+  readonly sendDeadlineMs?: number;
   readonly lookup?: (hostname: string) => Promise<readonly SmtpAddress[]>;
   readonly createTransport?: (options: Record<string, unknown>) => Transporter;
   readonly onOtpDeliveryFailure?: (metadata: OtpDeliveryErrorMetadata) => void;
@@ -126,6 +128,7 @@ export class MediaMailer implements MediaMailerLike {
   private readonly lookup: NonNullable<MediaMailerOptions['lookup']>;
   private readonly createTransport: NonNullable<MediaMailerOptions['createTransport']>;
   private readonly onOtpDeliveryFailure: MediaMailerOptions['onOtpDeliveryFailure'];
+  private readonly sendDeadlineMs: number;
 
   constructor(options: MediaMailerOptions) {
     this.host = options.host;
@@ -148,11 +151,14 @@ export class MediaMailer implements MediaMailerLike {
       ((config) =>
         nodemailer.createTransport(config as Parameters<typeof nodemailer.createTransport>[0]));
     this.onOtpDeliveryFailure = options.onOtpDeliveryFailure;
+    this.sendDeadlineMs = Math.max(1, Math.min(12_000, options.sendDeadlineMs ?? 12_000));
   }
 
   async sendOtp(gmail: string, code: string): Promise<void> {
     try {
-      const addresses = await this.lookup(this.host);
+      const deadlineAt = Date.now() + this.sendDeadlineMs;
+      const remainingMs = () => Math.max(0, deadlineAt - Date.now());
+      const addresses = await withDeadline(this.lookup(this.host), remainingMs());
       const candidates = smtpCandidates(addresses, this.family);
       if (candidates.length === 0)
         throw Object.assign(new Error('SMTP host has no matching addresses'), {
@@ -161,6 +167,8 @@ export class MediaMailer implements MediaMailerLike {
         });
       let lastError: unknown;
       for (const address of candidates) {
+        const remaining = remainingMs();
+        if (remaining <= 0) throw smtpDeadlineError();
         const transporter = this.createTransport({
           host: address.address,
           name: this.ehloName,
@@ -168,31 +176,52 @@ export class MediaMailer implements MediaMailerLike {
           secure: this.port === 465,
           auth: { user: this.user, pass: this.pass },
           tls: { servername: this.host, rejectUnauthorized: true },
-          connectionTimeout: 8_000,
-          greetingTimeout: 8_000,
-          socketTimeout: 30_000,
+          connectionTimeout: remaining,
+          greetingTimeout: remaining,
+          socketTimeout: remaining,
           disableFileAccess: true,
           disableUrlAccess: true,
         });
+        let timeout: NodeJS.Timeout | undefined;
+        let transportClosed = false;
+        const closeTransport = () => {
+          if (transportClosed) return;
+          transportClosed = true;
+          try {
+            transporter.close();
+          } catch {
+            // A close error must not replace the delivery result or deadline.
+          }
+        };
         try {
-          await transporter.sendMail({
-            from: this.from,
-            to: gmail,
-            subject: 'Joy Studio — Login Code',
-            text:
-              `Your Joy Studio login code is ${code}.\n\n` +
-              `Expires in 5 minutes.\n\n` +
-              `Do not share this code with anyone.`,
-            html: joyStudioOtpHtml(code),
-            disableFileAccess: true,
-            disableUrlAccess: true,
-          });
+          await Promise.race([
+            transporter.sendMail({
+              from: this.from,
+              to: gmail,
+              subject: 'Joy Studio — Login Code',
+              text:
+                `Your Joy Studio login code is ${code}.\n\n` +
+                `Expires in 5 minutes.\n\n` +
+                `Do not share this code with anyone.`,
+              html: joyStudioOtpHtml(code),
+              disableFileAccess: true,
+              disableUrlAccess: true,
+            }),
+            new Promise<never>((_, reject) => {
+              timeout = setTimeout(() => {
+                closeTransport();
+                reject(smtpDeadlineError());
+              }, remaining);
+            }),
+          ]);
           return;
         } catch (error) {
           lastError = error;
+          if (remainingMs() <= 0) throw error;
           if (!shouldFallbackSmtp(error) || address === candidates.at(-1)) throw error;
         } finally {
-          transporter.close();
+          if (timeout !== undefined) clearTimeout(timeout);
+          closeTransport();
         }
       }
       throw lastError;
@@ -205,6 +234,26 @@ export class MediaMailer implements MediaMailerLike {
       throw error;
     }
   }
+}
+
+function withDeadline<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  if (timeoutMs <= 0) return Promise.reject(smtpDeadlineError());
+  let timeout: NodeJS.Timeout | undefined;
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => reject(smtpDeadlineError()), timeoutMs);
+    }),
+  ]).finally(() => {
+    if (timeout !== undefined) clearTimeout(timeout);
+  });
+}
+
+function smtpDeadlineError(): Error {
+  return Object.assign(new Error('SMTP OTP delivery deadline exceeded'), {
+    code: 'ETIMEDOUT',
+    command: 'CONN',
+  });
 }
 
 export function smtpCandidates(
