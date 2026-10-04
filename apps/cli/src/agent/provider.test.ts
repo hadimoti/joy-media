@@ -13,10 +13,11 @@ import {
 import * as providerModule from './provider.js';
 import { runJoyAgent } from './joy-agent.js';
 import { createDefaultProject } from '../utils/project-loader.js';
-import { getCliConfigPath } from '../utils/config.js';
+import { getCliConfigPath, saveJoySession } from '../utils/config.js';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { configureSecretStoreRuntimeForTests } from '../utils/secret-store.js';
 
 let tempHome: string | undefined;
 
@@ -215,7 +216,7 @@ describe('effective BYOK provider configuration', () => {
 
   it('resolves JOY hosted from a stubbed default catalog and env token', async () => {
     isolateConfig();
-    vi.stubEnv('JOY_MEDIA_SESSION_TOKEN', 'session-test-REDACTED');
+    vi.stubEnv('JOY_MEDIA_SESSION_TOKEN', 'tok-fake-1');
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -230,7 +231,7 @@ describe('effective BYOK provider configuration', () => {
         provider: 'joy-hosted',
         baseUrl: 'https://joyst.ir/api/v1/agent',
         modelId: 'joy-model-test',
-        apiKey: 'session-test-REDACTED',
+        apiKey: 'tok-fake-1',
         vision: true,
       });
       await resolveByokConfig({ provider: 'joy-hosted' });
@@ -240,9 +241,62 @@ describe('effective BYOK provider configuration', () => {
     }
   });
 
+  it('uses the saved login session for JOY hosted and sends it as a Bearer token', async () => {
+    isolateConfig();
+    const restoreSecretStore = configureSecretStoreRuntimeForTests({
+      platform: 'linux',
+      runner: () => ({ status: 0, stdout: '' }),
+    });
+    saveJoySession({ token: 'tok-fake-stored' }, true);
+    restoreSecretStore();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ models: [{ id: 'joy-model-test', isDefault: true }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    try {
+      const resolved = await resolveByokConfig({
+        provider: 'joy-hosted',
+        baseUrl: 'https://joy-hosted-stored-test.invalid/api/v1/agent',
+      });
+      expect(resolved.apiKey).toBe('tok-fake-stored');
+      expect(fetchSpy.mock.calls[0]?.[1]?.headers).toEqual({
+        Authorization: 'Bearer tok-fake-stored',
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('gives JOY_MEDIA_SESSION_TOKEN precedence over a saved session', async () => {
+    isolateConfig();
+    const restoreSecretStore = configureSecretStoreRuntimeForTests({
+      platform: 'linux',
+      runner: () => ({ status: 0, stdout: '' }),
+    });
+    saveJoySession({ token: 'tok-fake-stored' }, true);
+    restoreSecretStore();
+    vi.stubEnv('JOY_MEDIA_SESSION_TOKEN', 'tok-fake-env');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ models: [{ id: 'joy-model-test', isDefault: true }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    try {
+      await expect(resolveByokConfig({ provider: 'joy-hosted' })).resolves.toMatchObject({
+        apiKey: 'tok-fake-env',
+      });
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it('uses the hosted catalog vision flag for an explicitly selected model', async () => {
     isolateConfig();
-    vi.stubEnv('JOY_MEDIA_SESSION_TOKEN', 'session-test-REDACTED');
+    vi.stubEnv('JOY_MEDIA_SESSION_TOKEN', 'tok-fake-1');
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({ models: [{ id: 'anthropic/claude-sonnet-4.6', vision: true }] }),
@@ -264,7 +318,7 @@ describe('effective BYOK provider configuration', () => {
   it('reports a clear missing JOY hosted session token error', async () => {
     isolateConfig();
     await expect(resolveByokConfig({ provider: 'joy-hosted' })).rejects.toThrow(
-      'set JOY_MEDIA_SESSION_TOKEN',
+      'run `joy-media login` or set JOY_MEDIA_SESSION_TOKEN',
     );
   });
 

@@ -8,6 +8,7 @@ import { handleProjectCommand } from './commands/project-cmd.js';
 import { handleRenderCommand } from './commands/render-cmd.js';
 import { handleTimelineCommand } from './commands/timeline-cmd.js';
 import { handleWorkerCommand } from './commands/worker-cmd.js';
+import { handleAuthCommand } from './commands/auth-cmd.js';
 import { printAgentHelp } from './commands/agent-cmd.js';
 import { printTimelineHelp } from './commands/timeline-cmd.js';
 import { printRenderHelp } from './commands/render-cmd.js';
@@ -38,6 +39,8 @@ export interface CliFlags {
   font: string | undefined;
   track: string | undefined;
   clip: string | undefined;
+  clipId: string | undefined;
+  clipIdDash: string | undefined;
   asset: string | undefined;
   text: string | undefined;
   x: number | undefined;
@@ -62,10 +65,15 @@ export interface CliFlags {
   system: boolean;
   'media-engine': boolean;
   look: string | undefined;
+  kind: string | undefined;
+  type: string | undefined;
   intensity: number | undefined;
   scanlineStrength: number | undefined;
   noiseAmount: number | undefined;
   insecureFileStore: boolean;
+  email: string | undefined;
+  code: string | undefined;
+  apiBase: string | undefined;
   resolution: string | undefined;
   aspect: string | undefined;
 }
@@ -97,6 +105,9 @@ export function printHelp(): void {
   );
   console.log(
     `    ${c('doctor', 'cyan')}                            System health check & diagnostics`,
+  );
+  console.log(
+    `    ${c('login|logout|whoami', 'cyan')}                 JOY account session commands`,
   );
   console.log(`    ${c('help', 'cyan')}                              Show this help guide\n`);
   console.log(`  ${c('Examples:', 'bold')}`);
@@ -148,6 +159,8 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     font: typeof v.font === 'string' ? v.font : undefined,
     track: typeof v.track === 'string' ? v.track : undefined,
     clip: typeof v.clip === 'string' ? v.clip : undefined,
+    clipId: typeof v.clipId === 'string' ? v.clipId : undefined,
+    clipIdDash: typeof v['clip-id'] === 'string' ? v['clip-id'] : undefined,
     asset: typeof v.asset === 'string' ? v.asset : undefined,
     text: typeof v.text === 'string' ? v.text : undefined,
     x: parseFloatFlag('x', v.x, { min: -0.4, max: 0.4, allowNegative: true, allowZero: true }),
@@ -178,6 +191,8 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     system: Boolean(v.system),
     'media-engine': Boolean(v['media-engine']),
     look: typeof v.look === 'string' ? v.look : undefined,
+    kind: typeof v.kind === 'string' ? v.kind : undefined,
+    type: typeof v.type === 'string' ? v.type : undefined,
     intensity: parseFloatFlag('intensity', v.intensity, { min: 0, max: 1, allowZero: true }),
     scanlineStrength: parseFloatFlag('scanline-strength', v['scanline-strength'], {
       min: 0,
@@ -190,6 +205,9 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
       allowZero: true,
     }),
     insecureFileStore: Boolean(v['insecure-file-store']),
+    email: typeof v.email === 'string' ? v.email : undefined,
+    code: typeof v.code === 'string' ? v.code : undefined,
+    apiBase: typeof v['api-base'] === 'string' ? v['api-base'] : undefined,
     resolution: typeof v.resolution === 'string' ? v.resolution : undefined,
     aspect: typeof v.aspect === 'string' ? v.aspect : undefined,
   };
@@ -222,6 +240,8 @@ export async function runCli(argv: string[]): Promise<number> {
         font: { type: 'string' },
         track: { type: 'string' },
         clip: { type: 'string' },
+        clipId: { type: 'string' },
+        'clip-id': { type: 'string' },
         asset: { type: 'string' },
         text: { type: 'string' },
         x: { type: 'string' },
@@ -246,10 +266,15 @@ export async function runCli(argv: string[]): Promise<number> {
         system: { type: 'boolean', default: false },
         'media-engine': { type: 'boolean', default: false },
         look: { type: 'string' },
+        kind: { type: 'string' },
+        type: { type: 'string' },
         intensity: { type: 'string' },
         'scanline-strength': { type: 'string' },
         'noise-amount': { type: 'string' },
         'insecure-file-store': { type: 'boolean', default: false },
+        email: { type: 'string' },
+        code: { type: 'string' },
+        'api-base': { type: 'string' },
         resolution: { type: 'string' },
         aspect: { type: 'string' },
       },
@@ -319,10 +344,15 @@ export async function runCli(argv: string[]): Promise<number> {
       case 'doctor':
         return await handleDoctorCommand();
       case 'login':
-        logWarn(
-          'Interactive JOY login is not implemented yet. Set JOY_MEDIA_SESSION_TOKEN to use the hosted provider.',
-        );
-        return 1;
+      case 'logout':
+      case 'whoami':
+        return await handleAuthCommand([command, ...subArgs], {
+          ...(flags.email === undefined ? {} : { email: flags.email }),
+          ...(flags.code === undefined ? {} : { code: flags.code }),
+          ...(flags.apiBase === undefined ? {} : { apiBase: flags.apiBase }),
+          insecureFileStore: flags.insecureFileStore,
+          json: flags.json,
+        });
       case 'help':
         printHelp();
         return 0;

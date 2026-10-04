@@ -6,6 +6,8 @@ import {
   chmodPrivate,
   deleteProtectedSecret,
   migrateLegacySecret,
+  protectSecret,
+  unprotectSecret,
   type ProtectedSecret,
 } from './secret-store.js';
 
@@ -16,6 +18,11 @@ export interface CliConfig {
   defaultModel?: string | undefined;
   customBaseUrl?: string | undefined;
   sqlitePath?: string | undefined;
+  joySession?: {
+    readonly token: ProtectedSecret;
+    readonly email?: string;
+    readonly expiresAt?: string;
+  };
 }
 
 export interface AiProviderConfig {
@@ -76,6 +83,54 @@ export function saveCliConfig(config: CliConfig): void {
   const path = getCliConfigPath();
   writeFileSync(path, JSON.stringify(config, null, 2), { encoding: 'utf8', mode: 0o600 });
   chmodPrivate(path);
+}
+
+const JOY_SESSION_ACCOUNT = 'joy-media-session';
+
+export interface JoySessionConfig {
+  readonly token: string;
+  readonly email?: string;
+  readonly expiresAt?: string;
+}
+
+export function saveJoySession(session: JoySessionConfig, insecureFileStore = false): void {
+  const config = loadCliConfig();
+  const protectedToken = protectSecret(session.token, JOY_SESSION_ACCOUNT, { insecureFileStore });
+  config.joySession = {
+    token: protectedToken,
+    ...(session.email === undefined ? {} : { email: session.email }),
+    ...(session.expiresAt === undefined ? {} : { expiresAt: session.expiresAt }),
+  };
+  saveCliConfig(config);
+}
+
+export function loadJoySession(): JoySessionConfig | undefined {
+  const stored = loadCliConfig().joySession;
+  if (!stored) return undefined;
+  try {
+    return {
+      token: unprotectSecret(stored.token),
+      ...(stored.email === undefined ? {} : { email: stored.email }),
+      ...(stored.expiresAt === undefined ? {} : { expiresAt: stored.expiresAt }),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export function clearJoySession(): boolean {
+  const config = loadCliConfig();
+  const stored = config.joySession;
+  if (!stored) return false;
+  if (
+    (stored.token.scheme === 'keychain' || stored.token.scheme === 'libsecret') &&
+    !deleteProtectedSecret(stored.token)
+  ) {
+    throw new Error('Unable to remove the JOY session token from the system keyring.');
+  }
+  delete config.joySession;
+  saveCliConfig(config);
+  return true;
 }
 
 export function loadAiProviders(): Record<string, AiProviderConfig> {

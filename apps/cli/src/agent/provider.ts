@@ -5,13 +5,14 @@ import {
   canonicalKiloBaseUrl,
   defaultModelFor,
   isRetiredModelId,
+  KILO_MODEL_PRESETS,
   KILO_GATEWAY_BASE_URL,
   OPENROUTER_BASE_URL,
   JOY_HOSTED_BASE_URL as DEFAULT_JOY_HOSTED_BASE_URL,
   type ByokSessionConfig,
 } from '@joy-media/joy-agent-engine';
 import type { LanguageModel } from 'ai';
-import { loadAiProviders, loadCliConfig } from '../utils/config.js';
+import { loadAiProviders, loadCliConfig, loadJoySession } from '../utils/config.js';
 import { unprotectSecret } from '../utils/secret-store.js';
 
 export interface ResolveProviderOptions {
@@ -167,6 +168,10 @@ export async function resolveByokConfig(
   const keyProvider = aiProviders[effective.provider]?.provider ?? effective.provider;
   let apiKey = options.apiKey;
   const keylessLocalProvider = effective.provider === 'lm-studio';
+  if (!apiKey && effective.provider === 'joy-hosted') {
+    // An explicit environment token is useful for CI and overrides the interactive login.
+    apiKey = process.env.JOY_MEDIA_SESSION_TOKEN || loadJoySession()?.token;
+  }
   if (!apiKey && !keylessLocalProvider) {
     const keyEnv =
       options.apiKeyEnv ??
@@ -181,7 +186,9 @@ export async function resolveByokConfig(
     }
   }
   if ((effective.provider === 'joy-hosted' || keyProvider === 'joy-hosted') && !apiKey) {
-    throw new Error('JOY hosted provider needs a session token; set JOY_MEDIA_SESSION_TOKEN');
+    throw new Error(
+      'JOY hosted provider needs a session token; run `joy-media login` or set JOY_MEDIA_SESSION_TOKEN',
+    );
   }
   if (!apiKey && !keylessLocalProvider) {
     const envName =
@@ -209,6 +216,9 @@ export async function resolveByokConfig(
     const catalog = await getJoyHostedModelCatalog(effective.baseUrl, apiKey);
     hostedVision = catalog.find((model) => model.id === effective.modelId)?.vision === true;
   }
+  const presetVision = KILO_MODEL_PRESETS.find((preset) => preset.id === effective.modelId)?.vision;
+  const vision =
+    hostedVision ?? presetVision ?? (effective.modelId === 'openrouter/free' ? false : undefined);
 
   const actualProviderType =
     aiProviders[effective.provider]?.provider ??
@@ -233,7 +243,7 @@ export async function resolveByokConfig(
     baseUrl: effective.baseUrl,
     modelId: effective.modelId,
     apiKey: apiKey ?? 'local-no-key-required',
-    ...(hostedVision === undefined ? {} : { vision: hostedVision }),
+    ...(vision === undefined ? {} : { vision }),
   });
 }
 
