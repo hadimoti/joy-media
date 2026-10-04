@@ -26,6 +26,7 @@ export interface RunAgentOptions {
   readonly prompt: string;
   readonly taskKind?: JoyAgentTaskKind | undefined;
   readonly apply?: boolean | undefined;
+  readonly keepPartial?: boolean | undefined;
   readonly json?: boolean | undefined;
   readonly allowFrames?: boolean | undefined;
   readonly vision?: boolean | undefined;
@@ -129,7 +130,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
       if (options.json) console.log(JSON.stringify(event));
       else logStep('Agent Phase', `${event.phase} (${event.activityCode})`);
     } else if (event.type === 'text-delta') {
-      if (!options.json) console.log(`\nModel notes:\n${event.text}\n`);
+      if (!options.json && event.text.trim()) console.log(`\nModel notes:\n${event.text}\n`);
     } else if (event.type === 'proposal') {
       if (options.json) console.log(JSON.stringify(event));
       else
@@ -199,30 +200,48 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
   if (options.apply && runResult.status === 'completed' && bridge.hasSubmittedPlan()) {
     if (!options.json) logInfo('Applying staged operations to project...');
     const applyRes = bridge.applyStaged();
-    updatedProject = applyRes.updatedProject;
-    appliedCount = applyRes.appliedCount;
-    appliedOperationIds = applyRes.appliedOperationIds;
+    const candidateProject = applyRes.updatedProject;
     errors = [...errors, ...applyRes.errors];
     notes = applyRes.notes;
     placementSummary = applyRes.placementSummary;
-    applied = errors.length === 0 && applyRes.errors.length === 0 && applyRes.appliedCount > 0;
-    const verification = verifyPlanChecklist(updatedProject, checklist);
-    verified = verification.verified;
-    errors = [...errors, ...verification.unmet.map((item) => `Checklist not verified: ${item}`)];
-    if (errors.length > 0) {
-      logWarn(
-        applied
-          ? `Applied with ${errors.length} warning(s):`
-          : `Apply refused with ${errors.length} error(s):`,
-      );
-      for (const err of errors) console.log(`  ${c('!', 'yellow')} ${err}`);
+    const requestVerification = verifyRequestIntent(candidateProject, options.prompt);
+    const verification = verifyPlanChecklist(candidateProject, checklist);
+    verified = [...verification.verified, ...requestVerification.verified];
+    errors = [
+      ...errors,
+      ...verification.unmet.map((item) => `Checklist not verified: ${item}`),
+      ...requestVerification.unmet.map((item) => `Request not verified: ${item}`),
+      ...missingOperationCoverage(staged, checklist, options.prompt),
+    ];
+    const clean = errors.length === 0 && applyRes.errors.length === 0 && applyRes.appliedCount > 0;
+    applied = clean || (options.keepPartial === true && applyRes.appliedCount > 0);
+    if (applied) {
+      updatedProject = candidateProject;
+      appliedCount = applyRes.appliedCount;
+      appliedOperationIds = applyRes.appliedOperationIds;
     }
+    if (errors.length > 0) {
+      const heading = applied
+        ? `Applied partial changes with ${errors.length} failed check(s):`
+        : `Apply refused with ${errors.length} error(s):`;
+      if (options.json) console.error(`${heading} ${errors.join('; ')}`);
+      else {
+        logWarn(heading);
+        for (const err of errors) console.error(`  ${c('!', 'yellow')} ${err}`);
+      }
+    }
+  }
+
+  if (runResult.partialReason === 'no-plan' || (options.apply && !bridge.hasSubmittedPlan())) {
+    errors = [...errors, 'No plan was submitted after the single retry.'];
   }
 
   return {
     resultText:
       runResult.status === 'partial'
-        ? `Partial plan stopped at the ${runResult.partialReason ?? 'safety'} limit. Nothing was applied.`
+        ? runResult.partialReason === 'no-plan'
+          ? 'Partial run: no plan was submitted after one retry. Nothing was applied.'
+          : `Partial plan stopped at the ${runResult.partialReason ?? 'safety'} limit. Nothing was applied.`
         : truthfulAgentSummary({
             applyRequested: options.apply === true,
             applied,
@@ -237,9 +256,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     steps: runResult.steps,
     staged,
     applied,
-    status: errors.some((error) => error.startsWith('Checklist not verified:'))
-      ? 'partial'
-      : runResult.status,
+    status: errors.length > 0 || runResult.status === 'partial' ? 'partial' : runResult.status,
     updatedProject,
     appliedCount,
     appliedOperationIds,
@@ -250,6 +267,130 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     ...(placementSummary === undefined ? {} : { placementSummary }),
     ...(runResult.resolvedModelId ? { resolvedModelId: runResult.resolvedModelId } : {}),
   };
+}
+
+export function missingOperationCoverage(
+  staged: StagedOperationsSummary,
+  checklist: readonly JoyPlanChecklistItem[],
+  request: string,
+): string[] {
+  const issues = checklist.length === 0 ? ['Checklist not verified: checklist is empty'] : [];
+  const operationKinds = [...staged.timelineOps, ...staged.documentOps].map(
+    (operation) => operation.kind,
+  );
+  const checks = new Set(checklist.map((item) => item.kind));
+  const intent = parseRequestIntent(request);
+  const missing = new Set<string>();
+  for (const kind of operationKinds) {
+    const covered =
+      (kind === 'trim' && (checks.has('trim') || intent.trimRange !== undefined)) ||
+      (kind === 'add-effect' && (checks.has('look') || intent.look !== undefined)) ||
+      ((kind === 'create-text' || kind === 'set-text') &&
+        (checks.has('text') || intent.centerText)) ||
+      (kind === 'set-property' && intent.centerText) ||
+      ((kind === 'insert' || kind === 'move' || kind === 'split') &&
+        (intent.startAtZero || intent.durationUs !== undefined));
+    if (!covered) missing.add(kind);
+  }
+  return [
+    ...issues,
+    ...[...missing].map((kind) => `Checklist not verified: no check covers operation type ${kind}`),
+  ];
+}
+
+interface RequestIntent {
+  centerText: boolean;
+  startAtZero: boolean;
+  trimRange?: readonly [number, number];
+  look?: 'crt' | 'bw' | 'warm' | 'cool';
+  durationUs?: number;
+}
+
+function parseRequestIntent(request: string): RequestIntent {
+  const normalized = request.toLowerCase();
+  const intent: RequestIntent = {
+    centerText: /\b(center|centre|centered|centred|middle)\b|وسط.?چین|وسط/i.test(normalized),
+    startAtZero:
+      /\b(at the start|at 0|from the beginning|start at zero)\b|از ابتدا|از ابتدای|از شروع/i.test(
+        normalized,
+      ),
+  };
+  const range =
+    /(?:from\s+)?(\d+(?:\.\d+)?)\s*(?:s|sec(?:onds?)?)?\s*(?:to|[-–])\s*(\d+(?:\.\d+)?)\s*(?:s|sec(?:onds?)?)?/i.exec(
+      normalized,
+    );
+  if (range?.[1] && range[2])
+    intent.trimRange = [
+      Math.round(Number(range[1]) * 1_000_000),
+      Math.round(Number(range[2]) * 1_000_000),
+    ];
+  if (/\bcrt\b/i.test(normalized)) intent.look = 'crt';
+  else if (/\b(bw|black\s*(?:and|&)\s*white|black-and-white)\b|سیاه.?سفید/i.test(normalized))
+    intent.look = 'bw';
+  else if (/\bwarm\b|گرم/i.test(normalized)) intent.look = 'warm';
+  else if (/\bcool\b|سرد/i.test(normalized)) intent.look = 'cool';
+  const duration = /(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\s+long/i.exec(normalized);
+  if (duration?.[1]) intent.durationUs = Math.round(Number(duration[1]) * 1_000_000);
+  return intent;
+}
+
+export function verifyRequestIntent(
+  project: JoyProjectV1,
+  request: string,
+): { readonly verified: string[]; readonly unmet: string[] } {
+  const intent = parseRequestIntent(request);
+  const root = project.compositions[project.rootCompositionId];
+  const clips = root?.tracks.flatMap((track) => track.clips) ?? [];
+  const verified: string[] = [];
+  const unmet: string[] = [];
+  if (intent.centerText) {
+    const centered = Object.values(project.visualObjects).some(
+      (object) =>
+        object.kind === 'text' &&
+        Math.abs(object.transform.x) < 0.001 &&
+        Math.abs(object.transform.y) < 0.001,
+    );
+    (centered ? verified : unmet).push(
+      centered ? 'Request: centered text' : 'request asked for centered text',
+    );
+  }
+  if (intent.startAtZero) {
+    const startsAtZero = clips.some((clip) => clip.startUs === 0);
+    (startsAtZero ? verified : unmet).push(
+      startsAtZero ? 'Request: clip starts at 0' : 'request asked for a clip starting at 0',
+    );
+  }
+  if (intent.trimRange) {
+    const [sourceInUs, sourceOutUs] = intent.trimRange;
+    const trimmed = clips.some(
+      (clip) =>
+        clip.kind === 'video' &&
+        clip.sourceInUs === sourceInUs &&
+        clip.sourceInUs + Math.round(clip.durationUs * (clip.playbackRate || 1)) === sourceOutUs,
+    );
+    (trimmed ? verified : unmet).push(
+      trimmed
+        ? `Request: source trim ${sourceInUs}–${sourceOutUs} µs`
+        : `request asked for source trim ${sourceInUs}–${sourceOutUs} µs`,
+    );
+  }
+  if (intent.look) {
+    const hasLook = clips.some(
+      (clip) => clip.kind === 'video' && clip.look?.preset === intent.look,
+    );
+    (hasLook ? verified : unmet).push(
+      hasLook ? `Request: ${intent.look} look` : `request asked for ${intent.look} look`,
+    );
+  }
+  if (intent.durationUs !== undefined) {
+    const durationMatches = root?.durationUs === intent.durationUs;
+    (durationMatches ? verified : unmet).push(
+      durationMatches
+        ? `Request: duration ${intent.durationUs} µs`
+        : `request asked for duration ${intent.durationUs} µs`,
+    );
+  }
+  return { verified, unmet };
 }
 
 export function verifyPlanChecklist(

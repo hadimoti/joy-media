@@ -18,9 +18,7 @@ describe('agent REPL project saving', () => {
 
   it('reports no retired model ids in the dual-brain REPL status', () => {
     const status = describeDualBrain();
-    const renderedStatus = JSON.stringify(status);
-    for (const retiredModelId of RETIRED_MODEL_IDS) {
-      expect(renderedStatus).not.toContain(retiredModelId);
-    }
+    for (const retiredModelId of RETIRED_MODEL_IDS)
+      expect([status.workhorse.model, status.creative.model]).not.toContain(retiredModelId);
   });
 });

@@ -107,12 +107,12 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
         name: 'APICallError',
         statusCode: 429,
         urlOrigin: 'https://provider.invalid',
-        message: 'rate limited',
+        message: 'JOY_AGENT_RATE_LIMITED: openrouter after 3 attempts; last Retry-After: 8',
         responseBodySnippet: '',
       },
     });
-    expect(formatAgentRunFailure(error, false)).toBe(
-      'Joy Agent execution failed: JOY_AGENT_RATE_LIMITED',
+    expect(formatAgentRunFailure(error, false)).toContain(
+      'JOY_AGENT_RATE_LIMITED: openrouter after 3 attempts; last Retry-After: 8',
     );
     expect(formatAgentRunFailure(error, true)).toContain('"statusCode":429');
   });
@@ -141,6 +141,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       expect(await runCli(['agent', '--help'])).toBe(0);
       expect(output.mock.calls.flat().join('\n')).toContain('probe');
       expect(output.mock.calls.flat().join('\n')).toContain('--apply');
+      expect(output.mock.calls.flat().join('\n')).toContain('--keep-partial');
       expect(output.mock.calls.flat().join('\n')).toContain('--allow-frames');
       expect(output.mock.calls.flat().join('\n')).toContain('--vision');
       expect(output.mock.calls.flat().join('\n')).toContain('--base-url|--url');
@@ -376,6 +377,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       const records = output.mock.calls.map(
         (call) => JSON.parse(String(call[0])) as Record<string, unknown>,
       );
+      expect(records).toHaveLength(output.mock.calls.length);
       expect(records.map((record) => record.type)).toEqual([
         'tool_call',
         'observation',
@@ -431,6 +433,160 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     } finally {
       runSpy.mockRestore();
       stderr.mockRestore();
+      stdout.mockRestore();
+    }
+  });
+
+  it('leaves a project unchanged when the checklist fails without --keep-partial', async () => {
+    const project = createDefaultProject('Checklist refusal', { id: 'checklist-refusal' });
+    const projectFile = join(isolatedHome, 'checklist-refusal.json');
+    const original = JSON.stringify({ format: 'joy-media-project', revision: 2, project });
+    writeFileSync(projectFile, original, 'utf8');
+    const runSpy = vi.spyOn(joyAgentRuntime, 'runJoyAgent').mockResolvedValue({
+      resultText: 'Partial checklist failure.',
+      modelText: '',
+      capability: 'tool-loop',
+      steps: 2,
+      status: 'partial',
+      staged: { timelineOps: [], documentOps: [] },
+      applied: false,
+      updatedProject: { ...project, title: 'Must not be saved' },
+      appliedCount: 0,
+      errors: ['Checklist not verified: requested outcome'],
+      notes: [],
+    });
+    const output = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(
+        await runCli(['agent', 'run', 'make a title', '--project', projectFile, '--apply']),
+      ).toBe(1);
+      expect(readFileSync(projectFile, 'utf8')).toBe(original);
+    } finally {
+      runSpy.mockRestore();
+      output.mockRestore();
+    }
+  });
+
+  it('saves partial results only with --keep-partial and still exits non-zero', async () => {
+    const project = createDefaultProject('Keep partial', { id: 'keep-partial' });
+    const projectFile = join(isolatedHome, 'keep-partial.json');
+    writeFileSync(
+      projectFile,
+      JSON.stringify({ format: 'joy-media-project', revision: 3, project }),
+    );
+    const runSpy = vi.spyOn(joyAgentRuntime, 'runJoyAgent').mockResolvedValue({
+      resultText: 'Saved partial result.',
+      modelText: '',
+      capability: 'tool-loop',
+      steps: 2,
+      status: 'partial',
+      staged: { timelineOps: [], documentOps: [] },
+      applied: true,
+      updatedProject: { ...project, title: 'Saved partial title' },
+      appliedCount: 1,
+      errors: ['Checklist not verified: another requested outcome'],
+      notes: [],
+    });
+    const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(
+        await runCli([
+          'agent',
+          'run',
+          'change title',
+          '--project',
+          projectFile,
+          '--apply',
+          '--keep-partial',
+        ]),
+      ).toBe(1);
+      expect(JSON.parse(readFileSync(projectFile, 'utf8'))).toMatchObject({
+        revision: 4,
+        project: { title: 'Saved partial title' },
+      });
+    } finally {
+      runSpy.mockRestore();
+      output.mockRestore();
+    }
+  });
+
+  it('keeps partial JSON stdout as parseable records and includes checklist errors', async () => {
+    const project = createDefaultProject('JSON partial', { id: 'json-partial' });
+    const projectFile = join(isolatedHome, 'json-partial.json');
+    writeFileSync(
+      projectFile,
+      JSON.stringify({ format: 'joy-media-project', revision: 1, project }),
+    );
+    const runSpy = vi.spyOn(joyAgentRuntime, 'runJoyAgent').mockResolvedValue({
+      resultText: 'Partial.',
+      modelText: '',
+      capability: 'tool-loop',
+      steps: 1,
+      status: 'partial',
+      staged: { timelineOps: [], documentOps: [] },
+      applied: false,
+      updatedProject: project,
+      appliedCount: 0,
+      errors: ['Checklist not verified: title'],
+      notes: [],
+    });
+    const stdout = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(
+        await runCli([
+          'agent',
+          'run',
+          'make a title',
+          '--project',
+          projectFile,
+          '--apply',
+          '--json',
+        ]),
+      ).toBe(1);
+      const records = stdout.mock.calls.map(
+        (call) => JSON.parse(String(call[0])) as Record<string, unknown>,
+      );
+      expect(records.every((record) => typeof record.type === 'string')).toBe(true);
+      expect(records.find((record) => record.type === 'apply_result')).toMatchObject({
+        applied: false,
+        errors: ['Checklist not verified: title'],
+      });
+      expect(stderr.mock.calls).toHaveLength(0);
+    } finally {
+      runSpy.mockRestore();
+      stdout.mockRestore();
+      stderr.mockRestore();
+    }
+  });
+
+  it('keeps JSON stdout valid and preserves rate-limit retry details on failure', async () => {
+    const project = createDefaultProject('JSON failed', { id: 'json-failed' });
+    const projectFile = join(isolatedHome, 'json-failed.json');
+    writeFileSync(
+      projectFile,
+      JSON.stringify({ format: 'joy-media-project', revision: 1, project }),
+    );
+    const runSpy = vi.spyOn(joyAgentRuntime, 'runJoyAgent').mockRejectedValue(
+      new JoyAgentRunError('JOY_AGENT_RATE_LIMITED', {
+        detail: {
+          name: 'Error',
+          statusCode: 429,
+          message: 'JOY_AGENT_RATE_LIMITED: openrouter after 3 attempts; last Retry-After: 8',
+          responseBodySnippet: '',
+        },
+      }),
+    );
+    const stdout = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(await runCli(['agent', 'run', 'edit', '--project', projectFile, '--json'])).toBe(1);
+      const records = stdout.mock.calls.map(
+        (call) => JSON.parse(String(call[0])) as Record<string, unknown>,
+      );
+      expect(records).toHaveLength(1);
+      expect(records[0]?.error).toContain('openrouter after 3 attempts; last Retry-After: 8');
+    } finally {
+      runSpy.mockRestore();
       stdout.mockRestore();
     }
   });

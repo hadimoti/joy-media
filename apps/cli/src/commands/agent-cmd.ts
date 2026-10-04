@@ -44,6 +44,7 @@ import {
 export interface AgentCommandFlags {
   project?: string | undefined;
   apply?: boolean | undefined;
+  keepPartial?: boolean | undefined;
   allowFrames?: boolean | undefined;
   name?: string | undefined;
   provider?: string | undefined;
@@ -62,6 +63,9 @@ export function formatAgentRunFailure(error: unknown, debug: boolean): string {
   const gatewayCode = /"code"\s*:\s*"([A-Z0-9_]+)"/.exec(error.detail.responseBodySnippet)?.[1];
   if (error.detail.statusCode === 402 && gatewayCode === 'JOY_SUBSCRIPTION_REQUIRED') {
     return 'Joy Agent execution failed: JOY_SUBSCRIPTION_REQUIRED (an active JOY Pro subscription is required)';
+  }
+  if (error.code === 'JOY_AGENT_RATE_LIMITED') {
+    return `Joy Agent execution failed: JOY_AGENT_RATE_LIMITED (${error.detail.message})${debug ? `\nDebug detail: ${JSON.stringify(error.detail)}` : ''}`;
   }
   if (
     gatewayCode === 'JOY_AGENT_UPSTREAM_AUTH_FAILED' ||
@@ -87,6 +91,7 @@ Commands:
 
   Options: --project <id|file> --apply --allow-frames --vision --provider <name> --model <id>
          --api-key-env <VAR> --base-url <url> --debug --json
+         --keep-partial             Save successful operations from a partial checklist run (still exits 1)
 
 On Linux/macOS, --api-key uses the system keyring. If unavailable, use --api-key-env <VAR>,
 or explicitly opt in to plaintext with --insecure-file-store (mode 0600).`);
@@ -537,6 +542,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         revision: projectInfo.revision,
         prompt,
         apply: flags.apply,
+        keepPartial: flags.keepPartial,
         json: flags.json,
         onTrace: (record) => {
           if (flags.json) console.log(JSON.stringify(record));
@@ -572,6 +578,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
             appliedCount: output.appliedCount,
             operationIds: output.appliedOperationIds,
             errors: output.errors,
+            notes: output.notes,
             summary: output.resultText,
             checklist: output.checklist ?? [],
             verified: output.verified ?? [],
