@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { joyStudioOtpHtml, MediaMailer, sanitizeOtpDeliveryError } from './media-mailer.js';
+import {
+  isValidSmtpHostname,
+  joyStudioOtpHtml,
+  MediaMailer,
+  sanitizeOtpDeliveryError,
+} from './media-mailer.js';
 
 describe('JOY Studio OTP email', () => {
   it('uses a neutral email-safe stack without retired font families', () => {
@@ -62,7 +67,7 @@ describe('MediaMailer address selection', () => {
     expect(created).toHaveLength(1);
     expect(created[0]).toMatchObject({
       host: '192.0.2.25',
-      name: 'smtp.example.invalid',
+      name: 'joyst.ir',
       tls: { servername: 'smtp.example.invalid', rejectUnauthorized: true },
     });
   });
@@ -91,7 +96,7 @@ describe('MediaMailer address selection', () => {
       host: '192.0.2.25',
       port: 587,
       secure: false,
-      name: 'smtp.example.invalid',
+      name: 'joyst.ir',
       tls: { servername: 'smtp.example.invalid', rejectUnauthorized: true },
       connectionTimeout: 8000,
       greetingTimeout: 8000,
@@ -124,5 +129,31 @@ describe('MediaMailer address selection', () => {
       secure: true,
       tls: { servername: 'smtp.example.invalid', rejectUnauthorized: true },
     });
+  });
+
+  it('uses a separately configured client EHLO hostname', async () => {
+    const created: Record<string, unknown>[] = [];
+    const createTransport = vi.fn((config: Record<string, unknown>) => {
+      created.push(config);
+      return { sendMail: async () => ({}), close: () => {} } as never;
+    });
+    await new MediaMailer({ ...options(), ehloName: 'mail.joyst.ir', createTransport }).sendOtp(
+      'person@example.invalid',
+      '123456',
+    );
+    expect(created[0]).toMatchObject({
+      name: 'mail.joyst.ir',
+      host: '192.0.2.25',
+      tls: { servername: 'smtp.example.invalid' },
+    });
+  });
+
+  it('validates configured EHLO names as hostnames', () => {
+    expect(isValidSmtpHostname('joyst.ir')).toBe(true);
+    expect(isValidSmtpHostname('mail.joyst.ir')).toBe(true);
+    expect(isValidSmtpHostname('smtp.gmail.com\r\nAUTH PLAIN')).toBe(false);
+    expect(() => new MediaMailer({ ...options(), ehloName: 'bad name' })).toThrow(
+      'ehloName must be a valid hostname',
+    );
   });
 });

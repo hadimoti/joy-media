@@ -25,6 +25,8 @@ The environment file is created on the VPS with mode `0600` and contains (see
   resolves the SMTP hostname and falls back across address families only for
   connection-stage failures. TLS verifies the configured hostname even when
   the socket connects to an IP literal. Invalid values warn and use IPv4.
+- `JOY_MEDIA_SMTP_EHLO_NAME` — optional client hostname sent in EHLO; defaults
+  to `joyst.ir` and must be a valid hostname. It does not change TLS verification.
 - `JOY_MEDIA_BOT_TOKEN` — dedicated Telegram bot token for OTP delivery,
   independent of the `joy-wg-bot` token
 - `JOY_MEDIA_MISTRAL_API_KEY` — optional, dedicated JOY Media Mistral key for

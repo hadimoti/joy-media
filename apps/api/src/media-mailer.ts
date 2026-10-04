@@ -11,6 +11,7 @@ export interface MediaMailerOptions {
   readonly pass: string;
   readonly from: string;
   readonly family?: SmtpAddressFamily;
+  readonly ehloName?: string;
   readonly lookup?: (hostname: string) => Promise<readonly SmtpAddress[]>;
   readonly createTransport?: (options: Record<string, unknown>) => Transporter;
   readonly onOtpDeliveryFailure?: (metadata: OtpDeliveryErrorMetadata) => void;
@@ -64,6 +65,20 @@ export interface MediaMailerLike {
   sendOtp(gmail: string, code: string): Promise<void>;
 }
 
+export function isValidSmtpHostname(value: string): boolean {
+  return (
+    value.length <= 253 &&
+    value
+      .split('.')
+      .every(
+        (label) =>
+          label.length > 0 &&
+          label.length <= 63 &&
+          /^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$/.test(label),
+      )
+  );
+}
+
 const JOY_STUDIO_LOGO_URL = 'https://joyst.ir/assets/JoyCodeNew_256x256.png';
 
 export function joyStudioOtpHtml(code: string): string {
@@ -107,6 +122,7 @@ export class MediaMailer implements MediaMailerLike {
   private readonly pass: string;
   private readonly from: string;
   private readonly family: SmtpAddressFamily;
+  private readonly ehloName: string;
   private readonly lookup: NonNullable<MediaMailerOptions['lookup']>;
   private readonly createTransport: NonNullable<MediaMailerOptions['createTransport']>;
   private readonly onOtpDeliveryFailure: MediaMailerOptions['onOtpDeliveryFailure'];
@@ -118,6 +134,8 @@ export class MediaMailer implements MediaMailerLike {
     this.pass = options.pass;
     this.from = options.from;
     this.family = options.family ?? '4';
+    this.ehloName = options.ehloName ?? 'joyst.ir';
+    if (!isValidSmtpHostname(this.ehloName)) throw new Error('ehloName must be a valid hostname');
     this.lookup =
       options.lookup ??
       (async (hostname) =>
@@ -145,7 +163,7 @@ export class MediaMailer implements MediaMailerLike {
       for (const address of candidates) {
         const transporter = this.createTransport({
           host: address.address,
-          name: this.host,
+          name: this.ehloName,
           port: this.port,
           secure: this.port === 465,
           auth: { user: this.user, pass: this.pass },

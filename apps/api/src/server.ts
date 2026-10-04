@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { LocalControlPlane } from './control-plane.js';
 import { createControlPlaneHttpServer } from './http-server.js';
 import { DisabledMediaAuth, MediaAuthService } from './media-auth.js';
-import { MediaMailer } from './media-mailer.js';
+import { isValidSmtpHostname, MediaMailer } from './media-mailer.js';
 import { MediaTelegramSender } from './media-telegram.js';
 import { PostgresControlPlane } from './postgres-control-plane.js';
 import { RclonePrivateObjectStore } from './private-object-store.js';
@@ -275,6 +275,9 @@ function createMailer(): MediaMailer | undefined {
     : '4';
   if (configuredFamily && family !== configuredFamily)
     console.warn('Invalid JOY_MEDIA_SMTP_FAMILY; using IPv4 (4).');
+  const rawEhloName = process.env.JOY_MEDIA_SMTP_EHLO_NAME?.trim() || 'joyst.ir';
+  const ehloName = isValidSmtpHostname(rawEhloName) ? rawEhloName : 'joyst.ir';
+  if (ehloName !== rawEhloName) console.warn('Invalid JOY_MEDIA_SMTP_EHLO_NAME; using joyst.ir.');
   if (
     host === undefined ||
     port === undefined ||
@@ -290,6 +293,7 @@ function createMailer(): MediaMailer | undefined {
     pass,
     from,
     family,
+    ehloName,
     onOtpDeliveryFailure: (metadata) => console.error('JOY Media OTP delivery failed', metadata),
   });
 }

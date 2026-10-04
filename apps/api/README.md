@@ -10,6 +10,7 @@
 - `JOY_MEDIA_DATABASE_URL` — Postgres connection string (control plane + auth tables)
 - `JOY_MEDIA_SMTP_HOST` / `JOY_MEDIA_SMTP_PORT` / `JOY_MEDIA_SMTP_USER` / `JOY_MEDIA_SMTP_PASS` / `JOY_MEDIA_SMTP_FROM` — OTP email delivery (optional)
 - `JOY_MEDIA_SMTP_FAMILY` — SMTP address family: `4` (default), `6`, or `auto`; `auto` tries resolved addresses in order and only falls back after connection-stage failures. Invalid values warn and use `4`. SMTP connects to resolved IPs while verifying TLS against the configured hostname.
+- `JOY_MEDIA_SMTP_EHLO_NAME` — optional client hostname announced with EHLO (default `joyst.ir`); must be a valid hostname and does not change the SMTP TLS server name.
 - `JOY_MEDIA_BOT_TOKEN` — dedicated Telegram bot for OTP delivery (optional; telegram login is silently unavailable without it)
 
 At startup the durable adapter applies the idempotent schema (including the
