@@ -21,7 +21,14 @@ describe('CLI secret storage', () => {
         process.platform === 'win32' ? 'dpapi-user' : 'file-0600',
       );
       expect(unprotectSecret(loaded.legacy!.apiKeyProtected!)).toBe('sk-test-REDACTED-0000');
-      expect(readFileSync(path, 'utf8')).not.toContain('sk-test-REDACTED-0000');
+      const persisted = JSON.parse(readFileSync(path, 'utf8')) as {
+        legacy: { apiKey?: string; apiKeyProtected?: { scheme: string } };
+      };
+      expect(persisted.legacy.apiKey).toBeUndefined();
+      expect(persisted.legacy.apiKeyProtected?.scheme).toBe(
+        process.platform === 'win32' ? 'dpapi-user' : 'file-0600',
+      );
+      if (process.platform !== 'win32') expect(statSync(path).mode & 0o777).toBe(0o600);
     } finally {
       vi.unstubAllEnvs();
       rmSync(home, { recursive: true, force: true });
@@ -39,7 +46,6 @@ describe('CLI secret storage', () => {
         saveAiProviders({ test: { apiKeyProtected: protectSecret('sk-test-REDACTED-0000') } });
         const path = join(home, '.joy-media', 'ai-providers.json');
         expect(statSync(path).mode & 0o777).toBe(0o600);
-        expect(readFileSync(path, 'utf8')).not.toContain('sk-test-REDACTED-0000');
       } finally {
         if (previousHome === undefined) delete process.env.HOME;
         else process.env.HOME = previousHome;
@@ -49,6 +55,25 @@ describe('CLI secret storage', () => {
       }
     },
   );
+
+  it.runIf(process.platform === 'win32')('does not persist plaintext protected keys', () => {
+    const home = mkdtempSync(join(tmpdir(), 'joy-secret-test-'));
+    const previousHome = process.env.HOME;
+    const previousProfile = process.env.USERPROFILE;
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      saveAiProviders({ test: { apiKeyProtected: protectSecret('sk-test-REDACTED-0000') } });
+      const path = join(home, '.joy-media', 'ai-providers.json');
+      expect(readFileSync(path, 'utf8')).not.toContain('sk-test-REDACTED-0000');
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousProfile;
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
 
   it.runIf(process.platform === 'win32')('round trips a DPAPI protected secret', () => {
     const key = 'sk-test-REDACTED-0000';
