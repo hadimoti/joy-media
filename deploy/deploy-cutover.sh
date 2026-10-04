@@ -133,6 +133,8 @@ fi
 bash "$SCRIPT_DIR/joy-media-release-identity.sh" merge \
   "$API_ENV_FILE" "$RELEASE_DIR/release-identity.env" "$API_ENV_STAGE"
 [[ -s "$API_ENV_STAGE" ]] || die "staged API environment is empty"
+python3 "$SCRIPT_DIR/ensure-trusted-proxy.py" "$API_ENV_STAGE" ||
+  die "could not ensure the local trusted proxy in staged API environment"
 ln -s -- "$RELEASE_DIR" "$SWITCH_API_LINK"
 
 mv -Tf -- "$API_ENV_STAGE" "$API_ENV_FILE"
