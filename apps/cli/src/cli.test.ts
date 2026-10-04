@@ -20,6 +20,21 @@ import {
   saveProject,
 } from './utils/project-loader.js';
 
+function cliChildEnvironment(): NodeJS.ProcessEnv {
+  const environment = { ...process.env };
+  for (const key of [
+    'OPENROUTER_API_KEY',
+    'KILO_API_KEY',
+    'OPENAI_API_KEY',
+    'ANTHROPIC_API_KEY',
+    'GEMINI_API_KEY',
+    'JOY_MEDIA_OPENROUTER_API_KEY',
+    'JOY_MEDIA_SESSION_TOKEN',
+  ])
+    delete environment[key];
+  return environment;
+}
+
 describe('JOY Media CLI (@joy-media/cli)', () => {
   let isolatedHome: string;
   beforeEach(() => {
@@ -93,7 +108,11 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       {
         cwd: process.cwd(),
         encoding: 'utf8',
-        env: { ...process.env, HOME: isolatedHome, USERPROFILE: isolatedHome },
+        env: {
+          ...cliChildEnvironment(),
+          HOME: isolatedHome,
+          USERPROFILE: isolatedHome,
+        },
       },
     );
     expect(result.error).toBeUndefined();
