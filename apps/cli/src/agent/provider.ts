@@ -60,6 +60,7 @@ async function getJoyHostedModelCatalog(
     return joyHostedModelCache.models;
   const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/models`, {
     headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+    redirect: apiKey ? 'manual' : 'follow',
   });
   if (!response.ok) throw new Error(`JOY hosted model catalog returned HTTP ${response.status}`);
   const payload = (await response.json()) as { models?: Array<Record<string, unknown>> };
@@ -163,6 +164,26 @@ export function validateProviderBaseUrl(baseUrl: string): void {
 export async function resolveByokConfig(
   options: ResolveProviderOptions = {},
 ): Promise<ByokSessionConfig> {
+  const cliConfigBeforeResolve = loadCliConfig();
+  const selectedProvider =
+    options.provider ??
+    cliConfigBeforeResolve.activeProvider ??
+    ENV_PROVIDER_PRIORITY.find(([key]) => Boolean(process.env[key]))?.[1] ??
+    'openrouter';
+  if (
+    selectedProvider === 'joy-hosted' &&
+    !options.apiKey &&
+    !process.env.JOY_MEDIA_SESSION_TOKEN
+  ) {
+    const session = loadJoySession();
+    if (session) {
+      const cliConfig = cliConfigBeforeResolve;
+      const savedBase = loadAiProviders()['joy-hosted']?.baseUrl;
+      const targetBase =
+        options.baseUrl ?? cliConfig.customBaseUrl ?? savedBase ?? DEFAULT_JOY_HOSTED_BASE_URL;
+      assertJoySessionOrigin(targetBase, session.apiOrigin ?? 'https://joyst.ir');
+    }
+  }
   let effective = describeEffectiveConfig(options);
   const aiProviders = loadAiProviders();
   const keyProvider = aiProviders[effective.provider]?.provider ?? effective.provider;
@@ -170,7 +191,14 @@ export async function resolveByokConfig(
   const keylessLocalProvider = effective.provider === 'lm-studio';
   if (!apiKey && effective.provider === 'joy-hosted') {
     // An explicit environment token is useful for CI and overrides the interactive login.
-    apiKey = process.env.JOY_MEDIA_SESSION_TOKEN || loadJoySession()?.token;
+    apiKey = process.env.JOY_MEDIA_SESSION_TOKEN;
+    if (!apiKey) {
+      const session = loadJoySession();
+      if (session) {
+        assertJoySessionOrigin(effective.baseUrl, session.apiOrigin ?? 'https://joyst.ir');
+        apiKey = session.token;
+      }
+    }
   }
   if (!apiKey && !keylessLocalProvider) {
     const keyEnv =
@@ -247,10 +275,22 @@ export async function resolveByokConfig(
   });
 }
 
+function assertJoySessionOrigin(baseUrl: string, savedOrigin: string): void {
+  const outgoingOrigin = new URL(baseUrl).origin;
+  const normalizedSavedOrigin = new URL(savedOrigin).origin;
+  if (outgoingOrigin !== normalizedSavedOrigin) {
+    throw new Error(
+      `saved login is for ${normalizedSavedOrigin}; run joy-media login --api-base <url> for this host`,
+    );
+  }
+}
+
 export function createModelFromConfig(config: ByokSessionConfig): LanguageModel {
-  const { model } = createJoyAgentProvider(config, (input, init) =>
-    retryProviderFetch(input, init, fetch, config.provider),
-  );
+  const { model } = createJoyAgentProvider(config, (input, init) => {
+    const requestInit =
+      config.provider === 'joy-hosted' ? { ...init, redirect: 'manual' as const } : init;
+    return retryProviderFetch(input, requestInit, fetch, config.provider);
+  });
   return model;
 }
 

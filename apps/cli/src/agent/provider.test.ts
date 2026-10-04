@@ -241,13 +241,13 @@ describe('effective BYOK provider configuration', () => {
     }
   });
 
-  it('uses the saved login session for JOY hosted and sends it as a Bearer token', async () => {
+  it('sends a saved login token only to its exact stored origin', async () => {
     isolateConfig();
     const restoreSecretStore = configureSecretStoreRuntimeForTests({
       platform: 'linux',
       runner: () => ({ status: 0, stdout: '' }),
     });
-    saveJoySession({ token: 'tok-fake-stored' }, true);
+    saveJoySession({ token: 'tok-fake-stored', apiOrigin: 'https://joyst.ir' }, true);
     restoreSecretStore();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ models: [{ id: 'joy-model-test', isDefault: true }] }), {
@@ -259,11 +259,65 @@ describe('effective BYOK provider configuration', () => {
     try {
       const resolved = await resolveByokConfig({
         provider: 'joy-hosted',
-        baseUrl: 'https://joy-hosted-stored-test.invalid/api/v1/agent',
+        baseUrl: 'https://joyst.ir/api/v2/agent',
       });
       expect(resolved.apiKey).toBe('tok-fake-stored');
       expect(fetchSpy.mock.calls[0]?.[1]?.headers).toEqual({
         Authorization: 'Bearer tok-fake-stored',
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    'https://other.example.invalid/api/v1/agent',
+    'http://joyst.ir/api/v1/agent',
+    'https://joyst.ir:8443/api/v1/agent',
+    'https://joyst.ir.evil.com/api/v1/agent',
+    'https://evil.com/joyst.ir/api/v1/agent',
+    'https://joyst.ir@evil.com/api/v1/agent',
+  ])('refuses to attach a saved login token to %s', async (baseUrl) => {
+    isolateConfig();
+    const restoreSecretStore = configureSecretStoreRuntimeForTests({
+      platform: 'linux',
+      runner: () => ({ status: 0, stdout: '' }),
+    });
+    saveJoySession({ token: 'tok-fake-stored', apiOrigin: 'https://joyst.ir' }, true);
+    restoreSecretStore();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    try {
+      await expect(resolveByokConfig({ provider: 'joy-hosted', baseUrl })).rejects.toThrow(
+        'saved login is for https://joyst.ir; run joy-media login --api-base <url> for this host',
+      );
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('does not follow a JOY model catalog redirect with the saved token', async () => {
+    isolateConfig();
+    const restoreSecretStore = configureSecretStoreRuntimeForTests({
+      platform: 'linux',
+      runner: () => ({ status: 0, stdout: '' }),
+    });
+    saveJoySession({ token: 'tok-fake-stored', apiOrigin: 'https://joyst.ir' }, true);
+    restoreSecretStore();
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(null, { status: 302, headers: { location: 'https://evil.example.invalid/' } }),
+      );
+
+    try {
+      await expect(
+        resolveByokConfig({ provider: 'joy-hosted', baseUrl: 'https://joyst.ir/api/v3/agent' }),
+      ).rejects.toThrow('model catalog returned HTTP 302');
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      expect(fetchSpy.mock.calls[0]?.[1]).toMatchObject({
+        redirect: 'manual',
+        headers: { Authorization: 'Bearer tok-fake-stored' },
       });
     } finally {
       fetchSpy.mockRestore();
