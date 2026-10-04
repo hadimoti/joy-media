@@ -9,8 +9,11 @@ export interface CreateTextClipInput {
   readonly text: string;
   readonly startUs: number;
   readonly durationUs: number;
+  /** Caption editor frame-fraction offset (normally between -0.4 and 0.4). */
   readonly x?: number;
+  /** Caption editor frame-fraction offset (normally between -0.4 and 0.4). */
   readonly y?: number;
+  /** Multiplier applied to the selected caption template's font size. */
   readonly size?: number;
   readonly color?: string;
 }
@@ -25,12 +28,12 @@ export function createTextClip(input: CreateTextClipInput): {
     throw new RangeError('Text start is invalid.');
   if (!Number.isSafeInteger(input.durationUs) || input.durationUs <= 0)
     throw new RangeError('Text duration is invalid.');
-  const size = input.size ?? 64;
-  if (!Number.isSafeInteger(size) || size < 1 || size > 512)
-    throw new RangeError('Text size must be from 1 through 512.');
+  const size = input.size ?? 1;
+  if (!Number.isFinite(size) || size < 0.1 || size > 8)
+    throw new RangeError('Text size multiplier must be from 0.1 through 8.');
   for (const coordinate of [input.x, input.y]) {
-    if (coordinate !== undefined && (!Number.isFinite(coordinate) || Math.abs(coordinate) > 32768))
-      throw new RangeError('Text position is outside the supported range.');
+    if (coordinate !== undefined && (!Number.isFinite(coordinate) || Math.abs(coordinate) > 0.4))
+      throw new RangeError('Text position must be a frame fraction from -0.4 through 0.4.');
   }
   const color = input.color ?? '#ffffff';
   if (!/^#[0-9a-f]{6}$/i.test(color)) throw new RangeError('Text color must be #RRGGBB.');

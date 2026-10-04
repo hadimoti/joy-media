@@ -503,7 +503,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
           '--duration',
           '2',
           '--size',
-          '52',
+          '1.2',
           '--color',
           '#ffcc00',
           '--sqlite-path',
@@ -518,6 +518,12 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       expect(captionClip).toBeDefined();
       if (!captionClip || captionClip.kind !== 'caption') throw new Error('caption clip missing');
       expect(captionClip).toMatchObject({ startUs: 1_000_000, durationUs: 2_000_000 });
+      expect(captionClip.style).toMatchObject({
+        positionX: 0,
+        positionY: 0,
+        fontSize: 1.2,
+        align: 'center',
+      });
       expect(
         saved.captionDocuments[captionClip.captionDocumentId]?.words[
           `${captionClip.captionDocumentId}-word`

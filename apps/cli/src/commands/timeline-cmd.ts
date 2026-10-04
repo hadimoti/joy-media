@@ -32,7 +32,7 @@ export interface TimelineCommandFlags {
 export function printTimelineHelp(): void {
   console.log(`Usage: joy-media timeline <add-clip|add-text|add-effect|clear-effect|split|trim|remove-clip> --project <id|file>
   add-clip --asset <id> [--track <id>] [--start <seconds>] [--duration <seconds>]
-  add-text --text <text> [--track <id>] [--start <seconds>] --duration <seconds> [--x <px> --y <px> --size <px> --color <#RRGGBB>]
+  add-text --text <text> [--track <id>] [--start <seconds>] --duration <seconds> [--x <frame-fraction> --y <frame-fraction> --size <template-multiplier> --color <#RRGGBB>]
   split --clip <id> --at <seconds>
   trim --clip <id> [--start <seconds>] [--end <seconds>] [--duration <seconds>]
   remove-clip --clip <id>`);

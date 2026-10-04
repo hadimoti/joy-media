@@ -22,6 +22,7 @@
     "@joy-media/commands": "workspace:*",
     "@joy-media/export-core": "workspace:*",
     "@joy-media/agent-tools": "workspace:*",
+    "@joy-media/captions-core": "workspace:*",
     "@joy-media/motion-core": "workspace:*",
     "ai": "7.0.92"
   },

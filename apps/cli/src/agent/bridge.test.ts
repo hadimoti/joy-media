@@ -163,7 +163,7 @@ describe('CLI Joy Agent bridge timeline operations', () => {
           text: "it's 50%: a,b;[c] x'\\:textfile=/tmp/dt/secret.txt\\:y='5",
           startUs: 0,
           durationUs: 1_000_000,
-          size: 24,
+          size: 1.2,
         });
         const project: JoyProjectV1 = {
           ...baseProject,
@@ -422,7 +422,7 @@ describe('CLI Joy Agent bridge timeline operations', () => {
           text: 'Hello JOY',
           startUs: 500_000,
           durationUs: 2_000_000,
-          size: 48,
+          size: 1.5,
           color: '#ffcc00',
           dependsOn: [],
         },

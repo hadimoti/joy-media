@@ -128,6 +128,9 @@ importers:
       '@joy-media/agent-tools':
         specifier: workspace:*
         version: link:../../packages/agent-tools
+      '@joy-media/captions-core':
+        specifier: workspace:*
+        version: link:../../packages/captions-core
       '@joy-media/commands':
         specifier: workspace:*
         version: link:../../packages/commands

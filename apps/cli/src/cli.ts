@@ -34,6 +34,7 @@ export interface CliFlags {
   width: number | undefined;
   height: number | undefined;
   fps: number | undefined;
+  font: string | undefined;
   track: string | undefined;
   clip: string | undefined;
   asset: string | undefined;
@@ -134,13 +135,14 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     width: parseIntFlag('width', v.width, NUMERIC_RANGES.width),
     height: parseIntFlag('height', v.height, NUMERIC_RANGES.height),
     fps: parseIntFlag('fps', v.fps, NUMERIC_RANGES.fps),
+    font: typeof v.font === 'string' ? v.font : undefined,
     track: typeof v.track === 'string' ? v.track : undefined,
     clip: typeof v.clip === 'string' ? v.clip : undefined,
     asset: typeof v.asset === 'string' ? v.asset : undefined,
     text: typeof v.text === 'string' ? v.text : undefined,
-    x: parseFloatFlag('x', v.x, { min: -32768, max: 32768 }),
-    y: parseFloatFlag('y', v.y, { min: -32768, max: 32768 }),
-    size: parseIntFlag('size', v.size, { min: 1, max: 512, allowZero: false }),
+    x: parseFloatFlag('x', v.x, { min: -0.4, max: 0.4 }),
+    y: parseFloatFlag('y', v.y, { min: -0.4, max: 0.4 }),
+    size: parseFloatFlag('size', v.size, { min: 0.1, max: 8 }),
     color: typeof v.color === 'string' ? v.color : undefined,
     id: typeof v.id === 'string' ? v.id : undefined,
     strict: Boolean(v.strict),
@@ -196,6 +198,7 @@ export async function runCli(argv: string[]): Promise<number> {
         width: { type: 'string' },
         height: { type: 'string' },
         fps: { type: 'string' },
+        font: { type: 'string' },
         track: { type: 'string' },
         clip: { type: 'string' },
         asset: { type: 'string' },
