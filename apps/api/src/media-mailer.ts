@@ -1,4 +1,8 @@
 import nodemailer, { type Transporter } from 'nodemailer';
+import { lookup as dnsLookup } from 'node:dns/promises';
+
+export type SmtpAddressFamily = '4' | '6' | 'auto';
+type SmtpAddress = { address: string; family: 4 | 6 };
 
 export interface MediaMailerOptions {
   readonly host: string;
@@ -6,6 +10,9 @@ export interface MediaMailerOptions {
   readonly user: string;
   readonly pass: string;
   readonly from: string;
+  readonly family?: SmtpAddressFamily;
+  readonly lookup?: (hostname: string) => Promise<readonly SmtpAddress[]>;
+  readonly createTransport?: (options: Record<string, unknown>) => Transporter;
   readonly onOtpDeliveryFailure?: (metadata: OtpDeliveryErrorMetadata) => void;
 }
 
@@ -94,37 +101,83 @@ export function joyStudioOtpHtml(code: string): string {
 
 /** Dedicated SMTP sender for JOY Media OTP email, independent of joy-vps's mailer. */
 export class MediaMailer implements MediaMailerLike {
-  private readonly transporter: Transporter;
+  private readonly host: string;
+  private readonly port: number;
+  private readonly user: string;
+  private readonly pass: string;
   private readonly from: string;
+  private readonly family: SmtpAddressFamily;
+  private readonly lookup: NonNullable<MediaMailerOptions['lookup']>;
+  private readonly createTransport: NonNullable<MediaMailerOptions['createTransport']>;
   private readonly onOtpDeliveryFailure: MediaMailerOptions['onOtpDeliveryFailure'];
 
   constructor(options: MediaMailerOptions) {
-    this.transporter = nodemailer.createTransport({
-      host: options.host,
-      port: options.port,
-      secure: options.port === 465,
-      auth: { user: options.user, pass: options.pass },
-      disableFileAccess: true,
-      disableUrlAccess: true,
-    });
+    this.host = options.host;
+    this.port = options.port;
+    this.user = options.user;
+    this.pass = options.pass;
     this.from = options.from;
+    this.family = options.family ?? '4';
+    this.lookup =
+      options.lookup ??
+      (async (hostname) =>
+        (await dnsLookup(hostname, { all: true, verbatim: true })).map((address) => ({
+          address: address.address,
+          family: address.family === 6 ? 6 : 4,
+        })));
+    this.createTransport =
+      options.createTransport ??
+      ((config) =>
+        nodemailer.createTransport(config as Parameters<typeof nodemailer.createTransport>[0]));
     this.onOtpDeliveryFailure = options.onOtpDeliveryFailure;
   }
 
   async sendOtp(gmail: string, code: string): Promise<void> {
     try {
-      await this.transporter.sendMail({
-        from: this.from,
-        to: gmail,
-        subject: 'Joy Studio — Login Code',
-        text:
-          `Your Joy Studio login code is ${code}.\n\n` +
-          `Expires in 5 minutes.\n\n` +
-          `Do not share this code with anyone.`,
-        html: joyStudioOtpHtml(code),
-        disableFileAccess: true,
-        disableUrlAccess: true,
-      });
+      const addresses = await this.lookup(this.host);
+      const candidates = smtpCandidates(addresses, this.family);
+      if (candidates.length === 0)
+        throw Object.assign(new Error('SMTP host has no matching addresses'), {
+          code: 'ECONNECTION',
+          command: 'CONN',
+        });
+      let lastError: unknown;
+      for (const address of candidates) {
+        const transporter = this.createTransport({
+          host: address.address,
+          name: this.host,
+          port: this.port,
+          secure: this.port === 465,
+          auth: { user: this.user, pass: this.pass },
+          tls: { servername: this.host, rejectUnauthorized: true },
+          connectionTimeout: 8_000,
+          greetingTimeout: 8_000,
+          socketTimeout: 30_000,
+          disableFileAccess: true,
+          disableUrlAccess: true,
+        });
+        try {
+          await transporter.sendMail({
+            from: this.from,
+            to: gmail,
+            subject: 'Joy Studio — Login Code',
+            text:
+              `Your Joy Studio login code is ${code}.\n\n` +
+              `Expires in 5 minutes.\n\n` +
+              `Do not share this code with anyone.`,
+            html: joyStudioOtpHtml(code),
+            disableFileAccess: true,
+            disableUrlAccess: true,
+          });
+          return;
+        } catch (error) {
+          lastError = error;
+          if (!shouldFallbackSmtp(error) || address === candidates.at(-1)) throw error;
+        } finally {
+          transporter.close();
+        }
+      }
+      throw lastError;
     } catch (error) {
       try {
         this.onOtpDeliveryFailure?.(sanitizeOtpDeliveryError(error));
@@ -134,4 +187,25 @@ export class MediaMailer implements MediaMailerLike {
       throw error;
     }
   }
+}
+
+export function smtpCandidates(
+  addresses: readonly SmtpAddress[],
+  family: SmtpAddressFamily,
+): SmtpAddress[] {
+  const ordered = [...addresses];
+  if (family === '4') return ordered.filter((address) => address.family === 4);
+  if (family === '6') return ordered.filter((address) => address.family === 6);
+  return ordered;
+}
+
+function shouldFallbackSmtp(error: unknown): boolean {
+  const value =
+    typeof error === 'object' && error !== null ? (error as Record<string, unknown>) : {};
+  const code = value.code;
+  const command = value.command;
+  return (
+    (command === 'CONN' || command === 'CONNECT' || command === undefined) &&
+    ['ESOCKET', 'ETIMEDOUT', 'ECONNECTION', 'ECONNREFUSED', 'EOF'].includes(String(code))
+  );
 }

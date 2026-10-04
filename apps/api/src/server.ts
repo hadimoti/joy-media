@@ -70,6 +70,8 @@ async function start(): Promise<void> {
     await audioDenoiseLedger.initialize();
   const controlPlane = durableControlPlane ?? new LocalControlPlane();
   const mailer = createMailer();
+  if (mailer === undefined)
+    console.warn('JOY Media OTP email is unavailable: SMTP is not configured.');
   const telegram = createTelegramSender();
   const clientAddressResolver = createClientAddressResolver({
     trustedProxyAddresses: trustedProxyAddressesFromEnv(),
@@ -267,6 +269,12 @@ function createMailer(): MediaMailer | undefined {
   const user = process.env.JOY_MEDIA_SMTP_USER;
   const pass = process.env.JOY_MEDIA_SMTP_PASS;
   const from = process.env.JOY_MEDIA_SMTP_FROM;
+  const configuredFamily = process.env.JOY_MEDIA_SMTP_FAMILY?.trim().toLowerCase();
+  const family = ['4', '6', 'auto'].includes(configuredFamily ?? '')
+    ? (configuredFamily as '4' | '6' | 'auto')
+    : '4';
+  if (configuredFamily && family !== configuredFamily)
+    console.warn('Invalid JOY_MEDIA_SMTP_FAMILY; using IPv4 (4).');
   if (
     host === undefined ||
     port === undefined ||
@@ -281,6 +289,7 @@ function createMailer(): MediaMailer | undefined {
     user,
     pass,
     from,
+    family,
     onOtpDeliveryFailure: (metadata) => console.error('JOY Media OTP delivery failed', metadata),
   });
 }

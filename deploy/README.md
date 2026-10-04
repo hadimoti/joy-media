@@ -21,6 +21,10 @@ The environment file is created on the VPS with mode `0600` and contains (see
 - `JOY_MEDIA_DATABASE_URL` — the shared Postgres instance
 - `JOY_MEDIA_SMTP_HOST` / `_PORT` / `_USER` / `_PASS` / `_FROM` — dedicated
   SMTP account for OTP email, independent of joy-vps's mailer
+- `JOY_MEDIA_SMTP_FAMILY` — optional `4` (default), `6`, or `auto`; `auto`
+  resolves the SMTP hostname and falls back across address families only for
+  connection-stage failures. TLS verifies the configured hostname even when
+  the socket connects to an IP literal. Invalid values warn and use IPv4.
 - `JOY_MEDIA_BOT_TOKEN` — dedicated Telegram bot token for OTP delivery,
   independent of the `joy-wg-bot` token
 - `JOY_MEDIA_MISTRAL_API_KEY` — optional, dedicated JOY Media Mistral key for

@@ -8,7 +8,8 @@
 `/v1` (project/job/asset routes) stays disabled unless `JOY_MEDIA_DATABASE_URL` is set; `/v1/auth/*` (login) is always served, but only ever succeeds against an allow-listed contact once the database is configured.
 
 - `JOY_MEDIA_DATABASE_URL` — Postgres connection string (control plane + auth tables)
-- `JOY_MEDIA_SMTP_HOST` / `JOY_MEDIA_SMTP_PORT` / `JOY_MEDIA_SMTP_USER` / `JOY_MEDIA_SMTP_PASS` / `JOY_MEDIA_SMTP_FROM` — OTP email delivery (optional; gmail login is silently unavailable without it)
+- `JOY_MEDIA_SMTP_HOST` / `JOY_MEDIA_SMTP_PORT` / `JOY_MEDIA_SMTP_USER` / `JOY_MEDIA_SMTP_PASS` / `JOY_MEDIA_SMTP_FROM` — OTP email delivery (optional)
+- `JOY_MEDIA_SMTP_FAMILY` — SMTP address family: `4` (default), `6`, or `auto`; `auto` tries resolved addresses in order and only falls back after connection-stage failures. Invalid values warn and use `4`. SMTP connects to resolved IPs while verifying TLS against the configured hostname.
 - `JOY_MEDIA_BOT_TOKEN` — dedicated Telegram bot for OTP delivery (optional; telegram login is silently unavailable without it)
 
 At startup the durable adapter applies the idempotent schema (including the
@@ -17,6 +18,10 @@ uses transactions plus `FOR UPDATE SKIP LOCKED` for the queue lease. It
 persists only Media project/job/Worker metadata, events, and its own
 allow-list/session records; it never stores or accepts a JOY password,
 session cookie, or identity signing key.
+
+OTP requests use the same generic response for known and unknown contacts.
+Email delivery runs after the response, and delivery errors are logged with a
+short SHA-256 contact digest rather than the email address.
 
 **Must not:** Heavy inference, frame rendering, large-media relay; one microservice per module.
 
