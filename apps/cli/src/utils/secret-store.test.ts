@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   configureSecretStoreRuntimeForTests,
   deleteProtectedSecret,
+  migrateLegacySecret,
   protectSecret,
   unprotectSecret,
   type SecretStoreRunner,
@@ -12,6 +13,33 @@ import {
 import { getAiProvidersPath, loadAiProviders, saveAiProviders } from './config.js';
 
 describe('CLI secret storage', () => {
+  it('caches keyring unavailability for later legacy-secret migrations', () => {
+    const home = mkdtempSync(join(tmpdir(), 'joy-secret-cache-'));
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('USERPROFILE', home);
+    let probes = 0;
+    const restore = configureSecretStoreRuntimeForTests({
+      platform: 'linux',
+      runner: () => {
+        probes += 1;
+        return { status: 1, stdout: '' };
+      },
+    });
+    try {
+      expect(migrateLegacySecret('sk-test-REDACTED-0000', 'legacy-a')).toBeUndefined();
+      const firstProbeCount = probes;
+      expect(firstProbeCount).toBeGreaterThan(0);
+      expect(migrateLegacySecret('sk-test-REDACTED-0000', 'legacy-b')).toBeUndefined();
+      expect(probes).toBe(firstProbeCount);
+      const state = readFileSync(join(home, '.joy-media', 'secret-store-state.json'), 'utf8');
+      expect(state).toMatch(/^\{"noKeyringUntil":\d+\}$/);
+    } finally {
+      restore();
+      vi.unstubAllEnvs();
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it('stores and looks up macOS keys through stdin without placing the key in argv', () => {
     const calls: Array<{ command: string; args: readonly string[]; stdin?: string }> = [];
     const runner: SecretStoreRunner = (command, args, stdin) => {

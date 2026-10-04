@@ -132,6 +132,7 @@ export function describeEffectiveConfig(
     else throw new Error(`Provider "${provider}" needs --base-url`);
   }
   if (provider === 'kilo') baseUrl = canonicalKiloBaseUrl(baseUrl);
+  validateProviderBaseUrl(baseUrl);
   if (
     (provider === 'anthropic' || provider === 'kilo') &&
     new URL(baseUrl).origin === 'https://api.openai.com'
@@ -140,6 +141,22 @@ export function describeEffectiveConfig(
   }
 
   return { provider, modelId, baseUrl, source };
+}
+
+export function validateProviderBaseUrl(baseUrl: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    throw new Error(
+      'INSECURE_PROVIDER_URL: provider URL must be a valid HTTPS URL or a loopback HTTP URL.',
+    );
+  }
+  const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname.toLowerCase());
+  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && loopback))
+    throw new Error(
+      'INSECURE_PROVIDER_URL: HTTP is allowed only for localhost, 127.0.0.1, or [::1].',
+    );
 }
 
 export async function resolveByokConfig(
@@ -220,6 +237,36 @@ export async function resolveByokConfig(
 }
 
 export function createModelFromConfig(config: ByokSessionConfig): LanguageModel {
-  const { model } = createJoyAgentProvider(config);
+  const { model } = createJoyAgentProvider(config, (input, init) =>
+    retryProviderFetch(input, init),
+  );
   return model;
+}
+
+export async function retryProviderFetch(
+  input: Request | URL | string,
+  init?: RequestInit,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Response> {
+  const startedAt = Date.now();
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const response = await fetchImpl(input, init);
+    if (response.status !== 429) return response;
+    await response.body?.cancel().catch(() => {});
+    if (attempt === 3)
+      throw new Error('JOY_AGENT_RATE_LIMITED: provider rate limit persisted after 3 attempts.');
+    const retryAfter = response.headers.get('retry-after');
+    const dateSeconds = retryAfter ? (Date.parse(retryAfter) - Date.now()) / 1000 : Number.NaN;
+    const seconds =
+      retryAfter && /^\d+(?:\.\d+)?$/.test(retryAfter)
+        ? Number(retryAfter)
+        : Number.isFinite(dateSeconds)
+          ? Math.max(0, dateSeconds)
+          : 1;
+    const delayMs = Math.max(0, Math.ceil(seconds * 1000));
+    if (Date.now() - startedAt + delayMs > 60_000)
+      throw new Error('JOY_AGENT_RATE_LIMITED: retry delay exceeds the 60 second budget.');
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  throw new Error('JOY_AGENT_RATE_LIMITED: provider retry budget exhausted.');
 }

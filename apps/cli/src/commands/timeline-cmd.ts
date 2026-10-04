@@ -39,7 +39,9 @@ export function printTimelineHelp(): void {
   split --clip <id> --at <seconds>
   trim --clip <id> [--start <seconds>] [--end <seconds>] [--duration <seconds>]
   remove-clip --clip <id>`);
-  console.log('  Text placement: 0 = center, -0.4 = near left/top, 0.4 = near right/bottom');
+  console.log(
+    '  Text placement: x/y are editor frame fractions; captions anchor to the bottom title line, then clamp into frame bounds.',
+  );
   console.log(
     '  add-effect <clipId> --look <crt|bw|warm|cool> [--intensity 0..1] [--scanline-strength 0..1] [--noise-amount 0..1]',
   );
@@ -85,8 +87,16 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
       clips: track.clips.map((clip) => ({
         id: clip.id,
         kind: clip.kind,
-        startUs: clip.startUs,
-        durationUs: clip.durationUs,
+        timelineStartUs: clip.startUs,
+        timelineEndUs: clip.startUs + clip.durationUs,
+        ...(clip.kind === 'video'
+          ? {
+              sourceInUs: clip.sourceInUs,
+              sourceOutUs: clip.sourceInUs + Math.round(clip.durationUs * (clip.playbackRate ?? 1)),
+            }
+          : {}),
+        ...('look' in clip && clip.look ? { look: clip.look } : {}),
+        ...('effects' in clip && Array.isArray(clip.effects) ? { effects: clip.effects } : {}),
       })),
     }));
     if (flags.json) {
@@ -98,7 +108,7 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
       console.log(`${track.id} [${track.kind}]`);
       for (const clip of track.clips) {
         console.log(
-          `  ${clip.id} [${clip.kind}] start=${(clip.startUs / 1_000_000).toFixed(3)}s duration=${(clip.durationUs / 1_000_000).toFixed(3)}s`,
+          `  ${clip.id} [${clip.kind}] timeline=${(clip.timelineStartUs / 1_000_000).toFixed(3)}–${(clip.timelineEndUs / 1_000_000).toFixed(3)}s${clip.sourceInUs === undefined ? '' : ` source=${(clip.sourceInUs / 1_000_000).toFixed(3)}–${(clip.sourceOutUs! / 1_000_000).toFixed(3)}s`}${clip.look ? ` look=${typeof clip.look === 'string' ? clip.look : ((clip.look as { preset?: string }).preset ?? 'custom')}` : ''}${clip.effects ? ` effects=${JSON.stringify(clip.effects)}` : ''}`,
         );
       }
     }
@@ -298,7 +308,7 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
   }
 
   if (sub === 'add-clip') {
-    const selectedAssetId = flags.asset;
+    const selectedAssetId = flags.asset ?? args[1];
     const selectedAsset = selectedAssetId ? project.assets[selectedAssetId] : undefined;
     if (selectedAssetId && !selectedAsset) {
       logError(`Asset "${selectedAssetId}" not found in project.`);

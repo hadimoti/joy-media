@@ -4,7 +4,12 @@ import {
   KILO_GATEWAY_BASE_URL,
   DEFAULT_OPENROUTER_MODEL,
 } from '@joy-media/joy-agent-engine';
-import { resolveByokConfig, describeEffectiveConfig } from './provider.js';
+import {
+  resolveByokConfig,
+  describeEffectiveConfig,
+  retryProviderFetch,
+  validateProviderBaseUrl,
+} from './provider.js';
 import * as providerModule from './provider.js';
 import { runJoyAgent } from './joy-agent.js';
 import { createDefaultProject } from '../utils/project-loader.js';
@@ -37,6 +42,62 @@ afterEach(() => {
 });
 
 describe('effective BYOK provider configuration', () => {
+  it('allows only HTTPS or loopback HTTP custom provider URLs', () => {
+    for (const url of [
+      'http://127.0.0.1:1234/v1',
+      'http://localhost:1234/v1',
+      'http://[::1]:1234/v1',
+      'https://provider.example/v1',
+    ])
+      expect(() => validateProviderBaseUrl(url)).not.toThrow();
+    expect(() => validateProviderBaseUrl('http://provider.example/v1')).toThrow(
+      'INSECURE_PROVIDER_URL',
+    );
+  });
+  it('retries provider 429 responses after the advertised seconds delay', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(null, { status: 429, headers: { 'retry-after': '2' } }))
+        .mockResolvedValueOnce(new Response('ok', { status: 200 }));
+      const pending = retryProviderFetch(
+        'https://provider.example/v1/chat/completions',
+        {},
+        fetchImpl,
+      );
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(pending).resolves.toMatchObject({ status: 200 });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('honors HTTP-date Retry-After and gives up after three attempts', async () => {
+    vi.useFakeTimers();
+    try {
+      const retryAt = new Date(Date.now() + 1_000).toUTCString();
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(null, { status: 429, headers: { 'retry-after': retryAt } }),
+        )
+        .mockResolvedValueOnce(new Response(null, { status: 429, headers: { 'retry-after': '0' } }))
+        .mockResolvedValueOnce(new Response(null, { status: 429 }));
+      const pending = retryProviderFetch(
+        'https://provider.example/v1/chat/completions',
+        {},
+        fetchImpl,
+      );
+      const rejected = expect(pending).rejects.toThrow('JOY_AGENT_RATE_LIMITED');
+      await vi.advanceTimersByTimeAsync(1_000);
+      await rejected;
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it.each([
     { name: 'no provider key', env: {}, provider: 'openrouter', source: 'default' },
     {

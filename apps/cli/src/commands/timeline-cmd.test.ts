@@ -7,6 +7,65 @@ import { createDefaultProject } from '../utils/project-loader.js';
 import { resolveTextFont } from '../render/text-font.js';
 
 describe('timeline clip looks', () => {
+  it('accepts the asset id as the add-clip positional argument', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-timeline-positional-asset-'));
+    try {
+      const project = createDefaultProject('positional asset', { id: 'positional-asset-project' });
+      (project.assets as Record<string, unknown>)['asset-a'] = {
+        id: 'asset-a',
+        kind: 'video',
+        displayName: 'asset.mp4',
+        descriptor: { durationUs: 1_500_000 },
+      };
+      const path = join(directory, 'project.json');
+      writeFileSync(path, JSON.stringify({ format: 'joy-media-project', revision: 1, project }));
+      expect(await runCli(['timeline', 'add-clip', 'asset-a', '--project', path])).toBe(0);
+      const saved = JSON.parse(readFileSync(path, 'utf8')).project;
+      expect(saved.compositions.root.tracks[0].clips[0]).toMatchObject({
+        assetId: 'asset-a',
+        durationUs: 1_500_000,
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('lists source and timeline ranges plus looks in human and JSON output', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-timeline-list-'));
+    const originalLog = console.log;
+    try {
+      const project = createDefaultProject('timeline list', { id: 'timeline-list-cli' });
+      (project.compositions.root!.tracks[0]!.clips as unknown as Array<any>).push({
+        id: 'listed-clip',
+        kind: 'video',
+        assetId: 'asset-default',
+        startUs: 2_000_000,
+        durationUs: 3_000_000,
+        sourceInUs: 7_000_000,
+        look: { preset: 'crt' },
+      });
+      const path = join(directory, 'project.json');
+      writeFileSync(path, JSON.stringify({ format: 'joy-media-project', revision: 1, project }));
+      const logs: string[] = [];
+      console.log = (...values: unknown[]) => logs.push(values.map(String).join(' '));
+      expect(await runCli(['timeline', 'list', '--project', path, '--json'])).toBe(0);
+      const json = JSON.parse(logs.join(''));
+      expect(json.tracks[0].clips[0]).toMatchObject({
+        timelineStartUs: 2_000_000,
+        timelineEndUs: 5_000_000,
+        sourceInUs: 7_000_000,
+        sourceOutUs: 10_000_000,
+        look: { preset: 'crt' },
+      });
+      logs.length = 0;
+      expect(await runCli(['timeline', 'list', '--project', path])).toBe(0);
+      expect(logs.join('\n')).toContain('timeline=2.000–5.000s source=7.000–10.000s look=crt');
+    } finally {
+      console.log = originalLog;
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('adds and clears a schema-validated look and rejects out-of-range intensity', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-timeline-look-'));
     try {

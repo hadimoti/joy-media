@@ -1,6 +1,8 @@
 /* global process */
 import { spawnSync } from 'node:child_process';
-import { chmodSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 export interface ProtectedSecret {
   readonly scheme: 'dpapi-user' | 'keychain' | 'libsecret' | 'file-0600';
@@ -43,6 +45,7 @@ let secretStoreRuntime: { platform: NodeJS.Platform; runner: SecretStoreRunner }
   runner: defaultRunner,
 };
 let keyringAvailability: boolean | undefined;
+const NO_KEYRING_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** Injects platform and process execution for tests; production uses the current host. */
 export function configureSecretStoreRuntimeForTests(runtime: {
@@ -60,18 +63,61 @@ export function configureSecretStoreRuntimeForTests(runtime: {
 
 /** Migrates one legacy plaintext key unless this process already found the keyring unavailable. */
 export function migrateLegacySecret(secret: string, account: string): ProtectedSecret | undefined {
+  if (keyringAvailability === undefined && hasCachedNoKeyring()) keyringAvailability = false;
   if (keyringAvailability === false) return undefined;
   try {
     const protectedKey = protectSecret(secret, account);
     if (protectedKey.scheme === 'file-0600' || unprotectSecret(protectedKey) !== secret) {
       keyringAvailability = false;
+      cacheNoKeyring();
       return undefined;
     }
     keyringAvailability = true;
+    clearCachedNoKeyring();
     return protectedKey;
   } catch {
     keyringAvailability = false;
+    cacheNoKeyring();
     return undefined;
+  }
+}
+
+function noKeyringStatePath(): string {
+  return join(homedir(), '.joy-media', 'secret-store-state.json');
+}
+
+function hasCachedNoKeyring(): boolean {
+  try {
+    const state = JSON.parse(readFileSync(noKeyringStatePath(), 'utf8')) as {
+      noKeyringUntil?: unknown;
+    };
+    if (typeof state.noKeyringUntil === 'number' && state.noKeyringUntil > Date.now()) return true;
+    clearCachedNoKeyring();
+  } catch {
+    /* no cached state */
+  }
+  return false;
+}
+
+function cacheNoKeyring(): void {
+  try {
+    const directory = join(homedir(), '.joy-media');
+    mkdirSync(directory, { recursive: true });
+    const path = noKeyringStatePath();
+    writeFileSync(path, JSON.stringify({ noKeyringUntil: Date.now() + NO_KEYRING_TTL_MS }), {
+      mode: 0o600,
+    });
+    chmodPrivate(path);
+  } catch {
+    /* cache is best effort; migration must remain safe */
+  }
+}
+
+function clearCachedNoKeyring(): void {
+  try {
+    unlinkSync(noKeyringStatePath());
+  } catch {
+    /* no cached state */
   }
 }
 
