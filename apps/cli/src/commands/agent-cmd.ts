@@ -10,7 +10,7 @@ import {
 import { JoyAgentRunError } from '@joy-media/joy-agent-engine';
 import { describeEffectiveConfig } from '../agent/provider.js';
 import type { CliFlags } from '../cli.js';
-import { probeAgent, runJoyAgent } from '../agent/joy-agent.js';
+import { probeAgent, runJoyAgent, type RunAgentOutput } from '../agent/joy-agent.js';
 import { startAgentRepl } from '../agent/repl.js';
 import {
   deleteAiProvider,
@@ -75,7 +75,9 @@ Commands:
   model <get|set>              Show or change the model
 
   Options: --project <id|file> --apply --allow-frames --vision --provider <name> --model <id>
-         --api-key-env <VAR> --base-url <url> --debug --json`);
+         --api-key-env <VAR> --base-url <url> --debug --json
+
+On Linux/macOS, --api-key stores the key in a mode 0600 file; prefer --api-key-env <VAR>.`);
 }
 
 export async function handleAgentCommand(args: string[], flags: CliFlags): Promise<number> {
@@ -181,6 +183,9 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
       });
 
       logSuccess(`Provider "${name}" configured successfully!`);
+      if (flags.apiKey && process.platform !== 'win32') {
+        logWarn('API key stored in a mode 0600 file. Prefer --api-key-env <VAR> for key storage.');
+      }
       logStep(
         'Base URL',
         providerType === 'kilo' ? canonicalKiloBaseUrl(flags.baseUrl) : flags.baseUrl,
@@ -344,9 +349,17 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
       }
       logStep('Capability', c(res.capability, res.capability === 'tool-loop' ? 'green' : 'yellow'));
       if (res.capability === 'incompatible') {
-        const debug = flags.debug || process.env.JOY_DEBUG === '1';
+        logError('Probe failed: model is incompatible (no tool-calling capability).');
+        return 1;
+      }
+      if (res.failure) {
+        const detail = res.failure.detail;
+        const providerMessage = detail?.message || detail?.responseBodySnippet || res.failure.code;
+        const status = detail?.statusCode;
         logError(
-          `Probe failed: model is incompatible${debug && res.failure ? `\nDebug detail: ${JSON.stringify(res.failure.detail)}` : ''}`,
+          status === undefined
+            ? `Probe failed: ${providerMessage}`
+            : `Probe failed (HTTP ${status}): ${providerMessage}`,
         );
         return 1;
       }
@@ -486,6 +499,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
           `Staged ${output.staged.timelineOps.length + output.staged.documentOps.length} operation(s), NOT applied. Re-run with --apply to commit.`,
         );
       }
+      if (output.applied) printPlacementSummary(output.placementSummary);
 
       return 0;
     } catch (err) {
@@ -499,4 +513,33 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
     `Available: ${c('chat', 'cyan')}, ${c('run', 'cyan')}, ${c('probe', 'cyan')}, ${c('config', 'cyan')}`,
   );
   return 1;
+}
+
+function printPlacementSummary(summary: RunAgentOutput['placementSummary']): void {
+  if (!summary) return;
+  logInfo('Verified timeline placement:');
+  for (const clip of summary.clips) {
+    const source =
+      clip.sourceInUs === undefined || clip.sourceOutUs === undefined
+        ? ''
+        : `, source ${seconds(clip.sourceInUs)}–${seconds(clip.sourceOutUs)}`;
+    logStep(
+      clip.clipId,
+      `${clip.track} (${clip.trackId}), timeline ${seconds(clip.startUs)}–${seconds(clip.endUs)}${source}`,
+    );
+  }
+  for (const gap of summary.gaps) {
+    logWarn(
+      `Uncovered visual track ${gap.trackId}: ${seconds(gap.startUs)}–${seconds(gap.endUs)}.`,
+    );
+  }
+  for (const region of summary.blackRegions) {
+    logWarn(
+      `Black region (no visual track covers this span): ${seconds(region.startUs)}–${seconds(region.endUs)}.`,
+    );
+  }
+}
+
+function seconds(microseconds: number): string {
+  return `${(microseconds / 1_000_000).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}s`;
 }

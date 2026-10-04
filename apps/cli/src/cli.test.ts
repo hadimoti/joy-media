@@ -8,6 +8,7 @@ import { resolveByokConfig } from './agent/provider.js';
 import { formatAgentRunFailure } from './commands/agent-cmd.js';
 import { protectSecret } from './utils/secret-store.js';
 import { setAiProvider } from './utils/config.js';
+import { resolveTextFont } from './render/text-font.js';
 import * as joyAgentRuntime from './agent/joy-agent.js';
 import { JoyAgentRunError } from '@joy-media/joy-agent-engine';
 import {
@@ -109,6 +110,37 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     }
   });
 
+  it.each([
+    [401, 'authentication denied'],
+    [403, 'access forbidden'],
+    [404, 'model missing'],
+    [429, 'too many requests'],
+    [503, 'provider is unavailable'],
+  ])(
+    'prints HTTP %i and the provider message for probe failures without debug',
+    async (status, message) => {
+      const probeSpy = vi.spyOn(joyAgentRuntime, 'probeAgent').mockResolvedValue({
+        capability: 'untested',
+        provider: 'openrouter',
+        modelId: 'provider-model',
+        failure: {
+          code: 'JOY_AGENT_UNKNOWN',
+          retryable: false,
+          detail: { name: 'APICallError', statusCode: status, message, responseBodySnippet: '' },
+        },
+      });
+      const output = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      try {
+        expect(await runCli(['agent', 'probe'])).toBe(1);
+        expect(output.mock.calls.flat().join('\n')).toContain(`HTTP ${status}`);
+        expect(output.mock.calls.flat().join('\n')).toContain(message);
+      } finally {
+        probeSpy.mockRestore();
+        output.mockRestore();
+      }
+    },
+  );
+
   it('treats a plan-only probe as a warning and exits successfully', async () => {
     const probeSpy = vi.spyOn(joyAgentRuntime, 'probeAgent').mockResolvedValue({
       capability: 'plan-only',
@@ -166,6 +198,21 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       updatedProject,
       appliedCount: 1,
       errors: [],
+      placementSummary: {
+        clips: [
+          {
+            clipId: 'agent-clip-1',
+            trackId: 'track-v1',
+            track: 'Video 1',
+            startUs: 1_000_000,
+            endUs: 2_000_000,
+            sourceInUs: 3_000_000,
+            sourceOutUs: 4_000_000,
+          },
+        ],
+        gaps: [{ trackId: 'track-v1', startUs: 0, endUs: 1_000_000 }],
+        blackRegions: [{ startUs: 0, endUs: 1_000_000 }],
+      },
     });
     const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     try {
@@ -179,7 +226,11 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       };
       expect(saved.revision).toBe(8);
       expect(saved.project.title).toBe('Updated by agent');
-      expect(output.mock.calls.flat().join('\n')).toContain('Applied 1 operation(s) (--apply)');
+      const outputText = output.mock.calls.flat().join('\n');
+      expect(outputText).toContain('Applied 1 operation(s) (--apply)');
+      expect(outputText).toContain('Verified timeline placement');
+      expect(outputText).toContain('agent-clip-1');
+      expect(outputText).toContain('Black region');
     } finally {
       runSpy.mockRestore();
       output.mockRestore();
@@ -426,6 +477,44 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       expect(finalClips?.length).toBe(1);
     });
 
+    it.skipIf(!resolveTextFont())('adds a schema-valid, timed text clip via CLI', async () => {
+      const textProject = createDefaultProject('Text CLI Project', { id: 'text-cli-project' });
+      saveProject(textProject, { source: 'sqlite', path: testDbPath, revision: 0 });
+      expect(
+        await runCli([
+          'timeline',
+          'add-text',
+          '--project',
+          textProject.id,
+          '--text',
+          'CLI title',
+          '--start',
+          '1',
+          '--duration',
+          '2',
+          '--size',
+          '52',
+          '--color',
+          '#ffcc00',
+          '--sqlite-path',
+          testDbPath,
+        ]),
+      ).toBe(0);
+      const saved = loadProject(textProject.id, testDbPath).project;
+      const captionTrack = saved.compositions.root!.tracks.find(
+        (track) => track.kind === 'caption',
+      );
+      const captionClip = captionTrack?.clips[0];
+      expect(captionClip).toBeDefined();
+      if (!captionClip || captionClip.kind !== 'caption') throw new Error('caption clip missing');
+      expect(captionClip).toMatchObject({ startUs: 1_000_000, durationUs: 2_000_000 });
+      expect(
+        saved.captionDocuments[captionClip.captionDocumentId]?.words[
+          `${captionClip.captionDocumentId}-word`
+        ]?.text,
+      ).toBe('CLI title');
+    });
+
     it('fits root duration to content with a one-second minimum', async () => {
       const project = createDefaultProject('Fit extent project', { id: 'fit-extent-test' });
       (
@@ -650,6 +739,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
           ),
         ),
       );
+      const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
       try {
         // 1. Add provider; discovery is served by the local mock.
         const addCode = await runCli([
@@ -665,6 +755,13 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
           'byteplus-coding/dola-seed-2.0-pro',
         ]);
         expect(addCode).toBe(0);
+        const addOutput = output.mock.calls.flat().join('\n');
+        if (process.platform === 'win32') {
+          expect(addOutput).not.toContain('mode 0600');
+        } else {
+          expect(addOutput).toContain('stored in a mode 0600 file');
+          expect(addOutput).toContain('--api-key-env <VAR>');
+        }
 
         // 2. List providers
         const listCode = await runCli(['agent', 'provider', 'list']);
@@ -694,6 +791,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
         const removeCode = await runCli(['agent', 'provider', 'remove', 'kilo-test']);
         expect(removeCode).toBe(0);
       } finally {
+        output.mockRestore();
         vi.unstubAllGlobals();
         vi.stubEnv('USERPROFILE', isolatedHome);
         vi.stubEnv('HOME', isolatedHome);
