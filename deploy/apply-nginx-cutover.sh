@@ -1,130 +1,165 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# apply-nginx-cutover.sh: Apply lean boundary to joyst.ir in /etc/nginx/conf.d/joy-wg-bot.conf
-# Wave 6: Reduce joyst.ir edge surface to auth, account, entitlements, releases, billing, and agent.
-
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-CONF_FILE="/etc/nginx/conf.d/joy-wg-bot.conf"
-TARGET_CONF="$SCRIPT_DIR/joy-media-account-web.nginx.conf"
-TIMESTAMP="$(date +%Y%m%d%H%M%S)"
-BACKUP_FILE="${CONF_FILE}.pre-cutover-${TIMESTAMP}"
+# Patch only the joyst.ir TLS server's agent location. The shared file also
+# contains unrelated sites, so preserve every other server block byte-for-byte.
+CONF_FILE="${JOY_MEDIA_NGINX_CONF:-/etc/nginx/conf.d/joy-wg-bot.conf}"
+CA_FILE="${JOY_MEDIA_CA_FILE:-${NODE_EXTRA_CA_CERTS:-/etc/ssl/joyst/origincertificate.pem}}"
+EDGE_ADDR="${JOY_MEDIA_EDGE_ADDR:-}"
+BACKUP_DIR="${JOY_MEDIA_NGINX_BACKUP_DIR:-$(dirname -- "$CONF_FILE")}"
 
 die() {
   echo "apply-nginx-cutover: $*" >&2
   exit 1
 }
 
-[[ "${EUID:-$(id -u)}" -eq 0 ]] || die "must run as root on Sweden VPS"
+if [[ "${EUID:-$(id -u)}" -ne 0 && !( "${JOY_DEPLOY_TEST_MODE:-}" == 1 && "${JOY_DEPLOY_TEST_ROOT_OK:-}" == 1 ) ]]; then
+  die "must run as root on Sweden VPS (test override requires JOY_DEPLOY_TEST_MODE=1 and JOY_DEPLOY_TEST_ROOT_OK=1)"
+fi
 [[ -f "$CONF_FILE" ]] || die "Nginx config not found: $CONF_FILE"
-[[ -f "$TARGET_CONF" ]] || die "Target template not found: $TARGET_CONF"
+[[ -f "$CA_FILE" ]] || die "CA file missing: $CA_FILE (set JOY_MEDIA_CA_FILE)"
+[[ -n "$EDGE_ADDR" ]] || die "JOY_MEDIA_EDGE_ADDR is required (IPv4 or IPv6 literal)"
 
-echo "Backing up $CONF_FILE to $BACKUP_FILE"
+EDGE_ADDR="$(python3 - "$EDGE_ADDR" <<'PYEOF'
+import ipaddress, sys
+try:
+    print(ipaddress.ip_address(sys.argv[1].strip("[]")))
+except ValueError:
+    sys.exit(1)
+PYEOF
+)" || die "JOY_MEDIA_EDGE_ADDR must be an IP literal"
+EDGE_RESOLVE="$EDGE_ADDR"
+if [[ "$EDGE_ADDR" == *:* ]]; then EDGE_RESOLVE="[$EDGE_ADDR]"; fi
+
+mkdir -p -- "$BACKUP_DIR"
+TIMESTAMP="$(date +%Y%m%d%H%M%S)"
+BACKUP_FILE="$BACKUP_DIR/$(basename -- "$CONF_FILE").pre-agent-location-${TIMESTAMP}"
 cp -p "$CONF_FILE" "$BACKUP_FILE"
 
 restore() {
-  echo "Restoring backup from $BACKUP_FILE"
+  echo "Restoring backup from $BACKUP_FILE" >&2
   cp -p "$BACKUP_FILE" "$CONF_FILE"
-  systemctl reload nginx || true
+  nginx -t && systemctl reload nginx || true
 }
 
-python3 - "$CONF_FILE" "$TARGET_CONF" <<'PYEOF'
-import sys
+if ! python3 - "$CONF_FILE" <<'PYEOF'
+import re, sys
+path = sys.argv[1]
+with open(path, encoding="utf-8", newline="") as source:
+    text = source.read()
 
-conf_path = sys.argv[1]
-target_path = sys.argv[2]
+def matching_brace(source, opening):
+    depth, quote, escaped, comment = 0, None, False, False
+    for index in range(opening, len(source)):
+        char = source[index]
+        if comment:
+            if char == "\n": comment = False
+            continue
+        if quote:
+            if escaped: escaped = False
+            elif char == "\\": escaped = True
+            elif char == quote: quote = None
+            continue
+        if char == "#": comment = True
+        elif char in ("'", '"'): quote = char
+        elif char == "{": depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0: return index + 1
+    return -1
 
-with open(conf_path, "r", encoding="utf-8") as f:
-    content = f.read()
+def server_blocks(source):
+    found = []
+    for match in re.finditer(r"(?m)^\s*server\s*\{", source):
+        opening = source.find("{", match.start())
+        end = matching_brace(source, opening)
+        if end < 0: raise ValueError("Unclosed Nginx server block")
+        found.append((match.start(), end, source[match.start():end]))
+    return found
 
-with open(target_path, "r", encoding="utf-8") as f:
-    target_content = f.read()
+replacement = '''    location ~ ^/api/v1/agent(?:/|$) {
+        rewrite ^/api/(.*)$ /$1 break;
+        proxy_pass http://127.0.0.1:8790;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_cache off;
+        gzip off;
+        proxy_read_timeout 90s;
+        proxy_send_timeout 90s;
+    }'''
 
-marker = "server_name joyst.ir www.joyst.ir;"
-if marker not in content:
-    sys.stderr.write("Could not find joyst.ir in " + conf_path + "\n")
-    sys.exit(1)
-
-# Find joyst.ir server block in existing conf
-idx_marker = content.find(marker)
-idx_start = content.rfind("server {", 0, idx_marker)
-if idx_start == -1:
-    sys.stderr.write("Could not find server block start for joyst.ir\n")
-    sys.exit(1)
-
-depth = 0
-idx_end = -1
-for i in range(idx_start, len(content)):
-    if content[i] == '{':
-        depth += 1
-    elif content[i] == '}':
-        depth -= 1
-        if depth == 0:
-            idx_end = i + 1
+try:
+    before = server_blocks(text)
+    target_index = None
+    for index, (_, _, block) in enumerate(before):
+        names = re.findall(r"(?m)^\s*server_name\s+([^;]+);", block)
+        listens = re.findall(r"(?m)^\s*listen\s+([^;]+);", block)
+        is_joyst = any("joyst.ir" in name.split() for name in names)
+        is_tls = any(re.search(r"(?:^|\s)(?:\[[^]]+\]|[0-9.]+|\*):443(?:\s|$)|(?:^|\s)443(?:\s|$)", item) for item in listens)
+        if is_joyst and is_tls:
+            target_index = index
             break
+    if target_index is None: raise ValueError("Could not find joyst.ir TLS server block")
 
-if idx_end == -1:
-    sys.stderr.write("Could not find server block end for joyst.ir\n")
+    block_start, block_end, target = before[target_index]
+    agent = re.search(r"(?m)^\s*location\s+~\s+\^/api/v1/agent[^\n]*\{", target)
+    if agent:
+        opening = target.find("{", agent.start())
+        end = matching_brace(target, opening)
+        if end < 0: raise ValueError("Unclosed joyst.ir agent location")
+        changed_target = target[:agent.start()] + replacement + target[end:]
+    else:
+        generic = re.search(r"(?m)^\s*location\s+(?:\^~\s+)?/api/[^\n]*\{", target)
+        insertion = generic.start() if generic else target.rfind("}")
+        if insertion < 0: raise ValueError("Unclosed joyst.ir server block")
+        changed_target = target[:insertion] + replacement + "\n" + target[insertion:]
+
+    patched = text[:block_start] + changed_target + text[block_end:]
+    after = server_blocks(patched)
+    if len(before) != len(after): raise ValueError("Server block count changed")
+    for index, ((_, _, old), (_, _, new)) in enumerate(zip(before, after)):
+        if index != target_index and old != new:
+            raise ValueError("A non-joyst.ir server block changed")
+    protected = re.compile(r"(?m)^\s*(?:listen|server_name|ssl_certificate(?:_key)?)\s+[^;\n]*;")
+    if protected.findall(target) != protected.findall(after[target_index][2]):
+        raise ValueError("joyst.ir listen/server_name/ssl_certificate directives changed")
+    with open(path, "w", encoding="utf-8", newline="") as destination:
+        destination.write(patched)
+except (ValueError, StopIteration) as error:
+    sys.stderr.write(str(error) + "\n")
     sys.exit(1)
-
-# Extract joyst.ir server block from target template
-t_marker = "server_name joyst.ir www.joyst.ir;"
-t_idx_marker = target_content.find(t_marker)
-t_idx_start = target_content.rfind("server {", 0, t_idx_marker)
-depth = 0
-t_idx_end = -1
-for i in range(t_idx_start, len(target_content)):
-    if target_content[i] == '{':
-        depth += 1
-    elif target_content[i] == '}':
-        depth -= 1
-        if depth == 0:
-            t_idx_end = i + 1
-            break
-
-if t_idx_end == -1:
-    sys.stderr.write("Could not find target block in " + target_path + "\n")
-    sys.exit(1)
-
-replacement_block = target_content[t_idx_start:t_idx_end]
-
-new_content = content[:idx_start] + replacement_block + content[idx_end:]
-with open(conf_path, "w", encoding="utf-8") as f:
-    f.write(new_content)
-
-print("Updated /etc/nginx/conf.d/joy-wg-bot.conf with lean cutover boundary")
 PYEOF
-
-echo "Testing Nginx configuration syntax..."
-if ! nginx -t; then
-  echo "Nginx syntax test FAILED! Rolling back..." >&2
+then
   restore
-  exit 1
+  die "failed to patch only the joyst.ir agent location"
 fi
 
-echo "Nginx syntax OK. Reloading nginx service..."
-systemctl reload nginx
-
-echo "Running probe verifications against local edge..."
-sleep 1
+if ! nginx -t; then
+  restore
+  die "Nginx syntax test failed; prior config restored"
+fi
+if ! systemctl reload nginx; then
+  restore
+  die "Nginx reload failed; prior config restored"
+fi
 
 check_probe() {
-  local url="$1"
-  local expected="$2"
-  local code
-  code="$(curl -k -s -o /dev/null -w "%{http_code}" "$url" -H "Host: joyst.ir")"
-  if [[ "$code" != "$expected" ]]; then
-    echo "PROBE_FAIL $url expected $expected got $code" >&2
-    restore
-    exit 1
-  fi
-  echo "PROBE_OK $url -> $code"
+  local path="$1" expected="$2" code
+  code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+    --max-time 20 --cacert "$CA_FILE" --resolve "joyst.ir:443:$EDGE_RESOLVE" \
+    "https://joyst.ir$path")" || { restore; die "probe failed: $path"; }
+  [[ "$code" == "$expected" ]] || { restore; die "probe $path expected $expected, received $code"; }
+  echo "PROBE_OK $path -> $code"
 }
 
-check_probe "https://127.0.0.1/api/health" "200"
-check_probe "https://127.0.0.1/ready" "200"
-check_probe "https://127.0.0.1/api/v1/projects" "404"
-check_probe "https://127.0.0.1/api/v1/media" "404"
-check_probe "https://127.0.0.1/api/v1/jobs" "404"
-
-echo "Nginx lean cutover boundary applied and verified successfully!"
+check_probe "/api/health" "200"
+check_probe "/ready" "200"
+check_probe "/api/v1/projects" "404"
+check_probe "/api/v1/media" "404"
+check_probe "/api/v1/jobs" "404"
+echo "Nginx agent location applied and verified; backup: $BACKUP_FILE"

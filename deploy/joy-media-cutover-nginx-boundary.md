@@ -14,6 +14,23 @@ depend on whatever `apps/editor-web` (or a new, smaller `apps/account-web`) actu
 
 ## What changes
 
+Operational note for the gateway deployment scripts: `JOY_MEDIA_EDGE_ADDR` must be set to
+the IP literal on which the joyst.ir TLS server block listens (currently expected to be
+`82.115.8.224`). Smoke and curl probes resolve `joyst.ir` to that address while preserving
+joyst.ir for TLS SNI and HTTP Host. Set `JOY_MEDIA_CA_FILE` (or `NODE_EXTRA_CA_CERTS`) to the
+origin CA certificate when it is not at `/etc/ssl/joyst/origincertificate.pem`. All curl
+probes use that CA and a 20 second maximum. The automated Nginx script patches only the
+`/api/v1/agent/` location, backs up the active file and validates it with `nginx -t`; it does
+not install this entire illustrative server block.
+
+The old `--pre-cutover` check has been removed. `deploy-cutover.sh` creates and immediately
+activates its immutable release, with startup migrations and the systemd credential contract
+tied to that activation. There is no supported independent staging service/credential profile
+in this flow, so probing the current live release beforehand tested the wrong version. The
+control-plane script now validates the edge address, CA and active Nginx syntax before it
+builds or swaps account-web, then runs bounded edge checks after cutover and restores both the
+API pointer and Nginx file if step 6 fails.
+
 | Today (full editor)                                                                                                            | Target (reduced site)                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `root /opt/joy-media/web` serves the whole editor SPA (motion/effects/timeline/agent bundles, fonts, worklets, transitions, …) | `root` serves a much smaller static site: OTP login, installer/download page, account/subscription panel. The editor SPA build stays on disk for the desktop app's own use (or is retired entirely — a later, separate decision) but is no longer served at `joyst.ir`.                                                                                                                                                                                 |
@@ -25,7 +42,9 @@ depend on whatever `apps/editor-web` (or a new, smaller `apps/account-web`) actu
 ```nginx
 server {
     listen 80;
-    listen 443 ssl;
+    listen 82.115.8.224:443 ssl;
+    listen 46.249.103.142:443 ssl;
+    listen [::]:443 ssl;
     http2 on;
     server_name joyst.ir www.joyst.ir;
 
