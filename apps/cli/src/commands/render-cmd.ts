@@ -22,6 +22,11 @@ import {
 } from '../utils/logger.js';
 import { listProjects, loadProject, type createDefaultProject } from '../utils/project-loader.js';
 import { buildFfmpegRenderPlan } from '../render/ffmpeg-plan.js';
+import {
+  createFfmpegTextWorkspace,
+  removeFfmpegTextWorkspace,
+  writeFfmpegTextFiles,
+} from '../render/text-files.js';
 import { runFfmpegRender } from '../render/ffmpeg-run.js';
 
 export interface RenderCommandFlags {
@@ -493,36 +498,142 @@ async function runFfmpegHeadlessRender(
 ): Promise<RenderCommandResult> {
   const { project, preset, outDir, json, concurrency } = input;
   const startTime = Date.now();
-  const plan = buildFfmpegRenderPlan(project, preset, {
-    ...(input.width === undefined ? {} : { width: input.width }),
-    ...(input.height === undefined ? {} : { height: input.height }),
-    ...(input.fps === undefined ? {} : { fps: input.fps }),
-  });
-  const root = project.compositions[project.rootCompositionId];
-  const fps = Number(plan.fpsExpr.split('/')[0]) / Number(plan.fpsExpr.split('/')[1]);
-  const totalFrames = Math.ceil((plan.durationUs / 1_000_000) * fps);
-  const totalClips = root?.tracks.reduce((sum, track) => sum + track.clips.length, 0) ?? 0;
-  const outDirPath = join(outDir);
-  const spec = RENDER_PRESETS[preset];
-  const outputPath = join(outDirPath, `${project.id}.${spec.extension}`);
-  const manifestPath = `${outputPath}.manifest.json`;
-  mkdirSync(outDirPath, { recursive: true });
-  if (plan.skipped.length > 0) {
-    if (!json) {
-      for (const skipped of plan.skipped) logWarn(`Skipped ${skipped.clipId}: ${skipped.reason}`);
+  const textWorkspace = createFfmpegTextWorkspace();
+  try {
+    const plan = buildFfmpegRenderPlan(
+      project,
+      preset,
+      {
+        ...(input.width === undefined ? {} : { width: input.width }),
+        ...(input.height === undefined ? {} : { height: input.height }),
+        ...(input.fps === undefined ? {} : { fps: input.fps }),
+      },
+      textWorkspace,
+    );
+    writeFfmpegTextFiles(plan.textFiles);
+    const root = project.compositions[project.rootCompositionId];
+    const fps = Number(plan.fpsExpr.split('/')[0]) / Number(plan.fpsExpr.split('/')[1]);
+    const totalFrames = Math.ceil((plan.durationUs / 1_000_000) * fps);
+    const totalClips = root?.tracks.reduce((sum, track) => sum + track.clips.length, 0) ?? 0;
+    const outDirPath = join(outDir);
+    const spec = RENDER_PRESETS[preset];
+    const outputPath = join(outDirPath, `${project.id}.${spec.extension}`);
+    const manifestPath = `${outputPath}.manifest.json`;
+    mkdirSync(outDirPath, { recursive: true });
+    if (plan.skipped.length > 0) {
+      if (!json) {
+        for (const skipped of plan.skipped) logWarn(`Skipped ${skipped.clipId}: ${skipped.reason}`);
+      }
+      if (input.strict) {
+        emitJson(
+          {
+            type: 'error',
+            projectId: project.id,
+            message: `Strict render rejected ${plan.skipped.length} unsupported clip(s).`,
+            ts: new Date().toISOString(),
+          },
+          json,
+        );
+        return {
+          exitCode: 3,
+          projectId: project.id,
+          preset,
+          outDir,
+          artifactPath: '',
+          totalFrames,
+          totalClips,
+          durationMs: Date.now() - startTime,
+        };
+      }
     }
-    if (input.strict) {
+    if (!json) {
+      printBanner();
+      logInfo(`Headless FFmpeg render: ${c(project.title, 'bold')} (${project.id})`);
+      logStep('Preset', `${preset} (${spec.container}/${spec.videoCodec})`);
+      logStep('Resolution', `${plan.width}x${plan.height} @ ${plan.fpsExpr} fps`);
+      logStep('Output', outputPath);
+    }
+    emitJson(
+      {
+        type: 'start',
+        projectId: project.id,
+        title: project.title,
+        preset,
+        outDir,
+        totalFrames,
+        totalClips,
+        concurrency,
+        ts: new Date().toISOString(),
+      },
+      json,
+    );
+    let lastFrames = -1;
+    try {
+      const rendered = await runFfmpegRender({
+        plan,
+        outputPath,
+        preset,
+        onProgress: (outTimeUs) => {
+          const framesRendered = Math.min(totalFrames, Math.floor((outTimeUs / 1_000_000) * fps));
+          if (framesRendered === lastFrames) return;
+          lastFrames = framesRendered;
+          emitJson({ type: 'progress', framesRendered, totalFrames }, json);
+        },
+      });
+      const durationMs = Date.now() - startTime;
+      const manifest = {
+        schemaVersion: 1,
+        format: 'joy-media-render-manifest',
+        projectId: project.id,
+        projectTitle: project.title,
+        preset,
+        skipped: plan.skipped,
+        ffmpegVersion: rendered.ffmpegVersion,
+        width: plan.width,
+        height: plan.height,
+        fps: plan.fpsExpr,
+        durationUs: plan.durationUs,
+        sha256: rendered.sha256,
+        output: rendered.probe,
+        totalFrames,
+        totalClips,
+        durationMs,
+        renderedAt: new Date().toISOString(),
+      };
+      writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+      if (!json) logSuccess(`Rendered and verified ${outputPath}.`);
       emitJson(
         {
-          type: 'error',
+          type: 'complete',
           projectId: project.id,
-          message: `Strict render rejected ${plan.skipped.length} unsupported clip(s).`,
+          preset,
+          outDir,
+          artifactPath: manifestPath,
+          totalFrames,
+          durationMs,
           ts: new Date().toISOString(),
         },
         json,
       );
       return {
-        exitCode: 3,
+        exitCode: 0,
+        projectId: project.id,
+        preset,
+        outDir,
+        artifactPath: manifestPath,
+        totalFrames,
+        totalClips,
+        durationMs,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      emitJson(
+        { type: 'error', projectId: project.id, message, ts: new Date().toISOString() },
+        json,
+      );
+      if (!json) logError(message);
+      return {
+        exitCode: 1,
         projectId: project.id,
         preset,
         outDir,
@@ -532,100 +643,8 @@ async function runFfmpegHeadlessRender(
         durationMs: Date.now() - startTime,
       };
     }
-  }
-  if (!json) {
-    printBanner();
-    logInfo(`Headless FFmpeg render: ${c(project.title, 'bold')} (${project.id})`);
-    logStep('Preset', `${preset} (${spec.container}/${spec.videoCodec})`);
-    logStep('Resolution', `${plan.width}x${plan.height} @ ${plan.fpsExpr} fps`);
-    logStep('Output', outputPath);
-  }
-  emitJson(
-    {
-      type: 'start',
-      projectId: project.id,
-      title: project.title,
-      preset,
-      outDir,
-      totalFrames,
-      totalClips,
-      concurrency,
-      ts: new Date().toISOString(),
-    },
-    json,
-  );
-  let lastFrames = -1;
-  try {
-    const rendered = await runFfmpegRender({
-      plan,
-      outputPath,
-      preset,
-      onProgress: (outTimeUs) => {
-        const framesRendered = Math.min(totalFrames, Math.floor((outTimeUs / 1_000_000) * fps));
-        if (framesRendered === lastFrames) return;
-        lastFrames = framesRendered;
-        emitJson({ type: 'progress', framesRendered, totalFrames }, json);
-      },
-    });
-    const durationMs = Date.now() - startTime;
-    const manifest = {
-      schemaVersion: 1,
-      format: 'joy-media-render-manifest',
-      projectId: project.id,
-      projectTitle: project.title,
-      preset,
-      skipped: plan.skipped,
-      ffmpegVersion: rendered.ffmpegVersion,
-      width: plan.width,
-      height: plan.height,
-      fps: plan.fpsExpr,
-      durationUs: plan.durationUs,
-      sha256: rendered.sha256,
-      output: rendered.probe,
-      totalFrames,
-      totalClips,
-      durationMs,
-      renderedAt: new Date().toISOString(),
-    };
-    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
-    if (!json) logSuccess(`Rendered and verified ${outputPath}.`);
-    emitJson(
-      {
-        type: 'complete',
-        projectId: project.id,
-        preset,
-        outDir,
-        artifactPath: manifestPath,
-        totalFrames,
-        durationMs,
-        ts: new Date().toISOString(),
-      },
-      json,
-    );
-    return {
-      exitCode: 0,
-      projectId: project.id,
-      preset,
-      outDir,
-      artifactPath: manifestPath,
-      totalFrames,
-      totalClips,
-      durationMs,
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    emitJson({ type: 'error', projectId: project.id, message, ts: new Date().toISOString() }, json);
-    if (!json) logError(message);
-    return {
-      exitCode: 1,
-      projectId: project.id,
-      preset,
-      outDir,
-      artifactPath: '',
-      totalFrames,
-      totalClips,
-      durationMs: Date.now() - startTime,
-    };
+  } finally {
+    removeFfmpegTextWorkspace(textWorkspace);
   }
 }
 

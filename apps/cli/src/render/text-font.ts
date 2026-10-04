@@ -29,10 +29,31 @@ export function resolveTextFont(): string | undefined {
   return undefined;
 }
 
-export function escapeDrawtextValue(value: string): string {
-  const escaped = new Set(['\\', ':', "'", '%', ',', '[', ']', ';']);
-  return [...value]
-    .map((character) => (escaped.has(character) ? `\\${character}` : character))
-    .join('')
-    .replace(/\r?\n/g, '\\n');
+/** Escape a filesystem path through drawtext's option parser and the filtergraph parser. */
+export function escapeFilterPath(path: string): string {
+  if (
+    [...path].some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+  )
+    throw new Error('FFmpeg paths cannot contain control characters.');
+  const normalized = path.replace(/\\/g, '/');
+  const optionEscaped = [...normalized]
+    .map((character) =>
+      character === "'" || character === ':' || character === '\\' ? `\\${character}` : character,
+    )
+    .join('');
+  return [...optionEscaped]
+    .map((character) =>
+      character === '\\' ||
+      character === "'" ||
+      character === '[' ||
+      character === ']' ||
+      character === ',' ||
+      character === ';'
+        ? `\\${character}`
+        : character,
+    )
+    .join('');
 }

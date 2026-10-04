@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createDefaultProject } from '../utils/project-loader.js';
 import { buildFfmpegFramePlan, buildFfmpegRenderPlan } from './ffmpeg-plan.js';
 import { createTextClip } from './text-clip.js';
+import { resolveTextFont } from './text-font.js';
 
 describe('buildFfmpegRenderPlan', () => {
   it('builds a bounded still-image output from the render composition graph', () => {
@@ -93,24 +94,75 @@ describe('buildFfmpegRenderPlan', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('renders schema-valid caption text through drawtext with escaped content', () => {
-    const project = createDefaultProject('caption plan');
-    const text = createTextClip({
-      id: 'caption-1',
-      text: "Title: [hello], it's 100%",
-      startUs: 0,
-      durationUs: 1_000_000,
-    });
-    (project.captionDocuments as Record<string, unknown>)[text.document.id] = text.document;
-    (project.compositions.root!.tracks[0]!.clips as unknown[]).push(text.clip);
-    const plan = buildFfmpegRenderPlan(project, 'webm', { width: 640, height: 360, fps: 25 });
-    expect(plan.width).toBe(640);
-    expect(plan.height).toBe(360);
-    expect(plan.fpsExpr).toBe('25/1');
-    expect(plan.args.join(' ')).toContain('drawtext=fontfile=');
-    expect(plan.args.join(' ')).toContain("Title\\: \\[hello\\]\\, it\\'s 100\\%");
-    expect(plan.skipped).not.toContainEqual(expect.objectContaining({ clipId: 'text-caption-1' }));
+  it('keeps caption text out of the filtergraph and returns it as a text file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-ffmpeg-caption-plan-'));
+    try {
+      const project = createDefaultProject('caption plan');
+      const content = "it's 50%: a,b;[c] x'\\:textfile=/tmp/dt/secret.txt\\:y='5";
+      const text = createTextClip({
+        id: 'caption-1',
+        text: content,
+        startUs: 0,
+        durationUs: 1_000_000,
+      });
+      (project.captionDocuments as Record<string, unknown>)[text.document.id] = text.document;
+      (project.compositions.root!.tracks[0]!.clips as unknown[]).push(text.clip);
+      const plan = buildFfmpegRenderPlan(
+        project,
+        'webm',
+        { width: 640, height: 360, fps: 25 },
+        dir,
+      );
+      expect(plan.width).toBe(640);
+      expect(plan.height).toBe(360);
+      expect(plan.fpsExpr).toBe('25/1');
+      expect(plan.args.join(' ')).toContain('drawtext=fontfile=');
+      const graph = plan.args[plan.args.indexOf('-filter_complex') + 1]!;
+      expect(graph).not.toContain(content);
+      expect(graph).not.toContain('secret.txt');
+      expect(graph).toContain('expansion=none');
+      expect(plan.textFiles).toEqual([{ path: join(dir, 'joy-text-0.txt'), content }]);
+      expect(plan.skipped).not.toContainEqual(
+        expect.objectContaining({ clipId: 'text-caption-1' }),
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
+
+  it.skipIf(!resolveTextFont())(
+    'rejects non-finite caption positions and unvalidated colors',
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), 'joy-ffmpeg-caption-style-'));
+      try {
+        const project = createDefaultProject('invalid caption style');
+        const text = createTextClip({
+          id: 'invalid-style',
+          text: 'safe content',
+          startUs: 0,
+          durationUs: 1_000_000,
+        });
+        (project.captionDocuments as Record<string, unknown>)[text.document.id] = text.document;
+        const invalidClip = {
+          ...text.clip,
+          style: { ...text.clip.style, positionX: Number.NaN },
+        };
+        (project.compositions.root!.tracks[0]!.clips as unknown[]).push(invalidClip);
+        expect(() => buildFfmpegRenderPlan(project, 'mp4', {}, dir)).toThrow(RangeError);
+
+        const colorProject = createDefaultProject('invalid caption color');
+        (colorProject.captionDocuments as Record<string, unknown>)[text.document.id] =
+          text.document;
+        (colorProject.compositions.root!.tracks[0]!.clips as unknown[]).push({
+          ...text.clip,
+          style: { ...text.clip.style, textColor: 'red:drawtext=text=unsafe' },
+        });
+        expect(() => buildFfmpegRenderPlan(colorProject, 'mp4', {}, dir)).toThrow(RangeError);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('mixes embedded audio from unmuted video-track clips', () => {
     const dir = mkdtempSync(join(tmpdir(), 'joy-ffmpeg-video-audio-plan-'));

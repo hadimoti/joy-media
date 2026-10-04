@@ -7,6 +7,7 @@ import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { CliJoyAgentToolBridge } from './bridge.js';
 import { resolveFfmpegExecutable } from '../render/ffmpeg-run.js';
 import { resolveTextFont } from '../render/text-font.js';
+import { createTextClip } from '../render/text-clip.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version'], { shell: false }).status === 0;
 
@@ -80,6 +81,47 @@ function projectWithTracks(): JoyProjectV1 {
 }
 
 describe('CLI Joy Agent bridge timeline operations', () => {
+  it('counts spans covered only by captions as black in the placement summary', async () => {
+    const baseProject = projectWithTracks();
+    const root = baseProject.compositions.root!;
+    const text = createTextClip({
+      id: 'caption-only',
+      text: 'Text over black',
+      startUs: 4_000_000,
+      durationUs: 2_000_000,
+    });
+    const project: JoyProjectV1 = {
+      ...baseProject,
+      captionDocuments: { [text.document.id]: text.document },
+      compositions: {
+        ...baseProject.compositions,
+        root: {
+          ...root,
+          tracks: [
+            ...root.tracks,
+            {
+              id: 'captions',
+              kind: 'caption',
+              family: 'visual',
+              name: 'Captions',
+              order: 2,
+              enabled: true,
+              locked: false,
+              clips: [text.clip],
+            },
+          ],
+        },
+      },
+    };
+    const bridge = new CliJoyAgentToolBridge(project, 1);
+    await bridge.proposeTimelineOperations({ operations: [] });
+    const result = bridge.applyStaged();
+    expect(result.placementSummary.blackRegions).toContainEqual({
+      startUs: 3_000_000,
+      endUs: 6_000_000,
+    });
+  });
+
   it('uses the renderer ffmpeg resolver configured by JOY_FFMPEG', () => {
     const previous = process.env.JOY_FFMPEG;
     process.env.JOY_FFMPEG = 'custom-ffmpeg-test';
@@ -116,8 +158,16 @@ describe('CLI Joy Agent bridge timeline operations', () => {
         expect(generated.status).toBe(0);
         const baseProject = projectWithTracks();
         const root = baseProject.compositions.root!;
+        const text = createTextClip({
+          id: 'frame-caption',
+          text: "it's 50%: a,b;[c] x'\\:textfile=/tmp/dt/secret.txt\\:y='5",
+          startUs: 0,
+          durationUs: 1_000_000,
+          size: 24,
+        });
         const project: JoyProjectV1 = {
           ...baseProject,
+          captionDocuments: { [text.document.id]: text.document },
           compositions: {
             ...baseProject.compositions,
             root: {
@@ -125,23 +175,35 @@ describe('CLI Joy Agent bridge timeline operations', () => {
               width: 160,
               height: 90,
               durationUs: 1_000_000,
-              tracks: root.tracks.map((track, index) =>
-                index === 0
-                  ? {
-                      ...track,
-                      clips: [
-                        {
-                          id: 'frame-clip',
-                          kind: 'video',
-                          assetId: 'frame-asset',
-                          startUs: 0,
-                          durationUs: 1_000_000,
-                          sourceInUs: 0,
-                        },
-                      ],
-                    }
-                  : track,
-              ),
+              tracks: [
+                ...root.tracks.map((track, index) =>
+                  index === 0
+                    ? {
+                        ...track,
+                        clips: [
+                          {
+                            id: 'frame-clip',
+                            kind: 'video' as const,
+                            assetId: 'frame-asset',
+                            startUs: 0,
+                            durationUs: 1_000_000,
+                            sourceInUs: 0,
+                          },
+                        ],
+                      }
+                    : track,
+                ),
+                {
+                  id: 'caption-track',
+                  kind: 'caption',
+                  family: 'visual',
+                  name: 'Captions',
+                  order: 2,
+                  enabled: true,
+                  locked: false,
+                  clips: [text.clip],
+                },
+              ],
             },
           },
           assets: {
@@ -159,10 +221,12 @@ describe('CLI Joy Agent bridge timeline operations', () => {
           maxEdge: 80,
         });
         expect(result).toMatchObject({ mediaType: 'image/jpeg', width: 80, height: 45 });
-        if ('base64' in result)
+        if ('base64' in result) {
+          expect(Buffer.from(result.base64, 'base64').byteLength).toBeGreaterThan(800);
           expect(Buffer.from(result.base64, 'base64').subarray(0, 2)).toEqual(
             Buffer.from([0xff, 0xd8]),
           );
+        }
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

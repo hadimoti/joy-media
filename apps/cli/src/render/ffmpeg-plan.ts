@@ -1,7 +1,8 @@
 import { existsSync, statSync } from 'node:fs';
-import { isAbsolute } from 'node:path';
+import { isAbsolute, join } from 'node:path';
+import type { FfmpegTextFile } from './text-files.js';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
-import { escapeDrawtextValue, resolveTextFont } from './text-font.js';
+import { escapeFilterPath, resolveTextFont } from './text-font.js';
 
 export interface FfmpegRenderOverrides {
   readonly width?: number;
@@ -17,6 +18,7 @@ export interface FfmpegRenderPlan {
   readonly height: number;
   readonly fpsExpr: string;
   readonly durationUs: number;
+  readonly textFiles: readonly FfmpegTextFile[];
 }
 
 export interface FfmpegFramePlan {
@@ -24,6 +26,7 @@ export interface FfmpegFramePlan {
   readonly inputs: { readonly assetId: string; readonly path: string }[];
   readonly width: number;
   readonly height: number;
+  readonly textFiles: readonly FfmpegTextFile[];
 }
 
 /** Build a one-frame extraction from the same composited video graph as renders. */
@@ -31,8 +34,9 @@ export function buildFfmpegFramePlan(
   project: JoyProjectV1,
   atUs: number,
   maxEdge = 1024,
+  textFileDirectory?: string,
 ): FfmpegFramePlan {
-  const render = buildFfmpegRenderPlan(project, 'mp4');
+  const render = buildFfmpegRenderPlan(project, 'mp4', {}, textFileDirectory);
   if (!Number.isSafeInteger(atUs) || atUs < 0 || atUs >= render.durationUs)
     throw new RangeError('Frame time must be inside the project duration.');
   if (!Number.isSafeInteger(maxEdge) || maxEdge < 1 || maxEdge > 1024)
@@ -43,9 +47,9 @@ export function buildFfmpegFramePlan(
   const videoMap = render.args[mapIndex + 1];
   if (filterIndex < 0 || filterGraph === undefined || mapIndex < 0 || videoMap === undefined)
     throw new Error('Render plan is missing its video graph.');
-  const videoFilters = filterGraph
-    .split(';')
-    .filter((filter) => !/\[\d+:a\]|\[a_\d+\]|\[aout\]|\bamix=|\banullsrc/.test(filter));
+  const videoFilters = splitFilterGraph(filterGraph).filter(
+    (filter) => !/\[\d+:a\]|\[a_\d+\]|\[aout\]|\bamix=|\banullsrc/.test(filter),
+  );
   const scaleFilter = `scale=${maxEdge}:${maxEdge}:force_original_aspect_ratio=decrease`;
   const hasVideoFilterGraph = videoFilters.length > 0;
   if (hasVideoFilterGraph) videoFilters.push(`${videoMap}${scaleFilter}[frame]`);
@@ -66,13 +70,33 @@ export function buildFfmpegFramePlan(
     'mjpeg',
     'pipe:1',
   ];
-  return { args, inputs: render.inputs, ...frameDimensions };
+  return { args, inputs: render.inputs, textFiles: render.textFiles, ...frameDimensions };
+}
+
+function splitFilterGraph(graph: string): string[] {
+  const filters: string[] = [];
+  let current = '';
+  for (let index = 0; index < graph.length; index += 1) {
+    const character = graph[index]!;
+    if (character === '\\' && index + 1 < graph.length) {
+      current += character + graph[index + 1]!;
+      index += 1;
+    } else if (character === ';') {
+      filters.push(current);
+      current = '';
+    } else {
+      current += character;
+    }
+  }
+  if (current.length > 0) filters.push(current);
+  return filters;
 }
 
 export function buildFfmpegRenderPlan(
   project: JoyProjectV1,
   presetId: 'mp4' | 'webm' | 'prores',
   overrides: FfmpegRenderOverrides = {},
+  textFileDirectory?: string,
 ): FfmpegRenderPlan {
   const root = project.compositions[project.rootCompositionId];
   if (!root) throw new Error('Project has no root composition.');
@@ -151,6 +175,7 @@ export function buildFfmpegRenderPlan(
     )
     .sort((a, b) => a.order - b.order);
   const audioInputs: string[] = [];
+  const textFiles: FfmpegTextFile[] = [];
   for (const track of tracks) {
     for (const clip of [...track.clips].sort((a, b) => a.startUs - b.startUs)) {
       if (clip.kind === 'caption') {
@@ -176,14 +201,25 @@ export function buildFfmpegRenderPlan(
           }
           const start = clip.startUs + segment.startUs;
           const end = Math.min(clip.startUs + clip.durationUs, clip.startUs + segment.endUs);
-          const x = style?.positionX ? String(style.positionX) : '(w-text_w)/2';
-          const y = style?.positionY ? String(style.positionY) : '(h-text_h)/2';
-          const size = Math.max(1, Math.round((style?.fontSize ?? 64) * (style?.scale ?? 1)));
-          const color = safeColor(style?.textColor ?? '#ffffff');
+          if (!textFileDirectory) {
+            skipped.push({ clipId: clip.id, reason: 'text rendering needs a temporary workspace' });
+            continue;
+          }
+          const x = drawtextCoordinate(style?.positionX, '(w-text_w)/2');
+          const y = drawtextCoordinate(style?.positionY, '(h-text_h)/2');
+          const fontSize = style?.fontSize ?? 64;
+          const scale = style?.scale ?? 1;
+          if (!Number.isFinite(fontSize) || !Number.isFinite(scale) || fontSize <= 0 || scale <= 0)
+            throw new RangeError('Caption font size and scale must be finite positive numbers.');
+          const size = Math.max(1, Math.round(fontSize * scale));
+          if (!Number.isFinite(size)) throw new RangeError('Caption font size is invalid.');
+          const color = drawtextColor(style?.textColor ?? '#ffffff');
+          const textFilePath = join(textFileDirectory, `joy-text-${textFiles.length}.txt`);
+          textFiles.push({ path: textFilePath, content: text });
           const next = `txt_${overlayIndex++}`;
           const enabled = `between(t\\,${seconds(start)}\\,${seconds(end)})`;
           filters.push(
-            `[${videoLabel}]drawtext=fontfile='${escapeDrawtextValue(fontPath)}':text='${escapeDrawtextValue(text)}':x=${x}:y=${y}:fontsize=${size}:fontcolor=${color}:enable='${enabled}'[${next}]`,
+            `[${videoLabel}]drawtext=fontfile=${escapeFilterPath(fontPath)}:textfile=${escapeFilterPath(textFilePath)}:expansion=none:x=${x}:y=${y}:fontsize=${size}:fontcolor=${color}:enable='${enabled}'[${next}]`,
           );
           videoLabel = next;
         }
@@ -401,7 +437,19 @@ export function buildFfmpegRenderPlan(
       '-c:a',
       'pcm_s24le',
     );
-  return { args, inputs, skipped, width, height, fpsExpr, durationUs };
+  return { args, inputs, skipped, width, height, fpsExpr, durationUs, textFiles };
+}
+
+function drawtextCoordinate(value: number | undefined, fallback: string): string {
+  if (value === undefined) return fallback;
+  if (!Number.isFinite(value)) throw new RangeError('Caption position must be a finite number.');
+  return String(value);
+}
+
+function drawtextColor(value: string): string {
+  const match = /^#([0-9a-f]{6})(?:[0-9a-f]{2})?$/i.exec(value);
+  if (!match?.[1]) throw new RangeError('Caption color must be a 6- or 8-digit hexadecimal color.');
+  return `0x${match[1]}`;
 }
 
 function positiveOverride(
