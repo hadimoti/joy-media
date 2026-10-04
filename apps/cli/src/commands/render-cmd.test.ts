@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { Writable } from 'node:stream';
 import { runCli } from '../cli.js';
 import {
@@ -9,8 +10,11 @@ import {
   isRenderPresetId,
   RENDER_PRESETS,
   runHeadlessRender,
+  renderCompletionMessage,
 } from './render-cmd.js';
 import { createDefaultProject, saveProject } from '../utils/project-loader.js';
+
+const hasFfmpeg = spawnSync('ffmpeg', ['-version'], { shell: false }).status === 0;
 
 class StringWritable extends Writable {
   public chunks: Buffer[] = [];
@@ -43,6 +47,53 @@ describe('joy render (headless batch render command)', () => {
   const tempDir = mkdtempSync(join(tmpdir(), 'joy-render-cmd-test-'));
   const testDbPath = join(tempDir, 'render-test.sqlite3');
   const outDir = join(tempDir, 'renders');
+
+  it('withholds verified wording and reports skipped clip count', () => {
+    expect(renderCompletionMessage('out.mp4', 0)).toBe('Rendered and verified out.mp4.');
+    expect(renderCompletionMessage('out.mp4', 2)).toBe(
+      'Rendered out.mp4 with 2 skipped clip(s) (not fully verified).',
+    );
+  });
+
+  it.skipIf(!hasFfmpeg)(
+    'reports skipped clip count in the ffmpeg JSON completion event',
+    async () => {
+      const dir = join(outDir, 'skipped-summary');
+      const project = createDefaultProject('skipped clip summary', { width: 160, height: 120 });
+      (project.compositions.root!.tracks[0]!.clips as unknown[]).push({
+        id: 'unimported-summary-clip',
+        kind: 'video',
+        assetId: 'missing-asset',
+        startUs: 0,
+        durationUs: 1_000_000,
+        sourceInUs: 0,
+      });
+      const capture = new StringWritable();
+      const restore = redirectStdout(capture);
+      try {
+        const result = await runHeadlessRender({
+          project,
+          preset: 'mp4',
+          outDir: dir,
+          concurrency: 1,
+          json: true,
+          manifestOnly: false,
+        });
+        expect(result.exitCode).toBe(0);
+        const events = capture
+          .text()
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => JSON.parse(line));
+        expect(events.find((event) => event.type === 'complete')).toMatchObject({
+          skippedClipCount: 1,
+        });
+      } finally {
+        restore();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('exposes mp4/webm/prores render presets with deterministic specs', () => {
     expect(isRenderPresetId('mp4')).toBe(true);

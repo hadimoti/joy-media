@@ -43,6 +43,12 @@ export interface RenderCommandFlags {
   manifestOnly?: boolean | undefined;
 }
 
+export function renderCompletionMessage(outputPath: string, skippedCount: number): string {
+  return skippedCount === 0
+    ? `Rendered and verified ${outputPath}.`
+    : `Rendered ${outputPath} with ${skippedCount} skipped clip(s) (not fully verified).`;
+}
+
 export function printRenderHelp(): void {
   console.log(`Usage: joy-media render --project <id|file.json> --preset <mp4|webm|prores> --out <directory>
 Options: --width <px> --height <px> --fps <rate> --strict --manifest-only --concurrency <1-32> --json`);
@@ -117,6 +123,7 @@ export interface RenderCompleteEvent {
   readonly outDir: string;
   readonly artifactPath: string;
   readonly totalFrames: number;
+  readonly skippedClipCount?: number;
   readonly durationMs: number;
   readonly ts: string;
 }
@@ -601,7 +608,11 @@ async function runFfmpegHeadlessRender(
         renderedAt: new Date().toISOString(),
       };
       writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
-      if (!json) logSuccess(`Rendered and verified ${outputPath}.`);
+      if (!json) {
+        const message = renderCompletionMessage(outputPath, plan.skipped.length);
+        if (plan.skipped.length === 0) logSuccess(message);
+        else logWarn(message);
+      }
       emitJson(
         {
           type: 'complete',
@@ -610,6 +621,7 @@ async function runFfmpegHeadlessRender(
           outDir,
           artifactPath: manifestPath,
           totalFrames,
+          skippedClipCount: plan.skipped.length,
           durationMs,
           ts: new Date().toISOString(),
         },
