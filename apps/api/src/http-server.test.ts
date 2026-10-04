@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { IncomingMessage, Server } from 'node:http';
 import { once } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { newDb } from 'pg-mem';
 import {
   ControlPlaneError,
   LocalControlPlane,
@@ -21,7 +22,7 @@ import {
   type ApiAuthentication,
   type ApiReadinessOptions,
 } from './http-server.js';
-import { DisabledMediaAuth } from './media-auth.js';
+import { DisabledMediaAuth, MediaAuthService, type MediaAuthApi } from './media-auth.js';
 import type { JoyModelGateway } from './joy-model-gateway.js';
 import { createClientAddressResolver, type ClientAddressResolver } from './client-address.js';
 import { renderFixture, verifyExport } from '@joy-media/export-core';
@@ -55,6 +56,44 @@ afterEach(async () => {
 });
 
 describe('control-plane HTTP transport', () => {
+  it('returns identical 200 OTP response bodies for registered and unknown contacts', async () => {
+    const adapter = newDb().adapters.createPg();
+    const db = new adapter.Pool();
+    await db.query(`
+      CREATE TABLE media_allowed_users (id bigserial primary key, gmail text, telegram_id text, telegram_username text, added_by text not null, added_at timestamptz not null, enabled boolean not null default true);
+      CREATE TABLE media_otp_codes (id bigserial primary key, contact text not null, method text not null, code_hash text not null, created_at timestamptz not null, expires_at timestamptz not null, used boolean not null default false);
+      CREATE TABLE media_sessions (id bigserial primary key, token_hash text not null, contact text not null, method text not null, created_at timestamptz not null, expires_at timestamptz not null, revoked_at timestamptz);
+    `);
+    const mediaAuth = new MediaAuthService({ pool: db as never });
+    await mediaAuth.addAllowed({ gmail: 'known@example.invalid', addedBy: 'test' });
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const origin = await start(
+      { authenticate: () => undefined },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      mediaAuth,
+    );
+    const registered = await request(origin, 'POST', '/v1/auth/request-otp', {
+      contact: 'known@example.invalid',
+      method: 'gmail',
+    });
+    const unknown = await request(origin, 'POST', '/v1/auth/request-otp', {
+      contact: 'unknown@example.invalid',
+      method: 'gmail',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(registered).toEqual(unknown);
+    expect(registered.status).toBe(200);
+    expect(JSON.stringify(warnings.mock.calls)).not.toContain('known@example.invalid');
+    await db.end();
+  });
+
   it('returns route-specific 404 and 405 errors for unmatched Joy Agent paths', async () => {
     const gateway = {
       handleGetModels: vi.fn(),
@@ -1830,11 +1869,12 @@ async function start(
   clientAddressResolver?: ClientAddressResolver,
   readiness?: ApiReadinessOptions,
   joyModelGateway?: JoyModelGateway,
+  mediaAuth: MediaAuthApi = new DisabledMediaAuth(),
 ): Promise<string> {
   const server = createControlPlaneHttpServer({
     controlPlane,
     authentication,
-    mediaAuth: new DisabledMediaAuth(),
+    mediaAuth,
     ...(privateObjectStore === undefined ? {} : { privateObjectStore }),
     ...(mistral === undefined ? {} : { mistral }),
     ...(audioDenoise === undefined ? {} : { audioDenoise }),

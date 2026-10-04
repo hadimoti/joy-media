@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomInt } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomInt } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Pool } from 'pg';
 import type { Actor } from './control-plane.js';
@@ -13,6 +13,9 @@ const OTP_MAX_ACTIVE = 3;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
 const OTP_RATE_LIMIT_WINDOW_MS = 10 * 60_000; // 10 minutes
 const OTP_RATE_LIMIT_MAX = 3; // max 3 OTP requests per window per IP
+const OTP_ACCOUNT_RATE_LIMIT_MAX = 3;
+const OTP_ACCOUNT_RATE_LIMIT_MAX_BUCKETS = 10_000;
+const OTP_CONTACT_LOG_HMAC_KEY = randomBytes(32);
 
 const otpRateLimitWindow = new Map<string, number[]>();
 
@@ -66,6 +69,7 @@ export interface MediaAuthServiceOptions {
   readonly telegram?: MediaTelegramSenderLike;
   /** Shared trusted-proxy boundary for durable OTP abuse buckets. */
   readonly clientAddressResolver?: ClientAddressResolver;
+  readonly accountRateLimitMax?: number;
 }
 
 export interface MediaSessionProfile {
@@ -102,12 +106,15 @@ export class MediaAuthService implements MediaAuthApi {
   private readonly mailer: MediaMailerLike | undefined;
   private readonly telegram: MediaTelegramSenderLike | undefined;
   private readonly clientAddressResolver: ClientAddressResolver;
+  private readonly accountRateLimitMax: number;
+  private readonly accountOtpRateLimit = new Map<string, number[]>();
 
   constructor(options: MediaAuthServiceOptions) {
     this.pool = options.pool;
     this.mailer = options.mailer;
     this.telegram = options.telegram;
     this.clientAddressResolver = options.clientAddressResolver ?? createClientAddressResolver();
+    this.accountRateLimitMax = options.accountRateLimitMax ?? OTP_ACCOUNT_RATE_LIMIT_MAX;
   }
 
   async listAllowed(): Promise<readonly MediaAllowedUser[]> {
@@ -161,12 +168,19 @@ export class MediaAuthService implements MediaAuthApi {
     method: MediaAuthMethod,
     request?: IncomingMessage,
   ): Promise<{ message: string }> {
-    if (request !== undefined) {
-      checkOtpRateLimit(this.clientAddressResolver(request));
-    }
     const contact = normalizeContact(rawContact, method);
+    if (request !== undefined) checkOtpRateLimit(this.clientAddressResolver(request));
+    checkAccountOtpRateLimit(
+      this.accountOtpRateLimit,
+      `${method}:${contact}`,
+      this.accountRateLimitMax,
+    );
     const allowed = await this.findAllowed(contact, method);
     if (allowed !== undefined && allowed.enabled) {
+      if (!this.hasDeliveryConfigured(allowed, method)) {
+        warnOtpDeliveryFailure(contact);
+        return { message: OTP_REQUESTED_MESSAGE };
+      }
       const otpContact = canonicalOtpContact(contact, method, allowed);
       const active = await this.pool.query<{ count: string }>(
         `SELECT count(*)::text AS count FROM media_otp_codes
@@ -176,9 +190,9 @@ export class MediaAuthService implements MediaAuthApi {
       if (Number(active.rows[0]?.count ?? '0') < OTP_MAX_ACTIVE) {
         const code = randomInt(100_000, 1_000_000).toString();
         const now = new Date();
-        await this.pool.query(
+        const inserted = await this.pool.query<{ id: string | number }>(
           `INSERT INTO media_otp_codes (contact, method, code_hash, created_at, expires_at, used)
-           VALUES ($1, $2, $3, $4, $5, false)`,
+           VALUES ($1, $2, $3, $4, $5, false) RETURNING id`,
           [
             otpContact,
             method,
@@ -187,7 +201,17 @@ export class MediaAuthService implements MediaAuthApi {
             new Date(now.getTime() + OTP_TTL_MS),
           ],
         );
-        await this.deliver(allowed, method, code);
+        const otpId = inserted.rows[0]?.id;
+        if (otpId !== undefined) {
+          void this.deliver(allowed, method, code).catch(async () => {
+            try {
+              await this.pool.query('DELETE FROM media_otp_codes WHERE id = $1', [otpId]);
+            } catch {
+              // The generic response is independent of mail and cleanup failures.
+            }
+            warnOtpDeliveryFailure(contact);
+          });
+        }
       }
     }
     return { message: OTP_REQUESTED_MESSAGE };
@@ -325,14 +349,59 @@ export class MediaAuthService implements MediaAuthApi {
   ): Promise<void> {
     if (method === 'gmail' && allowed.gmail !== null && this.mailer !== undefined) {
       await this.mailer.sendOtp(allowed.gmail, code);
+    } else if (method === 'gmail' && allowed.gmail !== null) {
+      throw new Error('SMTP is not configured');
     } else if (
       method === 'telegram' &&
       allowed.telegramId !== null &&
       this.telegram !== undefined
     ) {
       await this.telegram.sendOtp(allowed.telegramId, code);
+    } else if (method === 'telegram' && allowed.telegramId !== null) {
+      throw new Error('Telegram delivery is not configured');
     }
   }
+
+  private hasDeliveryConfigured(allowed: MediaAllowedUser, method: MediaAuthMethod): boolean {
+    if (method === 'gmail') return allowed.gmail !== null && this.mailer !== undefined;
+    return allowed.telegramId !== null && this.telegram !== undefined;
+  }
+}
+
+function warnOtpDeliveryFailure(contact: string): void {
+  const contactHash = createHmac('sha256', OTP_CONTACT_LOG_HMAC_KEY)
+    .update(contact)
+    .digest('hex')
+    .slice(0, 12);
+  console.warn('JOY Media OTP delivery failed', { contactHash });
+}
+
+function checkAccountOtpRateLimit(
+  buckets: Map<string, number[]>,
+  key: string,
+  limit: number,
+): void {
+  const now = Date.now();
+  if (buckets.size >= OTP_ACCOUNT_RATE_LIMIT_MAX_BUCKETS) {
+    for (const [bucketKey, timestamps] of buckets) {
+      const recentTimestamps = timestamps.filter(
+        (timestamp) => now - timestamp < OTP_RATE_LIMIT_WINDOW_MS,
+      );
+      if (recentTimestamps.length === 0) buckets.delete(bucketKey);
+      else buckets.set(bucketKey, recentTimestamps);
+    }
+  }
+  const recent = (buckets.get(key) ?? []).filter(
+    (timestamp) => now - timestamp < OTP_RATE_LIMIT_WINDOW_MS,
+  );
+  if (recent.length >= limit)
+    throw new MediaAuthError('RATE_LIMITED', 'Too many login requests. Try again later.');
+  if (!buckets.has(key) && buckets.size >= OTP_ACCOUNT_RATE_LIMIT_MAX_BUCKETS) {
+    const oldestKey = buckets.keys().next().value;
+    if (oldestKey !== undefined) buckets.delete(oldestKey);
+  }
+  recent.push(now);
+  buckets.set(key, recent);
 }
 
 /** Used when JOY_MEDIA_DATABASE_URL is unset — /v1/auth stays disabled, same spirit as LocalControlPlane. */
