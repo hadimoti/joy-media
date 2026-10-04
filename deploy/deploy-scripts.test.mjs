@@ -339,6 +339,9 @@ describe(
           /auth\|devices\|account\|entitlements\|releases\|billing/,
         );
       }
+      const combinedApi = locations.find((location) => location.pattern.includes('auth|devices'));
+      assert.ok(combinedApi);
+      assert.doesNotMatch(combinedApi.pattern, /\|agent|agent\|/);
       assert.equal(selectNginxLocation(locations, '/api/v1/projects').body.trim(), 'return 404;');
       const once = updated;
       const second = runBash(applyScript, [], {
@@ -475,6 +478,34 @@ describe(
         selectNginxLocation(locations, '/api/v1/agent/models').body,
         /proxy_buffering off;/,
       );
+    });
+
+    it('strips agent from the exact live combined regex in first, last, and only positions', (t) => {
+      if (!hasPython)
+        return t.skip('python3 is unavailable; Nginx patch integration needs real Python');
+      const live =
+        'location ~ ^/api/v1/(?:auth|devices|account|entitlements|releases|billing|agent)(?:/|$)';
+      for (const replacement of [
+        'location ~ ^/api/v1/(?:agent|auth|devices|account|entitlements|releases|billing)(?:/|$)',
+        'location ~ ^/api/v1/(?:auth|devices|account|entitlements|releases|billing|agent)(?:/|$)',
+        'location ~ ^/api/v1/(?:agent)(?:/|$)',
+      ]) {
+        const sandbox = createSandbox(t);
+        writeFileSync(sandbox.conf, fixture.replace(live, replacement));
+        const result = runBash(applyScript, [], sandbox.env);
+        assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+        const joyst = findJoystTlsBlock(readFileSync(sandbox.conf, 'utf8'));
+        assert.ok(joyst);
+        const locations = parseLocations(joyst);
+        const selected = selectNginxLocation(locations, '/api/v1/agent/models');
+        assert.match(selected.body, /proxy_buffering off;/);
+        const combined = locations.find((location) => location.pattern.includes('auth|devices'));
+        if (replacement.includes('auth|devices')) {
+          assert.ok(combined);
+          assert.doesNotMatch(combined.pattern, /agent/);
+          assert.match(selectNginxLocation(locations, '/api/v1/auth/request-otp').pattern, /auth/);
+        }
+      }
     });
 
     it('restores account-web when step 5 fails', (t) => {

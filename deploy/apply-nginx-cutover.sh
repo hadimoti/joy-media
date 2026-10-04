@@ -101,23 +101,28 @@ def location_blocks(server):
         yield match.start(), end, match.group(1).strip(), server[match.start():end]
 
 def drop_agent_alternation(line):
-    match = re.search(r"\(\?:([^)]*)\)(\?:/\|\$)", line)
+    match = re.search(r"\(\?:([^)]*)\)\(\?:/\|\$\)", line)
     if not match: return line
     members = match.group(1).split("|")
     if "agent" not in members: return line
     remaining = [member for member in members if member != "agent"]
-    if not remaining: raise ValueError("Combined API regex contains only agent")
+    if not remaining: return None
     return line[:match.start(1)] + "|".join(remaining) + line[match.end(1):]
 
-def normalized_target(server):
-    blocks = list(location_blocks(server))
+def strip_agent_locations(server):
     result = server
-    for start, end, header, block in reversed(blocks):
-        if re.match(r"~\s+\^/api/v1/agent\(\?:/\|\$\)", header):
-            if end < len(server) and server[end] == "\n": end += 1
+    for start, end, header, block in reversed(list(location_blocks(result))):
+        dedicated = re.match(r"~\s+\^/api/v1/agent\(\?:/\|\$\)", header)
+        changed_header = drop_agent_alternation(header)
+        if dedicated or (changed_header is None and "agent" in header):
+            if end < len(result) and result[end] == "\n": end += 1
             result = result[:start] + result[end:]
-    result = re.sub(r"(?m)^([ \t]*location[ \t]+~[ \t]+\^/api/v1/[^\n]*)(?=\n)",
-                    lambda match: drop_agent_alternation(match.group(1)), result)
+        elif changed_header != header:
+            result = result[:start] + block.replace(header, changed_header, 1) + result[end:]
+    return result
+
+def normalized_target(server):
+    result = strip_agent_locations(server)
     return re.sub(r"\n[ \t]*\n+", "\n", result)
 
 try:
@@ -134,17 +139,7 @@ try:
     if target_index is None: raise ValueError("Could not find joyst.ir TLS server block")
 
     block_start, block_end, target = before[target_index]
-    changed_target = target
-    for start, end, header, block in reversed(list(location_blocks(changed_target))):
-        if re.match(r"~\s+\^/api/v1/agent\(\?:/\|\$\)", header):
-            if end < len(changed_target) and changed_target[end] == "\n": end += 1
-            changed_target = changed_target[:start] + changed_target[end:]
-
-    lines = changed_target.splitlines(keepends=True)
-    for index, line in enumerate(lines):
-        if re.match(r"\s*location\s+~\s+\^/api/v1/", line):
-            lines[index] = drop_agent_alternation(line)
-    changed_target = "".join(lines)
+    changed_target = strip_agent_locations(target)
 
     # Nginx selects the first matching regex in file order. Put the dedicated
     # agent rule before every regex location, including unrelated broad ones.
