@@ -1,14 +1,15 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   JoyModelGateway,
   JOY_AGENT_DEFAULT_MODELS,
+  effectiveJoyModelCatalog,
   OPENROUTER_SYSTEMD_CREDENTIAL_IDS,
   readOpenRouterApiKeyFromCredential,
 } from './joy-model-gateway.js';
-import { MemoryAgentUsageLedger } from './agent-usage-ledger.js';
+import { MemoryAgentUsageLedger, type AgentUsageLedger } from './agent-usage-ledger.js';
 import type { MediaAuthService } from './media-auth.js';
 import type { AccountService, Subscription } from './account-service.js';
 
@@ -66,6 +67,67 @@ function createMockRes(): {
 }
 
 describe('JoyModelGateway', () => {
+  beforeEach(() => {
+    vi.stubEnv(
+      'JOY_GATEWAY_PAID_MODEL_ALLOWLIST',
+      JOY_AGENT_DEFAULT_MODELS.map((model) => model.id).join(','),
+    );
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('defaults to only the free catalog model and default alias resolution', async () => {
+    vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', '');
+    const gateway = new JoyModelGateway({
+      mediaAuth: {} as MediaAuthService,
+      account: {} as AccountService,
+      ledger: new MemoryAgentUsageLedger(),
+      openRouterApiKey: 'test-key',
+    });
+    const { res, getBody } = createMockRes();
+    await gateway.handleGetModels(createMockReq({ method: 'GET' }), res);
+    expect(JSON.parse(getBody()).models).toEqual([
+      expect.objectContaining({ id: 'openrouter/free', isDefault: true }),
+    ]);
+    expect(effectiveJoyModelCatalog('')).toHaveLength(1);
+  });
+
+  it('refuses paid model IDs by default and redirects a legacy alias to the free default', async () => {
+    vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', '');
+    let sentModel: string | undefined;
+    const gateway = new JoyModelGateway({
+      mediaAuth: {
+        authenticate: async () => ({ id: 'free-default' }),
+      } as unknown as MediaAuthService,
+      account: {
+        getSubscription: async () => ({
+          ownerId: 'free-default',
+          plan: 'pro',
+          status: 'active',
+          updatedAt: 0,
+        }),
+      } as unknown as AccountService,
+      ledger: new MemoryAgentUsageLedger(),
+      openRouterApiKey: 'test-key',
+      fetchImpl: async (_url, init) => {
+        sentModel = (JSON.parse(String(init?.body)) as { model: string }).model;
+        return new Response(JSON.stringify({ choices: [], usage: {} }), { status: 200 });
+      },
+    });
+    const denied = createMockRes();
+    await gateway.handleChatCompletions(
+      createMockReq({ body: { model: 'anthropic/claude-sonnet-4.6', messages: [] } }),
+      denied.res,
+    );
+    expect(denied.getStatus()).toBe(400);
+    expect(denied.getBody()).toContain('MODEL_NOT_ALLOWED');
+    const aliased = createMockRes();
+    await gateway.handleChatCompletions(
+      createMockReq({ body: { model: 'minimax/minimax-m3', messages: [] } }),
+      aliased.res,
+    );
+    expect(aliased.getStatus()).toBe(200);
+    expect(sentModel).toBe('openrouter/free');
+  });
   it('serves the model catalog without authentication', async () => {
     const gateway = new JoyModelGateway({
       mediaAuth: { authenticate: async () => undefined } as unknown as MediaAuthService,
@@ -79,7 +141,7 @@ describe('JoyModelGateway', () => {
     await gateway.handleGetModels(req, res);
 
     expect(getStatus()).toBe(200);
-    expect(JSON.parse(getBody()).models).toHaveLength(JOY_AGENT_DEFAULT_MODELS.length);
+    expect(JSON.parse(getBody()).models).toHaveLength(JOY_AGENT_DEFAULT_MODELS.length + 1);
   });
 
   it('serves the models catalog after authentication', async () => {
@@ -94,20 +156,17 @@ describe('JoyModelGateway', () => {
     expect(getStatus()).toBe(200);
     expect(getStatus()).toBe(200);
     const data = JSON.parse(getBody());
-    expect(data.models).toHaveLength(JOY_AGENT_DEFAULT_MODELS.length);
-    expect(data.models[0]).toMatchObject({
-      id: 'bytedance-seed/seed-2.0-lite',
-      isDefault: true,
-      vision: true,
-    });
+    expect(data.models).toHaveLength(JOY_AGENT_DEFAULT_MODELS.length + 1);
+    expect(data.models[0]).toMatchObject({ id: 'openrouter/free', isDefault: true });
     expect(data.models.some((model: { id: string }) => model.id.includes('minimax'))).toBe(false);
     expect(data.models.some((model: { id: string }) => model.id.includes('claude-3.5'))).toBe(
       false,
     );
     expect(
       data.models.every(
-        (model: { inputUsdPerMillion: number; outputUsdPerMillion: number }) =>
-          model.inputUsdPerMillion > 0 && model.outputUsdPerMillion > 0,
+        (model: { id: string; inputUsdPerMillion: number; outputUsdPerMillion: number }) =>
+          model.id === 'openrouter/free' ||
+          (model.inputUsdPerMillion > 0 && model.outputUsdPerMillion > 0),
       ),
     ).toBe(true);
   });
@@ -608,6 +667,65 @@ describe('JoyModelGateway', () => {
     }
   });
 
+  it('reserves image input tokens before forwarding parallel Claude requests', async () => {
+    vi.stubEnv('JOY_GATEWAY_RATE_LIMIT_PER_MIN', '100');
+    vi.stubEnv('JOY_GATEWAY_DAILY_SPEND_CAP_USD', '0.05');
+    vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', 'anthropic/claude-sonnet-4.6');
+    let forwarded = 0;
+    const gateway = new JoyModelGateway({
+      mediaAuth: {
+        authenticate: async () => ({ id: 'image-budget-user' }),
+      } as unknown as MediaAuthService,
+      account: {
+        getSubscription: async () => ({
+          ownerId: 'image-budget-user',
+          plan: 'monthly',
+          status: 'active',
+          updatedAt: 0,
+        }),
+      } as unknown as AccountService,
+      ledger: new MemoryAgentUsageLedger(),
+      openRouterApiKey: 'test-key',
+      fetchImpl: async () => {
+        forwarded += 1;
+        return new Response(
+          JSON.stringify({
+            choices: [],
+            usage: { prompt_tokens: 4800, completion_tokens: 1, cost: 0.0145 },
+          }),
+          { status: 200 },
+        );
+      },
+    });
+    try {
+      const responses = Array.from({ length: 20 }, () => createMockRes());
+      const body = {
+        model: 'anthropic/claude-sonnet-4.6',
+        max_tokens: 1,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,ZmFrZQ==' } },
+              { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,ZmFrZQ==' } },
+              { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,ZmFrZQ==' } },
+            ],
+          },
+        ],
+      };
+      await Promise.all(
+        responses.map(({ res }) => gateway.handleChatCompletions(createMockReq({ body }), res)),
+      );
+      expect(forwarded).toBeLessThanOrEqual(2);
+      expect(forwarded).toBeGreaterThan(0);
+      expect(responses.filter((response) => response.getStatus() === 429)).toHaveLength(
+        20 - forwarded,
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('fails closed with 503 when a spend reservation cannot be written', async () => {
     const fetchImpl = vi.fn();
     const gateway = new JoyModelGateway({
@@ -638,6 +756,41 @@ describe('JoyModelGateway', () => {
     expect(response.getStatus()).toBe(503);
     expect(response.getBody()).toContain('SPEND_LEDGER_UNAVAILABLE');
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('returns 503 SPEND_LEDGER_BUSY for a Postgres advisory lock timeout', async () => {
+    const gateway = new JoyModelGateway({
+      mediaAuth: {
+        authenticate: async () => ({ id: 'busy-owner' }),
+      } as unknown as MediaAuthService,
+      account: {
+        getSubscription: async () => ({
+          ownerId: 'busy-owner',
+          plan: 'monthly',
+          status: 'active',
+          updatedAt: 0,
+        }),
+      } as unknown as AccountService,
+      ledger: {
+        reserveSpend: async () => {
+          throw new Error('SPEND_LEDGER_BUSY');
+        },
+        getSummary: async () => ({}),
+        getDailyBilledCostMicros: async () => 0n,
+        record: async () => 'record',
+        settleSpend: async () => 'record',
+        releaseSpend: async () => undefined,
+      } as unknown as AgentUsageLedger,
+      openRouterApiKey: 'test-key',
+      fetchImpl: vi.fn(),
+    });
+    const result = createMockRes();
+    await gateway.handleChatCompletions(
+      createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } }),
+      result.res,
+    );
+    expect(result.getStatus()).toBe(503);
+    expect(result.getBody()).toContain('SPEND_LEDGER_BUSY');
   });
 
   it('sends SSE keep-alive comments while the upstream stream is waiting', async () => {

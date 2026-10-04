@@ -54,6 +54,33 @@ export const JOY_AGENT_DEFAULT_MODELS: readonly JoyModelCatalogEntry[] = Object.
   },
 ]);
 
+export const JOY_AGENT_FREE_DEFAULT_MODEL: JoyModelCatalogEntry = Object.freeze({
+  id: 'openrouter/free',
+  displayName: 'Joy Free',
+  description: 'Free model selected by OpenRouter',
+  contextLength: 200000,
+  vision: false,
+  isDefault: true,
+  inputUsdPerMillion: 0,
+  outputUsdPerMillion: 0,
+});
+
+export function effectiveJoyModelCatalog(
+  allowlist = process.env.JOY_GATEWAY_PAID_MODEL_ALLOWLIST ?? '',
+): readonly JoyModelCatalogEntry[] {
+  const allowed = new Set(
+    allowlist
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean),
+  );
+  const paid = JOY_AGENT_DEFAULT_MODELS.filter((model) => allowed.has(model.id)).map((model) => ({
+    ...model,
+    isDefault: false,
+  }));
+  return [JOY_AGENT_FREE_DEFAULT_MODEL, ...paid];
+}
+
 export const LEGACY_MODEL_ALIASES: Readonly<Record<string, string>> = Object.freeze({
   'minimax/minimax-m3': 'bytedance-seed/seed-2.0-lite',
   'anthropic/claude-3.5-sonnet': 'anthropic/claude-sonnet-4.6',
@@ -113,11 +140,12 @@ export class JoyModelGateway {
   }
 
   async handleGetModels(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const catalog = effectiveJoyModelCatalog();
     res.writeHead(200, {
       'content-type': 'application/json',
       'cache-control': 'public, max-age=3600',
     });
-    res.end(JSON.stringify({ models: JOY_AGENT_DEFAULT_MODELS }));
+    res.end(JSON.stringify({ models: catalog }));
   }
 
   async handleGetUsage(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -241,8 +269,15 @@ export class JoyModelGateway {
     }
 
     const requestedModel = typeof parsedBody.model === 'string' ? parsedBody.model : '';
-    const modelId = LEGACY_MODEL_ALIASES[requestedModel] ?? requestedModel;
-    const allowed = JOY_AGENT_DEFAULT_MODELS.some((m) => m.id === modelId);
+    const catalog = effectiveJoyModelCatalog();
+    const aliasedModel = LEGACY_MODEL_ALIASES[requestedModel];
+    const modelId =
+      aliasedModel && catalog.some((model) => model.id === aliasedModel)
+        ? aliasedModel
+        : aliasedModel
+          ? JOY_AGENT_FREE_DEFAULT_MODEL.id
+          : requestedModel;
+    const allowed = catalog.some((m) => m.id === modelId);
     if (!allowed) {
       res.writeHead(400, { 'content-type': 'application/json' });
       res.end(
@@ -293,6 +328,18 @@ export class JoyModelGateway {
             error: {
               code: 'DAILY_SPEND_CAP_REACHED',
               message: 'Daily JOY Agent spend cap would be exceeded; retry after the daily reset.',
+            },
+          }),
+        );
+        return;
+      }
+      if (error instanceof Error && error.message === 'SPEND_LEDGER_BUSY') {
+        res.writeHead(503, { 'content-type': 'application/json', 'retry-after': '5' });
+        res.end(
+          JSON.stringify({
+            error: {
+              code: 'SPEND_LEDGER_BUSY',
+              message: 'Spend accounting is busy; retry shortly.',
             },
           }),
         );
@@ -710,6 +757,7 @@ function positiveEnvNumber(name: string, fallback: number): number {
 }
 
 function estimatePromptTokens(messages: unknown, tools?: unknown): number {
+  let imageCount = 0;
   const textParts = Array.isArray(messages)
     ? messages.flatMap((message) => {
         if (message === null || typeof message !== 'object') return [];
@@ -718,20 +766,27 @@ function estimatePromptTokens(messages: unknown, tools?: unknown): number {
         if (typeof item.content === 'string') parts.push(item.content);
         else if (Array.isArray(item.content))
           parts.push(
-            ...item.content.flatMap((part) =>
-              part !== null &&
-              typeof part === 'object' &&
-              typeof (part as { text?: unknown }).text === 'string'
+            ...item.content.flatMap((part) => {
+              if (
+                part !== null &&
+                typeof part === 'object' &&
+                ((part as { type?: unknown }).type === 'image' ||
+                  (part as { type?: unknown }).type === 'image_url')
+              )
+                imageCount += 1;
+              return part !== null &&
+                typeof part === 'object' &&
+                typeof (part as { text?: unknown }).text === 'string'
                 ? [(part as { text: string }).text]
-                : [],
-            ),
+                : [];
+            }),
           );
         parts.push(...toolCallsAsText(item.tool_calls));
         return parts;
       })
     : [];
   if (tools !== undefined) textParts.push(JSON.stringify(tools));
-  return estimateTextTokens(textParts.join(' '));
+  return estimateTextTokens(textParts.join(' ')) + imageCount * 1600;
 }
 
 function estimateCompletionTokens(choices: unknown): number {
@@ -776,7 +831,7 @@ function estimateTextTokens(text: string): number {
 }
 
 function estimateCostUsd(modelId: string, promptTokens: number, completionTokens: number): number {
-  const model = JOY_AGENT_DEFAULT_MODELS.find((entry) => entry.id === modelId);
+  const model = effectiveJoyModelCatalog().find((entry) => entry.id === modelId);
   if (!model) return 0;
   return (
     (promptTokens * model.inputUsdPerMillion + completionTokens * model.outputUsdPerMillion) /

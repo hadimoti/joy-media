@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 
+export const SPEND_RESERVATION_TTL_MS = 15 * 60 * 1000;
+const SPEND_RESERVATION_SWEEP_MS = 60 * 1000;
+
 export interface RecordAgentUsageInput {
   readonly ownerId: string;
   readonly modelId: string;
@@ -44,7 +47,22 @@ export interface AgentUsageLedger {
 }
 
 export class PostgresAgentUsageLedger implements AgentUsageLedger {
-  constructor(private readonly pool: Pool) {}
+  private readonly sweepTimer: ReturnType<typeof setInterval>;
+
+  constructor(private readonly pool: Pool) {
+    this.sweepTimer = setInterval(
+      () => void this.sweepExpiredReservations().catch(() => undefined),
+      SPEND_RESERVATION_SWEEP_MS,
+    );
+    this.sweepTimer.unref?.();
+    void this.sweepExpiredReservations().catch(() => undefined);
+  }
+
+  async sweepExpiredReservations(): Promise<void> {
+    await this.pool.query(
+      "DELETE FROM agent_usage_reservations WHERE created_at <= CURRENT_TIMESTAMP - INTERVAL '15 minutes'",
+    );
+  }
 
   async record(input: RecordAgentUsageInput): Promise<string> {
     const id = randomUUID();
@@ -81,6 +99,8 @@ export class PostgresAgentUsageLedger implements AgentUsageLedger {
     const id = randomUUID();
     try {
       await client.query('BEGIN');
+      await client.query("SET LOCAL lock_timeout = '5s'");
+      await client.query("SET LOCAL statement_timeout = '5s'");
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [
         ownerId,
         dayStart.toISOString().slice(0, 10),
@@ -88,7 +108,7 @@ export class PostgresAgentUsageLedger implements AgentUsageLedger {
       const totals = await client.query<{ spent: string; reserved: string }>(
         `SELECT
           (SELECT COALESCE(SUM(billed_cost_micros), 0)::text FROM agent_usage WHERE owner_id = $1 AND created_at >= $2) AS spent,
-          (SELECT COALESCE(SUM(amount_micros), 0)::text FROM agent_usage_reservations WHERE owner_id = $1 AND day_start = $2) AS reserved`,
+          (SELECT COALESCE(SUM(amount_micros), 0)::text FROM agent_usage_reservations WHERE owner_id = $1 AND day_start = $2 AND created_at > CURRENT_TIMESTAMP - INTERVAL '15 minutes') AS reserved`,
         [ownerId, dayStart],
       );
       const row = totals.rows[0];
@@ -108,6 +128,12 @@ export class PostgresAgentUsageLedger implements AgentUsageLedger {
       } catch {
         /* transaction already closed */
       }
+      const code =
+        error !== null && typeof error === 'object'
+          ? (error as { code?: unknown }).code
+          : undefined;
+      if (code === '55P03' || code === '57014')
+        throw new Error('SPEND_LEDGER_BUSY', { cause: error });
       throw error;
     } finally {
       client.release();
@@ -223,8 +249,25 @@ export class MemoryAgentUsageLedger implements AgentUsageLedger {
   private readonly records: (RecordAgentUsageInput & { id: string; createdAt: Date })[] = [];
   private readonly reservations = new Map<
     string,
-    { ownerId: string; dayStart: Date; amountMicros: bigint }
+    { ownerId: string; dayStart: Date; amountMicros: bigint; createdAtMs: number }
   >();
+
+  private readonly sweepTimer: ReturnType<typeof setInterval>;
+
+  constructor(private readonly now: () => number = Date.now) {
+    this.sweepTimer = setInterval(
+      () => this.sweepExpiredReservations(),
+      SPEND_RESERVATION_SWEEP_MS,
+    );
+    this.sweepTimer.unref?.();
+    this.sweepExpiredReservations();
+  }
+
+  sweepExpiredReservations(): void {
+    const expiry = this.now() - SPEND_RESERVATION_TTL_MS;
+    for (const [id, reservation] of this.reservations)
+      if (reservation.createdAtMs <= expiry) this.reservations.delete(id);
+  }
 
   async reserveSpend(
     ownerId: string,
@@ -232,6 +275,7 @@ export class MemoryAgentUsageLedger implements AgentUsageLedger {
     amountMicros: bigint,
     capMicros: bigint,
   ): Promise<string> {
+    this.sweepExpiredReservations();
     const spent = this.records
       .filter((record) => record.ownerId === ownerId && record.createdAt >= dayStart)
       .reduce((sum, record) => sum + record.billedCostMicros, 0n);
@@ -240,7 +284,7 @@ export class MemoryAgentUsageLedger implements AgentUsageLedger {
       .reduce((sum, item) => sum + item.amountMicros, 0n);
     if (spent + reserved + amountMicros > capMicros) throw new Error('DAILY_SPEND_CAP_REACHED');
     const id = randomUUID();
-    this.reservations.set(id, { ownerId, dayStart, amountMicros });
+    this.reservations.set(id, { ownerId, dayStart, amountMicros, createdAtMs: this.now() });
     return id;
   }
 
