@@ -226,6 +226,93 @@ describe('JoyModelGateway', () => {
     expect(summary.totalBilledCostMicros).toBe('2500');
   });
 
+  it('forwards only catalog-safe completion fields and caps output tokens', async () => {
+    let forwardedBody: Record<string, unknown> | undefined;
+    const gateway = new JoyModelGateway({
+      mediaAuth: { authenticate: async () => ({ id: 'u' }) } as unknown as MediaAuthService,
+      account: {
+        getSubscription: async () => ({
+          ownerId: 'u',
+          plan: 'monthly',
+          status: 'active',
+          updatedAt: 0,
+        }),
+      } as unknown as AccountService,
+      ledger: new MemoryAgentUsageLedger(),
+      openRouterApiKey: 'test-key',
+      fetchImpl: async (_url, init) => {
+        forwardedBody = JSON.parse(String(init?.body));
+        return new Response(JSON.stringify({ choices: [], usage: {} }), { status: 200 });
+      },
+    });
+    const allowedFields = {
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [{ type: 'function', function: { name: 'edit', parameters: {} } }],
+      tool_choice: 'auto',
+      temperature: 0.2,
+      top_p: 0.8,
+      max_tokens: 9000,
+      max_completion_tokens: 9001,
+      stream: false,
+      stream_options: { include_usage: true },
+      response_format: { type: 'json_object' },
+      stop: ['END'],
+      seed: 42,
+    };
+    await gateway.handleChatCompletions(
+      createMockReq({
+        body: {
+          model: 'bytedance-seed/seed-2.0-lite',
+          ...allowedFields,
+          models: ['not-in-catalog/model'],
+          provider: { order: ['untrusted-provider'] },
+          plugins: [{ id: 'web' }],
+          route: 'fallback',
+          transforms: ['middle-out'],
+          arbitrary: 'drop-me',
+        },
+      }),
+      createMockRes().res,
+    );
+    expect(forwardedBody).toMatchObject({
+      model: 'bytedance-seed/seed-2.0-lite',
+      ...allowedFields,
+      max_tokens: 8192,
+      max_completion_tokens: 8192,
+      usage: { include: true },
+    });
+    expect(forwardedBody).not.toHaveProperty('models');
+    expect(forwardedBody).not.toHaveProperty('provider');
+    expect(forwardedBody).not.toHaveProperty('plugins');
+    expect(forwardedBody).not.toHaveProperty('route');
+    expect(forwardedBody).not.toHaveProperty('transforms');
+    expect(forwardedBody).not.toHaveProperty('arbitrary');
+  });
+
+  it('records OpenRouter usage.cost for non-streaming responses', async () => {
+    const ledger = new MemoryAgentUsageLedger();
+    const gateway = new JoyModelGateway({
+      mediaAuth: { authenticate: async () => ({ id: 'u' }) } as unknown as MediaAuthService,
+      account: {
+        getSubscription: async () => ({
+          ownerId: 'u',
+          plan: 'monthly',
+          status: 'active',
+          updatedAt: 0,
+        }),
+      } as unknown as AccountService,
+      ledger,
+      openRouterApiKey: 'test-key',
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ choices: [], usage: { cost: 0.003 } }), { status: 200 }),
+    });
+    await gateway.handleChatCompletions(
+      createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } }),
+      createMockRes().res,
+    );
+    expect((await ledger.getSummary('u')).totalUpstreamCostMicros).toBe('3000');
+  });
+
   it('rewrites installed legacy model ids to their catalog replacements before forwarding', async () => {
     const mockAuth = {
       authenticate: async () => ({ id: 'user-pro' }),
@@ -413,9 +500,7 @@ describe('JoyModelGateway', () => {
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(encoder.encode('data: {"usage":{"prompt_t'));
-        controller.enqueue(
-          encoder.encode('okens":5,"completion_tokens":3,"total_cost":0.001}}\n\n'),
-        );
+        controller.enqueue(encoder.encode('okens":5,"completion_tokens":3,"cost":0.001}}\n\n'));
         controller.close();
       },
     });
@@ -436,7 +521,132 @@ describe('JoyModelGateway', () => {
     const summary = await ledger.getSummary('u');
     expect(summary.totalPromptTokens).toBe(5);
     expect(summary.totalCompletionTokens).toBe(3);
+    expect(summary.totalUpstreamCostMicros).toBe('1000');
     expect(response.getHeaders()['x-accel-buffering']).toBe('no');
+  });
+
+  it('ends an idle stream cleanly after recording usage already received', async () => {
+    vi.useFakeTimers();
+    try {
+      const ledger = new MemoryAgentUsageLedger();
+      const signalRef: { signal?: AbortSignal } = {};
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode('data: {"usage":{"prompt_tokens":2,"cost":0.004}}\n\n'),
+          );
+        },
+      });
+      const gateway = new JoyModelGateway({
+        mediaAuth: { authenticate: async () => ({ id: 'u' }) } as unknown as MediaAuthService,
+        account: {
+          getSubscription: async () => ({
+            ownerId: 'u',
+            plan: 'monthly',
+            status: 'active',
+            updatedAt: 0,
+          }),
+        } as unknown as AccountService,
+        ledger,
+        openRouterApiKey: 'test-key',
+        fetchImpl: async (_url, init) => {
+          signalRef.signal = init?.signal as AbortSignal;
+          return new Response(stream, { status: 200 });
+        },
+      });
+      const response = createMockRes();
+      const operation = gateway.handleChatCompletions(
+        createMockReq({
+          body: { model: 'bytedance-seed/seed-2.0-lite', stream: true, messages: [] },
+        }),
+        response.res,
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await operation;
+      expect(response.getStatus()).toBe(200);
+      expect(response.getBody()).toContain('prompt_tokens');
+      expect(signalRef.signal?.aborted).toBe(false);
+      expect((await ledger.getSummary('u')).totalPromptTokens).toBe(2);
+      expect((await ledger.getSummary('u')).totalUpstreamCostMicros).toBe('4000');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears the upstream header timeout after fetch resolves', async () => {
+    vi.useFakeTimers();
+    try {
+      let signal: AbortSignal | undefined;
+      const gateway = new JoyModelGateway({
+        mediaAuth: { authenticate: async () => ({ id: 'u' }) } as unknown as MediaAuthService,
+        account: {
+          getSubscription: async () => ({
+            ownerId: 'u',
+            plan: 'monthly',
+            status: 'active',
+            updatedAt: 0,
+          }),
+        } as unknown as AccountService,
+        ledger: new MemoryAgentUsageLedger(),
+        openRouterApiKey: 'test-key',
+        fetchImpl: async (_url, init) => {
+          signal = init?.signal as AbortSignal;
+          return new Response(JSON.stringify({ choices: [], usage: {} }), { status: 200 });
+        },
+      });
+      await gateway.handleChatCompletions(
+        createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } }),
+        createMockRes().res,
+      );
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(signal?.aborted).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('records a complete usage frame before ending a stream that errors', async () => {
+    const ledger = new MemoryAgentUsageLedger();
+    let sentChunk = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (!sentChunk) {
+          sentChunk = true;
+          controller.enqueue(
+            new TextEncoder().encode('data: {"usage":{"prompt_tokens":4,"cost":0.006}}'),
+          );
+          return;
+        }
+        controller.error(new Error('stream reset'));
+      },
+    });
+    const gateway = new JoyModelGateway({
+      mediaAuth: { authenticate: async () => ({ id: 'u' }) } as unknown as MediaAuthService,
+      account: {
+        getSubscription: async () => ({
+          ownerId: 'u',
+          plan: 'monthly',
+          status: 'active',
+          updatedAt: 0,
+        }),
+      } as unknown as AccountService,
+      ledger,
+      openRouterApiKey: 'test-key',
+      fetchImpl: async () => new Response(stream, { status: 200 }),
+    });
+    const response = createMockRes();
+    await expect(
+      gateway.handleChatCompletions(
+        createMockReq({
+          body: { model: 'bytedance-seed/seed-2.0-lite', stream: true, messages: [] },
+        }),
+        response.res,
+      ),
+    ).resolves.toBeUndefined();
+    expect(response.getStatus()).toBe(200);
+    expect((await ledger.getSummary('u')).totalPromptTokens).toBe(4);
+    expect((await ledger.getSummary('u')).totalUpstreamCostMicros).toBe('6000');
   });
 
   it('keeps missing streaming usage at zero and tolerates ledger write failures', async () => {

@@ -50,6 +50,24 @@ export const LEGACY_MODEL_ALIASES: Readonly<Record<string, string>> = Object.fre
 });
 
 export const DEFAULT_COMMISSION_RATE_BPS = 2500; // 25% gross margin
+export const JOY_MODEL_MAX_OUTPUT_TOKENS = 8192;
+const UPSTREAM_HEADER_TIMEOUT_MS = 120_000;
+const UPSTREAM_STREAM_IDLE_TIMEOUT_MS = 60_000;
+
+const FORWARDED_COMPLETION_FIELDS = [
+  'messages',
+  'tools',
+  'tool_choice',
+  'temperature',
+  'top_p',
+  'max_tokens',
+  'max_completion_tokens',
+  'stream',
+  'stream_options',
+  'response_format',
+  'stop',
+  'seed',
+] as const;
 
 export interface JoyModelGatewayOptions {
   readonly mediaAuth: MediaAuthApi;
@@ -188,6 +206,12 @@ export class JoyModelGateway {
     // Forward to OpenRouter
     const isStream = parsedBody.stream === true;
     let upstreamRes: Response;
+    const upstreamController = new AbortController();
+    let upstreamTimedOut = false;
+    const headerTimeout = setTimeout(() => {
+      upstreamTimedOut = true;
+      upstreamController.abort();
+    }, UPSTREAM_HEADER_TIMEOUT_MS);
     try {
       upstreamRes = await this.fetchImpl('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
@@ -197,16 +221,13 @@ export class JoyModelGateway {
           'http-referer': 'https://joyst.ir',
           'x-title': 'JOY Media Built-in Agent',
         },
-        body: JSON.stringify({
-          ...parsedBody,
-          model: modelId,
-          usage: { include: true },
-        }),
-        signal: AbortSignal.timeout(120_000),
+        body: JSON.stringify(buildUpstreamBody(parsedBody, modelId)),
+        signal: upstreamController.signal,
       });
     } catch (error) {
       const timedOut =
-        error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+        upstreamTimedOut ||
+        (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError'));
       res.writeHead(timedOut ? 504 : 502, { 'content-type': 'application/json' });
       res.end(
         JSON.stringify({
@@ -217,6 +238,8 @@ export class JoyModelGateway {
         }),
       );
       return;
+    } finally {
+      clearTimeout(headerTimeout);
     }
 
     if (!upstreamRes.ok) {
@@ -296,7 +319,8 @@ export class JoyModelGateway {
               usageReported = true;
               promptTokens = Number(data.usage.prompt_tokens ?? promptTokens);
               completionTokens = Number(data.usage.completion_tokens ?? completionTokens);
-              if (typeof data.usage.total_cost === 'number') rawCostUsd = data.usage.total_cost;
+              const reportedCost = data.usage.cost ?? data.usage.total_cost;
+              if (typeof reportedCost === 'number') rawCostUsd = reportedCost;
             }
           } catch {
             // Ignore non-JSON SSE frames.
@@ -306,7 +330,17 @@ export class JoyModelGateway {
 
       try {
         while (true) {
-          const { done, value } = await reader.read();
+          let readResult: ReadableStreamReadResult<Uint8Array>;
+          try {
+            readResult = await readStreamChunk(reader, UPSTREAM_STREAM_IDLE_TIMEOUT_MS);
+          } catch {
+            // The response has already started. End it cleanly and account for usage seen so far.
+            processLines(decoder.decode());
+            if (pending.length > 0) processLines('\n');
+            void reader.cancel().catch(() => {});
+            break;
+          }
+          const { done, value } = readResult;
           if (done) {
             processLines(decoder.decode());
             if (pending.length > 0) processLines('\n');
@@ -351,7 +385,7 @@ export class JoyModelGateway {
     const usage = (jsonResponse.usage ?? {}) as Record<string, unknown>;
     const promptTokens = Number(usage.prompt_tokens ?? 0);
     const completionTokens = Number(usage.completion_tokens ?? 0);
-    const rawCostUsd = Number(usage.total_cost ?? 0);
+    const rawCostUsd = Number(usage.cost ?? usage.total_cost ?? 0);
 
     const upstreamMicros = BigInt(Math.round(rawCostUsd * 1_000_000));
     const billedMicros = (upstreamMicros * BigInt(10000 + this.commissionRateBps)) / 10000n;
@@ -394,6 +428,48 @@ async function readRequestBody(req: IncomingMessage, maxBytes = 2 * 1024 * 1024)
     chunks.push(buf);
   }
   return Buffer.concat(chunks);
+}
+
+function buildUpstreamBody(
+  parsedBody: Record<string, unknown>,
+  modelId: string,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = { model: modelId };
+  for (const field of FORWARDED_COMPLETION_FIELDS) {
+    if (!Object.hasOwn(parsedBody, field)) continue;
+    const value = parsedBody[field];
+    if (field === 'max_tokens' || field === 'max_completion_tokens') {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        body[field] = Math.min(value, JOY_MODEL_MAX_OUTPUT_TOKENS);
+      }
+      continue;
+    }
+    body[field] = value;
+  }
+  // Request OpenRouter's usage metadata internally; clients cannot override this.
+  body.usage = { include: true };
+  return body;
+}
+
+async function readStreamChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs: number,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(
+            Object.assign(new Error('Upstream stream idle timeout'), { name: 'TimeoutError' }),
+          );
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
 }
 
 /** @deprecated Use OPENROUTER_SYSTEMD_CREDENTIAL_IDS. */
