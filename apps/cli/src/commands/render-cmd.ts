@@ -4,11 +4,8 @@
  *
  * `joy render --project <id|file.json> --preset <mp4|webm|prores> --out <dir>`
  *
- * Streams progress either as a deterministic progress bar (default, TTY) or as
- * newline-delimited JSON events (when `--json` is passed). The render itself
- * is a deterministic simulation that walks every clip of every track of the
- * root composition, accumulating frames and emitting progress + a final
- * per-render artifact manifest written to `<out>/<projectId>.<preset>.json`.
+ * By default, renders through FFmpeg and writes a verified media file plus a
+ * manifest. `--manifest-only` retains the deterministic benchmark simulation.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -24,6 +21,8 @@ import {
   printBanner,
 } from '../utils/logger.js';
 import { listProjects, loadProject, type createDefaultProject } from '../utils/project-loader.js';
+import { buildFfmpegRenderPlan } from '../render/ffmpeg-plan.js';
+import { runFfmpegRender } from '../render/ffmpeg-run.js';
 
 export interface RenderCommandFlags {
   project?: string | undefined;
@@ -32,11 +31,16 @@ export interface RenderCommandFlags {
   concurrency?: number | undefined;
   json?: boolean | undefined;
   sqlitePath?: string | undefined;
+  width?: number | undefined;
+  height?: number | undefined;
+  fps?: number | undefined;
+  strict?: boolean | undefined;
+  manifestOnly?: boolean | undefined;
 }
 
 export function printRenderHelp(): void {
   console.log(`Usage: joy-media render --project <id|file.json> --preset <mp4|webm|prores> --out <directory>
-Options: --concurrency <1-32> --json`);
+Options: --width <px> --height <px> --fps <rate> --strict --manifest-only --concurrency <1-32> --json`);
 }
 
 export interface RenderPresetSpec {
@@ -44,9 +48,6 @@ export interface RenderPresetSpec {
   readonly container: string;
   readonly videoCodec: string;
   readonly audioCodec: string;
-  readonly width: number;
-  readonly height: number;
-  readonly fps: number;
   readonly extension: string;
 }
 
@@ -56,9 +57,6 @@ export const RENDER_PRESETS: Readonly<Record<RenderPresetSpec['id'], RenderPrese
     container: 'mp4',
     videoCodec: 'h264',
     audioCodec: 'aac',
-    width: 1080,
-    height: 1920,
-    fps: 30,
     extension: 'mp4',
   },
   webm: {
@@ -66,9 +64,6 @@ export const RENDER_PRESETS: Readonly<Record<RenderPresetSpec['id'], RenderPrese
     container: 'webm',
     videoCodec: 'vp9',
     audioCodec: 'opus',
-    width: 1080,
-    height: 1920,
-    fps: 30,
     extension: 'webm',
   },
   prores: {
@@ -76,9 +71,6 @@ export const RENDER_PRESETS: Readonly<Record<RenderPresetSpec['id'], RenderPrese
     container: 'mov',
     videoCodec: 'prores-ks',
     audioCodec: 'pcm-s24le',
-    width: 1080,
-    height: 1920,
-    fps: 30,
     extension: 'mov',
   },
 };
@@ -131,8 +123,19 @@ export interface RenderErrorEvent {
   readonly ts: string;
 }
 
+export interface RenderProgressEvent {
+  readonly type: 'progress';
+  readonly framesRendered: number;
+  readonly totalFrames: number;
+}
+
 export type RenderEvent =
-  RenderStartEvent | RenderClipEvent | RenderTrackEvent | RenderCompleteEvent | RenderErrorEvent;
+  | RenderStartEvent
+  | RenderClipEvent
+  | RenderTrackEvent
+  | RenderCompleteEvent
+  | RenderErrorEvent
+  | RenderProgressEvent;
 
 export interface RenderCommandResult {
   readonly exitCode: number;
@@ -192,6 +195,11 @@ export async function handleRenderCommand(args: string[], flags: CliFlags): Prom
     outDir,
     concurrency,
     json,
+    width: flags.width,
+    height: flags.height,
+    fps: flags.fps,
+    strict: flags.strict,
+    manifestOnly: flags.manifestOnly,
   });
 
   return result.exitCode;
@@ -203,6 +211,11 @@ export interface RunHeadlessRenderInput {
   readonly outDir: string;
   readonly concurrency: number;
   readonly json: boolean;
+  readonly width?: number | undefined;
+  readonly height?: number | undefined;
+  readonly fps?: number | undefined;
+  readonly strict?: boolean | undefined;
+  readonly manifestOnly?: boolean | undefined;
 }
 
 export async function runHeadlessRender(
@@ -212,7 +225,10 @@ export async function runHeadlessRender(
   const presetSpec = RENDER_PRESETS[preset];
   const startedAt = Date.now();
 
+  if (!input.manifestOnly) return runFfmpegHeadlessRender(input);
+
   const root = project.compositions[project.rootCompositionId];
+  const projectFps = root ? root.frameRate.num / root.frameRate.den : 30;
   const allClips: Array<{
     trackId: string;
     trackName: string;
@@ -224,7 +240,7 @@ export async function runHeadlessRender(
     for (const track of root.tracks ?? []) {
       for (const clip of track.clips ?? []) {
         const durationUs = typeof clip.durationUs === 'number' ? clip.durationUs : 0;
-        const frames = Math.max(1, Math.round((durationUs / 1_000_000) * presetSpec.fps));
+        const frames = Math.max(1, Math.round((durationUs / 1_000_000) * projectFps));
         allClips.push({
           trackId: track.id,
           trackName: track.name ?? track.id,
@@ -470,6 +486,147 @@ export async function runHeadlessRender(
     totalClips,
     durationMs,
   };
+}
+
+async function runFfmpegHeadlessRender(
+  input: RunHeadlessRenderInput,
+): Promise<RenderCommandResult> {
+  const { project, preset, outDir, json, concurrency } = input;
+  const startTime = Date.now();
+  const plan = buildFfmpegRenderPlan(project, preset, {
+    ...(input.width === undefined ? {} : { width: input.width }),
+    ...(input.height === undefined ? {} : { height: input.height }),
+    ...(input.fps === undefined ? {} : { fps: input.fps }),
+  });
+  const root = project.compositions[project.rootCompositionId];
+  const fps = Number(plan.fpsExpr.split('/')[0]) / Number(plan.fpsExpr.split('/')[1]);
+  const totalFrames = Math.ceil((plan.durationUs / 1_000_000) * fps);
+  const totalClips = root?.tracks.reduce((sum, track) => sum + track.clips.length, 0) ?? 0;
+  const outDirPath = join(outDir);
+  const spec = RENDER_PRESETS[preset];
+  const outputPath = join(outDirPath, `${project.id}.${spec.extension}`);
+  const manifestPath = `${outputPath}.manifest.json`;
+  mkdirSync(outDirPath, { recursive: true });
+  if (plan.skipped.length > 0) {
+    if (!json) {
+      for (const skipped of plan.skipped) logWarn(`Skipped ${skipped.clipId}: ${skipped.reason}`);
+    }
+    if (input.strict) {
+      emitJson(
+        {
+          type: 'error',
+          projectId: project.id,
+          message: `Strict render rejected ${plan.skipped.length} unsupported clip(s).`,
+          ts: new Date().toISOString(),
+        },
+        json,
+      );
+      return {
+        exitCode: 3,
+        projectId: project.id,
+        preset,
+        outDir,
+        artifactPath: '',
+        totalFrames,
+        totalClips,
+        durationMs: Date.now() - startTime,
+      };
+    }
+  }
+  if (!json) {
+    printBanner();
+    logInfo(`Headless FFmpeg render: ${c(project.title, 'bold')} (${project.id})`);
+    logStep('Preset', `${preset} (${spec.container}/${spec.videoCodec})`);
+    logStep('Resolution', `${plan.width}x${plan.height} @ ${plan.fpsExpr} fps`);
+    logStep('Output', outputPath);
+  }
+  emitJson(
+    {
+      type: 'start',
+      projectId: project.id,
+      title: project.title,
+      preset,
+      outDir,
+      totalFrames,
+      totalClips,
+      concurrency,
+      ts: new Date().toISOString(),
+    },
+    json,
+  );
+  let lastFrames = -1;
+  try {
+    const rendered = await runFfmpegRender({
+      plan,
+      outputPath,
+      preset,
+      onProgress: (outTimeUs) => {
+        const framesRendered = Math.min(totalFrames, Math.floor((outTimeUs / 1_000_000) * fps));
+        if (framesRendered === lastFrames) return;
+        lastFrames = framesRendered;
+        emitJson({ type: 'progress', framesRendered, totalFrames }, json);
+      },
+    });
+    const durationMs = Date.now() - startTime;
+    const manifest = {
+      schemaVersion: 1,
+      format: 'joy-media-render-manifest',
+      projectId: project.id,
+      projectTitle: project.title,
+      preset,
+      skipped: plan.skipped,
+      ffmpegVersion: rendered.ffmpegVersion,
+      width: plan.width,
+      height: plan.height,
+      fps: plan.fpsExpr,
+      durationUs: plan.durationUs,
+      sha256: rendered.sha256,
+      output: rendered.probe,
+      totalFrames,
+      totalClips,
+      durationMs,
+      renderedAt: new Date().toISOString(),
+    };
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+    if (!json) logSuccess(`Rendered and verified ${outputPath}.`);
+    emitJson(
+      {
+        type: 'complete',
+        projectId: project.id,
+        preset,
+        outDir,
+        artifactPath: manifestPath,
+        totalFrames,
+        durationMs,
+        ts: new Date().toISOString(),
+      },
+      json,
+    );
+    return {
+      exitCode: 0,
+      projectId: project.id,
+      preset,
+      outDir,
+      artifactPath: manifestPath,
+      totalFrames,
+      totalClips,
+      durationMs,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    emitJson({ type: 'error', projectId: project.id, message, ts: new Date().toISOString() }, json);
+    if (!json) logError(message);
+    return {
+      exitCode: 1,
+      projectId: project.id,
+      preset,
+      outDir,
+      artifactPath: '',
+      totalFrames,
+      totalClips,
+      durationMs: Date.now() - startTime,
+    };
+  }
 }
 
 export function isRenderPresetId(value: string): value is RenderPresetSpec['id'] {

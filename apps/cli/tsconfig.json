@@ -11,6 +11,7 @@
     { "path": "../../packages/project-persistence" },
     { "path": "../../packages/commands" },
     { "path": "../../packages/agent-tools" },
-    { "path": "../../packages/motion-core" }
+    { "path": "../../packages/motion-core" },
+    { "path": "../../packages/export-core" }
   ]
 }

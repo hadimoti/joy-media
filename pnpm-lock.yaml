@@ -131,6 +131,9 @@ importers:
       '@joy-media/commands':
         specifier: workspace:*
         version: link:../../packages/commands
+      '@joy-media/export-core':
+        specifier: workspace:*
+        version: link:../../packages/export-core
       '@joy-media/joy-agent-engine':
         specifier: workspace:*
         version: link:../../packages/joy-agent-engine

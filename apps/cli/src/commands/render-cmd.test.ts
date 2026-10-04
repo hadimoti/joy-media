@@ -89,6 +89,7 @@ describe('joy render (headless batch render command)', () => {
       'mp4',
       '--out',
       outDir,
+      '--manifest-only',
       '--sqlite-path',
       testDbPath,
     ]);
@@ -130,6 +131,7 @@ describe('joy render (headless batch render command)', () => {
         outDir: join(outDir, 'json'),
         concurrency: 2,
         json: true,
+        manifestOnly: true,
       });
     } finally {
       restore();
@@ -185,6 +187,27 @@ describe('joy render (headless batch render command)', () => {
     expect(code).toBe(1);
   });
 
+  it('strict mode returns exit code 3 when the project contains unimported media', async () => {
+    const project = createDefaultProject('Strict render project');
+    (project.compositions.root!.tracks[0]!.clips as unknown[]).push({
+      id: 'unimported-clip',
+      kind: 'video',
+      assetId: 'missing-asset',
+      startUs: 0,
+      durationUs: 1_000_000,
+      sourceInUs: 0,
+    });
+    const result = await runHeadlessRender({
+      project,
+      preset: 'mp4',
+      outDir: join(outDir, 'strict'),
+      concurrency: 1,
+      json: true,
+      strict: true,
+    });
+    expect(result.exitCode).toBe(3);
+  });
+
   it('handleRenderCommand wires through runHeadlessRender with json mode', async () => {
     const project = createDefaultProject('Wired Render Project');
     saveProject(project, { source: 'sqlite', path: testDbPath, revision: 0 });
@@ -198,6 +221,7 @@ describe('joy render (headless batch render command)', () => {
         out: join(outDir, 'wired'),
         concurrency: 1,
         json: true,
+        manifestOnly: true,
         sqlitePath: testDbPath,
       } as unknown as Parameters<typeof handleRenderCommand>[1]);
       expect(code).toBe(0);
