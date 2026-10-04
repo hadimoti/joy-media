@@ -1,12 +1,13 @@
 /* global process */
 import { runCli, formatError, handleUnhandledError } from './cli.js';
 import { logError } from './utils/logger.js';
+import { exitWithCode } from './utils/exit.js';
 
 let exiting = false;
 
-async function exitWithCode(code: number, codeOverride?: NodeJS.Signals): Promise<void> {
+async function finishWithCode(code: number, codeOverride?: NodeJS.Signals): Promise<void> {
+  process.exitCode = code;
   if (exiting) {
-    process.exit(code);
     return;
   }
   exiting = true;
@@ -14,27 +15,7 @@ async function exitWithCode(code: number, codeOverride?: NodeJS.Signals): Promis
   if (code !== 0) {
     logError(`Process exiting with code ${code}${reason}.`);
   }
-  // Give async logs a chance to flush before exiting.
-  await new Promise<void>((resolve) => {
-    if (typeof process.stdout?.once === 'function') {
-      let settled = false;
-      const done = (): void => {
-        if (settled) return;
-        settled = true;
-        resolve();
-      };
-      try {
-        process.stdout.once('drain', done);
-        process.stdout.once('close', done);
-      } catch {
-        done();
-      }
-      setTimeout(done, 50).unref();
-    } else {
-      resolve();
-    }
-  });
-  process.exit(code);
+  await exitWithCode(code);
 }
 
 function installSignalHandlers(): void {
@@ -47,17 +28,17 @@ function installSignalHandlers(): void {
       return;
     }
     logError(`Received ${sig}. Shutting down gracefully.`);
-    void exitWithCode(130, sig);
+    void finishWithCode(130, sig);
   };
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
   process.on('uncaughtException', (err) => {
     handleUnhandledError(err, 'uncaughtException');
-    void exitWithCode(1);
+    void finishWithCode(1);
   });
   process.on('unhandledRejection', (reason) => {
     handleUnhandledError(reason, 'unhandledRejection');
-    void exitWithCode(1);
+    void finishWithCode(1);
   });
 }
 
@@ -76,10 +57,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   installSignalHandlers();
   try {
     const code = await runCli(argv);
-    await exitWithCode(code);
+    await finishWithCode(code);
   } catch (error) {
     logError(`Fatal CLI error: ${formatError(error)}`);
-    await exitWithCode(1);
+    await finishWithCode(1);
   }
 }
 
