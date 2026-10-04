@@ -1,8 +1,24 @@
 import { describe, expect, it } from 'vitest';
+import type { CaptionClipV1, TrackV1 } from '@joy-media/project-schema';
 import { createDefaultProject } from '../utils/project-loader.js';
 import { createTextClip } from '../render/text-clip.js';
 import { missingOperationCoverage, verifyPlanChecklist, verifyRequestIntent } from './joy-agent.js';
 import { truthfulAgentSummary } from './joy-agent.js';
+
+function addCaptionTrack(project: ReturnType<typeof createDefaultProject>, clips: CaptionClipV1[]) {
+  const root = project.compositions.root!;
+  const track: TrackV1 = {
+    id: `captions-${root.tracks.length}`,
+    kind: 'caption',
+    family: 'visual',
+    name: 'Captions',
+    order: root.tracks.length,
+    enabled: true,
+    locked: false,
+    clips,
+  };
+  (root.tracks as unknown as TrackV1[]).push(track);
+}
 
 describe('truthfulAgentSummary', () => {
   it('verifies trim, centered text and look outcomes against the final project', () => {
@@ -119,6 +135,15 @@ describe('truthfulAgentSummary', () => {
         crop: { left: 0, top: 0, right: 0, bottom: 0 },
       },
     };
+    const captionTitle = createTextClip({
+      id: 'caption-title',
+      text: 'Title',
+      startUs: 0,
+      durationUs: 2_000_000,
+    });
+    (project.captionDocuments as Record<string, any>)[captionTitle.document.id] =
+      captionTitle.document;
+    addCaptionTrack(project, [captionTitle.clip]);
     const request =
       'Center the title, start a clip at 0, trim it from 7 s to 17 s, make it black and white, and make the output 10 seconds long';
     expect(verifyRequestIntent(project, request)).toMatchObject({
@@ -135,6 +160,47 @@ describe('truthfulAgentSummary', () => {
     (empty.compositions.root as unknown as { durationUs: number }).durationUs = 0;
     const failed = verifyRequestIntent(empty, request);
     expect(failed.unmet).toHaveLength(5);
+  });
+
+  it('verifies centered caption clips from renderer layout instead of visualObjects', () => {
+    const project = createDefaultProject('caption intent', { id: 'caption-intent-project' });
+    const title = createTextClip({ id: 'title', text: 'Hello', startUs: 0, durationUs: 2_000_000 });
+    (project.captionDocuments as Record<string, any>)[title.document.id] = title.document;
+    addCaptionTrack(project, [title.clip]);
+
+    expect(verifyRequestIntent(project, 'add a centred title "Hello"')).toMatchObject({
+      verified: ['Request: centered text'],
+      unmet: [],
+    });
+    expect(verifyRequestIntent(project, 'put the title in the middle')).toEqual({
+      verified: [],
+      unmet: ['request asked for centered text'],
+    });
+
+    const offCenterProject = createDefaultProject('off-center caption', {
+      id: 'off-center-project',
+    });
+    const offCenter = createTextClip({
+      id: 'off-center',
+      text: 'Hello',
+      startUs: 0,
+      durationUs: 2_000_000,
+      x: 0.2,
+    });
+    (offCenterProject.captionDocuments as Record<string, any>)[offCenter.document.id] =
+      offCenter.document;
+    addCaptionTrack(offCenterProject, [offCenter.clip]);
+    const failed = verifyRequestIntent(offCenterProject, 'add a centred title "Hello"');
+    expect(failed.verified).toEqual([]);
+    expect(failed.unmet).toEqual(['request asked for centered text']);
+  });
+
+  it('does not interpret arbitrary timing language as a trim request', () => {
+    const project = createDefaultProject('timing intent', { id: 'timing-intent-project' });
+    expect(verifyRequestIntent(project, 'title Hello from 2 to 5 seconds')).toEqual({
+      verified: [],
+      unmet: [],
+    });
   });
 
   it('maps applied operations by id when an earlier proposal failed', () => {

@@ -8,6 +8,11 @@ import {
   KILO_MODEL_PRESETS,
 } from '@joy-media/joy-agent-engine';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
+import {
+  ffmpegCaptionFontSize,
+  ffmpegCaptionY,
+  layoutFfmpegCaption,
+} from '../render/caption-layout.js';
 import { c, logInfo, logStep, logSuccess, logWarn } from '../utils/logger.js';
 import {
   CliJoyAgentToolBridge,
@@ -300,6 +305,7 @@ export function missingOperationCoverage(
 
 interface RequestIntent {
   centerText: boolean;
+  verticalCenterText?: boolean;
   startAtZero: boolean;
   trimRange?: readonly [number, number];
   look?: 'crt' | 'bw' | 'warm' | 'cool';
@@ -319,7 +325,11 @@ function parseRequestIntent(request: string): RequestIntent {
     /(?:from\s+)?(\d+(?:\.\d+)?)\s*(?:s|sec(?:onds?)?)?\s*(?:to|[-–])\s*(\d+(?:\.\d+)?)\s*(?:s|sec(?:onds?)?)?/i.exec(
       normalized,
     );
-  if (range?.[1] && range[2])
+  if (
+    range?.[1] &&
+    range[2] &&
+    /\b(trim|cut|keep|source)\b|keep\s+only|برش|نگه\s*دار|منبع/i.test(normalized)
+  )
     intent.trimRange = [
       Math.round(Number(range[1]) * 1_000_000),
       Math.round(Number(range[2]) * 1_000_000),
@@ -331,6 +341,7 @@ function parseRequestIntent(request: string): RequestIntent {
   else if (/\bcool\b|سرد/i.test(normalized)) intent.look = 'cool';
   const duration = /(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\s+long/i.exec(normalized);
   if (duration?.[1]) intent.durationUs = Math.round(Number(duration[1]) * 1_000_000);
+  intent.verticalCenterText = /\b(middle|vertically)\b/i.test(normalized);
   return intent;
 }
 
@@ -344,12 +355,44 @@ export function verifyRequestIntent(
   const verified: string[] = [];
   const unmet: string[] = [];
   if (intent.centerText) {
-    const centered = Object.values(project.visualObjects).some(
+    const root = project.compositions[project.rootCompositionId];
+    const centeredVisualObject = Object.values(project.visualObjects).some(
       (object) =>
         object.kind === 'text' &&
         Math.abs(object.transform.x) < 0.001 &&
-        Math.abs(object.transform.y) < 0.001,
+        (!intent.verticalCenterText || Math.abs(object.transform.y) < 0.001),
     );
+    const centeredCaption =
+      root?.tracks.some(
+        (track) =>
+          track.kind === 'caption' &&
+          track.enabled &&
+          track.clips.some((clip) => {
+            if (clip.kind !== 'caption') return false;
+            const document = project.captionDocuments[clip.captionDocumentId];
+            if (!document) return false;
+            return document.segments.some((segment) =>
+              layoutFfmpegCaption({
+                clipId: clip.id,
+                document,
+                segment,
+                style: clip.style,
+                width: root.width,
+                height: root.height,
+              }).some((node) => {
+                const horizontalCenter =
+                  node.align === 'center' &&
+                  Math.abs(node.transform.translateX - root.width / 2) <= 2;
+                if (!horizontalCenter) return false;
+                if (!intent.verticalCenterText) return true;
+                const top = ffmpegCaptionY(node, root.height);
+                const centerY = top + ffmpegCaptionFontSize(node) / 2;
+                return Math.abs(centerY - root.height / 2) <= 4;
+              }),
+            );
+          }),
+      ) ?? false;
+    const centered = centeredVisualObject || centeredCaption;
     (centered ? verified : unmet).push(
       centered ? 'Request: centered text' : 'request asked for centered text',
     );
