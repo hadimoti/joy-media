@@ -13,6 +13,7 @@ export interface ReplOptions {
   source: 'sqlite' | 'file';
   path: string;
   providerOptions?: ResolveProviderOptions;
+  allowFrames?: boolean;
 }
 
 export interface DualBrainStatus {
@@ -164,6 +165,7 @@ export async function startAgentRepl(options: ReplOptions): Promise<void> {
           prompt: trimmed,
           apply: false,
           providerOptions: options.providerOptions,
+          allowFrames: options.allowFrames,
         });
 
         const totalStaged = result.staged.timelineOps.length + result.staged.documentOps.length;
@@ -191,6 +193,7 @@ export async function startAgentRepl(options: ReplOptions): Promise<void> {
               prompt: trimmed,
               apply: true,
               providerOptions: options.providerOptions,
+              allowFrames: options.allowFrames,
             });
             currentProject = applied.updatedProject;
             currentRev = saveReplProject(currentProject, options, currentRev);

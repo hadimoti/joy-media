@@ -78,6 +78,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       expect(await runCli(['agent', '--help'])).toBe(0);
       expect(output.mock.calls.flat().join('\n')).toContain('probe');
       expect(output.mock.calls.flat().join('\n')).toContain('--apply');
+      expect(output.mock.calls.flat().join('\n')).toContain('--allow-frames');
     } finally {
       output.mockRestore();
     }
@@ -168,6 +169,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       expect(
         await runCli(['agent', 'run', 'change title', '--project', projectFile, '--apply']),
       ).toBe(0);
+      expect(runSpy.mock.calls[0]?.[0].allowFrames).toBe(false);
       const saved = JSON.parse(readFileSync(projectFile, 'utf8')) as {
         revision: number;
         project: { title: string };
@@ -175,6 +177,35 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       expect(saved.revision).toBe(8);
       expect(saved.project.title).toBe('Updated by agent');
       expect(output.mock.calls.flat().join('\n')).toContain('Applied 1 operation(s) (--apply)');
+    } finally {
+      runSpy.mockRestore();
+      output.mockRestore();
+    }
+  });
+
+  it('passes explicit frame consent to the agent run', async () => {
+    const project = createDefaultProject('Frame consent project', { id: 'frame-consent-test' });
+    const projectFile = join(isolatedHome, 'frame-consent.json');
+    writeFileSync(
+      projectFile,
+      JSON.stringify({ format: 'joy-media-project', revision: 1, project }),
+    );
+    const runSpy = vi.spyOn(joyAgentRuntime, 'runJoyAgent').mockResolvedValue({
+      resultText: 'done',
+      capability: 'tool-loop',
+      steps: 1,
+      staged: { timelineOps: [], documentOps: [] },
+      applied: false,
+      updatedProject: project,
+      appliedCount: 0,
+      errors: [],
+    });
+    const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(
+        await runCli(['agent', 'run', 'inspect', '--project', projectFile, '--allow-frames']),
+      ).toBe(0);
+      expect(runSpy.mock.calls[0]?.[0].allowFrames).toBe(true);
     } finally {
       runSpy.mockRestore();
       output.mockRestore();

@@ -39,6 +39,7 @@ import {
 export interface AgentCommandFlags {
   project?: string | undefined;
   apply?: boolean | undefined;
+  allowFrames?: boolean | undefined;
   name?: string | undefined;
   provider?: string | undefined;
   model?: string | undefined;
@@ -73,7 +74,7 @@ Commands:
   models                       Fetch available models
   model <get|set>              Show or change the model
 
-Options: --project <id|file> --apply --provider <name> --model <id>
+Options: --project <id|file> --apply --allow-frames --provider <name> --model <id>
          --api-key-env <VAR> --base-url <url> --debug --json`);
 }
 
@@ -430,6 +431,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         apiKeyEnv: flags.apiKeyEnv,
         baseUrl: flags.baseUrl,
       },
+      allowFrames: flags.allowFrames,
     });
     return 0;
   }
@@ -451,6 +453,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         revision: projectInfo.revision,
         prompt,
         apply: flags.apply,
+        allowFrames: flags.allowFrames,
         providerOptions: {
           provider: flags.provider,
           model: flags.model,

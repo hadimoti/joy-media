@@ -126,4 +126,120 @@ describe('JOY Agent tool catalog', () => {
       'JOY_AGENT_UNAVAILABLE',
     );
   });
+
+  it('registers frame observation only for consented vision models with a frame reader', () => {
+    const visionModel = 'byteplus-coding/dola-seed-2.0-pro';
+    expect(
+      createJoyAgentTools(bridge(), DEFAULT_JOY_AGENT_LIMITS, {
+        modelId: visionModel,
+        allowFrames: true,
+      }),
+    ).not.toHaveProperty('read_frame');
+    expect(
+      createJoyAgentTools(
+        bridge({ readFrame: async () => ({ unavailable: 'missing' }) }),
+        DEFAULT_JOY_AGENT_LIMITS,
+        { modelId: 'byteplus-coding/deepseek-v4-flash', allowFrames: true },
+      ),
+    ).not.toHaveProperty('read_frame');
+    expect(
+      createJoyAgentTools(
+        bridge({ readFrame: async () => ({ unavailable: 'missing' }) }),
+        DEFAULT_JOY_AGENT_LIMITS,
+        { modelId: visionModel },
+      ),
+    ).not.toHaveProperty('read_frame');
+    expect(
+      createJoyAgentTools(
+        bridge({ readFrame: async () => ({ unavailable: 'missing' }) }),
+        DEFAULT_JOY_AGENT_LIMITS,
+        { modelId: visionModel, allowFrames: true },
+      ),
+    ).toHaveProperty('read_frame');
+  });
+
+  it('caps frame reads at three and returns an unavailable result on the fourth call', async () => {
+    const readFrame = vi.fn(async () => ({
+      mediaType: 'image/jpeg' as const,
+      base64: 'ZmFrZQ==',
+      width: 1,
+      height: 1,
+    }));
+    const tools = createJoyAgentTools(bridge({ readFrame }), DEFAULT_JOY_AGENT_LIMITS, {
+      modelId: 'byteplus-coding/dola-seed-2.0-pro',
+      allowFrames: true,
+    });
+    const execute = (tools.read_frame as { execute: (input: { atUs: number }) => Promise<unknown> })
+      .execute;
+    await execute({ atUs: 0 });
+    await execute({ atUs: 1 });
+    await execute({ atUs: 2 });
+    await expect(execute({ atUs: 3 })).resolves.toMatchObject({ unavailable: expect.any(String) });
+    expect(readFrame).toHaveBeenCalledTimes(3);
+  });
+
+  it('maps JPEG tool results to AI SDK multipart file output within the payload limit', async () => {
+    const base64 = 'ZmFrZQ==';
+    const tools = createJoyAgentTools(
+      bridge({ readFrame: async () => ({ mediaType: 'image/jpeg', base64, width: 1, height: 1 }) }),
+      DEFAULT_JOY_AGENT_LIMITS,
+      { modelId: 'byteplus-coding/dola-seed-2.0-pro', allowFrames: true },
+    );
+    const frameTool = tools.read_frame as unknown as {
+      execute: (input: { atUs: number }) => Promise<unknown>;
+      toModelOutput: (options: {
+        output: { mediaType: 'image/jpeg'; base64: string; width: number; height: number };
+      }) => unknown;
+    };
+    const output = await frameTool.execute({ atUs: 500_000 });
+    expect(
+      frameTool.toModelOutput({
+        output: output as {
+          mediaType: 'image/jpeg';
+          base64: string;
+          width: number;
+          height: number;
+        },
+      }),
+    ).toEqual({
+      type: 'content',
+      value: [{ type: 'file', data: { type: 'data', data: base64 }, mediaType: 'image/jpeg' }],
+    });
+  });
+
+  it('rejects frame payloads larger than the configured tool payload limit', async () => {
+    const tools = createJoyAgentTools(
+      bridge({
+        readFrame: async () => ({
+          mediaType: 'image/jpeg',
+          base64: 'A'.repeat(DEFAULT_JOY_AGENT_LIMITS.toolPayloadBytes + 1),
+          width: 1,
+          height: 1,
+        }),
+      }),
+      DEFAULT_JOY_AGENT_LIMITS,
+      { modelId: 'byteplus-coding/dola-seed-2.0-pro', allowFrames: true },
+    );
+    const execute = (tools.read_frame as { execute: (input: { atUs: number }) => Promise<unknown> })
+      .execute;
+    await expect(execute({ atUs: 0 })).resolves.toMatchObject({ unavailable: expect.any(String) });
+  });
+
+  it('rejects frame dimensions beyond the requested edge limit', async () => {
+    const tools = createJoyAgentTools(
+      bridge({
+        readFrame: async () => ({
+          mediaType: 'image/jpeg',
+          base64: 'ZmFrZQ==',
+          width: 1025,
+          height: 1,
+        }),
+      }),
+      DEFAULT_JOY_AGENT_LIMITS,
+      { modelId: 'byteplus-coding/dola-seed-2.0-pro', allowFrames: true },
+    );
+    const execute = (tools.read_frame as { execute: (input: { atUs: number }) => Promise<unknown> })
+      .execute;
+    await expect(execute({ atUs: 0 })).resolves.toMatchObject({ unavailable: expect.any(String) });
+  });
 });

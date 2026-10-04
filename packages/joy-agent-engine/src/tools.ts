@@ -3,6 +3,7 @@ import type { ToolCapability } from '@joy-media/agent-tools';
 import { z } from 'zod';
 import { DEFAULT_JOY_AGENT_LIMITS, type JoyAgentLimits } from './limits.js';
 import type { JoyAgentSurface } from './contracts.js';
+import { KILO_MODEL_PRESETS } from './provider-presets.js';
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
 const boundedText = z.string().max(4096);
@@ -111,6 +112,15 @@ export interface JoyAgentToolBridge {
   /** Optional domain readers/proposers keep media surfaces on the same bridge. */
   readonly readBrief?: () => Promise<unknown>;
   readonly readScene3d?: () => Promise<unknown>;
+  readonly readFrame?: (input: { readonly atUs: number; readonly maxEdge?: number }) => Promise<
+    | {
+        readonly mediaType: 'image/png' | 'image/jpeg';
+        readonly base64: string;
+        readonly width: number;
+        readonly height: number;
+      }
+    | { readonly unavailable: string }
+  >;
   readonly proposeAsset?: (input: {
     readonly assetId: string;
     readonly summary: string;
@@ -201,6 +211,13 @@ export const JOY_AGENT_TOOL_METADATA: Readonly<Record<string, JoyAgentToolMetada
       activityCode: 'read.scene-3d',
       surface: 'scene-3d',
       parallel: true,
+    },
+    read_frame: {
+      access: 'read',
+      capability: 'assets.read',
+      activityCode: 'read.frame',
+      surface: 'joy-code',
+      parallel: false,
     },
     propose_asset: {
       access: 'preview',
@@ -302,6 +319,7 @@ function boundedResult(value: unknown, maxBytes: number): unknown {
 export function createJoyAgentTools(
   bridge: JoyAgentToolBridge,
   limits: JoyAgentLimits = DEFAULT_JOY_AGENT_LIMITS,
+  options: { readonly modelId?: string; readonly allowFrames?: boolean } = {},
 ): ToolSet {
   const reads = new ReadConcurrencyGate(
     Math.min(limits.maxConcurrentReads, DEFAULT_JOY_AGENT_LIMITS.maxConcurrentReads),
@@ -310,9 +328,10 @@ export function createJoyAgentTools(
     limits.toolPayloadBytes,
     DEFAULT_JOY_AGENT_LIMITS.toolPayloadBytes,
   );
+  const maxFrameReads = Math.min(limits.maxFrameReads, DEFAULT_JOY_AGENT_LIMITS.maxFrameReads);
   const runRead = <T>(operation: () => Promise<T>): Promise<T> => reads.run(operation);
   const operationLimit = Math.min(limits.maxOperations, DEFAULT_JOY_AGENT_LIMITS.maxOperations);
-  return {
+  const tools: ToolSet = {
     read_project_summary: tool({
       description: 'Read a bounded project summary.',
       inputSchema: z.object({}).strict(),
@@ -408,4 +427,52 @@ export function createJoyAgentTools(
       execute: async () => boundedResult(await bridge.submitPlan(), maxPayloadBytes),
     }),
   };
+  const visionCapable = KILO_MODEL_PRESETS.some(
+    (preset) => preset.id === options.modelId && preset.vision,
+  );
+  if (bridge.readFrame && visionCapable && options.allowFrames) {
+    let frameReads = 0;
+    tools.read_frame = tool({
+      description: 'Read one bounded frame from the local timeline for visual inspection.',
+      inputSchema: z
+        .object({
+          atUs: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+          maxEdge: z.number().int().positive().max(1024).optional(),
+        })
+        .strict(),
+      execute: async (input) => {
+        if (frameReads >= maxFrameReads) return { unavailable: 'Frame read limit reached.' };
+        frameReads += 1;
+        const maxEdge = Math.min(input.maxEdge ?? 1024, 1024);
+        const result = await runRead(() => bridge.readFrame!({ atUs: input.atUs, maxEdge }));
+        if ('unavailable' in result) return result;
+        if (
+          !Number.isSafeInteger(result.width) ||
+          !Number.isSafeInteger(result.height) ||
+          result.width < 1 ||
+          result.height < 1 ||
+          result.width > maxEdge ||
+          result.height > maxEdge
+        )
+          return { unavailable: 'Frame dimensions exceed the requested edge limit.' };
+        if (new TextEncoder().encode(result.base64).byteLength > maxPayloadBytes)
+          return { unavailable: 'Frame exceeds the tool payload limit.' };
+        return result;
+      },
+      toModelOutput: ({ output }) =>
+        'unavailable' in output
+          ? { type: 'text', value: output.unavailable }
+          : {
+              type: 'content',
+              value: [
+                {
+                  type: 'file',
+                  data: { type: 'data', data: output.base64 },
+                  mediaType: output.mediaType,
+                },
+              ],
+            },
+    });
+  }
+  return tools;
 }

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { CliJoyAgentToolBridge } from './bridge.js';
+
+const hasFfmpeg = spawnSync('ffmpeg', ['-version'], { shell: false }).status === 0;
 
 function projectWithTracks(): JoyProjectV1 {
   return {
@@ -72,6 +78,84 @@ function projectWithTracks(): JoyProjectV1 {
 }
 
 describe('CLI Joy Agent bridge timeline operations', () => {
+  it.skipIf(!hasFfmpeg)(
+    'reads a bounded JPEG frame from the composited local timeline',
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'joy-agent-frame-'));
+      try {
+        const mediaPath = join(dir, 'fixture.mp4');
+        const generated = spawnSync(
+          'ffmpeg',
+          [
+            '-y',
+            '-f',
+            'lavfi',
+            '-i',
+            'color=c=red:s=160x90:r=25:d=1',
+            '-c:v',
+            'libx264',
+            '-pix_fmt',
+            'yuv420p',
+            mediaPath,
+          ],
+          { shell: false, stdio: 'ignore' },
+        );
+        expect(generated.status).toBe(0);
+        const baseProject = projectWithTracks();
+        const root = baseProject.compositions.root!;
+        const project: JoyProjectV1 = {
+          ...baseProject,
+          compositions: {
+            ...baseProject.compositions,
+            root: {
+              ...root,
+              width: 160,
+              height: 90,
+              durationUs: 1_000_000,
+              tracks: root.tracks.map((track, index) =>
+                index === 0
+                  ? {
+                      ...track,
+                      clips: [
+                        {
+                          id: 'frame-clip',
+                          kind: 'video',
+                          assetId: 'frame-asset',
+                          startUs: 0,
+                          durationUs: 1_000_000,
+                          sourceInUs: 0,
+                        },
+                      ],
+                    }
+                  : track,
+              ),
+            },
+          },
+          assets: {
+            ...baseProject.assets,
+            'frame-asset': {
+              id: 'frame-asset',
+              kind: 'video',
+              displayName: 'fixture',
+              localSource: { path: mediaPath },
+            },
+          },
+        };
+        const result = await new CliJoyAgentToolBridge(project, 1).readFrame({
+          atUs: 500_000,
+          maxEdge: 80,
+        });
+        expect(result).toMatchObject({ mediaType: 'image/jpeg', width: 80, height: 45 });
+        if ('base64' in result)
+          expect(Buffer.from(result.base64, 'base64').subarray(0, 2)).toEqual(
+            Buffer.from([0xff, 0xd8]),
+          );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('moves a clip between tracks and keeps each track sorted by timeline start', async () => {
     const bridge = new CliJoyAgentToolBridge(projectWithTracks(), 1);
     await bridge.proposeTimelineOperations({

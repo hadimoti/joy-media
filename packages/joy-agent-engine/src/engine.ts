@@ -40,6 +40,8 @@ const planOnlyOutput = z
 export interface JoyAgentEngineOptions {
   readonly model: LanguageModel;
   readonly bridge: JoyAgentToolBridge;
+  readonly modelId?: string;
+  readonly allowFrames?: boolean;
   readonly limits?: Partial<JoyAgentLimits>;
   readonly capability?: JoyAgentCapability;
   readonly onEvent?: (event: JoyAgentSafeEvent) => void;
@@ -255,7 +257,10 @@ export class JoyAgentEngine {
       surface: 'joy-code',
       activityCode: 'agent.inspecting',
     });
-    const tools = createJoyAgentTools(this.options.bridge, this.limits);
+    const tools = createJoyAgentTools(this.options.bridge, this.limits, {
+      ...(this.options.modelId === undefined ? {} : { modelId: this.options.modelId }),
+      ...(this.options.allowFrames === undefined ? {} : { allowFrames: this.options.allowFrames }),
+    });
     const toolCallLimit: StopCondition<typeof tools> = ({ steps }) =>
       steps.reduce((count, step) => count + step.toolCalls.length, 0) >= this.limits.maxToolCalls;
     const agent = new ToolLoopAgent({

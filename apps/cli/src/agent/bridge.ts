@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import type {
   JoyAgentToolBridge,
   JoyDocumentOperation,
@@ -6,6 +7,8 @@ import type {
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { sourceTimeAtVideoClipTime, validateJoyProjectV1 } from '@joy-media/project-schema';
 import { recomputeRootDuration } from '../utils/timeline-math.js';
+import { buildFfmpegFramePlan } from '../render/ffmpeg-plan.js';
+import { DEFAULT_JOY_AGENT_LIMITS } from '@joy-media/joy-agent-engine';
 
 export interface StagedOperationsSummary {
   readonly timelineOps: readonly JoyTimelineOperation[];
@@ -82,6 +85,68 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
       selectedClipIds: this.selectedClipIds,
       playheadUs: this.playheadUs,
     };
+  }
+
+  async readFrame(input: { readonly atUs: number; readonly maxEdge?: number }): Promise<
+    | {
+        readonly mediaType: 'image/jpeg';
+        readonly base64: string;
+        readonly width: number;
+        readonly height: number;
+      }
+    | { readonly unavailable: string }
+  > {
+    const maxEdge = Math.min(input.maxEdge ?? 1024, 1024);
+    let plan;
+    try {
+      plan = buildFfmpegFramePlan(this.project, input.atUs, maxEdge);
+    } catch {
+      return { unavailable: 'Frame is outside the available local timeline.' };
+    }
+    const hasLocalVisualMedia = plan.inputs.some((input) => {
+      const kind = this.project.assets[input.assetId]?.kind;
+      return kind === 'video' || kind === 'image';
+    });
+    if (!hasLocalVisualMedia) return { unavailable: 'No local video media is available.' };
+    const maxOutputBytes = Math.floor((DEFAULT_JOY_AGENT_LIMITS.toolPayloadBytes * 3) / 4);
+    return await new Promise((resolve) => {
+      let settled = false;
+      let outputBytes = 0;
+      const chunks: Buffer[] = [];
+      const child = spawn('ffmpeg', plan.args, {
+        shell: false,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      const finish = (result: Awaited<ReturnType<CliJoyAgentToolBridge['readFrame']>>): void => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
+      };
+      child.on('error', () => finish({ unavailable: 'ffmpeg is not available.' }));
+      child.stdout.on('data', (chunk: Buffer) => {
+        outputBytes += chunk.byteLength;
+        if (outputBytes > maxOutputBytes) {
+          void child.kill();
+          finish({ unavailable: 'Frame exceeds the tool payload limit.' });
+          return;
+        }
+        chunks.push(chunk);
+      });
+      child.on('close', (code) => {
+        if (code !== 0 || chunks.length === 0) {
+          finish({ unavailable: 'ffmpeg could not read this local frame.' });
+          return;
+        }
+        const bytes = Buffer.concat(chunks);
+        const scale = Math.min(1, maxEdge / plan.width, maxEdge / plan.height);
+        finish({
+          mediaType: 'image/jpeg',
+          base64: bytes.toString('base64'),
+          width: Math.round(plan.width * scale),
+          height: Math.round(plan.height * scale),
+        });
+      });
+    });
   }
 
   async readTimelineWindow(input: {

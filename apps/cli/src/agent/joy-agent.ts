@@ -4,6 +4,7 @@ import {
   type JoyAgentSafeEvent,
   type JoyAgentTaskKind,
   type JoyAgentProbeResult,
+  KILO_MODEL_PRESETS,
 } from '@joy-media/joy-agent-engine';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { c, logInfo, logStep, logSuccess, logWarn } from '../utils/logger.js';
@@ -20,6 +21,7 @@ export interface RunAgentOptions {
   readonly prompt: string;
   readonly taskKind?: JoyAgentTaskKind | undefined;
   readonly apply?: boolean | undefined;
+  readonly allowFrames?: boolean | undefined;
   readonly providerOptions?: ResolveProviderOptions | undefined;
   readonly onEvent?: ((event: JoyAgentSafeEvent) => void) | undefined;
   readonly onStagedChange?: ((summary: StagedOperationsSummary) => void) | undefined;
@@ -120,6 +122,11 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
   const engine = new JoyAgentEngine({
     model,
     bridge,
+    ...(config.provider === 'kilo' ? { modelId: config.modelId } : {}),
+    allowFrames:
+      options.allowFrames === true &&
+      config.provider === 'kilo' &&
+      KILO_MODEL_PRESETS.some((preset) => preset.id === config.modelId && preset.vision),
     onEvent: eventLogger,
     apiKeyForRedaction: config.apiKey,
   });

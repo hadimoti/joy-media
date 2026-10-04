@@ -22,6 +22,7 @@ import { c, logError, logWarn, printBanner } from './utils/logger.js';
 export interface CliFlags {
   project: string | undefined;
   apply: boolean;
+  allowFrames: boolean;
   name: string | undefined;
   provider: string | undefined;
   model: string | undefined;
@@ -105,6 +106,7 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
   return {
     project: typeof v.project === 'string' ? v.project : undefined,
     apply: Boolean(v.apply),
+    allowFrames: Boolean(v['allow-frames']),
     name: typeof v.name === 'string' ? v.name : undefined,
     provider: typeof v.provider === 'string' ? v.provider : undefined,
     model: typeof v.model === 'string' ? v.model : undefined,
@@ -156,6 +158,7 @@ export async function runCli(argv: string[]): Promise<number> {
         version: { type: 'boolean', short: 'v', default: false },
         project: { type: 'string', short: 'p' },
         apply: { type: 'boolean', default: false },
+        'allow-frames': { type: 'boolean', default: false },
         name: { type: 'string', short: 'n' },
         provider: { type: 'string' },
         model: { type: 'string', short: 'm' },

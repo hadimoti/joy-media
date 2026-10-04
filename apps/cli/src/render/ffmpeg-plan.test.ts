@@ -3,9 +3,46 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDefaultProject } from '../utils/project-loader.js';
-import { buildFfmpegRenderPlan } from './ffmpeg-plan.js';
+import { buildFfmpegFramePlan, buildFfmpegRenderPlan } from './ffmpeg-plan.js';
 
 describe('buildFfmpegRenderPlan', () => {
+  it('builds a bounded still-image output from the render composition graph', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-ffmpeg-frame-plan-'));
+    try {
+      const mediaPath = join(dir, 'clip.mp4');
+      writeFileSync(mediaPath, 'plan-only placeholder');
+      const project = createDefaultProject('frame plan', { width: 1920, height: 1080, fps: 30 });
+      (project.assets as Record<string, unknown>)['asset-1'] = {
+        id: 'asset-1',
+        kind: 'video',
+        displayName: 'clip.mp4',
+        localSource: { path: mediaPath },
+      };
+      (project.compositions.root!.tracks[0]!.clips as unknown[]).push({
+        id: 'clip-1',
+        kind: 'video',
+        assetId: 'asset-1',
+        startUs: 0,
+        durationUs: 1_000_000,
+        sourceInUs: 250_000,
+      });
+      const plan = buildFfmpegFramePlan(project, 500_000, 512);
+      expect(plan.args).toContain('-ss');
+      expect(plan.args).toContain('0.5');
+      expect(plan.args).toContain('-frames:v');
+      expect(plan.args).toContain('1');
+      expect(plan.args).toContain('scale=512:512:force_original_aspect_ratio=decrease');
+      expect(plan.args).toContain('image2pipe');
+      expect(plan.args).toContain('mjpeg');
+      expect(plan.args.join(' ')).toContain('trim=start=0.25');
+      expect(plan.args.join(' ')).not.toContain('[aout]');
+      expect(plan.inputs).toHaveLength(1);
+      expect(() => buildFfmpegFramePlan(project, 500_000, 1025)).toThrow(RangeError);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('uses project dimensions and rational fps and skips unimported media', () => {
     const dir = mkdtempSync(join(tmpdir(), 'joy-ffmpeg-plan-'));
     const mediaPath = join(dir, 'clip.mp4');

@@ -18,6 +18,53 @@ export interface FfmpegRenderPlan {
   readonly durationUs: number;
 }
 
+export interface FfmpegFramePlan {
+  readonly args: string[];
+  readonly inputs: { readonly assetId: string; readonly path: string }[];
+  readonly width: number;
+  readonly height: number;
+}
+
+/** Build a one-frame extraction from the same composited video graph as renders. */
+export function buildFfmpegFramePlan(
+  project: JoyProjectV1,
+  atUs: number,
+  maxEdge = 1024,
+): FfmpegFramePlan {
+  const render = buildFfmpegRenderPlan(project, 'mp4');
+  if (!Number.isSafeInteger(atUs) || atUs < 0 || atUs >= render.durationUs)
+    throw new RangeError('Frame time must be inside the project duration.');
+  if (!Number.isSafeInteger(maxEdge) || maxEdge < 1 || maxEdge > 1024)
+    throw new RangeError('Frame edge must be an integer from 1 through 1024.');
+  const filterIndex = render.args.indexOf('-filter_complex');
+  const filterGraph = render.args[filterIndex + 1];
+  const mapIndex = render.args.indexOf('-map', filterIndex + 2);
+  const videoMap = render.args[mapIndex + 1];
+  if (filterIndex < 0 || filterGraph === undefined || mapIndex < 0 || videoMap === undefined)
+    throw new Error('Render plan is missing its video graph.');
+  const videoFilters = filterGraph
+    .split(';')
+    .filter((filter) => !/\[\d+:a\]|\[a_\d+\]|\[aout\]|\bamix=|\banullsrc/.test(filter));
+  const args = [
+    ...render.args.slice(0, filterIndex),
+    ...(videoFilters.length > 0 ? ['-filter_complex', videoFilters.join(';')] : []),
+    '-map',
+    videoMap,
+    '-ss',
+    seconds(atUs),
+    '-frames:v',
+    '1',
+    '-vf',
+    `scale=${maxEdge}:${maxEdge}:force_original_aspect_ratio=decrease`,
+    '-f',
+    'image2pipe',
+    '-c:v',
+    'mjpeg',
+    'pipe:1',
+  ];
+  return { args, inputs: render.inputs, width: render.width, height: render.height };
+}
+
 export function buildFfmpegRenderPlan(
   project: JoyProjectV1,
   presetId: 'mp4' | 'webm' | 'prores',
