@@ -289,6 +289,94 @@ describe('JoyModelGateway', () => {
     expect(forwardedBody).not.toHaveProperty('arbitrary');
   });
 
+  it('defaults absent or invalid output limits to 8192 tokens', async () => {
+    const forwarded: Array<Record<string, unknown>> = [];
+    const gateway = new JoyModelGateway({
+      mediaAuth: { authenticate: async () => ({ id: 'u' }) } as unknown as MediaAuthService,
+      account: {
+        getSubscription: async () => ({
+          ownerId: 'u',
+          plan: 'monthly',
+          status: 'active',
+          updatedAt: 0,
+        }),
+      } as unknown as AccountService,
+      ledger: new MemoryAgentUsageLedger(),
+      openRouterApiKey: 'test-key',
+      fetchImpl: async (_url, init) => {
+        forwarded.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(JSON.stringify({ choices: [], usage: {} }), { status: 200 });
+      },
+    });
+    for (const fields of [
+      {},
+      { max_tokens: 0 },
+      { max_tokens: 1.5 },
+      { max_completion_tokens: -2 },
+    ]) {
+      await gateway.handleChatCompletions(
+        createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [], ...fields } }),
+        createMockRes().res,
+      );
+    }
+    expect(forwarded).toHaveLength(4);
+    expect(forwarded.every((body) => body.max_tokens === 8192)).toBe(true);
+    expect(forwarded.every((body) => !Object.hasOwn(body, 'max_completion_tokens'))).toBe(true);
+  });
+
+  it.each(['true', 1])('normalizes client stream value %s to boolean false', async (stream) => {
+    let forwardedBody: Record<string, unknown> | undefined;
+    const gateway = new JoyModelGateway({
+      mediaAuth: { authenticate: async () => ({ id: 'u' }) } as unknown as MediaAuthService,
+      account: {
+        getSubscription: async () => ({
+          ownerId: 'u',
+          plan: 'monthly',
+          status: 'active',
+          updatedAt: 0,
+        }),
+      } as unknown as AccountService,
+      ledger: new MemoryAgentUsageLedger(),
+      openRouterApiKey: 'test-key',
+      fetchImpl: async (_url, init) => {
+        forwardedBody = JSON.parse(String(init?.body));
+        return new Response(JSON.stringify({ choices: [], usage: {} }), { status: 200 });
+      },
+    });
+    await gateway.handleChatCompletions(
+      createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [], stream } }),
+      createMockRes().res,
+    );
+    expect(forwardedBody?.stream).toBe(false);
+  });
+
+  it('returns a safe upstream error and records usage when the upstream body is not JSON', async () => {
+    const ledger = new MemoryAgentUsageLedger();
+    const gateway = new JoyModelGateway({
+      mediaAuth: { authenticate: async () => ({ id: 'u' }) } as unknown as MediaAuthService,
+      account: {
+        getSubscription: async () => ({
+          ownerId: 'u',
+          plan: 'monthly',
+          status: 'active',
+          updatedAt: 0,
+        }),
+      } as unknown as AccountService,
+      ledger,
+      openRouterApiKey: 'test-key',
+      fetchImpl: async () => new Response('private-upstream-body', { status: 200 }),
+    });
+    const response = createMockRes();
+    await gateway.handleChatCompletions(
+      createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } }),
+      response.res,
+    );
+    expect(response.getStatus()).toBe(502);
+    expect(response.getBody()).toContain('UPSTREAM_ERROR');
+    expect(response.getBody()).not.toContain('private-upstream-body');
+    expect((await ledger.getSummary('u')).totalRequests).toBe(1);
+  });
+
   it('records OpenRouter usage.cost for non-streaming responses', async () => {
     const ledger = new MemoryAgentUsageLedger();
     const gateway = new JoyModelGateway({
@@ -487,6 +575,7 @@ describe('JoyModelGateway', () => {
 
   it('counts usage from an SSE usage frame split across chunks', async () => {
     const ledger = new MemoryAgentUsageLedger();
+    let forwardedStream: unknown;
     const auth = { authenticate: async () => ({ id: 'u' }) } as unknown as MediaAuthService;
     const account = {
       getSubscription: async () => ({
@@ -509,7 +598,10 @@ describe('JoyModelGateway', () => {
       account,
       ledger,
       openRouterApiKey: 'sk-test-REDACTED-0000',
-      fetchImpl: async () => new Response(stream, { status: 200 }),
+      fetchImpl: async (_url, init) => {
+        forwardedStream = (JSON.parse(String(init?.body)) as Record<string, unknown>).stream;
+        return new Response(stream, { status: 200 });
+      },
     });
     const response = createMockRes();
     await gateway.handleChatCompletions(
@@ -522,6 +614,7 @@ describe('JoyModelGateway', () => {
     expect(summary.totalPromptTokens).toBe(5);
     expect(summary.totalCompletionTokens).toBe(3);
     expect(summary.totalUpstreamCostMicros).toBe('1000');
+    expect(forwardedStream).toBe(true);
     expect(response.getHeaders()['x-accel-buffering']).toBe('no');
   });
 

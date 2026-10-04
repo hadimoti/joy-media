@@ -221,7 +221,7 @@ export class JoyModelGateway {
           'http-referer': 'https://joyst.ir',
           'x-title': 'JOY Media Built-in Agent',
         },
-        body: JSON.stringify(buildUpstreamBody(parsedBody, modelId)),
+        body: JSON.stringify(buildUpstreamBody(parsedBody, modelId, isStream)),
         signal: upstreamController.signal,
       });
     } catch (error) {
@@ -381,7 +381,34 @@ export class JoyModelGateway {
     }
 
     // Non-streaming response
-    const jsonResponse = (await upstreamRes.json()) as Record<string, unknown>;
+    let jsonResponse: Record<string, unknown>;
+    try {
+      const parsedResponse: unknown = await upstreamRes.json();
+      if (
+        parsedResponse === null ||
+        typeof parsedResponse !== 'object' ||
+        Array.isArray(parsedResponse)
+      )
+        throw new Error('Upstream response was not an object.');
+      jsonResponse = parsedResponse as Record<string, unknown>;
+    } catch {
+      await this.safeRecord({
+        ownerId: actor.id,
+        modelId,
+        promptTokens: 0,
+        completionTokens: 0,
+        upstreamCostMicros: 0n,
+        billedCostMicros: 0n,
+        commissionRateBps: this.commissionRateBps,
+      });
+      res.writeHead(502, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          error: { code: 'UPSTREAM_ERROR', message: 'AI upstream returned an invalid response' },
+        }),
+      );
+      return;
+    }
     const usage = (jsonResponse.usage ?? {}) as Record<string, unknown>;
     const promptTokens = Number(usage.prompt_tokens ?? 0);
     const completionTokens = Number(usage.completion_tokens ?? 0);
@@ -433,19 +460,24 @@ async function readRequestBody(req: IncomingMessage, maxBytes = 2 * 1024 * 1024)
 function buildUpstreamBody(
   parsedBody: Record<string, unknown>,
   modelId: string,
+  isStream: boolean,
 ): Record<string, unknown> {
   const body: Record<string, unknown> = { model: modelId };
+  let hasOutputLimit = false;
   for (const field of FORWARDED_COMPLETION_FIELDS) {
     if (!Object.hasOwn(parsedBody, field)) continue;
     const value = parsedBody[field];
     if (field === 'max_tokens' || field === 'max_completion_tokens') {
-      if (typeof value === 'number' && Number.isFinite(value)) {
+      if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
         body[field] = Math.min(value, JOY_MODEL_MAX_OUTPUT_TOKENS);
+        hasOutputLimit = true;
       }
       continue;
     }
-    body[field] = value;
+    if (field !== 'stream') body[field] = value;
   }
+  body.stream = isStream;
+  if (!hasOutputLimit) body.max_tokens = JOY_MODEL_MAX_OUTPUT_TOKENS;
   // Request OpenRouter's usage metadata internally; clients cannot override this.
   body.usage = { include: true };
   return body;
