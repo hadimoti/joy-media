@@ -116,14 +116,14 @@ describe('ModelDrawer', () => {
     });
 
     expect(container?.textContent).toContain('Model Drawer');
-    expect(container?.textContent).toContain('kilo: byteplus-coding/dola-seed-2.0-pro');
+    expect(container?.textContent).toContain('kilo: kilo/kilo-auto/free');
     expect(container?.textContent).toContain('A saved model has been retired');
     expect(container?.textContent).toContain('Kilo Gateway');
     expect(container?.textContent).toContain('OpenRouter Primary');
     expect(container?.textContent).toContain('byteplus-coding/dola-seed-2.0-lite');
     expect(container?.textContent).toContain('byteplus-coding/deepseek-v4-flash');
     expect(container?.textContent).not.toContain('minimax/minimax-m3');
-    expect(container?.textContent).not.toContain('kilo-auto/');
+    expect(container?.textContent).not.toContain('kilo-auto/efficient');
   });
 
   it('offers the current Claude Sonnet model in OpenRouter presets', async () => {

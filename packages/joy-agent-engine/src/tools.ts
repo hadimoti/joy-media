@@ -129,6 +129,7 @@ export type JoyPlanChecklistItem =
     };
 
 export interface JoyAgentToolBridge {
+  readonly hasSubmittedPlan?: () => boolean;
   readonly readProjectSummary: () => Promise<unknown>;
   readonly readSelection: () => Promise<unknown>;
   readonly readTimelineWindow: (input: {
@@ -318,6 +319,13 @@ export function parseJoyTimelineOperationsDetailed(value: unknown): {
       return candidate;
     const record = candidate as Record<string, unknown>;
     const unknown = Object.keys(record).filter((key) => !acceptedFields.includes(key));
+    const amountAliases = ['trimLeftUs', 'trimRightUs', 'trimStartUs', 'trimEndUs'].filter(
+      (key) => record[key] !== undefined,
+    );
+    if (amountAliases.length)
+      throw new Error(
+        `${amountAliases.join(', ')} are trim amounts, not source positions; use sourceInUs/sourceOutUs explicitly.`,
+      );
     if (unknown.length)
       throw new Error(
         `Unknown trim field(s): ${unknown.join(', ')}. Valid fields: sourceInUs, sourceOutUs, timelineStartUs (aliases: startUs/endUs, trimStartUs/trimEndUs, inUs/outUs, trimLeftUs/trimRightUs).`,
@@ -612,7 +620,7 @@ export function createJoyAgentTools(
     }),
     submit_plan: tool({
       description:
-        'Finalize the staged plan for JOY approval. Include a short checklist of requested outcomes so the CLI can verify each against the final timeline.',
+        'Finalize the staged plan for JOY approval. Include a non-empty checklist that covers every staged operation type and each requested outcome (trim source range, centered text, look, start position, or duration) so the CLI can verify the final timeline. The CLI independently checks explicit outcomes from the user request.',
       inputSchema: z
         .object({
           checklist: z
@@ -642,6 +650,7 @@ export function createJoyAgentTools(
                   .strict(),
               ]),
             )
+            .min(1)
             .max(12)
             .default([]),
         })

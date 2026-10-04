@@ -30,7 +30,7 @@ export const JOY_AGENT_INSTRUCTIONS = [
   'Never claim an edit is applied until submit_plan returns a committed result.',
   'When applying a timeline change, call submit_plan and use its verified placement summary in your final response.',
   'Batch every requested change into one plan and one submit_plan call whenever possible.',
-  'When calling submit_plan, include a short checklist for each requested trim, centered text, or clip look so the host can verify the final timeline.',
+  'When calling submit_plan, include a non-empty checklist covering every staged operation type and every requested trim, centered text, clip look, start position, or duration so the host can verify the final timeline.',
   'Do not split a requested edit across multiple partial plans. Unsupported requests must be called out explicitly.',
   'Do not request credentials, DOM selectors, endpoints, arbitrary headers, or hidden reasoning.',
 ].join(' ');
@@ -79,7 +79,7 @@ export interface JoyAgentRunResult {
   readonly text: string;
   readonly steps: number;
   readonly status: 'completed' | 'partial';
-  readonly partialReason?: 'step-limit' | 'tool-call-limit';
+  readonly partialReason?: 'step-limit' | 'tool-call-limit' | 'no-plan';
   readonly resolvedModelId?: string;
 }
 
@@ -331,10 +331,25 @@ export class JoyAgentEngine {
         return { messages: [...messages, ...additions] };
       },
     });
-    const result = await agent.generate({
+    let result = await agent.generate({
       prompt: request.request,
       ...(abortSignal === undefined ? {} : { abortSignal }),
     });
+    const endedAfterFrameWithoutPlan =
+      result.text.trim().length === 0 &&
+      result.steps.some((step) => step.toolCalls.some((call) => call.toolName === 'read_frame')) &&
+      this.options.bridge.hasSubmittedPlan?.() === false;
+    if (endedAfterFrameWithoutPlan) {
+      const retry = await agent.generate({
+        prompt: `Original request: ${request.request}\nCall submit_plan with all requested operations and a non-empty checklist covering every operation type and requested outcome.`,
+        ...(abortSignal === undefined ? {} : { abortSignal }),
+      });
+      result = {
+        ...retry,
+        text: [result.text, retry.text].filter(Boolean).join('\n'),
+        steps: [...result.steps, ...retry.steps],
+      };
+    }
     for (const step of result.steps) {
       for (const call of step.toolCalls)
         this.options.onTrace?.({ type: 'tool_call', name: call.toolName, value: call.input });
@@ -346,6 +361,7 @@ export class JoyAgentEngine {
         });
     }
     const toolCalls = result.steps.reduce((count, step) => count + step.toolCalls.length, 0);
+    const noPlan = this.options.bridge.hasSubmittedPlan?.() === false;
     const stepLimitHit =
       result.steps.length >= maxSteps && result.steps.at(-1)?.finishReason === 'tool-calls';
     const toolCallLimitHit =
@@ -373,7 +389,8 @@ export class JoyAgentEngine {
       status: stepLimitHit || toolCallLimitHit ? 'partial' : 'completed',
       ...(stepLimitHit ? { partialReason: 'step-limit' as const } : {}),
       ...(!stepLimitHit && toolCallLimitHit ? { partialReason: 'tool-call-limit' as const } : {}),
-      resolvedModelId: result.response.modelId,
+      ...(noPlan ? { status: 'partial' as const, partialReason: 'no-plan' as const } : {}),
+      resolvedModelId: result.response?.modelId,
     };
   }
 }

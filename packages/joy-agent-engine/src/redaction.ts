@@ -78,6 +78,7 @@ export function classifyJoyAgentError(error: unknown): JoyAgentErrorCode {
     normalized.includes('unauthorized')
   )
     return 'JOY_AGENT_AUTH_FAILED';
+  if (/\b429\b|rate.?limit/i.test(message)) return 'JOY_AGENT_RATE_LIMITED';
   if (normalized.includes('too large') || normalized.includes('oversize'))
     return 'JOY_AGENT_RESPONSE_TOO_LARGE';
   if (normalized.includes('tool')) return 'JOY_AGENT_INVALID_TOOL';

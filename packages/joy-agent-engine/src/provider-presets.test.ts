@@ -4,6 +4,7 @@ import {
   KILO_GATEWAY_BASE_URL,
   KILO_MODEL_PRESETS,
   canonicalKiloBaseUrl,
+  defaultModelFor,
   isRetiredModelId,
 } from './provider-presets.js';
 
@@ -19,10 +20,12 @@ describe('provider presets', () => {
     expect(canonicalKiloBaseUrl(url)).toBe(KILO_GATEWAY_BASE_URL);
   });
 
-  it('uses only BytePlus Kilo presets and selects the vision model by default', () => {
+  it('keeps BytePlus presets available and defaults Kilo and JOY hosted to free models', () => {
     expect(KILO_MODEL_PRESETS.length).toBeGreaterThan(0);
     expect(KILO_MODEL_PRESETS.every(({ id }) => id.startsWith('byteplus-coding/'))).toBe(true);
-    expect(DEFAULT_KILO_MODEL).toBe('byteplus-coding/dola-seed-2.0-pro');
+    expect(DEFAULT_KILO_MODEL).toBe('kilo/kilo-auto/free');
+    expect(defaultModelFor('openrouter')).toBe('openrouter/free');
+    expect(defaultModelFor('joy-hosted')).toBe('openrouter/free');
   });
 
   it('recognizes retired model IDs', () => {

@@ -110,14 +110,17 @@ export function normalizeCustomBaseUrl(value: unknown): string {
   } catch {
     throw new ProviderConfigError();
   }
+  const hostname = url.hostname.toLowerCase();
+  const loopback = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+  if (url.protocol === 'http:' && !loopback) throw new Error('INSECURE_PROVIDER_URL');
   if (
-    url.protocol !== 'https:' ||
+    (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) ||
     url.username !== '' ||
     url.password !== '' ||
     url.search !== '' ||
     url.hash !== '' ||
     url.pathname.toLowerCase().endsWith('/chat/completions') ||
-    !isPublicWebHost(url.hostname)
+    (url.protocol === 'https:' && !isPublicWebHost(url.hostname))
   ) {
     throw new ProviderConfigError();
   }

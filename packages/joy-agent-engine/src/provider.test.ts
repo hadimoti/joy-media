@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createHardenedFetch } from './provider.js';
 import type { JoyFetch } from './provider.js';
+import { normalizeByokSessionConfig } from './provider-config.js';
 
 function response(body: string, init?: ResponseInit): Response {
   return new Response(body, {
@@ -29,6 +30,31 @@ describe('hardened provider fetch', () => {
     await expect(fetcher('https://other.example/v1/chat/completions')).rejects.toThrow(
       'JOY_AGENT_CORS_OR_NETWORK',
     );
+  });
+
+  it.each(['http://localhost:1234/v1', 'http://127.0.0.1:1234/v1', 'http://[::1]:1234/v1'])(
+    'accepts local HTTP provider URL %s',
+    (baseUrl) => {
+      expect(() =>
+        normalizeByokSessionConfig({
+          provider: 'openai-compatible',
+          baseUrl,
+          modelId: 'local-model',
+          apiKey: 'local-no-key-required',
+        }),
+      ).not.toThrow();
+    },
+  );
+
+  it('rejects non-loopback HTTP provider URLs with the stable configuration error', () => {
+    expect(() =>
+      normalizeByokSessionConfig({
+        provider: 'openai-compatible',
+        baseUrl: 'http://provider.example/v1',
+        modelId: 'model',
+        apiKey: 'fake',
+      }),
+    ).toThrow('INSECURE_PROVIDER_URL');
   });
 
   it('rejects a redirect response crossing the configured origin', async () => {

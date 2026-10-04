@@ -166,7 +166,8 @@ export async function resolveByokConfig(
   const aiProviders = loadAiProviders();
   const keyProvider = aiProviders[effective.provider]?.provider ?? effective.provider;
   let apiKey = options.apiKey;
-  if (!apiKey) {
+  const keylessLocalProvider = effective.provider === 'lm-studio';
+  if (!apiKey && !keylessLocalProvider) {
     const keyEnv =
       options.apiKeyEnv ??
       aiProviders[effective.provider]?.apiKeyEnv ??
@@ -182,7 +183,7 @@ export async function resolveByokConfig(
   if ((effective.provider === 'joy-hosted' || keyProvider === 'joy-hosted') && !apiKey) {
     throw new Error('JOY hosted provider needs a session token; set JOY_MEDIA_SESSION_TOKEN');
   }
-  if (!apiKey) {
+  if (!apiKey && !keylessLocalProvider) {
     const envName =
       options.apiKeyEnv ??
       aiProviders[effective.provider]?.apiKeyEnv ??
@@ -231,14 +232,14 @@ export async function resolveByokConfig(
     provider: normalizedProvider,
     baseUrl: effective.baseUrl,
     modelId: effective.modelId,
-    apiKey: apiKey ?? 'not-provided',
+    apiKey: apiKey ?? 'local-no-key-required',
     ...(hostedVision === undefined ? {} : { vision: hostedVision }),
   });
 }
 
 export function createModelFromConfig(config: ByokSessionConfig): LanguageModel {
   const { model } = createJoyAgentProvider(config, (input, init) =>
-    retryProviderFetch(input, init),
+    retryProviderFetch(input, init, fetch, config.provider),
   );
   return model;
 }
@@ -247,15 +248,17 @@ export async function retryProviderFetch(
   input: Request | URL | string,
   init?: RequestInit,
   fetchImpl: typeof fetch = fetch,
+  providerName = 'provider',
 ): Promise<Response> {
   const startedAt = Date.now();
+  let lastRetryAfter: string | null = null;
   for (let attempt = 1; attempt <= 3; attempt++) {
     const response = await fetchImpl(input, init);
     if (response.status !== 429) return response;
     await response.body?.cancel().catch(() => {});
-    if (attempt === 3)
-      throw new Error('JOY_AGENT_RATE_LIMITED: provider rate limit persisted after 3 attempts.');
     const retryAfter = response.headers.get('retry-after');
+    lastRetryAfter = safeRetryAfter(retryAfter);
+    if (attempt === 3) throw rateLimitError(providerName, attempt, lastRetryAfter);
     const dateSeconds = retryAfter ? (Date.parse(retryAfter) - Date.now()) / 1000 : Number.NaN;
     const seconds =
       retryAfter && /^\d+(?:\.\d+)?$/.test(retryAfter)
@@ -265,8 +268,24 @@ export async function retryProviderFetch(
           : 1;
     const delayMs = Math.max(0, Math.ceil(seconds * 1000));
     if (Date.now() - startedAt + delayMs > 60_000)
-      throw new Error('JOY_AGENT_RATE_LIMITED: retry delay exceeds the 60 second budget.');
+      throw rateLimitError(providerName, attempt, lastRetryAfter);
     await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
-  throw new Error('JOY_AGENT_RATE_LIMITED: provider retry budget exhausted.');
+  throw rateLimitError(providerName, 3, lastRetryAfter);
+}
+
+function rateLimitError(providerName: string, attempts: number, retryAfter: string | null): Error {
+  return Object.assign(
+    new Error(
+      `JOY_AGENT_RATE_LIMITED: ${providerName} after ${attempts} attempts; last Retry-After: ${retryAfter ?? 'not provided'}.`,
+    ),
+    { statusCode: 429 },
+  );
+}
+
+function safeRetryAfter(value: string | null): string | null {
+  if (value === null) return null;
+  if (value.length > 64) return '[invalid]';
+  if (/^\d+(?:\.\d+)?$/.test(value) || Number.isFinite(Date.parse(value))) return value;
+  return '[invalid]';
 }

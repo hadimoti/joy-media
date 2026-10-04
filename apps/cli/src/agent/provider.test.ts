@@ -54,6 +54,15 @@ describe('effective BYOK provider configuration', () => {
       'INSECURE_PROVIDER_URL',
     );
   });
+  it('resolves LM Studio to its local endpoint without requiring an API key', async () => {
+    isolateConfig();
+    const resolved = await resolveByokConfig({ provider: 'lm-studio' });
+    expect(resolved).toMatchObject({
+      provider: 'openai-compatible',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      modelId: 'local-model',
+    });
+  });
   it('retries provider 429 responses after the advertised seconds delay', async () => {
     vi.useFakeTimers();
     try {
@@ -89,8 +98,11 @@ describe('effective BYOK provider configuration', () => {
         'https://provider.example/v1/chat/completions',
         {},
         fetchImpl,
+        'openrouter',
       );
-      const rejected = expect(pending).rejects.toThrow('JOY_AGENT_RATE_LIMITED');
+      const rejected = expect(pending).rejects.toThrow(
+        /JOY_AGENT_RATE_LIMITED: openrouter after 3 attempts; last Retry-After: not provided/,
+      );
       await vi.advanceTimersByTimeAsync(1_000);
       await rejected;
       expect(fetchImpl).toHaveBeenCalledTimes(3);
@@ -148,7 +160,7 @@ describe('effective BYOK provider configuration', () => {
     const resolved = await resolveByokConfig({ provider: 'kilo', apiKey: 'k' });
     expect(resolved).toMatchObject({
       baseUrl: KILO_GATEWAY_BASE_URL,
-      modelId: 'byteplus-coding/dola-seed-2.0-pro',
+      modelId: DEFAULT_KILO_MODEL,
     });
   });
 

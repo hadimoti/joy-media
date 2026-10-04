@@ -35,19 +35,19 @@ describe('BYOK provider configuration', () => {
   });
 
   it.each([
-    'http://provider.example/v1',
-    'https://user:pass@provider.example/v1',
-    'https://provider.example/v1?token=secret',
-    'https://provider.example/v1#fragment',
-    'https://localhost/v1',
-    'https://127.0.0.1/v1',
-    'https://[::ffff:7f00:1]/v1',
-    'https://[::1]/v1',
-    'https://169.254.169.254/v1',
-    'https://192.168.1.1/v1',
-    'https://10.0.0.4/v1',
-  ])('rejects unsafe public-web URL %s', (url) => {
-    expect(() => normalizeCustomBaseUrl(url)).toThrow('JOY_AGENT_PROVIDER_CONFIG_INVALID');
+    ['http://provider.example/v1', 'INSECURE_PROVIDER_URL'],
+    ['https://user:pass@provider.example/v1', 'JOY_AGENT_PROVIDER_CONFIG_INVALID'],
+    ['https://provider.example/v1?token=secret', 'JOY_AGENT_PROVIDER_CONFIG_INVALID'],
+    ['https://provider.example/v1#fragment', 'JOY_AGENT_PROVIDER_CONFIG_INVALID'],
+    ['https://localhost/v1', 'JOY_AGENT_PROVIDER_CONFIG_INVALID'],
+    ['https://127.0.0.1/v1', 'JOY_AGENT_PROVIDER_CONFIG_INVALID'],
+    ['https://[::ffff:7f00:1]/v1', 'JOY_AGENT_PROVIDER_CONFIG_INVALID'],
+    ['https://[::1]/v1', 'JOY_AGENT_PROVIDER_CONFIG_INVALID'],
+    ['https://169.254.169.254/v1', 'JOY_AGENT_PROVIDER_CONFIG_INVALID'],
+    ['https://192.168.1.1/v1', 'JOY_AGENT_PROVIDER_CONFIG_INVALID'],
+    ['https://10.0.0.4/v1', 'JOY_AGENT_PROVIDER_CONFIG_INVALID'],
+  ])('rejects unsafe public-web URL %s', (url, code) => {
+    expect(() => normalizeCustomBaseUrl(url)).toThrow(code);
   });
 
   it('bounds model IDs and API keys', () => {

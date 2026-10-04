@@ -269,7 +269,7 @@ describe('JOY Agent Settings connection status', () => {
       creative: {
         provider: 'kilo',
         baseUrl: 'https://api.kilo.ai/api/gateway',
-        modelId: 'byteplus-coding/dola-seed-2.0-pro',
+        modelId: 'kilo/kilo-auto/free',
         apiKey: 'kilo-only-key',
       },
     });
@@ -767,7 +767,7 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
     });
   }
 
-  it('selects the canonical Kilo URL and BytePlus default model', async () => {
+  it('selects the canonical Kilo URL and free default model', async () => {
     const rendered = await render(client(), readyStatus);
     await selectCustomPreset(rendered);
     await changeProvider(rendered, 'kilo');
@@ -775,7 +775,7 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
       rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]')?.value,
     ).toBe('https://api.kilo.ai/api/gateway');
     expect(rendered.querySelector<HTMLInputElement>('input[aria-label="Model ID"]')?.value).toBe(
-      'byteplus-coding/dola-seed-2.0-pro',
+      'kilo/kilo-auto/free',
     );
   });
 

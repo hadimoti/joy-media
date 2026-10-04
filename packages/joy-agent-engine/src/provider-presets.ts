@@ -32,8 +32,9 @@ export const KILO_MODEL_PRESETS: readonly ProviderModelPreset[] = [
   },
 ];
 
-export const DEFAULT_KILO_MODEL = 'byteplus-coding/dola-seed-2.0-pro';
+export const DEFAULT_KILO_MODEL = 'kilo/kilo-auto/free';
 export const DEFAULT_OPENROUTER_MODEL = 'openrouter/free';
+export const DEFAULT_LM_STUDIO_MODEL = 'local-model';
 export const RETIRED_MODEL_IDS = [
   'minimax/minimax-m3',
   'kilo-auto/efficient',
@@ -55,5 +56,7 @@ export function isRetiredModelId(id: string): boolean {
 export function defaultModelFor(provider: string): string | undefined {
   if (provider === 'kilo') return DEFAULT_KILO_MODEL;
   if (provider === 'openrouter') return DEFAULT_OPENROUTER_MODEL;
+  if (provider === 'joy-hosted') return DEFAULT_OPENROUTER_MODEL;
+  if (provider === 'lm-studio') return DEFAULT_LM_STUDIO_MODEL;
   return undefined;
 }

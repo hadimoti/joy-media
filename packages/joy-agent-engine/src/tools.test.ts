@@ -213,6 +213,23 @@ describe('JOY Agent tool catalog', () => {
     ).toThrow(/Unknown trim field.*srcIn.*Valid fields.*timelineStartUs/);
   });
 
+  it.each(['trimLeftUs', 'trimRightUs', 'trimStartUs', 'trimEndUs'])(
+    'rejects amount alias %s instead of treating it as a source position',
+    (field) => {
+      expect(() =>
+        parseJoyTimelineOperationsDetailed([
+          {
+            kind: 'trim',
+            id: 'trim-amount',
+            clipId: 'clip-1',
+            [field]: 500_000,
+            sourceOutUs: 2_000_000,
+          },
+        ]),
+      ).toThrow(`${field} are trim amounts, not source positions`);
+    },
+  );
+
   it('exposes bounded domain tools without granting them a default executor', async () => {
     const readBrief = vi.fn(async () => ({ request: 'brief' }));
     const tools = createJoyAgentTools(bridge({ readBrief }));

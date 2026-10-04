@@ -1206,7 +1206,7 @@ export function JoyAgentSettingsDialog({
                     <div className="joy-preset-text">
                       <strong>Dual-Brain Studio</strong>
                       <span>
-                        Workhorse (openrouter/free) + Creative (Dola Seed 2.0 Pro, vision)
+                        Workhorse (openrouter/free) + Creative (kilo/kilo-auto/free default)
                       </span>
                     </div>
                     <span className="joy-preset-tag">Recommended</span>

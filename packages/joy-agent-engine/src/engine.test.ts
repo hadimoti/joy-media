@@ -141,6 +141,55 @@ describe('JOY Agent bounded model loop', () => {
     });
   });
 
+  it('nudges once after a silent read_frame and returns partial when no plan is submitted', async () => {
+    let calls = 0;
+    const promptSnapshots: string[] = [];
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        calls += 1;
+        promptSnapshots.push(JSON.stringify(options.prompt));
+        return {
+          content:
+            calls === 1
+              ? [
+                  {
+                    type: 'tool-call',
+                    toolCallId: 'frame-1',
+                    toolName: 'read_frame',
+                    input: JSON.stringify({ atUs: 0 }),
+                  },
+                ]
+              : [{ type: 'text', text: '' }],
+          finishReason: {
+            unified: calls === 1 ? 'tool-calls' : 'stop',
+            raw: calls === 1 ? 'tool_calls' : 'stop',
+          },
+          usage: {
+            inputTokens: { total: 2, noCache: 2, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 0, text: 0, reasoning: undefined },
+          },
+          warnings: [],
+          response: { modelId: 'mock-vision-model' },
+        };
+      },
+    });
+    const silentBridge: JoyAgentToolBridge = {
+      ...bridge,
+      hasSubmittedPlan: () => false,
+      readFrame: async () => ({ mediaType: 'image/jpeg', base64: 'ZmFrZQ==', width: 1, height: 1 }),
+    };
+    const engine = new JoyAgentEngine({
+      model,
+      bridge: silentBridge,
+      allowFrames: true,
+      vision: true,
+    });
+    const result = await engine.run(request);
+    expect(calls).toBe(3);
+    expect(promptSnapshots[2]).toContain('Call submit_plan');
+    expect(result).toMatchObject({ status: 'partial', partialReason: 'no-plan', text: '' });
+  });
+
   it('returns partial when a mocked model keeps using tools through the adaptive step budget', async () => {
     let callIndex = 0;
     const model = new MockLanguageModelV3({
