@@ -8,7 +8,11 @@ import {
 } from '@joy-media/joy-agent-engine';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { c, logInfo, logStep, logSuccess, logWarn } from '../utils/logger.js';
-import { CliJoyAgentToolBridge, type StagedOperationsSummary } from './bridge.js';
+import {
+  CliJoyAgentToolBridge,
+  type AppliedTimelineSummary,
+  type StagedOperationsSummary,
+} from './bridge.js';
 import {
   createModelFromConfig,
   resolveByokConfig,
@@ -37,6 +41,7 @@ export interface RunAgentOutput {
   readonly updatedProject: JoyProjectV1;
   readonly appliedCount: number;
   readonly errors: string[];
+  readonly placementSummary?: AppliedTimelineSummary;
   readonly resolvedModelId?: string;
 }
 
@@ -128,8 +133,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     vision:
       options.vision === true ||
       config.vision === true ||
-      (config.provider === 'kilo' &&
-        KILO_MODEL_PRESETS.some((preset) => preset.id === config.modelId && preset.vision)),
+      KILO_MODEL_PRESETS.some((preset) => preset.id === config.modelId && preset.vision),
     onEvent: eventLogger,
     apiKeyForRedaction: config.apiKey,
   });
@@ -162,6 +166,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
   let appliedCount = 0;
   let errors: string[] = [];
   let applied = false;
+  let placementSummary: AppliedTimelineSummary | undefined;
 
   if (options.apply) {
     logInfo('Applying staged operations to project...');
@@ -169,6 +174,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     updatedProject = applyRes.updatedProject;
     appliedCount = applyRes.appliedCount;
     errors = applyRes.errors;
+    placementSummary = applyRes.placementSummary;
     applied = applyRes.errors.length === 0;
     if (errors.length > 0) {
       logWarn(
@@ -189,6 +195,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     updatedProject,
     appliedCount,
     errors,
+    ...(placementSummary === undefined ? {} : { placementSummary }),
     ...(runResult.resolvedModelId ? { resolvedModelId: runResult.resolvedModelId } : {}),
   };
 }
