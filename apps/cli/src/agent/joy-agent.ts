@@ -322,13 +322,13 @@ function parseRequestIntent(request: string): RequestIntent {
       ),
   };
   const range =
-    /(?:from\s+)?(\d+(?:\.\d+)?)\s*(?:s|sec(?:onds?)?)?\s*(?:to|[-–])\s*(\d+(?:\.\d+)?)\s*(?:s|sec(?:onds?)?)?/i.exec(
+    /(?:from\s+)?(\d+(?:\.\d+)?)\s*(?:s|sec(?:onds?)?)?\s*(?:to|تا|[-–])\s*(\d+(?:\.\d+)?)\s*(?:s|sec(?:onds?)?)?/i.exec(
       normalized,
     );
   if (
     range?.[1] &&
     range[2] &&
-    /\b(trim|cut|source)\b|\bkeep\s+(?:only\b|source\b|(?:the\s+)?(?:part|section|range)\s+(?:from|between)\b)/i.test(
+    /\b(trim|cut|source)\b|\bkeep\s+(?:only\b|source\b|(?:the\s+)?(?:part|section|range)\s+(?:from|between)\b)|برش|منبع|(?:کلیپ|منبع).{0,40}نگه[\s\u200c]*دار|نگه[\s\u200c]*دار.{0,40}(?:کلیپ|منبع)/i.test(
       normalized,
     )
   )

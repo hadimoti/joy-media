@@ -211,6 +211,22 @@ describe('truthfulAgentSummary', () => {
     });
   });
 
+  it('requires a trim for Persian clip ranges described with برش', () => {
+    const project = createDefaultProject('Persian trim intent', { id: 'persian-trim-intent' });
+    expect(verifyRequestIntent(project, 'کلیپ را از 7 تا 17 ثانیه برش بده')).toEqual({
+      verified: [],
+      unmet: ['request asked for source trim 7000000–17000000 µs'],
+    });
+    expect(verifyRequestIntent(project, 'بازه 7 تا 17 ثانیه را برای کلیپ نگه‌دار')).toEqual({
+      verified: [],
+      unmet: ['request asked for source trim 7000000–17000000 µs'],
+    });
+    expect(verifyRequestIntent(project, 'عنوان را از 7 تا 17 ثانیه نگه دار')).toEqual({
+      verified: [],
+      unmet: [],
+    });
+  });
+
   it('maps applied operations by id when an earlier proposal failed', () => {
     const summary = truthfulAgentSummary({
       applyRequested: true,
