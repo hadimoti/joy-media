@@ -1,5 +1,8 @@
 export interface MediaTelegramSenderOptions {
   readonly botToken: string;
+  readonly fetchImpl?: typeof fetch;
+  readonly stickerTimeoutMs?: number;
+  readonly messageTimeoutMs?: number;
 }
 
 export interface MediaTelegramSenderLike {
@@ -12,6 +15,19 @@ export interface MediaTelegramSenderLike {
 const OTP_LOGO_STICKER_FILE_ID = 'CAACAgQAAxkBAAFQhQ1qawkzrgwBMqsn8vR8GSLNjwJpugACKR8AAmEkWFM';
 const OTP_PREMIUM_EMOJI_ID = '6003380332865262018';
 
+export class TelegramOtpRejectedError extends Error {
+  readonly code = 'ETELEGRAM_REJECTED';
+
+  constructor() {
+    super('Telegram rejected the OTP message');
+    this.name = 'TelegramOtpRejectedError';
+  }
+}
+
+export function isDefiniteTelegramRejection(error: unknown): boolean {
+  return error instanceof TelegramOtpRejectedError;
+}
+
 /**
  * Minimal Telegram Bot API sender for one-way OTP delivery. The recipient must
  * have already started a chat with this bot at least once (Telegram requires a
@@ -19,9 +35,15 @@ const OTP_PREMIUM_EMOJI_ID = '6003380332865262018';
  */
 export class MediaTelegramSender implements MediaTelegramSenderLike {
   private readonly botToken: string;
+  private readonly fetchImpl: typeof fetch;
+  private readonly stickerTimeoutMs: number;
+  private readonly messageTimeoutMs: number;
 
   constructor(options: MediaTelegramSenderOptions) {
     this.botToken = options.botToken;
+    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.stickerTimeoutMs = Math.max(1, options.stickerTimeoutMs ?? 5_000);
+    this.messageTimeoutMs = Math.max(1, options.messageTimeoutMs ?? 10_000);
   }
 
   async sendOtp(telegramId: string, code: string): Promise<void> {
@@ -44,21 +66,32 @@ export class MediaTelegramSender implements MediaTelegramSenderLike {
       inline_keyboard: [[{ text: 'Copy code', copy_text: { text: code } }]],
     };
 
-    const ok = await this.sendMessage(telegramId, withEmoji, replyMarkup);
-    if (ok) return;
+    const deadlineAt = Date.now() + this.messageTimeoutMs;
+    const tryMessage = async (
+      text: string,
+      markup?: { readonly inline_keyboard: ReadonlyArray<ReadonlyArray<object>> },
+    ) => this.sendMessage(telegramId, text, markup, deadlineAt);
 
-    const okFallback = await this.sendMessage(telegramId, fallback, replyMarkup);
-    if (okFallback) return;
-
-    const plainOk = await this.sendMessage(telegramId, fallback);
-    if (!plainOk) {
-      throw new Error('Telegram sendMessage failed');
+    try {
+      await tryMessage(withEmoji, replyMarkup);
+      return;
+    } catch (error) {
+      if (!isDefiniteTelegramRejection(error)) throw error;
     }
+
+    try {
+      await tryMessage(fallback, replyMarkup);
+      return;
+    } catch (error) {
+      if (!isDefiniteTelegramRejection(error)) throw error;
+    }
+
+    await tryMessage(fallback);
   }
 
   async fetchProfilePhoto(telegramId: string): Promise<Buffer | undefined> {
     try {
-      const listResponse = await fetch(
+      const listResponse = await this.fetchImpl(
         `https://api.telegram.org/bot${this.botToken}/getUserProfilePhotos`,
         {
           method: 'POST',
@@ -78,11 +111,14 @@ export class MediaTelegramSender implements MediaTelegramSenderLike {
       const fileId = sizes?.[sizes.length - 1]?.file_id;
       if (fileId === undefined) return undefined;
 
-      const fileResponse = await fetch(`https://api.telegram.org/bot${this.botToken}/getFile`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ file_id: fileId }),
-      });
+      const fileResponse = await this.fetchImpl(
+        `https://api.telegram.org/bot${this.botToken}/getFile`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ file_id: fileId }),
+        },
+      );
       if (!fileResponse.ok) return undefined;
       const fileBody = (await fileResponse.json()) as {
         readonly result?: { readonly file_path?: string };
@@ -90,7 +126,7 @@ export class MediaTelegramSender implements MediaTelegramSenderLike {
       const filePath = fileBody.result?.file_path;
       if (filePath === undefined || filePath.length === 0) return undefined;
 
-      const bytesResponse = await fetch(
+      const bytesResponse = await this.fetchImpl(
         `https://api.telegram.org/file/bot${this.botToken}/${filePath}`,
       );
       if (!bytesResponse.ok) return undefined;
@@ -103,9 +139,10 @@ export class MediaTelegramSender implements MediaTelegramSenderLike {
 
   private async sendStickerBestEffort(telegramId: string): Promise<void> {
     try {
-      await fetch(`https://api.telegram.org/bot${this.botToken}/sendSticker`, {
+      await this.fetchImpl(`https://api.telegram.org/bot${this.botToken}/sendSticker`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
+        signal: AbortSignal.timeout(this.stickerTimeoutMs),
         body: JSON.stringify({
           chat_id: telegramId,
           sticker: OTP_LOGO_STICKER_FILE_ID,
@@ -120,7 +157,8 @@ export class MediaTelegramSender implements MediaTelegramSenderLike {
     telegramId: string,
     text: string,
     replyMarkup?: { readonly inline_keyboard: ReadonlyArray<ReadonlyArray<object>> },
-  ): Promise<boolean> {
+    deadlineAt = Date.now() + this.messageTimeoutMs,
+  ): Promise<void> {
     const body: Record<string, unknown> = {
       chat_id: telegramId,
       text,
@@ -128,11 +166,19 @@ export class MediaTelegramSender implements MediaTelegramSenderLike {
     };
     if (replyMarkup !== undefined) body.reply_markup = replyMarkup;
 
-    const response = await fetch(`https://api.telegram.org/bot${this.botToken}/sendMessage`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    return response.ok;
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs <= 0) throw new DOMException('Telegram OTP send timed out', 'TimeoutError');
+    const response = await this.fetchImpl(
+      `https://api.telegram.org/bot${this.botToken}/sendMessage`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(remainingMs),
+      },
+    );
+    const result = (await response.json().catch(() => undefined)) as
+      { readonly ok?: boolean } | undefined;
+    if (!response.ok || result?.ok === false) throw new TelegramOtpRejectedError();
   }
 }
