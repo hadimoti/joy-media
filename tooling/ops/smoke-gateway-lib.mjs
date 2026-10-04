@@ -1,20 +1,55 @@
+import http from 'node:http';
 import https from 'node:https';
+import { existsSync, readFileSync } from 'node:fs';
+import { isIP } from 'node:net';
+
+const DEFAULT_CA_PATH = '/etc/ssl/joyst/origincertificate.pem';
 
 export function parseSmokeArgs(argv, env = process.env) {
-  let baseUrl = env.JOY_GATEWAY_BASE_URL ?? 'https://127.0.0.1/api/v1/agent';
+  let baseUrl = env.JOY_GATEWAY_BASE_URL ?? 'https://joyst.ir/api/v1/agent';
   let host = env.JOY_GATEWAY_HOST ?? 'joyst.ir';
-  let preCutover = false;
+  let edgeAddr = env.JOY_MEDIA_EDGE_ADDR;
+  let caPath = env.JOY_MEDIA_CA_FILE ?? env.NODE_EXTRA_CA_CERTS;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === '--pre-cutover') preCutover = true;
-    else if (arg === '--base-url' && argv[index + 1]) baseUrl = argv[++index];
+    if (arg === '--base-url' && argv[index + 1]) baseUrl = argv[++index];
     else if (arg === '--host' && argv[index + 1]) host = argv[++index];
+    else if (arg === '--edge-addr' && argv[index + 1]) edgeAddr = argv[++index];
+    else if (arg === '--ca' && argv[index + 1]) caPath = argv[++index];
     else throw new Error(`Unknown or incomplete smoke argument: ${arg}`);
   }
   const url = new URL(baseUrl);
-  if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname.toLowerCase()))
-    throw new Error('Gateway smoke base URL must target a loopback host.');
-  return { baseUrl: url.toString().replace(/\/$/, ''), host, preCutover };
+  if (!['http:', 'https:'].includes(url.protocol))
+    throw new Error('Gateway smoke base URL must use HTTP or HTTPS.');
+  if (url.protocol === 'https:') {
+    if (!edgeAddr)
+      throw new Error('JOY_MEDIA_EDGE_ADDR or --edge-addr is required for HTTPS smoke.');
+    edgeAddr = normalizeIpLiteral(edgeAddr);
+  }
+  if (!caPath && existsSync(DEFAULT_CA_PATH)) caPath = DEFAULT_CA_PATH;
+  if (caPath && !existsSync(caPath)) throw new Error(`CA file does not exist: ${caPath}`);
+  return { baseUrl: url.toString().replace(/\/$/, ''), host, edgeAddr, caPath };
+}
+
+export function normalizeIpLiteral(value) {
+  const normalized = value.startsWith('[') && value.endsWith(']') ? value.slice(1, -1) : value;
+  if (!isIP(normalized))
+    throw new Error(`Gateway smoke edge address must be an IP address: ${value}`);
+  return normalized;
+}
+
+export function modelsCatalogIssue(response) {
+  try {
+    const parsed = typeof response === 'string' ? JSON.parse(response) : response;
+    const models = parsed?.models;
+    if (!Array.isArray(models)) return 'GET /models response is not JSON with a models array.';
+    const ids = models.map((model) => model?.id);
+    if (ids.length !== 1 || ids[0] !== 'openrouter/free')
+      return 'GET /models must list only openrouter/free.';
+    return undefined;
+  } catch {
+    return 'GET /models response is not valid JSON.';
+  }
 }
 
 export async function requestGateway(baseUrl, path, options = {}, host = 'joyst.ir', tls = {}) {
@@ -25,16 +60,19 @@ export async function requestGateway(baseUrl, path, options = {}, host = 'joyst.
     const deadline = setTimeout(() => {
       request.destroy(new Error('Gateway smoke request timed out'));
     }, 10_000);
-    const request = https.request(
+    const transport = base.protocol === 'https:' ? https : http;
+    const request = transport.request(
       {
-        protocol: 'https:',
-        hostname: base.hostname,
-        port: base.port || 443,
+        protocol: base.protocol,
+        hostname: tls.edgeAddr ?? base.hostname,
+        port: base.port || (base.protocol === 'https:' ? 443 : 80),
         method: options.method ?? 'GET',
         path: `${pathname}${base.search}`,
         servername: host,
         headers: { ...(options.headers ?? {}), Host: host },
-        ...(tls.ca === undefined ? {} : { ca: tls.ca }),
+        ...(base.protocol !== 'https:' || tls.ca === undefined
+          ? {}
+          : { ca: Buffer.isBuffer(tls.ca) ? tls.ca : readFileSync(tls.ca) }),
       },
       (incoming) => {
         const chunks = [];

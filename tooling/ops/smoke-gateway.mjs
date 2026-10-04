@@ -1,4 +1,9 @@
-import { classifyKeyCheck, parseSmokeArgs, requestGateway } from './smoke-gateway-lib.mjs';
+import {
+  classifyKeyCheck,
+  modelsCatalogIssue,
+  parseSmokeArgs,
+  requestGateway,
+} from './smoke-gateway-lib.mjs';
 
 let options;
 try {
@@ -8,7 +13,8 @@ try {
   process.exit(2);
 }
 
-const prefix = options.preCutover ? 'Pre-cutover' : 'Gateway';
+const prefix = 'Gateway';
+const tls = { edgeAddr: options.edgeAddr, ca: options.caPath };
 try {
   const root = options.baseUrl.replace(/\/+$/, '');
   const catalog = await requestGateway(
@@ -16,13 +22,30 @@ try {
     '/models',
     { headers: { accept: 'application/json' } },
     options.host,
+    tls,
   );
   if (catalog.status !== 200) {
     console.error(
       `${prefix}: expected unauthenticated GET /models to return 200; received ${catalog.status}.`,
     );
     process.exitCode = 1;
-  } else console.log(`${prefix}: unauthenticated GET /models returned 200.`);
+  } else {
+    let catalogBody;
+    try {
+      catalogBody = await catalog.json();
+    } catch {
+      catalogBody = undefined;
+    }
+    const issue =
+      catalogBody === undefined
+        ? 'GET /models response is not valid JSON.'
+        : modelsCatalogIssue(catalogBody);
+    if (issue) {
+      console.error(`${prefix}: ${issue}`);
+      process.exitCode = 1;
+    } else
+      console.log(`${prefix}: unauthenticated GET /models returned 200 (openrouter/free only).`);
+  }
 
   const chat = await requestGateway(
     root,
@@ -33,6 +56,7 @@ try {
       body: '{}',
     },
     options.host,
+    tls,
   );
   const keyIssue = await classifyKeyCheck(chat);
   if (keyIssue) {
