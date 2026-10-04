@@ -45,7 +45,11 @@ import {
   type SerializedGpuPreviewFrameResponse,
 } from './gpu-preview-transport.js';
 import type { GpuPreviewFrameRequest } from '@joy-media/job-protocol';
-import { createClientAddressResolver, type ClientAddressResolver } from './client-address.js';
+import {
+  clientAddressKey,
+  createClientAddressResolver,
+  type ClientAddressResolver,
+} from './client-address.js';
 import { attachDbQueryCountHeader, withDbQueryContext } from './db-query-observability.js';
 import {
   ORIGINAL_UPLOAD_PART_BYTES,
@@ -597,6 +601,7 @@ async function route(
       requiredString(body, 'contact'),
       requiredAuthMethod(body),
       requiredString(body, 'code'),
+      request,
     );
     respondJson(response, 200, { data: { token } });
     return;
@@ -2816,7 +2821,7 @@ export function consumeRateLimit(
   clientAddressResolver: ClientAddressResolver,
   maxBuckets = DEFAULT_RATE_LIMIT_MAX_BUCKETS,
 ): boolean {
-  const key = clientAddressResolver(request);
+  const key = clientAddressKey(clientAddressResolver(request));
   const now = Date.now();
   const existing = buckets.get(key);
   if (existing === undefined || now - existing.windowStart >= windowMs) {

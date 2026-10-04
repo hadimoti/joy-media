@@ -2,9 +2,15 @@ import { createHash, createHmac, randomBytes, randomInt } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Pool } from 'pg';
 import type { Actor } from './control-plane.js';
-import { createClientAddressResolver, type ClientAddressResolver } from './client-address.js';
+import {
+  clientAddressKey,
+  createClientAddressResolver,
+  type ClientAddressResolver,
+} from './client-address.js';
 import type { MediaMailerLike } from './media-mailer.js';
+import { isDefiniteSmtpRejection } from './media-mailer.js';
 import type { MediaTelegramSenderLike } from './media-telegram.js';
+import { isDefiniteTelegramRejection } from './media-telegram.js';
 
 export type MediaAuthMethod = 'gmail' | 'telegram';
 
@@ -15,7 +21,9 @@ const OTP_RATE_LIMIT_WINDOW_MS = 10 * 60_000; // 10 minutes
 const OTP_RATE_LIMIT_MAX = 3; // max 3 OTP requests per window per IP
 const OTP_ACCOUNT_RATE_LIMIT_MAX = 5;
 const OTP_ACCOUNT_RATE_LIMIT_MAX_BUCKETS = 10_000;
+const OTP_VERIFY_FAILURE_MAX_BUCKETS = 100_000;
 const OTP_VERIFY_FAILURE_MAX = 5;
+const OTP_VERIFY_CLIENT_FAILURE_MAX = 30;
 const OTP_CONTACT_LOG_HMAC_KEY = randomBytes(32);
 
 export class BoundedOtpRateLimitMap {
@@ -104,6 +112,7 @@ export interface MediaAuthServiceOptions {
   readonly clientAddressResolver?: ClientAddressResolver;
   readonly accountRateLimitMax?: number;
   readonly verifyFailureMaxBuckets?: number;
+  readonly verifyClientFailureMax?: number;
   readonly otpSendConcurrency?: number;
   readonly otpDeliveryTimeoutMs?: number;
 }
@@ -123,7 +132,12 @@ export interface MediaAuthApi {
     method: MediaAuthMethod,
     request?: IncomingMessage,
   ): Promise<{ readonly message: string }>;
-  verifyOtp(contact: string, method: MediaAuthMethod, code: string): Promise<string>;
+  verifyOtp(
+    contact: string,
+    method: MediaAuthMethod,
+    code: string,
+    request?: IncomingMessage,
+  ): Promise<string>;
   logout(token: string): Promise<void>;
   authenticate(request: IncomingMessage): Promise<Actor | undefined>;
   sessionProfile(request: IncomingMessage): Promise<MediaSessionProfile | undefined>;
@@ -146,10 +160,15 @@ export class MediaAuthService implements MediaAuthApi {
   private readonly clientAddressResolver: ClientAddressResolver;
   private readonly accountRateLimitMax: number;
   private readonly verifyFailureMaxBuckets: number;
+  private readonly verifyClientFailureMax: number;
   private readonly otpSendConcurrency: number;
   private readonly otpDeliveryTimeoutMs: number;
   private readonly accountOtpRateLimit = new Map<string, number[]>();
   private readonly verifyFailures = new Map<
+    string,
+    { readonly timestamps: number[]; blockedUntil: number; inFlight: number }
+  >();
+  private readonly verifyClientFailures = new Map<
     string,
     { readonly timestamps: number[]; blockedUntil: number; inFlight: number }
   >();
@@ -166,7 +185,11 @@ export class MediaAuthService implements MediaAuthApi {
     this.accountRateLimitMax = options.accountRateLimitMax ?? OTP_ACCOUNT_RATE_LIMIT_MAX;
     this.verifyFailureMaxBuckets = Math.max(
       1,
-      Math.floor(options.verifyFailureMaxBuckets ?? OTP_ACCOUNT_RATE_LIMIT_MAX_BUCKETS),
+      Math.floor(options.verifyFailureMaxBuckets ?? OTP_VERIFY_FAILURE_MAX_BUCKETS),
+    );
+    this.verifyClientFailureMax = Math.max(
+      1,
+      Math.floor(options.verifyClientFailureMax ?? OTP_VERIFY_CLIENT_FAILURE_MAX),
     );
     this.otpSendConcurrency = Math.max(1, Math.floor(options.otpSendConcurrency ?? 10));
     this.otpDeliveryTimeoutMs = Math.max(1, options.otpDeliveryTimeoutMs ?? 15_000);
@@ -228,7 +251,8 @@ export class MediaAuthService implements MediaAuthApi {
     request?: IncomingMessage,
   ): Promise<{ message: string }> {
     const contact = normalizeContact(rawContact, method);
-    if (request !== undefined) checkOtpRateLimit(this.clientAddressResolver(request));
+    if (request !== undefined)
+      checkOtpRateLimit(clientAddressKey(this.clientAddressResolver(request)));
     checkAccountOtpRateLimit(
       this.accountOtpRateLimit,
       `${method}:${contact}`,
@@ -341,11 +365,16 @@ export class MediaAuthService implements MediaAuthApi {
       if (otp !== undefined) {
         try {
           await this.deliverWithLimit(allowed, method, otp.code);
-        } catch {
-          try {
-            await this.pool.query('DELETE FROM media_otp_codes WHERE id = $1', [otp.id]);
-          } catch {
-            // The generic response is independent of delivery and cleanup failures.
+        } catch (error) {
+          const definitelyRejected =
+            (method === 'gmail' && isDefiniteSmtpRejection(error)) ||
+            (method === 'telegram' && isDefiniteTelegramRejection(error));
+          if (definitelyRejected) {
+            try {
+              await this.pool.query('DELETE FROM media_otp_codes WHERE id = $1', [otp.id]);
+            } catch {
+              // The generic response is independent of delivery and cleanup failures.
+            }
           }
           warnOtpDeliveryFailure(contact);
         }
@@ -353,12 +382,24 @@ export class MediaAuthService implements MediaAuthApi {
     }
   }
 
-  async verifyOtp(rawContact: string, method: MediaAuthMethod, code: string): Promise<string> {
+  async verifyOtp(
+    rawContact: string,
+    method: MediaAuthMethod,
+    code: string,
+    request?: IncomingMessage,
+  ): Promise<string> {
     const contact = normalizeContact(rawContact, method);
     const initialFailureKey = `${method}:${contact}`;
     let reservationKey = initialFailureKey;
-    this.reserveVerifyAttempt(reservationKey);
+    const resolvedClientAddress =
+      request === undefined ? undefined : this.clientAddressResolver(request);
+    const clientKey =
+      resolvedClientAddress === undefined || resolvedClientAddress === 'unknown'
+        ? undefined
+        : clientAddressKey(resolvedClientAddress);
+    this.reserveVerifyAttempt(reservationKey, clientKey);
     let settled = false;
+    let clientSettled = false;
     try {
       const allowed = await this.findAllowed(contact, method);
       const otpContact = allowed ? canonicalOtpContact(contact, method, allowed) : contact;
@@ -371,6 +412,10 @@ export class MediaAuthService implements MediaAuthApi {
       if (allowed === undefined || !allowed.enabled) {
         const failure = this.recordVerifyFailure(reservationKey, otpContact, method);
         settled = true;
+        if (clientKey !== undefined) {
+          this.settleClientVerifyFailure(clientKey);
+          clientSettled = true;
+        }
         const blocked = await failure;
         throw blocked ? tooManyVerifyAttemptsError() : invalidOtpError();
       }
@@ -388,6 +433,10 @@ export class MediaAuthService implements MediaAuthApi {
       if (result.rows.length === 0) {
         const failure = this.recordVerifyFailure(reservationKey, otpContact, method);
         settled = true;
+        if (clientKey !== undefined) {
+          this.settleClientVerifyFailure(clientKey);
+          clientSettled = true;
+        }
         const blocked = await failure;
         throw blocked ? tooManyVerifyAttemptsError() : invalidOtpError();
       }
@@ -400,10 +449,14 @@ export class MediaAuthService implements MediaAuthApi {
       );
       this.settleVerifySuccess(reservationKey);
       settled = true;
+      if (clientKey !== undefined) this.releaseVerifyBucket(this.verifyClientFailures, clientKey);
+      clientSettled = true;
       this.accountOtpRateLimit.delete(`${method}:${otpContact}`);
       return token;
     } finally {
       if (!settled) this.releaseVerifyAttempt(reservationKey);
+      if (!clientSettled && clientKey !== undefined)
+        this.releaseVerifyBucket(this.verifyClientFailures, clientKey);
     }
   }
 
@@ -436,12 +489,28 @@ export class MediaAuthService implements MediaAuthApi {
     return canonicalKey;
   }
 
-  private reserveVerifyAttempt(key: string): void {
+  private reserveVerifyAttempt(key: string, clientKey?: string): void {
+    if (clientKey !== undefined)
+      this.reserveVerifyBucket(this.verifyClientFailures, clientKey, this.verifyClientFailureMax);
+    try {
+      this.reserveVerifyBucket(this.verifyFailures, key, OTP_VERIFY_FAILURE_MAX);
+    } catch (error) {
+      if (clientKey !== undefined) this.releaseVerifyBucket(this.verifyClientFailures, clientKey);
+      throw error;
+    }
+  }
+
+  private reserveVerifyBucket(
+    buckets: Map<string, { readonly timestamps: number[]; blockedUntil: number; inFlight: number }>,
+    key: string,
+    limit: number,
+  ): void {
     const now = Date.now();
-    let bucket = this.verifyFailures.get(key);
+    let bucket = buckets.get(key);
     if (bucket !== undefined && bucket.blockedUntil > now) throw tooManyVerifyAttemptsError();
     if (bucket === undefined) {
-      if (!this.makeRoomForVerifyBucket(now)) throw tooManyVerifyAttemptsError();
+      if (!this.makeRoomForVerifyBucket(now, undefined, buckets))
+        throw tooManyVerifyAttemptsError();
       bucket = { timestamps: [], blockedUntil: 0, inFlight: 0 };
     }
     if (bucket.blockedUntil > 0) {
@@ -452,16 +521,19 @@ export class MediaAuthService implements MediaAuthApi {
       (timestamp) => now - timestamp < OTP_RATE_LIMIT_WINDOW_MS,
     );
     bucket.timestamps.splice(0, bucket.timestamps.length, ...recent);
-    if (bucket.timestamps.length + bucket.inFlight >= OTP_VERIFY_FAILURE_MAX)
-      throw tooManyVerifyAttemptsError();
+    if (bucket.timestamps.length + bucket.inFlight >= limit) throw tooManyVerifyAttemptsError();
     bucket.inFlight += 1;
-    this.touchVerifyBucket(key, bucket);
+    this.touchVerifyBucket(key, bucket, buckets);
   }
 
-  private makeRoomForVerifyBucket(now: number, protectedKey?: string): boolean {
-    if (this.verifyFailures.size < this.verifyFailureMaxBuckets) return true;
-    const entriesToScan = this.verifyFailures.size;
-    const entries = this.verifyFailures.entries();
+  private makeRoomForVerifyBucket(
+    now: number,
+    protectedKey?: string,
+    buckets = this.verifyFailures,
+  ): boolean {
+    if (buckets.size < this.verifyFailureMaxBuckets) return true;
+    const entriesToScan = buckets.size;
+    const entries = buckets.entries();
     for (let index = 0; index < entriesToScan; index += 1) {
       const entry = entries.next().value as
         | [string, { readonly timestamps: number[]; blockedUntil: number; inFlight: number }]
@@ -470,11 +542,11 @@ export class MediaAuthService implements MediaAuthApi {
       const [key, bucket] = entry;
       if (key === protectedKey || bucket.inFlight > 0 || bucket.blockedUntil > now) {
         // Rotate protected entries so a later idle bucket is considered first next time.
-        this.touchVerifyBucket(key, bucket);
+        this.touchVerifyBucket(key, bucket, buckets);
         continue;
       }
       // Map order is LRU: idle, unblocked failures appear before newer protected entries.
-      this.verifyFailures.delete(key);
+      buckets.delete(key);
       return true;
     }
     return false;
@@ -483,18 +555,37 @@ export class MediaAuthService implements MediaAuthApi {
   private touchVerifyBucket(
     key: string,
     bucket: { readonly timestamps: number[]; blockedUntil: number; inFlight: number },
+    buckets = this.verifyFailures,
   ): void {
-    this.verifyFailures.delete(key);
-    this.verifyFailures.set(key, bucket);
+    buckets.delete(key);
+    buckets.set(key, bucket);
   }
 
   private releaseVerifyAttempt(key: string): void {
-    const bucket = this.verifyFailures.get(key);
+    this.releaseVerifyBucket(this.verifyFailures, key);
+  }
+
+  private releaseVerifyBucket(
+    buckets: Map<string, { readonly timestamps: number[]; blockedUntil: number; inFlight: number }>,
+    key: string,
+  ): void {
+    const bucket = buckets.get(key);
     if (bucket === undefined) return;
     bucket.inFlight = Math.max(0, bucket.inFlight - 1);
     if (bucket.inFlight === 0 && bucket.timestamps.length === 0 && bucket.blockedUntil === 0)
-      this.verifyFailures.delete(key);
-    else this.touchVerifyBucket(key, bucket);
+      buckets.delete(key);
+    else this.touchVerifyBucket(key, bucket, buckets);
+  }
+
+  private settleClientVerifyFailure(key: string): void {
+    const bucket = this.verifyClientFailures.get(key);
+    if (bucket === undefined) return;
+    const now = Date.now();
+    bucket.inFlight = Math.max(0, bucket.inFlight - 1);
+    bucket.timestamps.push(now);
+    if (bucket.timestamps.length >= this.verifyClientFailureMax)
+      bucket.blockedUntil = now + OTP_RATE_LIMIT_WINDOW_MS;
+    this.touchVerifyBucket(key, bucket, this.verifyClientFailures);
   }
 
   private settleVerifySuccess(key: string): void {

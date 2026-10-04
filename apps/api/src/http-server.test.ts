@@ -73,6 +73,25 @@ describe('control-plane HTTP transport', () => {
     expect(buckets.has('ip-0')).toBe(false);
   });
 
+  it('shares API rate-limit buckets across IPv6 /64 and IPv4-mapped addresses', () => {
+    const buckets = new Map<string, { windowStart: number; count: number }>();
+    const resolveAddress = (incoming: IncomingMessage) =>
+      String(incoming.headers['x-test-ip'] ?? 'unknown');
+    const request = (address: string) =>
+      ({ headers: { 'x-test-ip': address } }) as unknown as IncomingMessage;
+
+    expect(consumeRateLimit(request('2001:db8:1:2::1'), buckets, 60_000, 1, resolveAddress)).toBe(
+      true,
+    );
+    expect(consumeRateLimit(request('2001:db8:1:2::2'), buckets, 60_000, 1, resolveAddress)).toBe(
+      false,
+    );
+    expect(consumeRateLimit(request('::ffff:192.0.2.4'), buckets, 60_000, 1, resolveAddress)).toBe(
+      true,
+    );
+    expect(consumeRateLimit(request('192.0.2.4'), buckets, 60_000, 1, resolveAddress)).toBe(false);
+  });
+
   it('starts a bounded OTP send drain when the HTTP server closes', async () => {
     const mediaAuth = new DisabledMediaAuth();
     const drain = vi.spyOn(mediaAuth, 'drainPendingOtpSends');

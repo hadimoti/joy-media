@@ -7,6 +7,61 @@ const MAX_TRUSTED_PROXY_ADDRESSES = 64;
 
 export type ClientAddressResolver = (request: IncomingMessage) => string;
 
+/** Stable abuse-control key: IPv4 as-is, IPv4-mapped IPv6 as IPv4, other IPv6 by /64. */
+export function clientAddressKey(value: string): string {
+  const address = value.trim().split('%', 1)[0] ?? '';
+  const version = isIP(address);
+  if (version === 4) return address;
+  if (version !== 6) return value;
+
+  const normalized = address.toLowerCase();
+  const dottedMatch = normalized.match(/(\d+\.\d+\.\d+\.\d+)$/);
+  const expandedInput = dottedMatch
+    ? normalized.replace(/\d+\.\d+\.\d+\.\d+$/, (ipv4) => {
+        const octets = ipv4.split('.').map(Number);
+        return `${(((octets[0] ?? 0) << 8) | (octets[1] ?? 0)).toString(16)}:${(((octets[2] ?? 0) << 8) | (octets[3] ?? 0)).toString(16)}`;
+      })
+    : normalized;
+  const [leftText = '', rightText] = expandedInput.split('::');
+  const left = leftText.length === 0 ? [] : leftText.split(':');
+  const right = rightText === undefined || rightText.length === 0 ? [] : rightText.split(':');
+  const missing = 8 - left.length - right.length;
+  if (missing < 0 || (rightText === undefined && missing !== 0)) return value;
+  const groups = [...left, ...Array.from({ length: missing }, () => '0'), ...right].map((group) =>
+    Number.parseInt(group, 16),
+  );
+  if (groups.length !== 8 || groups.some((group) => !Number.isInteger(group))) return value;
+
+  if (groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff) {
+    const high = groups[6] ?? 0;
+    const low = groups[7] ?? 0;
+    return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
+  }
+
+  const networkGroups = [...groups.slice(0, 4), 0, 0, 0, 0];
+  let bestStart = -1;
+  let bestLength = 1;
+  for (let index = 0; index < networkGroups.length;) {
+    if (networkGroups[index] !== 0) {
+      index += 1;
+      continue;
+    }
+    let end = index;
+    while (end < networkGroups.length && networkGroups[end] === 0) end += 1;
+    if (end - index > bestLength) {
+      bestStart = index;
+      bestLength = end - index;
+    }
+    index = end;
+  }
+  const hexGroups = networkGroups.map((group) => group!.toString(16));
+  const prefix =
+    bestStart < 0
+      ? hexGroups.join(':')
+      : `${hexGroups.slice(0, bestStart).join(':')}::${hexGroups.slice(bestStart + bestLength).join(':')}`;
+  return `${prefix}/64`;
+}
+
 export interface ClientAddressResolverOptions {
   /** Exact IP addresses of reverse proxies allowed to supply X-Forwarded-For. */
   readonly trustedProxyAddresses?: readonly string[];

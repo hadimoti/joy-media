@@ -1,8 +1,24 @@
 import type { IncomingMessage } from 'node:http';
 import { describe, expect, it } from 'vitest';
-import { createClientAddressResolver, trustedProxyAddressesFromEnv } from './client-address.js';
+import {
+  clientAddressKey,
+  createClientAddressResolver,
+  trustedProxyAddressesFromEnv,
+} from './client-address.js';
 
 describe('client address resolution', () => {
+  it.each([
+    ['192.0.2.4', '192.0.2.4'],
+    ['::ffff:192.0.2.4', '192.0.2.4'],
+    ['::FFFF:C000:0204', '192.0.2.4'],
+    ['2001:DB8:1:2::abcd', '2001:db8:1:2::/64'],
+    ['2001:0db8:0001:0002:0000:0000:0000:abcd', '2001:db8:1:2::/64'],
+    ['2001:db8:1:2::abcd%eth0', '2001:db8:1:2::/64'],
+    ['not-an-ip', 'not-an-ip'],
+  ])('maps client address %s to key %s', (address, expected) => {
+    expect(clientAddressKey(address)).toBe(expected);
+  });
+
   it('ignores spoofed forwarding headers from an untrusted direct peer', () => {
     const resolve = createClientAddressResolver();
     expect(resolve(request('203.0.113.10', '198.51.100.7'))).toBe('203.0.113.10');

@@ -15,6 +15,7 @@ async function service(
     mailer?: { sendOtp: ReturnType<typeof vi.fn> } | undefined;
     accountRateLimitMax?: number;
     verifyFailureMaxBuckets?: number;
+    verifyClientFailureMax?: number;
     otpSendConcurrency?: number;
     otpDeliveryTimeoutMs?: number;
   } = {},
@@ -35,6 +36,9 @@ async function service(
     ...(overrides.verifyFailureMaxBuckets === undefined
       ? {}
       : { verifyFailureMaxBuckets: overrides.verifyFailureMaxBuckets }),
+    ...(overrides.verifyClientFailureMax === undefined
+      ? {}
+      : { verifyClientFailureMax: overrides.verifyClientFailureMax }),
     ...(overrides.otpSendConcurrency === undefined
       ? {}
       : { otpSendConcurrency: overrides.otpSendConcurrency }),
@@ -57,12 +61,77 @@ function sentCode(mailer: { sendOtp: ReturnType<typeof vi.fn> }): string {
 }
 
 describe('MediaAuthService', () => {
-  it('keeps the production verify-failure bucket cap at 10,000 by default', async () => {
+  it('keeps the production verify-failure bucket cap at 100,000 by default', async () => {
     const { auth } = await service();
 
     expect((auth as unknown as { verifyFailureMaxBuckets: number }).verifyFailureMaxBuckets).toBe(
-      10_000,
+      100_000,
     );
+  });
+
+  it('limits a client before it can allocate more contact failure buckets', async () => {
+    const { auth } = await service({ verifyFailureMaxBuckets: 20, verifyClientFailureMax: 2 });
+    const client = (address: string) => ({ socket: { remoteAddress: address } }) as never;
+    await auth
+      .verifyOtp('junk-a@example.invalid', 'gmail', '000000', client('198.51.100.9'))
+      .catch(() => undefined);
+    await auth
+      .verifyOtp('junk-b@example.invalid', 'gmail', '000000', client('198.51.100.9'))
+      .catch(() => undefined);
+    const failures = (auth as unknown as { verifyFailures: Map<string, unknown> }).verifyFailures;
+    const sizeAtLimit = failures.size;
+
+    await expect(
+      auth.verifyOtp('junk-c@example.invalid', 'gmail', '000000', client('198.51.100.9')),
+    ).rejects.toMatchObject({ code: 'TOO_MANY_ATTEMPTS' });
+    expect(failures.size).toBe(sizeAtLimit);
+  });
+
+  it('allows a different client to log in after distributed failures below each client limit', async () => {
+    const { auth, mailer } = await service({
+      verifyFailureMaxBuckets: 4,
+      verifyClientFailureMax: 6,
+    });
+    await auth.addAllowed({ gmail: 'legitimate@example.com', addedBy: 'admin' });
+    await auth.requestOtp('legitimate@example.com', 'gmail');
+    await auth.drainPendingOtpSends();
+    const clients = Array.from(
+      { length: 5 },
+      (_, index) => ({ socket: { remoteAddress: `198.51.100.${index + 1}` } }) as never,
+    );
+    for (let contact = 0; contact < 3; contact += 1) {
+      for (let guess = 0; guess < 5; guess += 1) {
+        const client = clients[guess % clients.length]!;
+        await auth
+          .verifyOtp(`junk-${contact}@example.invalid`, 'gmail', '000000', client)
+          .catch(() => undefined);
+      }
+    }
+
+    await expect(
+      auth.verifyOtp('legitimate@example.com', 'gmail', sentCode(mailer), {
+        socket: { remoteAddress: '203.0.113.20' },
+      } as never),
+    ).resolves.toEqual(expect.any(String));
+  });
+
+  it('shares verify-failure limits across IPv6 addresses in one /64 and IPv4-mapped addresses', async () => {
+    const { auth } = await service({ verifyClientFailureMax: 1 });
+    const request = (address: string) => ({ socket: { remoteAddress: address } }) as never;
+    await auth
+      .verifyOtp('first@example.invalid', 'gmail', '000000', request('2001:db8:1:2::1'))
+      .catch(() => undefined);
+    await expect(
+      auth.verifyOtp('second@example.invalid', 'gmail', '000000', request('2001:db8:1:2::2')),
+    ).rejects.toMatchObject({ code: 'TOO_MANY_ATTEMPTS' });
+
+    const { auth: mappedAuth } = await service({ verifyClientFailureMax: 1 });
+    await mappedAuth
+      .verifyOtp('first@example.invalid', 'gmail', '000000', request('::ffff:1.2.3.4'))
+      .catch(() => undefined);
+    await expect(
+      mappedAuth.verifyOtp('second@example.invalid', 'gmail', '000000', request('1.2.3.4')),
+    ).rejects.toMatchObject({ code: 'TOO_MANY_ATTEMPTS' });
   });
 
   it('prunes expired IP buckets and never exceeds its configured cap', () => {
@@ -222,6 +291,79 @@ describe('MediaAuthService', () => {
     );
   });
 
+  it('keeps an OTP row after an ambiguous SMTP timeout so a late email can still verify', async () => {
+    let capturedCode = '';
+    const mailer = {
+      sendOtp: vi.fn(async (_gmail: string, code: string) => {
+        capturedCode = code;
+        throw Object.assign(new Error('delivery deadline'), { code: 'ETIMEDOUT' });
+      }),
+    };
+    const { auth, db } = await service({ mailer });
+    await auth.addAllowed({ gmail: 'late@example.com', addedBy: 'admin' });
+    await auth.requestOtp('late@example.com', 'gmail');
+    await auth.drainPendingOtpSends();
+    const rows = await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM media_otp_codes WHERE contact = $1 AND used = false',
+      ['late@example.com'],
+    );
+
+    expect(rows.rows[0]?.count).toBe('1');
+    await expect(auth.verifyOtp('late@example.com', 'gmail', capturedCode)).resolves.toEqual(
+      expect.any(String),
+    );
+  });
+
+  it.each([451, 550] as const)(
+    'deletes an OTP row after SMTP explicitly rejects with %s',
+    async (responseCode) => {
+      const mailer = {
+        sendOtp: vi.fn(async () => {
+          throw Object.assign(new Error('SMTP rejected'), { responseCode });
+        }),
+      };
+      const { auth, db } = await service({ mailer });
+      await auth.addAllowed({ gmail: 'rejected@example.com', addedBy: 'admin' });
+      await auth.requestOtp('rejected@example.com', 'gmail');
+      await auth.drainPendingOtpSends();
+      const rows = await db.query<{ count: string }>(
+        'SELECT count(*)::text AS count FROM media_otp_codes WHERE contact = $1 AND used = false',
+        ['rejected@example.com'],
+      );
+      expect(rows.rows[0]?.count).toBe('0');
+    },
+  );
+
+  it('keeps an OTP row after a connection failure with an unknown delivery outcome', async () => {
+    const mailer = {
+      sendOtp: vi.fn(async () => {
+        throw Object.assign(new Error('connection lost'), { code: 'ECONNECTION' });
+      }),
+    };
+    const { auth, db } = await service({ mailer });
+    await auth.addAllowed({ gmail: 'connection@example.com', addedBy: 'admin' });
+    await auth.requestOtp('connection@example.com', 'gmail');
+    await auth.drainPendingOtpSends();
+    const rows = await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM media_otp_codes WHERE contact = $1 AND used = false',
+      ['connection@example.com'],
+    );
+    expect(rows.rows[0]?.count).toBe('1');
+  });
+
+  it('keeps an OTP row after an ambiguous Telegram timeout', async () => {
+    const { auth, db, telegram } = await service();
+    vi.spyOn(telegram, 'sendOtp').mockRejectedValue(new Error('TimeoutError'));
+    await auth.addAllowed({ telegramId: '987654321', addedBy: 'admin' });
+    await auth.requestOtp('987654321', 'telegram');
+    await auth.drainPendingOtpSends();
+    const rows = await db.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM media_otp_codes WHERE contact = $1 AND used = false',
+      ['987654321'],
+    );
+    expect(rows.rows[0]?.count).toBe('1');
+  });
+
   it('holds OTP send concurrency slots until the underlying slow sends settle', async () => {
     let active = 0;
     let maximumActive = 0;
@@ -246,7 +388,7 @@ describe('MediaAuthService', () => {
     expect(maximumActive).toBe(2);
   });
 
-  it('deletes the code only after a send that timed out later rejects', async () => {
+  it('keeps the code when a delivery deadline wins before the send later rejects', async () => {
     const mailer = {
       sendOtp: vi.fn(async () => {
         await new Promise((resolve) => setTimeout(resolve, 30));
@@ -261,13 +403,13 @@ describe('MediaAuthService', () => {
     const rows = await db.query('SELECT id FROM media_otp_codes WHERE contact = $1', [
       'late-failure@example.com',
     ]);
-    expect(rows.rows).toEqual([]);
+    expect(rows.rows).toHaveLength(1);
   });
 
   it('deletes failed delivery rows by id so repeated failures leave no active OTPs', async () => {
     const failingMailer = {
       sendOtp: vi.fn(async () => {
-        throw new Error('smtp failure');
+        throw Object.assign(new Error('smtp rejected'), { code: 'EAUTH' });
       }),
     };
     const { auth, db } = await service({ mailer: failingMailer, accountRateLimitMax: 10 });
@@ -729,6 +871,23 @@ describe('MediaAuthService', () => {
     ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
     await auth.drainPendingOtpSends();
     expect(mailer.sendOtp).toHaveBeenCalledTimes(3);
+  });
+
+  it('shares request-OTP limits across IPv6 /64 and IPv4-mapped addresses', async () => {
+    const { auth } = await service();
+    const request = (address: string) => ({ socket: { remoteAddress: address } }) as never;
+    await auth.requestOtp('first@example.invalid', 'gmail', request('2001:db8:1:2::1'));
+    await auth.requestOtp('second@example.invalid', 'gmail', request('2001:db8:1:2::2'));
+    await auth.requestOtp('third@example.invalid', 'gmail', request('2001:db8:1:2::3'));
+    await expect(
+      auth.requestOtp('fourth@example.invalid', 'gmail', request('2001:db8:1:2::4')),
+    ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+
+    for (let i = 0; i < 3; i += 1)
+      await auth.requestOtp(`v4-${i}@example.invalid`, 'gmail', request('::ffff:192.0.2.44'));
+    await expect(
+      auth.requestOtp('v4-limit@example.invalid', 'gmail', request('192.0.2.44')),
+    ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
   });
 
   it('delivers Telegram OTP by telegram_id and rejects gmail login for a Telegram-only user', async () => {
