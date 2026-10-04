@@ -62,6 +62,24 @@ const timelineOperation = z.discriminatedUnion('kind', [
 const documentOperation = z.discriminatedUnion('kind', [
   z
     .object({
+      kind: z.literal('create-text'),
+      id,
+      trackId: id.optional(),
+      text: boundedText,
+      startUs: z.number().int().nonnegative(),
+      durationUs: z.number().int().positive().max(86_400_000_000),
+      x: z.number().finite().optional(),
+      y: z.number().finite().optional(),
+      size: z.number().int().min(1).max(512).optional(),
+      color: z
+        .string()
+        .regex(/^#[0-9a-f]{6}$/i)
+        .optional(),
+      dependsOn: z.array(id).max(32).default([]),
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal('set-text'),
       id,
       objectId: id,
@@ -323,6 +341,12 @@ export function createJoyAgentTools(
     readonly modelId?: string;
     readonly allowFrames?: boolean;
     readonly vision?: boolean;
+    readonly onFrameRead?: (frame: {
+      readonly mediaType: 'image/png' | 'image/jpeg';
+      readonly base64: string;
+      readonly width: number;
+      readonly height: number;
+    }) => void;
   } = {},
 ): ToolSet {
   const reads = new ReadConcurrencyGate(
@@ -366,7 +390,8 @@ export function createJoyAgentTools(
       execute: async () => boundedResult(await runRead(bridge.readStyleCatalog), maxPayloadBytes),
     }),
     propose_timeline_operations: tool({
-      description: 'Stage validated timeline operations for preview.',
+      description:
+        'Stage validated timeline operations for preview. Trimming changes a clip’s source in/out and visible duration; it does not move the clip on the timeline. Use a separate move operation to change its timeline position.',
       inputSchema: z
         .object({ operations: z.array(timelineOperation).max(operationLimit) })
         .strict(),
@@ -432,7 +457,7 @@ export function createJoyAgentTools(
     }),
   };
   const visionCapable =
-    options.vision ??
+    options.vision === true ||
     KILO_MODEL_PRESETS.some((preset) => preset.id === options.modelId && preset.vision);
   if (bridge.readFrame && visionCapable && options.allowFrames) {
     let frameReads = 0;
@@ -461,21 +486,9 @@ export function createJoyAgentTools(
           return { unavailable: 'Frame dimensions exceed the requested edge limit.' };
         if (new TextEncoder().encode(result.base64).byteLength > maxPayloadBytes)
           return { unavailable: 'Frame exceeds the tool payload limit.' };
-        return result;
+        options.onFrameRead?.(result);
+        return { acknowledgement: 'Frame attached in the next user message.' };
       },
-      toModelOutput: ({ output }) =>
-        'unavailable' in output
-          ? { type: 'text', value: output.unavailable }
-          : {
-              type: 'content',
-              value: [
-                {
-                  type: 'file',
-                  data: { type: 'data', data: output.base64 },
-                  mediaType: output.mediaType,
-                },
-              ],
-            },
     });
   }
   return tools;

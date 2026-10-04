@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { APICallError } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
 import { JoyAgentEngine, JoyAgentRunError, probeJoyAgentModel } from './engine.js';
+import { createJoyAgentProvider } from './provider.js';
 import type { JoyAgentRunRequest } from './contracts.js';
 import type { JoyAgentToolBridge } from './tools.js';
 
@@ -43,7 +44,7 @@ function textModel(text = 'Done.', modelId?: string, resolvedModelId?: string) {
 describe('JOY Agent bounded model loop', () => {
   it('uses an explicit capability result and no fallback provider', async () => {
     const result = await probeJoyAgentModel(textModel());
-    expect(['tool-loop', 'plan-only', 'incompatible']).toContain(result.capability);
+    expect(['tool-loop', 'plan-only', 'incompatible', 'untested']).toContain(result.capability);
   });
 
   it('probes with enough output budget for a small tool call', async () => {
@@ -91,11 +92,44 @@ describe('JOY Agent bounded model loop', () => {
     const engine = new JoyAgentEngine({ model, bridge, apiKeyForRedaction: secret });
     const result = await engine.probe();
     expect(result).toMatchObject({
-      capability: 'incompatible',
+      capability: 'untested',
       failure: { code: 'JOY_AGENT_UPSTREAM_UNAVAILABLE', detail: { statusCode: 503 } },
     });
     expect(JSON.stringify(result)).not.toContain(secret);
   });
+
+  it.each([
+    [401, 'JOY_AGENT_AUTH_FAILED'],
+    [403, 'JOY_AGENT_AUTH_FAILED'],
+    [404, 'JOY_AGENT_MODEL_NOT_FOUND'],
+    [429, 'JOY_AGENT_RATE_LIMITED'],
+    [503, 'JOY_AGENT_UPSTREAM_UNAVAILABLE'],
+    [500, 'JOY_AGENT_UPSTREAM_UNAVAILABLE'],
+  ] as const)(
+    'preserves provider HTTP %i as a probe failure, not incompatibility',
+    async (status, code) => {
+      const model = new MockLanguageModelV3({
+        doGenerate: async () => {
+          throw new APICallError({
+            message: `provider rejected request ${status}`,
+            url: 'https://provider.invalid/v1/chat/completions',
+            requestBodyValues: {},
+            statusCode: status,
+            responseBody: `provider message ${status}`,
+          });
+        },
+      });
+      const result = await probeJoyAgentModel(model);
+      expect(result).toMatchObject({
+        capability: 'untested',
+        failure: {
+          code,
+          detail: { statusCode: status, message: `provider rejected request ${status}` },
+        },
+      });
+      expect(model.doGenerateCalls).toHaveLength(1);
+    },
+  );
 
   it('returns the model ID reported by the final run response', async () => {
     const engine = new JoyAgentEngine({
@@ -104,6 +138,99 @@ describe('JOY Agent bounded model loop', () => {
     });
     await expect(engine.run(request)).resolves.toMatchObject({
       resolvedModelId: 'upstream-resolved-model',
+    });
+  });
+
+  it('sends read_frame output as an image_url user part after its tool result', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const fetchStub = async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      requests.push(body);
+      const callIndex = requests.length;
+      const completion =
+        callIndex === 1
+          ? {
+              id: 'completion-1',
+              object: 'chat.completion',
+              choices: [
+                {
+                  index: 0,
+                  message: {
+                    role: 'assistant',
+                    tool_calls: [
+                      {
+                        id: 'frame-call-1',
+                        type: 'function',
+                        function: { name: 'read_frame', arguments: '{"atUs":0}' },
+                      },
+                    ],
+                  },
+                  finish_reason: 'tool_calls',
+                },
+              ],
+              usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 },
+            }
+          : {
+              id: 'completion-2',
+              object: 'chat.completion',
+              choices: [
+                {
+                  index: 0,
+                  message: { role: 'assistant', content: 'I see the frame.' },
+                  finish_reason: 'stop',
+                },
+              ],
+              usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+            };
+      return new Response(JSON.stringify(completion), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+    const { model } = createJoyAgentProvider(
+      {
+        provider: 'openai-compatible',
+        baseUrl: 'https://provider.invalid/v1',
+        modelId: 'vision-model',
+        apiKey: 'sk-test-REDACTED-0000',
+        vision: true,
+      },
+      fetchStub,
+    );
+    const engine = new JoyAgentEngine({
+      model,
+      modelId: 'vision-model',
+      vision: true,
+      allowFrames: true,
+      bridge: {
+        ...bridge,
+        readFrame: async () => ({
+          mediaType: 'image/jpeg',
+          base64: '/9j/4AAQSkZJRgABAQAAAQABAAD/',
+          width: 1,
+          height: 1,
+        }),
+      },
+    });
+
+    await engine.run(request);
+
+    expect(requests).toHaveLength(2);
+    const secondMessages = requests[1]?.messages as Array<{
+      role: string;
+      content?: Array<Record<string, unknown>>;
+    }>;
+    const toolMessageIndex = secondMessages.findIndex((message) => message.role === 'tool');
+    const imageMessage = secondMessages[toolMessageIndex + 1];
+    expect(imageMessage?.role).toBe('user');
+    expect(imageMessage?.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'image_url', image_url: expect.any(Object) }),
+      ]),
+    );
+    expect(imageMessage?.content?.[0]).toMatchObject({
+      type: 'text',
+      text: 'Frame read from the local timeline:',
     });
   });
 

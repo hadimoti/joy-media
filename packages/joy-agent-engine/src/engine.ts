@@ -1,10 +1,12 @@
 import {
+  APICallError,
   generateObject,
   generateText,
   stepCountIs,
   ToolLoopAgent,
   tool,
   type LanguageModel,
+  type ModelMessage,
   type StopCondition,
 } from 'ai';
 import { z } from 'zod';
@@ -26,6 +28,7 @@ export const JOY_AGENT_INSTRUCTIONS = [
   'You are the JOY Media editing assistant.',
   'Inspect bounded context and propose bounded operations only.',
   'Never claim an edit is applied until submit_plan returns a committed result.',
+  'When applying a timeline change, call submit_plan and use its verified placement summary in your final response.',
   'Do not request credentials, DOM selectors, endpoints, arbitrary headers, or hidden reasoning.',
 ].join(' ');
 
@@ -108,7 +111,18 @@ export async function probeJoyAgentModel(
     });
     resolvedModelId = result.response.modelId;
     return { capability: 'tool-loop', resolvedModelId };
-  } catch {
+  } catch (toolFailure) {
+    const toolFailureIsCapability =
+      APICallError.isInstance(toolFailure) &&
+      (toolFailure.statusCode === 400 || toolFailure.statusCode === 422) &&
+      /tool|function/i.test(toolFailure.responseBody ?? toolFailure.message);
+    if (!toolFailureIsCapability) {
+      const safe = toSafeJoyAgentError(toolFailure);
+      return {
+        capability: 'untested',
+        failure: { ...safe, detail: safeErrorDetail(toolFailure, apiKeyForRedaction) },
+      };
+    }
     try {
       const result = await generateObject({
         model,
@@ -122,8 +136,15 @@ export async function probeJoyAgentModel(
       return { capability: 'plan-only', resolvedModelId: result.response.modelId };
     } catch (planFailure) {
       const safe = toSafeJoyAgentError(planFailure);
+      const providerFailure =
+        APICallError.isInstance(planFailure) &&
+        planFailure.statusCode !== undefined &&
+        !(
+          (planFailure.statusCode === 400 || planFailure.statusCode === 422) &&
+          /tool|function/i.test(planFailure.responseBody ?? planFailure.message)
+        );
       return {
-        capability: 'incompatible',
+        capability: providerFailure ? 'untested' : 'incompatible',
         failure: { ...safe, detail: safeErrorDetail(planFailure, apiKeyForRedaction) },
       };
     }
@@ -258,10 +279,17 @@ export class JoyAgentEngine {
       surface: 'joy-code',
       activityCode: 'agent.inspecting',
     });
+    const pendingFrames: Array<{
+      readonly mediaType: 'image/png' | 'image/jpeg';
+      readonly base64: string;
+      readonly width: number;
+      readonly height: number;
+    }> = [];
     const tools = createJoyAgentTools(this.options.bridge, this.limits, {
       ...(this.options.modelId === undefined ? {} : { modelId: this.options.modelId }),
       ...(this.options.allowFrames === undefined ? {} : { allowFrames: this.options.allowFrames }),
       ...(this.options.vision === undefined ? {} : { vision: this.options.vision }),
+      onFrameRead: (frame) => pendingFrames.push(frame),
     });
     const toolCallLimit: StopCondition<typeof tools> = ({ steps }) =>
       steps.reduce((count, step) => count + step.toolCalls.length, 0) >= this.limits.maxToolCalls;
@@ -273,6 +301,22 @@ export class JoyAgentEngine {
       maxOutputTokens: this.limits.maxOutputTokens,
       maxRetries: 0,
       telemetry: { isEnabled: false },
+      prepareStep: ({ messages }) => {
+        if (pendingFrames.length === 0) return undefined;
+        const frames = pendingFrames.splice(0);
+        const additions: ModelMessage[] = frames.map((frame) => ({
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Frame read from the local timeline:' },
+            {
+              type: 'file',
+              data: { type: 'data', data: frame.base64 },
+              mediaType: frame.mediaType,
+            },
+          ],
+        }));
+        return { messages: [...messages, ...additions] };
+      },
     });
     const result = await agent.generate({
       prompt: request.request,

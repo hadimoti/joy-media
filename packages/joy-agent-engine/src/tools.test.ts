@@ -108,6 +108,12 @@ describe('JOY Agent tool catalog', () => {
       tools.propose_timeline_operations as { inputSchema: { parse: (input: unknown) => unknown } }
     ).inputSchema;
     expect(() => inputSchema.parse({ operations: [{ ...insert('op-1'), headers: {} }] })).toThrow();
+    expect((tools.propose_timeline_operations as { description: string }).description).toContain(
+      'does not move the clip on the timeline',
+    );
+    expect((tools.propose_timeline_operations as { description: string }).description).toContain(
+      'separate move operation',
+    );
   });
 
   it('exposes bounded domain tools without granting them a default executor', async () => {
@@ -198,32 +204,24 @@ describe('JOY Agent tool catalog', () => {
     expect(readFrame).toHaveBeenCalledTimes(3);
   });
 
-  it('maps JPEG tool results to AI SDK multipart file output within the payload limit', async () => {
+  it('returns a text acknowledgement and hands the bounded frame to the engine', async () => {
     const base64 = 'ZmFrZQ==';
+    const onFrameRead = vi.fn();
     const tools = createJoyAgentTools(
       bridge({ readFrame: async () => ({ mediaType: 'image/jpeg', base64, width: 1, height: 1 }) }),
       DEFAULT_JOY_AGENT_LIMITS,
-      { modelId: 'byteplus-coding/dola-seed-2.0-pro', allowFrames: true },
+      { modelId: 'byteplus-coding/dola-seed-2.0-pro', allowFrames: true, onFrameRead },
     );
     const frameTool = tools.read_frame as unknown as {
       execute: (input: { atUs: number }) => Promise<unknown>;
-      toModelOutput: (options: {
-        output: { mediaType: 'image/jpeg'; base64: string; width: number; height: number };
-      }) => unknown;
     };
     const output = await frameTool.execute({ atUs: 500_000 });
-    expect(
-      frameTool.toModelOutput({
-        output: output as {
-          mediaType: 'image/jpeg';
-          base64: string;
-          width: number;
-          height: number;
-        },
-      }),
-    ).toEqual({
-      type: 'content',
-      value: [{ type: 'file', data: { type: 'data', data: base64 }, mediaType: 'image/jpeg' }],
+    expect(output).toEqual({ acknowledgement: 'Frame attached in the next user message.' });
+    expect(onFrameRead).toHaveBeenCalledWith({
+      mediaType: 'image/jpeg',
+      base64,
+      width: 1,
+      height: 1,
     });
   });
 
