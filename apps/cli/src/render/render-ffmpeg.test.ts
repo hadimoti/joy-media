@@ -324,7 +324,7 @@ describe('CLI ffmpeg render', () => {
         const outDir = join(dir, 'out');
         const project = createDefaultProject('Persian text', { width: 320, height: 240, fps: 25 });
         const root = project.compositions.root!;
-        (root as { durationUs: number }).durationUs = 1_000_000;
+        (root as { durationUs: number }).durationUs = 2_000_000;
         const texts = [
           createTextClip({
             id: 'persian',
