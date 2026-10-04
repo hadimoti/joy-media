@@ -328,7 +328,9 @@ function parseRequestIntent(request: string): RequestIntent {
   if (
     range?.[1] &&
     range[2] &&
-    /\b(trim|cut|keep|source)\b|keep\s+only|برش|نگه\s*دار|منبع/i.test(normalized)
+    /\b(trim|cut|source)\b|\bkeep\s+(?:only\b|source\b|(?:the\s+)?(?:part|section|range)\s+(?:from|between)\b)/i.test(
+      normalized,
+    )
   )
     intent.trimRange = [
       Math.round(Number(range[1]) * 1_000_000),

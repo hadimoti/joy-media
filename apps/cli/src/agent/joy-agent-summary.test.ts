@@ -201,6 +201,14 @@ describe('truthfulAgentSummary', () => {
       verified: [],
       unmet: [],
     });
+    expect(verifyRequestIntent(project, 'keep it centered from 2 to 5 s')).toEqual({
+      verified: [],
+      unmet: ['request asked for centered text'],
+    });
+    expect(verifyRequestIntent(project, 'keep only 7 to 17 s of the clip')).toEqual({
+      verified: [],
+      unmet: ['request asked for source trim 7000000–17000000 µs'],
+    });
   });
 
   it('maps applied operations by id when an earlier proposal failed', () => {
