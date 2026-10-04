@@ -209,6 +209,13 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
             sourceInUs: 3_000_000,
             sourceOutUs: 4_000_000,
           },
+          {
+            clipId: 'caption-1',
+            trackId: 'captions',
+            track: 'Captions',
+            startUs: 0,
+            endUs: 500_000,
+          },
         ],
         gaps: [{ trackId: 'track-v1', startUs: 0, endUs: 1_000_000 }],
         blackRegions: [{ startUs: 0, endUs: 1_000_000 }],
@@ -231,6 +238,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       expect(outputText).toContain('Verified timeline placement');
       expect(outputText).toContain('agent-clip-1');
       expect(outputText).toContain('Black region');
+      expect(outputText).toContain('Black region (text over black)');
     } finally {
       runSpy.mockRestore();
       output.mockRestore();

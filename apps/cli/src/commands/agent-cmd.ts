@@ -534,8 +534,12 @@ function printPlacementSummary(summary: RunAgentOutput['placementSummary']): voi
     );
   }
   for (const region of summary.blackRegions) {
+    const hasTextOverlay = summary.clips.some(
+      (clip) =>
+        clip.sourceInUs === undefined && clip.startUs < region.endUs && clip.endUs > region.startUs,
+    );
     logWarn(
-      `Black region (no visual track covers this span): ${seconds(region.startUs)}–${seconds(region.endUs)}.`,
+      `Black region${hasTextOverlay ? ' (text over black)' : ' (no visual track covers this span)'}: ${seconds(region.startUs)}–${seconds(region.endUs)}.`,
     );
   }
 }
