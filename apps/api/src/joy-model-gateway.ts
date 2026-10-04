@@ -87,6 +87,22 @@ export const LEGACY_MODEL_ALIASES: Readonly<Record<string, string>> = Object.fre
   'meta-llama/llama-3.3-70b-instruct': 'deepseek/deepseek-v4-flash',
 });
 
+let warnedAboutUnknownPaidModels = false;
+
+function warnAboutUnknownPaidModelAllowlistEntries(): void {
+  if (warnedAboutUnknownPaidModels) return;
+  const catalogIds = new Set(JOY_AGENT_DEFAULT_MODELS.map((model) => model.id));
+  const unknownCount = (process.env.JOY_GATEWAY_PAID_MODEL_ALLOWLIST ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0 && !catalogIds.has(id)).length;
+  if (unknownCount === 0) return;
+  warnedAboutUnknownPaidModels = true;
+  console.warn(
+    `joy-model-gateway: ignored ${unknownCount} unknown paid model allowlist entr${unknownCount === 1 ? 'y' : 'ies'}`,
+  );
+}
+
 export const DEFAULT_COMMISSION_RATE_BPS = 2500; // 25% gross margin
 export const JOY_MODEL_MAX_OUTPUT_TOKENS = 8192;
 const UPSTREAM_HEADER_TIMEOUT_MS = 85_000;
@@ -127,6 +143,7 @@ export class JoyModelGateway {
   private readonly requestTimesByUser = new Map<string, number[]>();
 
   constructor(options: JoyModelGatewayOptions) {
+    warnAboutUnknownPaidModelAllowlistEntries();
     this.mediaAuth = options.mediaAuth;
     this.account = options.account;
     this.ledger = options.ledger;
@@ -270,7 +287,9 @@ export class JoyModelGateway {
 
     const requestedModel = typeof parsedBody.model === 'string' ? parsedBody.model : '';
     const catalog = effectiveJoyModelCatalog();
-    const aliasedModel = LEGACY_MODEL_ALIASES[requestedModel];
+    const aliasedModel = Object.hasOwn(LEGACY_MODEL_ALIASES, requestedModel)
+      ? LEGACY_MODEL_ALIASES[requestedModel]
+      : undefined;
     const modelId =
       aliasedModel && catalog.some((model) => model.id === aliasedModel)
         ? aliasedModel

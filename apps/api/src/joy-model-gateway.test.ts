@@ -128,6 +128,59 @@ describe('JoyModelGateway', () => {
     expect(aliased.getStatus()).toBe(200);
     expect(sentModel).toBe('openrouter/free');
   });
+
+  it.each(['__proto__', 'constructor', 'toString'])(
+    'does not treat the prototype property %s as a model alias',
+    async (model) => {
+      const gateway = new JoyModelGateway({
+        mediaAuth: {
+          authenticate: async () => ({ id: 'prototype-key-user' }),
+        } as unknown as MediaAuthService,
+        account: {
+          getSubscription: async () => ({
+            ownerId: 'prototype-key-user',
+            plan: 'pro',
+            status: 'active',
+            updatedAt: 0,
+          }),
+        } as unknown as AccountService,
+        ledger: new MemoryAgentUsageLedger(),
+        openRouterApiKey: 'test-key',
+        fetchImpl: async () => {
+          throw new Error('unlisted model must not be forwarded');
+        },
+      });
+      const result = createMockRes();
+      await gateway.handleChatCompletions(
+        createMockReq({ body: { model, messages: [] } }),
+        result.res,
+      );
+      expect(result.getStatus()).toBe(400);
+      expect(result.getBody()).toContain('MODEL_NOT_ALLOWED');
+    },
+  );
+
+  it('warns once without echoing entries omitted from the paid model catalog', () => {
+    vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', 'private-test-model-id,other-invalid-id');
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const createGateway = () =>
+        new JoyModelGateway({
+          mediaAuth: {} as MediaAuthService,
+          account: {} as AccountService,
+          ledger: new MemoryAgentUsageLedger(),
+          openRouterApiKey: undefined,
+        });
+      createGateway();
+      createGateway();
+      expect(warning).toHaveBeenCalledOnce();
+      expect(warning.mock.calls[0]?.join(' ')).toContain('unknown paid model allowlist');
+      expect(warning.mock.calls.flat().join(' ')).not.toContain('private-test-model-id');
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
   it('serves the model catalog without authentication', async () => {
     const gateway = new JoyModelGateway({
       mediaAuth: { authenticate: async () => undefined } as unknown as MediaAuthService,
