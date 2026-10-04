@@ -305,8 +305,7 @@ describe('gateway smoke helpers', () => {
     const secondServer = target.indexOf('\nserver {', firstServer + 1);
     const joystBlock = target.slice(firstServer, secondServer);
     assert.match(joystBlock, /listen 82\.115\.8\.224:443 ssl;/);
-    assert.match(joystBlock, /listen 46\.249\.103\.142:443 ssl;/);
-    assert.match(joystBlock, /listen \[::\]:443 ssl;/);
+    assert.doesNotMatch(joystBlock, /listen (?:46\.249\.103\.142:443|\[::\]:443) ssl;/);
     assert.doesNotMatch(joystBlock, /listen 443 ssl;/);
   });
 });

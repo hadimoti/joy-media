@@ -43,8 +43,6 @@ API pointer and Nginx file if step 6 fails.
 server {
     listen 80;
     listen 82.115.8.224:443 ssl;
-    listen 46.249.103.142:443 ssl;
-    listen [::]:443 ssl;
     http2 on;
     server_name joyst.ir www.joyst.ir;
 
