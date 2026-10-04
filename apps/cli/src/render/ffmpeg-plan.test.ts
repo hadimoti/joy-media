@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDefaultProject } from '../utils/project-loader.js';
 import { buildFfmpegFramePlan, buildFfmpegRenderPlan } from './ffmpeg-plan.js';
+import { createTextClip } from './text-clip.js';
 
 describe('buildFfmpegRenderPlan', () => {
   it('builds a bounded still-image output from the render composition graph', () => {
@@ -92,23 +93,23 @@ describe('buildFfmpegRenderPlan', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('skips captions and applies explicit output overrides', () => {
+  it('renders schema-valid caption text through drawtext with escaped content', () => {
     const project = createDefaultProject('caption plan');
-    (project.compositions.root!.tracks[0]!.clips as unknown[]).push({
+    const text = createTextClip({
       id: 'caption-1',
-      kind: 'caption',
-      captionDocumentId: 'captions',
+      text: "Title: [hello], it's 100%",
       startUs: 0,
       durationUs: 1_000_000,
     });
+    (project.captionDocuments as Record<string, unknown>)[text.document.id] = text.document;
+    (project.compositions.root!.tracks[0]!.clips as unknown[]).push(text.clip);
     const plan = buildFfmpegRenderPlan(project, 'webm', { width: 640, height: 360, fps: 25 });
     expect(plan.width).toBe(640);
     expect(plan.height).toBe(360);
     expect(plan.fpsExpr).toBe('25/1');
-    expect(plan.skipped).toContainEqual({
-      clipId: 'caption-1',
-      reason: 'caption clips are not supported by the v1 renderer',
-    });
+    expect(plan.args.join(' ')).toContain('drawtext=fontfile=');
+    expect(plan.args.join(' ')).toContain("Title\\: \\[hello\\]\\, it\\'s 100\\%");
+    expect(plan.skipped).not.toContainEqual(expect.objectContaining({ clipId: 'text-caption-1' }));
   });
 
   it('mixes embedded audio from unmuted video-track clips', () => {

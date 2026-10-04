@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { CliJoyAgentToolBridge } from './bridge.js';
 import { resolveFfmpegExecutable } from '../render/ffmpeg-run.js';
+import { resolveTextFont } from '../render/text-font.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version'], { shell: false }).status === 0;
 
@@ -249,6 +250,23 @@ describe('CLI Joy Agent bridge timeline operations', () => {
       durationUs: 2_000_000,
       sourceInUs: 3_000_000,
     });
+    expect(result.placementSummary.clips.find((item) => item.clipId === 'moving')).toMatchObject({
+      trackId: 'video-1',
+      track: 'Video 1',
+      startUs: 3_000_000,
+      endUs: 5_000_000,
+      sourceInUs: 3_000_000,
+      sourceOutUs: 7_000_000,
+    });
+    expect(result.placementSummary.gaps).toContainEqual({
+      trackId: 'video-1',
+      startUs: 1_000_000,
+      endUs: 3_000_000,
+    });
+    expect(result.placementSummary.blackRegions).toContainEqual({
+      startUs: 1_000_000,
+      endUs: 3_000_000,
+    });
   });
 
   it('splits with a source offset and deterministic operation id', async () => {
@@ -268,7 +286,7 @@ describe('CLI Joy Agent bridge timeline operations', () => {
     expect(clips[2]).toMatchObject({ sourceInUs: 500_000 });
   });
 
-  it('mutates document fields and counts only successful operations', async () => {
+  it('does not claim text/effect operations that the renderer cannot display', async () => {
     const project = {
       ...projectWithTracks(),
       visualObjects: {
@@ -313,14 +331,50 @@ describe('CLI Joy Agent bridge timeline operations', () => {
       ],
     });
     const result = bridge.applyStaged();
-    expect(result.appliedCount).toBe(3);
-    expect(result.errors).toContain('Property unlisted is not writable');
-    expect(result.errors).toContain('Object missing not found');
+    expect(result.appliedCount).toBe(0);
+    expect(result.errors.some((error) => error.startsWith('unsupported: set-text'))).toBe(true);
+    expect(
+      result.errors.some((error) => error.startsWith('unsupported: text property opacity')),
+    ).toBe(true);
+    expect(
+      result.errors.some((error) => error.startsWith('unsupported: text property unlisted')),
+    ).toBe(true);
+    expect(result.errors).toContain('unsupported: effect blur is not rendered by ffmpeg.');
+    expect(result.errors).toContain('unsupported: set-text for missing is not rendered by ffmpeg.');
     expect(result.updatedProject.visualObjects.title).toMatchObject({
-      text: 'New title',
-      transform: { opacity: 0.5 },
-      effects: [{ id: 'effect-op', effectId: 'blur', enabled: true, params: {} }],
+      text: 'Old',
+      transform: { opacity: 1 },
     });
+  });
+
+  it.skipIf(!resolveTextFont())('stores create-text as a valid timed caption clip', async () => {
+    const project = projectWithTracks();
+    const bridge = new CliJoyAgentToolBridge(project, 1);
+    await bridge.proposeDocumentOperations({
+      operations: [
+        {
+          kind: 'create-text',
+          id: 'headline',
+          text: 'Hello JOY',
+          startUs: 500_000,
+          durationUs: 2_000_000,
+          size: 48,
+          color: '#ffcc00',
+          dependsOn: [],
+        },
+      ],
+    });
+    const result = bridge.applyStaged();
+    expect(result.appliedCount).toBe(1);
+    expect(result.errors).toEqual([]);
+    expect(result.updatedProject.captionDocuments.headline?.words['headline-word']?.text).toBe(
+      'Hello JOY',
+    );
+    expect(
+      result.updatedProject.compositions.root!.tracks.flatMap((track) => track.clips),
+    ).toContainEqual(
+      expect.objectContaining({ kind: 'caption', startUs: 500_000, durationUs: 2_000_000 }),
+    );
   });
 
   it('reports whether the plan will wait for approval or auto-apply', async () => {
@@ -334,6 +388,39 @@ describe('CLI Joy Agent bridge timeline operations', () => {
       awaitingApproval: false,
       willApplyOnFinish: true,
     });
+  });
+
+  it('returns the resulting placement to the agent when auto-apply is submitted', async () => {
+    const automatic = new CliJoyAgentToolBridge(projectWithTracks(), 1, undefined, true);
+    await automatic.proposeTimelineOperations({
+      operations: [
+        {
+          kind: 'move',
+          id: 'move-op',
+          clipId: 'moving',
+          trackId: 'video-1',
+          startUs: 4_000_000,
+          dependsOn: [],
+        },
+      ],
+    });
+    const submit = await automatic.submitPlan();
+    const submitted = submit as {
+      applied: boolean;
+      placementSummary: { clips: Array<{ clipId: string; startUs: number; endUs: number }> };
+    };
+    expect(submitted.applied).toBe(true);
+    expect(submitted.placementSummary.clips.find((clip) => clip.clipId === 'moving')).toMatchObject(
+      {
+        startUs: 4_000_000,
+        endUs: 5_000_000,
+      },
+    );
+    const applied = automatic.applyStaged();
+    expect(applied.appliedCount).toBe(1);
+    expect(applied.placementSummary.clips.find((clip) => clip.clipId === 'moving')?.startUs).toBe(
+      4_000_000,
+    );
   });
 
   it('keeps the previous project when applying operations makes it invalid', async () => {

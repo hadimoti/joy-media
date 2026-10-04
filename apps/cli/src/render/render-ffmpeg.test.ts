@@ -5,11 +5,76 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { runCli } from '../cli.js';
 import { createDefaultProject } from '../utils/project-loader.js';
+import { createTextClip } from './text-clip.js';
+import { resolveTextFont } from './text-font.js';
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version'], { shell: false }).status === 0;
 const hasFfprobe = spawnSync('ffprobe', ['-version'], { shell: false }).status === 0;
 
 describe('CLI ffmpeg render', () => {
+  it.skipIf(!hasFfmpeg || !hasFfprobe || !resolveTextFont())(
+    'renders timed text instead of reporting it applied without output',
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'joy-render-text-'));
+      try {
+        const projectPath = join(dir, 'text-project.json');
+        const outDir = join(dir, 'out');
+        const project = createDefaultProject('Text render', { width: 320, height: 240, fps: 25 });
+        const root = project.compositions.root!;
+        (root as { durationUs: number }).durationUs = 1_000_000;
+        const text = createTextClip({
+          id: 'integration-title',
+          text: 'JOY Text',
+          startUs: 0,
+          durationUs: 1_000_000,
+          size: 48,
+          color: '#ffffff',
+        });
+        (project.captionDocuments as Record<string, unknown>)[text.document.id] = text.document;
+        (root.tracks as unknown as Array<Record<string, unknown>>).push({
+          id: 'captions',
+          kind: 'caption',
+          family: 'visual',
+          name: 'Captions',
+          order: 3,
+          enabled: true,
+          locked: false,
+          clips: [text.clip],
+        });
+        writeFileSync(projectPath, JSON.stringify(project));
+        expect(
+          await runCli(['render', '--project', projectPath, '--preset', 'mp4', '--out', outDir]),
+        ).toBe(0);
+        const output = join(outDir, `${project.id}.mp4`);
+        const frame = spawnSync(
+          'ffmpeg',
+          [
+            '-v',
+            'error',
+            '-ss',
+            '0.5',
+            '-i',
+            output,
+            '-frames:v',
+            '1',
+            '-f',
+            'rawvideo',
+            '-pix_fmt',
+            'rgb24',
+            'pipe:1',
+          ],
+          { shell: false, encoding: 'buffer' },
+        );
+        expect(frame.status).toBe(0);
+        const pixels = frame.stdout as Buffer;
+        const distinct = new Set(pixels).size;
+        expect(distinct).toBeGreaterThan(2);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it.skipIf(!hasFfmpeg || !hasFfprobe)(
     'renders imported clips at project resolution and verifies output',
     async () => {

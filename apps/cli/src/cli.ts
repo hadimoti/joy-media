@@ -37,6 +37,11 @@ export interface CliFlags {
   track: string | undefined;
   clip: string | undefined;
   asset: string | undefined;
+  text: string | undefined;
+  x: number | undefined;
+  y: number | undefined;
+  size: number | undefined;
+  color: string | undefined;
   id: string | undefined;
   strict: boolean;
   manifestOnly: boolean;
@@ -127,6 +132,11 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     track: typeof v.track === 'string' ? v.track : undefined,
     clip: typeof v.clip === 'string' ? v.clip : undefined,
     asset: typeof v.asset === 'string' ? v.asset : undefined,
+    text: typeof v.text === 'string' ? v.text : undefined,
+    x: parseFloatFlag('x', v.x, { min: -32768, max: 32768 }),
+    y: parseFloatFlag('y', v.y, { min: -32768, max: 32768 }),
+    size: parseIntFlag('size', v.size, { min: 1, max: 512, allowZero: false }),
+    color: typeof v.color === 'string' ? v.color : undefined,
     id: typeof v.id === 'string' ? v.id : undefined,
     strict: Boolean(v.strict),
     manifestOnly: Boolean(v['manifest-only']),
@@ -176,6 +186,11 @@ export async function runCli(argv: string[]): Promise<number> {
         track: { type: 'string' },
         clip: { type: 'string' },
         asset: { type: 'string' },
+        text: { type: 'string' },
+        x: { type: 'string' },
+        y: { type: 'string' },
+        size: { type: 'string' },
+        color: { type: 'string' },
         id: { type: 'string' },
         strict: { type: 'boolean', default: false },
         'manifest-only': { type: 'boolean', default: false },

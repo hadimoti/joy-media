@@ -4,13 +4,20 @@ import { FlagValidationError, NUMERIC_RANGES } from '../utils/flags.js';
 import { c, logError, logSuccess } from '../utils/logger.js';
 import { loadProject, saveProject } from '../utils/project-loader.js';
 import { recomputeRootDuration } from '../utils/timeline-math.js';
-import { sourceTimeAtVideoClipTime } from '@joy-media/project-schema';
+import { sourceTimeAtVideoClipTime, validateJoyProjectV1 } from '@joy-media/project-schema';
+import { createTextClip } from '../render/text-clip.js';
+import { resolveTextFont } from '../render/text-font.js';
 
 export interface TimelineCommandFlags {
   project?: string | undefined;
   track?: string | undefined;
   clip?: string | undefined;
   asset?: string | undefined;
+  text?: string | undefined;
+  x?: number | undefined;
+  y?: number | undefined;
+  size?: number | undefined;
+  color?: string | undefined;
   start?: number | undefined;
   duration?: number | undefined;
   end?: number | undefined;
@@ -19,8 +26,9 @@ export interface TimelineCommandFlags {
 }
 
 export function printTimelineHelp(): void {
-  console.log(`Usage: joy-media timeline <add-clip|split|trim|remove-clip> --project <id|file>
+  console.log(`Usage: joy-media timeline <add-clip|add-text|split|trim|remove-clip> --project <id|file>
   add-clip --asset <id> [--track <id>] [--start <seconds>] [--duration <seconds>]
+  add-text --text <text> [--track <id>] [--start <seconds>] --duration <seconds> [--x <px> --y <px> --size <px> --color <#RRGGBB>]
   split --clip <id> --at <seconds>
   trim --clip <id> [--start <seconds>] [--end <seconds>] [--duration <seconds>]
   remove-clip --clip <id>`);
@@ -56,6 +64,8 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
   const tracks = root.tracks as unknown as Array<{
     id: string;
     name?: string;
+    kind?: string;
+    family?: string;
     clips: Array<{
       id: string;
       startUs: number;
@@ -68,6 +78,82 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
       [key: string]: unknown;
     }>;
   }>;
+
+  if (sub === 'add-text') {
+    if (!flags.text || flags.duration === undefined) {
+      logError(
+        'Usage: joy-media timeline add-text --project <id|file> --text <text> --duration <seconds> [--start <seconds>]',
+      );
+      return 1;
+    }
+    if (!resolveTextFont()) {
+      logError('unsupported: no usable font found; set JOY_FONT or install DejaVu Sans.');
+      return 1;
+    }
+    let track = flags.track
+      ? tracks.find((candidate) => candidate.id === flags.track)
+      : tracks.find((candidate) => candidate.kind === 'caption');
+    if (track && track.kind !== 'caption') {
+      logError(`unsupported: text needs a caption track (${track.id}).`);
+      return 1;
+    }
+    if (!track) {
+      if (flags.track) {
+        logError(`unsupported: caption track ${flags.track} was not found.`);
+        return 1;
+      }
+      const captionTrack = {
+        id: `track-captions-${tracks.length + 1}`,
+        kind: 'caption',
+        family: 'visual',
+        name: 'Captions',
+        order:
+          Math.max(
+            -1,
+            ...tracks.map((candidate) => Number((candidate as { order?: number }).order ?? -1)),
+          ) + 1,
+        enabled: true,
+        locked: false,
+        clips: [],
+      };
+      tracks.push(captionTrack);
+      track = captionTrack;
+    }
+    const id = `text-${Date.now().toString(36)}`;
+    let created;
+    try {
+      created = createTextClip({
+        id,
+        text: flags.text,
+        startUs: Math.round((flags.start ?? 0) * 1_000_000),
+        durationUs: Math.round(flags.duration * 1_000_000),
+        ...(flags.x === undefined ? {} : { x: flags.x }),
+        ...(flags.y === undefined ? {} : { y: flags.y }),
+        ...(flags.size === undefined ? {} : { size: flags.size }),
+        ...(flags.color === undefined ? {} : { color: flags.color }),
+      });
+    } catch (error) {
+      logError(`unsupported: ${error instanceof Error ? error.message : String(error)}`);
+      return 1;
+    }
+    (project.captionDocuments as Record<string, unknown>)[created.document.id] = created.document;
+    track.clips.push(created.clip as unknown as (typeof track.clips)[number]);
+    recomputeRootDuration(project);
+    const diagnostics = validateJoyProjectV1(project);
+    if (diagnostics.length > 0) {
+      logError(`unsupported: text clip is not schema-valid (${diagnostics[0]!.message}).`);
+      return 1;
+    }
+    const nextRev = saveProject(project, {
+      source: projectInfo.source,
+      path: projectInfo.path,
+      revision: projectInfo.revision,
+    });
+    logSuccess(
+      `Added renderable text clip ${c(created.clip.id, 'bold')} to ${track.name ?? track.id} (saved rev ${nextRev}).`,
+    );
+    return 0;
+  }
 
   if (sub === 'add-clip') {
     const selectedAssetId = flags.asset;

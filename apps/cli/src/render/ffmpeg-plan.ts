@@ -1,6 +1,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
+import { escapeDrawtextValue, resolveTextFont } from './text-font.js';
 
 export interface FfmpegRenderOverrides {
   readonly width?: number;
@@ -143,17 +144,49 @@ export function buildFfmpegRenderPlan(
   let overlayIndex = 0;
   const tracks = [...root.tracks]
     .filter(
-      (track) => track.enabled !== false && track.kind === 'video' && track.family !== 'audio',
+      (track) =>
+        track.enabled !== false &&
+        track.family !== 'audio' &&
+        (track.kind === 'video' || track.kind === 'caption'),
     )
     .sort((a, b) => a.order - b.order);
   const audioInputs: string[] = [];
   for (const track of tracks) {
     for (const clip of [...track.clips].sort((a, b) => a.startUs - b.startUs)) {
       if (clip.kind === 'caption') {
-        skipped.push({
-          clipId: clip.id,
-          reason: 'caption clips are not supported by the v1 renderer',
-        });
+        const document = project.captionDocuments?.[clip.captionDocumentId];
+        const fontPath = resolveTextFont();
+        if (!document || !fontPath) {
+          skipped.push({
+            clipId: clip.id,
+            reason: !fontPath
+              ? 'unsupported: no usable font found; set JOY_FONT or install DejaVu Sans'
+              : 'unsupported: caption document is missing',
+          });
+          continue;
+        }
+        const style = clip.style;
+        for (const segment of document.segments) {
+          const text =
+            segment.textOverride ??
+            segment.wordIds.map((wordId) => document.words[wordId]?.text ?? '').join('');
+          if (!text) {
+            skipped.push({ clipId: clip.id, reason: 'unsupported: caption segment has no text' });
+            continue;
+          }
+          const start = clip.startUs + segment.startUs;
+          const end = Math.min(clip.startUs + clip.durationUs, clip.startUs + segment.endUs);
+          const x = style?.positionX ? String(style.positionX) : '(w-text_w)/2';
+          const y = style?.positionY ? String(style.positionY) : '(h-text_h)/2';
+          const size = Math.max(1, Math.round((style?.fontSize ?? 64) * (style?.scale ?? 1)));
+          const color = safeColor(style?.textColor ?? '#ffffff');
+          const next = `txt_${overlayIndex++}`;
+          const enabled = `between(t\\,${seconds(start)}\\,${seconds(end)})`;
+          filters.push(
+            `[${videoLabel}]drawtext=fontfile='${escapeDrawtextValue(fontPath)}':text='${escapeDrawtextValue(text)}':x=${x}:y=${y}:fontsize=${size}:fontcolor=${color}:enable='${enabled}'[${next}]`,
+          );
+          videoLabel = next;
+        }
         continue;
       }
       if (clip.kind === 'composition') {

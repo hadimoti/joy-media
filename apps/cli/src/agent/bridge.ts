@@ -10,10 +10,37 @@ import { recomputeRootDuration } from '../utils/timeline-math.js';
 import { buildFfmpegFramePlan } from '../render/ffmpeg-plan.js';
 import { resolveFfmpegExecutable } from '../render/ffmpeg-run.js';
 import { DEFAULT_JOY_AGENT_LIMITS } from '@joy-media/joy-agent-engine';
+import { createTextClip } from '../render/text-clip.js';
+import { resolveTextFont } from '../render/text-font.js';
 
 export interface StagedOperationsSummary {
   readonly timelineOps: readonly JoyTimelineOperation[];
   readonly documentOps: readonly JoyDocumentOperation[];
+}
+
+export interface AppliedTimelineSummary {
+  readonly clips: readonly {
+    readonly clipId: string;
+    readonly trackId: string;
+    readonly track: string;
+    readonly startUs: number;
+    readonly endUs: number;
+    readonly sourceInUs?: number;
+    readonly sourceOutUs?: number;
+  }[];
+  readonly gaps: readonly {
+    readonly trackId: string;
+    readonly startUs: number;
+    readonly endUs: number;
+  }[];
+  readonly blackRegions: readonly { readonly startUs: number; readonly endUs: number }[];
+}
+
+export interface ApplyStagedResult {
+  readonly updatedProject: JoyProjectV1;
+  readonly appliedCount: number;
+  readonly errors: string[];
+  readonly placementSummary: AppliedTimelineSummary;
 }
 
 export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
@@ -21,6 +48,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
   private stagedDocument: JoyDocumentOperation[] = [];
   private selectedClipIds: string[] = [];
   private playheadUs: number = 0;
+  private lastApplyResult: ApplyStagedResult | undefined;
 
   constructor(
     private project: JoyProjectV1,
@@ -208,6 +236,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
     readonly operations: readonly JoyTimelineOperation[];
   }): Promise<unknown> {
     this.stagedTimeline.push(...input.operations);
+    this.lastApplyResult = undefined;
     this.notify();
     return {
       staged: true,
@@ -221,6 +250,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
     readonly operations: readonly JoyDocumentOperation[];
   }): Promise<unknown> {
     this.stagedDocument.push(...input.operations);
+    this.lastApplyResult = undefined;
     this.notify();
     return {
       staged: true,
@@ -231,6 +261,17 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
   }
 
   async submitPlan(): Promise<unknown> {
+    if (this.autoApply) {
+      const result = this.applyStaged();
+      return {
+        awaitingApproval: false,
+        willApplyOnFinish: true,
+        applied: result.errors.length === 0,
+        appliedCount: result.appliedCount,
+        errors: result.errors,
+        placementSummary: result.placementSummary,
+      };
+    }
     return {
       awaitingApproval: !this.autoApply,
       willApplyOnFinish: this.autoApply,
@@ -243,14 +284,25 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
   /**
    * Applies all staged operations onto the project and returns a clean, modified project document.
    */
-  applyStaged(): { updatedProject: JoyProjectV1; appliedCount: number; errors: string[] } {
+  applyStaged(): ApplyStagedResult {
+    if (
+      this.lastApplyResult !== undefined &&
+      this.stagedTimeline.length === 0 &&
+      this.stagedDocument.length === 0
+    )
+      return this.lastApplyResult;
     const current = structuredClone(this.project);
     const errors: string[] = [];
     let appliedCount = 0;
 
     const root = current.compositions[current.rootCompositionId];
     if (!root) {
-      return { updatedProject: current, appliedCount: 0, errors: ['Missing root composition'] };
+      return {
+        updatedProject: current,
+        appliedCount: 0,
+        errors: ['Missing root composition'],
+        placementSummary: summarizePlacements(current),
+      };
     }
 
     const tracks = root.tracks as unknown as Array<{
@@ -435,32 +487,68 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
     // Apply document operations
     for (const op of this.stagedDocument) {
       try {
-        if (op.kind === 'set-text') {
-          // Update caption document or visual object
-          const object = current.visualObjects?.[op.objectId] as
-            (typeof current.visualObjects)[string] | undefined;
-          if (object?.kind === 'text') {
-            (object as { text?: string }).text = op.text;
-            appliedCount++;
-          } else {
-            let updated = false;
-            for (const document of Object.values(current.captionDocuments ?? {})) {
-              const segment = document.segments.find((entry) => entry.id === op.objectId);
-              if (segment) {
-                (segment as { textOverride?: string }).textOverride = op.text;
-                updated = true;
-                break;
-              }
-            }
-            if (updated) appliedCount++;
-            else errors.push(`Object ${op.objectId} not found`);
+        if (op.kind === 'create-text') {
+          let track = op.trackId
+            ? tracks.find((candidate) => candidate.id === op.trackId)
+            : tracks.find((candidate) => candidate.kind === 'caption');
+          if (track && track.kind !== 'caption') {
+            errors.push(`unsupported: text needs a caption track (${op.trackId}).`);
+            continue;
           }
+          if (!track) {
+            if (op.trackId) {
+              errors.push(`unsupported: caption track ${op.trackId} was not found.`);
+              continue;
+            }
+            const captionTrack = {
+              id: `track-captions-${tracks.length + 1}`,
+              kind: 'caption',
+              family: 'visual',
+              name: 'Captions',
+              order:
+                Math.max(
+                  -1,
+                  ...tracks.map((candidate) =>
+                    Number((candidate as { order?: number }).order ?? -1),
+                  ),
+                ) + 1,
+              enabled: true,
+              locked: false,
+              clips: [],
+            };
+            tracks.push(captionTrack);
+            track = captionTrack;
+          }
+          if (!resolveTextFont()) {
+            errors.push('unsupported: no usable font found; set JOY_FONT or install DejaVu Sans.');
+            continue;
+          }
+          const created = createTextClip({
+            id: op.id,
+            text: op.text,
+            startUs: op.startUs,
+            durationUs: op.durationUs,
+            ...(op.x === undefined ? {} : { x: op.x }),
+            ...(op.y === undefined ? {} : { y: op.y }),
+            ...(op.size === undefined ? {} : { size: op.size }),
+            ...(op.color === undefined ? {} : { color: op.color }),
+          });
+          (current.captionDocuments as Record<string, unknown>)[created.document.id] =
+            created.document;
+          track.clips.push(created.clip as unknown as (typeof track.clips)[number]);
+          appliedCount++;
+        } else if (op.kind === 'set-text') {
+          errors.push(`unsupported: set-text for ${op.objectId} is not rendered by ffmpeg.`);
         } else if (op.kind === 'set-property') {
           const object = current.visualObjects?.[op.objectId] as
             (typeof current.visualObjects)[string] | undefined;
           if (!object) {
             errors.push(`Object ${op.objectId} not found`);
           } else {
+            if (object.kind === 'text') {
+              errors.push(`unsupported: text property ${op.property} is not rendered by ffmpeg.`);
+              continue;
+            }
             const allowed = new Set([
               'opacity',
               'x',
@@ -488,19 +576,6 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
                 editable.transform.scaleY = op.value;
               } else if (op.property === 'rotation') {
                 editable.transform.rotationDeg = op.value;
-              } else if (
-                op.property === 'fontSize' &&
-                object.kind === 'text' &&
-                editable.textStyle
-              ) {
-                editable.textStyle.fontSizePx = op.value;
-              } else if (op.property === 'color' && object.kind === 'text' && editable.textStyle) {
-                const fill = editable.textStyle.fill as Record<string, unknown> | undefined;
-                if (fill?.kind !== 'solid') {
-                  errors.push(`Property color requires a solid fill on ${op.objectId}`);
-                  continue;
-                }
-                fill.color = op.value;
               } else {
                 errors.push(`Property ${op.property} is not supported for ${object.kind} objects`);
                 continue;
@@ -509,17 +584,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
             }
           }
         } else if (op.kind === 'add-effect') {
-          const object = current.visualObjects?.[op.objectId] as
-            (typeof current.visualObjects)[string] | undefined;
-          if (!object) errors.push(`Object ${op.objectId} not found`);
-          else {
-            const effects = (object as { effects?: readonly unknown[] }).effects ?? [];
-            (object as unknown as { effects: unknown[] }).effects = [
-              ...effects,
-              { id: op.id, effectId: op.effectId, enabled: true, params: {} },
-            ];
-            appliedCount++;
-          }
+          errors.push(`unsupported: effect ${op.effectId} is not rendered by ffmpeg.`);
         }
       } catch (err) {
         errors.push(`Error applying ${op.kind}: ${String(err)}`);
@@ -533,15 +598,83 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
       errors.push(`${diagnostic.path}: ${diagnostic.message}`);
     }
     if (diagnostics.length > 0) {
-      return { updatedProject: this.project, appliedCount: 0, errors };
+      return {
+        updatedProject: this.project,
+        appliedCount: 0,
+        errors,
+        placementSummary: summarizePlacements(this.project),
+      };
     }
     this.project = current;
     this.clearStaged();
 
-    return {
+    this.lastApplyResult = {
       updatedProject: current,
       appliedCount,
       errors,
+      placementSummary: summarizePlacements(current),
     };
+    return this.lastApplyResult;
   }
+}
+
+function summarizePlacements(project: JoyProjectV1): AppliedTimelineSummary {
+  const root = project.compositions[project.rootCompositionId];
+  if (!root) return { clips: [], gaps: [], blackRegions: [] };
+  const visualTracks = root.tracks.filter(
+    (track) =>
+      track.enabled !== false &&
+      track.family !== 'audio' &&
+      (track.kind === 'video' || track.kind === 'caption'),
+  );
+  const clips: AppliedTimelineSummary['clips'][number][] = [];
+  const gaps: AppliedTimelineSummary['gaps'][number][] = [];
+  const allSpans: Array<{ startUs: number; endUs: number }> = [];
+  for (const track of visualTracks) {
+    const spans = track.clips
+      .map((clip) => ({ startUs: clip.startUs, endUs: clip.startUs + clip.durationUs }))
+      .sort((a, b) => a.startUs - b.startUs);
+    for (const clip of track.clips) {
+      const range = {
+        clipId: clip.id,
+        trackId: track.id,
+        track: track.name ?? track.id,
+        startUs: clip.startUs,
+        endUs: clip.startUs + clip.durationUs,
+      };
+      if (clip.kind === 'video') {
+        clips.push({
+          ...range,
+          sourceInUs: clip.sourceInUs,
+          sourceOutUs: sourceTimeAtVideoClipTime(clip, clip.startUs + clip.durationUs),
+        });
+      } else clips.push(range);
+    }
+    allSpans.push(...spans);
+    let coveredUntil = 0;
+    for (const span of spans) {
+      if (span.startUs > coveredUntil)
+        gaps.push({ trackId: track.id, startUs: coveredUntil, endUs: span.startUs });
+      coveredUntil = Math.max(coveredUntil, span.endUs);
+    }
+    if (coveredUntil < root.durationUs)
+      gaps.push({ trackId: track.id, startUs: coveredUntil, endUs: root.durationUs });
+  }
+  const merged = allSpans
+    .map((span) => ({
+      startUs: Math.max(0, span.startUs),
+      endUs: Math.min(root.durationUs, span.endUs),
+    }))
+    .filter((span) => span.endUs > span.startUs)
+    .sort((a, b) => a.startUs - b.startUs);
+  const blackRegions: Array<{ startUs: number; endUs: number }> = [];
+  let coveredUntil = 0;
+  for (const span of merged) {
+    if (span.startUs > coveredUntil)
+      blackRegions.push({ startUs: coveredUntil, endUs: span.startUs });
+    coveredUntil = Math.max(coveredUntil, span.endUs);
+  }
+  if (coveredUntil < root.durationUs)
+    blackRegions.push({ startUs: coveredUntil, endUs: root.durationUs });
+  return { clips, gaps, blackRegions };
 }
