@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FlagValidationError, parseFloatFlag, parseIntFlag } from './flags.js';
+import { FlagValidationError, NUMERIC_RANGES, parseFloatFlag, parseIntFlag } from './flags.js';
 
 describe('utils/flags (numeric flag validation)', () => {
   describe('parseIntFlag', () => {
@@ -66,5 +66,12 @@ describe('utils/flags (numeric flag validation)', () => {
       expect(e.received).toBe('not-a-number');
       expect(e.message).toMatch(/--width/);
     }
+  });
+
+  it('accepts zero timeline positions while keeping duration positive', () => {
+    expect(parseFloatFlag('start', '0', NUMERIC_RANGES.start)).toBe(0);
+    expect(parseFloatFlag('end', '0', NUMERIC_RANGES.end)).toBe(0);
+    expect(parseFloatFlag('at', '0', NUMERIC_RANGES.at)).toBe(0);
+    expect(() => parseFloatFlag('duration', '0', NUMERIC_RANGES.duration)).toThrow();
   });
 });

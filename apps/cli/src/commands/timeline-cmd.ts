@@ -3,6 +3,8 @@ import type { CliFlags } from '../cli.js';
 import { FlagValidationError, NUMERIC_RANGES } from '../utils/flags.js';
 import { c, logError, logSuccess } from '../utils/logger.js';
 import { loadProject, saveProject } from '../utils/project-loader.js';
+import { recomputeRootDuration } from '../utils/timeline-math.js';
+import { sourceTimeAtVideoClipTime } from '@joy-media/project-schema';
 
 export interface TimelineCommandFlags {
   project?: string | undefined;
@@ -14,6 +16,14 @@ export interface TimelineCommandFlags {
   end?: number | undefined;
   at?: number | undefined;
   sqlitePath?: string | undefined;
+}
+
+export function printTimelineHelp(): void {
+  console.log(`Usage: joy-media timeline <add-clip|split|trim|remove-clip> --project <id|file>
+  add-clip --asset <id> [--track <id>] [--start <seconds>] [--duration <seconds>]
+  split --clip <id> --at <seconds>
+  trim --clip <id> [--start <seconds>] [--end <seconds>] [--duration <seconds>]
+  remove-clip --clip <id>`);
 }
 
 export async function handleTimelineCommand(args: string[], flags: CliFlags): Promise<number> {
@@ -46,7 +56,17 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
   const tracks = root.tracks as unknown as Array<{
     id: string;
     name?: string;
-    clips: Array<{ id: string; startUs: number; durationUs: number; [key: string]: unknown }>;
+    clips: Array<{
+      id: string;
+      startUs: number;
+      durationUs: number;
+      kind?: string;
+      sourceInUs?: number;
+      childOffsetUs?: number;
+      playbackRate?: number;
+      reversed?: boolean;
+      [key: string]: unknown;
+    }>;
   }>;
 
   if (sub === 'add-clip') {
@@ -74,6 +94,8 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
       durationUs,
       sourceInUs: 0,
     });
+    track.clips.sort((a, b) => a.startUs - b.startUs);
+    recomputeRootDuration(project);
 
     const nextRev = saveProject(project, {
       source: projectInfo.source,
@@ -111,15 +133,30 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
         const dur1 = atUs - clip.startUs;
         const dur2 = originalDuration - dur1;
 
+        let secondSourceInUs: number | undefined;
+        if (clip.kind === 'video') {
+          secondSourceInUs = sourceTimeAtVideoClipTime(clip as never, atUs);
+          if (secondSourceInUs < 0) {
+            logError('Split would use a negative source time.');
+            return 1;
+          }
+        }
+
         clip.durationUs = dur1;
         const part2 = {
           ...clip,
           id: `${clip.id}-p2`,
           startUs: atUs,
           durationUs: dur2,
-        };
+        } as typeof clip;
+        if (clip.kind === 'video') {
+          part2.sourceInUs = secondSourceInUs!;
+        } else if (clip.kind === 'composition') {
+          part2.childOffsetUs = (part2.childOffsetUs ?? 0) + dur1;
+        }
 
         track.clips.splice(idx + 1, 0, part2);
+        track.clips.sort((a, b) => a.startUs - b.startUs);
         found = true;
         break;
       }
@@ -129,6 +166,8 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
       logError(`Clip "${flags.clip}" not found.`);
       return 1;
     }
+
+    recomputeRootDuration(project);
 
     const nextRev = saveProject(project, {
       source: projectInfo.source,
@@ -160,7 +199,19 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
       const clip = track.clips.find((c) => c.id === flags.clip);
       if (clip) {
         if (flags.start !== undefined) {
-          clip.startUs = Math.round(flags.start * 1_000_000);
+          const nextStartUs = Math.round(flags.start * 1_000_000);
+          const oldStartUs = clip.startUs;
+          if (clip.kind === 'video') {
+            const sourceInUs = sourceTimeAtVideoClipTime(clip as never, nextStartUs);
+            if (sourceInUs < 0) {
+              logError('Trim would use a negative source time.');
+              return 1;
+            }
+            clip.sourceInUs = sourceInUs;
+          } else if (clip.kind === 'composition') {
+            clip.childOffsetUs = (clip.childOffsetUs ?? 0) + nextStartUs - oldStartUs;
+          }
+          clip.startUs = nextStartUs;
         }
         if (flags.end !== undefined) {
           const endUs = Math.round(flags.end * 1_000_000);
@@ -169,6 +220,7 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
           clip.durationUs = Math.round(flags.duration * 1_000_000);
         }
         found = true;
+        track.clips.sort((a, b) => a.startUs - b.startUs);
         break;
       }
     }
@@ -177,6 +229,8 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
       logError(`Clip "${flags.clip}" not found.`);
       return 1;
     }
+
+    recomputeRootDuration(project);
 
     const nextRev = saveProject(project, {
       source: projectInfo.source,
@@ -208,6 +262,8 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
       logError(`Clip "${flags.clip}" not found.`);
       return 1;
     }
+
+    recomputeRootDuration(project);
 
     const nextRev = saveProject(project, {
       source: projectInfo.source,

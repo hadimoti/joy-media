@@ -1,0 +1,242 @@
+import { describe, expect, it } from 'vitest';
+import type { JoyProjectV1 } from '@joy-media/project-schema';
+import { CliJoyAgentToolBridge } from './bridge.js';
+
+function projectWithTracks(): JoyProjectV1 {
+  return {
+    schemaVersion: 1,
+    id: 'project-1',
+    title: 'Move test',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    rootCompositionId: 'root',
+    settings: { defaultLocale: 'en' },
+    compositions: {
+      root: {
+        id: 'root',
+        name: 'Root',
+        width: 1920,
+        height: 1080,
+        pixelAspectRatio: { num: 1, den: 1 },
+        frameRate: { num: 30, den: 1 },
+        durationUs: 10_000_000,
+        background: '#000000',
+        tracks: [
+          {
+            id: 'video-1',
+            kind: 'video',
+            family: 'visual',
+            name: 'Video 1',
+            order: 0,
+            enabled: true,
+            locked: false,
+            clips: [
+              {
+                id: 'early',
+                kind: 'video',
+                assetId: 'asset',
+                startUs: 0,
+                durationUs: 1_000_000,
+                sourceInUs: 0,
+              },
+              {
+                id: 'moving',
+                kind: 'video',
+                assetId: 'asset',
+                startUs: 2_000_000,
+                durationUs: 1_000_000,
+                sourceInUs: 0,
+              },
+            ],
+          },
+          {
+            id: 'video-2',
+            kind: 'video',
+            family: 'visual',
+            name: 'Video 2',
+            order: 1,
+            enabled: true,
+            locked: false,
+            clips: [],
+          },
+        ],
+      },
+    },
+    assets: {},
+    variables: {},
+    markers: [],
+    visualObjects: {},
+    captionDocuments: {},
+    pluginData: {},
+  } as JoyProjectV1;
+}
+
+describe('CLI Joy Agent bridge timeline operations', () => {
+  it('moves a clip between tracks and keeps each track sorted by timeline start', async () => {
+    const bridge = new CliJoyAgentToolBridge(projectWithTracks(), 1);
+    await bridge.proposeTimelineOperations({
+      operations: [
+        {
+          kind: 'move',
+          id: 'move-op',
+          clipId: 'moving',
+          trackId: 'video-2',
+          startUs: 5_000_000,
+          dependsOn: [],
+        },
+      ],
+    });
+
+    const { updatedProject, appliedCount, errors } = bridge.applyStaged();
+    const tracks = updatedProject.compositions.root!.tracks;
+    expect(errors).toEqual([]);
+    expect(appliedCount).toBe(1);
+    expect(tracks[0]!.clips.map((clip) => clip.id)).toEqual(['early']);
+    expect(tracks[1]!.clips.map((clip) => [clip.id, clip.startUs])).toEqual([
+      ['moving', 5_000_000],
+    ]);
+  });
+
+  it('rejects a missing target without losing the source clip', async () => {
+    const bridge = new CliJoyAgentToolBridge(projectWithTracks(), 1);
+    await bridge.proposeTimelineOperations({
+      operations: [
+        {
+          kind: 'move',
+          id: 'move-op',
+          clipId: 'moving',
+          trackId: 'missing',
+          startUs: 5_000_000,
+          dependsOn: [],
+        },
+      ],
+    });
+
+    const { updatedProject, appliedCount, errors } = bridge.applyStaged();
+    expect(appliedCount).toBe(0);
+    expect(errors).toContain('Target track missing not found');
+    expect(updatedProject.compositions.root!.tracks[0]!.clips.map((clip) => clip.id)).toEqual([
+      'early',
+      'moving',
+    ]);
+  });
+
+  it('trims video source position using playback rate and reverse semantics', async () => {
+    const project = projectWithTracks();
+    const clips = project.compositions.root!.tracks[0]!.clips as unknown as Array<
+      Record<string, unknown>
+    >;
+    clips[1] = {
+      ...clips[1],
+      startUs: 2_000_000,
+      durationUs: 4_000_000,
+      sourceInUs: 1_000_000,
+      playbackRate: 2,
+    };
+    const bridge = new CliJoyAgentToolBridge(project, 1);
+    await bridge.proposeTimelineOperations({
+      operations: [
+        {
+          kind: 'trim',
+          id: 'trim-op',
+          clipId: 'moving',
+          startUs: 3_000_000,
+          endUs: 5_000_000,
+          dependsOn: [],
+        },
+      ],
+    });
+    const result = bridge.applyStaged();
+    const clip = result.updatedProject.compositions.root!.tracks[0]!.clips[1]!;
+    expect(clip).toMatchObject({
+      startUs: 3_000_000,
+      durationUs: 2_000_000,
+      sourceInUs: 3_000_000,
+    });
+  });
+
+  it('splits with a source offset and deterministic operation id', async () => {
+    const bridge = new CliJoyAgentToolBridge(projectWithTracks(), 1);
+    await bridge.proposeTimelineOperations({
+      operations: [
+        { kind: 'split', id: 'split-op', clipId: 'moving', atUs: 2_500_000, dependsOn: [] },
+      ],
+    });
+    const result = bridge.applyStaged();
+    const clips = result.updatedProject.compositions.root!.tracks[0]!.clips;
+    expect(clips.map((clip) => [clip.id, clip.startUs, clip.durationUs])).toEqual([
+      ['early', 0, 1_000_000],
+      ['moving', 2_000_000, 500_000],
+      ['moving-split-split-op', 2_500_000, 500_000],
+    ]);
+    expect(clips[2]).toMatchObject({ sourceInUs: 500_000 });
+  });
+
+  it('mutates document fields and counts only successful operations', async () => {
+    const project = {
+      ...projectWithTracks(),
+      visualObjects: {
+        title: {
+          id: 'title',
+          kind: 'text',
+          text: 'Old',
+          transform: {
+            x: 0,
+            y: 0,
+            scaleX: 1,
+            scaleY: 1,
+            rotationDeg: 0,
+            opacity: 1,
+            crop: { left: 0, top: 0, right: 0, bottom: 0 },
+          },
+        },
+      },
+    } as JoyProjectV1;
+    const bridge = new CliJoyAgentToolBridge(project, 1);
+    await bridge.proposeDocumentOperations({
+      operations: [
+        { kind: 'set-text', id: 'text-op', objectId: 'title', text: 'New title', dependsOn: [] },
+        {
+          kind: 'set-property',
+          id: 'prop-op',
+          objectId: 'title',
+          property: 'opacity',
+          value: 0.5,
+          dependsOn: [],
+        },
+        {
+          kind: 'set-property',
+          id: 'bad-prop-op',
+          objectId: 'title',
+          property: 'unlisted',
+          value: 1,
+          dependsOn: [],
+        },
+        { kind: 'add-effect', id: 'effect-op', objectId: 'title', effectId: 'blur', dependsOn: [] },
+        { kind: 'set-text', id: 'missing-op', objectId: 'missing', text: 'ignored', dependsOn: [] },
+      ],
+    });
+    const result = bridge.applyStaged();
+    expect(result.appliedCount).toBe(3);
+    expect(result.errors).toContain('Property unlisted is not writable');
+    expect(result.errors).toContain('Object missing not found');
+    expect(result.updatedProject.visualObjects.title).toMatchObject({
+      text: 'New title',
+      transform: { opacity: 0.5 },
+      effects: [{ id: 'effect-op', effectId: 'blur', enabled: true, params: {} }],
+    });
+  });
+
+  it('reports whether the plan will wait for approval or auto-apply', async () => {
+    const staged = new CliJoyAgentToolBridge(projectWithTracks(), 1);
+    const automatic = new CliJoyAgentToolBridge(projectWithTracks(), 1, undefined, true);
+    await expect(staged.submitPlan()).resolves.toMatchObject({
+      awaitingApproval: true,
+      willApplyOnFinish: false,
+    });
+    await expect(automatic.submitPlan()).resolves.toMatchObject({
+      awaitingApproval: false,
+      willApplyOnFinish: true,
+    });
+  });
+});

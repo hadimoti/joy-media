@@ -83,10 +83,10 @@ export const NUMERIC_RANGES = {
   width: { min: 16, max: 15360 } as NumericRange,
   height: { min: 16, max: 8640 } as NumericRange,
   fps: { min: 1, max: 240 } as NumericRange,
-  start: { min: 0, max: 86400 } as NumericRange,
+  start: { min: 0, max: 86400, allowZero: true } as NumericRange,
   duration: { min: 0.001, max: 86400 } as NumericRange,
-  end: { min: 0, max: 86400 } as NumericRange,
-  at: { min: 0, max: 86400 } as NumericRange,
+  end: { min: 0, max: 86400, allowZero: true } as NumericRange,
+  at: { min: 0, max: 86400, allowZero: true } as NumericRange,
   scale: { min: 1, max: 16 } as NumericRange,
 };
 

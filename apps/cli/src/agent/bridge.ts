@@ -4,6 +4,8 @@ import type {
   JoyTimelineOperation,
 } from '@joy-media/joy-agent-engine';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
+import { sourceTimeAtVideoClipTime, validateJoyProjectV1 } from '@joy-media/project-schema';
+import { recomputeRootDuration } from '../utils/timeline-math.js';
 
 export interface StagedOperationsSummary {
   readonly timelineOps: readonly JoyTimelineOperation[];
@@ -20,6 +22,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
     private project: JoyProjectV1,
     private revision: number,
     private onStagedChange?: (summary: StagedOperationsSummary) => void,
+    private readonly autoApply = false,
   ) {}
 
   setSelection(clipIds: string[], playheadUs: number = 0): void {
@@ -163,7 +166,8 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
 
   async submitPlan(): Promise<unknown> {
     return {
-      awaitingApproval: true,
+      awaitingApproval: !this.autoApply,
+      willApplyOnFinish: this.autoApply,
       timelineOperations: this.stagedTimeline.length,
       documentOperations: this.stagedDocument.length,
       revision: this.revision,
@@ -185,10 +189,17 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
 
     const tracks = root.tracks as unknown as Array<{
       id: string;
+      kind: string;
+      family?: string;
       clips: Array<{
         id: string;
         startUs: number;
         durationUs: number;
+        kind?: string;
+        sourceInUs?: number;
+        childOffsetUs?: number;
+        playbackRate?: number;
+        reversed?: boolean;
         [key: string]: unknown;
       }>;
     }>;
@@ -200,6 +211,20 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
           const track = tracks.find((t) => t.id === op.trackId);
           if (!track) {
             errors.push(`Track ${op.trackId} not found for insert`);
+            continue;
+          }
+          if (track.kind !== 'video') {
+            errors.push(`Track ${op.trackId} cannot host video clips`);
+            continue;
+          }
+          if (
+            track.clips.some(
+              (clip) =>
+                op.startUs < clip.startUs + clip.durationUs &&
+                op.startUs + op.durationUs > clip.startUs,
+            )
+          ) {
+            errors.push(`Insert ${op.id} overlaps another clip on track ${op.trackId}`);
             continue;
           }
           track.clips.push({
@@ -224,16 +249,11 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
           }
           if (!found) errors.push(`Clip ${op.clipId} not found for remove`);
         } else if (op.kind === 'move') {
-          let clipToMove: unknown = null;
-          for (const track of tracks) {
-            const index = track.clips.findIndex((c) => c.id === op.clipId);
-            if (index !== -1) {
-              clipToMove = track.clips[index];
-              track.clips.splice(index, 1);
-              break;
-            }
-          }
-          if (!clipToMove) {
+          const sourceTrack = tracks.find((track) =>
+            track.clips.some((clip) => clip.id === op.clipId),
+          );
+          const sourceIndex = sourceTrack?.clips.findIndex((clip) => clip.id === op.clipId) ?? -1;
+          if (!sourceTrack || sourceIndex < 0) {
             errors.push(`Clip ${op.clipId} not found to move`);
             continue;
           }
@@ -242,22 +262,69 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
             errors.push(`Target track ${op.trackId} not found`);
             continue;
           }
-          const updated = { ...(clipToMove as object), startUs: op.startUs } as {
-            id: string;
-            startUs: number;
-            durationUs: number;
-          };
+          const sourceClip = sourceTrack.clips[sourceIndex]!;
+          const compatibleKind =
+            sourceClip.kind === 'composition' || sourceClip.kind === 'video'
+              ? targetTrack.kind === 'video'
+              : sourceClip.kind === targetTrack.kind;
+          const compatibleFamily = !(targetTrack.family === 'audio' && sourceClip.kind === 'video');
+          if (!compatibleKind || !compatibleFamily) {
+            errors.push(`Track ${op.trackId} cannot host ${sourceClip.kind} clips`);
+            continue;
+          }
+          if (
+            targetTrack.clips.some(
+              (clip) =>
+                clip.id !== op.clipId &&
+                op.startUs < clip.startUs + clip.durationUs &&
+                op.startUs + sourceClip.durationUs > clip.startUs,
+            )
+          ) {
+            errors.push(`Move of ${op.clipId} overlaps another clip on track ${op.trackId}`);
+            continue;
+          }
+          const updated = { ...sourceClip, startUs: op.startUs };
+          sourceTrack.clips.splice(sourceIndex, 1);
           targetTrack.clips.push(updated);
+          targetTrack.clips.sort((a, b) => a.startUs - b.startUs);
           appliedCount++;
         } else if (op.kind === 'trim') {
+          if (op.endUs <= op.startUs) {
+            errors.push(`Invalid trim range for ${op.clipId}: end must be greater than start`);
+            continue;
+          }
           let found = false;
           for (const track of tracks) {
             const clip = track.clips.find((c) => c.id === op.clipId);
             if (clip) {
+              const overlapping = track.clips.some(
+                (other) =>
+                  other.id !== clip.id &&
+                  op.startUs < other.startUs + other.durationUs &&
+                  op.endUs > other.startUs,
+              );
+              if (overlapping) {
+                errors.push(`Trim of ${op.clipId} overlaps another clip on track ${track.id}`);
+                found = true;
+                break;
+              }
+              const previousStartUs = clip.startUs;
+              if (clip.kind === 'video') {
+                const sourceInUs = sourceTimeAtVideoClipTime(clip as never, op.startUs);
+                if (sourceInUs < 0) {
+                  errors.push(`Trim of ${op.clipId} would use a negative source time`);
+                  found = true;
+                  break;
+                }
+                clip.sourceInUs = sourceInUs;
+              } else if (clip.kind === 'composition') {
+                clip.childOffsetUs = (clip.childOffsetUs ?? 0) + op.startUs - previousStartUs;
+              }
               clip.startUs = op.startUs;
-              clip.durationUs = Math.max(1000, op.endUs - op.startUs);
+              clip.durationUs = op.endUs - op.startUs;
               found = true;
-              appliedCount++;
+              if (!errors.some((error) => error.includes(`Trim of ${op.clipId}`))) appliedCount++;
+              track.clips.sort((a, b) => a.startUs - b.startUs);
               break;
             }
           }
@@ -276,10 +343,15 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
                 original.durationUs = duration1;
                 const secondPart = {
                   ...original,
-                  id: `${original.id}-split-${Date.now().toString(36)}`,
+                  id: `${original.id}-split-${op.id}`,
                   startUs: op.atUs,
                   durationUs: duration2,
-                };
+                } as typeof original;
+                if (original.kind === 'video') {
+                  secondPart.sourceInUs = sourceTimeAtVideoClipTime(original as never, op.atUs);
+                } else if (original.kind === 'composition') {
+                  secondPart.childOffsetUs = (secondPart.childOffsetUs ?? 0) + duration1;
+                }
                 track.clips.splice(index + 1, 0, secondPart);
                 found = true;
                 appliedCount++;
@@ -299,19 +371,100 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
       try {
         if (op.kind === 'set-text') {
           // Update caption document or visual object
-          if (current.visualObjects && current.visualObjects[op.objectId]) {
+          const object = current.visualObjects?.[op.objectId] as
+            (typeof current.visualObjects)[string] | undefined;
+          if (object?.kind === 'text') {
+            (object as { text?: string }).text = op.text;
             appliedCount++;
           } else {
+            let updated = false;
+            for (const document of Object.values(current.captionDocuments ?? {})) {
+              const segment = document.segments.find((entry) => entry.id === op.objectId);
+              if (segment) {
+                (segment as { textOverride?: string }).textOverride = op.text;
+                updated = true;
+                break;
+              }
+            }
+            if (updated) appliedCount++;
+            else errors.push(`Object ${op.objectId} not found`);
+          }
+        } else if (op.kind === 'set-property') {
+          const object = current.visualObjects?.[op.objectId] as
+            (typeof current.visualObjects)[string] | undefined;
+          if (!object) {
+            errors.push(`Object ${op.objectId} not found`);
+          } else {
+            const allowed = new Set([
+              'opacity',
+              'x',
+              'y',
+              'scale',
+              'rotation',
+              'fontSize',
+              'color',
+            ]);
+            if (!allowed.has(op.property)) {
+              errors.push(`Property ${op.property} is not writable`);
+            } else if (op.property === 'color' && typeof op.value !== 'string') {
+              errors.push('Property color requires a string value');
+            } else if (op.property !== 'color' && typeof op.value !== 'number') {
+              errors.push(`Property ${op.property} requires a numeric value`);
+            } else {
+              const editable = object as unknown as {
+                transform: Record<string, unknown>;
+                textStyle?: Record<string, unknown>;
+              };
+              if (['opacity', 'x', 'y'].includes(op.property)) {
+                editable.transform[op.property] = op.value;
+              } else if (op.property === 'scale') {
+                editable.transform.scaleX = op.value;
+                editable.transform.scaleY = op.value;
+              } else if (op.property === 'rotation') {
+                editable.transform.rotationDeg = op.value;
+              } else if (
+                op.property === 'fontSize' &&
+                object.kind === 'text' &&
+                editable.textStyle
+              ) {
+                editable.textStyle.fontSizePx = op.value;
+              } else if (op.property === 'color' && object.kind === 'text' && editable.textStyle) {
+                const fill = editable.textStyle.fill as Record<string, unknown> | undefined;
+                if (fill?.kind !== 'solid') {
+                  errors.push(`Property color requires a solid fill on ${op.objectId}`);
+                  continue;
+                }
+                fill.color = op.value;
+              } else {
+                errors.push(`Property ${op.property} is not supported for ${object.kind} objects`);
+                continue;
+              }
+              appliedCount++;
+            }
+          }
+        } else if (op.kind === 'add-effect') {
+          const object = current.visualObjects?.[op.objectId] as
+            (typeof current.visualObjects)[string] | undefined;
+          if (!object) errors.push(`Object ${op.objectId} not found`);
+          else {
+            const effects = (object as { effects?: readonly unknown[] }).effects ?? [];
+            (object as unknown as { effects: unknown[] }).effects = [
+              ...effects,
+              { id: op.id, effectId: op.effectId, enabled: true, params: {} },
+            ];
             appliedCount++;
           }
-        } else if (op.kind === 'set-property' || op.kind === 'add-effect') {
-          appliedCount++;
         }
       } catch (err) {
         errors.push(`Error applying ${op.kind}: ${String(err)}`);
       }
     }
 
+    for (const track of tracks) track.clips.sort((a, b) => a.startUs - b.startUs);
+    recomputeRootDuration(current);
+    for (const diagnostic of validateJoyProjectV1(current)) {
+      errors.push(`${diagnostic.path}: ${diagnostic.message}`);
+    }
     this.project = current;
     this.clearStaged();
 
