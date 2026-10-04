@@ -103,6 +103,7 @@ export interface MediaAuthServiceOptions {
   /** Shared trusted-proxy boundary for durable OTP abuse buckets. */
   readonly clientAddressResolver?: ClientAddressResolver;
   readonly accountRateLimitMax?: number;
+  readonly verifyFailureMaxBuckets?: number;
   readonly otpSendConcurrency?: number;
   readonly otpDeliveryTimeoutMs?: number;
 }
@@ -144,6 +145,7 @@ export class MediaAuthService implements MediaAuthApi {
   private readonly telegram: MediaTelegramSenderLike | undefined;
   private readonly clientAddressResolver: ClientAddressResolver;
   private readonly accountRateLimitMax: number;
+  private readonly verifyFailureMaxBuckets: number;
   private readonly otpSendConcurrency: number;
   private readonly otpDeliveryTimeoutMs: number;
   private readonly accountOtpRateLimit = new Map<string, number[]>();
@@ -162,6 +164,10 @@ export class MediaAuthService implements MediaAuthApi {
     this.telegram = options.telegram;
     this.clientAddressResolver = options.clientAddressResolver ?? createClientAddressResolver();
     this.accountRateLimitMax = options.accountRateLimitMax ?? OTP_ACCOUNT_RATE_LIMIT_MAX;
+    this.verifyFailureMaxBuckets = Math.max(
+      1,
+      Math.floor(options.verifyFailureMaxBuckets ?? OTP_ACCOUNT_RATE_LIMIT_MAX_BUCKETS),
+    );
     this.otpSendConcurrency = Math.max(1, Math.floor(options.otpSendConcurrency ?? 10));
     this.otpDeliveryTimeoutMs = Math.max(1, options.otpDeliveryTimeoutMs ?? 15_000);
   }
@@ -453,14 +459,23 @@ export class MediaAuthService implements MediaAuthApi {
   }
 
   private makeRoomForVerifyBucket(now: number, protectedKey?: string): boolean {
-    if (this.verifyFailures.size < OTP_ACCOUNT_RATE_LIMIT_MAX_BUCKETS) return true;
-    for (const [key, bucket] of this.verifyFailures) {
-      if (key === protectedKey) continue;
-      if (bucket.inFlight === 0 && bucket.blockedUntil <= now) {
-        // Map order is LRU: expired failures appear before newer active failures.
-        this.verifyFailures.delete(key);
-        return true;
+    if (this.verifyFailures.size < this.verifyFailureMaxBuckets) return true;
+    const entriesToScan = this.verifyFailures.size;
+    const entries = this.verifyFailures.entries();
+    for (let index = 0; index < entriesToScan; index += 1) {
+      const entry = entries.next().value as
+        | [string, { readonly timestamps: number[]; blockedUntil: number; inFlight: number }]
+        | undefined;
+      if (entry === undefined) break;
+      const [key, bucket] = entry;
+      if (key === protectedKey || bucket.inFlight > 0 || bucket.blockedUntil > now) {
+        // Rotate protected entries so a later idle bucket is considered first next time.
+        this.touchVerifyBucket(key, bucket);
+        continue;
       }
+      // Map order is LRU: idle, unblocked failures appear before newer protected entries.
+      this.verifyFailures.delete(key);
+      return true;
     }
     return false;
   }

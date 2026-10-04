@@ -14,6 +14,7 @@ async function service(
   overrides: {
     mailer?: { sendOtp: ReturnType<typeof vi.fn> } | undefined;
     accountRateLimitMax?: number;
+    verifyFailureMaxBuckets?: number;
     otpSendConcurrency?: number;
     otpDeliveryTimeoutMs?: number;
   } = {},
@@ -31,6 +32,9 @@ async function service(
     ...(overrides.accountRateLimitMax === undefined
       ? {}
       : { accountRateLimitMax: overrides.accountRateLimitMax }),
+    ...(overrides.verifyFailureMaxBuckets === undefined
+      ? {}
+      : { verifyFailureMaxBuckets: overrides.verifyFailureMaxBuckets }),
     ...(overrides.otpSendConcurrency === undefined
       ? {}
       : { otpSendConcurrency: overrides.otpSendConcurrency }),
@@ -53,6 +57,14 @@ function sentCode(mailer: { sendOtp: ReturnType<typeof vi.fn> }): string {
 }
 
 describe('MediaAuthService', () => {
+  it('keeps the production verify-failure bucket cap at 10,000 by default', async () => {
+    const { auth } = await service();
+
+    expect((auth as unknown as { verifyFailureMaxBuckets: number }).verifyFailureMaxBuckets).toBe(
+      10_000,
+    );
+  });
+
   it('prunes expired IP buckets and never exceeds its configured cap', () => {
     const buckets = new BoundedOtpRateLimitMap(2);
     buckets.consume('old-a', 3, 0);
@@ -422,12 +434,13 @@ describe('MediaAuthService', () => {
   });
 
   it('evicts junk verify buckets at capacity so a legitimate correct code can log in', async () => {
-    const { auth, mailer } = await service();
+    const maxBuckets = 50;
+    const { auth, mailer } = await service({ verifyFailureMaxBuckets: maxBuckets });
     await auth.addAllowed({ gmail: 'legitimate@example.com', addedBy: 'admin' });
     await auth.requestOtp('legitimate@example.com', 'gmail');
     await auth.drainPendingOtpSends();
     const code = sentCode(mailer);
-    for (let i = 0; i < 10_000; i += 1)
+    for (let i = 0; i < maxBuckets; i += 1)
       await auth.verifyOtp(`junk-${i}@example.invalid`, 'gmail', '000000').catch(() => undefined);
 
     await expect(auth.verifyOtp('legitimate@example.com', 'gmail', code)).resolves.toEqual(
@@ -436,7 +449,8 @@ describe('MediaAuthService', () => {
   });
 
   it('preserves blocked verify entries while evicting junk buckets', async () => {
-    const { auth, mailer } = await service();
+    const maxBuckets = 50;
+    const { auth, mailer } = await service({ verifyFailureMaxBuckets: maxBuckets });
     await auth.addAllowed({ gmail: 'legitimate@example.com', addedBy: 'admin' });
     await auth.requestOtp('legitimate@example.com', 'gmail');
     await auth.drainPendingOtpSends();
@@ -449,24 +463,29 @@ describe('MediaAuthService', () => {
       }
     ).verifyFailures;
     const now = Date.now();
-    failures.set('gmail:blocked-victim@example.com', {
-      timestamps: [now, now, now, now, now],
-      blockedUntil: now + 60_000,
-      inFlight: 0,
-    });
-    for (let i = 0; i < 9_999; i += 1)
+    const blockedCount = Math.floor(maxBuckets / 2);
+    for (let i = 0; i < blockedCount; i += 1) {
+      failures.set(`gmail:blocked-victim-${i}@example.com`, {
+        timestamps: [now, now, now, now, now],
+        blockedUntil: now + 60_000,
+        inFlight: 0,
+      });
+    }
+    for (let i = 0; i < maxBuckets - blockedCount; i += 1)
       failures.set(`gmail:junk-${i}`, { timestamps: [now], blockedUntil: 0, inFlight: 0 });
 
     await auth.verifyOtp('legitimate@example.com', 'gmail', sentCode(mailer));
 
-    expect(failures.get('gmail:blocked-victim@example.com')?.blockedUntil).toBeGreaterThan(now);
+    expect(failures.get('gmail:blocked-victim-0@example.com')?.blockedUntil).toBeGreaterThan(now);
+    expect(failures.has('gmail:junk-0')).toBe(false);
     await expect(
-      auth.verifyOtp('blocked-victim@example.com', 'gmail', '000000'),
+      auth.verifyOtp('blocked-victim-0@example.com', 'gmail', '000000'),
     ).rejects.toMatchObject({ code: 'TOO_MANY_ATTEMPTS' });
   });
 
   it('does not evict verify entries with in-flight reservations', async () => {
-    const { auth, mailer } = await service();
+    const maxBuckets = 50;
+    const { auth, mailer } = await service({ verifyFailureMaxBuckets: maxBuckets });
     await auth.addAllowed({ gmail: 'legitimate@example.com', addedBy: 'admin' });
     await auth.requestOtp('legitimate@example.com', 'gmail');
     await auth.drainPendingOtpSends();
@@ -480,7 +499,7 @@ describe('MediaAuthService', () => {
     ).verifyFailures;
     const now = Date.now();
     failures.set('gmail:in-flight@example.com', { timestamps: [], blockedUntil: 0, inFlight: 1 });
-    for (let i = 0; i < 9_999; i += 1)
+    for (let i = 0; i < maxBuckets - 1; i += 1)
       failures.set(`gmail:junk-${i}`, { timestamps: [now], blockedUntil: 0, inFlight: 0 });
 
     await auth.verifyOtp('legitimate@example.com', 'gmail', sentCode(mailer));
@@ -489,7 +508,8 @@ describe('MediaAuthService', () => {
   });
 
   it('rejects a verify key only when every bucket is blocked or in flight', async () => {
-    const { auth } = await service();
+    const maxBuckets = 50;
+    const { auth } = await service({ verifyFailureMaxBuckets: maxBuckets });
     const failures = (
       auth as unknown as {
         verifyFailures: Map<
@@ -498,13 +518,13 @@ describe('MediaAuthService', () => {
         >;
       }
     ).verifyFailures;
-    for (let i = 0; i < 10_000; i += 1)
+    for (let i = 0; i < maxBuckets; i += 1)
       failures.set(`gmail:protected-${i}`, { timestamps: [], blockedUntil: 0, inFlight: 1 });
 
     await expect(auth.verifyOtp('new@example.com', 'gmail', '000000')).rejects.toMatchObject({
       code: 'TOO_MANY_ATTEMPTS',
     });
-    expect(failures.size).toBe(10_000);
+    expect(failures.size).toBe(maxBuckets);
   });
 
   it('returns the same verify error sequence for unknown contacts', async () => {
