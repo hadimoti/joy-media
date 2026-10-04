@@ -30,6 +30,7 @@ export const JOY_AGENT_INSTRUCTIONS = [
   'Never claim an edit is applied until submit_plan returns a committed result.',
   'When applying a timeline change, call submit_plan and use its verified placement summary in your final response.',
   'Batch every requested change into one plan and one submit_plan call whenever possible.',
+  'When calling submit_plan, include a short checklist for each requested trim, centered text, or clip look so the host can verify the final timeline.',
   'Do not split a requested edit across multiple partial plans. Unsupported requests must be called out explicitly.',
   'Do not request credentials, DOM selectors, endpoints, arbitrary headers, or hidden reasoning.',
 ].join(' ');

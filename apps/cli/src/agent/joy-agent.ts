@@ -4,6 +4,7 @@ import {
   type JoyAgentSafeEvent,
   type JoyAgentTaskKind,
   type JoyAgentProbeResult,
+  type JoyPlanChecklistItem,
   KILO_MODEL_PRESETS,
 } from '@joy-media/joy-agent-engine';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
@@ -53,6 +54,8 @@ export interface RunAgentOutput {
   readonly appliedOperationIds?: readonly string[] | undefined;
   readonly errors: string[];
   readonly notes: string[];
+  readonly checklist?: readonly JoyPlanChecklistItem[];
+  readonly verified?: readonly string[];
   readonly placementSummary?: AppliedTimelineSummary;
   readonly resolvedModelId?: string;
 }
@@ -190,6 +193,8 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
   let notes: string[] = [];
   let applied = false;
   let placementSummary: AppliedTimelineSummary | undefined;
+  const checklist = bridge.getPlanChecklist();
+  let verified: string[] = [];
 
   if (options.apply && runResult.status === 'completed' && bridge.hasSubmittedPlan()) {
     if (!options.json) logInfo('Applying staged operations to project...');
@@ -200,7 +205,10 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     errors = [...errors, ...applyRes.errors];
     notes = applyRes.notes;
     placementSummary = applyRes.placementSummary;
-    applied = applyRes.errors.length === 0 && applyRes.appliedCount > 0;
+    applied = errors.length === 0 && applyRes.errors.length === 0 && applyRes.appliedCount > 0;
+    const verification = verifyPlanChecklist(updatedProject, checklist);
+    verified = verification.verified;
+    errors = [...errors, ...verification.unmet.map((item) => `Checklist not verified: ${item}`)];
     if (errors.length > 0) {
       logWarn(
         applied
@@ -229,15 +237,71 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     steps: runResult.steps,
     staged,
     applied,
-    status: runResult.status,
+    status: errors.some((error) => error.startsWith('Checklist not verified:'))
+      ? 'partial'
+      : runResult.status,
     updatedProject,
     appliedCount,
     appliedOperationIds,
     errors,
     notes,
+    checklist,
+    verified,
     ...(placementSummary === undefined ? {} : { placementSummary }),
     ...(runResult.resolvedModelId ? { resolvedModelId: runResult.resolvedModelId } : {}),
   };
+}
+
+export function verifyPlanChecklist(
+  project: JoyProjectV1,
+  checklist: readonly JoyPlanChecklistItem[],
+): { readonly verified: string[]; readonly unmet: string[] } {
+  const root = project.compositions[project.rootCompositionId];
+  const clips = root?.tracks.flatMap((track) => track.clips) ?? [];
+  const verified: string[] = [];
+  const unmet: string[] = [];
+  for (const item of checklist) {
+    if (item.kind === 'trim') {
+      const clip = clips.find((candidate) => candidate.id === item.clipId);
+      const actualIn = clip?.kind === 'video' ? clip.sourceInUs : undefined;
+      const rate =
+        clip?.kind === 'video' && clip.playbackRate && clip.playbackRate > 0
+          ? clip.playbackRate
+          : 1;
+      const actualOut =
+        actualIn === undefined ? undefined : actualIn + Math.round(clip!.durationUs * rate);
+      if (actualIn === item.sourceInUs && actualOut === item.sourceOutUs)
+        verified.push(`Trim ${item.clipId}: source ${item.sourceInUs}–${item.sourceOutUs} µs`);
+      else
+        unmet.push(`trim ${item.clipId} expected source ${item.sourceInUs}–${item.sourceOutUs} µs`);
+    } else if (item.kind === 'look') {
+      const clip = clips.find((candidate) => candidate.id === item.clipId);
+      if (clip?.kind === 'video' && clip.look?.preset === item.look)
+        verified.push(`Look ${item.clipId}: ${item.look}`);
+      else unmet.push(`look ${item.look} on clip ${item.clipId}`);
+    } else {
+      const found = Object.values(project.captionDocuments ?? {}).some((document) =>
+        document.segments.some((segment) => {
+          const text =
+            segment.textOverride ??
+            segment.wordIds.map((id) => document.words[id]?.text ?? '').join('');
+          if (text !== item.text) return false;
+          const caption = clips.find(
+            (clip) => clip.kind === 'caption' && clip.captionDocumentId === document.id,
+          );
+          return (
+            caption?.kind === 'caption' &&
+            (item.position !== 'center' ||
+              (caption.style?.positionX === 0 && caption.style?.positionY === 0))
+          );
+        }),
+      );
+      if (found)
+        verified.push(`Text “${item.text}”${item.position === 'center' ? ' centered' : ''}`);
+      else unmet.push(`text “${item.text}”${item.position === 'center' ? ' centered' : ''}`);
+    }
+  }
+  return { verified, unmet };
 }
 
 export function truthfulAgentSummary(input: {

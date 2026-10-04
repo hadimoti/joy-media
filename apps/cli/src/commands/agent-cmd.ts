@@ -573,9 +573,19 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
             operationIds: output.appliedOperationIds,
             errors: output.errors,
             summary: output.resultText,
+            checklist: output.checklist ?? [],
+            verified: output.verified ?? [],
           }),
         );
-        console.log(JSON.stringify({ type: 'status', status: output.status, steps: output.steps }));
+        console.log(
+          JSON.stringify({
+            type: 'status',
+            status: output.status,
+            steps: output.steps,
+            checklist: output.checklist ?? [],
+            verified: output.verified ?? [],
+          }),
+        );
       } else if (flags.apply && !output.applied && output.errors.length > 0) {
         logError(`Apply refused: ${output.errors.join('; ')}`);
         return 1;
@@ -618,8 +628,10 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
           }),
         );
       if (output.applied && !flags.json) printPlacementSummary(output.placementSummary);
+      if ((output.verified?.length ?? 0) > 0 && !flags.json)
+        logInfo(`Verified: ${output.verified!.join('; ')}`);
 
-      return output.status === 'partial' ? 1 : 0;
+      return output.status === 'partial' || (flags.apply === true && !output.applied) ? 1 : 0;
     } catch (err) {
       const failure = formatAgentRunFailure(err, flags.debug || process.env.JOY_DEBUG === '1');
       if (flags.json)

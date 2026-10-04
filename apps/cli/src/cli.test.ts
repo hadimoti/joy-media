@@ -70,7 +70,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     });
     expect(text.document.direction).toBe('rtl');
     expect(text.document.words['rtl-title-word']?.text).toBe('فارسی JOY Media');
-    expect(text.clip.style?.align).toBe('end');
+    expect(text.clip.style?.align).toBe('center');
   });
 
   it.each([
@@ -431,6 +431,43 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     } finally {
       runSpy.mockRestore();
       stderr.mockRestore();
+      stdout.mockRestore();
+    }
+  });
+
+  it('exits non-zero for a rejected JSON --apply result', async () => {
+    const project = createDefaultProject('JSON apply rejection', { id: 'json-apply-rejection' });
+    const projectFile = join(isolatedHome, 'json-apply-rejection.json');
+    writeFileSync(
+      projectFile,
+      JSON.stringify({ format: 'joy-media-project', revision: 1, project }),
+    );
+    const runSpy = vi.spyOn(joyAgentRuntime, 'runJoyAgent').mockResolvedValue({
+      resultText: 'Apply refused.',
+      modelText: '',
+      capability: 'tool-loop',
+      steps: 1,
+      status: 'completed',
+      staged: { timelineOps: [], documentOps: [] },
+      applied: false,
+      updatedProject: project,
+      appliedCount: 0,
+      errors: ['invalid final plan'],
+      notes: [],
+    });
+    const stdout = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(
+        await runCli(['agent', 'run', 'change it', '--project', projectFile, '--apply', '--json']),
+      ).toBe(1);
+      const records = stdout.mock.calls
+        .flat()
+        .map((line) => JSON.parse(String(line)) as Record<string, unknown>);
+      expect(records.find((record) => record.type === 'apply_result')).toMatchObject({
+        applied: false,
+      });
+    } finally {
+      runSpy.mockRestore();
       stdout.mockRestore();
     }
   });
@@ -888,8 +925,10 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
             {
               id: 'list-clip',
               kind: 'video',
-              startUs: 1_250_000,
-              durationUs: 2_000_000,
+              timelineStartUs: 1_250_000,
+              timelineEndUs: 3_250_000,
+              sourceInUs: 0,
+              sourceOutUs: 2_000_000,
             },
           ],
         });
