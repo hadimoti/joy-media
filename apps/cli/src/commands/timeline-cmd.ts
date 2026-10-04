@@ -73,7 +73,7 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
   if (sub === 'list') {
     const tracks = root.tracks.map((track) => ({
       id: track.id,
-      kind: track.kind,
+      kind: track.family === 'audio' ? 'audio' : track.kind,
       clips: track.clips.map((clip) => ({
         id: clip.id,
         kind: clip.kind,
