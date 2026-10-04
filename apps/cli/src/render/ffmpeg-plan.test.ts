@@ -31,12 +31,18 @@ describe('buildFfmpegRenderPlan', () => {
       expect(plan.args).toContain('0.5');
       expect(plan.args).toContain('-frames:v');
       expect(plan.args).toContain('1');
-      expect(plan.args).toContain('scale=512:512:force_original_aspect_ratio=decrease');
+      expect(plan.args).not.toContain('-vf');
+      expect(plan.args.join(' ')).toContain(
+        'scale=512:512:force_original_aspect_ratio=decrease[frame]',
+      );
+      expect(plan.args).toContain('[frame]');
       expect(plan.args).toContain('image2pipe');
       expect(plan.args).toContain('mjpeg');
       expect(plan.args.join(' ')).toContain('trim=start=0.25');
       expect(plan.args.join(' ')).not.toContain('[aout]');
       expect(plan.inputs).toHaveLength(1);
+      expect(plan.width).toBe(512);
+      expect(plan.height).toBe(288);
       expect(() => buildFfmpegFramePlan(project, 500_000, 1025)).toThrow(RangeError);
     } finally {
       rmSync(dir, { recursive: true, force: true });

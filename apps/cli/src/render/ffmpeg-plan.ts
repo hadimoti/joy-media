@@ -45,24 +45,27 @@ export function buildFfmpegFramePlan(
   const videoFilters = filterGraph
     .split(';')
     .filter((filter) => !/\[\d+:a\]|\[a_\d+\]|\[aout\]|\bamix=|\banullsrc/.test(filter));
+  const scaleFilter = `scale=${maxEdge}:${maxEdge}:force_original_aspect_ratio=decrease`;
+  const hasVideoFilterGraph = videoFilters.length > 0;
+  if (hasVideoFilterGraph) videoFilters.push(`${videoMap}${scaleFilter}[frame]`);
+  const frameDimensions = fitWithinMaxEdge(render.width, render.height, maxEdge);
   const args = [
     ...render.args.slice(0, filterIndex),
-    ...(videoFilters.length > 0 ? ['-filter_complex', videoFilters.join(';')] : []),
+    ...(hasVideoFilterGraph ? ['-filter_complex', videoFilters.join(';')] : []),
     '-map',
-    videoMap,
+    hasVideoFilterGraph ? '[frame]' : videoMap,
     '-ss',
     seconds(atUs),
     '-frames:v',
     '1',
-    '-vf',
-    `scale=${maxEdge}:${maxEdge}:force_original_aspect_ratio=decrease`,
+    ...(!hasVideoFilterGraph ? ['-vf', scaleFilter] : []),
     '-f',
     'image2pipe',
     '-c:v',
     'mjpeg',
     'pipe:1',
   ];
-  return { args, inputs: render.inputs, width: render.width, height: render.height };
+  return { args, inputs: render.inputs, ...frameDimensions };
 }
 
 export function buildFfmpegRenderPlan(
@@ -372,6 +375,18 @@ function positiveOverride(
 
 function seconds(microseconds: number): string {
   return (microseconds / 1_000_000).toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function fitWithinMaxEdge(
+  width: number,
+  height: number,
+  maxEdge: number,
+): {
+  width: number;
+  height: number;
+} {
+  const scale = Math.min(1, maxEdge / width, maxEdge / height);
+  return { width: Math.round(width * scale), height: Math.round(height * scale) };
 }
 
 function safeColor(value: string): string {
