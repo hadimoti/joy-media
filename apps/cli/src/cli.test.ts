@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { runCli } from './cli.js';
 import { CliJoyAgentToolBridge } from './agent/bridge.js';
 import { resolveByokConfig } from './agent/provider.js';
+import { formatAgentRunFailure } from './commands/agent-cmd.js';
+import { JoyAgentRunError } from '@joy-media/joy-agent-engine';
 import {
   createDefaultProject,
   listProjects,
@@ -30,6 +32,22 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     rmSync(isolatedHome, { recursive: true, force: true });
+  });
+
+  it('prints safe provider detail only when agent debug is enabled', () => {
+    const error = new JoyAgentRunError('JOY_AGENT_RATE_LIMITED', {
+      detail: {
+        name: 'APICallError',
+        statusCode: 429,
+        urlOrigin: 'https://provider.invalid',
+        message: 'rate limited',
+        responseBodySnippet: '',
+      },
+    });
+    expect(formatAgentRunFailure(error, false)).toBe(
+      'Joy Agent execution failed: JOY_AGENT_RATE_LIMITED',
+    );
+    expect(formatAgentRunFailure(error, true)).toContain('"statusCode":429');
   });
 
   it('prints help guide on help command and exits 0', async () => {

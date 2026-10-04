@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { APICallError } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
-import { JoyAgentEngine, probeJoyAgentModel } from './engine.js';
+import { JoyAgentEngine, JoyAgentRunError, probeJoyAgentModel } from './engine.js';
 import type { JoyAgentRunRequest } from './contracts.js';
 import type { JoyAgentToolBridge } from './tools.js';
 
@@ -64,6 +65,31 @@ describe('JOY Agent bounded model loop', () => {
     expect(engine.getLimits().maxSteps).toBe(DEFAULT_LIMITS.maxSteps);
     expect(engine.getLimits().maxToolCalls).toBe(4);
     expect(engine.getLimits().maxOutputTokens).toBe(128);
+  });
+
+  it('preserves a classified failure with redacted diagnostic detail and cause', async () => {
+    const secret = 'sk-test-REDACTED-0000';
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        throw new APICallError({
+          message: `request failed ${secret}`,
+          url: 'https://provider.invalid/v1/chat/completions?token=private',
+          requestBodyValues: {},
+          statusCode: 429,
+          responseBody: `Bearer ${secret}`,
+        });
+      },
+    });
+    const engine = new JoyAgentEngine({ model, bridge, apiKeyForRedaction: secret });
+
+    const error = await engine.run(request).catch((value: unknown) => value);
+    expect(error).toBeInstanceOf(JoyAgentRunError);
+    expect(error).toMatchObject({
+      code: 'JOY_AGENT_RATE_LIMITED',
+      detail: { statusCode: 429, urlOrigin: 'https://provider.invalid' },
+    });
+    expect(JSON.stringify(error)).not.toContain(secret);
+    expect((error as Error).cause).toBeDefined();
   });
 });
 

@@ -2,6 +2,7 @@
 export const PACKAGE_NAME = '@joy-media/joy-agent-engine' as const;
 
 export type {
+  JoyAgentErrorDetail,
   JoyAgentActivityEvent,
   JoyAgentCapabilityEvent,
   JoyAgentCancelledEvent,
@@ -37,6 +38,7 @@ export {
   isJoyAgentErrorCode,
   toSafeJoyAgentError,
 } from './redaction.js';
+export { JoyAgentRunError } from './engine.js';
 export type { ByokSessionConfig, ByokSessionStatus } from './provider-config.js';
 export {
   ProviderConfigError,

@@ -1352,6 +1352,12 @@ function failureMessage(
     return { code: 'JOY_AGENT_ABORTED', message: 'JOY run stopped' };
   const code = classifyError(error);
   if (code === 'JOY_AGENT_AUTH_FAILED') return { code, message: 'Provider authentication failed' };
+  if (code === 'JOY_AGENT_RATE_LIMITED') return { code, message: 'Provider rate limit reached' };
+  if (code === 'JOY_AGENT_MODEL_NOT_FOUND') return { code, message: 'Provider model not found' };
+  if (code === 'JOY_AGENT_UPSTREAM_UNAVAILABLE')
+    return { code, message: 'Provider is temporarily unavailable' };
+  if (code === 'JOY_AGENT_UNKNOWN')
+    return { code, message: 'Provider request failed for an unknown reason' };
   if (code === 'JOY_AGENT_RESPONSE_TOO_LARGE')
     return { code, message: 'Provider response too large' };
   if (code === 'JOY_AGENT_TIMEOUT') return { code, message: 'Provider request timed out' };

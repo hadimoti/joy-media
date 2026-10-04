@@ -1,5 +1,6 @@
+import { APICallError } from 'ai';
 import { describe, expect, it } from 'vitest';
-import { redactUnknownValue, toSafeJoyAgentError } from './redaction.js';
+import { classifyJoyAgentError, redactUnknownValue, toSafeJoyAgentError } from './redaction.js';
 
 describe('JOY Agent redaction', () => {
   it('projects secrets and provider diagnostics out of arbitrary values', () => {
@@ -37,5 +38,36 @@ describe('JOY Agent redaction', () => {
     const safe = toSafeJoyAgentError(new Error('401 provider rejected private response body'));
     expect(safe).toEqual({ code: 'JOY_AGENT_AUTH_FAILED', retryable: false });
     expect(Object.keys(safe)).toEqual(['code', 'retryable']);
+  });
+
+  it('classifies API status codes and leaves unknown errors unknown', () => {
+    const classify = (statusCode: number, responseBody?: string) =>
+      classifyJoyAgentError(
+        new APICallError({
+          message: 'request failed',
+          url: 'https://provider.invalid/chat',
+          requestBodyValues: {},
+          statusCode,
+          ...(responseBody === undefined ? {} : { responseBody }),
+        }),
+      );
+
+    expect(classify(401)).toBe('JOY_AGENT_AUTH_FAILED');
+    expect(classify(403)).toBe('JOY_AGENT_AUTH_FAILED');
+    expect(classify(404)).toBe('JOY_AGENT_MODEL_NOT_FOUND');
+    expect(classify(408)).toBe('JOY_AGENT_TIMEOUT');
+    expect(classify(504)).toBe('JOY_AGENT_TIMEOUT');
+    expect(classify(429)).toBe('JOY_AGENT_RATE_LIMITED');
+    expect(classify(503)).toBe('JOY_AGENT_UPSTREAM_UNAVAILABLE');
+    expect(classify(400, 'invalid tool call')).toBe('JOY_AGENT_INVALID_TOOL');
+    expect(classifyJoyAgentError(new Error('weird'))).toBe('JOY_AGENT_UNKNOWN');
+  });
+
+  it('marks only transient provider failures retryable', () => {
+    expect(toSafeJoyAgentError(new Error('unknown'))).toEqual({
+      code: 'JOY_AGENT_UNKNOWN',
+      retryable: false,
+    });
+    expect(toSafeJoyAgentError(new Error('request timeout')).retryable).toBe(true);
   });
 });

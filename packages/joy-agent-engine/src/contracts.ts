@@ -54,6 +54,10 @@ export const JOY_AGENT_ERROR_CODES = [
   'JOY_AGENT_TIMEOUT',
   'JOY_AGENT_CORS_OR_NETWORK',
   'JOY_AGENT_AUTH_FAILED',
+  'JOY_AGENT_RATE_LIMITED',
+  'JOY_AGENT_MODEL_NOT_FOUND',
+  'JOY_AGENT_UPSTREAM_UNAVAILABLE',
+  'JOY_AGENT_UNKNOWN',
   'JOY_AGENT_RESPONSE_TOO_LARGE',
   'JOY_AGENT_INVALID_TOOL',
   'JOY_AGENT_INVALID_PROPOSAL',
@@ -142,6 +146,14 @@ export interface JoyAgentRunRequest {
 export interface JoyAgentSafeError {
   readonly code: JoyAgentErrorCode;
   readonly retryable: boolean;
+}
+
+export interface JoyAgentErrorDetail {
+  readonly name: string;
+  readonly statusCode?: number;
+  readonly urlOrigin?: string;
+  readonly message: string;
+  readonly responseBodySnippet: string;
 }
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;

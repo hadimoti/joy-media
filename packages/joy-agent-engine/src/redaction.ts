@@ -1,6 +1,8 @@
+import { APICallError } from 'ai';
 import {
   JOY_AGENT_ERROR_CODES,
   type JoyAgentErrorCode,
+  type JoyAgentErrorDetail,
   type JoyAgentSafeError,
 } from './contracts.js';
 
@@ -50,6 +52,19 @@ function project(value: unknown, seen: WeakSet<object>, depth: number): unknown 
 }
 
 export function classifyJoyAgentError(error: unknown): JoyAgentErrorCode {
+  if (APICallError.isInstance(error)) {
+    const status = error.statusCode;
+    if (status === 401 || status === 403) return 'JOY_AGENT_AUTH_FAILED';
+    if (status === 404) return 'JOY_AGENT_MODEL_NOT_FOUND';
+    if (status === 408 || status === 504) return 'JOY_AGENT_TIMEOUT';
+    if (status === 429) return 'JOY_AGENT_RATE_LIMITED';
+    if (status !== undefined && status >= 500) return 'JOY_AGENT_UPSTREAM_UNAVAILABLE';
+    if (
+      (status === 400 || status === 422) &&
+      /tool|function/i.test(error.responseBody ?? error.message)
+    )
+      return 'JOY_AGENT_INVALID_TOOL';
+  }
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
   if (normalized.includes('abort') || normalized.includes('cancel')) return 'JOY_AGENT_ABORTED';
@@ -68,23 +83,49 @@ export function classifyJoyAgentError(error: unknown): JoyAgentErrorCode {
   if (normalized.includes('tool')) return 'JOY_AGENT_INVALID_TOOL';
   if (normalized.includes('proposal')) return 'JOY_AGENT_INVALID_PROPOSAL';
   if (normalized.includes('revision')) return 'JOY_AGENT_STALE_REVISION';
-  return 'JOY_AGENT_PROVIDER_INCOMPATIBLE';
+  return 'JOY_AGENT_UNKNOWN';
 }
 
 export function toSafeJoyAgentError(error: unknown): JoyAgentSafeError {
   const code = classifyJoyAgentError(error);
   return {
     code,
-    retryable: !(
+    retryable: (
       [
-        'JOY_AGENT_ABORTED',
-        'JOY_AGENT_AUTH_FAILED',
-        'JOY_AGENT_INVALID_TOOL',
-        'JOY_AGENT_INVALID_PROPOSAL',
-        'JOY_AGENT_STALE_REVISION',
-        'JOY_AGENT_PROVIDER_INCOMPATIBLE',
+        'JOY_AGENT_TIMEOUT',
+        'JOY_AGENT_CORS_OR_NETWORK',
+        'JOY_AGENT_RATE_LIMITED',
+        'JOY_AGENT_UPSTREAM_UNAVAILABLE',
       ] as readonly JoyAgentErrorCode[]
     ).includes(code),
+  };
+}
+
+export function safeErrorDetail(error: unknown, configuredApiKey?: string): JoyAgentErrorDetail {
+  const record =
+    error !== null && typeof error === 'object' ? (error as Record<string, unknown>) : {};
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  const rawBody = typeof record.responseBody === 'string' ? record.responseBody : '';
+  const url = typeof record.url === 'string' ? record.url : '';
+  let urlOrigin: string | undefined;
+  try {
+    urlOrigin = new URL(url).origin;
+  } catch {
+    /* omit malformed URLs */
+  }
+  const sanitize = (value: string) => {
+    let result = value
+      .replace(/Bearer\s+\S+/gi, 'Bearer [Redacted]')
+      .replace(/sk-[A-Za-z0-9_-]{8,}/g, '[Redacted]');
+    if (configuredApiKey) result = result.split(configuredApiKey).join('[Redacted]');
+    return result.slice(0, 300);
+  };
+  return {
+    name: error instanceof Error ? error.name : 'Error',
+    ...(typeof record.statusCode === 'number' ? { statusCode: record.statusCode } : {}),
+    ...(urlOrigin ? { urlOrigin } : {}),
+    message: sanitize(rawMessage),
+    responseBodySnippet: sanitize(rawBody),
   };
 }
 

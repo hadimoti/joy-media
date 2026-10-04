@@ -112,6 +112,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     model,
     bridge,
     onEvent: eventLogger,
+    apiKeyForRedaction: config.apiKey,
   });
 
   const runId = `cli-${Date.now().toString(36)}`;

@@ -40,6 +40,7 @@ export interface CliFlags {
   out: string | undefined;
   concurrency: number | undefined;
   json: boolean;
+  debug: boolean;
   system: boolean;
   'media-engine': boolean;
 }
@@ -124,6 +125,7 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
       allowZero: false,
     }),
     json: Boolean(v.json),
+    debug: Boolean(v.debug),
     system: Boolean(v.system),
     'media-engine': Boolean(v['media-engine']),
   };
@@ -162,6 +164,7 @@ export async function runCli(argv: string[]): Promise<number> {
         out: { type: 'string' },
         concurrency: { type: 'string' },
         json: { type: 'boolean', default: false },
+        debug: { type: 'boolean', default: false },
         system: { type: 'boolean', default: false },
         'media-engine': { type: 'boolean', default: false },
       },

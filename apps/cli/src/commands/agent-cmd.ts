@@ -7,6 +7,7 @@ import {
   canonicalKiloBaseUrl,
   defaultModelFor,
 } from '@joy-media/joy-agent-engine';
+import { JoyAgentRunError } from '@joy-media/joy-agent-engine';
 import { describeEffectiveConfig } from '../agent/provider.js';
 import type { CliFlags } from '../cli.js';
 import { probeAgent, runJoyAgent } from '../agent/joy-agent.js';
@@ -42,6 +43,11 @@ export interface AgentCommandFlags {
   model?: string | undefined;
   apiKey?: string | undefined;
   baseUrl?: string | undefined;
+}
+
+export function formatAgentRunFailure(error: unknown, debug: boolean): string {
+  if (!(error instanceof JoyAgentRunError)) return 'Joy Agent execution failed: JOY_AGENT_UNKNOWN';
+  return `Joy Agent execution failed: ${error.code}${debug ? `\nDebug detail: ${JSON.stringify(error.detail)}` : ''}`;
 }
 
 export async function handleAgentCommand(args: string[], flags: CliFlags): Promise<number> {
@@ -417,7 +423,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
 
       return 0;
     } catch (err) {
-      logError(`Joy Agent execution failed: ${String(err)}`);
+      logError(formatAgentRunFailure(err, flags.debug || process.env.JOY_DEBUG === '1'));
       return 1;
     }
   }

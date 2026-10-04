@@ -12,11 +12,13 @@ import {
   JOY_AGENT_PROTOCOL_VERSION,
   parseJoyAgentSafeEvent,
   type JoyAgentCapability,
+  type JoyAgentErrorDetail,
+  type JoyAgentErrorCode,
   type JoyAgentSafeEvent,
   type JoyAgentRunRequest,
 } from './contracts.js';
 import { DEFAULT_JOY_AGENT_LIMITS, clampJoyAgentLimits, type JoyAgentLimits } from './limits.js';
-import { toSafeJoyAgentError } from './redaction.js';
+import { safeErrorDetail, toSafeJoyAgentError } from './redaction.js';
 import { createJoyAgentTools, type JoyAgentToolBridge } from './tools.js';
 
 export const JOY_AGENT_INSTRUCTIONS = [
@@ -41,6 +43,20 @@ export interface JoyAgentEngineOptions {
   readonly capability?: JoyAgentCapability;
   readonly onEvent?: (event: JoyAgentSafeEvent) => void;
   readonly now?: () => Date;
+  readonly apiKeyForRedaction?: string;
+}
+
+export class JoyAgentRunError extends Error {
+  readonly detail: JoyAgentErrorDetail;
+
+  constructor(
+    readonly code: JoyAgentErrorCode,
+    options: { readonly cause?: unknown; readonly detail: JoyAgentErrorDetail },
+  ) {
+    super(code, { cause: options.cause });
+    this.name = 'JoyAgentRunError';
+    this.detail = options.detail;
+  }
 }
 
 export interface JoyAgentRunResult {
@@ -131,7 +147,15 @@ export class JoyAgentEngine {
   }
 
   async run(request: JoyAgentRunRequest, abortSignal?: AbortSignal): Promise<JoyAgentRunResult> {
-    if (this.capability === 'incompatible') throw new Error('JOY_AGENT_PROVIDER_INCOMPATIBLE');
+    if (this.capability === 'incompatible') {
+      throw new JoyAgentRunError('JOY_AGENT_PROVIDER_INCOMPATIBLE', {
+        detail: {
+          name: 'JoyAgentProbeError',
+          message: 'Provider capability probe failed',
+          responseBodySnippet: '',
+        },
+      });
+    }
     let sequence = -1;
     const emit = (event: JoyAgentEventPayload): void => {
       const parsed = parseJoyAgentSafeEvent(
@@ -164,7 +188,10 @@ export class JoyAgentEngine {
     } catch (error) {
       const safe = toSafeJoyAgentError(error);
       emit({ type: 'failed', code: safe.code, retryable: safe.retryable });
-      throw new Error(safe.code);
+      throw new JoyAgentRunError(safe.code, {
+        cause: error,
+        detail: safeErrorDetail(error, this.options.apiKeyForRedaction),
+      });
     }
   }
 
