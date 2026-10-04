@@ -15,10 +15,14 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { describe, it } from 'node:test';
+import { runClientKeySmoke } from '../tooling/ops/smoke-client-key.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '..');
 const applyScript = join(repoRoot, 'deploy', 'apply-nginx-cutover.sh');
 const deployScript = join(repoRoot, 'deploy', 'deploy-control-plane.sh');
+const cloudflareIps = join(repoRoot, 'deploy', 'cloudflare-ips.txt');
+const refreshCloudflareScript = join(repoRoot, 'deploy', 'refresh-cloudflare-ips.sh');
+const ensureProxyScript = join(repoRoot, 'deploy', 'ensure-trusted-proxy.py');
 
 function findBash() {
   if (process.platform !== 'win32') {
@@ -124,6 +128,7 @@ function createSandbox(t) {
   const conf = join(root, 'joy-wg-bot.conf');
   const ca = join(root, 'test-ca.pem');
   const apiEnv = join(root, 'api.env');
+  const ips = join(root, 'cloudflare-ips.txt');
   const deployState = join(root, 'deploy-state');
   const log = join(root, 'commands.log');
   const curlCount = join(root, 'curl-count');
@@ -136,7 +141,11 @@ function createSandbox(t) {
   writeFileSync(join(repo, 'pnpm-lock.yaml'), 'lockfile fixture');
   writeFileSync(conf, fixture);
   writeFileSync(ca, 'test CA placeholder');
-  writeFileSync(apiEnv, 'JOY_MEDIA_RELEASE_SCHEMA_VERSION=9\nJOY_MEDIA_TEST_SENTINEL=original\n');
+  writeFileSync(
+    apiEnv,
+    'JOY_MEDIA_RELEASE_SCHEMA_VERSION=9\nJOY_MEDIA_TEST_SENTINEL=original\nJOY_MEDIA_TRUSTED_PROXY_ADDRESSES=10.0.0.2\n',
+  );
+  writeFileSync(ips, readFileSync(cloudflareIps, 'utf8'));
   const oldRelease = join(releaseRoot, 'old-release');
   const nextRelease = join(releaseRoot, 'next-release');
   mkdirSync(oldRelease);
@@ -150,7 +159,7 @@ function createSandbox(t) {
   );
   writeFileSync(
     cutover,
-    '#!/usr/bin/env bash\nset -e\nprintf \'cutover\\n\' >> "$JOY_STUB_LOG"\ncp -p "$JOY_MEDIA_API_ENV_FILE" "${JOY_MEDIA_API_ENV_FILE}.before-next-release.env"\nprintf \'JOY_MEDIA_RELEASE_SCHEMA_VERSION=11\\nJOY_MEDIA_TEST_SENTINEL=deployed\\n\' > "${JOY_MEDIA_API_ENV_FILE}.next"\nmv -Tf -- "${JOY_MEDIA_API_ENV_FILE}.next" "$JOY_MEDIA_API_ENV_FILE"\nprintf \'next-release\\t%s\\n\' "${JOY_MEDIA_API_ENV_FILE}.before-next-release.env" > "$JOY_MEDIA_DEPLOY_STATE_FILE"\nln -s -- "$JOY_TEST_NEXT_RELEASE" "${JOY_MEDIA_CURRENT_API_LINK}.next"\nmv -Tf -- "${JOY_MEDIA_CURRENT_API_LINK}.next" "$JOY_MEDIA_CURRENT_API_LINK"\n',
+    '#!/usr/bin/env bash\nset -e\nprintf \'cutover\\n\' >> "$JOY_STUB_LOG"\ncp -p "$JOY_MEDIA_API_ENV_FILE" "${JOY_MEDIA_API_ENV_FILE}.before-next-release.env"\nprintf \'JOY_MEDIA_RELEASE_SCHEMA_VERSION=11\\nJOY_MEDIA_TEST_SENTINEL=deployed\\nJOY_MEDIA_TRUSTED_PROXY_ADDRESSES=10.0.0.2,127.0.0.1\\n\' > "${JOY_MEDIA_API_ENV_FILE}.next"\nmv -Tf -- "${JOY_MEDIA_API_ENV_FILE}.next" "$JOY_MEDIA_API_ENV_FILE"\nprintf \'next-release\\t%s\\n\' "${JOY_MEDIA_API_ENV_FILE}.before-next-release.env" > "$JOY_MEDIA_DEPLOY_STATE_FILE"\nln -s -- "$JOY_TEST_NEXT_RELEASE" "${JOY_MEDIA_CURRENT_API_LINK}.next"\nmv -Tf -- "${JOY_MEDIA_CURRENT_API_LINK}.next" "$JOY_MEDIA_CURRENT_API_LINK"\n',
   );
   chmodSync(cutover, 0o755);
   symlinkSync(oldRelease, current, process.platform === 'win32' ? 'junction' : 'dir');
@@ -216,6 +225,7 @@ fi
     JOY_MEDIA_DEPLOY_STATE_FILE: toShellPath(deployState),
     JOY_MEDIA_NGINX_CONF: toShellPath(conf),
     JOY_MEDIA_NGINX_BACKUP_DIR: toShellPath(backupDir),
+    JOY_MEDIA_CLOUDFLARE_IPS_FILE: toShellPath(ips),
     JOY_MEDIA_CA_FILE: toShellPath(ca),
     JOY_MEDIA_EDGE_ADDR: '82.115.8.224',
     JOY_MEDIA_CUTOVER_SCRIPT: toShellPath(cutover),
@@ -243,6 +253,7 @@ fi
     curlCount,
     current,
     apiEnv,
+    ips,
     deployState,
     oldRelease,
     nextRelease,
@@ -300,6 +311,28 @@ describe(
   'deploy scripts',
   { skip: !bash ? 'bash/Git Bash not found; shell integration tests skipped' : undefined },
   () => {
+    it('adds the loopback trusted proxy while preserving the existing list', (t) => {
+      if (!hasPython) return t.skip('python3 is unavailable; api.env staging test needs Python');
+      const sandbox = createSandbox(t);
+      const result = spawnSync('python3', [ensureProxyScript, sandbox.apiEnv], {
+        encoding: 'utf8',
+      });
+      assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+      assert.match(
+        readFileSync(sandbox.apiEnv, 'utf8'),
+        /^JOY_MEDIA_TRUSTED_PROXY_ADDRESSES=10\.0\.0\.2,127\.0\.0\.1$/mu,
+      );
+      writeFileSync(sandbox.apiEnv, 'JOY_MEDIA_RELEASE_SCHEMA_VERSION=9\n');
+      const missing = spawnSync('python3', [ensureProxyScript, sandbox.apiEnv], {
+        encoding: 'utf8',
+      });
+      assert.equal(missing.status, 0, `${missing.stdout}\n${missing.stderr}`);
+      assert.match(
+        readFileSync(sandbox.apiEnv, 'utf8'),
+        /^JOY_MEDIA_TRUSTED_PROXY_ADDRESSES=127\.0\.0\.1$/mu,
+      );
+    });
+
     it('patches the agent ahead of matching regexes and preserves the other joyst routes', (t) => {
       if (!hasPython)
         return t.skip('python3 is unavailable; Nginx patch integration needs real Python');
@@ -342,6 +375,33 @@ describe(
       const combinedApi = locations.find((location) => location.pattern.includes('auth|devices'));
       assert.ok(combinedApi);
       assert.doesNotMatch(combinedApi.pattern, /\|agent|agent\|/);
+      for (const location of [
+        selectNginxLocation(locations, '/api/v1/agent/models'),
+        combinedApi,
+      ]) {
+        assert.match(location.body, /proxy_set_header X-Forwarded-For \$remote_addr;/);
+        assert.match(location.body, /proxy_set_header X-Real-IP \$remote_addr;/);
+        assert.doesNotMatch(
+          location.body,
+          /proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;/,
+        );
+      }
+      const ranges = readFileSync(cloudflareIps, 'utf8')
+        .split(/\r?\n/u)
+        .map((line) => line.replace(/^\uFEFF/u, '').trim())
+        .filter((line) => line && !line.startsWith('#'));
+      assert.equal(ranges.length, 22);
+      assert.match(
+        joyst,
+        /# BEGIN joy-media realip \(managed\)[\s\S]*real_ip_header CF-Connecting-IP;[\s\S]*# END joy-media realip \(managed\)/,
+      );
+      for (const range of ranges) assert.ok(joyst.includes(`set_real_ip_from ${range};`));
+      assert.match(joyst, /location \/internal\/ \{\s*return 404;\s*\}/);
+      assert.equal(
+        selectNginxLocation(locations, '/internal/client-key').body.trim(),
+        'return 404;',
+        'the public server rejects the loopback-only diagnostic path',
+      );
       assert.equal(selectNginxLocation(locations, '/api/v1/projects').body.trim(), 'return 404;');
       const once = updated;
       const second = runBash(applyScript, [], {
@@ -352,6 +412,51 @@ describe(
       assert.equal(readFileSync(sandbox.conf, 'utf8'), once, 'patch is idempotent');
       const lines = commandLog(sandbox);
       assertCurlSafety(lines, sandbox.env.JOY_MEDIA_CA_FILE, '2001:db8::25');
+    });
+
+    it('rejects invalid Cloudflare CIDRs and restores the original Nginx file', (t) => {
+      if (!hasPython)
+        return t.skip('python3 is unavailable; Nginx patch integration needs real Python');
+      const sandbox = createSandbox(t);
+      const invalidIps = '# fake range list\n192.0.2.0/24\nnot-a-cidr\n';
+      writeFileSync(sandbox.ips, invalidIps);
+      const result = runBash(applyScript, [], sandbox.env);
+      assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+      assert.equal(
+        readFileSync(sandbox.conf, 'utf8'),
+        fixture,
+        'original config restored after invalid CIDR',
+      );
+    });
+
+    it('does not invoke the Cloudflare refresh tool from deployment scripts', () => {
+      const scripts = [applyScript, deployScript, join(repoRoot, 'deploy', 'deploy-cutover.sh')]
+        .map((path) => readFileSync(path, 'utf8'))
+        .join('\n');
+      assert.ok(existsSync(refreshCloudflareScript));
+      assert.doesNotMatch(scripts, /refresh-cloudflare-ips\.sh|--refresh-cloudflare-ips/u);
+    });
+
+    it('checks distinct loopback diagnostic keys using bounded curl calls', () => {
+      const requests = [];
+      const result = runClientKeySmoke('http://127.0.0.1:8790', (command, argv) => {
+        assert.equal(command, 'curl');
+        requests.push(argv);
+        const header = argv.includes('--header') ? argv[argv.indexOf('--header') + 1] : undefined;
+        const key = header?.endsWith('198.51.100.71')
+          ? 'a'.repeat(64)
+          : header?.endsWith('198.51.100.72')
+            ? 'b'.repeat(64)
+            : 'c'.repeat(64);
+        return JSON.stringify({ clientKey: key });
+      });
+      assert.equal(result, 'CLIENT_KEY_SMOKE_OK distinct loopback keys');
+      assert.equal(requests.length, 4);
+      for (const argv of requests) assert.ok(argv.includes('--max-time'));
+      assert.equal(
+        requests.filter((argv) => argv.some((arg) => arg.includes('198.51.100.'))).length,
+        2,
+      );
     });
 
     it('inserts an agent location when joyst.ir has none and restores on nginx -t failure', (t) => {
@@ -435,7 +540,7 @@ describe(
       );
       assert.equal(
         readFileSync(sandbox.apiEnv, 'utf8'),
-        'JOY_MEDIA_RELEASE_SCHEMA_VERSION=9\nJOY_MEDIA_TEST_SENTINEL=original\n',
+        'JOY_MEDIA_RELEASE_SCHEMA_VERSION=9\nJOY_MEDIA_TEST_SENTINEL=original\nJOY_MEDIA_TRUSTED_PROXY_ADDRESSES=10.0.0.2\n',
       );
       const readyCheck = spawnSync(
         bash,
@@ -528,7 +633,7 @@ describe(
       assert.equal(realpathSync(sandbox.current), realpathSync(sandbox.oldRelease));
       assert.equal(
         readFileSync(sandbox.apiEnv, 'utf8'),
-        'JOY_MEDIA_RELEASE_SCHEMA_VERSION=9\nJOY_MEDIA_TEST_SENTINEL=original\n',
+        'JOY_MEDIA_RELEASE_SCHEMA_VERSION=9\nJOY_MEDIA_TEST_SENTINEL=original\nJOY_MEDIA_TRUSTED_PROXY_ADDRESSES=10.0.0.2\n',
       );
     });
 
@@ -542,6 +647,20 @@ describe(
           [...joyst.matchAll(/^\s*listen\s+([^;]+);/gm)].map((match) => match[1]),
           ['80', '82.115.8.224:443 ssl'],
         );
+        const ranges = readFileSync(cloudflareIps, 'utf8')
+          .split(/\r?\n/u)
+          .map((line) => line.replace(/^\uFEFF/u, '').trim())
+          .filter((line) => line && !line.startsWith('#'));
+        for (const range of ranges) assert.ok(joyst.includes(`set_real_ip_from ${range};`));
+        assert.match(joyst, /real_ip_header CF-Connecting-IP;/u);
+        assert.match(joyst, /location \/internal\/ \{\s*return 404;\s*\}/u);
+        for (const location of parseLocations(joyst).filter((item) =>
+          /agent|auth\|devices/u.test(item.pattern),
+        )) {
+          assert.match(location.body, /proxy_set_header X-Forwarded-For \$remote_addr;/u);
+          assert.match(location.body, /proxy_set_header X-Real-IP \$remote_addr;/u);
+          assert.doesNotMatch(location.body, /\$proxy_add_x_forwarded_for/u);
+        }
       }
     });
 
@@ -552,12 +671,24 @@ describe(
       const result = runBash(deployScript, [], sandbox.env, sandbox.repo);
       assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
       const lines = commandLog(sandbox);
+      assert.match(
+        readFileSync(sandbox.apiEnv, 'utf8'),
+        /^JOY_MEDIA_TRUSTED_PROXY_ADDRESSES=10\.0\.0\.2,127\.0\.0\.1$/mu,
+      );
       const smoke = lines.find(
         (line) => line.startsWith('node\t') && line.includes('smoke-gateway.mjs'),
       );
       assert.ok(
         smoke?.includes('--edge-addr\t82.115.8.224\t--ca\t'),
         `smoke receives edge address and CA; calls were:\n${lines.join('\n')}`,
+      );
+      const clientSmoke = lines.find(
+        (line) => line.startsWith('node\t') && line.includes('smoke-client-key.mjs'),
+      );
+      assert.ok(clientSmoke?.includes('--origin\thttp://127.0.0.1:8790'));
+      assert.match(
+        readFileSync(join(repoRoot, 'tooling', 'ops', 'smoke-client-key.mjs'), 'utf8'),
+        /--max-time/u,
       );
       assertCurlSafety(lines, sandbox.env.JOY_MEDIA_CA_FILE, sandbox.env.JOY_MEDIA_EDGE_ADDR);
     });

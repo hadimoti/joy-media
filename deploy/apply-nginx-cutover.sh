@@ -4,6 +4,8 @@ set -Eeuo pipefail
 # Patch only the joyst.ir TLS server's agent location. The shared file also
 # contains unrelated sites, so preserve every other server block byte-for-byte.
 CONF_FILE="${JOY_MEDIA_NGINX_CONF:-/etc/nginx/conf.d/joy-wg-bot.conf}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+IPS_FILE="${JOY_MEDIA_CLOUDFLARE_IPS_FILE:-$SCRIPT_DIR/cloudflare-ips.txt}"
 CA_FILE="${JOY_MEDIA_CA_FILE:-${NODE_EXTRA_CA_CERTS:-/etc/ssl/joyst/origincertificate.pem}}"
 EDGE_ADDR="${JOY_MEDIA_EDGE_ADDR:-}"
 BACKUP_DIR="${JOY_MEDIA_NGINX_BACKUP_DIR:-$(dirname -- "$CONF_FILE")}"
@@ -17,6 +19,7 @@ if [[ "${EUID:-$(id -u)}" -ne 0 && !( "${JOY_DEPLOY_TEST_MODE:-}" == 1 && "${JOY
   die "must run as root on Sweden VPS (test override requires JOY_DEPLOY_TEST_MODE=1 and JOY_DEPLOY_TEST_ROOT_OK=1)"
 fi
 [[ -f "$CONF_FILE" ]] || die "Nginx config not found: $CONF_FILE"
+[[ -f "$IPS_FILE" ]] || die "Cloudflare IP list not found: $IPS_FILE"
 [[ -f "$CA_FILE" ]] || die "CA file missing: $CA_FILE (set JOY_MEDIA_CA_FILE)"
 [[ -n "$EDGE_ADDR" ]] || die "JOY_MEDIA_EDGE_ADDR is required (IPv4 or IPv6 literal)"
 
@@ -42,11 +45,26 @@ restore() {
   nginx -t && systemctl reload nginx || true
 }
 
-if ! python3 - "$CONF_FILE" <<'PYEOF'
+if ! python3 - "$CONF_FILE" "$IPS_FILE" <<'PYEOF'
 import re, sys
+import ipaddress
 path = sys.argv[1]
+ips_path = sys.argv[2]
 with open(path, encoding="utf-8", newline="") as source:
     text = source.read()
+with open(ips_path, encoding="utf-8-sig") as source:
+    ranges = []
+    for line_number, raw in enumerate(source, 1):
+        value = raw.strip()
+        if not value or value.startswith("#"):
+            continue
+        try:
+            network = ipaddress.ip_network(value, strict=True)
+        except ValueError as error:
+            raise ValueError(f"Invalid Cloudflare CIDR at {ips_path}:{line_number}: {error}")
+        ranges.append(str(network))
+if not ranges:
+    raise ValueError("Cloudflare IP list contains no CIDRs")
 
 def matching_brace(source, opening):
     depth, quote, escaped, comment = 0, None, False, False
@@ -84,7 +102,7 @@ replacement = '''    location ~ ^/api/v1/agent(?:/|$) {
         proxy_set_header Connection "";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_buffering off;
         proxy_cache off;
@@ -94,7 +112,7 @@ replacement = '''    location ~ ^/api/v1/agent(?:/|$) {
     }'''
 
 def location_blocks(server):
-    for match in re.finditer(r"(?m)^\s*location\s+([^\n{]+)\{", server):
+    for match in re.finditer(r"(?m)^[ \t]*location\s+([^\n{]+)\{", server):
         opening = server.find("{", match.start())
         end = matching_brace(server, opening)
         if end < 0: raise ValueError("Unclosed joyst.ir location")
@@ -121,8 +139,50 @@ def strip_agent_locations(server):
             result = result[:start] + block.replace(header, changed_header, 1) + result[end:]
     return result
 
+BEGIN_REALIP = "# BEGIN joy-media realip (managed)"
+END_REALIP = "# END joy-media realip (managed)"
+
+def strip_managed_realip(server):
+    pattern = re.compile(r"(?m)^[ \t]*" + re.escape(BEGIN_REALIP) + r"\n[\s\S]*?^[ \t]*" + re.escape(END_REALIP) + r"\n?")
+    return pattern.sub("", server)
+
+def strip_internal_deny(server):
+    for start, end, header, block in reversed(list(location_blocks(server))):
+        if header == "/internal/" and re.search(r"(?m)^\s*return\s+404\s*;\s*$", block):
+            if end < len(server) and server[end] == "\n": end += 1
+            server = server[:start] + server[end:]
+    return server
+
+def canonicalize_proxy_headers(server):
+    for start, end, header, block in reversed(list(location_blocks(server))):
+        if not ("/api/v1/agent" in header or re.search(r"auth\|devices\|account\|entitlements\|releases\|billing", header)):
+            continue
+        lines = block.splitlines()
+        output = []
+        added = False
+        for line in lines[:-1]:
+            if re.match(r"^[ \t]*proxy_set_header X-(?:Forwarded-For|Real-IP)\s+", line):
+                continue
+            output.append(line)
+            if re.match(r"^[ \t]*proxy_set_header Host\s+", line):
+                indent = re.match(r"^[ \t]*", line).group(0)
+                output.extend((indent + "proxy_set_header X-Real-IP $remote_addr;", indent + "proxy_set_header X-Forwarded-For $remote_addr;"))
+                added = True
+        if not added:
+            close_indent = re.match(r"^[ \t]*", lines[-1]).group(0)
+            indent = close_indent + "    "
+            output.extend((indent + "proxy_set_header X-Real-IP $remote_addr;", indent + "proxy_set_header X-Forwarded-For $remote_addr;"))
+        output.append(lines[-1])
+        body = "\n".join(output)
+        server = server[:start] + body + server[end:]
+    return server
+
 def normalized_target(server):
     result = strip_agent_locations(server)
+    result = strip_managed_realip(result)
+    result = strip_internal_deny(result)
+    result = canonicalize_proxy_headers(result)
+    result = re.sub(r"(?m)^[ \t]+$", "", result)
     return re.sub(r"\n[ \t]*\n+", "\n", result)
 
 try:
@@ -139,18 +199,39 @@ try:
     if target_index is None: raise ValueError("Could not find joyst.ir TLS server block")
 
     block_start, block_end, target = before[target_index]
-    changed_target = strip_agent_locations(target)
+    changed_target = strip_managed_realip(strip_agent_locations(target))
+    changed_target = strip_internal_deny(changed_target)
+
+    managed = "    # BEGIN joy-media realip (managed)\n"
+    managed += "    # CF-Connecting-IP is authoritative because only Cloudflare CIDRs are trusted.\n"
+    managed += "".join(f"    set_real_ip_from {network};\n" for network in ranges)
+    managed += "    real_ip_header CF-Connecting-IP;\n    # END joy-media realip (managed)\n\n"
+    first_location = re.search(r"(?m)^[ \t]*location\s+", changed_target)
+    insertion = first_location.start() if first_location else changed_target.rfind("}")
+    if insertion < 0: raise ValueError("Unclosed joyst.ir server block")
+    prefix = changed_target[:insertion].rstrip(" \t\r\n") + "\n"
+    changed_target = prefix + managed + changed_target[insertion:]
 
     # Nginx selects the first matching regex in file order. Put the dedicated
     # agent rule before every regex location, including unrelated broad ones.
-    regex_location = re.search(r"(?m)^\s*location\s+~\*?\s+", changed_target)
+    regex_location = re.search(r"(?m)^[ \t]*location\s+~\*?\s+", changed_target)
     if regex_location:
         insertion = regex_location.start()
     else:
-        generic = re.search(r"(?m)^\s*location\s+(?:\^~\s+)?/api/[^\n]*\{", changed_target)
+        generic = re.search(r"(?m)^[ \t]*location\s+(?:\^~\s+)?/api/[^\n]*\{", changed_target)
         insertion = generic.start() if generic else changed_target.rfind("}")
     if insertion < 0: raise ValueError("Unclosed joyst.ir server block")
     changed_target = changed_target[:insertion] + replacement + "\n" + changed_target[insertion:]
+
+    # The public server never proxies diagnostics; only direct loopback smoke can reach the API route.
+    deny_internal = "    location /internal/ {\n        return 404;\n    }\n"
+    api_prefix = re.search(r"(?m)^[ \t]*location\s+/api/\s*\{", changed_target)
+    if api_prefix:
+        changed_target = changed_target[:api_prefix.start()] + deny_internal + changed_target[api_prefix.start():]
+    else:
+        server_close = changed_target.rfind("}")
+        changed_target = changed_target[:server_close] + deny_internal + changed_target[server_close:]
+    changed_target = canonicalize_proxy_headers(changed_target)
 
     patched = text[:block_start] + changed_target + text[block_end:]
     after = server_blocks(patched)
@@ -162,7 +243,7 @@ try:
     if protected.findall(target) != protected.findall(after[target_index][2]):
         raise ValueError("joyst.ir listen/server_name/ssl_certificate directives changed")
     if normalized_target(target) != normalized_target(after[target_index][2]):
-        raise ValueError("joyst.ir changes exceed the agent location and combined regex edit")
+        raise ValueError("joyst.ir changes exceed the managed realip/internal/agent edits")
     with open(path, "w", encoding="utf-8", newline="") as destination:
         destination.write(patched)
 except (ValueError, StopIteration) as error:
