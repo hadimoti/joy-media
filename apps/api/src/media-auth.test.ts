@@ -60,6 +60,14 @@ function sentCode(mailer: { sendOtp: ReturnType<typeof vi.fn> }): string {
   return call[1];
 }
 
+async function waitFor(condition: () => boolean, timeoutMs = 3_000, pollMs = 10): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error(`condition not met within ${timeoutMs} ms`);
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+}
+
 describe('MediaAuthService', () => {
   it('keeps the production verify-failure bucket cap at 100,000 by default', async () => {
     const { auth } = await service();
@@ -197,7 +205,7 @@ describe('MediaAuthService', () => {
     expect(Math.abs(registeredMs - unknownMs)).toBeLessThan(20);
     expect(registeredMs).toBeLessThan(100);
     expect(unknownMs).toBeLessThan(100);
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await waitFor(() => slowMailer.sendOtp.mock.calls.length === 1);
     expect(slowMailer.sendOtp).toHaveBeenCalledTimes(1);
     releaseMail();
     await auth.drainPendingOtpSends();
@@ -277,8 +285,11 @@ describe('MediaAuthService', () => {
     };
     const { auth, db } = await service({ otpDeliveryTimeoutMs: 10, mailer });
     await auth.addAllowed({ gmail: 'slow@example.com', addedBy: 'admin' });
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
     await auth.requestOtp('slow@example.com', 'gmail');
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await waitFor(() =>
+      warning.mock.calls.some(([message]) => message === 'JOY Media OTP send slow'),
+    );
 
     const rows = await db.query('SELECT id FROM media_otp_codes WHERE contact = $1', [
       'slow@example.com',
@@ -456,7 +467,6 @@ describe('MediaAuthService', () => {
     const registered = await auth.requestOtp('known@example.com', 'gmail');
     await auth.drainPendingOtpSends();
     const unknown = await auth.requestOtp('unknown@example.com', 'gmail');
-    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(registered).toEqual(unknown);
     expect(registered.message).toBe('If that account is registered, a login code was sent.');

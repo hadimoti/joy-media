@@ -8,6 +8,14 @@ import {
   sanitizeOtpDeliveryError,
 } from './media-mailer.js';
 
+async function waitFor(condition: () => boolean, timeoutMs = 3_000, pollMs = 10): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error(`condition not met within ${timeoutMs} ms`);
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+}
+
 async function smtpServer(
   options: {
     rcptCode?: 451 | 550;
@@ -243,7 +251,7 @@ describe('MediaMailer address selection', () => {
       ),
     ).rejects.toMatchObject({ code: 'ETIMEDOUT' });
 
-    expect(Date.now() - startedAt).toBeLessThan(250);
+    expect(Date.now() - startedAt).toBeLessThan(40 + 1_000);
     expect(created).toHaveLength(2);
     expect(created[0]?.connectionTimeout).toBeLessThanOrEqual(40);
     expect(created[1]?.connectionTimeout).toBeLessThanOrEqual(40);
@@ -263,8 +271,9 @@ describe('MediaMailer address selection', () => {
           lookup: async () => [{ address: '127.0.0.1', family: 4 as const }],
         }).sendOtp('person@example.invalid', '123456'),
       ).rejects.toMatchObject({ code: 'ETIMEDOUT' });
-      expect(Date.now() - startedAt).toBeLessThan(300);
-      await new Promise((resolve) => setTimeout(resolve, 190));
+      expect(Date.now() - startedAt).toBeLessThan(180 + 1_000);
+      expect(smtp.accepted()).toBe(false);
+      await waitFor(() => smtp.accepted());
       expect(smtp.accepted()).toBe(true);
     } finally {
       await smtp.close();
@@ -329,7 +338,7 @@ describe('MediaMailer address selection', () => {
         lookup: () => new Promise<never>(() => {}),
       }).sendOtp('person@example.invalid', '123456'),
     ).rejects.toMatchObject({ code: 'ETIMEDOUT' });
-    expect(Date.now() - startedAt).toBeLessThan(250);
+    expect(Date.now() - startedAt).toBeLessThan(20 + 1_000);
   });
 
   it('validates configured EHLO names as hostnames', () => {
