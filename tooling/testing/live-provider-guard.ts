@@ -1,6 +1,7 @@
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import http from 'node:http';
 import https from 'node:https';
+import { resolveChildGuardPath } from './live-provider-guard-path.js';
 
 const PROVIDER_CREDENTIAL_ENV_VARS = [
   'OPENROUTER_API_KEY',
@@ -29,11 +30,13 @@ function isBlockedProviderHost(hostname: string): boolean {
 
 for (const key of PROVIDER_CREDENTIAL_ENV_VARS) delete process.env[key];
 
-const childGuardPath = fileURLToPath(new URL('./live-provider-guard-child.mjs', import.meta.url));
-const childGuardOption = `--import=${pathToFileURL(childGuardPath).href}`;
-const existingNodeOptions = process.env.NODE_OPTIONS?.trim() ?? '';
-if (!existingNodeOptions.includes(childGuardPath))
-  process.env.NODE_OPTIONS = `${existingNodeOptions} ${childGuardOption}`.trim();
+const childGuardPath = resolveChildGuardPath(import.meta.url);
+if (childGuardPath) {
+  const childGuardOption = `--import=${pathToFileURL(childGuardPath).href}`;
+  const existingNodeOptions = process.env.NODE_OPTIONS?.trim() ?? '';
+  if (!existingNodeOptions.includes(childGuardPath))
+    process.env.NODE_OPTIONS = `${existingNodeOptions} ${childGuardOption}`.trim();
+}
 
 function isBlockedProvider(input: RequestInfo | URL): boolean {
   const raw = input instanceof Request ? input.url : input.toString();
