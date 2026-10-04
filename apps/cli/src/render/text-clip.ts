@@ -16,6 +16,20 @@ export interface CreateTextClipInput {
   /** Multiplier applied to the selected caption template's font size. */
   readonly size?: number;
   readonly color?: string;
+  readonly direction?: 'rtl' | 'ltr' | 'auto';
+}
+
+export function detectTextDirection(text: string): 'rtl' | 'ltr' {
+  for (const character of text) {
+    if (
+      /\p{Script=Arabic}|\p{Script=Hebrew}|\p{Script=Syriac}|\p{Script=Thaana}|\p{Script=Nko}|\p{Script=Adlam}/u.test(
+        character,
+      )
+    )
+      return 'rtl';
+    if (/\p{L}/u.test(character)) return 'ltr';
+  }
+  return 'ltr';
 }
 
 export function createTextClip(input: CreateTextClipInput): {
@@ -39,10 +53,14 @@ export function createTextClip(input: CreateTextClipInput): {
   if (!/^#[0-9a-f]{6}$/i.test(color)) throw new RangeError('Text color must be #RRGGBB.');
   const wordId = `${input.id}-word`;
   const segmentId = `${input.id}-segment`;
+  const direction =
+    input.direction === undefined || input.direction === 'auto'
+      ? detectTextDirection(input.text)
+      : input.direction;
   const document: CaptionDocumentV1 = {
     id: input.id,
     language: 'en',
-    direction: 'auto',
+    direction,
     speakers: [],
     words: { [wordId]: { id: wordId, text: input.text, startUs: 0, endUs: input.durationUs } },
     segments: [{ id: segmentId, startUs: 0, endUs: input.durationUs, wordIds: [wordId] }],
@@ -50,7 +68,8 @@ export function createTextClip(input: CreateTextClipInput): {
   const style: CaptionClipStyleV2 = {
     version: 2,
     positionX: input.x ?? 0,
-    positionY: input.y ?? 0,
+    // captions-core stores positive Y as an upward offset; the CLI uses the intuitive +down convention.
+    positionY: input.y === undefined || input.y === 0 ? 0 : -input.y,
     scale: 1,
     opacity: 1,
     fontSize: size,
@@ -60,7 +79,7 @@ export function createTextClip(input: CreateTextClipInput): {
     plateColor: '#000000',
     plateOpacity: 0,
     highlightColor: color,
-    align: 'center',
+    align: direction === 'rtl' ? 'end' : 'center',
   };
   const clip: CaptionClipV1 = {
     id: `text-${input.id}`,

@@ -41,6 +41,7 @@ export interface CliFlags {
   text: string | undefined;
   x: number | undefined;
   y: number | undefined;
+  direction: 'rtl' | 'ltr' | 'auto' | undefined;
   size: number | undefined;
   color: string | undefined;
   id: string | undefined;
@@ -108,6 +109,9 @@ export function printHelp(): void {
     `    ${c('joy-media project list', 'dim')}                        # List all desktop projects`,
   );
   console.log(
+    `    ${c('joy-media project create "My Project"', 'dim')}     # Creates a 1920x1080 landscape project`,
+  );
+  console.log(
     `    ${c('joy-media worker status', 'dim')}                       # Check RTX GPU and models`,
   );
   console.log(
@@ -117,6 +121,8 @@ export function printHelp(): void {
 
 function parseFlags(rawValues: Record<string, unknown>): CliFlags {
   const v = rawValues as Record<string, string | boolean | undefined>;
+  if (typeof v.direction === 'string' && !['rtl', 'ltr', 'auto'].includes(v.direction))
+    throw new FlagValidationError('direction', 'expected rtl, ltr, or auto', v.direction);
   return {
     project: typeof v.project === 'string' ? v.project : undefined,
     apply: Boolean(v.apply),
@@ -142,8 +148,11 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     clip: typeof v.clip === 'string' ? v.clip : undefined,
     asset: typeof v.asset === 'string' ? v.asset : undefined,
     text: typeof v.text === 'string' ? v.text : undefined,
-    x: parseFloatFlag('x', v.x, { min: -0.4, max: 0.4, allowNegative: true }),
-    y: parseFloatFlag('y', v.y, { min: -0.4, max: 0.4, allowNegative: true }),
+    x: parseFloatFlag('x', v.x, { min: -0.4, max: 0.4, allowNegative: true, allowZero: true }),
+    y: parseFloatFlag('y', v.y, { min: -0.4, max: 0.4, allowNegative: true, allowZero: true }),
+    direction: ['rtl', 'ltr', 'auto'].includes(String(v.direction))
+      ? (v.direction as 'rtl' | 'ltr' | 'auto')
+      : undefined,
     size: parseFloatFlag('size', v.size, { min: 0.1, max: 8 }),
     color: typeof v.color === 'string' ? v.color : undefined,
     id: typeof v.id === 'string' ? v.id : undefined,
@@ -167,12 +176,17 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     system: Boolean(v.system),
     'media-engine': Boolean(v['media-engine']),
     look: typeof v.look === 'string' ? v.look : undefined,
-    intensity: parseFloatFlag('intensity', v.intensity, { min: 0, max: 1 }),
+    intensity: parseFloatFlag('intensity', v.intensity, { min: 0, max: 1, allowZero: true }),
     scanlineStrength: parseFloatFlag('scanline-strength', v['scanline-strength'], {
       min: 0,
       max: 1,
+      allowZero: true,
     }),
-    noiseAmount: parseFloatFlag('noise-amount', v['noise-amount'], { min: 0, max: 1 }),
+    noiseAmount: parseFloatFlag('noise-amount', v['noise-amount'], {
+      min: 0,
+      max: 1,
+      allowZero: true,
+    }),
     insecureFileStore: Boolean(v['insecure-file-store']),
     resolution: typeof v.resolution === 'string' ? v.resolution : undefined,
     aspect: typeof v.aspect === 'string' ? v.aspect : undefined,
@@ -209,6 +223,7 @@ export async function runCli(argv: string[]): Promise<number> {
         text: { type: 'string' },
         x: { type: 'string' },
         y: { type: 'string' },
+        direction: { type: 'string' },
         size: { type: 'string' },
         color: { type: 'string' },
         id: { type: 'string' },

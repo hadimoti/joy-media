@@ -1,12 +1,13 @@
 /* global console */
 import type { CliFlags } from '../cli.js';
 import { FlagValidationError, NUMERIC_RANGES } from '../utils/flags.js';
-import { c, logError, logSuccess } from '../utils/logger.js';
+import { c, logError, logSuccess, logWarn } from '../utils/logger.js';
 import { loadProject, saveProject } from '../utils/project-loader.js';
 import { recomputeRootDuration } from '../utils/timeline-math.js';
 import { sourceTimeAtVideoClipTime, validateJoyProjectV1 } from '@joy-media/project-schema';
 import { createTextClip } from '../render/text-clip.js';
 import { resolveTextFont } from '../render/text-font.js';
+import { layoutFfmpegCaption } from '../render/caption-layout.js';
 
 export interface TimelineCommandFlags {
   project?: string | undefined;
@@ -16,6 +17,7 @@ export interface TimelineCommandFlags {
   text?: string | undefined;
   x?: number | undefined;
   y?: number | undefined;
+  direction?: 'rtl' | 'ltr' | 'auto' | undefined;
   size?: number | undefined;
   color?: string | undefined;
   start?: number | undefined;
@@ -33,10 +35,11 @@ export function printTimelineHelp(): void {
   console.log(`Usage: joy-media timeline <list|add-clip|add-text|add-effect|clear-effect|split|trim|remove-clip> --project <id|file>
   list [--json]
   add-clip --asset <id> [--track <id>] [--start <seconds>] [--duration <seconds>]
-  add-text --text <text> [--track <id>] [--start <seconds>] --duration <seconds> [--x <frame-fraction> --y <frame-fraction> --size <template-multiplier> --color <#RRGGBB>]
+  add-text --text <text> [--track <id>] [--start <seconds>] --duration <seconds> [--x <frame-fraction> --y <frame-fraction> --direction <rtl|ltr|auto> --size <template-multiplier> --color <#RRGGBB>]
   split --clip <id> --at <seconds>
   trim --clip <id> [--start <seconds>] [--end <seconds>] [--duration <seconds>]
   remove-clip --clip <id>`);
+  console.log('  Text placement: 0 = center, -0.4 = near left/top, 0.4 = near right/bottom');
   console.log(
     '  add-effect <clipId> --look <crt|bw|warm|cool> [--intensity 0..1] [--scanline-strength 0..1] [--noise-amount 0..1]',
   );
@@ -49,6 +52,11 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
   validateRange(flags.end, NUMERIC_RANGES.end, 'end');
   validateRange(flags.at, NUMERIC_RANGES.at, 'at');
   const sub = args[0];
+
+  if (sub === 'help' || sub === '--help' || sub === '-h') {
+    printTimelineHelp();
+    return 0;
+  }
 
   if (!flags.project) {
     logError('Please specify target project via --project <id|file.json>');
@@ -217,12 +225,60 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
         ...(flags.y === undefined ? {} : { y: flags.y }),
         ...(flags.size === undefined ? {} : { size: flags.size }),
         ...(flags.color === undefined ? {} : { color: flags.color }),
+        ...(flags.direction === undefined ? {} : { direction: flags.direction }),
       });
     } catch (error) {
       logError(`unsupported: ${error instanceof Error ? error.message : String(error)}`);
       return 1;
     }
     (project.captionDocuments as Record<string, unknown>)[created.document.id] = created.document;
+    const rootWidth = root.width ?? 1920;
+    const rootHeight = root.height ?? 1080;
+    const segment = created.document.segments[0]!;
+    const layout = layoutFfmpegCaption({
+      clipId: created.clip.id,
+      document: created.document,
+      segment,
+      style: created.clip.style!,
+      width: rootWidth,
+      height: rootHeight,
+    });
+    const baseline = layoutFfmpegCaption({
+      clipId: created.clip.id,
+      document: created.document,
+      segment,
+      style: { ...created.clip.style!, positionX: 0, positionY: 0 },
+      width: rootWidth,
+      height: rootHeight,
+    });
+    const clipped =
+      layout.length < baseline.length ||
+      layout.some((line) => {
+        const estimatedWidth = Math.min(
+          line.maxWidth ?? rootWidth,
+          line.text.length * (line.fontSizePx ?? 16) * 0.62,
+        );
+        const left =
+          line.align === 'right'
+            ? line.transform.translateX - estimatedWidth
+            : line.align === 'center'
+              ? line.transform.translateX - estimatedWidth / 2
+              : line.transform.translateX;
+        const top = line.transform.translateY;
+        return (
+          left < 0 ||
+          left + estimatedWidth > rootWidth ||
+          top < 0 ||
+          top + (line.fontSizePx ?? 16) > rootHeight
+        );
+      });
+    if (clipped) {
+      if (flags.strict) {
+        logError('Text would be clipped at this position; no changes were saved.');
+        return 1;
+      }
+      logWarn('Text may be clipped at this position.');
+    }
     track.clips.push(created.clip as unknown as (typeof track.clips)[number]);
     recomputeRootDuration(project);
     const diagnostics = validateJoyProjectV1(project);

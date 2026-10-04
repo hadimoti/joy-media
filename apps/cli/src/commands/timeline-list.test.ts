@@ -24,5 +24,12 @@ describe('timeline list', () => {
     expect(output.mock.calls.flat().join('\n')).not.toContain('track-a1 [video]');
   });
 
+  it('prints timeline help without requiring a project', async () => {
+    const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    expect(await runCli(['timeline', 'help'])).toBe(0);
+    expect(output.mock.calls.flat().join('\n')).toContain('0 = center');
+    output.mockRestore();
+  });
+
   afterAll(() => rmSync(tempDir, { recursive: true, force: true }));
 });

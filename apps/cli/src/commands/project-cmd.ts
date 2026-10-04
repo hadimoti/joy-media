@@ -207,8 +207,8 @@ function resolveProjectDimensions(flags: CliFlags): { width: number; height: num
     '4:5': { width: 1080, height: 1350 },
   };
   let dimensions: { width: number; height: number } = {
-    width: flags.width ?? 1080,
-    height: flags.height ?? 1920,
+    width: flags.width ?? 1920,
+    height: flags.height ?? 1080,
   };
   if (flags.resolution) {
     const match = /^(\d{2,5})[xX](\d{2,5})$/.exec(flags.resolution.trim());
@@ -232,7 +232,7 @@ function resolveProjectDimensions(flags: CliFlags): { width: number; height: num
       );
     dimensions = resolved;
   } else if (flags.width !== undefined || flags.height !== undefined) {
-    dimensions = { width: flags.width ?? 1080, height: flags.height ?? 1920 };
+    dimensions = { width: flags.width ?? 1920, height: flags.height ?? 1080 };
   }
   if (flags.aspect) {
     const expected = aspectSizes[flags.aspect];
