@@ -19,9 +19,17 @@ EDGE_RESOLVE=""
 NGINX_CONF="${JOY_MEDIA_NGINX_CONF:-/etc/nginx/conf.d/joy-wg-bot.conf}"
 RELEASE_ROOT="${JOY_MEDIA_API_RELEASE_ROOT:-/opt/joy-media/releases}"
 CURRENT_API_LINK="${JOY_MEDIA_CURRENT_API_LINK:-$RELEASE_ROOT/current-api}"
+API_ENV_FILE="${JOY_MEDIA_API_ENV_FILE:-/etc/joy-media/api.env}"
 PREVIOUS_API_TARGET=""
+API_ENV_BACKUP=""
 NGINX_ROLLBACK_FILE=""
 API_CUTOVER_DONE=0
+ACCOUNT_WEB_SWAPPED=0
+BACKUP_WEB=""
+TEMP_WEB_STAGE=""
+DEPLOY_STATE_FILE="${JOY_MEDIA_DEPLOY_STATE_FILE:-${TMPDIR:-/tmp}/joy-media-deploy-state.$$}"
+REMOVE_DEPLOY_STATE=0
+if [[ -z "${JOY_MEDIA_DEPLOY_STATE_FILE:-}" ]]; then REMOVE_DEPLOY_STATE=1; fi
 CUTOVER_SCRIPT="${JOY_MEDIA_CUTOVER_SCRIPT:-$SCRIPT_DIR/deploy-cutover.sh}"
 NGINX_APPLY_SCRIPT="${JOY_MEDIA_NGINX_APPLY_SCRIPT:-$SCRIPT_DIR/apply-nginx-cutover.sh}"
 
@@ -35,8 +43,7 @@ log() {
 }
 
 rollback_cutover() {
-  [[ "$API_CUTOVER_DONE" == 1 ]] || return 0
-  echo "deploy-control-plane: restoring previous API and Nginx configuration" >&2
+  echo "deploy-control-plane: restoring previous API, account-web and Nginx configuration" >&2
   if [[ -n "$NGINX_ROLLBACK_FILE" && -f "$NGINX_ROLLBACK_FILE" ]]; then
     if cp -p "$NGINX_ROLLBACK_FILE" "$NGINX_CONF"; then
       nginx -t && systemctl reload nginx ||
@@ -45,16 +52,43 @@ rollback_cutover() {
       echo "deploy-control-plane: could not restore Nginx backup" >&2
     fi
   fi
-  if [[ -n "$PREVIOUS_API_TARGET" ]]; then
+  if [[ "$API_CUTOVER_DONE" == 1 && -n "$PREVIOUS_API_TARGET" ]]; then
     local restore_link="${CURRENT_API_LINK}.rollback.$$"
     if ln -s -- "$PREVIOUS_API_TARGET" "$restore_link" &&
       mv -Tf -- "$restore_link" "$CURRENT_API_LINK"; then
-      systemctl restart "${JOY_MEDIA_API_SYSTEMD_UNIT:-joy-media@api}" || true
+      :
     else
       echo "deploy-control-plane: could not restore previous API pointer" >&2
     fi
+    if [[ -n "$API_ENV_BACKUP" && -f "$API_ENV_BACKUP" ]]; then
+      local restore_env="${API_ENV_FILE}.rollback.$$"
+      if cp -p -- "$API_ENV_BACKUP" "$restore_env" && mv -Tf -- "$restore_env" "$API_ENV_FILE"; then
+        :
+      else
+        rm -f -- "$restore_env"
+        echo "deploy-control-plane: could not restore API environment" >&2
+      fi
+    fi
+    systemctl restart "${JOY_MEDIA_API_SYSTEMD_UNIT:-joy-media@api}" || true
+  fi
+  if [[ "$ACCOUNT_WEB_SWAPPED" == 1 && -n "$BACKUP_WEB" && -d "$BACKUP_WEB" ]]; then
+    local failed_web="${ACCOUNT_WEB_TARGET}.failed-rollback.$$"
+    if [[ -d "$ACCOUNT_WEB_TARGET" ]]; then mv -- "$ACCOUNT_WEB_TARGET" "$failed_web"; fi
+    if mv -- "$BACKUP_WEB" "$ACCOUNT_WEB_TARGET"; then
+      rm -rf -- "$failed_web"
+      ACCOUNT_WEB_SWAPPED=0
+    else
+      [[ ! -d "$failed_web" ]] || mv -- "$failed_web" "$ACCOUNT_WEB_TARGET" || true
+      echo "deploy-control-plane: could not restore previous account-web" >&2
+    fi
   fi
 }
+
+cleanup_deploy_state() {
+  if [[ "$REMOVE_DEPLOY_STATE" == 1 ]]; then rm -f -- "$DEPLOY_STATE_FILE"; fi
+  return 0
+}
+trap cleanup_deploy_state EXIT
 
 edge_failure() {
   rollback_cutover
@@ -128,11 +162,27 @@ if [[ -d "$ACCOUNT_WEB_TARGET" ]]; then
   mv "$ACCOUNT_WEB_TARGET" "$BACKUP_WEB"
 fi
 mv "$TEMP_WEB_STAGE" "$ACCOUNT_WEB_TARGET"
+TEMP_WEB_STAGE=""
+if [[ -n "$BACKUP_WEB" && -d "$BACKUP_WEB" ]]; then ACCOUNT_WEB_SWAPPED=1; fi
 log "Account Web SPA successfully deployed to $ACCOUNT_WEB_TARGET"
 
 log "Step 4/6: Building and deploying API release via deploy-cutover.sh"
-bash "$CUTOVER_SCRIPT" || die "deploy-cutover.sh failed"
+JOY_MEDIA_DEPLOY_STATE_FILE="$DEPLOY_STATE_FILE" bash "$CUTOVER_SCRIPT" || {
+  rollback_cutover
+  die "deploy-cutover.sh failed"
+}
 API_CUTOVER_DONE=1
+if [[ -s "$DEPLOY_STATE_FILE" ]]; then
+  IFS=$'\t' read -r CUTOVER_RELEASE_NAME API_ENV_BACKUP < "$DEPLOY_STATE_FILE"
+fi
+if [[ -z "$API_ENV_BACKUP" ]]; then
+  CUTOVER_RELEASE_NAME="$(basename -- "$(readlink -f -- "$CURRENT_API_LINK")")"
+  API_ENV_BACKUP="${API_ENV_FILE}.before-${CUTOVER_RELEASE_NAME}.env"
+fi
+if [[ ! -f "$API_ENV_BACKUP" ]]; then
+  rollback_cutover
+  die "deploy-cutover.sh did not expose an API environment backup"
+fi
 
 log "Step 5/6: Applying Nginx lean boundary"
 if ! bash "$NGINX_APPLY_SCRIPT"; then

@@ -68,6 +68,7 @@ SWITCH_DIR="$(mktemp -d "$RELEASE_ROOT/.switch-${SHORT_SHA}.XXXXXX")"
 API_ENV_STAGE="$SWITCH_DIR/api.env"
 SWITCH_API_LINK="$SWITCH_DIR/current-api"
 API_ENV_BACKUP="${API_ENV_FILE}.before-${RELEASE_NAME}.env"
+DEPLOY_STATE_FILE="${JOY_MEDIA_DEPLOY_STATE_FILE:-}"
 ENV_SWITCHED=0
 API_SWITCHED=0
 
@@ -124,6 +125,11 @@ mv -T -- "$STAGING_DIR" "$RELEASE_DIR"
 # Validate the replacement environment before moving either live pointer.
 [[ ! -e "$API_ENV_BACKUP" && ! -L "$API_ENV_BACKUP" ]] || die "environment backup already exists: $API_ENV_BACKUP"
 cp -p -- "$API_ENV_FILE" "$API_ENV_BACKUP"
+if [[ -n "$DEPLOY_STATE_FILE" ]]; then
+  STATE_STAGE="${DEPLOY_STATE_FILE}.stage.$$"
+  printf '%s\t%s\n' "$RELEASE_NAME" "$API_ENV_BACKUP" > "$STATE_STAGE"
+  mv -Tf -- "$STATE_STAGE" "$DEPLOY_STATE_FILE"
+fi
 bash "$SCRIPT_DIR/joy-media-release-identity.sh" merge \
   "$API_ENV_FILE" "$RELEASE_DIR/release-identity.env" "$API_ENV_STAGE"
 [[ -s "$API_ENV_STAGE" ]] || die "staged API environment is empty"

@@ -58,7 +58,55 @@ function shellPathList() {
 const bash = findBash();
 const hasPython = spawnSync('python3', ['--version'], { encoding: 'utf8' }).status === 0;
 
-const fixture = `# shared nginx config\nserver {\n    listen 80;\n    server_name joyst.ir;\n    return 301 https://joyst.ir$request_uri;\n}\n\nserver {\n    listen 443 ssl;\n    server_name other.example;\n    ssl_certificate /tmp/other.pem;\n    location ~ ^/api/v1/agent(?:/|$) { return 418; }\n}\n\nserver {\n    listen 82.115.8.224:443 ssl;\n    listen 46.249.103.142:443 ssl;\n    listen [::]:443 ssl;\n    server_name joyst.ir www.joyst.ir;\n    ssl_certificate /etc/ssl/joyst/origincertificate.pem;\n    ssl_certificate_key /etc/ssl/joyst/privatekey.pem;\n    location ~ ^/api/v1/agent(?:/|$) {\n        proxy_pass http://old-agent;\n    }\n    location /api/ { proxy_pass http://127.0.0.1:8790; }\n    location / { try_files $uri /index.html; }\n}\n`;
+const fixture = `# shared nginx config\nserver {\n    listen 80;\n    server_name joyst.ir;\n    return 301 https://joyst.ir$request_uri;\n}\n\nserver {\n    listen 443 ssl;\n    server_name other.example;\n    ssl_certificate /tmp/other.pem;\n    location ~ ^/api/v1/agent(?:/|$) { return 418; }\n}\n\nserver {\n    listen 82.115.8.224:443 ssl;\n    server_name joyst.ir www.joyst.ir;\n    ssl_certificate /etc/ssl/joyst/origincertificate.pem;\n    ssl_certificate_key /etc/ssl/joyst/privatekey.pem;\n    location = /api/health { proxy_pass http://127.0.0.1:8790/health; }\n    location ~ ^/api/v1/(?:auth|devices|account|entitlements|releases|billing|agent)(?:/|$) {\n        proxy_pass http://127.0.0.1:8790;\n        proxy_read_timeout 180;\n        proxy_send_timeout 180;\n    }\n    location /api/ { return 404; }\n    location / { try_files $uri /index.html; }\n}\n`;
+
+function parseLocations(serverBlock) {
+  const locations = [];
+  const directive = /^\s*location\s+(=\s+|\^~\s+|~\*?\s+)?([^\s{]+)[^\n]*\{/gm;
+  for (const match of serverBlock.matchAll(directive)) {
+    const open = match.index + match[0].lastIndexOf('{');
+    let depth = 0;
+    let end = open;
+    for (; end < serverBlock.length; end += 1) {
+      if (serverBlock[end] === '{') depth += 1;
+      if (serverBlock[end] === '}' && --depth === 0) break;
+    }
+    locations.push({
+      modifier: (match[1] ?? '').trim(),
+      pattern: match[2],
+      body: serverBlock.slice(open + 1, end),
+    });
+  }
+  return locations;
+}
+
+function selectNginxLocation(locations, requestPath) {
+  const exact = locations.find(
+    (location) => location.modifier === '=' && location.pattern === requestPath,
+  );
+  if (exact) return exact;
+  const prefixes = locations
+    .filter(
+      (location) =>
+        !['~', '~*', '='].includes(location.modifier) && requestPath.startsWith(location.pattern),
+    )
+    .sort((left, right) => right.pattern.length - left.pattern.length);
+  const longestPrefix = prefixes[0];
+  if (longestPrefix?.modifier === '^~') return longestPrefix;
+  const regex = locations.find((location) => {
+    if (!['~', '~*'].includes(location.modifier)) return false;
+    const expression = new RegExp(location.pattern, location.modifier === '~*' ? 'i' : '');
+    return expression.test(requestPath);
+  });
+  return regex ?? longestPrefix;
+}
+
+function findJoystTlsBlock(source) {
+  const nameIndex = source.indexOf('server_name joyst.ir www.joyst.ir;');
+  const start = source.lastIndexOf('server {', nameIndex);
+  const end = source.indexOf('\n}', nameIndex) + 2;
+  return start >= 0 && end >= 2 ? source.slice(start, end) : undefined;
+}
 
 function putExecutable(path, source) {
   writeFileSync(path, `#!/usr/bin/env bash\nset -u\n${source}\n`);
@@ -75,6 +123,8 @@ function createSandbox(t) {
   const accountTarget = join(root, 'account-web');
   const conf = join(root, 'joy-wg-bot.conf');
   const ca = join(root, 'test-ca.pem');
+  const apiEnv = join(root, 'api.env');
+  const deployState = join(root, 'deploy-state');
   const log = join(root, 'commands.log');
   const curlCount = join(root, 'curl-count');
   mkdirSync(stubs);
@@ -86,6 +136,7 @@ function createSandbox(t) {
   writeFileSync(join(repo, 'pnpm-lock.yaml'), 'lockfile fixture');
   writeFileSync(conf, fixture);
   writeFileSync(ca, 'test CA placeholder');
+  writeFileSync(apiEnv, 'JOY_MEDIA_RELEASE_SCHEMA_VERSION=9\nJOY_MEDIA_TEST_SENTINEL=original\n');
   const oldRelease = join(releaseRoot, 'old-release');
   const nextRelease = join(releaseRoot, 'next-release');
   mkdirSync(oldRelease);
@@ -99,7 +150,7 @@ function createSandbox(t) {
   );
   writeFileSync(
     cutover,
-    '#!/usr/bin/env bash\nset -e\nprintf \'cutover\\n\' >> "$JOY_STUB_LOG"\nln -s -- "$JOY_TEST_NEXT_RELEASE" "${JOY_MEDIA_CURRENT_API_LINK}.next"\nmv -Tf -- "${JOY_MEDIA_CURRENT_API_LINK}.next" "$JOY_MEDIA_CURRENT_API_LINK"\n',
+    '#!/usr/bin/env bash\nset -e\nprintf \'cutover\\n\' >> "$JOY_STUB_LOG"\ncp -p "$JOY_MEDIA_API_ENV_FILE" "${JOY_MEDIA_API_ENV_FILE}.before-next-release.env"\nprintf \'JOY_MEDIA_RELEASE_SCHEMA_VERSION=11\\nJOY_MEDIA_TEST_SENTINEL=deployed\\n\' > "${JOY_MEDIA_API_ENV_FILE}.next"\nmv -Tf -- "${JOY_MEDIA_API_ENV_FILE}.next" "$JOY_MEDIA_API_ENV_FILE"\nprintf \'next-release\\t%s\\n\' "${JOY_MEDIA_API_ENV_FILE}.before-next-release.env" > "$JOY_MEDIA_DEPLOY_STATE_FILE"\nln -s -- "$JOY_TEST_NEXT_RELEASE" "${JOY_MEDIA_CURRENT_API_LINK}.next"\nmv -Tf -- "${JOY_MEDIA_CURRENT_API_LINK}.next" "$JOY_MEDIA_CURRENT_API_LINK"\n',
   );
   chmodSync(cutover, 0o755);
   symlinkSync(oldRelease, current, process.platform === 'win32' ? 'junction' : 'dir');
@@ -129,7 +180,15 @@ printf '%s' "$count" > "$JOY_STUB_CURL_COUNT"
 if [[ "\${STUB_CURL_FAIL_AT:-}" == "$count" ]]; then exit "\${STUB_CURL_EXIT:-22}"; fi
 url="\${@: -1}"
 if [[ -n "\${STUB_CURL_HTTP_CODE:-}" ]]; then echo "$STUB_CURL_HTTP_CODE"; else
-  case "$url" in */api/health|*/ready|*/) echo 200 ;; *) echo 404 ;; esac
+  case "$url" in
+    */ready)
+      target="$(readlink -f -- "$JOY_MEDIA_CURRENT_API_LINK")"
+      if [[ "$target" == "$JOY_TEST_OLD_RELEASE" ]] && grep -q '^JOY_MEDIA_RELEASE_SCHEMA_VERSION=9$' "$JOY_MEDIA_API_ENV_FILE"; then echo 200
+      elif [[ "$target" == "$JOY_TEST_NEXT_RELEASE" ]] && grep -q '^JOY_MEDIA_RELEASE_SCHEMA_VERSION=11$' "$JOY_MEDIA_API_ENV_FILE"; then echo 200
+      else echo 503; fi ;;
+    */api/health|*/) echo 200 ;;
+    *) echo 404 ;;
+  esac
 fi
 `,
   );
@@ -145,6 +204,7 @@ fi
     JOY_STUB_LOG: toShellPath(log),
     JOY_STUB_CURL_COUNT: toShellPath(curlCount),
     JOY_TEST_NEXT_RELEASE: toShellPath(nextRelease),
+    JOY_TEST_OLD_RELEASE: toShellPath(oldRelease),
     JOY_DEPLOY_TEST_MODE: '1',
     JOY_DEPLOY_TEST_ROOT_OK: '1',
     JOY_MEDIA_REPO_DIR: toShellPath(repo),
@@ -152,6 +212,8 @@ fi
     JOY_MEDIA_ACCOUNT_WEB_TARGET: toShellPath(accountTarget),
     JOY_MEDIA_API_RELEASE_ROOT: toShellPath(releaseRoot),
     JOY_MEDIA_CURRENT_API_LINK: toShellPath(current),
+    JOY_MEDIA_API_ENV_FILE: toShellPath(apiEnv),
+    JOY_MEDIA_DEPLOY_STATE_FILE: toShellPath(deployState),
     JOY_MEDIA_NGINX_CONF: toShellPath(conf),
     JOY_MEDIA_NGINX_BACKUP_DIR: toShellPath(backupDir),
     JOY_MEDIA_CA_FILE: toShellPath(ca),
@@ -180,6 +242,8 @@ fi
     log,
     curlCount,
     current,
+    apiEnv,
+    deployState,
     oldRelease,
     nextRelease,
     cutover,
@@ -236,7 +300,7 @@ describe(
   'deploy scripts',
   { skip: !bash ? 'bash/Git Bash not found; shell integration tests skipped' : undefined },
   () => {
-    it('patches only the joyst.ir TLS agent location and preserves IP listeners and other sites', (t) => {
+    it('patches the agent ahead of matching regexes and preserves the other joyst routes', (t) => {
       if (!hasPython)
         return t.skip('python3 is unavailable; Nginx patch integration needs real Python');
       const sandbox = createSandbox(t);
@@ -247,8 +311,6 @@ describe(
       assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
       const updated = readFileSync(sandbox.conf, 'utf8');
       assert.ok(updated.includes('listen 82.115.8.224:443 ssl;'));
-      assert.ok(updated.includes('listen 46.249.103.142:443 ssl;'));
-      assert.ok(updated.includes('listen [::]:443 ssl;'));
       assert.ok(updated.includes('proxy_pass http://127.0.0.1:8790;'));
       const updatedOther = updated.match(
         /server \{\n\s{4}listen 443 ssl;\n\s{4}server_name other\.example;[\s\S]*?\n\}/,
@@ -257,6 +319,34 @@ describe(
         /server \{\n\s{4}listen 443 ssl;\n\s{4}server_name other\.example;[\s\S]*?\n\}/,
       )?.[0];
       assert.equal(updatedOther, originalOther, 'another site remains byte-identical');
+      const joyst = findJoystTlsBlock(updated);
+      assert.ok(joyst);
+      const locations = parseLocations(joyst);
+      assert.equal(selectNginxLocation(locations, '/api/health').pattern, '/api/health');
+      for (const path of [
+        '/api/v1/agent/chat/completions',
+        '/api/v1/agent/models',
+        '/api/v1/agent',
+      ]) {
+        const selected = selectNginxLocation(locations, path);
+        assert.match(selected.body, /proxy_buffering off;/);
+        assert.match(selected.body, /proxy_read_timeout 90;/);
+        assert.match(selected.body, /proxy_send_timeout 90;/);
+      }
+      for (const path of ['/api/v1/auth/request-otp', '/api/v1/billing/x']) {
+        assert.match(
+          selectNginxLocation(locations, path).pattern,
+          /auth\|devices\|account\|entitlements\|releases\|billing/,
+        );
+      }
+      assert.equal(selectNginxLocation(locations, '/api/v1/projects').body.trim(), 'return 404;');
+      const once = updated;
+      const second = runBash(applyScript, [], {
+        ...sandbox.env,
+        JOY_MEDIA_EDGE_ADDR: '2001:db8::25',
+      });
+      assert.equal(second.status, 0, `${second.stdout}\n${second.stderr}`);
+      assert.equal(readFileSync(sandbox.conf, 'utf8'), once, 'patch is idempotent');
       const lines = commandLog(sandbox);
       assertCurlSafety(lines, sandbox.env.JOY_MEDIA_CA_FILE, '2001:db8::25');
     });
@@ -340,6 +430,88 @@ describe(
             line.startsWith('pnpm\t') && line.includes('account-web') && line.endsWith('\tbuild'),
         ),
       );
+      assert.equal(
+        readFileSync(sandbox.apiEnv, 'utf8'),
+        'JOY_MEDIA_RELEASE_SCHEMA_VERSION=9\nJOY_MEDIA_TEST_SENTINEL=original\n',
+      );
+      const readyCheck = spawnSync(
+        bash,
+        [
+          '-c',
+          'export PATH="$JOY_TEST_STUB_PATH:$PATH"; curl --silent --show-error --max-time 20 --cacert "$JOY_MEDIA_CA_FILE" --resolve "joyst.ir:443:$JOY_MEDIA_EDGE_ADDR" https://joyst.ir/ready',
+        ],
+        {
+          env: {
+            ...sandbox.env,
+            JOY_STUB_CURL_COUNT: toShellPath(join(sandbox.root, 'post-rollback-curl-count')),
+          },
+          encoding: 'utf8',
+        },
+      );
+      assert.equal(readyCheck.status, 0, readyCheck.stderr);
+      assert.equal(readyCheck.stdout.trim(), '200', 'the old API is ready after rollback');
+      assert.equal(
+        readFileSync(join(sandbox.accountTarget, 'old.html'), 'utf8'),
+        'old account page',
+      );
+      assert.equal(existsSync(join(sandbox.accountTarget, 'index.html')), false);
+    });
+
+    it('moves an existing agent location above a combined API regex', (t) => {
+      if (!hasPython)
+        return t.skip('python3 is unavailable; Nginx patch integration needs real Python');
+      const sandbox = createSandbox(t);
+      const below = fixture.replace(
+        '    location /api/ { return 404; }',
+        `    location ~ ^/api/v1/agent(?:/|$) {\n        proxy_pass http://old-agent;\n    }\n    location /api/ { return 404; }`,
+      );
+      writeFileSync(sandbox.conf, below);
+      const result = runBash(applyScript, [], sandbox.env);
+      assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+      const joyst = findJoystTlsBlock(readFileSync(sandbox.conf, 'utf8'));
+      assert.ok(joyst);
+      const locations = parseLocations(joyst);
+      assert.match(
+        selectNginxLocation(locations, '/api/v1/agent/models').body,
+        /proxy_buffering off;/,
+      );
+    });
+
+    it('restores account-web when step 5 fails', (t) => {
+      const sandbox = createSandbox(t);
+      const failNginx = join(sandbox.root, 'fail-nginx-apply.sh');
+      writeFileSync(failNginx, '#!/usr/bin/env bash\nexit 1\n');
+      chmodSync(failNginx, 0o755);
+      const result = runBash(
+        deployScript,
+        [],
+        { ...sandbox.env, JOY_MEDIA_NGINX_APPLY_SCRIPT: toShellPath(failNginx) },
+        sandbox.repo,
+      );
+      assert.notEqual(result.status, 0);
+      assert.equal(
+        readFileSync(join(sandbox.accountTarget, 'old.html'), 'utf8'),
+        'old account page',
+      );
+      assert.equal(existsSync(join(sandbox.accountTarget, 'index.html')), false);
+      assert.equal(realpathSync(sandbox.current), realpathSync(sandbox.oldRelease));
+      assert.equal(
+        readFileSync(sandbox.apiEnv, 'utf8'),
+        'JOY_MEDIA_RELEASE_SCHEMA_VERSION=9\nJOY_MEDIA_TEST_SENTINEL=original\n',
+      );
+    });
+
+    it('keeps joyst.ir templates bound only to the live TLS address', async () => {
+      const { readFile } = await import('node:fs/promises');
+      for (const name of ['joy-media-account-web.nginx.conf', 'joy-media.nginx.conf']) {
+        const source = await readFile(join(repoRoot, 'deploy', name), 'utf8');
+        const joyst = findJoystTlsBlock(source);
+        assert.ok(joyst, `${name} has a joyst.ir server block`);
+        assert.deepEqual(
+          [...joyst.matchAll(/^\s*listen\s+([^;]+);/gm)].map((match) => match[1]),
+          ['80', '82.115.8.224:443 ssl'],
+        );
+      }
     });
 
     it('invokes gateway smoke with the resolved edge address and CA', (t) => {
