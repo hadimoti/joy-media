@@ -906,7 +906,7 @@ export function JoyAgentSettingsDialog({
         : next.capability === 'tool-loop'
           ? 'Connected successfully. JOY is ready to edit in this session.'
           : next.capability === 'plan-only'
-            ? 'Connected successfully in plan-only mode. Creative Brief is ready in this session.'
+            ? "Connected in plan-only mode: JOY can propose plans but this model can't call tools."
             : `Connection failed: ${safeStatus.message}`;
       const kind = next.capability === 'incompatible' ? 'error' : 'success';
       setConnectionNotice({ kind, message });
@@ -1377,7 +1377,7 @@ export function JoyAgentSettingsDialog({
                               <option value="openrouter">OpenRouter (BYOK)</option>
                               <option value="kilo">Kilo Gateway (api.kilo.ai)</option>
                               <option value="openai-compatible">
-                                Custom S3 / OpenAI Compatible
+                                Custom OpenAI-compatible endpoint
                               </option>
                               <option value="joy-hosted">Joy Model (Built-in Pro AI)</option>
                             </select>

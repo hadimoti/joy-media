@@ -265,11 +265,15 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         }
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 10000);
-        const res = await fetch(endpoint, {
-          headers,
-          signal: controller.signal,
-        });
-        clearTimeout(timer);
+        let res: Response;
+        try {
+          res = await fetch(endpoint, {
+            headers,
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timer);
+        }
         if (!res.ok) {
           const errText = await res.text().catch(() => '');
           return {

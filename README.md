@@ -24,7 +24,8 @@
 - **Local Asset Streaming (`joy-asset://`)**: Custom protocol streaming video frames, waveforms, and catalog media straight from your NVMe drive with sub-millisecond seek times.
 - **Dual AI Agent Integration**:
   - **Free / Open BYOK**: Plug in any OpenRouter or OpenAI-compatible endpoint with your own API key, securely encrypted via Windows DPAPI.
-  - **Joy Pro Gateway**: Instant keyless access to curated frontier models (`minimax/minimax-m3`, `claude-3.5-sonnet`, `gpt-4o-mini`) through our VPS gateway with transparent token usage.
+  - **Joy Pro Gateway**: Access to the JOY catalog requires a signed-in JOY account with an active Pro subscription. It includes `bytedance-seed/seed-2.0-lite` (default, Joy Vision), `deepseek/deepseek-v4-flash` (Joy Fast), `anthropic/claude-sonnet-4.6` (Joy Studio), and `openai/gpt-4o-mini`.
+- **Kilo / BytePlus Coding**: Use the gateway at `https://api.kilo.ai/api/gateway` with `byteplus-coding/dola-seed-2.0-pro` (default creative model with vision), `byteplus-coding/dola-seed-2.0-lite` (vision), or `byteplus-coding/deepseek-v4-flash` (text).
 - **Living Looks GPU Color Science**: Cinematic real-time color grading, dynamic film grain, and LUT emulation running at 60 FPS on your GPU.
 - **Pixel-Perfect Preview / Export Parity**: What you see in the timeline monitor matches the final encoded MP4 byte-for-byte.
 
@@ -102,7 +103,7 @@ joy-media/
 ### 1. Workspace Initialization
 
 ```bash
-# Clone the private repository
+# Clone the public repository
 git clone https://github.com/hadimoti/joy-media.git
 cd joy-media
 
@@ -113,8 +114,9 @@ pnpm install
 ### 2. Launch Desktop NLE in Development
 
 ```bash
-# Run Electron desktop shell with hot-reloading editor
-pnpm --filter @joy-media/desktop dev
+# Build the workspace, then run the Electron desktop shell
+pnpm build
+pnpm --filter @joy-media/desktop dev:electron
 ```
 
 ### 3. Run Quality & Verification Suite

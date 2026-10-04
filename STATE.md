@@ -36,7 +36,7 @@ JOY Media has transitioned from a dual web/desktop architecture into a dedicated
 
 - **Local-First Timeline Engine**: Track virtualization, sample-accurate playhead sync, Living Looks GPU color science, 3D scenes, motion typography, and audio polish run entirely on the user's workstation without cloud latency.
 - **Data Privacy & Storage**: Local media assets are streamed via the custom `joy-asset://` protocol. Projects are stored in SQLite with WAL mode.
-- **AI Agent Intelligence**: Dual-mode engine supporting Free/Open BYOK (OpenRouter / OpenAI) or Joy Pro curated frontier models (`minimax/minimax-m3`, `claude-3.5-sonnet`, `gpt-4o-mini`) through the zero-knowledge model gateway.
+- **AI Agent Intelligence**: Dual-mode engine supporting Free/Open BYOK (OpenRouter / OpenAI) or Joy Pro curated models through the model gateway.
 
 ---
 
@@ -78,13 +78,13 @@ JOY Media has transitioned from a dual web/desktop architecture into a dedicated
 
 ## 3. Verification Matrix
 
-| Check                        | Scope                    | Tool / Command                               | Result                            |
-| :--------------------------- | :----------------------- | :------------------------------------------- | :-------------------------------- |
-| **Unit & Integration Tests** | Full Monorepo            | `pnpm test`                                  | **588 passed**, 4,819 tests green |
-| **TypeScript Types**         | Full Monorepo            | `pnpm typecheck` (`tsc -b`)                  | **Clean** (0 errors)              |
-| **Account Web Build**        | `@joy-media/account-web` | `pnpm --filter @joy-media/account-web build` | **Clean** (0.62s)                 |
-| **Desktop Editor Build**     | `@joy-media/editor-web`  | `pnpm --filter @joy-media/editor-web build`  | **Clean**                         |
-| **CI Budget Guard**          | `.github/workflows/`     | Manual inspection                            | **100% `workflow_dispatch`**      |
+| Check                        | Scope                                    | Tool / Command                               | Result                                                                                                                                                             |
+| :--------------------------- | :--------------------------------------- | :------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Unit & Integration Tests** | Full Monorepo                            | `pnpm test`                                  | **608 files passed, 1 skipped; 5,095 tests passed, 3 skipped** (latest full run on this branch)                                                                    |
+| **TypeScript Types**         | Full Monorepo                            | `pnpm typecheck` (`tsc -b`)                  | **Clean** (0 errors)                                                                                                                                               |
+| **Account Web Build**        | `@joy-media/account-web`                 | `pnpm --filter @joy-media/account-web build` | **Clean** (0.62s)                                                                                                                                                  |
+| **Desktop Editor Build**     | `@joy-media/editor-web`                  | `pnpm --filter @joy-media/editor-web build`  | **Clean**                                                                                                                                                          |
+| **CI Triggers**              | `.github/workflows/ci.yml`, `ci-dev.yml` | Manual inspection                            | `ci.yml`: `workflow_dispatch`, `pull_request`, and `push` to `main` on `joy-media-ci` / `joy-media-worker-docker` self-hosted runners; `ci-dev.yml`: dispatch-only |
 
 ---
 

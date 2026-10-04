@@ -503,7 +503,11 @@ describe('JOY Agent Settings connection status', () => {
 
     expect(rendered.querySelector('[role="status"]')?.textContent).toContain('Plan-only ready');
     expect(countLeafTextMatches(rendered, /Plan-only/)).toBe(1);
-    expect(rendered.textContent).toContain('Connected successfully in plan-only mode.');
+    expect(rendered.textContent).toContain(
+      "Connected in plan-only mode: JOY can propose plans but this model can't call tools.",
+    );
+    expect(rendered.textContent).not.toContain('Creative Brief is ready');
+    expect(rendered.textContent).toContain('Custom OpenAI-compatible endpoint');
   });
 
   it('shows a resolved provider failure with one redacted error in the dialog', async () => {

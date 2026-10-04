@@ -468,6 +468,24 @@ describe('IPC dispatch', () => {
     }
   });
 
+  it('provider-profile.fetch-models clears its timeout when fetch rejects', async () => {
+    const handlers = createIpcHandlers(deps());
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network unavailable')));
+    try {
+      await dispatchIpcRequest(handlers, {
+        origin: 'https://joyst.ir',
+        channel: 'desktop.provider-profile.fetch-models',
+        payload: { baseUrl: 'https://provider.example/api', apiKey: 'sk-test-REDACTED-0000' },
+      });
+
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
   it('check-for-update forwards a well-shaped request to the injected policy check', async () => {
     const d = deps();
     const handlers = createIpcHandlers(d);
