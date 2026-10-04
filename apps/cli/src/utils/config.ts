@@ -5,8 +5,7 @@ import { join } from 'node:path';
 import {
   chmodPrivate,
   deleteProtectedSecret,
-  protectSecret,
-  unprotectSecret,
+  migrateLegacySecret,
   type ProtectedSecret,
 } from './secret-store.js';
 
@@ -87,26 +86,15 @@ export function loadAiProviders(): Record<string, AiProviderConfig> {
     const providers = JSON.parse(raw) as Record<string, AiProviderConfig>;
     let migrated = false;
     for (const [name, provider] of Object.entries(providers)) {
-      if (
-        provider.apiKeyEnv &&
-        (provider.apiKey || provider.apiKeyProtected?.scheme === 'file-0600')
-      ) {
+      if (provider.apiKeyEnv && provider.apiKey) {
         delete provider.apiKey;
-        if (provider.apiKeyProtected?.scheme === 'file-0600') delete provider.apiKeyProtected;
         migrated = true;
-      } else if (provider.apiKey || provider.apiKeyProtected?.scheme === 'file-0600') {
-        const oldSecret = provider.apiKey ?? provider.apiKeyProtected?.data;
-        if (!oldSecret) continue;
-        try {
-          const protectedKey = protectSecret(oldSecret, name);
-          if (protectedKey.scheme === 'file-0600' || unprotectSecret(protectedKey) !== oldSecret)
-            continue;
-          provider.apiKeyProtected = protectedKey;
-          delete provider.apiKey;
-          migrated = true;
-        } catch {
-          // Keep the legacy value intact until a keyring can verify a safe migration.
-        }
+      } else if (provider.apiKey) {
+        const protectedKey = migrateLegacySecret(provider.apiKey, name);
+        if (!protectedKey) continue;
+        provider.apiKeyProtected = protectedKey;
+        delete provider.apiKey;
+        migrated = true;
       }
     }
     if (migrated) {

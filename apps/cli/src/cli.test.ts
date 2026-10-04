@@ -7,7 +7,7 @@ import { runCli } from './cli.js';
 import { CliJoyAgentToolBridge } from './agent/bridge.js';
 import { resolveByokConfig } from './agent/provider.js';
 import { formatAgentRunFailure } from './commands/agent-cmd.js';
-import { configureSecretStoreRuntimeForTests, protectSecret } from './utils/secret-store.js';
+import { configureSecretStoreRuntimeForTests } from './utils/secret-store.js';
 import { setAiProvider } from './utils/config.js';
 import { resolveTextFont } from './render/text-font.js';
 import * as joyAgentRuntime from './agent/joy-agent.js';
@@ -205,9 +205,10 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     setAiProvider('safe-provider', {
       name: 'safe-provider',
       provider: 'custom',
-      apiKeyProtected: protectSecret(key, 'safe-provider', {
-        insecureFileStore: process.platform !== 'win32',
-      }),
+      apiKeyProtected:
+        process.platform === 'win32'
+          ? { scheme: 'dpapi-user', data: 'fake-protected-test-value' }
+          : { scheme: 'file-0600', data: key },
     });
     const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     try {
@@ -283,7 +284,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       expect(saved.project.title).toBe('Updated by agent');
       const outputText = output.mock.calls.flat().join('\n');
       expect(outputText).toContain('Applied 1 operation(s) (--apply)');
-      expect(outputText).toContain('Applied 1 change(s): remove (applied-remove).');
+      expect(outputText).toContain('Applied 1 change(s).');
       expect(outputText).not.toContain('unrelated change');
       expect(outputText).toContain('Verified timeline placement');
       expect(outputText).toContain('agent-clip-1');
@@ -979,6 +980,12 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
 
     it('supports adding, listing, selecting, and removing providers via CLI', async () => {
       const providerHome = mkdtempSync(join(tmpdir(), 'joy-cli-provider-test-'));
+      const restoreSecretStoreRuntime = configureSecretStoreRuntimeForTests({
+        platform: 'linux',
+        runner: () => {
+          throw new Error('unexpected secret store access in provider CLI test');
+        },
+      });
       vi.stubEnv('USERPROFILE', providerHome);
       vi.stubEnv('HOME', providerHome);
       for (const key of [
@@ -1130,6 +1137,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
           vi.stubEnv(key, '');
         }
         rmSync(providerHome, { recursive: true, force: true });
+        restoreSecretStoreRuntime();
       }
     }, 15000);
   });

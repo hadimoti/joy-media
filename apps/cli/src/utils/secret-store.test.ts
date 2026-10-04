@@ -147,14 +147,16 @@ describe('CLI secret storage', () => {
     }
   });
 
-  it('migrates legacy plaintext only after keyring read-back succeeds', () => {
+  it('migrates legacy plaintext only and leaves explicit file storage untouched', () => {
     const home = mkdtempSync(join(tmpdir(), 'joy-secret-migration-'));
     const previousHome = process.env.HOME;
     const previousProfile = process.env.USERPROFILE;
     process.env.HOME = home;
     process.env.USERPROFILE = home;
     const stored = new Map<string, string>();
+    const calls: string[] = [];
     const runner: SecretStoreRunner = (_command, args, stdin) => {
+      calls.push(String(args[0]));
       const account = args.at(-1)!;
       if (args[0] === 'store') {
         stored.set(account, stdin ?? '');
@@ -177,11 +179,16 @@ describe('CLI secret storage', () => {
       const migrated = loadAiProviders();
       expect(migrated.legacy?.apiKey).toBeUndefined();
       expect(migrated.legacy?.apiKeyProtected?.scheme).toBe('libsecret');
-      expect(migrated.oldFileScheme?.apiKeyProtected?.scheme).toBe('libsecret');
+      expect(migrated.oldFileScheme?.apiKeyProtected).toEqual({
+        scheme: 'file-0600',
+        data: 'sk-test-REDACTED-0000',
+      });
       const persisted = JSON.parse(readFileSync(getAiProvidersPath(), 'utf8'));
       expect(persisted.legacy.apiKey).toBeUndefined();
-      expect(persisted.oldFileScheme.apiKeyProtected.scheme).toBe('libsecret');
-      expect(JSON.stringify(persisted)).not.toContain('sk-test-REDACTED-0000');
+      expect(persisted.oldFileScheme.apiKeyProtected.scheme).toBe('file-0600');
+      const callsAfterMigration = calls.length;
+      expect(loadAiProviders().legacy?.apiKeyProtected?.scheme).toBe('libsecret');
+      expect(calls).toHaveLength(callsAfterMigration);
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
@@ -213,5 +220,70 @@ describe('CLI secret storage', () => {
       else process.env.USERPROFILE = previousProfile;
       failing();
     }
+  });
+
+  it('does not probe the keyring when loading an explicit file-0600 key', () => {
+    const home = mkdtempSync(join(tmpdir(), 'joy-secret-file-load-'));
+    const previousHome = process.env.HOME;
+    const previousProfile = process.env.USERPROFILE;
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    const runner = vi.fn<SecretStoreRunner>(() => {
+      throw new Error('keyring runner must not be called');
+    });
+    const restore = configureSecretStoreRuntimeForTests({ platform: 'linux', runner });
+    try {
+      writeFileSync(
+        getAiProvidersPath(),
+        JSON.stringify({
+          explicit: {
+            apiKeyProtected: { scheme: 'file-0600', data: 'sk-test-REDACTED-0000' },
+          },
+        }),
+      );
+
+      expect(loadAiProviders().explicit?.apiKeyProtected?.scheme).toBe('file-0600');
+      expect(runner).not.toHaveBeenCalled();
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousProfile;
+      rmSync(home, { recursive: true, force: true });
+      restore();
+    }
+  });
+
+  it('caches an unavailable keyring after the first legacy migration attempt', () => {
+    const home = mkdtempSync(join(tmpdir(), 'joy-secret-unavailable-cache-'));
+    const previousHome = process.env.HOME;
+    const previousProfile = process.env.USERPROFILE;
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    const runner = vi.fn<SecretStoreRunner>(() => ({ status: 1, stdout: '' }));
+    const restore = configureSecretStoreRuntimeForTests({ platform: 'linux', runner });
+    try {
+      writeFileSync(
+        getAiProvidersPath(),
+        JSON.stringify({ legacy: { apiKey: 'sk-test-REDACTED-0000' } }),
+      );
+
+      expect(loadAiProviders().legacy?.apiKey).toBe('sk-test-REDACTED-0000');
+      expect(loadAiProviders().legacy?.apiKey).toBe('sk-test-REDACTED-0000');
+      expect(runner).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousProfile;
+      rmSync(home, { recursive: true, force: true });
+      restore();
+    }
+  });
+
+  it('fails fast instead of spawning a real platform secret store in Vitest', () => {
+    expect(() => protectSecret('sk-test-REDACTED-0000', 'test-runner-guard')).toThrow(
+      'injected runner in tests',
+    );
   });
 });

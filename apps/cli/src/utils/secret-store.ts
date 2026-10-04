@@ -21,6 +21,9 @@ export type SecretStoreRunner = (
 ) => SecretStoreRunnerResult;
 
 const defaultRunner: SecretStoreRunner = (command, args, stdin) => {
+  if (process.env.VITEST || process.env.NODE_ENV === 'test') {
+    throw new Error('Secret store commands must use an injected runner in tests.');
+  }
   const result = spawnSync(command, [...args], {
     input: stdin,
     encoding: 'utf8',
@@ -39,17 +42,37 @@ let secretStoreRuntime: { platform: NodeJS.Platform; runner: SecretStoreRunner }
   platform: process.platform,
   runner: defaultRunner,
 };
+let keyringAvailability: boolean | undefined;
 
 /** Injects platform and process execution for tests; production uses the current host. */
 export function configureSecretStoreRuntimeForTests(runtime: {
   platform: NodeJS.Platform;
   runner: SecretStoreRunner;
 }): () => void {
-  const previous = secretStoreRuntime;
+  const previous = { runtime: secretStoreRuntime, keyringAvailability };
   secretStoreRuntime = runtime;
+  keyringAvailability = undefined;
   return () => {
-    secretStoreRuntime = previous;
+    secretStoreRuntime = previous.runtime;
+    keyringAvailability = previous.keyringAvailability;
   };
+}
+
+/** Migrates one legacy plaintext key unless this process already found the keyring unavailable. */
+export function migrateLegacySecret(secret: string, account: string): ProtectedSecret | undefined {
+  if (keyringAvailability === false) return undefined;
+  try {
+    const protectedKey = protectSecret(secret, account);
+    if (protectedKey.scheme === 'file-0600' || unprotectSecret(protectedKey) !== secret) {
+      keyringAvailability = false;
+      return undefined;
+    }
+    keyringAvailability = true;
+    return protectedKey;
+  } catch {
+    keyringAvailability = false;
+    return undefined;
+  }
 }
 
 export function protectSecret(
@@ -196,6 +219,9 @@ function ok(result: SecretStoreRunnerResult): boolean {
 }
 
 function runPowerShell(script: string, stdin: string): string {
+  if (process.env.VITEST || process.env.NODE_ENV === 'test') {
+    throw new Error('Secret store commands must use an injected runner in tests.');
+  }
   const encodedCommand = Buffer.from(script, 'utf16le').toString('base64');
   const result = spawnSync(
     'powershell.exe',
