@@ -60,7 +60,7 @@ describe('CLI ffmpeg render', () => {
           [first, 'first'],
           [second, 'second'],
           [audio, 'tone'],
-        ]) {
+        ] as const) {
           expect(
             await runCli(['asset', 'import', path, '--project', projectPath, '--id', id]),
           ).toBe(0);
