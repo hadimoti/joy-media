@@ -120,6 +120,7 @@ describe('CLI Joy Agent bridge timeline operations', () => {
       startUs: 3_000_000,
       endUs: 6_000_000,
     });
+    expect(result.placementSummary.gaps.some((gap) => gap.trackId === 'video-2')).toBe(false);
   });
 
   it('uses the renderer ffmpeg resolver configured by JOY_FFMPEG', () => {
@@ -163,7 +164,10 @@ describe('CLI Joy Agent bridge timeline operations', () => {
           text: "it's 50%: a,b;[c] x'\\:textfile=/tmp/dt/secret.txt\\:y='5",
           startUs: 0,
           durationUs: 1_000_000,
-          size: 1.2,
+          // The preview fixture is only 160×90. Use a visible editor-unit
+          // multiplier so this test can distinguish rendered text from a
+          // nearly blank JPEG while retaining the escaping payload.
+          size: 8,
         });
         const project: JoyProjectV1 = {
           ...baseProject,
@@ -260,7 +264,7 @@ describe('CLI Joy Agent bridge timeline operations', () => {
 
   it('rejects a missing target without losing the source clip', async () => {
     const bridge = new CliJoyAgentToolBridge(projectWithTracks(), 1);
-    await bridge.proposeTimelineOperations({
+    const proposal = (await bridge.proposeTimelineOperations({
       operations: [
         {
           kind: 'move',
@@ -271,11 +275,13 @@ describe('CLI Joy Agent bridge timeline operations', () => {
           dependsOn: [],
         },
       ],
-    });
+    })) as { accepted: boolean; errors: string[] };
 
     const { updatedProject, appliedCount, errors } = bridge.applyStaged();
     expect(appliedCount).toBe(0);
-    expect(errors).toContain('Target track missing not found');
+    expect(proposal.accepted).toBe(false);
+    expect(proposal.errors).toContain('Track missing not found.');
+    expect(errors).toEqual([]);
     expect(updatedProject.compositions.root!.tracks[0]!.clips.map((clip) => clip.id)).toEqual([
       'early',
       'moving',
@@ -371,7 +377,7 @@ describe('CLI Joy Agent bridge timeline operations', () => {
       },
     } as JoyProjectV1;
     const bridge = new CliJoyAgentToolBridge(project, 1);
-    await bridge.proposeDocumentOperations({
+    const proposal = (await bridge.proposeDocumentOperations({
       operations: [
         { kind: 'set-text', id: 'text-op', objectId: 'title', text: 'New title', dependsOn: [] },
         {
@@ -393,18 +399,16 @@ describe('CLI Joy Agent bridge timeline operations', () => {
         { kind: 'add-effect', id: 'effect-op', objectId: 'title', effectId: 'blur', dependsOn: [] },
         { kind: 'set-text', id: 'missing-op', objectId: 'missing', text: 'ignored', dependsOn: [] },
       ],
-    });
+    })) as { accepted: boolean; errors: string[] };
     const result = bridge.applyStaged();
     expect(result.appliedCount).toBe(0);
-    expect(result.errors.some((error) => error.startsWith('unsupported: set-text'))).toBe(true);
-    expect(
-      result.errors.some((error) => error.startsWith('unsupported: text property opacity')),
-    ).toBe(true);
-    expect(
-      result.errors.some((error) => error.startsWith('unsupported: text property unlisted')),
-    ).toBe(true);
-    expect(result.errors).toContain('unsupported: effect blur is not rendered by ffmpeg.');
-    expect(result.errors).toContain('unsupported: set-text for missing is not rendered by ffmpeg.');
+    expect(proposal.accepted).toBe(false);
+    expect(proposal.errors).toContain('set-text for title is not rendered by the CLI.');
+    expect(proposal.errors).toContain('Text property opacity is not rendered by the CLI.');
+    expect(proposal.errors).toContain('Text property unlisted is not rendered by the CLI.');
+    expect(proposal.errors).toContain('add-effect is not supported by the CLI renderer yet.');
+    expect(proposal.errors).toContain('Object missing not found.');
+    expect(result.errors).toEqual([]);
     expect(result.updatedProject.visualObjects.title).toMatchObject({
       text: 'Old',
       transform: { opacity: 1 },
@@ -439,6 +443,61 @@ describe('CLI Joy Agent bridge timeline operations', () => {
     ).toContainEqual(
       expect.objectContaining({ kind: 'caption', startUs: 500_000, durationUs: 2_000_000 }),
     );
+  });
+
+  it.skipIf(!resolveTextFont())(
+    'reroutes create-text from a video track to a caption track',
+    async () => {
+      const project = projectWithTracks();
+      const bridge = new CliJoyAgentToolBridge(project, 1);
+      const proposal = await bridge.proposeDocumentOperations({
+        operations: [
+          {
+            kind: 'create-text',
+            id: 'video-target-text',
+            trackId: 'video-1',
+            text: 'Caption text',
+            startUs: 0,
+            durationUs: 1_000_000,
+            dependsOn: [],
+          },
+        ],
+      });
+      expect(proposal).toMatchObject({
+        accepted: true,
+        notes: [expect.stringContaining('will be routed')],
+      });
+      const result = bridge.applyStaged();
+      expect(result.errors).toEqual([]);
+      expect(result.notes[0]).toContain('rerouted from video track video-1');
+      expect(
+        result.updatedProject.compositions.root!.tracks.find((track) => track.kind === 'video')
+          ?.clips,
+      ).toHaveLength(2);
+      expect(
+        result.updatedProject.compositions.root!.tracks.find((track) => track.kind === 'caption')
+          ?.clips,
+      ).toHaveLength(1);
+    },
+  );
+
+  it('rejects create-text shorter than one project frame during planning', async () => {
+    const bridge = new CliJoyAgentToolBridge(projectWithTracks(), 1);
+    const proposal = (await bridge.proposeDocumentOperations({
+      operations: [
+        {
+          kind: 'create-text',
+          id: 'too-short',
+          text: 'Tiny duration',
+          startUs: 0,
+          durationUs: 1,
+          dependsOn: [],
+        },
+      ],
+    })) as { accepted: boolean; errors: string[] };
+    expect(proposal.accepted).toBe(false);
+    expect(proposal.errors).toContain('Text too-short duration is shorter than one project frame.');
+    expect(bridge.getStagedOperations().documentOps).toEqual([]);
   });
 
   it('reports whether the plan will wait for approval or auto-apply', async () => {
@@ -508,7 +567,7 @@ describe('CLI Joy Agent bridge timeline operations', () => {
       },
     } as JoyProjectV1;
     const bridge = new CliJoyAgentToolBridge(project, 1);
-    await bridge.proposeDocumentOperations({
+    const proposal = (await bridge.proposeDocumentOperations({
       operations: [
         {
           kind: 'set-property',
@@ -519,9 +578,11 @@ describe('CLI Joy Agent bridge timeline operations', () => {
           dependsOn: [],
         },
       ],
-    });
+    })) as { accepted: boolean; errors: string[] };
     const result = bridge.applyStaged();
-    expect(result.errors.some((error) => error.includes('opacity'))).toBe(true);
+    expect(proposal.accepted).toBe(false);
+    expect(proposal.errors).toContain('Text property opacity is not rendered by the CLI.');
+    expect(result.errors).toEqual([]);
     expect(result.updatedProject.visualObjects.title).toMatchObject({
       transform: { opacity: 1 },
     });
