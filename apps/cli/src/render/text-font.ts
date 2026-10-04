@@ -1,10 +1,22 @@
 /* global process */
 import { existsSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { containsArabicScript } from './text-scripts.js';
 
-export function resolveTextFont(): string | undefined {
-  const candidates = [
+export function resolveTextFont(text = '', explicitPath?: string): string | undefined {
+  if (explicitPath !== undefined) {
+    if (!isFontFile(explicitPath)) throw new Error(`Font file does not exist: ${explicitPath}`);
+    return explicitPath;
+  }
+  const configured = [
+    ...(containsArabicScript(text) ? [process.env.JOY_FONT_ARABIC] : []),
     process.env.JOY_FONT,
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  for (const candidate of configured) {
+    if (!isFontFile(candidate)) throw new Error(`Font file does not exist: ${candidate}`);
+    return candidate;
+  }
+  const candidates = [
     process.platform === 'win32' ? 'C:\\Windows\\Fonts\\arial.ttf' : undefined,
     '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
     '/usr/share/fonts/TTF/DejaVuSans.ttf',
@@ -12,7 +24,7 @@ export function resolveTextFont(): string | undefined {
   ].filter((candidate): candidate is string => Boolean(candidate));
   for (const candidate of candidates) {
     try {
-      if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
+      if (isFontFile(candidate)) return candidate;
     } catch {
       // Try the next known path.
     }
@@ -24,9 +36,17 @@ export function resolveTextFont(): string | undefined {
       windowsHide: true,
     });
     const path = match.status === 0 ? match.stdout.trim() : '';
-    if (path && existsSync(path) && statSync(path).isFile()) return path;
+    if (path && isFontFile(path)) return path;
   }
   return undefined;
+}
+
+function isFontFile(path: string): boolean {
+  try {
+    return existsSync(path) && statSync(path).isFile();
+  } catch {
+    return false;
+  }
 }
 
 /** Escape a filesystem path through drawtext's option parser and the filtergraph parser. */

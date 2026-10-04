@@ -28,6 +28,7 @@ import {
   writeFfmpegTextFiles,
 } from '../render/text-files.js';
 import { runFfmpegRender } from '../render/ffmpeg-run.js';
+import { resolveTextFont } from '../render/text-font.js';
 
 export interface RenderCommandFlags {
   project?: string | undefined;
@@ -39,6 +40,7 @@ export interface RenderCommandFlags {
   width?: number | undefined;
   height?: number | undefined;
   fps?: number | undefined;
+  font?: string | undefined;
   strict?: boolean | undefined;
   manifestOnly?: boolean | undefined;
 }
@@ -51,7 +53,9 @@ export function renderCompletionMessage(outputPath: string, skippedCount: number
 
 export function printRenderHelp(): void {
   console.log(`Usage: joy-media render --project <id|file.json> --preset <mp4|webm|prores> --out <directory>
-Options: --width <px> --height <px> --fps <rate> --strict --manifest-only --concurrency <1-32> --json`);
+Options: --width <px> --height <px> --fps <rate> --font <path> --strict --manifest-only --concurrency <1-32> --json
+Text fonts default to JOY_FONT; Arabic-script text can use JOY_FONT_ARABIC.
+Legacy CLI pixel-unit caption styles are skipped with a warning; recreate them using editor-unit timeline flags.`);
 }
 
 export interface RenderPresetSpec {
@@ -179,6 +183,15 @@ export async function handleRenderCommand(args: string[], flags: CliFlags): Prom
     }) ?? 2;
   const json = Boolean(flags.json);
 
+  if (flags.font !== undefined) {
+    try {
+      resolveTextFont('', flags.font);
+    } catch (error) {
+      logError(error instanceof Error ? error.message : String(error));
+      return 2;
+    }
+  }
+
   if (!flags.project) {
     logError('Please specify target project via --project <id|file.json>');
     return 1;
@@ -210,6 +223,7 @@ export async function handleRenderCommand(args: string[], flags: CliFlags): Prom
     width: flags.width,
     height: flags.height,
     fps: flags.fps,
+    font: flags.font,
     strict: flags.strict,
     manifestOnly: flags.manifestOnly,
   });
@@ -226,6 +240,7 @@ export interface RunHeadlessRenderInput {
   readonly width?: number | undefined;
   readonly height?: number | undefined;
   readonly fps?: number | undefined;
+  readonly font?: string | undefined;
   readonly strict?: boolean | undefined;
   readonly manifestOnly?: boolean | undefined;
 }
@@ -514,6 +529,7 @@ async function runFfmpegHeadlessRender(
         ...(input.width === undefined ? {} : { width: input.width }),
         ...(input.height === undefined ? {} : { height: input.height }),
         ...(input.fps === undefined ? {} : { fps: input.fps }),
+        ...(input.font === undefined ? {} : { font: input.font }),
       },
       textWorkspace,
     );
@@ -536,7 +552,7 @@ async function runFfmpegHeadlessRender(
           {
             type: 'error',
             projectId: project.id,
-            message: `Strict render rejected ${plan.skipped.length} unsupported clip(s).`,
+            message: `Strict render rejected ${plan.skipped.length} unsupported clip(s): ${plan.skipped.map((item) => `${item.clipId}: ${item.reason}`).join('; ')}`,
             ts: new Date().toISOString(),
           },
           json,
