@@ -20,6 +20,7 @@ describe('Joy Model hosted API helpers', () => {
     );
     await expect(fetchJoyHostedDefaultModel(fetchFn)).resolves.toBe('bytedance-seed/seed-2.0-lite');
     expect(fetchFn).toHaveBeenCalledWith('/api/v1/agent/models');
+    expect(fetchFn.mock.calls[0]).toHaveLength(1);
   });
 
   it('distinguishes signed-out, active, and unsubscribed accounts', async () => {

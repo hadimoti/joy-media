@@ -92,4 +92,7 @@ check_endpoint "https://127.0.0.1/api/v1/projects" "404"
 check_endpoint "https://127.0.0.1/api/v1/media" "404"
 check_endpoint "https://127.0.0.1/api/v1/jobs" "404"
 
+log "Post-deploy Joy Model gateway smoke"
+node "$REPO_DIR/tooling/ops/smoke-gateway.mjs" || die "Joy Model gateway smoke failed"
+
 log "JOY Media Control Plane and Account Web deployment completed successfully!"

@@ -320,6 +320,24 @@ const AGENT_USAGE_METADATA_MIGRATION: PostgresMigration = {
   },
 };
 
+const AGENT_USAGE_RESERVATIONS_MIGRATION: PostgresMigration = {
+  id: '011-agent-usage-reservations',
+  checksum: 'sha256:agent-usage-reservations-2026-10-04',
+  up: async (database) => {
+    await database.query(`
+      CREATE TABLE IF NOT EXISTS agent_usage_reservations (
+        id text PRIMARY KEY,
+        owner_id text NOT NULL,
+        day_start timestamptz NOT NULL,
+        amount_micros bigint NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS agent_usage_reservations_owner_day
+        ON agent_usage_reservations (owner_id, day_start);
+    `);
+  },
+};
+
 export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
   BASELINE_MIGRATION,
   ASSET_REVOCATION_PRIMARY_KEY_MIGRATION,
@@ -331,6 +349,7 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
   USDC_INVOICES_MIGRATION,
   AGENT_USAGE_LEDGER_MIGRATION,
   AGENT_USAGE_METADATA_MIGRATION,
+  AGENT_USAGE_RESERVATIONS_MIGRATION,
 ];
 
 export async function runPostgresMigrations(database: MigrationDatabase): Promise<void> {

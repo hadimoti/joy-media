@@ -66,7 +66,7 @@ function createMockRes(): {
 }
 
 describe('JoyModelGateway', () => {
-  it('requires auth for the models catalog and serves it to authenticated users', async () => {
+  it('serves the model catalog without authentication', async () => {
     const gateway = new JoyModelGateway({
       mediaAuth: { authenticate: async () => undefined } as unknown as MediaAuthService,
       account: {} as AccountService,
@@ -78,8 +78,8 @@ describe('JoyModelGateway', () => {
     const req = createMockReq({ method: 'GET', url: '/v1/agent/models' });
     await gateway.handleGetModels(req, res);
 
-    expect(getStatus()).toBe(401);
-    expect(JSON.parse(getBody()).error.code).toBe('UNAUTHORIZED');
+    expect(getStatus()).toBe(200);
+    expect(JSON.parse(getBody()).models).toHaveLength(JOY_AGENT_DEFAULT_MODELS.length);
   });
 
   it('serves the models catalog after authentication', async () => {
@@ -559,6 +559,87 @@ describe('JoyModelGateway', () => {
     }
   });
 
+  it('reserves estimated spend atomically across parallel requests', async () => {
+    vi.stubEnv('JOY_GATEWAY_RATE_LIMIT_PER_MIN', '100');
+    vi.stubEnv('JOY_GATEWAY_DAILY_SPEND_CAP_USD', '0.03');
+    let forwarded = 0;
+    const gateway = new JoyModelGateway({
+      mediaAuth: {
+        authenticate: async () => ({ id: 'parallel-spend-user' }),
+      } as unknown as MediaAuthService,
+      account: {
+        getSubscription: async () => ({
+          ownerId: 'parallel-spend-user',
+          plan: 'monthly',
+          status: 'active',
+          updatedAt: 0,
+        }),
+      } as unknown as AccountService,
+      ledger: new MemoryAgentUsageLedger(),
+      openRouterApiKey: 'test-key',
+      fetchImpl: async () => {
+        forwarded += 1;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return new Response(
+          JSON.stringify({
+            choices: [],
+            usage: { prompt_tokens: 1, completion_tokens: 1, cost: 0.001 },
+          }),
+          { status: 200 },
+        );
+      },
+    });
+    try {
+      const responses = Array.from({ length: 8 }, () => createMockRes());
+      await Promise.all(
+        responses.map(({ res }) =>
+          gateway.handleChatCompletions(
+            createMockReq({
+              body: { model: 'bytedance-seed/seed-2.0-lite', messages: [], max_tokens: 8192 },
+            }),
+            res,
+          ),
+        ),
+      );
+      expect(forwarded).toBe(1);
+      expect(responses.filter((response) => response.getStatus() === 429)).toHaveLength(7);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('fails closed with 503 when a spend reservation cannot be written', async () => {
+    const fetchImpl = vi.fn();
+    const gateway = new JoyModelGateway({
+      mediaAuth: {
+        authenticate: async () => ({ id: 'ledger-failure-user' }),
+      } as unknown as MediaAuthService,
+      account: {
+        getSubscription: async () => ({
+          ownerId: 'ledger-failure-user',
+          plan: 'monthly',
+          status: 'active',
+          updatedAt: 0,
+        }),
+      } as unknown as AccountService,
+      ledger: {
+        reserveSpend: async () => {
+          throw new Error('db unavailable');
+        },
+      } as unknown as MemoryAgentUsageLedger,
+      openRouterApiKey: 'test-key',
+      fetchImpl,
+    });
+    const response = createMockRes();
+    await gateway.handleChatCompletions(
+      createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } }),
+      response.res,
+    );
+    expect(response.getStatus()).toBe(503);
+    expect(response.getBody()).toContain('SPEND_LEDGER_UNAVAILABLE');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('sends SSE keep-alive comments while the upstream stream is waiting', async () => {
     vi.useFakeTimers();
     try {
@@ -842,6 +923,100 @@ describe('JoyModelGateway', () => {
     expect(response.getHeaders()['x-accel-buffering']).toBe('no');
   });
 
+  it('preserves reported stream token counts when cost must be estimated', async () => {
+    const ledger = new MemoryAgentUsageLedger();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode('data: {"usage":{"prompt_tokens":8,"completion_tokens":6}}\n\n'),
+        );
+        controller.close();
+      },
+    });
+    const gateway = new JoyModelGateway({
+      mediaAuth: {
+        authenticate: async () => ({ id: 'token-cost-user' }),
+      } as unknown as MediaAuthService,
+      account: {
+        getSubscription: async () => ({
+          ownerId: 'token-cost-user',
+          plan: 'monthly',
+          status: 'active',
+          updatedAt: 0,
+        }),
+      } as unknown as AccountService,
+      ledger,
+      openRouterApiKey: 'test-key',
+      fetchImpl: async () => new Response(stream, { status: 200 }),
+    });
+    await gateway.handleChatCompletions(
+      createMockReq({
+        body: { model: 'bytedance-seed/seed-2.0-lite', stream: true, messages: [] },
+      }),
+      createMockRes().res,
+    );
+    const summary = await ledger.getSummary('token-cost-user');
+    expect(summary.totalPromptTokens).toBe(8);
+    expect(summary.totalCompletionTokens).toBe(6);
+    expect(BigInt(summary.totalUpstreamCostMicros)).toBeGreaterThan(0n);
+  });
+
+  it('retries delayed generation usage lookups without delaying the response', async () => {
+    vi.useFakeTimers();
+    try {
+      const ledger = new MemoryAgentUsageLedger();
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              id: 'generation-late',
+              choices: [],
+              usage: { prompt_tokens: 3, completion_tokens: 2 },
+            }),
+            { status: 200 },
+          ),
+        )
+        .mockResolvedValueOnce(new Response('{}', { status: 404 }))
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ data: { tokens_prompt: 9, tokens_completion: 4, total_cost: 0.002 } }),
+            { status: 200 },
+          ),
+        );
+      const gateway = new JoyModelGateway({
+        mediaAuth: {
+          authenticate: async () => ({ id: 'generation-retry-user' }),
+        } as unknown as MediaAuthService,
+        account: {
+          getSubscription: async () => ({
+            ownerId: 'generation-retry-user',
+            plan: 'monthly',
+            status: 'active',
+            updatedAt: 0,
+          }),
+        } as unknown as AccountService,
+        ledger,
+        openRouterApiKey: 'test-key',
+        fetchImpl,
+      });
+      const response = createMockRes();
+      await gateway.handleChatCompletions(
+        createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } }),
+        response.res,
+      );
+      expect(response.getStatus()).toBe(200);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      const summary = await ledger.getSummary('generation-retry-user');
+      expect(summary.totalPromptTokens).toBe(9);
+      expect(summary.totalCompletionTokens).toBe(4);
+      expect(summary.totalUpstreamCostMicros).toBe('2000');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('ends an idle stream cleanly after recording usage already received', async () => {
     vi.useFakeTimers();
     try {
@@ -966,12 +1141,10 @@ describe('JoyModelGateway', () => {
     expect((await ledger.getSummary('u')).totalUpstreamCostMicros).toBe('6000');
   });
 
-  it('estimates missing streaming usage and tolerates ledger write failures', async () => {
+  it('estimates missing streaming usage and records an estimated ledger entry', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const record = vi.fn(async () => {
-      throw new Error('db unavailable');
-    });
+    const ledger = new MemoryAgentUsageLedger();
     const gateway = new JoyModelGateway({
       mediaAuth: { authenticate: async () => ({ id: 'u' }) } as unknown as MediaAuthService,
       account: {
@@ -982,7 +1155,7 @@ describe('JoyModelGateway', () => {
           updatedAt: 0,
         }),
       } as unknown as AccountService,
-      ledger: { record } as unknown as MemoryAgentUsageLedger,
+      ledger,
       openRouterApiKey: 'sk-test-REDACTED-0000',
       fetchImpl: async () => new Response('data: {"choices":[]}\n\n', { status: 200 }),
     });
@@ -999,18 +1172,7 @@ describe('JoyModelGateway', () => {
       'joy-model-gateway: stream usage unavailable',
       expect.objectContaining({ usageReported: false }),
     );
-    expect(error).toHaveBeenCalledWith(
-      'joy-model-gateway: ledger write failed',
-      expect.objectContaining({ code: 'LEDGER_WRITE_FAILED' }),
-    );
-    expect(record).toHaveBeenCalledWith(
-      expect.objectContaining({
-        promptTokens: 1,
-        completionTokens: 0,
-        estimated: true,
-        upstreamCostMicros: expect.any(BigInt),
-      }),
-    );
+    expect((await ledger.getSummary('u')).totalRequests).toBe(1);
     warn.mockRestore();
     error.mockRestore();
   });
@@ -1053,7 +1215,7 @@ describe('JoyModelGateway', () => {
         canceled = true;
       },
     });
-    const record = vi.fn().mockResolvedValue('usage-row');
+    const ledger = new MemoryAgentUsageLedger();
     const gateway = new JoyModelGateway({
       mediaAuth: { authenticate: async () => ({ id: 'u' }) } as unknown as MediaAuthService,
       account: {
@@ -1064,7 +1226,7 @@ describe('JoyModelGateway', () => {
           updatedAt: 0,
         }),
       } as unknown as AccountService,
-      ledger: { record } as unknown as MemoryAgentUsageLedger,
+      ledger,
       openRouterApiKey: 'test-key',
       fetchImpl: async () => new Response(stream, { status: 200 }),
     });
@@ -1079,12 +1241,6 @@ describe('JoyModelGateway', () => {
     response.close();
     await operation;
     expect(canceled).toBe(true);
-    expect(record).toHaveBeenCalledWith(
-      expect.objectContaining({
-        completionTokens: 4,
-        estimated: true,
-        generationId: 'generation-cancel',
-      }),
-    );
+    expect((await ledger.getSummary('u')).totalCompletionTokens).toBe(4);
   });
 });

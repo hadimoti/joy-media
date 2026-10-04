@@ -62,9 +62,8 @@ export const LEGACY_MODEL_ALIASES: Readonly<Record<string, string>> = Object.fre
 
 export const DEFAULT_COMMISSION_RATE_BPS = 2500; // 25% gross margin
 export const JOY_MODEL_MAX_OUTPUT_TOKENS = 8192;
-const UPSTREAM_HEADER_TIMEOUT_MS = 90_000;
+const UPSTREAM_HEADER_TIMEOUT_MS = 85_000;
 const UPSTREAM_STREAM_IDLE_TIMEOUT_MS = 60_000;
-const ESTIMATED_CHARS_PER_TOKEN = 4; // Conservative text-only estimate: 4 UTF-16 chars per token.
 
 const FORWARDED_COMPLETION_FIELDS = [
   'messages',
@@ -97,6 +96,7 @@ export class JoyModelGateway {
   private readonly openRouterApiKey: string | undefined;
   private readonly commissionRateBps: number;
   private readonly fetchImpl: typeof fetch;
+  // Per-minute throttling is process-local and resets when this API process restarts.
   private readonly requestTimesByUser = new Map<string, number[]>();
 
   constructor(options: JoyModelGatewayOptions) {
@@ -113,14 +113,6 @@ export class JoyModelGateway {
   }
 
   async handleGetModels(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const actor = await this.mediaAuth.authenticate(req);
-    if (actor === undefined) {
-      res.writeHead(401, { 'content-type': 'application/json' });
-      res.end(
-        JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } }),
-      );
-      return;
-    }
     res.writeHead(200, {
       'content-type': 'application/json',
       'cache-control': 'public, max-age=3600',
@@ -267,27 +259,48 @@ export class JoyModelGateway {
     const dailyCapMicros = BigInt(
       Math.round(positiveEnvNumber('JOY_GATEWAY_DAILY_SPEND_CAP_USD', 5) * 1_000_000),
     );
-    const dailySpend = this.ledger.getDailyBilledCostMicros
-      ? await this.ledger.getDailyBilledCostMicros(actor.id, new Date(now - (now % 86_400_000)))
-      : 0n;
+    // Daily billing cap resets at 00:00 UTC (03:30 Asia/Tehran).
+    const dayStart = new Date(now - (now % 86_400_000));
     const requestedOutputLimit = Number(parsedBody.max_tokens ?? parsedBody.max_completion_tokens);
     const reservedOutputTokens =
       Number.isSafeInteger(requestedOutputLimit) && requestedOutputLimit > 0
         ? Math.min(requestedOutputLimit, JOY_MODEL_MAX_OUTPUT_TOKENS)
         : JOY_MODEL_MAX_OUTPUT_TOKENS;
-    const maximumRequestCost = BigInt(
+    const maximumRawCost = BigInt(
       Math.ceil(
         estimateCostUsd(modelId, estimatePromptTokens(parsedBody.messages), reservedOutputTokens) *
           1_000_000,
       ),
     );
-    if (dailySpend >= dailyCapMicros || dailySpend + maximumRequestCost > dailyCapMicros) {
-      res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '3600' });
+    const maximumRequestCost = (maximumRawCost * BigInt(10000 + this.commissionRateBps)) / 10000n;
+    let reservationId: string;
+    try {
+      if (!this.ledger.reserveSpend) throw new Error('SPEND_LEDGER_UNAVAILABLE');
+      reservationId = await this.ledger.reserveSpend(
+        actor.id,
+        dayStart,
+        maximumRequestCost,
+        dailyCapMicros,
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message === 'DAILY_SPEND_CAP_REACHED') {
+        res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '3600' });
+        res.end(
+          JSON.stringify({
+            error: {
+              code: 'DAILY_SPEND_CAP_REACHED',
+              message: 'Daily JOY Agent spend cap would be exceeded; retry after the daily reset.',
+            },
+          }),
+        );
+        return;
+      }
+      res.writeHead(503, { 'content-type': 'application/json' });
       res.end(
         JSON.stringify({
           error: {
-            code: 'DAILY_SPEND_CAP_REACHED',
-            message: 'Daily JOY Agent spend cap would be exceeded; retry after the daily reset.',
+            code: 'SPEND_LEDGER_UNAVAILABLE',
+            message: 'Spend accounting is temporarily unavailable; request was not forwarded.',
           },
         }),
       );
@@ -316,6 +329,7 @@ export class JoyModelGateway {
         signal: upstreamController.signal,
       });
     } catch (error) {
+      await this.safeRelease(reservationId);
       const timedOut =
         upstreamTimedOut ||
         (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError'));
@@ -334,6 +348,7 @@ export class JoyModelGateway {
     }
 
     if (!upstreamRes.ok) {
+      await this.safeRelease(reservationId);
       const status = upstreamRes.status;
       if (status === 401 || status === 403) {
         res.writeHead(503, { 'content-type': 'application/json' });
@@ -392,7 +407,7 @@ export class JoyModelGateway {
       let completionTokens = 0;
       let rawCostUsd = 0;
       let usageReported = false;
-      let streamedOutputChars = 0;
+      let streamedOutputText = '';
       let generationId: string | undefined;
       let pending = '';
       let streamComplete = false;
@@ -411,7 +426,7 @@ export class JoyModelGateway {
             if (typeof data.id === 'string') generationId = data.id;
             for (const choice of data.choices ?? []) {
               if (typeof choice?.delta?.content === 'string')
-                streamedOutputChars += choice.delta.content.length;
+                streamedOutputText += choice.delta.content;
             }
             if (data.usage) {
               usageReported = true;
@@ -470,14 +485,16 @@ export class JoyModelGateway {
 
       // Record in ledger
       const estimated = !usageReported || rawCostUsd === 0;
-      if (estimated) {
+      if (!usageReported) {
         promptTokens = estimatePromptTokens(parsedBody.messages);
-        completionTokens = Math.ceil(streamedOutputChars / ESTIMATED_CHARS_PER_TOKEN);
+        completionTokens = estimateTextTokens(streamedOutputText);
+      }
+      if (estimated) {
         rawCostUsd = estimateCostUsd(modelId, promptTokens, completionTokens);
       }
       const upstreamMicros = BigInt(Math.round(rawCostUsd * 1_000_000));
       const billedMicros = (upstreamMicros * BigInt(10000 + this.commissionRateBps)) / 10000n;
-      const recordId = await this.safeRecord({
+      const recordId = await this.safeSettle(reservationId, {
         ownerId: actor.id,
         modelId,
         promptTokens,
@@ -505,7 +522,7 @@ export class JoyModelGateway {
         throw new Error('Upstream response was not an object.');
       jsonResponse = parsedResponse as Record<string, unknown>;
     } catch {
-      await this.safeRecord({
+      await this.safeSettle(reservationId, {
         ownerId: actor.id,
         modelId,
         promptTokens: 0,
@@ -538,17 +555,31 @@ export class JoyModelGateway {
 
     const upstreamMicros = BigInt(Math.round(rawCostUsd * 1_000_000));
     const billedMicros = (upstreamMicros * BigInt(10000 + this.commissionRateBps)) / 10000n;
-    const recordId = await this.safeRecord({
-      ownerId: actor.id,
-      modelId,
-      promptTokens,
-      completionTokens,
-      upstreamCostMicros: upstreamMicros,
-      billedCostMicros: billedMicros,
-      commissionRateBps: this.commissionRateBps,
-      estimated: !costReported,
-      ...(generationId ? { generationId } : {}),
-    });
+    let recordId: string | undefined;
+    try {
+      recordId = await this.ledger.settleSpend(reservationId, {
+        ownerId: actor.id,
+        modelId,
+        promptTokens,
+        completionTokens,
+        upstreamCostMicros: upstreamMicros,
+        billedCostMicros: billedMicros,
+        commissionRateBps: this.commissionRateBps,
+        estimated: !costReported,
+        ...(generationId ? { generationId } : {}),
+      });
+    } catch {
+      res.writeHead(503, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          error: {
+            code: 'SPEND_LEDGER_UNAVAILABLE',
+            message: 'Spend accounting failed; the upstream response was not returned.',
+          },
+        }),
+      );
+      return;
+    }
     if (!costReported && generationId && recordId)
       void this.reconcileGenerationUsage(recordId, generationId);
 
@@ -556,14 +587,16 @@ export class JoyModelGateway {
     res.end(JSON.stringify(jsonResponse));
   }
 
-  private async safeRecord(
+  private async safeSettle(
+    reservationId: string,
     input: Parameters<AgentUsageLedger['record']>[0],
   ): Promise<string | undefined> {
     try {
-      return await this.ledger.record(input);
+      if (!this.ledger.settleSpend) throw new Error('SPEND_LEDGER_UNAVAILABLE');
+      return await this.ledger.settleSpend(reservationId, input);
     } catch {
-      console.error('joy-model-gateway: ledger write failed', {
-        code: 'LEDGER_WRITE_FAILED',
+      console.error('joy-model-gateway: spend settlement failed', {
+        code: 'SPEND_LEDGER_UNAVAILABLE',
         ownerId: input.ownerId,
         modelId: input.modelId,
       });
@@ -571,34 +604,48 @@ export class JoyModelGateway {
     }
   }
 
+  private async safeRelease(reservationId: string): Promise<void> {
+    try {
+      await this.ledger.releaseSpend?.(reservationId);
+    } catch {
+      console.error('joy-model-gateway: spend reservation release failed', {
+        code: 'SPEND_LEDGER_UNAVAILABLE',
+      });
+    }
+  }
+
   private async reconcileGenerationUsage(recordId: string, generationId: string): Promise<void> {
     if (!this.ledger.replaceEstimate) return;
-    try {
-      const response = await this.fetchImpl(
-        `https://openrouter.ai/api/v1/generation?id=${encodeURIComponent(generationId)}`,
-        {
-          headers: { authorization: `Bearer ${this.openRouterApiKey}` },
-          signal: AbortSignal.timeout(5_000),
-        },
-      );
-      if (!response.ok) return;
-      const payload = (await response.json()) as { data?: Record<string, unknown> };
-      const data = payload.data ?? {};
-      const promptTokens = Number(data.tokens_prompt ?? data.prompt_tokens);
-      const completionTokens = Number(data.tokens_completion ?? data.completion_tokens);
-      const cost = Number(data.total_cost ?? data.cost);
-      if (![promptTokens, completionTokens, cost].every(Number.isFinite) || cost < 0) return;
-      const upstreamCostMicros = BigInt(Math.round(cost * 1_000_000));
-      const billedCostMicros =
-        (upstreamCostMicros * BigInt(10000 + this.commissionRateBps)) / 10000n;
-      await this.ledger.replaceEstimate(recordId, {
-        promptTokens,
-        completionTokens,
-        upstreamCostMicros,
-        billedCostMicros,
-      });
-    } catch {
-      // Reconciliation is best effort and never delays an already-sent response.
+    for (const delayMs of [0, 2_000, 5_000, 10_000]) {
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      try {
+        const response = await this.fetchImpl(
+          `https://openrouter.ai/api/v1/generation?id=${encodeURIComponent(generationId)}`,
+          {
+            headers: { authorization: `Bearer ${this.openRouterApiKey}` },
+            signal: AbortSignal.timeout(5_000),
+          },
+        );
+        if (!response.ok) continue;
+        const payload = (await response.json()) as { data?: Record<string, unknown> };
+        const data = payload.data ?? {};
+        const promptTokens = Number(data.tokens_prompt ?? data.prompt_tokens);
+        const completionTokens = Number(data.tokens_completion ?? data.completion_tokens);
+        const cost = Number(data.total_cost ?? data.cost);
+        if (![promptTokens, completionTokens, cost].every(Number.isFinite) || cost < 0) continue;
+        const upstreamCostMicros = BigInt(Math.round(cost * 1_000_000));
+        const billedCostMicros =
+          (upstreamCostMicros * BigInt(10000 + this.commissionRateBps)) / 10000n;
+        await this.ledger.replaceEstimate(recordId, {
+          promptTokens,
+          completionTokens,
+          upstreamCostMicros,
+          billedCostMicros,
+        });
+        return;
+      } catch {
+        // Best effort; scheduled retry never delays the already-sent response.
+      }
     }
   }
 }
@@ -654,12 +701,55 @@ function positiveEnvNumber(name: string, fallback: number): number {
 }
 
 function estimatePromptTokens(messages: unknown): number {
-  return Math.ceil(JSON.stringify(messages ?? []).length / ESTIMATED_CHARS_PER_TOKEN);
+  const text = Array.isArray(messages)
+    ? messages
+        .map((message) => {
+          if (message === null || typeof message !== 'object') return '';
+          const content = (message as { content?: unknown }).content;
+          if (typeof content === 'string') return content;
+          if (!Array.isArray(content)) return '';
+          return content
+            .flatMap((part) =>
+              part !== null &&
+              typeof part === 'object' &&
+              typeof (part as { text?: unknown }).text === 'string'
+                ? [(part as { text: string }).text]
+                : [],
+            )
+            .join(' ');
+        })
+        .join(' ')
+    : '';
+  return estimateTextTokens(text);
 }
 
 function estimateCompletionTokens(choices: unknown): number {
-  const text = JSON.stringify(choices ?? []);
-  return Math.ceil(text.length / ESTIMATED_CHARS_PER_TOKEN);
+  const text = Array.isArray(choices)
+    ? choices
+        .flatMap((choice) => {
+          if (choice === null || typeof choice !== 'object') return [];
+          const message = (choice as { message?: unknown }).message;
+          return message !== null &&
+            typeof message === 'object' &&
+            typeof (message as { content?: unknown }).content === 'string'
+            ? [(message as { content: string }).content]
+            : [];
+        })
+        .join(' ')
+    : '';
+  return estimateTextTokens(text);
+}
+
+function estimateTextTokens(text: string): number {
+  let latinCharacters = 0;
+  let nonLatinText = '';
+  for (const character of text) {
+    if ((character.codePointAt(0) ?? 0) < 128) latinCharacters += 1;
+    else nonLatinText += character;
+  }
+  const latinEstimate = latinCharacters / 4;
+  const nonLatinEstimate = Buffer.byteLength(nonLatinText, 'utf8') / 3;
+  return Math.ceil(latinEstimate + nonLatinEstimate);
 }
 
 function estimateCostUsd(modelId: string, promptTokens: number, completionTokens: number): number {
