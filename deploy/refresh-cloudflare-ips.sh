@@ -28,6 +28,9 @@ for path, family in ((v4_path, 4), (v6_path, 6)):
                 raise SystemExit(f"Invalid CIDR at {path}:{line_number}: {error}")
             if network.version != family:
                 raise SystemExit(f"Wrong address family at {path}:{line_number}")
+            # Same bound as apply-nginx-cutover.sh: Cloudflare's broadest ranges are /13 and /29.
+            if network.prefixlen < {4: 12, 6: 24}[family] or not network.is_global:
+                raise SystemExit(f"Refusing over-broad or non-public Cloudflare CIDR at {path}:{line_number}: {network}")
             entries.append(str(network))
 if not entries or not any(":" not in item for item in entries) or not any(":" in item for item in entries):
     raise SystemExit("Both IPv4 and IPv6 Cloudflare CIDR lists must be non-empty")

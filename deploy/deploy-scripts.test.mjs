@@ -478,6 +478,70 @@ describe(
       );
     });
 
+    it('rejects over-broad or non-public Cloudflare CIDRs and restores the original Nginx file', (t) => {
+      if (!hasPython)
+        return t.skip('python3 is unavailable; Nginx patch integration needs real Python');
+      const valid = readFileSync(cloudflareIps, 'utf8');
+      for (const range of [
+        '0.0.0.0/0',
+        '::/0',
+        '104.0.0.0/8',
+        '10.0.0.0/8',
+        '2400::/12',
+        '127.0.0.0/8',
+      ]) {
+        const sandbox = createSandbox(t);
+        writeFileSync(sandbox.ips, `${valid}${range}\n`);
+        const result = runBash(applyScript, [], sandbox.env);
+        assert.notEqual(result.status, 0, `${range} should be rejected`);
+        assert.match(result.stderr, /over-broad or non-public/u, range);
+        assert.equal(readFileSync(sandbox.conf, 'utf8'), fixture, `${range}: config restored`);
+      }
+    });
+
+    it('refreshes Cloudflare CIDRs only when every range is narrow and public', (t) => {
+      if (!hasPython) return t.skip('python3 is unavailable; refresh tool needs real Python');
+      const sandbox = createSandbox(t);
+      const fetchStubs = join(sandbox.root, 'fetch-stubs');
+      mkdirSync(fetchStubs);
+      putExecutable(
+        join(fetchStubs, 'curl'),
+        'out=""; url=""\nwhile [[ $# -gt 0 ]]; do case "$1" in -o) out="$2"; shift 2 ;; --max-time) shift 2 ;; -*) shift ;; *) url="$1"; shift ;; esac; done\ncase "$url" in */ips-v4) printf "%b" "$STUB_CF_V4" > "$out" ;; */ips-v6) printf "%b" "$STUB_CF_V6" > "$out" ;; *) exit 22 ;; esac',
+      );
+      const output = join(sandbox.root, 'refreshed-ips.txt');
+      writeFileSync(output, 'previous list\n');
+      const run = (v4, v6) =>
+        runBash(refreshCloudflareScript, [], {
+          ...sandbox.env,
+          JOY_TEST_STUB_PATH: toShellPath(fetchStubs),
+          JOY_MEDIA_CLOUDFLARE_IPS_FILE: toShellPath(output),
+          STUB_CF_V4: v4,
+          STUB_CF_V6: v6,
+        });
+      for (const [v4, v6] of [
+        ['173.245.48.0/20\\n0.0.0.0/0\\n', '2400:cb00::/32\\n'],
+        ['173.245.48.0/20\\n', '2400:cb00::/32\\n::/0\\n'],
+        ['173.245.48.0/20\\n100.0.0.0/6\\n', '2400:cb00::/32\\n'],
+        ['192.168.0.0/16\\n', '2400:cb00::/32\\n'],
+      ]) {
+        const result = run(v4, v6);
+        assert.notEqual(result.status, 0, `${v4} ${v6} should be rejected`);
+        assert.match(result.stderr, /over-broad or non-public/u);
+        assert.equal(readFileSync(output, 'utf8'), 'previous list\n', 'list left unchanged');
+      }
+      const accepted = run(
+        '173.245.48.0/20\\n104.16.0.0/13\\n',
+        '2400:cb00::/32\\n2a06:98c0::/29\\n',
+      );
+      assert.equal(accepted.status, 0, `${accepted.stdout}\n${accepted.stderr}`);
+      assert.deepEqual(
+        readFileSync(output, 'utf8')
+          .split('\n')
+          .filter((line) => line && !line.startsWith('#')),
+        ['173.245.48.0/20', '104.16.0.0/13', '2400:cb00::/32', '2a06:98c0::/29'],
+      );
+    });
+
     it('does not invoke the Cloudflare refresh tool from deployment scripts', () => {
       const scripts = [applyScript, deployScript, join(repoRoot, 'deploy', 'deploy-cutover.sh')]
         .map((path) => readFileSync(path, 'utf8'))
