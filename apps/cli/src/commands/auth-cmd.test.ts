@@ -4,12 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from '../cli.js';
 import { configureSecretStoreRuntimeForTests } from '../utils/secret-store.js';
+import { configureAuthPromptsForTests } from './auth-cmd.js';
 import { loadJoySession, saveJoySession } from '../utils/config.js';
 
 describe('CLI JOY session commands', () => {
   let home: string;
   let restoreSecretStore: (() => void) | undefined;
   let keyring: Map<string, string>;
+  let restorePrompts: (() => void) | undefined;
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'joy-auth-home-'));
@@ -19,6 +21,7 @@ describe('CLI JOY session commands', () => {
     vi.stubEnv('JOY_MEDIA_API_URL', '');
     vi.stubEnv('JOY_MEDIA_SESSION_TOKEN', '');
     keyring = new Map();
+    restorePrompts = configureAuthPromptsForTests({ interactive: () => false });
     restoreSecretStore = configureSecretStoreRuntimeForTests({
       platform: 'linux',
       runner: (_command, args, stdin) => {
@@ -31,6 +34,7 @@ describe('CLI JOY session commands', () => {
   });
 
   afterEach(() => {
+    restorePrompts?.();
     restoreSecretStore?.();
     restoreSecretStore = undefined;
     vi.unstubAllEnvs();
@@ -79,6 +83,7 @@ describe('CLI JOY session commands', () => {
       code: '123456',
     });
     expect(keyring.get('joy-media-session')).toBe(token);
+    expect(keyring.has('joy-media-session-probe')).toBe(false);
     expect(JSON.stringify(output.mock.calls)).not.toContain(token);
     expect(JSON.stringify(calls.map((call) => call.init?.body))).not.toContain(token);
   });
@@ -101,7 +106,26 @@ describe('CLI JOY session commands', () => {
     expect(keyring.has('joy-media-session')).toBe(false);
   });
 
-  it('uses the API URL environment override and asks for insecure storage consent when no keyring exists', async () => {
+  it('fails before requesting a code when no keyring is usable and plaintext was not opted in', async () => {
+    vi.stubEnv('JOY_MEDIA_API_BASE_URL', 'https://api-env.example.invalid/api');
+    restoreSecretStore?.();
+    restoreSecretStore = configureSecretStoreRuntimeForTests({
+      platform: 'linux',
+      runner: () => ({ status: 1, stdout: '' }),
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await runCli(['login', '--email', 'person@example.invalid', '--code', '123456']);
+
+    expect(result).not.toBe(0);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(JSON.stringify(errors.mock.calls)).toContain('--insecure-file-store');
+    expect(JSON.stringify(errors.mock.calls)).not.toContain('--api-key-env');
+    expect(keyring.has('joy-media-session')).toBe(false);
+  });
+
+  it('uses the API URL environment override and stores plaintext only with --insecure-file-store', async () => {
     vi.stubEnv('JOY_MEDIA_API_BASE_URL', 'https://api-env.example.invalid/api');
     restoreSecretStore?.();
     restoreSecretStore = configureSecretStoreRuntimeForTests({
@@ -111,20 +135,42 @@ describe('CLI JOY session commands', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) =>
       String(input).endsWith('/v1/auth/request-otp')
         ? new Response(JSON.stringify({ data: { message: 'Code requested.' } }), { status: 200 })
-        : new Response(JSON.stringify({ data: { token: 'session-test-no-keyring' } }), {
+        : new Response(JSON.stringify({ data: { token: 'session-test-file-store' } }), {
             status: 200,
           }),
     );
-    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    const result = await runCli(['login', '--email', 'person@example.invalid', '--code', '123456']);
+    const result = await runCli([
+      'login',
+      '--email',
+      'person@example.invalid',
+      '--code',
+      '123456',
+      '--insecure-file-store',
+    ]);
 
-    expect(result).not.toBe(0);
+    expect(result).toBe(0);
     expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toBe(
       'https://api-env.example.invalid/api/v1/auth/request-otp',
     );
-    expect(JSON.stringify(errors.mock.calls)).toContain('--insecure-file-store');
-    expect(keyring.has('joy-media-session')).toBe(false);
+    expect(loadJoySession()?.token).toBe('session-test-file-store');
+  });
+
+  it.each([
+    [['login', '--email', 'person@example.invalid'], 'Pass --code'],
+    [['login', '--code', '123456'], 'Pass --email'],
+    [['login', '--email', 'person@example.invalid', '--code', '12ab'], 'Invalid code'],
+    [['login', '--email', 'not-an-email', '--code', '123456'], 'Invalid email address'],
+  ])('validates %j locally without contacting the server', async (args, message) => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await runCli(args);
+
+    expect(result).toBe(2);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(JSON.stringify(errors.mock.calls)).toContain(message);
   });
 
   it('shows identity and subscription details from the desktop identity endpoints as JSON', async () => {

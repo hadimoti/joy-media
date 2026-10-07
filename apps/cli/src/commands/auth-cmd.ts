@@ -1,7 +1,12 @@
 /* global console, process */
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
-import { clearJoySession, loadJoySession, saveJoySession } from '../utils/config.js';
+import {
+  assertJoySessionStorable,
+  clearJoySession,
+  loadJoySession,
+  saveJoySession,
+} from '../utils/config.js';
 import { logError, logSuccess } from '../utils/logger.js';
 
 export interface AuthCommandOptions {
@@ -19,6 +24,41 @@ interface AuthRequestError extends Error {
 
 const DEFAULT_JOY_API_BASE = 'https://joyst.ir/api';
 
+/** A problem with the user's own flags or setup, found before any request (exit 2). */
+class AuthInputError extends Error {
+  readonly exitCode: number;
+  constructor(message: string, exitCode = 2) {
+    super(message);
+    this.name = 'AuthInputError';
+    this.exitCode = exitCode;
+  }
+}
+
+const NO_LOGIN_KEYRING =
+  'No usable system keyring is available to store the login. Re-run with --insecure-file-store to keep the session token in a private (0600) file instead.';
+
+/** Terminal interaction, replaceable in tests so a developer TTY never blocks a run. */
+export interface AuthPrompts {
+  readonly interactive: () => boolean;
+  readonly email: () => Promise<string>;
+  readonly code: () => Promise<string>;
+}
+
+const defaultPrompts: AuthPrompts = {
+  interactive: () => Boolean(stdin.isTTY) && typeof stdin.setRawMode === 'function',
+  email: () => promptEmail(),
+  code: () => promptHiddenCode(),
+};
+let prompts: AuthPrompts = defaultPrompts;
+
+export function configureAuthPromptsForTests(next: Partial<AuthPrompts>): () => void {
+  const previous = prompts;
+  prompts = { ...defaultPrompts, ...next };
+  return () => {
+    prompts = previous;
+  };
+}
+
 export async function handleAuthCommand(
   args: readonly string[],
   options: AuthCommandOptions = {},
@@ -33,6 +73,10 @@ export async function handleAuthCommand(
   } catch (error) {
     const message = error instanceof Error ? error.message : '';
     const code = errorCodeOf(error);
+    if (error instanceof AuthInputError) {
+      logError(message);
+      return error.exitCode;
+    }
     if (
       message.startsWith('No usable system keyring is available.') ||
       message.startsWith('saved login is for ')
@@ -51,17 +95,35 @@ export async function handleAuthCommand(
   }
 }
 
+const LOGIN_CODE = /^\d{4,8}$/;
+const EMAIL_ADDRESS = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 async function login(options: AuthCommandOptions): Promise<number> {
-  const email = (options.email ?? (await promptEmail())).trim();
-  if (!email) throw new Error('Email is required');
-  const apiBase = resolveApiBase(options.apiBase);
+  // Validate everything that can fail locally before a code is requested: a request
+  // sends a real email and uses up one of the account's few active codes.
+  const apiBase = resolveLoginApiBase(options.apiBase);
+  const interactive = prompts.interactive();
+  if (options.email === undefined && !interactive)
+    throw new AuthInputError('Pass --email when stdin is not an interactive TTY.');
+  if (options.code !== undefined && !LOGIN_CODE.test(options.code))
+    throw new AuthInputError('Invalid code: login codes are 4 to 8 digits.');
+  if (options.code === undefined && !interactive)
+    throw new AuthInputError('Pass --code when stdin is not an interactive TTY.');
+  try {
+    assertJoySessionStorable(Boolean(options.insecureFileStore));
+  } catch {
+    throw new AuthInputError(NO_LOGIN_KEYRING, 1);
+  }
+  const email = (options.email ?? (await prompts.email())).trim();
+  if (!EMAIL_ADDRESS.test(email)) throw new AuthInputError('Invalid email address.');
   await requestJson(`${apiBase}/v1/auth/request-otp`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ contact: email, method: 'gmail' }),
   });
-  const code = options.code ?? (await promptHiddenCode());
-  if (!/^\d{4,8}$/.test(code)) throw new Error('Invalid code');
+  const code = options.code ?? (await prompts.code());
+  if (!LOGIN_CODE.test(code))
+    throw new AuthInputError('Invalid code: login codes are 4 to 8 digits.');
   let verification: unknown;
   try {
     verification = await requestJson(`${apiBase}/v1/auth/verify-otp`, {
@@ -212,6 +274,14 @@ function resolveApiBase(flag?: string): string {
   )
     throw new Error('API base URL must use HTTPS or localhost HTTP');
   return url.toString().replace(/\/+$/, '');
+}
+
+function resolveLoginApiBase(flag?: string): string {
+  try {
+    return resolveApiBase(flag);
+  } catch (error) {
+    throw new AuthInputError(error instanceof Error ? error.message : 'Invalid API base URL');
+  }
 }
 
 function statusOf(error: unknown): number | undefined {

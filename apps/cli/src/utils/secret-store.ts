@@ -1,5 +1,6 @@
 /* global process */
 import { spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -170,6 +171,27 @@ export function protectSecret(
     return { scheme: 'libsecret', data: account, account };
   }
   throw keyringUnavailableError();
+}
+
+/**
+ * Checks, without touching any stored secret, that a secret could be saved now.
+ * Writes, reads back and deletes a random value under a separate probe account.
+ */
+export function assertSecretStoreWritable(
+  account: string,
+  options: { insecureFileStore?: boolean } = {},
+): void {
+  if (options.insecureFileStore || secretStoreRuntime.platform === 'win32') return;
+  const probeAccount = `${account}-probe`;
+  const probe = `probe-${randomBytes(8).toString('hex')}`;
+  let stored: ProtectedSecret | undefined;
+  try {
+    stored = protectSecret(probe, probeAccount);
+  } catch {
+    throw keyringUnavailableError();
+  } finally {
+    if (stored) deleteProtectedSecret(stored);
+  }
 }
 
 export function unprotectSecret(secret: ProtectedSecret): string {

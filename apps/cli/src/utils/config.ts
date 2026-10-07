@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
+  assertSecretStoreWritable,
   chmodPrivate,
   deleteProtectedSecret,
   migrateLegacySecret,
@@ -106,6 +107,11 @@ export function saveJoySession(session: JoySessionConfig, insecureFileStore = fa
     ...(session.apiOrigin === undefined ? {} : { apiOrigin: new URL(session.apiOrigin).origin }),
   };
   saveCliConfig(config);
+}
+
+/** Throws before any login request when the session token could not be stored afterwards. */
+export function assertJoySessionStorable(insecureFileStore = false): void {
+  assertSecretStoreWritable(JOY_SESSION_ACCOUNT, { insecureFileStore });
 }
 
 export function loadJoySession(): JoySessionConfig | undefined {
