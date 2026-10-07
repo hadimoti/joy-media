@@ -630,6 +630,19 @@ describe('CLI Joy Agent bridge timeline operations', () => {
   it('reports whether the plan will wait for approval or auto-apply', async () => {
     const staged = new CliJoyAgentToolBridge(projectWithTracks(), 1);
     const automatic = new CliJoyAgentToolBridge(projectWithTracks(), 1, undefined, true);
+    for (const bridge of [staged, automatic])
+      await bridge.proposeTimelineOperations({
+        operations: [
+          {
+            kind: 'move',
+            id: 'move-op',
+            clipId: 'moving',
+            trackId: 'video-1',
+            startUs: 4_000_000,
+            dependsOn: [],
+          },
+        ],
+      });
     await expect(staged.submitPlan()).resolves.toMatchObject({
       awaitingApproval: true,
       willApplyOnFinish: false,
@@ -638,6 +651,60 @@ describe('CLI Joy Agent bridge timeline operations', () => {
       awaitingApproval: false,
       willApplyOnFinish: true,
     });
+  });
+
+  it('refuses to stage a plan when every proposal was rejected', async () => {
+    for (const autoApply of [false, true]) {
+      const bridge = new CliJoyAgentToolBridge(projectWithTracks(), 1, undefined, autoApply);
+      await bridge.proposeTimelineOperations({
+        operations: [
+          {
+            kind: 'trim',
+            id: 'bad-trim',
+            clipId: 'track-v1-clip',
+            sourceInUs: 0,
+            sourceOutUs: 500_000,
+            dependsOn: [],
+          },
+        ],
+      });
+
+      const result = await bridge.submitPlan({
+        checklist: [{ kind: 'trim', clipId: 'track-v1-clip', sourceInUs: 0, sourceOutUs: 500_000 }],
+      });
+
+      expect(result).toMatchObject({ staged: false, willApplyOnFinish: false });
+      const errors = (result as { validationErrors: string[] }).validationErrors;
+      expect(errors[0]).toMatch(/No operations are staged/);
+      expect(errors).toContain('Clip track-v1-clip not found.');
+      expect(errors).toContain('Checklist references unknown clip track-v1-clip.');
+      expect(bridge.hasSubmittedPlan()).toBe(false);
+    }
+  });
+
+  it('flags checklist items that reference clips missing from the planned timeline', async () => {
+    const bridge = new CliJoyAgentToolBridge(projectWithTracks(), 1, undefined, true);
+    await bridge.proposeTimelineOperations({
+      operations: [
+        {
+          kind: 'trim',
+          id: 'good-trim',
+          clipId: 'early',
+          sourceInUs: 0,
+          sourceOutUs: 500_000,
+          dependsOn: [],
+        },
+      ],
+    });
+
+    const result = await bridge.submitPlan({
+      checklist: [{ kind: 'look', clipId: 'ghost-clip', look: 'crt' }],
+    });
+
+    expect(result).toMatchObject({ staged: true });
+    expect((result as { validationErrors: string[] }).validationErrors).toContain(
+      'Checklist references unknown clip ghost-clip.',
+    );
   });
 
   it('returns the resulting placement to the agent when auto-apply is submitted', async () => {

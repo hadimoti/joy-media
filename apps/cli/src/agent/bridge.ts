@@ -446,19 +446,39 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
   async submitPlan(
     input: { readonly checklist: readonly JoyPlanChecklistItem[] } = { checklist: [] },
   ): Promise<unknown> {
+    const preview = new CliJoyAgentToolBridge(structuredClone(this.project), this.revision);
+    preview.stagedTimeline = [...this.stagedTimeline];
+    preview.stagedDocument = [...this.stagedDocument];
+    const result = preview.applyStaged();
+    const checklistErrors = unknownChecklistClips(result.updatedProject, input.checklist).map(
+      (clipId) => `Checklist references unknown clip ${clipId}.`,
+    );
+    if (this.stagedTimeline.length === 0 && this.stagedDocument.length === 0) {
+      // Nothing to approve: never report a staged plan the host would refuse anyway.
+      return {
+        staged: false,
+        awaitingApproval: false,
+        willApplyOnFinish: false,
+        applied: false,
+        validationErrors: [
+          'No operations are staged: every proposal was rejected or none was made. Fix the rejected proposals before calling submit_plan.',
+          ...this.getReportedIssues(),
+          ...checklistErrors,
+        ],
+        timelineOperations: 0,
+        documentOperations: 0,
+        revision: this.revision,
+      };
+    }
     this.submittedPlan = true;
     this.finalChecklist = [...input.checklist];
     if (this.autoApply) {
-      const preview = new CliJoyAgentToolBridge(structuredClone(this.project), this.revision);
-      preview.stagedTimeline = [...this.stagedTimeline];
-      preview.stagedDocument = [...this.stagedDocument];
-      const result = preview.applyStaged();
       return {
         awaitingApproval: false,
         willApplyOnFinish: true,
         staged: true,
         applied: false,
-        validationErrors: result.errors,
+        validationErrors: [...result.errors, ...checklistErrors],
         placementSummary: result.placementSummary,
         checklist: this.finalChecklist,
         timelineOperations: this.stagedTimeline.length,
@@ -469,6 +489,8 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
     return {
       awaitingApproval: !this.autoApply,
       willApplyOnFinish: this.autoApply,
+      staged: true,
+      validationErrors: [...result.errors, ...checklistErrors],
       timelineOperations: this.stagedTimeline.length,
       documentOperations: this.stagedDocument.length,
       revision: this.revision,
@@ -923,4 +945,16 @@ function oneFrameUs(frameRateNumerator: number, frameRateDenominator: number): n
   if (frameRateNumerator <= 0 || frameRateDenominator <= 0)
     throw new RangeError('Project frame rate must be positive.');
   return Math.ceil((1_000_000 * frameRateDenominator) / frameRateNumerator);
+}
+
+function unknownChecklistClips(
+  project: JoyProjectV1,
+  checklist: readonly JoyPlanChecklistItem[],
+): string[] {
+  const root = project.compositions[project.rootCompositionId];
+  const known = new Set(root?.tracks.flatMap((track) => track.clips.map((clip) => clip.id)) ?? []);
+  const missing = new Set<string>();
+  for (const item of checklist)
+    if ('clipId' in item && !known.has(item.clipId)) missing.add(item.clipId);
+  return [...missing];
 }
