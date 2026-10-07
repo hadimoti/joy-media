@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -11,7 +11,10 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { request as httpRequest, createServer } from 'node:http';
+import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
+import { setTimeout as delay } from 'node:timers/promises';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { describe, it } from 'node:test';
@@ -112,6 +115,39 @@ function findJoystTlsBlock(source) {
   return start >= 0 && end >= 2 ? source.slice(start, end) : undefined;
 }
 
+function findNginx() {
+  const candidates = [process.env.JOY_TEST_NGINX, '/usr/sbin/nginx', '/usr/local/sbin/nginx'];
+  const onPath = spawnSync('sh', ['-c', 'command -v nginx'], { encoding: 'utf8' });
+  if (onPath.status === 0) candidates.push(onPath.stdout.trim());
+  return candidates.find((candidate) => candidate && existsSync(candidate));
+}
+
+function freePort() {
+  return new Promise((done, fail) => {
+    const probe = createServer();
+    probe.on('error', fail);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => done(port));
+    });
+  });
+}
+
+async function waitForPort(port, attempts = 100) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const open = await new Promise((done) => {
+      const socket = connect({ host: '127.0.0.1', port }, () => {
+        socket.destroy();
+        done(true);
+      });
+      socket.on('error', () => done(false));
+    });
+    if (open) return;
+    await delay(50);
+  }
+  throw new Error(`nginx did not listen on ${port}`);
+}
+
 function putExecutable(path, source) {
   writeFileSync(path, `#!/usr/bin/env bash\nset -u\n${source}\n`);
   chmodSync(path, 0o755);
@@ -187,6 +223,13 @@ if [[ -f "$JOY_STUB_CURL_COUNT" ]]; then count="$(<"$JOY_STUB_CURL_COUNT")"; fi
 count=$((count + 1))
 printf '%s' "$count" > "$JOY_STUB_CURL_COUNT"
 if [[ "\${STUB_CURL_FAIL_AT:-}" == "$count" ]]; then exit "\${STUB_CURL_EXIT:-22}"; fi
+for arg in "$@"; do
+  if [[ "$arg" == --interface ]]; then
+    # A non-Cloudflare source: nginx answers 444 (curl: empty reply, exit 52).
+    if [[ -n "\${STUB_CURL_INTERFACE_HTTP:-}" ]]; then echo "$STUB_CURL_INTERFACE_HTTP"; exit 0; fi
+    exit 52
+  fi
+done
 url="\${@: -1}"
 if [[ -n "\${STUB_CURL_HTTP_CODE:-}" ]]; then echo "$STUB_CURL_HTTP_CODE"; else
   case "$url" in
@@ -297,7 +340,12 @@ function assertCurlSafety(lines, caPath, edgeAddr) {
     const resolveIndex = argv.indexOf('--resolve');
     assert.notEqual(resolveIndex, -1, `--resolve missing in ${line}`);
     const resolved = argv[resolveIndex + 1];
-    assert.equal(resolved, `joyst.ir:443:${edgeAddr.includes(':') ? `[${edgeAddr}]` : edgeAddr}`);
+    // Only the Cloudflare-only refusal probe (loopback source) uses plain HTTP on :80.
+    const port = argv.includes('--interface') ? 80 : 443;
+    assert.equal(
+      resolved,
+      `joyst.ir:${port}:${edgeAddr.includes(':') ? `[${edgeAddr}]` : edgeAddr}`,
+    );
     const caIndex = argv.indexOf('--cacert');
     assert.notEqual(caIndex, -1, `--cacert missing in ${line}`);
     assert.equal(argv[caIndex + 1], caPath);
@@ -452,6 +500,33 @@ describe(
         'the public server rejects the loopback-only diagnostic path',
       );
       assert.equal(selectNginxLocation(locations, '/api/v1/projects').body.trim(), 'return 404;');
+      // Cloudflare-only origin (OL-1): an http-level geo on the TCP peer and a 444 in joyst.ir.
+      const geo = updated.match(
+        /# BEGIN joy-media cloudflare-only geo \(managed\)\n[\s\S]*?# END joy-media cloudflare-only geo \(managed\)\n/u,
+      )?.[0];
+      assert.ok(geo, 'managed geo block present');
+      assert.ok(updated.indexOf(geo) < updated.indexOf(joyst), 'geo precedes the joyst.ir server');
+      assert.ok(!joyst.includes('geo $'), 'geo is not inside a server block');
+      assert.match(geo, /^geo \$realip_remote_addr \$joy_media_from_cloudflare \{$/mu);
+      assert.match(geo, /^ {4}default 0;$/mu);
+      for (const range of ranges) assert.ok(geo.includes(`\n    ${range} 1;\n`), range);
+      for (const self of ['127.0.0.1', '::1', '82.115.8.224', '2001:db8::25'])
+        assert.ok(geo.includes(`\n    ${self} 1;\n`), `self probe source ${self}`);
+      assert.doesNotMatch(geo, /\$remote_addr\b/u, 'never keyed on the rewritten $remote_addr');
+      assert.match(
+        joyst,
+        /# END joy-media realip \(managed\)\n\s*# BEGIN joy-media cloudflare-only \(managed\)\n[^\n]*\n\s*if \(\$joy_media_from_cloudflare = 0\) \{\n\s*return 444;\n\s*\}\n\s*# END joy-media cloudflare-only \(managed\)\n/u,
+      );
+      assert.ok(
+        joyst.indexOf('return 444;') < joyst.search(/^\s*location\s/mu),
+        'the lock runs before any location',
+      );
+      const plainHttp = updated.match(
+        /server \{\n\s{4}listen 80;\n\s{4}server_name joyst\.ir;[\s\S]*?\n\}/u,
+      )?.[0];
+      assert.ok(plainHttp, 'the separate joyst.ir :80 block is still there');
+      assert.match(plainHttp, /if \(\$joy_media_from_cloudflare = 0\) \{\s*return 444;\s*\}/u);
+      assert.ok(plainHttp.includes('return 301 https://joyst.ir$request_uri;'));
       const once = updated;
       const second = runBash(applyScript, [], {
         ...sandbox.env,
@@ -461,6 +536,25 @@ describe(
       assert.equal(readFileSync(sandbox.conf, 'utf8'), once, 'patch is idempotent');
       const lines = commandLog(sandbox);
       assertCurlSafety(lines, sandbox.env.JOY_MEDIA_CA_FILE, '2001:db8::25');
+    });
+
+    it('proves non-Cloudflare sources are refused after reload, or restores the config', (t) => {
+      if (!hasPython)
+        return t.skip('python3 is unavailable; Nginx patch integration needs real Python');
+      const refused = createSandbox(t);
+      const ok = runBash(applyScript, [], refused.env);
+      assert.equal(ok.status, 0, `${ok.stdout}\n${ok.stderr}`);
+      assert.match(ok.stdout, /CF_ONLY_OK/u);
+      const probe = commandLog(refused).find((line) => line.includes('\t--interface\t'));
+      assert.ok(probe, 'a loopback-source probe was sent');
+      assert.ok(probe.includes('\t--interface\t127.0.0.2\t'));
+      assert.ok(probe.includes('\tjoyst.ir:80:82.115.8.224\t'));
+
+      const open = createSandbox(t);
+      const leaked = runBash(applyScript, [], { ...open.env, STUB_CURL_INTERFACE_HTTP: '200' });
+      assert.notEqual(leaked.status, 0, 'a non-Cloudflare 200 must fail the apply');
+      assert.match(leaked.stderr, /Cloudflare-only lock is not effective/u);
+      assert.equal(readFileSync(open.conf, 'utf8'), fixture, 'original config restored');
     });
 
     it('rejects invalid Cloudflare CIDRs and restores the original Nginx file', (t) => {
@@ -669,7 +763,9 @@ describe(
       const result = runBash(
         deployScript,
         [],
-        { ...sandbox.env, STUB_CURL_FAIL_AT: '6' },
+        // Curls 1-6 are step 5 (five edge probes plus the Cloudflare-only refusal probe);
+        // 7 is the first step-6 check.
+        { ...sandbox.env, STUB_CURL_FAIL_AT: '7' },
         sandbox.repo,
       );
       assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
@@ -811,6 +907,15 @@ describe(
           .filter((line) => line && !line.startsWith('#'));
         for (const range of ranges) assert.ok(joyst.includes(`set_real_ip_from ${range};`));
         assert.match(joyst, /real_ip_header CF-Connecting-IP;/u);
+        assert.match(joyst, /if \(\$joy_media_from_cloudflare = 0\) \{\s*return 444;\s*\}/u);
+        const geo = source.match(
+          /^geo \$realip_remote_addr \$joy_media_from_cloudflare \{\n([\s\S]*?)\n\}/mu,
+        );
+        assert.ok(geo, `${name} defines the Cloudflare-only geo`);
+        assert.ok(source.indexOf(geo[0]) < source.indexOf(joyst), `${name}: geo precedes joyst.ir`);
+        assert.match(geo[1], /^ {4}default 0;$/mu);
+        for (const range of ranges)
+          assert.ok(geo[1].includes(`    ${range} 1;`), `${name}: ${range}`);
         assert.match(joyst, /location \/internal\/ \{\s*return 404;\s*\}/u);
         const proxied = parseLocations(joyst).filter((item) =>
           /proxy_pass http:\/\/127\.0\.0\.1:8790/u.test(item.body),
@@ -854,6 +959,124 @@ describe(
         /--max-time/u,
       );
       assertCurlSafety(lines, sandbox.env.JOY_MEDIA_CA_FILE, sandbox.env.JOY_MEDIA_EDGE_ADDR);
+    });
+
+    it('closes non-Cloudflare connections in a real nginx, even with a forged CF-Connecting-IP', async (t) => {
+      const nginx = findNginx();
+      if (process.platform !== 'linux' || !nginx || !hasPython)
+        return t.skip(
+          'needs Linux, an nginx binary (JOY_TEST_NGINX, PATH or /usr/sbin/nginx) and python3',
+        );
+      const sandbox = createSandbox(t);
+      const applied = runBash(applyScript, [], sandbox.env);
+      assert.equal(applied.status, 0, `${applied.stdout}\n${applied.stderr}`);
+      const patched = readFileSync(sandbox.conf, 'utf8');
+
+      const backend = createServer((request, response) => {
+        response.setHeader('content-type', 'application/json');
+        response.end(
+          JSON.stringify({
+            path: request.url,
+            forwardedFor: request.headers['x-forwarded-for'] ?? null,
+            realIp: request.headers['x-real-ip'] ?? null,
+          }),
+        );
+      });
+      await new Promise((done) => backend.listen(0, '127.0.0.1', done));
+      t.after(() => backend.close());
+      const backendPort = backend.address().port;
+      const port = await freePort();
+
+      // Run the generated geo and joyst.ir block verbatim, apart from the listen
+      // address, TLS files and upstream port. 127.0.0.2 stands in for a Cloudflare
+      // edge (added to both the trusted real-IP list and the geo); 127.0.0.3 is an
+      // ordinary client. 127.0.0.1 is this host, which the geo allows for probes.
+      const geo = patched
+        .match(
+          /# BEGIN joy-media cloudflare-only geo \(managed\)\n[\s\S]*?# END joy-media cloudflare-only geo \(managed\)\n/u,
+        )[0]
+        .replace('    default 0;\n', '    default 0;\n    127.0.0.2/32 1;\n');
+      const server = findJoystTlsBlock(patched)
+        .replace(/^\s*listen\s+[^;]+;\n/gmu, '')
+        .replace(/^\s*ssl_certificate(?:_key)?\s+[^;]+;\n/gmu, '')
+        .replace('server {\n', `server {\n    listen 127.0.0.1:${port};\n`)
+        .replace(
+          '# BEGIN joy-media realip (managed)\n',
+          '# BEGIN joy-media realip (managed)\n    set_real_ip_from 127.0.0.2/32;\n',
+        )
+        .replaceAll('127.0.0.1:8790', `127.0.0.1:${backendPort}`);
+      const prefix = join(sandbox.root, 'nginx');
+      mkdirSync(join(prefix, 'logs'), { recursive: true });
+      mkdirSync(join(prefix, 'html'), { recursive: true });
+      writeFileSync(join(prefix, 'html', 'index.html'), 'spa');
+      const temp = (name) => join(prefix, name);
+      writeFileSync(
+        join(prefix, 'nginx.conf'),
+        `daemon off;\nmaster_process off;\npid ${temp('nginx.pid')};\nerror_log ${temp('logs/error.log')};\nevents {}\nhttp {\n  access_log off;\n  client_body_temp_path ${temp('body')};\n  proxy_temp_path ${temp('proxy')};\n  fastcgi_temp_path ${temp('fastcgi')};\n  uwsgi_temp_path ${temp('uwsgi')};\n  scgi_temp_path ${temp('scgi')};\n${geo}${server}\n}\n`,
+      );
+      const syntax = spawnSync(
+        nginx,
+        ['-t', '-p', prefix, '-e', temp('logs/error.log'), '-c', join(prefix, 'nginx.conf')],
+        { encoding: 'utf8' },
+      );
+      assert.equal(syntax.status, 0, syntax.stderr);
+      const child = spawn(
+        nginx,
+        ['-p', prefix, '-e', temp('logs/error.log'), '-c', join(prefix, 'nginx.conf')],
+        { stdio: 'ignore' },
+      );
+      t.after(() => child.kill('SIGKILL'));
+      await waitForPort(port);
+
+      const get = (localAddress, headers = {}) =>
+        new Promise((done) => {
+          const call = httpRequest(
+            {
+              host: '127.0.0.1',
+              port,
+              path: '/api/health',
+              localAddress,
+              headers: { host: 'joyst.ir', ...headers },
+            },
+            (response) => {
+              let body = '';
+              response.setEncoding('utf8');
+              response.on('data', (chunk) => (body += chunk));
+              response.on('end', () => done({ status: response.statusCode, body }));
+            },
+          );
+          call.setTimeout(5_000, () => call.destroy(new Error('timeout')));
+          call.on('error', (error) => done({ error: error.code ?? error.message }));
+          call.end();
+        });
+
+      const viaCloudflare = await get('127.0.0.2', { 'CF-Connecting-IP': '203.0.113.7' });
+      assert.equal(viaCloudflare.status, 200, JSON.stringify(viaCloudflare));
+      // real_ip rewrote $remote_addr to the visitor, yet the geo still passed: it is keyed on the TCP peer.
+      assert.deepEqual(JSON.parse(viaCloudflare.body), {
+        path: '/health',
+        forwardedFor: '203.0.113.7',
+        realIp: '203.0.113.7',
+      });
+      const selfProbe = await get('127.0.0.1');
+      assert.equal(selfProbe.status, 200, JSON.stringify(selfProbe));
+      for (const headers of [
+        {},
+        { 'CF-Connecting-IP': '173.245.48.5' },
+        { 'CF-Connecting-IP': '127.0.0.2', 'X-Forwarded-For': '173.245.48.5' },
+      ]) {
+        const direct = await get('127.0.0.3', headers);
+        assert.equal(
+          direct.status,
+          undefined,
+          `non-Cloudflare source answered: ${JSON.stringify({ headers, direct })}`,
+        );
+        assert.equal(
+          direct.error,
+          'ECONNRESET',
+          `expected a closed connection (444) for ${JSON.stringify(headers)}`,
+        );
+      }
     });
   },
 );

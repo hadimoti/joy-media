@@ -45,11 +45,12 @@ restore() {
   nginx -t && systemctl reload nginx || true
 }
 
-if ! python3 - "$CONF_FILE" "$IPS_FILE" <<'PYEOF'
+if ! python3 - "$CONF_FILE" "$IPS_FILE" "$EDGE_ADDR" <<'PYEOF'
 import re, sys
 import ipaddress
 path = sys.argv[1]
 ips_path = sys.argv[2]
+edge_addr = ipaddress.ip_address(sys.argv[3])
 with open(path, encoding="utf-8", newline="") as source:
     text = source.read()
 with open(ips_path, encoding="utf-8-sig") as source:
@@ -93,7 +94,7 @@ def matching_brace(source, opening):
 
 def server_blocks(source):
     found = []
-    for match in re.finditer(r"(?m)^\s*server\s*\{", source):
+    for match in re.finditer(r"(?m)^[ \t]*server\s*\{", source):
         opening = source.find("{", match.start())
         end = matching_brace(source, opening)
         if end < 0: raise ValueError("Unclosed Nginx server block")
@@ -161,9 +162,79 @@ def attached_comment_start(source, index):
         pos = line_start
     return start
 
+def strip_marked(source, begin, end):
+    # Drops a managed block and the blank line inserted after it.
+    pattern = re.compile(r"(?m)^[ \t]*" + re.escape(begin) + r"\n[\s\S]*?^[ \t]*" + re.escape(end) + r"(?:\n[ \t]*(?=\n))?\n?")
+    return pattern.sub("", source)
+
 def strip_managed_realip(server):
-    pattern = re.compile(r"(?m)^[ \t]*" + re.escape(BEGIN_REALIP) + r"\n[\s\S]*?^[ \t]*" + re.escape(END_REALIP) + r"(?:\n[ \t]*(?=\n))?\n?")
-    return pattern.sub("", server)
+    return strip_marked(server, BEGIN_REALIP, END_REALIP)
+
+# Cloudflare-only origin (OL-1). real_ip rewrites $remote_addr from CF-Connecting-IP,
+# so the allow list is keyed on $realip_remote_addr: the TCP peer, which a client
+# cannot forge. Everything that is not a Cloudflare edge or this host is closed (444).
+BEGIN_GEO = "# BEGIN joy-media cloudflare-only geo (managed)"
+END_GEO = "# END joy-media cloudflare-only geo (managed)"
+BEGIN_CF_ONLY = "# BEGIN joy-media cloudflare-only (managed)"
+END_CF_ONLY = "# END joy-media cloudflare-only (managed)"
+CF_ONLY = (
+    "    " + BEGIN_CF_ONLY + "\n"
+    "    # Close connections that did not arrive from a Cloudflare edge or this host.\n"
+    "    if ($joy_media_from_cloudflare = 0) {\n"
+    "        return 444;\n"
+    "    }\n"
+    "    " + END_CF_ONLY + "\n"
+)
+
+def strip_cf_only(server):
+    return strip_marked(server, BEGIN_CF_ONLY, END_CF_ONLY)
+
+def listen_addresses(server):
+    found = []
+    for item in re.findall(r"(?m)^\s*listen\s+([^;]+);", server):
+        token = item.split()[0]
+        match = re.match(r"^\[([^\]]+)\](?::\d+)?$", token) or re.match(r"^(\d+\.\d+\.\d+\.\d+)(?::\d+)?$", token)
+        if not match: continue
+        address = ipaddress.ip_address(match.group(1))
+        if not address.is_unspecified: found.append(address)
+    return found
+
+def geo_block(server):
+    networks = [ipaddress.ip_network(item) for item in ranges]
+    # Deploy probes run on the origin and connect to the edge address (normally the
+    # joyst.ir listen address), so that address is also their source.
+    own = [ipaddress.ip_address("127.0.0.1"), ipaddress.ip_address("::1"), *listen_addresses(server), edge_addr]
+    own = [address for address in dict.fromkeys(own) if not any(address in network for network in networks)]
+    lines = [BEGIN_GEO,
+             "# 1 for Cloudflare edges (deploy/cloudflare-ips.txt) and this host's own probes.",
+             "# Keyed on the TCP peer, never on the client address rewritten from CF-Connecting-IP.",
+             "geo $realip_remote_addr $joy_media_from_cloudflare {",
+             "    default 0;"]
+    lines += [f"    {network} 1;" for network in ranges]
+    lines += ["    # origin self-probes: loopback, joyst.ir listen address, deploy edge address"]
+    lines += [f"    {address} 1;" for address in own]
+    lines += ["}", END_GEO]
+    return "\n".join(lines) + "\n\n"
+
+def is_joyst_block(block):
+    names = re.findall(r"(?m)^\s*server_name\s+([^;]+);", block)
+    return any(name in ("joyst.ir", "www.joyst.ir") for entry in names for name in entry.split())
+
+def add_cf_only_after_names(server):
+    # For a joyst.ir block without the realip section (e.g. a plain :80 redirect).
+    server = strip_cf_only(server)
+    names = list(re.finditer(r"(?m)^[ \t]*server_name\s+[^;\n]*;[^\n]*\n", server))
+    if not names: raise ValueError("joyst.ir block without server_name")
+    insertion = names[-1].end()
+    return server[:insertion] + CF_ONLY + server[insertion:]
+
+def outside_servers(source):
+    # Everything outside server blocks, without the managed geo.
+    result, position = [], 0
+    for start, end, _ in server_blocks(source):
+        result.append(source[position:start]); position = end
+    result.append(source[position:])
+    return strip_marked("\x00".join(result), BEGIN_GEO, END_GEO)
 
 def strip_internal_deny(server):
     for start, end, header, block in reversed(list(location_blocks(server))):
@@ -213,6 +284,7 @@ def canonicalize_proxy_headers(server):
 def normalized_target(server):
     result = strip_agent_locations(server)
     result = strip_managed_realip(result)
+    result = strip_cf_only(result)
     result = strip_internal_deny(result)
     result = canonicalize_proxy_headers(result)
     result = re.sub(r"(?m)^[ \t]+$", "", result)
@@ -232,13 +304,14 @@ try:
     if target_index is None: raise ValueError("Could not find joyst.ir TLS server block")
 
     block_start, block_end, target = before[target_index]
-    changed_target = strip_managed_realip(strip_agent_locations(target))
+    changed_target = strip_cf_only(strip_managed_realip(strip_agent_locations(target)))
     changed_target = strip_internal_deny(changed_target)
 
     managed = "    # BEGIN joy-media realip (managed)\n"
     managed += "    # CF-Connecting-IP is authoritative because only Cloudflare CIDRs are trusted.\n"
     managed += "".join(f"    set_real_ip_from {network};\n" for network in ranges)
-    managed += "    real_ip_header CF-Connecting-IP;\n    # END joy-media realip (managed)\n\n"
+    managed += "    real_ip_header CF-Connecting-IP;\n    # END joy-media realip (managed)\n"
+    managed += CF_ONLY + "\n"
     first_location = re.search(r"(?m)^[ \t]*location\s+", changed_target)
     insertion = attached_comment_start(changed_target, first_location.start()) if first_location else changed_target.rfind("}")
     if insertion < 0: raise ValueError("Unclosed joyst.ir server block")
@@ -267,12 +340,31 @@ try:
         changed_target = changed_target[:server_close] + deny_internal + changed_target[server_close:]
     changed_target = canonicalize_proxy_headers(changed_target)
 
-    patched = text[:block_start] + changed_target + text[block_end:]
+    joyst_indexes = [index for index, (_, _, block) in enumerate(before) if is_joyst_block(block)]
+    patched = text
+    for index in reversed(range(len(before))):
+        start, end, block = before[index]
+        if index == target_index:
+            patched = patched[:start] + changed_target + patched[end:]
+        elif index in joyst_indexes:
+            patched = patched[:start] + add_cf_only_after_names(block) + patched[end:]
+    patched = strip_marked(patched, BEGIN_GEO, END_GEO)
+    first_joyst = server_blocks(patched)[joyst_indexes[0]][0]
+    insertion = attached_comment_start(patched, first_joyst)
+    patched = patched[:insertion] + geo_block(target) + patched[insertion:]
+
     after = server_blocks(patched)
     if len(before) != len(after): raise ValueError("Server block count changed")
     for index, ((_, _, old), (_, _, new)) in enumerate(zip(before, after)):
-        if index != target_index and old != new:
+        if index in joyst_indexes and index != target_index:
+            if strip_cf_only(old) != strip_cf_only(new):
+                raise ValueError("A joyst.ir server block changed beyond the managed Cloudflare-only lock")
+        elif index != target_index and old != new:
             raise ValueError("A non-joyst.ir server block changed")
+    if outside_servers(text) != outside_servers(patched):
+        raise ValueError("Text outside server blocks changed beyond the managed geo")
+    if patched.count(BEGIN_GEO) != 1 or after[target_index][2].count("return 444;") != 1:
+        raise ValueError("Cloudflare-only lock was not applied exactly once")
     protected = re.compile(r"(?m)^\s*(?:listen|server_name|ssl_certificate(?:_key)?)\s+[^;\n]*;")
     if protected.findall(target) != protected.findall(after[target_index][2]):
         raise ValueError("joyst.ir listen/server_name/ssl_certificate directives changed")
@@ -312,4 +404,26 @@ check_probe "/ready" "200"
 check_probe "/api/v1/projects" "404"
 check_probe "/api/v1/media" "404"
 check_probe "/api/v1/jobs" "404"
+
+# Probes from this host are allowed, so prove the lock from a loopback source that
+# is not (only 127.0.0.1 and ::1 are): nginx must close the connection (444).
+check_refused() {
+  if [[ "$EDGE_ADDR" == *:* ]]; then
+    echo "CF_ONLY_PROBE_SKIPPED (IPv6 edge address; no second loopback source)"
+    return 0
+  fi
+  local code rc=0
+  code="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 20 \
+    --cacert "$CA_FILE" --interface 127.0.0.2 --resolve "joyst.ir:80:$EDGE_ADDR" \
+    "http://joyst.ir/api/health")" || rc=$?
+  if [[ "$rc" -eq 52 ]]; then
+    echo "CF_ONLY_OK non-Cloudflare source refused (444)"
+  elif [[ "$rc" -eq 0 ]]; then
+    restore
+    die "non-Cloudflare source received HTTP $code; Cloudflare-only lock is not effective; prior config restored"
+  else
+    echo "CF_ONLY_PROBE_INCONCLUSIVE (curl exit $rc); check from outside Cloudflare by hand" >&2
+  fi
+}
+check_refused
 echo "Nginx agent location applied and verified; backup: $BACKUP_FILE"

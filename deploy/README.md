@@ -15,6 +15,20 @@ proxied through Cloudflare (SSL/TLS mode: Full, self-signed origin cert at
 to `joyst.ir` so the joy-vps super-app launcher's `media.joyteam.ir` link
 never had to change. See `joy-media.nginx.conf` for both server blocks.
 
+**Cloudflare-only origin (OL-1):** `apply-nginx-cutover.sh` also writes a
+managed http-level `geo $realip_remote_addr $joy_media_from_cloudflare` block
+(from `cloudflare-ips.txt`) above the joyst.ir server and a managed
+`if ($joy_media_from_cloudflare = 0) { return 444; }` into every joyst.ir
+server block (:80 and :443). The geo is keyed on the TCP peer, so a forged
+`CF-Connecting-IP` from a non-Cloudflare source is still closed. This host's
+own probes stay allowed: `127.0.0.1`, `::1`, the joyst.ir listen address and
+`JOY_MEDIA_EDGE_ADDR`. Other sites in the shared file are not touched. After
+reload the script checks the edge probes from this host, then sends one probe
+from loopback source `127.0.0.2` to `joyst.ir:80` and requires the connection
+to be closed (444); if that probe gets an HTTP answer it restores the backup.
+Rollback: copy the `*.pre-agent-location-<timestamp>` backup the script
+printed back over the config, `nginx -t`, `systemctl reload nginx`.
+
 The environment file is created on the VPS with mode `0600` and contains (see
 [ADR-0017](../docs/adr/0017-independent-media-login.md)):
 
