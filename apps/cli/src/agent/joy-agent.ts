@@ -85,10 +85,27 @@ export function formatAgentTraceLine(record: JoyAgentTraceRecord): string {
 export function frameInspectionSkipNote(
   modelId: string,
   vision: boolean | undefined,
+  explicitVision = false,
 ): string | undefined {
+  if (explicitVision) return undefined;
   return vision === false || modelId === 'openrouter/free'
     ? 'frame inspection skipped: model has no vision'
     : undefined;
+}
+
+/** One-line warning when --vision overrides a routed or text-only model's default. */
+export function visionOverrideWarning(
+  modelId: string,
+  vision: boolean | undefined,
+  explicitVision: boolean,
+  allowFrames: boolean,
+): string | undefined {
+  if (!explicitVision || !allowFrames) return undefined;
+  if (modelId === 'openrouter/free')
+    return '--vision: openrouter/free routes to a model that may not support images; frame reads can fail or be ignored.';
+  if (vision === false)
+    return `--vision overrides the text-only default for ${modelId}; frame reads can fail if the model rejects images.`;
+  return undefined;
 }
 
 export async function probeAgent(providerOptions?: ResolveProviderOptions): Promise<{
@@ -146,8 +163,14 @@ export async function probeAgent(providerOptions?: ResolveProviderOptions): Prom
 export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOutput> {
   const config = await resolveByokConfig(options.providerOptions);
   const model = createModelFromConfig(config);
-  const frameNote = frameInspectionSkipNote(config.modelId, config.vision);
-  const frameInspectionSkipped = frameNote !== undefined;
+  const explicitVision = options.vision === true;
+  const frameNote = frameInspectionSkipNote(config.modelId, config.vision, explicitVision);
+  const visionWarning = visionOverrideWarning(
+    config.modelId,
+    config.vision,
+    explicitVision,
+    options.allowFrames === true,
+  );
 
   const bridge = new CliJoyAgentToolBridge(
     options.project,
@@ -187,10 +210,10 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     modelId: config.modelId,
     allowFrames: options.allowFrames === true,
     vision:
-      !frameInspectionSkipped &&
-      (options.vision === true ||
-        config.vision === true ||
-        KILO_MODEL_PRESETS.some((preset) => preset.id === config.modelId && preset.vision)),
+      explicitVision ||
+      (frameNote === undefined &&
+        (config.vision === true ||
+          KILO_MODEL_PRESETS.some((preset) => preset.id === config.modelId && preset.vision))),
     onEvent: eventLogger,
     ...(options.onTrace === undefined ? {} : { onTrace: options.onTrace }),
     apiKeyForRedaction: config.apiKey,
@@ -202,6 +225,10 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
       `Connecting to Joy Agent with model ${c(config.modelId, 'bold')} (${config.provider})...`,
     );
   if (frameNote && !options.json) logInfo(`Model notes: ${frameNote}.`);
+  if (visionWarning) {
+    if (options.json) console.error(visionWarning);
+    else logWarn(visionWarning);
+  }
 
   const runResult = await engine.run({
     taskKind: options.taskKind ?? 'joy-code-edit',

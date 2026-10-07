@@ -298,14 +298,29 @@ describe('JOY Agent tool catalog', () => {
     ).toHaveProperty('read_frame');
   });
 
-  it('does not expose frame inspection for openrouter/free even when vision is overridden', () => {
+  it('keeps openrouter/free and text-only presets text-only unless vision is explicitly requested', () => {
     for (const modelId of ['openrouter/free', 'byteplus-coding/deepseek-v4-flash']) {
-      const tools = createJoyAgentTools(
-        bridge({ readFrame: async () => ({ unavailable: 'missing' }) }),
-        DEFAULT_JOY_AGENT_LIMITS,
-        { modelId, vision: true, allowFrames: true },
-      );
-      expect(tools).not.toHaveProperty('read_frame');
+      const withReader = bridge({ readFrame: async () => ({ unavailable: 'missing' }) });
+      expect(
+        createJoyAgentTools(withReader, DEFAULT_JOY_AGENT_LIMITS, { modelId, allowFrames: true }),
+      ).not.toHaveProperty('read_frame');
+      expect(
+        createJoyAgentTools(withReader, DEFAULT_JOY_AGENT_LIMITS, {
+          modelId,
+          allowFrames: true,
+          vision: false,
+        }),
+      ).not.toHaveProperty('read_frame');
+      expect(
+        createJoyAgentTools(withReader, DEFAULT_JOY_AGENT_LIMITS, { modelId, vision: true }),
+      ).not.toHaveProperty('read_frame');
+      expect(
+        createJoyAgentTools(withReader, DEFAULT_JOY_AGENT_LIMITS, {
+          modelId,
+          vision: true,
+          allowFrames: true,
+        }),
+      ).toHaveProperty('read_frame');
     }
   });
 

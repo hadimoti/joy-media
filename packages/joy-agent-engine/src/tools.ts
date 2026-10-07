@@ -663,13 +663,12 @@ export function createJoyAgentTools(
   };
   let invalidTimelineProposals = 0;
   let invalidDocumentProposals = 0;
-  const knownTextOnlyModel =
-    options.modelId === 'openrouter/free' ||
-    KILO_MODEL_PRESETS.some((preset) => preset.id === options.modelId && !preset.vision);
+  // An explicit vision flag always wins (the host warns for routed/text-only models);
+  // otherwise only presets known to accept images get frame reads. openrouter/free routes
+  // to an unknown model, so it stays text-only by default.
   const visionCapable =
-    !knownTextOnlyModel &&
-    (options.vision === true ||
-      KILO_MODEL_PRESETS.some((preset) => preset.id === options.modelId && preset.vision));
+    options.vision ??
+    KILO_MODEL_PRESETS.some((preset) => preset.id === options.modelId && preset.vision);
   if (bridge.readFrame && visionCapable && options.allowFrames) {
     let frameReads = 0;
     tools.read_frame = tool({

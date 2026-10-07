@@ -4,6 +4,7 @@ import { createDefaultProject } from '../utils/project-loader.js';
 import { createTextClip } from '../render/text-clip.js';
 import {
   frameInspectionSkipNote,
+  visionOverrideWarning,
   missingOperationCoverage,
   verifyPlanChecklist,
   verifyRequestIntent,
@@ -34,6 +35,21 @@ describe('frame inspection notes', () => {
       'frame inspection skipped: model has no vision',
     );
     expect(frameInspectionSkipNote('byteplus-coding/dola-seed-2.0-pro', true)).toBeUndefined();
+  });
+
+  it('lets an explicit --vision override the text-only default with a warning', () => {
+    expect(frameInspectionSkipNote('openrouter/free', false, true)).toBeUndefined();
+    expect(visionOverrideWarning('openrouter/free', false, true, true)).toMatch(
+      /openrouter\/free routes to a model that may not support images/,
+    );
+    expect(visionOverrideWarning('byteplus-coding/deepseek-v4-flash', false, true, true)).toMatch(
+      /text-only/,
+    );
+    expect(visionOverrideWarning('openrouter/free', false, false, true)).toBeUndefined();
+    expect(visionOverrideWarning('openrouter/free', false, true, false)).toBeUndefined();
+    expect(
+      visionOverrideWarning('byteplus-coding/dola-seed-2.0-pro', true, true, true),
+    ).toBeUndefined();
   });
 });
 

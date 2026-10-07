@@ -181,4 +181,46 @@ describe('agent run transcript', () => {
     expect(text.indexOf('Model: Observed')).toBeLessThan(text.indexOf('Tool call: read_selection'));
     expect(text.match(/Inspection finished\./g)).toHaveLength(1);
   });
+
+  it('honours --vision with --allow-frames for openrouter/free and warns once', async () => {
+    const projectFile = join(home, 'trace-vision.json');
+    writeProject(projectFile);
+    const runWith = async (extra: string[]) => {
+      const offered: string[][] = [];
+      vi.spyOn(providerRuntime, 'createModelFromConfig').mockReturnValue(
+        scriptedAgentModel([[{ type: 'text', text: 'Looked.' }]], offered),
+      );
+      const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      await runCli([
+        'agent',
+        'run',
+        'check frame 8',
+        '--project',
+        projectFile,
+        '--provider',
+        'openrouter',
+        '--model',
+        'openrouter/free',
+        '--api-key',
+        'sk-test-REDACTED-0000',
+        '--allow-frames',
+        ...extra,
+      ]);
+      const text = [...output.mock.calls, ...errors.mock.calls].flat().join('\n');
+      vi.restoreAllMocks();
+      return { offered: offered.flat(), text };
+    };
+
+    const explicit = await runWith(['--vision']);
+    expect(explicit.offered).toContain('read_frame');
+    expect(explicit.text).toContain(
+      'openrouter/free routes to a model that may not support images',
+    );
+    expect(explicit.text).not.toContain('frame inspection skipped');
+
+    const implicit = await runWith([]);
+    expect(implicit.offered).not.toContain('read_frame');
+    expect(implicit.text).toContain('frame inspection skipped: model has no vision');
+  });
 });
