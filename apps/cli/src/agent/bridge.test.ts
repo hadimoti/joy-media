@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
+import { createJoyAgentTools } from '@joy-media/joy-agent-engine';
 import { CliJoyAgentToolBridge } from './bridge.js';
 import { resolveFfmpegExecutable } from '../render/ffmpeg-run.js';
 import { resolveTextFont } from '../render/text-font.js';
@@ -79,6 +80,29 @@ function projectWithTracks(): JoyProjectV1 {
     pluginData: {},
   } as JoyProjectV1;
 }
+
+describe('CLI Joy Agent bridge through the engine tool set', () => {
+  it('reads the project summary and selection from a real bridge instance', async () => {
+    const bridge = new CliJoyAgentToolBridge(projectWithTracks(), 3);
+    bridge.setSelection(['moving'], 2_500_000);
+    const tools = createJoyAgentTools(bridge);
+    const execute = (name: string) =>
+      (tools[name] as unknown as { execute: (input: unknown) => Promise<unknown> }).execute({});
+
+    await expect(execute('read_project_summary')).resolves.toMatchObject({
+      projectId: 'project-1',
+      revision: 3,
+      clipCount: 2,
+    });
+    await expect(execute('read_selection')).resolves.toEqual({
+      selectedClipIds: ['moving'],
+      playheadUs: 2_500_000,
+    });
+    await expect(execute('read_style_catalog')).resolves.toMatchObject({
+      looks: ['crt', 'bw', 'warm', 'cool'],
+    });
+  });
+});
 
 describe('CLI Joy Agent bridge timeline operations', () => {
   it('discards rejected proposal issues when a corrected proposal validates', async () => {

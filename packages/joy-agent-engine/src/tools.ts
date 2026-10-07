@@ -495,12 +495,14 @@ export function createJoyAgentTools(
     read_project_summary: tool({
       description: 'Read a bounded project summary.',
       inputSchema: z.object({}).strict(),
-      execute: async () => boundedResult(await runRead(bridge.readProjectSummary), maxPayloadBytes),
+      execute: async () =>
+        boundedResult(await runRead(() => bridge.readProjectSummary()), maxPayloadBytes),
     }),
     read_selection: tool({
       description: 'Read the current bounded selection.',
       inputSchema: z.object({}).strict(),
-      execute: async () => boundedResult(await runRead(bridge.readSelection), maxPayloadBytes),
+      execute: async () =>
+        boundedResult(await runRead(() => bridge.readSelection()), maxPayloadBytes),
     }),
     read_timeline_window: tool({
       description: 'Read a bounded timeline window.',
@@ -519,7 +521,8 @@ export function createJoyAgentTools(
     read_style_catalog: tool({
       description: 'Read the bounded style catalog.',
       inputSchema: z.object({}).strict(),
-      execute: async () => boundedResult(await runRead(bridge.readStyleCatalog), maxPayloadBytes),
+      execute: async () =>
+        boundedResult(await runRead(() => bridge.readStyleCatalog()), maxPayloadBytes),
     }),
     propose_timeline_operations: tool({
       description:
@@ -583,7 +586,7 @@ export function createJoyAgentTools(
       inputSchema: z.object({}).strict(),
       execute: async () => {
         if (bridge.readBrief === undefined) throw new Error('JOY_AGENT_UNAVAILABLE');
-        return boundedResult(await runRead(bridge.readBrief), maxPayloadBytes);
+        return boundedResult(await runRead(() => bridge.readBrief!()), maxPayloadBytes);
       },
     }),
     read_scene_3d: tool({
@@ -591,7 +594,7 @@ export function createJoyAgentTools(
       inputSchema: z.object({}).strict(),
       execute: async () => {
         if (bridge.readScene3d === undefined) throw new Error('JOY_AGENT_UNAVAILABLE');
-        return boundedResult(await runRead(bridge.readScene3d), maxPayloadBytes);
+        return boundedResult(await runRead(() => bridge.readScene3d!()), maxPayloadBytes);
       },
     }),
     propose_asset: tool({
