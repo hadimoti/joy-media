@@ -73,6 +73,8 @@ export interface CliFlags {
   insecureFileStore: boolean;
   email: string | undefined;
   code: string | undefined;
+  codeOnly: boolean;
+  requestCode: boolean;
   apiBase: string | undefined;
   resolution: string | undefined;
   aspect: string | undefined;
@@ -207,6 +209,8 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     insecureFileStore: Boolean(v['insecure-file-store']),
     email: typeof v.email === 'string' ? v.email : undefined,
     code: typeof v.code === 'string' ? v.code : undefined,
+    codeOnly: Boolean(v['code-only']),
+    requestCode: Boolean(v['request-code']),
     apiBase: typeof v['api-base'] === 'string' ? v['api-base'] : undefined,
     resolution: typeof v.resolution === 'string' ? v.resolution : undefined,
     aspect: typeof v.aspect === 'string' ? v.aspect : undefined,
@@ -274,6 +278,8 @@ export async function runCli(argv: string[]): Promise<number> {
         'insecure-file-store': { type: 'boolean', default: false },
         email: { type: 'string' },
         code: { type: 'string' },
+        'code-only': { type: 'boolean', default: false },
+        'request-code': { type: 'boolean', default: false },
         'api-base': { type: 'string' },
         resolution: { type: 'string' },
         aspect: { type: 'string' },
@@ -349,6 +355,8 @@ export async function runCli(argv: string[]): Promise<number> {
         return await handleAuthCommand([command, ...subArgs], {
           ...(flags.email === undefined ? {} : { email: flags.email }),
           ...(flags.code === undefined ? {} : { code: flags.code }),
+          codeOnly: flags.codeOnly,
+          requestCode: flags.requestCode,
           ...(flags.apiBase === undefined ? {} : { apiBase: flags.apiBase }),
           insecureFileStore: flags.insecureFileStore,
           json: flags.json,

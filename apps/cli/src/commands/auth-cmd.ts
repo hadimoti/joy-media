@@ -12,6 +12,10 @@ import { logError, logSuccess } from '../utils/logger.js';
 export interface AuthCommandOptions {
   readonly email?: string;
   readonly code?: string;
+  /** Verify a code you already received; do not request a new one. */
+  readonly codeOnly?: boolean;
+  /** Only request a code (for scripts without a TTY); finish later with --code-only. */
+  readonly requestCode?: boolean;
   readonly apiBase?: string;
   readonly insecureFileStore?: boolean;
   readonly json?: boolean;
@@ -100,6 +104,8 @@ export async function handleAuthCommand(
 const LOGIN_CODE = /^\d{4,8}$/;
 const EMAIL_ADDRESS = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+const MAX_INTERACTIVE_CODE_ATTEMPTS = 3;
+
 async function login(options: AuthCommandOptions): Promise<number> {
   // Validate everything that can fail locally before a code is requested: a request
   // sends a real email and uses up one of the account's few active codes.
@@ -107,40 +113,67 @@ async function login(options: AuthCommandOptions): Promise<number> {
   const interactive = prompts.interactive();
   if (options.email === undefined && !interactive)
     throw new AuthInputError('Pass --email when stdin is not an interactive TTY.');
+  if (options.requestCode && (options.codeOnly || options.code !== undefined))
+    throw new AuthInputError('--request-code cannot be combined with --code or --code-only.');
   if (options.code !== undefined && !LOGIN_CODE.test(options.code))
     throw new AuthInputError('Invalid code: login codes are 4 to 8 digits.');
-  if (options.code === undefined && !interactive)
-    throw new AuthInputError('Pass --code when stdin is not an interactive TTY.');
-  try {
-    assertJoySessionStorable(Boolean(options.insecureFileStore));
-  } catch {
-    throw new AuthInputError(NO_LOGIN_KEYRING, 1);
+  if (!options.requestCode && options.code === undefined && !interactive)
+    throw new AuthInputError(
+      options.codeOnly
+        ? 'Pass --code with --code-only when stdin is not an interactive TTY.'
+        : 'Pass --code when stdin is not an interactive TTY, or run with --request-code first and then --code-only --code <code>.',
+    );
+  if (!options.requestCode) {
+    try {
+      assertJoySessionStorable(Boolean(options.insecureFileStore));
+    } catch {
+      throw new AuthInputError(NO_LOGIN_KEYRING, 1);
+    }
   }
   const email = (options.email ?? (await prompts.email())).trim();
   if (!EMAIL_ADDRESS.test(email)) throw new AuthInputError('Invalid email address.');
-  try {
-    await requestJson(`${apiBase}/v1/auth/request-otp`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ contact: email, method: 'gmail' }),
-    });
-  } catch (error) {
-    logError(describeLoginFailure(error, 'request', apiBase));
-    return 1;
+  if (!options.codeOnly) {
+    try {
+      await requestJson(`${apiBase}/v1/auth/request-otp`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ contact: email, method: 'gmail' }),
+      });
+    } catch (error) {
+      logError(describeLoginFailure(error, 'request', apiBase));
+      return 1;
+    }
+    if (options.requestCode) {
+      logSuccess(`If ${email} can sign in, a login code is on its way.`);
+      console.log(
+        `Finish with: joy-media login --email ${email} --code-only${options.apiBase ? ` --api-base ${apiBase}` : ''}`,
+      );
+      return 0;
+    }
   }
-  const code = options.code ?? (await prompts.code());
-  if (!LOGIN_CODE.test(code))
-    throw new AuthInputError('Invalid code: login codes are 4 to 8 digits.');
+  // A typo in the interactive flow is re-prompted; it must not cost another email.
+  const attempts = options.code === undefined ? MAX_INTERACTIVE_CODE_ATTEMPTS : 1;
   let verification: unknown;
-  try {
-    verification = await requestJson(`${apiBase}/v1/auth/verify-otp`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ contact: email, method: 'gmail', code }),
-    });
-  } catch (error) {
-    logError(describeLoginFailure(error, 'verify', apiBase));
-    return 1;
+  for (let attempt = 1; ; attempt += 1) {
+    const code = options.code ?? (await prompts.code());
+    if (!LOGIN_CODE.test(code)) {
+      if (attempt < attempts) {
+        logError('Invalid code: login codes are 4 to 8 digits.');
+        continue;
+      }
+      throw new AuthInputError('Invalid code: login codes are 4 to 8 digits.');
+    }
+    try {
+      verification = await requestJson(`${apiBase}/v1/auth/verify-otp`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ contact: email, method: 'gmail', code }),
+      });
+      break;
+    } catch (error) {
+      logError(describeLoginFailure(error, 'verify', apiBase));
+      if (attempt >= attempts || !isRejectedCode(error)) return 1;
+    }
   }
   const token =
     isRecord(verification) && typeof verification.token === 'string'
@@ -156,6 +189,21 @@ async function login(options: AuthCommandOptions): Promise<number> {
   );
   logSuccess(`Logged in as ${email}.`);
   return 0;
+}
+
+/** A wrong or expired code (not a lockout, rate limit, server or network failure). */
+function isRejectedCode(error: unknown): boolean {
+  const status = statusOf(error);
+  const code = errorCodeOf(error);
+  return (
+    code !== 'TOO_MANY_ATTEMPTS' &&
+    code !== 'RATE_LIMITED' &&
+    status !== undefined &&
+    status >= 400 &&
+    status < 500 &&
+    status !== 404 &&
+    status !== 429
+  );
 }
 
 async function whoami(options: AuthCommandOptions): Promise<number> {
