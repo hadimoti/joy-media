@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Ensure the API trusts the local Nginx hop in a staged api.env file.
 
-The file is a systemd EnvironmentFile. Every assignment of the key (with any
-surrounding whitespace or quotes) is merged into one unquoted line at the
-first assignment's position, keeping that line's ending. The API refuses to
+The file is a systemd EnvironmentFile. As there, the last assignment of the key
+wins: its value (with any surrounding whitespace, quotes or `export ` prefix)
+becomes one unquoted line at that position, keeping the line's ending and
+prefix, and earlier assignments are removed. The API refuses to
 start unless the list holds at most 64 exact IP literals, so anything else
 fails here, before the release is switched, and the file is left unchanged.
 """
@@ -17,7 +18,9 @@ import sys
 KEY = "JOY_MEDIA_TRUSTED_PROXY_ADDRESSES"
 LOOPBACK = "127.0.0.1"
 MAX_ADDRESSES = 64  # MAX_TRUSTED_PROXY_ADDRESSES in apps/api/src/client-address.ts
-ASSIGNMENT = re.compile(r"^[ \t]*" + re.escape(KEY) + r"[ \t]*=(?P<value>.*?)(?P<ending>\r?\n|\r)?$", re.S)
+ASSIGNMENT = re.compile(
+    r"^[ \t]*(?P<export>export[ \t]+)?" + re.escape(KEY) + r"[ \t]*=(?P<value>.*?)(?P<ending>\r?\n|\r)?$", re.S
+)
 
 
 def fail(message: str) -> None:
@@ -50,8 +53,8 @@ def main(path: Path) -> None:
     matches = [(index, match) for index, match in matches if match]
 
     addresses: dict[str, str] = {}
-    for _, match in matches:
-        for item in unquote(match.group("value")).split(","):
+    if matches:
+        for item in unquote(matches[-1][1].group("value")).split(","):
             item = item.strip()
             if item:
                 addresses.setdefault(canonical(item), item)
@@ -61,9 +64,10 @@ def main(path: Path) -> None:
     value = f"{KEY}={','.join(addresses.values())}"
 
     if matches:
-        first_index, first_match = matches[0]
-        lines[first_index] = value + (first_match.group("ending") or "\n")
-        for index, _ in reversed(matches[1:]):
+        last_index, last_match = matches[-1]
+        prefix = "export " if last_match.group("export") else ""
+        lines[last_index] = prefix + value + (last_match.group("ending") or "\n")
+        for index, _ in reversed(matches[:-1]):
             del lines[index]
     else:
         ending = "\r\n" if lines and lines[0].endswith("\r\n") else "\n"
