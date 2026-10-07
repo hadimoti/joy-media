@@ -333,6 +333,50 @@ describe(
       );
     });
 
+    it('normalises quoting, spacing, duplicates and line endings in the trusted proxy list', (t) => {
+      if (!hasPython) return t.skip('python3 is unavailable; api.env staging test needs Python');
+      const sandbox = createSandbox(t);
+      const key = 'JOY_MEDIA_TRUSTED_PROXY_ADDRESSES';
+      const cases = [
+        [`${key}="10.0.0.2"\n`, `${key}=10.0.0.2,127.0.0.1\n`],
+        [`${key}='10.0.0.2, 10.0.0.9'\n`, `${key}=10.0.0.2,10.0.0.9,127.0.0.1\n`],
+        [`  ${key} = 10.0.0.2 , ,\n`, `${key}=10.0.0.2,127.0.0.1\n`],
+        [`A=1\r\n${key}=10.0.0.2\r\nB=2\r\n`, `A=1\r\n${key}=10.0.0.2,127.0.0.1\r\nB=2\r\n`],
+        [`A=1\r\n`, `A=1\r\n${key}=127.0.0.1\r\n`],
+        [
+          `${key}=10.0.0.2\nB=2\n${key}=10.0.0.3,10.0.0.2\n`,
+          `${key}=10.0.0.2,10.0.0.3,127.0.0.1\nB=2\n`,
+        ],
+        [`# ${key}=192.0.2.1\n${key}=\n`, `# ${key}=192.0.2.1\n${key}=127.0.0.1\n`],
+        [`${key}=127.0.0.1,::1\n`, `${key}=127.0.0.1,::1\n`],
+      ];
+      for (const [input, expected] of cases) {
+        writeFileSync(sandbox.apiEnv, input);
+        const result = spawnSync('python3', [ensureProxyScript, sandbox.apiEnv], {
+          encoding: 'utf8',
+        });
+        assert.equal(result.status, 0, `${JSON.stringify(input)}: ${result.stderr}`);
+        assert.equal(readFileSync(sandbox.apiEnv, 'utf8'), expected, JSON.stringify(input));
+      }
+      // The API refuses to start on anything but exact IP literals (at most 64),
+      // so the staging step fails instead of writing a list that would.
+      const tooMany = Array.from({ length: 64 }, (_, index) => `10.0.1.${index + 1}`).join(',');
+      for (const input of [
+        `${key}=10.0.0.0/8\n`,
+        `${key}=proxy.internal\n`,
+        `${key}="10.0.0.2\n`,
+        `${key}=${tooMany}\n`,
+      ]) {
+        writeFileSync(sandbox.apiEnv, input);
+        const result = spawnSync('python3', [ensureProxyScript, sandbox.apiEnv], {
+          encoding: 'utf8',
+        });
+        assert.notEqual(result.status, 0, `${JSON.stringify(input)} should be rejected`);
+        assert.match(result.stderr, /JOY_MEDIA_TRUSTED_PROXY_ADDRESSES/u);
+        assert.equal(readFileSync(sandbox.apiEnv, 'utf8'), input, 'file left unchanged');
+      }
+    });
+
     it('patches the agent ahead of matching regexes and preserves the other joyst routes', (t) => {
       if (!hasPython)
         return t.skip('python3 is unavailable; Nginx patch integration needs real Python');
