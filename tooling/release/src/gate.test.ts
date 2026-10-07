@@ -1143,7 +1143,18 @@ describe('JOY Studio 1.0 release gate', () => {
 
     const fixtureHandlers = findProductionFixtureRegistrations(root);
     expect(fixtureHandlers).toEqual([]);
-    expect(evaluateReleaseGate({ ...passingInput(), fixtureHandlers }).passed).toBe(true);
+    // Pin the clock: passingInput() evidence is dated August 2026 and the gate
+    // rejects evidence older than RELEASE_STATUS_MAX_AGE_DAYS.
+    expect(
+      evaluateReleaseGate(
+        {
+          ...passingInput(),
+          windowsAcceptance: windowsAcceptance('a'.repeat(40), '2026-08-28T11:00:00.000Z'),
+          fixtureHandlers,
+        },
+        new Date('2026-08-28T12:00:00.000Z'),
+      ).passed,
+    ).toBe(true);
   });
 
   it('requires every build plus the manifest and SBOM', () => {
