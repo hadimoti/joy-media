@@ -148,4 +148,37 @@ describe('agent run transcript', () => {
       expect.objectContaining({ type: 'observation', name: 'read_project_summary' }),
     );
   });
+
+  it('prints model text written between tool calls (frame observations are not dropped)', async () => {
+    const projectFile = join(home, 'trace-text.json');
+    writeProject(projectFile);
+    vi.spyOn(providerRuntime, 'createModelFromConfig').mockReturnValue(
+      scriptedAgentModel([
+        [
+          { type: 'text', text: 'Observed 08.000 = frame 240 with 4 bars.' },
+          { type: 'tool-call', toolName: 'read_selection' },
+        ],
+        [{ type: 'text', text: 'Inspection finished.' }],
+      ]),
+    );
+    const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await runCli([
+      'agent',
+      'run',
+      'inspect the project',
+      '--project',
+      projectFile,
+      '--provider',
+      'openrouter',
+      '--api-key',
+      'sk-test-REDACTED-0000',
+    ]);
+
+    const text = output.mock.calls.flat().join('\n');
+    expect(text).toContain('Model: Observed 08.000 = frame 240 with 4 bars.');
+    expect(text.indexOf('Model: Observed')).toBeLessThan(text.indexOf('Tool call: read_selection'));
+    expect(text.match(/Inspection finished\./g)).toHaveLength(1);
+  });
 });

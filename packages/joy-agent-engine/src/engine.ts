@@ -59,7 +59,7 @@ export interface JoyAgentEngineOptions {
 
 /** One line of the run transcript; failed tool calls are traced, never dropped. */
 export interface JoyAgentTraceRecord {
-  readonly type: 'tool_call' | 'observation' | 'tool_error';
+  readonly type: 'tool_call' | 'observation' | 'tool_error' | 'assistant_text';
   readonly name: string;
   readonly value: unknown;
 }
@@ -73,6 +73,12 @@ function traceErrorMessage(error: unknown, apiKey?: string): string {
   return message.length > MAX_TRACE_ERROR_CHARS
     ? `${message.slice(0, MAX_TRACE_ERROR_CHARS)}…`
     : message;
+}
+
+function boundedTraceText(text: string, maxBytes: number): string {
+  const encoded = new TextEncoder().encode(text);
+  if (encoded.byteLength <= maxBytes) return text;
+  return `${new TextDecoder().decode(encoded.slice(0, maxBytes)).replace(/\uFFFD$/, '')}…`;
 }
 
 export class JoyAgentRunError extends Error {
@@ -349,6 +355,8 @@ export class JoyAgentEngine {
       prompt: request.request,
       ...(abortSignal === undefined ? {} : { abortSignal }),
     });
+    // Steps whose text is already part of result.text (reported once as the final notes).
+    const finalTextSteps = new Set<unknown>([result.steps.at(-1)]);
     const endedAfterFrameWithoutPlan =
       result.text.trim().length === 0 &&
       result.steps.some((step) => step.toolCalls.some((call) => call.toolName === 'read_frame')) &&
@@ -358,6 +366,7 @@ export class JoyAgentEngine {
         prompt: `Original request: ${request.request}\nCall submit_plan with all requested operations and a non-empty checklist covering every operation type and requested outcome.`,
         ...(abortSignal === undefined ? {} : { abortSignal }),
       });
+      finalTextSteps.add(retry.steps.at(-1));
       result = {
         ...retry,
         text: [result.text, retry.text].filter(Boolean).join('\n'),
@@ -366,7 +375,14 @@ export class JoyAgentEngine {
     }
     for (const step of result.steps) {
       for (const part of step.content) {
-        if (part.type === 'tool-call')
+        if (part.type === 'text') {
+          if (!finalTextSteps.has(step) && part.text.trim())
+            this.options.onTrace?.({
+              type: 'assistant_text',
+              name: 'assistant',
+              value: boundedTraceText(part.text, this.limits.toolPayloadBytes),
+            });
+        } else if (part.type === 'tool-call')
           this.options.onTrace?.({ type: 'tool_call', name: part.toolName, value: part.input });
         else if (part.type === 'tool-result')
           this.options.onTrace?.({ type: 'observation', name: part.toolName, value: part.output });

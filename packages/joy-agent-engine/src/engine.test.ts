@@ -287,6 +287,27 @@ describe('JOY Agent bounded model loop', () => {
     ]);
   });
 
+  it('traces model text written between tool calls, without repeating the final text', async () => {
+    const model = scriptedModel([
+      [
+        { type: 'text', text: 'Frame at 08.000 is frame 240.' },
+        { type: 'tool-call', toolName: 'read_selection', input: {} },
+      ],
+      [{ type: 'text', text: 'All checks done.' }],
+    ]);
+    const traces: Array<{ type: string; name: string; value: unknown }> = [];
+    const engine = new JoyAgentEngine({ model, bridge, onTrace: (record) => traces.push(record) });
+
+    const result = await engine.run(request);
+
+    expect(result.text).toBe('All checks done.');
+    expect(traces).toEqual([
+      { type: 'assistant_text', name: 'assistant', value: 'Frame at 08.000 is frame 240.' },
+      { type: 'tool_call', name: 'read_selection', value: {} },
+      { type: 'observation', name: 'read_selection', value: { selection: [] } },
+    ]);
+  });
+
   it('returns a proposal validation error to the model and accepts its retry', async () => {
     const createText = {
       kind: 'create-text',

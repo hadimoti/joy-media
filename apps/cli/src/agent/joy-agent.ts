@@ -65,10 +65,13 @@ const TRACE_LABELS: Record<JoyAgentTraceRecord['type'], string> = {
   tool_call: 'Tool call',
   observation: 'Observation',
   tool_error: 'Tool error',
+  assistant_text: 'Model',
 };
 
-/** Formats one transcript record for text output; tool errors keep their message visible. */
+/** Formats one transcript record for text output; tool errors and interim model text stay visible. */
 export function formatAgentTraceLine(record: JoyAgentTraceRecord): string {
+  if (record.type === 'assistant_text')
+    return `${TRACE_LABELS.assistant_text}: ${String(record.value)}`;
   const value =
     record.type === 'tool_error' &&
     typeof record.value === 'object' &&
