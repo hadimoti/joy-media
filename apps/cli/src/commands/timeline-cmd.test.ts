@@ -281,3 +281,77 @@ describe('timeline add-text layout bounds', () => {
     },
   );
 });
+
+describe('timeline trim against the media duration', () => {
+  function writeThirtySecondProject(directory: string): string {
+    const project = createDefaultProject('trim bounds', { id: 'trim-bounds-project' });
+    (project.assets as Record<string, unknown>)['asset-30'] = {
+      id: 'asset-30',
+      kind: 'video',
+      displayName: 'thirty.mp4',
+      descriptor: { mimeType: 'video/mp4', durationUs: 30_000_000 },
+    };
+    (project.compositions.root!.tracks[0]!.clips as unknown[]).push({
+      id: 'clip-30',
+      kind: 'video',
+      assetId: 'asset-30',
+      startUs: 0,
+      durationUs: 30_000_000,
+      sourceInUs: 0,
+    });
+    const path = join(directory, 'project.json');
+    writeFileSync(path, JSON.stringify({ format: 'joy-media-project', revision: 1, project }));
+    return path;
+  }
+
+  const clipOf = (path: string) =>
+    JSON.parse(readFileSync(path, 'utf8')).project.compositions.root.tracks[0].clips[0];
+
+  it('rejects a start beyond the media end and leaves the project unchanged', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-trim-beyond-'));
+    const originalError = console.error;
+    const errors: string[] = [];
+    console.error = (...values: unknown[]) => errors.push(values.map(String).join(' '));
+    try {
+      const path = writeThirtySecondProject(directory);
+      const before = readFileSync(path, 'utf8');
+      expect(
+        await runCli(['timeline', 'trim', '--project', path, '--clip', 'clip-30', '--start', '40']),
+      ).toBe(1);
+      expect(readFileSync(path, 'utf8')).toBe(before);
+      expect(errors.join('\n')).toContain('beyond the end of its media (30s)');
+    } finally {
+      console.error = originalError;
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('clamps an end past the media to the media end with a warning', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-trim-clamp-'));
+    const originalLog = console.log;
+    const originalWarn = console.warn;
+    const logs: string[] = [];
+    console.log = (...values: unknown[]) => logs.push(values.map(String).join(' '));
+    console.warn = (...values: unknown[]) => logs.push(values.map(String).join(' '));
+    try {
+      const path = writeThirtySecondProject(directory);
+      expect(
+        await runCli(['timeline', 'trim', '--project', path, '--clip', 'clip-30', '--start', '7']),
+      ).toBe(0);
+      expect(clipOf(path)).toMatchObject({
+        startUs: 7_000_000,
+        sourceInUs: 7_000_000,
+        durationUs: 23_000_000,
+      });
+      expect(logs.join('\n')).toContain('clamped to the media end (30s)');
+      expect(
+        await runCli(['timeline', 'trim', '--project', path, '--clip', 'clip-30', '--end', '45']),
+      ).toBe(0);
+      expect(clipOf(path)).toMatchObject({ startUs: 7_000_000, durationUs: 23_000_000 });
+    } finally {
+      console.log = originalLog;
+      console.warn = originalWarn;
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});

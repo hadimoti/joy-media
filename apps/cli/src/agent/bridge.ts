@@ -659,6 +659,22 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
                 found = true;
                 break;
               }
+              const mediaEndUs =
+                clip.kind === 'video' && clip.timeRemap === undefined && clip.reversed !== true
+                  ? current.assets?.[typeof clip.assetId === 'string' ? clip.assetId : '']
+                      ?.descriptor?.durationUs
+                  : undefined;
+              if (
+                typeof mediaEndUs === 'number' &&
+                mediaEndUs > 0 &&
+                (op.sourceInUs >= mediaEndUs || op.sourceOutUs > mediaEndUs)
+              ) {
+                errors.push(
+                  `Trim of ${op.clipId} runs past the end of its media (${mediaEndUs / 1_000_000}s): source ${op.sourceInUs}–${op.sourceOutUs} µs, media ends at ${mediaEndUs} µs.`,
+                );
+                found = true;
+                break;
+              }
               if (clip.kind === 'video') {
                 clip.sourceInUs = op.sourceInUs;
               } else if (clip.kind === 'composition') {

@@ -478,6 +478,24 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
         } else if (flags.duration !== undefined) {
           clip.durationUs = Math.round(flags.duration * 1_000_000);
         }
+        const mediaEnd = videoMediaEndUs(project, clip);
+        if (mediaEnd !== undefined && clip.kind === 'video') {
+          const rate =
+            typeof clip.playbackRate === 'number' && clip.playbackRate > 0 ? clip.playbackRate : 1;
+          const sourceInUs = clip.sourceInUs ?? 0;
+          if (sourceInUs >= mediaEnd) {
+            logError(
+              `Trim start puts clip "${flags.clip}" at source ${formatSeconds(sourceInUs)}, beyond the end of its media (${formatSeconds(mediaEnd)}). Nothing was changed.`,
+            );
+            return 1;
+          }
+          if (sourceInUs + Math.round(clip.durationUs * rate) > mediaEnd) {
+            clip.durationUs = Math.floor((mediaEnd - sourceInUs) / rate);
+            logWarn(
+              `Clip "${flags.clip}" ends at source ${formatSeconds(mediaEnd)}: clamped to the media end (${formatSeconds(mediaEnd)}).`,
+            );
+          }
+        }
         found = true;
         track.clips.sort((a, b) => a.startUs - b.startUs);
         break;
@@ -580,4 +598,28 @@ function validateRange(
   if (value > range.max) {
     throw new FlagValidationError(flag, `value must be <= ${range.max}`, value);
   }
+}
+
+/** Source media length for a forward, unremapped video clip, when the asset records it. */
+function videoMediaEndUs(
+  project: {
+    readonly assets?: Record<string, { readonly descriptor?: { readonly durationUs?: number } }>;
+  },
+  clip: {
+    readonly kind?: string;
+    readonly assetId?: string;
+    readonly timeRemap?: unknown;
+    readonly reversed?: boolean;
+  },
+): number | undefined {
+  if (clip.kind !== 'video' || clip.timeRemap !== undefined || clip.reversed === true)
+    return undefined;
+  const duration = clip.assetId
+    ? project.assets?.[clip.assetId]?.descriptor?.durationUs
+    : undefined;
+  return typeof duration === 'number' && duration > 0 ? duration : undefined;
+}
+
+function formatSeconds(microseconds: number): string {
+  return `${(microseconds / 1_000_000).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}s`;
 }

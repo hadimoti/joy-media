@@ -425,6 +425,32 @@ describe('CLI Joy Agent bridge timeline operations', () => {
     });
   });
 
+  it('rejects an agent trim whose source range runs past the media end', async () => {
+    const project = projectWithTracks();
+    (project.assets as Record<string, unknown>).asset = {
+      id: 'asset',
+      kind: 'video',
+      displayName: 'thirty.mp4',
+      descriptor: { mimeType: 'video/mp4', durationUs: 30_000_000 },
+    };
+    const bridge = new CliJoyAgentToolBridge(project, 1);
+    const rejected = await bridge.proposeTimelineOperations({
+      operations: [
+        {
+          kind: 'trim',
+          id: 'too-far',
+          clipId: 'moving',
+          sourceInUs: 25_000_000,
+          sourceOutUs: 40_000_000,
+          dependsOn: [],
+        },
+      ],
+    });
+    expect(rejected).toMatchObject({ accepted: false });
+    expect(bridge.getReportedIssues().join(' ')).toContain('past the end of its media (30s)');
+    expect(bridge.getStagedOperations().timelineOps).toEqual([]);
+  });
+
   it('splits with a source offset and deterministic operation id', async () => {
     const bridge = new CliJoyAgentToolBridge(projectWithTracks(), 1);
     await bridge.proposeTimelineOperations({
