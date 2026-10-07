@@ -2,6 +2,7 @@
 import {
   JoyAgentEngine,
   type JoyAgentSafeEvent,
+  type JoyAgentTraceRecord,
   type JoyAgentTaskKind,
   type JoyAgentProbeResult,
   type JoyPlanChecklistItem,
@@ -37,13 +38,7 @@ export interface RunAgentOptions {
   readonly vision?: boolean | undefined;
   readonly providerOptions?: ResolveProviderOptions | undefined;
   readonly onEvent?: ((event: JoyAgentSafeEvent) => void) | undefined;
-  readonly onTrace?:
-    | ((record: {
-        readonly type: 'tool_call' | 'observation';
-        readonly name: string;
-        readonly value: unknown;
-      }) => void)
-    | undefined;
+  readonly onTrace?: ((record: JoyAgentTraceRecord) => void) | undefined;
   readonly onStagedChange?: ((summary: StagedOperationsSummary) => void) | undefined;
 }
 
@@ -64,6 +59,24 @@ export interface RunAgentOutput {
   readonly verified?: readonly string[];
   readonly placementSummary?: AppliedTimelineSummary;
   readonly resolvedModelId?: string;
+}
+
+const TRACE_LABELS: Record<JoyAgentTraceRecord['type'], string> = {
+  tool_call: 'Tool call',
+  observation: 'Observation',
+  tool_error: 'Tool error',
+};
+
+/** Formats one transcript record for text output; tool errors keep their message visible. */
+export function formatAgentTraceLine(record: JoyAgentTraceRecord): string {
+  const value =
+    record.type === 'tool_error' &&
+    typeof record.value === 'object' &&
+    record.value !== null &&
+    typeof (record.value as { error?: unknown }).error === 'string'
+      ? (record.value as { error: string }).error
+      : JSON.stringify(record.value);
+  return `${TRACE_LABELS[record.type]}: ${record.name} ${value}`;
 }
 
 export function frameInspectionSkipNote(

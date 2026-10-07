@@ -41,6 +41,40 @@ function textModel(text = 'Done.', modelId?: string, resolvedModelId?: string) {
   });
 }
 
+type ScriptedPart =
+  | { readonly type: 'text'; readonly text: string }
+  | { readonly type: 'tool-call'; readonly toolName: string; readonly input: unknown };
+
+function scriptedModel(steps: readonly (readonly ScriptedPart[])[]) {
+  let index = 0;
+  return new MockLanguageModelV3({
+    doGenerate: async () => {
+      const parts = steps[index++] ?? [{ type: 'text' as const, text: 'Done.' }];
+      const hasToolCall = parts.some((part) => part.type === 'tool-call');
+      return {
+        content: parts.map((part, partIndex) =>
+          part.type === 'text'
+            ? { type: 'text' as const, text: part.text }
+            : {
+                type: 'tool-call' as const,
+                toolCallId: `call-${index}-${partIndex}`,
+                toolName: part.toolName,
+                input: JSON.stringify(part.input),
+              },
+        ),
+        finishReason: hasToolCall
+          ? { unified: 'tool-calls' as const, raw: 'tool_calls' }
+          : { unified: 'stop' as const, raw: 'stop' },
+        usage: {
+          inputTokens: { total: 2, noCache: 2, cacheRead: undefined, cacheWrite: undefined },
+          outputTokens: { total: 1, text: 1, reasoning: undefined },
+        },
+        warnings: [],
+      };
+    },
+  });
+}
+
 describe('JOY Agent bounded model loop', () => {
   it('uses an explicit capability result and no fallback provider', async () => {
     const result = await probeJoyAgentModel(textModel());
@@ -219,6 +253,38 @@ describe('JOY Agent bounded model loop', () => {
     expect(result.partialReason).toBe('step-limit');
     expect(result.steps).toBeGreaterThan(12);
     expect(result.steps).toBeLessThanOrEqual(30);
+  });
+
+  it('traces a failing tool call as a tool error instead of hiding it', async () => {
+    const model = scriptedModel([
+      [{ type: 'tool-call', toolName: 'read_project_summary', input: {} }],
+      [{ type: 'tool-call', toolName: 'read_selection', input: {} }],
+      [{ type: 'text', text: 'Done.' }],
+    ]);
+    const traces: Array<{ type: string; name: string; value: unknown }> = [];
+    const engine = new JoyAgentEngine({
+      model,
+      bridge: {
+        ...bridge,
+        readProjectSummary: async () => {
+          throw new TypeError('summary exploded');
+        },
+      },
+      onTrace: (record) => traces.push(record),
+    });
+
+    await engine.run(request);
+
+    expect(traces).toEqual([
+      { type: 'tool_call', name: 'read_project_summary', value: {} },
+      {
+        type: 'tool_error',
+        name: 'read_project_summary',
+        value: { error: 'TypeError: summary exploded' },
+      },
+      { type: 'tool_call', name: 'read_selection', value: {} },
+      { type: 'observation', name: 'read_selection', value: { selection: [] } },
+    ]);
   });
 
   it('returns a proposal validation error to the model and accepts its retry', async () => {

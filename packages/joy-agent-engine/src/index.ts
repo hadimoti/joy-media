@@ -88,4 +88,5 @@ export {
   type JoyAgentEngineOptions,
   type JoyAgentProbeResult,
   type JoyAgentRunResult,
+  type JoyAgentTraceRecord,
 } from './engine.js';

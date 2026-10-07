@@ -11,6 +11,7 @@ import { JoyAgentRunError } from '@joy-media/joy-agent-engine';
 import { describeEffectiveConfig } from '../agent/provider.js';
 import type { CliFlags } from '../cli.js';
 import {
+  formatAgentTraceLine,
   probeAgent,
   runJoyAgent,
   truthfulAgentSummary,
@@ -546,10 +547,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         json: flags.json,
         onTrace: (record) => {
           if (flags.json) console.log(JSON.stringify(record));
-          else
-            console.log(
-              `${record.type === 'tool_call' ? 'Tool call' : 'Observation'}: ${record.name} ${JSON.stringify(record.value)}`,
-            );
+          else console.log(formatAgentTraceLine(record));
         },
         allowFrames: flags.allowFrames,
         vision: flags.vision,

@@ -52,13 +52,27 @@ export interface JoyAgentEngineOptions {
   readonly limits?: Partial<JoyAgentLimits>;
   readonly capability?: JoyAgentCapability;
   readonly onEvent?: (event: JoyAgentSafeEvent) => void;
-  readonly onTrace?: (record: {
-    readonly type: 'tool_call' | 'observation';
-    readonly name: string;
-    readonly value: unknown;
-  }) => void;
+  readonly onTrace?: (record: JoyAgentTraceRecord) => void;
   readonly now?: () => Date;
   readonly apiKeyForRedaction?: string;
+}
+
+/** One line of the run transcript; failed tool calls are traced, never dropped. */
+export interface JoyAgentTraceRecord {
+  readonly type: 'tool_call' | 'observation' | 'tool_error';
+  readonly name: string;
+  readonly value: unknown;
+}
+
+const MAX_TRACE_ERROR_CHARS = 500;
+
+function traceErrorMessage(error: unknown, apiKey?: string): string {
+  let message =
+    error instanceof Error ? `${error.name}: ${error.message}` : String(error ?? 'unknown error');
+  if (apiKey) message = message.split(apiKey).join('[REDACTED]');
+  return message.length > MAX_TRACE_ERROR_CHARS
+    ? `${message.slice(0, MAX_TRACE_ERROR_CHARS)}…`
+    : message;
 }
 
 export class JoyAgentRunError extends Error {
@@ -351,14 +365,18 @@ export class JoyAgentEngine {
       };
     }
     for (const step of result.steps) {
-      for (const call of step.toolCalls)
-        this.options.onTrace?.({ type: 'tool_call', name: call.toolName, value: call.input });
-      for (const observation of step.toolResults)
-        this.options.onTrace?.({
-          type: 'observation',
-          name: observation.toolName,
-          value: observation.output,
-        });
+      for (const part of step.content) {
+        if (part.type === 'tool-call')
+          this.options.onTrace?.({ type: 'tool_call', name: part.toolName, value: part.input });
+        else if (part.type === 'tool-result')
+          this.options.onTrace?.({ type: 'observation', name: part.toolName, value: part.output });
+        else if (part.type === 'tool-error')
+          this.options.onTrace?.({
+            type: 'tool_error',
+            name: part.toolName,
+            value: { error: traceErrorMessage(part.error, this.options.apiKeyForRedaction) },
+          });
+      }
     }
     const toolCalls = result.steps.reduce((count, step) => count + step.toolCalls.length, 0);
     const noPlan = this.options.bridge.hasSubmittedPlan?.() === false;
