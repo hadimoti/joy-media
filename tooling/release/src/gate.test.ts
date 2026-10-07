@@ -31,9 +31,15 @@ const sourceProvenance = (commit = 'a'.repeat(40)): ReleaseSourceProvenance => (
   worktreeClean: true,
 });
 
+// Fixture evidence is dated August 2026; evaluate it at a fixed time so the release
+// gate's freshness windows (hours for evidence, RELEASE_STATUS_MAX_AGE_DAYS for the
+// feature audit) never depend on the day the suite runs.
+const FIXED_NOW = new Date('2026-08-28T12:00:00.000Z');
+const FIXED_EVIDENCE_AT = '2026-08-28T11:00:00.000Z';
+
 const windowsAcceptance = (
   commit = 'a'.repeat(40),
-  verifiedAt = new Date().toISOString(),
+  verifiedAt = FIXED_EVIDENCE_AT,
 ): ReleaseWindowsAcceptance => ({
   candidateSha: commit,
   workflowRunId: '123456789',
@@ -649,10 +655,13 @@ describe('JOY Studio 1.0 release gate', () => {
   });
 
   it('requires deployment manifests and rollback markers in release evidence', () => {
-    const result = evaluateReleaseGate({
-      ...passingInput(),
-      deploymentManifests: ['deploy/README.md missing: systemctl restart joy-media@api'],
-    });
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        deploymentManifests: ['deploy/README.md missing: systemctl restart joy-media@api'],
+      },
+      FIXED_NOW,
+    );
 
     expect(result.passed).toBe(false);
     expect(result.checks.find((check) => check.id === 'deployment-manifests')?.status).toBe(
@@ -697,22 +706,28 @@ describe('JOY Studio 1.0 release gate', () => {
   });
 
   it('fails the gate if required transition frames are not packaged as SVG', () => {
-    const result = evaluateReleaseGate({
-      ...passingInput(),
-      staticAssetPackaging: [
-        'build output has invalid signature: assets/transition-preview-frame-b.svg',
-      ],
-    });
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        staticAssetPackaging: [
+          'build output has invalid signature: assets/transition-preview-frame-b.svg',
+        ],
+      },
+      FIXED_NOW,
+    );
 
     expect(result.passed).toBe(false);
     expect(result.checks.find((check) => check.id === 'static-assets')?.status).toBe('failed');
   });
 
   it('fails the gate when the font redistribution scan reports an error', () => {
-    const result = evaluateReleaseGate({
-      ...passingInput(),
-      fontAssetErrors: ['retired font asset present: assets/fonts/modam-pro'],
-    });
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        fontAssetErrors: ['retired font asset present: assets/fonts/modam-pro'],
+      },
+      FIXED_NOW,
+    );
 
     expect(result.passed).toBe(false);
     expect(result.checks.find((check) => check.id === 'font-assets')).toMatchObject({
@@ -956,41 +971,53 @@ describe('JOY Studio 1.0 release gate', () => {
   });
 
   it('fails closed when test collection is empty', () => {
-    const result = evaluateReleaseGate({
-      ...passingInput(),
-      testSummary: { collected: 0, failed: 0 },
-    });
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        testSummary: { collected: 0, failed: 0 },
+      },
+      FIXED_NOW,
+    );
     expect(result.passed).toBe(false);
     expect(result.checks.find((check) => check.id === 'tests')?.status).toBe('failed');
   });
 
   it('requires all provenance-bound quantitative release evidence', () => {
-    const missing = evaluateReleaseGate({ ...passingInput(), performanceEvidence: undefined });
+    const missing = evaluateReleaseGate(
+      { ...passingInput(), performanceEvidence: undefined },
+      FIXED_NOW,
+    );
     expect(missing.passed).toBe(false);
     expect(missing.checks.find((check) => check.id === 'performance-evidence')).toMatchObject({
       status: 'failed',
       message: 'quantitative performance evidence is missing',
     });
 
-    const overBudget = evaluateReleaseGate({
-      ...passingInput(),
-      performanceEvidence: {
-        ...performanceEvidence(),
-        effectsSoak: { ...performanceEvidence().effectsSoak, maxPlayingPreviews: 7 },
+    const overBudget = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        performanceEvidence: {
+          ...performanceEvidence(),
+          effectsSoak: { ...performanceEvidence().effectsSoak, maxPlayingPreviews: 7 },
+        },
       },
-    });
+      FIXED_NOW,
+    );
     expect(overBudget.passed).toBe(false);
     expect(overBudget.checks.find((check) => check.id === 'performance-evidence')?.status).toBe(
       'failed',
     );
 
-    const malformed = evaluateReleaseGate({
-      ...passingInput(),
-      performanceEvidence: {
-        ...performanceEvidence(),
-        polling: undefined,
-      } as unknown as ReleaseGateInput['performanceEvidence'],
-    });
+    const malformed = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        performanceEvidence: {
+          ...performanceEvidence(),
+          polling: undefined,
+        } as unknown as ReleaseGateInput['performanceEvidence'],
+      },
+      FIXED_NOW,
+    );
     expect(malformed.passed).toBe(false);
     expect(malformed.checks.find((check) => check.id === 'performance-evidence')?.message).toBe(
       'performance evidence metric blocks are malformed',
@@ -1008,15 +1035,18 @@ describe('JOY Studio 1.0 release gate', () => {
       'worker-build',
       'goldens',
     ];
-    const result = evaluateReleaseGate({
-      ...passingInput(),
-      commandResults: commandIds.map((id) => ({
-        id,
-        command: id,
-        exitCode: id === 'lint' ? 1 : 0,
-        durationMs: 1,
-      })),
-    });
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        commandResults: commandIds.map((id) => ({
+          id,
+          command: id,
+          exitCode: id === 'lint' ? 1 : 0,
+          durationMs: 1,
+        })),
+      },
+      FIXED_NOW,
+    );
     expect(result.passed).toBe(false);
     expect(result.checks.find((check) => check.id === 'command-health')?.status).toBe('failed');
   });
@@ -1032,15 +1062,18 @@ describe('JOY Studio 1.0 release gate', () => {
       'worker-build',
       'goldens',
     ];
-    const result = evaluateReleaseGate({
-      ...passingInput(),
-      commandResults: commandIds.map((id) => ({
-        id,
-        command: id,
-        exitCode: id === 'format' ? 1 : 0,
-        durationMs: 1,
-      })),
-    });
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        commandResults: commandIds.map((id) => ({
+          id,
+          command: id,
+          exitCode: id === 'format' ? 1 : 0,
+          durationMs: 1,
+        })),
+      },
+      FIXED_NOW,
+    );
 
     expect(result.checks.find((check) => check.id === 'command-health')).toMatchObject({
       status: 'failed',
@@ -1049,10 +1082,13 @@ describe('JOY Studio 1.0 release gate', () => {
   });
 
   it('rejects dirty generated artifacts', () => {
-    const result = evaluateReleaseGate({
-      ...passingInput(),
-      dirtyGeneratedArtifacts: ['apps/api/dist/server.js'],
-    });
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        dirtyGeneratedArtifacts: ['apps/api/dist/server.js'],
+      },
+      FIXED_NOW,
+    );
     expect(result.passed).toBe(false);
     expect(result.checks.find((check) => check.id === 'generated-artifacts')?.status).toBe(
       'failed',
@@ -1084,10 +1120,13 @@ describe('JOY Studio 1.0 release gate', () => {
   });
 
   it('rejects fixture handlers in production registries', () => {
-    const result = evaluateReleaseGate({
-      ...passingInput(),
-      fixtureHandlers: ['apps/api/src/server.ts: fixture handler'],
-    });
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        fixtureHandlers: ['apps/api/src/server.ts: fixture handler'],
+      },
+      FIXED_NOW,
+    );
     expect(result.passed).toBe(false);
     expect(result.checks.find((check) => check.id === 'fixture-registries')?.status).toBe('failed');
   });
@@ -1106,7 +1145,7 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(fixtureHandlers).toHaveLength(1);
     expect(fixtureHandlers[0]?.replaceAll('\\', '/')).toBe('apps/api/src/control-plane.ts:1');
 
-    const result = evaluateReleaseGate({ ...passingInput(), fixtureHandlers });
+    const result = evaluateReleaseGate({ ...passingInput(), fixtureHandlers }, FIXED_NOW);
     expect(result.passed).toBe(false);
     expect(result.checks.find((check) => check.id === 'fixture-registries')?.status).toBe('failed');
   });
@@ -1143,27 +1182,28 @@ describe('JOY Studio 1.0 release gate', () => {
 
     const fixtureHandlers = findProductionFixtureRegistrations(root);
     expect(fixtureHandlers).toEqual([]);
-    // Pin the clock: passingInput() evidence is dated August 2026 and the gate
-    // rejects evidence older than RELEASE_STATUS_MAX_AGE_DAYS.
     expect(
       evaluateReleaseGate(
         {
           ...passingInput(),
-          windowsAcceptance: windowsAcceptance('a'.repeat(40), '2026-08-28T11:00:00.000Z'),
+          windowsAcceptance: windowsAcceptance(),
           fixtureHandlers,
         },
-        new Date('2026-08-28T12:00:00.000Z'),
+        FIXED_NOW,
       ).passed,
     ).toBe(true);
   });
 
   it('requires every build plus the manifest and SBOM', () => {
-    const result = evaluateReleaseGate({
-      ...passingInput(),
-      builds: { editor: true, api: false, worker: true },
-      manifestGenerated: false,
-      sbomGenerated: false,
-    });
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        builds: { editor: true, api: false, worker: true },
+        manifestGenerated: false,
+        sbomGenerated: false,
+      },
+      FIXED_NOW,
+    );
     expect(result.passed).toBe(false);
     expect(result.checks.find((check) => check.id === 'builds')?.status).toBe('failed');
     expect(result.checks.find((check) => check.id === 'manifest')?.status).toBe('failed');
@@ -1171,7 +1211,7 @@ describe('JOY Studio 1.0 release gate', () => {
   });
 
   it('rejects an unverified or incomplete browser journey', () => {
-    const result = evaluateReleaseGate({ ...passingInput(), browserJourneys: [] });
+    const result = evaluateReleaseGate({ ...passingInput(), browserJourneys: [] }, FIXED_NOW);
     expect(result.passed).toBe(false);
     expect(result.checks.find((check) => check.id === 'browser-journey')).toMatchObject({
       status: 'failed',
@@ -1199,18 +1239,24 @@ describe('JOY Studio 1.0 release gate', () => {
   });
 
   it('requires complete operational evidence when a real workspace supplies it', () => {
-    const passed = evaluateReleaseGate({
-      ...passingInput(),
-      operationalEvidence: operationalEvidence(),
-    });
+    const passed = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        operationalEvidence: operationalEvidence(),
+      },
+      FIXED_NOW,
+    );
     expect(passed.checks.find((check) => check.id === 'operational-evidence')).toMatchObject({
       status: 'passed',
     });
 
-    const incomplete = evaluateReleaseGate({
-      ...passingInput(),
-      operationalEvidence: null,
-    });
+    const incomplete = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        operationalEvidence: null,
+      },
+      FIXED_NOW,
+    );
     expect(incomplete.checks.find((check) => check.id === 'operational-evidence')).toMatchObject({
       status: 'failed',
       message: 'delivery, Windows, and restore evidence is missing',
@@ -1218,10 +1264,13 @@ describe('JOY Studio 1.0 release gate', () => {
   });
 
   it('accepts the container harness schema-2 lifecycle contract', () => {
-    const result = evaluateReleaseGate({
-      ...passingInput(),
-      operationalEvidence: schema2OperationalEvidence(),
-    });
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        operationalEvidence: schema2OperationalEvidence(),
+      },
+      FIXED_NOW,
+    );
     expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
       'passed',
     );
@@ -1284,13 +1333,16 @@ describe('JOY Studio 1.0 release gate', () => {
     for (const fail of failures) {
       const changedLifecycle = { ...lifecycle };
       fail(changedLifecycle);
-      const result = evaluateReleaseGate({
-        ...passingInput(),
-        operationalEvidence: {
-          ...base,
-          windows: { ...windows, lifecycle: changedLifecycle },
+      const result = evaluateReleaseGate(
+        {
+          ...passingInput(),
+          operationalEvidence: {
+            ...base,
+            windows: { ...windows, lifecycle: changedLifecycle },
+          },
         },
-      });
+        FIXED_NOW,
+      );
       expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
         'failed',
       );
@@ -1299,19 +1351,22 @@ describe('JOY Studio 1.0 release gate', () => {
 
   it('requires export bytes and hashes to match download and re-import evidence', () => {
     const evidence = operationalEvidence();
-    const result = evaluateReleaseGate({
-      ...passingInput(),
-      operationalEvidence: {
-        ...evidence,
-        delivery: {
-          ...evidence.delivery,
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        operationalEvidence: {
+          ...evidence,
           delivery: {
-            ...(evidence.delivery.delivery as Record<string, unknown>),
-            downloaded: { status: 200, bytes: 128, sha256: 'e'.repeat(64) },
+            ...evidence.delivery,
+            delivery: {
+              ...(evidence.delivery.delivery as Record<string, unknown>),
+              downloaded: { status: 200, bytes: 128, sha256: 'e'.repeat(64) },
+            },
           },
         },
       },
-    });
+      FIXED_NOW,
+    );
     expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
       'failed',
     );
@@ -1319,23 +1374,26 @@ describe('JOY Studio 1.0 release gate', () => {
 
   it('rejects delivery evidence that is not bound to the JOY export path', () => {
     const evidence = operationalEvidence();
-    const result = evaluateReleaseGate({
-      ...passingInput(),
-      operationalEvidence: {
-        ...evidence,
-        delivery: {
-          ...evidence.delivery,
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        operationalEvidence: {
+          ...evidence,
           delivery: {
-            ...(evidence.delivery.delivery as Record<string, unknown>),
-            mixedSourceExport: {
-              ...((evidence.delivery.delivery as Record<string, unknown>)
-                .mixedSourceExport as Record<string, unknown>),
-              producer: 'standalone-ffmpeg',
+            ...evidence.delivery,
+            delivery: {
+              ...(evidence.delivery.delivery as Record<string, unknown>),
+              mixedSourceExport: {
+                ...((evidence.delivery.delivery as Record<string, unknown>)
+                  .mixedSourceExport as Record<string, unknown>),
+                producer: 'standalone-ffmpeg',
+              },
             },
           },
         },
       },
-    });
+      FIXED_NOW,
+    );
     expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
       'failed',
     );
@@ -1343,23 +1401,26 @@ describe('JOY Studio 1.0 release gate', () => {
 
   it('rejects delivery evidence when the retained export cannot be redownloaded byte-for-byte', () => {
     const evidence = operationalEvidence();
-    const result = evaluateReleaseGate({
-      ...passingInput(),
-      operationalEvidence: {
-        ...evidence,
-        delivery: {
-          ...evidence.delivery,
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        operationalEvidence: {
+          ...evidence,
           delivery: {
-            ...(evidence.delivery.delivery as Record<string, unknown>),
-            mixedSourceExport: {
-              ...((evidence.delivery.delivery as Record<string, unknown>)
-                .mixedSourceExport as Record<string, unknown>),
-              durableRedownloadMatched: false,
+            ...evidence.delivery,
+            delivery: {
+              ...(evidence.delivery.delivery as Record<string, unknown>),
+              mixedSourceExport: {
+                ...((evidence.delivery.delivery as Record<string, unknown>)
+                  .mixedSourceExport as Record<string, unknown>),
+                durableRedownloadMatched: false,
+              },
             },
           },
         },
       },
-    });
+      FIXED_NOW,
+    );
     expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
       'failed',
     );
@@ -1367,19 +1428,22 @@ describe('JOY Studio 1.0 release gate', () => {
 
   it('rejects operational evidence with a failed lifecycle step', () => {
     const evidence = operationalEvidence();
-    const result = evaluateReleaseGate({
-      ...passingInput(),
-      operationalEvidence: {
-        ...evidence,
-        windows: {
-          ...evidence.windows,
-          lifecycle: {
-            ...evidence.windows.lifecycle,
-            startup: { status: 'failed' },
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        operationalEvidence: {
+          ...evidence,
+          windows: {
+            ...evidence.windows,
+            lifecycle: {
+              ...evidence.windows.lifecycle,
+              startup: { status: 'failed' },
+            },
           },
         },
       },
-    });
+      FIXED_NOW,
+    );
     expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
       'failed',
     );
@@ -1387,23 +1451,26 @@ describe('JOY Studio 1.0 release gate', () => {
 
   it('rejects Windows evidence without a protected disposable fixture session', () => {
     const evidence = operationalEvidence();
-    const result = evaluateReleaseGate({
-      ...passingInput(),
-      operationalEvidence: {
-        ...evidence,
-        windows: {
-          ...evidence.windows,
-          lifecycle: {
-            ...evidence.windows.lifecycle,
-            session: {
-              ...evidence.windows.lifecycle.session,
-              fixtureSessionUsed: false,
-              protectedState: false,
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        operationalEvidence: {
+          ...evidence,
+          windows: {
+            ...evidence.windows,
+            lifecycle: {
+              ...evidence.windows.lifecycle,
+              session: {
+                ...evidence.windows.lifecycle.session,
+                fixtureSessionUsed: false,
+                protectedState: false,
+              },
             },
           },
         },
       },
-    });
+      FIXED_NOW,
+    );
     expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
       'failed',
     );
@@ -1411,26 +1478,29 @@ describe('JOY Studio 1.0 release gate', () => {
 
   it('rejects Windows evidence when startup trigger or notification proof disagrees', () => {
     const evidence = operationalEvidence();
-    const result = evaluateReleaseGate({
-      ...passingInput(),
-      operationalEvidence: {
-        ...evidence,
-        windows: {
-          ...evidence.windows,
-          lifecycle: {
-            ...evidence.windows.lifecycle,
-            startup: {
-              ...evidence.windows.lifecycle.startup,
-              triggerVerified: false,
-              daemon: {
-                ...(evidence.windows.lifecycle.startup.daemon as Record<string, unknown>),
-                notificationCleared: false,
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        operationalEvidence: {
+          ...evidence,
+          windows: {
+            ...evidence.windows,
+            lifecycle: {
+              ...evidence.windows.lifecycle,
+              startup: {
+                ...evidence.windows.lifecycle.startup,
+                triggerVerified: false,
+                daemon: {
+                  ...(evidence.windows.lifecycle.startup.daemon as Record<string, unknown>),
+                  notificationCleared: false,
+                },
               },
             },
           },
         },
       },
-    });
+      FIXED_NOW,
+    );
     expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
       'failed',
     );
@@ -1438,16 +1508,19 @@ describe('JOY Studio 1.0 release gate', () => {
 
   it('rejects non-verified operational evidence statuses', () => {
     const evidence = operationalEvidence();
-    const result = evaluateReleaseGate({
-      ...passingInput(),
-      operationalEvidence: {
-        ...evidence,
-        delivery: {
-          ...evidence.delivery,
-          status: 'smoke-only',
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        operationalEvidence: {
+          ...evidence,
+          delivery: {
+            ...evidence.delivery,
+            status: 'smoke-only',
+          },
         },
       },
-    });
+      FIXED_NOW,
+    );
     expect(result.checks.find((check) => check.id === 'operational-evidence')?.status).toBe(
       'failed',
     );
@@ -1455,7 +1528,7 @@ describe('JOY Studio 1.0 release gate', () => {
 
   describe('mandatory Windows-Docker acceptance', () => {
     it('fails closed when evidence is missing', () => {
-      const result = evaluateReleaseGate({ ...passingInput(), windowsAcceptance: null });
+      const result = evaluateReleaseGate({ ...passingInput(), windowsAcceptance: null }, FIXED_NOW);
       expect(result.checks.find((c) => c.id === 'windows-acceptance')).toMatchObject({
         status: 'failed',
         critical: true,
@@ -1476,7 +1549,10 @@ describe('JOY Studio 1.0 release gate', () => {
         execution: 'windows-self-hosted-docker',
       } as unknown as ReleaseWindowsAcceptance;
       for (const evidence of [portable, hostDirect]) {
-        const result = evaluateReleaseGate({ ...passingInput(), windowsAcceptance: evidence });
+        const result = evaluateReleaseGate(
+          { ...passingInput(), windowsAcceptance: evidence },
+          FIXED_NOW,
+        );
         expect(result.checks.find((c) => c.id === 'windows-acceptance')?.status).toBe('failed');
         expect(result.passed).toBe(false);
       }
@@ -1493,11 +1569,14 @@ describe('JOY Studio 1.0 release gate', () => {
         } as unknown as ReleaseWindowsAcceptance,
       ];
       for (const evidence of cases) {
-        const result = evaluateReleaseGate({
-          ...passingInput(),
-          sourceProvenance: sourceProvenance(),
-          windowsAcceptance: evidence,
-        });
+        const result = evaluateReleaseGate(
+          {
+            ...passingInput(),
+            sourceProvenance: sourceProvenance(),
+            windowsAcceptance: evidence,
+          },
+          FIXED_NOW,
+        );
         expect(result.checks.find((c) => c.id === 'windows-acceptance')?.status).toBe('failed');
         expect(result.passed).toBe(false);
       }
@@ -1514,10 +1593,13 @@ describe('JOY Studio 1.0 release gate', () => {
       process.env.JOY_RELEASE_CANDIDATE_SHA = 'a'.repeat(40);
       try {
         expect(
-          evaluateReleaseGate({
-            ...passingInput(),
-            windowsAcceptance: windowsAcceptance(),
-          }).checks.find((check) => check.id === 'windows-acceptance')?.status,
+          evaluateReleaseGate(
+            {
+              ...passingInput(),
+              windowsAcceptance: windowsAcceptance(),
+            },
+            FIXED_NOW,
+          ).checks.find((check) => check.id === 'windows-acceptance')?.status,
         ).toBe('passed');
         const mismatches = [
           { ...windowsAcceptance(), workflowRunId: '987654321' },
@@ -1526,9 +1608,10 @@ describe('JOY Studio 1.0 release gate', () => {
         ];
         for (const evidence of mismatches) {
           expect(
-            evaluateReleaseGate({ ...passingInput(), windowsAcceptance: evidence }).checks.find(
-              (check) => check.id === 'windows-acceptance',
-            )?.status,
+            evaluateReleaseGate(
+              { ...passingInput(), windowsAcceptance: evidence },
+              FIXED_NOW,
+            ).checks.find((check) => check.id === 'windows-acceptance')?.status,
           ).toBe('failed');
         }
       } finally {
@@ -1556,19 +1639,25 @@ describe('JOY Studio 1.0 release gate', () => {
         withStartup({ trigger: 'at-logon', launchObserved: true, taskRan: undefined }),
       ];
       for (const evidence of rejected) {
-        const result = evaluateReleaseGate({ ...passingInput(), windowsAcceptance: evidence });
+        const result = evaluateReleaseGate(
+          { ...passingInput(), windowsAcceptance: evidence },
+          FIXED_NOW,
+        );
         expect(result.checks.find((c) => c.id === 'windows-acceptance')?.status).toBe('failed');
         expect(result.passed).toBe(false);
       }
 
-      const scheduled = evaluateReleaseGate({
-        ...passingInput(),
-        windowsAcceptance: withStartup({
-          trigger: 'at-logon',
-          launchObserved: undefined,
-          taskRan: true,
-        }),
-      });
+      const scheduled = evaluateReleaseGate(
+        {
+          ...passingInput(),
+          windowsAcceptance: withStartup({
+            trigger: 'at-logon',
+            launchObserved: undefined,
+            taskRan: true,
+          }),
+        },
+        FIXED_NOW,
+      );
       expect(scheduled.checks.find((c) => c.id === 'windows-acceptance')?.status).toBe('passed');
     });
 
@@ -1591,7 +1680,10 @@ describe('JOY Studio 1.0 release gate', () => {
         },
       ];
       for (const evidence of malformedIdentityCases) {
-        const result = evaluateReleaseGate({ ...passingInput(), windowsAcceptance: evidence });
+        const result = evaluateReleaseGate(
+          { ...passingInput(), windowsAcceptance: evidence },
+          FIXED_NOW,
+        );
         expect(result.checks.find((c) => c.id === 'windows-acceptance')?.status).toBe('failed');
         expect(result.passed).toBe(false);
       }
@@ -1600,10 +1692,13 @@ describe('JOY Studio 1.0 release gate', () => {
         ...base,
         execution: 'windows-self-hosted-docker',
       } as const;
-      const legacyResult = evaluateReleaseGate({
-        ...passingInput(),
-        windowsAcceptance: legacyExecution,
-      });
+      const legacyResult = evaluateReleaseGate(
+        {
+          ...passingInput(),
+          windowsAcceptance: legacyExecution,
+        },
+        FIXED_NOW,
+      );
       expect(legacyResult.checks.find((c) => c.id === 'windows-acceptance')).toMatchObject({
         status: 'passed',
         critical: true,
@@ -1614,10 +1709,13 @@ describe('JOY Studio 1.0 release gate', () => {
         runner: 'self-hosted,windows,x64,joy-media-worker',
         execution: 'windows-self-hosted-docker',
       } as unknown as ReleaseWindowsAcceptance;
-      const untrustedLegacyResult = evaluateReleaseGate({
-        ...passingInput(),
-        windowsAcceptance: untrustedLegacyExecution,
-      });
+      const untrustedLegacyResult = evaluateReleaseGate(
+        {
+          ...passingInput(),
+          windowsAcceptance: untrustedLegacyExecution,
+        },
+        FIXED_NOW,
+      );
       expect(untrustedLegacyResult.checks.find((c) => c.id === 'windows-acceptance')?.status).toBe(
         'failed',
       );
@@ -1625,10 +1723,13 @@ describe('JOY Studio 1.0 release gate', () => {
     });
 
     it('accepts only the complete exact-candidate Windows-Docker fixture', () => {
-      const result = evaluateReleaseGate({
-        ...passingInput(),
-        windowsAcceptance: windowsAcceptance(),
-      });
+      const result = evaluateReleaseGate(
+        {
+          ...passingInput(),
+          windowsAcceptance: windowsAcceptance(),
+        },
+        FIXED_NOW,
+      );
       expect(result.checks.find((c) => c.id === 'windows-acceptance')).toMatchObject({
         status: 'passed',
         critical: true,
@@ -1638,16 +1739,19 @@ describe('JOY Studio 1.0 release gate', () => {
 
   it('requires strict boolean timeline integrity evidence', () => {
     const evidence = performanceEvidence();
-    const result = evaluateReleaseGate({
-      ...passingInput(),
-      performanceEvidence: {
-        ...evidence,
-        timelineIntegrity: {
-          ...evidence.timelineIntegrity,
-          uniqueIds: 1 as unknown as boolean,
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        performanceEvidence: {
+          ...evidence,
+          timelineIntegrity: {
+            ...evidence.timelineIntegrity,
+            uniqueIds: 1 as unknown as boolean,
+          },
         },
       },
-    });
+      FIXED_NOW,
+    );
     expect(result.checks.find((check) => check.id === 'performance-evidence')?.status).toBe(
       'failed',
     );
@@ -1764,7 +1868,7 @@ describe('JOY Studio 1.0 release gate', () => {
       },
     };
 
-    expect(() => writeReleaseEvidence(root, output, evidence)).toThrow(
+    expect(() => writeReleaseEvidence(root, output, evidence, FIXED_NOW)).toThrow(
       'release manifest source provenance does not match the workspace evidence',
     );
   });
