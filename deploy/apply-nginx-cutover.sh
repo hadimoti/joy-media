@@ -153,11 +153,25 @@ def strip_internal_deny(server):
             server = server[:start] + server[end:]
     return server
 
+def expand_single_line(block):
+    # "location = /x { a; b; }" -> one directive per line, so headers can be inserted.
+    if "\n" in block:
+        return block
+    opening, closing = block.index("{"), block.rindex("}")
+    indent = re.match(r"^[ \t]*", block).group(0)
+    directives = [item.strip() for item in block[opening + 1:closing].split(";") if item.strip()]
+    body = "".join(f"{indent}    {item};\n" for item in directives)
+    return block[:opening + 1].rstrip() + "\n" + body + indent + "}"
+
+API_UPSTREAM = re.compile(r"(?m)^[^#\n]*\bproxy_pass\s+http://127\.0\.0\.1:8790[/;]")
+
 def canonicalize_proxy_headers(server):
+    # Every location that reaches the API (including health/readiness probes)
+    # replaces any client-supplied X-Forwarded-For/X-Real-IP with the peer.
     for start, end, header, block in reversed(list(location_blocks(server))):
-        if not ("/api/v1/agent" in header or re.search(r"auth\|devices\|account\|entitlements\|releases\|billing", header)):
+        if not ("/api/v1/agent" in header or re.search(r"auth\|devices\|account\|entitlements\|releases\|billing", header) or API_UPSTREAM.search(block)):
             continue
-        lines = block.splitlines()
+        lines = expand_single_line(block).splitlines()
         output = []
         added = False
         for line in lines[:-1]:

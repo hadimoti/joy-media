@@ -355,7 +355,9 @@ describe(
       const joyst = findJoystTlsBlock(updated);
       assert.ok(joyst);
       const locations = parseLocations(joyst);
-      assert.equal(selectNginxLocation(locations, '/api/health').pattern, '/api/health');
+      const health = selectNginxLocation(locations, '/api/health');
+      assert.equal(health.pattern, '/api/health');
+      assert.match(health.body, /proxy_pass http:\/\/127\.0\.0\.1:8790\/health;/);
       for (const path of [
         '/api/v1/agent/chat/completions',
         '/api/v1/agent/models',
@@ -375,9 +377,12 @@ describe(
       const combinedApi = locations.find((location) => location.pattern.includes('auth|devices'));
       assert.ok(combinedApi);
       assert.doesNotMatch(combinedApi.pattern, /\|agent|agent\|/);
+      // Every location that reaches the API, including the health probes,
+      // overwrites the client's X-Forwarded-For (r13 review finding 1).
       for (const location of [
         selectNginxLocation(locations, '/api/v1/agent/models'),
         combinedApi,
+        health,
       ]) {
         assert.match(location.body, /proxy_set_header X-Forwarded-For \$remote_addr;/);
         assert.match(location.body, /proxy_set_header X-Real-IP \$remote_addr;/);
@@ -654,9 +659,14 @@ describe(
         for (const range of ranges) assert.ok(joyst.includes(`set_real_ip_from ${range};`));
         assert.match(joyst, /real_ip_header CF-Connecting-IP;/u);
         assert.match(joyst, /location \/internal\/ \{\s*return 404;\s*\}/u);
-        for (const location of parseLocations(joyst).filter((item) =>
-          /agent|auth\|devices/u.test(item.pattern),
-        )) {
+        const proxied = parseLocations(joyst).filter((item) =>
+          /proxy_pass http:\/\/127\.0\.0\.1:8790/u.test(item.body),
+        );
+        assert.ok(
+          proxied.some((item) => item.pattern === '/ready'),
+          `${name} proxies the readiness probe`,
+        );
+        for (const location of proxied) {
           assert.match(location.body, /proxy_set_header X-Forwarded-For \$remote_addr;/u);
           assert.match(location.body, /proxy_set_header X-Real-IP \$remote_addr;/u);
           assert.doesNotMatch(location.body, /\$proxy_add_x_forwarded_for/u);
