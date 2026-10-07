@@ -66,7 +66,7 @@ with open(ips_path, encoding="utf-8-sig") as source:
         # Every trusted range may set the client address, so a typo such as
         # 0.0.0.0/0 or a private range would let anyone spoof CF-Connecting-IP.
         # Cloudflare's broadest ranges are /13 (IPv4) and /29 (IPv6).
-        if network.prefixlen < {4: 12, 6: 24}[network.version] or not network.is_global:
+        if network.prefixlen < {4: 12, 6: 29}[network.version] or not network.is_global:
             raise ValueError(f"Refusing over-broad or non-public Cloudflare CIDR at {ips_path}:{line_number}: {network}")
         ranges.append(str(network))
 if not ranges:
