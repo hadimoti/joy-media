@@ -249,12 +249,17 @@ async function whoami(options: AuthCommandOptions): Promise<number> {
   return 0;
 }
 
+const LOGOUT_TIMEOUT_MS = 10_000;
+
 async function logout(options: AuthCommandOptions): Promise<number> {
   const session = loadJoySession();
   if (!session) {
     logSuccess('Already logged out.');
     return 0;
   }
+  // The local token is always removed; the exit code says whether the server revoked it.
+  let notRevoked: string | undefined;
+  let alreadyEnded = false;
   try {
     const apiBase = resolveApiBase(options.apiBase);
     assertSessionOrigin(session.apiOrigin ?? 'https://joyst.ir', apiBase);
@@ -262,20 +267,28 @@ async function logout(options: AuthCommandOptions): Promise<number> {
       method: 'POST',
       headers: { authorization: `Bearer ${session.token}` },
       redirect: 'manual',
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(LOGOUT_TIMEOUT_MS),
     });
-    if (!response.ok) throw new Error('Server logout was not confirmed');
+    if (response.status === 401) alreadyEnded = true;
+    else if (!response.ok) notRevoked = `server answered HTTP ${response.status}`;
   } catch (error) {
     const message = error instanceof Error ? error.message : '';
-    logError(
-      message.startsWith('saved login is for ')
+    notRevoked =
+      message.startsWith('saved login is for ') ||
+      message.startsWith('API base URL') ||
+      message === 'Invalid API base URL'
         ? message
-        : 'Server logout could not be confirmed; the local session was removed.',
-    );
+        : isRecord(error) && (error.name === 'TimeoutError' || error.name === 'AbortError')
+          ? `no answer within ${LOGOUT_TIMEOUT_MS / 1000} s`
+          : `could not reach the server: ${networkReason(error)}`;
   } finally {
     clearJoySession();
   }
-  logSuccess('Logged out.');
+  if (notRevoked !== undefined) {
+    logError(`Logged out locally; server session not revoked (${notRevoked}).`);
+    return 1;
+  }
+  logSuccess(alreadyEnded ? 'Logged out (the server session had already ended).' : 'Logged out.');
   return 0;
 }
 

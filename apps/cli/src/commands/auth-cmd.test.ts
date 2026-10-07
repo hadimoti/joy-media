@@ -476,19 +476,66 @@ describe('CLI JOY session commands', () => {
     expect(JSON.stringify(errors.mock.calls)).not.toContain('https://evil.example.invalid');
   });
 
-  it('times out server logout, clears the local token, and reports that revocation was not confirmed', async () => {
+  it('times out server logout, clears the local token, and exits non-zero', async () => {
     saveJoySession({ token: 'tok-fake-1', apiOrigin: 'https://joyst.ir' });
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
       expect(init?.signal).toBeInstanceOf(AbortSignal);
       throw new DOMException('The operation was aborted', 'TimeoutError');
     });
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    expect(await runCli(['logout'])).toBe(0);
+    expect(await runCli(['logout'])).toBe(1);
 
     expect(fetchSpy).toHaveBeenCalledOnce();
     expect(keyring.has('joy-media-session')).toBe(false);
-    expect(JSON.stringify(errors.mock.calls)).toContain('Server logout could not be confirmed');
+    expect(JSON.stringify(errors.mock.calls)).toContain(
+      'Logged out locally; server session not revoked (no answer within 10 s)',
+    );
+    expect(JSON.stringify(output.mock.calls)).not.toContain('Logged out.');
+  });
+
+  it('reports a failed server revocation with a non-zero exit', async () => {
+    saveJoySession({ token: 'tok-fake-1', apiOrigin: 'https://joyst.ir' });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: 'INTERNAL' } }), { status: 500 }),
+    );
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    expect(await runCli(['logout'])).toBe(1);
+
+    expect(keyring.has('joy-media-session')).toBe(false);
+    expect(JSON.stringify(errors.mock.calls)).toContain(
+      'Logged out locally; server session not revoked (server answered HTTP 500)',
+    );
+    expect(JSON.stringify(output.mock.calls)).not.toContain('Logged out.');
+  });
+
+  it('does not send the token to another origin on logout and says it was not revoked', async () => {
+    saveJoySession({ token: 'tok-fake-1', apiOrigin: 'https://joyst.ir' });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runCli(['logout', '--api-base', 'https://example.invalid/api'])).toBe(1);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(keyring.has('joy-media-session')).toBe(false);
+    expect(JSON.stringify(errors.mock.calls)).toContain(
+      'Logged out locally; server session not revoked (saved login is for https://joyst.ir',
+    );
+  });
+
+  it('treats an already-expired server session as logged out', async () => {
+    saveJoySession({ token: 'tok-fake-1', apiOrigin: 'https://joyst.ir' });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: 'UNAUTHENTICATED' } }), { status: 401 }),
+    );
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    expect(await runCli(['logout'])).toBe(0);
+    expect(keyring.has('joy-media-session')).toBe(false);
+    expect(JSON.stringify(output.mock.calls)).toContain('server session had already ended');
   });
 
   it('shows the stable too-many-attempts login message', async () => {
