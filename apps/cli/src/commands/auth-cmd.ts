@@ -20,6 +20,8 @@ export interface AuthCommandOptions {
 interface AuthRequestError extends Error {
   readonly status?: number;
   readonly code?: string;
+  /** Set when no HTTP response arrived (DNS, refused connection, TLS, timeout). */
+  readonly network?: string;
 }
 
 const DEFAULT_JOY_API_BASE = 'https://joyst.ir/api';
@@ -88,7 +90,7 @@ export async function handleAuthCommand(
     else
       logError(
         command === 'login'
-          ? 'Login failed. Check the email and try again.'
+          ? `Login failed: ${message || 'unexpected error'}.`
           : 'JOY account request failed.',
       );
     return 1;
@@ -116,11 +118,16 @@ async function login(options: AuthCommandOptions): Promise<number> {
   }
   const email = (options.email ?? (await prompts.email())).trim();
   if (!EMAIL_ADDRESS.test(email)) throw new AuthInputError('Invalid email address.');
-  await requestJson(`${apiBase}/v1/auth/request-otp`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ contact: email, method: 'gmail' }),
-  });
+  try {
+    await requestJson(`${apiBase}/v1/auth/request-otp`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ contact: email, method: 'gmail' }),
+    });
+  } catch (error) {
+    logError(describeLoginFailure(error, 'request', apiBase));
+    return 1;
+  }
   const code = options.code ?? (await prompts.code());
   if (!LOGIN_CODE.test(code))
     throw new AuthInputError('Invalid code: login codes are 4 to 8 digits.');
@@ -132,18 +139,17 @@ async function login(options: AuthCommandOptions): Promise<number> {
       body: JSON.stringify({ contact: email, method: 'gmail', code }),
     });
   } catch (error) {
-    const code = errorCodeOf(error);
-    if (code === 'TOO_MANY_ATTEMPTS')
-      logError('Too many incorrect login codes. Request a new code later.');
-    else if (code === 'RATE_LIMITED') logError('Too many login requests. Try again later.');
-    else logError('The login code was invalid or expired.');
+    logError(describeLoginFailure(error, 'verify', apiBase));
     return 1;
   }
   const token =
     isRecord(verification) && typeof verification.token === 'string'
       ? verification.token
       : undefined;
-  if (!token) throw new Error('Invalid login response');
+  if (!token) {
+    logError('The JOY server sent an unexpected login response. Try again later.');
+    return 1;
+  }
   saveJoySession(
     { token, email, apiOrigin: new URL(apiBase).origin },
     Boolean(options.insecureFileStore),
@@ -231,8 +237,21 @@ function signedOut(json = false): number {
   return 1;
 }
 
+const AUTH_REQUEST_TIMEOUT_MS = 20_000;
+
 async function requestJson(url: string, init: RequestInit): Promise<unknown> {
-  const response = await fetch(url, { ...init, redirect: 'manual' });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...init,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS),
+    });
+  } catch (cause) {
+    const error = new Error('JOY account request did not reach the server') as AuthRequestError;
+    Object.defineProperty(error, 'network', { value: networkReason(cause) });
+    throw error;
+  }
   let body: unknown;
   try {
     body = await response.json();
@@ -274,6 +293,43 @@ function resolveApiBase(flag?: string): string {
   )
     throw new Error('API base URL must use HTTPS or localhost HTTP');
   return url.toString().replace(/\/+$/, '');
+}
+
+/**
+ * Names what went wrong with a login request. Only a rejected code keeps the deliberately
+ * vague "invalid or expired" wording; the server hides whether the address exists.
+ */
+function describeLoginFailure(
+  error: unknown,
+  phase: 'request' | 'verify',
+  apiBase: string,
+): string {
+  const origin = new URL(apiBase).origin;
+  const network = isRecord(error) && typeof error.network === 'string' ? error.network : undefined;
+  if (network)
+    return `Could not reach the JOY API at ${origin} (${network}). Check --api-base and your connection.`;
+  const code = errorCodeOf(error);
+  if (code === 'TOO_MANY_ATTEMPTS')
+    return 'Too many incorrect login codes. Request a new code later.';
+  if (code === 'RATE_LIMITED') return 'Too many login requests. Try again later.';
+  const status = statusOf(error) ?? 0;
+  const action = phase === 'request' ? 'sending the login code' : 'checking the login code';
+  if (status === 0 || (status >= 300 && status < 400))
+    return `The JOY API at ${origin} answered with a redirect (HTTP ${status}); check --api-base (it should be the API URL, e.g. https://joyst.ir/api).`;
+  if (status >= 500)
+    return `The JOY server failed (HTTP ${status}) while ${action}. This is not a problem with your email; try again in a few minutes.`;
+  if (status === 404) return `${apiBase} has no login endpoint (HTTP 404); check --api-base.`;
+  if (status === 429) return 'Too many login requests. Try again later.';
+  if (phase === 'verify') return 'The login code was invalid or expired.';
+  return `The server rejected the login request (HTTP ${status}). Check the email address and try again.`;
+}
+
+function networkReason(cause: unknown): string {
+  if (isRecord(cause) && (cause.name === 'TimeoutError' || cause.name === 'AbortError'))
+    return `no answer within ${AUTH_REQUEST_TIMEOUT_MS / 1000} s`;
+  const nested = isRecord(cause) && isRecord(cause.cause) ? cause.cause : undefined;
+  const code = nested && typeof nested.code === 'string' ? nested.code : undefined;
+  return code && /^[A-Z0-9_]{2,40}$/.test(code) ? code : 'network error';
 }
 
 function resolveLoginApiBase(flag?: string): string {

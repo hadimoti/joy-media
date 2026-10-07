@@ -162,6 +162,26 @@ describe('CLI JOY session commands', () => {
     [['login', '--code', '123456'], 'Pass --email'],
     [['login', '--email', 'person@example.invalid', '--code', '12ab'], 'Invalid code'],
     [['login', '--email', 'not-an-email', '--code', '123456'], 'Invalid email address'],
+    [
+      ['login', '--email', 'a@example.invalid', '--code', '123456', '--api-base', 'ftp://x/api'],
+      'API base URL must use HTTPS or localhost HTTP',
+    ],
+    [
+      [
+        'login',
+        '--email',
+        'a@example.invalid',
+        '--code',
+        '123456',
+        '--api-base',
+        'http://192.168.1.5:8080/api',
+      ],
+      'API base URL must use HTTPS or localhost HTTP',
+    ],
+    [
+      ['login', '--email', 'a@example.invalid', '--code', '123456', '--api-base', 'not-a-url'],
+      'Invalid API base URL',
+    ],
   ])('validates %j locally without contacting the server', async (args, message) => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -171,6 +191,65 @@ describe('CLI JOY session commands', () => {
     expect(result).toBe(2);
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(JSON.stringify(errors.mock.calls)).toContain(message);
+  });
+
+  it.each([
+    [
+      'a server error while sending the code',
+      () => new Response(JSON.stringify({ error: { code: 'INTERNAL' } }), { status: 500 }),
+      'The JOY server failed (HTTP 500) while sending the login code',
+    ],
+    [
+      'a redirect',
+      () =>
+        new Response(null, { status: 302, headers: { location: 'https://elsewhere.invalid/' } }),
+      'answered with a redirect (HTTP 302)',
+    ],
+    [
+      'a missing endpoint',
+      () => new Response('not found', { status: 404 }),
+      'has no login endpoint (HTTP 404)',
+    ],
+    [
+      'a rejected request',
+      () => new Response(JSON.stringify({ error: { code: 'INVALID_CONTACT' } }), { status: 400 }),
+      'The server rejected the login request (HTTP 400)',
+    ],
+    [
+      'a network failure',
+      () => {
+        throw new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } });
+      },
+      'Could not reach the JOY API at https://joyst.ir (ECONNREFUSED)',
+    ],
+  ])('names %s on request-otp instead of blaming the email', async (_label, reply, message) => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => reply());
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await runCli(['login', '--email', 'person@example.invalid', '--code', '123456']);
+
+    expect(result).toBe(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const printed = JSON.stringify(errors.mock.calls);
+    expect(printed).toContain(message);
+    expect(printed).not.toContain('Login failed. Check the email and try again.');
+    expect(printed).not.toContain('elsewhere.invalid');
+  });
+
+  it('reports a server error while checking the code instead of an invalid code', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) =>
+      String(input).endsWith('/v1/auth/request-otp')
+        ? new Response(JSON.stringify({ data: { message: 'Code requested.' } }), { status: 200 })
+        : new Response(JSON.stringify({ error: { code: 'INTERNAL' } }), { status: 503 }),
+    );
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await runCli(['login', '--email', 'person@example.invalid', '--code', '123456']);
+
+    expect(result).toBe(1);
+    const printed = JSON.stringify(errors.mock.calls);
+    expect(printed).toContain('The JOY server failed (HTTP 503) while checking the login code');
+    expect(printed).not.toContain('invalid or expired');
   });
 
   it('shows identity and subscription details from the desktop identity endpoints as JSON', async () => {
