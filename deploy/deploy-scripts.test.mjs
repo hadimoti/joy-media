@@ -542,6 +542,51 @@ describe(
       );
     });
 
+    it('keeps each comment above the location it describes', (t) => {
+      if (!hasPython)
+        return t.skip('python3 is unavailable; Nginx patch integration needs real Python');
+      const sandbox = createSandbox(t);
+      const commented = `server {\n    listen 82.115.8.224:443 ssl;\n    server_name joyst.ir www.joyst.ir;\n    ssl_certificate /etc/ssl/joyst/origincertificate.pem;\n\n    # Static root comment\n    root /opt/joy-media/account-web;\n\n    # Static assets comment\n    location ~* \\.(?:css|js)$ {\n        try_files $uri =404;\n    }\n\n    # Control plane comment\n    # (second line)\n    location ~ ^/api/v1/(?:auth|devices|account|entitlements|releases|billing)(?:/|$) {\n        proxy_pass http://127.0.0.1:8790;\n    }\n\n    # Edge denial comment\n    location /api/ {\n        return 404;\n    }\n}\n`;
+      const assertAttached = (text) => {
+        assert.match(text, /# Static root comment\n\s*root /u);
+        assert.match(text, /# Static assets comment\n\s*location ~\* /u);
+        assert.match(
+          text,
+          /# Control plane comment\n\s*# \(second line\)\n\s*location ~ \^\/api\/v1\/\(\?:auth/u,
+        );
+        assert.match(text, /# Edge denial comment\n\s*location \/api\/ \{/u);
+        assert.match(text, /# END joy-media realip \(managed\)\n/u);
+        assert.doesNotMatch(
+          text,
+          /comment\n\s*# BEGIN joy-media realip/u,
+          'no comment is stranded above the managed block',
+        );
+      };
+      // Second input: the r13 output, where the first location's comment was
+      // stranded above the managed block; re-applying the patch repairs it.
+      const ipsLines = readFileSync(cloudflareIps, 'utf8')
+        .split(/\r?\n/u)
+        .map((line) => line.replace(/^\uFEFF/u, '').trim())
+        .filter((line) => line && !line.startsWith('#'));
+      const stranded = commented.replace(
+        '    # Static assets comment\n',
+        `    # Static assets comment\n    # BEGIN joy-media realip (managed)\n${ipsLines.map((range) => `    set_real_ip_from ${range};\n`).join('')}    real_ip_header CF-Connecting-IP;\n    # END joy-media realip (managed)\n\n`,
+      );
+      let first;
+      for (const input of [commented, stranded]) {
+        writeFileSync(sandbox.conf, input);
+        const result = runBash(applyScript, [], sandbox.env);
+        assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+        const once = readFileSync(sandbox.conf, 'utf8');
+        assertAttached(once);
+        const again = runBash(applyScript, [], sandbox.env);
+        assert.equal(again.status, 0, `${again.stdout}\n${again.stderr}`);
+        assert.equal(readFileSync(sandbox.conf, 'utf8'), once, 'patch is idempotent');
+        if (first === undefined) first = once;
+        else assert.equal(once, first, 'repaired output matches a fresh patch');
+      }
+    });
+
     it('does not invoke the Cloudflare refresh tool from deployment scripts', () => {
       const scripts = [applyScript, deployScript, join(repoRoot, 'deploy', 'deploy-cutover.sh')]
         .map((path) => readFileSync(path, 'utf8'))

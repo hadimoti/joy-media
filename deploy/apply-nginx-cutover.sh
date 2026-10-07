@@ -147,8 +147,22 @@ def strip_agent_locations(server):
 BEGIN_REALIP = "# BEGIN joy-media realip (managed)"
 END_REALIP = "# END joy-media realip (managed)"
 
+def attached_comment_start(source, index):
+    # Comment lines directly above a location (blank lines allowed) describe it;
+    # insert managed content above them instead of between comment and location.
+    start = pos = index
+    while pos > 0:
+        line_start = source.rfind("\n", 0, pos - 1) + 1
+        line = source[line_start:pos - 1].strip()
+        if line.startswith("#") and not line.startswith(("# BEGIN joy-media", "# END joy-media")):
+            start = line_start
+        elif line:
+            break
+        pos = line_start
+    return start
+
 def strip_managed_realip(server):
-    pattern = re.compile(r"(?m)^[ \t]*" + re.escape(BEGIN_REALIP) + r"\n[\s\S]*?^[ \t]*" + re.escape(END_REALIP) + r"\n?")
+    pattern = re.compile(r"(?m)^[ \t]*" + re.escape(BEGIN_REALIP) + r"\n[\s\S]*?^[ \t]*" + re.escape(END_REALIP) + r"(?:\n[ \t]*(?=\n))?\n?")
     return pattern.sub("", server)
 
 def strip_internal_deny(server):
@@ -226,7 +240,7 @@ try:
     managed += "".join(f"    set_real_ip_from {network};\n" for network in ranges)
     managed += "    real_ip_header CF-Connecting-IP;\n    # END joy-media realip (managed)\n\n"
     first_location = re.search(r"(?m)^[ \t]*location\s+", changed_target)
-    insertion = first_location.start() if first_location else changed_target.rfind("}")
+    insertion = attached_comment_start(changed_target, first_location.start()) if first_location else changed_target.rfind("}")
     if insertion < 0: raise ValueError("Unclosed joyst.ir server block")
     prefix = changed_target[:insertion].rstrip(" \t\r\n") + "\n"
     changed_target = prefix + managed + changed_target[insertion:]
@@ -235,10 +249,10 @@ try:
     # agent rule before every regex location, including unrelated broad ones.
     regex_location = re.search(r"(?m)^[ \t]*location\s+~\*?\s+", changed_target)
     if regex_location:
-        insertion = regex_location.start()
+        insertion = attached_comment_start(changed_target, regex_location.start())
     else:
         generic = re.search(r"(?m)^[ \t]*location\s+(?:\^~\s+)?/api/[^\n]*\{", changed_target)
-        insertion = generic.start() if generic else changed_target.rfind("}")
+        insertion = attached_comment_start(changed_target, generic.start()) if generic else changed_target.rfind("}")
     if insertion < 0: raise ValueError("Unclosed joyst.ir server block")
     changed_target = changed_target[:insertion] + replacement + "\n" + changed_target[insertion:]
 
@@ -246,7 +260,8 @@ try:
     deny_internal = "    location /internal/ {\n        return 404;\n    }\n"
     api_prefix = re.search(r"(?m)^[ \t]*location\s+/api/\s*\{", changed_target)
     if api_prefix:
-        changed_target = changed_target[:api_prefix.start()] + deny_internal + changed_target[api_prefix.start():]
+        insertion = attached_comment_start(changed_target, api_prefix.start())
+        changed_target = changed_target[:insertion] + deny_internal + changed_target[insertion:]
     else:
         server_close = changed_target.rfind("}")
         changed_target = changed_target[:server_close] + deny_internal + changed_target[server_close:]
