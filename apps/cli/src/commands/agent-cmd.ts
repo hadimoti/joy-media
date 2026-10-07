@@ -54,6 +54,29 @@ export interface AgentCommandFlags {
   baseUrl?: string | undefined;
 }
 
+/** The JOY gateway's `{"error":{"code","message"}}`, read from a possibly truncated body. */
+export function gatewayErrorFromBody(
+  body: string,
+): { readonly code: string; readonly message?: string } | undefined {
+  const code = /"code"\s*:\s*"([A-Z0-9_]{1,64})"/.exec(body)?.[1];
+  if (code === undefined) return undefined;
+  const rawMessage = /"message"\s*:\s*"((?:[^"\\]|\\.){0,400})"/.exec(body)?.[1];
+  let message: string | undefined;
+  if (rawMessage !== undefined) {
+    try {
+      message = JSON.parse(`"${rawMessage}"`) as string;
+    } catch {
+      message = rawMessage;
+    }
+    const printable = [...message].filter((char) => {
+      const point = char.codePointAt(0) ?? 0;
+      return point >= 0x20 && point !== 0x7f;
+    });
+    message = printable.join('').trim().slice(0, 200) || undefined;
+  }
+  return message === undefined ? { code } : { code, message };
+}
+
 export function formatAgentRunFailure(error: unknown, debug: boolean): string {
   if (!(error instanceof JoyAgentRunError)) {
     const message = error instanceof Error ? error.message : '';
@@ -61,20 +84,28 @@ export function formatAgentRunFailure(error: unknown, debug: boolean): string {
       return `Joy Agent execution failed: JOY_AGENT_NO_API_KEY (${message})`;
     return 'Joy Agent execution failed: JOY_AGENT_UNKNOWN';
   }
-  const gatewayCode = /"code"\s*:\s*"([A-Z0-9_]+)"/.exec(error.detail.responseBodySnippet)?.[1];
-  if (error.detail.statusCode === 402 && gatewayCode === 'JOY_SUBSCRIPTION_REQUIRED') {
-    return 'Joy Agent execution failed: JOY_SUBSCRIPTION_REQUIRED (an active JOY Pro subscription is required)';
+  const debugSuffix = debug ? `\nDebug detail: ${JSON.stringify(error.detail)}` : '';
+  const gateway = gatewayErrorFromBody(error.detail.responseBodySnippet);
+  const status = error.detail.statusCode;
+  const httpNote = status === undefined ? '' : `, HTTP ${status}`;
+  if (status === 402 && gateway?.code === 'JOY_SUBSCRIPTION_REQUIRED') {
+    return `Joy Agent execution failed: JOY_SUBSCRIPTION_REQUIRED (an active JOY Pro subscription is required)${debugSuffix}`;
   }
   if (error.code === 'JOY_AGENT_RATE_LIMITED') {
-    return `Joy Agent execution failed: JOY_AGENT_RATE_LIMITED (${error.detail.message})${debug ? `\nDebug detail: ${JSON.stringify(error.detail)}` : ''}`;
+    return `Joy Agent execution failed: JOY_AGENT_RATE_LIMITED (${error.detail.message})${debugSuffix}`;
   }
   if (
-    gatewayCode === 'JOY_AGENT_UPSTREAM_AUTH_FAILED' ||
-    gatewayCode === 'JOY_AGENT_UNCONFIGURED'
+    gateway?.code === 'JOY_AGENT_UPSTREAM_AUTH_FAILED' ||
+    gateway?.code === 'JOY_AGENT_UNCONFIGURED'
   ) {
-    return 'Joy Agent execution failed: JOY_AGENT_UPSTREAM_UNAVAILABLE (the JOY hosted service is unavailable)';
+    const reason = gateway.message ?? 'the hosted model provider is not available';
+    return `Joy Agent execution failed: JOY_AGENT_UPSTREAM_UNAVAILABLE (JOY hosted service: ${reason} (${gateway.code}${httpNote}); this is a JOY server problem, not a problem with your network or account)${debugSuffix}`;
   }
-  return `Joy Agent execution failed: ${error.code}${debug ? `\nDebug detail: ${JSON.stringify(error.detail)}` : ''}`;
+  if (gateway !== undefined) {
+    const serverDetail = gateway.message ? `${gateway.code}: ${gateway.message}` : gateway.code;
+    return `Joy Agent execution failed: ${error.code} (server: ${serverDetail}${httpNote})${debugSuffix}`;
+  }
+  return `Joy Agent execution failed: ${error.code}${debugSuffix}`;
 }
 
 export function printAgentHelp(): void {

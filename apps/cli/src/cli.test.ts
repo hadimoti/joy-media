@@ -149,6 +149,48 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     expect(formatAgentRunFailure(error, false)).toContain('JOY_SUBSCRIPTION_REQUIRED');
   });
 
+  it.each([false, true])(
+    'surfaces the hosted gateway error code and message (debug=%s)',
+    (debug) => {
+      const responseBodySnippet =
+        '{"error":{"code":"JOY_AGENT_UPSTREAM_AUTH_FAILED","message":"Server provider credential rejected"}}';
+      const error = new JoyAgentRunError('JOY_AGENT_UPSTREAM_UNAVAILABLE', {
+        detail: {
+          name: 'APICallError',
+          statusCode: 503,
+          urlOrigin: 'https://joyst.ir',
+          message: 'Service Unavailable',
+          responseBodySnippet,
+        },
+      });
+      const formatted = formatAgentRunFailure(error, debug);
+      expect(formatted).toContain('JOY_AGENT_UPSTREAM_UNAVAILABLE');
+      expect(formatted).toContain(
+        'JOY hosted service: Server provider credential rejected (JOY_AGENT_UPSTREAM_AUTH_FAILED, HTTP 503)',
+      );
+      expect(formatted).toContain('not a problem with your network or account');
+      if (debug) expect(formatted).toContain('Debug detail: {"name":"APICallError"');
+      else expect(formatted).not.toContain('Debug detail');
+    },
+  );
+
+  it('shows any other server error code and message, even from a truncated body', () => {
+    const error = new JoyAgentRunError('JOY_AGENT_UNKNOWN', {
+      detail: {
+        name: 'APICallError',
+        statusCode: 400,
+        urlOrigin: 'https://joyst.ir',
+        message: 'Bad Request',
+        responseBodySnippet:
+          '{"error":{"code":"JOY_AGENT_MODEL_NOT_ALLOWED","message":"Model x/y is not offered\\u0007 on this plan","details":{"allowed":["openrouter/free"',
+      },
+    });
+    const formatted = formatAgentRunFailure(error, false);
+    expect(formatted).toContain(
+      'Joy Agent execution failed: JOY_AGENT_UNKNOWN (server: JOY_AGENT_MODEL_NOT_ALLOWED: Model x/y is not offered on this plan, HTTP 400)',
+    );
+  });
+
   it('prints help guide on help command and exits 0', async () => {
     const code = await runCli(['help']);
     expect(code).toBe(0);
