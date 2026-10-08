@@ -176,6 +176,47 @@ describe('JOY Agent tool catalog', () => {
     expect(submitPlan).toHaveBeenCalledWith({ checklist });
   });
 
+  it('accepts a timelineStartUs hint on checklist items and drops it before the bridge', async () => {
+    const submitPlan = vi.fn(async () => ({ ok: true }));
+    const tools = createJoyAgentTools(bridge({ submitPlan }));
+    const tool = tools.submit_plan as unknown as {
+      inputSchema: { safeParse: (input: unknown) => { success: boolean; data?: unknown } };
+      execute: (input: unknown) => Promise<unknown>;
+    };
+    const parsed = tool.inputSchema.safeParse({
+      checklist: [
+        {
+          kind: 'trim',
+          clipId: 'clip-a',
+          sourceInUs: 0,
+          sourceOutUs: 5_000_000,
+          timelineStartUs: 2_000_000,
+        },
+        { kind: 'look', clipId: 'clip-a', look: 'crt', timelineStartUs: 0 },
+        { kind: 'text', text: 'Hi', position: 'center', timelineStartUs: 1_000_000 },
+      ],
+    });
+    expect(parsed.success).toBe(true);
+    await tool.execute(parsed.data);
+    expect(submitPlan).toHaveBeenCalledWith({
+      checklist: [
+        { kind: 'trim', clipId: 'clip-a', sourceInUs: 0, sourceOutUs: 5_000_000 },
+        { kind: 'look', clipId: 'clip-a', look: 'crt' },
+        { kind: 'text', text: 'Hi', position: 'center' },
+      ],
+    });
+    expect(
+      tool.inputSchema.safeParse({
+        checklist: [{ kind: 'look', clipId: 'clip-a', look: 'crt', timelineStartUs: -1 }],
+      }).success,
+    ).toBe(false);
+    expect(
+      tool.inputSchema.safeParse({
+        checklist: [{ kind: 'look', clipId: 'clip-a', look: 'crt', startAt: 0 }],
+      }).success,
+    ).toBe(false);
+  });
+
   it('normalizes trim aliases and rejects unknown trim fields helpfully', () => {
     const parsed = parseJoyTimelineOperationsDetailed([
       {

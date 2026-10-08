@@ -11,6 +11,14 @@ import {
 } from './aliases.js';
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
+/**
+ * Models often add the clip's timeline start to a submit_plan checklist item (BUGS.md 9).
+ * It is accepted so the plan isn't rejected, then dropped: start positions are verified by
+ * the CLI from the user's request, not from the checklist.
+ */
+const checklistStartHint = {
+  timelineStartUs: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+};
 const boundedText = z.string().max(4096);
 
 const timelineOperation = z.discriminatedUnion('kind', [
@@ -642,6 +650,7 @@ export function createJoyAgentTools(
                     clipId: id,
                     sourceInUs: z.number().int().nonnegative(),
                     sourceOutUs: z.number().int().positive(),
+                    ...checklistStartHint,
                   })
                   .strict(),
                 z
@@ -649,13 +658,15 @@ export function createJoyAgentTools(
                     kind: z.literal('text'),
                     text: boundedText,
                     position: z.literal('center').optional(),
+                    ...checklistStartHint,
                   })
                   .strict(),
                 z
                   .object({
                     kind: z.literal('look'),
                     clipId: id,
-                    look: z.enum(['crt', 'bw', 'warm', 'cool']),
+                    look: z.enum(JOY_LOOK_PRESETS),
+                    ...checklistStartHint,
                   })
                   .strict(),
               ]),
@@ -665,7 +676,16 @@ export function createJoyAgentTools(
             .default([]),
         })
         .strict(),
-      execute: async (input) => boundedResult(await bridge.submitPlan(input), maxPayloadBytes),
+      execute: async (input) =>
+        boundedResult(
+          await bridge.submitPlan({
+            // The start hint is informational: the CLI checks start positions from the request.
+            checklist: input.checklist.map(
+              ({ timelineStartUs: _timelineStartUs, ...item }) => item,
+            ),
+          }),
+          maxPayloadBytes,
+        ),
     }),
   };
   let invalidTimelineProposals = 0;
