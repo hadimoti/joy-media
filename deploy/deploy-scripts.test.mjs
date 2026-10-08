@@ -227,6 +227,7 @@ for arg in "$@"; do
   if [[ "$arg" == --interface ]]; then
     # A non-Cloudflare source: nginx answers 444 (curl: empty reply, exit 52).
     if [[ -n "\${STUB_CURL_INTERFACE_HTTP:-}" ]]; then echo "$STUB_CURL_INTERFACE_HTTP"; exit 0; fi
+    if [[ -n "\${STUB_CURL_INTERFACE_EXIT:-}" ]]; then exit "$STUB_CURL_INTERFACE_EXIT"; fi
     exit 52
   fi
 done
@@ -558,6 +559,28 @@ describe(
       assert.notEqual(leaked.status, 0, 'a non-Cloudflare 200 must fail the apply');
       assert.match(leaked.stderr, /Cloudflare-only lock is not effective/u);
       assert.equal(readFileSync(open.conf, 'utf8'), fixture, 'original config restored');
+    });
+
+    it('fails and restores on an inconclusive self-probe unless explicitly accepted', (t) => {
+      if (!hasPython)
+        return t.skip('python3 is unavailable; Nginx patch integration needs real Python');
+      // curl exit 7: the 127.0.0.2 source could not connect, so the lock is unproven.
+      const unproven = createSandbox(t);
+      const failed = runBash(applyScript, [], { ...unproven.env, STUB_CURL_INTERFACE_EXIT: '7' });
+      assert.notEqual(failed.status, 0, 'an inconclusive probe must fail the apply');
+      assert.match(failed.stderr, /CF_ONLY_PROBE_INCONCLUSIVE \(curl exit 7\)/u);
+      assert.match(failed.stderr, /JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE=1/u);
+      assert.equal(readFileSync(unproven.conf, 'utf8'), fixture, 'original config restored');
+
+      const accepted = createSandbox(t);
+      const ok = runBash(applyScript, [], {
+        ...accepted.env,
+        STUB_CURL_INTERFACE_EXIT: '7',
+        JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE: '1',
+      });
+      assert.equal(ok.status, 0, `${ok.stdout}\n${ok.stderr}`);
+      assert.match(ok.stderr, /accepted by JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE=1/u);
+      assert.notEqual(readFileSync(accepted.conf, 'utf8'), fixture, 'patch kept');
     });
 
     it('rejects invalid Cloudflare CIDRs and restores the original Nginx file', (t) => {

@@ -421,8 +421,11 @@ check_refused() {
   elif [[ "$rc" -eq 0 ]]; then
     restore
     die "non-Cloudflare source received HTTP $code; Cloudflare-only lock is not effective; prior config restored"
+  elif [[ "${JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE:-}" == 1 ]]; then
+    echo "CF_ONLY_PROBE_INCONCLUSIVE (curl exit $rc); accepted by JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE=1, check from outside Cloudflare by hand" >&2
   else
-    echo "CF_ONLY_PROBE_INCONCLUSIVE (curl exit $rc); check from outside Cloudflare by hand" >&2
+    restore
+    die "CF_ONLY_PROBE_INCONCLUSIVE (curl exit $rc): the Cloudflare-only lock could not be proven; prior config restored. Check from outside Cloudflare, then rerun with JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE=1 to accept"
   fi
 }
 check_refused

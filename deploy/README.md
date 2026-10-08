@@ -26,6 +26,10 @@ own probes stay allowed: `127.0.0.1`, `::1`, the joyst.ir listen address and
 reload the script checks the edge probes from this host, then sends one probe
 from loopback source `127.0.0.2` to `joyst.ir:80` and requires the connection
 to be closed (444); if that probe gets an HTTP answer it restores the backup.
+If the probe is inconclusive (for example curl cannot bind `127.0.0.2`), the
+script also restores the backup and fails; after checking from outside
+Cloudflare by hand, rerun with `JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE=1` to
+accept it.
 Rollback: copy the `*.pre-agent-location-<timestamp>` backup the script
 printed back over the config, `nginx -t`, `systemctl reload nginx`.
 
