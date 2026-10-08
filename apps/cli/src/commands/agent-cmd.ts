@@ -99,6 +99,10 @@ export function formatAgentRunFailure(error: unknown, debug: boolean): string {
   if (error.code === 'JOY_AGENT_RATE_LIMITED') {
     return `Joy Agent execution failed: JOY_AGENT_RATE_LIMITED (${error.detail.message})${debugSuffix}`;
   }
+  if (gateway?.code === 'JOY_AGENT_MODELS_BUSY') {
+    const reason = gateway.message ?? 'every free model is busy right now; retry shortly';
+    return `Joy Agent execution failed: JOY_AGENT_MODELS_BUSY (JOY hosted service: ${reason}${status === undefined ? '' : ` (HTTP ${status})`}; this is temporary, not a problem with your network or account)${debugSuffix}`;
+  }
   if (
     gateway?.code === 'JOY_AGENT_UPSTREAM_AUTH_FAILED' ||
     gateway?.code === 'JOY_AGENT_UNCONFIGURED'

@@ -475,22 +475,25 @@ export class JoyModelGateway {
             },
           }),
         );
-      } else if (verdict === 'fallback' && status === 404) {
-        res.writeHead(400, { 'content-type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            error: { code: 'MODEL_UNAVAILABLE', message: 'The selected model is unavailable' },
-          }),
-        );
-      } else if (verdict === 'fallback' && status === 429) {
-        const retryAfter = last.retryAfter;
-        res.writeHead(429, {
+      } else if (verdict === 'fallback') {
+        // Every candidate was busy, gated or failing: a temporary, retryable condition.
+        const retryAfterSeconds = retryHintSeconds(failures);
+        const vision = messagesHaveImages(parsedBody.messages);
+        res.writeHead(503, {
           'content-type': 'application/json',
-          ...(retryAfter === undefined ? {} : { 'retry-after': retryAfter }),
+          'retry-after': String(retryAfterSeconds),
         });
         res.end(
           JSON.stringify({
-            error: { code: 'RATE_LIMITED', message: 'AI upstream rate limit reached' },
+            error: {
+              code: 'JOY_AGENT_MODELS_BUSY',
+              message: vision
+                ? `Every free image model is busy or unavailable right now (${failures.length} tried); retry in about ${retryAfterSeconds} seconds, or send the request without images.`
+                : `Every free model is busy or unavailable right now (${failures.length} tried); retry in about ${retryAfterSeconds} seconds.`,
+              retryable: true,
+              retryAfterSeconds,
+              vision,
+            },
           }),
         );
       } else {
@@ -863,6 +866,23 @@ function unsupportedContentIssue(messages: unknown): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * Seconds a client should wait when every model was busy: the soonest upstream Retry-After,
+ * clamped to 5..300, or 30 when no attempt sent one.
+ */
+function retryHintSeconds(failures: readonly UpstreamFailure[]): number {
+  let soonest: number | undefined;
+  for (const { retryAfter } of failures) {
+    if (retryAfter === undefined) continue;
+    const seconds = /^\d+(?:\.\d+)?$/.test(retryAfter)
+      ? Number(retryAfter)
+      : (Date.parse(retryAfter) - Date.now()) / 1000;
+    if (Number.isFinite(seconds) && seconds > 0)
+      soonest = soonest === undefined ? seconds : Math.min(soonest, seconds);
+  }
+  return Math.min(300, Math.max(5, Math.ceil(soonest ?? 30)));
 }
 
 const UPSTREAM_ERROR_BODY_MAX_BYTES = 32 * 1024;

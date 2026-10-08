@@ -174,6 +174,23 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     },
   );
 
+  it('says a busy hosted catalog is temporary and passes on the retry hint', () => {
+    const error = new JoyAgentRunError('JOY_AGENT_UPSTREAM_UNAVAILABLE', {
+      detail: {
+        name: 'APICallError',
+        statusCode: 503,
+        urlOrigin: 'https://joyst.ir',
+        message: 'Service Unavailable',
+        responseBodySnippet:
+          '{"error":{"code":"JOY_AGENT_MODELS_BUSY","message":"Every free model is busy or unavailable right now (5 tried); retry in about 30 seconds.","retryable":true,"retryAfterSeconds":30,"vision":false}}',
+      },
+    });
+    const formatted = formatAgentRunFailure(error, false);
+    expect(formatted).toBe(
+      'Joy Agent execution failed: JOY_AGENT_MODELS_BUSY (JOY hosted service: Every free model is busy or unavailable right now (5 tried); retry in about 30 seconds. (HTTP 503); this is temporary, not a problem with your network or account)',
+    );
+  });
+
   it('shows any other server error code and message, even from a truncated body', () => {
     const error = new JoyAgentRunError('JOY_AGENT_UNKNOWN', {
       detail: {

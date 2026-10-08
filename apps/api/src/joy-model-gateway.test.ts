@@ -252,12 +252,18 @@ describe('JoyModelGateway', () => {
       expect(tried.every((id) => JOY_AGENT_FREE_MODELS.some((model) => model.id === id))).toBe(
         true,
       );
-      expect(result.getStatus()).toBe(429);
-      expect(result.getBody()).toContain('RATE_LIMITED');
+      expect(result.getStatus()).toBe(503);
+      expect(JSON.parse(result.getBody()).error).toMatchObject({
+        code: 'JOY_AGENT_MODELS_BUSY',
+        retryable: true,
+        retryAfterSeconds: 30,
+        vision: false,
+      });
+      expect(result.getHeaders()['retry-after']).toBe('30');
       expect(result.getBody()).not.toContain('provider-detail');
     });
 
-    it('falls back on upstream 404 (a withdrawn free model) and keeps the 404 mapping at the end', async () => {
+    it('falls back on upstream 404 (a withdrawn free model), then reports every model busy', async () => {
       const tried: string[] = [];
       const gateway = new JoyModelGateway({
         ...activeUser(),
@@ -286,8 +292,8 @@ describe('JoyModelGateway', () => {
         final.res,
       );
       expect(allGone).toHaveLength(5);
-      expect(final.getStatus()).toBe(400);
-      expect(final.getBody()).toContain('MODEL_UNAVAILABLE');
+      expect(final.getStatus()).toBe(503);
+      expect(final.getBody()).toContain('JOY_AGENT_MODELS_BUSY');
     });
 
     it.each([400, 401, 402])('does not fall back on upstream %i', async (status) => {
@@ -389,6 +395,41 @@ describe('JoyModelGateway', () => {
           ),
         );
         expect(tried).toEqual([SUPER, ULTRA]);
+      });
+
+      it('answers JOY_AGENT_MODELS_BUSY with the soonest Retry-After when every model is busy', async () => {
+        const tried: string[] = [];
+        const busy = (retryAfter?: string) => () =>
+          openRouterError(
+            429,
+            { code: 429, metadata: { limit_source: 'upstream_provider_shared_pool' } },
+            retryAfter === undefined ? {} : { 'retry-after': retryAfter },
+          );
+        const result = await run(
+          sequence(
+            [
+              busy('120'),
+              busy('12'),
+              () => openRouterError(403, { metadata: { failed_routing_step: 'Gate' } }),
+              busy(),
+              busy('1'),
+            ],
+            tried,
+          ),
+        );
+        expect(tried).toHaveLength(5);
+        expect(result.getStatus()).toBe(503);
+        // 1s is below the 5s floor, so the soonest usable hint is 5.
+        expect(result.getHeaders()['retry-after']).toBe('5');
+        const error = JSON.parse(result.getBody()).error;
+        expect(error).toMatchObject({
+          code: 'JOY_AGENT_MODELS_BUSY',
+          retryable: true,
+          retryAfterSeconds: 5,
+          vision: false,
+        });
+        expect(error.message).toContain('5 tried');
+        expect(result.getBody()).not.toContain('AUTH_FAILED');
       });
 
       it('logs status, error code and routing metadata for every attempt, never bodies', async () => {
@@ -498,7 +539,14 @@ describe('JoyModelGateway', () => {
         result.res,
       );
       expect(tried).toEqual([GEMMA, OMNI]);
-      expect(result.getStatus()).toBe(502);
+      // Every vision model is busy: a retryable 503, not an auth failure or a 502.
+      expect(result.getStatus()).toBe(503);
+      expect(JSON.parse(result.getBody()).error).toMatchObject({
+        code: 'JOY_AGENT_MODELS_BUSY',
+        retryable: true,
+        vision: true,
+      });
+      expect(JSON.parse(result.getBody()).error.message).toContain('image');
     });
 
     it('routes an image request for the text default to gemma, then nano-omni, and records who answered', async () => {
@@ -1624,7 +1672,7 @@ describe('JoyModelGateway', () => {
     }
   });
 
-  it('maps upstream 429, 404, and other failures to bounded gateway errors', async () => {
+  it('maps exhausted 429, 404 and 5xx answers to a bounded, retryable JOY_AGENT_MODELS_BUSY', async () => {
     const auth = { authenticate: async () => ({ id: 'u' }) } as unknown as MediaAuthService;
     const account = {
       getSubscription: async () => ({
@@ -1635,9 +1683,10 @@ describe('JoyModelGateway', () => {
       }),
     } as unknown as AccountService;
     for (const [upstreamStatus, expectedStatus, expectedCode] of [
-      [404, 400, 'MODEL_UNAVAILABLE'],
-      [429, 429, 'RATE_LIMITED'],
-      [500, 502, 'UPSTREAM_ERROR'],
+      [404, 503, 'JOY_AGENT_MODELS_BUSY'],
+      [429, 503, 'JOY_AGENT_MODELS_BUSY'],
+      [500, 503, 'JOY_AGENT_MODELS_BUSY'],
+      [400, 502, 'UPSTREAM_ERROR'],
     ] as const) {
       const gateway = new JoyModelGateway({
         mediaAuth: auth,
@@ -1658,7 +1707,9 @@ describe('JoyModelGateway', () => {
       expect(response.getStatus()).toBe(expectedStatus);
       expect(response.getBody()).toContain(expectedCode);
       expect(response.getBody()).not.toContain('untrusted provider body');
-      expect(response.getHeaders()['retry-after']).toBe(upstreamStatus === 429 ? '17' : undefined);
+      expect(response.getHeaders()['retry-after']).toBe(
+        upstreamStatus === 429 ? '17' : upstreamStatus === 400 ? undefined : '30',
+      );
     }
   });
 
