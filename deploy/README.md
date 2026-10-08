@@ -22,7 +22,9 @@ managed http-level `geo $realip_remote_addr $joy_media_from_cloudflare` block
 server block (:80 and :443). The geo is keyed on the TCP peer, so a forged
 `CF-Connecting-IP` from a non-Cloudflare source is still closed. This host's
 own probes stay allowed: `127.0.0.1`, `::1`, the joyst.ir listen address and
-`JOY_MEDIA_EDGE_ADDR`. Other sites in the shared file are not touched. After
+`JOY_MEDIA_EDGE_ADDR`, which the script refuses unless it is a joyst.ir listen
+address or an address of this host (`ip -o addr`). Other sites in the shared
+file are not touched. After
 reload the script checks the edge probes from this host, then sends one probe
 from loopback source `127.0.0.2` to `joyst.ir:80` and requires the connection
 to be closed (444); if that probe gets an HTTP answer it restores the backup.

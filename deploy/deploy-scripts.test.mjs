@@ -215,6 +215,11 @@ function createSandbox(t) {
     join(stubs, 'ln'),
     `${logger}\n[[ "\${1:-}" == -s ]] || exit 2\nshift\n[[ "\${1:-}" == -- ]] && shift\n"$JOY_TEST_NODE" "$JOY_TEST_LINK_HELPER" link "$1" "$2"`,
   );
+  // ip -o addr show: the VPS's addresses (override with STUB_IP_ADDRS, CIDR tokens).
+  putExecutable(
+    join(stubs, 'ip'),
+    `n=1\nfor a in \${STUB_IP_ADDRS-127.0.0.1/8 82.115.8.224/24 ::1/128}; do\n  family=inet; [[ "$a" == *:* ]] && family=inet6\n  printf '%s: eth0    %s %s scope global eth0\\n' "$n" "$family" "$a"\n  n=$((n + 1))\ndone`,
+  );
   putExecutable(
     join(stubs, 'curl'),
     `${logger}
@@ -436,6 +441,7 @@ describe(
       const result = runBash(applyScript, [], {
         ...sandbox.env,
         JOY_MEDIA_EDGE_ADDR: '2001:db8::25',
+        STUB_IP_ADDRS: '127.0.0.1/8 82.115.8.224/24 ::1/128 2001:db8::25/64',
       });
       assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
       const updated = readFileSync(sandbox.conf, 'utf8');
@@ -535,6 +541,7 @@ describe(
       const second = runBash(applyScript, [], {
         ...sandbox.env,
         JOY_MEDIA_EDGE_ADDR: '2001:db8::25',
+        STUB_IP_ADDRS: '127.0.0.1/8 82.115.8.224/24 ::1/128 2001:db8::25/64',
       });
       assert.equal(second.status, 0, `${second.stdout}\n${second.stderr}`);
       assert.equal(readFileSync(sandbox.conf, 'utf8'), once, 'patch is idempotent');
@@ -559,6 +566,36 @@ describe(
       assert.notEqual(leaked.status, 0, 'a non-Cloudflare 200 must fail the apply');
       assert.match(leaked.stderr, /Cloudflare-only lock is not effective/u);
       assert.equal(readFileSync(open.conf, 'utf8'), fixture, 'original config restored');
+    });
+
+    it('refuses an edge address that is neither a joyst.ir listen address nor on this host', (t) => {
+      if (!hasPython)
+        return t.skip('python3 is unavailable; Nginx patch integration needs real Python');
+      for (const [edge, addrs] of [
+        ['203.0.113.9', '127.0.0.1/8 82.115.8.224/24 ::1/128'],
+        ['2001:db8::25', '127.0.0.1/8 ::1/128'],
+      ]) {
+        const sandbox = createSandbox(t);
+        const result = runBash(applyScript, [], {
+          ...sandbox.env,
+          JOY_MEDIA_EDGE_ADDR: edge,
+          STUB_IP_ADDRS: addrs,
+        });
+        assert.notEqual(result.status, 0, `${edge} must be refused`);
+        assert.match(
+          result.stderr,
+          /is neither a joyst\.ir listen address nor an address of this host/u,
+        );
+        assert.equal(readFileSync(sandbox.conf, 'utf8'), fixture, `${edge}: config unchanged`);
+        assert.ok(
+          !commandLog(sandbox).some((line) => line.startsWith('curl')),
+          `${edge}: no probe was sent`,
+        );
+      }
+      // The joyst.ir listen address is accepted even when ip lists nothing.
+      const listenOnly = createSandbox(t);
+      const ok = runBash(applyScript, [], { ...listenOnly.env, STUB_IP_ADDRS: '' });
+      assert.equal(ok.status, 0, `${ok.stdout}\n${ok.stderr}`);
     });
 
     it('fails and restores on an inconclusive self-probe unless explicitly accepted', (t) => {

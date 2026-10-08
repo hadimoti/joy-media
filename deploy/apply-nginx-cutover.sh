@@ -33,6 +33,9 @@ PYEOF
 )" || die "JOY_MEDIA_EDGE_ADDR must be an IP literal"
 EDGE_RESOLVE="$EDGE_ADDR"
 if [[ "$EDGE_ADDR" == *:* ]]; then EDGE_RESOLVE="[$EDGE_ADDR]"; fi
+# This host's addresses: EDGE_ADDR must be one of them or a joyst.ir listen address,
+# because it is added to the Cloudflare-only allow-list as a self-probe source.
+LOCAL_ADDRS="$( (ip -o addr show 2>/dev/null || true) | awk '{print $4}' | tr '\n' ' ')"
 
 mkdir -p -- "$BACKUP_DIR"
 TIMESTAMP="$(date +%Y%m%d%H%M%S)"
@@ -45,12 +48,18 @@ restore() {
   nginx -t && systemctl reload nginx || true
 }
 
-if ! python3 - "$CONF_FILE" "$IPS_FILE" "$EDGE_ADDR" <<'PYEOF'
+if ! python3 - "$CONF_FILE" "$IPS_FILE" "$EDGE_ADDR" "$LOCAL_ADDRS" <<'PYEOF'
 import re, sys
 import ipaddress
 path = sys.argv[1]
 ips_path = sys.argv[2]
 edge_addr = ipaddress.ip_address(sys.argv[3])
+local_addrs = set()
+for token in sys.argv[4].split():
+    try:
+        local_addrs.add(ipaddress.ip_interface(token).ip)
+    except ValueError:
+        pass
 with open(path, encoding="utf-8", newline="") as source:
     text = source.read()
 with open(ips_path, encoding="utf-8-sig") as source:
@@ -304,6 +313,12 @@ try:
     if target_index is None: raise ValueError("Could not find joyst.ir TLS server block")
 
     block_start, block_end, target = before[target_index]
+    # EDGE_ADDR joins the Cloudflare-only allow-list, so it must really be this host.
+    joyst_listens = {address for _, _, block in before if is_joyst_block(block) for address in listen_addresses(block)}
+    if edge_addr not in joyst_listens and edge_addr not in local_addrs:
+        raise ValueError(
+            f"JOY_MEDIA_EDGE_ADDR {edge_addr} is neither a joyst.ir listen address nor an address of this host; "
+            "refusing to add it to the Cloudflare-only allow-list")
     changed_target = strip_cf_only(strip_managed_realip(strip_agent_locations(target)))
     changed_target = strip_internal_deny(changed_target)
 
