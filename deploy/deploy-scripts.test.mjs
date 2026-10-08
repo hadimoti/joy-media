@@ -657,6 +657,15 @@ describe(
       }
     });
 
+    it('documents the same CIDR floors the check enforces', () => {
+      const script = readFileSync(applyScript, 'utf8');
+      const code = /prefixlen < \{4: (\d+), 6: (\d+)\}/u.exec(script);
+      const comment = /# Floors: \/(\d+) \(IPv4\)[^\n]*\/(\d+) \(IPv6\)/u.exec(script);
+      assert.ok(code && comment, 'floor check and its comment are present');
+      assert.deepEqual([comment[1], comment[2]], [code[1], code[2]]);
+      assert.deepEqual([code[1], code[2]], ['12', '29']);
+    });
+
     it('refreshes Cloudflare CIDRs only when every range is narrow and public', (t) => {
       if (!hasPython) return t.skip('python3 is unavailable; refresh tool needs real Python');
       const sandbox = createSandbox(t);
