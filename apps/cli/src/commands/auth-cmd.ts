@@ -20,6 +20,8 @@ export interface AuthCommandOptions {
   /** Only request a code (for scripts without a TTY); finish later with --code-stdin or --code. */
   readonly requestCode?: boolean;
   readonly apiBase?: string;
+  /** logout: remove the local token even when the server could not revoke it. */
+  readonly force?: boolean;
   readonly insecureFileStore?: boolean;
   readonly json?: boolean;
 }
@@ -75,7 +77,7 @@ export function printAuthHelp(): void {
   console.log(`Usage:
   joy-media login [--email <address>] [--code-stdin | --code <digits>] [options]
   joy-media whoami [--json] [--api-base <url>]
-  joy-media logout [--api-base <url>]
+  joy-media logout [--api-base <url>] [--force]
 
 login signs in to your JOY account with a one-time code sent by email.
   (no code flag)            At a terminal: send a code, then ask for it (hidden).
@@ -92,7 +94,8 @@ login signs in to your JOY account with a one-time code sent by email.
                             system keyring is available.
 
 whoami prints the signed-in email and plan (--json for a JSON object).
-logout revokes the session on the server and removes the local token.
+logout revokes the session on the server, then removes the local token. If the
+server can't revoke it, the token is kept so you can retry; --force removes it anyway.
 whoami and logout use the API base saved at login unless --api-base is given.
 
 Example (scripts):
@@ -310,7 +313,8 @@ async function logout(options: AuthCommandOptions): Promise<number> {
     logSuccess('Already logged out.');
     return 0;
   }
-  // The local token is always removed; the exit code says whether the server revoked it.
+  // The local token is removed only once the server session is gone (or with --force), so a
+  // failed revoke can be retried; the exit code says whether the server revoked it.
   let notRevoked: string | undefined;
   let alreadyEnded = false;
   try {
@@ -335,13 +339,19 @@ async function logout(options: AuthCommandOptions): Promise<number> {
         : isRecord(error) && (error.name === 'TimeoutError' || error.name === 'AbortError')
           ? `no answer within ${LOGOUT_TIMEOUT_MS / 1000} s`
           : `could not reach the server: ${networkReason(error)}`;
-  } finally {
-    clearJoySession();
   }
   if (notRevoked !== undefined) {
-    logError(`Logged out locally; server session not revoked (${notRevoked}).`);
+    if (options.force) {
+      clearJoySession();
+      logError(`Logged out locally; server session not revoked (${notRevoked}).`);
+      return 1;
+    }
+    logError(
+      `Server session not revoked (${notRevoked}). Your login is still saved on this computer so you can retry \`joy-media logout\`; \`joy-media logout --force\` removes it without revoking.`,
+    );
     return 1;
   }
+  clearJoySession();
   logSuccess(alreadyEnded ? 'Logged out (the server session had already ended).' : 'Logged out.');
   return 0;
 }

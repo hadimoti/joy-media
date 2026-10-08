@@ -594,7 +594,7 @@ describe('CLI JOY session commands', () => {
     expect(JSON.stringify(errors.mock.calls)).not.toContain('https://evil.example.invalid');
   });
 
-  it('times out server logout, clears the local token, and exits non-zero', async () => {
+  it('times out server logout, keeps the local token for a retry, and exits non-zero', async () => {
     saveJoySession({ token: 'tok-fake-1', apiOrigin: 'https://joyst.ir' });
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
       expect(init?.signal).toBeInstanceOf(AbortSignal);
@@ -606,28 +606,51 @@ describe('CLI JOY session commands', () => {
     expect(await runCli(['logout'])).toBe(1);
 
     expect(fetchSpy).toHaveBeenCalledOnce();
-    expect(keyring.has('joy-media-session')).toBe(false);
+    expect(keyring.has('joy-media-session')).toBe(true);
     expect(JSON.stringify(errors.mock.calls)).toContain(
-      'Logged out locally; server session not revoked (no answer within 10 s)',
+      'Server session not revoked (no answer within 10 s). Your login is still saved on this computer so you can retry',
     );
     expect(JSON.stringify(output.mock.calls)).not.toContain('Logged out.');
   });
 
-  it('reports a failed server revocation with a non-zero exit', async () => {
+  it('keeps the token after a failed revocation so a retry can revoke it', async () => {
     saveJoySession({ token: 'tok-fake-1', apiOrigin: 'https://joyst.ir' });
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ error: { code: 'INTERNAL' } }), { status: 500 }),
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { code: 'INTERNAL' } }), { status: 500 }),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { ok: true } }), { status: 200 }));
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     const output = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     expect(await runCli(['logout'])).toBe(1);
 
+    expect(keyring.has('joy-media-session')).toBe(true);
+    const errorText = JSON.stringify(errors.mock.calls);
+    expect(errorText).toContain('Server session not revoked (server answered HTTP 500)');
+    expect(errorText).toContain('joy-media logout --force');
+    expect(JSON.stringify(output.mock.calls)).not.toContain('Logged out.');
+
+    expect(await runCli(['logout'])).toBe(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls[1]?.[1]?.headers).toEqual({ authorization: 'Bearer tok-fake-1' });
+    expect(keyring.has('joy-media-session')).toBe(false);
+  });
+
+  it('logout --force removes the token even when the server cannot revoke it', async () => {
+    saveJoySession({ token: 'tok-fake-1', apiOrigin: 'https://joyst.ir' });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: 'INTERNAL' } }), { status: 500 }),
+    );
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runCli(['logout', '--force'])).toBe(1);
+
     expect(keyring.has('joy-media-session')).toBe(false);
     expect(JSON.stringify(errors.mock.calls)).toContain(
       'Logged out locally; server session not revoked (server answered HTTP 500)',
     );
-    expect(JSON.stringify(output.mock.calls)).not.toContain('Logged out.');
   });
 
   it('does not send the token to another origin on logout and says it was not revoked', async () => {
@@ -638,9 +661,9 @@ describe('CLI JOY session commands', () => {
     expect(await runCli(['logout', '--api-base', 'https://example.invalid/api'])).toBe(1);
 
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(keyring.has('joy-media-session')).toBe(false);
+    expect(keyring.has('joy-media-session')).toBe(true);
     expect(JSON.stringify(errors.mock.calls)).toContain(
-      'Logged out locally; server session not revoked (saved login is for https://joyst.ir',
+      'Server session not revoked (saved login is for https://joyst.ir',
     );
   });
 

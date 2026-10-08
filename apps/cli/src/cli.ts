@@ -76,6 +76,7 @@ export interface CliFlags {
   code: string | undefined;
   codeOnly: boolean;
   codeStdin: boolean;
+  force: boolean;
   requestCode: boolean;
   apiBase: string | undefined;
   resolution: string | undefined;
@@ -215,6 +216,7 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     codeStdin: Boolean(v['code-stdin']),
     requestCode: Boolean(v['request-code']),
     apiBase: typeof v['api-base'] === 'string' ? v['api-base'] : undefined,
+    force: Boolean(v.force),
     resolution: typeof v.resolution === 'string' ? v.resolution : undefined,
     aspect: typeof v.aspect === 'string' ? v.aspect : undefined,
   };
@@ -280,6 +282,7 @@ const CLI_OPTIONS = {
   'code-stdin': { type: 'boolean', default: false },
   'request-code': { type: 'boolean', default: false },
   'api-base': { type: 'string' },
+  force: { type: 'boolean', default: false },
   resolution: { type: 'string' },
   aspect: { type: 'string' },
 } satisfies ParseArgsConfig['options'];
@@ -398,6 +401,7 @@ export async function runCli(argv: string[]): Promise<number> {
           codeStdin: flags.codeStdin,
           requestCode: flags.requestCode,
           ...(flags.apiBase === undefined ? {} : { apiBase: flags.apiBase }),
+          force: flags.force,
           insecureFileStore: flags.insecureFileStore,
           json: flags.json,
         });
