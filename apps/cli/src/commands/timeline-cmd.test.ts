@@ -422,6 +422,74 @@ describe('timeline trim against the media duration', () => {
     }
   });
 
+  it('rejects a trim that would leave less than one frame and changes nothing', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-trim-subframe-'));
+    const originalError = console.error;
+    const originalWarn = console.warn;
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    console.error = (...values: unknown[]) => errors.push(values.map(String).join(' '));
+    console.warn = (...values: unknown[]) => warnings.push(values.map(String).join(' '));
+    try {
+      const path = writeThirtySecondProject(directory);
+      const before = readFileSync(path, 'utf8');
+      expect(
+        await runCli([
+          'timeline',
+          'trim',
+          '--project',
+          path,
+          '--clip',
+          'clip-30',
+          '--start',
+          '29.99',
+          '--duration',
+          '5',
+        ]),
+      ).toBe(1);
+      expect(readFileSync(path, 'utf8')).toBe(before);
+      expect(errors.join('\n')).toContain(
+        'Trim leaves clip "clip-30" 0.01s long (source 29.99s to the media end at 30s), shorter than one frame at 30 fps (0.033s). Nothing was changed.',
+      );
+      expect(warnings.join('\n')).not.toContain('clamped');
+
+      errors.length = 0;
+      expect(
+        await runCli([
+          'timeline',
+          'trim',
+          '--project',
+          path,
+          '--clip',
+          'clip-30',
+          '--duration',
+          '0.01',
+        ]),
+      ).toBe(1);
+      expect(readFileSync(path, 'utf8')).toBe(before);
+      expect(errors.join('\n')).toContain('shorter than one frame at 30 fps');
+
+      // Exactly one frame (rounded up to whole microseconds) is still allowed.
+      expect(
+        await runCli([
+          'timeline',
+          'trim',
+          '--project',
+          path,
+          '--clip',
+          'clip-30',
+          '--start',
+          '29.966666',
+        ]),
+      ).toBe(0);
+      expect(clipOf(path)).toMatchObject({ sourceInUs: 29_966_666, durationUs: 33_334 });
+    } finally {
+      console.error = originalError;
+      console.warn = originalWarn;
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('clamps an end past the media to the media end with a warning', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-trim-clamp-'));
     const originalLog = console.log;

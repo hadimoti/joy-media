@@ -505,6 +505,10 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
       return 1;
     }
 
+    const { num: fpsNum, den: fpsDen } = root.frameRate;
+    const minimumFrameUs = Math.ceil((1_000_000 * fpsDen) / fpsNum);
+    const fpsLabel =
+      fpsDen === 1 ? String(fpsNum) : (fpsNum / fpsDen).toFixed(3).replace(/\.?0+$/, '');
     let found = false;
     for (const track of tracks) {
       const clip = track.clips.find((c) => c.id === clipFlag);
@@ -543,10 +547,23 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
           }
           if (sourceInUs + Math.round(clip.durationUs * rate) > mediaEnd) {
             clip.durationUs = Math.floor((mediaEnd - sourceInUs) / rate);
+            // Clamping must never leave less than one frame: reject instead (N3).
+            if (clip.durationUs < minimumFrameUs) {
+              logError(
+                `Trim leaves clip "${clipFlag}" ${formatSeconds(clip.durationUs)} long (source ${formatSeconds(sourceInUs)} to the media end at ${formatSeconds(mediaEnd)}), shorter than one frame at ${fpsLabel} fps (${formatSeconds(minimumFrameUs)}). Nothing was changed.`,
+              );
+              return 1;
+            }
             logWarn(
               `Clip "${clipFlag}" ends at source ${formatSeconds(mediaEnd)}: clamped to the media end (${formatSeconds(mediaEnd)}).`,
             );
           }
+        }
+        if (clip.durationUs < minimumFrameUs) {
+          logError(
+            `Trim leaves clip "${clipFlag}" ${formatSeconds(clip.durationUs)} long, shorter than one frame at ${fpsLabel} fps (${formatSeconds(minimumFrameUs)}). Nothing was changed.`,
+          );
+          return 1;
         }
         found = true;
         track.clips.sort((a, b) => a.startUs - b.startUs);
