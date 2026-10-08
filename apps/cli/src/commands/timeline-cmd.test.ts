@@ -225,6 +225,102 @@ describe('timeline clip looks', () => {
   });
 });
 
+describe('timeline clip id and look aliases (item 10)', () => {
+  it('accepts --look in any case, refuses conflicting look flags, and lets move-clip take --clipId', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-timeline-aliases-10-'));
+    const errors: string[] = [];
+    const originalError = console.error;
+    try {
+      const project = createDefaultProject('aliases', { id: 'aliases-10-project' });
+      (project.compositions.root!.tracks[0]!.clips as unknown[]).push({
+        id: 'clip-x',
+        kind: 'video',
+        assetId: 'asset-default',
+        startUs: 4_000_000,
+        durationUs: 5_000_000,
+        sourceInUs: 0,
+      });
+      const path = join(directory, 'project.json');
+      writeFileSync(path, JSON.stringify({ format: 'joy-media-project', revision: 1, project }));
+      const clip = () =>
+        JSON.parse(readFileSync(path, 'utf8')).project.compositions.root.tracks[0].clips[0];
+      console.error = (...values: unknown[]) => errors.push(values.map(String).join(' '));
+
+      expect(
+        await runCli([
+          'timeline',
+          'add-effect',
+          '--project',
+          path,
+          '--clip-id',
+          'clip-x',
+          '--look',
+          'CRT',
+        ]),
+      ).toBe(0);
+      expect(clip().look).toEqual({ preset: 'crt' });
+
+      const before = readFileSync(path, 'utf8');
+      expect(
+        await runCli([
+          'timeline',
+          'add-effect',
+          '--project',
+          path,
+          '--clip-id',
+          'clip-x',
+          '--look',
+          'crt',
+          '--kind',
+          'bw',
+        ]),
+      ).toBe(2);
+      expect(errors.join('\n')).toContain('Conflicting look values: --look crt, --kind bw');
+      expect(readFileSync(path, 'utf8')).toBe(before);
+
+      errors.length = 0;
+      expect(
+        await runCli([
+          'timeline',
+          'move-clip',
+          '--project',
+          path,
+          '--clip',
+          'clip-x',
+          '--clipId',
+          'other',
+          '--start',
+          '0',
+        ]),
+      ).toBe(2);
+      expect(errors.join('\n')).toContain(
+        'Conflicting clip id values: --clip clip-x, --clipId other',
+      );
+
+      expect(
+        await runCli([
+          'timeline',
+          'move-clip',
+          '--project',
+          path,
+          '--clipId',
+          'clip-x',
+          '--start',
+          '0',
+        ]),
+      ).toBe(0);
+      expect(clip().startUs).toBe(0);
+      expect(
+        await runCli(['timeline', 'trim', '--project', path, '--clip-id', 'clip-x', '--end', '3']),
+      ).toBe(0);
+      expect(clip().durationUs).toBe(3_000_000);
+    } finally {
+      console.error = originalError;
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('timeline add-text layout bounds', () => {
   it.skipIf(!resolveTextFont())(
     'warns on clipped layout and rejects it under --strict',

@@ -8,6 +8,7 @@ import { sourceTimeAtVideoClipTime, validateJoyProjectV1 } from '@joy-media/proj
 import { createTextClip } from '../render/text-clip.js';
 import { resolveTextFont } from '../render/text-font.js';
 import { layoutFfmpegCaption } from '../render/caption-layout.js';
+import { pickAlias, resolveLookAliases, type JoyLookPreset } from '@joy-media/joy-agent-engine';
 
 export interface TimelineCommandFlags {
   project?: string | undefined;
@@ -50,7 +51,10 @@ export function printTimelineHelp(): void {
     '  y offsets the template bottom title line (0 = default position, negative = up, positive = down); rendering clamps y to the frame, and add-text warns if text may clip.',
   );
   console.log(
-    '  add-effect <clipId> --look <crt|bw|warm|cool> (also --clipId/--clip-id and --type/--kind) [--intensity 0..1] [--scanline-strength 0..1] [--noise-amount 0..1]',
+    '  add-effect <clipId> --look <crt|bw|warm|cool> (any case; also --type/--kind) [--intensity 0..1] [--scanline-strength 0..1] [--noise-amount 0..1]',
+  );
+  console.log(
+    '  Every --clip also accepts --clipId or --clip-id. Giving two different values (or two different looks) is an error.',
   );
   console.log('  clear-effect <clipId>');
 }
@@ -65,6 +69,31 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
   if (sub === 'help' || sub === '--help' || sub === '-h') {
     printTimelineHelp();
     return 0;
+  }
+
+  // The clip id and look aliases follow the same rules as the agent's operation schema:
+  // any case for looks, and two aliases that disagree are an error, never a silent pick.
+  let clipFlag: string | undefined;
+  let look: JoyLookPreset | undefined;
+  try {
+    const clipAliases = [
+      ['--clip', flags.clip],
+      ['--clipId', flags.clipId],
+      ['--clip-id', flags.clipIdDash],
+    ] as const;
+    clipFlag = pickAlias('clip id', clipAliases) as string | undefined;
+    if (sub === 'add-effect' || sub === 'clear-effect')
+      clipFlag = pickAlias('clip id', [['<clipId>', args[1]], ...clipAliases]) as
+        string | undefined;
+    if (sub === 'add-effect')
+      look = resolveLookAliases([
+        ['--look', flags.look],
+        ['--kind', flags.kind],
+        ['--type', flags.type],
+      ]);
+  } catch (error) {
+    logError(error instanceof Error ? error.message : String(error));
+    return 2;
   }
 
   if (!flags.project) {
@@ -123,15 +152,14 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
   }
 
   if (sub === 'add-effect' || sub === 'clear-effect') {
-    const clipId = args[1] ?? flags.clip ?? flags.clipId ?? flags.clipIdDash;
-    const look = flags.look ?? flags.kind ?? flags.type;
+    const clipId = clipFlag;
     if (!clipId) {
       logError(
         `Usage: joy-media timeline ${sub} <clipId> --project <id|file>${sub === 'add-effect' ? ' --look <crt|bw|warm|cool>' : ''}`,
       );
       return 1;
     }
-    if (sub === 'add-effect' && !['crt', 'bw', 'warm', 'cool'].includes(look ?? '')) {
+    if (sub === 'add-effect' && look === undefined) {
       logError('Look must be one of: crt, bw, warm, cool.');
       return 1;
     }
@@ -149,7 +177,7 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
     if (sub === 'clear-effect') delete clip.look;
     else {
       clip.look = {
-        preset: look as 'crt' | 'bw' | 'warm' | 'cool',
+        preset: look!,
         ...(flags.intensity === undefined ? {} : { intensity: flags.intensity }),
         ...(flags.scanlineStrength === undefined
           ? {}
@@ -369,7 +397,7 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
   }
 
   if (sub === 'split') {
-    if (!flags.clip || flags.at === undefined) {
+    if (!clipFlag || flags.at === undefined) {
       logError('Usage: joy-media timeline split --project <id> --clip <clipId> --at <seconds>');
       return 1;
     }
@@ -378,7 +406,7 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
     let found = false;
 
     for (const track of tracks) {
-      const idx = track.clips.findIndex((c) => c.id === flags.clip);
+      const idx = track.clips.findIndex((c) => c.id === clipFlag);
       if (idx !== -1) {
         const clip = track.clips[idx]!;
         if (atUs <= clip.startUs || atUs >= clip.startUs + clip.durationUs) {
@@ -422,7 +450,7 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
     }
 
     if (!found) {
-      logError(`Clip "${flags.clip}" not found.`);
+      logError(`Clip "${clipFlag}" not found.`);
       return 1;
     }
 
@@ -434,12 +462,12 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
       revision: projectInfo.revision,
     });
 
-    logSuccess(`Split clip ${c(flags.clip, 'bold')} at ${flags.at}s (saved rev ${nextRev}).`);
+    logSuccess(`Split clip ${c(clipFlag, 'bold')} at ${flags.at}s (saved rev ${nextRev}).`);
     return 0;
   }
 
   if (sub === 'trim') {
-    if (!flags.clip) {
+    if (!clipFlag) {
       logError(
         'Usage: joy-media timeline trim --project <id> --clip <clipId> [--start <sec>] [--end <sec>]',
       );
@@ -455,7 +483,7 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
 
     let found = false;
     for (const track of tracks) {
-      const clip = track.clips.find((c) => c.id === flags.clip);
+      const clip = track.clips.find((c) => c.id === clipFlag);
       if (clip) {
         if (flags.start !== undefined) {
           const nextStartUs = Math.round(flags.start * 1_000_000);
@@ -485,14 +513,14 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
           const sourceInUs = clip.sourceInUs ?? 0;
           if (sourceInUs >= mediaEnd) {
             logError(
-              `Trim start puts clip "${flags.clip}" at source ${formatSeconds(sourceInUs)}, beyond the end of its media (${formatSeconds(mediaEnd)}). Nothing was changed.`,
+              `Trim start puts clip "${clipFlag}" at source ${formatSeconds(sourceInUs)}, beyond the end of its media (${formatSeconds(mediaEnd)}). Nothing was changed.`,
             );
             return 1;
           }
           if (sourceInUs + Math.round(clip.durationUs * rate) > mediaEnd) {
             clip.durationUs = Math.floor((mediaEnd - sourceInUs) / rate);
             logWarn(
-              `Clip "${flags.clip}" ends at source ${formatSeconds(mediaEnd)}: clamped to the media end (${formatSeconds(mediaEnd)}).`,
+              `Clip "${clipFlag}" ends at source ${formatSeconds(mediaEnd)}: clamped to the media end (${formatSeconds(mediaEnd)}).`,
             );
           }
         }
@@ -503,7 +531,7 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
     }
 
     if (!found) {
-      logError(`Clip "${flags.clip}" not found.`);
+      logError(`Clip "${clipFlag}" not found.`);
       return 1;
     }
 
@@ -515,20 +543,20 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
       revision: projectInfo.revision,
     });
 
-    logSuccess(`Trimmed clip ${c(flags.clip, 'bold')} (saved rev ${nextRev}).`);
+    logSuccess(`Trimmed clip ${c(clipFlag, 'bold')} (saved rev ${nextRev}).`);
     return 0;
   }
 
   if (sub === 'move-clip') {
-    if (!flags.clip || flags.start === undefined) {
+    if (!clipFlag || flags.start === undefined) {
       logError(
         'Usage: joy-media timeline move-clip --project <id> --clip <clipId> --start <seconds>',
       );
       return 1;
     }
-    const clip = tracks.flatMap((track) => track.clips).find((item) => item.id === flags.clip);
+    const clip = tracks.flatMap((track) => track.clips).find((item) => item.id === clipFlag);
     if (!clip) {
-      logError(`Clip "${flags.clip}" not found.`);
+      logError(`Clip "${clipFlag}" not found.`);
       return 1;
     }
     clip.startUs = Math.round(flags.start * 1_000_000);
@@ -539,19 +567,19 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
       path: projectInfo.path,
       revision: projectInfo.revision,
     });
-    logSuccess(`Moved clip ${c(flags.clip, 'bold')} to ${flags.start}s (saved rev ${nextRev}).`);
+    logSuccess(`Moved clip ${c(clipFlag, 'bold')} to ${flags.start}s (saved rev ${nextRev}).`);
     return 0;
   }
 
   if (sub === 'remove-clip') {
-    if (!flags.clip) {
+    if (!clipFlag) {
       logError('Usage: joy-media timeline remove-clip --project <id> --clip <clipId>');
       return 1;
     }
 
     let found = false;
     for (const track of tracks) {
-      const idx = track.clips.findIndex((c) => c.id === flags.clip);
+      const idx = track.clips.findIndex((c) => c.id === clipFlag);
       if (idx !== -1) {
         track.clips.splice(idx, 1);
         found = true;
@@ -560,7 +588,7 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
     }
 
     if (!found) {
-      logError(`Clip "${flags.clip}" not found.`);
+      logError(`Clip "${clipFlag}" not found.`);
       return 1;
     }
 
@@ -572,7 +600,7 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
       revision: projectInfo.revision,
     });
 
-    logSuccess(`Removed clip ${c(flags.clip, 'bold')} (saved rev ${nextRev}).`);
+    logSuccess(`Removed clip ${c(clipFlag, 'bold')} (saved rev ${nextRev}).`);
     return 0;
   }
 
