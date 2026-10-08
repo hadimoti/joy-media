@@ -127,6 +127,9 @@ describe('JoyModelGateway', () => {
     expect(joyModelFallbackOrder(OMNI)).toEqual([OMNI, SUPER, ULTRA, NORTH, GEMMA]);
     expect(joyModelFallbackOrder('anthropic/claude-sonnet-4.6')).toEqual([]);
     expect(joyModelFallbackOrder(OMNI, { requireVision: true })).toEqual([OMNI, GEMMA]);
+    // Images sent to a text model (such as the text default) go to gemma, then nano-omni.
+    expect(joyModelFallbackOrder(SUPER, { requireVision: true })).toEqual([GEMMA, OMNI]);
+    expect(joyModelFallbackOrder(NORTH, { requireVision: true })).toEqual([GEMMA, OMNI]);
   });
 
   it('refuses paid model IDs by default and redirects a legacy alias to the free default', async () => {
@@ -330,6 +333,39 @@ describe('JoyModelGateway', () => {
       );
       expect(tried).toEqual([GEMMA, OMNI]);
       expect(result.getStatus()).toBe(502);
+    });
+
+    it('routes an image request for the text default to gemma, then nano-omni, and records who answered', async () => {
+      const tried: string[] = [];
+      const ledger = new MemoryAgentUsageLedger();
+      const settle = vi.spyOn(ledger, 'settleSpend');
+      const gateway = new JoyModelGateway({
+        ...activeUser(),
+        ledger,
+        openRouterApiKey: 'test-key',
+        fetchImpl: scripted([429], tried),
+      });
+      const result = createMockRes();
+      await gateway.handleChatCompletions(
+        createMockReq({
+          body: {
+            model: 'openrouter/free',
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: 'what is in this frame?' },
+                  { type: 'image_url', image_url: { url: 'https://example.invalid/f.png' } },
+                ],
+              },
+            ],
+          },
+        }),
+        result.res,
+      );
+      expect(result.getStatus()).toBe(200);
+      expect(tried).toEqual([GEMMA, OMNI]);
+      expect(settle.mock.calls[0]?.[1]).toMatchObject({ modelId: OMNI });
     });
 
     it('drops client-supplied OpenRouter routing fields so upstream cannot pick another model', async () => {
@@ -775,8 +811,8 @@ describe('JoyModelGateway', () => {
       expect(fetchImpl).not.toHaveBeenCalled();
     });
 
-    it('accepts images only for vision models and only as https or data:image URLs', async () => {
-      const fetchImpl = vi.fn(async () => ok());
+    it('sends images only to vision models and only as https or data:image URLs', async () => {
+      const fetchImpl = vi.fn(async (_url: unknown, _init?: RequestInit) => ok());
       const gateway = gatewayWith(fetchImpl as unknown as typeof fetch);
       const send = async (model: string, url: string) => {
         const result = createMockRes();
@@ -804,19 +840,18 @@ describe('JoyModelGateway', () => {
       ).toBe(200);
       expect((await send(OMNI, 'https://example.invalid/a.png')).getStatus()).toBe(200);
       expect(fetchImpl).toHaveBeenCalledTimes(2);
-      const textOnly = await send(
-        'nvidia/nemotron-3-super-120b-a12b:free',
-        'data:image/png;base64,AA==',
-      );
-      expect(textOnly.getStatus()).toBe(400);
-      expect(textOnly.getBody()).toContain('does not accept images');
+      // An image sent to the text default is answered by the first vision model instead.
+      const textDefault = await send(SUPER, 'data:image/png;base64,AA==');
+      expect(textDefault.getStatus()).toBe(200);
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      expect(JSON.parse(String(fetchImpl.mock.calls[2]?.[1]?.body)).model).toBe(GEMMA);
       const pdfAsImage = await send(
         'google/gemma-4-31b-it:free',
         'data:application/pdf;base64,JVBERi0=',
       );
       expect(pdfAsImage.getStatus()).toBe(400);
       expect(pdfAsImage.getBody()).toContain('UNSUPPORTED_CONTENT_PART');
-      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
     });
 
     it('keeps plain text, tool and assistant messages working', async () => {

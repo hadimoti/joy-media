@@ -20,20 +20,25 @@ export const LEGACY_MODEL_ALIASES: Readonly<Record<string, string>> = Object.fre
 );
 
 /**
- * Models to try for a request, in order: the requested model, then the rest of the free list.
- * A request with images falls back only to vision models. An id outside the free list gets
- * nothing to try (the handler has already refused it).
+ * Models to try for a request, in order.
+ * - Text: the requested model, then the rest of the free list in catalog order.
+ * - Images: only vision models. A vision model that was asked for goes first; a request for a
+ *   text model (such as the text default) goes to the vision models in catalog order.
+ * An id outside the free list gets nothing to try (the handler has already refused it).
  */
 export function joyModelFallbackOrder(
   modelId: string,
   options: { readonly requireVision?: boolean } = {},
 ): readonly string[] {
-  if (!JOY_AGENT_FREE_MODELS.some((model) => model.id === modelId)) return [];
+  const requested = JOY_AGENT_FREE_MODELS.find((model) => model.id === modelId);
+  if (requested === undefined) return [];
+  if (options.requireVision === true) {
+    const vision = JOY_AGENT_FREE_MODELS.filter((model) => model.vision).map((model) => model.id);
+    return requested.vision ? [modelId, ...vision.filter((id) => id !== modelId)] : vision;
+  }
   return [
     modelId,
-    ...JOY_AGENT_FREE_MODELS.filter(
-      (model) => model.id !== modelId && (options.requireVision !== true || model.vision),
-    ).map((model) => model.id),
+    ...JOY_AGENT_FREE_MODELS.filter((model) => model.id !== modelId).map((model) => model.id),
   ];
 }
 
@@ -278,10 +283,10 @@ export class JoyModelGateway {
       return;
     }
 
-    // Only text (and, for vision models, images) may reach OpenRouter: a `file` part would be
-    // parsed upstream and can be billed (e.g. mistral-ocr for PDFs) even on a free model.
-    const servedModel = catalog.find((m) => m.id === modelId)!;
-    const contentIssue = unsupportedContentIssue(parsedBody.messages, servedModel);
+    // Only text and images may reach OpenRouter: a `file` part would be parsed upstream and can
+    // be billed (e.g. mistral-ocr for PDFs) even on a free model. Images are sent only to vision
+    // models (see joyModelFallbackOrder), whichever model was asked for.
+    const contentIssue = unsupportedContentIssue(parsedBody.messages);
     if (contentIssue !== undefined) {
       res.writeHead(400, { 'content-type': 'application/json' });
       res.end(
@@ -778,10 +783,7 @@ function warnIfFreeModelBilled(modelId: string, costUsd: number, ownerId: string
 }
 
 /** Content part types the gateway forwards; anything else (file, input_audio, video_url) is refused. */
-function unsupportedContentIssue(
-  messages: unknown,
-  model: JoyModelCatalogEntry,
-): string | undefined {
+function unsupportedContentIssue(messages: unknown): string | undefined {
   if (messages === undefined) return undefined;
   if (!Array.isArray(messages)) return 'messages must be an array.';
   for (const [index, message] of messages.entries()) {
@@ -796,7 +798,6 @@ function unsupportedContentIssue(
         part !== null && typeof part === 'object' ? (part as { type?: unknown }).type : undefined;
       if (type === 'text') continue;
       if (type === 'image_url') {
-        if (!model.vision) return `Model '${model.id}' does not accept images.`;
         const imageUrl = (part as { image_url?: unknown }).image_url;
         const url =
           typeof imageUrl === 'string'
@@ -808,7 +809,7 @@ function unsupportedContentIssue(
           return 'image_url parts must carry an https: or data:image/ URL.';
         continue;
       }
-      return `Content part type ${typeof type === 'string' ? `'${type.slice(0, 40)}'` : '(missing)'} is not supported; send text${model.vision ? ' or image_url' : ''} parts only.`;
+      return `Content part type ${typeof type === 'string' ? `'${type.slice(0, 40)}'` : '(missing)'} is not supported; send text or image_url parts only.`;
     }
   }
   return undefined;

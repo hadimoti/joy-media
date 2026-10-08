@@ -34,6 +34,7 @@ describe('README examples', () => {
     expect(readme).toContain('`nvidia/nemotron-3-super-120b-a12b:free` (the default, text)');
     expect(readme).toContain('`nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` (vision)');
     expect(readme).not.toContain('inkling');
+    expect(readme).toContain('Requests with images go only to the vision models, Gemma first.');
     expect(readme).toContain('never one outside it');
     expect(readme).toContain('Paid models cannot be enabled');
     expect(lowerReadme).not.toContain('paid catalog models are disabled by default');
