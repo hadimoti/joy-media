@@ -11,10 +11,13 @@ import { logError, logSuccess } from '../utils/logger.js';
 
 export interface AuthCommandOptions {
   readonly email?: string;
+  /** A code already received. Implies --code-only: no new code is requested. */
   readonly code?: string;
+  /** Read the received code from stdin (keeps it out of shell history and `ps`). */
+  readonly codeStdin?: boolean;
   /** Verify a code you already received; do not request a new one. */
   readonly codeOnly?: boolean;
-  /** Only request a code (for scripts without a TTY); finish later with --code-only. */
+  /** Only request a code (for scripts without a TTY); finish later with --code-stdin or --code. */
   readonly requestCode?: boolean;
   readonly apiBase?: string;
   readonly insecureFileStore?: boolean;
@@ -48,12 +51,15 @@ export interface AuthPrompts {
   readonly interactive: () => boolean;
   readonly email: () => Promise<string>;
   readonly code: () => Promise<string>;
+  /** The whole of a piped stdin, for --code-stdin. */
+  readonly stdinCode: () => Promise<string>;
 }
 
 const defaultPrompts: AuthPrompts = {
   interactive: () => Boolean(stdin.isTTY) && typeof stdin.setRawMode === 'function',
   email: () => promptEmail(),
   code: () => promptHiddenCode(),
+  stdinCode: () => readStdinCode(),
 };
 let prompts: AuthPrompts = defaultPrompts;
 
@@ -111,18 +117,29 @@ async function login(options: AuthCommandOptions): Promise<number> {
   // sends a real email and uses up one of the account's few active codes.
   const apiBase = resolveLoginApiBase(options.apiBase);
   const interactive = prompts.interactive();
-  if (options.email === undefined && !interactive)
-    throw new AuthInputError('Pass --email when stdin is not an interactive TTY.');
-  if (options.requestCode && (options.codeOnly || options.code !== undefined))
-    throw new AuthInputError('--request-code cannot be combined with --code or --code-only.');
+  if (options.code !== undefined && options.codeStdin)
+    throw new AuthInputError('Pass either --code or --code-stdin, not both.');
+  if (options.requestCode && (options.codeOnly || options.codeStdin || options.code !== undefined))
+    throw new AuthInputError(
+      '--request-code cannot be combined with --code, --code-stdin or --code-only.',
+    );
+  if (options.email === undefined && (!interactive || options.codeStdin))
+    throw new AuthInputError(
+      options.codeStdin
+        ? 'Pass --email with --code-stdin.'
+        : 'Pass --email when stdin is not an interactive TTY.',
+    );
   if (options.code !== undefined && !LOGIN_CODE.test(options.code))
     throw new AuthInputError('Invalid code: login codes are 4 to 8 digits.');
-  if (!options.requestCode && options.code === undefined && !interactive)
+  if (!options.requestCode && options.code === undefined && !options.codeStdin && !interactive)
     throw new AuthInputError(
       options.codeOnly
-        ? 'Pass --code with --code-only when stdin is not an interactive TTY.'
-        : 'Pass --code when stdin is not an interactive TTY, or run with --request-code first and then --code-only --code <code>.',
+        ? 'Pass --code-stdin (or --code) with --code-only when stdin is not an interactive TTY.'
+        : 'Pass --code-stdin (or --code) when stdin is not an interactive TTY. To get a code first, run with --request-code.',
     );
+  // A code you already have (flag or stdin) is only verified: requesting another one
+  // would send a new email and could invalidate the code being typed.
+  const codeOnly = Boolean(options.codeOnly || options.codeStdin || options.code !== undefined);
   if (!options.requestCode) {
     try {
       assertJoySessionStorable(Boolean(options.insecureFileStore));
@@ -132,7 +149,13 @@ async function login(options: AuthCommandOptions): Promise<number> {
   }
   const email = (options.email ?? (await prompts.email())).trim();
   if (!EMAIL_ADDRESS.test(email)) throw new AuthInputError('Invalid email address.');
-  if (!options.codeOnly) {
+  let suppliedCode = options.code;
+  if (options.codeStdin) {
+    suppliedCode = (await prompts.stdinCode()).trim();
+    if (!LOGIN_CODE.test(suppliedCode))
+      throw new AuthInputError('Invalid code on stdin: login codes are 4 to 8 digits.');
+  }
+  if (!codeOnly) {
     try {
       await requestJson(`${apiBase}/v1/auth/request-otp`, {
         method: 'POST',
@@ -145,17 +168,18 @@ async function login(options: AuthCommandOptions): Promise<number> {
     }
     if (options.requestCode) {
       logSuccess(`If ${email} can sign in, a login code is on its way.`);
+      const apiFlag = options.apiBase ? ` --api-base ${apiBase}` : '';
       console.log(
-        `Finish with: joy-media login --email ${email} --code-only${options.apiBase ? ` --api-base ${apiBase}` : ''}`,
+        `Finish with: joy-media login --email ${email} --code-stdin${apiFlag}  (then type or pipe the code)`,
       );
       return 0;
     }
   }
   // A typo in the interactive flow is re-prompted; it must not cost another email.
-  const attempts = options.code === undefined ? MAX_INTERACTIVE_CODE_ATTEMPTS : 1;
+  const attempts = suppliedCode === undefined ? MAX_INTERACTIVE_CODE_ATTEMPTS : 1;
   let verification: unknown;
   for (let attempt = 1; ; attempt += 1) {
-    const code = options.code ?? (await prompts.code());
+    const code = suppliedCode ?? (await prompts.code());
     if (!LOGIN_CODE.test(code)) {
       if (attempt < attempts) {
         logError('Invalid code: login codes are 4 to 8 digits.');
@@ -408,6 +432,19 @@ function statusOf(error: unknown): number | undefined {
 
 function errorCodeOf(error: unknown): string | undefined {
   return isRecord(error) && typeof error.code === 'string' ? error.code : undefined;
+}
+
+const MAX_STDIN_CODE_BYTES = 256;
+
+async function readStdinCode(): Promise<string> {
+  // Nothing piped: ask on the terminal without echoing the digits.
+  if (stdin.isTTY) return await promptHiddenCode();
+  let value = '';
+  for await (const chunk of stdin) {
+    value += String(chunk);
+    if (value.length > MAX_STDIN_CODE_BYTES) break;
+  }
+  return value.split(/\r?\n/, 1)[0] ?? '';
 }
 
 async function promptEmail(): Promise<string> {

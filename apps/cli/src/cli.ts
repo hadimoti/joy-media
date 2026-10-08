@@ -74,6 +74,7 @@ export interface CliFlags {
   email: string | undefined;
   code: string | undefined;
   codeOnly: boolean;
+  codeStdin: boolean;
   requestCode: boolean;
   apiBase: string | undefined;
   resolution: string | undefined;
@@ -210,6 +211,7 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     email: typeof v.email === 'string' ? v.email : undefined,
     code: typeof v.code === 'string' ? v.code : undefined,
     codeOnly: Boolean(v['code-only']),
+    codeStdin: Boolean(v['code-stdin']),
     requestCode: Boolean(v['request-code']),
     apiBase: typeof v['api-base'] === 'string' ? v['api-base'] : undefined,
     resolution: typeof v.resolution === 'string' ? v.resolution : undefined,
@@ -279,6 +281,7 @@ export async function runCli(argv: string[]): Promise<number> {
         email: { type: 'string' },
         code: { type: 'string' },
         'code-only': { type: 'boolean', default: false },
+        'code-stdin': { type: 'boolean', default: false },
         'request-code': { type: 'boolean', default: false },
         'api-base': { type: 'string' },
         resolution: { type: 'string' },
@@ -356,6 +359,7 @@ export async function runCli(argv: string[]): Promise<number> {
           ...(flags.email === undefined ? {} : { email: flags.email }),
           ...(flags.code === undefined ? {} : { code: flags.code }),
           codeOnly: flags.codeOnly,
+          codeStdin: flags.codeStdin,
           requestCode: flags.requestCode,
           ...(flags.apiBase === undefined ? {} : { apiBase: flags.apiBase }),
           insecureFileStore: flags.insecureFileStore,

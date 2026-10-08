@@ -42,7 +42,7 @@ describe('CLI JOY session commands', () => {
     rmSync(home, { recursive: true, force: true });
   });
 
-  it('requests and verifies an OTP, then stores the session token without printing it', async () => {
+  it('verifies a code given with --code without requesting another, then stores the token unprinted', async () => {
     const token = 'tok-fake-never-print';
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
@@ -71,14 +71,9 @@ describe('CLI JOY session commands', () => {
     expect(loadJoySession()?.apiOrigin).toBe('https://api.example.invalid:8443');
     expect(loadJoySession()?.apiBase).toBe('https://api.example.invalid:8443/api');
     expect(calls.map((call) => call.url)).toEqual([
-      'https://api.example.invalid:8443/api/v1/auth/request-otp',
       'https://api.example.invalid:8443/api/v1/auth/verify-otp',
     ]);
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
-      contact: 'person@example.invalid',
-      method: 'gmail',
-    });
-    expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({
       contact: 'person@example.invalid',
       method: 'gmail',
       code: '123456',
@@ -153,7 +148,7 @@ describe('CLI JOY session commands', () => {
 
     expect(result).toBe(0);
     expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toBe(
-      'https://api-env.example.invalid/api/v1/auth/request-otp',
+      'https://api-env.example.invalid/api/v1/auth/verify-otp',
     );
     expect(loadJoySession()?.token).toBe('session-test-file-store');
   });
@@ -227,7 +222,7 @@ describe('CLI JOY session commands', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => reply());
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    const result = await runCli(['login', '--email', 'person@example.invalid', '--code', '123456']);
+    const result = await runCli(['login', '--email', 'person@example.invalid', '--request-code']);
 
     expect(result).toBe(1);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
@@ -277,7 +272,7 @@ describe('CLI JOY session commands', () => {
     expect(loadJoySession()?.token).toBe('session-test-code-only');
   });
 
-  it('requires --code with --code-only when stdin is not a TTY', async () => {
+  it('requires a code with --code-only when stdin is not a TTY', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -285,7 +280,9 @@ describe('CLI JOY session commands', () => {
 
     expect(result).toBe(2);
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(JSON.stringify(errors.mock.calls)).toContain('Pass --code with --code-only');
+    expect(JSON.stringify(errors.mock.calls)).toContain(
+      'Pass --code-stdin (or --code) with --code-only',
+    );
   });
 
   it('requests a code only with --request-code and explains how to finish', async () => {
@@ -302,8 +299,75 @@ describe('CLI JOY session commands', () => {
 
     expect(result).toBe(0);
     expect(calls).toEqual(['https://joyst.ir/api/v1/auth/request-otp']);
-    expect(JSON.stringify(output.mock.calls)).toContain('--code-only');
+    expect(JSON.stringify(output.mock.calls)).toContain(
+      'joy-media login --email person@example.invalid --code-stdin',
+    );
     expect(loadJoySession()).toBeUndefined();
+  });
+
+  it('never requests a new code when --code is given, even at an interactive terminal', async () => {
+    restorePrompts?.();
+    restorePrompts = configureAuthPromptsForTests({ interactive: () => true });
+    const calls: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      calls.push(String(input));
+      return new Response(JSON.stringify({ data: { token: 'session-test-tty-code' } }), {
+        status: 200,
+      });
+    });
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    expect(await runCli(['login', '--email', 'person@example.invalid', '--code', '123456'])).toBe(
+      0,
+    );
+    expect(calls).toEqual(['https://joyst.ir/api/v1/auth/verify-otp']);
+  });
+
+  it('reads the code from stdin with --code-stdin and only verifies it', async () => {
+    restorePrompts?.();
+    restorePrompts = configureAuthPromptsForTests({
+      interactive: () => false,
+      stdinCode: async () => '654321\n',
+    });
+    const bodies: unknown[] = [];
+    const calls: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      calls.push(String(input));
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ data: { token: 'session-test-stdin' } }), {
+        status: 200,
+      });
+    });
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    expect(await runCli(['login', '--email', 'person@example.invalid', '--code-stdin'])).toBe(0);
+    expect(calls).toEqual(['https://joyst.ir/api/v1/auth/verify-otp']);
+    expect(bodies[0]).toMatchObject({ code: '654321' });
+    expect(loadJoySession()?.token).toBe('session-test-stdin');
+    expect(JSON.stringify(output.mock.calls)).not.toContain('654321');
+  });
+
+  it.each([
+    [['--code-stdin', '--code', '123456'], 'either --code or --code-stdin'],
+    [['--code-stdin', '--request-code'], '--request-code cannot be combined'],
+  ])('rejects login %j before any request', async (extra, message) => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runCli(['login', '--email', 'person@example.invalid', ...extra])).toBe(2);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(JSON.stringify(errors.mock.calls)).toContain(message);
+  });
+
+  it('rejects a malformed code on stdin without contacting the server', async () => {
+    restorePrompts?.();
+    restorePrompts = configureAuthPromptsForTests({ stdinCode: async () => 'abc' });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runCli(['login', '--email', 'person@example.invalid', '--code-stdin'])).toBe(2);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(JSON.stringify(errors.mock.calls)).toContain('Invalid code on stdin');
   });
 
   it('whoami and a bare logout use the API base saved at login', async () => {
