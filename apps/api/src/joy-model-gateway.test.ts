@@ -290,7 +290,7 @@ describe('JoyModelGateway', () => {
       expect(final.getBody()).toContain('MODEL_UNAVAILABLE');
     });
 
-    it.each([400, 401, 403])('does not fall back on upstream %i', async (status) => {
+    it.each([400, 401, 402])('does not fall back on upstream %i', async (status) => {
       const tried: string[] = [];
       const gateway = new JoyModelGateway({
         ...activeUser(),
@@ -303,6 +303,172 @@ describe('JoyModelGateway', () => {
         createMockRes().res,
       );
       expect(tried).toEqual(['google/gemma-4-31b-it:free']);
+    });
+
+    describe('which upstream failures fall back (FC3)', () => {
+      const openRouterError = (
+        status: number,
+        error: { code?: number | string; message?: string; metadata?: Record<string, unknown> },
+        headers: Record<string, string> = {},
+      ) =>
+        new Response(JSON.stringify({ error }), {
+          status,
+          headers: { 'content-type': 'application/json', ...headers },
+        });
+      const sequence =
+        (responses: Array<() => Response>, tried: string[]) =>
+        async (_url: unknown, init?: RequestInit) => {
+          tried.push((JSON.parse(String(init?.body)) as { model: string }).model);
+          const next = responses[tried.length - 1];
+          return next
+            ? next()
+            : new Response(JSON.stringify({ choices: [], usage: { cost: 0 } }), { status: 200 });
+        };
+      const run = async (fetchImpl: typeof fetch, body: Record<string, unknown> = {}) => {
+        const result = createMockRes();
+        await new JoyModelGateway({
+          ...activeUser(),
+          ledger: new MemoryAgentUsageLedger(),
+          openRouterApiKey: 'test-key',
+          fetchImpl,
+        }).handleChatCompletions(
+          createMockReq({ body: { model: SUPER, messages: [], ...body } }),
+          result.res,
+        );
+        return result;
+      };
+
+      it('falls back on a model-specific 403 (a gated free endpoint), not as an auth failure', async () => {
+        const tried: string[] = [];
+        const result = await run(
+          sequence(
+            [
+              () =>
+                openRouterError(403, {
+                  code: 403,
+                  message: 'This model is only available on agentic harnesses',
+                  metadata: { failed_routing_step: 'Gate Free Endpoints by Agentic Harness' },
+                }),
+              () => new Response('', { status: 403 }),
+            ],
+            tried,
+          ),
+        );
+        expect(tried).toEqual([SUPER, ULTRA, NORTH]);
+        expect(result.getStatus()).toBe(200);
+        expect(result.getBody()).not.toContain('AUTH_FAILED');
+      });
+
+      it.each([
+        'This API key is disabled',
+        'Key limit exceeded (total limit)',
+        'Invalid credentials',
+      ])('treats a 403 about the key (%s) as an auth failure and stops', async (message) => {
+        const tried: string[] = [];
+        const result = await run(
+          sequence([() => openRouterError(403, { code: 403, message })], tried),
+        );
+        expect(tried).toEqual([SUPER]);
+        expect(result.getStatus()).toBe(503);
+        expect(result.getBody()).toContain('JOY_AGENT_UPSTREAM_AUTH_FAILED');
+        expect(result.getBody()).not.toContain(message);
+      });
+
+      it('still treats a key-sounding 403 that names a failed routing step as model-specific', async () => {
+        const tried: string[] = [];
+        await run(
+          sequence(
+            [
+              () =>
+                openRouterError(403, {
+                  message: 'Key limit exceeded for this endpoint',
+                  metadata: { failed_routing_step: 'Some Routing Gate' },
+                }),
+            ],
+            tried,
+          ),
+        );
+        expect(tried).toEqual([SUPER, ULTRA]);
+      });
+
+      it('logs status, error code and routing metadata for every attempt, never bodies', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+        try {
+          const tried: string[] = [];
+          await run(
+            sequence(
+              [
+                () =>
+                  openRouterError(
+                    429,
+                    {
+                      code: 429,
+                      message: 'shared pool busy; your prompt was USER-SECRET-PROMPT',
+                      metadata: {
+                        limit_source: 'upstream_provider_shared_pool',
+                        provider_name: 'Google AI Studio',
+                        raw: 'RAW-BODY-SENTINEL',
+                      },
+                    },
+                    { 'retry-after': '9' },
+                  ),
+                () =>
+                  openRouterError(403, {
+                    code: 403,
+                    message: 'only available on agentic harnesses',
+                    metadata: {
+                      failed_routing_step: 'Gate Free Endpoints\u0007 by Agentic Harness',
+                    },
+                  }),
+              ],
+              tried,
+            ),
+            { messages: [{ role: 'user', content: 'USER-SECRET-PROMPT' }] },
+          );
+          const attempts = warn.mock.calls.filter(
+            ([label]) => label === 'joy-model-gateway: upstream attempt',
+          );
+          expect(attempts.map(([, entry]) => entry)).toEqual([
+            {
+              ownerId: 'fb',
+              attempt: 1,
+              of: 5,
+              modelId: SUPER,
+              status: 429,
+              code: '429',
+              limitSource: 'upstream_provider_shared_pool',
+              providerName: 'Google AI Studio',
+              outcome: 'fallback',
+            },
+            {
+              ownerId: 'fb',
+              attempt: 2,
+              of: 5,
+              modelId: ULTRA,
+              status: 403,
+              code: '403',
+              failedRoutingStep: 'Gate Free Endpoints by Agentic Harness',
+              outcome: 'fallback',
+            },
+          ]);
+          expect(info).toHaveBeenCalledWith('joy-model-gateway: upstream attempt', {
+            ownerId: 'fb',
+            attempt: 3,
+            of: 5,
+            modelId: NORTH,
+            status: 200,
+            outcome: 'ok',
+          });
+          const logged = JSON.stringify([...warn.mock.calls, ...info.mock.calls]);
+          expect(logged).not.toContain('USER-SECRET-PROMPT');
+          expect(logged).not.toContain('RAW-BODY-SENTINEL');
+          expect(logged).not.toContain('agentic harnesses');
+        } finally {
+          warn.mockRestore();
+          info.mockRestore();
+        }
+      });
     });
 
     it('falls back only to vision models when the request carries images', async () => {

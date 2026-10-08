@@ -61,12 +61,43 @@ function messagesHaveImages(messages: unknown): boolean {
   );
 }
 
+/** What one failed upstream attempt tells us; never holds the response body itself. */
+interface UpstreamFailure {
+  readonly status: number;
+  /** OpenRouter's `error.code`, if any. */
+  readonly code?: string;
+  /** OpenRouter's `error.message`; used only to classify a 403, never logged or returned. */
+  readonly message?: string;
+  readonly failedRoutingStep?: string;
+  readonly limitSource?: string;
+  readonly providerName?: string;
+  readonly retryAfter?: string;
+}
+
+type UpstreamFailureKind = 'fallback' | 'auth' | 'stop';
+
+/** A 403 that is about the gateway's key rather than the model (disabled, revoked, over its limit). */
+const KEY_LEVEL_FORBIDDEN =
+  /api[\s_-]?key|\bkey\b[^.]{0,40}\b(?:invalid|disabled|revoked|expired|limit|not found)|credential|unauthori[sz]ed/i;
+
 /**
- * Upstream answers that mean "this model is busy, failing or gone right now": try the next one.
- * 404 covers a free variant OpenRouter has withdrawn or has no provider for.
+ * - auth: the key itself was rejected (401, or a 403 clearly about the key). Every model
+ *   would fail the same way, so stop.
+ * - fallback: this model is busy, gated or failing right now; try the next candidate. That is
+ *   404 (withdrawn or no provider), 429 (including a shared free pool), 5xx, and any other 403
+ *   (e.g. a free endpoint gated to agentic harnesses, reported as a failed routing step).
+ * - stop: anything else (such as 400 or 402) is about the request or the account; stop.
  */
-function isFallbackStatus(status: number): boolean {
-  return status === 404 || status === 429 || (status >= 500 && status <= 599);
+function classifyUpstreamFailure(failure: UpstreamFailure): UpstreamFailureKind {
+  const { status } = failure;
+  if (status === 401) return 'auth';
+  if (status === 403)
+    return failure.failedRoutingStep === undefined &&
+      KEY_LEVEL_FORBIDDEN.test(failure.message ?? '')
+      ? 'auth'
+      : 'fallback';
+  if (status === 404 || status === 429 || (status >= 500 && status <= 599)) return 'fallback';
+  return 'stop';
 }
 
 /**
@@ -361,14 +392,18 @@ export class JoyModelGateway {
       return;
     }
 
-    // Forward to OpenRouter. A free model that answers 429/5xx is retried with the next free
-    // model in catalog order; timeouts and network failures are not model-specific and stop.
+    // Forward to OpenRouter. A free model that is busy, gated or failing (see
+    // classifyUpstreamFailure) is retried with the next candidate; only a key-level rejection
+    // stops as an auth failure. Timeouts and network failures are not model-specific and stop.
     const isStream = parsedBody.stream === true;
     let upstreamRes: Response | undefined;
+    let verdict: 'ok' | UpstreamFailureKind = 'fallback';
+    const failures: UpstreamFailure[] = [];
     const candidates = joyModelFallbackOrder(modelId, {
       requireVision: messagesHaveImages(parsedBody.messages),
     });
-    for (const [attempt, candidate] of candidates.entries()) {
+    for (const [index, candidate] of candidates.entries()) {
+      const attempt = { ownerId: actor.id, attempt: index + 1, of: candidates.length };
       const upstreamController = new AbortController();
       let upstreamTimedOut = false;
       const headerTimeout = setTimeout(() => {
@@ -393,6 +428,11 @@ export class JoyModelGateway {
           upstreamTimedOut ||
           (error instanceof Error &&
             (error.name === 'TimeoutError' || error.name === 'AbortError'));
+        logUpstreamAttempt({
+          ...attempt,
+          modelId: candidate,
+          outcome: timedOut ? 'timeout' : 'unreachable',
+        });
         res.writeHead(timedOut ? 504 : 502, { 'content-type': 'application/json' });
         res.end(
           JSON.stringify({
@@ -407,15 +447,25 @@ export class JoyModelGateway {
         clearTimeout(headerTimeout);
       }
       modelId = candidate;
-      if (upstreamRes.ok || !isFallbackStatus(upstreamRes.status)) break;
-      if (attempt < candidates.length - 1) await upstreamRes.body?.cancel().catch(() => {});
+      if (upstreamRes.ok) {
+        logUpstreamAttempt({ ...attempt, modelId, status: upstreamRes.status, outcome: 'ok' });
+        verdict = 'ok';
+        break;
+      }
+      const failure = await readUpstreamFailure(upstreamRes);
+      const kind = classifyUpstreamFailure(failure);
+      logUpstreamAttempt({ ...attempt, modelId, ...failureLogFields(failure), outcome: kind });
+      failures.push(failure);
+      verdict = kind;
+      if (kind !== 'fallback') break;
     }
     if (upstreamRes === undefined) throw new Error('joy-model-gateway: no upstream attempt');
 
-    if (!upstreamRes.ok) {
+    if (verdict !== 'ok') {
       await this.safeRelease(reservationId);
-      const status = upstreamRes.status;
-      if (status === 401 || status === 403) {
+      const last = failures.at(-1)!;
+      const status = last.status;
+      if (verdict === 'auth') {
         res.writeHead(503, { 'content-type': 'application/json' });
         res.end(
           JSON.stringify({
@@ -425,18 +475,18 @@ export class JoyModelGateway {
             },
           }),
         );
-      } else if (status === 404) {
+      } else if (verdict === 'fallback' && status === 404) {
         res.writeHead(400, { 'content-type': 'application/json' });
         res.end(
           JSON.stringify({
             error: { code: 'MODEL_UNAVAILABLE', message: 'The selected model is unavailable' },
           }),
         );
-      } else if (status === 429) {
-        const retryAfter = upstreamRes.headers.get('retry-after');
+      } else if (verdict === 'fallback' && status === 429) {
+        const retryAfter = last.retryAfter;
         res.writeHead(429, {
           'content-type': 'application/json',
-          ...(retryAfter === null ? {} : { 'retry-after': retryAfter }),
+          ...(retryAfter === undefined ? {} : { 'retry-after': retryAfter }),
         });
         res.end(
           JSON.stringify({
@@ -813,6 +863,117 @@ function unsupportedContentIssue(messages: unknown): string | undefined {
     }
   }
   return undefined;
+}
+
+const UPSTREAM_ERROR_BODY_MAX_BYTES = 32 * 1024;
+
+/** Reads a bounded error body and keeps only OpenRouter's error code and routing metadata. */
+async function readUpstreamFailure(response: Response): Promise<UpstreamFailure> {
+  const retryAfter = response.headers.get('retry-after');
+  return {
+    status: response.status,
+    ...openRouterErrorFields(parseJsonObject(await readBoundedText(response))),
+    ...(retryAfter === null ? {} : { retryAfter }),
+  };
+}
+
+async function readBoundedText(
+  response: Response,
+  maxBytes = UPSTREAM_ERROR_BODY_MAX_BYTES,
+): Promise<string> {
+  if (response.body === null) return '';
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < maxBytes) {
+      const { done, value } = await readStreamChunk(reader, 10_000);
+      if (done) break;
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } catch {
+    // A partial body is enough to classify the failure.
+  } finally {
+    void reader.cancel().catch(() => {});
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks).subarray(0, maxBytes));
+}
+
+function parseJsonObject(text: string): Record<string, unknown> | undefined {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return isPlainObject(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** OpenRouter's `{ error: { code, message, metadata: { failed_routing_step, ... } } }`. */
+function openRouterErrorFields(
+  payload: Record<string, unknown> | undefined,
+): Omit<UpstreamFailure, 'status' | 'retryAfter'> {
+  const error = payload?.error;
+  if (!isPlainObject(error)) return {};
+  const metadata = isPlainObject(error.metadata) ? error.metadata : {};
+  const text = (value: unknown) =>
+    typeof value === 'string' || typeof value === 'number' ? logSafe(String(value)) : undefined;
+  const code = text(error.code);
+  const failedRoutingStep = text(metadata.failed_routing_step);
+  const limitSource = text(metadata.limit_source);
+  const providerName = text(metadata.provider_name);
+  return {
+    ...(code === undefined ? {} : { code }),
+    ...(typeof error.message === 'string' ? { message: error.message.slice(0, 500) } : {}),
+    ...(failedRoutingStep === undefined ? {} : { failedRoutingStep }),
+    ...(limitSource === undefined ? {} : { limitSource }),
+    ...(providerName === undefined ? {} : { providerName }),
+  };
+}
+
+/** Short, single-line, printable: safe for a log line. */
+function logSafe(value: string): string {
+  return value
+    .replace(/[\p{Cc}\p{Cf}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+}
+
+function failureLogFields(failure: UpstreamFailure) {
+  return {
+    status: failure.status,
+    ...(failure.code === undefined ? {} : { code: failure.code }),
+    ...(failure.failedRoutingStep === undefined
+      ? {}
+      : { failedRoutingStep: failure.failedRoutingStep }),
+    ...(failure.limitSource === undefined ? {} : { limitSource: failure.limitSource }),
+    ...(failure.providerName === undefined ? {} : { providerName: failure.providerName }),
+  };
+}
+
+/**
+ * One line per upstream attempt: model, HTTP status, OpenRouter error code and routing metadata.
+ * Never the request or response body, which can carry user content.
+ */
+function logUpstreamAttempt(entry: {
+  readonly ownerId: string;
+  readonly attempt: number;
+  readonly of: number;
+  readonly modelId: string;
+  readonly outcome: 'ok' | UpstreamFailureKind | 'timeout' | 'unreachable';
+  readonly status?: number;
+  readonly code?: string;
+  readonly failedRoutingStep?: string;
+  readonly limitSource?: string;
+  readonly providerName?: string;
+}): void {
+  if (entry.outcome === 'ok') console.info('joy-model-gateway: upstream attempt', entry);
+  else console.warn('joy-model-gateway: upstream attempt', entry);
 }
 
 function positiveEnvInteger(name: string, fallback: number): number {
