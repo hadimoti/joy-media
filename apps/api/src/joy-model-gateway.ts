@@ -556,16 +556,29 @@ export class JoyModelGateway {
         if (!streamComplete) void reader.cancel().catch(() => {});
       };
       res.on('close', onClose);
+      // Forwards complete SSE lines (minus any reasoning the model streamed) and accounts for
+      // usage. A partial line waits in `pending` for the rest of it.
       const processLines = (text: string) => {
         pending += text;
         const lines = pending.split(/\r?\n/);
         pending = lines.pop() ?? '';
+        let forward = '';
         for (const line of lines) {
-          if (!line.startsWith('data: ') || line.includes('[DONE]')) continue;
+          const payload = line.startsWith('data: ') ? line.slice(6) : undefined;
+          const data =
+            payload === undefined || payload.trim() === '[DONE]'
+              ? undefined
+              : parseJsonObject(payload);
+          if (data === undefined) {
+            forward += `${line}\n`;
+            continue;
+          }
+          forward += stripReasoning(data) ? `data: ${JSON.stringify(data)}\n` : `${line}\n`;
+          // The shape is not trusted: anything unexpected throws and the frame is skipped.
+          const chunk = data as StreamChunkShape;
           try {
-            const data = JSON.parse(line.slice(6));
-            if (typeof data.id === 'string') generationId = data.id;
-            for (const choice of data.choices ?? []) {
+            if (typeof chunk.id === 'string') generationId = chunk.id;
+            for (const choice of chunk.choices ?? []) {
               if (typeof choice?.delta?.content === 'string')
                 streamedOutputText += choice.delta.content;
               for (const toolCall of choice?.delta?.tool_calls ?? []) {
@@ -575,24 +588,24 @@ export class JoyModelGateway {
                   streamedOutputText += toolCall.function.arguments;
               }
             }
-            if (data.usage) {
+            if (chunk.usage) {
               usageReported = true;
-              promptTokens = Number(data.usage.prompt_tokens ?? promptTokens);
-              completionTokens = Number(data.usage.completion_tokens ?? completionTokens);
-              const reportedCost = data.usage.cost ?? data.usage.total_cost;
+              promptTokens = Number(chunk.usage.prompt_tokens ?? promptTokens);
+              completionTokens = Number(chunk.usage.completion_tokens ?? completionTokens);
+              const reportedCost = chunk.usage.cost ?? chunk.usage.total_cost;
               if (typeof reportedCost === 'number') rawCostUsd = reportedCost;
             }
           } catch {
-            // Ignore non-JSON SSE frames.
+            // Ignore frames with unexpected shapes.
           }
         }
+        if (forward.length > 0 && !res.destroyed && !res.writableEnded) res.write(forward);
       };
 
       const keepAlive = setInterval(() => {
         if (!res.destroyed && !res.writableEnded) res.write(': keep-alive\n\n');
       }, 15_000);
       // Forward what the peek already read, then carry on with the rest of the stream.
-      for (const chunk of streamStart.chunks) res.write(chunk);
       processLines(streamStart.text);
 
       try {
@@ -614,10 +627,7 @@ export class JoyModelGateway {
             streamComplete = true;
             break;
           }
-          if (value) {
-            res.write(value);
-            processLines(decoder.decode(value, { stream: true }));
-          }
+          if (value) processLines(decoder.decode(value, { stream: true }));
         }
       } finally {
         clearInterval(keepAlive);
@@ -681,6 +691,8 @@ export class JoyModelGateway {
       );
       return;
     }
+    // Reasoning (nano-omni) never reaches the client or its conversation history.
+    stripReasoning(jsonResponse);
     const usage = (jsonResponse.usage ?? {}) as Record<string, unknown>;
     const costReported = usage.cost !== undefined || usage.total_cost !== undefined;
     const promptTokens = Number.isFinite(Number(usage.prompt_tokens))
@@ -831,6 +843,9 @@ function buildUpstreamBody(
   if (!hasOutputLimit) body.max_tokens = JOY_MODEL_MAX_OUTPUT_TOKENS;
   // Request OpenRouter's usage metadata internally; clients cannot override this.
   body.usage = { include: true };
+  // Reasoning models think anyway; ask OpenRouter to leave the reasoning out of the reply.
+  if (JOY_AGENT_FREE_MODELS.find((model) => model.id === modelId)?.reasoning === true)
+    body.reasoning = { exclude: true };
   // Pin OpenRouter's file parser to its free engine so no paid one (mistral-ocr) can ever be
   // chosen. File parts are refused above; this is the second lock. Client plugins are never
   // forwarded (they are not in FORWARDED_COMPLETION_FIELDS).
@@ -885,6 +900,57 @@ function unsupportedContentIssue(messages: unknown): string | undefined {
   return undefined;
 }
 
+/** The parts of an OpenRouter stream chunk the gateway reads for accounting. */
+interface StreamChunkShape {
+  readonly id?: unknown;
+  readonly choices?: ReadonlyArray<{
+    readonly delta?: {
+      readonly content?: unknown;
+      readonly tool_calls?: ReadonlyArray<{
+        readonly function?: { readonly name?: unknown; readonly arguments?: unknown };
+      }>;
+    };
+  }>;
+  readonly usage?: {
+    readonly prompt_tokens?: unknown;
+    readonly completion_tokens?: unknown;
+    readonly cost?: unknown;
+    readonly total_cost?: unknown;
+  };
+}
+
+const REASONING_FIELDS = ['reasoning', 'reasoning_content', 'reasoning_details'] as const;
+
+/**
+ * Removes reasoning from a completion or a stream chunk, in place: the reasoning fields of each
+ * choice's message or delta, and a leading <think>...</think> block in a message's content.
+ * Returns true if anything was removed.
+ */
+function stripReasoning(payload: Record<string, unknown>): boolean {
+  if (!Array.isArray(payload.choices)) return false;
+  let changed = false;
+  for (const choice of payload.choices) {
+    if (!isPlainObject(choice)) continue;
+    for (const key of ['message', 'delta'] as const) {
+      const part = choice[key];
+      if (!isPlainObject(part)) continue;
+      for (const field of REASONING_FIELDS) {
+        if (!Object.hasOwn(part, field)) continue;
+        delete part[field];
+        changed = true;
+      }
+      if (key === 'message' && typeof part.content === 'string') {
+        const content = part.content.replace(/^\s*<think>[\s\S]*?<\/think>\s*/, '');
+        if (content !== part.content) {
+          part.content = content;
+          changed = true;
+        }
+      }
+    }
+  }
+  return changed;
+}
+
 /**
  * OpenRouter can answer HTTP 200 and still report a failure in the body: a top-level `error`
  * object, or an `error` on every choice. Returns it in the `{ error }` shape, or undefined.
@@ -905,9 +971,7 @@ function bodyErrorOf(payload: Record<string, unknown>): Record<string, unknown> 
 interface StreamStart {
   readonly reader: ReadableStreamDefaultReader<Uint8Array>;
   readonly decoder: TextDecoder;
-  /** Raw bytes read so far, forwarded as-is once the stream is accepted. */
-  readonly chunks: readonly Uint8Array[];
-  /** The same bytes, decoded, for usage accounting. */
+  /** What was read so far, decoded; forwarded once the stream is accepted. */
   readonly text: string;
 }
 
@@ -926,9 +990,9 @@ async function peekStreamStart(
 ): Promise<StreamPeek> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
-  const chunks: Uint8Array[] = [];
   let text = '';
-  const accept = (): StreamPeek => ({ kind: 'ok', start: { reader, decoder, chunks, text } });
+  let received = false;
+  const accept = (): StreamPeek => ({ kind: 'ok', start: { reader, decoder, text } });
   try {
     while (true) {
       const { done, value } = await readStreamChunk(reader, Math.max(1, deadline - Date.now()));
@@ -936,7 +1000,7 @@ async function peekStreamStart(
         text += decoder.decode();
         return accept();
       }
-      chunks.push(value);
+      received = true;
       text += decoder.decode(value, { stream: true });
       const lines = text.split(/\r?\n/);
       lines.pop();
@@ -953,8 +1017,7 @@ async function peekStreamStart(
   } catch (error) {
     // A stream that breaks after sending something is accepted: the main loop meets the same
     // error, ends the response cleanly and accounts for what arrived. A timeout still fails.
-    if (chunks.length > 0 && !(error instanceof Error && error.name === 'TimeoutError'))
-      return accept();
+    if (received && !(error instanceof Error && error.name === 'TimeoutError')) return accept();
     void reader.cancel().catch(() => {});
     throw error;
   }

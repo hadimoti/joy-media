@@ -1113,6 +1113,118 @@ describe('JoyModelGateway', () => {
     expect(forwardedBody).not.toHaveProperty('arbitrary');
   });
 
+  describe('reasoning output (FC3)', () => {
+    const gatewayWith = (fetchImpl: typeof fetch) =>
+      new JoyModelGateway({
+        mediaAuth: { authenticate: async () => ({ id: 'r' }) } as unknown as MediaAuthService,
+        account: {
+          getSubscription: async () => ({
+            ownerId: 'r',
+            plan: 'monthly',
+            status: 'active',
+            updatedAt: 0,
+          }),
+        } as unknown as AccountService,
+        ledger: new MemoryAgentUsageLedger(),
+        openRouterApiKey: 'test-key',
+        fetchImpl,
+      });
+
+    it('asks OpenRouter to exclude reasoning for the reasoning model only', async () => {
+      const bodies: Array<Record<string, unknown>> = [];
+      const gateway = gatewayWith((async (_url: unknown, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ choices: [], usage: { cost: 0 } }), { status: 200 });
+      }) as unknown as typeof fetch);
+      for (const model of [OMNI, SUPER])
+        await gateway.handleChatCompletions(
+          createMockReq({
+            body: { model, messages: [], reasoning: { effort: 'high', exclude: false } },
+          }),
+          createMockRes().res,
+        );
+      expect(bodies[0]).toMatchObject({ model: OMNI, reasoning: { exclude: true } });
+      expect(bodies[0]?.reasoning).toEqual({ exclude: true });
+      expect(bodies[1]?.model).toBe(SUPER);
+      expect(bodies[1]).not.toHaveProperty('reasoning');
+    });
+
+    it('strips reasoning fields and a leading think block from a completion', async () => {
+      const result = createMockRes();
+      await gatewayWith(
+        (async () =>
+          new Response(
+            JSON.stringify({
+              id: 'gen-r',
+              choices: [
+                {
+                  message: {
+                    role: 'assistant',
+                    content: '<think>LONG-HIDDEN-REASONING</think>\n\nThe frame is red.',
+                    reasoning: 'LONG-HIDDEN-REASONING',
+                    reasoning_details: [{ type: 'reasoning.text', text: 'LONG-HIDDEN-REASONING' }],
+                  },
+                },
+              ],
+              usage: { prompt_tokens: 5, completion_tokens: 900, cost: 0 },
+            }),
+            { status: 200 },
+          )) as unknown as typeof fetch,
+      ).handleChatCompletions(createMockReq({ body: { model: OMNI, messages: [] } }), result.res);
+      expect(result.getStatus()).toBe(200);
+      const message = JSON.parse(result.getBody()).choices[0].message;
+      expect(message).toEqual({ role: 'assistant', content: 'The frame is red.' });
+      expect(result.getBody()).not.toContain('LONG-HIDDEN-REASONING');
+    });
+
+    it('strips streamed reasoning deltas but keeps content, tool calls and usage', async () => {
+      const ledger = new MemoryAgentUsageLedger();
+      const result = createMockRes();
+      await new JoyModelGateway({
+        mediaAuth: { authenticate: async () => ({ id: 'r' }) } as unknown as MediaAuthService,
+        account: {
+          getSubscription: async () => ({
+            ownerId: 'r',
+            plan: 'monthly',
+            status: 'active',
+            updatedAt: 0,
+          }),
+        } as unknown as AccountService,
+        ledger,
+        openRouterApiKey: 'test-key',
+        fetchImpl: async () =>
+          new Response(
+            [
+              'data: {"id":"g","choices":[{"delta":{"role":"assistant","reasoning":"STREAMED-REASONING","reasoning_details":[{"text":"STREAMED-REASONING"}]}}]}',
+              '',
+              'data: {"id":"g","choices":[{"delta":{"content":"Hi","reasoning_content":"STREAMED-REASONING"}}]}',
+              '',
+              'data: {"id":"g","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"edit","arguments":"{}"}}]}}]}',
+              '',
+              'data: {"id":"g","choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3,"cost":0}}',
+              '',
+              'data: [DONE]',
+              '',
+              '',
+            ].join('\n'),
+            { status: 200, headers: { 'content-type': 'text/event-stream' } },
+          ),
+      }).handleChatCompletions(
+        createMockReq({ body: { model: OMNI, messages: [], stream: true } }),
+        result.res,
+      );
+      const body = result.getBody();
+      expect(body).not.toContain('STREAMED-REASONING');
+      expect(body).not.toContain('reasoning');
+      expect(body).toContain('data: {"id":"g","choices":[{"delta":{"content":"Hi"}}]}\n');
+      expect(body).toContain('"name":"edit"');
+      expect(body).toContain('data: [DONE]\n');
+      const summary = await ledger.getSummary('r');
+      expect(summary.totalPromptTokens).toBe(7);
+      expect(summary.totalCompletionTokens).toBe(3);
+    });
+  });
+
   describe('content parts that could be billed (FC-M1)', () => {
     const gatewayWith = (fetchImpl: typeof fetch) =>
       new JoyModelGateway({
