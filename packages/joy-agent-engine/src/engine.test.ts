@@ -335,6 +335,65 @@ describe('JOY Agent bounded model loop', () => {
     expect(JSON.stringify(traces)).not.toContain(secret);
   });
 
+  it('never puts model reasoning parts in the trace, events or result text', async () => {
+    const reasoning = 'PRIVATE-CHAIN-OF-THOUGHT-7f3a';
+    let step = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        step += 1;
+        const usage = {
+          inputTokens: { total: 2, noCache: 2, cacheRead: undefined, cacheWrite: undefined },
+          outputTokens: { total: 1, text: 1, reasoning: 1 },
+        };
+        return step === 1
+          ? {
+              content: [
+                { type: 'reasoning' as const, text: `${reasoning} step one` },
+                { type: 'text' as const, text: 'Checking the selection.' },
+                {
+                  type: 'tool-call' as const,
+                  toolCallId: 'call-r1',
+                  toolName: 'read_selection',
+                  input: '{}',
+                },
+              ],
+              finishReason: { unified: 'tool-calls' as const, raw: 'tool_calls' },
+              usage,
+              warnings: [],
+            }
+          : {
+              content: [
+                { type: 'reasoning' as const, text: `${reasoning} final` },
+                { type: 'text' as const, text: 'All done.' },
+              ],
+              finishReason: { unified: 'stop' as const, raw: 'stop' },
+              usage,
+              warnings: [],
+            };
+      },
+    });
+    const traces: unknown[] = [];
+    const events: unknown[] = [];
+    const engine = new JoyAgentEngine({
+      model,
+      bridge,
+      onTrace: (record) => traces.push(record),
+      onEvent: (event) => events.push(event),
+    });
+
+    const result = await engine.run(request);
+
+    expect(step).toBe(2);
+    expect(result.text).toBe('All done.');
+    expect(traces).toContainEqual({
+      type: 'assistant_text',
+      name: 'assistant',
+      value: 'Checking the selection.',
+    });
+    const transcript = JSON.stringify({ traces, events, result });
+    expect(transcript).not.toContain(reasoning);
+  });
+
   it('returns a proposal validation error to the model and accepts its retry', async () => {
     const createText = {
       kind: 'create-text',
