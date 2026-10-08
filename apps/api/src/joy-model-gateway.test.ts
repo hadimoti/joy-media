@@ -193,7 +193,7 @@ describe('JoyModelGateway', () => {
     }
   });
 
-  describe('free-model fallback on upstream 429/5xx', () => {
+  describe('free-model fallback on upstream 404/429/5xx', () => {
     const activeUser = () => ({
       mediaAuth: { authenticate: async () => ({ id: 'fb' }) } as unknown as MediaAuthService,
       account: {
@@ -268,7 +268,40 @@ describe('JoyModelGateway', () => {
       expect(result.getBody()).not.toContain('provider-detail');
     });
 
-    it.each([400, 404])('does not fall back on upstream %i', async (status) => {
+    it('falls back on upstream 404 (a withdrawn free model) and keeps the 404 mapping at the end', async () => {
+      const tried: string[] = [];
+      const gateway = new JoyModelGateway({
+        ...activeUser(),
+        ledger: new MemoryAgentUsageLedger(),
+        openRouterApiKey: 'test-key',
+        fetchImpl: scripted([404], tried),
+      });
+      const result = createMockRes();
+      await gateway.handleChatCompletions(
+        createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } }),
+        result.res,
+      );
+      expect(tried).toEqual(['google/gemma-4-31b-it:free', 'thinkingmachines/inkling:free']);
+      expect(result.getStatus()).toBe(200);
+
+      const allGone: string[] = [];
+      const gone = new JoyModelGateway({
+        ...activeUser(),
+        ledger: new MemoryAgentUsageLedger(),
+        openRouterApiKey: 'test-key',
+        fetchImpl: scripted([404, 404, 404, 404, 404], allGone),
+      });
+      const final = createMockRes();
+      await gone.handleChatCompletions(
+        createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } }),
+        final.res,
+      );
+      expect(allGone).toHaveLength(5);
+      expect(final.getStatus()).toBe(400);
+      expect(final.getBody()).toContain('MODEL_UNAVAILABLE');
+    });
+
+    it.each([400, 401, 403])('does not fall back on upstream %i', async (status) => {
       const tried: string[] = [];
       const gateway = new JoyModelGateway({
         ...activeUser(),

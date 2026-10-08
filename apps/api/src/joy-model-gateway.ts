@@ -56,9 +56,12 @@ function messagesHaveImages(messages: unknown): boolean {
   );
 }
 
-/** Upstream answers that mean "this model is busy or failing right now": try the next one. */
+/**
+ * Upstream answers that mean "this model is busy, failing or gone right now": try the next one.
+ * 404 covers a free variant OpenRouter has withdrawn or has no provider for.
+ */
 function isFallbackStatus(status: number): boolean {
-  return status === 429 || (status >= 500 && status <= 599);
+  return status === 404 || status === 429 || (status >= 500 && status <= 599);
 }
 
 /**
