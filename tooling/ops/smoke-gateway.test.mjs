@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   classifyKeyCheck,
+  JOY_FREE_MODEL_IDS,
   modelsCatalogIssue,
   parseSmokeArgs,
   requestGateway,
@@ -59,11 +60,23 @@ describe('gateway smoke helpers', () => {
     assert.match(await classifyKeyCheck(response), /OpenRouter key missing/);
   });
 
-  it('checks that /models returns a JSON catalog containing only openrouter/free', () => {
-    assert.equal(modelsCatalogIssue({ models: [{ id: 'openrouter/free' }] }), undefined);
+  it('checks that /models returns exactly the free catalog with the default first', () => {
+    const free = JOY_FREE_MODEL_IDS.map((id, index) => ({ id, isDefault: index === 0 }));
+    assert.equal(modelsCatalogIssue({ models: free }), undefined);
+    assert.equal(JOY_FREE_MODEL_IDS.length, 5);
+    for (const id of JOY_FREE_MODEL_IDS) assert.match(id, /:free$/);
     assert.match(
-      modelsCatalogIssue({ models: [{ id: 'anthropic/paid-model' }] }),
-      /only openrouter\/free/,
+      modelsCatalogIssue({ models: [{ id: 'openrouter/free', isDefault: true }] }),
+      /exactly the free catalog/,
+    );
+    assert.match(
+      modelsCatalogIssue({ models: [...free, { id: 'anthropic/paid-model' }] }),
+      /exactly the free catalog/,
+    );
+    assert.match(modelsCatalogIssue({ models: [...free].reverse() }), /exactly the free catalog/);
+    assert.match(
+      modelsCatalogIssue({ models: free.map((model) => ({ id: model.id })) }),
+      /as the default/,
     );
     assert.match(modelsCatalogIssue({}), /models array/);
     assert.match(modelsCatalogIssue(null), /models array/);

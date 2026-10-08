@@ -44,7 +44,9 @@ try {
       console.error(`${prefix}: ${issue}`);
       process.exitCode = 1;
     } else
-      console.log(`${prefix}: unauthenticated GET /models returned 200 (openrouter/free only).`);
+      console.log(
+        `${prefix}: unauthenticated GET /models returned 200 (the five free models only).`,
+      );
   }
 
   const chat = await requestGateway(

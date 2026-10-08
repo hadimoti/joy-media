@@ -241,6 +241,43 @@ describe('effective BYOK provider configuration', () => {
     }
   });
 
+  it('resolves the legacy hosted openrouter/free id to the catalog default and its vision flag', async () => {
+    isolateConfig();
+    vi.stubEnv('JOY_MEDIA_SESSION_TOKEN', 'tok-fake-1');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          models: [
+            { id: 'google/gemma-4-31b-it:free', isDefault: true, vision: true },
+            { id: 'nvidia/nemotron-3-super-120b-a12b:free', vision: false },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    try {
+      await expect(
+        resolveByokConfig({
+          provider: 'joy-hosted',
+          model: 'openrouter/free',
+          baseUrl: 'https://joy-hosted-legacy-test.invalid/api/v1/agent',
+        }),
+      ).resolves.toMatchObject({ modelId: 'google/gemma-4-31b-it:free', vision: true });
+      await expect(
+        resolveByokConfig({
+          provider: 'joy-hosted',
+          model: 'nvidia/nemotron-3-super-120b-a12b:free',
+          baseUrl: 'https://joy-hosted-legacy-test.invalid/api/v1/agent',
+        }),
+      ).resolves.toMatchObject({
+        modelId: 'nvidia/nemotron-3-super-120b-a12b:free',
+        vision: false,
+      });
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it('sends a saved login token only to its exact stored origin', async () => {
     isolateConfig();
     const restoreSecretStore = configureSecretStoreRuntimeForTests({

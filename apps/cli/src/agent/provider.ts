@@ -4,6 +4,7 @@ import {
   normalizeByokSessionConfig,
   canonicalKiloBaseUrl,
   defaultModelFor,
+  DEFAULT_OPENROUTER_MODEL,
   isRetiredModelId,
   KILO_MODEL_PRESETS,
   KILO_GATEWAY_BASE_URL,
@@ -228,11 +229,15 @@ export async function resolveByokConfig(
       : `configure a key with \`joy-media agent provider add ${effective.provider} --api-key-env <VAR>\``;
     throw new Error(`No API key for ${effective.provider}: ${hint}`);
   }
+  // The hosted default always comes from the server catalog. `openrouter/free` was the old
+  // hosted placeholder (saved configs may still hold it); the gateway aliases it to the catalog
+  // default, so resolve it the same way here to get that model's vision flag.
   if (
     effective.provider === 'joy-hosted' &&
-    !options.model &&
-    !loadCliConfig().defaultModels?.[effective.provider] &&
-    !aiProviders[effective.provider]?.defaultModel
+    (effective.modelId === DEFAULT_OPENROUTER_MODEL ||
+      (!options.model &&
+        !loadCliConfig().defaultModels?.[effective.provider] &&
+        !aiProviders[effective.provider]?.defaultModel))
   ) {
     effective = {
       ...effective,

@@ -2,18 +2,27 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AgentUsageLedger } from './agent-usage-ledger.js';
 import type { AccountApi } from './account-service.js';
 import type { MediaAuthApi } from './media-auth.js';
+import {
+  JOY_AGENT_FREE_MODELS,
+  JOY_AGENT_LEGACY_MODEL_IDS,
+  type JoyModelCatalogEntry,
+} from './joy-free-models.js';
 
-export interface JoyModelCatalogEntry {
-  readonly id: string;
-  readonly displayName: string;
-  readonly description: string;
-  readonly contextLength: number;
-  readonly vision: boolean;
-  readonly isDefault?: boolean;
-  readonly inputUsdPerMillion: number;
-  readonly outputUsdPerMillion: number;
+export { JOY_AGENT_FREE_MODELS, type JoyModelCatalogEntry } from './joy-free-models.js';
+
+// Fail at startup rather than ever forwarding a priced model as "free".
+for (const model of JOY_AGENT_FREE_MODELS) {
+  if (
+    !model.id.endsWith(':free') ||
+    model.inputUsdPerMillion !== 0 ||
+    model.outputUsdPerMillion !== 0
+  )
+    throw new Error(`joy-model-gateway: free catalog entry ${model.id} is not zero-cost`);
 }
+if (JOY_AGENT_FREE_MODELS.filter((model) => model.isDefault === true).length !== 1)
+  throw new Error('joy-model-gateway: the free catalog needs exactly one default');
 
+/** Paid models, offered only when listed in JOY_GATEWAY_PAID_MODEL_ALLOWLIST (unset in production). */
 export const JOY_AGENT_DEFAULT_MODELS: readonly JoyModelCatalogEntry[] = Object.freeze([
   {
     id: 'bytedance-seed/seed-2.0-lite',
@@ -54,16 +63,9 @@ export const JOY_AGENT_DEFAULT_MODELS: readonly JoyModelCatalogEntry[] = Object.
   },
 ]);
 
-export const JOY_AGENT_FREE_DEFAULT_MODEL: JoyModelCatalogEntry = Object.freeze({
-  id: 'openrouter/free',
-  displayName: 'Joy Free',
-  description: 'Free model selected by OpenRouter',
-  contextLength: 200000,
-  vision: false,
-  isDefault: true,
-  inputUsdPerMillion: 0,
-  outputUsdPerMillion: 0,
-});
+export const JOY_AGENT_FREE_DEFAULT_MODEL: JoyModelCatalogEntry = JOY_AGENT_FREE_MODELS.find(
+  (model) => model.isDefault === true,
+)!;
 
 export function effectiveJoyModelCatalog(
   allowlist = process.env.JOY_GATEWAY_PAID_MODEL_ALLOWLIST ?? '',
@@ -78,14 +80,31 @@ export function effectiveJoyModelCatalog(
     ...model,
     isDefault: false,
   }));
-  return [JOY_AGENT_FREE_DEFAULT_MODEL, ...paid];
+  return [...JOY_AGENT_FREE_MODELS, ...paid];
 }
 
-export const LEGACY_MODEL_ALIASES: Readonly<Record<string, string>> = Object.freeze({
-  'minimax/minimax-m3': 'bytedance-seed/seed-2.0-lite',
-  'anthropic/claude-3.5-sonnet': 'anthropic/claude-sonnet-4.6',
-  'meta-llama/llama-3.3-70b-instruct': 'deepseek/deepseek-v4-flash',
-});
+/** Legacy ids from installed clients all resolve to the free default. */
+export const LEGACY_MODEL_ALIASES: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries(JOY_AGENT_LEGACY_MODEL_IDS.map((id) => [id, JOY_AGENT_FREE_DEFAULT_MODEL.id])),
+);
+
+/**
+ * Models to try for a request, in order: the requested model, then (for a free model only)
+ * the rest of the free list. A paid model never falls back, and nothing outside the list is
+ * ever tried.
+ */
+export function joyModelFallbackOrder(modelId: string): readonly string[] {
+  if (!JOY_AGENT_FREE_MODELS.some((model) => model.id === modelId)) return [modelId];
+  return [
+    modelId,
+    ...JOY_AGENT_FREE_MODELS.map((model) => model.id).filter((id) => id !== modelId),
+  ];
+}
+
+/** Upstream answers that mean "this model is busy or failing right now": try the next one. */
+function isFallbackStatus(status: number): boolean {
+  return status === 429 || (status >= 500 && status <= 599);
+}
 
 let warnedAboutUnknownPaidModels = false;
 
@@ -290,12 +309,7 @@ export class JoyModelGateway {
     const aliasedModel = Object.hasOwn(LEGACY_MODEL_ALIASES, requestedModel)
       ? LEGACY_MODEL_ALIASES[requestedModel]
       : undefined;
-    const modelId =
-      aliasedModel && catalog.some((model) => model.id === aliasedModel)
-        ? aliasedModel
-        : aliasedModel
-          ? JOY_AGENT_FREE_DEFAULT_MODEL.id
-          : requestedModel;
+    let modelId = aliasedModel ?? requestedModel;
     const allowed = catalog.some((m) => m.id === modelId);
     if (!allowed) {
       res.writeHead(400, { 'content-type': 'application/json' });
@@ -376,45 +390,54 @@ export class JoyModelGateway {
       return;
     }
 
-    // Forward to OpenRouter
+    // Forward to OpenRouter. A free model that answers 429/5xx is retried with the next free
+    // model in catalog order; timeouts and network failures are not model-specific and stop.
     const isStream = parsedBody.stream === true;
-    let upstreamRes: Response;
-    const upstreamController = new AbortController();
-    let upstreamTimedOut = false;
-    const headerTimeout = setTimeout(() => {
-      upstreamTimedOut = true;
-      upstreamController.abort();
-    }, UPSTREAM_HEADER_TIMEOUT_MS);
-    try {
-      upstreamRes = await this.fetchImpl('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${this.openRouterApiKey}`,
-          'http-referer': 'https://joyst.ir',
-          'x-title': 'JOY Media Built-in Agent',
-        },
-        body: JSON.stringify(buildUpstreamBody(parsedBody, modelId, isStream)),
-        signal: upstreamController.signal,
-      });
-    } catch (error) {
-      await this.safeRelease(reservationId);
-      const timedOut =
-        upstreamTimedOut ||
-        (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError'));
-      res.writeHead(timedOut ? 504 : 502, { 'content-type': 'application/json' });
-      res.end(
-        JSON.stringify({
-          error: {
-            code: timedOut ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNREACHABLE',
-            message: timedOut ? 'AI upstream timed out' : 'Failed to connect to AI upstream',
+    let upstreamRes: Response | undefined;
+    const candidates = joyModelFallbackOrder(modelId);
+    for (const [attempt, candidate] of candidates.entries()) {
+      const upstreamController = new AbortController();
+      let upstreamTimedOut = false;
+      const headerTimeout = setTimeout(() => {
+        upstreamTimedOut = true;
+        upstreamController.abort();
+      }, UPSTREAM_HEADER_TIMEOUT_MS);
+      try {
+        upstreamRes = await this.fetchImpl('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${this.openRouterApiKey}`,
+            'http-referer': 'https://joyst.ir',
+            'x-title': 'JOY Media Built-in Agent',
           },
-        }),
-      );
-      return;
-    } finally {
-      clearTimeout(headerTimeout);
+          body: JSON.stringify(buildUpstreamBody(parsedBody, candidate, isStream)),
+          signal: upstreamController.signal,
+        });
+      } catch (error) {
+        await this.safeRelease(reservationId);
+        const timedOut =
+          upstreamTimedOut ||
+          (error instanceof Error &&
+            (error.name === 'TimeoutError' || error.name === 'AbortError'));
+        res.writeHead(timedOut ? 504 : 502, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            error: {
+              code: timedOut ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNREACHABLE',
+              message: timedOut ? 'AI upstream timed out' : 'Failed to connect to AI upstream',
+            },
+          }),
+        );
+        return;
+      } finally {
+        clearTimeout(headerTimeout);
+      }
+      modelId = candidate;
+      if (upstreamRes.ok || !isFallbackStatus(upstreamRes.status)) break;
+      if (attempt < candidates.length - 1) await upstreamRes.body?.cancel().catch(() => {});
     }
+    if (upstreamRes === undefined) throw new Error('joy-model-gateway: no upstream attempt');
 
     if (!upstreamRes.ok) {
       await this.safeRelease(reservationId);

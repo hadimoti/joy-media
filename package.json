@@ -25,6 +25,7 @@
     "test:harness": "node --test ops/self-hosted/linux-runner/ci-namespace-classify.test.mjs ops/self-hosted/linux-runner/evidence-retention.test.mjs ops/self-hosted/linux-runner/real-service-evidence.test.mjs ops/self-hosted/linux-runner/real-service-teardown.test.mjs tooling/ops/smoke-gateway.test.mjs deploy/deploy-scripts.test.mjs",
     "release:performance": "node tooling/release/release-performance-observer.mjs",
     "release:gate": "node --experimental-strip-types tooling/release/src/gate.ts",
+    "release:check-free-models": "node --experimental-strip-types tooling/release/src/free-model-check.ts",
     "verify:joy-agent-worker": "node tooling/release/verify-joy-agent-worker.mjs",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test",
     "verify:ci": "pnpm check && pnpm build && pnpm audit:prod"

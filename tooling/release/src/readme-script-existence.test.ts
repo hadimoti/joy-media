@@ -29,7 +29,10 @@ describe('README examples', () => {
     expect(lowerReadme).not.toContain('minimax');
     expect(readme.toLowerCase()).not.toContain('private repository');
     expect(readme).toContain('requires a signed-in JOY account with an active Pro subscription');
-    expect(readme).toContain('hosted catalog defaults to `openrouter/free`');
+    expect(readme).not.toContain('`openrouter/free`');
+    expect(readme).toContain('server-enforced allow-list of five zero-cost OpenRouter models');
+    expect(readme).toContain('`google/gemma-4-31b-it:free` (the default, with vision)');
+    expect(readme).toContain('never one outside it');
     expect(lowerReadme).toContain('paid catalog models are disabled by default');
     expect(readme).toContain('JOY_GATEWAY_PAID_MODEL_ALLOWLIST');
     expect(readme).not.toContain('bytedance-seed/seed-2.0-lite');

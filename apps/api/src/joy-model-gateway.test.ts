@@ -5,7 +5,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   JoyModelGateway,
   JOY_AGENT_DEFAULT_MODELS,
+  JOY_AGENT_FREE_MODELS,
+  LEGACY_MODEL_ALIASES,
   effectiveJoyModelCatalog,
+  joyModelFallbackOrder,
   OPENROUTER_SYSTEMD_CREDENTIAL_IDS,
   readOpenRouterApiKeyFromCredential,
 } from './joy-model-gateway.js';
@@ -75,7 +78,7 @@ describe('JoyModelGateway', () => {
   });
   afterEach(() => vi.unstubAllEnvs());
 
-  it('defaults to only the free catalog model and default alias resolution', async () => {
+  it('defaults to exactly the five zero-cost catalog models with correct vision flags', async () => {
     vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', '');
     const gateway = new JoyModelGateway({
       mediaAuth: {} as MediaAuthService,
@@ -85,10 +88,55 @@ describe('JoyModelGateway', () => {
     });
     const { res, getBody } = createMockRes();
     await gateway.handleGetModels(createMockReq({ method: 'GET' }), res);
-    expect(JSON.parse(getBody()).models).toEqual([
-      expect.objectContaining({ id: 'openrouter/free', isDefault: true }),
+    const models = JSON.parse(getBody()).models as Array<{
+      id: string;
+      vision: boolean;
+      isDefault?: boolean;
+      inputUsdPerMillion: number;
+      outputUsdPerMillion: number;
+    }>;
+    expect(models.map((model) => [model.id, model.vision, model.isDefault === true])).toEqual([
+      ['google/gemma-4-31b-it:free', true, true],
+      ['thinkingmachines/inkling:free', true, false],
+      ['nvidia/nemotron-3-ultra-550b-a55b:free', false, false],
+      ['nvidia/nemotron-3-super-120b-a12b:free', false, false],
+      ['cohere/north-mini-code:free', false, false],
     ]);
-    expect(effectiveJoyModelCatalog('')).toHaveLength(1);
+    expect(effectiveJoyModelCatalog('')).toHaveLength(5);
+    expect(models.some((model) => model.id === 'openrouter/free')).toBe(false);
+  });
+
+  it('only ever lists zero-cost ":free" ids in the free catalog', () => {
+    expect(JOY_AGENT_FREE_MODELS).toHaveLength(5);
+    for (const model of JOY_AGENT_FREE_MODELS) {
+      expect(model.id).toMatch(/:free$/);
+      expect(model.inputUsdPerMillion).toBe(0);
+      expect(model.outputUsdPerMillion).toBe(0);
+    }
+    for (const model of effectiveJoyModelCatalog('')) expect(model.id.endsWith(':free')).toBe(true);
+    expect(JOY_AGENT_FREE_MODELS.filter((model) => model.isDefault)).toHaveLength(1);
+  });
+
+  it('maps every legacy id to the free default', () => {
+    expect(LEGACY_MODEL_ALIASES).toEqual({
+      'openrouter/free': 'google/gemma-4-31b-it:free',
+      'minimax/minimax-m3': 'google/gemma-4-31b-it:free',
+      'anthropic/claude-3.5-sonnet': 'google/gemma-4-31b-it:free',
+      'meta-llama/llama-3.3-70b-instruct': 'google/gemma-4-31b-it:free',
+    });
+  });
+
+  it('falls back only within the free list, in catalog order, and never for paid models', () => {
+    expect(joyModelFallbackOrder('thinkingmachines/inkling:free')).toEqual([
+      'thinkingmachines/inkling:free',
+      'google/gemma-4-31b-it:free',
+      'nvidia/nemotron-3-ultra-550b-a55b:free',
+      'nvidia/nemotron-3-super-120b-a12b:free',
+      'cohere/north-mini-code:free',
+    ]);
+    expect(joyModelFallbackOrder('anthropic/claude-sonnet-4.6')).toEqual([
+      'anthropic/claude-sonnet-4.6',
+    ]);
   });
 
   it('refuses paid model IDs by default and redirects a legacy alias to the free default', async () => {
@@ -126,7 +174,204 @@ describe('JoyModelGateway', () => {
       aliased.res,
     );
     expect(aliased.getStatus()).toBe(200);
-    expect(sentModel).toBe('openrouter/free');
+    expect(sentModel).toBe('google/gemma-4-31b-it:free');
+    for (const model of ['openrouter/free', 'anthropic/claude-3.5-sonnet']) {
+      sentModel = undefined;
+      const legacy = createMockRes();
+      await gateway.handleChatCompletions(
+        createMockReq({ body: { model, messages: [] } }),
+        legacy.res,
+      );
+      expect(legacy.getStatus()).toBe(200);
+      expect(sentModel).toBe('google/gemma-4-31b-it:free');
+    }
+    for (const model of [
+      'openrouter/auto',
+      'google/gemma-4-31b-it',
+      'deepseek/deepseek-v4-flash',
+    ]) {
+      sentModel = undefined;
+      const refused = createMockRes();
+      await gateway.handleChatCompletions(
+        createMockReq({ body: { model, messages: [] } }),
+        refused.res,
+      );
+      expect(refused.getStatus()).toBe(400);
+      expect(refused.getBody()).toContain('MODEL_NOT_ALLOWED');
+      expect(sentModel).toBeUndefined();
+    }
+  });
+
+  describe('free-model fallback on upstream 429/5xx', () => {
+    const activeUser = () => ({
+      mediaAuth: { authenticate: async () => ({ id: 'fb' }) } as unknown as MediaAuthService,
+      account: {
+        getSubscription: async () => ({
+          ownerId: 'fb',
+          plan: 'pro',
+          status: 'active',
+          updatedAt: 0,
+        }),
+      } as unknown as AccountService,
+    });
+    const scripted =
+      (statuses: number[], tried: string[]) => async (_url: unknown, init?: RequestInit) => {
+        tried.push((JSON.parse(String(init?.body)) as { model: string }).model);
+        const status = statuses[tried.length - 1] ?? 200;
+        return status === 200
+          ? new Response(JSON.stringify({ choices: [], usage: { cost: 0 } }), { status })
+          : new Response('provider-detail', { status });
+      };
+
+    it('tries the next free model in order and records the one that answered', async () => {
+      vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', '');
+      const tried: string[] = [];
+      const ledger = new MemoryAgentUsageLedger();
+      const settle = vi.spyOn(ledger, 'settleSpend');
+      const gateway = new JoyModelGateway({
+        ...activeUser(),
+        ledger,
+        openRouterApiKey: 'test-key',
+        fetchImpl: scripted([429, 503], tried),
+      });
+      const result = createMockRes();
+      await gateway.handleChatCompletions(
+        createMockReq({ body: { model: 'openrouter/free', messages: [] } }),
+        result.res,
+      );
+      expect(result.getStatus()).toBe(200);
+      expect(tried).toEqual([
+        'google/gemma-4-31b-it:free',
+        'thinkingmachines/inkling:free',
+        'nvidia/nemotron-3-ultra-550b-a55b:free',
+      ]);
+      expect(settle.mock.calls[0]?.[1]).toMatchObject({
+        modelId: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+      });
+    });
+
+    it('stops after the whole list and never tries a model outside it', async () => {
+      vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', '');
+      const tried: string[] = [];
+      const gateway = new JoyModelGateway({
+        ...activeUser(),
+        ledger: new MemoryAgentUsageLedger(),
+        openRouterApiKey: 'test-key',
+        fetchImpl: scripted([500, 502, 503, 504, 429, 500], tried),
+      });
+      const result = createMockRes();
+      await gateway.handleChatCompletions(
+        createMockReq({ body: { model: 'cohere/north-mini-code:free', messages: [] } }),
+        result.res,
+      );
+      expect(tried).toEqual([
+        'cohere/north-mini-code:free',
+        'google/gemma-4-31b-it:free',
+        'thinkingmachines/inkling:free',
+        'nvidia/nemotron-3-ultra-550b-a55b:free',
+        'nvidia/nemotron-3-super-120b-a12b:free',
+      ]);
+      expect(tried.every((id) => JOY_AGENT_FREE_MODELS.some((model) => model.id === id))).toBe(
+        true,
+      );
+      expect(result.getStatus()).toBe(429);
+      expect(result.getBody()).toContain('RATE_LIMITED');
+      expect(result.getBody()).not.toContain('provider-detail');
+    });
+
+    it.each([400, 404])('does not fall back on upstream %i', async (status) => {
+      vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', '');
+      const tried: string[] = [];
+      const gateway = new JoyModelGateway({
+        ...activeUser(),
+        ledger: new MemoryAgentUsageLedger(),
+        openRouterApiKey: 'test-key',
+        fetchImpl: scripted([status], tried),
+      });
+      await gateway.handleChatCompletions(
+        createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } }),
+        createMockRes().res,
+      );
+      expect(tried).toEqual(['google/gemma-4-31b-it:free']);
+    });
+
+    it('drops client-supplied OpenRouter routing fields so upstream cannot pick another model', async () => {
+      vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', '');
+      let forwarded: Record<string, unknown> | undefined;
+      const gateway = new JoyModelGateway({
+        ...activeUser(),
+        ledger: new MemoryAgentUsageLedger(),
+        openRouterApiKey: 'test-key',
+        fetchImpl: async (_url, init) => {
+          forwarded = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          return new Response(JSON.stringify({ choices: [] }), { status: 200 });
+        },
+      });
+      await gateway.handleChatCompletions(
+        createMockReq({
+          body: {
+            model: 'google/gemma-4-31b-it:free',
+            models: ['openai/gpt-5'],
+            route: 'fallback',
+            provider: { allow_fallbacks: true },
+            messages: [],
+          },
+        }),
+        createMockRes().res,
+      );
+      expect(forwarded?.model).toBe('google/gemma-4-31b-it:free');
+      expect(forwarded).not.toHaveProperty('models');
+      expect(forwarded).not.toHaveProperty('route');
+      expect(forwarded).not.toHaveProperty('provider');
+    });
+
+    it('does not fall back for a paid model, even when one is allow-listed', async () => {
+      const tried: string[] = [];
+      const gateway = new JoyModelGateway({
+        ...activeUser(),
+        ledger: new MemoryAgentUsageLedger(),
+        openRouterApiKey: 'test-key',
+        fetchImpl: scripted([429], tried),
+      });
+      const result = createMockRes();
+      await gateway.handleChatCompletions(
+        createMockReq({ body: { model: 'deepseek/deepseek-v4-flash', messages: [] } }),
+        result.res,
+      );
+      expect(tried).toEqual(['deepseek/deepseek-v4-flash']);
+      expect(result.getStatus()).toBe(429);
+    });
+
+    it('falls back before a stream starts', async () => {
+      vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', '');
+      const tried: string[] = [];
+      const gateway = new JoyModelGateway({
+        ...activeUser(),
+        ledger: new MemoryAgentUsageLedger(),
+        openRouterApiKey: 'test-key',
+        fetchImpl: async (_url, init) => {
+          tried.push((JSON.parse(String(init?.body)) as { model: string }).model);
+          if (tried.length === 1) return new Response('busy', { status: 429 });
+          return new Response(
+            'data: {"id":"g1","choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n',
+            {
+              status: 200,
+              headers: { 'content-type': 'text/event-stream' },
+            },
+          );
+        },
+      });
+      const result = createMockRes();
+      await gateway.handleChatCompletions(
+        createMockReq({
+          body: { model: 'google/gemma-4-31b-it:free', messages: [], stream: true },
+        }),
+        result.res,
+      );
+      expect(result.getStatus()).toBe(200);
+      expect(result.getBody()).toContain('"content":"hi"');
+      expect(tried).toEqual(['google/gemma-4-31b-it:free', 'thinkingmachines/inkling:free']);
+    });
   });
 
   it.each(['__proto__', 'constructor', 'toString'])(
@@ -194,7 +439,9 @@ describe('JoyModelGateway', () => {
     await gateway.handleGetModels(req, res);
 
     expect(getStatus()).toBe(200);
-    expect(JSON.parse(getBody()).models).toHaveLength(JOY_AGENT_DEFAULT_MODELS.length + 1);
+    expect(JSON.parse(getBody()).models).toHaveLength(
+      JOY_AGENT_DEFAULT_MODELS.length + JOY_AGENT_FREE_MODELS.length,
+    );
   });
 
   it('serves the models catalog after authentication', async () => {
@@ -209,8 +456,11 @@ describe('JoyModelGateway', () => {
     expect(getStatus()).toBe(200);
     expect(getStatus()).toBe(200);
     const data = JSON.parse(getBody());
-    expect(data.models).toHaveLength(JOY_AGENT_DEFAULT_MODELS.length + 1);
-    expect(data.models[0]).toMatchObject({ id: 'openrouter/free', isDefault: true });
+    expect(data.models).toHaveLength(
+      JOY_AGENT_DEFAULT_MODELS.length + JOY_AGENT_FREE_MODELS.length,
+    );
+    expect(data.models[0]).toMatchObject({ id: 'google/gemma-4-31b-it:free', isDefault: true });
+    expect(data.models.filter((model: { isDefault?: boolean }) => model.isDefault)).toHaveLength(1);
     expect(data.models.some((model: { id: string }) => model.id.includes('minimax'))).toBe(false);
     expect(data.models.some((model: { id: string }) => model.id.includes('claude-3.5'))).toBe(
       false,
@@ -218,7 +468,7 @@ describe('JoyModelGateway', () => {
     expect(
       data.models.every(
         (model: { id: string; inputUsdPerMillion: number; outputUsdPerMillion: number }) =>
-          model.id === 'openrouter/free' ||
+          model.id.endsWith(':free') ||
           (model.inputUsdPerMillion > 0 && model.outputUsdPerMillion > 0),
       ),
     ).toBe(true);
@@ -883,7 +1133,7 @@ describe('JoyModelGateway', () => {
     }
   });
 
-  it('rewrites installed legacy model ids to their catalog replacements before forwarding', async () => {
+  it('rewrites installed legacy model ids to the free default before forwarding', async () => {
     const mockAuth = {
       authenticate: async () => ({ id: 'user-pro' }),
     } as unknown as MediaAuthService;
@@ -911,10 +1161,10 @@ describe('JoyModelGateway', () => {
       createMockReq({ body: { model: 'minimax/minimax-m3', messages: [] } }),
       res,
     );
-    expect(forwardedModel).toBe('bytedance-seed/seed-2.0-lite');
+    expect(forwardedModel).toBe('google/gemma-4-31b-it:free');
   });
 
-  it('aliases the removed llama 3.3 model to the current DeepSeek catalog model', async () => {
+  it('aliases the removed llama 3.3 model to the free default, not a paid model', async () => {
     let forwardedModel: unknown;
     const gateway = new JoyModelGateway({
       mediaAuth: { authenticate: async () => ({ id: 'u' }) } as unknown as MediaAuthService,
@@ -937,7 +1187,7 @@ describe('JoyModelGateway', () => {
       createMockReq({ body: { model: 'meta-llama/llama-3.3-70b-instruct', messages: [] } }),
       createMockRes().res,
     );
-    expect(forwardedModel).toBe('deepseek/deepseek-v4-flash');
+    expect(forwardedModel).toBe('google/gemma-4-31b-it:free');
     expect(
       JOY_AGENT_DEFAULT_MODELS.some((model) => model.id === 'meta-llama/llama-3.3-70b-instruct'),
     ).toBe(false);
