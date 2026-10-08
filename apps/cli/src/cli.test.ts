@@ -191,6 +191,22 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     );
   });
 
+  it('strips C1 control characters from a server error message', () => {
+    const error = new JoyAgentRunError('JOY_AGENT_UNKNOWN', {
+      detail: {
+        name: 'APICallError',
+        statusCode: 400,
+        urlOrigin: 'https://joyst.ir',
+        message: 'Bad Request',
+        responseBodySnippet:
+          '{"error":{"code":"JOY_AGENT_BAD","message":"red\\u009b31m alert\\u0085 \\u0080end\\u00a0ok"}}',
+      },
+    });
+    const formatted = formatAgentRunFailure(error, false);
+    expect(formatted).toContain('(server: JOY_AGENT_BAD: red31m alert end\u00a0ok, HTTP 400)');
+    expect(formatted).not.toMatch(/[\u0080-\u009f]/);
+  });
+
   it('prints help guide on help command and exits 0', async () => {
     const code = await runCli(['help']);
     expect(code).toBe(0);

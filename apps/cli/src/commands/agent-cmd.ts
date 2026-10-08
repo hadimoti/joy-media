@@ -70,7 +70,8 @@ export function gatewayErrorFromBody(
     }
     const printable = [...message].filter((char) => {
       const point = char.codePointAt(0) ?? 0;
-      return point >= 0x20 && point !== 0x7f;
+      // C0, DEL and C1 (0x80-0x9F, e.g. the 8-bit CSI 0x9B) would drive the terminal.
+      return point >= 0x20 && !(point >= 0x7f && point <= 0x9f);
     });
     message = printable.join('').trim().slice(0, 200) || undefined;
   }
