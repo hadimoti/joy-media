@@ -1315,6 +1315,41 @@ describe('JoyModelGateway', () => {
       expect(fetchImpl).toHaveBeenCalledTimes(3);
     });
 
+    it('refuses a bad part before reserving any spend', async () => {
+      const ledger = new MemoryAgentUsageLedger();
+      const reserve = vi.spyOn(ledger, 'reserveSpend');
+      const fetchImpl = vi.fn(async () => ok());
+      const result = createMockRes();
+      await new JoyModelGateway({
+        mediaAuth: { authenticate: async () => ({ id: 'parts' }) } as unknown as MediaAuthService,
+        account: {
+          getSubscription: async () => ({
+            ownerId: 'parts',
+            plan: 'monthly',
+            status: 'active',
+            updatedAt: 0,
+          }),
+        } as unknown as AccountService,
+        ledger,
+        openRouterApiKey: 'test-key',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      }).handleChatCompletions(
+        createMockReq({
+          body: {
+            model: SUPER,
+            messages: [
+              { role: 'user', content: [{ type: 'file', file: { file_data: 'data:,x' } }] },
+            ],
+          },
+        }),
+        result.res,
+      );
+      expect(result.getStatus()).toBe(400);
+      expect(result.getBody()).toContain('UNSUPPORTED_CONTENT_PART');
+      expect(reserve).not.toHaveBeenCalled();
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
     it('rebuilds messages and parts from known keys only', async () => {
       let forwarded: { messages?: unknown } | undefined;
       const result = createMockRes();
@@ -2230,6 +2265,74 @@ describe('JoyModelGateway', () => {
       expect(summary.totalCompletionTokens).toBe(4);
       expect(summary.totalUpstreamCostMicros).toBe('2000');
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('logs loudly when a reconciled generation reports a cost for a free model', async () => {
+    vi.useFakeTimers();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const ledger = new MemoryAgentUsageLedger();
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              id: 'generation-billed',
+              choices: [],
+              usage: { prompt_tokens: 3, completion_tokens: 2 },
+            }),
+            { status: 200 },
+          ),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              data: {
+                model: SUPER,
+                tokens_prompt: 3,
+                tokens_completion: 2,
+                total_cost: 0.25,
+              },
+            }),
+            { status: 200 },
+          ),
+        );
+      const gateway = new JoyModelGateway({
+        mediaAuth: {
+          authenticate: async () => ({ id: 'reconcile' }),
+        } as unknown as MediaAuthService,
+        account: {
+          getSubscription: async () => ({
+            ownerId: 'reconcile',
+            plan: 'monthly',
+            status: 'active',
+            updatedAt: 0,
+          }),
+        } as unknown as AccountService,
+        ledger,
+        openRouterApiKey: 'test-key',
+        fetchImpl,
+      });
+      await gateway.handleChatCompletions(
+        createMockReq({ body: { model: SUPER, messages: [] } }),
+        createMockRes().res,
+      );
+      // The chat response itself reported no cost, so nothing is logged yet.
+      expect(errors).not.toHaveBeenCalledWith(
+        'joy-model-gateway: PAID SPEND REPORTED FOR A FREE MODEL',
+        expect.anything(),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(String(fetchImpl.mock.calls[1]?.[0])).toContain('/generation?id=generation-billed');
+      expect(errors).toHaveBeenCalledWith(
+        'joy-model-gateway: PAID SPEND REPORTED FOR A FREE MODEL',
+        expect.objectContaining({ code: 'JOY_FREE_MODEL_BILLED', modelId: SUPER, costUsd: 0.25 }),
+      );
+      expect((await ledger.getSummary('reconcile')).totalUpstreamCostMicros).toBe('250000');
+    } finally {
+      errors.mockRestore();
       vi.useRealTimers();
     }
   });
