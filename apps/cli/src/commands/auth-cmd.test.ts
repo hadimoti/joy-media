@@ -69,6 +69,7 @@ describe('CLI JOY session commands', () => {
 
     expect(result).toBe(0);
     expect(loadJoySession()?.apiOrigin).toBe('https://api.example.invalid:8443');
+    expect(loadJoySession()?.apiBase).toBe('https://api.example.invalid:8443/api');
     expect(calls.map((call) => call.url)).toEqual([
       'https://api.example.invalid:8443/api/v1/auth/request-otp',
       'https://api.example.invalid:8443/api/v1/auth/verify-otp',
@@ -303,6 +304,35 @@ describe('CLI JOY session commands', () => {
     expect(calls).toEqual(['https://joyst.ir/api/v1/auth/request-otp']);
     expect(JSON.stringify(output.mock.calls)).toContain('--code-only');
     expect(loadJoySession()).toBeUndefined();
+  });
+
+  it('whoami and a bare logout use the API base saved at login', async () => {
+    saveJoySession({
+      token: 'tok-fake-1',
+      apiOrigin: 'https://api.example.invalid:8443',
+      apiBase: 'https://api.example.invalid:8443/custom/api',
+    });
+    const calls: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      calls.push(String(input));
+      if (String(input).endsWith('/v1/auth/session'))
+        return new Response(JSON.stringify({ data: { contact: 'person@example.invalid' } }), {
+          status: 200,
+        });
+      return new Response(JSON.stringify({ data: { plan: 'monthly', status: 'active' } }), {
+        status: 200,
+      });
+    });
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    expect(await runCli(['whoami'])).toBe(0);
+    expect(await runCli(['logout'])).toBe(0);
+    expect(calls).toEqual([
+      'https://api.example.invalid:8443/custom/api/v1/auth/session',
+      'https://api.example.invalid:8443/custom/api/v1/account/subscription',
+      'https://api.example.invalid:8443/custom/api/v1/auth/logout',
+    ]);
+    expect(keyring.has('joy-media-session')).toBe(false);
   });
 
   it('re-prompts for a mistyped code in the interactive flow without sending a new code', async () => {

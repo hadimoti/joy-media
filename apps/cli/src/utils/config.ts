@@ -24,6 +24,7 @@ export interface CliConfig {
     readonly email?: string;
     readonly expiresAt?: string;
     readonly apiOrigin?: string;
+    readonly apiBase?: string;
   };
 }
 
@@ -95,6 +96,8 @@ export interface JoySessionConfig {
   readonly expiresAt?: string;
   /** Origin of the API that issued this token. Missing legacy values mean joyst.ir. */
   readonly apiOrigin?: string;
+  /** Full API base URL used at login, so later commands default to the same API. */
+  readonly apiBase?: string;
 }
 
 export function saveJoySession(session: JoySessionConfig, insecureFileStore = false): void {
@@ -105,6 +108,7 @@ export function saveJoySession(session: JoySessionConfig, insecureFileStore = fa
     ...(session.email === undefined ? {} : { email: session.email }),
     ...(session.expiresAt === undefined ? {} : { expiresAt: session.expiresAt }),
     ...(session.apiOrigin === undefined ? {} : { apiOrigin: new URL(session.apiOrigin).origin }),
+    ...(session.apiBase === undefined ? {} : { apiBase: session.apiBase }),
   };
   saveCliConfig(config);
 }
@@ -123,6 +127,7 @@ export function loadJoySession(): JoySessionConfig | undefined {
       ...(stored.email === undefined ? {} : { email: stored.email }),
       ...(stored.expiresAt === undefined ? {} : { expiresAt: stored.expiresAt }),
       apiOrigin: stored.apiOrigin ?? 'https://joyst.ir',
+      ...(typeof stored.apiBase === 'string' ? { apiBase: stored.apiBase } : {}),
     };
   } catch {
     return undefined;

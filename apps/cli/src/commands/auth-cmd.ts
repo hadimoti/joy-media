@@ -184,7 +184,7 @@ async function login(options: AuthCommandOptions): Promise<number> {
     return 1;
   }
   saveJoySession(
-    { token, email, apiOrigin: new URL(apiBase).origin },
+    { token, email, apiOrigin: new URL(apiBase).origin, apiBase },
     Boolean(options.insecureFileStore),
   );
   logSuccess(`Logged in as ${email}.`);
@@ -209,7 +209,7 @@ function isRejectedCode(error: unknown): boolean {
 async function whoami(options: AuthCommandOptions): Promise<number> {
   const session = loadJoySession();
   if (!session) return signedOut(options.json);
-  const apiBase = resolveApiBase(options.apiBase);
+  const apiBase = resolveApiBase(options.apiBase ?? session.apiBase);
   assertSessionOrigin(session.apiOrigin ?? 'https://joyst.ir', apiBase);
   let identity: unknown;
   try {
@@ -261,7 +261,8 @@ async function logout(options: AuthCommandOptions): Promise<number> {
   let notRevoked: string | undefined;
   let alreadyEnded = false;
   try {
-    const apiBase = resolveApiBase(options.apiBase);
+    // Without --api-base, revoke at the API the login was made against.
+    const apiBase = resolveApiBase(options.apiBase ?? session.apiBase);
     assertSessionOrigin(session.apiOrigin ?? 'https://joyst.ir', apiBase);
     const response = await fetch(`${apiBase}/v1/auth/logout`, {
       method: 'POST',
