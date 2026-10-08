@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import {
   classifyKeyCheck,
   JOY_FREE_MODEL_IDS,
+  JOY_FREE_MODELS_EXPECTED,
   modelsCatalogIssue,
   parseSmokeArgs,
   requestGateway,
@@ -61,7 +62,11 @@ describe('gateway smoke helpers', () => {
   });
 
   it('checks that /models returns exactly the free catalog with the default first', () => {
-    const free = JOY_FREE_MODEL_IDS.map((id, index) => ({ id, isDefault: index === 0 }));
+    const free = JOY_FREE_MODELS_EXPECTED.map(({ id, vision }, index) => ({
+      id,
+      vision,
+      isDefault: index === 0,
+    }));
     assert.equal(modelsCatalogIssue({ models: free }), undefined);
     assert.equal(JOY_FREE_MODEL_IDS.length, 5);
     for (const id of JOY_FREE_MODEL_IDS) assert.match(id, /:free$/);
@@ -75,8 +80,18 @@ describe('gateway smoke helpers', () => {
     );
     assert.match(modelsCatalogIssue({ models: [...free].reverse() }), /exactly the free catalog/);
     assert.match(
-      modelsCatalogIssue({ models: free.map((model) => ({ id: model.id })) }),
+      modelsCatalogIssue({ models: free.map(({ id, vision }) => ({ id, vision })) }),
       /as the default/,
+    );
+    assert.match(
+      modelsCatalogIssue({
+        models: free.map((model, index) => (index === 1 ? { ...model, vision: false } : model)),
+      }),
+      /wrong vision flags: thinkingmachines\/inkling:free \(expected vision=true\)/,
+    );
+    assert.match(
+      modelsCatalogIssue({ models: free.map(({ vision: _vision, ...model }) => model) }),
+      /wrong vision flags/,
     );
     assert.match(modelsCatalogIssue({}), /models array/);
     assert.match(modelsCatalogIssue(null), /models array/);

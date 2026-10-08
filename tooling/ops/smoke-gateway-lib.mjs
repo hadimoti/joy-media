@@ -38,14 +38,15 @@ export function normalizeIpLiteral(value) {
   return normalized;
 }
 
-/** The production free catalog, default first (apps/api/src/joy-free-models.ts). */
-export const JOY_FREE_MODEL_IDS = Object.freeze([
-  'google/gemma-4-31b-it:free',
-  'thinkingmachines/inkling:free',
-  'nvidia/nemotron-3-ultra-550b-a55b:free',
-  'nvidia/nemotron-3-super-120b-a12b:free',
-  'cohere/north-mini-code:free',
+/** The production free catalog, default first, with vision flags (apps/api/src/joy-free-models.ts). */
+export const JOY_FREE_MODELS_EXPECTED = Object.freeze([
+  Object.freeze({ id: 'google/gemma-4-31b-it:free', vision: true }),
+  Object.freeze({ id: 'thinkingmachines/inkling:free', vision: true }),
+  Object.freeze({ id: 'nvidia/nemotron-3-ultra-550b-a55b:free', vision: false }),
+  Object.freeze({ id: 'nvidia/nemotron-3-super-120b-a12b:free', vision: false }),
+  Object.freeze({ id: 'cohere/north-mini-code:free', vision: false }),
 ]);
+export const JOY_FREE_MODEL_IDS = Object.freeze(JOY_FREE_MODELS_EXPECTED.map((model) => model.id));
 
 export function modelsCatalogIssue(response) {
   try {
@@ -60,6 +61,11 @@ export function modelsCatalogIssue(response) {
       return `GET /models must list exactly the free catalog: ${JOY_FREE_MODEL_IDS.join(', ')}.`;
     if (models[0]?.isDefault !== true || models.filter((model) => model?.isDefault).length !== 1)
       return `GET /models must mark only ${JOY_FREE_MODEL_IDS[0]} as the default.`;
+    const wrongVision = JOY_FREE_MODELS_EXPECTED.filter(
+      (expected, index) => models[index]?.vision !== expected.vision,
+    ).map((expected) => `${expected.id} (expected vision=${expected.vision})`);
+    if (wrongVision.length > 0)
+      return `GET /models has wrong vision flags: ${wrongVision.join(', ')}.`;
     return undefined;
   } catch {
     return 'GET /models response is not valid JSON.';

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { JOY_AGENT_FREE_MODELS } from '../../../apps/api/src/joy-free-models.ts';
-import { JOY_FREE_MODEL_IDS } from '../../ops/smoke-gateway-lib.mjs';
+import { JOY_FREE_MODELS_EXPECTED } from '../../ops/smoke-gateway-lib.mjs';
 import {
   OPENROUTER_PUBLIC_MODELS_URL,
   checkFreeModels,
@@ -75,6 +75,8 @@ describe('free-model release check', () => {
   });
 
   it('keeps the deploy smoke check in step with the gateway catalog', () => {
-    expect([...JOY_FREE_MODEL_IDS]).toEqual(JOY_AGENT_FREE_MODELS.map((model) => model.id));
+    expect(JOY_FREE_MODELS_EXPECTED.map(({ id, vision }) => ({ id, vision }))).toEqual(
+      JOY_AGENT_FREE_MODELS.map(({ id, vision }) => ({ id, vision })),
+    );
   });
 });
