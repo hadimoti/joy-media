@@ -264,9 +264,9 @@ export class JoyModelGateway {
       }
       throw error;
     }
-    let parsedBody: Record<string, unknown>;
+    let parsedJson: unknown;
     try {
-      parsedBody = JSON.parse(bodyBuffer.toString('utf8'));
+      parsedJson = JSON.parse(bodyBuffer.toString('utf8'));
     } catch {
       res.writeHead(400, { 'content-type': 'application/json' });
       res.end(
@@ -274,6 +274,17 @@ export class JoyModelGateway {
       );
       return;
     }
+    // `null`, an array or a bare value parses fine but is not a request.
+    if (!isPlainObject(parsedJson)) {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          error: { code: 'INVALID_JSON', message: 'Request body must be a JSON object' },
+        }),
+      );
+      return;
+    }
+    const parsedBody = parsedJson;
 
     if (
       parsedBody.tools !== undefined &&

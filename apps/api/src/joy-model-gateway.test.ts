@@ -2532,6 +2532,41 @@ describe('JoyModelGateway', () => {
     );
   });
 
+  it.each([
+    { label: 'null', body: null },
+    { label: 'array', body: [{ model: 'nvidia/nemotron-3-super-120b-a12b:free' }] },
+    { label: 'string', body: 'text' },
+    { label: 'number', body: 5 },
+    { label: 'boolean', body: true },
+  ])('answers a JSON $label body with 400, not a crash, and reserves nothing', async ({ body }) => {
+    const ledger = new MemoryAgentUsageLedger();
+    const reserve = vi.spyOn(ledger, 'reserveSpend');
+    const fetchImpl = vi.fn();
+    const gateway = new JoyModelGateway({
+      mediaAuth: { authenticate: async () => ({ id: 'u' }) } as unknown as MediaAuthService,
+      account: {
+        getSubscription: async () => ({
+          ownerId: 'u',
+          plan: 'monthly',
+          status: 'active',
+          updatedAt: 0,
+        }),
+      } as unknown as AccountService,
+      ledger,
+      openRouterApiKey: 'test-key',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const result = createMockRes();
+    await gateway.handleChatCompletions(createMockReq({ body }), result.res);
+    expect(result.getStatus()).toBe(400);
+    expect(JSON.parse(result.getBody()).error).toEqual({
+      code: 'INVALID_JSON',
+      message: 'Request body must be a JSON object',
+    });
+    expect(reserve).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('returns 413 for a request body larger than 2 MiB', async () => {
     const gateway = new JoyModelGateway({
       mediaAuth: { authenticate: async () => ({ id: 'u' }) } as unknown as MediaAuthService,
