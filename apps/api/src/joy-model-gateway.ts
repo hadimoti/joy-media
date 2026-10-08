@@ -21,14 +21,39 @@ export const LEGACY_MODEL_ALIASES: Readonly<Record<string, string>> = Object.fre
 
 /**
  * Models to try for a request, in order: the requested model, then the rest of the free list.
- * An id outside the free list gets nothing to try (the handler has already refused it).
+ * A request with images falls back only to vision models. An id outside the free list gets
+ * nothing to try (the handler has already refused it).
  */
-export function joyModelFallbackOrder(modelId: string): readonly string[] {
+export function joyModelFallbackOrder(
+  modelId: string,
+  options: { readonly requireVision?: boolean } = {},
+): readonly string[] {
   if (!JOY_AGENT_FREE_MODELS.some((model) => model.id === modelId)) return [];
   return [
     modelId,
-    ...JOY_AGENT_FREE_MODELS.map((model) => model.id).filter((id) => id !== modelId),
+    ...JOY_AGENT_FREE_MODELS.filter(
+      (model) => model.id !== modelId && (options.requireVision !== true || model.vision),
+    ).map((model) => model.id),
   ];
+}
+
+/** True when any message carries an image_url part. */
+function messagesHaveImages(messages: unknown): boolean {
+  return (
+    Array.isArray(messages) &&
+    messages.some(
+      (message) =>
+        message !== null &&
+        typeof message === 'object' &&
+        Array.isArray((message as { content?: unknown }).content) &&
+        ((message as { content: unknown[] }).content as unknown[]).some(
+          (part) =>
+            part !== null &&
+            typeof part === 'object' &&
+            (part as { type?: unknown }).type === 'image_url',
+        ),
+    )
+  );
 }
 
 /** Upstream answers that mean "this model is busy or failing right now": try the next one. */
@@ -332,7 +357,9 @@ export class JoyModelGateway {
     // model in catalog order; timeouts and network failures are not model-specific and stop.
     const isStream = parsedBody.stream === true;
     let upstreamRes: Response | undefined;
-    const candidates = joyModelFallbackOrder(modelId);
+    const candidates = joyModelFallbackOrder(modelId, {
+      requireVision: messagesHaveImages(parsedBody.messages),
+    });
     for (const [attempt, candidate] of candidates.entries()) {
       const upstreamController = new AbortController();
       let upstreamTimedOut = false;

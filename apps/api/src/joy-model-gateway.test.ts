@@ -126,6 +126,9 @@ describe('JoyModelGateway', () => {
       'cohere/north-mini-code:free',
     ]);
     expect(joyModelFallbackOrder('anthropic/claude-sonnet-4.6')).toEqual([]);
+    expect(joyModelFallbackOrder('thinkingmachines/inkling:free', { requireVision: true })).toEqual(
+      ['thinkingmachines/inkling:free', 'google/gemma-4-31b-it:free'],
+    );
   });
 
   it('refuses paid model IDs by default and redirects a legacy alias to the free default', async () => {
@@ -278,6 +281,36 @@ describe('JoyModelGateway', () => {
         createMockRes().res,
       );
       expect(tried).toEqual(['google/gemma-4-31b-it:free']);
+    });
+
+    it('falls back only to vision models when the request carries images', async () => {
+      const tried: string[] = [];
+      const gateway = new JoyModelGateway({
+        ...activeUser(),
+        ledger: new MemoryAgentUsageLedger(),
+        openRouterApiKey: 'test-key',
+        fetchImpl: scripted([429, 503, 500], tried),
+      });
+      const result = createMockRes();
+      await gateway.handleChatCompletions(
+        createMockReq({
+          body: {
+            model: 'google/gemma-4-31b-it:free',
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: 'what is in this frame?' },
+                  { type: 'image_url', image_url: { url: 'data:image/png;base64,AA==' } },
+                ],
+              },
+            ],
+          },
+        }),
+        result.res,
+      );
+      expect(tried).toEqual(['google/gemma-4-31b-it:free', 'thinkingmachines/inkling:free']);
+      expect(result.getStatus()).toBe(502);
     });
 
     it('drops client-supplied OpenRouter routing fields so upstream cannot pick another model', async () => {
