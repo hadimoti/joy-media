@@ -607,6 +607,11 @@ describe(
       assert.notEqual(failed.status, 0, 'an inconclusive probe must fail the apply');
       assert.match(failed.stderr, /CF_ONLY_PROBE_INCONCLUSIVE \(curl exit 7\)/u);
       assert.match(failed.stderr, /JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE=1/u);
+      // sudo resets the environment, so the hint shows the form that survives it.
+      assert.match(
+        failed.stderr,
+        /sudo JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE=1 bash deploy\/deploy-control-plane\.sh/u,
+      );
       assert.equal(readFileSync(unproven.conf, 'utf8'), fixture, 'original config restored');
 
       const accepted = createSandbox(t);
@@ -655,6 +660,26 @@ describe(
         assert.match(result.stderr, /over-broad or non-public/u, range);
         assert.equal(readFileSync(sandbox.conf, 'utf8'), fixture, `${range}: config restored`);
       }
+    });
+
+    it('documents the inconclusive-probe override in a form that survives sudo', () => {
+      const readme = readFileSync(join(repoRoot, 'deploy', 'README.md'), 'utf8').replace(
+        /\s+/gu,
+        ' ',
+      );
+      assert.ok(
+        readme.includes(
+          '`sudo JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE=1 JOY_MEDIA_EDGE_ADDR=<edge address> bash deploy/deploy-control-plane.sh`',
+        ),
+      );
+      assert.ok(
+        readme.includes('`sudo --preserve-env=JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE ...`'),
+      );
+      assert.ok(
+        readme.includes(
+          '`JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE=1 sudo ...` prefix does not reach the script',
+        ),
+      );
     });
 
     it('documents the same CIDR floors the check enforces', () => {

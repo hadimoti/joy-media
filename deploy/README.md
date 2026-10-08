@@ -31,7 +31,12 @@ to be closed (444); if that probe gets an HTTP answer it restores the backup.
 If the probe is inconclusive (for example curl cannot bind `127.0.0.2`), the
 script also restores the backup and fails; after checking from outside
 Cloudflare by hand, rerun with `JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE=1` to
-accept it.
+accept it. The deploy runs as root, and `sudo` drops the caller's environment,
+so put the variable after `sudo`:
+`sudo JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE=1 JOY_MEDIA_EDGE_ADDR=<edge address> bash deploy/deploy-control-plane.sh`
+(or `sudo --preserve-env=JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE ...`). A
+`JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE=1 sudo ...` prefix does not reach the
+script. Only `1` is accepted.
 Rollback: copy the `*.pre-agent-location-<timestamp>` backup the script
 printed back over the config, `nginx -t`, `systemctl reload nginx`.
 

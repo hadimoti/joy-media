@@ -440,7 +440,7 @@ check_refused() {
     echo "CF_ONLY_PROBE_INCONCLUSIVE (curl exit $rc); accepted by JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE=1, check from outside Cloudflare by hand" >&2
   else
     restore
-    die "CF_ONLY_PROBE_INCONCLUSIVE (curl exit $rc): the Cloudflare-only lock could not be proven; prior config restored. Check from outside Cloudflare, then rerun with JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE=1 to accept"
+    die "CF_ONLY_PROBE_INCONCLUSIVE (curl exit $rc): the Cloudflare-only lock could not be proven; prior config restored. Check from outside Cloudflare, then rerun with JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE=1 to accept (under sudo, put it after sudo: sudo JOY_MEDIA_ACCEPT_INCONCLUSIVE_CF_PROBE=1 bash deploy/deploy-control-plane.sh)"
   fi
 }
 check_refused
