@@ -278,13 +278,50 @@ describe('JOY Agent tool catalog', () => {
     expect(JOY_AGENT_TOOL_METADATA.propose_scene_3d?.access).toBe('preview');
     const read = (tools.read_brief as { execute: () => Promise<unknown> }).execute;
     await expect(read()).resolves.toEqual({ request: 'brief' });
-    const propose = (
-      tools.propose_asset as {
-        execute: (input: unknown) => Promise<unknown>;
-      }
-    ).execute;
-    await expect(propose({ assetId: 'asset-1', summary: 'retime' })).rejects.toThrow(
-      'JOY_AGENT_UNAVAILABLE',
+    // Only the optional tools the host implements are offered to the model.
+    expect(tools.read_scene_3d).toBeUndefined();
+    expect(tools.propose_asset).toBeUndefined();
+  });
+
+  it('does not offer optional domain tools the bridge does not implement', () => {
+    const tools = createJoyAgentTools(bridge());
+    for (const name of [
+      'read_brief',
+      'read_scene_3d',
+      'propose_asset',
+      'propose_brief',
+      'propose_scene_3d',
+    ])
+      expect(Object.keys(tools)).not.toContain(name);
+    expect(Object.keys(tools)).toEqual(
+      expect.arrayContaining([
+        'read_project_summary',
+        'read_selection',
+        'read_timeline_window',
+        'read_asset_metadata',
+        'read_style_catalog',
+        'propose_timeline_operations',
+        'propose_document_operations',
+        'submit_plan',
+      ]),
+    );
+    const all = createJoyAgentTools(
+      bridge({
+        readBrief: async () => ({}),
+        readScene3d: async () => ({}),
+        proposeAsset: async () => ({}),
+        proposeBrief: async () => ({}),
+        proposeScene3d: async () => ({}),
+      }),
+    );
+    expect(Object.keys(all)).toEqual(
+      expect.arrayContaining([
+        'read_brief',
+        'read_scene_3d',
+        'propose_asset',
+        'propose_brief',
+        'propose_scene_3d',
+      ]),
     );
   });
 

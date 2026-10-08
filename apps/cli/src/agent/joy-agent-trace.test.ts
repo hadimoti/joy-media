@@ -104,7 +104,10 @@ describe('agent run transcript', () => {
     const text = output.mock.calls.flat().join('\n');
     expect(text).toContain('Observation: read_project_summary {"projectId":"trace-project"');
     expect(text).toContain('Observation: read_selection {"selectedClipIds":[]');
-    expect(text).toContain('Tool error: read_brief Error: JOY_AGENT_UNAVAILABLE');
+    // read_brief is not offered (the CLI has no brief), so the call fails with the list of tools.
+    expect(text).toContain(
+      "Tool error: read_brief AI_NoSuchToolError: Model tried to call unavailable tool 'read_brief'.",
+    );
     expect(text).not.toContain('TypeError');
   });
 
@@ -143,7 +146,9 @@ describe('agent run transcript', () => {
     expect(records).toContainEqual({
       type: 'tool_error',
       name: 'read_brief',
-      value: { error: 'Error: JOY_AGENT_UNAVAILABLE' },
+      value: {
+        error: expect.stringMatching(/^AI_NoSuchToolError: .*unavailable tool 'read_brief'/),
+      },
     });
     expect(records).toContainEqual(
       expect.objectContaining({ type: 'observation', name: 'read_project_summary' }),

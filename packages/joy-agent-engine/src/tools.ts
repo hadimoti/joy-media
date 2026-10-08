@@ -688,6 +688,17 @@ export function createJoyAgentTools(
         ),
     }),
   };
+  // Optional domain tools are offered only when the host implements them; offering a
+  // tool that can only fail wastes model steps (and invites retries).
+  const optionalTools = {
+    read_brief: bridge.readBrief,
+    read_scene_3d: bridge.readScene3d,
+    propose_asset: bridge.proposeAsset,
+    propose_brief: bridge.proposeBrief,
+    propose_scene_3d: bridge.proposeScene3d,
+  } as const;
+  for (const [name, implementation] of Object.entries(optionalTools))
+    if (implementation === undefined) delete tools[name];
   let invalidTimelineProposals = 0;
   let invalidDocumentProposals = 0;
   // An explicit vision flag always wins (the host warns for routed/text-only models);
