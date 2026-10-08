@@ -70,10 +70,16 @@ const TRACE_LABELS: Record<JoyAgentTraceRecord['type'], string> = {
   assistant_text: 'Model',
 };
 
-/** Formats one transcript record for text output; tool errors and interim model text stay visible. */
-export function formatAgentTraceLine(record: JoyAgentTraceRecord): string {
-  if (record.type === 'assistant_text')
-    return `${TRACE_LABELS.assistant_text}: ${String(record.value)}`;
+/**
+ * Formats one transcript record for text output; tool errors and interim model text stay
+ * visible. Interim text is trimmed (models often start it with blank lines), and text that is
+ * empty or only whitespace prints nothing: the result is undefined.
+ */
+export function formatAgentTraceLine(record: JoyAgentTraceRecord): string | undefined {
+  if (record.type === 'assistant_text') {
+    const text = String(record.value).trim();
+    return text ? `${TRACE_LABELS.assistant_text}: ${text}` : undefined;
+  }
   const value =
     record.type === 'tool_error' &&
     typeof record.value === 'object' &&

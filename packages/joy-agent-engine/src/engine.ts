@@ -381,13 +381,16 @@ export class JoyAgentEngine {
     for (const step of result.steps) {
       for (const part of step.content) {
         if (part.type === 'text') {
-          if (!finalTextSteps.has(step) && part.text.trim())
+          // Models often wrap interim text in blank lines; trace it trimmed, and not at all
+          // when nothing but whitespace is left.
+          const interim = part.text.trim();
+          if (!finalTextSteps.has(step) && interim)
             this.options.onTrace?.({
               type: 'assistant_text',
               name: 'assistant',
               // Redact before bounding so a key cut at the limit cannot leak a prefix.
               value: boundedTraceText(
-                redactApiKey(part.text, this.options.apiKeyForRedaction),
+                redactApiKey(interim, this.options.apiKeyForRedaction),
                 this.limits.toolPayloadBytes,
               ),
             });

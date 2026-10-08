@@ -598,8 +598,12 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         keepPartial: flags.keepPartial,
         json: flags.json,
         onTrace: (record) => {
-          if (flags.json) console.log(JSON.stringify(record));
-          else console.log(formatAgentTraceLine(record));
+          if (flags.json) {
+            console.log(JSON.stringify(record));
+            return;
+          }
+          const line = formatAgentTraceLine(record);
+          if (line !== undefined) console.log(line);
         },
         allowFrames: flags.allowFrames,
         vision: flags.vision,

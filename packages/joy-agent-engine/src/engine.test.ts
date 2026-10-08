@@ -308,6 +308,28 @@ describe('JOY Agent bounded model loop', () => {
     ]);
   });
 
+  it('traces interim model text trimmed and skips whitespace-only text', async () => {
+    const model = scriptedModel([
+      [
+        { type: 'text', text: '\n\nThe project has one clip.\n' },
+        { type: 'tool-call', toolName: 'read_selection', input: {} },
+      ],
+      [
+        { type: 'text', text: ' \n\t ' },
+        { type: 'tool-call', toolName: 'read_selection', input: {} },
+      ],
+      [{ type: 'text', text: 'Done.' }],
+    ]);
+    const traces: Array<{ type: string; name: string; value: unknown }> = [];
+    const engine = new JoyAgentEngine({ model, bridge, onTrace: (record) => traces.push(record) });
+
+    await engine.run(request);
+
+    expect(traces.filter((record) => record.type === 'assistant_text')).toEqual([
+      { type: 'assistant_text', name: 'assistant', value: 'The project has one clip.' },
+    ]);
+  });
+
   it('redacts the API key from interim model text in the trace', async () => {
     const secret = 'sk-test-REDACTED-1111';
     const model = scriptedModel([

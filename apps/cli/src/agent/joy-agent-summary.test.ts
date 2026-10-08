@@ -3,6 +3,7 @@ import type { CaptionClipV1, TrackV1 } from '@joy-media/project-schema';
 import { createDefaultProject } from '../utils/project-loader.js';
 import { createTextClip } from '../render/text-clip.js';
 import {
+  formatAgentTraceLine,
   frameInspectionSkipNote,
   visionOverrideWarning,
   missingOperationCoverage,
@@ -25,6 +26,25 @@ function addCaptionTrack(project: ReturnType<typeof createDefaultProject>, clips
   };
   (root.tracks as unknown as TrackV1[]).push(track);
 }
+
+describe('formatAgentTraceLine', () => {
+  it('prints interim model text trimmed and nothing for empty or whitespace-only text', () => {
+    expect(
+      formatAgentTraceLine({
+        type: 'assistant_text',
+        name: 'assistant',
+        value: '\n\nLooks good.\n',
+      }),
+    ).toBe('Model: Looks good.');
+    for (const value of ['', '   ', '\n\n', '\t \n'])
+      expect(formatAgentTraceLine({ type: 'assistant_text', name: 'assistant', value })).toBe(
+        undefined,
+      );
+    expect(formatAgentTraceLine({ type: 'tool_call', name: 'read_selection', value: {} })).toBe(
+      'Tool call: read_selection {}',
+    );
+  });
+});
 
 describe('frame inspection notes', () => {
   it('explains when frame inspection is skipped for text-only models', () => {
