@@ -66,10 +66,15 @@ export interface JoyAgentTraceRecord {
 
 const MAX_TRACE_ERROR_CHARS = 500;
 
+function redactApiKey(text: string, apiKey?: string): string {
+  return apiKey ? text.split(apiKey).join('[REDACTED]') : text;
+}
+
 function traceErrorMessage(error: unknown, apiKey?: string): string {
-  let message =
-    error instanceof Error ? `${error.name}: ${error.message}` : String(error ?? 'unknown error');
-  if (apiKey) message = message.split(apiKey).join('[REDACTED]');
+  const message = redactApiKey(
+    error instanceof Error ? `${error.name}: ${error.message}` : String(error ?? 'unknown error'),
+    apiKey,
+  );
   return message.length > MAX_TRACE_ERROR_CHARS
     ? `${message.slice(0, MAX_TRACE_ERROR_CHARS)}…`
     : message;
@@ -380,7 +385,11 @@ export class JoyAgentEngine {
             this.options.onTrace?.({
               type: 'assistant_text',
               name: 'assistant',
-              value: boundedTraceText(part.text, this.limits.toolPayloadBytes),
+              // Redact before bounding so a key cut at the limit cannot leak a prefix.
+              value: boundedTraceText(
+                redactApiKey(part.text, this.options.apiKeyForRedaction),
+                this.limits.toolPayloadBytes,
+              ),
             });
         } else if (part.type === 'tool-call')
           this.options.onTrace?.({ type: 'tool_call', name: part.toolName, value: part.input });

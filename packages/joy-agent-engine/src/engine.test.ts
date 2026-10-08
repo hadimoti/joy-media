@@ -308,6 +308,33 @@ describe('JOY Agent bounded model loop', () => {
     ]);
   });
 
+  it('redacts the API key from interim model text in the trace', async () => {
+    const secret = 'sk-test-REDACTED-1111';
+    const model = scriptedModel([
+      [
+        { type: 'text', text: `Using key ${secret} for this.` },
+        { type: 'tool-call', toolName: 'read_selection', input: {} },
+      ],
+      [{ type: 'text', text: 'Done.' }],
+    ]);
+    const traces: Array<{ type: string; name: string; value: unknown }> = [];
+    const engine = new JoyAgentEngine({
+      model,
+      bridge,
+      apiKeyForRedaction: secret,
+      onTrace: (record) => traces.push(record),
+    });
+
+    await engine.run(request);
+
+    expect(traces[0]).toEqual({
+      type: 'assistant_text',
+      name: 'assistant',
+      value: 'Using key [REDACTED] for this.',
+    });
+    expect(JSON.stringify(traces)).not.toContain(secret);
+  });
+
   it('returns a proposal validation error to the model and accepts its retry', async () => {
     const createText = {
       kind: 'create-text',
