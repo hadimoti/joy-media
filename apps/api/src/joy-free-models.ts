@@ -70,6 +70,29 @@ export const JOY_AGENT_FREE_MODELS: readonly JoyModelCatalogEntry[] = Object.fre
   }),
 ]);
 
+/**
+ * Throws unless every entry is an OpenRouter ":free" id with zero prices, ids are unique and
+ * exactly one entry is the default. Run at module load, so a bad edit stops the API at startup
+ * instead of forwarding a priced model as "free".
+ */
+export function assertFreeCatalog(catalog: readonly JoyModelCatalogEntry[]): void {
+  if (catalog.length === 0) throw new Error('joy free catalog: no models');
+  const seen = new Set<string>();
+  for (const model of catalog) {
+    if (!model.id.endsWith(':free'))
+      throw new Error(`joy free catalog: ${model.id} is not an OpenRouter ":free" id`);
+    if (model.inputUsdPerMillion !== 0 || model.outputUsdPerMillion !== 0)
+      throw new Error(`joy free catalog: ${model.id} has a non-zero price`);
+    if (seen.has(model.id)) throw new Error(`joy free catalog: ${model.id} is listed twice`);
+    seen.add(model.id);
+  }
+  const defaults = catalog.filter((model) => model.isDefault === true).length;
+  if (defaults !== 1)
+    throw new Error(`joy free catalog: needs exactly one default model, found ${defaults}`);
+}
+
+assertFreeCatalog(JOY_AGENT_FREE_MODELS);
+
 /** Ids installed clients may still send; all resolve to the free default. */
 export const JOY_AGENT_LEGACY_MODEL_IDS: readonly string[] = Object.freeze([
   'openrouter/free',

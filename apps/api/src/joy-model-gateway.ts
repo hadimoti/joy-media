@@ -10,18 +10,6 @@ import {
 
 export { JOY_AGENT_FREE_MODELS, type JoyModelCatalogEntry } from './joy-free-models.js';
 
-// Fail at startup rather than ever forwarding a priced model as "free".
-for (const model of JOY_AGENT_FREE_MODELS) {
-  if (
-    !model.id.endsWith(':free') ||
-    model.inputUsdPerMillion !== 0 ||
-    model.outputUsdPerMillion !== 0
-  )
-    throw new Error(`joy-model-gateway: free catalog entry ${model.id} is not zero-cost`);
-}
-if (JOY_AGENT_FREE_MODELS.filter((model) => model.isDefault === true).length !== 1)
-  throw new Error('joy-model-gateway: the free catalog needs exactly one default');
-
 /** Paid models, offered only when listed in JOY_GATEWAY_PAID_MODEL_ALLOWLIST (unset in production). */
 export const JOY_AGENT_DEFAULT_MODELS: readonly JoyModelCatalogEntry[] = Object.freeze([
   {
