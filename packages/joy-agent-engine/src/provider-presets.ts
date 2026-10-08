@@ -34,6 +34,11 @@ export const KILO_MODEL_PRESETS: readonly ProviderModelPreset[] = [
 
 export const DEFAULT_KILO_MODEL = 'kilo/kilo-auto/free';
 export const DEFAULT_OPENROUTER_MODEL = 'openrouter/free';
+/**
+ * The hosted gateway's catalog default (apps/api/src/joy-free-models.ts). Clients still read the
+ * live default from GET /models; this is only the offline placeholder, kept equal by a test.
+ */
+export const DEFAULT_JOY_HOSTED_MODEL = 'google/gemma-4-31b-it:free';
 export const DEFAULT_LM_STUDIO_MODEL = 'local-model';
 export const RETIRED_MODEL_IDS = [
   'minimax/minimax-m3',
@@ -56,7 +61,7 @@ export function isRetiredModelId(id: string): boolean {
 export function defaultModelFor(provider: string): string | undefined {
   if (provider === 'kilo') return DEFAULT_KILO_MODEL;
   if (provider === 'openrouter') return DEFAULT_OPENROUTER_MODEL;
-  if (provider === 'joy-hosted') return DEFAULT_OPENROUTER_MODEL;
+  if (provider === 'joy-hosted') return DEFAULT_JOY_HOSTED_MODEL;
   if (provider === 'lm-studio') return DEFAULT_LM_STUDIO_MODEL;
   return undefined;
 }

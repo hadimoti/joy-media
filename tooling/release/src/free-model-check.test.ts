@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { JOY_AGENT_FREE_MODELS } from '../../../apps/api/src/joy-free-models.ts';
 import { JOY_FREE_MODELS_EXPECTED } from '../../ops/smoke-gateway-lib.mjs';
+import { DEFAULT_JOY_HOSTED_MODEL } from '../../../packages/joy-agent-engine/src/provider-presets.ts';
 import {
   OPENROUTER_PUBLIC_MODELS_URL,
   checkFreeModels,
@@ -72,6 +73,12 @@ describe('free-model release check', () => {
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(OPENROUTER_PUBLIC_MODELS_URL);
     expect(Object.keys((init.headers ?? {}) as Record<string, string>)).toEqual(['accept']);
+  });
+
+  it('keeps the engine hosted placeholder equal to the gateway catalog default', () => {
+    expect(DEFAULT_JOY_HOSTED_MODEL).toBe(
+      JOY_AGENT_FREE_MODELS.find((model) => model.isDefault)?.id,
+    );
   });
 
   it('keeps the deploy smoke check in step with the gateway catalog', () => {

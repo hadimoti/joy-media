@@ -25,7 +25,7 @@ describe('provider presets', () => {
     expect(KILO_MODEL_PRESETS.every(({ id }) => id.startsWith('byteplus-coding/'))).toBe(true);
     expect(DEFAULT_KILO_MODEL).toBe('kilo/kilo-auto/free');
     expect(defaultModelFor('openrouter')).toBe('openrouter/free');
-    expect(defaultModelFor('joy-hosted')).toBe('openrouter/free');
+    expect(defaultModelFor('joy-hosted')).toBe('google/gemma-4-31b-it:free');
   });
 
   it('recognizes retired model IDs', () => {
