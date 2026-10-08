@@ -399,6 +399,30 @@ describe('CLI JOY session commands', () => {
     expect(keyring.has('joy-media-session')).toBe(false);
   });
 
+  it.each(['login', 'logout', 'whoami'])(
+    'documents the %s flags in its own help without contacting the server',
+    async (command) => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      expect(await runCli([command, '--help'])).toBe(0);
+      const printed = output.mock.calls.flat().join('\n');
+      expect(fetchSpy).not.toHaveBeenCalled();
+      for (const flag of [
+        '--email',
+        '--code-stdin',
+        '--code ',
+        '--code-only',
+        '--request-code',
+        '--api-base',
+        '--insecure-file-store',
+        '--json',
+        'shell history',
+      ])
+        expect(printed).toContain(flag);
+    },
+  );
+
   it('re-prompts for a mistyped code in the interactive flow without sending a new code', async () => {
     restorePrompts?.();
     const typed = ['000000', '123456'];

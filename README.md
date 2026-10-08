@@ -31,6 +31,32 @@
 
 ---
 
+## CLI: JOY account login
+
+The `joy-media` CLI signs in with a one-time code sent to your account email. Run `joy-media login --help` for every flag.
+
+| Command / flag              | What it does                                                                                                      |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `joy-media login`           | At a terminal: asks for the email, sends a code, then asks for the code (hidden).                                 |
+| `--email <address>`         | The account email; required when stdin is not a terminal.                                                         |
+| `--request-code`            | Only sends a code and exits. Finish with `--code-stdin`.                                                          |
+| `--code-stdin`              | Reads a code you already received from stdin (or a hidden prompt). It only verifies the code; no new one is sent. |
+| `--code <digits>`           | Same as `--code-stdin`, but the code ends up in shell history and `ps`. Prefer the prompt or `--code-stdin`.      |
+| `--code-only`               | Verify only: asks for the code without sending a new one.                                                         |
+| `--api-base <url>`          | API base URL (default `https://joyst.ir/api`, or `JOY_MEDIA_API_BASE_URL`). It is saved with the login.           |
+| `--insecure-file-store`     | Keeps the session token in a private (0600) file when no system keyring is available.                             |
+| `joy-media whoami [--json]` | Shows the signed-in email and plan.                                                                               |
+| `joy-media logout`          | Revokes the session on the server and removes the local token.                                                    |
+
+`whoami` and `logout` use the API base saved at login unless you pass `--api-base`. For scripts:
+
+```sh
+joy-media login --email me@example.com --request-code
+read -rs CODE; printf '%s\n' "$CODE" | joy-media login --email me@example.com --code-stdin
+```
+
+---
+
 ## Architectural Blueprint
 
 ```text

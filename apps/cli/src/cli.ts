@@ -8,7 +8,7 @@ import { handleProjectCommand } from './commands/project-cmd.js';
 import { handleRenderCommand } from './commands/render-cmd.js';
 import { handleTimelineCommand } from './commands/timeline-cmd.js';
 import { handleWorkerCommand } from './commands/worker-cmd.js';
-import { handleAuthCommand } from './commands/auth-cmd.js';
+import { handleAuthCommand, printAuthHelp } from './commands/auth-cmd.js';
 import { printAgentHelp } from './commands/agent-cmd.js';
 import { printTimelineHelp } from './commands/timeline-cmd.js';
 import { printRenderHelp } from './commands/render-cmd.js';
@@ -110,7 +110,7 @@ export function printHelp(): void {
     `    ${c('doctor', 'cyan')}                            System health check & diagnostics`,
   );
   console.log(
-    `    ${c('login|logout|whoami', 'cyan')}                 JOY account session commands`,
+    `    ${c('login|logout|whoami', 'cyan')}                 JOY account session (joy-media login --help)`,
   );
   console.log(`    ${c('help', 'cyan')}                              Show this help guide\n`);
   console.log(`  ${c('Examples:', 'bold')}`);
@@ -307,6 +307,8 @@ export async function runCli(argv: string[]): Promise<number> {
     if (helpCommand === 'agent') printAgentHelp();
     else if (helpCommand === 'timeline') printTimelineHelp();
     else if (helpCommand === 'render') printRenderHelp();
+    else if (helpCommand === 'login' || helpCommand === 'logout' || helpCommand === 'whoami')
+      printAuthHelp();
     else if (helpCommand === 'asset')
       console.log('Usage: joy-media asset <import|list> --project <id|file>');
     else printHelp();

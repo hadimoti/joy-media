@@ -71,6 +71,35 @@ export function configureAuthPromptsForTests(next: Partial<AuthPrompts>): () => 
   };
 }
 
+export function printAuthHelp(): void {
+  console.log(`Usage:
+  joy-media login [--email <address>] [--code-stdin | --code <digits>] [options]
+  joy-media whoami [--json] [--api-base <url>]
+  joy-media logout [--api-base <url>]
+
+login signs in to your JOY account with a one-time code sent by email.
+  (no code flag)            At a terminal: send a code, then ask for it (hidden).
+  --email <address>         Account email (required when stdin is not a terminal).
+  --request-code            Only send a code, then exit; finish with --code-stdin.
+  --code-stdin              Read a code you already received from stdin (or a hidden prompt).
+                            Only verifies it; no new code is sent.
+  --code <digits>           Same as --code-stdin, but the code lands in shell history
+                            and \`ps\`; prefer the prompt or --code-stdin.
+  --code-only               Verify only; ask for the code without sending a new one.
+  --api-base <url>          API base URL (default https://joyst.ir/api, or
+                            JOY_MEDIA_API_BASE_URL). Saved with the login.
+  --insecure-file-store     Keep the session token in a private 0600 file when no
+                            system keyring is available.
+
+whoami prints the signed-in email and plan (--json for a JSON object).
+logout revokes the session on the server and removes the local token.
+whoami and logout use the API base saved at login unless --api-base is given.
+
+Example (scripts):
+  joy-media login --email me@example.com --request-code
+  read -rs CODE; printf '%s\\n' "$CODE" | joy-media login --email me@example.com --code-stdin`);
+}
+
 export async function handleAuthCommand(
   args: readonly string[],
   options: AuthCommandOptions = {},
