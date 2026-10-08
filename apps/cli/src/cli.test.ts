@@ -207,6 +207,22 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     expect(formatted).not.toMatch(/[\u0080-\u009f]/);
   });
 
+  it('strips bidi and other format characters from a server error message', () => {
+    const error = new JoyAgentRunError('JOY_AGENT_UNKNOWN', {
+      detail: {
+        name: 'APICallError',
+        statusCode: 400,
+        urlOrigin: 'https://joyst.ir',
+        message: 'Bad Request',
+        responseBodySnippet:
+          '{"error":{"code":"JOY_AGENT_BAD","message":"pay \\u202eloot\\u202c now\\u2066x\\u2069 \\u200bhidden\\u200f end"}}',
+      },
+    });
+    const formatted = formatAgentRunFailure(error, false);
+    expect(formatted).toContain('(server: JOY_AGENT_BAD: pay loot nowx hidden end, HTTP 400)');
+    expect(formatted).not.toMatch(/[\u202a-\u202e\u2066-\u2069\u200b-\u200f]/u);
+  });
+
   it('shows the wrong-host login message for a hosted run against another origin', async () => {
     // A no-op keyring runner keeps the test off the real Windows DPAPI/PowerShell store.
     const restoreSecretStore = configureSecretStoreRuntimeForTests({
