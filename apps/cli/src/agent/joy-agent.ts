@@ -55,6 +55,8 @@ export interface RunAgentOutput {
   readonly appliedOperationIds?: readonly string[] | undefined;
   readonly errors: string[];
   readonly notes: string[];
+  /** Run-level notes already shown as their own "Model notes" line (e.g. frame-skip). */
+  readonly modelNotes?: readonly string[];
   readonly checklist?: readonly JoyPlanChecklistItem[];
   readonly verified?: readonly string[];
   readonly placementSummary?: AppliedTimelineSummary;
@@ -252,7 +254,9 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
   let appliedCount = 0;
   let appliedOperationIds: readonly string[] = [];
   let errors: string[] = bridge.getReportedIssues();
-  let notes: string[] = frameNote ? [frameNote] : [];
+  // The frame-skip note is printed once as "Model notes" above; it is kept out of the
+  // apply notes so it is not spliced into the summary sentence.
+  let notes: string[] = [];
   let applied = false;
   let placementSummary: AppliedTimelineSummary | undefined;
   const checklist = bridge.getPlanChecklist();
@@ -323,6 +327,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     appliedOperationIds,
     errors,
     notes,
+    modelNotes: frameNote ? [frameNote] : [],
     checklist,
     verified,
     ...(placementSummary === undefined ? {} : { placementSummary }),

@@ -215,6 +215,16 @@ describe('JOY Agent CLI edit verification end-to-end', () => {
       expect(outputText).toContain('Request: centered text');
       expect(outputText).toContain('Request: source trim 7000000');
       expect(outputText).toContain('Request: crt look');
+      // Item 13: the frame-skip note is its own "Model notes" line, never part of the summary.
+      expect(outputText.match(/frame inspection skipped/g)).toHaveLength(1);
+      expect(outputText).toContain('Model notes: frame inspection skipped: model has no vision.');
+      const summaryLine = outputText
+        .split('\n')
+        .find((line) => line.includes('Applied 3 change(s)'));
+      expect(summaryLine).toBeDefined();
+      expect(summaryLine).not.toContain('frame inspection');
+      expect(agentResult?.resultText).not.toContain('frame inspection');
+      expect(agentResult?.modelNotes).toEqual(['frame inspection skipped: model has no vision']);
       expect(modelSpy).toHaveBeenCalledOnce();
       expect(runSpy).toHaveBeenCalledOnce();
     } finally {

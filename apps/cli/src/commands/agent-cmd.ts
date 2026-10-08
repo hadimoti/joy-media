@@ -610,6 +610,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
             operationIds: output.appliedOperationIds,
             errors: output.errors,
             notes: output.notes,
+            modelNotes: output.modelNotes ?? [],
             summary: output.resultText,
             checklist: output.checklist ?? [],
             verified: output.verified ?? [],
