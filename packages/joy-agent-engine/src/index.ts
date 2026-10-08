@@ -75,6 +75,16 @@ export type {
   JoyTimelineOperation,
 } from './tools.js';
 export {
+  JOY_LOOK_PRESETS,
+  normalizeDocumentOperationAliases,
+  normalizeLookName,
+  normalizeTimelineOperationAliases,
+  pickAlias,
+  resolveLookAliases,
+  type AliasEntry,
+  type JoyLookPreset,
+} from './aliases.js';
+export {
   JOY_AGENT_TOOL_METADATA,
   createJoyAgentTools,
   parseJoyDocumentOperations,

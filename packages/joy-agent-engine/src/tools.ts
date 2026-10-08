@@ -4,6 +4,11 @@ import { z } from 'zod';
 import { DEFAULT_JOY_AGENT_LIMITS, type JoyAgentLimits } from './limits.js';
 import type { JoyAgentSurface } from './contracts.js';
 import { KILO_MODEL_PRESETS } from './provider-presets.js';
+import {
+  JOY_LOOK_PRESETS,
+  normalizeDocumentOperationAliases,
+  normalizeTimelineOperationAliases,
+} from './aliases.js';
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
 const boundedText = z.string().max(4096);
@@ -103,7 +108,7 @@ const documentOperation = z.discriminatedUnion('kind', [
       kind: z.literal('add-effect'),
       id,
       objectId: id,
-      effectId: z.enum(['crt', 'bw', 'warm', 'cool']),
+      effectId: z.enum(JOY_LOOK_PRESETS),
       intensity: z.number().finite().min(0).max(1).optional(),
       scanlineStrength: z.number().finite().min(0).max(1).optional(),
       noiseAmount: z.number().finite().min(0).max(1).optional(),
@@ -286,11 +291,13 @@ export function parseJoyTimelineOperations(value: unknown): readonly JoyTimeline
   return parseJoyTimelineOperationsDetailed(value).operations;
 }
 
-export function parseJoyTimelineOperationsDetailed(value: unknown): {
+export function parseJoyTimelineOperationsDetailed(input: unknown): {
   readonly operations: readonly JoyTimelineOperation[];
   readonly deprecationNote?: string;
 } {
-  if (!Array.isArray(value)) return { operations: parseOperations(timelineOperation, value) };
+  const withKinds = normalizeTimelineOperationAliases(input);
+  if (!Array.isArray(withKinds))
+    return { operations: parseOperations(timelineOperation, withKinds) };
   const aliases = new Set<string>();
   const acceptedFields = [
     'kind',
@@ -309,7 +316,7 @@ export function parseJoyTimelineOperationsDetailed(value: unknown): {
     'trimRightUs',
     'dependsOn',
   ];
-  const normalized = value.map((candidate) => {
+  const normalized = withKinds.map((candidate) => {
     if (
       candidate === null ||
       typeof candidate !== 'object' ||
@@ -399,7 +406,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 export function parseJoyDocumentOperations(value: unknown): readonly JoyDocumentOperation[] {
-  return parseOperations(documentOperation, value);
+  return parseOperations(documentOperation, normalizeDocumentOperationAliases(value));
 }
 
 function parseOperations<T extends z.ZodTypeAny>(schema: T, value: unknown): readonly z.infer<T>[] {
