@@ -10,66 +10,9 @@ import {
 
 export { JOY_AGENT_FREE_MODELS, type JoyModelCatalogEntry } from './joy-free-models.js';
 
-/** Paid models, offered only when listed in JOY_GATEWAY_PAID_MODEL_ALLOWLIST (unset in production). */
-export const JOY_AGENT_DEFAULT_MODELS: readonly JoyModelCatalogEntry[] = Object.freeze([
-  {
-    id: 'bytedance-seed/seed-2.0-lite',
-    displayName: 'Joy Vision',
-    description: 'Vision-capable model for visual analysis and creative reasoning',
-    contextLength: 262144,
-    vision: true,
-    isDefault: true,
-    inputUsdPerMillion: 0.25,
-    outputUsdPerMillion: 2,
-  },
-  {
-    id: 'deepseek/deepseek-v4-flash',
-    displayName: 'Joy Fast',
-    description: 'Fast text model for tool and metadata edits',
-    contextLength: 131072,
-    vision: false,
-    inputUsdPerMillion: 0.0679,
-    outputUsdPerMillion: 0.168,
-  },
-  {
-    id: 'anthropic/claude-sonnet-4.6',
-    displayName: 'Joy Studio',
-    description: 'Advanced multimodal and deep video script orchestration',
-    contextLength: 200000,
-    vision: true,
-    inputUsdPerMillion: 3,
-    outputUsdPerMillion: 15,
-  },
-  {
-    id: 'openai/gpt-4o-mini',
-    displayName: 'Joy Compact',
-    description: 'Ultra-fast low-latency tool and metadata edits',
-    contextLength: 128000,
-    vision: true,
-    inputUsdPerMillion: 0.15,
-    outputUsdPerMillion: 0.6,
-  },
-]);
-
 export const JOY_AGENT_FREE_DEFAULT_MODEL: JoyModelCatalogEntry = JOY_AGENT_FREE_MODELS.find(
   (model) => model.isDefault === true,
 )!;
-
-export function effectiveJoyModelCatalog(
-  allowlist = process.env.JOY_GATEWAY_PAID_MODEL_ALLOWLIST ?? '',
-): readonly JoyModelCatalogEntry[] {
-  const allowed = new Set(
-    allowlist
-      .split(',')
-      .map((id) => id.trim())
-      .filter(Boolean),
-  );
-  const paid = JOY_AGENT_DEFAULT_MODELS.filter((model) => allowed.has(model.id)).map((model) => ({
-    ...model,
-    isDefault: false,
-  }));
-  return [...JOY_AGENT_FREE_MODELS, ...paid];
-}
 
 /** Legacy ids from installed clients all resolve to the free default. */
 export const LEGACY_MODEL_ALIASES: Readonly<Record<string, string>> = Object.freeze(
@@ -77,12 +20,11 @@ export const LEGACY_MODEL_ALIASES: Readonly<Record<string, string>> = Object.fre
 );
 
 /**
- * Models to try for a request, in order: the requested model, then (for a free model only)
- * the rest of the free list. A paid model never falls back, and nothing outside the list is
- * ever tried.
+ * Models to try for a request, in order: the requested model, then the rest of the free list.
+ * An id outside the free list gets nothing to try (the handler has already refused it).
  */
 export function joyModelFallbackOrder(modelId: string): readonly string[] {
-  if (!JOY_AGENT_FREE_MODELS.some((model) => model.id === modelId)) return [modelId];
+  if (!JOY_AGENT_FREE_MODELS.some((model) => model.id === modelId)) return [];
   return [
     modelId,
     ...JOY_AGENT_FREE_MODELS.map((model) => model.id).filter((id) => id !== modelId),
@@ -94,20 +36,16 @@ function isFallbackStatus(status: number): boolean {
   return status === 429 || (status >= 500 && status <= 599);
 }
 
-let warnedAboutUnknownPaidModels = false;
-
-function warnAboutUnknownPaidModelAllowlistEntries(): void {
-  if (warnedAboutUnknownPaidModels) return;
-  const catalogIds = new Set(JOY_AGENT_DEFAULT_MODELS.map((model) => model.id));
-  const unknownCount = (process.env.JOY_GATEWAY_PAID_MODEL_ALLOWLIST ?? '')
-    .split(',')
-    .map((id) => id.trim())
-    .filter((id) => id.length > 0 && !catalogIds.has(id)).length;
-  if (unknownCount === 0) return;
-  warnedAboutUnknownPaidModels = true;
+/**
+ * Paid models were once enabled by JOY_GATEWAY_PAID_MODEL_ALLOWLIST. That path is gone: the
+ * gateway serves only the free catalog. Say so loudly if an old environment still sets it.
+ */
+export function warnIfPaidModelAllowlistSet(env: NodeJS.ProcessEnv = process.env): boolean {
+  if ((env.JOY_GATEWAY_PAID_MODEL_ALLOWLIST ?? '').trim() === '') return false;
   console.warn(
-    `joy-model-gateway: ignored ${unknownCount} unknown paid model allowlist entr${unknownCount === 1 ? 'y' : 'ies'}`,
+    'joy-model-gateway: JOY_GATEWAY_PAID_MODEL_ALLOWLIST is set but ignored; the hosted gateway serves only the free catalog and paid models cannot be enabled.',
   );
+  return true;
 }
 
 export const DEFAULT_COMMISSION_RATE_BPS = 2500; // 25% gross margin
@@ -150,7 +88,7 @@ export class JoyModelGateway {
   private readonly requestTimesByUser = new Map<string, number[]>();
 
   constructor(options: JoyModelGatewayOptions) {
-    warnAboutUnknownPaidModelAllowlistEntries();
+    warnIfPaidModelAllowlistSet();
     this.mediaAuth = options.mediaAuth;
     this.account = options.account;
     this.ledger = options.ledger;
@@ -164,7 +102,7 @@ export class JoyModelGateway {
   }
 
   async handleGetModels(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const catalog = effectiveJoyModelCatalog();
+    const catalog = JOY_AGENT_FREE_MODELS;
     res.writeHead(200, {
       'content-type': 'application/json',
       'cache-control': 'public, max-age=3600',
@@ -293,7 +231,7 @@ export class JoyModelGateway {
     }
 
     const requestedModel = typeof parsedBody.model === 'string' ? parsedBody.model : '';
-    const catalog = effectiveJoyModelCatalog();
+    const catalog = JOY_AGENT_FREE_MODELS;
     const aliasedModel = Object.hasOwn(LEGACY_MODEL_ALIASES, requestedModel)
       ? LEGACY_MODEL_ALIASES[requestedModel]
       : undefined;
@@ -861,7 +799,7 @@ function estimateTextTokens(text: string): number {
 }
 
 function estimateCostUsd(modelId: string, promptTokens: number, completionTokens: number): number {
-  const model = effectiveJoyModelCatalog().find((entry) => entry.id === modelId);
+  const model = JOY_AGENT_FREE_MODELS.find((entry) => entry.id === modelId);
   if (!model) return 0;
   return (
     (promptTokens * model.inputUsdPerMillion + completionTokens * model.outputUsdPerMillion) /

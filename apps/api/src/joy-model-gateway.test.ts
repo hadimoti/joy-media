@@ -4,10 +4,9 @@ import { Readable } from 'node:stream';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   JoyModelGateway,
-  JOY_AGENT_DEFAULT_MODELS,
   JOY_AGENT_FREE_MODELS,
   LEGACY_MODEL_ALIASES,
-  effectiveJoyModelCatalog,
+  warnIfPaidModelAllowlistSet,
   joyModelFallbackOrder,
   OPENROUTER_SYSTEMD_CREDENTIAL_IDS,
   readOpenRouterApiKeyFromCredential,
@@ -70,16 +69,9 @@ function createMockRes(): {
 }
 
 describe('JoyModelGateway', () => {
-  beforeEach(() => {
-    vi.stubEnv(
-      'JOY_GATEWAY_PAID_MODEL_ALLOWLIST',
-      JOY_AGENT_DEFAULT_MODELS.map((model) => model.id).join(','),
-    );
-  });
   afterEach(() => vi.unstubAllEnvs());
 
   it('defaults to exactly the five zero-cost catalog models with correct vision flags', async () => {
-    vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', '');
     const gateway = new JoyModelGateway({
       mediaAuth: {} as MediaAuthService,
       account: {} as AccountService,
@@ -102,7 +94,7 @@ describe('JoyModelGateway', () => {
       ['nvidia/nemotron-3-super-120b-a12b:free', false, false],
       ['cohere/north-mini-code:free', false, false],
     ]);
-    expect(effectiveJoyModelCatalog('')).toHaveLength(5);
+    expect(JOY_AGENT_FREE_MODELS).toHaveLength(5);
     expect(models.some((model) => model.id === 'openrouter/free')).toBe(false);
   });
 
@@ -113,7 +105,6 @@ describe('JoyModelGateway', () => {
       expect(model.inputUsdPerMillion).toBe(0);
       expect(model.outputUsdPerMillion).toBe(0);
     }
-    for (const model of effectiveJoyModelCatalog('')) expect(model.id.endsWith(':free')).toBe(true);
     expect(JOY_AGENT_FREE_MODELS.filter((model) => model.isDefault)).toHaveLength(1);
   });
 
@@ -134,13 +125,10 @@ describe('JoyModelGateway', () => {
       'nvidia/nemotron-3-super-120b-a12b:free',
       'cohere/north-mini-code:free',
     ]);
-    expect(joyModelFallbackOrder('anthropic/claude-sonnet-4.6')).toEqual([
-      'anthropic/claude-sonnet-4.6',
-    ]);
+    expect(joyModelFallbackOrder('anthropic/claude-sonnet-4.6')).toEqual([]);
   });
 
   it('refuses paid model IDs by default and redirects a legacy alias to the free default', async () => {
-    vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', '');
     let sentModel: string | undefined;
     const gateway = new JoyModelGateway({
       mediaAuth: {
@@ -224,7 +212,6 @@ describe('JoyModelGateway', () => {
       };
 
     it('tries the next free model in order and records the one that answered', async () => {
-      vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', '');
       const tried: string[] = [];
       const ledger = new MemoryAgentUsageLedger();
       const settle = vi.spyOn(ledger, 'settleSpend');
@@ -251,7 +238,6 @@ describe('JoyModelGateway', () => {
     });
 
     it('stops after the whole list and never tries a model outside it', async () => {
-      vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', '');
       const tried: string[] = [];
       const gateway = new JoyModelGateway({
         ...activeUser(),
@@ -280,7 +266,6 @@ describe('JoyModelGateway', () => {
     });
 
     it.each([400, 404])('does not fall back on upstream %i', async (status) => {
-      vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', '');
       const tried: string[] = [];
       const gateway = new JoyModelGateway({
         ...activeUser(),
@@ -296,7 +281,6 @@ describe('JoyModelGateway', () => {
     });
 
     it('drops client-supplied OpenRouter routing fields so upstream cannot pick another model', async () => {
-      vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', '');
       let forwarded: Record<string, unknown> | undefined;
       const gateway = new JoyModelGateway({
         ...activeUser(),
@@ -325,25 +309,42 @@ describe('JoyModelGateway', () => {
       expect(forwarded).not.toHaveProperty('provider');
     });
 
-    it('does not fall back for a paid model, even when one is allow-listed', async () => {
+    it('refuses paid models even when JOY_GATEWAY_PAID_MODEL_ALLOWLIST lists them', async () => {
+      vi.stubEnv(
+        'JOY_GATEWAY_PAID_MODEL_ALLOWLIST',
+        'deepseek/deepseek-v4-flash,anthropic/claude-sonnet-4.6,bytedance-seed/seed-2.0-lite',
+      );
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       const tried: string[] = [];
       const gateway = new JoyModelGateway({
         ...activeUser(),
         ledger: new MemoryAgentUsageLedger(),
         openRouterApiKey: 'test-key',
-        fetchImpl: scripted([429], tried),
+        fetchImpl: scripted([], tried),
       });
-      const result = createMockRes();
-      await gateway.handleChatCompletions(
-        createMockReq({ body: { model: 'deepseek/deepseek-v4-flash', messages: [] } }),
-        result.res,
-      );
-      expect(tried).toEqual(['deepseek/deepseek-v4-flash']);
-      expect(result.getStatus()).toBe(429);
+      for (const model of [
+        'deepseek/deepseek-v4-flash',
+        'anthropic/claude-sonnet-4.6',
+        'bytedance-seed/seed-2.0-lite',
+      ]) {
+        const result = createMockRes();
+        await gateway.handleChatCompletions(
+          createMockReq({ body: { model, messages: [] } }),
+          result.res,
+        );
+        expect(result.getStatus()).toBe(400);
+        expect(result.getBody()).toContain('MODEL_NOT_ALLOWED');
+      }
+      expect(tried).toEqual([]);
+      const catalog = createMockRes();
+      await gateway.handleGetModels(createMockReq({ method: 'GET' }), catalog.res);
+      expect(
+        (JSON.parse(catalog.getBody()).models as Array<{ id: string }>).map((model) => model.id),
+      ).toEqual(JOY_AGENT_FREE_MODELS.map((model) => model.id));
+      warn.mockRestore();
     });
 
     it('falls back before a stream starts', async () => {
-      vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', '');
       const tried: string[] = [];
       const gateway = new JoyModelGateway({
         ...activeUser(),
@@ -405,8 +406,7 @@ describe('JoyModelGateway', () => {
     },
   );
 
-  it('warns once without echoing entries omitted from the paid model catalog', () => {
-    vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', 'private-test-model-id,other-invalid-id');
+  it('warns at startup that a set JOY_GATEWAY_PAID_MODEL_ALLOWLIST is ignored', () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       const createGateway = () =>
@@ -417,10 +417,15 @@ describe('JoyModelGateway', () => {
           openRouterApiKey: undefined,
         });
       createGateway();
+      expect(warning).not.toHaveBeenCalled();
+      vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', 'private-test-model-id');
       createGateway();
       expect(warning).toHaveBeenCalledOnce();
-      expect(warning.mock.calls[0]?.join(' ')).toContain('unknown paid model allowlist');
+      expect(warning.mock.calls[0]?.join(' ')).toContain(
+        'JOY_GATEWAY_PAID_MODEL_ALLOWLIST is set but ignored',
+      );
       expect(warning.mock.calls.flat().join(' ')).not.toContain('private-test-model-id');
+      expect(warnIfPaidModelAllowlistSet({ JOY_GATEWAY_PAID_MODEL_ALLOWLIST: '  ' })).toBe(false);
     } finally {
       warning.mockRestore();
     }
@@ -439,9 +444,7 @@ describe('JoyModelGateway', () => {
     await gateway.handleGetModels(req, res);
 
     expect(getStatus()).toBe(200);
-    expect(JSON.parse(getBody()).models).toHaveLength(
-      JOY_AGENT_DEFAULT_MODELS.length + JOY_AGENT_FREE_MODELS.length,
-    );
+    expect(JSON.parse(getBody()).models).toHaveLength(JOY_AGENT_FREE_MODELS.length);
   });
 
   it('serves the models catalog after authentication', async () => {
@@ -456,9 +459,7 @@ describe('JoyModelGateway', () => {
     expect(getStatus()).toBe(200);
     expect(getStatus()).toBe(200);
     const data = JSON.parse(getBody());
-    expect(data.models).toHaveLength(
-      JOY_AGENT_DEFAULT_MODELS.length + JOY_AGENT_FREE_MODELS.length,
-    );
+    expect(data.models).toHaveLength(JOY_AGENT_FREE_MODELS.length);
     expect(data.models[0]).toMatchObject({ id: 'google/gemma-4-31b-it:free', isDefault: true });
     expect(data.models.filter((model: { isDefault?: boolean }) => model.isDefault)).toHaveLength(1);
     expect(data.models.some((model: { id: string }) => model.id.includes('minimax'))).toBe(false);
@@ -468,8 +469,9 @@ describe('JoyModelGateway', () => {
     expect(
       data.models.every(
         (model: { id: string; inputUsdPerMillion: number; outputUsdPerMillion: number }) =>
-          model.id.endsWith(':free') ||
-          (model.inputUsdPerMillion > 0 && model.outputUsdPerMillion > 0),
+          model.id.endsWith(':free') &&
+          model.inputUsdPerMillion === 0 &&
+          model.outputUsdPerMillion === 0,
       ),
     ).toBe(true);
   });
@@ -483,7 +485,7 @@ describe('JoyModelGateway', () => {
     });
 
     const { res, getStatus, getBody } = createMockRes();
-    const req = createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } });
+    const req = createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } });
     await gateway.handleChatCompletions(req, res);
 
     expect(getStatus()).toBe(503);
@@ -504,7 +506,7 @@ describe('JoyModelGateway', () => {
     });
 
     const { res, getStatus, getBody } = createMockRes();
-    const req = createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } });
+    const req = createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } });
     await gateway.handleChatCompletions(req, res);
 
     expect(getStatus()).toBe(401);
@@ -534,7 +536,7 @@ describe('JoyModelGateway', () => {
     });
 
     const { res, getStatus, getBody } = createMockRes();
-    const req = createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } });
+    const req = createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } });
     await gateway.handleChatCompletions(req, res);
 
     expect(getStatus()).toBe(402);
@@ -587,7 +589,7 @@ describe('JoyModelGateway', () => {
     const { res, getStatus, getBody } = createMockRes();
     const req = createMockReq({
       body: {
-        model: 'bytedance-seed/seed-2.0-lite',
+        model: 'google/gemma-4-31b-it:free',
         messages: [{ role: 'user', content: 'add transition' }],
       },
     });
@@ -644,7 +646,7 @@ describe('JoyModelGateway', () => {
     await gateway.handleChatCompletions(
       createMockReq({
         body: {
-          model: 'bytedance-seed/seed-2.0-lite',
+          model: 'google/gemma-4-31b-it:free',
           ...allowedFields,
           models: ['not-in-catalog/model'],
           provider: { order: ['untrusted-provider'] },
@@ -657,7 +659,7 @@ describe('JoyModelGateway', () => {
       createMockRes().res,
     );
     expect(forwardedBody).toMatchObject({
-      model: 'bytedance-seed/seed-2.0-lite',
+      model: 'google/gemma-4-31b-it:free',
       ...allowedFields,
       max_tokens: 8192,
       max_completion_tokens: 8192,
@@ -696,7 +698,7 @@ describe('JoyModelGateway', () => {
     await gateway.handleChatCompletions(
       createMockReq({
         body: {
-          model: 'bytedance-seed/seed-2.0-lite',
+          model: 'google/gemma-4-31b-it:free',
           messages: [],
           tools: [{ type: 'computer', name: 'browser' }],
         },
@@ -739,7 +741,7 @@ describe('JoyModelGateway', () => {
       { max_completion_tokens: -2 },
     ]) {
       await gateway.handleChatCompletions(
-        createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [], ...fields } }),
+        createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [], ...fields } }),
         createMockRes().res,
       );
     }
@@ -768,7 +770,7 @@ describe('JoyModelGateway', () => {
       },
     });
     await gateway.handleChatCompletions(
-      createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [], stream } }),
+      createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [], stream } }),
       createMockRes().res,
     );
     expect(forwardedBody?.stream).toBe(false);
@@ -792,7 +794,7 @@ describe('JoyModelGateway', () => {
     });
     const response = createMockRes();
     await gateway.handleChatCompletions(
-      createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } }),
+      createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } }),
       response.res,
     );
     expect(response.getStatus()).toBe(502);
@@ -819,7 +821,7 @@ describe('JoyModelGateway', () => {
         new Response(JSON.stringify({ choices: [], usage: { cost: 0.003 } }), { status: 200 }),
     });
     await gateway.handleChatCompletions(
-      createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } }),
+      createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } }),
       createMockRes().res,
     );
     expect((await ledger.getSummary('u')).totalUpstreamCostMicros).toBe('3000');
@@ -857,13 +859,13 @@ describe('JoyModelGateway', () => {
       });
       await gateway.handleChatCompletions(
         createMockReq({
-          body: { model: 'bytedance-seed/seed-2.0-lite', messages: [], max_tokens: 1 },
+          body: { model: 'google/gemma-4-31b-it:free', messages: [], max_tokens: 1 },
         }),
         createMockRes().res,
       );
       const limited = createMockRes();
       await gateway.handleChatCompletions(
-        createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } }),
+        createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } }),
         limited.res,
       );
       expect(limited.getStatus()).toBe(429);
@@ -904,13 +906,13 @@ describe('JoyModelGateway', () => {
       });
       await gateway.handleChatCompletions(
         createMockReq({
-          body: { model: 'bytedance-seed/seed-2.0-lite', messages: [], max_tokens: 1 },
+          body: { model: 'google/gemma-4-31b-it:free', messages: [], max_tokens: 1 },
         }),
         createMockRes().res,
       );
       const limited = createMockRes();
       await gateway.handleChatCompletions(
-        createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } }),
+        createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } }),
         limited.res,
       );
       expect(limited.getStatus()).toBe(429);
@@ -921,17 +923,17 @@ describe('JoyModelGateway', () => {
     }
   });
 
-  it('reserves estimated spend atomically across parallel requests', async () => {
-    vi.stubEnv('JOY_GATEWAY_RATE_LIMIT_PER_MIN', '100');
+  it('still enforces the daily cap from reported spend, though free models estimate zero', async () => {
     vi.stubEnv('JOY_GATEWAY_DAILY_SPEND_CAP_USD', '0.03');
+    const warn = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     let forwarded = 0;
     const gateway = new JoyModelGateway({
       mediaAuth: {
-        authenticate: async () => ({ id: 'parallel-spend-user' }),
+        authenticate: async () => ({ id: 'reported-spend-user' }),
       } as unknown as MediaAuthService,
       account: {
         getSubscription: async () => ({
-          ownerId: 'parallel-spend-user',
+          ownerId: 'reported-spend-user',
           plan: 'monthly',
           status: 'active',
           updatedAt: 0,
@@ -941,90 +943,30 @@ describe('JoyModelGateway', () => {
       openRouterApiKey: 'test-key',
       fetchImpl: async () => {
         forwarded += 1;
-        await new Promise((resolve) => setTimeout(resolve, 5));
         return new Response(
           JSON.stringify({
             choices: [],
-            usage: { prompt_tokens: 1, completion_tokens: 1, cost: 0.001 },
+            usage: { prompt_tokens: 1, completion_tokens: 1, cost: 0.04 },
           }),
           { status: 200 },
         );
       },
     });
     try {
-      const responses = Array.from({ length: 8 }, () => createMockRes());
-      await Promise.all(
-        responses.map(({ res }) =>
-          gateway.handleChatCompletions(
-            createMockReq({
-              body: { model: 'bytedance-seed/seed-2.0-lite', messages: [], max_tokens: 8192 },
-            }),
-            res,
-          ),
-        ),
-      );
+      const request = () =>
+        createMockReq({
+          body: { model: 'google/gemma-4-31b-it:free', messages: [], max_tokens: 8192 },
+        });
+      const first = createMockRes();
+      await gateway.handleChatCompletions(request(), first.res);
+      expect(first.getStatus()).toBe(200);
+      const second = createMockRes();
+      await gateway.handleChatCompletions(request(), second.res);
+      expect(second.getStatus()).toBe(429);
+      expect(second.getBody()).toContain('DAILY_SPEND_CAP_REACHED');
       expect(forwarded).toBe(1);
-      expect(responses.filter((response) => response.getStatus() === 429)).toHaveLength(7);
     } finally {
-      vi.unstubAllEnvs();
-    }
-  });
-
-  it('reserves image input tokens before forwarding parallel Claude requests', async () => {
-    vi.stubEnv('JOY_GATEWAY_RATE_LIMIT_PER_MIN', '100');
-    vi.stubEnv('JOY_GATEWAY_DAILY_SPEND_CAP_USD', '0.05');
-    vi.stubEnv('JOY_GATEWAY_PAID_MODEL_ALLOWLIST', 'anthropic/claude-sonnet-4.6');
-    let forwarded = 0;
-    const gateway = new JoyModelGateway({
-      mediaAuth: {
-        authenticate: async () => ({ id: 'image-budget-user' }),
-      } as unknown as MediaAuthService,
-      account: {
-        getSubscription: async () => ({
-          ownerId: 'image-budget-user',
-          plan: 'monthly',
-          status: 'active',
-          updatedAt: 0,
-        }),
-      } as unknown as AccountService,
-      ledger: new MemoryAgentUsageLedger(),
-      openRouterApiKey: 'test-key',
-      fetchImpl: async () => {
-        forwarded += 1;
-        return new Response(
-          JSON.stringify({
-            choices: [],
-            usage: { prompt_tokens: 4800, completion_tokens: 1, cost: 0.0145 },
-          }),
-          { status: 200 },
-        );
-      },
-    });
-    try {
-      const responses = Array.from({ length: 20 }, () => createMockRes());
-      const body = {
-        model: 'anthropic/claude-sonnet-4.6',
-        max_tokens: 1,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,ZmFrZQ==' } },
-              { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,ZmFrZQ==' } },
-              { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,ZmFrZQ==' } },
-            ],
-          },
-        ],
-      };
-      await Promise.all(
-        responses.map(({ res }) => gateway.handleChatCompletions(createMockReq({ body }), res)),
-      );
-      expect(forwarded).toBeLessThanOrEqual(2);
-      expect(forwarded).toBeGreaterThan(0);
-      expect(responses.filter((response) => response.getStatus() === 429)).toHaveLength(
-        20 - forwarded,
-      );
-    } finally {
+      warn.mockRestore();
       vi.unstubAllEnvs();
     }
   });
@@ -1053,7 +995,7 @@ describe('JoyModelGateway', () => {
     });
     const response = createMockRes();
     await gateway.handleChatCompletions(
-      createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } }),
+      createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } }),
       response.res,
     );
     expect(response.getStatus()).toBe(503);
@@ -1089,7 +1031,7 @@ describe('JoyModelGateway', () => {
     });
     const result = createMockRes();
     await gateway.handleChatCompletions(
-      createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } }),
+      createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } }),
       result.res,
     );
     expect(result.getStatus()).toBe(503);
@@ -1119,7 +1061,7 @@ describe('JoyModelGateway', () => {
       const response = createMockRes();
       const pending = gateway.handleChatCompletions(
         createMockReq({
-          body: { model: 'bytedance-seed/seed-2.0-lite', stream: true, messages: [] },
+          body: { model: 'google/gemma-4-31b-it:free', stream: true, messages: [] },
         }),
         response.res,
       );
@@ -1188,9 +1130,6 @@ describe('JoyModelGateway', () => {
       createMockRes().res,
     );
     expect(forwardedModel).toBe('google/gemma-4-31b-it:free');
-    expect(
-      JOY_AGENT_DEFAULT_MODELS.some((model) => model.id === 'meta-llama/llama-3.3-70b-instruct'),
-    ).toBe(false);
   });
 
   it('maps upstream authentication failures without forwarding their body or status', async () => {
@@ -1211,7 +1150,7 @@ describe('JoyModelGateway', () => {
     });
     const { res, getStatus, getBody } = createMockRes();
     await gateway.handleChatCompletions(
-      createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } }),
+      createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } }),
       res,
     );
     expect(getStatus()).toBe(503);
@@ -1286,7 +1225,7 @@ describe('JoyModelGateway', () => {
       });
       const response = createMockRes();
       await gateway.handleChatCompletions(
-        createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } }),
+        createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } }),
         response.res,
       );
       expect(response.getStatus()).toBe(expectedStatus);
@@ -1325,7 +1264,7 @@ describe('JoyModelGateway', () => {
       });
       const response = createMockRes();
       await gateway.handleChatCompletions(
-        createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } }),
+        createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } }),
         response.res,
       );
       expect(response.getStatus()).toBe(expectedStatus);
@@ -1367,7 +1306,7 @@ describe('JoyModelGateway', () => {
     const response = createMockRes();
     await gateway.handleChatCompletions(
       createMockReq({
-        body: { model: 'bytedance-seed/seed-2.0-lite', stream: true, messages: [] },
+        body: { model: 'google/gemma-4-31b-it:free', stream: true, messages: [] },
       }),
       response.res,
     );
@@ -1407,14 +1346,15 @@ describe('JoyModelGateway', () => {
     });
     await gateway.handleChatCompletions(
       createMockReq({
-        body: { model: 'bytedance-seed/seed-2.0-lite', stream: true, messages: [] },
+        body: { model: 'google/gemma-4-31b-it:free', stream: true, messages: [] },
       }),
       createMockRes().res,
     );
     const summary = await ledger.getSummary('token-cost-user');
     expect(summary.totalPromptTokens).toBe(8);
     expect(summary.totalCompletionTokens).toBe(6);
-    expect(BigInt(summary.totalUpstreamCostMicros)).toBeGreaterThan(0n);
+    // Every catalog model is free, so an estimated cost is zero.
+    expect(BigInt(summary.totalUpstreamCostMicros)).toBe(0n);
   });
 
   it('retries delayed generation usage lookups without delaying the response', async () => {
@@ -1458,7 +1398,7 @@ describe('JoyModelGateway', () => {
       });
       const response = createMockRes();
       await gateway.handleChatCompletions(
-        createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } }),
+        createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } }),
         response.res,
       );
       expect(response.getStatus()).toBe(200);
@@ -1505,7 +1445,7 @@ describe('JoyModelGateway', () => {
       const response = createMockRes();
       const operation = gateway.handleChatCompletions(
         createMockReq({
-          body: { model: 'bytedance-seed/seed-2.0-lite', stream: true, messages: [] },
+          body: { model: 'google/gemma-4-31b-it:free', stream: true, messages: [] },
         }),
         response.res,
       );
@@ -1544,7 +1484,7 @@ describe('JoyModelGateway', () => {
         },
       });
       await gateway.handleChatCompletions(
-        createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } }),
+        createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } }),
         createMockRes().res,
       );
       await vi.advanceTimersByTimeAsync(120_000);
@@ -1587,7 +1527,7 @@ describe('JoyModelGateway', () => {
     await expect(
       gateway.handleChatCompletions(
         createMockReq({
-          body: { model: 'bytedance-seed/seed-2.0-lite', stream: true, messages: [] },
+          body: { model: 'google/gemma-4-31b-it:free', stream: true, messages: [] },
         }),
         response.res,
       ),
@@ -1619,7 +1559,7 @@ describe('JoyModelGateway', () => {
     await expect(
       gateway.handleChatCompletions(
         createMockReq({
-          body: { model: 'bytedance-seed/seed-2.0-lite', stream: true, messages: [] },
+          body: { model: 'google/gemma-4-31b-it:free', stream: true, messages: [] },
         }),
         response.res,
       ),
@@ -1664,7 +1604,7 @@ describe('JoyModelGateway', () => {
     });
     await gateway.handleChatCompletions(
       createMockReq({
-        body: { model: 'bytedance-seed/seed-2.0-lite', stream: true, messages: [] },
+        body: { model: 'google/gemma-4-31b-it:free', stream: true, messages: [] },
       }),
       createMockRes().res,
     );
@@ -1713,7 +1653,7 @@ describe('JoyModelGateway', () => {
         ),
     });
     await gateway.handleChatCompletions(
-      createMockReq({ body: { model: 'bytedance-seed/seed-2.0-lite', messages: [] } }),
+      createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } }),
       createMockRes().res,
     );
     expect((await ledger.getSummary('completion-tool-estimate')).totalCompletionTokens).toBe(
@@ -1761,7 +1701,7 @@ describe('JoyModelGateway', () => {
     });
     await gateway.handleChatCompletions(
       createMockReq({
-        body: { model: 'bytedance-seed/seed-2.0-lite', messages, tools },
+        body: { model: 'google/gemma-4-31b-it:free', messages, tools },
       }),
       createMockRes().res,
     );
@@ -1827,7 +1767,7 @@ describe('JoyModelGateway', () => {
     const response = createMockRes();
     const operation = gateway.handleChatCompletions(
       createMockReq({
-        body: { model: 'bytedance-seed/seed-2.0-lite', stream: true, messages: [] },
+        body: { model: 'google/gemma-4-31b-it:free', stream: true, messages: [] },
       }),
       response.res,
     );

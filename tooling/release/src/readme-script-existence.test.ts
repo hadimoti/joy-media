@@ -33,7 +33,8 @@ describe('README examples', () => {
     expect(readme).toContain('server-enforced allow-list of five zero-cost OpenRouter models');
     expect(readme).toContain('`google/gemma-4-31b-it:free` (the default, with vision)');
     expect(readme).toContain('never one outside it');
-    expect(lowerReadme).toContain('paid catalog models are disabled by default');
+    expect(readme).toContain('Paid models cannot be enabled');
+    expect(lowerReadme).not.toContain('paid catalog models are disabled by default');
     expect(readme).toContain('JOY_GATEWAY_PAID_MODEL_ALLOWLIST');
     expect(readme).not.toContain('bytedance-seed/seed-2.0-lite');
     expect(readme).not.toContain('deepseek/deepseek-v4-flash');

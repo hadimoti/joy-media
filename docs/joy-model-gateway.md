@@ -2,7 +2,7 @@
 
 The gateway applies a per-user request limit in memory. It resets when the API process restarts, so it is an abuse throttle rather than a durable quota.
 
-The effective model catalog defaults to `openrouter/free` only. Paid catalog models are accepted only when their exact IDs appear in the server-side `JOY_GATEWAY_PAID_MODEL_ALLOWLIST` comma-separated environment variable. The public `GET /models` response reflects this effective allow-list and marks `openrouter/free` as default. Legacy model aliases use their catalog target only when that target is allow-listed; otherwise they resolve to `openrouter/free`.
+The model catalog is a fixed list of five zero-cost OpenRouter `:free` models (`apps/api/src/joy-free-models.ts`), with `google/gemma-4-31b-it:free` as the default. `GET /models` returns exactly that list. Any other model id is refused with `MODEL_NOT_ALLOWED`; legacy ids (`openrouter/free`, `minimax/minimax-m3`, `anthropic/claude-3.5-sonnet`, `meta-llama/llama-3.3-70b-instruct`) resolve to the default. Paid models cannot be enabled: `JOY_GATEWAY_PAID_MODEL_ALLOWLIST` is ignored, with a startup warning if it is set.
 
 Daily spend is reserved against the ledger before requests are forwarded and settled atomically when a response completes. Image inputs reserve a conservative 1,600 prompt tokens per image at the selected model's input price. Reservations older than 15 minutes are ignored and swept at startup and periodically. The cap resets at 00:00 UTC, which is 03:30 in Tehran (Asia/Tehran). A reservation failure returns `503 SPEND_LEDGER_UNAVAILABLE`; a bounded Postgres lock wait returns `503 SPEND_LEDGER_BUSY` before forwarding the request.
 
