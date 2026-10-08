@@ -90,6 +90,19 @@ export async function getJoyHostedDefaultModel(
   return modelId;
 }
 
+/**
+ * A provider/login setup problem found before any model request (wrong saved-login host,
+ * unknown provider, unsafe URL, missing session). Its message is safe to print as is.
+ */
+export class AgentSetupError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AgentSetupError';
+  }
+}
+
+const BUILT_IN_PROVIDERS = ['kilo', 'openrouter', 'lm-studio', 'openai', 'anthropic', 'joy-hosted'];
+
 export function describeEffectiveConfig(
   options: ResolveProviderOptions = {},
 ): EffectiveProviderConfig {
@@ -132,7 +145,12 @@ export function describeEffectiveConfig(
     else if (provider === 'openai') baseUrl = 'https://api.openai.com/v1';
     else if (provider === 'anthropic') baseUrl = 'https://api.anthropic.com/v1/';
     else if (provider === 'joy-hosted') baseUrl = DEFAULT_JOY_HOSTED_BASE_URL;
-    else throw new Error(`Provider "${provider}" needs --base-url`);
+    else if (aiProviders[provider] === undefined) {
+      const saved = Object.keys(aiProviders);
+      throw new AgentSetupError(
+        `unknown provider "${provider}" (built-in: ${BUILT_IN_PROVIDERS.join(', ')}${saved.length > 0 ? `; saved: ${saved.join(', ')}` : ''}). Add one with: joy-media agent provider add ${provider} --base-url <url>`,
+      );
+    } else throw new AgentSetupError(`Provider "${provider}" needs --base-url`);
   }
   if (provider === 'kilo') baseUrl = canonicalKiloBaseUrl(baseUrl);
   validateProviderBaseUrl(baseUrl);
@@ -140,7 +158,7 @@ export function describeEffectiveConfig(
     (provider === 'anthropic' || provider === 'kilo') &&
     new URL(baseUrl).origin === 'https://api.openai.com'
   ) {
-    throw new Error(`Provider "${provider}" cannot use the OpenAI API origin`);
+    throw new AgentSetupError(`Provider "${provider}" cannot use the OpenAI API origin`);
   }
 
   return { provider, modelId, baseUrl, source };
@@ -151,13 +169,13 @@ export function validateProviderBaseUrl(baseUrl: string): void {
   try {
     parsed = new URL(baseUrl);
   } catch {
-    throw new Error(
+    throw new AgentSetupError(
       'INSECURE_PROVIDER_URL: provider URL must be a valid HTTPS URL or a loopback HTTP URL.',
     );
   }
   const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname.toLowerCase());
   if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && loopback))
-    throw new Error(
+    throw new AgentSetupError(
       'INSECURE_PROVIDER_URL: HTTP is allowed only for localhost, 127.0.0.1, or [::1].',
     );
 }
@@ -215,7 +233,7 @@ export async function resolveByokConfig(
     }
   }
   if ((effective.provider === 'joy-hosted' || keyProvider === 'joy-hosted') && !apiKey) {
-    throw new Error(
+    throw new AgentSetupError(
       'JOY hosted provider needs a session token; run `joy-media login` or set JOY_MEDIA_SESSION_TOKEN',
     );
   }
@@ -284,7 +302,7 @@ function assertJoySessionOrigin(baseUrl: string, savedOrigin: string): void {
   const outgoingOrigin = new URL(baseUrl).origin;
   const normalizedSavedOrigin = new URL(savedOrigin).origin;
   if (outgoingOrigin !== normalizedSavedOrigin) {
-    throw new Error(
+    throw new AgentSetupError(
       `saved login is for ${normalizedSavedOrigin}; run joy-media login --api-base <url> for this host`,
     );
   }

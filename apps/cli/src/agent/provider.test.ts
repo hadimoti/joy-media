@@ -207,11 +207,14 @@ describe('effective BYOK provider configuration', () => {
     });
   });
 
-  it('requires explicit base URLs for unknown providers', () => {
+  it('names an unknown provider and how to add it', () => {
     isolateConfig();
     expect(() => describeEffectiveConfig({ provider: 'foo' })).toThrow(
-      'Provider "foo" needs --base-url',
+      'unknown provider "foo" (built-in: kilo, openrouter, lm-studio, openai, anthropic, joy-hosted). Add one with: joy-media agent provider add foo --base-url <url>',
     );
+    expect(
+      describeEffectiveConfig({ provider: 'foo', baseUrl: 'https://llm.example.invalid/v1' }),
+    ).toMatchObject({ provider: 'foo', baseUrl: 'https://llm.example.invalid/v1' });
   });
 
   it('resolves JOY hosted from a stubbed default catalog and env token', async () => {

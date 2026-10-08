@@ -8,7 +8,7 @@ import {
   defaultModelFor,
 } from '@joy-media/joy-agent-engine';
 import { JoyAgentRunError } from '@joy-media/joy-agent-engine';
-import { describeEffectiveConfig } from '../agent/provider.js';
+import { AgentSetupError, describeEffectiveConfig } from '../agent/provider.js';
 import type { CliFlags } from '../cli.js';
 import {
   formatAgentTraceLine,
@@ -79,6 +79,7 @@ export function gatewayErrorFromBody(
 }
 
 export function formatAgentRunFailure(error: unknown, debug: boolean): string {
+  if (error instanceof AgentSetupError) return `Joy Agent execution failed: ${error.message}`;
   if (!(error instanceof JoyAgentRunError)) {
     const message = error instanceof Error ? error.message : '';
     if (/^No API key for [^:]+:/.test(message))

@@ -9,7 +9,7 @@ import { resolveByokConfig } from './agent/provider.js';
 import { formatAgentRunFailure } from './commands/agent-cmd.js';
 import { createTextClip, detectTextDirection } from './render/text-clip.js';
 import { configureSecretStoreRuntimeForTests } from './utils/secret-store.js';
-import { setAiProvider } from './utils/config.js';
+import { saveJoySession, setAiProvider } from './utils/config.js';
 import { resolveTextFont } from './render/text-font.js';
 import * as joyAgentRuntime from './agent/joy-agent.js';
 import { JoyAgentRunError } from '@joy-media/joy-agent-engine';
@@ -205,6 +205,61 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     const formatted = formatAgentRunFailure(error, false);
     expect(formatted).toContain('(server: JOY_AGENT_BAD: red31m alert end\u00a0ok, HTTP 400)');
     expect(formatted).not.toMatch(/[\u0080-\u009f]/);
+  });
+
+  it('shows the wrong-host login message for a hosted run against another origin', async () => {
+    // A no-op keyring runner keeps the test off the real Windows DPAPI/PowerShell store.
+    const restoreSecretStore = configureSecretStoreRuntimeForTests({
+      platform: 'linux',
+      runner: () => ({ status: 0, stdout: '' }),
+    });
+    saveJoySession({ token: 'tok-fake-host', apiOrigin: 'http://127.0.0.1:18741' }, true);
+    restoreSecretStore();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      const code = await runCli([
+        'agent',
+        'run',
+        'hi',
+        '--provider',
+        'joy-hosted',
+        '--model',
+        'openrouter/free',
+        '--base-url',
+        'https://example.invalid/api/v1/agent',
+      ]);
+      const printed = errors.mock.calls.flat().join('\n');
+      expect(code).toBe(1);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(printed).toContain(
+        'saved login is for http://127.0.0.1:18741; run joy-media login --api-base <url> for this host',
+      );
+      expect(printed).not.toContain('JOY_AGENT_UNKNOWN');
+    } finally {
+      fetchSpy.mockRestore();
+      errors.mockRestore();
+      vi.mocked(console.log).mockRestore();
+    }
+  });
+
+  it('names an unknown --provider instead of failing with JOY_AGENT_UNKNOWN', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(await runCli(['agent', 'run', 'hi', '--provider', 'nosuch'])).toBe(1);
+      const printed = errors.mock.calls.flat().join('\n');
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(printed).toContain('unknown provider "nosuch"');
+      expect(printed).toContain('openrouter');
+      expect(printed).not.toContain('JOY_AGENT_UNKNOWN');
+    } finally {
+      fetchSpy.mockRestore();
+      errors.mockRestore();
+      vi.mocked(console.log).mockRestore();
+    }
   });
 
   it('prints help guide on help command and exits 0', async () => {
