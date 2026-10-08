@@ -26,6 +26,7 @@ import {
   setAiProvider,
 } from '../utils/config.js';
 import { protectSecret } from '../utils/secret-store.js';
+import { closestMatch } from '../utils/suggest.js';
 import {
   c,
   logError,
@@ -131,8 +132,26 @@ On Linux/macOS, --api-key uses the system keyring. If unavailable, use --api-key
 or explicitly opt in to plaintext with --insecure-file-store (mode 0600).`);
 }
 
+/** Every `joy-media agent` subcommand, used for the unknown-subcommand hint. */
+export const AGENT_SUBCOMMANDS = [
+  'chat',
+  'run',
+  'probe',
+  'config',
+  'provider',
+  'models',
+  'model',
+  'help',
+] as const;
+
 export async function handleAgentCommand(args: string[], flags: CliFlags): Promise<number> {
   const sub = args[0] ?? 'chat';
+  if (!(AGENT_SUBCOMMANDS as readonly string[]).includes(sub)) {
+    const guess = closestMatch(sub, AGENT_SUBCOMMANDS);
+    logError(`Unknown agent subcommand "${sub}".${guess ? ` Did you mean "${guess}"?` : ''}`);
+    console.log(`Available: ${AGENT_SUBCOMMANDS.join(', ')}`);
+    return 2;
+  }
 
   if (sub === 'help') {
     printAgentHelp();
@@ -681,10 +700,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
   }
 
   logError(`Unknown agent subcommand: ${sub}`);
-  console.log(
-    `Available: ${c('chat', 'cyan')}, ${c('run', 'cyan')}, ${c('probe', 'cyan')}, ${c('config', 'cyan')}`,
-  );
-  return 1;
+  return 2;
 }
 
 function printPlacementSummary(summary: RunAgentOutput['placementSummary']): void {

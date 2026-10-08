@@ -262,6 +262,77 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     }
   });
 
+  describe('unknown commands and options (item 12)', () => {
+    const capture = async (args: string[]) => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      const runSpy = vi.spyOn(joyAgentRuntime, 'runJoyAgent');
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      try {
+        const code = await runCli(args);
+        return {
+          code,
+          text: [...errors.mock.calls, ...output.mock.calls].flat().join('\n'),
+          fetched: fetchSpy.mock.calls.length,
+          ran: runSpy.mock.calls.length,
+        };
+      } finally {
+        fetchSpy.mockRestore();
+        runSpy.mockRestore();
+        errors.mockRestore();
+        output.mockRestore();
+      }
+    };
+
+    it('refuses an unknown option before any model call', async () => {
+      const result = await capture(['agent', 'run', 'hi', '--frobnicate']);
+      expect(result.code).toBe(2);
+      expect(result.ran).toBe(0);
+      expect(result.fetched).toBe(0);
+      expect(result.text).toContain('Unknown option --frobnicate');
+    });
+
+    it('suggests the closest option and command', async () => {
+      expect((await capture(['agent', 'run', 'hi', '--aply'])).text).toContain(
+        'Did you mean --apply?',
+      );
+      const command = await capture(['timelin', 'list']);
+      expect(command.code).toBe(2);
+      expect(command.text).toContain('Unknown command "timelin". Did you mean "timeline"?');
+      const sub = await capture(['agent', 'rn', 'hi']);
+      expect(sub.code).toBe(2);
+      expect(sub.text).toContain('Did you mean "run"?');
+    });
+
+    it('treats an unknown top-level flag as an error, not as a help request', async () => {
+      const result = await capture(['--definitely-not-a-flag']);
+      expect(result.code).toBe(2);
+      expect(result.text).toContain('Unknown option --definitely-not-a-flag');
+      expect(result.text).not.toContain('Commands:');
+    });
+
+    it('lists every real timeline subcommand for an unknown one, before needing a project', async () => {
+      const result = await capture(['timeline', 'frobnicate']);
+      expect(result.code).toBe(2);
+      expect(result.text).toContain(
+        'Available: list, add-clip, add-text, add-effect, clear-effect, split, trim, move-clip, remove-clip',
+      );
+      const help = await capture(['timeline', 'help']);
+      for (const sub of [
+        'list',
+        'add-clip',
+        'add-text',
+        'add-effect',
+        'clear-effect',
+        'split',
+        'trim',
+        'move-clip',
+        'remove-clip',
+      ])
+        expect(help.text).toContain(sub);
+    });
+  });
+
   it('prints help guide on help command and exits 0', async () => {
     const code = await runCli(['help']);
     expect(code).toBe(0);

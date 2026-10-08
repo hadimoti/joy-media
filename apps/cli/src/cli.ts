@@ -1,5 +1,5 @@
 /* global console, process */
-import { parseArgs } from 'node:util';
+import { parseArgs, type ParseArgsConfig } from 'node:util';
 import { handleAgentCommand } from './commands/agent-cmd.js';
 import { handleAssetCommand } from './commands/asset-cmd.js';
 import { handleBenchmarkCommand } from './commands/benchmark-cmd.js';
@@ -19,6 +19,7 @@ import {
   parseIntFlag,
 } from './utils/flags.js';
 import { c, logError, logWarn, printBanner } from './utils/logger.js';
+import { closestMatch } from './utils/suggest.js';
 
 export interface CliFlags {
   project: string | undefined;
@@ -219,76 +220,95 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
   };
 }
 
+const CLI_OPTIONS = {
+  help: { type: 'boolean', short: 'h', default: false },
+  version: { type: 'boolean', short: 'v', default: false },
+  project: { type: 'string', short: 'p' },
+  apply: { type: 'boolean', default: false },
+  'keep-partial': { type: 'boolean', default: false },
+  'allow-frames': { type: 'boolean', default: false },
+  vision: { type: 'boolean', default: false },
+  name: { type: 'string', short: 'n' },
+  provider: { type: 'string' },
+  model: { type: 'string', short: 'm' },
+  'api-key': { type: 'string' },
+  'api-key-env': { type: 'string' },
+  'base-url': { type: 'string' },
+  url: { type: 'string', short: 'u' },
+  output: { type: 'string', short: 'o' },
+  width: { type: 'string' },
+  height: { type: 'string' },
+  fps: { type: 'string' },
+  font: { type: 'string' },
+  track: { type: 'string' },
+  clip: { type: 'string' },
+  clipId: { type: 'string' },
+  'clip-id': { type: 'string' },
+  asset: { type: 'string' },
+  text: { type: 'string' },
+  x: { type: 'string' },
+  y: { type: 'string' },
+  direction: { type: 'string' },
+  size: { type: 'string' },
+  color: { type: 'string' },
+  id: { type: 'string' },
+  strict: { type: 'boolean', default: false },
+  'manifest-only': { type: 'boolean', default: false },
+  start: { type: 'string' },
+  duration: { type: 'string' },
+  end: { type: 'string' },
+  at: { type: 'string' },
+  scale: { type: 'string' },
+  'sqlite-path': { type: 'string' },
+  preset: { type: 'string' },
+  out: { type: 'string' },
+  concurrency: { type: 'string' },
+  json: { type: 'boolean', default: false },
+  debug: { type: 'boolean', default: false },
+  system: { type: 'boolean', default: false },
+  'media-engine': { type: 'boolean', default: false },
+  look: { type: 'string' },
+  kind: { type: 'string' },
+  type: { type: 'string' },
+  intensity: { type: 'string' },
+  'scanline-strength': { type: 'string' },
+  'noise-amount': { type: 'string' },
+  'insecure-file-store': { type: 'boolean', default: false },
+  email: { type: 'string' },
+  code: { type: 'string' },
+  'code-only': { type: 'boolean', default: false },
+  'code-stdin': { type: 'boolean', default: false },
+  'request-code': { type: 'boolean', default: false },
+  'api-base': { type: 'string' },
+  resolution: { type: 'string' },
+  aspect: { type: 'string' },
+} satisfies ParseArgsConfig['options'];
+
+/** Top-level commands, used for the unknown-command hint. */
+const CLI_COMMANDS = [
+  'agent',
+  'project',
+  'timeline',
+  'asset',
+  'worker',
+  'render',
+  'benchmark',
+  'doctor',
+  'login',
+  'logout',
+  'whoami',
+  'help',
+];
+
 export async function runCli(argv: string[]): Promise<number> {
   let parsedArgs;
   try {
     parsedArgs = parseArgs({
       args: argv,
-      options: {
-        help: { type: 'boolean', short: 'h', default: false },
-        version: { type: 'boolean', short: 'v', default: false },
-        project: { type: 'string', short: 'p' },
-        apply: { type: 'boolean', default: false },
-        'keep-partial': { type: 'boolean', default: false },
-        'allow-frames': { type: 'boolean', default: false },
-        vision: { type: 'boolean', default: false },
-        name: { type: 'string', short: 'n' },
-        provider: { type: 'string' },
-        model: { type: 'string', short: 'm' },
-        'api-key': { type: 'string' },
-        'api-key-env': { type: 'string' },
-        'base-url': { type: 'string' },
-        url: { type: 'string', short: 'u' },
-        output: { type: 'string', short: 'o' },
-        width: { type: 'string' },
-        height: { type: 'string' },
-        fps: { type: 'string' },
-        font: { type: 'string' },
-        track: { type: 'string' },
-        clip: { type: 'string' },
-        clipId: { type: 'string' },
-        'clip-id': { type: 'string' },
-        asset: { type: 'string' },
-        text: { type: 'string' },
-        x: { type: 'string' },
-        y: { type: 'string' },
-        direction: { type: 'string' },
-        size: { type: 'string' },
-        color: { type: 'string' },
-        id: { type: 'string' },
-        strict: { type: 'boolean', default: false },
-        'manifest-only': { type: 'boolean', default: false },
-        start: { type: 'string' },
-        duration: { type: 'string' },
-        end: { type: 'string' },
-        at: { type: 'string' },
-        scale: { type: 'string' },
-        'sqlite-path': { type: 'string' },
-        preset: { type: 'string' },
-        out: { type: 'string' },
-        concurrency: { type: 'string' },
-        json: { type: 'boolean', default: false },
-        debug: { type: 'boolean', default: false },
-        system: { type: 'boolean', default: false },
-        'media-engine': { type: 'boolean', default: false },
-        look: { type: 'string' },
-        kind: { type: 'string' },
-        type: { type: 'string' },
-        intensity: { type: 'string' },
-        'scanline-strength': { type: 'string' },
-        'noise-amount': { type: 'string' },
-        'insecure-file-store': { type: 'boolean', default: false },
-        email: { type: 'string' },
-        code: { type: 'string' },
-        'code-only': { type: 'boolean', default: false },
-        'code-stdin': { type: 'boolean', default: false },
-        'request-code': { type: 'boolean', default: false },
-        'api-base': { type: 'string' },
-        resolution: { type: 'string' },
-        aspect: { type: 'string' },
-      },
+      options: CLI_OPTIONS,
       allowPositionals: true,
       strict: false,
+      tokens: true,
     });
   } catch (err) {
     logError(`Failed to parse CLI arguments: ${formatError(err)}`);
@@ -296,6 +316,20 @@ export async function runCli(argv: string[]): Promise<number> {
   }
 
   const { values, positionals } = parsedArgs;
+
+  // Unknown options are an error (exit 2) before anything runs: a typo must never be
+  // ignored on the way to a model call or a project write.
+  const knownOptions = Object.keys(CLI_OPTIONS);
+  const unknownOption = parsedArgs.tokens?.find(
+    (token) => token.kind === 'option' && !knownOptions.includes(token.name),
+  );
+  if (unknownOption?.kind === 'option') {
+    const guess = closestMatch(unknownOption.name, knownOptions);
+    logError(
+      `Unknown option ${unknownOption.rawName}.${guess ? ` Did you mean --${guess}?` : ''} Run ${c('joy-media help', 'cyan')} for usage.`,
+    );
+    return 2;
+  }
 
   if (values.version) {
     console.log('JOY Media CLI v1.0.1');
@@ -370,9 +404,13 @@ export async function runCli(argv: string[]): Promise<number> {
       case 'help':
         printHelp();
         return 0;
-      default:
-        logError(`Unknown command "${command}". Run ${c('joy-media help', 'cyan')} for usage.`);
-        return 1;
+      default: {
+        const guess = closestMatch(command ?? '', CLI_COMMANDS);
+        logError(
+          `Unknown command "${command}".${guess ? ` Did you mean "${guess}"?` : ''} Run ${c('joy-media help', 'cyan')} for usage.`,
+        );
+        return 2;
+      }
     }
   } catch (err) {
     return handleUnhandledError(err, command);

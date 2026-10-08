@@ -8,6 +8,7 @@ import { sourceTimeAtVideoClipTime, validateJoyProjectV1 } from '@joy-media/proj
 import { createTextClip } from '../render/text-clip.js';
 import { resolveTextFont } from '../render/text-font.js';
 import { layoutFfmpegCaption } from '../render/caption-layout.js';
+import { closestMatch } from '../utils/suggest.js';
 import { pickAlias, resolveLookAliases, type JoyLookPreset } from '@joy-media/joy-agent-engine';
 
 export interface TimelineCommandFlags {
@@ -32,8 +33,21 @@ export interface TimelineCommandFlags {
   noiseAmount?: number | undefined;
 }
 
+/** Every `joy-media timeline` subcommand: the help line and the unknown-subcommand hint. */
+export const TIMELINE_SUBCOMMANDS = [
+  'list',
+  'add-clip',
+  'add-text',
+  'add-effect',
+  'clear-effect',
+  'split',
+  'trim',
+  'move-clip',
+  'remove-clip',
+] as const;
+
 export function printTimelineHelp(): void {
-  console.log(`Usage: joy-media timeline <list|add-clip|add-text|add-effect|clear-effect|split|trim|remove-clip> --project <id|file>
+  console.log(`Usage: joy-media timeline <${TIMELINE_SUBCOMMANDS.join('|')}> --project <id|file>
   list [--json]
   add-clip --asset <id> [--track <id>] [--start <seconds>] [--duration <seconds>]
   add-text --text <text> [--track <id>] [--start <seconds>] --duration <seconds> [--x <frame-fraction> --y <frame-fraction> --direction <rtl|ltr|auto> --size <template-multiplier> --color <#RRGGBB>]
@@ -69,6 +83,16 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
   if (sub === 'help' || sub === '--help' || sub === '-h') {
     printTimelineHelp();
     return 0;
+  }
+  if (!(TIMELINE_SUBCOMMANDS as readonly string[]).includes(sub ?? '')) {
+    const guess = sub === undefined ? undefined : closestMatch(sub, TIMELINE_SUBCOMMANDS);
+    logError(
+      sub === undefined
+        ? 'Missing timeline subcommand.'
+        : `Unknown timeline subcommand "${sub}".${guess ? ` Did you mean "${guess}"?` : ''}`,
+    );
+    console.log(`Available: ${TIMELINE_SUBCOMMANDS.join(', ')}`);
+    return 2;
   }
 
   // The clip id and look aliases follow the same rules as the agent's operation schema:
@@ -605,10 +629,7 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
   }
 
   logError(`Unknown timeline subcommand: ${sub}`);
-  console.log(
-    `Available: ${c('add-clip', 'cyan')}, ${c('split', 'cyan')}, ${c('trim', 'cyan')}, ${c('remove-clip', 'cyan')}`,
-  );
-  return 1;
+  return 2;
 }
 
 function validateRange(
