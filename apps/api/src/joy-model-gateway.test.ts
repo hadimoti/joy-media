@@ -432,6 +432,141 @@ describe('JoyModelGateway', () => {
         expect(result.getBody()).not.toContain('AUTH_FAILED');
       });
 
+      const okJson = (content: string) => () =>
+        new Response(
+          JSON.stringify({
+            id: 'gen-ok',
+            choices: [{ message: { role: 'assistant', content } }],
+            usage: { prompt_tokens: 3, completion_tokens: 2, cost: 0 },
+          }),
+          { status: 200 },
+        );
+      const errorIn200 = () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 502,
+              message: 'ResourceExhausted: 16/16 SECRET-PROVIDER-DETAIL',
+              metadata: { provider_name: 'Nvidia' },
+            },
+          }),
+          { status: 200 },
+        );
+      const sse = (text: string) => () =>
+        new Response(text, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+
+      it('falls back when a 200 response carries an error object instead of an answer', async () => {
+        const tried: string[] = [];
+        const ledger = new MemoryAgentUsageLedger();
+        const settle = vi.spyOn(ledger, 'settleSpend');
+        const result = createMockRes();
+        await new JoyModelGateway({
+          ...activeUser(),
+          ledger,
+          openRouterApiKey: 'test-key',
+          fetchImpl: sequence(
+            [
+              errorIn200,
+              () =>
+                new Response(
+                  JSON.stringify({ choices: [{ error: { code: 503, message: 'overloaded' } }] }),
+                  { status: 200 },
+                ),
+              okJson('answered by north'),
+            ],
+            tried,
+          ),
+        }).handleChatCompletions(
+          createMockReq({ body: { model: SUPER, messages: [] } }),
+          result.res,
+        );
+        expect(tried).toEqual([SUPER, ULTRA, NORTH]);
+        expect(result.getStatus()).toBe(200);
+        expect(JSON.parse(result.getBody()).choices[0].message.content).toBe('answered by north');
+        expect(result.getBody()).not.toContain('SECRET-PROVIDER-DETAIL');
+        expect(settle).toHaveBeenCalledOnce();
+        expect(settle.mock.calls[0]?.[1]).toMatchObject({ modelId: NORTH });
+      });
+
+      it('falls back when a stream opens with an error event, before anything reaches the client', async () => {
+        const tried: string[] = [];
+        const result = await run(
+          sequence(
+            [
+              sse(
+                ': OPENROUTER PROCESSING\n\ndata: {"id":"g1","error":{"code":502,"message":"ResourceExhausted 16/16"},"choices":[{"index":0,"delta":{"content":""},"finish_reason":"error"}]}\n\n',
+              ),
+              sse(
+                ': OPENROUTER PROCESSING\n\ndata: {"id":"g2","choices":[{"delta":{"content":"hello"}}]}\n\ndata: {"id":"g2","choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"cost":0}}\n\ndata: [DONE]\n\n',
+              ),
+            ],
+            tried,
+          ),
+          { stream: true },
+        );
+        expect(tried).toEqual([SUPER, ULTRA]);
+        expect(result.getStatus()).toBe(200);
+        expect(result.getHeaders()['content-type']).toBe('text/event-stream');
+        expect(result.getBody()).toContain('"content":"hello"');
+        expect(result.getBody()).not.toContain('ResourceExhausted');
+        expect(result.getBody()).not.toContain('"g1"');
+      });
+
+      it('reports every image model busy when gemma is rate-limited and nano-omni errors in a 200', async () => {
+        const tried: string[] = [];
+        const result = await run(
+          sequence([() => openRouterError(429, { code: 429 }), errorIn200], tried),
+          {
+            messages: [
+              {
+                role: 'user',
+                content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,AA==' } }],
+              },
+            ],
+          },
+        );
+        expect(tried).toEqual([GEMMA, OMNI]);
+        expect(result.getStatus()).toBe(503);
+        expect(JSON.parse(result.getBody()).error).toMatchObject({
+          code: 'JOY_AGENT_MODELS_BUSY',
+          vision: true,
+        });
+      });
+
+      it('times out a stream that never sends its first event, within the header budget', async () => {
+        vi.useFakeTimers();
+        try {
+          const tried: string[] = [];
+          const silent = () =>
+            new Response(
+              new ReadableStream<Uint8Array>({
+                start(controller) {
+                  controller.enqueue(new TextEncoder().encode(': OPENROUTER PROCESSING\n\n'));
+                },
+              }),
+              { status: 200 },
+            );
+          const result = createMockRes();
+          const pending = new JoyModelGateway({
+            ...activeUser(),
+            ledger: new MemoryAgentUsageLedger(),
+            openRouterApiKey: 'test-key',
+            fetchImpl: sequence([silent], tried),
+          }).handleChatCompletions(
+            createMockReq({ body: { model: SUPER, messages: [], stream: true } }),
+            result.res,
+          );
+          await vi.advanceTimersByTimeAsync(86_000);
+          await pending;
+          expect(tried).toEqual([SUPER]);
+          expect(result.getStatus()).toBe(504);
+          expect(result.getBody()).toContain('UPSTREAM_TIMEOUT');
+          expect(result.getBody()).not.toContain('OPENROUTER PROCESSING');
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
       it('logs status, error code and routing metadata for every attempt, never bodies', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
         const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
@@ -1516,7 +1651,14 @@ describe('JoyModelGateway', () => {
   it('sends SSE keep-alive comments while the upstream stream is waiting', async () => {
     vi.useFakeTimers();
     try {
-      const stream = new ReadableStream<Uint8Array>({ start() {} });
+      // The first event commits the response; then the upstream goes quiet.
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode('data: {"id":"g","choices":[{"delta":{"content":""}}]}\n\n'),
+          );
+        },
+      });
       const gateway = new JoyModelGateway({
         mediaAuth: {
           authenticate: async () => ({ id: 'keepalive-user' }),

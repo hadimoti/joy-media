@@ -84,12 +84,15 @@ const KEY_LEVEL_FORBIDDEN =
  * - auth: the key itself was rejected (401, or a 403 clearly about the key). Every model
  *   would fail the same way, so stop.
  * - fallback: this model is busy, gated or failing right now; try the next candidate. That is
- *   404 (withdrawn or no provider), 429 (including a shared free pool), 5xx, and any other 403
- *   (e.g. a free endpoint gated to agentic harnesses, reported as a failed routing step).
+ *   404 (withdrawn or no provider), 429 (including a shared free pool), 5xx, any other 403
+ *   (e.g. a free endpoint gated to agentic harnesses, reported as a failed routing step), and
+ *   a 200 whose body (or first stream event) is an error, e.g. a provider's ResourceExhausted.
  * - stop: anything else (such as 400 or 402) is about the request or the account; stop.
  */
 function classifyUpstreamFailure(failure: UpstreamFailure): UpstreamFailureKind {
   const { status } = failure;
+  // An error carried in a 200 body or as a stream's first event: the model failed this time.
+  if (status >= 200 && status <= 299) return 'fallback';
   if (status === 401) return 'auth';
   if (status === 403)
     return failure.failedRoutingStep === undefined &&
@@ -399,6 +402,9 @@ export class JoyModelGateway {
     let upstreamRes: Response | undefined;
     let verdict: 'ok' | UpstreamFailureKind = 'fallback';
     const failures: UpstreamFailure[] = [];
+    // What the answering attempt already read: the parsed JSON body, or the start of the stream.
+    let upstreamJson: Record<string, unknown> | undefined;
+    let streamStart: StreamStart | undefined;
     const candidates = joyModelFallbackOrder(modelId, {
       requireVision: messagesHaveImages(parsedBody.messages),
     });
@@ -406,10 +412,12 @@ export class JoyModelGateway {
       const attempt = { ownerId: actor.id, attempt: index + 1, of: candidates.length };
       const upstreamController = new AbortController();
       let upstreamTimedOut = false;
+      const attemptDeadline = Date.now() + UPSTREAM_HEADER_TIMEOUT_MS;
       const headerTimeout = setTimeout(() => {
         upstreamTimedOut = true;
         upstreamController.abort();
       }, UPSTREAM_HEADER_TIMEOUT_MS);
+      let streamPeek: StreamPeek | undefined;
       try {
         upstreamRes = await this.fetchImpl('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
@@ -422,6 +430,10 @@ export class JoyModelGateway {
           body: JSON.stringify(buildUpstreamBody(parsedBody, candidate, isStream)),
           signal: upstreamController.signal,
         });
+        // A stream can start with HTTP 200 and an error as its first event. Look before
+        // committing the response, within the same time budget as the headers.
+        if (upstreamRes.ok && isStream && upstreamRes.body !== null)
+          streamPeek = await peekStreamStart(upstreamRes.body, attemptDeadline);
       } catch (error) {
         await this.safeRelease(reservationId);
         const timedOut =
@@ -447,12 +459,24 @@ export class JoyModelGateway {
         clearTimeout(headerTimeout);
       }
       modelId = candidate;
-      if (upstreamRes.ok) {
+      let failure: UpstreamFailure | undefined;
+      if (!upstreamRes.ok) {
+        failure = await readUpstreamFailure(upstreamRes);
+      } else if (streamPeek?.kind === 'error') {
+        failure = { status: upstreamRes.status, ...openRouterErrorFields(streamPeek.payload) };
+      } else if (!isStream) {
+        const parsed = parseJsonObject(await upstreamRes.text().catch(() => ''));
+        const bodyError = parsed === undefined ? undefined : bodyErrorOf(parsed);
+        if (bodyError !== undefined)
+          failure = { status: upstreamRes.status, ...openRouterErrorFields(bodyError) };
+        else upstreamJson = parsed;
+      }
+      if (failure === undefined) {
         logUpstreamAttempt({ ...attempt, modelId, status: upstreamRes.status, outcome: 'ok' });
+        if (streamPeek?.kind === 'ok') streamStart = streamPeek.start;
         verdict = 'ok';
         break;
       }
-      const failure = await readUpstreamFailure(upstreamRes);
       const kind = classifyUpstreamFailure(failure);
       logUpstreamAttempt({ ...attempt, modelId, ...failureLogFields(failure), outcome: kind });
       failures.push(failure);
@@ -511,7 +535,7 @@ export class JoyModelGateway {
       return;
     }
 
-    if (isStream && upstreamRes.body !== null) {
+    if (streamStart !== undefined) {
       res.writeHead(200, {
         'content-type': 'text/event-stream',
         'cache-control': 'no-cache',
@@ -519,8 +543,7 @@ export class JoyModelGateway {
         'x-accel-buffering': 'no',
       });
 
-      const reader = upstreamRes.body.getReader();
-      const decoder = new TextDecoder();
+      const { reader, decoder } = streamStart;
       let promptTokens = 0;
       let completionTokens = 0;
       let rawCostUsd = 0;
@@ -568,6 +591,9 @@ export class JoyModelGateway {
       const keepAlive = setInterval(() => {
         if (!res.destroyed && !res.writableEnded) res.write(': keep-alive\n\n');
       }, 15_000);
+      // Forward what the peek already read, then carry on with the rest of the stream.
+      for (const chunk of streamStart.chunks) res.write(chunk);
+      processLines(streamStart.text);
 
       try {
         while (true) {
@@ -635,18 +661,9 @@ export class JoyModelGateway {
       return;
     }
 
-    // Non-streaming response
-    let jsonResponse: Record<string, unknown>;
-    try {
-      const parsedResponse: unknown = await upstreamRes.json();
-      if (
-        parsedResponse === null ||
-        typeof parsedResponse !== 'object' ||
-        Array.isArray(parsedResponse)
-      )
-        throw new Error('Upstream response was not an object.');
-      jsonResponse = parsedResponse as Record<string, unknown>;
-    } catch {
+    // Non-streaming response (already read and checked for an in-body error by the attempt loop)
+    const jsonResponse = upstreamJson;
+    if (jsonResponse === undefined) {
       await this.safeSettle(reservationId, {
         ownerId: actor.id,
         modelId,
@@ -866,6 +883,81 @@ function unsupportedContentIssue(messages: unknown): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * OpenRouter can answer HTTP 200 and still report a failure in the body: a top-level `error`
+ * object, or an `error` on every choice. Returns it in the `{ error }` shape, or undefined.
+ */
+function bodyErrorOf(payload: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (isPlainObject(payload.error)) return { error: payload.error };
+  const choices = payload.choices;
+  if (
+    Array.isArray(choices) &&
+    choices.length > 0 &&
+    choices.every((choice) => isPlainObject(choice) && isPlainObject(choice.error))
+  )
+    return { error: (choices[0] as { error: Record<string, unknown> }).error };
+  return undefined;
+}
+
+/** The start of an upstream stream, read before the client response is committed. */
+interface StreamStart {
+  readonly reader: ReadableStreamDefaultReader<Uint8Array>;
+  readonly decoder: TextDecoder;
+  /** Raw bytes read so far, forwarded as-is once the stream is accepted. */
+  readonly chunks: readonly Uint8Array[];
+  /** The same bytes, decoded, for usage accounting. */
+  readonly text: string;
+}
+
+type StreamPeek =
+  | { readonly kind: 'ok'; readonly start: StreamStart }
+  | { readonly kind: 'error'; readonly payload: Record<string, unknown> };
+
+/**
+ * Reads the stream up to its first `data:` event (skipping comments such as OpenRouter's
+ * processing notices). An error event there means the model failed before answering, so the
+ * caller can still try the next one. Throws a TimeoutError at the deadline.
+ */
+async function peekStreamStart(
+  body: ReadableStream<Uint8Array>,
+  deadline: number,
+): Promise<StreamPeek> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: Uint8Array[] = [];
+  let text = '';
+  const accept = (): StreamPeek => ({ kind: 'ok', start: { reader, decoder, chunks, text } });
+  try {
+    while (true) {
+      const { done, value } = await readStreamChunk(reader, Math.max(1, deadline - Date.now()));
+      if (done) {
+        text += decoder.decode();
+        return accept();
+      }
+      chunks.push(value);
+      text += decoder.decode(value, { stream: true });
+      const lines = text.split(/\r?\n/);
+      lines.pop();
+      for (const line of lines) {
+        const match = /^data:\s?(.*)$/.exec(line);
+        if (match === null) continue;
+        const payload = parseJsonObject(match[1]!);
+        const bodyError = payload === undefined ? undefined : bodyErrorOf(payload);
+        if (bodyError === undefined) return accept();
+        void reader.cancel().catch(() => {});
+        return { kind: 'error', payload: bodyError };
+      }
+    }
+  } catch (error) {
+    // A stream that breaks after sending something is accepted: the main loop meets the same
+    // error, ends the response cleanly and accounts for what arrived. A timeout still fails.
+    if (chunks.length > 0 && !(error instanceof Error && error.name === 'TimeoutError'))
+      return accept();
+    void reader.cancel().catch(() => {});
+    throw error;
+  }
 }
 
 /**
