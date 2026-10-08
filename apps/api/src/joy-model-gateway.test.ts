@@ -1315,6 +1315,95 @@ describe('JoyModelGateway', () => {
       expect(fetchImpl).toHaveBeenCalledTimes(3);
     });
 
+    it('rebuilds messages and parts from known keys only', async () => {
+      let forwarded: { messages?: unknown } | undefined;
+      const result = createMockRes();
+      await gatewayWith((async (_url: unknown, init?: RequestInit) => {
+        forwarded = JSON.parse(String(init?.body));
+        return ok();
+      }) as unknown as typeof fetch).handleChatCompletions(
+        createMockReq({
+          body: {
+            model: GEMMA,
+            messages: [
+              { role: 'system', content: 'be brief', files: ['x'], cache_control: { t: 1 } },
+              {
+                role: 'user',
+                name: 'milad',
+                content: [
+                  {
+                    type: 'text',
+                    text: 'look',
+                    file: { file_data: 'data:application/pdf;base64,JVBERi0=' },
+                  },
+                  {
+                    type: 'image_url',
+                    image_url: { url: 'https://example.invalid/a.png', detail: 'low', extra: 1 },
+                    plugins: [{ id: 'web' }],
+                  },
+                  { type: 'image_url', image_url: 'data:image/png;base64,AA==' },
+                ],
+              },
+              {
+                role: 'assistant',
+                content: null,
+                reasoning: 'old reasoning',
+                tool_calls: [
+                  {
+                    id: 't1',
+                    type: 'function',
+                    function: { name: 'edit', arguments: '{}', extra: true },
+                    extra: 'drop',
+                  },
+                ],
+              },
+              { role: 'tool', tool_call_id: 't1', content: '{"ok":true}', plugins: ['x'] },
+            ],
+          },
+        }),
+        result.res,
+      );
+      expect(result.getStatus()).toBe(200);
+      expect(forwarded?.messages).toEqual([
+        { role: 'system', content: 'be brief' },
+        {
+          role: 'user',
+          name: 'milad',
+          content: [
+            { type: 'text', text: 'look' },
+            {
+              type: 'image_url',
+              image_url: { url: 'https://example.invalid/a.png', detail: 'low' },
+            },
+            { type: 'image_url', image_url: { url: 'data:image/png;base64,AA==' } },
+          ],
+        },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [{ id: 't1', type: 'function', function: { name: 'edit', arguments: '{}' } }],
+        },
+        { role: 'tool', content: '{"ok":true}', tool_call_id: 't1' },
+      ]);
+    });
+
+    it('refuses a text part whose text is not a string', async () => {
+      const fetchImpl = vi.fn(async () => ok());
+      const result = createMockRes();
+      await gatewayWith(fetchImpl as unknown as typeof fetch).handleChatCompletions(
+        createMockReq({
+          body: {
+            model: SUPER,
+            messages: [{ role: 'user', content: [{ type: 'text', text: { file: 'x' } }] }],
+          },
+        }),
+        result.res,
+      );
+      expect(result.getStatus()).toBe(400);
+      expect(result.getBody()).toContain('UNSUPPORTED_CONTENT_PART');
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
     it('keeps plain text, tool and assistant messages working', async () => {
       const fetchImpl = vi.fn(async () => ok());
       const result = createMockRes();

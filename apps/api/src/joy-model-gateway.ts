@@ -837,7 +837,8 @@ function buildUpstreamBody(
       }
       continue;
     }
-    if (field !== 'stream') body[field] = value;
+    if (field === 'messages') body.messages = rebuildMessages(value);
+    else if (field !== 'stream') body[field] = value;
   }
   body.stream = isStream;
   if (!hasOutputLimit) body.max_tokens = JOY_MODEL_MAX_OUTPUT_TOKENS;
@@ -851,6 +852,54 @@ function buildUpstreamBody(
   // forwarded (they are not in FORWARDED_COMPLETION_FIELDS).
   body.plugins = [{ id: 'file-parser', pdf: { engine: 'cloudflare-ai' } }];
   return body;
+}
+
+/**
+ * Rebuilds each message from the keys a chat completion needs (role, content, name,
+ * tool_calls, tool_call_id) and each part from type, text and image_url { url, detail }, so
+ * extra keys a client adds (a file, a plugin, old reasoning) never reach OpenRouter. Runs after
+ * unsupportedContentIssue, so every part here is text or image_url.
+ */
+function rebuildMessages(messages: unknown): unknown {
+  if (!Array.isArray(messages)) return messages;
+  return messages.map((message) => {
+    if (!isPlainObject(message)) return message;
+    const rebuilt: Record<string, unknown> = {};
+    if (typeof message.role === 'string') rebuilt.role = message.role;
+    if (Object.hasOwn(message, 'content'))
+      rebuilt.content = Array.isArray(message.content)
+        ? message.content.map(rebuildContentPart)
+        : message.content;
+    if (typeof message.name === 'string') rebuilt.name = message.name;
+    if (Array.isArray(message.tool_calls))
+      rebuilt.tool_calls = message.tool_calls.filter(isPlainObject).map(rebuildToolCall);
+    if (typeof message.tool_call_id === 'string') rebuilt.tool_call_id = message.tool_call_id;
+    return rebuilt;
+  });
+}
+
+function rebuildContentPart(part: unknown): unknown {
+  if (!isPlainObject(part)) return part;
+  if (part.type === 'image_url') {
+    const image = part.image_url;
+    const url = typeof image === 'string' ? image : isPlainObject(image) ? image.url : undefined;
+    const detail =
+      isPlainObject(image) && typeof image.detail === 'string' ? image.detail : undefined;
+    return { type: 'image_url', image_url: { url, ...(detail === undefined ? {} : { detail }) } };
+  }
+  return { type: part.type, text: part.text };
+}
+
+function rebuildToolCall(call: Record<string, unknown>): Record<string, unknown> {
+  const fn = isPlainObject(call.function) ? call.function : {};
+  return {
+    ...(typeof call.id === 'string' ? { id: call.id } : {}),
+    type: 'function',
+    function: {
+      ...(typeof fn.name === 'string' ? { name: fn.name } : {}),
+      ...(typeof fn.arguments === 'string' ? { arguments: fn.arguments } : {}),
+    },
+  };
 }
 
 /**
@@ -881,7 +930,11 @@ function unsupportedContentIssue(messages: unknown): string | undefined {
     for (const part of content) {
       const type =
         part !== null && typeof part === 'object' ? (part as { type?: unknown }).type : undefined;
-      if (type === 'text') continue;
+      if (type === 'text') {
+        if (typeof (part as { text?: unknown }).text !== 'string')
+          return 'text parts must carry a string text.';
+        continue;
+      }
       if (type === 'image_url') {
         const imageUrl = (part as { image_url?: unknown }).image_url;
         const url =
