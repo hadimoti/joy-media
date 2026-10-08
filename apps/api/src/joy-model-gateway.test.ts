@@ -650,7 +650,7 @@ describe('JoyModelGateway', () => {
           ...allowedFields,
           models: ['not-in-catalog/model'],
           provider: { order: ['untrusted-provider'] },
-          plugins: [{ id: 'web' }],
+          plugins: [{ id: 'web' }, { id: 'file-parser', pdf: { engine: 'mistral-ocr' } }],
           route: 'fallback',
           transforms: ['middle-out'],
           arbitrary: 'drop-me',
@@ -667,10 +667,186 @@ describe('JoyModelGateway', () => {
     });
     expect(forwardedBody).not.toHaveProperty('models');
     expect(forwardedBody).not.toHaveProperty('provider');
-    expect(forwardedBody).not.toHaveProperty('plugins');
+    // Client plugins are dropped; only the forced free file parser is sent.
+    expect(forwardedBody?.plugins).toEqual([
+      { id: 'file-parser', pdf: { engine: 'cloudflare-ai' } },
+    ]);
     expect(forwardedBody).not.toHaveProperty('route');
     expect(forwardedBody).not.toHaveProperty('transforms');
     expect(forwardedBody).not.toHaveProperty('arbitrary');
+  });
+
+  describe('content parts that could be billed (FC-M1)', () => {
+    const gatewayWith = (fetchImpl: typeof fetch) =>
+      new JoyModelGateway({
+        mediaAuth: { authenticate: async () => ({ id: 'parts' }) } as unknown as MediaAuthService,
+        account: {
+          getSubscription: async () => ({
+            ownerId: 'parts',
+            plan: 'monthly',
+            status: 'active',
+            updatedAt: 0,
+          }),
+        } as unknown as AccountService,
+        ledger: new MemoryAgentUsageLedger(),
+        openRouterApiKey: 'test-key',
+        fetchImpl,
+      });
+    const ok = () => new Response(JSON.stringify({ choices: [], usage: {} }), { status: 200 });
+
+    it.each([
+      [
+        'file',
+        {
+          type: 'file',
+          file: { filename: 'a.pdf', file_data: 'data:application/pdf;base64,JVBERi0=' },
+        },
+      ],
+      ['input_audio', { type: 'input_audio', input_audio: { data: 'AAAA', format: 'wav' } }],
+      ['video_url', { type: 'video_url', video_url: { url: 'https://example.invalid/v.mp4' } }],
+      ['unknown', { type: 'something-new', value: 1 }],
+      ['untyped', { text: 'no type' }],
+    ])('refuses a %s part with 400 and forwards nothing', async (_label, part) => {
+      const fetchImpl = vi.fn(async () => ok());
+      const result = createMockRes();
+      await gatewayWith(fetchImpl as unknown as typeof fetch).handleChatCompletions(
+        createMockReq({
+          body: {
+            model: 'google/gemma-4-31b-it:free',
+            messages: [{ role: 'user', content: [{ type: 'text', text: 'read this' }, part] }],
+          },
+        }),
+        result.res,
+      );
+      expect(result.getStatus()).toBe(400);
+      expect(result.getBody()).toContain('UNSUPPORTED_CONTENT_PART');
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    it('accepts images only for vision models and only as https or data:image URLs', async () => {
+      const fetchImpl = vi.fn(async () => ok());
+      const gateway = gatewayWith(fetchImpl as unknown as typeof fetch);
+      const send = async (model: string, url: string) => {
+        const result = createMockRes();
+        await gateway.handleChatCompletions(
+          createMockReq({
+            body: {
+              model,
+              messages: [
+                {
+                  role: 'user',
+                  content: [
+                    { type: 'text', text: 'look' },
+                    { type: 'image_url', image_url: { url } },
+                  ],
+                },
+              ],
+            },
+          }),
+          result.res,
+        );
+        return result;
+      };
+      expect(
+        (await send('google/gemma-4-31b-it:free', 'data:image/png;base64,AA==')).getStatus(),
+      ).toBe(200);
+      expect(
+        (await send('thinkingmachines/inkling:free', 'https://example.invalid/a.png')).getStatus(),
+      ).toBe(200);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      const textOnly = await send(
+        'nvidia/nemotron-3-super-120b-a12b:free',
+        'data:image/png;base64,AA==',
+      );
+      expect(textOnly.getStatus()).toBe(400);
+      expect(textOnly.getBody()).toContain('does not accept images');
+      const pdfAsImage = await send(
+        'google/gemma-4-31b-it:free',
+        'data:application/pdf;base64,JVBERi0=',
+      );
+      expect(pdfAsImage.getStatus()).toBe(400);
+      expect(pdfAsImage.getBody()).toContain('UNSUPPORTED_CONTENT_PART');
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps plain text, tool and assistant messages working', async () => {
+      const fetchImpl = vi.fn(async () => ok());
+      const result = createMockRes();
+      await gatewayWith(fetchImpl as unknown as typeof fetch).handleChatCompletions(
+        createMockReq({
+          body: {
+            model: 'cohere/north-mini-code:free',
+            messages: [
+              { role: 'system', content: 'be brief' },
+              { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+              {
+                role: 'assistant',
+                content: null,
+                tool_calls: [
+                  { id: 't1', type: 'function', function: { name: 'x', arguments: '{}' } },
+                ],
+              },
+              { role: 'tool', tool_call_id: 't1', content: '{"ok":true}' },
+            ],
+          },
+        }),
+        result.res,
+      );
+      expect(result.getStatus()).toBe(200);
+      expect(fetchImpl).toHaveBeenCalledOnce();
+    });
+
+    it('logs loudly when a free model response reports a cost', async () => {
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      try {
+        const billed = gatewayWith(
+          (async () =>
+            new Response(JSON.stringify({ choices: [], usage: { cost: 0.0123 } }), {
+              status: 200,
+            })) as unknown as typeof fetch,
+        );
+        await billed.handleChatCompletions(
+          createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } }),
+          createMockRes().res,
+        );
+        expect(errors).toHaveBeenCalledWith(
+          'joy-model-gateway: PAID SPEND REPORTED FOR A FREE MODEL',
+          expect.objectContaining({ modelId: 'google/gemma-4-31b-it:free', costUsd: 0.0123 }),
+        );
+        errors.mockClear();
+        const streamed = gatewayWith(
+          (async () =>
+            new Response(
+              'data: {"id":"g","choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1,"cost":0.5}}\n\ndata: [DONE]\n\n',
+              { status: 200, headers: { 'content-type': 'text/event-stream' } },
+            )) as unknown as typeof fetch,
+        );
+        await streamed.handleChatCompletions(
+          createMockReq({
+            body: { model: 'google/gemma-4-31b-it:free', messages: [], stream: true },
+          }),
+          createMockRes().res,
+        );
+        expect(errors).toHaveBeenCalledWith(
+          'joy-model-gateway: PAID SPEND REPORTED FOR A FREE MODEL',
+          expect.objectContaining({ costUsd: 0.5 }),
+        );
+        errors.mockClear();
+        const free = gatewayWith(
+          (async () =>
+            new Response(JSON.stringify({ choices: [], usage: { cost: 0 } }), {
+              status: 200,
+            })) as unknown as typeof fetch,
+        );
+        await free.handleChatCompletions(
+          createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } }),
+          createMockRes().res,
+        );
+        expect(errors).not.toHaveBeenCalled();
+      } finally {
+        errors.mockRestore();
+      }
+    });
   });
 
   it('rejects non-function tool types before forwarding a chat completion', async () => {

@@ -250,6 +250,18 @@ export class JoyModelGateway {
       return;
     }
 
+    // Only text (and, for vision models, images) may reach OpenRouter: a `file` part would be
+    // parsed upstream and can be billed (e.g. mistral-ocr for PDFs) even on a free model.
+    const servedModel = catalog.find((m) => m.id === modelId)!;
+    const contentIssue = unsupportedContentIssue(parsedBody.messages, servedModel);
+    if (contentIssue !== undefined) {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({ error: { code: 'UNSUPPORTED_CONTENT_PART', message: contentIssue } }),
+      );
+      return;
+    }
+
     const dailyCapMicros = BigInt(
       Math.round(positiveEnvNumber('JOY_GATEWAY_DAILY_SPEND_CAP_USD', 5) * 1_000_000),
     );
@@ -507,6 +519,7 @@ export class JoyModelGateway {
         });
       }
 
+      if (usageReported) warnIfFreeModelBilled(modelId, rawCostUsd, actor.id);
       // Record in ledger
       const estimated = !usageReported || rawCostUsd === 0;
       if (!usageReported) {
@@ -577,6 +590,7 @@ export class JoyModelGateway {
         ? Number(usage.cost ?? usage.total_cost ?? 0)
         : estimateCostUsd(modelId, promptTokens, completionTokens);
 
+    if (costReported) warnIfFreeModelBilled(modelId, rawCostUsd, actor.id);
     const upstreamMicros = BigInt(Math.round(rawCostUsd * 1_000_000));
     const billedMicros = (upstreamMicros * BigInt(10000 + this.commissionRateBps)) / 10000n;
     let recordId: string | undefined;
@@ -657,6 +671,7 @@ export class JoyModelGateway {
         const completionTokens = Number(data.tokens_completion ?? data.completion_tokens);
         const cost = Number(data.total_cost ?? data.cost);
         if (![promptTokens, completionTokens, cost].every(Number.isFinite) || cost < 0) continue;
+        warnIfFreeModelBilled(String(data.model ?? 'unknown'), cost, undefined);
         const upstreamCostMicros = BigInt(Math.round(cost * 1_000_000));
         const billedCostMicros =
           (upstreamCostMicros * BigInt(10000 + this.commissionRateBps)) / 10000n;
@@ -711,7 +726,62 @@ function buildUpstreamBody(
   if (!hasOutputLimit) body.max_tokens = JOY_MODEL_MAX_OUTPUT_TOKENS;
   // Request OpenRouter's usage metadata internally; clients cannot override this.
   body.usage = { include: true };
+  // Pin OpenRouter's file parser to its free engine so no paid one (mistral-ocr) can ever be
+  // chosen. File parts are refused above; this is the second lock. Client plugins are never
+  // forwarded (they are not in FORWARDED_COMPLETION_FIELDS).
+  body.plugins = [{ id: 'file-parser', pdf: { engine: 'cloudflare-ai' } }];
   return body;
+}
+
+/**
+ * Every catalog model is free, so OpenRouter reporting a cost means something upstream billed
+ * us anyway (a plugin, a re-routed model). Log it loudly so it is noticed and the key capped.
+ */
+function warnIfFreeModelBilled(modelId: string, costUsd: number, ownerId: string | undefined) {
+  if (!(costUsd > 0)) return;
+  console.error('joy-model-gateway: PAID SPEND REPORTED FOR A FREE MODEL', {
+    code: 'JOY_FREE_MODEL_BILLED',
+    modelId,
+    costUsd,
+    ...(ownerId === undefined ? {} : { ownerId }),
+  });
+}
+
+/** Content part types the gateway forwards; anything else (file, input_audio, video_url) is refused. */
+function unsupportedContentIssue(
+  messages: unknown,
+  model: JoyModelCatalogEntry,
+): string | undefined {
+  if (messages === undefined) return undefined;
+  if (!Array.isArray(messages)) return 'messages must be an array.';
+  for (const [index, message] of messages.entries()) {
+    if (message === null || typeof message !== 'object' || Array.isArray(message))
+      return `Message ${index + 1} is not an object.`;
+    const content = (message as { content?: unknown }).content;
+    if (content === undefined || content === null || typeof content === 'string') continue;
+    if (!Array.isArray(content))
+      return `Message ${index + 1} content must be a string or an array of parts.`;
+    for (const part of content) {
+      const type =
+        part !== null && typeof part === 'object' ? (part as { type?: unknown }).type : undefined;
+      if (type === 'text') continue;
+      if (type === 'image_url') {
+        if (!model.vision) return `Model '${model.id}' does not accept images.`;
+        const imageUrl = (part as { image_url?: unknown }).image_url;
+        const url =
+          typeof imageUrl === 'string'
+            ? imageUrl
+            : imageUrl !== null && typeof imageUrl === 'object'
+              ? (imageUrl as { url?: unknown }).url
+              : undefined;
+        if (typeof url !== 'string' || !/^(?:https:\/\/|data:image\/)/i.test(url))
+          return 'image_url parts must carry an https: or data:image/ URL.';
+        continue;
+      }
+      return `Content part type ${typeof type === 'string' ? `'${type.slice(0, 40)}'` : '(missing)'} is not supported; send text${model.vision ? ' or image_url' : ''} parts only.`;
+    }
+  }
+  return undefined;
 }
 
 function positiveEnvInteger(name: string, fallback: number): number {
