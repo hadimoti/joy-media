@@ -1062,7 +1062,10 @@ async function peekStreamStart(
       const { done, value } = await readStreamChunk(reader, Math.max(1, deadline - Date.now()));
       if (done) {
         text += decoder.decode();
-        return accept();
+        // No event at all: the body may be a plain JSON error instead of a stream.
+        const whole = parseJsonObject(text.trim());
+        const bodyError = whole === undefined ? undefined : bodyErrorOf(whole);
+        return bodyError === undefined ? accept() : { kind: 'error', payload: bodyError };
       }
       received = true;
       text += decoder.decode(value, { stream: true });

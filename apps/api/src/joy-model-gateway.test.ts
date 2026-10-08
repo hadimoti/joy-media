@@ -496,6 +496,8 @@ describe('JoyModelGateway', () => {
               sse(
                 ': OPENROUTER PROCESSING\n\ndata: {"id":"g1","error":{"code":502,"message":"ResourceExhausted 16/16"},"choices":[{"index":0,"delta":{"content":""},"finish_reason":"error"}]}\n\n',
               ),
+              // A stream request answered with a plain JSON error body and no events.
+              errorIn200,
               sse(
                 ': OPENROUTER PROCESSING\n\ndata: {"id":"g2","choices":[{"delta":{"content":"hello"}}]}\n\ndata: {"id":"g2","choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"cost":0}}\n\ndata: [DONE]\n\n',
               ),
@@ -504,7 +506,7 @@ describe('JoyModelGateway', () => {
           ),
           { stream: true },
         );
-        expect(tried).toEqual([SUPER, ULTRA]);
+        expect(tried).toEqual([SUPER, ULTRA, NORTH]);
         expect(result.getStatus()).toBe(200);
         expect(result.getHeaders()['content-type']).toBe('text/event-stream');
         expect(result.getBody()).toContain('"content":"hello"');
