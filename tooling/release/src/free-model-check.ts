@@ -59,6 +59,11 @@ export function checkFreeModels(
       ? upstream.supported_parameters
       : [];
     if (!parameters.includes('tools')) problems.push(`${model.id}: no tool-calling support.`);
+    // The gateway sends `reasoning: { exclude: true }` to reasoning models (FC3).
+    if (model.reasoning === true && !parameters.includes('reasoning'))
+      problems.push(
+        `${model.id}: catalog says reasoning but OpenRouter lists no reasoning parameter.`,
+      );
     const modalities = Array.isArray(upstream.architecture?.input_modalities)
       ? upstream.architecture.input_modalities
       : [];

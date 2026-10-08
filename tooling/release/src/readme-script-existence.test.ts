@@ -31,7 +31,9 @@ describe('README examples', () => {
     expect(readme).toContain('requires a signed-in JOY account with an active Pro subscription');
     expect(readme).not.toContain('`openrouter/free`');
     expect(readme).toContain('server-enforced allow-list of five zero-cost OpenRouter models');
-    expect(readme).toContain('`google/gemma-4-31b-it:free` (the default, with vision)');
+    expect(readme).toContain('`nvidia/nemotron-3-super-120b-a12b:free` (the default, text)');
+    expect(readme).toContain('`nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` (vision)');
+    expect(readme).not.toContain('inkling');
     expect(readme).toContain('never one outside it');
     expect(readme).toContain('Paid models cannot be enabled');
     expect(lowerReadme).not.toContain('paid catalog models are disabled by default');

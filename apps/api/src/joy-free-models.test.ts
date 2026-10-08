@@ -54,4 +54,33 @@ describe('assertFreeCatalog', () => {
     ).toThrow(/a\/one:free is listed twice/);
     expect(() => assertFreeCatalog([])).toThrow(/no models/);
   });
+
+  it('rejects a catalog with no vision model, since image requests need one', () => {
+    expect(() => assertFreeCatalog([entry('a/one:free', { isDefault: true })])).toThrow(
+      /at least one vision model/,
+    );
+  });
+});
+
+describe('JOY_AGENT_FREE_MODELS (FC3)', () => {
+  it('makes nemotron-3-super the text default and sends images to gemma, then nano-omni', () => {
+    expect(
+      JOY_AGENT_FREE_MODELS.map((model) => [
+        model.id,
+        model.isDefault === true,
+        model.vision,
+        model.reasoning === true,
+      ]),
+    ).toEqual([
+      ['nvidia/nemotron-3-super-120b-a12b:free', true, false, false],
+      ['nvidia/nemotron-3-ultra-550b-a55b:free', false, false, false],
+      ['cohere/north-mini-code:free', false, false, false],
+      ['google/gemma-4-31b-it:free', false, true, false],
+      ['nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', false, true, true],
+    ]);
+  });
+
+  it('no longer lists inkling, which OpenRouter gates to agentic harnesses', () => {
+    expect(JOY_AGENT_FREE_MODELS.some((model) => model.id.includes('inkling'))).toBe(false);
+  });
 });

@@ -40,11 +40,11 @@ export function normalizeIpLiteral(value) {
 
 /** The production free catalog, default first, with vision flags (apps/api/src/joy-free-models.ts). */
 export const JOY_FREE_MODELS_EXPECTED = Object.freeze([
-  Object.freeze({ id: 'google/gemma-4-31b-it:free', vision: true }),
-  Object.freeze({ id: 'thinkingmachines/inkling:free', vision: true }),
-  Object.freeze({ id: 'nvidia/nemotron-3-ultra-550b-a55b:free', vision: false }),
   Object.freeze({ id: 'nvidia/nemotron-3-super-120b-a12b:free', vision: false }),
+  Object.freeze({ id: 'nvidia/nemotron-3-ultra-550b-a55b:free', vision: false }),
   Object.freeze({ id: 'cohere/north-mini-code:free', vision: false }),
+  Object.freeze({ id: 'google/gemma-4-31b-it:free', vision: true }),
+  Object.freeze({ id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', vision: true }),
 ]);
 export const JOY_FREE_MODEL_IDS = Object.freeze(JOY_FREE_MODELS_EXPECTED.map((model) => model.id));
 

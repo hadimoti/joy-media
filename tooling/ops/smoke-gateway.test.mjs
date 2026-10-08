@@ -69,6 +69,11 @@ describe('gateway smoke helpers', () => {
     }));
     assert.equal(modelsCatalogIssue({ models: free }), undefined);
     assert.equal(JOY_FREE_MODEL_IDS.length, 5);
+    assert.equal(JOY_FREE_MODEL_IDS[0], 'nvidia/nemotron-3-super-120b-a12b:free');
+    assert.equal(
+      JOY_FREE_MODEL_IDS.some((id) => id.includes('inkling')),
+      false,
+    );
     for (const id of JOY_FREE_MODEL_IDS) assert.match(id, /:free$/);
     assert.match(
       modelsCatalogIssue({ models: [{ id: 'openrouter/free', isDefault: true }] }),
@@ -85,9 +90,9 @@ describe('gateway smoke helpers', () => {
     );
     assert.match(
       modelsCatalogIssue({
-        models: free.map((model, index) => (index === 1 ? { ...model, vision: false } : model)),
+        models: free.map((model, index) => (index === 4 ? { ...model, vision: false } : model)),
       }),
-      /wrong vision flags: thinkingmachines\/inkling:free \(expected vision=true\)/,
+      /wrong vision flags: nvidia\/nemotron-3-nano-omni-30b-a3b-reasoning:free \(expected vision=true\)/,
     );
     assert.match(
       modelsCatalogIssue({ models: free.map(({ vision: _vision, ...model }) => model) }),

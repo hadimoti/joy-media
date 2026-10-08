@@ -1,10 +1,12 @@
 /**
- * The hosted JOY Agent's zero-cost model allow-list (Round FC, approved 8 Oct 2026).
+ * The hosted JOY Agent's zero-cost model allow-list (Round FC, revised in FC3 on 8 Oct 2026).
  *
- * The gateway serves and forwards only these ids (plus paid ids explicitly listed in
- * JOY_GATEWAY_PAID_MODEL_ALLOWLIST, which stays unset in production). Every id is an
- * OpenRouter ":free" variant with tool calling; the first entry is the default. On an
- * upstream 429/5xx the gateway falls back through this list in order, never outside it.
+ * The gateway serves and forwards only these ids; paid models cannot be enabled. Every id is an
+ * OpenRouter ":free" variant with tool calling, and exactly one entry is the default.
+ * - Text requests try the requested model, then the rest of this list in order.
+ * - Requests with images go only to the vision entries (gemma-4-31b first, then nano-omni).
+ * An attempt that is busy, gated or failing upstream falls back to the next candidate, never to
+ * a model outside this list (see joy-model-gateway.ts for which upstream answers count).
  *
  * This file has no imports so `tooling/release/src/free-model-check.ts` can load it with
  * Node's type stripping and compare it with OpenRouter's public /models list.
@@ -17,27 +19,20 @@ export interface JoyModelCatalogEntry {
   readonly contextLength: number;
   readonly vision: boolean;
   readonly isDefault?: boolean;
+  /** A reasoning model: the gateway asks OpenRouter to leave its reasoning out of replies. */
+  readonly reasoning?: boolean;
   readonly inputUsdPerMillion: number;
   readonly outputUsdPerMillion: number;
 }
 
 export const JOY_AGENT_FREE_MODELS: readonly JoyModelCatalogEntry[] = Object.freeze([
   Object.freeze({
-    id: 'google/gemma-4-31b-it:free',
-    displayName: 'Gemma 4 31B (free)',
-    description: 'Default. Vision and tool calling at zero cost.',
+    id: 'nvidia/nemotron-3-super-120b-a12b:free',
+    displayName: 'Nemotron 3 Super (free)',
+    description: 'Default. Text and tool calling at zero cost.',
     contextLength: 262144,
-    vision: true,
+    vision: false,
     isDefault: true,
-    inputUsdPerMillion: 0,
-    outputUsdPerMillion: 0,
-  }),
-  Object.freeze({
-    id: 'thinkingmachines/inkling:free',
-    displayName: 'Inkling (free)',
-    description: 'Vision and tool calling at zero cost.',
-    contextLength: 1048576,
-    vision: true,
     inputUsdPerMillion: 0,
     outputUsdPerMillion: 0,
   }),
@@ -51,15 +46,6 @@ export const JOY_AGENT_FREE_MODELS: readonly JoyModelCatalogEntry[] = Object.fre
     outputUsdPerMillion: 0,
   }),
   Object.freeze({
-    id: 'nvidia/nemotron-3-super-120b-a12b:free',
-    displayName: 'Nemotron 3 Super (free)',
-    description: 'Text model with tool calling at zero cost.',
-    contextLength: 262144,
-    vision: false,
-    inputUsdPerMillion: 0,
-    outputUsdPerMillion: 0,
-  }),
-  Object.freeze({
     id: 'cohere/north-mini-code:free',
     displayName: 'North Mini Code (free)',
     description: 'Compact text and code model with tool calling at zero cost.',
@@ -68,11 +54,31 @@ export const JOY_AGENT_FREE_MODELS: readonly JoyModelCatalogEntry[] = Object.fre
     inputUsdPerMillion: 0,
     outputUsdPerMillion: 0,
   }),
+  Object.freeze({
+    id: 'google/gemma-4-31b-it:free',
+    displayName: 'Gemma 4 31B (free)',
+    description: 'Vision and tool calling at zero cost. Requests with images try it first.',
+    contextLength: 262144,
+    vision: true,
+    inputUsdPerMillion: 0,
+    outputUsdPerMillion: 0,
+  }),
+  Object.freeze({
+    id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+    displayName: 'Nemotron 3 Nano Omni (free)',
+    description:
+      'Best-effort vision fallback with tool calling at zero cost. A reasoning model; its reasoning is not returned.',
+    contextLength: 256000,
+    vision: true,
+    reasoning: true,
+    inputUsdPerMillion: 0,
+    outputUsdPerMillion: 0,
+  }),
 ]);
 
 /**
- * Throws unless every entry is an OpenRouter ":free" id with zero prices, ids are unique and
- * exactly one entry is the default. Run at module load, so a bad edit stops the API at startup
+ * Throws unless every entry is an OpenRouter ":free" id with zero prices, ids are unique,
+ * exactly one entry is the default and at least one accepts images. Run at module load, so a bad edit stops the API at startup
  * instead of forwarding a priced model as "free".
  */
 export function assertFreeCatalog(catalog: readonly JoyModelCatalogEntry[]): void {
@@ -89,6 +95,8 @@ export function assertFreeCatalog(catalog: readonly JoyModelCatalogEntry[]): voi
   const defaults = catalog.filter((model) => model.isDefault === true).length;
   if (defaults !== 1)
     throw new Error(`joy free catalog: needs exactly one default model, found ${defaults}`);
+  if (!catalog.some((model) => model.vision))
+    throw new Error('joy free catalog: needs at least one vision model for image requests');
 }
 
 assertFreeCatalog(JOY_AGENT_FREE_MODELS);

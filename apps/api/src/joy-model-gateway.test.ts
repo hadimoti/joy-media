@@ -68,6 +68,12 @@ function createMockRes(): {
   };
 }
 
+const SUPER = 'nvidia/nemotron-3-super-120b-a12b:free';
+const ULTRA = 'nvidia/nemotron-3-ultra-550b-a55b:free';
+const NORTH = 'cohere/north-mini-code:free';
+const GEMMA = 'google/gemma-4-31b-it:free';
+const OMNI = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
+
 describe('JoyModelGateway', () => {
   afterEach(() => vi.unstubAllEnvs());
 
@@ -88,11 +94,11 @@ describe('JoyModelGateway', () => {
       outputUsdPerMillion: number;
     }>;
     expect(models.map((model) => [model.id, model.vision, model.isDefault === true])).toEqual([
-      ['google/gemma-4-31b-it:free', true, true],
-      ['thinkingmachines/inkling:free', true, false],
+      ['nvidia/nemotron-3-super-120b-a12b:free', false, true],
       ['nvidia/nemotron-3-ultra-550b-a55b:free', false, false],
-      ['nvidia/nemotron-3-super-120b-a12b:free', false, false],
       ['cohere/north-mini-code:free', false, false],
+      ['google/gemma-4-31b-it:free', true, false],
+      ['nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', true, false],
     ]);
     expect(JOY_AGENT_FREE_MODELS).toHaveLength(5);
     expect(models.some((model) => model.id === 'openrouter/free')).toBe(false);
@@ -110,25 +116,17 @@ describe('JoyModelGateway', () => {
 
   it('maps every legacy id to the free default', () => {
     expect(LEGACY_MODEL_ALIASES).toEqual({
-      'openrouter/free': 'google/gemma-4-31b-it:free',
-      'minimax/minimax-m3': 'google/gemma-4-31b-it:free',
-      'anthropic/claude-3.5-sonnet': 'google/gemma-4-31b-it:free',
-      'meta-llama/llama-3.3-70b-instruct': 'google/gemma-4-31b-it:free',
+      'openrouter/free': 'nvidia/nemotron-3-super-120b-a12b:free',
+      'minimax/minimax-m3': 'nvidia/nemotron-3-super-120b-a12b:free',
+      'anthropic/claude-3.5-sonnet': 'nvidia/nemotron-3-super-120b-a12b:free',
+      'meta-llama/llama-3.3-70b-instruct': 'nvidia/nemotron-3-super-120b-a12b:free',
     });
   });
 
   it('falls back only within the free list, in catalog order, and never for paid models', () => {
-    expect(joyModelFallbackOrder('thinkingmachines/inkling:free')).toEqual([
-      'thinkingmachines/inkling:free',
-      'google/gemma-4-31b-it:free',
-      'nvidia/nemotron-3-ultra-550b-a55b:free',
-      'nvidia/nemotron-3-super-120b-a12b:free',
-      'cohere/north-mini-code:free',
-    ]);
+    expect(joyModelFallbackOrder(OMNI)).toEqual([OMNI, SUPER, ULTRA, NORTH, GEMMA]);
     expect(joyModelFallbackOrder('anthropic/claude-sonnet-4.6')).toEqual([]);
-    expect(joyModelFallbackOrder('thinkingmachines/inkling:free', { requireVision: true })).toEqual(
-      ['thinkingmachines/inkling:free', 'google/gemma-4-31b-it:free'],
-    );
+    expect(joyModelFallbackOrder(OMNI, { requireVision: true })).toEqual([OMNI, GEMMA]);
   });
 
   it('refuses paid model IDs by default and redirects a legacy alias to the free default', async () => {
@@ -165,7 +163,7 @@ describe('JoyModelGateway', () => {
       aliased.res,
     );
     expect(aliased.getStatus()).toBe(200);
-    expect(sentModel).toBe('google/gemma-4-31b-it:free');
+    expect(sentModel).toBe(SUPER);
     for (const model of ['openrouter/free', 'anthropic/claude-3.5-sonnet']) {
       sentModel = undefined;
       const legacy = createMockRes();
@@ -174,7 +172,7 @@ describe('JoyModelGateway', () => {
         legacy.res,
       );
       expect(legacy.getStatus()).toBe(200);
-      expect(sentModel).toBe('google/gemma-4-31b-it:free');
+      expect(sentModel).toBe(SUPER);
     }
     for (const model of [
       'openrouter/auto',
@@ -230,14 +228,8 @@ describe('JoyModelGateway', () => {
         result.res,
       );
       expect(result.getStatus()).toBe(200);
-      expect(tried).toEqual([
-        'google/gemma-4-31b-it:free',
-        'thinkingmachines/inkling:free',
-        'nvidia/nemotron-3-ultra-550b-a55b:free',
-      ]);
-      expect(settle.mock.calls[0]?.[1]).toMatchObject({
-        modelId: 'nvidia/nemotron-3-ultra-550b-a55b:free',
-      });
+      expect(tried).toEqual([SUPER, ULTRA, NORTH]);
+      expect(settle.mock.calls[0]?.[1]).toMatchObject({ modelId: NORTH });
     });
 
     it('stops after the whole list and never tries a model outside it', async () => {
@@ -253,13 +245,7 @@ describe('JoyModelGateway', () => {
         createMockReq({ body: { model: 'cohere/north-mini-code:free', messages: [] } }),
         result.res,
       );
-      expect(tried).toEqual([
-        'cohere/north-mini-code:free',
-        'google/gemma-4-31b-it:free',
-        'thinkingmachines/inkling:free',
-        'nvidia/nemotron-3-ultra-550b-a55b:free',
-        'nvidia/nemotron-3-super-120b-a12b:free',
-      ]);
+      expect(tried).toEqual([NORTH, SUPER, ULTRA, GEMMA, OMNI]);
       expect(tried.every((id) => JOY_AGENT_FREE_MODELS.some((model) => model.id === id))).toBe(
         true,
       );
@@ -281,7 +267,7 @@ describe('JoyModelGateway', () => {
         createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } }),
         result.res,
       );
-      expect(tried).toEqual(['google/gemma-4-31b-it:free', 'thinkingmachines/inkling:free']);
+      expect(tried).toEqual([GEMMA, SUPER]);
       expect(result.getStatus()).toBe(200);
 
       const allGone: string[] = [];
@@ -342,7 +328,7 @@ describe('JoyModelGateway', () => {
         }),
         result.res,
       );
-      expect(tried).toEqual(['google/gemma-4-31b-it:free', 'thinkingmachines/inkling:free']);
+      expect(tried).toEqual([GEMMA, OMNI]);
       expect(result.getStatus()).toBe(502);
     });
 
@@ -437,7 +423,7 @@ describe('JoyModelGateway', () => {
       );
       expect(result.getStatus()).toBe(200);
       expect(result.getBody()).toContain('"content":"hi"');
-      expect(tried).toEqual(['google/gemma-4-31b-it:free', 'thinkingmachines/inkling:free']);
+      expect(tried).toEqual([GEMMA, SUPER]);
     });
   });
 
@@ -526,7 +512,7 @@ describe('JoyModelGateway', () => {
     expect(getStatus()).toBe(200);
     const data = JSON.parse(getBody());
     expect(data.models).toHaveLength(JOY_AGENT_FREE_MODELS.length);
-    expect(data.models[0]).toMatchObject({ id: 'google/gemma-4-31b-it:free', isDefault: true });
+    expect(data.models[0]).toMatchObject({ id: SUPER, isDefault: true });
     expect(data.models.filter((model: { isDefault?: boolean }) => model.isDefault)).toHaveLength(1);
     expect(data.models.some((model: { id: string }) => model.id.includes('minimax'))).toBe(false);
     expect(data.models.some((model: { id: string }) => model.id.includes('claude-3.5'))).toBe(
@@ -816,9 +802,7 @@ describe('JoyModelGateway', () => {
       expect(
         (await send('google/gemma-4-31b-it:free', 'data:image/png;base64,AA==')).getStatus(),
       ).toBe(200);
-      expect(
-        (await send('thinkingmachines/inkling:free', 'https://example.invalid/a.png')).getStatus(),
-      ).toBe(200);
+      expect((await send(OMNI, 'https://example.invalid/a.png')).getStatus()).toBe(200);
       expect(fetchImpl).toHaveBeenCalledTimes(2);
       const textOnly = await send(
         'nvidia/nemotron-3-super-120b-a12b:free',
@@ -1345,7 +1329,7 @@ describe('JoyModelGateway', () => {
       createMockReq({ body: { model: 'minimax/minimax-m3', messages: [] } }),
       res,
     );
-    expect(forwardedModel).toBe('google/gemma-4-31b-it:free');
+    expect(forwardedModel).toBe(SUPER);
   });
 
   it('aliases the removed llama 3.3 model to the free default, not a paid model', async () => {
@@ -1371,7 +1355,7 @@ describe('JoyModelGateway', () => {
       createMockReq({ body: { model: 'meta-llama/llama-3.3-70b-instruct', messages: [] } }),
       createMockRes().res,
     );
-    expect(forwardedModel).toBe('google/gemma-4-31b-it:free');
+    expect(forwardedModel).toBe(SUPER);
   });
 
   it('maps upstream authentication failures without forwarding their body or status', async () => {

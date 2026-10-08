@@ -14,15 +14,21 @@ function fixture() {
     id,
     pricing: { prompt: '0', completion: '0', request: '0', image: '0' },
     architecture: { input_modalities: modalities },
-    supported_parameters: ['tools', 'tool_choice', 'max_tokens'],
+    supported_parameters: ['tools', 'tool_choice', 'max_tokens', 'reasoning'],
   });
   return {
     data: [
-      upstream('google/gemma-4-31b-it:free', ['image', 'text', 'video']),
-      upstream('thinkingmachines/inkling:free', ['text', 'image', 'audio']),
-      upstream('nvidia/nemotron-3-ultra-550b-a55b:free', ['text']),
       upstream('nvidia/nemotron-3-super-120b-a12b:free', ['text']),
+      upstream('nvidia/nemotron-3-ultra-550b-a55b:free', ['text']),
       upstream('cohere/north-mini-code:free', ['text']),
+      upstream('google/gemma-4-31b-it:free', ['image', 'text', 'video']),
+      upstream('nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', [
+        'text',
+        'audio',
+        'image',
+        'video',
+      ]),
+      upstream('thinkingmachines/inkling:free', ['text', 'image', 'audio']),
       upstream('openrouter/free', ['text']),
     ],
   };
@@ -43,27 +49,35 @@ describe('free-model release check', () => {
 
   it('fails on any non-zero price', () => {
     const body = fixture();
-    body.data[2]!.pricing = { prompt: '0.0000002', completion: '0', request: '0', image: '0' };
-    body.data[3]!.pricing = { prompt: '0', completion: '0', request: '-1', image: '0' };
+    body.data[1]!.pricing = { prompt: '0.0000002', completion: '0', request: '0', image: '0' };
+    body.data[0]!.pricing = { prompt: '0', completion: '0', request: '-1', image: '0' };
     const problems = checkFreeModels(body);
     expect(problems).toHaveLength(2);
-    expect(problems[0]).toMatch(/nemotron-3-ultra.*non-zero pricing \(prompt=0\.0000002\)/);
-    expect(problems[1]).toMatch(/nemotron-3-super.*non-zero pricing \(request=-1\)/);
+    expect(problems[0]).toMatch(/nemotron-3-super.*non-zero pricing \(request=-1\)/);
+    expect(problems[1]).toMatch(/nemotron-3-ultra.*non-zero pricing \(prompt=0\.0000002\)/);
   });
 
   it('fails on a vision mismatch or missing tool support', () => {
     const body = fixture();
-    body.data[1]!.architecture = { input_modalities: ['text'] };
-    body.data[4]!.supported_parameters = ['max_tokens'];
+    body.data[4]!.architecture = { input_modalities: ['text'] };
+    body.data[2]!.supported_parameters = ['max_tokens'];
     expect(checkFreeModels(body)).toEqual([
-      'thinkingmachines/inkling:free: catalog vision=true but OpenRouter image input=false.',
       'cohere/north-mini-code:free: no tool-calling support.',
+      'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free: catalog vision=true but OpenRouter image input=false.',
+    ]);
+  });
+
+  it('fails when a reasoning model no longer takes the reasoning parameter', () => {
+    const body = fixture();
+    body.data[4]!.supported_parameters = ['tools', 'max_tokens'];
+    expect(checkFreeModels(body)).toEqual([
+      'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free: catalog says reasoning but OpenRouter lists no reasoning parameter.',
     ]);
   });
 
   it('rejects a malformed response and a non-:free catalog id', () => {
     expect(checkFreeModels({})).toEqual(['OpenRouter /models response has no data array.']);
-    const priced = [{ ...JOY_AGENT_FREE_MODELS[0]!, id: 'google/gemma-4-31b-it' }];
+    const priced = [{ ...JOY_AGENT_FREE_MODELS[0]!, id: 'nvidia/nemotron-3-super-120b-a12b' }];
     expect(checkFreeModels(fixture(), priced)[0]).toMatch(/does not end in ':free'/);
   });
 
@@ -79,6 +93,7 @@ describe('free-model release check', () => {
     expect(DEFAULT_JOY_HOSTED_MODEL).toBe(
       JOY_AGENT_FREE_MODELS.find((model) => model.isDefault)?.id,
     );
+    expect(DEFAULT_JOY_HOSTED_MODEL).toBe('nvidia/nemotron-3-super-120b-a12b:free');
   });
 
   it('keeps the deploy smoke check in step with the gateway catalog', () => {
