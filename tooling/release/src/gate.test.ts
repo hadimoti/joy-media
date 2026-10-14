@@ -1143,7 +1143,17 @@ describe('JOY Studio 1.0 release gate', () => {
 
     const fixtureHandlers = findProductionFixtureRegistrations(root);
     expect(fixtureHandlers).toEqual([]);
-    expect(evaluateReleaseGate({ ...passingInput(), fixtureHandlers }).passed).toBe(true);
+    // This test evaluates at the real clock. passingInput() carries a fixed audit date that
+    // ages out of the 45-day freshness window, so pin the audit to today here instead of
+    // letting the test turn red as the calendar moves.
+    const input = passingInput();
+    expect(
+      evaluateReleaseGate({
+        ...input,
+        fixtureHandlers,
+        featureStatus: { ...input.featureStatus, auditedOn: new Date().toISOString().slice(0, 10) },
+      }).passed,
+    ).toBe(true);
   });
 
   it('requires every build plus the manifest and SBOM', () => {
