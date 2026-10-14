@@ -1,5 +1,6 @@
 dist/
 node_modules/
+.claude/worktrees/
 coverage/
 pnpm-lock.yaml
 # Local agent/tooling workspaces and generated evidence.

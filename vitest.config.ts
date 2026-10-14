@@ -64,6 +64,11 @@ export default defineConfig({
     },
   },
   test: {
+    // The full suite runs process-level CLI tests alongside CPU-heavy render
+    // acceptance tests. Keep finite hang protection without turning load spikes
+    // into false product failures; behavior tests use their own explicit limits.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     include: [
       '{apps,packages,tooling}/**/src/**/*.test.{ts,tsx}',
       'tests/e2e/helpers/browser-console-audit.unit.ts',
