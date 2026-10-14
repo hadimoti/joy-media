@@ -4,6 +4,19 @@ Written 2026-10-14 by the Claude orchestrator session that is stopping because t
 
 > **Hard rule for the next session: do not spawn Claude sub-agents or run Claude-model workers.** The owner's Claude Pro quota was at 85% (session) / 89% (week, resets Saturday 11:30 PM) when this was written. The previous session spent it on four Claude agents when the owner had asked for the external CLIs. That was the orchestrator's mistake; do not repeat it.
 
+## 0. Execution environment (read first)
+
+The next orchestrator runs **locally on the owner's Windows PC (PowerShell)**, not in a cloud container. Four agent CLIs are already installed and **logged in there — do not ask for or handle API keys**:
+
+| CLI                           | Model seen in the owner's terminal (2026-10-14)              | Notes                           |
+| ----------------------------- | ------------------------------------------------------------ | ------------------------------- |
+| Codex `v0.162.1`              | GPT-6-Luna (high)                                            | orchestrator; runs in YOLO mode |
+| Kilo CLI                      | BytePlus Coding Plan: DeepSeek-V4-Flash via the Kilo Gateway | cheap volume worker             |
+| AGY (Antigravity CLI `1.3.5`) | Gemini 3.8 Flash (High), Google AI Pro                       | long-context reviewer           |
+| Grok Build `1.0.52`           | Grok 4.7 (xhigh), **weekly limit: 9% left**                  | use only for small jobs         |
+
+Check each CLI's `--help` for its non-interactive/exec mode (Codex has `codex exec` — verify) before dispatching. Windows notes: in PowerShell use `$env:CI='true'; pnpm install --frozen-lockfile` (not `CI=true pnpm ...`); apply patches with `git apply --ignore-whitespace` (the repo has `.gitattributes`, CRLF can break strict apply); tests that assert POSIX file modes (0600/0700) must use `it.skipIf(process.platform === 'win32')` and a Windows-appropriate check instead; use `path.join`, never hard-coded `/`. JOY Media is **Windows-first**, so real-binary tests passing on Windows are worth more than on Linux. Everything in this file that says "Linux" or "previous container" describes the Claude session's cloud sandbox, not your machine.
+
 ## 1. Goal (the owner's words, condensed)
 
 - Make **joy-media fully tested with no bugs**, using **humanized tests** (scenarios the way a person or an AI agent really uses it, not function-level mocks).
@@ -60,7 +73,7 @@ Applied all four patches to `cac4c5c` in a scratch worktree, then:
 
 ### 5a. Per-file results
 
-**Root cause of the mass failures in the first combined run:** the single TS error above sits in a test file under `src/`, so `tsc -b` fails, the harness's auto-build fails, and every real-binary test fails or retries the build until timeout. The one-line fix is in `project-robustness.e2e.test.ts` line 169: replace `for (const r of [...readers, ...showers]) singleJson(r);` with `for (const r of all.slice(writers.length)) singleJson(r);`. **The patch files in this folder do NOT include that fix** — apply it by hand. Also harden the harness: it should fail fast with the build error and cache the failure instead of rebuilding on every `sb.run`.
+**Root cause of the mass failures in the first combined run:** the single TS error above sits in a test file under `src/`, so `tsc -b` fails, the harness's auto-build fails, and every real-binary test fails or retries the build until timeout. The one-line fix is in `project-robustness.e2e.test.ts` line 169: replace `for (const r of [...readers, ...showers]) singleJson(r);` with `for (const r of all.slice(writers.length)) singleJson(r);`. That fix **is now included** in `A-project-timeline.patch` (patch edited in place). Also harden the harness: it should fail fast with the build error and cache the failure instead of rebuilding on every `sb.run`.
 
 Per-file results **after** that one-line fix (each file run alone, 150 s cap, Linux, one machine):
 
@@ -123,7 +136,7 @@ Define it in one place and test it everywhere (flag, do not silently bend, anyth
 - **Never chain `git commit` after a pipeline that ends in `grep`** (it succeeds even when tests fail). Gate commits on the real exit code.
 - Agent-created git worktrees can appear at the wrong base briefly; check `git log -1` in each before trusting it.
 - Outbound network in the previous container went through a proxy (`HTTPS_PROXY`, CA at `/root/.ccr/ca-bundle.crt`); the harness passes proxy variables through, but tests must not need the internet.
-- The external CLIs (`codex`, `agy`, `grok`, `kilo`, BytePlus) were **not installed and had no credentials** in the previous container. They are on npm (`@openai/codex`, `@kilocode/cli`, `@xai-official/grok`, `@google/gemini-cli` all resolved). Provide keys as **environment variables in the environment settings**, never pasted in chat. This document cannot confirm the model name `gpt6luna` or which AGY/Kilo/BytePlus models the owner's plans include — query each CLI's model list first.
+- Provider keys for the external CLIs: **none needed** — they are logged in on the owner's PC (section 0). In the Claude cloud sandbox they were neither installed nor authenticated, which is why none were used there.
 - The CLI itself already has a Kilo provider preset (`https://api.kilo.ai/api/gateway/v1`, models like `minimax/minimax-m3`, `kilo-auto/efficient`) and honours `KILO_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`.
 - Commits so far carry Claude `Co-Authored-By` trailers; use whatever attribution your tool requires for new ones.
 
@@ -138,6 +151,8 @@ Define it in one place and test it everywhere (flag, do not silently bend, anyth
 | Patch D (flags, logger, doctor, worker)                                                    | cross-cutting design                | strongest available; it defines the contract the others conform to                       |
 | Fixtures (media via ffmpeg, malformed project files, Persian/RTL/emoji names, huge inputs) | cheap, mechanical                   | cheapest capable model (Kilo `kilo-auto/efficient`, BytePlus plan)                       |
 | Adversarial bug bash on the merged result                                                  | fresh eyes, different model family  | AGY/Gemini-class long-context model reading the whole `apps/cli` tree                    |
+
+Concrete routing for the owner's setup: **Codex (GPT-6-Luna)** orchestrates, merges, verifies, and takes areas C and D; **Kilo (DeepSeek-V4-Flash)** takes areas A and B and the fixture generation; **AGY (Gemini 3.8 Flash)** does the adversarial bug bash and the "does this test fail without the fix?" review, because it did not write the code; **Grok** only for small, bounded tasks (9% weekly limit left).
 
 Steps:
 

@@ -6,7 +6,9 @@ Paste the **Common preamble** plus one **area brief** into any worker CLI (Codex
 
 You are a QA + fix engineer on the JOY Media monorepo (TypeScript, Node 22, pnpm, vitest). JOY Media is an offline-first video editor built primarily for AI agents to drive; humans can use it too. The CLI's process-level behaviour — exit codes, stdout/stderr discipline, `--json`, error messages — is the product surface. Existing unit tests call `runCli()` in-process and miss all of that. Write **humanized end-to-end tests** (scenarios as a creator or an AI agent really uses the tool) against the **real built binary**, find real bugs, and fix them.
 
-Setup: `CI=true pnpm install --frozen-lockfile`. Read `apps/cli/src/humanized/harness.ts` (`createSandbox()`, `sb.run(args, {entry:'bin'|'bundle', env, input, timeoutMs, signal, signalAfterMs})`, `r.code r.out r.err r.json() r.ndjson() describeRun(r)`) and `apps/cli/src/humanized/exit-codes.e2e.test.ts` (the style to follow). Do **not** edit `harness.ts`; put helpers in your own `*-helpers.ts`.
+Platform: the owner is on Windows (PowerShell). Use `path.join`; tests asserting POSIX file modes use `it.skipIf(process.platform === 'win32')`.
+
+Setup: `pnpm install --frozen-lockfile` (PowerShell: `$env:CI='true'` first). Read `apps/cli/src/humanized/harness.ts` (`createSandbox()`, `sb.run(args, {entry:'bin'|'bundle', env, input, timeoutMs, signal, signalAfterMs})`, `r.code r.out r.err r.json() r.ndjson() describeRun(r)`) and `apps/cli/src/humanized/exit-codes.e2e.test.ts` (the style to follow). Do **not** edit `harness.ts`; put helpers in your own `*-helpers.ts`.
 
 Contract to assert (flag, do not silently bend, anything that might be intentional — check `README.md`, `--help`, existing tests, `git log -S`):
 

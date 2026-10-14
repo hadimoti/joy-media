@@ -2050,7 +2050,7 @@ index 0000000..3d2a38e
 +      expect(r.code, describeRun(r)).toBe(0);
 +      expect(r.err).not.toMatch(/locked|busy/i);
 +    }
-+    for (const r of [...readers, ...showers]) singleJson(r);
++    for (const r of all.slice(writers.length)) singleJson(r);
 +  });
 +
 +  it('the lock is released afterwards: no lock folder is left next to the database', async () => {
