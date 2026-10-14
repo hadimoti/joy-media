@@ -890,7 +890,7 @@ describe('cross-area CLI contracts used by render and benchmark', () => {
       '0',
     ]);
     expect(r.code, describeRun(r)).toBe(2);
-    expect(r.err).not.toMatch(/must be > 1\b/);
+    expect(r.err).toMatch(/Invalid value for --concurrency: value must be >= 1 \(received: 0\)/);
   });
 
   it('finds a project by id even when a folder with the same name exists in the current directory [utils/project-loader.ts]', async () => {
