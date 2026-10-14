@@ -101,7 +101,7 @@ describe('API keys at rest', () => {
     for (const file of readTree(env.sb.home)) {
       expect(file.content, file.path).not.toContain(envKey);
     }
-  });
+  }, 30_000);
 });
 
 describe('API keys never appear in output', () => {

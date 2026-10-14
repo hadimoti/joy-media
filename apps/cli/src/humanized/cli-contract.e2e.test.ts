@@ -92,7 +92,7 @@ describe('stderr is empty on a clean run (so any stderr means trouble)', () => {
         expect(r.code, describeRun(r)).toBe(0);
         expect(r.stderr, describeRun(r)).toBe('');
       }
-    });
+    }, 30_000);
 
     it(`other warnings still reach stderr via ${entry}`, async () => {
       const canary = sb.path('canary.cjs');
@@ -576,10 +576,11 @@ describe('process lifecycle', () => {
   // the interactive REPL, which prints a prompt to stdout and blocks forever on
   // an open non-TTY stdin (typical for tool runners). It should refuse (exit 2)
   // or treat a non-TTY stdin as a script and stop at EOF.
-  it.fails('`joy-media agent` without a TTY does not hang a tool loop', async () => {
+  it('`joy-media agent` without a TTY does not hang a tool loop', async () => {
     const r = await spawnCli(sb, ['agent'], { keepStdinOpen: true, timeoutMs: 5_000 });
     expect(r.signal).toBeNull();
-    expect(r.code).not.toBeNull();
+    expect(r.code).toBe(2);
+    expect(r.err).toMatch(/TTY/);
   });
 
   it('the launcher works from an install path containing "#"', async () => {

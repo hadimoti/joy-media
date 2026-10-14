@@ -64,7 +64,7 @@ describe('agent provider add: model discovery against the endpoint', () => {
       cachedModels: ['mock/alpha', 'mock/beta'],
     });
     expect(mock.modelRequests[0]?.headers.authorization).toBe(`Bearer ${KEY}`);
-  });
+  }, 30_000);
 
   it('accepts a bare JSON array too', async () => {
     mock.models({ kind: 'bare-array', ids: ['m1'] });

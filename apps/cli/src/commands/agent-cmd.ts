@@ -127,6 +127,9 @@ async function dispatch(args: string[], flags: CliFlags, out: AgentOutput): Prom
     case 'config':
       return handleConfig(flags, out);
     case 'chat':
+      if (args.length === 0 && !process.stdin.isTTY) {
+        throw usage('agent chat needs a TTY when no script is piped to stdin.');
+      }
       return handleChat(flags);
     case 'run':
       return handleRun(args, flags, out);
