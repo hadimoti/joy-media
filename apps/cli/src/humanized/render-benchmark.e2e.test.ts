@@ -491,9 +491,9 @@ describe('a creator or agent points render at a project', () => {
       [
         'bad-root.json',
         projectDoc({ id: 'p-2', rootCompositionId: 'missing-root' }),
-        /missing-root/,
+        /not a JOY Media project file/,
       ],
-      ['no-id.json', projectDoc({ omitId: true }), /"id"/],
+      ['no-id.json', projectDoc({ omitId: true }), /project with id/],
     ];
     const results = await Promise.all(
       broken.map(([name, doc], i) => renderDoc(name, doc, `broken-${i}`)),
@@ -837,91 +837,73 @@ describe('Ctrl-C during a long render', () => {
 });
 
 // ===========================================================================
-// 6. Known bugs in files this suite does not own (it.fails => flips red when fixed)
+// 6. Cross-area contracts covered here to keep the complete render workflow honest.
 // ===========================================================================
 
-describe('known bugs outside render-cmd.ts (documented, expected to fail today)', () => {
-  it.fails(
-    'treats a forgotten value after --preset as a usage error instead of silently using mp4 [cli.ts]',
-    async () => {
-      const r = await sb.run(['render', '--project', reel.id, '--out', 'known-preset', '--preset']);
-      expect(r.code, describeRun(r)).toBe(2);
-    },
-  );
+describe('cross-area CLI contracts used by render and benchmark', () => {
+  it('treats a forgotten value after --preset as a usage error instead of silently using mp4 [cli.ts]', async () => {
+    const r = await sb.run(['render', '--project', reel.id, '--out', 'known-preset', '--preset']);
+    expect(r.code, describeRun(r)).toBe(2);
+  });
 
-  it.fails(
-    'rejects a misspelled flag (--prest webm) instead of silently ignoring it [cli.ts strict:false]',
-    async () => {
-      const r = await sb.run([
-        'render',
-        '--project',
-        reel.id,
-        '--out',
-        'known-typo',
-        '--prest',
-        'webm',
-      ]);
-      expect(r.code, describeRun(r)).toBe(2);
-    },
-  );
+  it('rejects a misspelled flag (--prest webm) instead of silently ignoring it [cli.ts strict:false]', async () => {
+    const r = await sb.run([
+      'render',
+      '--project',
+      reel.id,
+      '--out',
+      'known-typo',
+      '--prest',
+      'webm',
+    ]);
+    expect(r.code, describeRun(r)).toBe(2);
+  });
 
-  it.fails(
-    'rejects a misspelled benchmark flag (--sytem) instead of running everything [cli.ts strict:false]',
-    async () => {
-      const r = await sb.run(['benchmark', '--sytem', '--json']);
-      expect(r.code, describeRun(r)).toBe(2);
-    },
-  );
+  it('rejects a misspelled benchmark flag (--sytem) instead of running everything [cli.ts strict:false]', async () => {
+    const r = await sb.run(['benchmark', '--sytem', '--json']);
+    expect(r.code, describeRun(r)).toBe(2);
+  });
 
-  it.fails(
-    'ends the --json stream with an error event for an invalid --concurrency [cli.ts]',
-    async () => {
-      const r = await sb.run([
-        'render',
-        '--project',
-        reel.id,
-        '--out',
-        'known-conc',
-        '--concurrency',
-        '99',
-        '--json',
-      ]);
-      expect(r.code, describeRun(r)).toBe(2);
-      expectNdjsonContract(r, ['error']);
-    },
-  );
+  it('ends the --json stream with an error event for an invalid --concurrency [cli.ts]', async () => {
+    const r = await sb.run([
+      'render',
+      '--project',
+      reel.id,
+      '--out',
+      'known-conc',
+      '--concurrency',
+      '99',
+      '--json',
+    ]);
+    expect(r.code, describeRun(r)).toBe(2);
+    expectNdjsonContract(r, ['error']);
+  });
 
-  it.fails(
-    'describes the lower bound of --concurrency correctly (>= 1, not "> 1") [utils/flags.ts]',
-    async () => {
-      const r = await sb.run([
-        'render',
-        '--project',
-        reel.id,
-        '--out',
-        'known-msg',
-        '--concurrency',
-        '0',
-      ]);
-      expect(r.code, describeRun(r)).toBe(2);
-      expect(r.err).not.toMatch(/must be > 1\b/);
-    },
-  );
+  it('describes the lower bound of --concurrency correctly (>= 1, not "> 1") [utils/flags.ts]', async () => {
+    const r = await sb.run([
+      'render',
+      '--project',
+      reel.id,
+      '--out',
+      'known-msg',
+      '--concurrency',
+      '0',
+    ]);
+    expect(r.code, describeRun(r)).toBe(2);
+    expect(r.err).not.toMatch(/must be > 1\b/);
+  });
 
-  it.fails(
-    'finds a project by id even when a folder with the same name exists in the current directory [utils/project-loader.ts]',
-    async () => {
-      // Natural workflow: `render --project <id> --out <id>` creates ./<id>/, and the next
-      // `render --project <id>` then tries to read that folder as a JSON file (EISDIR).
-      const cwd = sb.path('shadow');
-      mkdirSync(cwd, { recursive: true });
-      const args = ['render', '--project', reel.id, '--out', reel.id, '--json'];
-      const first = await sb.run(args, { cwd });
-      expect(first.code, describeRun(first)).toBe(0);
-      const second = await sb.run(args, { cwd });
-      expect(second.code, describeRun(second)).toBe(0);
-    },
-  );
+  it('finds a project by id even when a folder with the same name exists in the current directory [utils/project-loader.ts]', async () => {
+    // Natural workflow: `render --project <id> --out <id>` creates ./<id>/, and the next
+    // `render --project <id>` then tries to read that folder as a JSON file (EISDIR).
+    const cwd = sb.path('shadow');
+    mkdirSync(cwd, { recursive: true });
+    const args = ['render', '--project', reel.id, '--out', reel.id, '--json'];
+    const first = await sb.run(args, { cwd });
+    expect(first.code, describeRun(first)).toBe(0);
+    const second = await sb.run(args, { cwd });
+    expect(second.code, describeRun(second)).toBe(0);
+  });
 });
 
 // ===========================================================================
