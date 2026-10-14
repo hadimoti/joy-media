@@ -74,6 +74,7 @@ function buildIsStale(): boolean {
 }
 
 let buildChecked = false;
+let buildFailure: Error | undefined;
 
 /**
  * Build `apps/cli` if `dist/` is missing or older than its sources.
@@ -81,6 +82,7 @@ let buildChecked = false;
  * exactly one of them build while the rest wait.
  */
 export function ensureCliBuilt(): void {
+  if (buildFailure) throw buildFailure;
   if (buildChecked) return;
   if (!buildIsStale()) {
     buildChecked = true;
@@ -108,13 +110,20 @@ export function ensureCliBuilt(): void {
   }
   try {
     if (buildIsStale()) {
-      const res = spawnSync('pnpm', ['--filter', '@joy-media/cli', 'build'], {
+      const command = process.platform === 'win32' ? process.env.ComSpec || 'cmd.exe' : 'pnpm';
+      const args =
+        process.platform === 'win32'
+          ? ['/d', '/s', '/c', 'pnpm --filter @joy-media/cli build']
+          : ['--filter', '@joy-media/cli', 'build'];
+      const res = spawnSync(command, args, {
         cwd: REPO_ROOT,
         encoding: 'utf8',
-        shell: process.platform === 'win32',
       });
       if (res.status !== 0) {
-        throw new Error(`CLI build failed (exit ${res.status}):\n${res.stdout}\n${res.stderr}`);
+        buildFailure = new Error(
+          `CLI build failed (exit ${res.status}):\n${res.stdout}\n${res.stderr}`,
+        );
+        throw buildFailure;
       }
     }
   } finally {
