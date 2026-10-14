@@ -67,13 +67,14 @@ describe('agent run against a provider that stalls (real binary)', () => {
     },
   );
 
-  it.skipIf(process.platform === 'win32')('SIGTERM is handled the same way', async () => {
+  it.skipIf(process.platform === 'win32')('SIGTERM stops it cleanly with exit 143', async () => {
     mock.fallback({ kind: 'stall-stream', chunks: ['Thinking'] });
     const live = env.spawn(args());
     await mock.waitForRequests(1, '/chat/completions');
     live.child.kill('SIGTERM');
     const r = await live.done;
-    expect(r.code, describeRun(r)).toBe(130);
+    // 128 + 15: the shell convention for SIGTERM (SIGINT above is 130). See bin.ts SIGNAL_EXIT_CODES.
+    expect(r.code, describeRun(r)).toBe(143);
     expect(readProjects(env.sb)[0]!.revision).toBe(1);
   });
 

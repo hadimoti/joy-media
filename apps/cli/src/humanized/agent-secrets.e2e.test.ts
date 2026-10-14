@@ -67,20 +67,23 @@ describe('API keys at rest', () => {
     },
   );
 
-  it.skipIf(process.platform === 'win32')('a world-readable key file left by an older version is tightened', async () => {
-    mkdirSync(env.sb.joyDir, { recursive: true });
-    chmodSync(env.sb.joyDir, 0o755);
-    const path = writeJoyConfig(env.sb, 'ai-providers.json', {
-      old: { name: 'old', provider: 'custom', baseUrl: mock.url, apiKey: KEY },
-    });
-    chmodSync(path, 0o644);
+  it.skipIf(process.platform === 'win32')(
+    'a world-readable key file left by an older version is tightened',
+    async () => {
+      mkdirSync(env.sb.joyDir, { recursive: true });
+      chmodSync(env.sb.joyDir, 0o755);
+      const path = writeJoyConfig(env.sb, 'ai-providers.json', {
+        old: { name: 'old', provider: 'custom', baseUrl: mock.url, apiKey: KEY },
+      });
+      chmodSync(path, 0o644);
 
-    const r = await env.run(['agent', 'provider', 'list']);
-    expect(r.code, describeRun(r)).toBe(0);
-    expect(modeOf(path).toString(8)).toBe('600');
-    expect(modeOf(env.sb.joyDir).toString(8)).toBe('700');
-    expect(readJoyConfig(env.sb, 'ai-providers.json')).toMatchObject({ old: { apiKey: KEY } });
-  });
+      const r = await env.run(['agent', 'provider', 'list']);
+      expect(r.code, describeRun(r)).toBe(0);
+      expect(modeOf(path).toString(8)).toBe('600');
+      expect(modeOf(env.sb.joyDir).toString(8)).toBe('700');
+      expect(readJoyConfig(env.sb, 'ai-providers.json')).toMatchObject({ old: { apiKey: KEY } });
+    },
+  );
 
   it('a key that only came from the environment is never written to disk', async () => {
     const envKey = fakeKey('from-env');
