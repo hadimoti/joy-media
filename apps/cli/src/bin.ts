@@ -10,31 +10,35 @@ async function exitWithCode(code: number, codeOverride?: NodeJS.Signals): Promis
     return;
   }
   exiting = true;
+  // Record the code first: if anything below lets the event loop drain, Node
+  // still exits with the right status instead of falling back to 0.
+  process.exitCode = code;
   const reason = codeOverride ? ` (signal: ${codeOverride})` : '';
   if (code !== 0) {
     logError(`Process exiting with code ${code}${reason}.`);
   }
-  // Give async logs a chance to flush before exiting.
-  await new Promise<void>((resolve) => {
-    if (typeof process.stdout?.once === 'function') {
-      let settled = false;
-      const done = (): void => {
-        if (settled) return;
-        settled = true;
+  // Give async logs a chance to flush before exiting. The safety timer is
+  // intentionally NOT unref'd, otherwise an idle loop exits early and drops
+  // the exit code.
+  await Promise.race([
+    Promise.all([flushStream(process.stdout), flushStream(process.stderr)]),
+    new Promise<void>((resolve) => setTimeout(resolve, 250)),
+  ]);
+  process.exit(code);
+}
+
+function flushStream(stream: NodeJS.WriteStream | undefined): Promise<void> {
+  return new Promise<void>((resolve) => {
+    try {
+      if (!stream || stream.destroyed || !stream.writable) {
         resolve();
-      };
-      try {
-        process.stdout.once('drain', done);
-        process.stdout.once('close', done);
-      } catch {
-        done();
+        return;
       }
-      setTimeout(done, 50).unref();
-    } else {
+      stream.write('', () => resolve());
+    } catch {
       resolve();
     }
   });
-  process.exit(code);
 }
 
 function installSignalHandlers(): void {
