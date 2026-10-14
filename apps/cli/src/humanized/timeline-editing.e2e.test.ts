@@ -228,10 +228,95 @@ describe('a creator cuts a 30 second intro', () => {
         '--json',
       ]),
     );
-    const doc = singleJson<{ changed: boolean; clip: { startUs: number; durationUs: number } }>(r);
+    const doc = singleJson<{
+      changed: boolean;
+      clip: { startUs: number; durationUs: number; sourceInUs: number | null };
+    }>(r);
     expect(doc.changed).toBe(true);
-    expect(doc.clip).toMatchObject({ startUs: 2 * SEC, durationUs: 10 * SEC });
-    expect(spans(await showProject(sb, id))).toEqual([[2, 12]]);
+    expect(doc.clip).toMatchObject({
+      startUs: 2 * SEC,
+      durationUs: 10 * SEC,
+      sourceInUs: 2 * SEC,
+    });
+    const persisted = await showProject(sb, id);
+    expect(spans(persisted)).toEqual([[2, 12]]);
+    expect(persisted.tracks[0]!.clips[0]!.sourceInUs).toBe(2 * SEC);
+  });
+
+  it('can move a composition clip earlier without moving its child in-point below zero', async () => {
+    const id = await createProject(sb, 'Nested composition');
+    const file = sb.path('composition.json');
+    expectOk(await sb.run(['project', 'export', id, '--output', file, '--json']));
+
+    type Composition = {
+      id: string;
+      name: string;
+      tracks: Array<{ id: string; clips: Array<Record<string, unknown>>; [key: string]: unknown }>;
+      [key: string]: unknown;
+    };
+    type ExportedProject = {
+      source: {
+        rootCompositionId: string;
+        compositions: Record<string, Composition>;
+      };
+      [key: string]: unknown;
+    };
+    type SavedProject = {
+      project: {
+        rootCompositionId: string;
+        compositions: Record<string, Composition>;
+      };
+    };
+
+    const exported = JSON.parse(readFileSync(file, 'utf8')) as ExportedProject;
+    const { source } = exported;
+    const root = source.compositions[source.rootCompositionId]!;
+    source.compositions.child = {
+      ...structuredClone(root),
+      id: 'child',
+      name: 'Child composition',
+      tracks: root.tracks.map((t) => ({ ...t, clips: [] })),
+    };
+    root.tracks[0]!.clips.push({
+      id: 'nested-clip',
+      kind: 'composition',
+      compositionId: 'child',
+      startUs: SEC,
+      durationUs: 5 * SEC,
+      childOffsetUs: 0,
+    });
+    writeFileSync(file, JSON.stringify(exported), 'utf8');
+    const before = readFileSync(file);
+
+    const result = expectOk(
+      await sb.run([
+        'timeline',
+        'trim',
+        '--project',
+        file,
+        '--clip',
+        'nested-clip',
+        '--start',
+        '0',
+        '--end',
+        '5',
+        '--json',
+      ]),
+    );
+    expect(
+      singleJson<{ clip: { startUs: number; durationUs: number } }>(result).clip,
+    ).toMatchObject({
+      startUs: 0,
+      durationUs: 5 * SEC,
+    });
+    expect(readFileSync(file)).not.toEqual(before);
+    const saved = JSON.parse(readFileSync(file, 'utf8')) as SavedProject;
+    const rootAfter = saved.project.compositions[saved.project.rootCompositionId]!;
+    expect(rootAfter.tracks[0]!.clips[0]).toMatchObject({
+      id: 'nested-clip',
+      startUs: 0,
+      childOffsetUs: 0,
+    });
   });
 
   it('applying the same trim twice is idempotent: the second says nothing changed and does not bump the revision', async () => {

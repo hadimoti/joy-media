@@ -320,10 +320,17 @@ function addClip(tracks: TimelineTrack[], flags: CliFlags): Outcome {
   };
 }
 
-/** Source position of the second half of a split: the same frame the timeline already shows there. */
+/** Source position at a moved timeline point: the same frame the timeline already shows there. */
 function advanceSource(clip: TimelineClip, deltaUs: number): TimelineClip {
   if (clip.kind === 'composition' && typeof clip.childOffsetUs === 'number') {
-    return { ...clip, childOffsetUs: clip.childOffsetUs + deltaUs };
+    const childOffsetUs = clip.childOffsetUs + deltaUs;
+    if (childOffsetUs < 0) {
+      throw new CommandFailure(
+        'SOURCE_UNDERFLOW',
+        `Moving "${clip.id}" there would move the child in-point below 0.`,
+      );
+    }
+    return { ...clip, childOffsetUs };
   }
   if (typeof clip.sourceInUs === 'number') {
     const rate = typeof clip.playbackRate === 'number' ? clip.playbackRate : 1;
@@ -410,6 +417,7 @@ function trimClip(tracks: TimelineTrack[], flags: CliFlags): Outcome {
   }
 
   assertNoOverlap(track, newStartUs, newDurationUs, clip.id);
+  Object.assign(clip, advanceSource(clip, Math.max(0, newStartUs - clip.startUs)));
   clip.startUs = newStartUs;
   clip.durationUs = newDurationUs;
 
