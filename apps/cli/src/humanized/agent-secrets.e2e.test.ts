@@ -24,7 +24,6 @@ import {
 } from './agent-helpers.js';
 import { describeRun, type RunResult } from './harness.js';
 
-const posix = process.platform !== 'win32';
 const KEY = fakeKey('secret');
 
 describe('API keys at rest', () => {
@@ -46,7 +45,7 @@ describe('API keys at rest', () => {
     env.cleanup();
   });
 
-  it.runIf(posix)(
+  it.skipIf(process.platform === 'win32')(
     'ai-providers.json is 0600 and ~/.joy-media is 0700 on a fresh install',
     async () => {
       const r = await env.run([
@@ -68,7 +67,7 @@ describe('API keys at rest', () => {
     },
   );
 
-  it.runIf(posix)('a world-readable key file left by an older version is tightened', async () => {
+  it.skipIf(process.platform === 'win32')('a world-readable key file left by an older version is tightened', async () => {
     mkdirSync(env.sb.joyDir, { recursive: true });
     chmodSync(env.sb.joyDir, 0o755);
     const path = writeJoyConfig(env.sb, 'ai-providers.json', {
