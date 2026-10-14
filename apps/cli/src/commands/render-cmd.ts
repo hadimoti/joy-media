@@ -4,11 +4,14 @@
  *
  * `joy render --project <id|file.json> --preset <mp4|webm|prores> --out <dir>`
  *
- * IMPORTANT: this command does NOT encode video or audio. It walks every clip
- * of every enabled track of the root composition, accumulates frame counts and
- * emits progress, then writes a per-render *plan manifest* to
- * `<out>/<projectId>.<ext>.manifest.json`. No media file is produced, and every
- * human message and the final JSON event say so (`mediaProduced: false`).
+ * Two modes, chosen from the project:
+ * - Real render: when the clips point at media files on this machine (added with
+ *   `timeline add-clip --asset <file>`, or found via `--media-dir`), ffmpeg encodes
+ *   `<out>/<projectId>.<ext>` and a manifest is written beside it (`mediaProduced: true`).
+ * - Manifest only: when no clip has a media file (or with `--manifest-only`) it walks every
+ *   clip of every enabled track and writes a *plan manifest* to
+ *   `<out>/<projectId>.<ext>.manifest.json`. No media file is produced, and every human
+ *   message and the final JSON event say so (`mediaProduced: false`).
  *
  * Streams progress either as a progress bar (human mode, TTY only) or as
  * newline-delimited JSON events (`--json`). In `--json` mode stdout carries
@@ -37,6 +40,7 @@ import {
   logWarn,
   printBanner,
 } from '../utils/logger.js';
+import { buildFfmpegArgs, fileSize, planMedia, startEncode } from './render-media.js';
 import { listProjects, loadProject, type createDefaultProject } from '../utils/project-loader.js';
 
 export interface RenderCommandFlags {
@@ -46,6 +50,8 @@ export interface RenderCommandFlags {
   concurrency?: number | undefined;
   json?: boolean | undefined;
   sqlitePath?: string | undefined;
+  manifestOnly?: boolean | undefined;
+  mediaDir?: string | undefined;
 }
 
 export interface RenderPresetSpec {
@@ -142,8 +148,12 @@ export interface RenderCompleteEvent {
   readonly totalFrames: number;
   readonly durationMs: number;
   readonly ts: string;
-  /** Always `false`: this command writes a plan manifest, never a video/audio file. */
-  readonly mediaProduced: false;
+  /** `true` when a video file was encoded (`mediaPath`); `false` for a manifest-only run. */
+  readonly mediaProduced: boolean;
+  /** Real render only: the encoded video. */
+  readonly mediaPath?: string;
+  /** Real render only: the plan manifest written next to the video. */
+  readonly manifestPath?: string;
   /** `true` when `artifactPath` points at a manifest that was written. */
   readonly manifestWritten: boolean;
   /** Human-readable statement of what was (and was not) produced. */
@@ -153,7 +163,24 @@ export interface RenderCompleteEvent {
 }
 
 export type RenderErrorCode =
-  'usage' | 'project-load' | 'invalid-project' | 'output' | 'cancelled' | 'internal';
+  | 'usage'
+  | 'project-load'
+  | 'invalid-project'
+  | 'output'
+  | 'cancelled'
+  | 'internal'
+  | 'media-missing'
+  | 'media-unreadable'
+  | 'ffmpeg-missing'
+  | 'encode-failed';
+
+/** Real render only: encoder progress, at most one event per whole percent. */
+export interface RenderProgressEvent {
+  readonly type: 'progress';
+  readonly projectId: string;
+  readonly percent: number;
+  readonly ts: string;
+}
 
 export interface RenderErrorEvent {
   readonly type: 'error';
@@ -165,7 +192,12 @@ export interface RenderErrorEvent {
 }
 
 export type RenderEvent =
-  RenderStartEvent | RenderClipEvent | RenderTrackEvent | RenderCompleteEvent | RenderErrorEvent;
+  | RenderStartEvent
+  | RenderClipEvent
+  | RenderTrackEvent
+  | RenderProgressEvent
+  | RenderCompleteEvent
+  | RenderErrorEvent;
 
 export interface RenderCommandResult {
   readonly exitCode: number;
@@ -176,7 +208,8 @@ export interface RenderCommandResult {
   readonly totalFrames: number;
   readonly totalClips: number;
   readonly durationMs: number;
-  readonly mediaProduced: false;
+  readonly mediaProduced: boolean;
+  readonly mediaPath?: string;
   readonly manifestWritten: boolean;
   readonly warnings: readonly string[];
 }
@@ -246,6 +279,8 @@ export async function handleRenderCommand(args: string[], flags: CliFlags): Prom
       outDir,
       concurrency,
       json,
+      manifestOnly: flags.manifestOnly === true,
+      mediaDir: flags.mediaDir,
     });
 
     return result.exitCode;
@@ -269,6 +304,10 @@ export interface RunHeadlessRenderInput {
   readonly outDir: string;
   readonly concurrency: number;
   readonly json: boolean;
+  /** Skip ffmpeg and write only the plan manifest. */
+  readonly manifestOnly?: boolean | undefined;
+  /** Folder to look in for media files an asset names (by id or display name). */
+  readonly mediaDir?: string | undefined;
   /**
    * Draw the live progress bar (human mode only). Defaults to "stdout is a
    * terminal" so piped/redirected output is never spammed with `\r` frames.
@@ -507,10 +546,24 @@ export async function runHeadlessRender(
   const plan = planRender(project, presetSpec);
   if (!plan.ok) return failure('invalid-project', plan.message);
 
+  const mediaPlan = planMedia(
+    project,
+    { manifestOnly: input.manifestOnly === true, mediaDir: input.mediaDir },
+    presetSpec,
+  );
+  if (mediaPlan.mode === 'error') return failure(mediaPlan.code, mediaPlan.message);
+  const realMedia = mediaPlan.mode === 'media' ? mediaPlan : null;
+
   const { clips: allClips, totalFrames } = plan;
-  const warnings = [...plan.warnings];
+  // A real render uses the project's own size and frame rate, so the "preset is fixed at ..."
+  // note from planning does not apply to it.
+  const warnings = [
+    ...(realMedia ? plan.warnings.filter((w) => !w.includes('is fixed at')) : plan.warnings),
+    ...(realMedia ? realMedia.warnings : []),
+  ];
   const totalClips = allClips.length;
   const fileStem = safeFileStem(plan.projectId);
+  const mediaName = `${fileStem}.${presetSpec.extension}`;
   const manifestName = `${fileStem}.${presetSpec.extension}.manifest.json`;
   if (fileStem !== plan.projectId) {
     warnings.push(`Project id "${plan.projectId}" is not a safe file name; using "${fileStem}".`);
@@ -528,7 +581,12 @@ export async function runHeadlessRender(
     logInfo(`Headless render plan: ${c(plan.title, 'bold')} (${plan.projectId})`);
     logStep('Preset', `${presetSpec.id} (${presetSpec.container}/${presetSpec.videoCodec})`);
     logStep('Manifest', join(outDir, manifestName));
-    logStep('Media file', 'none - manifest only, this command does not encode video');
+    logStep(
+      'Media file',
+      realMedia
+        ? join(outDir, mediaName)
+        : 'none - manifest only, this command does not encode video',
+    );
     logStep('Concurrency', String(concurrency));
     logStep('Tracks', String(plan.trackCount));
     logStep('Clips', String(totalClips));
@@ -622,7 +680,7 @@ export async function runHeadlessRender(
   let lastDrawnPercent = -1;
   let framesSinceYield = 0;
   let nextClip = 0;
-  const workerCount = Math.min(concurrency, totalClips);
+  const workerCount = realMedia ? 0 : Math.min(concurrency, totalClips);
   const workers: Array<Promise<void>> = [];
   const stopWatchingSignals = announceCancellation(json, plan.projectId);
   for (let w = 0; w < workerCount; w += 1) {
@@ -667,21 +725,113 @@ export async function runHeadlessRender(
     );
   }
 
+  let mediaPath = '';
   try {
     await Promise.all(workers);
+    if (realMedia) {
+      const finalPath = join(outDir, mediaName);
+      const partialPath = join(outDir, `.${mediaName}.${process.pid}.partial`);
+      let lastPercent = -1;
+      const handle = startEncode(
+        buildFfmpegArgs(realMedia, preset, partialPath),
+        realMedia.durationUs,
+        (fraction) => {
+          const percent = Math.floor(fraction * 100);
+          if (percent === lastPercent) return;
+          lastPercent = percent;
+          if (showProgress) drawProgress(Math.round(fraction * totalFrames), totalFrames, 32);
+          emitJson(
+            { type: 'progress', projectId: plan.projectId, percent, ts: new Date().toISOString() },
+            json,
+          );
+        },
+      );
+      const discardPartial = (): void => {
+        handle.cancel();
+        try {
+          rmSync(partialPath, { force: true });
+        } catch {
+          // best effort: the partial file is hidden and ignored by every reader
+        }
+      };
+      process.prependListener('SIGINT', discardPartial);
+      process.prependListener('SIGTERM', discardPartial);
+      let outcome: Awaited<typeof handle.done>;
+      try {
+        outcome = await handle.done;
+      } finally {
+        process.off('SIGINT', discardPartial);
+        process.off('SIGTERM', discardPartial);
+      }
+      if (!outcome.ok) {
+        discardPartial();
+        if (showProgress) process.stdout.write('\n');
+        return failure(
+          outcome.code === 'cancelled' ? 'cancelled' : outcome.code,
+          outcome.message,
+          totalFrames,
+          totalClips,
+        );
+      }
+      try {
+        renameSync(partialPath, finalPath);
+      } catch (err) {
+        discardPartial();
+        return failure(
+          'output',
+          `Failed to write ${finalPath}: ${errorMessage(err)}`,
+          totalFrames,
+          totalClips,
+        );
+      }
+      mediaPath = finalPath;
+      let cumulative = 0;
+      for (const clip of allClips) {
+        cumulative += clip.frames;
+        emitJson(
+          {
+            type: 'clip',
+            projectId: plan.projectId,
+            trackId: clip.trackId,
+            clipId: clip.clipId,
+            progress: 1,
+            framesRendered: cumulative,
+            totalFrames,
+          },
+          json,
+        );
+      }
+    }
   } finally {
     stopWatchingSignals();
   }
 
   const durationMs = Date.now() - startedAt;
-  const artifactPath = join(outDir, manifestName);
+  const manifestPath = join(outDir, manifestName);
+  const artifactPath = realMedia ? mediaPath : manifestPath;
+  const doneMessage = realMedia
+    ? `Rendered ${basename(mediaPath)} with ffmpeg.`
+    : MANIFEST_ONLY_MESSAGE;
 
   const manifest = {
     schemaVersion: 1,
     format: 'joy-media-render-manifest',
-    mediaProduced: false,
-    mediaFile: null,
-    note: MANIFEST_ONLY_MESSAGE,
+    mediaProduced: realMedia !== null,
+    mediaFile: realMedia ? mediaName : null,
+    note: realMedia
+      ? 'Video rendered with ffmpeg; this manifest describes the timeline plan it came from.'
+      : MANIFEST_ONLY_MESSAGE,
+    ...(realMedia
+      ? {
+          media: {
+            width: realMedia.width,
+            height: realMedia.height,
+            fps: realMedia.fps,
+            durationUs: realMedia.durationUs,
+            bytes: fileSize(mediaPath),
+          },
+        }
+      : {}),
     projectId: plan.projectId,
     projectTitle: plan.title,
     preset,
@@ -706,12 +856,12 @@ export async function runHeadlessRender(
   };
 
   try {
-    writeFileAtomic(artifactPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    writeFileAtomic(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   } catch (err) {
     if (showProgress) process.stdout.write('\n');
     return failure(
       'output',
-      `Failed to write render manifest ${artifactPath}: ${errorMessage(err)}`,
+      `Failed to write render manifest ${manifestPath}: ${errorMessage(err)}`,
       totalFrames,
       totalClips,
     );
@@ -722,11 +872,21 @@ export async function runHeadlessRender(
       drawProgress(totalFrames, totalFrames, 32);
       process.stdout.write('\n\n');
     }
-    logSuccess(
-      `Wrote render manifest for ${totalClips} clip(s) / ${totalFrames} frame(s) in ${durationMs}ms.`,
-    );
-    logWarn(MANIFEST_ONLY_MESSAGE);
-    logStep('Manifest', artifactPath);
+    if (realMedia) {
+      const megabytes = (fileSize(mediaPath) / (1024 * 1024)).toFixed(1);
+      logSuccess(
+        `Rendered ${basename(mediaPath)} (${(realMedia.durationUs / 1e6).toFixed(2)}s, ` +
+          `${realMedia.width}x${realMedia.height}, ${megabytes} MB) in ${durationMs}ms.`,
+      );
+      logStep('Video', mediaPath);
+      logStep('Manifest', manifestPath);
+    } else {
+      logSuccess(
+        `Wrote render manifest for ${totalClips} clip(s) / ${totalFrames} frame(s) in ${durationMs}ms.`,
+      );
+      logWarn(MANIFEST_ONLY_MESSAGE);
+      logStep('Manifest', artifactPath);
+    }
   }
 
   emitJson(
@@ -739,9 +899,10 @@ export async function runHeadlessRender(
       totalFrames,
       durationMs,
       ts: new Date().toISOString(),
-      mediaProduced: false,
+      mediaProduced: realMedia !== null,
+      ...(realMedia ? { mediaPath, manifestPath } : {}),
       manifestWritten: true,
-      message: MANIFEST_ONLY_MESSAGE,
+      message: doneMessage,
       warnings,
     },
     json,
@@ -756,7 +917,8 @@ export async function runHeadlessRender(
     totalFrames,
     totalClips,
     durationMs,
-    mediaProduced: false,
+    mediaProduced: realMedia !== null,
+    ...(realMedia ? { mediaPath } : {}),
     manifestWritten: true,
     warnings,
   };

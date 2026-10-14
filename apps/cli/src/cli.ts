@@ -46,6 +46,8 @@ export interface CliFlags {
   json: boolean;
   system: boolean;
   'media-engine': boolean;
+  manifestOnly?: boolean;
+  mediaDir?: string | undefined;
 }
 
 /**
@@ -83,6 +85,8 @@ export const CLI_OPTIONS = {
   concurrency: { type: 'string', numeric: true },
   system: { type: 'boolean' },
   'media-engine': { type: 'boolean' },
+  'manifest-only': { type: 'boolean' },
+  'media-dir': { type: 'string' },
 } as const satisfies Record<string, CliOptionSpec>;
 
 interface CommandHelp {
@@ -173,7 +177,9 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       ['--project, -p <id|file.json>', 'Project to render (required)'],
       ['--preset <mp4|webm|prores>', 'Output preset (default mp4)'],
       ['--out <dir>', 'Output directory (default ./renders)'],
-      ['--concurrency <1-32>', 'Parallel clips (default 2)'],
+      ['--concurrency <1-32>', 'Parallel clips (manifest-only mode; default 2)'],
+      ['--media-dir <dir>', "Folder holding the media files the project's assets name"],
+      ['--manifest-only', 'Write only the plan manifest; encode no video'],
       ['--sqlite-path <path>', 'Project database'],
       ['--json', 'Newline-delimited JSON progress events'],
     ],
@@ -320,6 +326,8 @@ function parseFlags(v: Record<string, string | boolean | undefined>): CliFlags {
     json: v.json === true,
     system: v.system === true,
     'media-engine': v['media-engine'] === true,
+    manifestOnly: v['manifest-only'] === true,
+    mediaDir: str('media-dir'),
   };
 }
 

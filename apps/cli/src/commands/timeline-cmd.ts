@@ -1,7 +1,11 @@
 import { randomBytes } from 'node:crypto';
+import { statSync } from 'node:fs';
+import { basename, resolve } from 'node:path';
 import type { CliFlags } from '../cli.js';
+import { deriveAssetId, registerAssetSource } from '../utils/asset-sources.js';
 import { FlagValidationError, NUMERIC_RANGES } from '../utils/flags.js';
 import { c, logSuccess } from '../utils/logger.js';
+import { probeMedia } from '../utils/media-probe.js';
 import {
   CommandFailure,
   emitJson,
@@ -107,7 +111,8 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
       }
       const tracks = root.tracks as unknown as TimelineTrack[];
 
-      const result = apply(subcommand, tracks, flags);
+      const effectiveFlags = subcommand === 'add-clip' ? registerRealMedia(edited, flags) : flags;
+      const result = apply(subcommand, tracks, effectiveFlags);
       const saved = result.changed
         ? saveProject(edited, {
             source: info.source,
@@ -127,6 +132,51 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
   } catch (err) {
     return reportFailure(err, json, 'timeline');
   }
+}
+
+/**
+ * `add-clip --asset <file>` with a real media file: register the file as an asset (so the project
+ * knows its kind and length), remember where it lives on this machine (so `render` can find it),
+ * and default the clip length to the whole file. A plain label such as `intro` is left alone.
+ */
+function registerRealMedia(
+  project: { assets?: Record<string, unknown> },
+  flags: CliFlags,
+): CliFlags {
+  if (!flags.asset) return flags;
+  const absolute = resolve(flags.asset);
+  let size: number;
+  try {
+    const stats = statSync(absolute);
+    if (!stats.isFile()) return flags;
+    size = stats.size;
+  } catch {
+    return flags;
+  }
+  const info = probeMedia(absolute);
+  if (!info) {
+    throw new CommandFailure(
+      'MEDIA_UNREADABLE',
+      `"${flags.asset}" is not media ffprobe can read. Install ffmpeg (or set JOY_MEDIA_FFPROBE), or pass a plain label instead of a file path.`,
+    );
+  }
+  const assetId = deriveAssetId(absolute);
+  const assets = (project.assets ??= {});
+  assets[assetId] = {
+    id: assetId,
+    kind: info.isImage ? 'image' : info.hasVideo ? 'video' : 'audio',
+    displayName: basename(absolute),
+    bytes: size,
+    descriptor: {
+      mimeType: info.mimeType,
+      ...(info.durationUs > 0 ? { durationUs: info.durationUs } : {}),
+      ...(info.width !== undefined ? { width: info.width } : {}),
+      ...(info.height !== undefined ? { height: info.height } : {}),
+    },
+  };
+  registerAssetSource(assetId, absolute);
+  const wholeFile = info.isImage || info.durationUs <= 0 ? undefined : info.durationUs / 1_000_000;
+  return { ...flags, asset: assetId, duration: flags.duration ?? wholeFile };
 }
 
 function checkFlags(sub: Subcommand, flags: CliFlags): void {
