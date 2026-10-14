@@ -1,25 +1,17 @@
 #!/usr/bin/env node
-/* global process */
+/* global process, console */
 import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const distBin = join(__dirname, '..', 'dist', 'bin.js');
 
 if (existsSync(distBin)) {
-  await import(`file://${distBin.replace(/\\/g, '/')}`);
+  // pathToFileURL (not string concatenation) so install paths containing
+  // '#', '%', '?' or spaces still resolve. dist/bin.js runs the CLI itself.
+  await import(pathToFileURL(distBin).href);
 } else {
-  // If not yet compiled, run directly via TypeScript loader or dynamic import
-  try {
-    const srcBin = join(__dirname, '..', 'src', 'bin.ts');
-    // Use tsx or strip-types if available
-    const { main } = await import(`file://${srcBin.replace(/\\/g, '/')}`);
-    await main(process.argv.slice(2));
-  } catch (error) {
-    console.error('JOY Media CLI: Please build first via `pnpm --filter @joy-media/cli build`');
-    console.error(error);
-    process.exit(1);
-  }
+  console.error('JOY Media CLI is not built yet. Run: pnpm --filter @joy-media/cli build');
+  process.exit(1);
 }
