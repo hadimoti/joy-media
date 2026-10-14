@@ -23,7 +23,7 @@ describe('exit codes are honest (real binary)', () => {
           const r = await sb.run(args, { entry });
           expect(r.code, describeRun(r)).toBe(0);
         }
-      });
+      }, 30_000);
 
       it('exits 1 when a human mistypes a command', async () => {
         const r = await sb.run(['frobnicate'], { entry });

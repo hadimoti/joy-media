@@ -330,6 +330,21 @@ function withUsageHint(message: string, command: string | undefined): string {
   return `${sentence} Run "joy-media ${known ? `${command} ` : ''}--help" for usage.`;
 }
 
+function reportUsageError(command: string | undefined, message: string, json: boolean): void {
+  const detail = withUsageHint(message, command);
+  if (!json) {
+    logError(detail);
+    return;
+  }
+  if (command === 'render') {
+    // `render --json` is an NDJSON stream even when validation fails before the
+    // renderer starts. Keep the terminal failure machine-readable on stdout.
+    console.log(JSON.stringify({ type: 'error', code: 'usage_error', message: detail }));
+  } else {
+    printJson({ code: 'usage_error', error: detail });
+  }
+}
+
 function unknownCommandMessage(command: string): string {
   const guess = suggest(command, COMMANDS);
   const hint = guess ? ` Did you mean "${guess}"?` : '';
@@ -372,7 +387,7 @@ async function dispatch(argv: string[]): Promise<number> {
   }
 
   if (parsed.error) {
-    logError(withUsageHint(parsed.error.message, command));
+    reportUsageError(command, parsed.error.message, values.json === true);
     return 2;
   }
 
@@ -386,7 +401,7 @@ async function dispatch(argv: string[]): Promise<number> {
     flags = parseFlags(values);
   } catch (err) {
     if (err instanceof UsageError) {
-      logError(withUsageHint(err.message, command));
+      reportUsageError(command, err.message, values.json === true);
       if (process.env.JOY_CLI_DEBUG) {
         console.error(err.stack);
       }
