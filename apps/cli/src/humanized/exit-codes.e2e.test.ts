@@ -39,12 +39,12 @@ describe('exit codes are honest (real binary)', () => {
 
       it('exits non-zero when a project does not exist', async () => {
         const r = await sb.run(['render', '--project', 'does-not-exist', '--json'], { entry });
-        expect(r.code, describeRun(r)).not.toBe(0);
+        expect(r.code, describeRun(r)).toBe(1);
       });
 
       it('still delivers all stdout before exiting non-zero', async () => {
         const r = await sb.run(['render', '--project', 'does-not-exist', '--json'], { entry });
-        expect(r.code, describeRun(r)).not.toBe(0);
+        expect(r.code, describeRun(r)).toBe(1);
         const events = r.ndjson<{ type: string }>();
         expect(events.at(-1)?.type).toBe('error');
       });
