@@ -19,7 +19,11 @@ vi.mock('node:sqlite', () => ({
 const { runCli } = await import('../cli.js');
 
 describe('doctor with a failing core check', () => {
-  const savedEnv = { HOME: process.env.HOME, JOY_MEDIA_EDGE_URL: process.env.JOY_MEDIA_EDGE_URL };
+  const savedEnv = {
+    HOME: process.env.HOME,
+    USERPROFILE: process.env.USERPROFILE,
+    JOY_MEDIA_EDGE_URL: process.env.JOY_MEDIA_EDGE_URL,
+  };
   let home: string;
   let out: string[];
   let err: string[];
@@ -27,6 +31,7 @@ describe('doctor with a failing core check', () => {
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'joy-doctor-fail-'));
     process.env.HOME = home;
+    process.env.USERPROFILE = home;
     process.env.JOY_MEDIA_EDGE_URL = 'off';
     out = [];
     err = [];

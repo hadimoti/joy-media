@@ -500,10 +500,45 @@ function reportUsageError(command: string | undefined, message: string, json: bo
   console.log(JSON.stringify({ type: 'error', code: 'usage_error', message: detail }));
 }
 
-function unknownCommandMessage(command: string): string {
+function unknownCommandMessage(command: string, json = false): string {
   const guess = suggest(command, COMMANDS);
   const hint = guess ? ` Did you mean "${guess}"?` : '';
-  return `Unknown command "${command}".${hint} Run ${c('joy-media help', 'cyan')} for usage.`;
+  const help = json ? 'joy-media help' : c('joy-media help', 'cyan');
+  return `Unknown command "${command}".${hint} Run ${help} for usage.`;
+}
+
+/** Unknown command: exit 1, a document on stdout under `--json`, text on stderr otherwise. */
+function reportUnknownCommand(command: string, json: boolean): number {
+  if (json) {
+    const message = unknownCommandMessage(command, true);
+    console.log(JSON.stringify({ type: 'error', code: 'unknown_command', message }));
+  } else {
+    logError(unknownCommandMessage(command));
+  }
+  return 1;
+}
+
+/** `--json --help`: the same facts as the text help, as one document. */
+function printHelpJson(command: string | undefined): void {
+  const entry = (name: string, help: CommandHelp) => ({
+    name,
+    summary: help.summary,
+    usage: help.usage,
+    subcommands: (help.subcommands ?? []).map(([name, summary]) => ({ name, summary })),
+    options: (help.options ?? []).map(([flag, summary]) => ({ flag, summary })),
+    notes: help.notes ?? [],
+  });
+  if (command !== undefined && Object.hasOwn(COMMAND_HELP, command)) {
+    printJson(entry(command, COMMAND_HELP[command] as CommandHelp));
+    return;
+  }
+  printJson({
+    name: 'joy-media',
+    version: CLI_VERSION,
+    usage: 'joy-media <command> [subcommand] [options]',
+    exitCodes: { '0': 'ok', '1': 'failure', '2': 'usage error', '130': 'interrupted' },
+    commands: Object.entries(COMMAND_HELP).map(([name, help]) => entry(name, help)),
+  });
 }
 
 export async function runCli(argv: string[]): Promise<number> {
@@ -537,7 +572,8 @@ async function dispatch(argv: string[]): Promise<number> {
   if (parsed.help) {
     // `help project --help` -> project's help; `help --help` -> help's own help.
     const target = command === 'help' ? (subArgs[0] ?? 'help') : command;
-    if (target === undefined || !printCommandHelp(target)) printHelp();
+    if (values.json === true) printHelpJson(target);
+    else if (target === undefined || !printCommandHelp(target)) printHelp();
     return 0;
   }
 
@@ -547,7 +583,8 @@ async function dispatch(argv: string[]): Promise<number> {
   }
 
   if (command === undefined) {
-    printHelp();
+    if (values.json === true) printHelpJson(undefined);
+    else printHelp();
     return 0;
   }
 
@@ -589,17 +626,22 @@ async function dispatch(argv: string[]): Promise<number> {
         return await handleDoctorCommand(subArgs, flags);
       case 'help': {
         const target = subArgs[0];
+        if (flags.json) {
+          if (target !== undefined && !Object.hasOwn(COMMAND_HELP, target)) {
+            return reportUnknownCommand(target, true);
+          }
+          printHelpJson(target);
+          return 0;
+        }
         if (target === undefined) {
           printHelp();
           return 0;
         }
         if (printCommandHelp(target)) return 0;
-        logError(unknownCommandMessage(target));
-        return 1;
+        return reportUnknownCommand(target, false);
       }
       default:
-        logError(unknownCommandMessage(command));
-        return 1;
+        return reportUnknownCommand(command, flags.json);
     }
   } catch (err) {
     return handleUnhandledError(err, command);

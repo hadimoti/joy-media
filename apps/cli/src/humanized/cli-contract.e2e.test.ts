@@ -354,6 +354,56 @@ describe('help: an AI agent can discover every command', () => {
     expect(r.out).toMatch(/0 ok · 1 failure · 2 usage error · 130 interrupted/);
     for (const command of COMMANDS) expect(r.out).toContain(command);
   });
+
+  it('an AI agent gets help as one JSON document with --json, in either spelling', async () => {
+    for (const args of [['--json', '--help'], ['help', '--json'], ['--json']]) {
+      const r = await sb.run(args);
+      expect(r.code, describeRun(r)).toBe(0);
+      expect(r.err, describeRun(r)).toBe('');
+      expect(hasAnsi(r.out)).toBe(false);
+      const doc = r.json() as { commands: Array<{ name: string }>; exitCodes: object };
+      expect(doc.commands.map((c) => c.name)).toEqual(expect.arrayContaining(COMMANDS.slice(0, 7)));
+      expect(doc.exitCodes).toMatchObject({ '2': 'usage error' });
+    }
+  });
+
+  it('help for one command is one JSON document under --json', async () => {
+    for (const args of [
+      ['project', '--help', '--json'],
+      ['help', 'project', '--json'],
+    ]) {
+      const r = await sb.run(args);
+      expect(r.code, describeRun(r)).toBe(0);
+      expect(r.err, describeRun(r)).toBe('');
+      const doc = r.json() as { name: string; usage: string; subcommands: unknown[] };
+      expect(doc.name).toBe('project');
+      expect(doc.usage).toMatch(/joy-media project/);
+      expect(doc.subcommands.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('a mistyped command under --json is a machine-readable error (exit 1, stderr empty)', async () => {
+    for (const args of [
+      ['projct', '--json'],
+      ['help', 'projct', '--json'],
+    ]) {
+      const r = await sb.run(args);
+      expect(r.code, describeRun(r)).toBe(1);
+      expect(r.err, describeRun(r)).toBe('');
+      expect(hasAnsi(r.out)).toBe(false);
+      const doc = r.json() as { type: string; code: string; message: string };
+      expect(doc).toMatchObject({ type: 'error', code: 'unknown_command' });
+      expect(doc.message).toMatch(/Unknown command "projct"\. Did you mean "project"\?/);
+    }
+  });
+
+  it('benchmark usage errors under --json are single-line NDJSON events, like its stream', async () => {
+    const r = await sb.run(['benchmark', '--concurrency', '0', '--json']);
+    expect(r.code, describeRun(r)).toBe(2);
+    expect(r.err, describeRun(r)).toBe('');
+    expect(r.ndjson()).toHaveLength(1);
+    expect(r.ndjson()[0]).toMatchObject({ type: 'error', code: 'usage_error' });
+  });
 });
 
 describe('dispatcher ergonomics', () => {
