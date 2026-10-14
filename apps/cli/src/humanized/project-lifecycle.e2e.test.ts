@@ -139,17 +139,14 @@ describe('a creator starts a project', () => {
   // Bug in apps/cli/src/cli.ts (not owned by this suite): parseArgs runs with
   // `strict: false`, so `--name` with no value becomes boolean `true` and the
   // handler cannot tell it from "no name given". Expected: exit 2 and nothing created.
-  it.fails(
-    'rejects `--name` with no value instead of silently creating an untitled project',
-    async () => {
-      const r = await sb.run(['project', 'create', '--name']);
-      expect(r.code, describeRun(r)).toBe(2);
-    },
-  );
+  it('rejects `--name` with no value instead of silently creating an untitled project', async () => {
+    const r = await sb.run(['project', 'create', '--name']);
+    expect(r.code, describeRun(r)).toBe(2);
+  });
 
   // Same root cause: unknown flags are swallowed, so a typo like `--nmae` silently
   // produces "Untitled Project" - the typical AI mistake the CLI should catch.
-  it.fails("rejects a typo'd flag (--nmae) instead of silently ignoring it", async () => {
+  it("rejects a typo'd flag (--nmae) instead of silently ignoring it", async () => {
     const r = await sb.run(['project', 'create', '--nmae', 'Demo reel']);
     expect(r.code, describeRun(r)).toBe(2);
   });
