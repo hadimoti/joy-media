@@ -821,9 +821,22 @@ export function verifyRequestIntent(
     const moved = clips.filter(
       (clip) => startBefore.has(clip.id) && startBefore.get(clip.id) !== clip.startUs,
     );
-    const startsAtZero = (moved.length > 0 ? moved : clips).some((clip) => clip.startUs === 0);
+    // FT2 review HIGH: with a `before` project, only clips this run moved, added or changed
+    // count; an untouched clip that already sat at 0 does not prove "move clip C to start at 0".
+    const clipBefore = new Map(
+      (before?.compositions[before.rootCompositionId]?.tracks ?? [])
+        .flatMap((track) => track.clips)
+        .map((clip) => [clip.id, JSON.stringify(clip)] as const),
+    );
+    const touched = clips.filter((clip) => clipBefore.get(clip.id) !== JSON.stringify(clip));
+    const candidates = before === undefined ? clips : moved.length > 0 ? moved : touched;
+    const startsAtZero = candidates.some((clip) => clip.startUs === 0);
     (startsAtZero ? verified : unmet).push(
-      startsAtZero ? 'Request: clip starts at 0' : 'request asked for a clip starting at 0',
+      startsAtZero
+        ? 'Request: clip starts at 0'
+        : before === undefined || candidates.length > 0
+          ? 'request asked for a clip starting at 0'
+          : 'request asked for a clip starting at 0, but this run moved no clip',
     );
   }
   if (intent.trimRange) {
@@ -843,7 +856,11 @@ export function verifyRequestIntent(
   if (intent.look) {
     // Audit item 4: "both/all/every/each clip(s)" needs the look on every video clip.
     const videoClips = clips.filter((clip) => clip.kind === 'video');
-    const everyClip = /\b(?:both|all|every|each)\b/.test(request.toLowerCase());
+    // "all clips", "both videos", "each of the shots", "both of them"; not "keep all audio".
+    const everyClip =
+      /\b(?:both|all|every|each)\s+(?:of\s+)?(?:(?:the|my|these|those)\s+)?(?:\w+\s+)?(?:clips?|videos?|shots?|them)\b/.test(
+        request.toLowerCase(),
+      );
     const hasLook = everyClip
       ? videoClips.length > 0 &&
         videoClips.every((clip) => clip.kind === 'video' && clip.look?.preset === intent.look)
@@ -854,7 +871,7 @@ export function verifyRequestIntent(
   }
   if (intent.transition)
     verifyTransitionIntent(intent.transition, project, before, clips, verified, unmet);
-  if (before !== undefined && !/\b(?:gap|gaps|black|blank)\b/.test(request.toLowerCase())) {
+  if (before !== undefined && !requestsExplicitGap(request)) {
     // #7: a trim that leaves a hole between clips renders black there. Only holes this run
     // created and that have content after them count; a shorter ending is not a black gap.
     const durationUs = root?.durationUs ?? 0;
@@ -1154,6 +1171,23 @@ function partialLimitMessage(reason: string | undefined, value?: number): string
       ? ''
       : ` (${value} ${limit === 'step' ? 'steps' : 'tool calls'})`;
   return `Run stopped at the ${limit} limit${count} before the plan was final; nothing was applied.`;
+}
+
+/**
+ * True only for an explicit ask to leave a gap ("leave a 2s black gap", "add 2 seconds of black").
+ * "don't leave any gaps", "the title can stay blank" and "black and white look" are not.
+ */
+function requestsExplicitGap(request: string): boolean {
+  const text = request.toLowerCase().replace(/black[\s-]*(?:and|&)[\s-]*white/g, ' ');
+  const verb =
+    "(?<!\\b(?:don'?t|do not|never|not|no)\\s+)\\b(?:leave|keep|add|insert|put|create|want)";
+  const amount = '(?:\\d+(?:\\.\\d+)?\\s*(?:s|secs?|seconds?)\\s+)?';
+  return (
+    new RegExp(
+      `${verb}\\s+(?:a\\s+|an\\s+|the\\s+)?${amount}(?:black\\s+|blank\\s+|empty\\s+)?gaps?\\b`,
+    ).test(text) ||
+    new RegExp(`${verb}\\s+${amount.slice(0, -1)}\\s*of\\s+(?:black|blank)\\b`).test(text)
+  );
 }
 
 function formatSeconds(microseconds: number): string {
