@@ -8,6 +8,7 @@ import type {
 import type { CaptionDocumentV1, JoyProjectV1 } from '@joy-media/project-schema';
 import { sourceTimeAtVideoClipTime, validateJoyProjectV1 } from '@joy-media/project-schema';
 import { recomputeRootDuration } from '../utils/timeline-math.js';
+import { durationAtSpeedUs, speedProblem } from '../utils/clip-speed.js';
 import { buildFfmpegFramePlan } from '../render/ffmpeg-plan.js';
 import { resolveFfmpegExecutable } from '../render/ffmpeg-run.js';
 import { DEFAULT_JOY_AGENT_LIMITS } from '@joy-media/joy-agent-engine';
@@ -410,6 +411,14 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
             `Track ${operation.trackId} cannot host ${found?.clip.kind ?? 'this'} clips.`,
           );
       }
+      if (operation.kind === 'set-speed') {
+        const problem = speedProblem(operation.rate);
+        if (problem) errors.push(`Operation ${operation.id}: ${problem}`);
+        if (found && found.clip.kind !== 'video')
+          errors.push(
+            `Speed changes need a video clip; ${operation.clipId} is ${found.clip.kind}.`,
+          );
+      }
       if (operation.kind === 'trim' && operation.sourceOutUs <= operation.sourceInUs)
         errors.push(`Operation ${operation.id} sourceOutUs must be after sourceInUs.`);
       if (operation.kind === 'trim' && operation.sourceOutUs - operation.sourceInUs < minimumFrame)
@@ -770,6 +779,38 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
             }
           }
           if (!found) errors.push(`Clip ${op.clipId} not found for trim`);
+        } else if (op.kind === 'set-speed') {
+          const track = tracks.find((candidate) =>
+            candidate.clips.some((clip) => clip.id === op.clipId),
+          );
+          const clip = track?.clips.find((candidate) => candidate.id === op.clipId);
+          if (!track || !clip) {
+            errors.push(`Clip ${op.clipId} not found for set-speed`);
+            continue;
+          }
+          if (clip.kind !== 'video' || clip.timeRemap !== undefined) {
+            errors.push(`Speed of ${op.clipId} cannot be changed (needs a plain video clip).`);
+            continue;
+          }
+          const nextDurationUs = durationAtSpeedUs(clip, op.rate);
+          if (nextDurationUs < oneFrameUs(root.frameRate.num, root.frameRate.den)) {
+            errors.push(`Speed ${op.rate}x makes ${op.clipId} shorter than one frame.`);
+            continue;
+          }
+          if (
+            track.clips.some(
+              (other) =>
+                other.id !== clip.id &&
+                clip.startUs < other.startUs + other.durationUs &&
+                clip.startUs + nextDurationUs > other.startUs,
+            )
+          ) {
+            errors.push(`Speed ${op.rate}x makes ${op.clipId} overlap another clip on ${track.id}`);
+            continue;
+          }
+          clip.durationUs = nextDurationUs;
+          clip.playbackRate = op.rate;
+          recordApplied(op.id);
         } else if (op.kind === 'split') {
           let found = false;
           for (const track of tracks) {

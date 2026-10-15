@@ -308,7 +308,8 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
   }
 
   if (runResult.partialReason === 'no-plan' || (options.apply && !bridge.hasSubmittedPlan())) {
-    errors = [...errors, 'No plan was submitted after the single retry.'];
+    // The engine retries only after a frame-only turn; do not claim a retry that did not happen.
+    errors = [...errors, 'No plan was submitted, so nothing was applied.'];
   } else if (runResult.status === 'partial') {
     errors = [...errors, partialLimitMessage(runResult.partialReason)];
   }
@@ -317,7 +318,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     resultText:
       runResult.status === 'partial'
         ? runResult.partialReason === 'no-plan'
-          ? 'Partial run: no plan was submitted after one retry. Nothing was applied.'
+          ? 'Partial run: no plan was submitted. Nothing was applied.'
           : partialLimitMessage(runResult.partialReason)
         : truthfulAgentSummary({
             applyRequested: options.apply === true,
@@ -363,6 +364,7 @@ export function missingOperationCoverage(
     const covered =
       (kind === 'trim' && (checks.has('trim') || intent.trimRange !== undefined)) ||
       (kind === 'add-effect' && (checks.has('look') || intent.look !== undefined)) ||
+      (kind === 'set-speed' && (checks.has('speed') || intent.speed !== undefined)) ||
       ((kind === 'create-text' || kind === 'set-text' || kind === 'update-text') &&
         (checks.has('text') || intent.centerText || intent.textSize !== undefined)) ||
       (kind === 'set-property' && intent.centerText) ||
@@ -383,6 +385,8 @@ interface RequestIntent {
   trimRange?: readonly [number, number];
   look?: 'crt' | 'bw' | 'warm' | 'cool';
   durationUs?: number;
+  /** Requested playback rate ("2x speed", "twice as fast", "half speed"). */
+  speed?: number;
   /** "make the title smaller/bigger": compared with the text before the run (F3). */
   textSize?: 'smaller' | 'larger';
   /** Quoted caption text with the time range the request gave it (`"Hi" from 0s to 4s`). */
@@ -391,6 +395,21 @@ interface RequestIntent {
 
 const QUOTED_TIMED_TEXT =
   /["“«]([^"“”«»]{1,400})["”»]\s*,?\s*\(?\s*(?:from|between|at|از)?\s*(\d+(?:\.\d+)?)\s*(?:s|secs?|seconds?|ثانیه)?\s*(?:to|until|and|[-–]|تا)\s*(\d+(?:\.\d+)?)\s*(?:s\b|secs?\b|seconds?\b|ثانیه)?/giu;
+
+function parseRequestedSpeed(normalized: string): number | undefined {
+  if (/\btwice as fast\b|\bdouble (?:the )?speed\b/.test(normalized)) return 2;
+  if (/\bhalf (?:the )?speed\b|\bhalf as fast\b/.test(normalized)) return 0.5;
+  const multiple =
+    /(\d+(?:\.\d+)?)\s*[x×]\s*(?:speed|faster|slower|playback)?/.exec(normalized) ??
+    /\bspeed (?:of |to )?(\d+(?:\.\d+)?)\s*[x×]?/.exec(normalized);
+  if (
+    !multiple?.[1] ||
+    !/\b(speed|fast|faster|slow|slower|playback|slow-?mo)\b|سرعت|تند|کند/.test(normalized)
+  )
+    return undefined;
+  const rate = Number(multiple[1]);
+  return rate > 0 ? rate : undefined;
+}
 
 function parseCaptionTimes(request: string): { text: string; startUs: number; endUs: number }[] {
   return [...request.matchAll(QUOTED_TIMED_TEXT)].flatMap((match) => {
@@ -444,6 +463,8 @@ function parseRequestIntent(request: string): RequestIntent {
     )
   )
     intent.textSize = 'larger';
+  const speed = parseRequestedSpeed(normalized);
+  if (speed !== undefined) intent.speed = speed;
   const captionTimes = parseCaptionTimes(request);
   if (captionTimes.length > 0) intent.captionTimes = captionTimes;
   return intent;
@@ -529,6 +550,17 @@ export function verifyRequestIntent(
     );
     (hasLook ? verified : unmet).push(
       hasLook ? `Request: ${intent.look} look` : `request asked for ${intent.look} look`,
+    );
+  }
+  if (intent.speed !== undefined) {
+    const rate = intent.speed;
+    const sped = clips.some(
+      (clip) => clip.kind === 'video' && Math.abs((clip.playbackRate ?? 1) - rate) < 1e-6,
+    );
+    (sped ? verified : unmet).push(
+      sped
+        ? `Request: ${rate}x speed`
+        : `request asked for ${rate}x speed; no clip plays at ${rate}x`,
     );
   }
   if (intent.textSize !== undefined && before !== undefined) {
@@ -658,6 +690,11 @@ export function verifyPlanChecklist(
         verified.push(`Trim ${item.clipId}: source ${item.sourceInUs}–${item.sourceOutUs} µs`);
       else
         unmet.push(`trim ${item.clipId} expected source ${item.sourceInUs}–${item.sourceOutUs} µs`);
+    } else if (item.kind === 'speed') {
+      const clip = clips.find((candidate) => candidate.id === item.clipId);
+      if (clip?.kind === 'video' && Math.abs((clip.playbackRate ?? 1) - item.rate) < 1e-6)
+        verified.push(`Speed ${item.clipId}: ${item.rate}x`);
+      else unmet.push(`speed ${item.rate}x on clip ${item.clipId}`);
     } else if (item.kind === 'look') {
       const clip = clips.find((candidate) => candidate.id === item.clipId);
       if (clip?.kind === 'video' && clip.look?.preset === item.look)

@@ -69,6 +69,7 @@ export interface CliFlags {
   kind: string | undefined;
   type: string | undefined;
   intensity: number | undefined;
+  rate: number | undefined;
   scanlineStrength: number | undefined;
   noiseAmount: number | undefined;
   insecureFileStore: boolean;
@@ -199,6 +200,7 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     kind: typeof v.kind === 'string' ? v.kind : undefined,
     type: typeof v.type === 'string' ? v.type : undefined,
     intensity: parseFloatFlag('intensity', v.intensity, { min: 0, max: 1, allowZero: true }),
+    rate: parseFloatFlag('rate', v.rate, { min: 0.1, max: 8 }),
     scanlineStrength: parseFloatFlag('scanline-strength', v['scanline-strength'], {
       min: 0,
       max: 1,
@@ -273,6 +275,7 @@ const CLI_OPTIONS = {
   kind: { type: 'string' },
   type: { type: 'string' },
   intensity: { type: 'string' },
+  rate: { type: 'string' },
   'scanline-strength': { type: 'string' },
   'noise-amount': { type: 'string' },
   'insecure-file-store': { type: 'boolean', default: false },

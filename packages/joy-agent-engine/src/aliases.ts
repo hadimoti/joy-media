@@ -76,6 +76,10 @@ const KIND_SYNONYMS: Readonly<Record<string, string>> = {
   'create-caption': 'create-text',
   title: 'create-text',
   'add-title': 'create-text',
+  speed: 'set-speed',
+  'change-speed': 'set-speed',
+  'set-playback-rate': 'set-speed',
+  'playback-rate': 'set-speed',
   update: 'update-text',
   'edit-text': 'update-text',
   'modify-text': 'update-text',
@@ -141,7 +145,29 @@ export function normalizeTimelineOperationAliases(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
   return withIds(
     value.map((candidate, index) => (isRecord(candidate) ? withKind(candidate, index) : candidate)),
+  ).map((candidate) =>
+    isRecord(candidate) && candidate.kind === 'set-speed' ? setSpeedAliases(candidate) : candidate,
   );
+}
+
+/** `"2x"`/`2` under `rate`, `speed` or `playbackRate`. */
+function setSpeedAliases(candidate: Record<string, unknown>): Record<string, unknown> {
+  const { speed, playbackRate, ...rest } = candidate;
+  const toRate = (value: unknown): unknown => {
+    if (typeof value !== 'string') return value;
+    const match = /^\s*(\d+(?:\.\d+)?)\s*[x×]?\s*$/i.exec(value);
+    return match ? Number(match[1]) : value;
+  };
+  const rate = pickAlias(
+    'speed rate',
+    [
+      ['rate', toRate(rest.rate)],
+      ['speed', toRate(speed)],
+      ['playbackRate', toRate(playbackRate)],
+    ],
+    { prefix: `set-speed ${String(candidate.id)}` },
+  );
+  return rate === undefined ? rest : { ...rest, rate };
 }
 
 /**
