@@ -1255,31 +1255,47 @@ function formatSeconds(microseconds: number): string {
 }
 
 /**
- * FT3b: the top/bottom words that place the centred text. Fails safe (no word, so vertical
- * centring is required): only clauses that ask for the centring count, a clause that names another
- * subject (logo, image, clip) is ignored, words after a negation ("not at the bottom", "avoid the
- * bottom", "نه پایین") are ignored, and بالا/پایین only match as whole words ("بالاخره" is not "top").
+ * FT3d: the top/bottom placement that limits "center" to the horizontal axis. An ALLOW-LIST, so it
+ * fails safe (vertical centring is required unless a placement is explicit): only "at/on/near the
+ * top/bottom", "top-center"/"bottom-center", "lower third", and Persian "vasat/dar bala|paeen (safhe)"
+ * count, and only in a clause that asks for the centring, names no other subject (logo, image, clip)
+ * and has no contrast or negation word ("instead of at the bottom", "except the bottom", "from the
+ * bottom to the center", "so the bottom stays clear", "above the lower third", "be jaye", "khali").
  */
 function textPlacementWords(lower: string): { wantsTop: boolean; wantsBottom: boolean } {
   const centre = /\b(?:center|centre|centered|centred|middle|horizontally)\b|\u0648\u0633\u0637/u;
   const otherSubject =
     /\b(?:logos?|images?|pictures?|photos?|videos?|clips?|stickers?|watermarks?)\b|\u0644\u0648\u06af\u0648|\u0639\u06a9\u0633|\u062a\u0635\u0648\u06cc\u0631|\u06a9\u0644\u06cc\u067e|\u0648\u06cc\u062f\u06cc\u0648/u;
-  const negation =
-    /\b(?:not|no|never|avoid|without|don'?t)\b|(?<![\p{L}\p{M}])(?:\u0646\u0647|\u0645\u0628\u0627\u062f\u0627|\u0628\u062f\u0648\u0646|\u0646\u0628\u0627\u06cc\u062f)(?![\p{L}\p{M}])/u;
-  const top = /\b(?:top|upper)\b|(?<![\p{L}\p{M}])\u0628\u0627\u0644\u0627(?![\p{L}\p{M}])/u;
-  const bottom =
-    /\b(?:bottom|lower)\b|(?<![\p{L}\p{M}])\u067e\u0627\u06cc(?:\u06cc|\u064a)\u0646(?![\p{L}\p{M}])/u;
+  const contrast =
+    /\b(?:not|no|never|avoid|without|don'?t|instead|rather|except|from|clear|empty|above|below|away)\b|(?<![\p{L}\p{M}])(?:\u0646\u0647|\u0645\u0628\u0627\u062f\u0627|\u0628\u062f\u0648\u0646|\u0646\u0628\u0627\u06cc\u062f|\u0628\u0647\s*\u062c\u0627\u06cc|\u062e\u0627\u0644\u06cc)(?![\p{L}\p{M}])/u;
+  // "dar/vasat bala|paeen", optionally with ezafe (kasra or ye) and "safhe": "vasat balaye safhe".
+  const faPlace = (word: string): RegExp =>
+    new RegExp(
+      '(?<![\\p{L}\\p{M}])(?:\u062f\u0631|\u0648\u0633\u0637)\\s+' +
+        word +
+        '(?:\u0650|\u06cc)?(?![\\p{L}\\p{M}])',
+      'u',
+    );
+  const top = [
+    /\b(?:at|on|near)\s+the\s+(?:very\s+)?top\b/,
+    /\btop[-\s](?:center|centre|middle)\b/,
+    faPlace('\u0628\u0627\u0644\u0627'),
+  ];
+  const bottom = [
+    /\b(?:at|on|near)\s+the\s+(?:very\s+)?bottom\b/,
+    /\bbottom[-\s](?:center|centre|middle)\b/,
+    /\blower\s+third\b/,
+    faPlace('\u067e\u0627\u06cc(?:\u06cc|\u064a)\u0646'),
+  ];
   let wantsTop = false;
   let wantsBottom = false;
   const parts = lower
     .split(CLAUSE_SPLIT)
     .flatMap((clause) => clause.split(/\band\b|\s\u0648\s/u))
-    .filter((part) => centre.test(part) && !otherSubject.test(part));
+    .filter((part) => centre.test(part) && !otherSubject.test(part) && !contrast.test(part));
   for (const part of parts) {
-    const negated = negation.exec(part);
-    const live = negated ? part.slice(0, negated.index) : part;
-    wantsTop ||= top.test(live);
-    wantsBottom ||= bottom.test(live);
+    wantsTop ||= top.some((pattern) => pattern.test(part));
+    wantsBottom ||= bottom.some((pattern) => pattern.test(part));
   }
   return { wantsTop, wantsBottom };
 }

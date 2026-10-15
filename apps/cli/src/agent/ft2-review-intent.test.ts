@@ -209,3 +209,51 @@ describe('FT3b: top/bottom words only count in the centred-text clause', () => {
     ).toEqual([]);
   });
 });
+
+describe('FT3d: top/bottom placement is an allow-list (fails safe to vertical centring)', () => {
+  const at = (y: number) =>
+    fixtureProject({
+      clips: [{ id: 'clip-a', assetId: 'asset-a', startUs: 0, durationUs: 8_000_000 }],
+      texts: [{ id: 't1', text: 'Welcome', startUs: 0, durationUs: 4_000_000, y }],
+    }) as unknown as JoyProjectV1;
+  it.each([
+    ['center the text instead of at the bottom', 0.32],
+    ['center the text rather than at the bottom', 0.32],
+    ['center the text anywhere except the bottom', 0.32],
+    ['move the text from the bottom to the center', 0.32],
+    [
+      '\u0645\u062a\u0646 \u0631\u0627 \u0628\u0647 \u062c\u0627\u06cc \u067e\u0627\u06cc\u06cc\u0646 \u0648\u0633\u0637 \u0628\u0630\u0627\u0631',
+      0.32,
+    ],
+    ['center the text so the bottom stays clear', 0.32],
+    [
+      '\u0645\u062a\u0646 \u0631\u0627 \u0648\u0633\u0637 \u0628\u0630\u0627\u0631 \u06a9\u0647 \u067e\u0627\u06cc\u06cc\u0646 \u062e\u0627\u0644\u06cc \u0628\u0645\u0648\u0646\u0647',
+      0.32,
+    ],
+    ['center the title keeping the top empty', -0.7],
+    ['center the text above the lower third', 0.32],
+  ])('%s does not verify a caption at the edge (y=%s)', (request, y) => {
+    const result = verifyRequestIntent(at(y), request);
+    expect(result.verified.filter((item) => /centered/.test(item))).toEqual([]);
+    expect(result.unmet.some((item) => /centered/.test(item))).toBe(true);
+  });
+  it.each([
+    ['Welcome, centred horizontally near the bottom', 0.32, 'bottom'],
+    ['center the text on the lower third', 0.32, 'bottom'],
+    ['bottom-center the text', 0.32, 'bottom'],
+    [
+      '\u0645\u062a\u0646 \u0631\u0627 \u0648\u0633\u0637 \u067e\u0627\u06cc\u06cc\u0646\u0650 \u0635\u0641\u062d\u0647 \u0628\u0630\u0627\u0631',
+      0.32,
+      'bottom',
+    ],
+    [
+      '\u0645\u062a\u0646 \u0631\u0627 \u0648\u0633\u0637 \u0628\u0627\u0644\u0627\u06cc \u0635\u0641\u062d\u0647 \u0628\u0630\u0627\u0631',
+      -0.7,
+      'top',
+    ],
+  ])('explicit placement %s verifies at the %s', (request, y, place) => {
+    expect(verifyRequestIntent(at(y), request).verified).toContain(
+      `Request: text centered horizontally at the ${place}`,
+    );
+  });
+});
