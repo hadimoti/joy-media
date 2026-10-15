@@ -408,10 +408,19 @@ export class JoyAgentEngine {
     }
     const toolCalls = result.steps.reduce((count, step) => count + step.toolCalls.length, 0);
     const noPlan = this.options.bridge.hasSubmittedPlan?.() === false;
+    // A limit only cuts a plan short when the model was still working. When the last tool call
+    // of the run was submit_plan, the plan is final and was checked by submit_plan itself.
+    const planFinal =
+      this.options.bridge.hasSubmittedPlan?.() === true &&
+      result.steps.flatMap((step) => step.toolCalls).at(-1)?.toolName === 'submit_plan';
     const stepLimitHit =
-      result.steps.length >= maxSteps && result.steps.at(-1)?.finishReason === 'tool-calls';
+      !planFinal &&
+      result.steps.length >= maxSteps &&
+      result.steps.at(-1)?.finishReason === 'tool-calls';
     const toolCallLimitHit =
-      toolCalls >= this.limits.maxToolCalls && result.steps.at(-1)?.finishReason === 'tool-calls';
+      !planFinal &&
+      toolCalls >= this.limits.maxToolCalls &&
+      result.steps.at(-1)?.finishReason === 'tool-calls';
     if (result.text.length > this.limits.toolPayloadBytes)
       throw new Error('JOY_AGENT_INVALID_TOOL');
     emit({ type: 'text-delta', text: result.text });

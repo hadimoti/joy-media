@@ -305,6 +305,8 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
 
   if (runResult.partialReason === 'no-plan' || (options.apply && !bridge.hasSubmittedPlan())) {
     errors = [...errors, 'No plan was submitted after the single retry.'];
+  } else if (runResult.status === 'partial') {
+    errors = [...errors, partialLimitMessage(runResult.partialReason)];
   }
 
   return {
@@ -312,7 +314,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
       runResult.status === 'partial'
         ? runResult.partialReason === 'no-plan'
           ? 'Partial run: no plan was submitted after one retry. Nothing was applied.'
-          : `Partial plan stopped at the ${runResult.partialReason ?? 'safety'} limit. Nothing was applied.`
+          : partialLimitMessage(runResult.partialReason)
         : truthfulAgentSummary({
             applyRequested: options.apply === true,
             applied,
@@ -589,4 +591,10 @@ export function truthfulAgentSummary(input: {
   if (input.errors.length > 0)
     return `No project changes were made. Requests not staged: ${input.errors.join('; ')}`;
   return 'No project changes were made.';
+}
+
+function partialLimitMessage(reason: string | undefined): string {
+  const limit =
+    reason === 'step-limit' ? 'step' : reason === 'tool-call-limit' ? 'tool-call' : 'safety';
+  return `Run stopped at the ${limit} limit before the plan was final; nothing was applied.`;
 }
