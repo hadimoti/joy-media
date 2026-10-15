@@ -67,52 +67,89 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** `type` is accepted for an operation's `kind` (timeline and document operations). */
+/** Kind names models use for the operations Joy has (BUGS.md 9: h3, h5, k2, k3, k6). */
+const KIND_SYNONYMS: Readonly<Record<string, string>> = {
+  text: 'create-text',
+  'add-text': 'create-text',
+  caption: 'create-text',
+  'add-caption': 'create-text',
+  'create-caption': 'create-text',
+  title: 'create-text',
+  'add-title': 'create-text',
+  look: 'add-effect',
+  'apply-look': 'add-effect',
+  'set-look': 'add-effect',
+  'apply-effect': 'add-effect',
+  effect: 'add-effect',
+};
+
+function canonicalKind(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const name = value.trim().toLowerCase();
+  return KIND_SYNONYMS[name] ?? name;
+}
+
+/** `type`, `operation`, `op` and `action` are accepted for an operation's `kind`. */
 function withKind(record: Record<string, unknown>, index: number): Record<string, unknown> {
-  const { type, ...rest } = record;
-  if (type === undefined) return record;
-  if (rest.kind === undefined) return { ...rest, kind: type };
-  if (rest.kind === type) return rest;
-  // On add-effect, `type` names the look (like the CLI's --type flag).
-  if (rest.kind === 'add-effect' && normalizeLookName(type) !== undefined) return record;
-  throw conflict(
-    'operation kind',
-    [
-      ['kind', rest.kind],
-      ['type', type],
-    ],
-    `operation ${index + 1}`,
+  const { type, operation, op, action, ...rest } = record;
+  // On add-effect, `type` names the look (like the CLI's --type flag), so it is kept.
+  const typeIsLook =
+    canonicalKind(rest.kind ?? operation ?? op ?? action) === 'add-effect' &&
+    normalizeLookName(type) !== undefined;
+  const entries: AliasEntry[] = [
+    ['kind', rest.kind],
+    ...(typeIsLook ? [] : ([['type', type]] as AliasEntry[])),
+    ['operation', operation],
+    ['op', op],
+    ['action', action],
+  ];
+  const kind = pickAlias('operation kind', entries, {
+    prefix: `operation ${index + 1}`,
+    normalize: canonicalKind,
+  });
+  if (kind === undefined) return record;
+  return { ...rest, ...(typeIsLook ? { type } : {}), kind: canonicalKind(kind) };
+}
+
+/** Gives every operation without an `id` a unique `<kind>-N` id. */
+function withIds(operations: readonly unknown[]): unknown[] {
+  const used = new Set(
+    operations.flatMap((candidate) =>
+      isRecord(candidate) && typeof candidate.id === 'string' ? [candidate.id] : [],
+    ),
+  );
+  const next = (kind: unknown): string => {
+    const base = kind === 'create-text' ? 'text' : typeof kind === 'string' ? kind : 'op';
+    let n = 1;
+    while (used.has(`${base}-${n}`)) n += 1;
+    used.add(`${base}-${n}`);
+    return `${base}-${n}`;
+  };
+  return operations.map((candidate) =>
+    isRecord(candidate) && candidate.id === undefined
+      ? { ...candidate, id: next(candidate.kind) }
+      : candidate,
   );
 }
 
 export function normalizeTimelineOperationAliases(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
-  return value.map((candidate, index) =>
-    isRecord(candidate) ? withKind(candidate, index) : candidate,
+  return withIds(
+    value.map((candidate, index) => (isRecord(candidate) ? withKind(candidate, index) : candidate)),
   );
 }
 
 /**
- * Document operation aliases models commonly send: `type` for `kind`; for add-effect,
- * `clipId` for `objectId` and `look`/`effect`/`type` for `effectId` (case-insensitive);
- * for create-text, a missing `id` (`text-N`) and `startUs` (0).
+ * Document operation aliases models commonly send: `type`/`operation`/`op` for `kind` and kind
+ * synonyms (`text`, `caption`, `look`, …); a missing `id`; for add-effect, `clipId` for
+ * `objectId` and `look`/`effect`/`type` for `effectId` (case-insensitive); for create-text,
+ * `timelineStartUs`/`start` for `startUs`, `endUs` for `durationUs` and `position`.
  */
 export function normalizeDocumentOperationAliases(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
-  const withKinds = value.map((candidate, index) =>
-    isRecord(candidate) ? withKind(candidate, index) : candidate,
+  const withKinds = withIds(
+    value.map((candidate, index) => (isRecord(candidate) ? withKind(candidate, index) : candidate)),
   );
-  const usedIds = new Set(
-    withKinds.flatMap((candidate) =>
-      isRecord(candidate) && typeof candidate.id === 'string' ? [candidate.id] : [],
-    ),
-  );
-  const nextTextId = (): string => {
-    let n = 1;
-    while (usedIds.has(`text-${n}`)) n += 1;
-    usedIds.add(`text-${n}`);
-    return `text-${n}`;
-  };
   return withKinds.map((candidate) => {
     if (!isRecord(candidate)) return candidate;
     if (candidate.kind === 'add-effect') {
@@ -141,13 +178,59 @@ export function normalizeDocumentOperationAliases(value: unknown): unknown {
         ...(effectId === undefined ? {} : { effectId }),
       };
     }
-    if (candidate.kind === 'create-text') {
-      return {
-        ...candidate,
-        ...(candidate.id === undefined ? { id: nextTextId() } : {}),
-        ...(candidate.startUs === undefined ? { startUs: 0 } : {}),
-      };
-    }
+    if (candidate.kind === 'create-text') return createTextAliases(candidate);
     return candidate;
   });
+}
+
+/** create-text placements by name; `y` is the CLI's upward offset from the title line. */
+const TEXT_POSITIONS: Readonly<Record<string, { readonly x?: number; readonly y?: number }>> = {
+  center: { x: 0 },
+  centre: { x: 0 },
+  bottom: {},
+  'bottom-center': { x: 0 },
+};
+
+function createTextAliases(candidate: Record<string, unknown>): Record<string, unknown> {
+  const prefix = `create-text ${String(candidate.id)}`;
+  const { timelineStartUs, start, endUs, position, ...rest } = candidate;
+  const startUs = pickAlias(
+    'start',
+    [
+      ['startUs', rest.startUs],
+      ['timelineStartUs', timelineStartUs],
+      ['start', start],
+    ],
+    { prefix },
+  );
+  let durationUs = rest.durationUs;
+  if (endUs !== undefined) {
+    const fromEnd =
+      typeof endUs === 'number' ? endUs - (typeof startUs === 'number' ? startUs : 0) : endUs;
+    durationUs = pickAlias(
+      'duration',
+      [
+        ['durationUs', rest.durationUs],
+        ['endUs - startUs', fromEnd],
+      ],
+      { prefix },
+    );
+  }
+  let placement: { readonly x?: number; readonly y?: number } = {};
+  if (position !== undefined) {
+    const named =
+      typeof position === 'string' ? TEXT_POSITIONS[position.trim().toLowerCase()] : undefined;
+    if (named === undefined)
+      throw new Error(
+        `${prefix}: position must be one of ${Object.keys(TEXT_POSITIONS).join(', ')} (got ${JSON.stringify(position)}); use x/y for other placements.`,
+      );
+    placement = named;
+  }
+  return {
+    ...rest,
+    ...(placement.x !== undefined && rest.x === undefined ? { x: placement.x } : {}),
+    ...(placement.y !== undefined && rest.y === undefined ? { y: placement.y } : {}),
+    ...(durationUs === undefined ? {} : { durationUs }),
+    startUs: startUs ?? 0,
+  };
 }
