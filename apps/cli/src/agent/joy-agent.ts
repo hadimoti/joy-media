@@ -829,7 +829,26 @@ export function verifyRequestIntent(
         .map((clip) => [clip.id, JSON.stringify(clip)] as const),
     );
     const touched = clips.filter((clip) => clipBefore.get(clip.id) !== JSON.stringify(clip));
-    const candidates = before === undefined ? clips : moved.length > 0 ? moved : touched;
+    // A named clip ("move clip C to start at 0") must itself be changed by this run and sit at 0.
+    // Letters and numbers name clips by their order before this run.
+    const namedRef = /\bclip\s+([a-z0-9][\w-]*)\b/i.exec(request)?.[1];
+    const orderBefore = [
+      ...(before?.compositions[before.rootCompositionId]?.tracks ?? []).flatMap(
+        (track) => track.clips,
+      ),
+    ].sort((left, right) => left.startUs - right.startUs);
+    const namedId =
+      namedRef === undefined
+        ? undefined
+        : resolveClipRef(namedRef, before === undefined ? clips : orderBefore);
+    const candidates =
+      namedId !== undefined
+        ? (before === undefined ? clips : touched).filter((clip) => clip.id === namedId)
+        : before === undefined
+          ? clips
+          : moved.length > 0
+            ? moved
+            : touched;
     const startsAtZero = candidates.some((clip) => clip.startUs === 0);
     (startsAtZero ? verified : unmet).push(
       startsAtZero

@@ -54,6 +54,42 @@ describe('HIGH: start-at-0 needs a clip this run moved', () => {
   });
 });
 
+describe('named clip: start-at-0 needs THAT clip changed and at 0', () => {
+  it('trim-only-A plus "move clip C to start at 0" is unmet', () => {
+    const before = clipsAt(5_000_000);
+    const after = clipsAt(3_000_000); // only A changed; A sits at 0
+    const result = verifyRequestIntent(after, 'move clip C to start at 0', before);
+    expect(result.verified).not.toContain('Request: clip starts at 0');
+    expect(
+      result.unmet.some((item) => item.startsWith('request asked for a clip starting at 0')),
+    ).toBe(true);
+  });
+
+  it('C moved to 0 is verified', () => {
+    const result = verifyRequestIntent(
+      clipsAt(5_000_000, 0),
+      'move clip C to start at 0',
+      clipsAt(5_000_000),
+    );
+    expect(result.verified).toContain('Request: clip starts at 0');
+  });
+
+  it('B moved to 0 does not satisfy a request naming C', () => {
+    const before = clipsAt(5_000_000);
+    const after = fixtureProject({
+      assets: { a: 30_000_000, b: 30_000_000, c: 30_000_000 },
+      clips: [
+        { id: 'clip-b', assetId: 'b', startUs: 0, durationUs: 5_000_000 },
+        { id: 'clip-a', assetId: 'a', startUs: 5_000_000, durationUs: 5_000_000 },
+        { id: 'clip-c', assetId: 'c', startUs: 10_000_000, durationUs: 5_000_000 },
+      ],
+    }) as unknown as JoyProjectV1;
+    expect(verifyRequestIntent(after, 'move clip C to start at 0', before).verified).not.toContain(
+      'Request: clip starts at 0',
+    );
+  });
+});
+
 describe("SHOULD: 'all clips' look rule", () => {
   const withLook = () => {
     const project = clipsAt(5_000_000) as unknown as {
