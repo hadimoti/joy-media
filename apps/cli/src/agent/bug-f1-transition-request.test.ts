@@ -188,6 +188,38 @@ describe('F1 request verification (FT1 review)', () => {
     expect(check(withT(before, 'clip-a', 'clip-b'), request, before).unmet).toEqual([]);
   });
 
+  it.each([
+    ['Y15', 'avoid jump cuts with a crossfade between A and B'],
+    ['Y7', 'Never cut abruptly - use a crossfade between A and B'],
+    ['Y8', 'no worries crossfade A and B'],
+  ])('%s: an English negation of something else keeps the check (%s)', (_id, request) => {
+    const before = base();
+    expect(check(before, request, before).unmet).toEqual([
+      'request asked for a crossfade between a and b, but this run added none there',
+    ]);
+    expect(check(withT(before, 'clip-a', 'clip-b'), request, before).unmet).toEqual([]);
+  });
+
+  it('Y9: a hard cut between A and B does not require A-B; B-C is required', () => {
+    const before = base();
+    const request = 'hard cut between A and B and a crossfade between B and C';
+    expect(check(before, request, before).unmet).toEqual([
+      'request asked for a crossfade between b and c, but this run added none there',
+    ]);
+    expect(check(withT(before, 'clip-b', 'clip-c'), request, before).unmet).toEqual([]);
+  });
+
+  it('Y13: a timestamp colon (0:05) does not split the clause', () => {
+    const before = base();
+    const request = 'add a crossfade at 0:05 between A and B';
+    expect(check(before, request, before).unmet).toContain(
+      'request asked for a crossfade between a and b, but this run added none there',
+    );
+    const done = check(withT(before, 'clip-a', 'clip-b'), request, before);
+    expect(done.verified).toContain('Request: crossfade between a and b');
+    expect(done.unmet.filter((line) => /crossfade|transition/.test(line))).toEqual([]);
+  });
+
   it('P4: Persian "انتقال" meaning "move" is not a transition request', () => {
     const result = check(base(), 'کلیپ دوم را به ابتدا انتقال بده');
     expect(result.unmet.join(' ')).not.toMatch(/transition|crossfade/i);

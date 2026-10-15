@@ -436,8 +436,17 @@ const TRANSITION_WORDS = new RegExp(
 );
 // Negation spans. Each match covers the negation AND the transition word it negates, so stripping
 // the matches leaves any positive transition request in the same clause intact.
+const NEGATED_PAIR_TAIL =
+  '(?:\\s+between\\s+(?:the\\s+)?(?:clips?\\s+)?[a-z0-9][\\w-]*\\s+(?:and|&)\\s+(?:the\\s+)?(?:clips?\\s+)?[a-z0-9][\\w-]*)?';
 const TRANSITION_NEGATED_SOURCE =
-  "(?:\\b(?:no|without|zero|never|avoid|dont)\\b|\\bdo not\\b|\\bdon[\u2019']t\\b)[^.]{0,30}?\\b(?:transitions?|cross-?fades?|dissolves?)\\b|\\bhard cuts?\\b|" +
+  // English: the negation word, an optional verb, an optional determiner, then the transition word,
+  // with nothing else between (so "avoid jump cuts with a crossfade" stays positive). A named pair
+  // right after it ("no transition between A and B") belongs to the negated span.
+  "(?:\\b(?:no|without|zero|never|avoid|dont)\\b|\\bdo not\\b|\\bdon[\u2019']t\\b)(?:\\s+(?:add|use|put|insert|apply|do))?(?:\\s+(?:any|a|an|the|more|other))?\\s+(?:transitions?|cross-?fades?|dissolves?)\\b" +
+  NEGATED_PAIR_TAIL +
+  '|\\bhard cuts?\\b' +
+  NEGATED_PAIR_TAIL +
+  '|' +
   // "بدون ترنزیشن/انتقال": without (a) transition.
   FA_WITHOUT +
   '\\s*(?:' +
@@ -479,7 +488,7 @@ const NAMED_PAIR = new RegExp(
  * and "and" when a new verb follows ("crossfade A and B and don't add ...").
  */
 const CLAUSE_SPLIT =
-  /[.;,!?:\u060c\u061b]|\bbut\b|\bthen\b|\band\s+(?=(?:add|put|use|insert|apply|make|keep|do|don|never|avoid|crossfade|cross-fade|dissolve|remove|delete|drop)\b)|\u0648\u0644\u06cc|\u0627\u0645\u0627|\s\u0648\s/u;
+  /[.;,!?\u060c\u061b]|(?<!\d):(?!\d)|\bbut\b|\bthen\b|\band\s+(?=(?:add|put|use|insert|apply|make|keep|do|don|never|avoid|crossfade|cross-fade|dissolve|remove|delete|drop)\b)|\u0648\u0644\u06cc|\u0627\u0645\u0627|\s\u0648\s/u;
 
 function parseTransitionIntent(normalized: string): TransitionIntent | undefined {
   if (!TRANSITION_WORDS.test(normalized)) return undefined;
@@ -502,11 +511,14 @@ function parseTransitionIntent(normalized: string): TransitionIntent | undefined
     if (!TRANSITION_WORDS.test(clause) && !/\bhard cuts?\b/.test(clause)) continue;
     // Strip only the negated spans; whatever transition request is left is still positive. When in
     // doubt this keeps the check (unmet) rather than skipping it.
+    const spans = [...clause.matchAll(TRANSITION_NEGATED_ALL)].map((match) => match[0]);
     const rest = clause.replace(TRANSITION_NEGATED_ALL, ' ');
     if (TRANSITION_WORDS.test(rest)) {
       positive = true;
-      pairs.push(...pairsIn(clause));
-    } else if (rest !== clause) negatedPairs.push(...pairsIn(clause));
+      // Pairs come from what is left, so "hard cut between A and B" does not require A-B.
+      pairs.push(...pairsIn(rest));
+      negatedPairs.push(...spans.flatMap(pairsIn));
+    } else if (spans.length > 0) negatedPairs.push(...pairsIn(clause));
   }
   if (!positive && negatedPairs.length === 0) return undefined;
   return {
