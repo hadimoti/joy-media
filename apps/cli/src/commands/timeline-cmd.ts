@@ -1,4 +1,5 @@
 /* global console */
+import { durationAtSpeedUs, speedProblem } from '../utils/clip-speed.js';
 import type { CliFlags } from '../cli.js';
 import { FlagValidationError, NUMERIC_RANGES } from '../utils/flags.js';
 import { c, logError, logSuccess, logWarn } from '../utils/logger.js';
@@ -44,6 +45,7 @@ export const TIMELINE_SUBCOMMANDS = [
   'trim',
   'move-clip',
   'remove-clip',
+  'speed',
 ] as const;
 
 export function printTimelineHelp(): void {
@@ -54,7 +56,8 @@ export function printTimelineHelp(): void {
   split --clip <id> --at <seconds>
   trim --clip <id> [--start <seconds>] [--end <seconds>] [--duration <seconds>]
   move-clip --clip <id> --start <timeline-seconds>
-  remove-clip --clip <id>`);
+  remove-clip --clip <id>
+  speed --clip <id> --rate <0.1-8>  (2 = twice as fast; keeps the source range, changes the timeline length)`);
   console.log(
     '  trim --start changes the clip timeline position as well as its source in-point; --start 7 --end 17 leaves it at timeline 7–17s. Use move-clip --start 0 to place it at 0 while keeping the trimmed source range.',
   );
@@ -62,7 +65,7 @@ export function printTimelineHelp(): void {
     '  Text placement: x is horizontal frame offset (0 = center, -0.4 = near left, 0.4 = near right).',
   );
   console.log(
-    '  y offsets the template bottom title line (0 = default position, negative = up, positive = down); rendering clamps y to the frame, and add-text warns if text may clip.',
+    '  y offsets the template bottom title line (0 = default position near the bottom, negative = up, positive = down; about -0.36 = vertical centre, about -0.7 = top, range -0.75..0.4); rendering clamps y to the frame, and add-text warns if text may clip.',
   );
   console.log(
     '  add-effect <clipId> --look <crt|bw|warm|cool> (any case; also --type/--kind) [--intensity 0..1] [--scanline-strength 0..1] [--noise-amount 0..1]',
@@ -155,6 +158,9 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
               sourceOutUs: clip.sourceInUs + Math.round(clip.durationUs * (clip.playbackRate ?? 1)),
             }
           : {}),
+        ...(clip.kind === 'video' && clip.playbackRate !== undefined && clip.playbackRate !== 1
+          ? { speed: clip.playbackRate }
+          : {}),
         ...('look' in clip && clip.look ? { look: clip.look } : {}),
         ...('effects' in clip && Array.isArray(clip.effects) ? { effects: clip.effects } : {}),
       })),
@@ -168,7 +174,7 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
       console.log(`${track.id} [${track.kind}]`);
       for (const clip of track.clips) {
         console.log(
-          `  ${clip.id} [${clip.kind}] timeline=${(clip.timelineStartUs / 1_000_000).toFixed(3)}–${(clip.timelineEndUs / 1_000_000).toFixed(3)}s${clip.sourceInUs === undefined ? '' : ` source=${(clip.sourceInUs / 1_000_000).toFixed(3)}–${(clip.sourceOutUs! / 1_000_000).toFixed(3)}s`}${clip.look ? ` look=${typeof clip.look === 'string' ? clip.look : ((clip.look as { preset?: string }).preset ?? 'custom')}` : ''}${clip.effects ? ` effects=${JSON.stringify(clip.effects)}` : ''}`,
+          `  ${clip.id} [${clip.kind}] timeline=${(clip.timelineStartUs / 1_000_000).toFixed(3)}–${(clip.timelineEndUs / 1_000_000).toFixed(3)}s${clip.sourceInUs === undefined ? '' : ` source=${(clip.sourceInUs / 1_000_000).toFixed(3)}–${(clip.sourceOutUs! / 1_000_000).toFixed(3)}s`}${'speed' in clip && clip.speed ? ` speed=${clip.speed}x` : ''}${clip.look ? ` look=${typeof clip.look === 'string' ? clip.look : ((clip.look as { preset?: string }).preset ?? 'custom')}` : ''}${clip.effects ? ` effects=${JSON.stringify(clip.effects)}` : ''}`,
         );
       }
     }
@@ -609,6 +615,54 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
       revision: projectInfo.revision,
     });
     logSuccess(`Moved clip ${c(clipFlag, 'bold')} to ${flags.start}s (saved rev ${nextRev}).`);
+    return 0;
+  }
+
+  if (sub === 'speed') {
+    if (!clipFlag || flags.rate === undefined) {
+      logError('Usage: joy-media timeline speed --project <id> --clip <clipId> --rate <0.1-8>');
+      return 1;
+    }
+    const track = tracks.find((candidate) => candidate.clips.some((item) => item.id === clipFlag));
+    const clip = track?.clips.find((item) => item.id === clipFlag);
+    if (!track || !clip) {
+      logError(`Clip "${clipFlag}" not found.`);
+      return 1;
+    }
+    if (clip.kind !== 'video' || clip.timeRemap !== undefined) {
+      logError(`Clip "${clipFlag}" is not a plain video clip; its speed cannot be changed.`);
+      return 1;
+    }
+    const problem = speedProblem(flags.rate);
+    if (problem) {
+      logError(problem);
+      return 2;
+    }
+    const durationUs = durationAtSpeedUs(clip, flags.rate);
+    if (
+      track.clips.some(
+        (other) =>
+          other.id !== clip.id &&
+          clip.startUs < other.startUs + other.durationUs &&
+          clip.startUs + durationUs > other.startUs,
+      )
+    ) {
+      logError(
+        `At ${flags.rate}x, "${clipFlag}" would overlap the next clip; move or trim it first.`,
+      );
+      return 1;
+    }
+    clip.durationUs = durationUs;
+    clip.playbackRate = flags.rate;
+    recomputeRootDuration(project);
+    const nextRev = saveProject(project, {
+      source: projectInfo.source,
+      path: projectInfo.path,
+      revision: projectInfo.revision,
+    });
+    logSuccess(
+      `Set ${c(clipFlag, 'bold')} to ${flags.rate}x (now ${(durationUs / 1_000_000).toFixed(3)}s on the timeline, saved rev ${nextRev}).`,
+    );
     return 0;
   }
 

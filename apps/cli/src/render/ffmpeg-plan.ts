@@ -144,11 +144,33 @@ export function buildFfmpegRenderPlan(
   const inputs: { assetId: string; path: string }[] = [];
   const skipped: { clipId: string; reason: string }[] = [];
   const filters: string[] = ['[0:v]null[vout]'];
+  // Crossfades (registry `dissolve`, agent name `crossfade`) are drawn: the outgoing clip keeps
+  // playing for the transition length past the cut and the incoming clip fades in over it (F1).
+  // Other transition types are still reported as skipped.
+  const fadeIn = new Map<string, number>();
+  const fadeOut = new Map<string, number>();
   for (const transition of project.transitions ?? []) {
-    skipped.push({
-      clipId: transition.id,
-      reason: 'transitions are not supported by the v1 renderer',
-    });
+    const track = root.tracks.find((candidate) => candidate.id === transition.trackId);
+    const left = track?.clips.find((clip) => clip.id === transition.leftClipId);
+    const right = track?.clips.find((clip) => clip.id === transition.rightClipId);
+    const reason =
+      transition.type !== 'dissolve' && transition.type !== 'crossfade'
+        ? `transition type ${transition.type} is not supported by the v1 renderer (only crossfade)`
+        : !track || track.kind !== 'video' || left?.kind !== 'video' || right?.kind !== 'video'
+          ? 'transition does not join two video clips on one video track'
+          : left.startUs + left.durationUs !== right.startUs
+            ? 'transition clips are not adjacent'
+            : !Number.isSafeInteger(transition.durationUs) ||
+                transition.durationUs <= 0 ||
+                transition.durationUs > Math.min(left.durationUs, right.durationUs) / 2
+              ? 'transition duration is invalid'
+              : undefined;
+    if (reason) {
+      skipped.push({ clipId: transition.id, reason });
+      continue;
+    }
+    fadeIn.set(transition.rightClipId, transition.durationUs);
+    fadeOut.set(transition.leftClipId, transition.durationUs);
   }
   for (const objectId of Object.keys(project.visualObjects)) {
     skipped.push({
@@ -377,23 +399,49 @@ export function buildFfmpegRenderPlan(
         });
         continue;
       }
+      const fadeInUs = fadeIn.get(clip.id);
+      const fadeOutUs = fadeOut.get(clip.id);
+      // The outgoing clip of a crossfade runs fadeOutUs past its cut: from real source frames
+      // when the media has them, otherwise by holding its last frame.
+      const mediaDurationUs = asset.descriptor?.durationUs;
+      const handleUs =
+        fadeOutUs === undefined
+          ? 0
+          : asset.kind !== 'image' &&
+              !clip.reversed &&
+              typeof mediaDurationUs === 'number' &&
+              clip.sourceInUs + (clip.durationUs + fadeOutUs) * rate <= mediaDurationUs
+            ? fadeOutUs
+            : 0;
+      const holdUs = (fadeOutUs ?? 0) - handleUs;
       if (asset.hasAudio === true && !isTrackMuted(track)) {
         const label = `a_${audioInputs.length}`;
         const atempo = atempoChain(rate);
+        const audioFades = [
+          fadeInUs === undefined ? '' : `,afade=t=in:st=0:d=${seconds(fadeInUs)}`,
+          fadeOutUs === undefined
+            ? ''
+            : `,afade=t=out:st=${seconds(clip.durationUs + handleUs - fadeOutUs)}:d=${seconds(fadeOutUs)}`,
+        ].join('');
         filters.push(
-          `[${inputIndex}:a]atrim=start=${seconds(clip.sourceInUs)}:duration=${seconds(clip.durationUs * rate)},asetpts=PTS-STARTPTS,${atempo},adelay=${Math.round(clip.startUs / 1000)}|${Math.round(clip.startUs / 1000)}[${label}]`,
+          `[${inputIndex}:a]atrim=start=${seconds(clip.sourceInUs)}:duration=${seconds((clip.durationUs + handleUs) * rate)},asetpts=PTS-STARTPTS,${atempo}${audioFades},adelay=${Math.round(clip.startUs / 1000)}|${Math.round(clip.startUs / 1000)}[${label}]`,
         );
         audioInputs.push(label);
       }
-      const sourceDurationUs = clip.durationUs * (rate || 1);
+      const sourceDurationUs = (clip.durationUs + handleUs) * (rate || 1);
+      const hold = holdUs > 0 ? `,tpad=stop_mode=clone:stop_duration=${seconds(holdUs)}` : '';
+      const fade =
+        fadeInUs === undefined
+          ? ''
+          : `,fade=t=in:st=${seconds(clip.startUs)}:d=${seconds(fadeInUs)}:alpha=1`;
       const label = `v_${overlayIndex}`;
       const reverse = clip.reversed ? ',reverse' : '';
       filters.push(
-        `[${inputIndex}:v]trim=start=${seconds(clip.sourceInUs)}:duration=${seconds(sourceDurationUs)}${reverse},setpts=(PTS-STARTPTS)/${rate || 1}+${seconds(clip.startUs)}/TB${lookFilter ? `,${lookFilter}` : ''},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black@0,format=yuva420p[${label}]`,
+        `[${inputIndex}:v]trim=start=${seconds(clip.sourceInUs)}:duration=${seconds(sourceDurationUs)}${reverse}${hold},setpts=(PTS-STARTPTS)/${rate || 1}+${seconds(clip.startUs)}/TB${lookFilter ? `,${lookFilter}` : ''},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black@0,format=yuva420p${fade}[${label}]`,
       );
       const next = `o_${overlayIndex}`;
       filters.push(
-        `[${videoLabel}][${label}]overlay=eof_action=pass:enable='between(t,${seconds(clip.startUs)},${seconds(clip.startUs + clip.durationUs)})'[${next}]`,
+        `[${videoLabel}][${label}]overlay=eof_action=pass:enable='between(t,${seconds(clip.startUs)},${seconds(clip.startUs + clip.durationUs + (fadeOutUs ?? 0))})'[${next}]`,
       );
       videoLabel = next;
       overlayIndex += 1;

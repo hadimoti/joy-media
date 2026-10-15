@@ -158,7 +158,9 @@ describe('JOY Agent tool catalog', () => {
     );
     const textDescription = (tools.propose_document_operations as { description: string })
       .description;
-    expect(textDescription).toContain('x and y are editor-normalized frame fractions');
+    expect(textDescription).toContain(
+      'y is a vertical frame fraction measured from the default title line near the bottom',
+    );
     expect(textDescription).toContain('10 seconds = 10000000');
   });
 
@@ -176,7 +178,7 @@ describe('JOY Agent tool catalog', () => {
     expect(submitPlan).toHaveBeenCalledWith({ checklist });
   });
 
-  it('accepts a timelineStartUs hint on checklist items and drops it before the bridge', async () => {
+  it('accepts a timelineStartUs hint on checklist items and forwards it for verification', async () => {
     const submitPlan = vi.fn(async () => ({ ok: true }));
     const tools = createJoyAgentTools(bridge({ submitPlan }));
     const tool = tools.submit_plan as unknown as {
@@ -200,9 +202,15 @@ describe('JOY Agent tool catalog', () => {
     await tool.execute(parsed.data);
     expect(submitPlan).toHaveBeenCalledWith({
       checklist: [
-        { kind: 'trim', clipId: 'clip-a', sourceInUs: 0, sourceOutUs: 5_000_000 },
-        { kind: 'look', clipId: 'clip-a', look: 'crt' },
-        { kind: 'text', text: 'Hi', position: 'center' },
+        {
+          kind: 'trim',
+          clipId: 'clip-a',
+          sourceInUs: 0,
+          sourceOutUs: 5_000_000,
+          timelineStartUs: 2_000_000,
+        },
+        { kind: 'look', clipId: 'clip-a', look: 'crt', timelineStartUs: 0 },
+        { kind: 'text', text: 'Hi', position: 'center', timelineStartUs: 1_000_000 },
       ],
     });
     expect(

@@ -5,13 +5,15 @@ import type {
   JoyPlanChecklistItem,
   JoyTimelineOperation,
 } from '@joy-media/joy-agent-engine';
-import type { JoyProjectV1 } from '@joy-media/project-schema';
+import type { CaptionDocumentV1, JoyProjectV1, TransitionV1 } from '@joy-media/project-schema';
 import { sourceTimeAtVideoClipTime, validateJoyProjectV1 } from '@joy-media/project-schema';
 import { recomputeRootDuration } from '../utils/timeline-math.js';
+import { durationAtSpeedUs, speedProblem } from '../utils/clip-speed.js';
 import { buildFfmpegFramePlan } from '../render/ffmpeg-plan.js';
 import { resolveFfmpegExecutable } from '../render/ffmpeg-run.js';
 import { DEFAULT_JOY_AGENT_LIMITS } from '@joy-media/joy-agent-engine';
-import { createTextClip } from '../render/text-clip.js';
+import { createTextClip, TEXT_Y_RANGE } from '../render/text-clip.js';
+import { layoutFfmpegCaption } from '../render/caption-layout.js';
 import { resolveTextFont } from '../render/text-font.js';
 import {
   createFfmpegTextWorkspace,
@@ -139,6 +141,35 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
     };
   }
 
+  /** Caption clip ids that exist now or will after the staged create-text operations. */
+  private captionClipIds(): Set<string> {
+    const root = this.project.compositions[this.project.rootCompositionId];
+    return new Set([
+      ...(root?.tracks ?? [])
+        .flatMap((track) => track.clips)
+        .filter((clip) => clip.kind === 'caption')
+        .map((clip) => clip.id),
+      ...this.stagedDocument
+        .filter((operation) => operation.kind === 'create-text')
+        .map((operation) => `text-${operation.id}`),
+    ]);
+  }
+
+  private asTextUpdate(operation: JoyDocumentOperation): JoyDocumentOperation {
+    if (operation.kind !== 'set-text' && operation.kind !== 'set-property') return operation;
+    if (!this.captionClipIds().has(operation.objectId)) return operation;
+    const base = {
+      kind: 'update-text' as const,
+      id: operation.id,
+      objectId: operation.objectId,
+      dependsOn: operation.dependsOn,
+    };
+    if (operation.kind === 'set-text') return { ...base, text: operation.text };
+    const property = TEXT_PROPERTY_ALIASES[operation.property.toLowerCase()];
+    if (property === undefined) return operation; // reported by validation
+    return { ...base, [property]: operation.value } as JoyDocumentOperation;
+  }
+
   async readSelection(): Promise<unknown> {
     return {
       selectedClipIds: this.selectedClipIds,
@@ -237,6 +268,11 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
       startUs: number;
       durationUs: number;
       assetId?: string | undefined;
+      text?: string | undefined;
+      size?: number | undefined;
+      x?: number | undefined;
+      y?: number | undefined;
+      color?: string | undefined;
     }> = [];
 
     for (const track of root?.tracks ?? []) {
@@ -250,6 +286,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
             startUs: clip.startUs,
             durationUs: clip.durationUs,
             assetId: 'assetId' in clip ? (clip.assetId as string) : undefined,
+            ...(clip.kind === 'caption' ? describeTextClip(this.project, clip) : {}),
           });
         }
       }
@@ -275,7 +312,8 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
     return {
       textStyles: ['headline', 'subheadline', 'caption-glow', 'callout'],
       looks: ['crt', 'bw', 'warm', 'cool'],
-      transitions: ['crossfade', 'slide-left', 'wipe-up', 'zoom-in'],
+      // Only what add-transition can create and the CLI renderer draws (F1).
+      transitions: ['crossfade'],
       aspectRatios: ['9:16 (Reels/TikTok)', '16:9 (YouTube)', '1:1 (Square)'],
     };
   }
@@ -304,19 +342,22 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
   async proposeDocumentOperations(input: {
     readonly operations: readonly JoyDocumentOperation[];
   }): Promise<unknown> {
-    const errors = this.validateDocumentProposal(input.operations);
+    // set-text / set-property on a caption clip are what models try first for "make the title
+    // smaller"; they mean update-text (F3).
+    const operations = input.operations.map((operation) => this.asTextUpdate(operation));
+    const errors = this.validateDocumentProposal(operations);
     if (errors.length > 0) {
       this.documentProposalIssues = [...errors];
       return { accepted: false, errors };
     }
     this.documentProposalIssues = [];
-    this.stagedDocument.push(...input.operations);
+    this.stagedDocument.push(...operations);
     this.lastApplyResult = undefined;
     this.notify();
     return {
       accepted: true,
       staged: true,
-      addedCount: input.operations.length,
+      addedCount: operations.length,
       totalStaged: this.stagedDocument.length,
       revision: this.revision,
       notes: input.operations.flatMap((operation) => {
@@ -361,6 +402,19 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
           errors.push(`Operation ${operation.id} duration is shorter than one project frame.`);
         continue;
       }
+      if (operation.kind === 'add-transition') {
+        const staged = new Set(
+          [...this.stagedTimeline, ...operations].flatMap((candidate) =>
+            candidate.kind === 'insert' ? [candidate.id] : [],
+          ),
+        );
+        for (const clipId of [operation.leftClipId, operation.rightClipId])
+          if (!clips.some(({ clip }) => clip.id === clipId) && !staged.has(clipId))
+            errors.push(`Clip ${clipId} not found.`);
+        if (operation.leftClipId === operation.rightClipId)
+          errors.push(`Transition ${operation.id} needs two different clips.`);
+        continue;
+      }
       const found = clips.find(({ clip }) => clip.id === operation.clipId);
       if (!found) errors.push(`Clip ${operation.clipId} not found.`);
       if (operation.kind === 'move') {
@@ -369,6 +423,14 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
         else if (target.kind !== found?.track.kind)
           errors.push(
             `Track ${operation.trackId} cannot host ${found?.clip.kind ?? 'this'} clips.`,
+          );
+      }
+      if (operation.kind === 'set-speed') {
+        const problem = speedProblem(operation.rate);
+        if (problem) errors.push(`Operation ${operation.id}: ${problem}`);
+        if (found && found.clip.kind !== 'video')
+          errors.push(
+            `Speed changes need a video clip; ${operation.clipId} is ${found.clip.kind}.`,
           );
       }
       if (operation.kind === 'trim' && operation.sourceOutUs <= operation.sourceInUs)
@@ -403,14 +465,47 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
           errors.push(`Text ${operation.id} duration is shorter than one project frame.`);
         if (operation.x !== undefined && Math.abs(operation.x) > 0.4)
           errors.push(`Text ${operation.id} x must be in editor units from -0.4 to 0.4.`);
-        if (operation.y !== undefined && Math.abs(operation.y) > 0.4)
-          errors.push(`Text ${operation.id} y must be in editor units from -0.4 to 0.4.`);
+        if (
+          operation.y !== undefined &&
+          (operation.y < TEXT_Y_RANGE.min || operation.y > TEXT_Y_RANGE.max)
+        )
+          errors.push(
+            `Text ${operation.id} y must be from -0.75 to 0.4 (0 = default line near the bottom, about -0.36 = vertical centre, about -0.7 = top).`,
+          );
+        else if (!textFitsFrame(operation, root?.width ?? 1080, root?.height ?? 1920))
+          errors.push(
+            `Text ${operation.id} at y ${operation.y ?? 0} with size ${operation.size ?? 1} would not be drawn (it is above the safe area); use a larger y or a smaller size.`,
+          );
         if (operation.trackId) {
           const track = tracks.find((candidate) => candidate.id === operation.trackId);
           if (!track) errors.push(`Track ${operation.trackId} not found.`);
           else if (track.kind !== 'video' && track.kind !== 'caption')
             errors.push(`Track ${operation.trackId} cannot host caption text.`);
         }
+      } else if (operation.kind === 'update-text') {
+        const known = this.captionClipIds().has(operation.objectId);
+        const fields = ['text', 'x', 'y', 'size', 'color', 'startUs', 'durationUs'] as const;
+        if (!known)
+          errors.push(
+            `Text clip ${operation.objectId} not found; use the caption clipId from read_timeline_window.`,
+          );
+        else if (fields.every((field) => operation[field] === undefined))
+          errors.push(
+            `update-text ${operation.id} changes nothing; give text, size, x, y, color, startUs or durationUs.`,
+          );
+        if (operation.text !== undefined && !operation.text.trim())
+          errors.push(`update-text ${operation.id} text is empty.`);
+        if (operation.x !== undefined && Math.abs(operation.x) > 0.4)
+          errors.push(`Text ${operation.objectId} x must be in editor units from -0.4 to 0.4.`);
+        if (
+          operation.y !== undefined &&
+          (operation.y < TEXT_Y_RANGE.min || operation.y > TEXT_Y_RANGE.max)
+        )
+          errors.push(
+            `Text ${operation.objectId} y must be from -0.75 to 0.4 (0 = default line near the bottom, about -0.36 = vertical centre, about -0.7 = top).`,
+          );
+        if (operation.durationUs !== undefined && operation.durationUs < minimumFrame)
+          errors.push(`Text ${operation.objectId} duration is shorter than one project frame.`);
       } else if (
         operation.kind === 'set-text' &&
         !this.project.visualObjects?.[operation.objectId]
@@ -420,7 +515,11 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
         errors.push(`set-text for ${operation.objectId} is not rendered by the CLI.`);
       } else if (operation.kind === 'set-property') {
         const object = this.project.visualObjects?.[operation.objectId];
-        if (!object) errors.push(`Object ${operation.objectId} not found.`);
+        if (!object && this.captionClipIds().has(operation.objectId))
+          errors.push(
+            `Text property ${operation.property} cannot be set; use update-text with text, size, x, y, color, startUs or durationUs.`,
+          );
+        else if (!object) errors.push(`Object ${operation.objectId} not found.`);
         else if (object.kind === 'text')
           errors.push(`Text property ${operation.property} is not rendered by the CLI.`);
         else if (!['opacity', 'x', 'y', 'scale', 'rotation'].includes(operation.property))
@@ -547,10 +646,13 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
       }>;
     }>;
 
-    // Apply timeline operations
+    // Apply timeline operations; transitions are placed after every clip edit (F1).
+    const transitionOps: Extract<JoyTimelineOperation, { kind: 'add-transition' }>[] = [];
     for (const op of this.stagedTimeline) {
       try {
-        if (op.kind === 'insert') {
+        if (op.kind === 'add-transition') {
+          transitionOps.push(op);
+        } else if (op.kind === 'insert') {
           const track = tracks.find((t) => t.id === op.trackId);
           if (!track) {
             errors.push(`Track ${op.trackId} not found for insert`);
@@ -694,6 +796,38 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
             }
           }
           if (!found) errors.push(`Clip ${op.clipId} not found for trim`);
+        } else if (op.kind === 'set-speed') {
+          const track = tracks.find((candidate) =>
+            candidate.clips.some((clip) => clip.id === op.clipId),
+          );
+          const clip = track?.clips.find((candidate) => candidate.id === op.clipId);
+          if (!track || !clip) {
+            errors.push(`Clip ${op.clipId} not found for set-speed`);
+            continue;
+          }
+          if (clip.kind !== 'video' || clip.timeRemap !== undefined) {
+            errors.push(`Speed of ${op.clipId} cannot be changed (needs a plain video clip).`);
+            continue;
+          }
+          const nextDurationUs = durationAtSpeedUs(clip, op.rate);
+          if (nextDurationUs < oneFrameUs(root.frameRate.num, root.frameRate.den)) {
+            errors.push(`Speed ${op.rate}x makes ${op.clipId} shorter than one frame.`);
+            continue;
+          }
+          if (
+            track.clips.some(
+              (other) =>
+                other.id !== clip.id &&
+                clip.startUs < other.startUs + other.durationUs &&
+                clip.startUs + nextDurationUs > other.startUs,
+            )
+          ) {
+            errors.push(`Speed ${op.rate}x makes ${op.clipId} overlap another clip on ${track.id}`);
+            continue;
+          }
+          clip.durationUs = nextDurationUs;
+          clip.playbackRate = op.rate;
+          recordApplied(op.id);
         } else if (op.kind === 'split') {
           let found = false;
           for (const track of tracks) {
@@ -730,6 +864,69 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
         errors.push(`Error applying ${op.kind}: ${String(err)}`);
       }
     }
+
+    const minimumTransitionUs = oneFrameUs(root.frameRate.num, root.frameRate.den);
+    const transitionProblem = (input: {
+      readonly leftClipId: string;
+      readonly rightClipId: string;
+      readonly durationUs: number;
+    }): { trackId?: string; problem?: string } => {
+      const track = tracks.find((candidate) =>
+        candidate.clips.some((clip) => clip.id === input.leftClipId),
+      );
+      const left = track?.clips.find((clip) => clip.id === input.leftClipId);
+      const right = track?.clips.find((clip) => clip.id === input.rightClipId);
+      if (!track || !left) return { problem: `clip ${input.leftClipId} not found` };
+      if (!right)
+        return {
+          problem: `clips ${input.leftClipId} and ${input.rightClipId} are not on the same track`,
+        };
+      if (track.kind !== 'video' || left.kind !== 'video' || right.kind !== 'video')
+        return { problem: 'both clips must be video clips on a video track' };
+      if (left.startUs + left.durationUs !== right.startUs)
+        return {
+          problem: `clips must be adjacent: ${input.leftClipId} ends at ${left.startUs + left.durationUs} µs but ${input.rightClipId} starts at ${right.startUs} µs (they must touch)`,
+        };
+      if (input.durationUs < minimumTransitionUs)
+        return { problem: 'duration is shorter than one frame' };
+      if (input.durationUs > Math.min(left.durationUs, right.durationUs) / 2)
+        return { problem: 'duration must be at most half of each clip' };
+      return { trackId: track.id };
+    };
+    const transitions = [
+      ...((current as { transitions?: readonly TransitionV1[] }).transitions ?? []),
+    ];
+    for (const op of transitionOps) {
+      const placed = transitionProblem(op);
+      if (placed.problem !== undefined) {
+        errors.push(`Transition ${op.id}: ${placed.problem}.`);
+        continue;
+      }
+      const sameJunction = transitions.findIndex(
+        (existing) =>
+          existing.leftClipId === op.leftClipId && existing.rightClipId === op.rightClipId,
+      );
+      if (sameJunction >= 0) transitions.splice(sameJunction, 1);
+      // Stored under the editor's registry id: transition-shaders `dissolve` is the crossfade.
+      transitions.push({
+        id: op.id,
+        trackId: placed.trackId!,
+        leftClipId: op.leftClipId,
+        rightClipId: op.rightClipId,
+        type: 'dissolve',
+        durationUs: op.durationUs,
+      });
+      recordApplied(op.id);
+    }
+    // Edits such as trim, move or remove can break an existing junction.
+    for (const existing of transitions) {
+      if (transitionOps.some((op) => op.id === existing.id)) continue;
+      const placed = transitionProblem(existing);
+      if (placed.problem !== undefined)
+        errors.push(`Existing transition ${existing.id} is no longer valid: ${placed.problem}.`);
+    }
+    if (transitions.length > 0 || transitionOps.length > 0)
+      (current as { transitions?: readonly TransitionV1[] }).transitions = transitions;
 
     // Apply document operations
     for (const op of this.stagedDocument) {
@@ -790,6 +987,50 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
           (current.captionDocuments as Record<string, unknown>)[created.document.id] =
             created.document;
           track.clips.push(created.clip as unknown as (typeof track.clips)[number]);
+          recordApplied(op.id);
+        } else if (op.kind === 'update-text') {
+          const clip = tracks
+            .flatMap((track) => track.clips)
+            .find((candidate) => candidate.id === op.objectId);
+          const document =
+            clip?.kind === 'caption'
+              ? (current.captionDocuments as Record<string, CaptionDocumentV1>)[
+                  String((clip as { captionDocumentId?: unknown }).captionDocumentId)
+                ]
+              : undefined;
+          if (clip?.kind !== 'caption' || document === undefined) {
+            errors.push(`Text clip ${op.objectId} not found.`);
+            continue;
+          }
+          const editable = clip as unknown as {
+            startUs: number;
+            durationUs: number;
+            style: Record<string, unknown>;
+          };
+          const style = { ...editable.style };
+          if (op.x !== undefined) style.positionX = op.x;
+          if (op.y !== undefined) style.positionY = op.y === 0 ? 0 : -op.y;
+          if (op.size !== undefined) style.fontSize = op.size;
+          if (op.color !== undefined) {
+            style.textColor = op.color;
+            style.highlightColor = op.color;
+          }
+          editable.style = style;
+          if (op.startUs !== undefined) editable.startUs = op.startUs;
+          if (op.text !== undefined || op.durationUs !== undefined) {
+            const replaced = createTextClip({
+              id: document.id,
+              text: op.text ?? captionDocumentText(document),
+              startUs: editable.startUs,
+              durationUs: op.durationUs ?? editable.durationUs,
+            }).document;
+            (current.captionDocuments as Record<string, unknown>)[document.id] = {
+              ...replaced,
+              language: document.language,
+              ...(op.text === undefined ? { direction: document.direction } : {}),
+            };
+            if (op.durationUs !== undefined) editable.durationUs = op.durationUs;
+          }
           recordApplied(op.id);
         } else if (op.kind === 'set-text') {
           errors.push(`unsupported: set-text for ${op.objectId} is not rendered by ffmpeg.`);
@@ -973,4 +1214,86 @@ function unknownChecklistClips(
   for (const item of checklist)
     if ('clipId' in item && !known.has(item.clipId)) missing.add(item.clipId);
   return [...missing];
+}
+
+/** False when captions-core would lay out none of the text (it drops lines above the safe area). */
+function textFitsFrame(
+  operation: {
+    readonly text: string;
+    readonly x?: number | undefined;
+    readonly y?: number | undefined;
+    readonly size?: number | undefined;
+  },
+  width: number,
+  height: number,
+): boolean {
+  try {
+    const { document, clip } = createTextClip({
+      id: 'fit-check',
+      text: operation.text,
+      startUs: 0,
+      durationUs: 1_000_000,
+      ...(operation.x === undefined ? {} : { x: operation.x }),
+      ...(operation.y === undefined ? {} : { y: operation.y }),
+      ...(operation.size === undefined ? {} : { size: operation.size }),
+    });
+    return (
+      layoutFfmpegCaption({
+        clipId: clip.id,
+        document,
+        segment: document.segments[0]!,
+        style: clip.style!,
+        width,
+        height,
+      }).length > 0
+    );
+  } catch {
+    return true; // other validation reports the problem
+  }
+}
+
+/** set-property names models use for caption text fields, mapped to update-text fields. */
+const TEXT_PROPERTY_ALIASES: Readonly<Record<string, 'text' | 'x' | 'y' | 'size' | 'color'>> = {
+  text: 'text',
+  content: 'text',
+  x: 'x',
+  y: 'y',
+  size: 'size',
+  fontsize: 'size',
+  'font-size': 'size',
+  scale: 'size',
+  color: 'color',
+  textcolor: 'color',
+};
+
+function captionDocumentText(document: CaptionDocumentV1): string {
+  return document.segments
+    .map(
+      (segment) =>
+        segment.textOverride ??
+        segment.wordIds.map((id) => document.words[id]?.text ?? '').join(''),
+    )
+    .join(' ');
+}
+
+/** Caption text, size and placement in the units create-text/update-text take (F3). */
+function describeTextClip(
+  project: JoyProjectV1,
+  clip: { readonly captionDocumentId: string; readonly style?: unknown },
+): { text?: string; size: number; x: number; y: number; color?: string } {
+  const document = project.captionDocuments?.[clip.captionDocumentId];
+  const style = (clip.style ?? {}) as {
+    positionX?: number;
+    positionY?: number;
+    fontSize?: number;
+    textColor?: string;
+  };
+  const positionY = style.positionY ?? 0;
+  return {
+    ...(document ? { text: captionDocumentText(document) } : {}),
+    size: style.fontSize ?? 1,
+    x: style.positionX ?? 0,
+    y: positionY === 0 ? 0 : -positionY,
+    ...(style.textColor ? { color: style.textColor } : {}),
+  };
 }

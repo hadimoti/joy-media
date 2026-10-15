@@ -275,7 +275,11 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     errors = [...errors, ...applyRes.errors];
     notes = [...notes, ...applyRes.notes];
     placementSummary = applyRes.placementSummary;
-    const requestVerification = verifyRequestIntent(candidateProject, options.prompt);
+    const requestVerification = verifyRequestIntent(
+      candidateProject,
+      options.prompt,
+      options.project,
+    );
     const verification = verifyPlanChecklist(candidateProject, checklist);
     verified = [...verification.verified, ...requestVerification.verified];
     errors = [
@@ -304,15 +308,18 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
   }
 
   if (runResult.partialReason === 'no-plan' || (options.apply && !bridge.hasSubmittedPlan())) {
-    errors = [...errors, 'No plan was submitted after the single retry.'];
+    // The engine retries only after a frame-only turn; do not claim a retry that did not happen.
+    errors = [...errors, 'No plan was submitted, so nothing was applied.'];
+  } else if (runResult.status === 'partial') {
+    errors = [...errors, partialLimitMessage(runResult.partialReason)];
   }
 
   return {
     resultText:
       runResult.status === 'partial'
         ? runResult.partialReason === 'no-plan'
-          ? 'Partial run: no plan was submitted after one retry. Nothing was applied.'
-          : `Partial plan stopped at the ${runResult.partialReason ?? 'safety'} limit. Nothing was applied.`
+          ? 'Partial run: no plan was submitted. Nothing was applied.'
+          : partialLimitMessage(runResult.partialReason)
         : truthfulAgentSummary({
             applyRequested: options.apply === true,
             applied,
@@ -357,8 +364,11 @@ export function missingOperationCoverage(
     const covered =
       (kind === 'trim' && (checks.has('trim') || intent.trimRange !== undefined)) ||
       (kind === 'add-effect' && (checks.has('look') || intent.look !== undefined)) ||
-      ((kind === 'create-text' || kind === 'set-text') &&
-        (checks.has('text') || intent.centerText)) ||
+      (kind === 'set-speed' && (checks.has('speed') || intent.speed !== undefined)) ||
+      (kind === 'add-transition' &&
+        (checks.has('transition') || intent.transition !== undefined)) ||
+      ((kind === 'create-text' || kind === 'set-text' || kind === 'update-text') &&
+        (checks.has('text') || intent.centerText || intent.textSize !== undefined)) ||
       (kind === 'set-property' && intent.centerText) ||
       ((kind === 'insert' || kind === 'move' || kind === 'split') &&
         (intent.startAtZero || intent.durationUs !== undefined));
@@ -377,6 +387,278 @@ interface RequestIntent {
   trimRange?: readonly [number, number];
   look?: 'crt' | 'bw' | 'warm' | 'cool';
   durationUs?: number;
+  /** The request asks to add or remove a transition between clips (F1). */
+  transition?: TransitionIntent;
+  /** The request asks for a fade in/out (from/to black), which is not supported. */
+  fadeInOut?: boolean;
+  /** Requested playback rate ("2x speed", "twice as fast", "half speed"). */
+  speed?: number;
+  /** "make the title smaller/bigger": compared with the text before the run (F3). */
+  textSize?: 'smaller' | 'larger';
+  /** Quoted caption text with the time range the request gave it (`"Hi" from 0s to 4s`). */
+  captionTimes?: readonly { text: string; startUs: number; endUs: number }[];
+}
+
+const QUOTED_TIMED_TEXT =
+  /["“«]([^"“”«»]{1,400})["”»]\s*,?\s*\(?\s*(?:from|between|at|از)?\s*(\d+(?:\.\d+)?)\s*(?:s|secs?|seconds?|ثانیه)?\s*(?:to|until|and|[-–]|تا)\s*(\d+(?:\.\d+)?)\s*(?:s\b|secs?\b|seconds?\b|ثانیه)?/giu;
+
+interface TransitionIntent {
+  readonly mode: 'add' | 'remove';
+  /** A named type other than crossfade/dissolve (slide, wipe, ...): unsupported. */
+  readonly unsupportedType?: string;
+  /** Clip pairs the request asks a transition for, in request order. */
+  readonly pairs: readonly (readonly [string, string])[];
+  /** Clip pairs a negated clause names ("do not crossfade A and B"): must not get a new one. */
+  readonly negatedPairs: readonly (readonly [string, string])[];
+  /** False when only negated clauses mention transitions (then only negatedPairs are checked). */
+  readonly positive?: boolean;
+}
+
+const FA_TRANSITION = '\u062a\u0631\u0646\u0632\u06cc\u0634\u0646'; // transition (loanword)
+const FA_MOVE_OR_TRANSITION = '\u0627\u0646\u062a\u0642\u0627\u0644'; // move / transfer / transition
+const FA_FADE_WORDS =
+  '\u0645\u062d\u0648|\u06a9\u0631\u0627\u0633[\\s\u200c]?\u0641\u06cc\u062f|' + FA_TRANSITION;
+const FA_WITHOUT = '\u0628\u062f\u0648\u0646';
+const FA_REMOVE = '\u062d\u0630\u0641';
+const TRANSITION_WORDS = new RegExp(
+  '\\b(cross-?fades?|cross-?dissolves?|dissolves?|transitions?)\\b|\\bfade (?:between|from one|into the next)\\b|' +
+    FA_TRANSITION +
+    '|\u06a9\u0631\u0627\u0633[\\s\u200c]?\u0641\u06cc\u062f|' +
+    // انتقال alone means "move": only a transition next to a fade word.
+    FA_MOVE_OR_TRANSITION +
+    '.{0,20}(?:' +
+    FA_FADE_WORDS +
+    ')|(?:' +
+    FA_FADE_WORDS +
+    ').{0,20}' +
+    FA_MOVE_OR_TRANSITION,
+  'u',
+);
+// Negation spans. Each match covers the negation AND the transition word it negates, so stripping
+// the matches leaves any positive transition request in the same clause intact.
+const NEGATED_PAIR_TAIL =
+  '(?:\\s+between\\s+(?:the\\s+)?(?:clips?\\s+)?[a-z0-9][\\w-]*\\s+(?:and|&)\\s+(?:the\\s+)?(?:clips?\\s+)?[a-z0-9][\\w-]*)?';
+const TRANSITION_NEGATED_SOURCE =
+  // English: the negation word, an optional verb, an optional determiner, then the transition word,
+  // with nothing else between (so "avoid jump cuts with a crossfade" stays positive). A named pair
+  // right after it ("no transition between A and B") belongs to the negated span.
+  "(?:\\b(?:no|without|zero|never|avoid|dont)\\b|\\bdo not\\b|\\bdon[\u2019']t\\b)(?:\\s+(?:add|use|put|insert|apply|do))?(?:\\s+(?:any|a|an|the|more|other))?\\s+(?:transitions?|cross-?fades?|dissolves?)\\b" +
+  NEGATED_PAIR_TAIL +
+  '|\\bhard cuts?\\b' +
+  NEGATED_PAIR_TAIL +
+  '|' +
+  // "بدون ترنزیشن/انتقال": without (a) transition.
+  FA_WITHOUT +
+  '\\s*(?:' +
+  FA_TRANSITION +
+  '|' +
+  FA_MOVE_OR_TRANSITION +
+  ')\\u06cc?' +
+  // "هیچ ترنزیشنی": no transition at all.
+  '|\\u0647\\u06cc\\u0686\\s*(?:' +
+  FA_TRANSITION +
+  '|' +
+  FA_MOVE_OR_TRANSITION +
+  ')\\u06cc?' +
+  // "ترنزیشن(ی) نذار/نگذار/نزار/نزن": the negated verb right after the transition word only.
+  '|(?:' +
+  FA_TRANSITION +
+  '|' +
+  FA_MOVE_OR_TRANSITION +
+  ')\\u06cc?\\s*(?:(?:\\u0631\\u0648|\\u0631\\u0627)\\s*)?\\u0646(?:\\u06af\\u0630\\u0627\\u0631|\\u0630\\u0627\\u0631|\\u0632\\u0627\\u0631|\\u0632\\u0646)';
+const TRANSITION_NEGATED_ALL = new RegExp(TRANSITION_NEGATED_SOURCE, 'gu');
+const TRANSITION_REMOVE = new RegExp(
+  '\\b(?:remove|delete|drop|get rid of|take out)\\b[^.]{0,40}\\b(?:transitions?|cross-?fades?|dissolves?)\\b|' +
+    FA_REMOVE,
+  'u',
+);
+const UNSUPPORTED_TRANSITION_TYPE =
+  /\b(slide|wipe|zoom|push|spin|whip|glitch|iris|swipe|cube|flip)\b/;
+const PAIR_REF = '(?:the\\s+)?(?:clips?\\s+)?(?!(?:between|from)\\b)([a-z0-9][\\w-]*)';
+/** "between A and B", or "crossfade A and/into B" (the clip pair a clause talks about). */
+const NAMED_PAIR = new RegExp(
+  '(?:\\bbetween|\\b(?:cross-?fades?|dissolves?))\\s+' +
+    PAIR_REF +
+    '\\s+(?:and|&|into|to|with)\\s+' +
+    PAIR_REF,
+  'gi',
+);
+/**
+ * Clause boundaries: punctuation (Latin and Persian) and ":", "but", "then", "ولی", "اما", " و ",
+ * and "and" when a new verb follows ("crossfade A and B and don't add ...").
+ */
+const CLAUSE_SPLIT =
+  /[.;,!?\u060c\u061b]|(?<!\d):(?!\d)|\bbut\b|\bthen\b|\band\s+(?=(?:add|put|use|insert|apply|make|keep|do|don|never|avoid|crossfade|cross-fade|dissolve|remove|delete|drop)\b)|\u0648\u0644\u06cc|\u0627\u0645\u0627|\s\u0648\s/u;
+
+function parseTransitionIntent(normalized: string): TransitionIntent | undefined {
+  if (!TRANSITION_WORDS.test(normalized)) return undefined;
+  const pairsIn = (text: string) =>
+    [...text.matchAll(NAMED_PAIR)].map((match) => [match[1]!, match[2]!] as const);
+  const unsupported = UNSUPPORTED_TRANSITION_TYPE.exec(normalized)?.[1];
+  if (TRANSITION_REMOVE.test(normalized))
+    return {
+      mode: 'remove',
+      pairs: pairsIn(normalized),
+      negatedPairs: [],
+      ...(unsupported === undefined ? {} : { unsupportedType: unsupported }),
+    };
+  // Decide per clause: "Do not crossfade A and B, but add a crossfade between B and C" asks for
+  // B-C and forbids A-B. A request with only negated clauses and no named pair checks nothing.
+  const pairs: (readonly [string, string])[] = [];
+  const negatedPairs: (readonly [string, string])[] = [];
+  let positive = false;
+  for (const clause of normalized.split(CLAUSE_SPLIT)) {
+    if (!TRANSITION_WORDS.test(clause) && !/\bhard cuts?\b/.test(clause)) continue;
+    // Strip only the negated spans; whatever transition request is left is still positive. When in
+    // doubt this keeps the check (unmet) rather than skipping it.
+    const spans = [...clause.matchAll(TRANSITION_NEGATED_ALL)].map((match) => match[0]);
+    const rest = clause.replace(TRANSITION_NEGATED_ALL, ' ');
+    if (TRANSITION_WORDS.test(rest)) {
+      positive = true;
+      // Pairs come from what is left, so "hard cut between A and B" does not require A-B.
+      pairs.push(...pairsIn(rest));
+      negatedPairs.push(...spans.flatMap(pairsIn));
+    } else if (spans.length > 0) negatedPairs.push(...pairsIn(clause));
+  }
+  if (!positive && negatedPairs.length === 0) return undefined;
+  return {
+    mode: 'add',
+    positive,
+    pairs,
+    negatedPairs,
+    ...(unsupported === undefined ? {} : { unsupportedType: unsupported }),
+  };
+}
+
+type TransitionLike = { id?: string; leftClipId: string; rightClipId: string; type: string };
+
+function transitionsOf(project: JoyProjectV1 | undefined): readonly TransitionLike[] {
+  return (project as { transitions?: readonly TransitionLike[] } | undefined)?.transitions ?? [];
+}
+
+/** Resolves "B", "clip B", "clip-b" or "2" to a clip id (by id, then by letter/number order). */
+function resolveClipRef(ref: string, clipsByStart: readonly { id: string }[]): string | undefined {
+  const token = ref.toLowerCase();
+  const direct = clipsByStart.find(
+    (clip) => clip.id.toLowerCase() === token || clip.id.toLowerCase() === 'clip-' + token,
+  );
+  if (direct) return direct.id;
+  if (/^[a-z]$/.test(token)) return clipsByStart[token.charCodeAt(0) - 97]?.id;
+  if (/^\d+$/.test(token)) return clipsByStart[Number(token) - 1]?.id;
+  return undefined;
+}
+
+function samePair(transition: TransitionLike, a: string, b: string): boolean {
+  return (
+    (transition.leftClipId === a && transition.rightClipId === b) ||
+    (transition.leftClipId === b && transition.rightClipId === a)
+  );
+}
+
+function verifyTransitionIntent(
+  intent: TransitionIntent,
+  project: JoyProjectV1,
+  before: JoyProjectV1 | undefined,
+  clips: readonly { id: string; startUs: number }[],
+  verified: string[],
+  unmet: string[],
+): void {
+  const after = transitionsOf(project);
+  const previous = transitionsOf(before);
+  const clipsByStart = [...clips].sort((a, b) => a.startUs - b.startUs);
+  const pairs = intent.pairs.map(([a, b]) => ({
+    label: `${a} and ${b}`,
+    ids: [resolveClipRef(a, clipsByStart), resolveClipRef(b, clipsByStart)] as const,
+  }));
+  if (intent.mode === 'remove') {
+    if (pairs.length > 0) {
+      for (const pair of pairs) {
+        const [a, b] = pair.ids;
+        const gone = a !== undefined && b !== undefined && !after.some((t) => samePair(t, a, b));
+        (gone ? verified : unmet).push(
+          gone
+            ? `Request: no transition between ${pair.label}`
+            : `request asked to remove the transition between ${pair.label}, but it is still there`,
+        );
+      }
+      return;
+    }
+    if (before === undefined) return; // nothing to compare against
+    const fewer = after.length < previous.length;
+    (fewer ? verified : unmet).push(
+      fewer
+        ? 'Request: transition removed'
+        : 'request asked to remove a transition, but the timeline has as many as before',
+    );
+    return;
+  }
+  const keyOf = (t: TransitionLike) => `${t.id ?? ''}|${t.leftClipId}|${t.rightClipId}|${t.type}`;
+  const before_ = new Set(before === undefined ? [] : previous.map(keyOf));
+  const newTransitions = after.filter((t) => !before_.has(keyOf(t)));
+  for (const [a, b] of intent.negatedPairs) {
+    const ids = [resolveClipRef(a, clipsByStart), resolveClipRef(b, clipsByStart)] as const;
+    if (ids[0] === undefined || ids[1] === undefined) continue;
+    if (newTransitions.some((t) => samePair(t, ids[0]!, ids[1]!)))
+      unmet.push(`request asked for no transition between ${a} and ${b}, but this run added one`);
+  }
+  if (intent.positive === false) return;
+  if (intent.unsupportedType !== undefined) {
+    unmet.push(
+      `request asked for a ${intent.unsupportedType} transition; only crossfade is supported`,
+    );
+    return;
+  }
+  // Only transitions this run added (or changed) count; a crossfade that was already there does not.
+  const key = (t: TransitionLike) => `${t.id ?? ''}|${t.leftClipId}|${t.rightClipId}|${t.type}`;
+  const existing = new Set(before === undefined ? [] : previous.map(key));
+  const added = after.filter((t) => isCrossfade(t.type) && !existing.has(key(t)));
+  if (pairs.length > 0) {
+    for (const pair of pairs) {
+      const [a, b] = pair.ids;
+      const has = a !== undefined && b !== undefined && added.some((t) => samePair(t, a, b));
+      (has ? verified : unmet).push(
+        has
+          ? `Request: crossfade between ${pair.label}`
+          : `request asked for a crossfade between ${pair.label}, but this run added none there`,
+      );
+    }
+    return;
+  }
+  const has = added.length > 0;
+  (has ? verified : unmet).push(
+    has
+      ? 'Request: crossfade transition'
+      : before === undefined
+        ? 'request asked for a crossfade transition between clips, but the timeline has none'
+        : 'request asked for a crossfade transition between clips, but this run added none',
+  );
+}
+
+function isCrossfade(type: string): boolean {
+  return type === 'dissolve' || type === 'crossfade';
+}
+
+function parseRequestedSpeed(normalized: string): number | undefined {
+  if (/\btwice as fast\b|\bdouble (?:the )?speed\b/.test(normalized)) return 2;
+  if (/\bhalf (?:the )?speed\b|\bhalf as fast\b/.test(normalized)) return 0.5;
+  const multiple =
+    /(\d+(?:\.\d+)?)\s*[x×]\s*(?:speed|faster|slower|playback)?/.exec(normalized) ??
+    /\bspeed (?:of |to )?(\d+(?:\.\d+)?)\s*[x×]?/.exec(normalized);
+  if (
+    !multiple?.[1] ||
+    !/\b(speed|fast|faster|slow|slower|playback|slow-?mo)\b|سرعت|تند|کند/.test(normalized)
+  )
+    return undefined;
+  const rate = Number(multiple[1]);
+  return rate > 0 ? rate : undefined;
+}
+
+function parseCaptionTimes(request: string): { text: string; startUs: number; endUs: number }[] {
+  return [...request.matchAll(QUOTED_TIMED_TEXT)].flatMap((match) => {
+    const startUs = Math.round(Number(match[2]) * 1_000_000);
+    const endUs = Math.round(Number(match[3]) * 1_000_000);
+    return endUs > startUs ? [{ text: match[1]!.trim(), startUs, endUs }] : [];
+  });
 }
 
 function parseRequestIntent(request: string): RequestIntent {
@@ -411,12 +693,37 @@ function parseRequestIntent(request: string): RequestIntent {
   const duration = /(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\s+long/i.exec(normalized);
   if (duration?.[1]) intent.durationUs = Math.round(Number(duration[1]) * 1_000_000);
   intent.verticalCenterText = /\b(middle|vertically)\b/i.test(normalized);
+  if (
+    /\b(smaller|shrink|tinier|reduce (?:the )?(?:font |text )?size)\b|کوچک[\s\u200c]*تر/i.test(
+      normalized,
+    )
+  )
+    intent.textSize = 'smaller';
+  else if (
+    /\b(bigger|larger|enlarge|increase (?:the )?(?:font |text )?size)\b|بزرگ[\s\u200c]*تر/i.test(
+      normalized,
+    )
+  )
+    intent.textSize = 'larger';
+  const transition = parseTransitionIntent(normalized);
+  if (transition !== undefined) intent.transition = transition;
+  if (
+    transition === undefined &&
+    /\bfade[- ]?(?:in|out|ins|outs)\b|\b(?:from|to) black\b/.test(normalized)
+  )
+    intent.fadeInOut = true;
+  const speed = parseRequestedSpeed(normalized);
+  if (speed !== undefined) intent.speed = speed;
+  const captionTimes = parseCaptionTimes(request);
+  if (captionTimes.length > 0) intent.captionTimes = captionTimes;
   return intent;
 }
 
 export function verifyRequestIntent(
   project: JoyProjectV1,
   request: string,
+  /** The project before the run; enables checks of edits relative to it (smaller/larger). */
+  before?: JoyProjectV1,
 ): { readonly verified: string[]; readonly unmet: string[] } {
   const intent = parseRequestIntent(request);
   const root = project.compositions[project.rootCompositionId];
@@ -494,6 +801,61 @@ export function verifyRequestIntent(
       hasLook ? `Request: ${intent.look} look` : `request asked for ${intent.look} look`,
     );
   }
+  if (intent.transition)
+    verifyTransitionIntent(intent.transition, project, before, clips, verified, unmet);
+  if (intent.fadeInOut)
+    unmet.push('request asked for a fade in/out; fades from or to black are not supported');
+  if (intent.speed !== undefined) {
+    const rate = intent.speed;
+    const sped = clips.some(
+      (clip) => clip.kind === 'video' && Math.abs((clip.playbackRate ?? 1) - rate) < 1e-6,
+    );
+    (sped ? verified : unmet).push(
+      sped
+        ? `Request: ${rate}x speed`
+        : `request asked for ${rate}x speed; no clip plays at ${rate}x`,
+    );
+  }
+  if (intent.textSize !== undefined && before !== undefined) {
+    const sizes = (source: JoyProjectV1) =>
+      new Map(
+        (source.compositions[source.rootCompositionId]?.tracks ?? [])
+          .flatMap((track) => track.clips)
+          .flatMap((clip) =>
+            clip.kind === 'caption' ? [[clip.id, clip.style?.fontSize ?? 1] as const] : [],
+          ),
+      );
+    const previous = sizes(before);
+    const now = sizes(project);
+    // Only checkable when there was text to resize; a new title is not "the title, smaller".
+    if (previous.size > 0) {
+      const changed = [...previous].some(([clipId, size]) => {
+        const after = now.get(clipId);
+        return after !== undefined && (intent.textSize === 'smaller' ? after < size : after > size);
+      });
+      (changed ? verified : unmet).push(
+        changed
+          ? `Request: existing text made ${intent.textSize}`
+          : `request asked to make the existing text ${intent.textSize}, but no existing text got ${intent.textSize} (edit it with update-text instead of adding new text)`,
+      );
+    }
+  }
+  for (const wanted of intent.captionTimes ?? []) {
+    const matches = captionClipsWithText(project, clips, wanted.text);
+    const placed = matches.some(
+      (clip) => clip.startUs === wanted.startUs && clip.startUs + clip.durationUs === wanted.endUs,
+    );
+    const range = `${seconds(wanted.startUs)} to ${seconds(wanted.endUs)}`;
+    if (placed) verified.push(`Request: caption “${wanted.text}” from ${range}`);
+    else
+      unmet.push(
+        `request asked for caption “${wanted.text}” from ${range}; ${
+          matches.length === 0
+            ? 'no caption has that text'
+            : `it is at ${matches.map((clip) => `${seconds(clip.startUs)} to ${seconds(clip.startUs + clip.durationUs)}`).join(', ')}`
+        }`,
+      );
+  }
   if (intent.durationUs !== undefined) {
     const durationMatches = root?.durationUs === intent.durationUs;
     (durationMatches ? verified : unmet).push(
@@ -505,6 +867,52 @@ export function verifyRequestIntent(
   return { verified, unmet };
 }
 
+function seconds(us: number): string {
+  return `${Number((us / 1_000_000).toFixed(3))}s`;
+}
+
+type TimelineClip = NonNullable<
+  JoyProjectV1['compositions'][string]
+>['tracks'][number]['clips'][number];
+
+function captionText(project: JoyProjectV1, documentId: string): string | undefined {
+  const document = project.captionDocuments?.[documentId];
+  return document?.segments
+    .map(
+      (segment) =>
+        segment.textOverride ??
+        segment.wordIds.map((id) => document.words[id]?.text ?? '').join(''),
+    )
+    .join(' ');
+}
+
+/** Caption clips whose text is exactly `text`. */
+function captionClipsWithText(
+  project: JoyProjectV1,
+  clips: readonly TimelineClip[],
+  text: string,
+): TimelineClip[] {
+  return clips.filter(
+    (clip) => clip.kind === 'caption' && captionText(project, clip.captionDocumentId) === text,
+  );
+}
+
+function checklistItemStart(
+  project: JoyProjectV1,
+  clips: readonly TimelineClip[],
+  item: JoyPlanChecklistItem,
+): number | undefined {
+  if (item.kind === 'text') {
+    const matches = captionClipsWithText(project, clips, item.text);
+    return (
+      matches.find((clip) => clip.startUs === item.timelineStartUs)?.startUs ?? matches[0]?.startUs
+    );
+  }
+  // A transition starts at its cut, where the right clip starts.
+  const clipId = item.kind === 'transition' ? item.rightClipId : item.clipId;
+  return clips.find((clip) => clip.id === clipId)?.startUs;
+}
+
 export function verifyPlanChecklist(
   project: JoyProjectV1,
   checklist: readonly JoyPlanChecklistItem[],
@@ -514,6 +922,21 @@ export function verifyPlanChecklist(
   const verified: string[] = [];
   const unmet: string[] = [];
   for (const item of checklist) {
+    if (item.timelineStartUs !== undefined) {
+      const start = checklistItemStart(project, clips, item);
+      const label =
+        item.kind === 'text'
+          ? `text “${item.text}”`
+          : item.kind === 'transition'
+            ? `transition ${item.leftClipId} → ${item.rightClipId}`
+            : `${item.kind} ${item.clipId}`;
+      if (start === item.timelineStartUs)
+        verified.push(`Start of ${label}: ${seconds(item.timelineStartUs)}`);
+      else
+        unmet.push(
+          `${label} expected to start at ${seconds(item.timelineStartUs)} but starts at ${start === undefined ? 'nothing' : seconds(start)}`,
+        );
+    }
     if (item.kind === 'trim') {
       const clip = clips.find((candidate) => candidate.id === item.clipId);
       const actualIn = clip?.kind === 'video' ? clip.sourceInUs : undefined;
@@ -527,6 +950,26 @@ export function verifyPlanChecklist(
         verified.push(`Trim ${item.clipId}: source ${item.sourceInUs}–${item.sourceOutUs} µs`);
       else
         unmet.push(`trim ${item.clipId} expected source ${item.sourceInUs}–${item.sourceOutUs} µs`);
+    } else if (item.kind === 'transition') {
+      const transitions =
+        (
+          project as {
+            transitions?: readonly { leftClipId: string; rightClipId: string; type: string }[];
+          }
+        ).transitions ?? [];
+      const has = transitions.some(
+        (transition) =>
+          transition.leftClipId === item.leftClipId &&
+          transition.rightClipId === item.rightClipId &&
+          isCrossfade(transition.type),
+      );
+      if (has) verified.push(`Crossfade ${item.leftClipId} → ${item.rightClipId}`);
+      else unmet.push(`crossfade between ${item.leftClipId} and ${item.rightClipId}`);
+    } else if (item.kind === 'speed') {
+      const clip = clips.find((candidate) => candidate.id === item.clipId);
+      if (clip?.kind === 'video' && Math.abs((clip.playbackRate ?? 1) - item.rate) < 1e-6)
+        verified.push(`Speed ${item.clipId}: ${item.rate}x`);
+      else unmet.push(`speed ${item.rate}x on clip ${item.clipId}`);
     } else if (item.kind === 'look') {
       const clip = clips.find((candidate) => candidate.id === item.clipId);
       if (clip?.kind === 'video' && clip.look?.preset === item.look)
@@ -544,17 +987,37 @@ export function verifyPlanChecklist(
           );
           return (
             caption?.kind === 'caption' &&
-            (item.position !== 'center' ||
-              (caption.style?.positionX === 0 && caption.style?.positionY === 0))
+            (item.position === undefined || textAtPosition(caption.style, item.position))
           );
         }),
       );
-      if (found)
-        verified.push(`Text “${item.text}”${item.position === 'center' ? ' centered' : ''}`);
-      else unmet.push(`text “${item.text}”${item.position === 'center' ? ' centered' : ''}`);
+      const where = item.position === undefined ? '' : ` ${positionLabel(item.position)}`;
+      if (found) verified.push(`Text “${item.text}”${where}`);
+      else unmet.push(`text “${item.text}”${where}`);
     }
   }
   return { verified, unmet };
+}
+
+/**
+ * Checklist positions in CLI units (x from the centre; y = -positionY, measured from the
+ * template's bottom title line, negative = up). "center" is horizontal centring, which is what
+ * "centred near the bottom" means; bottom/middle/top are vertical bands of the frame.
+ */
+export function textAtPosition(
+  style: { readonly positionX?: number; readonly positionY?: number } | undefined,
+  position: NonNullable<Extract<JoyPlanChecklistItem, { kind: 'text' }>['position']>,
+): boolean {
+  const x = style?.positionX ?? 0;
+  const y = -(style?.positionY ?? 0);
+  if (position === 'center') return Math.abs(x) <= 0.05;
+  if (position === 'bottom') return y >= -0.2;
+  if (position === 'middle') return y < -0.2 && y > -0.5;
+  return y <= -0.5;
+}
+
+function positionLabel(position: string): string {
+  return position === 'center' ? 'centered' : `at the ${position}`;
 }
 
 export function truthfulAgentSummary(input: {
@@ -589,4 +1052,10 @@ export function truthfulAgentSummary(input: {
   if (input.errors.length > 0)
     return `No project changes were made. Requests not staged: ${input.errors.join('; ')}`;
   return 'No project changes were made.';
+}
+
+function partialLimitMessage(reason: string | undefined): string {
+  const limit =
+    reason === 'step-limit' ? 'step' : reason === 'tool-call-limit' ? 'tool-call' : 'safety';
+  return `Run stopped at the ${limit} limit before the plan was final; nothing was applied.`;
 }

@@ -9,9 +9,9 @@ export interface CreateTextClipInput {
   readonly text: string;
   readonly startUs: number;
   readonly durationUs: number;
-  /** Caption editor frame-fraction offset (normally between -0.4 and 0.4). */
+  /** Frame-fraction offset; see TEXT_X_RANGE / TEXT_Y_RANGE. */
   readonly x?: number;
-  /** Caption editor frame-fraction offset (normally between -0.4 and 0.4). */
+  /** Frame-fraction offset; see TEXT_X_RANGE / TEXT_Y_RANGE. */
   readonly y?: number;
   /** Multiplier applied to the selected caption template's font size. */
   readonly size?: number;
@@ -32,6 +32,14 @@ export function detectTextDirection(text: string): 'rtl' | 'ltr' {
   return 'ltr';
 }
 
+/**
+ * CLI/agent text placement in frame fractions. x is a horizontal offset from the centre.
+ * y is a vertical offset from the template's bottom title line (0 = default, near the bottom;
+ * negative = up, positive = down): about -0.36 is the vertical centre and about -0.7 the top.
+ */
+export const TEXT_X_RANGE = { min: -0.4, max: 0.4 } as const;
+export const TEXT_Y_RANGE = { min: -0.75, max: 0.4 } as const;
+
 export function createTextClip(input: CreateTextClipInput): {
   readonly document: CaptionDocumentV1;
   readonly clip: CaptionClipV1;
@@ -45,10 +53,18 @@ export function createTextClip(input: CreateTextClipInput): {
   const size = input.size ?? 1;
   if (!Number.isFinite(size) || size < 0.1 || size > 8)
     throw new RangeError('Text size multiplier must be from 0.1 through 8.');
-  for (const coordinate of [input.x, input.y]) {
-    if (coordinate !== undefined && (!Number.isFinite(coordinate) || Math.abs(coordinate) > 0.4))
-      throw new RangeError('Text position must be a frame fraction from -0.4 through 0.4.');
-  }
+  if (
+    input.x !== undefined &&
+    (!Number.isFinite(input.x) || input.x < TEXT_X_RANGE.min || input.x > TEXT_X_RANGE.max)
+  )
+    throw new RangeError('Text x must be a frame fraction from -0.4 through 0.4.');
+  if (
+    input.y !== undefined &&
+    (!Number.isFinite(input.y) || input.y < TEXT_Y_RANGE.min || input.y > TEXT_Y_RANGE.max)
+  )
+    throw new RangeError(
+      'Text y must be a frame fraction from -0.75 (top) through 0.4 (below the title line).',
+    );
   const color = input.color ?? '#ffffff';
   if (!/^#[0-9a-f]{6}$/i.test(color)) throw new RangeError('Text color must be #RRGGBB.');
   const wordId = `${input.id}-word`;

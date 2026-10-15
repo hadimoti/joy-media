@@ -408,10 +408,19 @@ export class JoyAgentEngine {
     }
     const toolCalls = result.steps.reduce((count, step) => count + step.toolCalls.length, 0);
     const noPlan = this.options.bridge.hasSubmittedPlan?.() === false;
+    // A limit only cuts a plan short when the model was still working. When the last tool call
+    // of the run was submit_plan, the plan is final and was checked by submit_plan itself.
+    const planFinal =
+      this.options.bridge.hasSubmittedPlan?.() === true &&
+      result.steps.flatMap((step) => step.toolCalls).at(-1)?.toolName === 'submit_plan';
     const stepLimitHit =
-      result.steps.length >= maxSteps && result.steps.at(-1)?.finishReason === 'tool-calls';
+      !planFinal &&
+      result.steps.length >= maxSteps &&
+      result.steps.at(-1)?.finishReason === 'tool-calls';
     const toolCallLimitHit =
-      toolCalls >= this.limits.maxToolCalls && result.steps.at(-1)?.finishReason === 'tool-calls';
+      !planFinal &&
+      toolCalls >= this.limits.maxToolCalls &&
+      result.steps.at(-1)?.finishReason === 'tool-calls';
     if (result.text.length > this.limits.toolPayloadBytes)
       throw new Error('JOY_AGENT_INVALID_TOOL');
     emit({ type: 'text-delta', text: result.text });
@@ -452,6 +461,14 @@ function estimateRequestedOperations(request: string): number {
   return Math.max(1, distinctIntentCount, explicitListItems);
 }
 
+/** The run hit `limits.wallTimeMs`; classified as JOY_AGENT_TIMEOUT. */
+class JoyAgentWallTimeError extends Error {
+  constructor(timeoutMs: number, cause?: unknown) {
+    super(`timeout: no complete answer within ${Math.round(timeoutMs / 1000)} s`, { cause });
+    this.name = 'JoyAgentTimeout';
+  }
+}
+
 async function withTimeout<T>(
   operation: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number,
@@ -461,9 +478,18 @@ async function withTimeout<T>(
   const forwardAbort = (): void => controller.abort();
   if (parent?.aborted === true) controller.abort();
   parent?.addEventListener('abort', forwardAbort, { once: true });
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new JoyAgentWallTimeError(timeoutMs));
+  }, timeoutMs);
   try {
     return await operation(controller.signal);
+  } catch (error) {
+    // Whatever the SDK wraps the abort in (an AbortError, or an APICallError with status 200
+    // when the body was still streaming), a run stopped by the wall-time limit is a timeout.
+    if (timedOut) throw new JoyAgentWallTimeError(timeoutMs, error);
+    throw error;
   } finally {
     clearTimeout(timer);
     parent?.removeEventListener('abort', forwardAbort);

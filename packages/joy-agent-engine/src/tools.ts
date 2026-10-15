@@ -13,8 +13,7 @@ import {
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
 /**
  * Models often add the clip's timeline start to a submit_plan checklist item (BUGS.md 9).
- * It is accepted so the plan isn't rejected, then dropped: start positions are verified by
- * the CLI from the user's request, not from the checklist.
+ * It is kept and verified like the rest of the item (F4: dropping it hid wrong start times).
  */
 const checklistStartHint = {
   timelineStartUs: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
@@ -64,6 +63,28 @@ const timelineOperation = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({
+      kind: z.literal('add-transition'),
+      id,
+      /** The earlier clip; it must end exactly where rightClipId starts, on the same track. */
+      leftClipId: id,
+      rightClipId: id,
+      type: z.enum(['crossfade']).default('crossfade'),
+      durationUs: z.number().int().positive().max(10_000_000).default(1_000_000),
+      dependsOn: z.array(id).max(32).default([]),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('set-speed'),
+      id,
+      clipId: id,
+      /** Playback rate: 2 = twice as fast (half as long), 0.5 = half speed. */
+      rate: z.number().finite().min(0.1).max(8),
+      dependsOn: z.array(id).max(32).default([]),
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal('split'),
       id,
       clipId: id,
@@ -82,6 +103,25 @@ const documentOperation = z.discriminatedUnion('kind', [
       text: boundedText,
       startUs: z.number().int().nonnegative(),
       durationUs: z.number().int().positive().max(86_400_000_000),
+      x: z.number().finite().optional(),
+      y: z.number().finite().optional(),
+      size: z.number().finite().min(0.1).max(8).optional(),
+      color: z
+        .string()
+        .regex(/^#[0-9a-f]{6}$/i)
+        .optional(),
+      dependsOn: z.array(id).max(32).default([]),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('update-text'),
+      id,
+      /** The caption clip id from read_timeline_window (e.g. `text-title`). */
+      objectId: id,
+      text: boundedText.optional(),
+      startUs: z.number().int().nonnegative().optional(),
+      durationUs: z.number().int().positive().max(86_400_000_000).optional(),
       x: z.number().finite().optional(),
       y: z.number().finite().optional(),
       size: z.number().finite().min(0.1).max(8).optional(),
@@ -125,21 +165,39 @@ const documentOperation = z.discriminatedUnion('kind', [
     .strict(),
 ]);
 
+export const JOY_CHECKLIST_TEXT_POSITIONS = ['center', 'bottom', 'middle', 'top'] as const;
+export type JoyChecklistTextPosition = (typeof JOY_CHECKLIST_TEXT_POSITIONS)[number];
 export type JoyTimelineOperation = z.infer<typeof timelineOperation>;
 export type JoyDocumentOperation = z.infer<typeof documentOperation>;
-export type JoyPlanChecklistItem =
+export type JoyPlanChecklistItem = (
   | {
       readonly kind: 'trim';
       readonly clipId: string;
       readonly sourceInUs: number;
       readonly sourceOutUs: number;
     }
-  | { readonly kind: 'text'; readonly text: string; readonly position?: 'center' | undefined }
+  | {
+      readonly kind: 'text';
+      readonly text: string;
+      /** center = horizontally centred; bottom/middle/top = vertical band of the frame. */
+      readonly position?: JoyChecklistTextPosition | undefined;
+    }
   | {
       readonly kind: 'look';
       readonly clipId: string;
       readonly look: 'crt' | 'bw' | 'warm' | 'cool';
-    };
+    }
+  | { readonly kind: 'speed'; readonly clipId: string; readonly rate: number }
+  | {
+      readonly kind: 'transition';
+      readonly leftClipId: string;
+      readonly rightClipId: string;
+      readonly type?: 'crossfade' | undefined;
+    }
+) & {
+  /** Where the clip or caption should start on the timeline; verified by the CLI. */
+  readonly timelineStartUs?: number | undefined;
+};
 
 export interface JoyAgentToolBridge {
   readonly hasSubmittedPlan?: () => boolean;
@@ -541,7 +599,7 @@ export function createJoyAgentTools(
     }),
     propose_timeline_operations: tool({
       description:
-        'Propose timeline operations. Each operation needs a unique id and schema-valid fields; the tool returns validation errors for repair and retry (up to three invalid proposals). Time values use integer microseconds. For trim, sourceInUs/sourceOutUs are positions into the SOURCE media, and timelineStartUs is optional. Example: keep source 7 s to 17 s => sourceInUs: 7000000, sourceOutUs: 17000000. Trimming changes the visible duration; use move to change timeline position.',
+        'Propose timeline operations. set-speed changes a video clip playback rate (rate 2 = twice as fast, so the clip source span lasts half as long on the timeline; 0.5 = half speed); apply it after any trim. add-transition puts a crossfade (the only transition type) between two clips that touch on the same video track (leftClipId ends exactly where rightClipId starts; place them first); durationUs defaults to 1 s and must be at most half of either clip. Each operation needs a unique id and schema-valid fields; the tool returns validation errors for repair and retry (up to three invalid proposals). Time values use integer microseconds. For trim, sourceInUs/sourceOutUs are positions into the SOURCE media, and timelineStartUs is optional. Example: keep source 7 s to 17 s => sourceInUs: 7000000, sourceOutUs: 17000000. Trimming changes the visible duration; use move to change timeline position.',
       inputSchema: proposalInput(operationLimit),
       execute: async (input) => {
         let operations: readonly JoyTimelineOperation[];
@@ -573,7 +631,7 @@ export function createJoyAgentTools(
     }),
     propose_document_operations: tool({
       description:
-        'Propose document operations. Batch all requested changes in one call, then submit_plan once. add-effect applies one of the supported looks (crt, bw, warm, cool) to a video clip; optional intensity, scanlineStrength, and noiseAmount are each 0..1. For create-text, x and y are editor-normalized frame fractions in [-0.4, 0.4]; 0 is centered and omitted values default to center. size is a template multiplier from 0.1 to 8. durationUs is an integer number of microseconds (10 seconds = 10000000) and must be at least one frame at project fps. Schema and project validation errors are returned so you can repair and retry (up to three invalid proposals).',
+        'Propose document operations. Batch all requested changes in one call, then submit_plan once. add-effect applies one of the supported looks (crt, bw, warm, cool) to a video clip; optional intensity, scanlineStrength, and noiseAmount are each 0..1. For create-text, x is a horizontal frame fraction in [-0.4, 0.4] (0 = centred, the default). y is a vertical frame fraction measured from the default title line near the bottom of the frame: 0 (the default) = bottom title line, negative = up, positive = down; about -0.36 = vertical centre, about -0.7 = top; range [-0.75, 0.4]. Instead of x/y you may give position: center, bottom, middle or top. To change existing text (shown with its text, size, x and y by read_timeline_window), use update-text with objectId = that caption clip id and only the fields to change (text, size, x, y, color, startUs, durationUs); do not create a second copy. size is a template multiplier from 0.1 to 8. durationUs is an integer number of microseconds (10 seconds = 10000000) and must be at least one frame at project fps. Schema and project validation errors are returned so you can repair and retry (up to three invalid proposals).',
       inputSchema: proposalInput(operationLimit),
       execute: async (input) => {
         let operations: readonly JoyDocumentOperation[];
@@ -638,7 +696,7 @@ export function createJoyAgentTools(
     }),
     submit_plan: tool({
       description:
-        'Finalize the staged plan for JOY approval. Include a non-empty checklist that covers every staged operation type and each requested outcome (trim source range, centered text, look, start position, or duration) so the CLI can verify the final timeline. The CLI independently checks explicit outcomes from the user request.',
+        'Finalize the staged plan for JOY approval. Include a non-empty checklist that covers every staged operation type and each requested outcome (trim source range, text with its position and timelineStartUs, look, speed, transition, start position, or duration) so the CLI can verify the final timeline. The CLI independently checks explicit outcomes from the user request.',
       inputSchema: z
         .object({
           checklist: z
@@ -657,7 +715,7 @@ export function createJoyAgentTools(
                   .object({
                     kind: z.literal('text'),
                     text: boundedText,
-                    position: z.literal('center').optional(),
+                    position: z.enum(JOY_CHECKLIST_TEXT_POSITIONS).optional(),
                     ...checklistStartHint,
                   })
                   .strict(),
@@ -666,6 +724,23 @@ export function createJoyAgentTools(
                     kind: z.literal('look'),
                     clipId: id,
                     look: z.enum(JOY_LOOK_PRESETS),
+                    ...checklistStartHint,
+                  })
+                  .strict(),
+                z
+                  .object({
+                    kind: z.literal('transition'),
+                    leftClipId: id,
+                    rightClipId: id,
+                    type: z.literal('crossfade').optional(),
+                    ...checklistStartHint,
+                  })
+                  .strict(),
+                z
+                  .object({
+                    kind: z.literal('speed'),
+                    clipId: id,
+                    rate: z.number().finite().min(0.1).max(8),
                     ...checklistStartHint,
                   })
                   .strict(),
@@ -679,9 +754,8 @@ export function createJoyAgentTools(
       execute: async (input) =>
         boundedResult(
           await bridge.submitPlan({
-            // The start hint is informational: the CLI checks start positions from the request.
-            checklist: input.checklist.map(
-              ({ timelineStartUs: _timelineStartUs, ...item }) => item,
+            checklist: input.checklist.map(({ timelineStartUs, ...item }) =>
+              timelineStartUs === undefined ? item : { ...item, timelineStartUs },
             ),
           }),
           maxPayloadBytes,
