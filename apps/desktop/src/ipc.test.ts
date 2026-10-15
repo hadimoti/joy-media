@@ -38,4 +38,18 @@ describe('IPC sender frame policy', () => {
       isTrustedIpcSenderFrame({ senderFrame: { url: 'not a URL' }, mainFrame }, 'https://joyst.ir'),
     ).toBe(false);
   });
+
+  it('rejects a detached frame (null senderFrame) and a request with no claimed origin', () => {
+    const mainFrame = { url: 'joy-media-app://renderer/index.html' };
+    expect(
+      isTrustedIpcSenderFrame({ senderFrame: null, mainFrame }, 'joy-media-app://renderer'),
+    ).toBe(false);
+    expect(isTrustedIpcSenderFrame({ senderFrame: mainFrame, mainFrame }, undefined)).toBe(false);
+    expect(isTrustedIpcSenderFrame({ senderFrame: mainFrame, mainFrame }, 42)).toBe(false);
+  });
+
+  it('rejects a frame with an opaque (null) origin even if the request claims "null"', () => {
+    const frame = { url: 'data:text/html,hi' };
+    expect(isTrustedIpcSenderFrame({ senderFrame: frame, mainFrame: frame }, 'null')).toBe(false);
+  });
 });
