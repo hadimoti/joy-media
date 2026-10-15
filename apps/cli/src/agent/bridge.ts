@@ -11,7 +11,8 @@ import { recomputeRootDuration } from '../utils/timeline-math.js';
 import { buildFfmpegFramePlan } from '../render/ffmpeg-plan.js';
 import { resolveFfmpegExecutable } from '../render/ffmpeg-run.js';
 import { DEFAULT_JOY_AGENT_LIMITS } from '@joy-media/joy-agent-engine';
-import { createTextClip } from '../render/text-clip.js';
+import { createTextClip, TEXT_Y_RANGE } from '../render/text-clip.js';
+import { layoutFfmpegCaption } from '../render/caption-layout.js';
 import { resolveTextFont } from '../render/text-font.js';
 import {
   createFfmpegTextWorkspace,
@@ -403,8 +404,17 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
           errors.push(`Text ${operation.id} duration is shorter than one project frame.`);
         if (operation.x !== undefined && Math.abs(operation.x) > 0.4)
           errors.push(`Text ${operation.id} x must be in editor units from -0.4 to 0.4.`);
-        if (operation.y !== undefined && Math.abs(operation.y) > 0.4)
-          errors.push(`Text ${operation.id} y must be in editor units from -0.4 to 0.4.`);
+        if (
+          operation.y !== undefined &&
+          (operation.y < TEXT_Y_RANGE.min || operation.y > TEXT_Y_RANGE.max)
+        )
+          errors.push(
+            `Text ${operation.id} y must be from -0.75 to 0.4 (0 = default line near the bottom, about -0.36 = vertical centre, about -0.7 = top).`,
+          );
+        else if (!textFitsFrame(operation, root?.width ?? 1080, root?.height ?? 1920))
+          errors.push(
+            `Text ${operation.id} at y ${operation.y ?? 0} with size ${operation.size ?? 1} would not be drawn (it is above the safe area); use a larger y or a smaller size.`,
+          );
         if (operation.trackId) {
           const track = tracks.find((candidate) => candidate.id === operation.trackId);
           if (!track) errors.push(`Track ${operation.trackId} not found.`);
@@ -973,4 +983,40 @@ function unknownChecklistClips(
   for (const item of checklist)
     if ('clipId' in item && !known.has(item.clipId)) missing.add(item.clipId);
   return [...missing];
+}
+
+/** False when captions-core would lay out none of the text (it drops lines above the safe area). */
+function textFitsFrame(
+  operation: {
+    readonly text: string;
+    readonly x?: number | undefined;
+    readonly y?: number | undefined;
+    readonly size?: number | undefined;
+  },
+  width: number,
+  height: number,
+): boolean {
+  try {
+    const { document, clip } = createTextClip({
+      id: 'fit-check',
+      text: operation.text,
+      startUs: 0,
+      durationUs: 1_000_000,
+      ...(operation.x === undefined ? {} : { x: operation.x }),
+      ...(operation.y === undefined ? {} : { y: operation.y }),
+      ...(operation.size === undefined ? {} : { size: operation.size }),
+    });
+    return (
+      layoutFfmpegCaption({
+        clipId: clip.id,
+        document,
+        segment: document.segments[0]!,
+        style: clip.style!,
+        width,
+        height,
+      }).length > 0
+    );
+  } catch {
+    return true; // other validation reports the problem
+  }
 }

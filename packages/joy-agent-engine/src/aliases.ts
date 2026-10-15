@@ -189,6 +189,9 @@ const TEXT_POSITIONS: Readonly<Record<string, { readonly x?: number; readonly y?
   centre: { x: 0 },
   bottom: {},
   'bottom-center': { x: 0 },
+  middle: { x: 0, y: -0.36 },
+  top: { x: 0, y: -0.65 },
+  'top-center': { x: 0, y: -0.65 },
 };
 
 function createTextAliases(candidate: Record<string, unknown>): Record<string, unknown> {

@@ -62,7 +62,7 @@ export function printTimelineHelp(): void {
     '  Text placement: x is horizontal frame offset (0 = center, -0.4 = near left, 0.4 = near right).',
   );
   console.log(
-    '  y offsets the template bottom title line (0 = default position, negative = up, positive = down); rendering clamps y to the frame, and add-text warns if text may clip.',
+    '  y offsets the template bottom title line (0 = default position near the bottom, negative = up, positive = down; about -0.36 = vertical centre, about -0.7 = top, range -0.75..0.4); rendering clamps y to the frame, and add-text warns if text may clip.',
   );
   console.log(
     '  add-effect <clipId> --look <crt|bw|warm|cool> (any case; also --type/--kind) [--intensity 0..1] [--scanline-strength 0..1] [--noise-amount 0..1]',

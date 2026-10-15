@@ -169,7 +169,7 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     asset: typeof v.asset === 'string' ? v.asset : undefined,
     text: typeof v.text === 'string' ? v.text : undefined,
     x: parseFloatFlag('x', v.x, { min: -0.4, max: 0.4, allowNegative: true, allowZero: true }),
-    y: parseFloatFlag('y', v.y, { min: -0.4, max: 0.4, allowNegative: true, allowZero: true }),
+    y: parseFloatFlag('y', v.y, { min: -0.75, max: 0.4, allowNegative: true, allowZero: true }),
     direction: ['rtl', 'ltr', 'auto'].includes(String(v.direction))
       ? (v.direction as 'rtl' | 'ltr' | 'auto')
       : undefined,

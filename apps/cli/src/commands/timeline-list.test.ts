@@ -33,7 +33,7 @@ describe('timeline list', () => {
       'x is horizontal frame offset (0 = center, -0.4 = near left, 0.4 = near right)',
     );
     expect(help).toContain(
-      'y offsets the template bottom title line (0 = default position, negative = up, positive = down)',
+      'y offsets the template bottom title line (0 = default position near the bottom, negative = up, positive = down; about -0.36 = vertical centre',
     );
     expect(help).toContain('rendering clamps y to the frame');
     expect(help).toContain('add-text warns if text may clip');

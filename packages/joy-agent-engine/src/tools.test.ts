@@ -158,7 +158,7 @@ describe('JOY Agent tool catalog', () => {
     );
     const textDescription = (tools.propose_document_operations as { description: string })
       .description;
-    expect(textDescription).toContain('x and y are editor-normalized frame fractions');
+    expect(textDescription).toContain('y is a vertical frame fraction measured from the default title line near the bottom');
     expect(textDescription).toContain('10 seconds = 10000000');
   });
 
