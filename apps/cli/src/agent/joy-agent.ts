@@ -769,11 +769,30 @@ export function verifyRequestIntent(
   const unmet: string[] = [];
   if (intent.centerText) {
     const root = project.compositions[project.rootCompositionId];
+    // FT3 MUST1: "center" means the middle of the frame unless the request limits it to the
+    // horizontal axis ("horizontally", "at the bottom/top", پایین / بالا). A named top/bottom
+    // placement must also hold: "center the text at the top" is not met by a bottom caption.
+    const lower = request.toLowerCase();
+    const wantsTop = /\b(?:top|upper)\b|\u0628\u0627\u0644\u0627/u.test(lower);
+    const wantsBottom = /\b(?:bottom|lower)\b|\u067e\u0627\u06cc\u06cc\u0646/u.test(lower);
+    const horizontalOnly =
+      !/\b(?:middle|vertically)\b/.test(lower) &&
+      (/\bhorizontally\b/.test(lower) || wantsTop !== wantsBottom);
+    const place = wantsTop === wantsBottom ? undefined : wantsTop ? 'top' : 'bottom';
+    /** `offset` is the text centre relative to the frame centre: negative is above, positive below. */
+    const positionOk = (offset: number, tolerance: number): boolean =>
+      horizontalOnly
+        ? place === 'top'
+          ? offset < -tolerance
+          : place === 'bottom'
+            ? offset > tolerance
+            : true
+        : Math.abs(offset) <= tolerance;
     const centeredVisualObject = Object.values(project.visualObjects).some(
       (object) =>
         object.kind === 'text' &&
         Math.abs(object.transform.x) < 0.001 &&
-        (!intent.verticalCenterText || Math.abs(object.transform.y) < 0.001),
+        positionOk(object.transform.y, 0.001),
     );
     const centeredCaption =
       root?.tracks.some(
@@ -797,23 +816,19 @@ export function verifyRequestIntent(
                   node.align === 'center' &&
                   Math.abs(node.transform.translateX - root.width / 2) <= 2;
                 if (!horizontalCenter) return false;
-                if (!intent.verticalCenterText) return true;
                 const top = ffmpegCaptionY(node, root.height);
                 const centerY = top + ffmpegCaptionFontSize(node) / 2;
-                return Math.abs(centerY - root.height / 2) <= 4;
+                return positionOk(centerY - root.height / 2, 4);
               }),
             );
           }),
       ) ?? false;
     const centered = centeredVisualObject || centeredCaption;
-    // NEW-4: "centred horizontally near the bottom" checks only the horizontal centre; say so
-    // instead of reporting plain "centered text" for bottom captions.
-    const horizontalOnly =
-      !intent.verticalCenterText &&
-      /\b(?:bottom|top|lower|upper|horizontally)\b|\u067e\u0627\u06cc\u06cc\u0646|\u0628\u0627\u0644\u0627/iu.test(
-        request,
-      );
-    const what = horizontalOnly ? 'text centered horizontally' : 'centered text';
+    const what = !horizontalOnly
+      ? 'centered text'
+      : place === undefined
+        ? 'text centered horizontally'
+        : `text centered horizontally at the ${place}`;
     (centered ? verified : unmet).push(centered ? `Request: ${what}` : `request asked for ${what}`);
   }
   if (intent.startAtZero) {
@@ -1217,7 +1232,7 @@ function requestsExplicitGap(request: string): boolean {
 }
 
 const GAP_NEGATION =
-  /\b(?:not|no|never|without|avoid|cannot|nothing|none)\b|n['\u2019]t\b|(?:^|\s)(?:\u0646\u0647|\u0628\u062f\u0648\u0646)(?=\s|$)|(?:^|\s)\u0646[\u0600-\u06ff]+/u;
+  /\b(?:not|no|never|without|avoid|cannot|nothing|none)\b|n['\u2019]t\b|(?:^|\s)(?:\u0646\u0647|\u0628\u062f\u0648\u0646|\u0645\u0628\u0627\u062f\u0627)(?=\s|$)|(?:^|\s)\u0646[\u0600-\u06ff]+/u;
 
 /** Persian "فاصله/گپ/صفحه سیاه … بذار/بگذار/بزار/اضافه کن" (leave/add a gap or black). */
 const FA_GAP_REQUEST =

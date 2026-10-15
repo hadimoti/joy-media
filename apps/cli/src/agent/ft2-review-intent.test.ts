@@ -21,6 +21,8 @@ const gapUnmet = (request: string) =>
 describe('MUST2: the #7 gap check is skipped only for an explicit gap request', () => {
   it.each([
     "Trim A to 3s and don't leave any gaps",
+    '\u0645\u0628\u0627\u062f\u0627 \u0641\u0627\u0635\u0644\u0647 \u0633\u06cc\u0627\u0647 \u0628\u0630\u0627\u0631\u06cc',
+    '\u0646\u0628\u0627\u06cc\u062f \u0641\u0627\u0635\u0644\u0647 \u0633\u06cc\u0627\u0647 \u0628\u0630\u0627\u0631\u06cc',
     '\u06a9\u0644\u06cc\u067e A \u0631\u0648 \u06a9\u0648\u062a\u0627\u0647 \u06a9\u0646 \u0648 \u0641\u0627\u0635\u0644\u0647 \u0646\u0630\u0627\u0631',
     'Trim A to 3s and make it \u0633\u06cc\u0627\u0647 \u0648 \u0633\u0641\u06cc\u062f',
     "Trim A to 3s; I don't want to leave a gap",
@@ -135,7 +137,7 @@ describe('NEW-4: bottom captions are not reported as plain "centered text"', () 
       'Add "Welcome to JOY" from 0s to 4s, centred horizontally near the bottom of the frame.',
     );
     expect(result.verified).not.toContain('Request: centered text');
-    expect(result.verified).toContain('Request: text centered horizontally');
+    expect(result.verified).toContain('Request: text centered horizontally at the bottom');
   });
 
   it('"in the middle of the screen" still needs vertical centring', () => {
@@ -145,5 +147,32 @@ describe('NEW-4: bottom captions are not reported as plain "centered text"', () 
     );
     expect(result.verified).not.toContain('Request: centered text');
     expect(result.unmet).toContain('request asked for centered text');
+  });
+});
+
+describe('FT3 MUST1: "center" means the middle unless limited to the horizontal axis', () => {
+  const bottomCaption = () =>
+    fixtureProject({
+      clips: [{ id: 'clip-a', assetId: 'asset-a', startUs: 0, durationUs: 8_000_000 }],
+      texts: [{ id: 't1', text: 'Welcome', startUs: 0, durationUs: 4_000_000, y: 0.32 }],
+    }) as unknown as JoyProjectV1;
+  it.each([
+    '\u0645\u062a\u0646 Welcome \u0631\u0627 \u0648\u0633\u0637 \u0635\u0641\u062d\u0647 \u0628\u0630\u0627\u0631',
+    '\u0645\u062a\u0646 \u0631\u0627 \u0648\u0633\u0637\u200c\u0686\u06cc\u0646 \u06a9\u0646',
+    'Put Welcome in the center of the frame',
+    'Welcome, centered on the screen',
+    'Welcome in the dead centre of the frame',
+    'Center the text',
+    'center the text at the top',
+  ])('a bottom caption does not verify %s', (request) => {
+    const result = verifyRequestIntent(bottomCaption(), request);
+    expect(result.verified.filter((item) => /centered/.test(item))).toEqual([]);
+    expect(result.unmet.some((item) => /centered/.test(item))).toBe(true);
+  });
+  it('"centred horizontally near the bottom" still verifies', () => {
+    expect(
+      verifyRequestIntent(bottomCaption(), 'Welcome, centred horizontally near the bottom')
+        .verified,
+    ).toContain('Request: text centered horizontally at the bottom');
   });
 });

@@ -60,7 +60,7 @@ function stubbedCenteredTitleModel(titleX: number) {
             startUs: 0,
             durationUs: 2_000_000,
             x: titleX,
-            y: 0,
+            y: -0.364, // vertical centre (FT3 MUST1: "centered" means the middle)
             dependsOn: [],
           },
           {

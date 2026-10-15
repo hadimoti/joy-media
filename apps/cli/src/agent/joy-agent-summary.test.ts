@@ -217,7 +217,14 @@ describe('truthfulAgentSummary', () => {
 
   it('verifies centered caption clips from renderer layout instead of visualObjects', () => {
     const project = createDefaultProject('caption intent', { id: 'caption-intent-project' });
-    const title = createTextClip({ id: 'title', text: 'Hello', startUs: 0, durationUs: 2_000_000 });
+    // FT3 MUST1: a centred title must sit in the middle; y = -0.364 is the vertical centre.
+    const title = createTextClip({
+      id: 'title',
+      text: 'Hello',
+      startUs: 0,
+      durationUs: 2_000_000,
+      y: -0.364,
+    });
     (project.captionDocuments as Record<string, any>)[title.document.id] = title.document;
     addCaptionTrack(project, [title.clip]);
 
@@ -225,7 +232,15 @@ describe('truthfulAgentSummary', () => {
       verified: ['Request: centered text'],
       unmet: [],
     });
-    expect(verifyRequestIntent(project, 'put the title in the middle')).toEqual({
+    expect(verifyRequestIntent(project, 'put the title in the middle')).toMatchObject({
+      verified: ['Request: centered text'],
+      unmet: [],
+    });
+    const bottomProject = createDefaultProject('bottom caption', { id: 'bottom-project' });
+    const bottom = createTextClip({ id: 'b', text: 'Hello', startUs: 0, durationUs: 2_000_000 });
+    (bottomProject.captionDocuments as Record<string, any>)[bottom.document.id] = bottom.document;
+    addCaptionTrack(bottomProject, [bottom.clip]);
+    expect(verifyRequestIntent(bottomProject, 'add a centred title "Hello"')).toEqual({
       verified: [],
       unmet: ['request asked for centered text'],
     });
