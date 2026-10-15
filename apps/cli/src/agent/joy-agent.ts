@@ -970,6 +970,25 @@ function checklistItemStart(
   return clips.find((clip) => clip.id === clipId)?.startUs;
 }
 
+/**
+ * R1: a transition is anchored at its cut (where the right clip starts), but some models report
+ * where the blend begins (cut - duration). Both describe the same crossfade, so any start in
+ * [cut - duration, cut] is accepted.
+ */
+function transitionStartAccepted(
+  project: JoyProjectV1,
+  item: JoyPlanChecklistItem & { kind: 'transition' },
+  cutUs: number,
+  claimedUs: number,
+): boolean {
+  const transition = (
+    project as { transitions?: readonly (TransitionLike & { durationUs?: number })[] }
+  ).transitions?.find((candidate) => samePair(candidate, item.leftClipId, item.rightClipId));
+  if (!transition) return false;
+  const durationUs = transition.durationUs ?? 1_000_000;
+  return claimedUs >= cutUs - durationUs && claimedUs <= cutUs;
+}
+
 export function verifyPlanChecklist(
   project: JoyProjectV1,
   checklist: readonly JoyPlanChecklistItem[],
@@ -987,7 +1006,12 @@ export function verifyPlanChecklist(
           : item.kind === 'transition'
             ? `transition ${item.leftClipId} → ${item.rightClipId}`
             : `${item.kind} ${item.clipId}`;
-      if (start === item.timelineStartUs)
+      if (
+        start === item.timelineStartUs ||
+        (item.kind === 'transition' &&
+          start !== undefined &&
+          transitionStartAccepted(project, item, start, item.timelineStartUs))
+      )
         verified.push(`Start of ${label}: ${seconds(item.timelineStartUs)}`);
       else
         unmet.push(
