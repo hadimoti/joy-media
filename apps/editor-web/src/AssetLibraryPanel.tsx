@@ -499,7 +499,7 @@ export function AssetLibraryPanel({
       setRenderLimit(reveal.renderLimit);
       setStatus(
         localOnly
-          ? `${selectedFile.name} saved on this device (offline). Sign in to back it up to the cloud.`
+          ? `${selectedFile.name} saved on this device only (offline import; it is not uploaded to the cloud).`
           : `${selectedFile.name} backed up to the cloud. Agent tags applied; catalog refreshing.`,
       );
       setImportProgress(1);
