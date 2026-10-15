@@ -17,6 +17,7 @@ import {
 import { c, logInfo, logStep, logSuccess, logWarn } from '../utils/logger.js';
 import {
   CliJoyAgentToolBridge,
+  summarizePlacements,
   type AppliedTimelineSummary,
   type StagedOperationsSummary,
 } from './bridge.js';
@@ -774,7 +775,17 @@ export function verifyRequestIntent(
     );
   }
   if (intent.startAtZero) {
-    const startsAtZero = clips.some((clip) => clip.startUs === 0);
+    // Audit item 2: when this run moved clips, one of the moved clips must be the one at 0; a
+    // clip that already sat at 0 does not prove "move clip B to the start".
+    const startBefore = new Map(
+      (before?.compositions[before.rootCompositionId]?.tracks ?? [])
+        .flatMap((track) => track.clips)
+        .map((clip) => [clip.id, clip.startUs] as const),
+    );
+    const moved = clips.filter(
+      (clip) => startBefore.has(clip.id) && startBefore.get(clip.id) !== clip.startUs,
+    );
+    const startsAtZero = (moved.length > 0 ? moved : clips).some((clip) => clip.startUs === 0);
     (startsAtZero ? verified : unmet).push(
       startsAtZero ? 'Request: clip starts at 0' : 'request asked for a clip starting at 0',
     );
@@ -794,15 +805,36 @@ export function verifyRequestIntent(
     );
   }
   if (intent.look) {
-    const hasLook = clips.some(
-      (clip) => clip.kind === 'video' && clip.look?.preset === intent.look,
-    );
+    // Audit item 4: "both/all/every/each clip(s)" needs the look on every video clip.
+    const videoClips = clips.filter((clip) => clip.kind === 'video');
+    const everyClip = /\b(?:both|all|every|each)\b/.test(request.toLowerCase());
+    const hasLook = everyClip
+      ? videoClips.length > 0 &&
+        videoClips.every((clip) => clip.kind === 'video' && clip.look?.preset === intent.look)
+      : videoClips.some((clip) => clip.kind === 'video' && clip.look?.preset === intent.look);
     (hasLook ? verified : unmet).push(
       hasLook ? `Request: ${intent.look} look` : `request asked for ${intent.look} look`,
     );
   }
   if (intent.transition)
     verifyTransitionIntent(intent.transition, project, before, clips, verified, unmet);
+  if (before !== undefined && !/\b(?:gap|gaps|black|blank)\b/.test(request.toLowerCase())) {
+    // #7: a trim that leaves a hole between clips renders black there. Only holes this run
+    // created and that have content after them count; a shorter ending is not a black gap.
+    const durationUs = root?.durationUs ?? 0;
+    const interior = (source: JoyProjectV1) =>
+      summarizePlacements(source).blackRegions.filter((region) => region.endUs < durationUs);
+    const earlier = interior(before);
+    for (const region of interior(project)) {
+      const existed = earlier.some(
+        (old) => old.startUs <= region.startUs && old.endUs >= region.endUs,
+      );
+      if (!existed)
+        unmet.push(
+          `this run left a black gap at ${formatSeconds(region.startUs)}–${formatSeconds(region.endUs)} (no clip covers it); close the gap or ask for it explicitly`,
+        );
+    }
+  }
   if (intent.fadeInOut)
     unmet.push('request asked for a fade in/out; fades from or to black are not supported');
   if (intent.speed !== undefined) {
@@ -1058,4 +1090,8 @@ function partialLimitMessage(reason: string | undefined): string {
   const limit =
     reason === 'step-limit' ? 'step' : reason === 'tool-call-limit' ? 'tool-call' : 'safety';
   return `Run stopped at the ${limit} limit before the plan was final; nothing was applied.`;
+}
+
+function formatSeconds(microseconds: number): string {
+  return `${(microseconds / 1_000_000).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}s`;
 }
