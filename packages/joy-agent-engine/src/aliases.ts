@@ -167,7 +167,7 @@ const TRANSITION_TYPES: Readonly<Record<string, 'crossfade'>> = {
   crossfade: 'crossfade',
   'cross-fade': 'crossfade',
   dissolve: 'crossfade',
-  fade: 'crossfade',
+  // "fade" is not mapped: a fade in/out from black is not a crossfade between two clips (FT1 review).
 };
 
 /** clipIdA/from → leftClipId, clipIdB/to → rightClipId, transition/style → type. */

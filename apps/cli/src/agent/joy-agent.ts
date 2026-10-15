@@ -365,7 +365,8 @@ export function missingOperationCoverage(
       (kind === 'trim' && (checks.has('trim') || intent.trimRange !== undefined)) ||
       (kind === 'add-effect' && (checks.has('look') || intent.look !== undefined)) ||
       (kind === 'set-speed' && (checks.has('speed') || intent.speed !== undefined)) ||
-      (kind === 'add-transition' && (checks.has('transition') || intent.transition)) ||
+      (kind === 'add-transition' &&
+        (checks.has('transition') || intent.transition !== undefined)) ||
       ((kind === 'create-text' || kind === 'set-text' || kind === 'update-text') &&
         (checks.has('text') || intent.centerText || intent.textSize !== undefined)) ||
       (kind === 'set-property' && intent.centerText) ||
@@ -386,8 +387,10 @@ interface RequestIntent {
   trimRange?: readonly [number, number];
   look?: 'crt' | 'bw' | 'warm' | 'cool';
   durationUs?: number;
-  /** The request asks for a crossfade/dissolve/transition between clips (F1). */
-  transition?: boolean;
+  /** The request asks to add or remove a transition between clips (F1). */
+  transition?: TransitionIntent;
+  /** The request asks for a fade in/out (from/to black), which is not supported. */
+  fadeInOut?: boolean;
   /** Requested playback rate ("2x speed", "twice as fast", "half speed"). */
   speed?: number;
   /** "make the title smaller/bigger": compared with the text before the run (F3). */
@@ -398,6 +401,159 @@ interface RequestIntent {
 
 const QUOTED_TIMED_TEXT =
   /["“«]([^"“”«»]{1,400})["”»]\s*,?\s*\(?\s*(?:from|between|at|از)?\s*(\d+(?:\.\d+)?)\s*(?:s|secs?|seconds?|ثانیه)?\s*(?:to|until|and|[-–]|تا)\s*(\d+(?:\.\d+)?)\s*(?:s\b|secs?\b|seconds?\b|ثانیه)?/giu;
+
+interface TransitionIntent {
+  readonly mode: 'add' | 'remove';
+  /** A named type other than crossfade/dissolve (slide, wipe, ...): unsupported. */
+  readonly unsupportedType?: string;
+  /** Clip references named as "between X and Y", in request order. */
+  readonly pairs: readonly (readonly [string, string])[];
+}
+
+const FA_TRANSITION = '\u062a\u0631\u0646\u0632\u06cc\u0634\u0646'; // transition (loanword)
+const FA_MOVE_OR_TRANSITION = '\u0627\u0646\u062a\u0642\u0627\u0644'; // move / transfer / transition
+const FA_FADE_WORDS =
+  '\u0645\u062d\u0648|\u06a9\u0631\u0627\u0633[\\s\u200c]?\u0641\u06cc\u062f|' + FA_TRANSITION;
+const FA_WITHOUT = '\u0628\u062f\u0648\u0646';
+const FA_REMOVE = '\u062d\u0630\u0641';
+const TRANSITION_WORDS = new RegExp(
+  '\\b(cross-?fades?|cross-?dissolves?|dissolves?|transitions?)\\b|\\bfade (?:between|from one|into the next)\\b|' +
+    FA_TRANSITION +
+    '|\u06a9\u0631\u0627\u0633[\\s\u200c]?\u0641\u06cc\u062f|' +
+    // انتقال alone means "move": only a transition next to a fade word.
+    FA_MOVE_OR_TRANSITION +
+    '.{0,20}(?:' +
+    FA_FADE_WORDS +
+    ')|(?:' +
+    FA_FADE_WORDS +
+    ').{0,20}' +
+    FA_MOVE_OR_TRANSITION,
+  'u',
+);
+const TRANSITION_NEGATED = new RegExp(
+  '\\b(?:no|without|zero)\\b[^.]{0,30}\\b(?:transitions?|cross-?fades?|dissolves?)\\b|\\bhard cuts?\\b|' +
+    FA_WITHOUT,
+  'u',
+);
+const TRANSITION_REMOVE = new RegExp(
+  '\\b(?:remove|delete|drop|get rid of|take out)\\b[^.]{0,40}\\b(?:transitions?|cross-?fades?|dissolves?)\\b|' +
+    FA_REMOVE,
+  'u',
+);
+const UNSUPPORTED_TRANSITION_TYPE =
+  /\b(slide|wipe|zoom|push|spin|whip|glitch|iris|swipe|cube|flip)\b/;
+const CLIP_REF = '(?:the\\s+)?(?:clips?\\s+)?([a-z0-9][\\w-]*)';
+const BETWEEN_PAIR = new RegExp('\\bbetween\\s+' + CLIP_REF + '\\s+(?:and|&)\\s+' + CLIP_REF, 'gi');
+
+function parseTransitionIntent(normalized: string): TransitionIntent | undefined {
+  if (!TRANSITION_WORDS.test(normalized)) return undefined;
+  const remove = TRANSITION_REMOVE.test(normalized);
+  // "no transitions, hard cuts only" asks for nothing to check.
+  if (!remove && TRANSITION_NEGATED.test(normalized)) return undefined;
+  const pairs = [...normalized.matchAll(BETWEEN_PAIR)].map(
+    (match) => [match[1]!, match[2]!] as const,
+  );
+  const unsupported = UNSUPPORTED_TRANSITION_TYPE.exec(normalized)?.[1];
+  return {
+    mode: remove ? 'remove' : 'add',
+    pairs,
+    ...(unsupported === undefined ? {} : { unsupportedType: unsupported }),
+  };
+}
+
+type TransitionLike = { id?: string; leftClipId: string; rightClipId: string; type: string };
+
+function transitionsOf(project: JoyProjectV1 | undefined): readonly TransitionLike[] {
+  return (project as { transitions?: readonly TransitionLike[] } | undefined)?.transitions ?? [];
+}
+
+/** Resolves "B", "clip B", "clip-b" or "2" to a clip id (by id, then by letter/number order). */
+function resolveClipRef(ref: string, clipsByStart: readonly { id: string }[]): string | undefined {
+  const token = ref.toLowerCase();
+  const direct = clipsByStart.find(
+    (clip) => clip.id.toLowerCase() === token || clip.id.toLowerCase() === 'clip-' + token,
+  );
+  if (direct) return direct.id;
+  if (/^[a-z]$/.test(token)) return clipsByStart[token.charCodeAt(0) - 97]?.id;
+  if (/^\d+$/.test(token)) return clipsByStart[Number(token) - 1]?.id;
+  return undefined;
+}
+
+function samePair(transition: TransitionLike, a: string, b: string): boolean {
+  return (
+    (transition.leftClipId === a && transition.rightClipId === b) ||
+    (transition.leftClipId === b && transition.rightClipId === a)
+  );
+}
+
+function verifyTransitionIntent(
+  intent: TransitionIntent,
+  project: JoyProjectV1,
+  before: JoyProjectV1 | undefined,
+  clips: readonly { id: string; startUs: number }[],
+  verified: string[],
+  unmet: string[],
+): void {
+  const after = transitionsOf(project);
+  const previous = transitionsOf(before);
+  const clipsByStart = [...clips].sort((a, b) => a.startUs - b.startUs);
+  const pairs = intent.pairs.map(([a, b]) => ({
+    label: `${a} and ${b}`,
+    ids: [resolveClipRef(a, clipsByStart), resolveClipRef(b, clipsByStart)] as const,
+  }));
+  if (intent.mode === 'remove') {
+    if (pairs.length > 0) {
+      for (const pair of pairs) {
+        const [a, b] = pair.ids;
+        const gone = a !== undefined && b !== undefined && !after.some((t) => samePair(t, a, b));
+        (gone ? verified : unmet).push(
+          gone
+            ? `Request: no transition between ${pair.label}`
+            : `request asked to remove the transition between ${pair.label}, but it is still there`,
+        );
+      }
+      return;
+    }
+    if (before === undefined) return; // nothing to compare against
+    const fewer = after.length < previous.length;
+    (fewer ? verified : unmet).push(
+      fewer
+        ? 'Request: transition removed'
+        : 'request asked to remove a transition, but the timeline has as many as before',
+    );
+    return;
+  }
+  if (intent.unsupportedType !== undefined) {
+    unmet.push(
+      `request asked for a ${intent.unsupportedType} transition; only crossfade is supported`,
+    );
+    return;
+  }
+  // Only transitions this run added (or changed) count; a crossfade that was already there does not.
+  const key = (t: TransitionLike) => `${t.id ?? ''}|${t.leftClipId}|${t.rightClipId}|${t.type}`;
+  const existing = new Set(before === undefined ? [] : previous.map(key));
+  const added = after.filter((t) => isCrossfade(t.type) && !existing.has(key(t)));
+  if (pairs.length > 0) {
+    for (const pair of pairs) {
+      const [a, b] = pair.ids;
+      const has = a !== undefined && b !== undefined && added.some((t) => samePair(t, a, b));
+      (has ? verified : unmet).push(
+        has
+          ? `Request: crossfade between ${pair.label}`
+          : `request asked for a crossfade between ${pair.label}, but this run added none there`,
+      );
+    }
+    return;
+  }
+  const has = added.length > 0;
+  (has ? verified : unmet).push(
+    has
+      ? 'Request: crossfade transition'
+      : before === undefined
+        ? 'request asked for a crossfade transition between clips, but the timeline has none'
+        : 'request asked for a crossfade transition between clips, but this run added none',
+  );
+}
 
 function isCrossfade(type: string): boolean {
   return type === 'dissolve' || type === 'crossfade';
@@ -470,12 +626,13 @@ function parseRequestIntent(request: string): RequestIntent {
     )
   )
     intent.textSize = 'larger';
+  const transition = parseTransitionIntent(normalized);
+  if (transition !== undefined) intent.transition = transition;
   if (
-    /\b(cross-?fades?|cross-?dissolves?|dissolves?|transitions?)\b|\bfade (?:between|from one|into the next)\b|ترنزیشن|انتقال/.test(
-      normalized,
-    )
+    transition === undefined &&
+    /\bfade[- ]?(?:in|out|ins|outs)\b|\b(?:from|to) black\b/.test(normalized)
   )
-    intent.transition = true;
+    intent.fadeInOut = true;
   const speed = parseRequestedSpeed(normalized);
   if (speed !== undefined) intent.speed = speed;
   const captionTimes = parseCaptionTimes(request);
@@ -565,16 +722,10 @@ export function verifyRequestIntent(
       hasLook ? `Request: ${intent.look} look` : `request asked for ${intent.look} look`,
     );
   }
-  if (intent.transition) {
-    const transitions =
-      (project as { transitions?: readonly { type: string }[] }).transitions ?? [];
-    const has = transitions.some((transition) => isCrossfade(transition.type));
-    (has ? verified : unmet).push(
-      has
-        ? 'Request: crossfade transition'
-        : 'request asked for a crossfade transition between clips, but the timeline has none',
-    );
-  }
+  if (intent.transition)
+    verifyTransitionIntent(intent.transition, project, before, clips, verified, unmet);
+  if (intent.fadeInOut)
+    unmet.push('request asked for a fade in/out; fades from or to black are not supported');
   if (intent.speed !== undefined) {
     const rate = intent.speed;
     const sped = clips.some(
