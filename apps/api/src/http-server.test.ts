@@ -235,6 +235,38 @@ describe('control-plane HTTP transport', () => {
     expect(consumeRateLimit(request('192.0.2.4'), buckets, 60_000, 1, resolveAddress)).toBe(false);
   });
 
+  it('answers the desktop renderer OTP preflight with 204 before authentication', async () => {
+    const { request: httpRequest } = await import('node:http');
+    const origin = await start({ authenticate: () => undefined });
+    const send = (headers: Record<string, string>) =>
+      new Promise<{ status: number; headers: Record<string, unknown> }>((resolve, reject) => {
+        const req = httpRequest(
+          `${origin}/v1/auth/request-otp`,
+          { method: 'OPTIONS', headers },
+          (res) => {
+            res.resume();
+            res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers }));
+          },
+        );
+        req.on('error', reject);
+        req.end();
+      });
+    const ok = await send({
+      origin: 'joy-media-app://renderer',
+      'access-control-request-method': 'POST',
+      'access-control-request-headers': 'content-type',
+    });
+    expect(ok.status).toBe(204);
+    expect(ok.headers['access-control-allow-origin']).toBe('joy-media-app://renderer');
+    expect(ok.headers['access-control-allow-credentials']).toBeUndefined();
+    const refused = await send({
+      origin: 'https://evil.example',
+      'access-control-request-method': 'POST',
+    });
+    expect(refused.status).toBe(403);
+    expect(refused.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
   it('starts a bounded OTP send drain when the HTTP server closes', async () => {
     const mediaAuth = new DisabledMediaAuth();
     const drain = vi.spyOn(mediaAuth, 'drainPendingOtpSends');
