@@ -117,7 +117,9 @@ export function AccountLanding({ user, release, onLogout }: AccountLandingProps)
               <span className="card-kicker">Desktop Client</span>
               <h2>Download JOY Media for Windows</h2>
             </div>
-            <span className="version-tag">Version {release?.version || '1.0.0'} (Stable)</span>
+            <span className="version-tag">
+              Version {release?.version ?? 'unavailable'} (Stable)
+            </span>
           </div>
 
           <p className="card-desc">
@@ -128,7 +130,8 @@ export function AccountLanding({ user, release, onLogout }: AccountLandingProps)
 
           <div className="download-actions-row">
             <a
-              href={release?.downloadUrl || '/releases/joy-media-windows-x64-v1.0.0.zip'}
+              href={release?.downloadUrl}
+              aria-disabled={release === null ? true : undefined}
               className="dash-btn-download"
               download
             >
@@ -151,7 +154,9 @@ export function AccountLanding({ user, release, onLogout }: AccountLandingProps)
 
             <div className="checksum-container">
               <span className="checksum-label">SHA-256 Checksum:</span>
-              <code className="checksum-code">{release?.sha256 || 'Calculating…'}</code>
+              <code className="checksum-code">
+                {release === null ? 'No release published yet' : release.sha256}
+              </code>
               <button type="button" className="copy-checksum-btn" onClick={copyChecksum}>
                 {copiedSha ? '✓ Copied' : 'Copy'}
               </button>

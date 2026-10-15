@@ -30,7 +30,9 @@ export function LandingHero({ release, onOpenLogin }: LandingHeroProps): ReactNo
       {/* Hero Section */}
       <section className="landing-hero-section">
         <div className="landing-hero-badge">
-          <span>⚡ Next-Generation Windows Desktop Release · v{release?.version || '1.0.0'}</span>
+          <span>
+            ⚡ Next-Generation Windows Desktop Release · v{release?.version ?? 'unavailable'}
+          </span>
         </div>
 
         <h1 className="landing-hero-title">
@@ -46,7 +48,8 @@ export function LandingHero({ release, onOpenLogin }: LandingHeroProps): ReactNo
 
         <div className="landing-hero-cta-group">
           <a
-            href={release?.downloadUrl || '/releases/joy-media-windows-x64-v1.0.0.zip'}
+            href={release?.downloadUrl}
+            aria-disabled={release === null ? true : undefined}
             className="landing-btn-primary"
             download
           >
