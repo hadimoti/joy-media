@@ -7,8 +7,8 @@
  * By default, renders through FFmpeg and writes a verified media file plus a
  * manifest. `--manifest-only` retains the deterministic benchmark simulation.
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, extname, join } from 'node:path';
 import type { CliFlags } from '../cli.js';
 import { parseIntFlag } from '../utils/flags.js';
 import {
@@ -52,7 +52,8 @@ export function renderCompletionMessage(outputPath: string, skippedCount: number
 }
 
 export function printRenderHelp(): void {
-  console.log(`Usage: joy-media render --project <id|file.json> --preset <mp4|webm|prores> --out <directory>
+  console.log(`Usage: joy-media render --project <id|file.json> --preset <mp4|webm|prores> --out <directory|file.ext>
+--out final.mp4 writes that file (its extension must match the preset); any other --out is a directory that gets <project-id>.<ext>.
 Options: --width <px> --height <px> --fps <rate> --font <path> --strict --manifest-only --concurrency <1-32> --json
 Text fonts default to JOY_FONT; Arabic-script text can use JOY_FONT_ARABIC.
 Legacy CLI pixel-unit caption styles are skipped with a warning; recreate them using editor-unit timeline flags.`);
@@ -174,7 +175,14 @@ export async function handleRenderCommand(args: string[], flags: CliFlags): Prom
   }
   const preset = presetRaw as RenderPresetSpec['id'];
 
-  const outDir = flags.out ?? './renders';
+  // --out is a directory, or (F9) a file name such as final.mp4 when it ends in a media
+  // extension and is not an existing directory.
+  const outTarget = resolveRenderOut(flags.out ?? './renders', RENDER_PRESETS[preset].extension);
+  if ('error' in outTarget) {
+    logError(outTarget.error);
+    return 2;
+  }
+  const { outDir, outFile } = outTarget;
   const concurrency =
     parseIntFlag('concurrency', flags.concurrency, {
       min: 1,
@@ -218,6 +226,7 @@ export async function handleRenderCommand(args: string[], flags: CliFlags): Prom
     project: projectInfo.project,
     preset,
     outDir,
+    ...(outFile === undefined ? {} : { outFile }),
     concurrency,
     json,
     width: flags.width,
@@ -243,6 +252,28 @@ export interface RunHeadlessRenderInput {
   readonly font?: string | undefined;
   readonly strict?: boolean | undefined;
   readonly manifestOnly?: boolean | undefined;
+  /** Output file name inside outDir; defaults to `<project id>.<preset extension>`. */
+  readonly outFile?: string | undefined;
+}
+
+const MEDIA_EXTENSIONS = new Set(['.mp4', '.m4v', '.webm', '.mov', '.mkv']);
+
+export function resolveRenderOut(
+  out: string,
+  presetExtension: string,
+): { outDir: string; outFile?: string } | { error: string } {
+  const extension = extname(out).toLowerCase();
+  if (!MEDIA_EXTENSIONS.has(extension) || (existsSync(out) && statSync(out).isDirectory()))
+    return { outDir: out };
+  if (extension !== `.${presetExtension}`)
+    return {
+      error: `--out ${out} ends in ${extension}, but the preset writes .${presetExtension}; use a .${presetExtension} file name, another --preset, or a directory.`,
+    };
+  return { outDir: dirname(out), outFile: basename(out) };
+}
+
+function renderFileName(input: RunHeadlessRenderInput, extension: string): string {
+  return input.outFile ?? `${input.project.id}.${extension}`;
 }
 
 export async function runHeadlessRender(
@@ -285,7 +316,7 @@ export async function runHeadlessRender(
     printBanner();
     logInfo(`Headless batch render: ${c(project.title, 'bold')} (${project.id})`);
     logStep('Preset', `${presetSpec.id} (${presetSpec.container}/${presetSpec.videoCodec})`);
-    logStep('Output', join(outDir, `${project.id}.${presetSpec.extension}`));
+    logStep('Output', join(outDir, renderFileName(input, presetSpec.extension)));
     logStep('Concurrency', String(concurrency));
     logStep('Tracks', String(root?.tracks.length ?? 0));
     logStep('Clips', String(totalClips));
@@ -444,7 +475,7 @@ export async function runHeadlessRender(
   let artifactPath = '';
   try {
     mkdirSync(outDir, { recursive: true });
-    artifactPath = join(outDir, `${project.id}.${presetSpec.extension}.manifest.json`);
+    artifactPath = join(outDir, `${renderFileName(input, presetSpec.extension)}.manifest.json`);
     const manifest = {
       schemaVersion: 1,
       format: 'joy-media-render-manifest',
@@ -540,7 +571,7 @@ async function runFfmpegHeadlessRender(
     const totalClips = root?.tracks.reduce((sum, track) => sum + track.clips.length, 0) ?? 0;
     const outDirPath = join(outDir);
     const spec = RENDER_PRESETS[preset];
-    const outputPath = join(outDirPath, `${project.id}.${spec.extension}`);
+    const outputPath = join(outDirPath, renderFileName(input, spec.extension));
     const manifestPath = `${outputPath}.manifest.json`;
     mkdirSync(outDirPath, { recursive: true });
     if (plan.skipped.length > 0) {
