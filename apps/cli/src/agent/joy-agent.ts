@@ -275,7 +275,11 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     errors = [...errors, ...applyRes.errors];
     notes = [...notes, ...applyRes.notes];
     placementSummary = applyRes.placementSummary;
-    const requestVerification = verifyRequestIntent(candidateProject, options.prompt);
+    const requestVerification = verifyRequestIntent(
+      candidateProject,
+      options.prompt,
+      options.project,
+    );
     const verification = verifyPlanChecklist(candidateProject, checklist);
     verified = [...verification.verified, ...requestVerification.verified];
     errors = [
@@ -359,8 +363,8 @@ export function missingOperationCoverage(
     const covered =
       (kind === 'trim' && (checks.has('trim') || intent.trimRange !== undefined)) ||
       (kind === 'add-effect' && (checks.has('look') || intent.look !== undefined)) ||
-      ((kind === 'create-text' || kind === 'set-text') &&
-        (checks.has('text') || intent.centerText)) ||
+      ((kind === 'create-text' || kind === 'set-text' || kind === 'update-text') &&
+        (checks.has('text') || intent.centerText || intent.textSize !== undefined)) ||
       (kind === 'set-property' && intent.centerText) ||
       ((kind === 'insert' || kind === 'move' || kind === 'split') &&
         (intent.startAtZero || intent.durationUs !== undefined));
@@ -379,6 +383,8 @@ interface RequestIntent {
   trimRange?: readonly [number, number];
   look?: 'crt' | 'bw' | 'warm' | 'cool';
   durationUs?: number;
+  /** "make the title smaller/bigger": compared with the text before the run (F3). */
+  textSize?: 'smaller' | 'larger';
   /** Quoted caption text with the time range the request gave it (`"Hi" from 0s to 4s`). */
   captionTimes?: readonly { text: string; startUs: number; endUs: number }[];
 }
@@ -426,6 +432,18 @@ function parseRequestIntent(request: string): RequestIntent {
   const duration = /(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\s+long/i.exec(normalized);
   if (duration?.[1]) intent.durationUs = Math.round(Number(duration[1]) * 1_000_000);
   intent.verticalCenterText = /\b(middle|vertically)\b/i.test(normalized);
+  if (
+    /\b(smaller|shrink|tinier|reduce (?:the )?(?:font |text )?size)\b|کوچک[\s\u200c]*تر/i.test(
+      normalized,
+    )
+  )
+    intent.textSize = 'smaller';
+  else if (
+    /\b(bigger|larger|enlarge|increase (?:the )?(?:font |text )?size)\b|بزرگ[\s\u200c]*تر/i.test(
+      normalized,
+    )
+  )
+    intent.textSize = 'larger';
   const captionTimes = parseCaptionTimes(request);
   if (captionTimes.length > 0) intent.captionTimes = captionTimes;
   return intent;
@@ -434,6 +452,8 @@ function parseRequestIntent(request: string): RequestIntent {
 export function verifyRequestIntent(
   project: JoyProjectV1,
   request: string,
+  /** The project before the run; enables checks of edits relative to it (smaller/larger). */
+  before?: JoyProjectV1,
 ): { readonly verified: string[]; readonly unmet: string[] } {
   const intent = parseRequestIntent(request);
   const root = project.compositions[project.rootCompositionId];
@@ -510,6 +530,30 @@ export function verifyRequestIntent(
     (hasLook ? verified : unmet).push(
       hasLook ? `Request: ${intent.look} look` : `request asked for ${intent.look} look`,
     );
+  }
+  if (intent.textSize !== undefined && before !== undefined) {
+    const sizes = (source: JoyProjectV1) =>
+      new Map(
+        (source.compositions[source.rootCompositionId]?.tracks ?? [])
+          .flatMap((track) => track.clips)
+          .flatMap((clip) =>
+            clip.kind === 'caption' ? [[clip.id, clip.style?.fontSize ?? 1] as const] : [],
+          ),
+      );
+    const previous = sizes(before);
+    const now = sizes(project);
+    // Only checkable when there was text to resize; a new title is not "the title, smaller".
+    if (previous.size > 0) {
+      const changed = [...previous].some(([clipId, size]) => {
+        const after = now.get(clipId);
+        return after !== undefined && (intent.textSize === 'smaller' ? after < size : after > size);
+      });
+      (changed ? verified : unmet).push(
+        changed
+          ? `Request: existing text made ${intent.textSize}`
+          : `request asked to make the existing text ${intent.textSize}, but no existing text got ${intent.textSize} (edit it with update-text instead of adding new text)`,
+      );
+    }
   }
   for (const wanted of intent.captionTimes ?? []) {
     const matches = captionClipsWithText(project, clips, wanted.text);

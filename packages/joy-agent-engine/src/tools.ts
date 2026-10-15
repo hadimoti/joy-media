@@ -93,6 +93,25 @@ const documentOperation = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({
+      kind: z.literal('update-text'),
+      id,
+      /** The caption clip id from read_timeline_window (e.g. `text-title`). */
+      objectId: id,
+      text: boundedText.optional(),
+      startUs: z.number().int().nonnegative().optional(),
+      durationUs: z.number().int().positive().max(86_400_000_000).optional(),
+      x: z.number().finite().optional(),
+      y: z.number().finite().optional(),
+      size: z.number().finite().min(0.1).max(8).optional(),
+      color: z
+        .string()
+        .regex(/^#[0-9a-f]{6}$/i)
+        .optional(),
+      dependsOn: z.array(id).max(32).default([]),
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal('set-text'),
       id,
       objectId: id,
@@ -583,7 +602,7 @@ export function createJoyAgentTools(
     }),
     propose_document_operations: tool({
       description:
-        'Propose document operations. Batch all requested changes in one call, then submit_plan once. add-effect applies one of the supported looks (crt, bw, warm, cool) to a video clip; optional intensity, scanlineStrength, and noiseAmount are each 0..1. For create-text, x is a horizontal frame fraction in [-0.4, 0.4] (0 = centred, the default). y is a vertical frame fraction measured from the default title line near the bottom of the frame: 0 (the default) = bottom title line, negative = up, positive = down; about -0.36 = vertical centre, about -0.7 = top; range [-0.75, 0.4]. Instead of x/y you may give position: center, bottom, middle or top. size is a template multiplier from 0.1 to 8. durationUs is an integer number of microseconds (10 seconds = 10000000) and must be at least one frame at project fps. Schema and project validation errors are returned so you can repair and retry (up to three invalid proposals).',
+        'Propose document operations. Batch all requested changes in one call, then submit_plan once. add-effect applies one of the supported looks (crt, bw, warm, cool) to a video clip; optional intensity, scanlineStrength, and noiseAmount are each 0..1. For create-text, x is a horizontal frame fraction in [-0.4, 0.4] (0 = centred, the default). y is a vertical frame fraction measured from the default title line near the bottom of the frame: 0 (the default) = bottom title line, negative = up, positive = down; about -0.36 = vertical centre, about -0.7 = top; range [-0.75, 0.4]. Instead of x/y you may give position: center, bottom, middle or top. To change existing text (shown with its text, size, x and y by read_timeline_window), use update-text with objectId = that caption clip id and only the fields to change (text, size, x, y, color, startUs, durationUs); do not create a second copy. size is a template multiplier from 0.1 to 8. durationUs is an integer number of microseconds (10 seconds = 10000000) and must be at least one frame at project fps. Schema and project validation errors are returned so you can repair and retry (up to three invalid proposals).',
       inputSchema: proposalInput(operationLimit),
       execute: async (input) => {
         let operations: readonly JoyDocumentOperation[];

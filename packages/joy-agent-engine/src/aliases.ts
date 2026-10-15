@@ -76,6 +76,11 @@ const KIND_SYNONYMS: Readonly<Record<string, string>> = {
   'create-caption': 'create-text',
   title: 'create-text',
   'add-title': 'create-text',
+  update: 'update-text',
+  'edit-text': 'update-text',
+  'modify-text': 'update-text',
+  'update-caption': 'update-text',
+  'edit-caption': 'update-text',
   look: 'add-effect',
   'apply-look': 'add-effect',
   'set-look': 'add-effect',
@@ -179,6 +184,18 @@ export function normalizeDocumentOperationAliases(value: unknown): unknown {
       };
     }
     if (candidate.kind === 'create-text') return createTextAliases(candidate);
+    if (candidate.kind === 'update-text' && candidate.clipId !== undefined) {
+      const { clipId, ...rest } = candidate;
+      const objectId = pickAlias(
+        'text clip id',
+        [
+          ['objectId', rest.objectId],
+          ['clipId', clipId],
+        ],
+        { prefix: `update-text ${String(candidate.id)}` },
+      );
+      return { ...rest, objectId };
+    }
     return candidate;
   });
 }
