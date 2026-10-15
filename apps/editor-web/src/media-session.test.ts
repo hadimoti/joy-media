@@ -27,31 +27,52 @@ afterEach(() => {
 });
 
 describe('media session token storage', () => {
-  it('migrates the legacy value once, verifies it, and deletes it', async () => {
+  it('migrates once through desktop IPC, deletes the legacy value, then uses only IPC', async () => {
     const values = new Map([['joy-media-session-token', 'legacy-test-token']]);
     const storage = {
-      getItem: (key: string) => values.get(key) ?? null,
+      getItem: vi.fn((key: string) => values.get(key) ?? null),
       setItem: vi.fn((key: string, value: string) => values.set(key, value)),
-      removeItem: (key: string) => values.delete(key),
+      removeItem: vi.fn((key: string) => values.delete(key)),
     } as unknown as Storage;
     let secureToken: string | undefined;
-    const backend = {
-      get: vi.fn(async () => secureToken),
-      set: vi.fn(async (token: string) => {
-        secureToken = token;
-      }),
-      clear: vi.fn(async () => {
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'desktop.media-session.get') return secureToken;
+      if (channel === 'desktop.media-session.set') {
+        secureToken = payload as string;
+        return undefined;
+      }
+      if (channel === 'desktop.media-session.clear') {
         secureToken = undefined;
-      }),
-    };
-    installWindow(storage, { invoke: async () => undefined });
-    setMediaSessionTokenBackendForTests(backend);
+        return undefined;
+      }
+      throw new Error('Unexpected desktop IPC channel');
+    });
+    installWindow(storage, { invoke });
+    setMediaSessionTokenBackendForTests();
 
     await initializeMediaSessionToken();
     await initializeMediaSessionToken();
     expect(secureToken).toBe('legacy-test-token');
     expect(values.has('joy-media-session-token')).toBe(false);
-    expect(backend.set).toHaveBeenCalledOnce();
+    expect(invoke).toHaveBeenCalledTimes(3);
+    expect(invoke.mock.calls.map(([channel]) => channel)).toEqual([
+      'desktop.media-session.get',
+      'desktop.media-session.set',
+      'desktop.media-session.get',
+    ]);
+
+    const migrationReads = vi.mocked(storage.getItem).mock.calls.length;
+    const migrationDeletes = vi.mocked(storage.removeItem).mock.calls.length;
+    expect(await getStoredMediaToken()).toBe('legacy-test-token');
+    await setStoredMediaToken('new-session-test-token');
+    await clearStoredMediaToken();
+    expect(vi.mocked(storage.getItem)).toHaveBeenCalledTimes(migrationReads);
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(vi.mocked(storage.removeItem)).toHaveBeenCalledTimes(migrationDeletes);
+    expect(invoke.mock.calls.slice(3).map(([channel]) => channel)).toEqual([
+      'desktop.media-session.set',
+      'desktop.media-session.clear',
+    ]);
   });
 
   it('deletes a legacy copy when a secure token already exists', async () => {
@@ -120,15 +141,21 @@ describe('media session token storage', () => {
     expect(values.has('joy-media-session-token')).toBe(false);
   });
 
-  it('uses memory-only storage when no desktop bridge exists', async () => {
+  it('uses localStorage fallback when no desktop bridge exists', async () => {
+    const values = new Map<string, string>();
     installWindow({
-      getItem: () => null,
-      setItem: vi.fn(),
-      removeItem: vi.fn(),
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: vi.fn((key: string, value: string) => values.set(key, value)),
+      removeItem: vi.fn((key: string) => values.delete(key)),
     } as unknown as Storage);
     setMediaSessionTokenBackendForTests();
     await setStoredMediaToken('browser-test-token');
     expect(await getStoredMediaToken()).toBe('browser-test-token');
+    expect(values.get('joy-media-session-token')).toBe('browser-test-token');
+    setMediaSessionTokenBackendForTests();
+    expect(await getStoredMediaToken()).toBe('browser-test-token');
+    await clearStoredMediaToken();
+    expect(values.has('joy-media-session-token')).toBe(false);
   });
 });
 

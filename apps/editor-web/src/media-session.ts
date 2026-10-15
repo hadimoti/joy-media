@@ -1,8 +1,9 @@
 /**
  * JOY Media's independent login session (ADR-0017).
  *
- * Desktop tokens live in Electron safeStorage. Browser and test contexts use memory only.
- * The sole localStorage access is the one-time migration from the historical key below.
+ * Desktop tokens live in Electron safeStorage, with a one-time migration from the historical
+ * localStorage key below. Browser builds retain localStorage persistence, with memory fallback
+ * when browser storage is unavailable.
  */
 import {
   clearDesktopSessionToken,
@@ -38,10 +39,37 @@ const memoryBackend = (() => {
   } satisfies MediaSessionTokenBackend;
 })();
 
+const browserBackend: MediaSessionTokenBackend = {
+  async get() {
+    try {
+      const token = window.localStorage.getItem(LEGACY_STORAGE_KEY);
+      return token !== null && token.length > 0 && token.length <= MAX_SESSION_TOKEN_LENGTH
+        ? token
+        : undefined;
+    } catch {
+      return memoryBackend.get();
+    }
+  },
+  async set(token) {
+    try {
+      window.localStorage.setItem(LEGACY_STORAGE_KEY, token);
+    } catch {
+      await memoryBackend.set(token);
+    }
+  },
+  async clear() {
+    try {
+      window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+    } catch {
+      await memoryBackend.clear();
+    }
+  },
+};
+
 const defaultBackend: MediaSessionTokenBackend = {
-  get: () => (isDesktopHost() ? getDesktopSessionToken() : memoryBackend.get()),
-  set: (token) => (isDesktopHost() ? setDesktopSessionToken(token) : memoryBackend.set(token)),
-  clear: () => (isDesktopHost() ? clearDesktopSessionToken() : memoryBackend.clear()),
+  get: () => (isDesktopHost() ? getDesktopSessionToken() : browserBackend.get()),
+  set: (token) => (isDesktopHost() ? setDesktopSessionToken(token) : browserBackend.set(token)),
+  clear: () => (isDesktopHost() ? clearDesktopSessionToken() : browserBackend.clear()),
 };
 
 let backend = defaultBackend;
@@ -174,8 +202,6 @@ export async function setStoredMediaToken(token: string): Promise<void> {
 
 export async function clearStoredMediaToken(): Promise<void> {
   await initializeMediaSessionToken();
-  // Logout must also remove a legacy copy if initialization could not reach IPC.
-  if (isDesktopHost()) removeLegacyTokenAfterMigration();
   await backend.clear();
   cachedToken = undefined;
   cacheLoaded = true;
