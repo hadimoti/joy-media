@@ -855,7 +855,9 @@ export function verifyRequestIntent(
         ? 'Request: clip starts at 0'
         : before === undefined || candidates.length > 0
           ? 'request asked for a clip starting at 0'
-          : 'request asked for a clip starting at 0, but this run moved no clip',
+          : namedId !== undefined && touched.length > 0
+            ? `request asked for ${namedId} to start at 0, but this run did not change ${namedId}`
+            : 'request asked for a clip starting at 0, but this run moved no clip',
     );
   }
   if (intent.trimRange) {
@@ -1198,8 +1200,18 @@ function partialLimitMessage(reason: string | undefined, value?: number): string
  */
 function requestsExplicitGap(request: string): boolean {
   const text = request.toLowerCase().replace(/black[\s-]*(?:and|&)[\s-]*white/g, ' ');
-  const verb =
-    "(?<!\\b(?:don'?t|do not|never|not|no)\\s+)\\b(?:leave|keep|add|insert|put|create|want)";
+  // FT2b: a clause with any negation ("I don't want to leave a gap", "make sure not to leave a
+  // gap", "no need to…", Persian نه / بدون / a ن-prefixed verb) is never an explicit gap request.
+  return text
+    .split(/[.;,!?\u060c\u061b]|\bbut\b|\bthen\b|\band\b|\s\u0648\s/u)
+    .some((clause) => !GAP_NEGATION.test(clause) && clauseAsksForGap(clause));
+}
+
+const GAP_NEGATION =
+  /\b(?:not|no|never|without|avoid|cannot|nothing|none)\b|n['\u2019]t\b|(?:^|\s)(?:\u0646\u0647|\u0628\u062f\u0648\u0646)(?=\s|$)|(?:^|\s)\u0646[\u0600-\u06ff]+/u;
+
+function clauseAsksForGap(text: string): boolean {
+  const verb = '\\b(?:leave|keep|add|insert|put|create|want)';
   const amount = '(?:\\d+(?:\\.\\d+)?\\s*(?:s|secs?|seconds?)\\s+)?';
   return (
     new RegExp(

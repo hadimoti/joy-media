@@ -21,6 +21,11 @@ const gapUnmet = (request: string) =>
 describe('MUST2: the #7 gap check is skipped only for an explicit gap request', () => {
   it.each([
     "Trim A to 3s and don't leave any gaps",
+    "Trim A to 3s; I don't want to leave a gap",
+    'Trim A to 3s and do not ever leave a gap',
+    'Trim A to 3s, no need to leave a gap',
+    'Trim A to 3s and make sure not to leave a gap',
+    'Trim A to 3s; avoid leaving a gap, never add a gap',
     'Trim A to 3s; the title can stay blank',
     'Trim A to 3s and give it a black and white look',
   ])('%s still reports the new gap', (request) => {
@@ -60,9 +65,9 @@ describe('named clip: start-at-0 needs THAT clip changed and at 0', () => {
     const after = clipsAt(3_000_000); // only A changed; A sits at 0
     const result = verifyRequestIntent(after, 'move clip C to start at 0', before);
     expect(result.verified).not.toContain('Request: clip starts at 0');
-    expect(
-      result.unmet.some((item) => item.startsWith('request asked for a clip starting at 0')),
-    ).toBe(true);
+    expect(result.unmet).toContain(
+      'request asked for clip-c to start at 0, but this run did not change clip-c',
+    );
   });
 
   it('C moved to 0 is verified', () => {
@@ -84,8 +89,10 @@ describe('named clip: start-at-0 needs THAT clip changed and at 0', () => {
         { id: 'clip-c', assetId: 'c', startUs: 10_000_000, durationUs: 5_000_000 },
       ],
     }) as unknown as JoyProjectV1;
-    expect(verifyRequestIntent(after, 'move clip C to start at 0', before).verified).not.toContain(
-      'Request: clip starts at 0',
+    const result = verifyRequestIntent(after, 'move clip C to start at 0', before);
+    expect(result.verified).not.toContain('Request: clip starts at 0');
+    expect(result.unmet).toContain(
+      'request asked for clip-c to start at 0, but this run did not change clip-c',
     );
   });
 });
