@@ -250,7 +250,13 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     },
   });
 
-  if (!options.json) logSuccess(`Joy Agent finished in ${runResult.steps} step(s).`);
+  if (!options.json) {
+    if (runResult.status === 'partial')
+      logWarn(`Joy Agent stopped after ${runResult.steps} step(s) without a final plan.`);
+    else logSuccess(`Joy Agent finished in ${runResult.steps} step(s).`);
+  }
+  const limitHit =
+    runResult.partialReason === 'step-limit' || runResult.partialReason === 'tool-call-limit';
   if (runResult.resolvedModelId && runResult.resolvedModelId !== config.modelId) {
     if (!options.json) logInfo(`Model: ${config.modelId} → ${runResult.resolvedModelId}`);
   }
@@ -308,11 +314,16 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     }
   }
 
-  if (runResult.partialReason === 'no-plan' || (options.apply && !bridge.hasSubmittedPlan())) {
+  if (limitHit) {
+    errors = [...errors, partialLimitMessage(runResult.partialReason, runResult.limit)];
+  } else if (
+    runResult.partialReason === 'no-plan' ||
+    (options.apply && !bridge.hasSubmittedPlan())
+  ) {
     // The engine retries only after a frame-only turn; do not claim a retry that did not happen.
     errors = [...errors, 'No plan was submitted, so nothing was applied.'];
   } else if (runResult.status === 'partial') {
-    errors = [...errors, partialLimitMessage(runResult.partialReason)];
+    errors = [...errors, partialLimitMessage(runResult.partialReason, runResult.limit)];
   }
 
   return {
@@ -320,7 +331,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
       runResult.status === 'partial'
         ? runResult.partialReason === 'no-plan'
           ? 'Partial run: no plan was submitted. Nothing was applied.'
-          : partialLimitMessage(runResult.partialReason)
+          : partialLimitMessage(runResult.partialReason, runResult.limit)
         : truthfulAgentSummary({
             applyRequested: options.apply === true,
             applied,
@@ -1135,10 +1146,14 @@ export function truthfulAgentSummary(input: {
   return 'No project changes were made.';
 }
 
-function partialLimitMessage(reason: string | undefined): string {
+function partialLimitMessage(reason: string | undefined, value?: number): string {
   const limit =
     reason === 'step-limit' ? 'step' : reason === 'tool-call-limit' ? 'tool-call' : 'safety';
-  return `Run stopped at the ${limit} limit before the plan was final; nothing was applied.`;
+  const count =
+    value === undefined || limit === 'safety'
+      ? ''
+      : ` (${value} ${limit === 'step' ? 'steps' : 'tool calls'})`;
+  return `Run stopped at the ${limit} limit${count} before the plan was final; nothing was applied.`;
 }
 
 function formatSeconds(microseconds: number): string {
